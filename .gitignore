@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments / packaging
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+
+# CWR Worldgen runtime caches and generated worlds
+.cwr-cache/
+source-data/
+output/
+outputs/
+builds/
+
+# Generated/debug files that should not live at repository root
+/*.wrp
+/*.pbo
+/*.p3d
+/*.paa
+/*.rpt
+/*.log
+/*.zip
+/*.tmp
+/*.bak
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
