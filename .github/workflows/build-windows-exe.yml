@@ -1,0 +1,66 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-exe:
+    name: Build Windows executable
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project and build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[sources]" pyinstaller
+
+      - name: Create GUI entry point
+        shell: pwsh
+        run: |
+          @'
+          from cwr_worldgen.gui import main
+
+          if __name__ == "__main__":
+              main()
+          '@ | Set-Content -Encoding utf8 build_gui.py
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --onefile `
+            --windowed `
+            --name "CWR-Worldgen" `
+            --collect-all cwr_worldgen `
+            build_gui.py
+
+      - name: Verify EXE was created
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/CWR-Worldgen.exe")) {
+            throw "dist/CWR-Worldgen.exe was not created"
+          }
+          Get-Item "dist/CWR-Worldgen.exe" | Format-List Name,Length,LastWriteTime
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v7
+        with:
+          name: CWR-Worldgen-Windows
+          path: dist/CWR-Worldgen.exe
+          if-no-files-found: error
