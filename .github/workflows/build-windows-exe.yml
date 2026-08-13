@@ -26,7 +26,30 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[sources]" pyinstaller
+          python -m pip install ".[sources]" "pyinstaller==6.21.0"
+
+      - name: Install UPX
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "upx-5.2.0-win64.zip"
+          $destination = Join-Path $env:RUNNER_TEMP "upx"
+          $url = "https://github.com/upx/upx/releases/download/v5.2.0/upx-5.2.0-win64.zip"
+          $expectedSha256 = "b471ebf1b7f20f4a89150264ed9a008a2a5bfd247f3c6d1184a75bb59ca08f5d"
+
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actualSha256 = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "UPX SHA-256 mismatch: expected $expectedSha256, got $actualSha256"
+          }
+
+          Expand-Archive -Path $archive -DestinationPath $destination -Force
+          $upxExe = Get-ChildItem -Path $destination -Recurse -Filter "upx.exe" | Select-Object -First 1
+          if (-not $upxExe) {
+            throw "upx.exe was not found after extraction"
+          }
+
+          "UPX_DIR=$($upxExe.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & $upxExe.FullName --version
 
       - name: Create GUI entry point
         shell: pwsh
@@ -46,17 +69,21 @@ jobs:
             --clean `
             --onefile `
             --windowed `
+            --optimize 2 `
             --name "CWR-Worldgen" `
-            --collect-all cwr_worldgen `
+            --collect-data cwr_worldgen `
+            --upx-dir "$env:UPX_DIR" `
             build_gui.py
 
       - name: Verify EXE was created
         shell: pwsh
         run: |
-          if (-not (Test-Path "dist/CWR-Worldgen.exe")) {
+          $exe = Get-Item "dist/CWR-Worldgen.exe"
+          if (-not $exe) {
             throw "dist/CWR-Worldgen.exe was not created"
           }
-          Get-Item "dist/CWR-Worldgen.exe" | Format-List Name,Length,LastWriteTime
+          $sizeMiB = [math]::Round($exe.Length / 1MB, 2)
+          Write-Host "Built $($exe.Name): $sizeMiB MiB ($($exe.Length) bytes)"
 
       - name: Upload EXE
         uses: actions/upload-artifact@v7
