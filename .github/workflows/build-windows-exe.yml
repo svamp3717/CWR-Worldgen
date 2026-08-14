@@ -26,21 +26,52 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[sources]" "pyinstaller==6.21.0"
+          python -m pip install ".[sources]" pyinstaller
 
-      - name: Locate Tcl/Tk data
+      - name: Ensure Tcl/Tk data is available
         shell: pwsh
         run: |
-          $paths = python -c "import _tkinter, pathlib, sys; root = pathlib.Path(sys.base_prefix) / 'tcl'; print(root / ('tcl' + _tkinter.TCL_VERSION)); print(root / ('tk' + _tkinter.TK_VERSION))"
-          $tclDir = $paths[0].Trim()
-          $tkDir = $paths[1].Trim()
+          $pythonExe = (Get-Command python).Source
+          $pythonRoot = Split-Path $pythonExe
 
-          if (-not (Test-Path (Join-Path $tclDir "init.tcl"))) {
-            throw "Tcl data directory is missing init.tcl: $tclDir"
+          $tclInit = Get-ChildItem -Path $pythonRoot -Recurse -File -Filter "init.tcl" -ErrorAction SilentlyContinue | Select-Object -First 1
+          $tkScript = Get-ChildItem -Path $pythonRoot -Recurse -File -Filter "tk.tcl" -ErrorAction SilentlyContinue | Select-Object -First 1
+
+          if (-not $tclInit -or -not $tkScript) {
+            $pythonVersion = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+            $msi = Join-Path $env:RUNNER_TEMP "python-tcltk.msi"
+            $extractDir = Join-Path $env:RUNNER_TEMP "python-tcltk"
+            $url = "https://www.python.org/ftp/python/$pythonVersion/amd64/tcltk.msi"
+
+            Write-Host "Tcl/Tk data is not present in the setup-python installation."
+            Write-Host "Downloading the matching official CPython Tcl/Tk package: $url"
+
+            Invoke-WebRequest -Uri $url -OutFile $msi
+            New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+
+            $process = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+              "/a",
+              "`"$msi`"",
+              "/qn",
+              "TARGETDIR=`"$extractDir`""
+            )
+            if ($process.ExitCode -ne 0) {
+              throw "Failed to extract the CPython Tcl/Tk MSI (exit code $($process.ExitCode))"
+            }
+
+            $tclInit = Get-ChildItem -Path $extractDir -Recurse -File -Filter "init.tcl" -ErrorAction SilentlyContinue | Select-Object -First 1
+            $tkScript = Get-ChildItem -Path $extractDir -Recurse -File -Filter "tk.tcl" -ErrorAction SilentlyContinue | Select-Object -First 1
           }
-          if (-not (Test-Path (Join-Path $tkDir "tk.tcl"))) {
-            throw "Tk data directory is missing tk.tcl: $tkDir"
+
+          if (-not $tclInit) {
+            throw "Could not locate Tcl init.tcl in either the Python installation or the official Tcl/Tk package"
           }
+          if (-not $tkScript) {
+            throw "Could not locate Tk tk.tcl in either the Python installation or the official Tcl/Tk package"
+          }
+
+          $tclDir = $tclInit.Directory.FullName
+          $tkDir = $tkScript.Directory.FullName
 
           "TCL_DATA_DIR=$tclDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TK_DATA_DIR=$tkDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -67,9 +98,8 @@ jobs:
             --onefile `
             --windowed `
             --noupx `
-            --optimize 2 `
             --name "CWR-Worldgen" `
-            --collect-data cwr_worldgen `
+            --collect-all cwr_worldgen `
             --add-data "$($env:TCL_DATA_DIR):_tcl_data" `
             --add-data "$($env:TK_DATA_DIR):_tk_data" `
             build_gui.py
