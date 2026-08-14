@@ -19,7 +19,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.14"
+          python-version: "3.12"
           cache: pip
 
       - name: Install project and build dependencies
@@ -27,57 +27,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install ".[sources]" pyinstaller
-
-      - name: Ensure Tcl/Tk data is available
-        shell: pwsh
-        run: |
-          $pythonExe = (Get-Command python).Source
-          $pythonRoot = Split-Path $pythonExe
-
-          $tclInit = Get-ChildItem -Path $pythonRoot -Recurse -File -Filter "init.tcl" -ErrorAction SilentlyContinue | Select-Object -First 1
-          $tkScript = Get-ChildItem -Path $pythonRoot -Recurse -File -Filter "tk.tcl" -ErrorAction SilentlyContinue | Select-Object -First 1
-
-          if (-not $tclInit -or -not $tkScript) {
-            $pythonVersion = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
-            $msi = Join-Path $env:RUNNER_TEMP "python-tcltk.msi"
-            $extractDir = Join-Path $env:RUNNER_TEMP "python-tcltk"
-            $url = "https://www.python.org/ftp/python/$pythonVersion/amd64/tcltk.msi"
-
-            Write-Host "Tcl/Tk data is not present in the setup-python installation."
-            Write-Host "Downloading the matching official CPython Tcl/Tk package: $url"
-
-            Invoke-WebRequest -Uri $url -OutFile $msi
-            New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
-
-            $process = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-              "/a",
-              "`"$msi`"",
-              "/qn",
-              "TARGETDIR=`"$extractDir`""
-            )
-            if ($process.ExitCode -ne 0) {
-              throw "Failed to extract the CPython Tcl/Tk MSI (exit code $($process.ExitCode))"
-            }
-
-            $tclInit = Get-ChildItem -Path $extractDir -Recurse -File -Filter "init.tcl" -ErrorAction SilentlyContinue | Select-Object -First 1
-            $tkScript = Get-ChildItem -Path $extractDir -Recurse -File -Filter "tk.tcl" -ErrorAction SilentlyContinue | Select-Object -First 1
-          }
-
-          if (-not $tclInit) {
-            throw "Could not locate Tcl init.tcl in either the Python installation or the official Tcl/Tk package"
-          }
-          if (-not $tkScript) {
-            throw "Could not locate Tk tk.tcl in either the Python installation or the official Tcl/Tk package"
-          }
-
-          $tclDir = $tclInit.Directory.FullName
-          $tkDir = $tkScript.Directory.FullName
-
-          "TCL_DATA_DIR=$tclDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "TK_DATA_DIR=$tkDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-          Write-Host "Tcl data: $tclDir"
-          Write-Host "Tk data:  $tkDir"
 
       - name: Create GUI entry point
         shell: pwsh
@@ -97,11 +46,8 @@ jobs:
             --clean `
             --onefile `
             --windowed `
-            --noupx `
             --name "CWR-Worldgen" `
             --collect-all cwr_worldgen `
-            --add-data "$($env:TCL_DATA_DIR):_tcl_data" `
-            --add-data "$($env:TK_DATA_DIR):_tk_data" `
             build_gui.py
 
       - name: Verify EXE was created
@@ -110,9 +56,7 @@ jobs:
           if (-not (Test-Path "dist/CWR-Worldgen.exe")) {
             throw "dist/CWR-Worldgen.exe was not created"
           }
-          $exe = Get-Item "dist/CWR-Worldgen.exe"
-          $sizeMiB = [math]::Round($exe.Length / 1MB, 2)
-          Write-Host "Built $($exe.Name): $sizeMiB MiB ($($exe.Length) bytes)"
+          Get-Item "dist/CWR-Worldgen.exe" | Format-List Name,Length,LastWriteTime
 
       - name: Upload EXE
         uses: actions/upload-artifact@v7
