@@ -46,6 +46,13 @@ def overture_command_prefix() -> list[str]:
     executable = shutil.which("overturemaps")
     if executable:
         return [executable]
+    if bool(getattr(sys, "frozen", False)):
+        # In a PyInstaller GUI sys.executable is the Worldgen executable, not a
+        # Python interpreter. Using ``sys.executable -m overturemaps`` would
+        # recursively launch another GUI instance. A frozen build must use a
+        # real overturemaps launcher found above; otherwise the caller falls
+        # back cleanly to non-Overture data.
+        raise FileNotFoundError("overturemaps executable was not found beside the frozen application or on PATH")
     return [sys.executable, "-m", "overturemaps"]
 
 

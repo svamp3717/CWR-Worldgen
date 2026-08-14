@@ -32,6 +32,23 @@ GUI_STATE_VERSION = 1
 DEFAULT_GUI_TERRAIN_CELLS = 256
 DEFAULT_GUI_CELL_SIZE_METRES = 25.0
 TRAILING_NUMBER = re.compile(r"^(.*?)(\d+)$")
+FROZEN_CLI_MARKER = "--cwr-cli"
+
+
+def cli_command_prefix(python: str | None = None) -> list[str]:
+    """Return a CLI launcher that works both from source and PyInstaller.
+
+    ``sys.executable`` is the Python interpreter in a normal install, but in a
+    frozen GUI it is the GUI executable itself. Launching it with ``-m`` simply
+    starts another copy of the GUI. Frozen builds therefore re-enter this
+    executable through a private dispatch marker handled by :func:`main`.
+    """
+    if python is not None:
+        return [python, "-m", "cwr_worldgen"]
+    if bool(getattr(sys, "frozen", False)):
+        return [sys.executable, FROZEN_CLI_MARKER]
+    return [sys.executable, "-m", "cwr_worldgen"]
+
 
 SOURCE_PREVIEW_MAX_WIDTH = 720
 SOURCE_PREVIEW_MAX_HEIGHT = 380
@@ -342,7 +359,7 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         profile=str(values.get("profile", "cwr-ce")),
     )
 
-    command = [python or sys.executable, "-m", "cwr_worldgen", "milestone9"]
+    command = cli_command_prefix(python) + ["milestone9"]
     command.extend(("--surface-ground-mode", "milestone9"))
     pairs = (
         ("--source-dir", "source_dir"),
@@ -472,7 +489,7 @@ def build_fetch_command(values: dict[str, object], python: str | None = None) ->
     source_dir = str(values.get("source_dir", "")).strip()
     if not source_dir:
         raise ValueError("Source directory is required")
-    command = [python or sys.executable, "-m", "cwr_worldgen", "fetch-sources", "--source-dir", source_dir]
+    command = cli_command_prefix(python) + ["fetch-sources", "--source-dir", source_dir]
     mode = str(values.get("selection_mode", "map_url"))
     if mode == "map_url":
         map_url = str(values.get("map_url", "")).strip()
@@ -2615,7 +2632,7 @@ class WorldgenGui(tk.Tk):
             messagebox.showerror(APP_TITLE, f"{key.replace('_', ' ').title()} is required")
             return
         self._start_pipeline(
-            [([sys.executable, "-m", "cwr_worldgen", command_name, option, value], command_name.replace("-", " ").title())],
+            [(cli_command_prefix() + [command_name, option, value], command_name.replace("-", " ").title())],
             kind="tool",
             success_message="Utility completed successfully.",
         )
@@ -2624,7 +2641,7 @@ class WorldgenGui(tk.Tk):
         source = Path(str(self.vars["source_dir"].get()))
         normalized = source / "normalized"
         self._start_pipeline(
-            [([sys.executable, "-m", "cwr_worldgen", "inspect-normalized", "--normalized-dir", str(normalized)], "Inspecting normalized data")],
+            [(cli_command_prefix() + ["inspect-normalized", "--normalized-dir", str(normalized)], "Inspecting normalized data")],
             kind="tool",
             success_message="Normalized bundle inspection completed.",
         )
@@ -2733,7 +2750,14 @@ class WorldgenGui(tk.Tk):
         self.destroy()
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == FROZEN_CLI_MARKER:
+        # PyInstaller sets sys.executable to this GUI executable. Internal GUI
+        # jobs come back through this marker so they run the CLI rather than
+        # constructing another WorldgenGui instance.
+        from .cli import main as cli_main
+        return cli_main(args[1:])
     try:
         app = WorldgenGui()
     except tk.TclError as exc:

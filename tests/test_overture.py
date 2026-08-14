@@ -30,6 +30,20 @@ class OvertureExecutableDiscoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(overture_command_prefix(), [str(overture)])
 
+    def test_frozen_app_never_uses_itself_as_python_module_launcher(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            app = root / "cwr-worldgen-gui.exe"
+            app.write_bytes(b"")
+            with (
+                patch("cwr_worldgen.overture.sys.argv", [str(app)]),
+                patch("cwr_worldgen.overture.sys.executable", str(app)),
+                patch("cwr_worldgen.overture.sys.frozen", True, create=True),
+                patch("cwr_worldgen.overture.shutil.which", return_value=None),
+            ):
+                with self.assertRaises(FileNotFoundError):
+                    overture_command_prefix()
+
     def test_running_entrypoint_folder_has_priority_over_python_scripts(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -4,11 +4,14 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from cwr_worldgen.gui import (
     WIZARD_STEPS,
+    FROZEN_CLI_MARKER,
     WorldgenGui,
     build_fetch_command,
+    cli_command_prefix,
     build_gui_osm_asset_mapping_document,
     build_milestone9_command,
     build_wizard_pipeline_commands,
@@ -17,6 +20,7 @@ from cwr_worldgen.gui import (
     existing_source_preview_path,
     format_wizard_world_size,
     increment_trailing_number,
+    main as gui_main,
     load_gui_state,
     quote_command,
     save_gui_state,
@@ -25,6 +29,35 @@ from cwr_worldgen.gui import (
     validate_wizard_step,
     write_gui_osm_asset_mapping,
 )
+
+
+class FrozenGuiDispatchTests(unittest.TestCase):
+    def test_frozen_cli_prefix_reenters_executable_without_python_dash_m(self) -> None:
+        with (
+            patch("cwr_worldgen.gui.sys.executable", r"C:\\Worldgen\\cwr-worldgen-gui.exe"),
+            patch("cwr_worldgen.gui.sys.frozen", True, create=True),
+        ):
+            self.assertEqual(
+                cli_command_prefix(),
+                [r"C:\\Worldgen\\cwr-worldgen-gui.exe", FROZEN_CLI_MARKER],
+            )
+            command = build_milestone9_command({
+                "source_dir": "source",
+                "output": "build",
+                "name": "map",
+                "display_name": "Map",
+            })
+            self.assertEqual(command[:3], [r"C:\\Worldgen\\cwr-worldgen-gui.exe", FROZEN_CLI_MARKER, "milestone9"])
+            self.assertNotIn("-m", command[:4])
+
+    def test_explicit_python_launcher_stays_compatible_with_source_mode(self) -> None:
+        self.assertEqual(cli_command_prefix("python"), ["python", "-m", "cwr_worldgen"])
+
+    def test_private_frozen_marker_dispatches_to_cli_without_opening_gui(self) -> None:
+        with patch("cwr_worldgen.cli.main", return_value=23) as cli_main:
+            result = gui_main([FROZEN_CLI_MARKER, "inspect-sources", "--source-dir", "bundle"])
+        self.assertEqual(result, 23)
+        cli_main.assert_called_once_with(["inspect-sources", "--source-dir", "bundle"])
 
 
 class GuiCommandTests(unittest.TestCase):
