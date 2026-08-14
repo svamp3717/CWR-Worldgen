@@ -282,107 +282,79 @@ def _barrier_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]
 
 
 def _bridge_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
-    """Build one bridge model of the requested full span length.
-
-    The WRP now places one procedural bridge object per bridge way. Internally
-    this P3D still splits a long span into modest deck/rail/collision sections so
-    legacy CWA never has to solve one enormous convex component. Visually and in
-    the world file it remains a single continuous bridge model.
-    """
-
     width = key.width_m
     length = key.length_m
     half_w = width * 0.5
     half_l = length * 0.5
     deck_bottom = -0.30
     deck_top = 0.18
-    component_span = 24.0
-    segment_count = max(1, int(math.ceil(length / component_span)))
-    segment_length = length / segment_count
-
     points: list[tuple[float, float, float]] = []
     faces: list[_Face] = []
-    geometry_boxes: list[tuple[float, float, float, float, float, float]] = []
+    _append_box(points, faces, x0=-half_w, x1=half_w, y0=deck_bottom, y1=deck_top, z0=-half_l, z1=half_l, texture=texture)
     rail_x = half_w + 0.08
-    for index in range(segment_count):
-        z0 = -half_l + index * segment_length
-        z1 = -half_l + (index + 1) * segment_length
-        _append_box(
-            points, faces,
-            x0=-half_w, x1=half_w,
-            y0=deck_bottom, y1=deck_top,
-            z0=z0, z1=z1,
-            texture=texture,
-        )
-        geometry_boxes.append((-half_w, half_w, deck_bottom, deck_top, z0, z1))
-        for sign in (-1.0, 1.0):
-            x0 = sign * rail_x - 0.08
-            x1 = sign * rail_x + 0.08
-            _append_box(
-                points, faces,
-                x0=min(x0, x1), x1=max(x0, x1),
-                y0=deck_top, y1=1.28,
-                z0=z0, z1=z1,
-                texture=texture,
-            )
-
-    # End abutments close the one-piece span visually without forcing their full
-    # depth into the terrain. The object origin still owns the final bridge Y.
+    for sign in (-1.0, 1.0):
+        x0 = sign * rail_x - 0.08
+        x1 = sign * rail_x + 0.08
+        _append_box(points, faces, x0=min(x0, x1), x1=max(x0, x1), y0=deck_top, y1=1.28, z0=-half_l, z1=half_l, texture=texture)
+    # Keep end abutments shallow; their purpose is visual closure, not terrain
+    # grounding. The actual WRP object origin controls bridge height.
     if key.subtype in {"start", "single"}:
-        _append_box(
-            points, faces,
-            x0=-half_w - 0.35, x1=half_w + 0.35,
-            y0=-0.55, y1=deck_top,
-            z0=-half_l, z1=-half_l + min(0.50, length),
-            texture=texture,
-        )
+        _append_box(points, faces, x0=-half_w - 0.35, x1=half_w + 0.35, y0=-0.55, y1=deck_top, z0=-half_l, z1=-half_l + 0.50, texture=texture)
     if key.subtype in {"end", "single"}:
-        _append_box(
-            points, faces,
-            x0=-half_w - 0.35, x1=half_w + 0.35,
-            y0=-0.55, y1=deck_top,
-            z0=half_l - min(0.50, length), z1=half_l,
-            texture=texture,
-        )
-
+        _append_box(points, faces, x0=-half_w - 0.35, x1=half_w + 0.35, y0=-0.55, y1=deck_top, z0=half_l - 0.50, z1=half_l, texture=texture)
+    # The bridge structure itself must not be another class=road object. The
+    # fitted stock road chain underneath already owns CWA's road-network/map
+    # semantics. Stacking a second road-class P3D several metres above it makes
+    # Poseidon's terrain/road clipping path treat the bridge deck like terrain-
+    # fitted road geometry, which can make modules sink or vanish in game even
+    # though their WRP transforms are correct. Keep this model as an ordinary
+    # static structure with a Roadway LOD instead.
     visual = _Lod(
         tuple(points), ((0.0, 1.0, 0.0),), tuple(faces), _VISUAL_LOD,
         properties=(("autocenter", "0"),),
     )
-    raw_geometry = _geometry_from_boxes(tuple(geometry_boxes))
+    # One bridge object can be very long now. Keep the P3D singular while
+    # internally splitting collision into ordinary-sized convex components so a
+    # 100+ metre span does not become one pathological Geometry component.
+    collision_segments = max(1, int(math.ceil(length / 24.0)))
+    collision_step = length / collision_segments
+    geometry_boxes = tuple(
+        (
+            -half_w,
+            half_w,
+            deck_bottom,
+            deck_top,
+            -half_l + index * collision_step,
+            -half_l + (index + 1) * collision_step,
+        )
+        for index in range(collision_segments)
+    )
+    raw_geometry = _geometry_from_boxes(geometry_boxes)
     geometry = _Lod(
         raw_geometry.points, raw_geometry.normals, raw_geometry.faces,
         raw_geometry.resolution, raw_geometry.mass_per_point, raw_geometry.selections,
         (("autocenter", "0"), ("canbeoccluded", "0"), ("canocclude", "0")),
     )
-
     roadway_y = GENERATED_BRIDGE_ROADWAY_HEIGHT_METRES
     roadway_points: list[tuple[float, float, float]] = []
     roadway_faces: list[_Face] = []
-    for index in range(segment_count):
-        z0 = -half_l + index * segment_length
-        z1 = -half_l + (index + 1) * segment_length
-        start_index = len(roadway_points)
+    roadway_segments = max(1, int(math.ceil(length / 20.0)))
+    roadway_step = length / roadway_segments
+    for index in range(roadway_segments):
+        z0 = -half_l + index * roadway_step
+        z1 = -half_l + (index + 1) * roadway_step
+        start = len(roadway_points)
         roadway_points.extend((
             (-half_w, roadway_y, z0),
             (half_w, roadway_y, z0),
             (half_w, roadway_y, z1),
             (-half_w, roadway_y, z1),
         ))
-        roadway_faces.append(_quad("", start_index + 0, start_index + 3, start_index + 2, start_index + 1))
-    roadway = _Lod(
-        tuple(roadway_points), ((0.0, 1.0, 0.0),), tuple(roadway_faces), _ROADWAY_LOD
-    )
-    land = _Lod(
-        (
-            (-half_w, deck_bottom, -half_l),
-            (half_w, deck_bottom, -half_l),
-            (-half_w, deck_bottom, half_l),
-            (half_w, deck_bottom, half_l),
-        ),
-        (), (), _LAND_CONTACT_LOD,
-    )
+        roadway_faces.append(_quad("", start + 0, start + 3, start + 2, start + 1))
+    roadway = _Lod(tuple(roadway_points), ((0.0, 1.0, 0.0),), tuple(roadway_faces), _ROADWAY_LOD)
+    land = _Lod(((-half_w, deck_bottom, -half_l), (half_w, deck_bottom, -half_l), (-half_w, deck_bottom, half_l), (half_w, deck_bottom, half_l)), (), (), _LAND_CONTACT_LOD)
     return visual, geometry, roadway, land
+
 
 def _gravel_curve_degrees(subtype: str) -> int:
     match = re.fullmatch(r"gravel(?:25|12|6|3)(?:_([lr])(05|10|15|20|30|45))?", subtype, re.IGNORECASE)
@@ -942,7 +914,7 @@ class ProceduralInfrastructureLibrary:
             model_cache_version = (
                 "procedural-infrastructure-model-v15-safe-junction-uvs"
                 if key.kind == "road"
-                else "procedural-infrastructure-model-v17-single-span-segmented-collision"
+                else "procedural-infrastructure-model-v16-static-bridge-roadway"
                 if key.kind == "bridge"
                 else "procedural-infrastructure-model-v5-osm-utilities"
             )

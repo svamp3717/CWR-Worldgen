@@ -545,8 +545,9 @@ def generate_semantic_objects(
 
     # Sports pitches are terrain semantics, not generated slab objects. The
     # surface pass paints them with the selected terrain material (Nogova uses
-    # o\b1.paa), which avoids z-fighting/colour mismatches and respects the
-    # terrain profile. Parking polygons likewise remain semantic-only for now.
+    # the same standard green grass texture as ordinary grass), which avoids
+    # z-fighting/colour mismatches and respects the terrain profile. Parking
+    # polygons likewise remain semantic-only for now.
 
     return SemanticGenerationResult(
         objects=tuple(objects),

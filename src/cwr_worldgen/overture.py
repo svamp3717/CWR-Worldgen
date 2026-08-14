@@ -17,12 +17,21 @@ def overture_buildings_cache_path(cache_dir: Path, bbox: tuple[float, float, flo
 
 def overture_command_prefix() -> list[str]:
     python_path = Path(sys.executable).resolve()
-    script_dirs = (
+    # Prefer the directory containing the currently launched application/entry
+    # point. In frozen/packaged builds this is where users naturally place
+    # overturemaps.exe next to cwr-worldgen.exe. When running from source, argv[0]
+    # points at the launcher script while sys.executable usually points at the
+    # Python installation, so supporting both avoids packaging-specific magic.
+    launch_path = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else python_path
+    candidate_dirs = (
+        launch_path.parent,
         python_path.parent,
         python_path.parent / "Scripts",
         python_path.parent.parent / "Scripts",
         python_path.parent.parent / "bin",
     )
+    # Preserve search priority while avoiding duplicate filesystem probes.
+    script_dirs = tuple(dict.fromkeys(candidate_dirs))
     executable_names = (
         "overturemaps.exe",
         "overturemaps.cmd",

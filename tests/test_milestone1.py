@@ -9,7 +9,7 @@ import unittest
 
 from cwr_worldgen.generator import WorldSpec, build_milestone1
 from cwr_worldgen.paa import inspect_paa
-from cwr_worldgen.templates import validate_cwa_config
+from cwr_worldgen.templates import render_config, validate_cwa_config
 from cwr_worldgen.pbo import read_pbo
 from cwr_worldgen.wrp import inspect_rvw4
 
@@ -118,9 +118,41 @@ class Milestone1Tests(unittest.TestCase):
             self.assertTrue(result.intro_mission_path.is_file())
             self.assertTrue(result.intro_script_path.is_file())
 
+    def test_render_config_registers_procedural_door_buildings(self) -> None:
+        spec = WorldSpec(name="door_world", display_name="Door World")
+        config = render_config(
+            spec,
+            milestone=9,
+            animated_building_models=(
+                r"door_world\g\b_a1b2_deadbeef.p3d",
+                r"door_world\g\b_a1b2_cafefeed.p3d",
+            ),
+        )
+        validate_cwa_config(config)
+        self.assertIn("class CfgVehicles", config)
+        self.assertIn("class CWR_door_world_ProceduralDoorHouse\n", config)
+        self.assertNotIn("class CWR_door_world_ProceduralDoorHouse: House", config)
+        self.assertIn('simulation = "house";', config)
+        self.assertIn("scope = 0;", config)
+        self.assertIn("class Land_b_a1b2_deadbeef: CWR_door_world_ProceduralDoorHouse", config)
+        self.assertRegex(config, r"class Land_b_a1b2_deadbeef: CWR_door_world_ProceduralDoorHouse\s*\{\s*scope = 1;")
+        self.assertIn('model = "\\door_world\\g\\b_a1b2_deadbeef.p3d";', config)
+        self.assertIn('selection = "door1";', config)
+        self.assertIn('axis = "door1_axis";', config)
+        self.assertIn('position = "door1_action";', config)
+        self.assertIn('displayName = "Open door";', config)
+        self.assertIn('displayName = "Close door";', config)
+        self.assertEqual(config.count("radius = 4.0;"), 2)
+        self.assertIn('statement = "this animate [""Door1"", 1]";', config)
+        self.assertIn('statement = "this animate [""Door1"", 0]";', config)
+
     def test_rejects_cwa_unsupported_bare_class_declaration(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsupported bare class declaration"):
             validate_cwa_config("class CfgWorlds { class Abel; };")
+
+    def test_rejects_cwa_inheritance_from_undeclared_external_base(self) -> None:
+        with self.assertRaisesRegex(ValueError, "undeclared base class House"):
+            validate_cwa_config("class CfgVehicles { class DoorHouse: House {}; };")
 
     def test_rvw4_wire_layout_has_serializer_terminator(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -1013,7 +1013,11 @@ def _normalize_buildings(
         building_value = str(raw_tags.get("building", "")).strip().casefold()
         has_building = bool(building_value) and building_value not in {"no", "false", "0", "none"}
         has_man_made = bool(raw_tags.get("man_made"))
-        if semantic_kind in {"school", "social_facility"}:
+        # A school campus/site polygon describes the grounds, not every
+        # physical building inside it.  Only school semantics attached to the
+        # building element itself may select a school model.  Social facilities
+        # intentionally keep their existing campus propagation behaviour.
+        if semantic_kind == "social_facility":
             for semantic_polygon in _element_polygons(element, projection, boundary):
                 if not semantic_polygon.is_empty:
                     semantic_areas.append((semantic_polygon, tags, _osm_id(element), semantic_kind))
@@ -1022,6 +1026,19 @@ def _normalize_buildings(
                 progress_callback(
                     int(element_index * 20 / max(1, element_total)),
                     f"Scanning building elements {element_index:,}/{element_total:,}; found {len(candidates):,} candidates",
+                )
+            continue
+
+        if semantic_kind == "school" and not has_building and not has_man_made:
+            # Do not promote a generic footprint merely because it contains an
+            # amenity=school node or lies inside an amenity=school campus.  This
+            # also avoids synthesizing a duplicate school building from a site
+            # polygon.  Explicit building footprints carrying school semantics
+            # are handled above as ordinary physical candidates.
+            if progress_callback is not None and (element_index % scan_interval == 0 or element_index == element_total):
+                progress_callback(
+                    int(element_index * 20 / max(1, element_total)),
+                    f"Scanning building elements {element_index:,}/{element_total:,}; found {len(candidates):,} footprints and {len(semantic_anchors):,} semantic POIs",
                 )
             continue
 
@@ -1116,9 +1133,9 @@ def _normalize_buildings(
                     if anchor.covers(candidates[index].geometry.representative_point())
                 ]
                 if inside:
-                    if semantic_kind in {"school", "social_facility"}:
-                        # School and social-facility campuses are semantic
-                        # areas, not merely hints for one largest footprint. Every
+                    if semantic_kind == "social_facility":
+                        # Social-facility campuses remain semantic areas rather
+                        # than merely hints for one largest footprint. Every
                         # physical building inside the mapped area inherits the
                         # amenity so generic/large footprints cannot fall through
                         # to barn or warehouse heuristics.
@@ -1277,10 +1294,10 @@ def _normalize_buildings(
                 f"Resolving building overlaps {cleanup_index:,}/{cleanup_total:,}; accepted {len(accepted):,}",
             )
 
-    # Make school/social-facility campus membership authoritative after all
-    # geometry cleanup. This catches generic wings and prevents a semantic campus
-    # envelope tagged building=no from becoming or leaving unrelated farm/industrial
-    # buildings inside the area.
+    # Make social-facility campus membership authoritative after all geometry
+    # cleanup. School campuses deliberately do not participate here: a school
+    # area is a site boundary and must not turn generic contained footprints
+    # into school models.
     if semantic_areas and accepted:
         accepted_tree = STRtree([candidate.geometry for candidate in accepted])
         for semantic_area, semantic_tags, source_id, semantic_kind in semantic_areas:
@@ -2791,7 +2808,7 @@ def _parse_normalized_dataset(bundle: NormalizedBundle) -> OsmDataset:
     )
 
 
-_PARSED_DATASET_CACHE_SCHEMA = 10
+_PARSED_DATASET_CACHE_SCHEMA = 11
 
 
 def load_normalized_dataset(
@@ -2803,7 +2820,7 @@ def load_normalized_dataset(
 ) -> OsmDataset:
     bundle = bundle_or_path if isinstance(bundle_or_path, NormalizedBundle) else validate_normalized_bundle(bundle_or_path)
     key = cache_key(
-        "normalized-dataset-v12-park-pitch-beach-textures",
+        "normalized-dataset-v13-school-buildings-only",
         {
             "schema": _PARSED_DATASET_CACHE_SCHEMA,
             "normalized_fingerprint": bundle.normalized_fingerprint,

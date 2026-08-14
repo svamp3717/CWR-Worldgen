@@ -79,6 +79,15 @@ class GuiCommandTests(unittest.TestCase):
         self.assertIn("--ground-textures", command)
         self.assertEqual(command[command.index("--ground-textures") + 1], "desert")
 
+    def test_overture_checkbox_uses_requested_random_generation_label(self) -> None:
+        gui_source = (
+            Path(__file__).resolve().parents[1] / "src" / "cwr_worldgen" / "gui.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '("Use Overture buildings before randomly generated", "overture_buildings", True)',
+            gui_source,
+        )
+
     def test_procedural_building_interiors_are_opt_in(self) -> None:
         values = default_gui_values()
         self.assertFalse(values["procedural_building_interiors"])
@@ -92,17 +101,18 @@ class GuiCommandTests(unittest.TestCase):
             build_milestone9_command(values, python="python"),
         )
 
-    def test_procedural_bridges_are_default_with_stock_opt_out(self) -> None:
+    def test_stock_nogova_bridges_are_default_with_procedural_opt_in(self) -> None:
         values = default_gui_values()
         self.assertTrue(values["bridges"])
-        self.assertTrue(values["procedural_bridges"])
+        self.assertFalse(values["procedural_bridges"])
         default_command = build_milestone9_command(values, python="python")
+        self.assertNotIn("--procedural-bridges", default_command)
         self.assertNotIn("--stock-bridges", default_command)
         self.assertIn("--bridge-module-length", default_command)
         self.assertEqual(default_command[default_command.index("--bridge-module-length") + 1], "30")
-        values["procedural_bridges"] = False
+        values["procedural_bridges"] = True
         self.assertIn(
-            "--stock-bridges",
+            "--procedural-bridges",
             build_milestone9_command(values, python="python"),
         )
 

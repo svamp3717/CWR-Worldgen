@@ -24,6 +24,40 @@ from cwr_worldgen.wrp import inspect_rvw4, quantize_elevations
 
 
 class ProceduralBuildingTests(unittest.TestCase):
+    def test_enterable_variants_bound_model_proliferation(self) -> None:
+        bbox = (0.0, 0.0, 0.01, 0.01)
+        projection = BboxProjection.create(bbox, 1000.0)
+        dataset = OsmDataset(
+            source_generator="interior-performance", element_count=0,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(),
+        )
+        library = ProceduralBuildingLibrary(
+            world_name="interior_perf", generate_interiors=True
+        )
+        library.prepare(dataset, projection, 12.0)
+        variants = {
+            library.plan_point(
+                {"building": "house", "name": f"House {index}"},
+                12.0, 0.0, x=100.0 + index * 7.0, z=200.0,
+            ).selected.texture_variant
+            for index in range(40)
+        }
+        self.assertTrue(variants)
+        self.assertTrue(all(0 <= variant < 3 for variant in variants))
+
+        placement = library.plan_point(
+            {"building": "house"}, 12.0, 0.0, x=100.0, z=200.0
+        )
+        self.assertTrue(placement.selected.interiors)
+        registered = library.register_placement(placement, foundation_depth_m=1.26)
+        self.assertEqual(registered.selected.foundation_depth_m, 1.5)
+
+        other_world = ProceduralBuildingLibrary(world_name="other_world")
+        self.assertNotEqual(
+            library.model_path(registered.selected).rsplit("\\", 1)[-1],
+            other_world.model_path(registered.selected).rsplit("\\", 1)[-1],
+        )
+
     def test_rural_floor_caps_and_oversized_footprints_use_barn_family(self) -> None:
         library = ProceduralBuildingLibrary(world_name="smart_buildings")
         rural_house = library.key_for({"building": "house", "building:levels": "5"}, 11.0, 17.0)
@@ -38,31 +72,235 @@ class ProceduralBuildingTests(unittest.TestCase):
         self.assertEqual((barn.family, barn.roof_style, barn.height_m), ("agricultural", "gabled", 6.0))
         self.assertEqual(warehouse.family, "industrial")
 
-    def test_tiny_generic_buildings_become_windowless_outbuildings_with_large_gate(self) -> None:
+    def test_outbuilding_size_selects_shed_or_garage_frontage(self) -> None:
         library = ProceduralBuildingLibrary(world_name="small_outbuildings")
         library.region_identifier = "sweden"
-        tiny = library.key_for({"building": "yes"}, 6.0, 8.0)
-        garage = library.key_for({"building": "garage"}, 7.0, 9.0)
+        tiny = library.key_for({"building": "garage"}, 2.0, 3.5)
+        garage = library.key_for({"building": "shed"}, 6.0, 8.0)
         small_house = library.key_for({"building": "house"}, 6.0, 8.0)
 
         self.assertEqual((tiny.family, tiny.height_m, tiny.regional_style), ("outbuilding", 3.0, "sweden_red"))
-        self.assertEqual(garage.family, "outbuilding")
+        self.assertEqual(tiny.outbuilding_kind, "shed")
+        self.assertEqual((garage.family, garage.outbuilding_kind), ("outbuilding", "garage"))
         self.assertFalse(tiny.interiors)
         self.assertEqual(small_house.family, "residential")
 
         side = building_models._wall_texture_image("outbuilding", 128, "sweden_red", 0)
-        front = building_models._front_texture_image("outbuilding", 128, "sweden_red", 0)
-        self.assertNotEqual(side.tobytes(), front.tobytes())
-        # The vehicle gate occupies a broad central area, far wider than the
-        # ordinary pedestrian-door artwork used by houses.
-        changed = 0
-        total = 0
-        for y in range(36, 124):
-            for x in range(24, 104):
-                total += 1
-                if side.getpixel((x, y)) != front.getpixel((x, y)):
-                    changed += 1
-        self.assertGreater(changed / total, 0.45)
+        shed_front = building_models._front_texture_image(
+            "outbuilding", 128, "sweden_red", 0, outbuilding_kind="shed"
+        )
+        garage_front = building_models._front_texture_image(
+            "outbuilding", 128, "sweden_red", 0, outbuilding_kind="garage"
+        )
+        self.assertNotEqual(side.tobytes(), shed_front.tobytes())
+        self.assertNotEqual(shed_front.tobytes(), garage_front.tobytes())
+        # The garage artwork must occupy substantially more of the central facade
+        # than the pedestrian shed door.
+        def changed_ratio(front):
+            changed = 0
+            total = 0
+            for y in range(36, 124):
+                for x in range(24, 104):
+                    total += 1
+                    if side.getpixel((x, y)) != front.getpixel((x, y)):
+                        changed += 1
+            return changed / total
+
+        self.assertGreater(changed_ratio(garage_front), changed_ratio(shed_front) + 0.12)
+
+    def test_utility_doors_use_matching_barn_and_sectional_garage_art(self) -> None:
+        barn_wall = building_models._wall_texture_image(
+            "agricultural", 128, "sweden_red", 0
+        )
+        barn_door = building_models._door_texture_image(
+            128, family="agricultural", regional_style="sweden_red",
+            texture_variant=0,
+        )
+        garage_front = building_models._front_texture_image(
+            "outbuilding", 128, "sweden_red", 0, outbuilding_kind="garage"
+        )
+        garage_door = building_models._door_texture_image(
+            128, family="outbuilding", regional_style="sweden_red",
+            texture_variant=0, outbuilding_kind="garage",
+        )
+
+        # Swedish barn doors are now visibly double-leaf and braced in both the
+        # closed facade atlas and the real animated panel.
+        self.assertNotEqual(barn_wall.getpixel((64, 50)), barn_wall.getpixel((40, 50)))
+        self.assertNotEqual(barn_door.getpixel((64, 16)), barn_door.getpixel((32, 16)))
+
+        # Garage art uses horizontal sectional bands instead of the old vertical
+        # barn-plank cue, and the animated panel shares the same pale palette.
+        front_colour = garage_front.getpixel((64, 64))
+        door_colour = garage_door.getpixel((64, 64))
+        self.assertLess(sum(abs(a - b) for a, b in zip(front_colour, door_colour)), 24)
+        vertical_samples = [garage_door.getpixel((64, y)) for y in (20, 29, 40, 53, 64)]
+        self.assertGreater(len(set(vertical_samples)), 1)
+
+        # The wall pieces surrounding an enterable garage opening must use a
+        # door-free cladding texture. Reusing the painted closed-front atlas is
+        # what produced the extra pale garage-door panels in game.
+        garage_key = BuildingVariantKey(
+            "outbuilding", "gabled", 6.0, 8.0, 3.0,
+            regional_style="sweden_red", interiors=True, outbuilding_kind="garage",
+        )
+        detail = building_models._visual_lod(
+            garage_key, r"g\wall.paa", r"g\roof.paa", 35.0,
+            r"g\closed_front.paa", r"g\foundation.paa", 0.5,
+            interior_texture=r"g\inside.paa",
+            plain_wall_texture=r"g\doorfree_front.paa",
+        )
+        front_plane = -garage_key.length_m * 0.5
+        front_textures = {
+            face.texture
+            for face in detail.faces
+            if face.vertices
+            and all(abs(detail.points[index][2] - front_plane) < 1e-6 for index, _n, _u, _v in face.vertices)
+        }
+        self.assertIn(r"g\doorfree_front.paa", front_textures)
+        self.assertNotIn(r"g\closed_front.paa", front_textures)
+
+    def test_enterable_utility_front_does_not_crop_painted_door_atlas_around_real_door(self) -> None:
+        garage = BuildingVariantKey(
+            "outbuilding", "gabled", 6.0, 8.0, 3.0,
+            interiors=True, outbuilding_kind="garage",
+        )
+        barn = BuildingVariantKey(
+            "agricultural", "gabled", 14.0, 30.0, 6.0,
+            regional_style="sweden_red", interiors=True,
+        )
+        garage_visual = building_models._visual_lod(
+            garage, "garage_wall.paa", "roof.paa", 35.0,
+            "garage_closed_front.paa", "floor.paa", 0.5,
+            interior_texture="inside.paa", plain_wall_texture="garage_plain.paa",
+        )
+        barn_visual = building_models._visual_lod(
+            barn, "barn_wall_with_painted_door.paa", "roof.paa", 35.0,
+            "barn_closed_front.paa", "floor.paa", 0.5,
+            interior_texture="inside.paa", plain_wall_texture="barn_plain.paa",
+        )
+        self.assertNotIn("garage_closed_front.paa", {face.texture for face in garage_visual.faces})
+        self.assertIn("garage_wall.paa", {face.texture for face in garage_visual.faces})
+        self.assertNotIn("barn_closed_front.paa", {face.texture for face in barn_visual.faces})
+        self.assertIn("barn_plain.paa", {face.texture for face in barn_visual.faces})
+
+    def test_vehicle_scale_utility_entrances_use_ramps_not_porch_stairs(self) -> None:
+        garage = BuildingVariantKey(
+            "outbuilding", "gabled", 6.0, 8.0, 3.0,
+            foundation_depth_m=0.5, regional_style="sweden_red",
+            interiors=True, outbuilding_kind="garage",
+        )
+        shed = BuildingVariantKey(
+            "outbuilding", "gabled", 2.2, 3.8, 3.0,
+            foundation_depth_m=0.5, regional_style="sweden_red",
+            interiors=True, outbuilding_kind="shed",
+        )
+        barn = BuildingVariantKey(
+            "agricultural", "gabled", 14.0, 30.0, 6.0,
+            foundation_depth_m=0.5, regional_style="sweden_red",
+            interiors=True,
+        )
+
+        self.assertIsNotNone(building_models._interior_vehicle_ramp_profile(garage, 0.5))
+        self.assertIsNotNone(building_models._interior_vehicle_ramp_profile(barn, 0.5))
+        self.assertIsNone(building_models._interior_vehicle_ramp_profile(shed, 0.5))
+
+        roadway = building_models._interior_roadway_lod(garage, 0.5)
+        self.assertIsNotNone(roadway)
+
+        # Pedestrian foundation stairs now have actual Geometry support as well
+        # as visible/Roadway treads, so the player cannot pass through them
+        # before a Roadway contact is established.
+        house = BuildingVariantKey(
+            "residential", "gabled", 10.0, 12.0, 6.0,
+            foundation_depth_m=0.5, interiors=True,
+        )
+        house_geometry = building_models._geometry_lod(house)
+        house_profile = building_models._interior_stair_profile(house, 0.5)
+        self.assertTrue(house_profile)
+        outer_z, inner_z, top_y, _bottom_y = house_profile[0]
+        self.assertTrue(any(
+            abs(z - outer_z) < 1e-6 and abs(y - (top_y - 0.02)) < 1e-6
+            for _x, y, z in house_geometry.points
+        ))
+        self.assertTrue(any(
+            abs(z - inner_z) < 1e-6 and abs(y - (top_y - 0.02)) < 1e-6
+            for _x, y, z in house_geometry.points
+        ))
+
+        sloped_faces = []
+        for face in roadway.faces:
+            heights = [roadway.points[index][1] for index, _normal, _u, _v in face.vertices]
+            if max(heights) - min(heights) > 0.05:
+                sloped_faces.append(face)
+        self.assertTrue(sloped_faces)
+
+    def test_second_storey_stair_has_solid_geometry_steps_and_roadway_treads(self) -> None:
+        key = BuildingVariantKey(
+            "residential", "gabled", 12.0, 16.0, 6.0,
+            foundation_depth_m=0.5, interiors=True, second_storey=True,
+        )
+        layout = building_models._second_storey_layout(key)
+        self.assertIsNotNone(layout)
+        geometry = building_models._geometry_lod(key)
+        roadway = building_models._interior_roadway_lod(key, 0.5)
+        self.assertIsNotNone(roadway)
+
+        step_count = building_models.INTERIOR_SECOND_STOREY_STAIR_STEPS
+        step_rise = layout.floor_y / step_count
+        expected_tops = [
+            (index + 1) * step_rise + building_models.INTERIOR_ROADWAY_Y_M - 0.035
+            for index in range(step_count)
+        ]
+        for expected_y in expected_tops:
+            self.assertTrue(any(
+                layout.stair_x0 - 1e-6 <= x <= layout.stair_x1 + 1e-6
+                and layout.stair_z0 - 0.05 <= z <= layout.stair_z1 + 0.05
+                and abs(y - expected_y) < 1e-6
+                for x, y, z in geometry.points
+            ))
+        self.assertTrue(any(
+            layout.stair_x0 - 1e-6 <= x <= layout.stair_x1 + 1e-6
+            and layout.stair_z0 - 0.05 <= z <= layout.stair_z1 + 0.05
+            and y <= -0.19
+            for x, y, z in geometry.points
+        ))
+
+        stair_treads = []
+        for face in roadway.faces:
+            coords = [roadway.points[index] for index, _normal, _u, _v in face.vertices]
+            if not coords:
+                continue
+            if (
+                min(point[0] for point in coords) >= layout.stair_x0 - 1e-6
+                and max(point[0] for point in coords) <= layout.stair_x1 + 1e-6
+                and min(point[2] for point in coords) >= layout.stair_z0 - 0.05
+                and max(point[2] for point in coords) <= layout.stair_z1 + 0.05
+                and max(point[1] for point in coords) - min(point[1] for point in coords) < 1e-6
+                and min(point[1] for point in coords) > building_models.INTERIOR_ROADWAY_Y_M + 0.10
+            ):
+                stair_treads.append(face)
+        self.assertGreaterEqual(len(stair_treads), step_count)
+
+    def test_generated_fallback_buildings_use_generic_shed_and_barn_size_rules(self) -> None:
+        library = ProceduralBuildingLibrary(world_name="generated_fallback_families")
+
+        shed = library.key_for(
+            {"building": "yes", "cwr:synthetic": "residential_infill"},
+            6.0, 8.0,
+        )
+        house = library.key_for(
+            {"building": "yes", "cwr:synthetic": "residential_infill"},
+            9.5, 14.0,
+        )
+        barn = library.key_for(
+            {"building": "yes", "cwr:synthetic": "residential_infill"},
+            12.0, 42.0,
+        )
+
+        self.assertEqual(shed.family, "outbuilding")
+        self.assertEqual(house.family, "residential")
+        self.assertEqual(barn.family, "agricultural")
 
     def test_single_house_inside_isolated_dwelling_polygon_becomes_one_storey_cabin(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
@@ -271,7 +509,7 @@ class ProceduralBuildingTests(unittest.TestCase):
             self.assertEqual(summary.selection_names[2], ())
             self.assertEqual(summary.mass_point_counts, (0, 8, 0))
             self.assertEqual(summary.named_properties[0], ())
-            self.assertEqual(summary.named_properties[1], (("map", "house"),))
+            self.assertEqual(summary.named_properties[1], (("map", "house"), ("autocenter", "0")))
             self.assertEqual(summary.named_properties[2], ())
             self.assertEqual(
                 summary.texture_paths,
@@ -330,6 +568,33 @@ class ProceduralBuildingTests(unittest.TestCase):
         self.assertAlmostEqual(lod.points[8][1], key.height_m - 3.0, places=6)
         self.assertAlmostEqual(lod.points[9][1], key.height_m - 3.0, places=6)
         self.assertGreater(max(point[1] for point in lod.points), key.height_m)
+
+
+    def test_all_procedural_building_geometry_uses_authored_origin(self) -> None:
+        for interiors in (False, True):
+            key = BuildingVariantKey(
+                "residential", "gabled", 12.0, 12.0, 6.0,
+                foundation_depth_m=0.75, interiors=interiors,
+            )
+            geometry = building_models._geometry_lod(key)
+            properties = dict(geometry.properties)
+            self.assertEqual(properties["autocenter"], "0")
+            if not interiors:
+                self.assertAlmostEqual(min(point[1] for point in geometry.points), 0.0, places=6)
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "house.p3d"
+            write_building_mlod(
+                path,
+                BuildingVariantKey("residential", "gabled", 12.0, 12.0, 6.0, foundation_depth_m=0.75),
+                wall_texture=r"testworld\d\wall.paa",
+                roof_texture=r"testworld\d\roof.paa",
+                foundation_texture=r"testworld\d\foundation.paa",
+                foundation_depth=0.75,
+            )
+            summary = inspect_mlod(path)
+            all_properties = {prop for lod in summary.named_properties for prop in lod}
+            self.assertIn(("autocenter", "0"), all_properties)
 
     def test_church_geometry_uses_authored_origin_without_autocenter(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -409,6 +674,82 @@ class ProceduralBuildingTests(unittest.TestCase):
                 for face in lod.faces
             )
         )
+
+    def test_gabled_wall_texture_remainder_is_anchored_above_ground(self) -> None:
+        # A 6 m gabled house has a 3.9 m eave at the default roof pitch. The
+        # old 0..(height/3) UV mapping therefore wrapped 0.3 of the facade atlas
+        # at local Y=0, painting the top/window portion of the texture into the
+        # terrain. Ground vertices must instead land on an integer V boundary so
+        # the partial repeat is consumed at the top of the wall.
+        wall_texture = r"test\wall.paa"
+        key = BuildingVariantKey("residential", "gabled", 12.0, 12.0, 6.0)
+        lod = building_models._visual_lod(
+            key, wall_texture, r"test\roof.paa", 35.0
+        )
+
+        full_height_wall_faces = []
+        for face in lod.faces:
+            if face.texture != wall_texture or len(face.vertices) != 4:
+                continue
+            heights = [lod.points[index][1] for index, _normal, _u, _v in face.vertices]
+            if min(heights) <= 1e-6 and max(heights) > 3.0 + 1e-6:
+                full_height_wall_faces.append(face)
+
+        self.assertGreaterEqual(len(full_height_wall_faces), 6)
+        fractional_top_seen = False
+        for face in full_height_wall_faces:
+            for point_index, _normal, _u, v in face.vertices:
+                height = lod.points[point_index][1]
+                if abs(height) <= 1e-6:
+                    self.assertAlmostEqual(v, round(v), places=6)
+                elif height > 3.0 + 1e-6 and abs(v - round(v)) > 1e-6:
+                    fractional_top_seen = True
+        self.assertTrue(fractional_top_seen)
+
+    def test_barn_door_atlas_is_limited_to_ground_floor(self) -> None:
+        # Agricultural wall atlases paint a large barn door into each 3 m tile.
+        # The tile may repeat horizontally along a long barn, but it must never
+        # be reused above the first storey. Upper walls and gables use the
+        # matching plain cladding texture instead.
+        wall_texture = r"test\barn_wall.paa"
+        front_texture = r"test\barn_front.paa"
+        plain_texture = r"test\barn_plain.paa"
+
+        for roof_style in ("gabled", "flat"):
+            with self.subTest(roof_style=roof_style):
+                key = BuildingVariantKey(
+                    "agricultural", roof_style, 14.0, 42.0, 6.0,
+                    regional_style="sweden_red",
+                )
+                lod = building_models._visual_lod(
+                    key,
+                    wall_texture,
+                    r"test\roof.paa",
+                    35.0,
+                    front_texture=front_texture,
+                    plain_wall_texture=plain_texture,
+                )
+
+                painted_faces = [
+                    face for face in lod.faces
+                    if face.texture in {wall_texture, front_texture}
+                ]
+                self.assertTrue(painted_faces)
+                for face in painted_faces:
+                    heights = [
+                        lod.points[index][1]
+                        for index, _normal, _u, _v in face.vertices
+                    ]
+                    self.assertLessEqual(max(heights), 3.0 + 1e-6)
+
+                self.assertTrue(any(
+                    face.texture == plain_texture
+                    and max(
+                        lod.points[index][1]
+                        for index, _normal, _u, _v in face.vertices
+                    ) > 3.0 + 1e-6
+                    for face in lod.faces
+                ))
 
     def test_large_geometry_is_split_into_named_collision_components(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -734,12 +1075,15 @@ class ProceduralBuildingTests(unittest.TestCase):
             walls = [relative for relative in result.texture_files if relative.startswith("d/w")]
             fronts = [relative for relative in result.texture_files if relative.startswith("d/e")]
             roofs = [relative for relative in result.texture_files if relative.startswith("d/r")]
-            self.assertEqual(len(walls), 10)
-            self.assertEqual(len(fronts), 10)
-            self.assertEqual(len(roofs), 10)
-            self.assertEqual(len({(root / relative).read_bytes() for relative in walls}), 10)
-            self.assertEqual(len({(root / relative).read_bytes() for relative in fronts}), 10)
-            self.assertEqual(len({(root / relative).read_bytes() for relative in roofs}), 10)
+            # Only texture variants referenced by generated P3Ds are emitted.
+            # This test produces three selected palettes, so writing all ten
+            # configured variants would only bloat the addon and load time.
+            self.assertEqual(len(walls), 3)
+            self.assertEqual(len(fronts), 3)
+            self.assertEqual(len(roofs), 3)
+            self.assertEqual(len({(root / relative).read_bytes() for relative in walls}), 3)
+            self.assertEqual(len({(root / relative).read_bytes() for relative in fronts}), 3)
+            self.assertEqual(len({(root / relative).read_bytes() for relative in roofs}), 3)
             wall = root / walls[0]
             roof = root / roofs[0]
             from cwr_worldgen.procedural_buildings import BUILDING_ASSET_TEXTURE_SIZE
@@ -850,6 +1194,35 @@ class ProceduralBuildingTests(unittest.TestCase):
         front = _front_texture_image("townhouse")
         self.assertEqual(front.getpixel((64, 40)), (66, 58, 47))
         self.assertNotEqual(front.getpixel((64, 116)), townhouse.getpixel((64, 116)))
+
+    def test_default_shop_texture_reads_as_intact_storefront(self) -> None:
+        from cwr_worldgen.procedural_buildings import (
+            _open_wall_texture_image,
+            _wall_texture_image,
+        )
+
+        shop = _wall_texture_image("shop")
+        plain = _open_wall_texture_image("shop")
+
+        # The rendered surround is intentionally light/off-white rather than
+        # the previous dirty mid-brown shop facade.
+        surround = shop.getpixel((4, 40))
+        self.assertGreater(sum(surround) / 3.0, 150.0)
+
+        # Separate left/right glazed display windows leave an intact rendered
+        # pier and framed door in the centre, rather than one giant dark void.
+        left_glass = shop.getpixel((20, 50))
+        centre_door = shop.getpixel((64, 50))
+        right_glass = shop.getpixel((108, 50))
+        self.assertLess(sum(left_glass) / 3.0, 125.0)
+        self.assertLess(sum(right_glass) / 3.0, 125.0)
+        self.assertNotEqual(left_glass, centre_door)
+        self.assertNotEqual(right_glass, centre_door)
+
+        # Enterable shops receive matching pale material with no painted glass.
+        plain_centre = plain.getpixel((64, 50))
+        self.assertGreater(sum(plain_centre) / 3.0, 145.0)
+        self.assertNotEqual(plain_centre, left_glass)
 
 
 class Milestone8BuildTests(unittest.TestCase):

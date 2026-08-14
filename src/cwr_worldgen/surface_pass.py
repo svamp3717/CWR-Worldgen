@@ -83,7 +83,10 @@ NOGOVA_SURFACE_TEXTURES: dict[str, str] = {
 NOGOVA_SURFACE_TEXTURES.update({
     "a": r"o\pole1.paa",
     "b": r"o\pole2.paa",
-    "y": r"o\b1.paa",
+    # Keep sports turf on the same standard green grass texture as ordinary
+    # grass.  The former o\b1.paa override is visibly lighter and creates pale
+    # pitch rectangles that do not match the surrounding Nogova terrain.
+    "y": NOGOVA_SURFACE_TEXTURES["g"],
     "x": r"o\ps.paa",
     # Nogova has no rock tile that blends cleanly with this terrain palette.
     # Rock/scree semantic cells therefore keep their ordinary Nogova cycle
@@ -665,9 +668,10 @@ def build_surface_pass(
             result[index] = MATERIAL_INDEX["s"]
             mapped_sand_count += 1
         elif sports_mask[index]:
-            # Sports pitches use a stock Nogova tile directly. Do not paint a
-            # generated semantic slab over the pitch; this also covers pitches
-            # such as ice-hockey Way 239731757 regardless of surface=asphalt.
+            # Sports pitches use the standard grass terrain slot directly. Do
+            # not paint a generated semantic slab over the pitch; this also
+            # covers pitches such as ice-hockey Way 239731757 regardless of
+            # surface=asphalt.
             result[index] = MATERIAL_INDEX["y"]
             sports_count += 1
         elif park_mask[index]:

@@ -27,6 +27,7 @@ from .osm import (
     OsmRaster,
     _maximum_polygon_elevation,
     _oriented_rectangle,
+    road_bridge_crosses_ditch_only,
     road_is_dirt,
     road_is_gravel,
     road_model_for_tags,
@@ -113,6 +114,15 @@ def _road_vertical_offset(tags: Mapping[str, str]) -> float:
         if road_is_gravel(tags)
         else _STOCK_ROAD_VERTICAL_OFFSET_METRES
     )
+
+
+def _road_is_explicit_bridge(tags: Mapping[str, str]) -> bool:
+    bridge = str(tags.get("bridge", "")).strip().casefold()
+    if bridge not in {"", "no", "false", "0", "none"}:
+        return True
+    if str(tags.get("man_made", "")).strip().casefold() == "bridge":
+        return True
+    return str(tags.get("special", "")).strip().casefold() == "bridge"
 
 
 def _sample_elevation(elevations: Sequence[float], cells: int, cell_size: float, x: float, z: float) -> float:
@@ -1308,6 +1318,16 @@ def _fit_stock_piece_road_objects(
                 f"Projected road lines {feature_index:,}/{total_roads:,}",
             )
         if not road_is_supported(feature.tags, include_minor=spec.include_minor_roads):
+            continue
+        if (
+            bool(getattr(spec, "bridges_enabled", True))
+            and not bool(getattr(spec, "procedural_bridges", False))
+            and _road_is_explicit_bridge(feature.tags)
+            and not road_bridge_crosses_ditch_only(feature, dataset, projection)
+        ):
+            # most_stred30 is the actual stock bridge/road model. Do not also
+            # lay sil/kos road pieces through the same OSM bridge span; the
+            # overlapping road simulations can fight for rendering/road links.
             continue
         points = tuple(_clean_road_points([projection.to_world(point) for point in feature.points]))
         if len(points) < 2:

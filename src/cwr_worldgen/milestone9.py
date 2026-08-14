@@ -206,7 +206,7 @@ class Milestone9Spec(Milestone8Spec):
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
     bridges_enabled: bool = True
-    procedural_bridges: bool = True
+    procedural_bridges: bool = False
     maximum_bridge_objects: int = 1000
     bridge_module_length: float = 30.0
     bridge_deck_clearance: float = 1.25
@@ -571,7 +571,7 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
     bridges_enabled: bool = True
-    procedural_bridges: bool = True
+    procedural_bridges: bool = False
     maximum_bridge_objects: int = 1000
     bridge_module_length: float = 30.0
     bridge_deck_clearance: float = 1.25

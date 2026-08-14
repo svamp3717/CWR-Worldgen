@@ -7,11 +7,13 @@ from types import SimpleNamespace
 import hashlib
 import json
 import math
+import re
 import tempfile
 import unittest
 
 from PIL import Image
 
+from cwr_worldgen import procedural_buildings as building_models
 from cwr_worldgen._version import GENERATOR_VERSION
 from cwr_worldgen.cli import _parser
 from cwr_worldgen.location_example import square_bbox
@@ -42,6 +44,7 @@ from cwr_worldgen.osm import (
     generate_world_objects,
     rasterize_osm,
     plan_building_placements,
+    road_bridge_crosses_ditch_only,
     road_is_dirt,
     road_is_gravel,
     road_model_for_tags,
@@ -60,6 +63,7 @@ from cwr_worldgen.osm import (
     _geographic_forest_single_tree_cells,
     _scaled_synthetic_tree_limit,
     _bridge_module_chunks,
+    _demote_dense_garage_clusters_to_sheds,
     ObjectGenerationResult,
     augment_dataset_with_overture_buildings,
     NOGOVA_BRIDGE_MODEL,
@@ -370,7 +374,7 @@ class SurfacePassTests(unittest.TestCase):
         self.assertEqual(report.indices.count(MATERIAL_INDEX["v"]), 0)
         self.assertEqual(report.gravel_blend_cells, 0)
 
-    def test_nogova_ice_hockey_pitch_uses_b1_without_generated_site_slab(self) -> None:
+    def test_nogova_ice_hockey_pitch_uses_standard_grass_without_generated_site_slab(self) -> None:
         dataset, projection = self._dataset()
         ring = tuple(projection.to_latlon(point) for point in (
             (420.0, 650.0), (520.0, 650.0), (520.0, 750.0), (420.0, 750.0), (420.0, 650.0)
@@ -388,7 +392,9 @@ class SurfacePassTests(unittest.TestCase):
         )
         self.assertGreater(report.mapped_sports_cells, 0)
         self.assertIn(MATERIAL_INDEX["y"], report.indices)
-        self.assertEqual(surface_texture_wire_paths("ice_hockey", "nogova")[MATERIAL_INDEX["y"]], r"o\b1.paa")
+        paths = surface_texture_wire_paths("ice_hockey", "nogova")
+        self.assertEqual(paths[MATERIAL_INDEX["y"]], paths[MATERIAL_INDEX["g"]])
+        self.assertEqual(paths[MATERIAL_INDEX["y"]], r"o\t1.paa")
 
     def test_optional_colour_reference_is_deterministic(self) -> None:
         dataset, projection = self._dataset()
@@ -439,7 +445,7 @@ class SurfacePassTests(unittest.TestCase):
         ]
         expected[MATERIAL_INDEX["a"]] = r"o\pole1.paa"
         expected[MATERIAL_INDEX["b"]] = r"o\pole2.paa"
-        expected[MATERIAL_INDEX["y"]] = r"o\b1.paa"
+        expected[MATERIAL_INDEX["y"]] = expected[MATERIAL_INDEX["g"]]
         expected[MATERIAL_INDEX["x"]] = r"o\ps.paa"
         self.assertEqual(nogova_paths, tuple(expected))
         self.assertEqual(nogova_paths[MATERIAL_INDEX["a"]], r"o\pole1.paa")
@@ -448,12 +454,14 @@ class SurfacePassTests(unittest.TestCase):
             nogova_paths[MATERIAL_INDEX["j"]],
             NOGOVA_GROUND_TEXTURE_CYCLE[MATERIAL_INDEX["j"] % len(NOGOVA_GROUND_TEXTURE_CYCLE)],
         )
-        self.assertEqual(nogova_paths[MATERIAL_INDEX["y"]], r"o\b1.paa")
+        self.assertEqual(nogova_paths[MATERIAL_INDEX["y"]], nogova_paths[MATERIAL_INDEX["g"]])
+        self.assertEqual(nogova_paths[MATERIAL_INDEX["y"]], r"o\t1.paa")
         self.assertEqual(nogova_paths[MATERIAL_INDEX["x"]], r"o\ps.paa")
         self.assertEqual(
             set(external_surface_texture_paths("nogova")),
-            {*NOGOVA_GROUND_TEXTURE_CYCLE, r"o\pole1.paa", r"o\pole2.paa", r"o\b1.paa", r"o\ps.paa"},
+            {*NOGOVA_GROUND_TEXTURE_CYCLE, r"o\pole1.paa", r"o\pole2.paa", r"o\ps.paa"},
         )
+        self.assertNotIn(r"o\b1.paa", external_surface_texture_paths("nogova"))
 
     def test_malden_profile_reuses_basic_ground_for_farmland(self) -> None:
         world_name = "abcdefghijklmnopqrst"
@@ -590,6 +598,8 @@ class RoadPieceFittingTests(unittest.TestCase):
         self.assertEqual(runtime_spec.forest_single_tree_footprint, 2.0)
         self.assertEqual(source_spec.forest_single_tree_maximum_float, 0.5)
         self.assertEqual(runtime_spec.forest_single_tree_maximum_float, 0.5)
+        self.assertFalse(source_spec.procedural_bridges)
+        self.assertFalse(runtime_spec.procedural_bridges)
 
     def test_milestone9_cli_uses_the_same_expanded_object_budgets(self) -> None:
         args = _parser().parse_args([
@@ -630,7 +640,7 @@ class RoadPieceFittingTests(unittest.TestCase):
         self.assertEqual(args.forest_severe_hill_trees_per_block, 10)
         self.assertEqual(args.forest_polygon_sink_fraction, 0.5)
         self.assertEqual(args.bridge_module_length, 30.0)
-        self.assertTrue(args.procedural_bridges)
+        self.assertFalse(args.procedural_bridges)
         self.assertAlmostEqual(args.bridge_deck_clearance, 1.25)
         self.assertFalse(args.procedural_building_interiors)
 
@@ -688,6 +698,29 @@ class RoadPieceFittingTests(unittest.TestCase):
         self.assertFalse(disabled.include_minor_roads)
         self.assertFalse(disabled.overture_buildings_enabled)
         self.assertFalse(disabled.forest_severe_hill_fallback)
+
+    def test_stock_nogova_bridge_mode_omits_ordinary_road_pieces_on_bridge_way(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        bridge = OsmLineFeature(
+            "way/stock-bridge-road",
+            {"highway": "secondary", "bridge": "yes", "surface": "asphalt"},
+            tuple(projection.to_latlon(point) for point in ((20.0, 100.0), (180.0, 100.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="stock-bridge-road", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(bridge,),
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="cwr_stock_bridge_road", heightmap_path=Path("unused.png"),
+            bbox=(0.0, 0.0, 1.0, 1.0), cells=8, cell_size=25.0,
+            max_road_objects=100, procedural_bridges=False, strict_assets=False,
+        )
+        stock = fit_road_objects(dataset, projection, (0.0,) * 64, spec)
+        self.assertEqual(stock.objects, ())
+        procedural = fit_road_objects(
+            dataset, projection, (0.0,) * 64, replace(spec, procedural_bridges=True)
+        )
+        self.assertGreater(len(procedural.objects), 0)
 
     def test_stock_roads_reject_a_budget_that_would_emit_a_partial_network(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
@@ -2506,7 +2539,13 @@ class SemanticFeatureTests(unittest.TestCase):
     def test_optional_procedural_building_interiors_are_enterable_and_bounded(self) -> None:
         from cwr_worldgen.procedural_buildings import (
             BuildingVariantKey,
+            _door_dimensions,
             _geometry_lod,
+            _interior_paths_lod,
+            _interior_roadway_lod,
+            _interior_storey_count,
+            _placement_uses_second_storey,
+            _interior_window_openings,
             _window_openings,
             write_building_mlod,
         )
@@ -2519,14 +2558,72 @@ class SemanticFeatureTests(unittest.TestCase):
         )
         key = enabled.key_for({"building": "house", "building:levels": "2"}, 12.0, 16.0)
         self.assertTrue(key.interiors)
+        self.assertEqual(_interior_storey_count(key), 2)
+        self.assertEqual(
+            _interior_storey_count(
+                enabled.key_for({"building": "house"}, 5.0, 7.0)
+            ),
+            1,
+        )
         self.assertFalse(
             disabled.key_for({"building": "house"}, 12.0, 16.0).interiors
         )
-        self.assertFalse(
-            enabled.key_for({"building": "industrial"}, 12.0, 16.0).interiors
+        utility_cases = (
+            ({"building": "barn"}, 14.0, 42.0, "agricultural"),
+            ({"building": "shed"}, 6.0, 8.0, "outbuilding"),
+            ({"building": "garage"}, 7.0, 9.0, "outbuilding"),
+            ({"building": "warehouse"}, 24.0, 60.0, "industrial"),
+        )
+        for tags, width, length, family in utility_cases:
+            with self.subTest(utility_family=family, tags=tags):
+                utility_key = enabled.key_for(tags, width, length)
+                self.assertEqual(utility_key.family, family)
+                self.assertTrue(utility_key.interiors)
+
+        # Barns/warehouses and car-capable outbuildings use vehicle-scale
+        # openings. Outbuildings too small to contain a car are sheds with a
+        # pedestrian-size entrance, regardless of whether OSM called them a
+        # garage or shed.
+        house_door_half, house_door_height, _ = _door_dimensions(key)
+        barn_key = enabled.key_for({"building": "barn"}, 14.0, 42.0)
+        garage_key = enabled.key_for({"building": "shed"}, 6.0, 8.0)
+        small_shed_key = enabled.key_for({"building": "garage"}, 2.0, 3.5)
+        warehouse_key = enabled.key_for({"building": "warehouse"}, 24.0, 60.0)
+        self.assertEqual(garage_key.outbuilding_kind, "garage")
+        self.assertEqual(small_shed_key.outbuilding_kind, "shed")
+        for utility_key in (barn_key, garage_key, warehouse_key):
+            utility_half, utility_height, _ = _door_dimensions(utility_key)
+            self.assertGreater(utility_half, house_door_half)
+            self.assertGreater(utility_height, house_door_height)
+        shed_half, shed_height, _ = _door_dimensions(small_shed_key)
+        self.assertLess(shed_half, garage_key.width_m * 0.25)
+        self.assertLess(shed_height, _door_dimensions(garage_key)[1])
+        self.assertLess(shed_half, _door_dimensions(garage_key)[0])
+
+        # Untagged/default-height houses get an upper floor most, but not all,
+        # of the time. Selection is stable from tags and placement coordinates.
+        generic_house = enabled.key_for({"building": "house"}, 12.0, 16.0)
+        mixed = [
+            _placement_uses_second_storey(
+                {"building": "house"}, ((float(index) * 17.0, 25.0),), generic_house
+            )
+            for index in range(40)
+        ]
+        self.assertGreater(sum(mixed), 20)
+        self.assertLess(sum(mixed), 40)
+        self.assertEqual(
+            mixed,
+            [
+                _placement_uses_second_storey(
+                    {"building": "house"}, ((float(index) * 17.0, 25.0),), generic_house
+                )
+                for index in range(40)
+            ],
         )
         self.assertFalse(
-            enabled.key_for({"building": "house"}, 32.0, 38.0).interiors
+            enabled.key_for(
+                {"building": "house"}, 32.0, 38.0, settlement_context="village"
+            ).interiors
         )
 
         plain = replace(key, interiors=False)
@@ -2553,6 +2650,57 @@ class SemanticFeatureTests(unittest.TestCase):
         self.assertGreater(len(visual.faces), len(plain_visual.faces))
         self.assertGreaterEqual(len(geometry.selections), 30)
         self.assertEqual(dict(geometry.properties)["class"], "house")
+        stair_key = replace(key, foundation_depth_m=2.0)
+        roadway = _interior_roadway_lod(stair_key, 2.0)
+        self.assertIsNotNone(roadway)
+        assert roadway is not None
+        self.assertTrue(math.isclose(roadway.resolution, 3.0e15, rel_tol=1e-6))
+        self.assertLess(min(point[1] for point in roadway.points), -1.5)
+        self.assertLess(
+            min(point[2] for point in roadway.points),
+            -stair_key.length_m * 0.5 - 2.0,
+        )
+        self.assertTrue(roadway.faces)
+        self.assertGreater(max(point[1] for point in roadway.points), 2.5)
+        # Upper stairs now use a segmented continuous Roadway slope. A thin
+        # solid stepped Geometry staircase sits just below matching horizontal
+        # Roadway treads, so infantry has both walkable and physical support.
+        stair_layout = building_models._second_storey_layout(stair_key)
+        self.assertIsNotNone(stair_layout)
+        horizontal_upper_faces = [
+            face for face in roadway.faces
+            if (
+                max(roadway.points[index][1] for index, _normal, _u, _v in face.vertices)
+                - min(roadway.points[index][1] for index, _normal, _u, _v in face.vertices)
+            ) < 1e-6
+            and min(roadway.points[index][1] for index, _normal, _u, _v in face.vertices)
+            > building_models.INTERIOR_ROADWAY_Y_M + 0.10
+        ]
+        self.assertGreaterEqual(
+            len(horizontal_upper_faces),
+            building_models.INTERIOR_SECOND_STOREY_STAIR_STEPS,
+        )
+
+        stair_levels = sorted({
+            round(roadway.points[index][1], 3)
+            for face in horizontal_upper_faces
+            for index, _normal, _u, _v in face.vertices
+            if 0.05 <= roadway.points[index][1] <= 2.65
+        })
+        self.assertGreaterEqual(len(stair_levels), 12)
+
+        paths = _interior_paths_lod(stair_key, 2.0)
+        self.assertIsNotNone(paths)
+        assert paths is not None
+        self.assertIn("Pos3", {selection.name for selection in paths.selections})
+        upstairs_positions = []
+        for selection in paths.selections:
+            if not selection.name.startswith("Pos"):
+                continue
+            for point_index, weight in enumerate(selection.point_weights):
+                if weight:
+                    upstairs_positions.append(paths.points[point_index][1])
+        self.assertGreater(max(upstairs_positions), 2.5)
 
         def assert_collision_free(x: float, y: float, z: float) -> None:
             for start in range(0, len(geometry.points), 8):
@@ -2566,15 +2714,48 @@ class SemanticFeatureTests(unittest.TestCase):
                     and min(zs) <= z <= max(zs)
                 )
 
-        assert_collision_free(0.0, 1.0, -key.length_m * 0.5 + 0.05)
-        back_openings = _window_openings(
-            -key.width_m * 0.5, key.width_m * 0.5, key.height_m
+        # The enterable collision shell no longer duplicates the Roadway floor
+        # or uses a low solid ceiling. Centre-floor and head-height space remain
+        # clear, including through the partition doorway.
+        assert_collision_free(0.0, 0.02, 1.0)
+        assert_collision_free(0.0, 2.55, 0.0)
+
+        roadway_wall_clearance = 0.12
+        wall_thickness = min(0.30, max(0.18, min(key.width_m, key.length_m) * 0.025))
+        self.assertLessEqual(
+            max(abs(point[0]) for point in roadway.points if point[2] > -key.length_m * 0.5),
+            key.width_m * 0.5 - wall_thickness - roadway_wall_clearance + 1e-6,
         )
-        side_openings = _window_openings(
-            -key.length_m * 0.5, key.length_m * 0.5, key.height_m
+
+        # The entrance is intentionally occupied by the closed animated door.
+        # Its collision component shares the visual ``door1`` selection so it
+        # rotates out of the doorway when a player opens it.
+        self.assertIn("door1", {selection.name for selection in geometry.selections})
+        door_half = min(0.8, max(0.6, key.width_m * 0.5 * 0.18))
+        door_z = -key.length_m * 0.5 + 0.05
+        door_components = []
+        for start in range(0, len(geometry.points), 8):
+            component = geometry.points[start:start + 8]
+            xs = [point[0] for point in component]
+            ys = [point[1] for point in component]
+            zs = [point[2] for point in component]
+            if (
+                min(xs) <= 0.0 <= max(xs)
+                and min(ys) <= 1.0 <= max(ys)
+                and min(zs) <= door_z <= max(zs)
+            ):
+                door_components.append(component)
+        self.assertEqual(len(door_components), 1)
+        self.assertLessEqual(max(abs(point[0]) for point in door_components[0]), door_half + 1e-6)
+        back_openings = _interior_window_openings(
+            key, -key.width_m * 0.5, key.width_m * 0.5, key.height_m
+        )
+        side_openings = _interior_window_openings(
+            key, -key.length_m * 0.5, key.length_m * 0.5, key.height_m
         )
         self.assertGreater(len(back_openings), 1)
         self.assertGreater(len(side_openings), 1)
+        self.assertTrue(any(opening_bottom > 3.0 for _a, _b, opening_bottom, _top in back_openings))
         for opening_min, opening_max, opening_bottom, opening_top in back_openings:
             assert_collision_free(
                 (opening_min + opening_max) * 0.5,
@@ -2663,11 +2844,228 @@ class SemanticFeatureTests(unittest.TestCase):
                 interior_texture=r"interior_test\d\inside.paa",
             )
             summary = inspect_mlod(model)
-            self.assertEqual(summary.lod_count, 3)
-            self.assertEqual(dict(summary.named_properties[1])["class"], "house")
+            self.assertEqual(summary.lod_count, 7)
+            self.assertTrue(any(
+                math.isclose(value, 20.0, rel_tol=1e-6)
+                for value in summary.resolutions
+            ))
+            self.assertTrue(any(
+                math.isclose(value, 3.0e15, rel_tol=1e-6)
+                for value in summary.resolutions
+            ))
+            geometry_index = next(
+                index for index, value in enumerate(summary.resolutions)
+                if math.isclose(value, 1.0e13, rel_tol=1e-6)
+            )
+            memory_index = next(
+                index for index, value in enumerate(summary.resolutions)
+                if math.isclose(value, 1.0e15, rel_tol=1e-6)
+            )
+            paths_index = next(
+                index for index, value in enumerate(summary.resolutions)
+                if math.isclose(value, 4.0e15, rel_tol=1e-6)
+            )
+            self.assertEqual(dict(summary.named_properties[geometry_index])["class"], "house")
+            self.assertIn("door1", summary.selection_names[0])
+            self.assertIn("door1", summary.selection_names[geometry_index])
+            self.assertIn("door1_axis", summary.selection_names[memory_index])
+            self.assertIn("door1_action", summary.selection_names[memory_index])
+            self.assertIn("In1", summary.selection_names[paths_index])
+            self.assertIn("In2", summary.selection_names[paths_index])
+            self.assertIn("Pos1", summary.selection_names[paths_index])
+            self.assertIn("Pos3", summary.selection_names[paths_index])
             self.assertIn(r"interior_test\d\inside.paa", summary.texture_paths)
+            # The distance shell should be tiny compared with the detailed
+            # enterable model and omit all interior/window-cut complexity.
+            distance_index = summary.resolutions.index(20.0)
+            self.assertLess(summary.face_counts[distance_index], 50)
+            self.assertLess(summary.face_counts[0], 750)
 
-    def test_unsafe_enterable_door_uses_closed_variant_without_rejecting_building(self) -> None:
+    def test_dense_garage_cluster_keeps_road_nearest_garage_and_demotes_farther_members(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        road = OsmLineFeature(
+            "way/service",
+            {"highway": "service"},
+            tuple(projection.to_latlon(point) for point in ((10.0, 20.0), (190.0, 20.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="garage-cluster", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(road,),
+        )
+        library = ProceduralBuildingLibrary(world_name="garage_cluster")
+        key = BuildingVariantKey(
+            "outbuilding", "gabled", 6.0, 8.0, 3.0,
+            outbuilding_kind="garage",
+        )
+        plans = []
+        for index, (x, z) in enumerate(((45.0, 25.0), (55.0, 34.0), (65.0, 43.0), (75.0, 52.0), (85.0, 61.0))):
+            placement = BuildingPlacement(
+                library.model_path(key), 0.0, key, key
+            )
+            plans.append(BuildingPlacementPlan(
+                osm_key=f"way/garage-{index}", geometry_index=0,
+                geometry_kind="polygon", x=x, z=z, heading_degrees=0.0,
+                model_path=placement.model_path,
+                support_polygon=((x-3.0, z-4.0), (x+3.0, z-4.0), (x+3.0, z+4.0), (x-3.0, z+4.0)),
+                procedural_placement=placement, building_family="outbuilding",
+            ))
+
+        updated = _demote_dense_garage_clusters_to_sheds(
+            plans, dataset, projection, library
+        )
+        kinds = [plan.procedural_placement.selected.outbuilding_kind for plan in updated]
+        self.assertEqual(kinds[0], "garage")
+        self.assertEqual(kinds.count("shed"), 2)
+        self.assertEqual(kinds.count("garage"), 3)
+        # The two farthest members should be the ones treated as likely sheds;
+        # road access is the strongest evidence that an accessory building is a
+        # genuine vehicle garage.
+        self.assertEqual(kinds[-2:], ["shed", "shed"])
+
+    def test_utility_interiors_use_open_halls_and_bounded_collision(self) -> None:
+        from cwr_worldgen import procedural_buildings as building_models
+
+        library = ProceduralBuildingLibrary(
+            world_name="utility_interiors", generate_interiors=True
+        )
+        cases = (
+            ({"building": "barn"}, 14.0, 42.0, "agricultural"),
+            ({"building": "shed"}, 6.0, 8.0, "outbuilding"),
+            ({"building": "garage"}, 7.0, 9.0, "outbuilding"),
+            ({"building": "warehouse"}, 24.0, 60.0, "industrial"),
+        )
+        for tags, width, length, family in cases:
+            with self.subTest(family=family, tags=tags):
+                key = library.key_for(tags, width, length)
+                self.assertTrue(key.interiors)
+                self.assertEqual(key.family, family)
+                self.assertEqual(
+                    building_models._interior_window_openings(
+                        key, -key.width_m * 0.5, key.width_m * 0.5, key.height_m
+                    ),
+                    (),
+                )
+                geometry = building_models._geometry_lod(key)
+                for start in range(0, len(geometry.points), 8):
+                    component = geometry.points[start:start + 8]
+                    self.assertLessEqual(
+                        max(point[0] for point in component)
+                        - min(point[0] for point in component),
+                        40.000001,
+                    )
+                    self.assertLessEqual(
+                        max(point[2] for point in component)
+                        - min(point[2] for point in component),
+                        40.000001,
+                    )
+                    xs = [point[0] for point in component]
+                    ys = [point[1] for point in component]
+                    zs = [point[2] for point in component]
+                    self.assertFalse(
+                        min(xs) <= 0.0 <= max(xs)
+                        and min(ys) <= 0.02 <= max(ys)
+                        and min(zs) <= 0.0 <= max(zs)
+                    )
+                roadway = building_models._interior_roadway_lod(key, 0.5)
+                self.assertIsNotNone(roadway)
+                assert roadway is not None
+                self.assertTrue(roadway.faces)
+
+        warehouse = library.key_for({"building": "warehouse"}, 24.0, 60.0)
+        warehouse_roadway = building_models._interior_roadway_lod(warehouse, 0.5)
+        assert warehouse_roadway is not None
+        self.assertGreater(len(warehouse_roadway.faces), 5)
+
+    def test_enterable_procedural_windows_have_visual_cross_mullions(self) -> None:
+        from cwr_worldgen.procedural_buildings import (
+            BuildingVariantKey,
+            _gabled_profile,
+            _interior_window_openings,
+            _visual_lod,
+        )
+
+        cross_texture = r"interior_test\d\white_trim.paa"
+        for roof_style in ("flat", "gabled"):
+            with self.subTest(roof_style=roof_style):
+                key = BuildingVariantKey(
+                    "residential", roof_style, 12.0, 16.0, 6.0,
+                    regional_style="sweden_red", interiors=True,
+                )
+                visual = _visual_lod(
+                    key,
+                    r"interior_test\d\open_wall.paa",
+                    r"interior_test\d\roof.paa",
+                    35.0,
+                    foundation_texture=r"interior_test\d\floor.paa",
+                    interior_texture=r"interior_test\d\inside.paa",
+                    window_trim_texture=cross_texture,
+                )
+
+                if roof_style == "flat":
+                    wall_top = key.height_m
+                else:
+                    wall_top, _roof_rise, _slope_length = _gabled_profile(key, 35.0)
+
+                half_width = key.width_m * 0.5
+                half_length = key.length_m * 0.5
+                door_half = min(0.8, max(0.6, half_width * 0.18))
+                front_windows = _interior_window_openings(
+                    key, -half_width, half_width, wall_top,
+                    ground_exclusions=((-door_half - 0.35, door_half + 0.35),),
+                )
+                back_windows = _interior_window_openings(key, -half_width, half_width, wall_top)
+                side_windows = _interior_window_openings(key, -half_length, half_length, wall_top)
+                window_count = len(front_windows) + len(back_windows) + 2 * len(side_windows)
+
+                trim_faces = [
+                    face for face in visual.faces if face.texture == cross_texture
+                ]
+                # Each window has four flat surround strips plus two flat
+                # mullion strips; the visual shell is double-sided. This keeps
+                # the same silhouette with a fraction of the old box geometry.
+                self.assertEqual(len(trim_faces), window_count * 6 * 2)
+
+                # The crossbars occupy only window-height bands. No cross may
+                # descend to the Y=0 entrance threshold.
+                cross_start = window_count * 4 * 2
+                for face in trim_faces[cross_start:]:
+                    heights = [
+                        visual.points[index][1]
+                        for index, _normal, _u, _v in face.vertices
+                    ]
+                    self.assertGreaterEqual(min(heights), 0.9 - 1e-6)
+
+    def test_two_outbuildings_prefer_the_road_nearest_one_as_garage(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        road = OsmLineFeature(
+            "way/service-pair", {"highway": "service"},
+            tuple(projection.to_latlon(point) for point in ((10.0, 20.0), (190.0, 20.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="garage-pair", element_count=1, coastlines=(),
+            water=(), forests=(), farmland=(), urban=(), roads=(road,),
+        )
+        library = ProceduralBuildingLibrary(world_name="garage_pair")
+        key = BuildingVariantKey(
+            "outbuilding", "gabled", 6.0, 8.0, 3.0,
+            outbuilding_kind="garage",
+        )
+        plans = []
+        for index, (x, z) in enumerate(((60.0, 28.0), (65.0, 52.0))):
+            placement = BuildingPlacement(library.model_path(key), 0.0, key, key)
+            plans.append(BuildingPlacementPlan(
+                osm_key=f"way/pair-{index}", geometry_index=0, geometry_kind="polygon",
+                x=x, z=z, heading_degrees=0.0, model_path=placement.model_path,
+                support_polygon=((x-3.0, z-4.0), (x+3.0, z-4.0), (x+3.0, z+4.0), (x-3.0, z+4.0)),
+                procedural_placement=placement, building_family="outbuilding",
+            ))
+        updated = _demote_dense_garage_clusters_to_sheds(
+            plans, dataset, projection, library
+        )
+        kinds = [plan.procedural_placement.selected.outbuilding_kind for plan in updated]
+        self.assertEqual(kinds, ["garage", "shed"])
+
+    def test_enterable_building_uses_house_grounding_and_foundation_stairs(self) -> None:
         cells = 20
         cell_size = 10.0
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), cells * cell_size)
@@ -2703,39 +3101,52 @@ class SemanticFeatureTests(unittest.TestCase):
             name="door_fallback", heightmap_path=Path("unused.png"),
             bbox=(0.0, 0.0, 1.0, 1.0), cells=cells, cell_size=cell_size,
             max_road_objects=0, max_buildings=1, max_forest_objects=0,
-            building_minimum_area=1.0, building_foundation_maximum_depth=1.5,
+            building_minimum_area=1.0, building_foundation_maximum_depth=0.5,
             forest_undergrowth_enabled=False, forest_border_enabled=False,
             ditch_grass_enabled=False, barriers_enabled=False, bridges_enabled=False,
             rural_vegetation_enabled=False, strict_assets=False,
         )
-        fallback_library = ProceduralBuildingLibrary(
-            world_name=spec.name, maximum_foundation_depth=1.5,
-            cache_enabled=False,
-        )
-        fallback = generate_world_objects(
-            dataset, projection, raster, elevations, spec, include_roads=False,
-            building_asset_library=fallback_library,
-            building_placement_plans=(plan,),
-        )
-        self.assertEqual(fallback.building_objects, 1)
-        self.assertEqual(fallback.building_foundation_rejections, 0)
-        self.assertEqual(fallback.building_interior_fallbacks, 1)
-        self.assertTrue(fallback_library._usage)
-        self.assertTrue(all(not used_key.interiors for used_key in fallback_library._usage))
-
         enterable_library = ProceduralBuildingLibrary(
-            world_name=spec.name, maximum_foundation_depth=2.0,
+            world_name=spec.name, maximum_foundation_depth=0.5,
             cache_enabled=False,
         )
         enterable = generate_world_objects(
-            dataset, projection, raster, elevations,
-            replace(spec, building_foundation_maximum_depth=2.0),
-            include_roads=False, building_asset_library=enterable_library,
+            dataset, projection, raster, elevations, spec, include_roads=False,
+            building_asset_library=enterable_library,
             building_placement_plans=(plan,),
         )
         self.assertEqual(enterable.building_objects, 1)
+        self.assertEqual(enterable.building_foundation_rejections, 0)
         self.assertEqual(enterable.building_interior_fallbacks, 0)
-        self.assertTrue(all(used_key.interiors for used_key in enterable_library._usage))
+        self.assertTrue(enterable_library._usage)
+        used_key = next(iter(enterable_library._usage))
+        self.assertTrue(used_key.interiors)
+        self.assertGreater(used_key.foundation_depth_m, 0.5)
+
+        closed_key = replace(key, interiors=False)
+        closed_placement = replace(
+            placement, selected=closed_key, requested=closed_key,
+            model_path=r"door_fallback\g\closed.p3d",
+        )
+        closed_plan = replace(
+            plan, model_path=closed_placement.model_path,
+            procedural_placement=closed_placement,
+        )
+        closed_library = ProceduralBuildingLibrary(
+            world_name=spec.name, maximum_foundation_depth=0.5, cache_enabled=False
+        )
+        closed = generate_world_objects(
+            dataset, projection, raster, elevations, spec, include_roads=False,
+            building_asset_library=closed_library,
+            building_placement_plans=(closed_plan,),
+        )
+        self.assertEqual(closed.building_objects, 1)
+        self.assertAlmostEqual(enterable.objects[0].y, closed.objects[0].y, places=6)
+        self.assertAlmostEqual(
+            enterable.maximum_building_foundation_depth,
+            closed.maximum_building_foundation_depth,
+            places=6,
+        )
 
     def test_six_stage_grounding_refines_building_and_tree_supports(self) -> None:
         cells = 4
@@ -4223,6 +4634,76 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         self.assertEqual(len([plan for plan in plans if plan.osm_key.startswith("overture/")]), 1)
         self.assertFalse(any(plan.synthetic_infill for plan in plans))
 
+    def test_overture_building_classes_drive_barn_warehouse_and_shed_families(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 300.0)
+        residential = self._polygon(
+            projection, "way/residential", {"landuse": "residential"},
+            (10.0, 10.0, 290.0, 290.0),
+        )
+        dataset = OsmDataset(
+            source_generator="overture-building-classes", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(residential,), roads=(),
+        )
+
+        def geojson_ring(points: tuple[tuple[float, float], ...]) -> list[list[float]]:
+            return [[lon, lat] for lat, lon in (projection.to_latlon(point) for point in points)]
+
+        definitions = (
+            ("barn-a", "barn", (30.0, 30.0, 42.0, 72.0)),
+            ("warehouse-a", "warehouse", (80.0, 30.0, 104.0, 90.0)),
+            ("shed-a", "shed", (140.0, 30.0, 146.0, 38.0)),
+        )
+        features = []
+        for source_id, building_class, (x0, z0, x1, z1) in definitions:
+            features.append({
+                "type": "Feature",
+                "id": source_id,
+                "properties": {
+                    "id": source_id,
+                    "class": building_class,
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [geojson_ring((
+                        (x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0),
+                    ))],
+                },
+            })
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "overture-building-classes.geojson"
+            path.write_text(json.dumps({
+                "type": "FeatureCollection",
+                "features": features,
+            }), encoding="utf-8")
+            augmented = augment_dataset_with_overture_buildings(
+                dataset, projection, Milestone9Spec(source_dir=Path("unused")), path
+            )
+
+        self.assertEqual(
+            {feature.osm_key: feature.tags.get("building") for feature in augmented.building_polygons},
+            {
+                "overture/barn-a": "barn",
+                "overture/warehouse-a": "warehouse",
+                "overture/shed-a": "shed",
+            },
+        )
+        library = ProceduralBuildingLibrary(world_name="cwr_overture_classes", maximum_variants=16)
+        library.prepare(augmented, projection, 12.0)
+        families = {}
+        for feature in augmented.building_polygons:
+            polygon = feature.polygons[0]
+            points = [projection.to_world(point) for point in polygon.outer[:-1]]
+            families[feature.osm_key] = library.plan_polygon(feature.tags, points).requested.family
+        self.assertEqual(
+            families,
+            {
+                "overture/barn-a": "agricultural",
+                "overture/warehouse-a": "industrial",
+                "overture/shed-a": "outbuilding",
+            },
+        )
+
     def test_overture_buildings_do_not_cover_existing_osm_building_areas(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 300.0)
         village = OsmPointFeature(
@@ -4677,12 +5158,11 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             if obj.model_path.casefold().startswith(r"cwr_proc_bridge\i\br_")
         ]
         self.assertEqual(result.bridge_segments, 1)
-        self.assertGreater(len(bridge_objects), 1)
+        self.assertEqual(len(bridge_objects), 1)
         self.assertEqual(len(bridge_objects), result.bridge_objects)
         self.assertFalse(any(obj.model_path == NOGOVA_BRIDGE_MODEL for obj in bridge_objects))
         paths = {obj.model_path.casefold() for obj in bridge_objects}
-        self.assertTrue(any("br_start_" in path for path in paths))
-        self.assertTrue(any("br_end_" in path for path in paths))
+        self.assertTrue(all("br_single_" in path for path in paths))
         self.assertTrue(all("_w" in path and "_l" in path for path in paths))
         expected_origin = spec.bridge_deck_clearance - GENERATED_BRIDGE_ROADWAY_HEIGHT_METRES
         self.assertTrue(all(abs(obj.y - expected_origin) < 1e-6 for obj in bridge_objects))
@@ -4694,7 +5174,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             library = ProceduralInfrastructureLibrary(spec.name)
             library.register_models(obj.model_path for obj in bridge_objects)
             assets = library.write_assets(root, root / "infrastructure.json")
-            self.assertGreaterEqual(assets.generated_variants, 2)
+            self.assertEqual(assets.generated_variants, 1)
             bridge_texture = root / "i" / "b.paa"
             self.assertTrue(bridge_texture.is_file())
             info = inspect_paa(bridge_texture)
@@ -4712,6 +5192,51 @@ class InfrastructureAndRuralTests(unittest.TestCase):
                 geometry_properties = summary.named_properties[1]
                 self.assertIn(("canbeoccluded", "0"), geometry_properties)
                 self.assertIn(("canocclude", "0"), geometry_properties)
+
+    def test_explicit_bridge_over_ditch_stays_an_ordinary_road(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        road = OsmLineFeature(
+            "way/ditch-bridge",
+            {"highway": "residential", "bridge": "yes"},
+            tuple(projection.to_latlon(point) for point in ((20.0, 100.0), (180.0, 100.0))),
+        )
+        ditch = OsmLineFeature(
+            "way/ditch",
+            {"waterway": "ditch"},
+            tuple(projection.to_latlon(point) for point in ((100.0, 20.0), (100.0, 180.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="ditch-bridge", element_count=2,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(),
+            roads=(road,), watercourses=(ditch,),
+        )
+        self.assertTrue(road_bridge_crosses_ditch_only(road, dataset, projection))
+
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(False,) * 64,
+            farmland=(False,) * 64, urban=(False,) * 64, roads=(False,) * 64,
+            buildings=(False,) * 64, high_resolution=8, coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="ditch_bridge", heightmap_path=Path("unused.png"),
+            bbox=(0, 0, 1, 1), cells=8, cell_size=25.0,
+            max_road_objects=1000, max_buildings=0, max_forest_objects=0,
+            bridges_enabled=True, procedural_bridges=False,
+            forest_undergrowth_enabled=False, forest_border_enabled=False,
+            ditch_grass_enabled=False, barriers_enabled=False,
+            rural_vegetation_enabled=False, wetland_reeds_enabled=False,
+            rocky_forest_fallback_enabled=False, steep_hill_bushes_enabled=False,
+            strict_assets=False,
+        )
+        nonroads = generate_world_objects(
+            dataset, projection, raster, (2.0,) * 64, spec, include_roads=False
+        )
+        self.assertEqual(nonroads.bridge_segments, 0)
+        self.assertEqual(nonroads.bridge_objects, 0)
+
+        roads = fit_road_objects(dataset, projection, (2.0,) * 64, spec)
+        self.assertGreater(len(roads.objects), 0)
+        self.assertFalse(any(obj.model_path == NOGOVA_BRIDGE_MODEL for obj in roads.objects))
 
     def test_procedural_bridge_uses_bank_approach_level_and_stays_visible(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
@@ -4810,10 +5335,20 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         self.assertLess(max(roadway_levels) - min(roadway_levels), 1e-9)
         self.assertGreaterEqual(roadway_levels[0], 5.5)
         # The tagged OSM bridge starts at x=95/155, but the road begins its beach
-        # descent near x=65/185. Generated bridge modules must extend uphill to
-        # those stable road approaches rather than starting at the water's edge.
-        self.assertLess(min(obj.x for obj in bridge_objects), 75.0)
-        self.assertGreater(max(obj.x for obj in bridge_objects), 165.0)
+        # descent near x=65/185. The one generated bridge model must be long
+        # enough that its *ends* reach those stable approaches even though there
+        # is now only one object centre in the WRP.
+        self.assertEqual(len(bridge_objects), 1)
+        obj = bridge_objects[0]
+        match = re.search(r"_l(\d+)\.p3d$", obj.model_path.casefold())
+        self.assertIsNotNone(match)
+        model_length = int(match.group(1)) / 10.0
+        half = model_length * 0.5
+        angle = math.radians(obj.heading_degrees)
+        end1_x = obj.x - math.sin(angle) * half
+        end2_x = obj.x + math.sin(angle) * half
+        self.assertLess(min(end1_x, end2_x), 75.0)
+        self.assertGreater(max(end1_x, end2_x), 165.0)
 
     def test_procedural_bridge_reaches_road_crest_beyond_old_short_probe(self) -> None:
         from cwr_worldgen.osm import _extend_procedural_bridge_to_approach_plateaus
@@ -4991,10 +5526,10 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             obj for obj in result.objects if obj.model_path == NOGOVA_BRIDGE_MODEL
         ]
         self.assertEqual(result.bridge_segments, 2)
-        self.assertEqual(result.bridge_objects, 5)
-        self.assertEqual(len(bridge_objects), 5)
-        self.assertEqual(len([obj for obj in bridge_objects if abs(obj.z - 50.0) < 0.01]), 1)
-        self.assertEqual(len([obj for obj in bridge_objects if abs(obj.z - 150.0) < 0.01]), 4)
+        self.assertEqual(result.bridge_objects, 7)
+        self.assertEqual(len(bridge_objects), 7)
+        self.assertEqual(len([obj for obj in bridge_objects if abs(obj.z - 50.0) < 0.01]), 2)
+        self.assertEqual(len([obj for obj in bridge_objects if abs(obj.z - 150.0) < 0.01]), 5)
 
         capped_result = generate_world_objects(
             OsmDataset(
@@ -5013,7 +5548,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         self.assertEqual(capped_result.bridge_objects, 0)
         self.assertEqual(capped_result.bridge_rejections, 1)
 
-    def test_stock_nogova_bridge_embeds_midspan_to_match_road_approaches(self) -> None:
+    def test_stock_nogova_bridge_is_flat_at_highest_road_centreline(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
         bridge = OsmLineFeature(
             "way/bridge-raised-centre",
@@ -5053,11 +5588,11 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         ]
         self.assertGreater(len(bridge_objects), 0)
         self.assertTrue(all(
-            abs(obj.y - NOGOVA_BRIDGE_APPROACH_OFFSET_METRES) < 1e-6
+            abs(obj.y - (6.0 + NOGOVA_BRIDGE_APPROACH_OFFSET_METRES)) < 1e-6
             for obj in bridge_objects
         ))
-        self.assertLess(max(obj.y for obj in bridge_objects), 1.0)
-        self.assertLess(max(abs(obj.pitch_degrees) for obj in bridge_objects), 1.0)
+        self.assertEqual(len({round(obj.y, 6) for obj in bridge_objects}), 1)
+        self.assertLess(max(abs(obj.pitch_degrees) for obj in bridge_objects), 1e-9)
 
     def test_barriers_bridges_and_rural_clusters_are_deterministic(self) -> None:
         from cwr_worldgen.procedural_infrastructure import ProceduralInfrastructureLibrary
@@ -5573,7 +6108,10 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         validate_source.assert_not_called()
 
     def test_building_front_rotates_toward_nearest_road(self) -> None:
-        from cwr_worldgen.procedural_buildings import ProceduralBuildingLibrary
+        from cwr_worldgen.procedural_buildings import (
+            ProceduralBuildingLibrary,
+            _front_vector_for_heading,
+        )
         library = ProceduralBuildingLibrary(world_name="cwr_facing")
         points = ((0.0,0.0),(12.0,0.0),(12.0,20.0),(0.0,20.0))
         projection = BboxProjection.create((0.0,0.0,1.0,1.0), 100.0)
@@ -5583,6 +6121,21 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         north = library.place_polygon({"building":"house"}, points, road_point=(6.0,30.0))
         south = library.place_polygon({"building":"house"}, points, road_point=(6.0,-10.0))
         self.assertAlmostEqual((north.heading_degrees - south.heading_degrees) % 360.0, 180.0)
+
+        # Near-square house footprints can rotate freely without changing their
+        # practical occupied footprint, so their actual door normal can point
+        # directly at a side road rather than only choosing front vs back.
+        square = ((40.0,40.0),(52.0,40.0),(52.0,52.0),(40.0,52.0))
+        square_ring = tuple(projection.to_latlon(point) for point in (*square, square[0]))
+        square_dataset = OsmDataset(source_generator="square-facing", element_count=1, coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(), building_polygons=(OsmPolygonFeature("way/square", {"building":"house"}, (GeoPolygon(square_ring),)),))
+        square_library = ProceduralBuildingLibrary(world_name="cwr_square_facing")
+        square_library.prepare(square_dataset, projection, 12.0)
+        east = square_library.place_polygon(
+            {"building":"house"}, square, road_point=(70.0,46.0)
+        )
+        front_x, front_z = _front_vector_for_heading(east.heading_degrees)
+        self.assertGreater(front_x, 0.999)
+        self.assertAlmostEqual(front_z, 0.0, places=6)
 
 
     def test_steep_forest_cells_keep_everon_rock_material(self) -> None:
@@ -5606,7 +6159,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         self.assertEqual(spec.forest_polygon_sink_fraction, 0.5)
         self.assertEqual(spec.forest_single_tree_maximum_float, 0.5)
         self.assertEqual(spec.bridge_module_length, 30.0)
-        self.assertTrue(spec.procedural_bridges)
+        self.assertFalse(spec.procedural_bridges)
         self.assertEqual(spec.forest_cluster_maximum_relief, 48.0)
         self.assertEqual(spec.rocky_forest_rocks_per_patch, 3)
         self.assertEqual(spec.rocky_forest_spread, 18.0)

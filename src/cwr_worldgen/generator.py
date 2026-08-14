@@ -2206,7 +2206,7 @@ def _load_terrain_solution(
             ).encode("utf-8")
         ).hexdigest(),
     }
-    key = cache_key("terrain-solution-v21-building-edge-grounding", payload)
+    key = cache_key("terrain-solution-v22-stock-nogova-bridge-default", payload)
     path = cache_dir / "terrain" / f"{key}.pickle" if cache_dir is not None else None
 
     def produce():
@@ -2345,7 +2345,7 @@ def _load_surface_pipeline(
         "colour_reference": file_snapshot(getattr(spec, "surface_colour_reference_path", None)),
         "spec": _spec_fields(spec, _SURFACE_CACHE_FIELDS),
     }
-    key = cache_key("surface-pipeline-v9-sports-b1-no-site-slab", payload)
+    key = cache_key("surface-pipeline-v10-sports-standard-grass-no-site-slab", payload)
     path = cache_dir / "surfaces" / f"{key}.pickle" if cache_dir is not None else None
     if progress_callback is not None:
         progress_callback(0, "Checking surface-mask cache")
@@ -2580,7 +2580,7 @@ def _load_nonroad_objects(
         "starting_object_id": starting_object_id,
         "spec": _spec_fields(spec, _PLACEMENT_CACHE_FIELDS),
     }
-    key = cache_key("nonroad-object-placement-v74-social-facility", payload)
+    key = cache_key("nonroad-object-placement-v80-garage-clusters-single-bridges", payload)
     path = cache_dir / "placements" / f"{key}.pickle" if cache_dir is not None else None
 
     def produce():
@@ -3330,7 +3330,20 @@ def build_milestone4(
                 shutil.copyfile(world_icon_path, overview_bundle / "icon.paa")
 
     report_progress(89, "Writing configuration and intro mission files")
-    config_text = render_config(spec, milestone=milestone_number, town_names=towns)
+    animated_building_models = (
+        tuple(
+            asset.model_path for asset in building_generation.model_assets
+            if asset.key.interiors
+        )
+        if building_generation is not None
+        else ()
+    )
+    config_text = render_config(
+        spec,
+        milestone=milestone_number,
+        town_names=towns,
+        animated_building_models=animated_building_models,
+    )
     validate_cwa_config(config_text)
     (source_dir / "config.cpp").write_text(config_text, encoding="ascii", newline="\n")
     mission_path.write_text(render_mission(spec, spawn_x=spawn.x, spawn_z=spawn.z, milestone=milestone_number), encoding="ascii", newline="\n")

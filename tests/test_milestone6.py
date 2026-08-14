@@ -201,7 +201,7 @@ class Milestone6Tests(unittest.TestCase):
                 total_overlap += restored.intersection(corridor).area
         self.assertLessEqual(total_overlap, 0.05)
 
-    def test_semantic_poi_tags_attach_to_real_building_footprints(self) -> None:
+    def test_semantic_poi_tags_attach_to_real_buildings_except_school_sites(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
 
         def ll(point: tuple[float, float]) -> dict[str, float]:
@@ -239,18 +239,24 @@ class Milestone6Tests(unittest.TestCase):
             NormalizationSpec(source_dir=Path("unused")),
         )
         self.assertEqual(len(buildings), 3)
-        self.assertEqual(statistics["semantic_attached"], 3)
+        self.assertEqual(statistics["semantic_attached"], 2)
         self.assertEqual(statistics["semantic_synthetic"], 0)
         by_name = {building.properties["name"]: building for building in buildings}
         self.assertEqual(by_name["Test Church"].properties["amenity"], "place_of_worship")
         self.assertEqual(by_name["Test Church"].properties["building_kind"], "church")
-        self.assertEqual(by_name["Test School"].properties["amenity"], "school")
-        self.assertEqual(by_name["Test School"].properties["building_kind"], "school")
         self.assertEqual(by_name["Test Shop"].properties["shop"], "convenience")
         self.assertEqual(by_name["Test Shop"].properties["building_kind"], "retail")
-        self.assertTrue(all(len(building.source_ids) == 2 for building in buildings))
+        school_footprint = min(
+            buildings,
+            key=lambda building: abs(building.geometry.centroid.x - 420.0),
+        )
+        self.assertEqual(school_footprint.properties.get("building_kind"), "yes")
+        self.assertNotIn("amenity", school_footprint.properties)
+        self.assertEqual(len(school_footprint.source_ids), 1)
+        self.assertEqual(len(by_name["Test Church"].source_ids), 2)
+        self.assertEqual(len(by_name["Test Shop"].source_ids), 2)
 
-    def test_school_campus_polygon_marks_every_contained_building_as_school(self) -> None:
+    def test_school_campus_only_keeps_explicit_school_building_as_school(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
 
         def ll(point: tuple[float, float]) -> dict[str, float]:
@@ -258,15 +264,16 @@ class Milestone6Tests(unittest.TestCase):
             return {"lat": latitude, "lon": longitude}
 
         elements: list[dict[str, object]] = []
-        for index, (x0, y0, x1, y1) in enumerate((
+        rectangles = (
             (210.0, 210.0, 240.0, 225.0),
             (260.0, 210.0, 290.0, 225.0),
             (235.0, 250.0, 270.0, 270.0),
-        ), start=1):
+        )
+        for index, (x0, y0, x1, y1) in enumerate(rectangles, start=1):
             ring = ((x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0))
             elements.append({
                 "type": "way", "id": index,
-                "tags": {"building": "yes"},
+                "tags": {"building": "school" if index == 2 else "yes"},
                 "geometry": [ll(point) for point in ring],
             })
         campus = ((190.0,190.0),(310.0,190.0),(310.0,290.0),(190.0,290.0),(190.0,190.0))
@@ -281,10 +288,13 @@ class Milestone6Tests(unittest.TestCase):
             NormalizationSpec(source_dir=Path("unused")),
         )
         self.assertEqual(len(buildings), 3)
-        self.assertEqual(statistics["semantic_attached"], 3)
-        self.assertTrue(all(building.properties.get("amenity") == "school" for building in buildings))
-        self.assertTrue(all(building.properties.get("building_kind") == "school" for building in buildings))
-        self.assertTrue(all(building.properties.get("name") == "Three Building School" for building in buildings))
+        self.assertEqual(statistics["semantic_attached"], 0)
+        explicit = [item for item in buildings if item.properties.get("building_kind") == "school"]
+        generic = [item for item in buildings if item.properties.get("building_kind") == "yes"]
+        self.assertEqual(len(explicit), 1)
+        self.assertEqual(len(generic), 2)
+        self.assertTrue(all("amenity" not in item.properties for item in buildings))
+        self.assertTrue(all(item.properties.get("name") != "Three Building School" for item in buildings))
 
     def test_social_facility_area_marks_contained_barns_and_warehouses_as_public(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
@@ -324,7 +334,7 @@ class Milestone6Tests(unittest.TestCase):
             self.assertEqual(item.properties.get("social_facility:for"), "senior")
             self.assertEqual(item.properties.get("building_kind"), "public")
 
-    def test_school_campus_building_no_still_marks_all_physical_buildings(self) -> None:
+    def test_school_campus_building_no_does_not_retag_physical_buildings(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
 
         def ll(point: tuple[float, float]) -> dict[str, float]:
@@ -350,8 +360,8 @@ class Milestone6Tests(unittest.TestCase):
             NormalizationSpec(source_dir=Path("unused")),
         )
         self.assertEqual(len(buildings), 2)
-        self.assertTrue(all(item.properties.get("amenity") == "school" for item in buildings))
-        self.assertTrue(all(item.properties.get("building_kind") == "school" for item in buildings))
+        self.assertTrue(all(item.properties.get("building_kind") == "yes" for item in buildings))
+        self.assertTrue(all("amenity" not in item.properties for item in buildings))
 
     def test_unnamed_isolated_dwelling_polygon_is_preserved_from_raw_osm(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)

@@ -12,7 +12,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from shapely.geometry import LineString, Point, Polygon, box
 
 from .model import ConstraintPlayabilitySpec
-from .osm import BuildingPlacementPlan, BboxProjection, GeoPolygon, OsmDataset, OsmLineFeature, OsmRaster, road_width_metres
+from .osm import BuildingPlacementPlan, BboxProjection, GeoPolygon, OsmDataset, OsmLineFeature, OsmRaster, road_bridge_crosses_ditch_only, road_width_metres
 
 
 PRIORITY_BOUNDARY = 100
@@ -971,6 +971,10 @@ def solve_terrain_constraints(
             bridge_value not in {"", "no", "false", "0"}
             or str(tags.get("man_made", "")).casefold() == "bridge"
         )
+        if is_bridge and road_bridge_crosses_ditch_only(feature, dataset, projection):
+            # Ditch crossings are intentionally ordinary roads, not bridge decks.
+            # Grade them with the road network instead of preserving a bridge gap.
+            is_bridge = False
         if not is_bridge:
             try:
                 positive_layer = float(str(tags.get("layer", "0")).replace(",", ".")) > 0.0

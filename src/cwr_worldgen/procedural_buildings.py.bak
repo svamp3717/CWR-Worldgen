@@ -99,10 +99,11 @@ INTERIOR_STAIR_MAXIMUM_STEPS = 64
 # CWA while remaining compact around ordinary 0.5-1.0 m foundation skirts.
 INTERIOR_VEHICLE_RAMP_RUN_PER_RISE = 4.0
 INTERIOR_VEHICLE_RAMP_MINIMUM_RUN_M = 1.6
-# The visible second-floor steps remain lightweight visual geometry. Matching
-# horizontal Roadway treads sit over a slightly lower solid stepped Geometry
-# staircase so the old infantry collider has no sloped or empty surface to fall
-# through.
+# The visible second-floor steps remain lightweight visual geometry. A thin
+# sloped Geometry component directly below them gives the old infantry collider
+# a continuous physical support surface; Roadway alone proved too easy to fall
+# through on some stair approaches.
+INTERIOR_SECOND_STOREY_COLLISION_RAMP_THICKNESS_M = 0.16
 INTERIOR_SECOND_STOREY_MINIMUM_WIDTH_M = 6.0
 INTERIOR_SECOND_STOREY_MINIMUM_LENGTH_M = 8.0
 INTERIOR_SECOND_STOREY_MINIMUM_HEIGHT_M = 5.6
@@ -1199,28 +1200,7 @@ def _open_wall_texture_image(
     image, draw = _pixel_canvas(base, size, salt, 3)
     width = height = _BUILDING_TEXTURE_LOGICAL_SIZE
 
-    if family == "outbuilding":
-        # Match the closed shed/garage cladding exactly, but omit the painted
-        # front door because an enterable model carries a real animated panel.
-        for x in range(0, width, 6):
-            plank = _shade(
-                base,
-                6 if (x // 6) % 3 == 0 else (-5 if (x // 6) % 3 == 1 else 1),
-            )
-            draw.rectangle((x, 0, min(width, x + 5), height), fill=plank)
-            draw.line((x, 0, x, height), fill=_shade(base, -22), width=1)
-        draw.rectangle((0, 56, width, height), fill=(82, 78, 68))
-        draw.line((0, 53, width, 53), fill=_shade(base, -15), width=2)
-    elif regional_style == "sweden_red" and family == "agricultural":
-        # Same Swedish barn boards/footing as the non-enterable wall atlas, only
-        # without the baked-in double barn door. This makes the real-door and
-        # painted-door variants read as the same building rather than cousins.
-        for x in range(0, width, 6):
-            plank = _shade(base, 6 if (x // 6) % 3 == 0 else -6)
-            draw.rectangle((x, 0, min(width, x + 5), height), fill=plank)
-            draw.line((x, 0, x, height), fill=_shade(base, -25), width=1)
-        draw.rectangle((0, 57, width, height), fill=(82, 78, 69))
-    elif family == "shop" and regional_style == "default":
+    if family == "shop" and regional_style == "default":
         # Enterable shops use real geometry for doors/windows, so this matching
         # material intentionally contains no fake openings.  Keep the pale
         # render and restrained course lines from the closed storefront instead
@@ -3821,8 +3801,7 @@ def _visual_lod(
     # around it uses the matching door-free material.
     interior_front_texture = (
         plain_wall_texture
-        if key.family in UTILITY_INTERIOR_FAMILIES
-        or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+        if key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
         else wall_texture
     )
     half_width = key.width_m / 2.0
@@ -4575,27 +4554,6 @@ def _hollow_geometry_lod(key: BuildingVariantKey) -> _Lod:
                 second_layout.stair_x1,
                 top_y,
                 z1,
-            )
-
-    # Exterior pedestrian foundation steps need Geometry too. Earlier builds
-    # only drew them and provided Roadway treads, so the player could sometimes
-    # clip through the visible porch staircase before the Roadway contact was
-    # established. Fill every exposed tread with a shallow convex block.
-    pedestrian_stairs = (
-        ()
-        if _entrance_uses_vehicle_ramp(key)
-        else _interior_stair_profile(key, key.foundation_depth_m)
-    )
-    if pedestrian_stairs:
-        transition_half = min(
-            key.width_m * 0.45,
-            door_half + INTERIOR_STAIR_SIDE_MARGIN_M,
-        )
-        stair_bottom = -max(0.20, key.foundation_depth_m + 0.08)
-        for outer_z, inner_z, top_y, _bottom_y in pedestrian_stairs:
-            add_box(
-                -transition_half, stair_bottom, outer_z,
-                transition_half, top_y - 0.02, inner_z,
             )
 
     vehicle_ramp = _interior_vehicle_ramp_profile(key, key.foundation_depth_m)
@@ -5773,7 +5731,7 @@ class ProceduralBuildingLibrary:
         })
         used_open_palette_variants = sorted({
             (key.family, key.regional_style, key.texture_variant) for key in selected
-            if key.interiors
+            if (key.interiors and key.family not in UTILITY_INTERIOR_FAMILIES)
             or key.family == "church"
             or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
         })
@@ -5846,7 +5804,7 @@ class ProceduralBuildingLibrary:
             relative = texture_path.split("\\", 1)[1].replace("\\", "/")
             file_path = source_dir / relative
             cache_id = cache_key(
-                "procedural-building-door-v3-clean-utility-aperture-selectable-quality",
+                "procedural-building-door-v2-family-specific-selectable-quality",
                 {
                     "family": family,
                     "regional_style": regional_style,
@@ -5917,7 +5875,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-open-wall-v4-utility-cladding-match-selectable-quality",
+                    "procedural-building-open-wall-v3-selectable-quality",
                     {
                         "family": family,
                         "regional_style": regional_style,
@@ -6044,7 +6002,7 @@ class ProceduralBuildingLibrary:
             relative = model_path.split("\\", 1)[1].replace("\\", "/")
             file_path = source_dir / relative
             asset_key = cache_key(
-                "procedural-building-model-v42-solid-stair-clean-utility-front",
+                "procedural-building-model-v41-utility-match-ramp-stair-support",
                 {
                     "world_name": self.world_name,
                     "variant": asdict(key),
@@ -6101,8 +6059,7 @@ class ProceduralBuildingLibrary:
                         self._open_wall_texture(
                             key.family, key.regional_style, key.texture_variant
                         )
-                        if key.interiors and key.family in UTILITY_INTERIOR_FAMILIES
-                        or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+                        if key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
                         or key.family == "church"
                         else self._wall_texture(
                             key.family, key.regional_style, key.texture_variant
@@ -6156,7 +6113,7 @@ class ProceduralBuildingLibrary:
         placements = sum(self._usage.values())
         generated = len(model_assets)
         document = {
-            "schema": 16,
+            "schema": 15,
             "generator": "cwr-worldgen procedural MLOD building library",
             "region": self.region_identifier or "default",
             "settings": {
@@ -6204,7 +6161,7 @@ class ProceduralBuildingLibrary:
                 "interior_second_storey_floor_y_m": INTERIOR_SECOND_STOREY_FLOOR_Y_M,
                 "interior_second_storey_stair_steps": INTERIOR_SECOND_STOREY_STAIR_STEPS,
                 "interior_second_storey_default_share_percent": INTERIOR_SECOND_STOREY_DEFAULT_SHARE_PERCENT,
-                "interior_second_storey_collision": "roadway-treads-with-solid-geometry-step-support-no-geometry-floor-or-ceiling",
+                "interior_second_storey_collision": "roadway-floor-and-horizontal-treads-only-no-geometry-floor-or-ceiling",
                 "utility_vehicle_scale_entrance_doors": True,
                 "outbuilding_door_selection": {
                     "garage_minimum_width_m": OUTBUILDING_GARAGE_MINIMUM_WIDTH_M,

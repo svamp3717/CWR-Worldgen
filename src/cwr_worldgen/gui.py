@@ -430,6 +430,9 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     elif bus_stop_signs is False:
         command.append("--no-bus-stop-signs")
 
+    if bool(values.get("procedural_bridges", False)):
+        command.append("--procedural-bridges")
+
     negative_flags = {
         "include_minor_roads": "--no-minor-roads",
         "forest_clusters": "--no-forest-clusters",
@@ -440,7 +443,6 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         "ditch_grass": "--no-ditch-grass",
         "barriers": "--no-barriers",
         "bridges": "--no-bridges",
-        "procedural_bridges": "--stock-bridges",
         "residential_infill": "--no-residential-infill",
         "overture_buildings": "--no-overture-buildings",
         "rural_vegetation": "--no-rural-vegetation",
@@ -649,7 +651,7 @@ def default_gui_values() -> dict[str, object]:
         "ditch_grass": True,
         "barriers": True,
         "bridges": True,
-        "procedural_bridges": True,
+        "procedural_bridges": False,
         "bridge_module_length": "30",
         "bridge_deck_clearance": "1.25",
         "bridge_water_clearance": "18.0",
@@ -1643,9 +1645,9 @@ class WorldgenGui(tk.Tk):
             ("Forest undergrowth", "forest_undergrowth", True),
             ("Fences, walls and hedges", "barriers", True),
             ("Bridge decks", "bridges", True),
-            ("Procedural bridges (instead of Nogova)", "procedural_bridges", True),
+            ("Procedural bridges (instead of Nogova)", "procedural_bridges", False),
             ("Fill empty residential areas", "residential_infill", True),
-            ("Use Overture buildings first", "overture_buildings", True),
+            ("Use Overture buildings before randomly generated", "overture_buildings", True),
             ("Rural vegetation", "rural_vegetation", True),
             ("Tall grass in OSM meadows", "meadow_grass", True),
             ("Wetland reeds", "wetland_reeds", True),
