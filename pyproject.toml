@@ -13,7 +13,13 @@ authors = [{ name = "CWR-CE contributors" }]
 dependencies = ["Pillow>=10", "Shapely>=2.0,<3"]
 
 [project.optional-dependencies]
-sources = ["dem-stitcher>=2.5,<3", "rasterio>=1.4", "numpy>=1.26", "overturemaps>=1.0,<2"]
+sources = [
+  "dem-stitcher>=2.5,<3",
+  "rasterio>=1.4",
+  "numpy>=1.26",
+  "pyarrow>=18",
+  "duckdb>=1.5,<2",
+]
 
 [project.scripts]
 cwr-worldgen = "cwr_worldgen.cli:main"

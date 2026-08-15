@@ -50,7 +50,8 @@ jobs:
             --collect-all cwr_worldgen `
             --collect-all dem_stitcher `
             --collect-all rasterio `
-            --collect-all overturemaps `
+            --collect-all pyarrow `
+            --collect-all duckdb `
             build_gui.py
 
       - name: Verify EXE was created
