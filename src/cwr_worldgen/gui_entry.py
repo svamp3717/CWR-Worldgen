@@ -60,7 +60,7 @@ def generated_mod_folder(output_dir: Path) -> Path | None:
     if not candidates:
         return None
     for candidate in candidates:
-        if candidate.name.casefold() == "@cwr-milestone9":
+        if candidate.name.casefold() == "cwr-worldgen":
             return candidate
     candidates.sort(key=lambda path: path.name.casefold())
     return candidates[0]
@@ -148,7 +148,7 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
             self._auto_world_guard = False
             self.open_generated_mod_button = gui.ttk.Button(
                 self.page_frames[gui.PROGRESS_STEP_INDEX],
-                text="Open generated mod folder",
+                text="Open generated files folder",
                 command=self._open_generated_mod_folder,
             )
             self._update_navigation()
@@ -180,7 +180,7 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
             if runtime is None:
                 gui.messagebox.showinfo(
                     gui.APP_TITLE,
-                    "No completed generated mod folder containing both Addons and Anims was found.",
+                    "No completed generated folder containing both Addons and Anims was found.",
                 )
                 return
             self._open_path(str(runtime))
