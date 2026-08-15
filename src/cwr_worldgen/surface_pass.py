@@ -497,6 +497,14 @@ def build_surface_pass(
     if len(elevations) != expected or len(slopes) != expected:
         raise ValueError("surface pass terrain grids have the wrong size")
 
+    # The OSM mask may contain elevated ponds that the terrain solver correctly
+    # preserved because CWA has no elevated water surfaces. Treat mapped water as
+    # actual surface water only where the solved terrain reaches the global plane.
+    surface_water = tuple(
+        bool(mapped) and float(elevation) <= float(spec.sea_level) + 1.0e-7
+        for mapped, elevation in zip(raster.water, elevations)
+    )
+
     wet_cells = int(getattr(spec, "surface_shoreline_wet_cells", 1))
     sand_cells = int(getattr(spec, "surface_shoreline_sand_cells", 2))
     transition_cells = int(getattr(spec, "surface_transition_cells", 2))
@@ -560,12 +568,12 @@ def build_surface_pass(
         dirt_blend_metres,
     )
     maximum_shore_distance = wet_cells + sand_cells + transition_cells
-    water_distance = _distance_from_mask(raster.water, cells, maximum_shore_distance)
+    water_distance = _distance_from_mask(surface_water, cells, maximum_shore_distance)
     coastline_signature = "coastline:" + "|".join(sorted(feature.osm_key for feature in dataset.coastlines))
     if coastline_signature == "coastline:":
         coastline_signature = "water-mask"
     water_owners = _nearest_feature_owners(
-        raster.water, water_grid, water_ids, cells, maximum_shore_distance, coastline_signature
+        surface_water, water_grid, water_ids, cells, maximum_shore_distance, coastline_signature
     )
     outside_forest = tuple(not value for value in raster.forest)
     forest_inside_distance = _distance_from_mask(outside_forest, cells, forest_edge_cells + 1)
@@ -581,7 +589,7 @@ def build_surface_pass(
 
     # Natural base, including height and steep-slope materials.
     for index, (elevation, slope) in enumerate(zip(elevations, slopes)):
-        if raster.water[index] or elevation <= spec.sea_level:
+        if surface_water[index] or elevation <= spec.sea_level:
             result[index] = MATERIAL_INDEX["w"]
         elif slope >= steep_slope:
             result[index] = MATERIAL_INDEX["k"]
@@ -596,7 +604,7 @@ def build_surface_pass(
 
     # Farmland subdivisions are owned by the source feature ID, not global RNG.
     for index, feature_number in enumerate(farmland_grid):
-        if feature_number <= 0 or raster.water[index] or result[index] in {MATERIAL_INDEX["r"], MATERIAL_INDEX["k"]}:
+        if feature_number <= 0 or surface_water[index] or result[index] in {MATERIAL_INDEX["r"], MATERIAL_INDEX["k"]}:
             continue
         feature_id = farmland_ids[feature_number]
         feature_seed_ids.add(feature_id)
@@ -619,7 +627,7 @@ def build_surface_pass(
 
     # Forest interior and its ground edge band.
     for index, feature_number in enumerate(forest_grid):
-        if feature_number <= 0 or raster.water[index] or result[index] in {MATERIAL_INDEX["r"], MATERIAL_INDEX["k"]}:
+        if feature_number <= 0 or surface_water[index] or result[index] in {MATERIAL_INDEX["r"], MATERIAL_INDEX["k"]}:
             continue
         feature_id = forest_ids[feature_number]
         feature_seed_ids.add(feature_id)
@@ -628,7 +636,7 @@ def build_surface_pass(
         else:
             result[index] = MATERIAL_INDEX["f"]
     for index, distance in enumerate(forest_distance):
-        if distance == 1 and not raster.water[index] and not raster.forest[index] and not raster.farmland[index] and not raster.urban[index]:
+        if distance == 1 and not surface_water[index] and not raster.forest[index] and not raster.farmland[index] and not raster.urban[index]:
             feature_id = forest_owners[index] or "forest-mask"
             feature_seed_ids.add(feature_id)
             if _stable_fraction(seed, feature_id, "forest-outer-edge", index % cells, index // cells) < 0.68:
@@ -638,7 +646,7 @@ def build_surface_pass(
     # building footprints select a darker, rougher material.
     softened = 0
     for index, feature_number in enumerate(urban_grid):
-        if feature_number <= 0 or raster.water[index]:
+        if feature_number <= 0 or surface_water[index]:
             continue
         feature_id = urban_ids[feature_number]
         feature_seed_ids.add(feature_id)
@@ -651,7 +659,7 @@ def build_surface_pass(
                 softened += 1
         result[index] = selected
     for index, building in enumerate(raster.buildings):
-        if building and not raster.water[index] and urban_grid[index] == 0:
+        if building and not surface_water[index] and urban_grid[index] == 0:
             result[index] = MATERIAL_INDEX["i" if industrial_building_mask[index] else "u"]
 
     # Explicit OSM natural/leisure surface polygons override broad land-use
@@ -659,7 +667,7 @@ def build_surface_pass(
     # therefore stay green instead of being paved by the surrounding polygon.
     grassland_count = park_count = sports_count = mapped_sand_count = 0
     for index in range(expected):
-        if raster.water[index] or raster.buildings[index]:
+        if surface_water[index] or raster.buildings[index]:
             continue
         if mapped_beach_mask[index]:
             result[index] = MATERIAL_INDEX["x"]
@@ -685,7 +693,7 @@ def build_surface_pass(
     # boundary itself is deliberately not painted as one enormous slab.
     aeroway_count = 0
     for index, selected in enumerate(aeroway_mask):
-        if selected and not raster.water[index] and not raster.buildings[index]:
+        if selected and not surface_water[index] and not raster.buildings[index]:
             result[index] = MATERIAL_INDEX["p"]
             aeroway_count += 1
 
@@ -693,7 +701,7 @@ def build_surface_pass(
     wet_count = 0
     dry_count = 0
     for index, distance in enumerate(water_distance):
-        if raster.water[index] or raster.roads[index] or raster.buildings[index] or distance <= 0:
+        if surface_water[index] or raster.roads[index] or raster.buildings[index] or distance <= 0:
             continue
         feature_id = water_owners[index] or coastline_signature
         feature_seed_ids.add(feature_id)
@@ -715,7 +723,7 @@ def build_surface_pass(
     dirt_blend_count = 0
     gravel_blend_count = 0
     for index in range(expected):
-        if raster.water[index] or raster.buildings[index]:
+        if surface_water[index] or raster.buildings[index]:
             continue
         if paved_expanded[index] and not paved[index] and not dirt[index]:
             result[index] = MATERIAL_INDEX["o"]
@@ -730,7 +738,7 @@ def build_surface_pass(
     dirt_count = 0
     gravel_count = 0
     for index in range(expected):
-        if raster.water[index]:
+        if surface_water[index]:
             continue
         # Gravel road objects deliberately leave the underlying world terrain
         # material intact. Their irregular visual ribbon supplies the aggregate,
@@ -747,7 +755,7 @@ def build_surface_pass(
             dirt_count += 1
         elif gravel[index]:
             gravel_count += 1
-    for index, water in enumerate(raster.water):
+    for index, water in enumerate(surface_water):
         if water:
             result[index] = MATERIAL_INDEX["w"]
 
@@ -797,7 +805,6 @@ def surface_texture_wire_paths(world_name: str, profile: str) -> tuple[str, ...]
         else:
             paths.append(rf"{world_name}\data\{material.code}.paa")
     return tuple(paths)
-
 
 def external_surface_texture_paths(profile: str) -> tuple[str, ...]:
     stock_paths = STOCK_SURFACE_TEXTURES.get(profile)

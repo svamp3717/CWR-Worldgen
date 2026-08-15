@@ -197,7 +197,6 @@ def _sample_elevation(elevations: Sequence[float], cells: int, cell_size: float,
     b = elevations[z1 * cells + x0] * (1.0 - tx) + elevations[z1 * cells + x1] * tx
     return a * (1.0 - tz) + b * tz
 
-
 def _cell_center(index: int, cells: int, cell_size: float) -> tuple[float, float]:
     x = index % cells
     z = index // cells
@@ -812,24 +811,45 @@ def solve_terrain_constraints(
         component for component in water_components
         if _component_touches_world_edge(component, spec.cells)
     ]
-    inland_water_components = [
+    mapped_inland_water_components = [
         component for component in water_components
         if not _component_touches_world_edge(component, spec.cells)
     ]
+
+    # CWA/OFP has one global water plane. An inland pond whose DEM surface is
+    # far above that plane cannot be represented as real engine water without
+    # excavating an artificial crater down to sea level. Only inland components
+    # already close enough to the global plane are therefore rendered as water.
+    # Elevated ponds/lakes keep their DEM terrain instead.
+    maximum_inland_water_surface = spec.sea_level + spec.water_depth
+    inland_water_components: list[list[int]] = []
+    elevated_inland_water_components: list[list[int]] = []
+    for component in mapped_inland_water_components:
+        component_surface = median(original[index] for index in component)
+        if component_surface <= maximum_inland_water_surface:
+            inland_water_components.append(component)
+        else:
+            elevated_inland_water_components.append(component)
+
     coastal_water_mask = _mask_from_components(coastal_water_components, len(original))
     inland_water_mask = _mask_from_components(inland_water_components, len(original))
+    active_water_mask = tuple(
+        coastal or inland
+        for coastal, inland in zip(coastal_water_mask, inland_water_mask)
+    )
     building_pad_groups: list[tuple[int, ...]] = []
     progress(5, (
-        f"Found {len(coastal_water_components):,} coastal and "
-        f"{len(inland_water_components):,} inland water components"
+        f"Found {len(coastal_water_components):,} coastal, "
+        f"{len(inland_water_components):,} renderable inland, and "
+        f"{len(elevated_inland_water_components):,} elevated inland water component(s) preserved at DEM height"
     ))
 
-    # 1. Water bodies. CWA/OFP exposes one global water plane, so every mapped
-    # body is lowered to a common submerged bed and surrounded by a protected
-    # shoreline ramp. Elevated independent lake surfaces are not engine-native.
+    # 1. Water bodies. Coastal and near-sea inland water can use CWA/OFP's
+    # single global water plane. Elevated independent lakes cannot, so those
+    # components were excluded from active_water_mask above and keep their DEM.
     water_target = spec.sea_level - spec.water_depth
-    progress(8, f"Applying water-bed constraints to {sum(raster.water):,} cells")
-    for index, is_water in enumerate(raster.water):
+    progress(8, f"Applying water-bed constraints to {sum(active_water_mask):,} cells")
+    for index, is_water in enumerate(active_water_mask):
         if is_water:
             field.apply(index, water_target, priority=PRIORITY_WATER, strength=1.0, hard=True, category="water")
     progress(12, "Building coastal shoreline transition distances")
@@ -1419,7 +1439,7 @@ def solve_terrain_constraints(
         iterations=iterations,
         constrained_cells=sum(priority > 0 for priority in field.priorities),
         hard_constraint_cells=sum(field.hard),
-        water_cells=sum(raster.water),
+        water_cells=sum(active_water_mask),
         protected_shore_cells=protected_shore_cells,
         shoreline_transition_cells=smoothing.shoreline_transition_cells,
         coastal_water_components=len(coastal_water_components),
