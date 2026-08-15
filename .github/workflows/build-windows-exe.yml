@@ -48,6 +48,8 @@ jobs:
             --windowed `
             --name "CWR-Worldgen" `
             --collect-all cwr_worldgen `
+            --collect-all dem_stitcher `
+            --collect-all rasterio `
             build_gui.py
 
       - name: Verify EXE was created
