@@ -32,10 +32,58 @@ jobs:
         shell: pwsh
         run: |
           @'
-          from cwr_worldgen.gui import main
+          from __future__ import annotations
+
+          import os
+          from pathlib import Path
+          import sys
+
+          FROZEN_CLI_MARKER = "--cwr-cli"
+
+
+          def storage_base_dir() -> Path:
+              executable = Path(sys.executable).resolve()
+              if sys.platform == "darwin" and executable.parent.name == "MacOS" and executable.parent.parent.name == "Contents":
+                  return executable.parents[3]
+              return executable.parent
+
+
+          BASE_DIR = storage_base_dir()
+          os.environ.setdefault(
+              "CWR_WORLDGEN_GUI_STATE",
+              str(BASE_DIR / "config" / "gui-state.json"),
+          )
+
+
+          def install_frozen_dem_cache() -> None:
+              """Make dem-stitcher localize remote DEM tiles before merging them."""
+              import dem_stitcher
+
+              original_stitch_dem = dem_stitcher.stitch_dem
+
+              def stitch_dem_with_local_cache(*args, **kwargs):
+                  if kwargs.get("dst_tile_dir") is None:
+                      dem_name = kwargs.get("dem_name")
+                      if dem_name is None and len(args) > 1:
+                          dem_name = args[1]
+                      cache_dir = BASE_DIR / "source-data" / ".dem-stitcher-cache" / str(dem_name or "dem")
+                      cache_dir.mkdir(parents=True, exist_ok=True)
+                      kwargs["dst_tile_dir"] = cache_dir
+                  return original_stitch_dem(*args, **kwargs)
+
+              dem_stitcher.stitch_dem = stitch_dem_with_local_cache
+
+
+          if FROZEN_CLI_MARKER in sys.argv:
+              install_frozen_dem_cache()
+
+          import cwr_worldgen.gui as gui
+
+          # Keep build, source-data, and config beside the distributed application.
+          gui.application_base_dir = lambda: BASE_DIR
 
           if __name__ == "__main__":
-              main()
+              gui.main()
           '@ | Set-Content -Encoding utf8 build_gui.py
 
       - name: Build EXE
