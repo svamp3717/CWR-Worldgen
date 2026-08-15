@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """OFP/CWA world generation utilities."""
 
+import sys as _sys
+
 from ._version import __version__
 from .generator import BuildResult, build_milestone1, build_milestone2, build_milestone3, build_milestone4
 from .model import HeightmapSpec, OsmSpec, PlayabilitySpec, WorldSpec
@@ -31,6 +33,22 @@ from .source_pipeline import (
     load_source_bundle,
     validate_source_bundle,
 )
+
+# Milestone 9 historically used an @-prefixed staging directory. In OFP/CWA
+# conventions, @ folders belong at the actual game/mod installation location,
+# not inside Worldgen's build workspace. Preserve the existing Milestone 9
+# implementation while translating only that legacy staging name at runtime.
+_milestone9_module = _sys.modules[__name__ + ".milestone9"]
+_original_milestone9_build_milestone4 = _milestone9_module.build_milestone4
+
+
+def _build_milestone9_with_worldgen_runtime(*args, **kwargs):
+    if kwargs.get("mod_directory_name") == "@CWR-Milestone9":
+        kwargs["mod_directory_name"] = "CWR-Worldgen"
+    return _original_milestone9_build_milestone4(*args, **kwargs)
+
+
+_milestone9_module.build_milestone4 = _build_milestone9_with_worldgen_runtime
 
 __all__ = [
     "__version__",
