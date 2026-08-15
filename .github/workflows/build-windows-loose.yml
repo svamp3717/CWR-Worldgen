@@ -1,0 +1,83 @@
+name: Build Windows Loose Files
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-loose:
+    name: Build Windows loose-file package
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install project and build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[sources]" pyinstaller
+
+      - name: Create GUI entry point
+        shell: pwsh
+        run: |
+          @'
+          from cwr_worldgen.gui_entry import main
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+          '@ | Set-Content -Encoding utf8 build_gui.py
+
+      - name: Build loose-file Windows package
+        shell: pwsh
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --onedir `
+            --contents-directory "." `
+            --noupx `
+            --windowed `
+            --name "CWR-Worldgen" `
+            --collect-all cwr_worldgen `
+            --collect-all dem_stitcher `
+            --collect-all rasterio `
+            --collect-all pyarrow `
+            --collect-all duckdb `
+            build_gui.py
+
+      - name: Verify loose-file package
+        shell: pwsh
+        run: |
+          $bundle = "dist/CWR-Worldgen"
+          $exe = Join-Path $bundle "CWR-Worldgen.exe"
+          if (-not (Test-Path $exe)) {
+            throw "$exe was not created"
+          }
+
+          $files = @(Get-ChildItem $bundle -Recurse -File)
+          if ($files.Count -le 1) {
+            throw "Expected a loose-file build, but only $($files.Count) file(s) were produced"
+          }
+
+          Write-Host "Loose-file package contains $($files.Count) files."
+          Get-Item $exe | Format-List Name,Length,LastWriteTime
+          Get-ChildItem $bundle | Sort-Object Name | Select-Object -First 40 Name,Length,Mode
+
+      - name: Upload loose-file ZIP artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: CWR-Worldgen-Windows-Loose
+          path: dist/CWR-Worldgen/**
+          if-no-files-found: error
+          retention-days: 7
