@@ -26,8 +26,8 @@ def test_managed_replacement_can_compare_normalized_paths() -> None:
     assert managed == "build/new_world"
 
 
-def test_generated_mod_folder_finds_milestone9_runtime(tmp_path: Path) -> None:
-    runtime = tmp_path / "@CWR-Milestone9"
+def test_generated_mod_folder_finds_worldgen_runtime(tmp_path: Path) -> None:
+    runtime = tmp_path / "CWR-Worldgen"
     (runtime / "Addons").mkdir(parents=True)
     (runtime / "Anims").mkdir()
 
@@ -42,18 +42,18 @@ def test_generated_mod_folder_accepts_runtime_root_directly(tmp_path: Path) -> N
 
 
 def test_generated_mod_folder_requires_addons_and_anims(tmp_path: Path) -> None:
-    incomplete = tmp_path / "@CWR-Milestone9"
+    incomplete = tmp_path / "CWR-Worldgen"
     (incomplete / "Addons").mkdir(parents=True)
 
     assert generated_mod_folder(tmp_path) is None
 
 
-def test_generated_mod_folder_prefers_milestone9_when_multiple_exist(tmp_path: Path) -> None:
-    other = tmp_path / "@Other"
+def test_generated_mod_folder_prefers_worldgen_when_multiple_exist(tmp_path: Path) -> None:
+    other = tmp_path / "OtherRuntime"
     (other / "Addons").mkdir(parents=True)
     (other / "Anims").mkdir()
-    milestone9 = tmp_path / "@CWR-Milestone9"
-    (milestone9 / "Addons").mkdir(parents=True)
-    (milestone9 / "Anims").mkdir()
+    worldgen = tmp_path / "CWR-Worldgen"
+    (worldgen / "Addons").mkdir(parents=True)
+    (worldgen / "Anims").mkdir()
 
-    assert generated_mod_folder(tmp_path) == milestone9.resolve()
+    assert generated_mod_folder(tmp_path) == worldgen.resolve()
