@@ -4,10 +4,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import sys
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 FROZEN_CLI_MARKER = "--cwr-cli"
 OVERTURE_CLI_MARKER = "--cwr-overture"
+CONSOLE_LOG_FILENAME = "cwr-worldgen-console.log"
 
 
 def storage_base_dir() -> Path:
@@ -38,6 +39,48 @@ def managed_replacement(
     if normalize(current) != normalize(managed):
         return current, None
     return replacement, replacement
+
+
+def console_log_paths(
+    source_dir: str | Path | None,
+    output_dir: str | Path | None,
+) -> tuple[Path, ...]:
+    """Return de-duplicated console-log targets for source and build folders."""
+    targets: list[Path] = []
+    seen: set[str] = set()
+    for raw_root in (source_dir, output_dir):
+        if raw_root is None or not str(raw_root).strip():
+            continue
+        target = Path(raw_root).expanduser() / CONSOLE_LOG_FILENAME
+        key = os.path.normcase(os.path.abspath(str(target)))
+        if key in seen:
+            continue
+        seen.add(key)
+        targets.append(target)
+    return tuple(targets)
+
+
+def mirror_console_log_fragment(
+    targets: Iterable[Path],
+    fragment: str,
+    transcript: str,
+    initialized: set[str],
+) -> None:
+    """Mirror a GUI log fragment, restoring the full transcript after folder cleanup."""
+    for raw_target in targets:
+        target = Path(raw_target)
+        key = os.path.normcase(os.path.abspath(str(target)))
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            reset = key not in initialized or not target.is_file()
+            mode = "w" if reset else "a"
+            payload = transcript if reset else fragment
+            with target.open(mode, encoding="utf-8", newline="") as stream:
+                stream.write(payload)
+            initialized.add(key)
+        except OSError:
+            # A diagnostic mirror must never be allowed to break the build itself.
+            continue
 
 
 def generated_mod_folder(output_dir: Path) -> Path | None:
@@ -130,11 +173,13 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
     original_class = gui.WorldgenGui
 
     class SyncedWorldgenGui(original_class):
-        """Keep generated paths aligned and expose the finished mod runtime."""
+        """Keep generated paths aligned, mirror logs, and expose the finished runtime."""
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self._auto_world_guard = True
             self._auto_display_name = ""
+            self._console_log_text = ""
+            self._console_log_initialized: set[str] = set()
             self._managed_world_values: dict[str, str | None] = {
                 "name": None,
                 "output": None,
@@ -167,6 +212,32 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
                     gui.save_gui_state(self.state_path, state)
             except OSError:
                 pass
+
+        def _console_log_targets(self) -> tuple[Path, ...]:
+            vars_map = getattr(self, "vars", {})
+            source_var = vars_map.get("source_dir")
+            output_var = vars_map.get("output")
+            source_text = str(source_var.get()).strip() if source_var is not None else ""
+            output_text = str(output_var.get()).strip() if output_var is not None else ""
+            source_dir = gui.resolve_gui_path(source_text) if source_text else None
+            output_dir = gui.resolve_gui_path(output_text) if output_text else None
+            return console_log_paths(source_dir, output_dir)
+
+        def _start_pipeline(self, *args: Any, **kwargs: Any) -> None:
+            if self.process is None and not self._pipeline_active:
+                self._console_log_text = ""
+                self._console_log_initialized.clear()
+            super()._start_pipeline(*args, **kwargs)
+
+        def _append_log(self, text: str) -> None:
+            super()._append_log(text)
+            self._console_log_text += text
+            mirror_console_log_fragment(
+                self._console_log_targets(),
+                text,
+                self._console_log_text,
+                self._console_log_initialized,
+            )
 
         def _generated_mod_folder(self) -> Path | None:
             output_text = str(self.vars["output"].get()).strip()
