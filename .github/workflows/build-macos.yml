@@ -25,7 +25,7 @@ jobs:
       - name: Install project and build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[sources]" "pyinstaller==6.21.0"
+          python -m pip install ".[sources]" pyinstaller
 
       - name: Create GUI entry point
         run: |
@@ -43,9 +43,8 @@ jobs:
             --clean \
             --onedir \
             --windowed \
-            --optimize 2 \
             --name "CWR-Worldgen" \
-            --collect-data cwr_worldgen \
+            --collect-all cwr_worldgen \
             build_gui.py
 
       - name: Verify app was created
