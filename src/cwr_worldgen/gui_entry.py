@@ -99,16 +99,15 @@ def _ensure_cli_streams() -> None:
 
 
 def _run_bundled_overture_cli(args: list[str]) -> int:
-    """Run the official Overture CLI already bundled into the frozen app."""
+    """Run CWR's isolated Overture Python-API worker without the upstream CLI."""
     _ensure_cli_streams()
-    from overturemaps.cli import cli as overture_cli
+    from .overture import run_overture_worker
 
-    result = overture_cli.main(
-        args=args,
-        prog_name="overturemaps",
-        standalone_mode=False,
-    )
-    return 0 if result is None else int(result)
+    try:
+        return run_overture_worker(args)
+    except Exception as exc:
+        print(f"CWR Worldgen Overture worker failed: {exc}", file=sys.stderr)
+        return 1
 
 
 def _configure_gui(gui: Any, base_dir: Path) -> None:
@@ -306,9 +305,10 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("CWR_WORLDGEN_GUI_STATE", str(base_dir / "config" / "gui-state.json"))
     os.environ.setdefault("CWR_WORLDGEN_RUNTIME_DIR", "CWR-Worldgen")
 
-    frozen = bool(getattr(sys, "frozen", False))
-    if frozen and args and args[0] == OVERTURE_CLI_MARKER:
+    if args and args[0] == OVERTURE_CLI_MARKER:
         return _run_bundled_overture_cli(args[1:])
+
+    frozen = bool(getattr(sys, "frozen", False))
     if frozen and args and args[0] == FROZEN_CLI_MARKER:
         _install_frozen_dem_cache(base_dir)
 
