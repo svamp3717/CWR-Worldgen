@@ -19,7 +19,7 @@ sources = ["dem-stitcher>=2.5,<3", "rasterio>=1.4", "numpy>=1.26"]
 cwr-worldgen = "cwr_worldgen.cli:main"
 
 [project.gui-scripts]
-cwr-worldgen-gui = "cwr_worldgen.gui:main"
+cwr-worldgen-gui = "cwr_worldgen.gui_entry:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
