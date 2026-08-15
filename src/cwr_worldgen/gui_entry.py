@@ -62,8 +62,19 @@ def _install_frozen_dem_cache(base_dir: Path) -> None:
     dem_stitcher.stitch_dem = stitch_dem_with_local_cache
 
 
+def _ensure_cli_streams() -> None:
+    """Provide harmless stdio streams in PyInstaller windowed processes."""
+    if sys.stdin is None:
+        sys.stdin = open(os.devnull, "r", encoding="utf-8")
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
+
 def _run_bundled_overture_cli(args: list[str]) -> int:
     """Run the official Overture CLI already bundled into the frozen app."""
+    _ensure_cli_streams()
     from overturemaps.cli import cli as overture_cli
 
     result = overture_cli.main(
