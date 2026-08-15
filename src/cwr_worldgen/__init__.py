@@ -3,6 +3,18 @@
 
 import os as _os
 import sys as _sys
+import warnings as _warnings
+
+# CWR deliberately reuses dem-stitcher's persistent tile cache. The upstream
+# library warns whenever that managed directory already exists, which is the
+# expected state on every run after the first. Suppress only that exact warning
+# from dem_stitcher.stitcher; all other DEM/network/raster warnings stay visible.
+_warnings.filterwarnings(
+    "ignore",
+    message=r"^The directory.* exists; We are writing new files to this directory$",
+    category=UserWarning,
+    module=r"^dem_stitcher\.stitcher$",
+)
 
 from ._version import __version__
 from .generator import BuildResult, build_milestone1, build_milestone2, build_milestone3, build_milestone4
