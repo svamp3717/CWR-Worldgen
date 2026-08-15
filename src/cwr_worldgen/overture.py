@@ -10,6 +10,9 @@ import subprocess
 import sys
 
 
+OVERTURE_CLI_MARKER = "--cwr-overture"
+
+
 def overture_buildings_cache_path(cache_dir: Path, bbox: tuple[float, float, float, float]) -> Path:
     digest = sha256(json.dumps(tuple(round(float(value), 7) for value in bbox)).encode("utf-8")).hexdigest()[:16]
     return cache_dir / f"overture-buildings-{digest}.geojson"
@@ -18,10 +21,8 @@ def overture_buildings_cache_path(cache_dir: Path, bbox: tuple[float, float, flo
 def overture_command_prefix() -> list[str]:
     python_path = Path(sys.executable).resolve()
     # Prefer the directory containing the currently launched application/entry
-    # point. In frozen/packaged builds this is where users naturally place
-    # overturemaps.exe next to cwr-worldgen.exe. When running from source, argv[0]
-    # points at the launcher script while sys.executable usually points at the
-    # Python installation, so supporting both avoids packaging-specific magic.
+    # point. In frozen/packaged builds this also preserves support for users who
+    # intentionally place a standalone overturemaps executable beside Worldgen.
     launch_path = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else python_path
     candidate_dirs = (
         launch_path.parent,
@@ -47,12 +48,11 @@ def overture_command_prefix() -> list[str]:
     if executable:
         return [executable]
     if bool(getattr(sys, "frozen", False)):
-        # In a PyInstaller GUI sys.executable is the Worldgen executable, not a
-        # Python interpreter. Using ``sys.executable -m overturemaps`` would
-        # recursively launch another GUI instance. A frozen build must use a
-        # real overturemaps launcher found above; otherwise the caller falls
-        # back cleanly to non-Overture data.
-        raise FileNotFoundError("overturemaps executable was not found beside the frozen application or on PATH")
+        # The packaged GUI contains the official overturemaps Python package.
+        # Re-enter the Worldgen executable through a private marker so Overture
+        # still runs in a child process and retains the existing timeout/fallback
+        # behavior without requiring a second executable beside the app.
+        return [sys.executable, OVERTURE_CLI_MARKER]
     return [sys.executable, "-m", "overturemaps"]
 
 
