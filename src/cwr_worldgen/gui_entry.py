@@ -304,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     base_dir = storage_base_dir()
     os.environ.setdefault("CWR_WORLDGEN_GUI_STATE", str(base_dir / "config" / "gui-state.json"))
+    os.environ.setdefault("CWR_WORLDGEN_RUNTIME_DIR", "CWR-Worldgen")
 
     frozen = bool(getattr(sys, "frozen", False))
     if frozen and args and args[0] == OVERTURE_CLI_MARKER:
