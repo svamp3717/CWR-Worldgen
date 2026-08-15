@@ -31,8 +31,8 @@ jobs:
         shell: bash
         run: |
           VERSION="$(python - <<'PY'
-          from cwr_worldgen._version import __version__
-          print(__version__)
+          import runpy
+          print(runpy.run_path("src/cwr_worldgen/_version.py")["__version__"])
           PY
           )"
           if [[ -z "$VERSION" ]]; then
