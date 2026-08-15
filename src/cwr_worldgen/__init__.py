@@ -64,6 +64,25 @@ def _build_milestone9_with_configured_runtime(*args, **kwargs):
 
 _milestone9_module.build_milestone4 = _build_milestone9_with_configured_runtime
 
+# Final worlds get a small human-readable reproduction note beside the PBO.
+# Install this after the runtime-folder compatibility wrapper so the ReadMe sees
+# the final generated Addons path and can mirror itself into an optional mod.
+from .terrain_readme import install_milestone9_terrain_readme as _install_milestone9_terrain_readme
+
+_install_milestone9_terrain_readme()
+build_milestone9 = _milestone9_module.build_milestone9
+
+# The coordinate-aware picker is GUI-only. Importing tkinter can legitimately
+# fail on headless/library-only installations, so leave non-GUI use untouched.
+try:
+    from .map_picker_coords import (
+        install_osm_area_picker_coordinate_controls as _install_osm_area_picker_coordinate_controls,
+    )
+
+    _install_osm_area_picker_coordinate_controls()
+except ImportError:
+    pass
+
 __all__ = [
     "__version__",
     "BuildResult",
