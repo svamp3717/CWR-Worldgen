@@ -10,11 +10,13 @@ from cwr_worldgen.gui import (
     WIZARD_STEPS,
     FROZEN_CLI_MARKER,
     WorldgenGui,
+    application_base_dir,
     build_fetch_command,
     cli_command_prefix,
     build_gui_osm_asset_mapping_document,
     build_milestone9_command,
     build_wizard_pipeline_commands,
+    default_gui_path,
     default_gui_values,
     defaults_with_recent_source,
     existing_source_preview_path,
@@ -23,6 +25,7 @@ from cwr_worldgen.gui import (
     main as gui_main,
     load_gui_state,
     quote_command,
+    resolve_gui_path,
     save_gui_state,
     slugify_world_name,
     suggested_world_values,
@@ -53,11 +56,65 @@ class FrozenGuiDispatchTests(unittest.TestCase):
     def test_explicit_python_launcher_stays_compatible_with_source_mode(self) -> None:
         self.assertEqual(cli_command_prefix("python"), ["python", "-m", "cwr_worldgen"])
 
+    def test_frozen_defaults_and_relative_paths_live_beside_executable(self) -> None:
+        with TemporaryDirectory() as temporary:
+            app_dir = Path(temporary).resolve()
+            executable = app_dir / "CWR-Worldgen.exe"
+            with (
+                patch("cwr_worldgen.gui.sys.executable", str(executable)),
+                patch("cwr_worldgen.gui.sys.frozen", True, create=True),
+            ):
+                self.assertEqual(application_base_dir(), app_dir)
+                self.assertEqual(resolve_gui_path("relative-output"), app_dir / "relative-output")
+                self.assertEqual(default_gui_path(Path("build") / "map"), str(app_dir / "build" / "map"))
+                defaults = default_gui_values()
+                self.assertEqual(defaults["output"], str(app_dir / "build" / "my_world"))
+                self.assertEqual(defaults["source_dir"], str(app_dir / "source-data" / "my_world"))
+                suggested = suggested_world_values(
+                    "Stockholm Test", source_mode="new", source_dir=str(app_dir / "unused")
+                )
+                self.assertEqual(suggested["output"], str(app_dir / "build" / "stockholm_test"))
+                self.assertEqual(suggested["source_dir"], str(app_dir / "source-data" / "stockholm_test"))
+
     def test_private_frozen_marker_dispatches_to_cli_without_opening_gui(self) -> None:
         with patch("cwr_worldgen.cli.main", return_value=23) as cli_main:
             result = gui_main([FROZEN_CLI_MARKER, "inspect-sources", "--source-dir", "bundle"])
         self.assertEqual(result, 23)
         cli_main.assert_called_once_with(["inspect-sources", "--source-dir", "bundle"])
+
+
+class DeployControlStateTests(unittest.TestCase):
+    class _Var:
+        def __init__(self, value: bool) -> None:
+            self.value = value
+
+        def get(self) -> bool:
+            return self.value
+
+    class _Widget:
+        def __init__(self) -> None:
+            self.state = ""
+
+        def configure(self, *, state: str) -> None:
+            self.state = state
+
+    def test_deploy_folder_picker_tracks_copy_checkbox(self) -> None:
+        enabled = self._Var(False)
+        entry = self._Widget()
+        button = self._Widget()
+        fake_gui = type("FakeGui", (), {})()
+        fake_gui.vars = {"deploy_to_mod_folder": enabled}
+        fake_gui.entry_widgets = {"deploy_mod_dir": entry}
+        fake_gui.browse_buttons = {"deploy_mod_dir": button}
+
+        WorldgenGui._update_deploy_controls(fake_gui)
+        self.assertEqual(entry.state, "disabled")
+        self.assertEqual(button.state, "disabled")
+
+        enabled.value = True
+        WorldgenGui._update_deploy_controls(fake_gui)
+        self.assertEqual(entry.state, "normal")
+        self.assertEqual(button.state, "normal")
 
 
 class GuiCommandTests(unittest.TestCase):

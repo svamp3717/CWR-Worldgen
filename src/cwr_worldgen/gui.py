@@ -50,6 +50,35 @@ def cli_command_prefix(python: str | None = None) -> list[str]:
     return [sys.executable, "-m", "cwr_worldgen"]
 
 
+def application_base_dir() -> Path:
+    """Return the stable directory used for GUI-relative files and child jobs.
+
+    Source installs intentionally retain the caller's working directory. A
+    PyInstaller executable is different: Windows shortcuts, shells and launchers
+    are free to give it an unrelated current directory, while users reasonably
+    expect ``build`` and ``source-data`` to appear beside the EXE.
+    """
+    if bool(getattr(sys, "frozen", False)):
+        return Path(sys.executable).resolve().parent
+    return Path.cwd().resolve()
+
+
+def resolve_gui_path(value: str | Path, *, base_dir: Path | None = None) -> Path:
+    """Resolve a user-entered relative filesystem path against the app base."""
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = (base_dir or application_base_dir()) / path
+    return path.resolve()
+
+
+def default_gui_path(relative: str | Path) -> str:
+    """Return a default path, EXE-relative when running as a frozen GUI."""
+    path = Path(relative)
+    if bool(getattr(sys, "frozen", False)):
+        return str(resolve_gui_path(path))
+    return str(path)
+
+
 SOURCE_PREVIEW_MAX_WIDTH = 720
 SOURCE_PREVIEW_MAX_HEIGHT = 380
 _SOURCE_PREVIEW_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
@@ -269,7 +298,8 @@ def defaults_with_recent_source(
             result["output"] = increment_trailing_number(output_text)
         else:
             output_slug = next_name[4:] if next_name.casefold().startswith("cwr_") else next_name
-            result["output"] = str(Path("build") / output_slug)
+            default_output = Path(str(result.get("output", default_gui_path(Path("build") / "my_world"))))
+            result["output"] = str(default_output.parent / output_slug)
     last_display_name = str(state.get("last_world_display_name", "")).strip()
     if last_display_name:
         result["display_name"] = increment_trailing_number(last_display_name)
@@ -561,11 +591,11 @@ def suggested_world_values(
     slug = slugify_world_name(display_name)
     values = {
         "name": "cwr_" + slug if not slug.startswith("cwr_") else slug,
-        "output": str(Path("build") / slug),
+        "output": default_gui_path(Path("build") / slug),
         "source_dir": source_dir,
     }
     if source_mode == "new":
-        values["source_dir"] = str(Path("source-data") / slug)
+        values["source_dir"] = default_gui_path(Path("source-data") / slug)
     return values
 
 
@@ -575,7 +605,7 @@ def resolve_wizard_world_grid(values: dict[str, object]) -> tuple[int, float]:
         source_text = str(values.get("source_dir", "")).strip()
         if not source_text:
             raise ValueError("Choose a source bundle directory.")
-        manifest_path = Path(source_text) / "source.json"
+        manifest_path = resolve_gui_path(source_text) / "source.json"
         try:
             document = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -610,8 +640,8 @@ def default_gui_values() -> dict[str, object]:
     south, west, north, east = square_bbox(59.45, 17.0, DEFAULT_GUI_TERRAIN_CELLS * DEFAULT_GUI_CELL_SIZE_METRES)
     return {
         "source_mode": "new",
-        "source_dir": r"source-data\my_world",
-        "fetch_source_dir": r"source-data\my_world",
+        "source_dir": default_gui_path(Path("source-data") / "my_world"),
+        "fetch_source_dir": default_gui_path(Path("source-data") / "my_world"),
         "selection_mode": "bbox",
         "map_url": "",
         "center_lat": "59.4500000",
@@ -624,7 +654,7 @@ def default_gui_values() -> dict[str, object]:
         "fetch_cell_size": "25",
         "fetch_refresh": False,
         "reference_map": True,
-        "output": r"build\my_world",
+        "output": default_gui_path(Path("build") / "my_world"),
         "deploy_to_mod_folder": False,
         "deploy_mod_dir": "",
         "name": "cwr_my_world",
@@ -728,7 +758,7 @@ def validate_wizard_step(step_index: int, values: dict[str, object], asset_roots
         if not source_dir:
             raise ValueError("Choose a source bundle directory.")
         if str(values.get("source_mode", "new")) == "existing":
-            if not (Path(source_dir) / "source.json").is_file():
+            if not (resolve_gui_path(source_dir) / "source.json").is_file():
                 raise ValueError("The selected folder is not a frozen source bundle. It needs a source.json file.")
             resolve_wizard_world_grid(values)
         else:
@@ -740,14 +770,14 @@ def validate_wizard_step(step_index: int, values: dict[str, object], asset_roots
     elif step_index == 1:
         build_milestone9_command(values, python="python")
         if bool(values.get("deploy_to_mod_folder", False)):
-            deploy_path = Path(str(values.get("deploy_mod_dir", "")).strip()).expanduser()
+            deploy_path = resolve_gui_path(str(values.get("deploy_mod_dir", "")).strip())
             if not deploy_path.is_dir():
                 raise ValueError("The deployment target must be an existing game mod folder.")
     elif step_index == 2:
         # Asset checking/mapping is optional and lives outside the main wizard,
         # but validate it here when somebody has explicitly enabled it.
         mapping_path = str(values.get("osm_asset_map", "")).strip()
-        if mapping_path and not Path(mapping_path).is_file():
+        if mapping_path and not resolve_gui_path(mapping_path).is_file():
             raise ValueError("The OSM asset mapping JSON file does not exist.")
         integer_fields = (
             "max_road_objects",
@@ -850,6 +880,8 @@ class WorldgenGui(tk.Tk):
         self._stop_requested = threading.Event()
         self.output_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.vars: dict[str, tk.Variable] = {}
+        self.entry_widgets: dict[str, ttk.Entry] = {}
+        self.browse_buttons: dict[str, ttk.Button] = {}
         self.asset_roots: list[str] = []
         self.profile_path: Path | None = None
         self.step_index = 0
@@ -909,6 +941,7 @@ class WorldgenGui(tk.Tk):
         self._update_source_mode_visibility()
         self._update_source_summary()
         self._update_source_preview()
+        self._update_deploy_controls()
         self._update_review()
         self._update_command_preview()
         self._refresh_osm_mapping_tree()
@@ -996,8 +1029,11 @@ class WorldgenGui(tk.Tk):
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=4)
         entry = ttk.Entry(parent, textvariable=self._var(key), width=width)
         entry.grid(row=row, column=1, sticky="ew", pady=4)
+        self.entry_widgets[key] = entry
         if browse:
-            ttk.Button(parent, text="Browse…", command=lambda: self._browse(key, browse)).grid(row=row, column=2, padx=(6, 0), pady=4)
+            button = ttk.Button(parent, text="Browse…", command=lambda: self._browse(key, browse))
+            button.grid(row=row, column=2, padx=(6, 0), pady=4)
+            self.browse_buttons[key] = button
         parent.columnconfigure(1, weight=1)
         return entry
 
@@ -1100,6 +1136,18 @@ class WorldgenGui(tk.Tk):
             style="Hint.TLabel",
             wraplength=700,
         ).grid(row=8, column=0, columnspan=3, sticky="w", pady=(10, 0))
+
+    def _update_deploy_controls(self) -> None:
+        """Disable the deployment folder picker until copying is enabled."""
+        if "deploy_to_mod_folder" not in self.vars:
+            return
+        state = "normal" if bool(self.vars["deploy_to_mod_folder"].get()) else "disabled"
+        entry = self.entry_widgets.get("deploy_mod_dir")
+        if entry is not None:
+            entry.configure(state=state)
+        button = self.browse_buttons.get("deploy_mod_dir")
+        if button is not None:
+            button.configure(state=state)
 
     def _build_assets_page(self) -> None:
         _page, body = self._new_scroll_page()
@@ -1815,12 +1863,17 @@ class WorldgenGui(tk.Tk):
         elif "osm_asset_map" in self.vars and self.vars["osm_asset_map"].get():
             self.vars["osm_asset_map"].set("")
         values = {name: var.get() for name, var in self.vars.items()}
-        values["asset_roots"] = list(self.asset_roots)
+        for key in ("source_dir", "output", "cache_dir", "osm_asset_map", "deploy_mod_dir"):
+            text = str(values.get(key, "")).strip()
+            if text:
+                values[key] = str(resolve_gui_path(text))
+        values["asset_roots"] = [str(resolve_gui_path(root)) for root in self.asset_roots]
         return values
 
     def _collect_fetch_values(self) -> dict[str, object]:
+        source_text = str(self.vars["source_dir"].get()).strip()
         return {
-            "source_dir": self.vars["source_dir"].get(),
+            "source_dir": str(resolve_gui_path(source_text)) if source_text else "",
             "selection_mode": self.vars["selection_mode"].get(),
             "map_url": self.vars["map_url"].get(),
             "center_lat": self.vars["center_lat"].get(),
@@ -1977,7 +2030,8 @@ class WorldgenGui(tk.Tk):
     def _update_source_summary(self) -> None:
         if not hasattr(self, "source_summary_var"):
             return
-        source_dir = Path(str(self.vars["source_dir"].get()).strip())
+        source_text = str(self.vars["source_dir"].get()).strip()
+        source_dir = resolve_gui_path(source_text) if source_text else application_base_dir()
         mode = str(self.vars["source_mode"].get())
         if mode == "existing":
             found = (source_dir / "source.json").is_file()
@@ -2005,7 +2059,8 @@ class WorldgenGui(tk.Tk):
             return
         if str(self.vars["source_mode"].get()) != "existing":
             return
-        source_dir = Path(str(self.vars["source_dir"].get()).strip()).expanduser()
+        source_text = str(self.vars["source_dir"].get()).strip()
+        source_dir = resolve_gui_path(source_text) if source_text else application_base_dir()
         preview_path = existing_source_preview_path(source_dir)
         if preview_path is None:
             self._source_preview_key = None
@@ -2194,21 +2249,16 @@ class WorldgenGui(tk.Tk):
             self._run_fetch_only()
 
     def _browse(self, key: str, kind: str) -> None:
-        current = str(self.vars[key].get())
+        current = str(self.vars[key].get()).strip()
+        initial = str(resolve_gui_path(current)) if current else str(application_base_dir())
         if kind == "directory":
-            selected = filedialog.askdirectory(initialdir=current or None)
+            selected = filedialog.askdirectory(initialdir=initial)
         else:
-            selected = filedialog.askopenfilename(initialdir=current or None)
+            selected = filedialog.askopenfilename(initialdir=initial)
         if selected:
             self.vars[key].set(selected)
             if key == "source_dir":
                 self._sync_source_paths()
-            elif key == "deploy_mod_dir":
-                # Choosing a deployment destination is itself an explicit opt-in.
-                # Previously the path could be selected while the independent
-                # checkbox remained off, producing a successful build that never
-                # copied anything outside the build folder.
-                self.vars["deploy_to_mod_folder"].set(True)
 
     def _add_asset_folder(self) -> None:
         value = filedialog.askdirectory()
@@ -2260,7 +2310,8 @@ class WorldgenGui(tk.Tk):
                     base_path / "Steam" / "steamapps" / "common" / "Arma Cold War Assault",
                     base_path / "GOG Galaxy" / "Games" / "Arma Cold War Assault",
                 ))
-        candidates.extend((Path.cwd(), Path.cwd().parent))
+        app_dir = application_base_dir()
+        candidates.extend((app_dir, app_dir.parent))
         unique: list[Path] = []
         seen: set[str] = set()
         for candidate in candidates:
@@ -2387,7 +2438,7 @@ class WorldgenGui(tk.Tk):
                     return
                 process = subprocess.Popen(
                     command,
-                    cwd=Path.cwd(),
+                    cwd=application_base_dir(),
                     env=child_env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -2638,7 +2689,7 @@ class WorldgenGui(tk.Tk):
         )
 
     def _inspect_normalized(self) -> None:
-        source = Path(str(self.vars["source_dir"].get()))
+        source = resolve_gui_path(str(self.vars["source_dir"].get()))
         normalized = source / "normalized"
         self._start_pipeline(
             [(cli_command_prefix() + ["inspect-normalized", "--normalized-dir", str(normalized)], "Inspecting normalized data")],
@@ -2647,11 +2698,11 @@ class WorldgenGui(tk.Tk):
         )
 
     def _clear_output(self) -> None:
-        self._delete_path(Path(str(self.vars["output"].get())), "build output")
+        self._delete_path(resolve_gui_path(str(self.vars["output"].get())), "build output")
 
     def _cache_path(self) -> Path:
         custom = str(self.vars["cache_dir"].get()).strip()
-        return Path(custom) if custom else Path(str(self.vars["source_dir"].get())) / ".cwr-cache"
+        return resolve_gui_path(custom) if custom else resolve_gui_path(str(self.vars["source_dir"].get())) / ".cwr-cache"
 
     def _clear_cache(self) -> None:
         self._delete_path(self._cache_path(), "persistent cache")
@@ -2659,7 +2710,7 @@ class WorldgenGui(tk.Tk):
     def _clear_all(self) -> None:
         if not messagebox.askyesno(APP_TITLE, "Delete both the build output and persistent cache?"):
             return
-        for path in (Path(str(self.vars["output"].get())), self._cache_path()):
+        for path in (resolve_gui_path(str(self.vars["output"].get())), self._cache_path()):
             if path.exists():
                 shutil.rmtree(path)
         self.footer_status_var.set("Deleted output and cache.")
@@ -2673,7 +2724,7 @@ class WorldgenGui(tk.Tk):
             self.footer_status_var.set(f"Deleted {label}: {path}")
 
     def _open_path(self, value: str) -> None:
-        path = Path(value).resolve()
+        path = resolve_gui_path(value)
         path.mkdir(parents=True, exist_ok=True)
         if os.name == "nt":
             os.startfile(path)  # type: ignore[attr-defined]
@@ -2758,6 +2809,12 @@ def main(argv: list[str] | None = None) -> int:
         # constructing another WorldgenGui instance.
         from .cli import main as cli_main
         return cli_main(args[1:])
+    if bool(getattr(sys, "frozen", False)):
+        # One-file executables may be started by Explorer, shortcuts or launchers
+        # with an arbitrary working directory. Make every remaining relative GUI
+        # operation consistently live beside the actual EXE, not beside whatever
+        # directory Windows happened to assign to the process.
+        os.chdir(application_base_dir())
     try:
         app = WorldgenGui()
     except tk.TclError as exc:
