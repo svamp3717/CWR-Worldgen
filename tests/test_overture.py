@@ -6,7 +6,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from cwr_worldgen.overture import OVERTURE_CLI_MARKER, overture_command_prefix
+from cwr_worldgen.overture import (
+    OVERTURE_CLI_MARKER,
+    fetch_overture_buildings_geojson,
+    overture_command_prefix,
+)
 
 
 class OvertureExecutableDiscoveryTests(unittest.TestCase):
@@ -62,6 +66,25 @@ class OvertureExecutableDiscoveryTests(unittest.TestCase):
                 patch("cwr_worldgen.overture.sys.executable", str(python_dir / "python.exe")),
             ):
                 self.assertEqual(overture_command_prefix(), [str(app_overture)])
+
+    def test_download_bypasses_stac_and_uses_longer_network_timeouts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "buildings.geojson"
+            with (
+                patch("cwr_worldgen.overture.overture_command_prefix", return_value=["overturemaps"]),
+                patch("cwr_worldgen.overture.subprocess.run") as run,
+            ):
+                self.assertIsNone(
+                    fetch_overture_buildings_geojson(
+                        (59.0, 18.0, 59.1, 18.1),
+                        output,
+                        refresh=True,
+                    )
+                )
+                command = run.call_args.args[0]
+                self.assertIn("--no-stac", command)
+                self.assertEqual(command[command.index("--connect_timeout") + 1], "10")
+                self.assertEqual(command[command.index("--request_timeout") + 1], "30")
 
 
 if __name__ == "__main__":
