@@ -740,6 +740,7 @@ def _apply_world_edges(
     spec: ConstraintPlayabilitySpec,
     *,
     blend_cells: int | None = None,
+    vertical_datum_offset: float = 0.0,
 ) -> str:
     width = spec.world_edge_blend_cells if blend_cells is None else int(blend_cells)
     if width <= 0:
@@ -754,7 +755,9 @@ def _apply_world_edges(
             return fallback
         latitude, longitude = projection.to_latlon((x, z))
         value = raw_sampler(latitude, longitude)
-        return fallback if value is None else value
+        if value is None:
+            return fallback
+        return value - vertical_datum_offset
 
     for layer in range(width):
         blend = (width - layer) / (width + 1.0)
@@ -801,13 +804,12 @@ def solve_terrain_constraints(
             progress_callback(max(0, min(100, int(percent))), stage)
 
     progress(0, f"Preparing terrain constraint field for {spec.cells:,}×{spec.cells:,} cells")
-    original = tuple(float(value) for value in elevations)
-    if len(original) != spec.cells * spec.cells:
+    raw_original = tuple(float(value) for value in elevations)
+    if len(raw_original) != spec.cells * spec.cells:
         raise ValueError("constraint solver elevation grid has the wrong size")
-    field = _ConstraintField.create(len(original))
     smoothing = _effective_terrain_smoothing(spec)
     water_components = _components(raster.water, spec.cells)
-    coastal_water_components = [
+    edge_water_components = [
         component for component in water_components
         if _component_touches_world_edge(component, spec.cells)
     ]
@@ -816,11 +818,97 @@ def solve_terrain_constraints(
         if not _component_touches_world_edge(component, spec.cells)
     ]
 
-    # CWA/OFP has one global water plane. An inland pond whose DEM surface is
-    # far above that plane cannot be represented as real engine water without
-    # excavating an artificial crater down to sea level. Only inland components
-    # already close enough to the global plane are therefore rendered as water.
-    # Elevated ponds/lakes keep their DEM terrain instead.
+    # A cropped map can cut through an inland lake. The old edge test treated
+    # every edge-touching water component as ocean, even when the source DEM
+    # puts that lake one hundred metres above sea level. CWA/OFP has only one
+    # global water plane, so locally excavating such a lake creates enormous
+    # beaches/cliffs. On an inland map with no real near-sea edge water, recenter
+    # the whole terrain datum toward the lowest large edge lake instead.
+    maximum_near_sea_surface = spec.sea_level + spec.water_depth
+    edge_surfaces = [
+        (component, median(raw_original[index] for index in component))
+        for component in edge_water_components
+    ]
+    near_sea_edge_components = [
+        component
+        for component, surface in edge_surfaces
+        if surface <= maximum_near_sea_surface
+    ]
+    vertical_datum_offset = 0.0
+    minimum_datum_component_cells = max(64, int(round(len(raw_original) * 0.005)))
+    datum_candidates = [
+        (component, surface)
+        for component, surface in edge_surfaces
+        if surface > maximum_near_sea_surface
+        and len(component) >= minimum_datum_component_cells
+    ]
+    if datum_candidates and not near_sea_edge_components:
+        lowest_edge_lake_surface = min(surface for _component, surface in datum_candidates)
+
+        # Do not blindly lower the map through unrelated dry valleys. Use dry
+        # terrain at least three cells away from mapped water as a safety floor,
+        # while allowing a tiny low-tail fraction to be outliers.
+        water_proximity = _distance_from_mask(raster.water, spec.cells, 3)
+        dry_reference = sorted(
+            raw_original[index]
+            for index, is_water in enumerate(raster.water)
+            if not is_water
+            and water_proximity[index] >= 3
+            and math.isfinite(raw_original[index])
+        )
+        dry_safe_floor = math.inf
+        if dry_reference:
+            safe_index = min(
+                len(dry_reference) - 1,
+                max(0, int(round((len(dry_reference) - 1) * 0.005))),
+            )
+            dry_safe_floor = dry_reference[safe_index] - max(1.0, spec.height_scale * 2.0)
+
+        requested_offset = max(0.0, lowest_edge_lake_surface - spec.sea_level)
+        safe_offset = max(0.0, dry_safe_floor - spec.sea_level)
+        candidate_offset = min(requested_offset, safe_offset)
+        if candidate_offset >= max(10.0, spec.water_depth * 2.0):
+            vertical_datum_offset = candidate_offset
+
+    original = tuple(value - vertical_datum_offset for value in raw_original)
+    field = _ConstraintField.create(len(original))
+    if vertical_datum_offset > 0.0:
+        progress(
+            3,
+            f"Lowering whole-world terrain datum by {vertical_datum_offset:.1f} m "
+            "to fit elevated edge lakes to CWA's global water plane",
+        )
+
+    # Reclassify water after the optional whole-world datum shift. Genuine sea
+    # components remain coastal. Elevated edge lakes can now use the same broad
+    # lake-bank treatment as inland water if the remaining elevation difference
+    # can be graded within the solver's 32-cell safety cap.
+    lake_rise_per_cell = (
+        spec.cell_size * spec.lake_shore_maximum_slope_percent / 100.0
+    )
+    maximum_edge_lake_surface = (
+        spec.sea_level + 32 * lake_rise_per_cell
+    )
+    coastal_water_components: list[list[int]] = []
+    recentered_edge_lake_components: list[list[int]] = []
+    elevated_edge_water_components: list[list[int]] = []
+    for component in edge_water_components:
+        component_surface = median(original[index] for index in component)
+        if component_surface <= maximum_near_sea_surface and vertical_datum_offset <= 0.0:
+            coastal_water_components.append(component)
+        elif (
+            vertical_datum_offset > 0.0
+            and component_surface <= maximum_edge_lake_surface
+        ):
+            recentered_edge_lake_components.append(component)
+        elif component_surface <= maximum_near_sea_surface:
+            coastal_water_components.append(component)
+        else:
+            elevated_edge_water_components.append(component)
+
+    # Ordinary inland ponds still follow the crater fix: only near-sea water is
+    # rendered unless the whole map was recentered enough to bring it close to
+    # the global water plane.
     maximum_inland_water_surface = spec.sea_level + spec.water_depth
     inland_water_components: list[list[int]] = []
     elevated_inland_water_components: list[list[int]] = []
@@ -832,16 +920,25 @@ def solve_terrain_constraints(
             elevated_inland_water_components.append(component)
 
     coastal_water_mask = _mask_from_components(coastal_water_components, len(original))
+    recentered_edge_lake_mask = _mask_from_components(
+        recentered_edge_lake_components, len(original)
+    )
     inland_water_mask = _mask_from_components(inland_water_components, len(original))
+    lake_water_mask = tuple(
+        edge_lake or inland
+        for edge_lake, inland in zip(recentered_edge_lake_mask, inland_water_mask)
+    )
     active_water_mask = tuple(
-        coastal or inland
-        for coastal, inland in zip(coastal_water_mask, inland_water_mask)
+        coastal or lake
+        for coastal, lake in zip(coastal_water_mask, lake_water_mask)
     )
     building_pad_groups: list[tuple[int, ...]] = []
     progress(5, (
         f"Found {len(coastal_water_components):,} coastal, "
-        f"{len(inland_water_components):,} renderable inland, and "
-        f"{len(elevated_inland_water_components):,} elevated inland water component(s) preserved at DEM height"
+        f"{len(recentered_edge_lake_components):,} recentered edge-lake, "
+        f"{len(inland_water_components):,} renderable inland, "
+        f"{len(elevated_edge_water_components) + len(elevated_inland_water_components):,} "
+        "elevated water component(s) preserved at DEM height"
     ))
 
     # 1. Water bodies. Coastal and near-sea inland water can use CWA/OFP's
@@ -877,25 +974,38 @@ def solve_terrain_constraints(
         )
         protected_shore_cells += 1
 
-    # Inland lakes need a broader treatment than a sea coast. The CWA water
-    # plane remains at sea level, so high DEM terrain beside a mapped lake must
-    # descend gradually toward that plane instead of forming a one-cell cliff.
-    progress(16, "Building inland-lake bank distance field")
+    # Inland lakes and recentered edge lakes need a broader treatment than a
+    # sea coast. Expand the bank width when the remaining lake level difference
+    # requires it, while retaining the configured maximum shoreline slope.
+    active_lake_surfaces = [
+        median(original[index] for index in component)
+        for component in (*recentered_edge_lake_components, *inland_water_components)
+    ]
+    required_lake_cells = 0
+    if active_lake_surfaces and lake_rise_per_cell > 0.0:
+        required_lake_cells = int(math.ceil(
+            max(0.0, max(active_lake_surfaces) - spec.sea_level) / lake_rise_per_cell
+        ))
+    effective_lake_shore_cells = min(
+        32,
+        max(smoothing.lake_shore_smoothing_cells, required_lake_cells + 1),
+    )
+    progress(
+        16,
+        f"Building lake-bank distance field across {effective_lake_shore_cells:,} cells",
+    )
     lake_bank_mask = [False] * len(original)
     lake_distances = _euclidean_distance_from_mask(
-        inland_water_mask,
+        lake_water_mask,
         spec.cells,
-        smoothing.lake_shore_smoothing_cells,
-    )
-    lake_rise_per_cell = (
-        spec.cell_size * spec.lake_shore_maximum_slope_percent / 100.0
+        effective_lake_shore_cells,
     )
     lake_shore_cells = 0
     for index, distance in enumerate(lake_distances):
         if (
             not math.isfinite(distance)
             or distance <= 0.0
-            or distance > smoothing.lake_shore_smoothing_cells
+            or distance > effective_lake_shore_cells
             or raster.water[index]
         ):
             continue
@@ -909,7 +1019,7 @@ def solve_terrain_constraints(
                     continue
                 if 0 <= nx < spec.cells and 0 <= nz < spec.cells:
                     neighbour = nz * spec.cells + nx
-                    if not inland_water_mask[neighbour]:
+                    if not lake_water_mask[neighbour]:
                         local_values.append(original[neighbour])
         local_smoothed = sum(local_values) / len(local_values)
         slope_limited = spec.sea_level + distance * lake_rise_per_cell
@@ -919,7 +1029,7 @@ def solve_terrain_constraints(
         )
         clipped_for_grade = original[index] > slope_limited + 1e-7
         fraction = distance / max(
-            1.0, float(smoothing.lake_shore_smoothing_cells)
+            1.0, float(effective_lake_shore_cells)
         )
         field.apply(
             index,
@@ -934,7 +1044,7 @@ def solve_terrain_constraints(
 
     maximum_lake_shore_slope_before = _maximum_lake_bank_slope(
         original,
-        inland_water_mask,
+        lake_water_mask,
         lake_bank_mask,
         spec.cells,
         spec.cell_size,
@@ -1259,6 +1369,7 @@ def solve_terrain_constraints(
         projection,
         spec,
         blend_cells=smoothing.world_edge_blend_cells,
+        vertical_datum_offset=vertical_datum_offset,
     )
 
     # Unified relaxation. All constraints remain in the same field; higher
@@ -1406,7 +1517,7 @@ def solve_terrain_constraints(
     )
     maximum_lake_shore_slope_after = _maximum_lake_bank_slope(
         result,
-        inland_water_mask,
+        lake_water_mask,
         lake_bank_mask,
         spec.cells,
         spec.cell_size,
@@ -1443,10 +1554,10 @@ def solve_terrain_constraints(
         protected_shore_cells=protected_shore_cells,
         shoreline_transition_cells=smoothing.shoreline_transition_cells,
         coastal_water_components=len(coastal_water_components),
-        inland_water_components=len(inland_water_components),
+        inland_water_components=len(inland_water_components) + len(recentered_edge_lake_components),
         lake_shore_cells=lake_shore_cells,
         osm_land_floor_cells=osm_land_floor_cells,
-        lake_shore_smoothing_cells=smoothing.lake_shore_smoothing_cells,
+        lake_shore_smoothing_cells=effective_lake_shore_cells,
         lake_shore_maximum_slope_percent=spec.lake_shore_maximum_slope_percent,
         maximum_lake_shore_slope_before_percent=maximum_lake_shore_slope_before,
         maximum_lake_shore_slope_after_percent=maximum_lake_shore_slope_after,
