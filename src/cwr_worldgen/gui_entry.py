@@ -7,6 +7,7 @@ import sys
 from typing import Any, Callable
 
 FROZEN_CLI_MARKER = "--cwr-cli"
+OVERTURE_CLI_MARKER = "--cwr-overture"
 
 
 def storage_base_dir() -> Path:
@@ -59,6 +60,18 @@ def _install_frozen_dem_cache(base_dir: Path) -> None:
 
     stitch_dem_with_local_cache._cwr_local_cache = True  # type: ignore[attr-defined]
     dem_stitcher.stitch_dem = stitch_dem_with_local_cache
+
+
+def _run_bundled_overture_cli(args: list[str]) -> int:
+    """Run the official Overture CLI already bundled into the frozen app."""
+    from overturemaps.cli import cli as overture_cli
+
+    result = overture_cli.main(
+        args=args,
+        prog_name="overturemaps",
+        standalone_mode=False,
+    )
+    return 0 if result is None else int(result)
 
 
 def _configure_gui(gui: Any, base_dir: Path) -> None:
@@ -198,7 +211,10 @@ def main(argv: list[str] | None = None) -> int:
     base_dir = storage_base_dir()
     os.environ.setdefault("CWR_WORLDGEN_GUI_STATE", str(base_dir / "config" / "gui-state.json"))
 
-    if bool(getattr(sys, "frozen", False)) and args and args[0] == FROZEN_CLI_MARKER:
+    frozen = bool(getattr(sys, "frozen", False))
+    if frozen and args and args[0] == OVERTURE_CLI_MARKER:
+        return _run_bundled_overture_cli(args[1:])
+    if frozen and args and args[0] == FROZEN_CLI_MARKER:
         _install_frozen_dem_cache(base_dir)
 
     from . import gui
