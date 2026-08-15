@@ -123,7 +123,7 @@ def install_osm_area_picker_coordinate_controls() -> None:
             for entry in entries:
                 entry.bind("<Return>", lambda _event: self._apply_typed_bbox())
 
-            self._sync_coordinate_fields()
+            self._update_selection_text()
 
         def _sync_coordinate_fields(self) -> None:
             if not hasattr(self, "coord_center_lat_var"):
