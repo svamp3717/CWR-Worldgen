@@ -40,6 +40,32 @@ def managed_replacement(
     return replacement, replacement
 
 
+def generated_mod_folder(output_dir: Path) -> Path | None:
+    """Find the generated runtime folder that directly contains Addons and Anims."""
+    root = Path(output_dir).expanduser()
+    if not root.is_dir():
+        return None
+    if (root / "Addons").is_dir() and (root / "Anims").is_dir():
+        return root.resolve()
+    try:
+        candidates = [
+            child.resolve()
+            for child in root.iterdir()
+            if child.is_dir()
+            and (child / "Addons").is_dir()
+            and (child / "Anims").is_dir()
+        ]
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    for candidate in candidates:
+        if candidate.name.casefold() == "@cwr-milestone9":
+            return candidate
+    candidates.sort(key=lambda path: path.name.casefold())
+    return candidates[0]
+
+
 def _install_frozen_dem_cache(base_dir: Path) -> None:
     """Make dem-stitcher localize remote DEM tiles before merging them."""
     import dem_stitcher
@@ -105,7 +131,7 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
     original_class = gui.WorldgenGui
 
     class SyncedWorldgenGui(original_class):
-        """Keep untouched generated names/paths aligned with the display name."""
+        """Keep generated paths aligned and expose the finished mod runtime."""
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self._auto_world_guard = True
@@ -116,9 +142,66 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
                 "source_dir": None,
             }
             super().__init__(*args, **kwargs)
+            self._clear_remembered_deploy_default()
             self._auto_display_name = str(self.vars["display_name"].get())
             self._arm_auto_world_values()
             self._auto_world_guard = False
+            self.open_generated_mod_button = gui.ttk.Button(
+                self.page_frames[gui.PROGRESS_STEP_INDEX],
+                text="Open generated mod folder",
+                command=self._open_generated_mod_folder,
+            )
+            self._update_navigation()
+
+        def _clear_remembered_deploy_default(self) -> None:
+            """Start deployment disabled and migrate away any remembered machine path."""
+            self.vars["deploy_to_mod_folder"].set(False)
+            self.vars["deploy_mod_dir"].set("")
+            try:
+                state = gui.load_gui_state(self.state_path)
+                had_deploy_path = bool(str(state.get("last_deploy_mod_dir", "")).strip())
+                deploy_was_enabled = bool(state.get("deploy_to_mod_folder", False))
+                if had_deploy_path or deploy_was_enabled:
+                    state.pop("state_version", None)
+                    state.pop("last_deploy_mod_dir", None)
+                    state["deploy_to_mod_folder"] = False
+                    gui.save_gui_state(self.state_path, state)
+            except OSError:
+                pass
+
+        def _generated_mod_folder(self) -> Path | None:
+            output_text = str(self.vars["output"].get()).strip()
+            if not output_text:
+                return None
+            return generated_mod_folder(gui.resolve_gui_path(output_text))
+
+        def _open_generated_mod_folder(self) -> None:
+            runtime = self._generated_mod_folder()
+            if runtime is None:
+                gui.messagebox.showinfo(
+                    gui.APP_TITLE,
+                    "No completed generated mod folder containing both Addons and Anims was found.",
+                )
+                return
+            self._open_path(str(runtime))
+
+        def _update_navigation(self) -> None:
+            super()._update_navigation()
+            button = getattr(self, "open_generated_mod_button", None)
+            if button is None:
+                return
+            show_button = (
+                self._operation_success
+                and self._pipeline_kind == "build"
+                and self.process is None
+                and not self._pipeline_active
+                and self._generated_mod_folder() is not None
+            )
+            if show_button:
+                if not button.winfo_manager():
+                    button.pack(anchor="e", padx=4, pady=(8, 4))
+            elif button.winfo_manager():
+                button.pack_forget()
 
         def _arm_auto_world_values(self) -> None:
             display_name = str(self.vars["display_name"].get())
