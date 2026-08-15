@@ -50,6 +50,7 @@ jobs:
             --collect-all cwr_worldgen `
             --collect-all dem_stitcher `
             --collect-all rasterio `
+            --collect-all overturemaps `
             build_gui.py
 
       - name: Verify EXE was created
