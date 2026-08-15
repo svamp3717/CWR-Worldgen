@@ -65,6 +65,15 @@ def install_osm_area_picker_coordinate_controls() -> None:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
 
+            toolbar = self.double_button.master
+            self.half_button = picker.ttk.Button(
+                toolbar,
+                text="Half size",
+                command=self._half_selection,
+                state="disabled",
+            )
+            self.half_button.pack(side="right", padx=4, before=self.double_button)
+
             self.coord_center_lat_var = picker.tk.StringVar(self)
             self.coord_center_lon_var = picker.tk.StringVar(self)
             self.coord_south_var = picker.tk.StringVar(self)
@@ -160,6 +169,27 @@ def install_osm_area_picker_coordinate_controls() -> None:
                 max(1, self.canvas.winfo_height()),
             )
 
+        def _half_selection(self) -> None:
+            plan = self.selection_plan
+            if plan is None or plan.cells <= 16:
+                return
+            south, west, north, east = plan.bbox
+            centre_lat = (south + north) / 2.0
+            centre_lon = (west + east) / 2.0
+            try:
+                self.selection_plan = picker.plan_center_selection(
+                    centre_lat,
+                    centre_lon,
+                    cells=max(16, plan.cells // 2),
+                    cell_size_metres=plan.cell_size_metres,
+                )
+            except ValueError as exc:
+                picker.messagebox.showerror("Cannot resize map area", str(exc), parent=self)
+                return
+            self._fit_to_selection()
+            self._update_selection_text()
+            self._redraw()
+
         def _apply_typed_center(self) -> None:
             try:
                 latitude, longitude = parse_center_coordinates(
@@ -205,6 +235,12 @@ def install_osm_area_picker_coordinate_controls() -> None:
 
         def _update_selection_text(self) -> None:
             super()._update_selection_text()
+            half_button = getattr(self, "half_button", None)
+            if half_button is not None:
+                plan = self.selection_plan
+                half_button.configure(
+                    state="normal" if plan is not None and plan.cells > 16 else "disabled"
+                )
             self._sync_coordinate_fields()
 
         def _pan_drag(self, event: Any) -> None:
@@ -218,3 +254,72 @@ def install_osm_area_picker_coordinate_controls() -> None:
                 self._sync_coordinate_fields()
 
     picker.OsmAreaPicker = CoordinateOsmAreaPicker
+    _install_gui_mod_folder_memory()
+
+
+def _install_gui_mod_folder_memory() -> None:
+    """Remember the last deploy folder while keeping deployment opt-in."""
+    from . import gui
+
+    original_class = gui.WorldgenGui
+    if bool(getattr(original_class, "_cwr_mod_folder_memory", False)):
+        return
+
+    class RememberedModFolderGui(original_class):
+        _cwr_mod_folder_memory = True
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            try:
+                state = gui.load_gui_state(gui.gui_state_path())
+                remembered = str(state.get("last_deploy_mod_dir", "")).strip()
+            except OSError:
+                remembered = ""
+            self._cwr_remembered_mod_folder = remembered
+            super().__init__(*args, **kwargs)
+            # gui_entry deliberately starts deployment disabled. Restore only
+            # the remembered path after that startup reset has finished.
+            self.after_idle(self._restore_remembered_mod_folder)
+
+        def _restore_remembered_mod_folder(self) -> None:
+            remembered = str(getattr(self, "_cwr_remembered_mod_folder", "")).strip()
+            if not remembered or "deploy_mod_dir" not in self.vars:
+                return
+            self.vars["deploy_mod_dir"].set(remembered)
+            self.vars["deploy_to_mod_folder"].set(False)
+            try:
+                gui.update_gui_state(
+                    self.state_path,
+                    {
+                        "last_deploy_mod_dir": remembered,
+                        "deploy_to_mod_folder": False,
+                    },
+                )
+            except OSError:
+                pass
+            update_controls = getattr(self, "_update_deploy_controls", None)
+            if callable(update_controls):
+                update_controls()
+
+        def _browse(self, key: str, kind: str) -> None:
+            previous = str(self.vars[key].get()).strip() if key in self.vars else ""
+            super()._browse(key, kind)
+            if key != "deploy_mod_dir" or key not in self.vars:
+                return
+            selected = str(self.vars[key].get()).strip()
+            if not selected or selected == previous:
+                return
+            self._cwr_remembered_mod_folder = selected
+            try:
+                gui.update_gui_state(
+                    self.state_path,
+                    {
+                        "last_deploy_mod_dir": selected,
+                        "deploy_to_mod_folder": bool(
+                            self.vars["deploy_to_mod_folder"].get()
+                        ),
+                    },
+                )
+            except OSError:
+                pass
+
+    gui.WorldgenGui = RememberedModFolderGui
