@@ -1,0 +1,293 @@
+name: Build and Publish Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-release:
+    name: Prepare release metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+
+    steps:
+      - name: Require main branch
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "Releases must be run from the main branch. Current ref: ${GITHUB_REF}" >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Read project version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(python - <<'PY'
+          from cwr_worldgen._version import __version__
+          print(__version__)
+          PY
+          )"
+          if [[ -z "$VERSION" ]]; then
+            echo "Could not determine project version" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Preparing CWR Worldgen $VERSION"
+
+      - name: Refuse to overwrite an existing tag or release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists. Bump src/cwr_worldgen/_version.py before publishing another release." >&2
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists. Bump src/cwr_worldgen/_version.py before publishing another release." >&2
+            exit 1
+          fi
+
+  build-windows:
+    name: Build Windows executable
+    needs: prepare-release
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install project and build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[sources]" pyinstaller
+
+      - name: Create GUI entry point
+        shell: pwsh
+        run: |
+          @'
+          from cwr_worldgen.gui_entry import main
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+          '@ | Set-Content -Encoding utf8 build_gui.py
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --onefile `
+            --windowed `
+            --name "CWR-Worldgen" `
+            --collect-all cwr_worldgen `
+            --collect-all dem_stitcher `
+            --collect-all rasterio `
+            --collect-all pyarrow `
+            --collect-all duckdb `
+            build_gui.py
+
+      - name: Verify Windows executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/CWR-Worldgen.exe")) {
+            throw "dist/CWR-Worldgen.exe was not created"
+          }
+          Get-Item "dist/CWR-Worldgen.exe" | Format-List Name,Length,LastWriteTime
+
+      - name: Upload Windows release asset
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: dist/CWR-Worldgen.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  build-linux:
+    name: Build Linux executable
+    needs: prepare-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install GUI runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tk
+
+      - name: Install project and build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[sources]" pyinstaller
+
+      - name: Create GUI entry point
+        run: |
+          cat > build_gui.py <<'PY'
+          from cwr_worldgen.gui_entry import main
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+          PY
+
+      - name: Build Linux executable
+        run: |
+          python -m PyInstaller \
+            --noconfirm \
+            --clean \
+            --onefile \
+            --name "CWR-Worldgen" \
+            --collect-all cwr_worldgen \
+            --collect-all dem_stitcher \
+            --collect-all rasterio \
+            --collect-all pyarrow \
+            --collect-all duckdb \
+            build_gui.py
+
+      - name: Package Linux executable
+        run: |
+          test -f "dist/CWR-Worldgen"
+          chmod +x "dist/CWR-Worldgen"
+          tar -czf "CWR-Worldgen-Linux-x64.tar.gz" -C dist "CWR-Worldgen"
+          ls -lh "CWR-Worldgen-Linux-x64.tar.gz"
+
+      - name: Upload Linux release asset
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-linux
+          path: CWR-Worldgen-Linux-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  build-macos:
+    name: Build macOS Intel application
+    needs: prepare-release
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install project and build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[sources]" pyinstaller
+
+      - name: Create GUI entry point
+        run: |
+          cat > build_gui.py <<'PY'
+          from cwr_worldgen.gui_entry import main
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+          PY
+
+      - name: Build macOS app
+        run: |
+          python -m PyInstaller \
+            --noconfirm \
+            --clean \
+            --onedir \
+            --windowed \
+            --name "CWR-Worldgen" \
+            --collect-all cwr_worldgen \
+            --collect-all dem_stitcher \
+            --collect-all rasterio \
+            --collect-all pyarrow \
+            --collect-all duckdb \
+            build_gui.py
+
+      - name: Package macOS application
+        run: |
+          test -d "dist/CWR-Worldgen.app"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "dist/CWR-Worldgen.app" \
+            "CWR-Worldgen-macOS-Intel.zip"
+          ls -lh "CWR-Worldgen-macOS-Intel.zip"
+
+      - name: Upload macOS release asset
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-macos
+          path: CWR-Worldgen-macOS-Intel.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-release:
+    name: Publish GitHub Release
+    needs:
+      - prepare-release
+      - build-windows
+      - build-linux
+      - build-macos
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "release-assets/CWR-Worldgen.exe"
+          test -f "release-assets/CWR-Worldgen-Linux-x64.tar.gz"
+          test -f "release-assets/CWR-Worldgen-macOS-Intel.zip"
+          ls -lh release-assets
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        shell: bash
+        run: |
+          gh release create "$TAG" \
+            "release-assets/CWR-Worldgen.exe" \
+            "release-assets/CWR-Worldgen-Linux-x64.tar.gz" \
+            "release-assets/CWR-Worldgen-macOS-Intel.zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "CWR Worldgen $VERSION" \
+            --generate-notes \
+            --latest
