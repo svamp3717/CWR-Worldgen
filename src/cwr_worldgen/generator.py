@@ -78,6 +78,8 @@ from .osm import (
     OsmDataset,
     OsmRaster,
     OSM_INDIVIDUAL_TREE_MODELS,
+    NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS,
+    NOGOVA_PINE_INDIVIDUAL_TREE_MODELS,
     STOCK_STONE_MODELS,
     apply_water_elevations,
     attribution_text,
@@ -157,6 +159,14 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+def _forest_proxy_profile(spec: object) -> str:
+    model = str(getattr(spec, "forest_tree_model", "")).casefold()
+    if model.startswith(r"o\tree\les_nw_jehl_"):
+        return "nogova_pine"
+    if model.startswith(r"o\tree\les_nw_"):
+        return "nogova_leaf"
+    return "everon"
 
 
 def _generate_milestone1_elevations(spec: WorldSpec) -> list[float]:
@@ -1553,7 +1563,15 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
     if milestone_number >= 9 and bool(getattr(spec, "forest_hillside_fallback", False)):
         trusted.add(canonical_asset_path(str(getattr(spec, "forest_hillside_tree_model", ""))))
     if milestone_number >= 9:
-        trusted.update(canonical_asset_path(path) for path in OSM_INDIVIDUAL_TREE_MODELS)
+        proxy_profile = _forest_proxy_profile(spec)
+        mapped_tree_models = (
+            NOGOVA_PINE_INDIVIDUAL_TREE_MODELS
+            if proxy_profile == "nogova_pine"
+            else NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS
+            if proxy_profile == "nogova_leaf"
+            else OSM_INDIVIDUAL_TREE_MODELS
+        )
+        trusted.update(canonical_asset_path(path) for path in mapped_tree_models)
         trusted.update(canonical_asset_path(path) for path in STOCK_STONE_MODELS)
     if (milestone_number >= 9
             and bool(getattr(spec, "semantic_landmarks", False))
@@ -3110,11 +3128,7 @@ def build_milestone4(
     if generated_cluster_paths:
         forest_cluster_library = ProceduralForestClusterLibrary(
             spec.name,
-            proxy_profile=(
-                "nogova"
-                if str(getattr(spec, "forest_tree_model", "")).casefold().startswith(r"o\tree\les_nw_")
-                else "everon"
-            ),
+            proxy_profile=_forest_proxy_profile(spec),
             cache_dir=getattr(spec, "cache_dir", None),
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
@@ -3558,11 +3572,7 @@ def build_milestone4(
         if repeat_cluster_paths:
             repeat_forest_cluster_library = ProceduralForestClusterLibrary(
                 spec.name,
-                proxy_profile=(
-                    "nogova"
-                    if str(getattr(spec, "forest_tree_model", "")).casefold().startswith(r"o\tree\les_nw_")
-                    else "everon"
-                ),
+                proxy_profile=_forest_proxy_profile(spec),
                 cache_dir=getattr(spec, "cache_dir", None),
                 cache_enabled=bool(getattr(spec, "cache_enabled", True)),
                 cache_refresh=bool(getattr(spec, "cache_refresh", False)),

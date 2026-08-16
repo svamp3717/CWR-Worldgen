@@ -12,9 +12,13 @@ from cwr_worldgen.gui import (
     APPEARANCE_PRESETS,
     RECOMMENDED_APPEARANCE_PRESET,
     RESISTANCE_APPEARANCE_PRESET,
+    PINE_NOGOVA_APPEARANCE_PRESET,
     NOGOVA_FOREST_BLOCK_MODEL,
     NOGOVA_FOREST_STEEP_MODEL,
-    NOGOVA_SINGLE_TREE_MODEL,
+    NOGOVA_PINE_FOREST_BLOCK_MODEL,
+    NOGOVA_PINE_FOREST_STEEP_MODEL,
+    NOGOVA_LEAF_SINGLE_TREE_MODEL,
+    NOGOVA_PINE_SINGLE_TREE_MODEL,
     WorldgenGui,
     application_base_dir,
     build_fetch_command,
@@ -182,7 +186,8 @@ class GuiCommandTests(unittest.TestCase):
             APPEARANCE_PRESETS,
             (
                 "Nogova textures + Everon trees (recommended)",
-                "Nogova Resistance forests",
+                "Nogova Resistance leaf forests",
+                "Nogova Resistance pine forests",
                 "Malden classic",
                 "Everon classic",
                 "Desert ground textures",
@@ -191,23 +196,49 @@ class GuiCommandTests(unittest.TestCase):
             ),
         )
 
+    def test_obsolete_terrainfit_test_preset_is_removed(self) -> None:
+        self.assertFalse(any("terrain-fit" in preset.casefold() for preset in APPEARANCE_PRESETS))
+        self.assertFalse(any("10m" in preset.casefold() for preset in APPEARANCE_PRESETS))
+
     def test_recommended_preset_keeps_everon_forest_models(self) -> None:
         values = default_gui_values()
         command = build_milestone9_command(values, python="python")
         self.assertNotIn("--forest-block-model", command)
         self.assertNotIn("--forest-steep-model", command)
 
+    def test_pine_nogova_preset_uses_conifer_polygon_models(self) -> None:
+        values = default_gui_values()
+        values["appearance_preset"] = PINE_NOGOVA_APPEARANCE_PRESET
+        values["forest_polygon_sink_fraction"] = "0.25"
+        values["advanced_args"] = "--forest-block-model custom-block.p3d"
+        command = build_milestone9_command(values, python="python")
+        self.assertEqual(command[-4:], [
+            "--forest-block-model", NOGOVA_PINE_FOREST_BLOCK_MODEL,
+            "--forest-steep-model", NOGOVA_PINE_FOREST_STEEP_MODEL,
+        ])
+        self.assertEqual(command.count("--forest-single-tree-model"), 1)
+        self.assertEqual(command.count("--forest-polygon-sink-fraction"), 1)
+        self.assertEqual(
+            command[command.index("--forest-polygon-sink-fraction") + 1], "0.25"
+        )
+        self.assertEqual(NOGOVA_PINE_FOREST_BLOCK_MODEL, r"o\tree\les_nw_jehl_ctver_pruhozi.p3d")
+        self.assertEqual(NOGOVA_PINE_FOREST_STEEP_MODEL, r"o\tree\les_nw_jehl_trojuhelnik.p3d")
+
     def test_resistance_preset_overrides_forest_geometry_after_advanced_args(self) -> None:
         values = default_gui_values()
         values["appearance_preset"] = RESISTANCE_APPEARANCE_PRESET
-        values["advanced_args"] = "--forest-block-model custom-block.p3d --forest-polygon-sink-fraction 0.75"
+        values["forest_polygon_sink_fraction"] = "0.75"
+        values["advanced_args"] = "--forest-block-model custom-block.p3d"
         command = build_milestone9_command(values, python="python")
-        self.assertEqual(command[-8:], [
+        self.assertEqual(command[-4:], [
             "--forest-block-model", NOGOVA_FOREST_BLOCK_MODEL,
             "--forest-steep-model", NOGOVA_FOREST_STEEP_MODEL,
-            "--forest-single-tree-model", NOGOVA_SINGLE_TREE_MODEL,
-            "--forest-polygon-sink-fraction", "0",
         ])
+        self.assertEqual(command.count("--forest-single-tree-model"), 1)
+        self.assertEqual(command.count("--forest-polygon-sink-fraction"), 1)
+        self.assertEqual(
+            command[command.index("--forest-polygon-sink-fraction") + 1], "0.75"
+        )
         self.assertNotIn("--forest-block-max-burial", command)
         self.assertNotIn("--forest-steep-max-burial", command)
 
@@ -675,6 +706,59 @@ class GuiCommandTests(unittest.TestCase):
     def test_command_preview_quotes_spaces(self) -> None:
         rendered = quote_command(["python", "-m", "cwr_worldgen", "--value", "a b"])
         self.assertIn("a b", rendered)
+
+
+class AdvancedSettingHighlightTests(unittest.TestCase):
+    class _Var:
+        def __init__(self, value: object) -> None:
+            self.value = value
+
+        def get(self) -> object:
+            return self.value
+
+    class _Widget:
+        def __init__(self) -> None:
+            self.style = ""
+
+        def configure(self, *, style: str) -> None:
+            self.style = style
+
+    def test_numeric_formatting_equal_to_default_stays_unbolded(self) -> None:
+        self.assertTrue(WorldgenGui._advanced_value_matches_default("0.50", "0.5"))
+        self.assertTrue(WorldgenGui._advanced_value_matches_default("8.0", "8"))
+        self.assertFalse(WorldgenGui._advanced_value_matches_default("0.25", "0.5"))
+
+    def test_advanced_setting_style_bolds_changed_values_and_restores_default(self) -> None:
+        label = self._Widget()
+        checkbox = self._Widget()
+        fake_gui = type("FakeGui", (), {})()
+        fake_gui.vars = {
+            "forest_polygon_sink_fraction": self._Var("0.25"),
+            "cache_refresh": self._Var(False),
+        }
+        fake_gui._advanced_default_values = {
+            "forest_polygon_sink_fraction": "0.5",
+            "cache_refresh": False,
+        }
+        fake_gui.advanced_setting_widgets = {
+            "forest_polygon_sink_fraction": [
+                (label, "TLabel", "AdvancedChanged.TLabel")
+            ],
+            "cache_refresh": [
+                (checkbox, "TCheckbutton", "AdvancedChanged.TCheckbutton")
+            ],
+        }
+        fake_gui._advanced_value_matches_default = WorldgenGui._advanced_value_matches_default
+
+        WorldgenGui._update_advanced_setting_styles(fake_gui)
+        self.assertEqual(label.style, "AdvancedChanged.TLabel")
+        self.assertEqual(checkbox.style, "TCheckbutton")
+
+        fake_gui.vars["forest_polygon_sink_fraction"].value = "0.500"
+        fake_gui.vars["cache_refresh"].value = True
+        WorldgenGui._update_advanced_setting_styles(fake_gui)
+        self.assertEqual(label.style, "TLabel")
+        self.assertEqual(checkbox.style, "AdvancedChanged.TCheckbutton")
 
 
 if __name__ == "__main__":

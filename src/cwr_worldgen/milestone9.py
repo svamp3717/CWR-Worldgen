@@ -41,18 +41,31 @@ DEFAULT_STEEP_HILL_BUSH_MODELS: tuple[str, ...] = (
     r"data3d\ker buxus.p3d",
 )
 
-# Resistance/Nogova vegetation from O.pbo. Keep this asset family separate from
-# the Everon geometry profile: Nogova still uses the square/triangle placement
-# ladder, but road cuts, steep infill, sparse singles and bushes should visually
-# belong to the same island rather than reverting to CWC Data3D vegetation.
-NOGOVA_SINGLE_TREE_MODEL = r"o\tree\smrk_maly.p3d"
-NOGOVA_ROADSIDE_TREE_MODEL = r"o\tree\smrk_velky.p3d"
-NOGOVA_ROADSIDE_TREE_MODELS: tuple[str, ...] = (
+# Resistance/Nogova vegetation from O.pbo. Keep the leaf and pine families
+# explicit so neither named preset silently falls back to Data3D trees.
+NOGOVA_LEAF_SINGLE_TREE_MODEL = r"o\tree\Javor01.p3d"
+NOGOVA_LEAF_ROADSIDE_TREE_MODEL = r"o\tree\Javor02.p3d"
+NOGOVA_LEAF_ROADSIDE_TREE_MODELS: tuple[str, ...] = (
+    r"o\tree\Javor01.p3d",
+    r"o\tree\Javor02.p3d",
+    r"o\tree\Akat01.p3d",
+    r"o\tree\Akat02.p3d",
+    r"o\tree\Akat03.p3d",
+    r"o\tree\DubFX.p3d",
+)
+NOGOVA_PINE_SINGLE_TREE_MODEL = r"o\tree\smrk_maly.p3d"
+NOGOVA_PINE_ROADSIDE_TREE_MODEL = r"o\tree\smrk_velky.p3d"
+NOGOVA_PINE_ROADSIDE_TREE_MODELS: tuple[str, ...] = (
     r"o\tree\smrk_velky.p3d",
     r"o\tree\smrk_siroky.p3d",
     r"o\tree\dd_borovice.p3d",
     r"o\tree\dd_borovice02.p3d",
 )
+# Compatibility aliases retained for callers/tests that used the old generic
+# Nogova names before leaf/pine were split.
+NOGOVA_SINGLE_TREE_MODEL = NOGOVA_PINE_SINGLE_TREE_MODEL
+NOGOVA_ROADSIDE_TREE_MODEL = NOGOVA_PINE_ROADSIDE_TREE_MODEL
+NOGOVA_ROADSIDE_TREE_MODELS = NOGOVA_PINE_ROADSIDE_TREE_MODELS
 NOGOVA_BUSH_MODELS: tuple[str, ...] = (
     r"o\tree\dd_bush01.p3d",
     r"o\tree\dd_bush01b.p3d",
@@ -61,6 +74,8 @@ NOGOVA_BUSH_MODELS: tuple[str, ...] = (
     r"o\tree\dd_bush02big.p3d",
     r"o\tree\dd_bush03.p3d",
 )
+NOGOVA_LEAF_HILLSIDE_TREE_MODEL = NOGOVA_LEAF_SINGLE_TREE_MODEL
+NOGOVA_PINE_HILLSIDE_TREE_MODEL = NOGOVA_PINE_SINGLE_TREE_MODEL
 
 # Malden/Abel preset vegetation. These are original CWC Data3D families rather
 # than the Resistance O\Tree set, keeping the preset visually closer to the
@@ -88,35 +103,22 @@ def _resolved_forest_profile_models(spec: "Milestone9Spec") -> dict[str, object]
     """Resolve profile defaults without clobbering explicit custom model paths."""
 
     forest_tree_model = str(spec.forest_tree_model)
-    nogova_resistance = forest_tree_model.casefold().startswith(r"o\tree\les_nw_")
-    if nogova_resistance:
+    folded = forest_tree_model.casefold()
+    nogova_pine = folded.startswith(r"o\tree\les_nw_jehl_")
+    nogova_leaf = folded.startswith(r"o\tree\les_nw_") and not nogova_pine
+    if nogova_leaf or nogova_pine:
+        single = NOGOVA_PINE_SINGLE_TREE_MODEL if nogova_pine else NOGOVA_LEAF_SINGLE_TREE_MODEL
+        roadside = NOGOVA_PINE_ROADSIDE_TREE_MODEL if nogova_pine else NOGOVA_LEAF_ROADSIDE_TREE_MODEL
+        roadside_models = NOGOVA_PINE_ROADSIDE_TREE_MODELS if nogova_pine else NOGOVA_LEAF_ROADSIDE_TREE_MODELS
+        hillside = NOGOVA_PINE_HILLSIDE_TREE_MODEL if nogova_pine else NOGOVA_LEAF_HILLSIDE_TREE_MODEL
         return {
             "forest_tree_model": forest_tree_model,
-            "forest_single_tree_model": (
-                NOGOVA_SINGLE_TREE_MODEL
-                if spec.forest_single_tree_model == EVERON_SINGLE_TREE_MODEL
-                else spec.forest_single_tree_model
-            ),
-            "forest_roadside_tree_model": (
-                NOGOVA_ROADSIDE_TREE_MODEL
-                if spec.forest_roadside_tree_model == EVERON_ROADSIDE_TREE_MODEL
-                else spec.forest_roadside_tree_model
-            ),
-            "forest_roadside_tree_models": (
-                NOGOVA_ROADSIDE_TREE_MODELS
-                if spec.forest_roadside_tree_models == ROADSIDE_TREE_MODELS
-                else spec.forest_roadside_tree_models
-            ),
-            "forest_roadside_bush_models": (
-                NOGOVA_BUSH_MODELS
-                if spec.forest_roadside_bush_models == ROADSIDE_BUSH_MODELS
-                else spec.forest_roadside_bush_models
-            ),
-            "steep_hill_bush_models": (
-                NOGOVA_BUSH_MODELS
-                if spec.steep_hill_bush_models == DEFAULT_STEEP_HILL_BUSH_MODELS
-                else spec.steep_hill_bush_models
-            ),
+            "forest_single_tree_model": single if spec.forest_single_tree_model == EVERON_SINGLE_TREE_MODEL else spec.forest_single_tree_model,
+            "forest_roadside_tree_model": roadside if spec.forest_roadside_tree_model == EVERON_ROADSIDE_TREE_MODEL else spec.forest_roadside_tree_model,
+            "forest_roadside_tree_models": roadside_models if spec.forest_roadside_tree_models == ROADSIDE_TREE_MODELS else spec.forest_roadside_tree_models,
+            "forest_roadside_bush_models": NOGOVA_BUSH_MODELS if spec.forest_roadside_bush_models == ROADSIDE_BUSH_MODELS else spec.forest_roadside_bush_models,
+            "steep_hill_bush_models": NOGOVA_BUSH_MODELS if spec.steep_hill_bush_models == DEFAULT_STEEP_HILL_BUSH_MODELS else spec.steep_hill_bush_models,
+            "forest_hillside_tree_model": hillside if spec.forest_hillside_tree_model == r"data3d\str_fikovnik.p3d" else spec.forest_hillside_tree_model,
         }
 
     if str(spec.forest_profile).casefold() != "malden":
@@ -127,38 +129,16 @@ def _resolved_forest_profile_models(spec: "Milestone9Spec") -> dict[str, object]
             "forest_roadside_tree_models": spec.forest_roadside_tree_models,
             "forest_roadside_bush_models": spec.forest_roadside_bush_models,
             "steep_hill_bush_models": spec.steep_hill_bush_models,
+            "forest_hillside_tree_model": spec.forest_hillside_tree_model,
         }
     return {
-        "forest_tree_model": (
-            MALDEN_FOREST_BLOCK_MODEL
-            if spec.forest_tree_model == EVERON_FOREST_BLOCK_MODEL
-            else spec.forest_tree_model
-        ),
-        "forest_single_tree_model": (
-            MALDEN_SINGLE_TREE_MODEL
-            if spec.forest_single_tree_model == EVERON_SINGLE_TREE_MODEL
-            else spec.forest_single_tree_model
-        ),
-        "forest_roadside_tree_model": (
-            MALDEN_ROADSIDE_TREE_MODEL
-            if spec.forest_roadside_tree_model == EVERON_ROADSIDE_TREE_MODEL
-            else spec.forest_roadside_tree_model
-        ),
-        "forest_roadside_tree_models": (
-            MALDEN_ROADSIDE_TREE_MODELS
-            if spec.forest_roadside_tree_models == ROADSIDE_TREE_MODELS
-            else spec.forest_roadside_tree_models
-        ),
-        "forest_roadside_bush_models": (
-            MALDEN_BUSH_MODELS
-            if spec.forest_roadside_bush_models == ROADSIDE_BUSH_MODELS
-            else spec.forest_roadside_bush_models
-        ),
-        "steep_hill_bush_models": (
-            MALDEN_BUSH_MODELS
-            if spec.steep_hill_bush_models == DEFAULT_STEEP_HILL_BUSH_MODELS
-            else spec.steep_hill_bush_models
-        ),
+        "forest_tree_model": MALDEN_FOREST_BLOCK_MODEL if spec.forest_tree_model == EVERON_FOREST_BLOCK_MODEL else spec.forest_tree_model,
+        "forest_single_tree_model": MALDEN_SINGLE_TREE_MODEL if spec.forest_single_tree_model == EVERON_SINGLE_TREE_MODEL else spec.forest_single_tree_model,
+        "forest_roadside_tree_model": MALDEN_ROADSIDE_TREE_MODEL if spec.forest_roadside_tree_model == EVERON_ROADSIDE_TREE_MODEL else spec.forest_roadside_tree_model,
+        "forest_roadside_tree_models": MALDEN_ROADSIDE_TREE_MODELS if spec.forest_roadside_tree_models == ROADSIDE_TREE_MODELS else spec.forest_roadside_tree_models,
+        "forest_roadside_bush_models": MALDEN_BUSH_MODELS if spec.forest_roadside_bush_models == ROADSIDE_BUSH_MODELS else spec.forest_roadside_bush_models,
+        "steep_hill_bush_models": MALDEN_BUSH_MODELS if spec.steep_hill_bush_models == DEFAULT_STEEP_HILL_BUSH_MODELS else spec.steep_hill_bush_models,
+        "forest_hillside_tree_model": spec.forest_hillside_tree_model,
     }
 
 
@@ -1040,7 +1020,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         ditch_grass_maximum_float=spec.ditch_grass_maximum_float,
         ditch_grass_ground_clearance=spec.ditch_grass_ground_clearance,
         forest_hillside_fallback=spec.forest_hillside_fallback,
-        forest_hillside_tree_model=spec.forest_hillside_tree_model,
+        forest_hillside_tree_model=str(forest_models["forest_hillside_tree_model"]),
         forest_hillside_trees_per_block=spec.forest_hillside_trees_per_block,
         forest_hillside_tree_footprint=spec.forest_hillside_tree_footprint,
         forest_hillside_tree_maximum_relief=spec.forest_hillside_tree_maximum_relief,

@@ -102,17 +102,32 @@ DEFAULT_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = DEFAULT_BORDER_PROXY_MODELS
 # Nogova O.pbo family.  Cluster geometry and placement remain identical; only
 # the external stock proxies change, so steep/fallback stands do not quietly
 # reintroduce Everon/Data3D trees and bushes.
-NOGOVA_PROXY_MODELS: tuple[str, ...] = (
+NOGOVA_LEAF_PROXY_MODELS: tuple[str, ...] = (
     r"o\tree\les_nw_ctver_pruhozi_T1.p3d",
     r"o\tree\les_nw_trojuhelnik.p3d",
 )
-NOGOVA_BORDER_PROXY_MODELS: tuple[str, ...] = (
+NOGOVA_PINE_PROXY_MODELS: tuple[str, ...] = (
+    r"o\tree\les_nw_jehl_ctver_pruhozi.p3d",
+    r"o\tree\les_nw_jehl_trojuhelnik.p3d",
+)
+NOGOVA_LEAF_BORDER_PROXY_MODELS: tuple[str, ...] = (
+    r"o\tree\dd_bush01.p3d",
+    r"o\tree\dd_bush02.p3d",
+    r"o\tree\dd_bush03.p3d",
+    r"o\tree\Javor01.p3d",
+)
+NOGOVA_PINE_BORDER_PROXY_MODELS: tuple[str, ...] = (
     r"o\tree\dd_bush01.p3d",
     r"o\tree\dd_bush02.p3d",
     r"o\tree\dd_bush03.p3d",
     r"o\tree\smrk_maly.p3d",
 )
-NOGOVA_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = NOGOVA_BORDER_PROXY_MODELS
+NOGOVA_LEAF_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = NOGOVA_LEAF_BORDER_PROXY_MODELS
+NOGOVA_PINE_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = NOGOVA_PINE_BORDER_PROXY_MODELS
+# Compatibility aliases: generic Nogova means the ordinary/leaf family.
+NOGOVA_PROXY_MODELS = NOGOVA_LEAF_PROXY_MODELS
+NOGOVA_BORDER_PROXY_MODELS = NOGOVA_LEAF_BORDER_PROXY_MODELS
+NOGOVA_UNDERGROWTH_PROXY_MODELS = NOGOVA_LEAF_UNDERGROWTH_PROXY_MODELS
 
 # Tall grass and reeds used for deterministic ditch-edge strips. These are
 # stock Data3D/Resistance assets and remain external to the generated PBO.
@@ -389,13 +404,18 @@ def _profiled_cluster_variant(variant: ForestClusterVariant, proxy_profile: str)
     profile = str(proxy_profile or "everon").strip().casefold()
     if profile == "everon":
         return variant
-    if profile != "nogova":
+    if profile == "nogova":
+        profile = "nogova_leaf"
+    if profile not in {"nogova_leaf", "nogova_pine"}:
         raise ValueError(f"unsupported forest proxy profile: {proxy_profile!r}")
 
+    proxy_models = NOGOVA_PINE_PROXY_MODELS if profile == "nogova_pine" else NOGOVA_LEAF_PROXY_MODELS
+    border_models = NOGOVA_PINE_BORDER_PROXY_MODELS if profile == "nogova_pine" else NOGOVA_LEAF_BORDER_PROXY_MODELS
+    undergrowth_models = NOGOVA_PINE_UNDERGROWTH_PROXY_MODELS if profile == "nogova_pine" else NOGOVA_LEAF_UNDERGROWTH_PROXY_MODELS
     replacements = {
-        **dict(zip(DEFAULT_PROXY_MODELS, NOGOVA_PROXY_MODELS)),
-        **dict(zip(DEFAULT_BORDER_PROXY_MODELS, NOGOVA_BORDER_PROXY_MODELS)),
-        **dict(zip(DEFAULT_UNDERGROWTH_PROXY_MODELS, NOGOVA_UNDERGROWTH_PROXY_MODELS)),
+        **dict(zip(DEFAULT_PROXY_MODELS, proxy_models)),
+        **dict(zip(DEFAULT_BORDER_PROXY_MODELS, border_models)),
+        **dict(zip(DEFAULT_UNDERGROWTH_PROXY_MODELS, undergrowth_models)),
     }
     remapped = tuple(
         (replacements.get(model_path, model_path), x, z, scale, heading)
@@ -568,7 +588,9 @@ class ProceduralForestClusterLibrary:
         self.cache_enabled = cache_enabled
         self.cache_refresh = cache_refresh
         self.proxy_profile = str(proxy_profile or "everon").strip().casefold()
-        if self.proxy_profile not in {"everon", "nogova"}:
+        if self.proxy_profile == "nogova":
+            self.proxy_profile = "nogova_leaf"
+        if self.proxy_profile not in {"everon", "nogova_leaf", "nogova_pine"}:
             raise ValueError(f"unsupported forest proxy profile: {proxy_profile!r}")
         self.cache_hits = 0
         self.cache_misses = 0

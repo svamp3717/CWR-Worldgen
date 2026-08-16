@@ -35,11 +35,14 @@ TRAILING_NUMBER = re.compile(r"^(.*?)(\d+)$")
 FROZEN_CLI_MARKER = "--cwr-cli"
 
 RECOMMENDED_APPEARANCE_PRESET = "Nogova textures + Everon trees (recommended)"
-RESISTANCE_APPEARANCE_PRESET = "Nogova Resistance forests"
+RESISTANCE_APPEARANCE_PRESET = "Nogova Resistance leaf forests"
+LEGACY_RESISTANCE_APPEARANCE_PRESET = "Nogova Resistance forests"
+PINE_NOGOVA_APPEARANCE_PRESET = "Nogova Resistance pine forests"
 LEGACY_NOGOVA_APPEARANCE_PRESET = "Nogova (recommended)"
 APPEARANCE_PRESETS = (
     RECOMMENDED_APPEARANCE_PRESET,
     RESISTANCE_APPEARANCE_PRESET,
+    PINE_NOGOVA_APPEARANCE_PRESET,
     "Malden classic",
     "Everon classic",
     "Desert ground textures",
@@ -48,7 +51,11 @@ APPEARANCE_PRESETS = (
 )
 NOGOVA_FOREST_BLOCK_MODEL = r"o\tree\les_nw_ctver_pruhozi_T1.p3d"
 NOGOVA_FOREST_STEEP_MODEL = r"o\tree\les_nw_trojuhelnik.p3d"
-NOGOVA_SINGLE_TREE_MODEL = r"o\tree\smrk_maly.p3d"
+NOGOVA_PINE_FOREST_BLOCK_MODEL = r"o\tree\les_nw_jehl_ctver_pruhozi.p3d"
+NOGOVA_PINE_FOREST_STEEP_MODEL = r"o\tree\les_nw_jehl_trojuhelnik.p3d"
+NOGOVA_LEAF_SINGLE_TREE_MODEL = r"o\tree\Javor01.p3d"
+NOGOVA_PINE_SINGLE_TREE_MODEL = r"o\tree\smrk_maly.p3d"
+NOGOVA_SINGLE_TREE_MODEL = NOGOVA_PINE_SINGLE_TREE_MODEL  # compatibility alias
 EVERON_SINGLE_TREE_MODEL = r"data3d\str smrk_medium.p3d"
 
 
@@ -531,14 +538,21 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         command.extend(shlex.split(advanced, posix=os.name != "nt"))
 
     preset = str(values.get("appearance_preset", "")).strip()
-    if preset in {RESISTANCE_APPEARANCE_PRESET, LEGACY_NOGOVA_APPEARANCE_PRESET}:
-        # Append these after Advanced arguments so the named preset remains the
-        # final authority for its defining Resistance/Nogova vegetation.
+    if preset == PINE_NOGOVA_APPEARANCE_PRESET:
+        # Clone of the Resistance/Nogova preset using its separate conifer
+        # (jehl = needle-tree) polygon forest pieces. The GUI fields already
+        # carry the preset's single-tree and sink settings, so append only the
+        # polygon models here to avoid duplicate command-line options.
+        command.extend((
+            "--forest-block-model", NOGOVA_PINE_FOREST_BLOCK_MODEL,
+            "--forest-steep-model", NOGOVA_PINE_FOREST_STEEP_MODEL,
+        ))
+    elif preset in {RESISTANCE_APPEARANCE_PRESET, LEGACY_RESISTANCE_APPEARANCE_PRESET, LEGACY_NOGOVA_APPEARANCE_PRESET}:
+        # Append only the defining polygon models after Advanced arguments.
+        # Single-tree and sink values are emitted once from the normal GUI fields.
         command.extend((
             "--forest-block-model", NOGOVA_FOREST_BLOCK_MODEL,
             "--forest-steep-model", NOGOVA_FOREST_STEEP_MODEL,
-            "--forest-single-tree-model", NOGOVA_SINGLE_TREE_MODEL,
-            "--forest-polygon-sink-fraction", "0",
         ))
     return command
 
@@ -910,6 +924,8 @@ class WorldgenGui(tk.Tk):
         self.vars: dict[str, tk.Variable] = {}
         self.entry_widgets: dict[str, ttk.Entry] = {}
         self.browse_buttons: dict[str, ttk.Button] = {}
+        self.advanced_setting_widgets: dict[str, list[tuple[ttk.Widget, str, str]]] = {}
+        self._advanced_default_values = default_gui_values()
         self.asset_roots: list[str] = []
         self.profile_path: Path | None = None
         self.step_index = 0
@@ -947,6 +963,8 @@ class WorldgenGui(tk.Tk):
         style.configure("StepCurrent.TLabel", font=("Segoe UI", 10, "bold"), padding=(8, 8))
         style.configure("Hint.TLabel", font=("Segoe UI", 9))
         style.configure("Summary.TLabel", font=("Segoe UI", 11))
+        style.configure("AdvancedChanged.TLabel", font=("Segoe UI", 9, "bold"))
+        style.configure("AdvancedChanged.TCheckbutton", font=("Segoe UI", 9, "bold"))
 
     def _var(self, name: str, value: object = "", boolean: bool = False) -> tk.Variable:
         existing = self.vars.get(name)
@@ -973,7 +991,53 @@ class WorldgenGui(tk.Tk):
         self._update_review()
         self._update_command_preview()
         self._refresh_osm_mapping_tree()
+        self._update_advanced_setting_styles()
         self._update_navigation()
+
+    @staticmethod
+    def _advanced_value_matches_default(current: object, default: object) -> bool:
+        """Compare a GUI value with its default without bolding cosmetic number edits."""
+        if isinstance(default, bool):
+            return bool(current) is default
+        current_text = str(current).strip()
+        default_text = str(default).strip()
+        if current_text == default_text:
+            return True
+        try:
+            current_number = float(current_text)
+            default_number = float(default_text)
+        except ValueError:
+            return False
+        return (
+            math.isfinite(current_number)
+            and math.isfinite(default_number)
+            and math.isclose(current_number, default_number, rel_tol=0.0, abs_tol=1.0e-12)
+        )
+
+    def _register_advanced_setting(
+        self,
+        key: str,
+        widget: ttk.Widget,
+        *,
+        normal_style: str,
+        changed_style: str,
+    ) -> ttk.Widget:
+        self.advanced_setting_widgets.setdefault(key, []).append(
+            (widget, normal_style, changed_style)
+        )
+        return widget
+
+    def _update_advanced_setting_styles(self) -> None:
+        """Bold Advanced-setting text whenever its effective value is non-default."""
+        for key, widgets in self.advanced_setting_widgets.items():
+            variable = self.vars.get(key)
+            if variable is None or key not in self._advanced_default_values:
+                continue
+            matches_default = self._advanced_value_matches_default(
+                variable.get(), self._advanced_default_values[key]
+            )
+            for widget, normal_style, changed_style in widgets:
+                widget.configure(style=normal_style if matches_default else changed_style)
 
     def _build_ui(self) -> None:
         header = ttk.Frame(self, padding=(16, 12, 16, 8))
@@ -1053,8 +1117,17 @@ class WorldgenGui(tk.Tk):
         *,
         browse: str | None = None,
         width: int = 54,
+        advanced: bool = False,
     ) -> ttk.Entry:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=4)
+        label_widget = ttk.Label(parent, text=label)
+        label_widget.grid(row=row, column=0, sticky="w", padx=(0, 10), pady=4)
+        if advanced:
+            self._register_advanced_setting(
+                key,
+                label_widget,
+                normal_style="TLabel",
+                changed_style="AdvancedChanged.TLabel",
+            )
         entry = ttk.Entry(parent, textvariable=self._var(key), width=width)
         entry.grid(row=row, column=1, sticky="ew", pady=4)
         self.entry_widgets[key] = entry
@@ -1724,7 +1797,7 @@ class WorldgenGui(tk.Tk):
         ).grid(row=0, column=1, sticky="w")
         ttk.Label(
             preset,
-            text="The recommended preset mixes Nogova/Resistance ground textures with Everon forest and tree models. Nogova Resistance forests keeps the same ground palette but switches forest blocks to the Resistance O\\Tree models. Malden uses a drier CWC-style palette and original CWC vegetation.",
+            text="The recommended preset mixes Nogova/Resistance ground textures with stock Everon forest and tree models. Nogova Resistance leaf forests uses the ordinary Resistance broadleaf forest family and Resistance leaf trees. Nogova Resistance pine forests uses the separate jehl conifer polygons and Resistance pine/spruce trees.",
             style="Hint.TLabel",
             wraplength=700,
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
@@ -1762,9 +1835,17 @@ class WorldgenGui(tk.Tk):
         advanced.pack(fill="x", pady=(14, 0))
         custom = ttk.LabelFrame(advanced.body, text="Custom appearance", padding=10)
         custom.pack(fill="x", pady=(0, 10))
-        ttk.Label(custom, text="Ground textures").grid(row=0, column=0, sticky="w", padx=(0, 10), pady=3)
+        ground_label = ttk.Label(custom, text="Ground textures")
+        ground_label.grid(row=0, column=0, sticky="w", padx=(0, 10), pady=3)
+        self._register_advanced_setting(
+            "ground_textures", ground_label, normal_style="TLabel", changed_style="AdvancedChanged.TLabel"
+        )
         ttk.Combobox(custom, textvariable=self._var("ground_textures"), values=("nogova", "malden", "everon", "desert", "generated"), state="readonly", width=18).grid(row=0, column=1, sticky="w")
-        ttk.Label(custom, text="Forest profile").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=3)
+        forest_profile_label = ttk.Label(custom, text="Forest profile")
+        forest_profile_label.grid(row=1, column=0, sticky="w", padx=(0, 10), pady=3)
+        self._register_advanced_setting(
+            "forest_profile", forest_profile_label, normal_style="TLabel", changed_style="AdvancedChanged.TLabel"
+        )
         ttk.Combobox(custom, textvariable=self._var("forest_profile"), values=("everon", "malden"), state="readonly", width=18).grid(row=1, column=1, sticky="w")
 
         features = ttk.LabelFrame(advanced.body, text="Additional generated features", padding=10)
@@ -1777,7 +1858,11 @@ class WorldgenGui(tk.Tk):
             ("Ditch grass", "ditch_grass"),
         )
         for index, (label, key) in enumerate(feature_values):
-            ttk.Checkbutton(features, text=label, variable=self._var(key, True, boolean=True)).grid(row=index // 3, column=index % 3, sticky="w", padx=(0, 24))
+            check = ttk.Checkbutton(features, text=label, variable=self._var(key, True, boolean=True))
+            check.grid(row=index // 3, column=index % 3, sticky="w", padx=(0, 24))
+            self._register_advanced_setting(
+                key, check, normal_style="TCheckbutton", changed_style="AdvancedChanged.TCheckbutton"
+            )
 
         tuning = ttk.LabelFrame(advanced.body, text="Limits and solver", padding=10)
         tuning.pack(fill="x", pady=(0, 10))
@@ -1826,7 +1911,11 @@ class WorldgenGui(tk.Tk):
             row, column = divmod(index, 2)
             cell = ttk.Frame(tuning)
             cell.grid(row=row, column=column, sticky="ew", padx=(0, 18), pady=3)
-            ttk.Label(cell, text=label, width=27).pack(side="left")
+            field_label = ttk.Label(cell, text=label, width=27)
+            field_label.pack(side="left")
+            self._register_advanced_setting(
+                key, field_label, normal_style="TLabel", changed_style="AdvancedChanged.TLabel"
+            )
             ttk.Entry(cell, textvariable=self._var(key, default), width=12).pack(side="left")
             tuning.columnconfigure(column, weight=1)
 
@@ -1840,15 +1929,23 @@ class WorldgenGui(tk.Tk):
             ("Verify deterministic regeneration (slow)", "verify_regeneration"),
         )
         for index, (label, key) in enumerate(option_values):
-            ttk.Checkbutton(build_opts, text=label, variable=self._var(key, False, boolean=True)).grid(row=index // 2, column=index % 2, sticky="w", padx=(0, 28), pady=3)
+            check = ttk.Checkbutton(build_opts, text=label, variable=self._var(key, False, boolean=True))
+            check.grid(row=index // 2, column=index % 2, sticky="w", padx=(0, 28), pady=3)
+            self._register_advanced_setting(
+                key, check, normal_style="TCheckbutton", changed_style="AdvancedChanged.TCheckbutton"
+            )
 
         pbo = ttk.LabelFrame(advanced.body, text="PBO and CLI", padding=10)
         pbo.pack(fill="x")
-        self._entry_row(pbo, 0, "Custom cache folder", "cache_dir", browse="directory")
-        ttk.Label(pbo, text="PBO backend").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=4)
+        self._entry_row(pbo, 0, "Custom cache folder", "cache_dir", browse="directory", advanced=True)
+        pbo_backend_label = ttk.Label(pbo, text="PBO backend")
+        pbo_backend_label.grid(row=1, column=0, sticky="w", padx=(0, 10), pady=4)
+        self._register_advanced_setting(
+            "pbo_backend", pbo_backend_label, normal_style="TLabel", changed_style="AdvancedChanged.TLabel"
+        )
         ttk.Combobox(pbo, textvariable=self._var("pbo_backend", "auto"), values=("auto", "python", "poseidon"), state="readonly", width=18).grid(row=1, column=1, sticky="w")
-        self._entry_row(pbo, 2, "PoseidonTools executable", "poseidon_tools", browse="file")
-        self._entry_row(pbo, 3, "Additional CLI arguments", "advanced_args")
+        self._entry_row(pbo, 2, "PoseidonTools executable", "poseidon_tools", browse="file", advanced=True)
+        self._entry_row(pbo, 3, "Additional CLI arguments", "advanced_args", advanced=True)
 
     def _build_progress_page(self) -> None:
         page = ttk.Frame(self.page_host)
@@ -2013,10 +2110,12 @@ class WorldgenGui(tk.Tk):
             return
         preset = str(self.vars["appearance_preset"].get())
         desired: tuple[str, str, str] | None
-        if preset in {RECOMMENDED_APPEARANCE_PRESET}:
+        if preset == RECOMMENDED_APPEARANCE_PRESET:
             desired = ("nogova", "everon", EVERON_SINGLE_TREE_MODEL)
-        elif preset in {RESISTANCE_APPEARANCE_PRESET, LEGACY_NOGOVA_APPEARANCE_PRESET}:
-            desired = ("nogova", "everon", NOGOVA_SINGLE_TREE_MODEL)
+        elif preset == PINE_NOGOVA_APPEARANCE_PRESET:
+            desired = ("nogova", "everon", NOGOVA_PINE_SINGLE_TREE_MODEL)
+        elif preset in {RESISTANCE_APPEARANCE_PRESET, LEGACY_RESISTANCE_APPEARANCE_PRESET, LEGACY_NOGOVA_APPEARANCE_PRESET}:
+            desired = ("nogova", "everon", NOGOVA_LEAF_SINGLE_TREE_MODEL)
         elif preset == "Malden classic":
             desired = ("malden", "malden", r"data3d\str_fikovnik.p3d")
         elif preset in {"Everon classic", "Everon classic (recommended)"}:
@@ -2790,10 +2889,10 @@ class WorldgenGui(tk.Tk):
             for key, value in values.items():
                 if key in self.vars:
                     self.vars[key].set(value)
-            if str(values.get("appearance_preset", "")).strip() == LEGACY_NOGOVA_APPEARANCE_PRESET:
-                # v5 split the ambiguous old Nogova preset into a recommended
-                # mixed preset and an explicit Resistance-forest preset. Preserve
-                # the legacy preset's historical v5 bootstrap behavior.
+            loaded_preset = str(values.get("appearance_preset", "")).strip()
+            if loaded_preset in {LEGACY_NOGOVA_APPEARANCE_PRESET, LEGACY_RESISTANCE_APPEARANCE_PRESET}:
+                # Historical generic Resistance/Nogova presets now map to the
+                # explicitly named leaf family.
                 self.vars["appearance_preset"].set(RESISTANCE_APPEARANCE_PRESET)
             if "bus_stop_signs" not in values and "bus_stops" in values:
                 self.vars["bus_stop_signs"].set(values["bus_stops"])

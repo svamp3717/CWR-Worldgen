@@ -23,9 +23,14 @@ from cwr_worldgen.milestone9 import (
     MALDEN_ROADSIDE_TREE_MODELS,
     MALDEN_SINGLE_TREE_MODEL,
     NOGOVA_BUSH_MODELS,
-    NOGOVA_ROADSIDE_TREE_MODEL,
-    NOGOVA_ROADSIDE_TREE_MODELS,
-    NOGOVA_SINGLE_TREE_MODEL,
+    NOGOVA_LEAF_HILLSIDE_TREE_MODEL,
+    NOGOVA_LEAF_ROADSIDE_TREE_MODEL,
+    NOGOVA_LEAF_ROADSIDE_TREE_MODELS,
+    NOGOVA_LEAF_SINGLE_TREE_MODEL,
+    NOGOVA_PINE_HILLSIDE_TREE_MODEL,
+    NOGOVA_PINE_ROADSIDE_TREE_MODEL,
+    NOGOVA_PINE_ROADSIDE_TREE_MODELS,
+    NOGOVA_PINE_SINGLE_TREE_MODEL,
     Milestone9Spec,
     _Milestone9PlayabilitySpec,
     _resolved_forest_profile_models,
@@ -77,6 +82,8 @@ from cwr_worldgen.osm import (
     CHURCH_EXTRA_GROUND_CLEARANCE_METRES,
     BUILDING_TERRAIN_EDGE_MARGIN_METRES,
     OSM_INDIVIDUAL_TREE_MODELS,
+    NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS,
+    NOGOVA_PINE_INDIVIDUAL_TREE_MODELS,
     STOCK_HEDGE_MODELS,
     STOCK_STONE_MODELS,
     ROADSIDE_BARRIER_CLEARANCE_METRES,
@@ -487,18 +494,46 @@ class SurfacePassTests(unittest.TestCase):
         self.assertEqual(tuple(resolved["forest_roadside_bush_models"]), MALDEN_BUSH_MODELS)
         self.assertEqual(tuple(resolved["steep_hill_bush_models"]), MALDEN_BUSH_MODELS)
 
-    def test_nogova_resistance_blocks_resolve_nogova_individual_vegetation(self) -> None:
+    def test_nogova_leaf_blocks_resolve_only_resistance_leaf_trees(self) -> None:
         spec = Milestone9Spec(
             source_dir=Path("unused"),
             forest_profile="everon",
             forest_tree_model=r"o\tree\les_nw_ctver_pruhozi_T1.p3d",
         )
         resolved = _resolved_forest_profile_models(spec)
-        self.assertEqual(resolved["forest_single_tree_model"], NOGOVA_SINGLE_TREE_MODEL)
-        self.assertEqual(resolved["forest_roadside_tree_model"], NOGOVA_ROADSIDE_TREE_MODEL)
-        self.assertEqual(tuple(resolved["forest_roadside_tree_models"]), NOGOVA_ROADSIDE_TREE_MODELS)
+        self.assertEqual(resolved["forest_single_tree_model"], NOGOVA_LEAF_SINGLE_TREE_MODEL)
+        self.assertEqual(resolved["forest_roadside_tree_model"], NOGOVA_LEAF_ROADSIDE_TREE_MODEL)
+        self.assertEqual(tuple(resolved["forest_roadside_tree_models"]), NOGOVA_LEAF_ROADSIDE_TREE_MODELS)
+        self.assertEqual(resolved["forest_hillside_tree_model"], NOGOVA_LEAF_HILLSIDE_TREE_MODEL)
         self.assertEqual(tuple(resolved["forest_roadside_bush_models"]), NOGOVA_BUSH_MODELS)
-        self.assertEqual(tuple(resolved["steep_hill_bush_models"]), NOGOVA_BUSH_MODELS)
+        tree_paths = (
+            str(resolved["forest_single_tree_model"]),
+            str(resolved["forest_roadside_tree_model"]),
+            str(resolved["forest_hillside_tree_model"]),
+            *tuple(resolved["forest_roadside_tree_models"]),
+        )
+        self.assertTrue(all(path.casefold().startswith("o\\tree" + "\\") for path in tree_paths))
+        self.assertFalse(any(path.casefold().startswith("data3d" + "\\") for path in tree_paths))
+
+    def test_nogova_pine_blocks_resolve_only_resistance_pine_trees(self) -> None:
+        spec = Milestone9Spec(
+            source_dir=Path("unused"),
+            forest_profile="everon",
+            forest_tree_model=r"o\tree\les_nw_jehl_ctver_pruhozi.p3d",
+        )
+        resolved = _resolved_forest_profile_models(spec)
+        self.assertEqual(resolved["forest_single_tree_model"], NOGOVA_PINE_SINGLE_TREE_MODEL)
+        self.assertEqual(resolved["forest_roadside_tree_model"], NOGOVA_PINE_ROADSIDE_TREE_MODEL)
+        self.assertEqual(tuple(resolved["forest_roadside_tree_models"]), NOGOVA_PINE_ROADSIDE_TREE_MODELS)
+        self.assertEqual(resolved["forest_hillside_tree_model"], NOGOVA_PINE_HILLSIDE_TREE_MODEL)
+        tree_paths = (
+            str(resolved["forest_single_tree_model"]),
+            str(resolved["forest_roadside_tree_model"]),
+            str(resolved["forest_hillside_tree_model"]),
+            *tuple(resolved["forest_roadside_tree_models"]),
+        )
+        self.assertTrue(all(path.casefold().startswith("o\\tree" + "\\") for path in tree_paths))
+        self.assertFalse(any(path.casefold().startswith("data3d" + "\\") for path in tree_paths))
 
     def test_desert_profile_is_packaged_without_changing_everon_paths(self) -> None:
         world_name = "abcdefghijklmnopqrst"
@@ -4104,10 +4139,10 @@ class SemanticFeatureTests(unittest.TestCase):
         self.assertIn(r"data3d\les trojuhelnik pruchozi.p3d", trusted)
         self.assertNotIn(r"data3d\str_fikovnik.p3d", trusted)
         self.assertIn(r"data3d\str smrk_medium.p3d", trusted)
-        self.assertTrue(all(path.casefold().startswith("data3d\\") for path in spec.forest_roadside_tree_models))
-        self.assertTrue(all(path.casefold().startswith("data3d\\") for path in spec.forest_roadside_bush_models))
-        self.assertTrue(all(path.casefold().startswith("data3d\\") for path in spec.steep_hill_bush_models))
-        self.assertFalse(any(path.casefold().startswith("o\\tree\\") for path in trusted if "rakosi" not in path.casefold()))
+        self.assertTrue(all(path.casefold().startswith("data3d" + "\\") for path in spec.forest_roadside_tree_models))
+        self.assertTrue(all(path.casefold().startswith("data3d" + "\\") for path in spec.forest_roadside_bush_models))
+        self.assertTrue(all(path.casefold().startswith("data3d" + "\\") for path in spec.steep_hill_bush_models))
+        self.assertFalse(any(path.casefold().startswith("o\\tree" + "\\") for path in trusted if "rakosi" not in path.casefold()))
         self.assertIn(r"o\misc\aut_z_st.p3d", trusted)
         self.assertTrue(set(path.casefold() for path in STOCK_HEDGE_MODELS).issubset(trusted))
         self.assertTrue(set(path.casefold() for path in STOCK_WALL_MODELS).issubset(trusted))
@@ -4367,6 +4402,45 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         self.assertTrue(any(obj.model_path.casefold().endswith(r"\i\util_power_pole.p3d") for obj in result.objects))
         self.assertTrue(any(obj.model_path.casefold().endswith(r"\i\util_power_tower.p3d") for obj in result.objects))
         self.assertTrue(any(obj.model_path.casefold().endswith(r"\i\util_water_tower.p3d") for obj in result.objects))
+
+    def test_nogova_presets_use_resistance_models_for_mapped_osm_trees(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        dataset = OsmDataset(
+            source_generator="nogova-mapped-tree", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(),
+            individual_trees=(
+                OsmPointFeature("node/tree-a", {"natural": "tree", "leaf_type": "broadleaved"}, projection.to_latlon((100.0, 100.0))),
+            ),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(False,) * 64, farmland=(False,) * 64,
+            urban=(False,) * 64, roads=(False,) * 64, buildings=(False,) * 64,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        base = dict(
+            name="cwr_nogova_mapped", heightmap_path=Path("unused.png"), bbox=(0, 0, 1, 1),
+            cells=8, cell_size=25.0, max_road_objects=0, max_buildings=0, max_forest_objects=0,
+            forest_single_tree_enabled=False, forest_undergrowth_enabled=False, forest_border_enabled=False,
+            ditch_grass_enabled=False, barriers_enabled=False, bridges_enabled=False, rural_vegetation_enabled=False,
+            wetland_reeds_enabled=False, rocky_forest_fallback_enabled=False, steep_hill_bushes_enabled=False,
+            strict_assets=False,
+        )
+        elevations = (10.0,) * 64
+        leaf_spec = _Milestone9PlayabilitySpec(
+            **base, forest_tree_model=r"o\tree\les_nw_ctver_pruhozi_T1.p3d"
+        )
+        leaf_result = generate_world_objects(dataset, projection, raster, elevations, leaf_spec, include_roads=False)
+        self.assertEqual(leaf_result.mapped_tree_objects, 1)
+        leaf_model = next(obj.model_path for obj in leaf_result.objects if obj.model_path in NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS)
+        self.assertTrue(leaf_model.casefold().startswith("o\\tree" + "\\"))
+
+        pine_spec = _Milestone9PlayabilitySpec(
+            **base, forest_tree_model=r"o\tree\les_nw_jehl_ctver_pruhozi.p3d"
+        )
+        pine_result = generate_world_objects(dataset, projection, raster, elevations, pine_spec, include_roads=False)
+        self.assertEqual(pine_result.mapped_tree_objects, 1)
+        pine_model = next(obj.model_path for obj in pine_result.objects if obj.model_path in NOGOVA_PINE_INDIVIDUAL_TREE_MODELS)
+        self.assertTrue(pine_model.casefold().startswith("o\\tree" + "\\"))
 
     def test_capped_interior_undergrowth_walk_is_spatially_distributed(self) -> None:
         columns = 64

@@ -118,6 +118,24 @@ OSM_CONIFER_TREE_MODELS: tuple[str, ...] = (
     r"data3d\str jedle.p3d",
 )
 OSM_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = OSM_BROADLEAF_TREE_MODELS + OSM_CONIFER_TREE_MODELS
+# Resistance/Nogova-only individual-tree families. These are selected when the
+# active polygon forest model is from O.pbo, preventing mapped OSM trees from
+# quietly reintroducing Data3D vegetation into the leaf/pine Nogova presets.
+NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
+    r"o\tree\Javor01.p3d",
+    r"o\tree\Javor02.p3d",
+    r"o\tree\Akat01.p3d",
+    r"o\tree\Akat02.p3d",
+    r"o\tree\Akat03.p3d",
+    r"o\tree\DubFX.p3d",
+)
+NOGOVA_PINE_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
+    r"o\tree\Smrk_maly.p3d",
+    r"o\tree\Smrk_siroky.p3d",
+    r"o\tree\Smrk_velky.p3d",
+    r"o\tree\DD_borovice.p3d",
+    r"o\tree\DD_borovice02.p3d",
+)
 # The 256x256, 25 m world is the visual-density baseline requested for
 # synthetic individual forest trees. Larger worlds retain the same density per
 # square kilometre, so their safety limits scale with physical area.
@@ -7776,7 +7794,12 @@ def generate_world_objects(
             continue
         leaf_type = feature.tags.get("leaf_type", "").casefold()
         species_text = " ".join((feature.tags.get("species", ""), feature.tags.get("genus", ""))).casefold()
-        if leaf_type == "needleleaved" or any(word in species_text for word in ("picea", "pinus", "abies", "spruce", "pine", "fir")):
+        active_forest_model = str(getattr(spec, "forest_tree_model", "")).casefold()
+        if active_forest_model.startswith(r"o\tree\les_nw_jehl_"):
+            models = NOGOVA_PINE_INDIVIDUAL_TREE_MODELS
+        elif active_forest_model.startswith(r"o\tree\les_nw_"):
+            models = NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS
+        elif leaf_type == "needleleaved" or any(word in species_text for word in ("picea", "pinus", "abies", "spruce", "pine", "fir")):
             models = OSM_CONIFER_TREE_MODELS
         elif leaf_type == "broadleaved" or species_text:
             models = OSM_BROADLEAF_TREE_MODELS
