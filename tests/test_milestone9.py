@@ -22,6 +22,10 @@ from cwr_worldgen.milestone9 import (
     MALDEN_FOREST_BLOCK_MODEL,
     MALDEN_ROADSIDE_TREE_MODELS,
     MALDEN_SINGLE_TREE_MODEL,
+    NOGOVA_BUSH_MODELS,
+    NOGOVA_ROADSIDE_TREE_MODEL,
+    NOGOVA_ROADSIDE_TREE_MODELS,
+    NOGOVA_SINGLE_TREE_MODEL,
     Milestone9Spec,
     _Milestone9PlayabilitySpec,
     _resolved_forest_profile_models,
@@ -482,6 +486,19 @@ class SurfacePassTests(unittest.TestCase):
         self.assertEqual(tuple(resolved["forest_roadside_tree_models"]), MALDEN_ROADSIDE_TREE_MODELS)
         self.assertEqual(tuple(resolved["forest_roadside_bush_models"]), MALDEN_BUSH_MODELS)
         self.assertEqual(tuple(resolved["steep_hill_bush_models"]), MALDEN_BUSH_MODELS)
+
+    def test_nogova_resistance_blocks_resolve_nogova_individual_vegetation(self) -> None:
+        spec = Milestone9Spec(
+            source_dir=Path("unused"),
+            forest_profile="everon",
+            forest_tree_model=r"o\tree\les_nw_ctver_pruhozi_T1.p3d",
+        )
+        resolved = _resolved_forest_profile_models(spec)
+        self.assertEqual(resolved["forest_single_tree_model"], NOGOVA_SINGLE_TREE_MODEL)
+        self.assertEqual(resolved["forest_roadside_tree_model"], NOGOVA_ROADSIDE_TREE_MODEL)
+        self.assertEqual(tuple(resolved["forest_roadside_tree_models"]), NOGOVA_ROADSIDE_TREE_MODELS)
+        self.assertEqual(tuple(resolved["forest_roadside_bush_models"]), NOGOVA_BUSH_MODELS)
+        self.assertEqual(tuple(resolved["steep_hill_bush_models"]), NOGOVA_BUSH_MODELS)
 
     def test_desert_profile_is_packaged_without_changing_everon_paths(self) -> None:
         world_name = "abcdefghijklmnopqrst"

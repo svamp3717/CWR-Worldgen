@@ -41,6 +41,27 @@ DEFAULT_STEEP_HILL_BUSH_MODELS: tuple[str, ...] = (
     r"data3d\ker buxus.p3d",
 )
 
+# Resistance/Nogova vegetation from O.pbo. Keep this asset family separate from
+# the Everon geometry profile: Nogova still uses the square/triangle placement
+# ladder, but road cuts, steep infill, sparse singles and bushes should visually
+# belong to the same island rather than reverting to CWC Data3D vegetation.
+NOGOVA_SINGLE_TREE_MODEL = r"o\tree\smrk_maly.p3d"
+NOGOVA_ROADSIDE_TREE_MODEL = r"o\tree\smrk_velky.p3d"
+NOGOVA_ROADSIDE_TREE_MODELS: tuple[str, ...] = (
+    r"o\tree\smrk_velky.p3d",
+    r"o\tree\smrk_siroky.p3d",
+    r"o\tree\dd_borovice.p3d",
+    r"o\tree\dd_borovice02.p3d",
+)
+NOGOVA_BUSH_MODELS: tuple[str, ...] = (
+    r"o\tree\dd_bush01.p3d",
+    r"o\tree\dd_bush01b.p3d",
+    r"o\tree\dd_bush02.p3d",
+    r"o\tree\dd_bush02b.p3d",
+    r"o\tree\dd_bush02big.p3d",
+    r"o\tree\dd_bush03.p3d",
+)
+
 # Malden/Abel preset vegetation. These are original CWC Data3D families rather
 # than the Resistance O\Tree set, keeping the preset visually closer to the
 # older island. The broad-leaf sycamore family is mixed with the original pine
@@ -66,9 +87,41 @@ MALDEN_BUSH_MODELS: tuple[str, ...] = (
 def _resolved_forest_profile_models(spec: "Milestone9Spec") -> dict[str, object]:
     """Resolve profile defaults without clobbering explicit custom model paths."""
 
+    forest_tree_model = str(spec.forest_tree_model)
+    nogova_resistance = forest_tree_model.casefold().startswith(r"o\tree\les_nw_")
+    if nogova_resistance:
+        return {
+            "forest_tree_model": forest_tree_model,
+            "forest_single_tree_model": (
+                NOGOVA_SINGLE_TREE_MODEL
+                if spec.forest_single_tree_model == EVERON_SINGLE_TREE_MODEL
+                else spec.forest_single_tree_model
+            ),
+            "forest_roadside_tree_model": (
+                NOGOVA_ROADSIDE_TREE_MODEL
+                if spec.forest_roadside_tree_model == EVERON_ROADSIDE_TREE_MODEL
+                else spec.forest_roadside_tree_model
+            ),
+            "forest_roadside_tree_models": (
+                NOGOVA_ROADSIDE_TREE_MODELS
+                if spec.forest_roadside_tree_models == ROADSIDE_TREE_MODELS
+                else spec.forest_roadside_tree_models
+            ),
+            "forest_roadside_bush_models": (
+                NOGOVA_BUSH_MODELS
+                if spec.forest_roadside_bush_models == ROADSIDE_BUSH_MODELS
+                else spec.forest_roadside_bush_models
+            ),
+            "steep_hill_bush_models": (
+                NOGOVA_BUSH_MODELS
+                if spec.steep_hill_bush_models == DEFAULT_STEEP_HILL_BUSH_MODELS
+                else spec.steep_hill_bush_models
+            ),
+        }
+
     if str(spec.forest_profile).casefold() != "malden":
         return {
-            "forest_tree_model": spec.forest_tree_model,
+            "forest_tree_model": forest_tree_model,
             "forest_single_tree_model": spec.forest_single_tree_model,
             "forest_roadside_tree_model": spec.forest_roadside_tree_model,
             "forest_roadside_tree_models": spec.forest_roadside_tree_models,

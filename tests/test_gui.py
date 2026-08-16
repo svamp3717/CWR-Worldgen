@@ -9,6 +9,12 @@ from unittest.mock import patch
 from cwr_worldgen.gui import (
     WIZARD_STEPS,
     FROZEN_CLI_MARKER,
+    APPEARANCE_PRESETS,
+    RECOMMENDED_APPEARANCE_PRESET,
+    RESISTANCE_APPEARANCE_PRESET,
+    NOGOVA_FOREST_BLOCK_MODEL,
+    NOGOVA_FOREST_STEEP_MODEL,
+    NOGOVA_SINGLE_TREE_MODEL,
     WorldgenGui,
     application_base_dir,
     build_fetch_command,
@@ -168,6 +174,42 @@ class GuiCommandTests(unittest.TestCase):
         command = build_milestone9_command(values, python="python")
         self.assertIn("--ground-textures", command)
         self.assertEqual(command[command.index("--ground-textures") + 1], "desert")
+
+    def test_v5_appearance_presets_are_native_and_recommended_by_default(self) -> None:
+        values = default_gui_values()
+        self.assertEqual(values["appearance_preset"], RECOMMENDED_APPEARANCE_PRESET)
+        self.assertEqual(
+            APPEARANCE_PRESETS,
+            (
+                "Nogova textures + Everon trees (recommended)",
+                "Nogova Resistance forests",
+                "Malden classic",
+                "Everon classic",
+                "Desert ground textures",
+                "Generated ground textures",
+                "Custom",
+            ),
+        )
+
+    def test_recommended_preset_keeps_everon_forest_models(self) -> None:
+        values = default_gui_values()
+        command = build_milestone9_command(values, python="python")
+        self.assertNotIn("--forest-block-model", command)
+        self.assertNotIn("--forest-steep-model", command)
+
+    def test_resistance_preset_overrides_forest_geometry_after_advanced_args(self) -> None:
+        values = default_gui_values()
+        values["appearance_preset"] = RESISTANCE_APPEARANCE_PRESET
+        values["advanced_args"] = "--forest-block-model custom-block.p3d --forest-polygon-sink-fraction 0.75"
+        command = build_milestone9_command(values, python="python")
+        self.assertEqual(command[-8:], [
+            "--forest-block-model", NOGOVA_FOREST_BLOCK_MODEL,
+            "--forest-steep-model", NOGOVA_FOREST_STEEP_MODEL,
+            "--forest-single-tree-model", NOGOVA_SINGLE_TREE_MODEL,
+            "--forest-polygon-sink-fraction", "0",
+        ])
+        self.assertNotIn("--forest-block-max-burial", command)
+        self.assertNotIn("--forest-steep-max-burial", command)
 
     def test_overture_checkbox_uses_requested_random_generation_label(self) -> None:
         gui_source = (

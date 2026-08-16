@@ -10,6 +10,8 @@ from cwr_worldgen.procedural_forests import (
     DEFAULT_BORDER_PROXY_MODELS,
     DEFAULT_PROXY_MODELS,
     DEFAULT_UNDERGROWTH_PROXY_MODELS,
+    NOGOVA_BORDER_PROXY_MODELS,
+    NOGOVA_PROXY_MODELS,
     FOREST_CLUSTER_VARIANTS,
     ProceduralForestClusterLibrary,
     cluster_model_path,
@@ -32,6 +34,18 @@ class ProceduralForestClusterTests(unittest.TestCase):
         self.assertTrue(DEFAULT_BORDER_PROXY_MODELS)
         self.assertTrue(all(path.casefold().startswith("data3d\\") for path in DEFAULT_BORDER_PROXY_MODELS))
         self.assertFalse(any(path.casefold().startswith("o\\tree\\") for path in DEFAULT_BORDER_PROXY_MODELS))
+
+    def test_nogova_proxy_profile_remaps_forest_and_bush_clusters(self) -> None:
+        library = ProceduralForestClusterLibrary("cwr_cluster", proxy_profile="nogova")
+        library.register_models((
+            cluster_model_path("cwr_cluster", "pine", 0.30),
+            cluster_model_path("cwr_cluster", "border_thicket", 0.15),
+        ))
+        models = library.required_proxy_models()
+        self.assertTrue(set(NOGOVA_PROXY_MODELS).intersection(models))
+        self.assertTrue(set(NOGOVA_BORDER_PROXY_MODELS).intersection(models))
+        self.assertFalse(any(path.casefold().startswith("data3d\\les ") for path in models))
+        self.assertFalse(any(path.casefold().startswith("data3d\\ker ") for path in models))
 
     def test_cluster_model_contains_reusable_stock_proxies_and_support_lods(self) -> None:
         variant = FOREST_CLUSTER_VARIANTS[0]

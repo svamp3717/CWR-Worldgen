@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 from pathlib import Path
 import json
@@ -97,6 +97,22 @@ DEFAULT_BORDER_PROXY_MODELS: tuple[str, ...] = (
 
 # Interior undergrowth reuses the same original Data3D bush and small-tree set.
 DEFAULT_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = DEFAULT_BORDER_PROXY_MODELS
+
+# Resistance/Nogova equivalents used when the selected forest profile is the
+# Nogova O.pbo family.  Cluster geometry and placement remain identical; only
+# the external stock proxies change, so steep/fallback stands do not quietly
+# reintroduce Everon/Data3D trees and bushes.
+NOGOVA_PROXY_MODELS: tuple[str, ...] = (
+    r"o\tree\les_nw_ctver_pruhozi_T1.p3d",
+    r"o\tree\les_nw_trojuhelnik.p3d",
+)
+NOGOVA_BORDER_PROXY_MODELS: tuple[str, ...] = (
+    r"o\tree\dd_bush01.p3d",
+    r"o\tree\dd_bush02.p3d",
+    r"o\tree\dd_bush03.p3d",
+    r"o\tree\smrk_maly.p3d",
+)
+NOGOVA_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = NOGOVA_BORDER_PROXY_MODELS
 
 # Tall grass and reeds used for deterministic ditch-edge strips. These are
 # stock Data3D/Resistance assets and remain external to the generated PBO.
@@ -261,6 +277,7 @@ FOREST_BORDER_VARIANTS: tuple[ForestClusterVariant, ...] = (
 
 
 
+
 # Reusable undergrowth islands sprinkled through forest interiors. The models
 # are deliberately low and irregular so they soften the empty ground beneath
 # stock forest blocks without forming another hard perimeter.
@@ -366,6 +383,25 @@ def cluster_variant(name: str) -> ForestClusterVariant:
         if variant.name == name:
             return variant
     raise KeyError(name)
+
+
+def _profiled_cluster_variant(variant: ForestClusterVariant, proxy_profile: str) -> ForestClusterVariant:
+    profile = str(proxy_profile or "everon").strip().casefold()
+    if profile == "everon":
+        return variant
+    if profile != "nogova":
+        raise ValueError(f"unsupported forest proxy profile: {proxy_profile!r}")
+
+    replacements = {
+        **dict(zip(DEFAULT_PROXY_MODELS, NOGOVA_PROXY_MODELS)),
+        **dict(zip(DEFAULT_BORDER_PROXY_MODELS, NOGOVA_BORDER_PROXY_MODELS)),
+        **dict(zip(DEFAULT_UNDERGROWTH_PROXY_MODELS, NOGOVA_UNDERGROWTH_PROXY_MODELS)),
+    }
+    remapped = tuple(
+        (replacements.get(model_path, model_path), x, z, scale, heading)
+        for model_path, x, z, scale, heading in variant.proxy_layout
+    )
+    return replace(variant, proxy_layout=remapped)
 
 
 def quantize_cluster_grade(grade: float) -> float:
@@ -525,11 +561,15 @@ class ProceduralForestClusterLibrary:
         cache_dir: Path | None = None,
         cache_enabled: bool = True,
         cache_refresh: bool = False,
+        proxy_profile: str = "everon",
     ) -> None:
         self.world_name = world_name
         self.cache_dir = cache_dir
         self.cache_enabled = cache_enabled
         self.cache_refresh = cache_refresh
+        self.proxy_profile = str(proxy_profile or "everon").strip().casefold()
+        if self.proxy_profile not in {"everon", "nogova"}:
+            raise ValueError(f"unsupported forest proxy profile: {proxy_profile!r}")
         self.cache_hits = 0
         self.cache_misses = 0
         self._usage: Counter[ForestClusterModelKey] = Counter()
@@ -551,20 +591,22 @@ class ProceduralForestClusterLibrary:
     def required_proxy_models(self) -> tuple[str, ...]:
         models: set[str] = set()
         for key in self._usage:
-            models.update(entry[0] for entry in cluster_variant(key.variant).proxy_layout)
+            variant = _profiled_cluster_variant(cluster_variant(key.variant), self.proxy_profile)
+            models.update(entry[0] for entry in variant.proxy_layout)
         return tuple(sorted(models, key=str.casefold))
 
     def write_assets(self, source_dir: Path, catalogue_path: Path) -> ForestClusterAssetResult:
         models: list[dict[str, object]] = []
         for key in sorted(self._usage):
-            variant = cluster_variant(key.variant)
+            variant = _profiled_cluster_variant(cluster_variant(key.variant), self.proxy_profile)
             wire = cluster_model_path(self.world_name, key.variant, key.grade)
             relative = wire.split("\\", 1)[1].replace("\\", "/")
             destination = source_dir / relative
             asset_key = cache_key(
-                "procedural-forest-cluster-model-v5-grouped-everon-performance",
+                "procedural-forest-cluster-model-v6-profiled-stock-vegetation",
                 {
                     "world_name": self.world_name,
+                    "proxy_profile": self.proxy_profile,
                     "key": asdict(key),
                     "variant": asdict(variant),
                     "proxy_models": tuple(entry[0] for entry in variant.proxy_layout),
@@ -602,6 +644,7 @@ class ProceduralForestClusterLibrary:
         document: dict[str, object] = {
             "schema": 1,
             "generator": "cwr-worldgen procedural forest clusters",
+            "proxy_profile": self.proxy_profile,
             "placements": sum(self._usage.values()),
             "generated_variants": len(models),
             "proxy_models": list(self.required_proxy_models()),

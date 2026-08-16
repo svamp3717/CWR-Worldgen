@@ -34,6 +34,23 @@ DEFAULT_GUI_CELL_SIZE_METRES = 25.0
 TRAILING_NUMBER = re.compile(r"^(.*?)(\d+)$")
 FROZEN_CLI_MARKER = "--cwr-cli"
 
+RECOMMENDED_APPEARANCE_PRESET = "Nogova textures + Everon trees (recommended)"
+RESISTANCE_APPEARANCE_PRESET = "Nogova Resistance forests"
+LEGACY_NOGOVA_APPEARANCE_PRESET = "Nogova (recommended)"
+APPEARANCE_PRESETS = (
+    RECOMMENDED_APPEARANCE_PRESET,
+    RESISTANCE_APPEARANCE_PRESET,
+    "Malden classic",
+    "Everon classic",
+    "Desert ground textures",
+    "Generated ground textures",
+    "Custom",
+)
+NOGOVA_FOREST_BLOCK_MODEL = r"o\tree\les_nw_ctver_pruhozi_T1.p3d"
+NOGOVA_FOREST_STEEP_MODEL = r"o\tree\les_nw_trojuhelnik.p3d"
+NOGOVA_SINGLE_TREE_MODEL = r"o\tree\smrk_maly.p3d"
+EVERON_SINGLE_TREE_MODEL = r"data3d\str smrk_medium.p3d"
+
 
 def cli_command_prefix(python: str | None = None) -> list[str]:
     """Return a CLI launcher that works both from source and PyInstaller.
@@ -512,6 +529,17 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     advanced = str(values.get("advanced_args", "")).strip()
     if advanced:
         command.extend(shlex.split(advanced, posix=os.name != "nt"))
+
+    preset = str(values.get("appearance_preset", "")).strip()
+    if preset in {RESISTANCE_APPEARANCE_PRESET, LEGACY_NOGOVA_APPEARANCE_PRESET}:
+        # Append these after Advanced arguments so the named preset remains the
+        # final authority for its defining Resistance/Nogova vegetation.
+        command.extend((
+            "--forest-block-model", NOGOVA_FOREST_BLOCK_MODEL,
+            "--forest-steep-model", NOGOVA_FOREST_STEEP_MODEL,
+            "--forest-single-tree-model", NOGOVA_SINGLE_TREE_MODEL,
+            "--forest-polygon-sink-fraction", "0",
+        ))
     return command
 
 
@@ -660,7 +688,7 @@ def default_gui_values() -> dict[str, object]:
         "name": "cwr_my_world",
         "display_name": "My CWA World",
         "profile": "cwr-ce",
-        "appearance_preset": "Nogova (recommended)",
+        "appearance_preset": RECOMMENDED_APPEARANCE_PRESET,
         "ground_textures": "nogova",
         "forest_profile": "everon",
         "strict_assets": False,
@@ -1689,14 +1717,14 @@ class WorldgenGui(tk.Tk):
         ttk.Label(preset, text="Appearance").grid(row=0, column=0, sticky="w", padx=(0, 10))
         ttk.Combobox(
             preset,
-            textvariable=self._var("appearance_preset", "Nogova (recommended)"),
-            values=("Nogova (recommended)", "Malden classic", "Everon classic", "Desert ground textures", "Generated ground textures", "Custom"),
+            textvariable=self._var("appearance_preset", RECOMMENDED_APPEARANCE_PRESET),
+            values=APPEARANCE_PRESETS,
             state="readonly",
-            width=34,
+            width=48,
         ).grid(row=0, column=1, sticky="w")
         ttk.Label(
             preset,
-            text="Nogova uses the Resistance ground palette. Malden uses a drier CWC-style palette, Malden forest/tree defaults and original CWC brush models; farmland reuses basic ground.",
+            text="The recommended preset mixes Nogova/Resistance ground textures with Everon forest and tree models. Nogova Resistance forests keeps the same ground palette but switches forest blocks to the Resistance O\\Tree models. Malden uses a drier CWC-style palette and original CWC vegetation.",
             style="Hint.TLabel",
             wraplength=700,
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
@@ -1985,16 +2013,18 @@ class WorldgenGui(tk.Tk):
             return
         preset = str(self.vars["appearance_preset"].get())
         desired: tuple[str, str, str] | None
-        if preset == "Nogova (recommended)":
-            desired = ("nogova", "everon", r"data3d\str smrk_medium.p3d")
+        if preset in {RECOMMENDED_APPEARANCE_PRESET}:
+            desired = ("nogova", "everon", EVERON_SINGLE_TREE_MODEL)
+        elif preset in {RESISTANCE_APPEARANCE_PRESET, LEGACY_NOGOVA_APPEARANCE_PRESET}:
+            desired = ("nogova", "everon", NOGOVA_SINGLE_TREE_MODEL)
         elif preset == "Malden classic":
             desired = ("malden", "malden", r"data3d\str_fikovnik.p3d")
         elif preset in {"Everon classic", "Everon classic (recommended)"}:
-            desired = ("everon", "everon", r"data3d\str smrk_medium.p3d")
+            desired = ("everon", "everon", EVERON_SINGLE_TREE_MODEL)
         elif preset == "Desert ground textures":
-            desired = ("desert", "everon", r"data3d\str smrk_medium.p3d")
+            desired = ("desert", "everon", EVERON_SINGLE_TREE_MODEL)
         elif preset == "Generated ground textures":
-            desired = ("generated", "everon", r"data3d\str smrk_medium.p3d")
+            desired = ("generated", "everon", EVERON_SINGLE_TREE_MODEL)
         else:
             desired = None
         if desired is None:
@@ -2760,13 +2790,18 @@ class WorldgenGui(tk.Tk):
             for key, value in values.items():
                 if key in self.vars:
                     self.vars[key].set(value)
+            if str(values.get("appearance_preset", "")).strip() == LEGACY_NOGOVA_APPEARANCE_PRESET:
+                # v5 split the ambiguous old Nogova preset into a recommended
+                # mixed preset and an explicit Resistance-forest preset. Preserve
+                # the legacy preset's historical v5 bootstrap behavior.
+                self.vars["appearance_preset"].set(RESISTANCE_APPEARANCE_PRESET)
             if "bus_stop_signs" not in values and "bus_stops" in values:
                 self.vars["bus_stop_signs"].set(values["bus_stops"])
             if "appearance_preset" not in values:
                 ground = str(values.get("ground_textures", "nogova"))
                 forest = str(values.get("forest_profile", "everon"))
                 if ground == "nogova" and forest == "everon":
-                    self.vars["appearance_preset"].set("Nogova (recommended)")
+                    self.vars["appearance_preset"].set(RECOMMENDED_APPEARANCE_PRESET)
                 elif ground == "malden" and forest == "malden":
                     self.vars["appearance_preset"].set("Malden classic")
                 elif ground == "everon" and forest == "everon":

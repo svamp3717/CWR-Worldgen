@@ -19,6 +19,14 @@ _warnings.filterwarnings(
 from ._version import __version__
 from .generator import BuildResult, build_milestone1, build_milestone2, build_milestone3, build_milestone4
 from .model import HeightmapSpec, OsmSpec, PlayabilitySpec, WorldSpec
+
+# Public Overpass servers sometimes all return transient 5xx/timeout errors at
+# once. Install the bounded retry wrapper before milestone modules import the
+# shared source pipeline so every GUI/CLI source fetch receives the same policy.
+from .overpass_retry import install_overpass_retries as _install_overpass_retries
+
+_install_overpass_retries()
+
 from .milestone6 import Milestone6Spec, build_milestone6
 from .milestone7 import Milestone7Spec, build_milestone7
 from .milestone8 import Milestone8Spec, build_milestone8
@@ -70,6 +78,7 @@ _milestone9_module.build_milestone4 = _build_milestone9_with_configured_runtime
 from .terrain_readme import install_milestone9_terrain_readme as _install_milestone9_terrain_readme
 
 _install_milestone9_terrain_readme()
+
 build_milestone9 = _milestone9_module.build_milestone9
 
 # The coordinate-aware picker is GUI-only. Importing tkinter can legitimately

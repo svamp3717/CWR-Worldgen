@@ -1,0 +1,16 @@
+{
+  "map_url": "https://opentopomap.org/#map=13/59.42766/16.89457",
+  "world_name": "cwr_malaren",
+  "display_name": "Malaren Topographic Example",
+  "cells": 256,
+  "cell_size_metres": 25.0,
+  "world_size_metres": 6400.0,
+  "bbox_south_west_north_east": [
+    59.398881748360814,
+    16.837989602089053,
+    59.45643825163919,
+    16.95115039791095
+  ],
+  "elevation_tiles": ["N59E016"],
+  "forest_road_clearance_metres": 4.0
+}

@@ -1,0 +1,301 @@
+{
+  "global": {
+    "models": [],
+    "textures": [
+      "Eden\\tn.paa",
+      "Eden\\bak\\bah.pac",
+      "Eden\\zbh.paa"
+    ]
+  },
+  "inherit_defaults": false,
+  "rules": [
+    {
+      "description": "Temporary stock CWA/Resistance cobblestone family used for gravel roads",
+      "enabled": true,
+      "exclude": {},
+      "geometry": "line",
+      "id": "road-gravel",
+      "layers": [
+        "gravel_roads"
+      ],
+      "match": {},
+      "models": [
+        "O\\Road\\kos25.p3d",
+        "O\\Road\\kos12.p3d",
+        "O\\Road\\kos6.p3d"
+      ],
+      "textures": []
+    },
+    {
+      "description": "Current paved-road model family",
+      "enabled": true,
+      "exclude": {
+        "surface": [
+          "gravel",
+          "fine_gravel",
+          "compacted",
+          "pebblestone",
+          "dirt",
+          "earth",
+          "ground",
+          "mud",
+          "sand",
+          "unpaved"
+        ]
+      },
+      "geometry": "line",
+      "id": "road-paved",
+      "layers": [
+        "roads"
+      ],
+      "match": {
+        "highway": [
+          "motorway",
+          "trunk",
+          "primary",
+          "secondary",
+          "tertiary",
+          "residential",
+          "living_street"
+        ]
+      },
+      "models": [
+        "o\\road\\sil25.p3d"
+      ],
+      "textures": []
+    },
+    {
+      "description": "Current dirt-road model family",
+      "enabled": true,
+      "exclude": {
+        "surface": [
+          "asphalt",
+          "paved",
+          "concrete",
+          "concrete:plates",
+          "sett"
+        ]
+      },
+      "geometry": "line",
+      "id": "road-dirt-by-class",
+      "layers": [
+        "roads"
+      ],
+      "match": {
+        "highway": [
+          "service",
+          "track",
+          "unclassified",
+          "road"
+        ]
+      },
+      "models": [
+        "o\\road\\ces25.p3d"
+      ],
+      "textures": []
+    },
+    {
+      "description": "",
+      "enabled": true,
+      "exclude": {},
+      "geometry": "line",
+      "id": "road-dirt-by-surface",
+      "layers": [
+        "roads"
+      ],
+      "match": {
+        "surface": [
+          "dirt",
+          "earth",
+          "ground",
+          "mud",
+          "sand",
+          "unpaved"
+        ]
+      },
+      "models": [
+        "o\\road\\ces25.p3d"
+      ],
+      "textures": []
+    },
+    {
+      "description": "",
+      "enabled": true,
+      "exclude": {},
+      "geometry": "polygon",
+      "id": "primary-forest",
+      "layers": [
+        "forests"
+      ],
+      "match": {},
+      "models": [
+        "data3d\\les ctverec pruchozi_T1.p3d"
+      ],
+      "textures": []
+    },
+    {
+      "description": "",
+      "enabled": true,
+      "exclude": {},
+      "geometry": "line",
+      "id": "hedges",
+      "layers": [
+        "barriers"
+      ],
+      "match": {
+        "barrier": [
+          "hedge"
+        ]
+      },
+      "models": [
+        "data3d\\Krovi_long.p3d",
+        "data3d\\Krovi_bigest.p3d",
+        "data3d\\Krovi2.p3d",
+        "data3d\\Krovi3.p3d",
+        "data3d\\Krovi4.p3d",
+        "data3d\\Krovia.p3d",
+        "data3d\\Krovib.p3d"
+      ],
+      "textures": []
+    },
+    {
+      "description": "",
+      "enabled": true,
+      "exclude": {},
+      "geometry": "line",
+      "id": "stone-walls",
+      "layers": [
+        "barriers"
+      ],
+      "match": {
+        "barrier": [
+          "wall",
+          "retaining_wall"
+        ]
+      },
+      "models": [
+        "O\\Hous\\zidka01.p3d",
+        "O\\Hous\\zidka02.p3d"
+      ],
+      "textures": []
+    },
+    {
+      "description": "",
+      "enabled": true,
+      "exclude": {},
+      "geometry": "line",
+      "id": "metal-fences-by-type",
+      "layers": [
+        "barriers"
+      ],
+      "match": {
+        "barrier": [
+          "fence"
+        ],
+        "fence_type": [
+          "chain_link",
+          "chainlink",
+          "metal",
+          "metal_bars",
+          "wire",
+          "wire_mesh",
+          "welded_wire_mesh",
+          "mesh"
+        ]
+      },
+      "models": [
+        "O\\Hous\\DD_pletivo.p3d"
+      ],
+      "textures": []
+    },
+    {
+      "description": "",
+      "enabled": true,
+      "exclude": {},
+      "geometry": "line",
+      "id": "metal-fences-by-material",
+      "layers": [
+        "barriers"
+      ],
+      "match": {
+        "barrier": [
+          "fence"
+        ],
+        "material": [
+          "metal",
+          "steel",
+          "iron",
+          "wire",
+          "wire_mesh"
+        ]
+      },
+      "models": [
+        "O\\Hous\\DD_pletivo.p3d"
+      ],
+      "textures": []
+    },
+    {
+      "description": "",
+      "enabled": true,
+      "exclude": {},
+      "geometry": "point",
+      "id": "bus-stop-signs",
+      "layers": [
+        "landmarks"
+      ],
+      "match": {
+        "landmark": [
+          "bus_stop"
+        ]
+      },
+      "models": [
+        "o\\misc\\aut_z_st.p3d"
+      ],
+      "textures": []
+    },
+    {
+      "description": "",
+      "enabled": true,
+      "exclude": {},
+      "geometry": "polygon",
+      "id": "cemetery-graves",
+      "layers": [
+        "sites"
+      ],
+      "match": {
+        "site": [
+          "cemetery"
+        ]
+      },
+      "models": [
+        "O\\Hous\\Nahrobek1.p3d",
+        "O\\Hous\\Nahrobek2.p3d",
+        "O\\Hous\\Nahrobek3.p3d",
+        "O\\Hous\\Nahrobek4.p3d",
+        "O\\Hous\\Nahrobek5.p3d"
+      ],
+      "textures": []
+    },
+    {
+      "description": "",
+      "enabled": true,
+      "exclude": {},
+      "geometry": "polygon",
+      "id": "wetland-reeds",
+      "layers": [
+        "rural_vegetation"
+      ],
+      "match": {
+        "natural": [
+          "wetland"
+        ]
+      },
+      "models": [
+        "o\\tree\\dd_rakosi.p3d",
+        "o\\tree\\dd_rakosi02.p3d"
+      ],
+      "textures": []
+    }
+  ],
+  "schema": 1
+}

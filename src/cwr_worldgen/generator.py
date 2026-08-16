@@ -3110,6 +3110,11 @@ def build_milestone4(
     if generated_cluster_paths:
         forest_cluster_library = ProceduralForestClusterLibrary(
             spec.name,
+            proxy_profile=(
+                "nogova"
+                if str(getattr(spec, "forest_tree_model", "")).casefold().startswith(r"o\tree\les_nw_")
+                else "everon"
+            ),
             cache_dir=getattr(spec, "cache_dir", None),
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
@@ -3553,6 +3558,11 @@ def build_milestone4(
         if repeat_cluster_paths:
             repeat_forest_cluster_library = ProceduralForestClusterLibrary(
                 spec.name,
+                proxy_profile=(
+                    "nogova"
+                    if str(getattr(spec, "forest_tree_model", "")).casefold().startswith(r"o\tree\les_nw_")
+                    else "everon"
+                ),
                 cache_dir=getattr(spec, "cache_dir", None),
                 cache_enabled=bool(getattr(spec, "cache_enabled", True)),
                 cache_refresh=bool(getattr(spec, "cache_refresh", False)),
