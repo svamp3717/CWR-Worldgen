@@ -17,6 +17,9 @@ _warnings.filterwarnings(
 )
 
 from ._version import __version__
+from .network import install_network_compatibility as _install_network_compatibility
+
+_install_network_compatibility()
 from .generator import BuildResult, build_milestone1, build_milestone2, build_milestone3, build_milestone4
 from .model import HeightmapSpec, OsmSpec, PlayabilitySpec, WorldSpec
 
@@ -31,6 +34,9 @@ from .milestone6 import Milestone6Spec, build_milestone6
 from .milestone7 import Milestone7Spec, build_milestone7
 from .milestone8 import Milestone8Spec, build_milestone8
 from .milestone9 import Milestone9Spec, build_milestone9
+from .network import install_overture_release_resolution as _install_overture_release_resolution
+
+_install_overture_release_resolution()
 from .procedural_buildings import (
     BuildingGenerationResult,
     BuildingVariantKey,
