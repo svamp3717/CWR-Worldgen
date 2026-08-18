@@ -242,12 +242,12 @@ class GuiCommandTests(unittest.TestCase):
         self.assertNotIn("--forest-block-max-burial", command)
         self.assertNotIn("--forest-steep-max-burial", command)
 
-    def test_overture_checkbox_uses_requested_random_generation_label(self) -> None:
+    def test_overture_checkbox_describes_download_and_merge(self) -> None:
         gui_source = (
             Path(__file__).resolve().parents[1] / "src" / "cwr_worldgen" / "gui.py"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            '("Use Overture buildings before randomly generated", "overture_buildings", True)',
+            '("Download/merge Overture building data", "overture_buildings", True)',
             gui_source,
         )
 
@@ -536,6 +536,23 @@ class GuiCommandTests(unittest.TestCase):
         }, python="python")
         self.assertIn("--map-url", command)
         self.assertIn("--refresh", command)
+
+    def test_fetch_command_can_disable_overture_download(self) -> None:
+        command = build_fetch_command({
+            "source_dir": "source-data/map",
+            "selection_mode": "map_url",
+            "map_url": "https://www.opentopomap.org/#map=13/1/2",
+            "overture_buildings": False,
+        }, python="python")
+        self.assertIn("--no-overture-buildings", command)
+
+    def test_fetch_command_keeps_overture_enabled_by_default(self) -> None:
+        command = build_fetch_command({
+            "source_dir": "source-data/map",
+            "selection_mode": "map_url",
+            "map_url": "https://www.opentopomap.org/#map=13/1/2",
+        }, python="python")
+        self.assertNotIn("--no-overture-buildings", command)
 
     def test_fetch_command_defaults_to_recommended_256_cell_area(self) -> None:
         command = build_fetch_command({

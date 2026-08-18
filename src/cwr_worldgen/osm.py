@@ -8,8 +8,9 @@ import hashlib
 import json
 import pickle
 import math
+import time
 from typing import Any, TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
-from urllib import parse, request
+from urllib import error, parse, request
 
 from PIL import Image, ImageDraw
 
@@ -17,6 +18,12 @@ from ._version import __version__
 from .cache import CACHE_SCHEMA_VERSION, atomic_write_bytes, cache_key
 from .building_semantics import is_actual_church
 from .model import OsmSpec, WorldObject
+from .network import (
+    OVERPASS_RATE_LIMIT_BACKOFF_SECONDS,
+    OVERPASS_REFERER,
+    OVERPASS_USER_AGENT,
+    UNVERIFIED_SSL_CONTEXT,
+)
 from .procedural_infrastructure import (
     GENERATED_BRIDGE_MAXIMUM_DEPTH_METRES,
     GENERATED_BRIDGE_RAIL_OVERHANG_METRES,
@@ -302,6 +309,7 @@ class OsmDataset:
     utility_points: tuple[OsmPointFeature, ...] = ()
     surface_areas: tuple[OsmPolygonFeature, ...] = ()
     rural_vegetation: tuple[OsmPolygonFeature, ...] = ()
+    building_entrances: tuple[OsmPointFeature, ...] = ()
     normalized_fingerprint: str = ""
     parsed_cache_hit: bool = False
 
@@ -562,6 +570,7 @@ def build_overpass_query(bbox: tuple[float, float, float, float], *, timeout_sec
   nwr["landuse"~"^(forest|farmland|meadow|orchard|vineyard|grass|allotments|plant_nursery|greenhouse_horticulture|recreation_ground|village_green|residential|commercial|industrial|retail|construction|farmyard|garages|railway|education|institutional|civic)$"];
   way["highway"];
   nwr["building"];
+  node["entrance"];
   nwr["amenity"~"^(place_of_worship|school|social_facility|parking)$"];
   nwr["social_facility"];
   nwr["amenity"="grave_yard"];
@@ -597,16 +606,30 @@ def fetch_overpass_json(url: str, query_text: str, *, timeout_seconds: int) -> b
         url,
         data=payload,
         headers={
+            "Accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded; charset=ascii",
-            "User-Agent": f"cwr-worldgen/{__version__} (OSM geography importer)",
+            "User-Agent": OVERPASS_USER_AGENT,
+            "Referer": OVERPASS_REFERER,
         },
         method="POST",
     )
-    try:
-        with request.urlopen(req, timeout=timeout_seconds + 15) as response:
-            data = response.read()
-    except OSError as exc:
-        raise RuntimeError(f"Overpass request failed: {exc}") from exc
+    # The direct OSM importer has one configured endpoint rather than the
+    # multi-mirror source-fetch path. On HTTP 429, respect Overpass guidance by
+    # waiting 30 seconds before making exactly one retry.
+    for attempt in range(2):
+        try:
+            with request.urlopen(req, timeout=timeout_seconds + 15, context=UNVERIFIED_SSL_CONTEXT) as response:
+                data = response.read()
+            break
+        except error.HTTPError as exc:
+            if exc.code == 429 and attempt == 0:
+                time.sleep(OVERPASS_RATE_LIMIT_BACKOFF_SECONDS)
+                continue
+            raise RuntimeError(f"Overpass request failed: HTTP {exc.code}") from exc
+        except OSError as exc:
+            raise RuntimeError(f"Overpass request failed: {exc}") from exc
+    else:  # pragma: no cover - loop always returns, breaks, or raises.
+        raise RuntimeError("Overpass request failed")
     if not data:
         raise RuntimeError("Overpass returned an empty response")
     return data
@@ -764,6 +787,7 @@ def parse_overpass_json(
     watercourses: list[OsmLineFeature] = []
     building_polygons: list[OsmPolygonFeature] = []
     building_points: list[OsmPointFeature] = []
+    building_entrances: list[OsmPointFeature] = []
     places: list[OsmPointFeature] = []
     place_areas: list[OsmPolygonFeature] = []
     landmarks: list[OsmPointFeature] = []
@@ -826,6 +850,10 @@ def parse_overpass_json(
                 building_polygons.append(OsmPolygonFeature(key, tags, polygons))
             elif len(geometry) == 1:
                 building_points.append(OsmPointFeature(key, tags, geometry[0]))
+
+        entrance_kind = tags.get("entrance", "").strip().casefold()
+        if entrance_kind and entrance_kind not in {"no", "none"} and len(geometry) == 1:
+            building_entrances.append(OsmPointFeature(key, tags, geometry[0]))
 
         place_kind = str(tags.get("place", "")).casefold()
         keep_place = bool(place_kind) and (bool(tags.get("name")) or place_kind == "isolated_dwelling")
@@ -942,6 +970,7 @@ def parse_overpass_json(
         watercourses=tuple(sorted(watercourses, key=sort_key)),
         building_polygons=tuple(sorted(building_polygons, key=sort_key)),
         building_points=tuple(sorted(building_points, key=sort_key)),
+        building_entrances=tuple(sorted(building_entrances, key=sort_key)),
         places=tuple(sorted(places, key=sort_key)),
         place_areas=tuple(sorted(place_areas, key=sort_key)),
         landmarks=tuple(sorted(landmarks, key=sort_key)),
@@ -2574,14 +2603,28 @@ def refine_iterative_grounding_terrain(
         for plan in building_placement_plans
         if not _building_plan_fully_submerged(plan, elevations, raster, spec)
     )
+    multipart_targets: dict[str, float] = {}
+    for plan in active_building_plans:
+        if plan.geometry_kind != "polygon_part":
+            continue
+        value = _maximum_polygon_elevation(
+            elevations, cells, cell_size, tuple(plan.support_polygon)
+        )
+        multipart_targets[plan.osm_key] = max(
+            multipart_targets.get(plan.osm_key, -math.inf), value
+        )
     for plan, obj in zip(active_building_plans, building_objects):
         footprint = tuple(plan.support_polygon)
         # Enterable and closed procedural buildings now share exactly the same
         # terrain support rule. Foundation stairs bridge the doorway down to the
         # surrounding terrain, so the exterior apron must not lift or reshape an
         # enterable building differently from its non-interior counterpart.
-        target = _maximum_polygon_elevation(
-            elevations, cells, cell_size, footprint
+        target = (
+            multipart_targets[plan.osm_key]
+            if plan.geometry_kind == "polygon_part" and plan.osm_key in multipart_targets
+            else _maximum_polygon_elevation(
+                elevations, cells, cell_size, footprint
+            )
         )
         accepted = add_support(
             footprint,
@@ -4996,6 +5039,140 @@ def _overture_building_tag(properties: Mapping[str, Any] | None) -> str:
     return "yes"
 
 
+def _overture_source_osm_keys(properties: Mapping[str, Any] | None) -> tuple[str, ...]:
+    """Return CWR OSM keys referenced by Overture source provenance."""
+
+    if properties is None:
+        return ()
+    raw_sources = properties.get("sources")
+    if not isinstance(raw_sources, list):
+        return ()
+    keys: set[str] = set()
+    prefix_names = {"w": "way", "n": "node", "r": "relation"}
+    for source in raw_sources:
+        if not isinstance(source, Mapping):
+            continue
+        dataset_name = str(source.get("dataset") or "").strip().casefold().replace(" ", "")
+        if dataset_name not in {"openstreetmap", "osm"}:
+            continue
+        record_id = str(source.get("record_id") or "").strip().casefold()
+        if len(record_id) < 2 or record_id[0] not in prefix_names:
+            continue
+        numeric = record_id[1:].split("@", 1)[0]
+        if numeric.isdigit():
+            keys.add(f"{prefix_names[record_id[0]]}/{numeric}")
+    return tuple(sorted(keys))
+
+
+def _overture_text_number(
+    value: Any, *, integer: bool = False, allow_zero: bool = False
+) -> str:
+    if value is None or value == "":
+        return ""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if not math.isfinite(number):
+        return ""
+    if integer:
+        rounded = int(round(number))
+        return str(rounded) if rounded > 0 else ""
+    if number < 0.0 or (number == 0.0 and not allow_zero):
+        return ""
+    return format(number, ".6g")
+
+
+def _overture_enrichment_tags(properties: Mapping[str, Any] | None) -> dict[str, str]:
+    """Map useful Overture building attributes into OSM-style CWR tags."""
+
+    if properties is None:
+        return {}
+    tags: dict[str, str] = {}
+    source_id = str(properties.get("id") or "").strip()
+    if source_id:
+        tags["cwr:overture_id"] = source_id
+    building_class = str(properties.get("class") or "").strip().casefold()
+    subtype = str(properties.get("subtype") or "").strip().casefold()
+    if building_class:
+        tags["cwr:overture_class"] = building_class
+    if subtype:
+        tags["cwr:overture_subtype"] = subtype
+    osm_keys = _overture_source_osm_keys(properties)
+    if osm_keys:
+        tags["cwr:overture_osm_keys"] = "|".join(osm_keys)
+
+    height = _overture_text_number(properties.get("height"))
+    floors = _overture_text_number(properties.get("num_floors"), integer=True)
+    roof_height = _overture_text_number(properties.get("roof_height"))
+    roof_direction = _overture_text_number(
+        properties.get("roof_direction"), allow_zero=True
+    )
+    if height:
+        tags["height"] = height
+    if floors:
+        tags["building:levels"] = floors
+    if roof_height:
+        tags["roof:height"] = roof_height
+    if roof_direction:
+        tags["roof:direction"] = roof_direction
+
+    roof_shape = str(properties.get("roof_shape") or "").strip().casefold().replace("_", "-")
+    roof_orientation = str(properties.get("roof_orientation") or "").strip().casefold()
+    facade_material = str(properties.get("facade_material") or "").strip().casefold()
+    facade_color = str(properties.get("facade_color") or "").strip().casefold()
+    roof_material = str(properties.get("roof_material") or "").strip().casefold()
+    roof_color = str(properties.get("roof_color") or "").strip().casefold()
+    if roof_shape:
+        tags["roof:shape"] = roof_shape
+    if roof_orientation:
+        tags["roof:orientation"] = roof_orientation
+    if facade_material:
+        tags["building:material"] = facade_material
+    if facade_color:
+        tags["building:colour"] = facade_color
+    if roof_material:
+        tags["roof:material"] = roof_material
+    if roof_color:
+        tags["roof:colour"] = roof_color
+
+    min_height = _overture_text_number(properties.get("min_height"))
+    min_floor = _overture_text_number(properties.get("min_floor"), integer=True)
+    if min_height:
+        # Keep floating-part data for diagnostics/future part support without
+        # pretending the current ground-based building generator can honour it.
+        tags["cwr:overture_min_height"] = min_height
+    if min_floor:
+        tags["cwr:overture_min_floor"] = min_floor
+    if properties.get("has_parts") is True:
+        tags["cwr:overture_has_parts"] = "yes"
+    return tags
+
+
+def _merge_overture_tags(
+    osm_tags: Mapping[str, str],
+    overture_tags: Mapping[str, str],
+    *,
+    match_method: str,
+) -> dict[str, str]:
+    """Enrich OSM tags without overwriting explicit OSM building knowledge."""
+
+    merged = {str(key): str(value) for key, value in osm_tags.items()}
+    overture_building = str(overture_tags.get("building", "")).strip().casefold()
+    if merged.get("building", "").strip().casefold() in {"", "yes"} and overture_building not in {"", "yes"}:
+        merged["building"] = overture_building
+
+    for key, value in overture_tags.items():
+        if key in {"building", "source", "cwr:synthetic"} or not value:
+            continue
+        if key.startswith("cwr:overture_"):
+            merged[key] = value
+        elif not str(merged.get(key, "")).strip():
+            merged[key] = value
+    merged["cwr:overture_match"] = match_method
+    return merged
+
+
 def _geojson_overture_building_polygons(path: Path) -> tuple[OsmPolygonFeature, ...]:
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
@@ -5063,14 +5240,9 @@ def _geojson_overture_building_polygons(path: Path) -> tuple[OsmPolygonFeature, 
             "building": _overture_building_tag(properties),
             "source": "overturemaps",
             "cwr:synthetic": "overture_building",
+            **_overture_enrichment_tags(properties),
         }
-        if properties is not None:
-            building_class = str(properties.get("class") or "").strip().casefold()
-            subtype = str(properties.get("subtype") or "").strip().casefold()
-            if building_class:
-                tags["cwr:overture_class"] = building_class
-            if subtype:
-                tags["cwr:overture_subtype"] = subtype
+        tags.setdefault("cwr:overture_id", source_id)
         buildings.append(OsmPolygonFeature(
             f"overture/{source_id}",
             tags,
@@ -5085,45 +5257,205 @@ def augment_dataset_with_overture_buildings(
     spec: OsmSpec,
     geojson_path: Path,
 ) -> OsmDataset:
-    """Use Overture building footprints before synthetic residential infill."""
+    """Merge Overture metadata into matching OSM buildings, then add true gaps.
+
+    OSM remains authoritative for footprint geometry and explicit tags. Overture
+    fills missing height/floor/roof/material metadata. Provenance-derived OSM IDs
+    are used first; remaining records use conservative footprint IoU matching.
+    Only Overture buildings that match neither route are considered for the
+    existing missing-building fallback areas.
+    """
+
     overture_buildings = _geojson_overture_building_polygons(geojson_path)
     if not overture_buildings:
         return dataset
 
-    fallback_areas: list[tuple[tuple[PointXZ, ...], tuple[tuple[PointXZ, ...], ...], tuple[float, float, float, float]]] = []
-    for feature in sorted(dataset.urban, key=lambda item: item.osm_key):
+    polygon_buildings = list(dataset.building_polygons)
+    point_buildings = list(dataset.building_points)
+    polygon_key_index = {feature.osm_key: index for index, feature in enumerate(polygon_buildings)}
+    point_key_index = {feature.osm_key: index for index, feature in enumerate(point_buildings)}
+    matched_overture: set[int] = set()
+    matched_polygon_indices: set[int] = set()
+    matched_point_indices: set[int] = set()
+    exact_matches = 0
+    spatial_matches = 0
+
+    # First use Overture's own source provenance. This is deterministic and
+    # avoids any ambiguity among tightly packed row houses.
+    for overture_index, overture in enumerate(overture_buildings):
+        source_keys = tuple(
+            key for key in str(overture.tags.get("cwr:overture_osm_keys", "")).split("|") if key
+        )
+        target_kind = ""
+        target_index = -1
+        for source_key in source_keys:
+            if source_key in polygon_key_index:
+                target_kind, target_index = "polygon", polygon_key_index[source_key]
+                break
+            if source_key in point_key_index:
+                target_kind, target_index = "point", point_key_index[source_key]
+                break
+        if target_index < 0:
+            continue
+        if target_kind == "polygon":
+            original = polygon_buildings[target_index]
+            polygon_buildings[target_index] = OsmPolygonFeature(
+                original.osm_key,
+                _merge_overture_tags(original.tags, overture.tags, match_method="source-id"),
+                original.polygons,
+            )
+            matched_polygon_indices.add(target_index)
+        else:
+            original = point_buildings[target_index]
+            point_buildings[target_index] = OsmPointFeature(
+                original.osm_key,
+                _merge_overture_tags(original.tags, overture.tags, match_method="source-id"),
+                original.point,
+            )
+            matched_point_indices.add(target_index)
+        matched_overture.add(overture_index)
+        exact_matches += 1
+
+    # Build lightweight spatial buckets for the remaining polygon-to-polygon
+    # comparison. Shapely performs exact intersection/union area only for nearby
+    # candidates, avoiding a quadratic comparison across an entire city.
+    try:
+        from shapely.geometry import Polygon as ShapelyPolygon
+        from shapely.ops import unary_union
+    except ImportError:
+        ShapelyPolygon = None  # type: ignore[assignment]
+        unary_union = None  # type: ignore[assignment]
+
+    polygon_shapes: list[Any] = []
+    polygon_bounds: list[tuple[float, float, float, float]] = []
+    bucket_size = 100.0
+    spatial_buckets: dict[tuple[int, int], list[int]] = defaultdict(list)
+
+    def shapely_feature(feature: OsmPolygonFeature):
+        if ShapelyPolygon is None or unary_union is None:
+            return None
+        shapes = []
+        for polygon in feature.polygons:
+            outer = tuple(projection.to_world(point) for point in polygon.outer[:-1])
+            holes = tuple(
+                tuple(projection.to_world(point) for point in hole[:-1])
+                for hole in polygon.holes
+            )
+            if len(outer) < 3:
+                continue
+            try:
+                shape = ShapelyPolygon(outer, [hole for hole in holes if len(hole) >= 3])
+                if not shape.is_valid:
+                    shape = shape.buffer(0)
+                if not shape.is_empty and shape.area > 0.01:
+                    shapes.append(shape)
+            except Exception:
+                continue
+        if not shapes:
+            return None
+        return unary_union(shapes)
+
+    if ShapelyPolygon is not None:
+        for osm_index, feature in enumerate(polygon_buildings):
+            shape = shapely_feature(feature)
+            polygon_shapes.append(shape)
+            if shape is None or shape.is_empty:
+                polygon_bounds.append((0.0, 0.0, 0.0, 0.0))
+                continue
+            bounds = tuple(float(value) for value in shape.bounds)
+            polygon_bounds.append(bounds)
+            min_x, min_z, max_x, max_z = bounds
+            for bz in range(math.floor(min_z / bucket_size), math.floor(max_z / bucket_size) + 1):
+                for bx in range(math.floor(min_x / bucket_size), math.floor(max_x / bucket_size) + 1):
+                    spatial_buckets[(bx, bz)].append(osm_index)
+
+        for overture_index, overture in enumerate(overture_buildings):
+            if overture_index in matched_overture:
+                continue
+            shape = shapely_feature(overture)
+            if shape is None or shape.is_empty or shape.area <= 0.01:
+                continue
+            min_x, min_z, max_x, max_z = (float(value) for value in shape.bounds)
+            candidate_indices: set[int] = set()
+            for bz in range(math.floor(min_z / bucket_size), math.floor(max_z / bucket_size) + 1):
+                for bx in range(math.floor(min_x / bucket_size), math.floor(max_x / bucket_size) + 1):
+                    candidate_indices.update(spatial_buckets.get((bx, bz), ()))
+            best: tuple[float, float, int] | None = None
+            for osm_index in candidate_indices:
+                if osm_index in matched_polygon_indices:
+                    continue
+                osm_shape = polygon_shapes[osm_index]
+                if osm_shape is None or osm_shape.is_empty:
+                    continue
+                try:
+                    intersection = shape.intersection(osm_shape).area
+                    if intersection <= 0.0:
+                        continue
+                    union = shape.union(osm_shape).area
+                    if union <= 0.0:
+                        continue
+                    iou = intersection / union
+                    area_ratio = min(shape.area, osm_shape.area) / max(shape.area, osm_shape.area)
+                    centroid_distance = shape.centroid.distance(osm_shape.centroid)
+                except Exception:
+                    continue
+                accepted_match = (
+                    iou >= 0.65
+                    or (iou >= 0.50 and area_ratio >= 0.65 and centroid_distance <= 5.0)
+                )
+                if not accepted_match:
+                    continue
+                candidate = (iou, area_ratio, osm_index)
+                if best is None or candidate > best:
+                    best = candidate
+            if best is None:
+                continue
+            osm_index = best[2]
+            original = polygon_buildings[osm_index]
+            polygon_buildings[osm_index] = OsmPolygonFeature(
+                original.osm_key,
+                _merge_overture_tags(original.tags, overture.tags, match_method="geometry"),
+                original.polygons,
+            )
+            matched_overture.add(overture_index)
+            matched_polygon_indices.add(osm_index)
+            spatial_matches += 1
+
+    # Preserve the original Overture-as-fallback behavior for records that did
+    # not correspond to an OSM building at all.
+    merged_dataset = replace(
+        dataset,
+        building_polygons=tuple(polygon_buildings),
+        building_points=tuple(point_buildings),
+    )
+    fallback_areas: list[
+        tuple[tuple[PointXZ, ...], tuple[tuple[PointXZ, ...], ...], tuple[float, float, float, float]]
+    ] = []
+    for feature in sorted(merged_dataset.urban, key=lambda item: item.osm_key):
         if feature.tags.get("landuse", "").casefold() != "residential":
             continue
         for polygon in feature.polygons:
             outer = tuple(projection.to_world(point) for point in polygon.outer[:-1])
             holes = tuple(tuple(projection.to_world(point) for point in hole[:-1]) for hole in polygon.holes)
-            if len(outer) >= 3 and not _residential_area_has_mapped_building(dataset, projection, outer, holes):
+            if len(outer) >= 3 and not _residential_area_has_mapped_building(merged_dataset, projection, outer, holes):
                 fallback_areas.append((outer, holes, _world_bbox(outer)))
-    for place in sorted(dataset.places, key=lambda item: item.osm_key):
-        settlement = _small_settlement_infill_feature(place, dataset, projection, spec)
+    for place in sorted(merged_dataset.places, key=lambda item: item.osm_key):
+        settlement = _small_settlement_infill_feature(place, merged_dataset, projection, spec)
         if settlement is None:
             continue
         polygon = settlement.polygons[0]
         outer = tuple(projection.to_world(point) for point in polygon.outer[:-1])
         holes = tuple(tuple(projection.to_world(point) for point in hole[:-1]) for hole in polygon.holes)
-        if len(outer) >= 3 and not _residential_area_has_mapped_building(dataset, projection, outer, holes):
+        if len(outer) >= 3 and not _residential_area_has_mapped_building(merged_dataset, projection, outer, holes):
             fallback_areas.append((outer, holes, _world_bbox(outer)))
     fallback_areas.extend(
         (outer, holes, _world_bbox(outer))
-        for outer, holes in _overture_road_ending_fallback_areas(dataset, projection, spec)
+        for outer, holes in _overture_road_ending_fallback_areas(merged_dataset, projection, spec)
     )
-    if not fallback_areas:
-        return dataset
 
-    mapped_points = tuple(
-        projection.to_world(feature.point)
-        for feature in dataset.building_points
-        if feature.tags.get("source") != "overturemaps"
-    )
+    mapped_points = tuple(projection.to_world(feature.point) for feature in point_buildings)
     mapped_polygons: list[tuple[tuple[PointXZ, ...], tuple[float, float, float, float]]] = []
-    for feature in dataset.building_polygons:
-        if feature.tags.get("source") == "overturemaps":
-            continue
+    for feature in polygon_buildings:
         for polygon in feature.polygons:
             projected = tuple(projection.to_world(point) for point in polygon.outer[:-1])
             if len(projected) >= 3:
@@ -5150,49 +5482,62 @@ def augment_dataset_with_overture_buildings(
         return False
 
     accepted: list[OsmPolygonFeature] = []
-    seen_keys = {feature.osm_key for feature in dataset.building_polygons}
-    for feature in overture_buildings:
-        kept_polygons: list[GeoPolygon] = []
-        for polygon in feature.polygons:
-            projected = tuple(projection.to_world(point) for point in polygon.outer[:-1])
-            if len(projected) < 3:
+    seen_keys = {feature.osm_key for feature in polygon_buildings}
+    if fallback_areas:
+        for overture_index, feature in enumerate(overture_buildings):
+            if overture_index in matched_overture:
                 continue
-            bbox = _world_bbox(projected)
-            area, x, z = _polygon_area_centroid(projected)
-            if area < getattr(spec, "building_minimum_area", 10.0):
-                continue
-            if conflicts_with_mapped_building(projected, bbox, x, z):
-                continue
-            if any(
-                _bboxes_intersect(bbox, fallback_bbox)
-                and _polygon_contains_with_holes((x, z), outer, holes)
-                for outer, holes, fallback_bbox in fallback_areas
-            ):
-                kept_polygons.append(polygon)
-        if kept_polygons and feature.osm_key not in seen_keys:
-            accepted.append(OsmPolygonFeature(feature.osm_key, feature.tags, tuple(kept_polygons)))
-            seen_keys.add(feature.osm_key)
-    if not accepted:
+            kept_polygons: list[GeoPolygon] = []
+            for polygon in feature.polygons:
+                projected = tuple(projection.to_world(point) for point in polygon.outer[:-1])
+                if len(projected) < 3:
+                    continue
+                bbox = _world_bbox(projected)
+                area, x, z = _polygon_area_centroid(projected)
+                if area < getattr(spec, "building_minimum_area", 10.0):
+                    continue
+                if conflicts_with_mapped_building(projected, bbox, x, z):
+                    continue
+                if any(
+                    _bboxes_intersect(bbox, fallback_bbox)
+                    and _polygon_contains_with_holes((x, z), outer, holes)
+                    for outer, holes, fallback_bbox in fallback_areas
+                ):
+                    kept_polygons.append(polygon)
+            if kept_polygons and feature.osm_key not in seen_keys:
+                accepted.append(OsmPolygonFeature(feature.osm_key, feature.tags, tuple(kept_polygons)))
+                seen_keys.add(feature.osm_key)
+
+    if exact_matches == 0 and spatial_matches == 0 and not accepted:
         return dataset
+
+    final_polygons = tuple(sorted((*polygon_buildings, *accepted), key=lambda item: item.osm_key))
+    final_points = tuple(sorted(point_buildings, key=lambda item: item.osm_key))
     overture_fingerprint = cache_key(
-        "overture-buildings-accepted-v3-building-semantics",
+        "overture-buildings-conflated-v4",
         {
             "base": dataset.normalized_fingerprint,
-            "keys": tuple(feature.osm_key for feature in accepted),
-            "tags": tuple(tuple(sorted(feature.tags.items())) for feature in accepted),
-            "polygons": tuple(
-                tuple(tuple(round(value, 7) for point in polygon.outer for value in point) for polygon in feature.polygons)
-                for feature in accepted
+            "exact_matches": exact_matches,
+            "spatial_matches": spatial_matches,
+            "polygon_tags": tuple(
+                (feature.osm_key, tuple(sorted(feature.tags.items())))
+                for feature in final_polygons
+                if feature.tags.get("cwr:overture_match") or feature.tags.get("source") == "overturemaps"
+            ),
+            "point_tags": tuple(
+                (feature.osm_key, tuple(sorted(feature.tags.items())))
+                for feature in final_points
+                if feature.tags.get("cwr:overture_match")
             ),
         },
     )
     return replace(
         dataset,
-        building_polygons=tuple(sorted((*dataset.building_polygons, *accepted), key=lambda item: item.osm_key)),
+        building_polygons=final_polygons,
+        building_points=final_points,
         element_count=dataset.element_count + len(accepted),
         normalized_fingerprint=overture_fingerprint,
     )
-
 
 def _infill_candidate_rectangles(
     feature: OsmPolygonFeature,
@@ -5371,6 +5716,51 @@ def _demote_dense_garage_clusters_to_sheds(
             )
     return tuple(updated)
 
+
+def _mapped_entrance_for_building(
+    dataset: OsmDataset,
+    projection: BboxProjection,
+    footprint: Sequence[PointXZ],
+    *,
+    maximum_boundary_distance: float = 3.0,
+) -> PointXZ | None:
+    """Return the best mapped OSM entrance associated with one building polygon.
+
+    Entrance nodes are not reliably delivered with parent-way membership in the
+    compact Overpass geometry response, so association is geometric. A node may
+    lie just inside, exactly on, or a few centimetres outside the source outline.
+    Explicit ``entrance=main`` wins, then the closest usable entrance to the
+    footprint boundary.
+    """
+
+    if len(footprint) < 3 or not dataset.building_entrances:
+        return None
+    polygon = tuple(footprint)
+    limit_sq = max(0.0, float(maximum_boundary_distance)) ** 2
+    priorities = {
+        "main": 0,
+        "yes": 1,
+        "home": 1,
+        "staircase": 2,
+        "service": 3,
+        "emergency": 4,
+    }
+    candidates: list[tuple[int, float, str, PointXZ]] = []
+    for feature in dataset.building_entrances:
+        point = projection.to_world(feature.point)
+        distance_sq = min(
+            _point_to_segment_distance_squared(point, start, end)
+            for start, end in zip(polygon, polygon[1:] + polygon[:1])
+        )
+        if not _point_in_polygon(point, polygon) and distance_sq > limit_sq:
+            continue
+        kind = feature.tags.get("entrance", "").strip().casefold()
+        candidates.append((priorities.get(kind, 2), distance_sq, feature.osm_key, point))
+    if not candidates:
+        return None
+    return min(candidates)[3]
+
+
 def plan_building_placements(
     dataset: OsmDataset,
     projection: BboxProjection,
@@ -5389,6 +5779,27 @@ def plan_building_placements(
     candidates: list[tuple[int, str, int, str, Any, Any]] = []
     for feature in dataset.building_polygons:
         for polygon_index, polygon in enumerate(feature.polygons):
+            # Procedural buildings can preserve common orthogonal L/T/U shapes
+            # as a small assembly of adjoining rectangular wings. Stock-model
+            # mode keeps the legacy one-object behaviour because stock P3Ds do
+            # not have dimensions that can be fitted to the source parts.
+            if building_asset_library is not None:
+                from .procedural_buildings import decompose_footprint_rectangles
+                parent_projected = tuple(
+                    projection.to_world(point) for point in polygon.outer[:-1]
+                )
+                parts = decompose_footprint_rectangles(parent_projected)
+                if len(parts) > 1:
+                    for part_index, part in enumerate(parts):
+                        candidates.append((
+                            _building_placement_priority(feature.tags),
+                            feature.osm_key,
+                            polygon_index * 8 + part_index,
+                            "polygon_part",
+                            feature,
+                            (part, parent_projected),
+                        ))
+                    continue
             candidates.append((
                 _building_placement_priority(feature.tags),
                 feature.osm_key,
@@ -5418,8 +5829,13 @@ def plan_building_placements(
 
         procedural_placement = None
         building_family = _building_family(feature.tags)
-        if geometry_kind == "polygon":
-            projected = [projection.to_world(point) for point in geometry.outer[:-1]]
+        if geometry_kind in {"polygon", "polygon_part"}:
+            if geometry_kind == "polygon_part":
+                projected = list(geometry[0])
+                parent_projected = tuple(geometry[1])
+            else:
+                projected = [projection.to_world(point) for point in geometry.outer[:-1]]
+                parent_projected = tuple(projected)
             area, x, z = _polygon_area_centroid(projected)
             if area < spec.building_minimum_area or len(projected) < 3:
                 continue
@@ -5431,11 +5847,29 @@ def plan_building_placements(
                 support_polygon = tuple(projected)
             else:
                 road_point = nearest_road_point(dataset, projection, x, z)
+                entrance_point = _mapped_entrance_for_building(
+                    dataset, projection, parent_projected
+                )
+                if entrance_point is not None and geometry_kind == "polygon_part":
+                    part_boundary_distance = min(
+                        _point_to_segment_distance_squared(entrance_point, start, end)
+                        for start, end in zip(projected, projected[1:] + projected[:1])
+                    )
+                    if (
+                        not _point_in_polygon(entrance_point, projected)
+                        and part_boundary_distance > 3.0 ** 2
+                    ):
+                        entrance_point = None
                 planner = getattr(building_asset_library, "plan_polygon", None)
                 procedural_placement = (
-                    planner(feature.tags, projected, road_point=road_point)
+                    planner(
+                        feature.tags, projected, road_point=road_point,
+                        entrance_point=entrance_point,
+                    )
                     if planner is not None
-                    else building_asset_library.place_polygon(feature.tags, projected, road_point=road_point)
+                    else building_asset_library.place_polygon(
+                        feature.tags, projected, road_point=(entrance_point or road_point)
+                    )
                 )
                 heading = procedural_placement.heading_degrees
                 model_path = procedural_placement.model_path
@@ -5481,7 +5915,10 @@ def plan_building_placements(
                 )
 
         road_nudged = False
-        if _polygon_maximum_span(support_polygon) >= LARGE_BUILDING_ROAD_NUDGE_MINIMUM_SPAN_METRES:
+        if (
+            geometry_kind != "polygon_part"
+            and _polygon_maximum_span(support_polygon) >= LARGE_BUILDING_ROAD_NUDGE_MINIMUM_SPAN_METRES
+        ):
             x, z, support_polygon, road_nudged = _nudge_building_footprint_off_roads(
                 dataset, projection, raster, spec, x, z, heading, support_polygon,
                 road_corridors=building_road_corridors,
@@ -5698,6 +6135,20 @@ def generate_world_objects(
     minimum_foundation_depth = max(0.0, float(getattr(spec, "building_foundation_depth", 0.5)))
     foundation_safety = max(0.0, float(getattr(spec, "building_foundation_safety", 0.20)))
 
+    multipart_ground_heights: dict[str, float] = {}
+    for grouped_plan in building_placement_plans:
+        if grouped_plan.geometry_kind != "polygon_part":
+            continue
+        if _building_plan_fully_submerged(grouped_plan, elevations, raster, spec):
+            continue
+        _minimum, grouped_maximum = _polygon_elevation_extrema(
+            elevations, spec.cells, spec.cell_size, tuple(grouped_plan.support_polygon)
+        )
+        multipart_ground_heights[grouped_plan.osm_key] = max(
+            multipart_ground_heights.get(grouped_plan.osm_key, -math.inf),
+            grouped_maximum,
+        )
+
     for plan in building_placement_plans:
         if _building_plan_fully_submerged(plan, elevations, raster, spec):
             building_fully_submerged_rejections += 1
@@ -5711,7 +6162,11 @@ def generate_world_objects(
         minimum_height, footprint_maximum_height = _polygon_elevation_extrema(
             elevations, spec.cells, spec.cell_size, grounding_polygon
         )
-        maximum_height = footprint_maximum_height
+        maximum_height = (
+            multipart_ground_heights.get(plan.osm_key, footprint_maximum_height)
+            if plan.geometry_kind == "polygon_part"
+            else footprint_maximum_height
+        )
         relief = maximum_height - minimum_height
         # Interior and non-interior variants use exactly the same world placement
         # and foundation calculation. Enterable variants now carry their own

@@ -297,6 +297,13 @@ def _add_fetch_source_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cell-size", type=float, default=25.0, help="metres")
     parser.add_argument("--refresh", action="store_true", help="replace the frozen snapshot explicitly")
     parser.add_argument("--reference-map", action="store_true", help="also freeze an OpenTopoMap comparison image")
+    parser.add_argument(
+        "--no-overture-buildings",
+        action="store_false",
+        dest="overture_buildings_enabled",
+        help="do not download Overture building enrichment data while freezing sources",
+    )
+    parser.set_defaults(overture_buildings_enabled=True)
     parser.add_argument("--dem-provider", choices=("dem-stitcher", "hgt"), default="dem-stitcher")
     parser.add_argument("--dem-name", default="glo_30", help="dem-stitcher dataset shortname")
     parser.add_argument("--overpass-url", action="append", default=[], help="Overpass interpreter endpoint; repeatable")
@@ -513,9 +520,9 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--residential-infill-min-area", type=float, default=1800.0)
     milestone9.add_argument("--residential-infill-road-clearance", type=float, default=0.5)
     milestone9.add_argument("--residential-infill-building-clearance", type=float, default=6.0)
-    milestone9.add_argument("--no-overture-buildings", action="store_false", dest="overture_buildings_enabled", help="skip optional Overture Maps building footprints before synthetic residential infill")
+    milestone9.add_argument("--no-overture-buildings", action="store_false", dest="overture_buildings_enabled", help="skip Overture building enrichment and missing-building fallback; no Overture download is performed by Milestone 9")
     milestone9.set_defaults(overture_buildings_enabled=True)
-    milestone9.add_argument("--overture-buildings-geojson", type=Path, default=None, help="pre-downloaded Overture building GeoJSON to use before synthetic residential infill")
+    milestone9.add_argument("--overture-buildings-geojson", type=Path, default=None, help="pre-downloaded Overture building GeoJSON to merge into OSM buildings and use for missing-building fallback")
     milestone9.add_argument("--no-rural-vegetation", action="store_false", dest="rural_vegetation_enabled", help="disable tree rows, orchards, vineyards, scrub and mapped rock areas")
     milestone9.set_defaults(rural_vegetation_enabled=True)
     milestone9.add_argument("--max-rural-vegetation-objects", type=int, default=3000)
@@ -688,6 +695,7 @@ def main(argv: list[str] | None = None) -> int:
                 cell_size=args.cell_size,
                 refresh=args.refresh,
                 reference_map=args.reference_map,
+                overture_buildings_enabled=args.overture_buildings_enabled,
                 dem_provider=args.dem_provider,
                 dem_name=args.dem_name,
                 overpass_urls=overpass_urls,

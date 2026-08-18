@@ -4795,7 +4795,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             },
         )
 
-    def test_overture_buildings_do_not_cover_existing_osm_building_areas(self) -> None:
+    def test_overture_buildings_merge_without_duplicating_existing_osm_building(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 300.0)
         village = OsmPointFeature(
             "node/village", {"place": "village", "name": "Mapped Village"},
@@ -4832,7 +4832,13 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             }), encoding="utf-8")
             augmented = augment_dataset_with_overture_buildings(dataset, projection, Milestone9Spec(source_dir=Path("unused")), path)
 
-        self.assertEqual(augmented.building_polygons, dataset.building_polygons)
+        self.assertEqual(len(augmented.building_polygons), 1)
+        merged = augmented.building_polygons[0]
+        self.assertEqual(merged.osm_key, house.osm_key)
+        self.assertEqual(merged.polygons, house.polygons)
+        self.assertEqual(merged.tags["building"], "house")
+        self.assertEqual(merged.tags["cwr:overture_id"], "duplicate-house")
+        self.assertEqual(merged.tags["cwr:overture_match"], "geometry")
 
     def test_overture_buildings_can_fill_empty_road_endings(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 300.0)

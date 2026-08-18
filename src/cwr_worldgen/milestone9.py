@@ -903,11 +903,26 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         bundled_geojson=source.overture_buildings_geojson_path,
     )
     if overture_path is not None:
-        report_progress(9, f"Loading Overture building fallback footprints from {overture_path.name}")
+        report_progress(9, f"Loading Overture building enrichment from {overture_path.name}")
         before = len(dataset.building_polygons)
+        before_merged = sum(
+            1 for feature in dataset.building_polygons
+            if feature.tags.get("cwr:overture_match")
+        ) + sum(
+            1 for feature in dataset.building_points
+            if feature.tags.get("cwr:overture_match")
+        )
         dataset = augment_dataset_with_overture_buildings(dataset, projection, spec, overture_path)
         added = len(dataset.building_polygons) - before
-        report_progress(10, f"Overture fallback buildings accepted: {added:,}")
+        after_merged = sum(
+            1 for feature in dataset.building_polygons
+            if feature.tags.get("cwr:overture_match")
+        ) + sum(
+            1 for feature in dataset.building_points
+            if feature.tags.get("cwr:overture_match")
+        )
+        merged = max(0, after_merged - before_merged)
+        report_progress(10, f"Overture buildings merged: {merged:,}; fallback buildings added: {added:,}")
     report_progress(10, (
         f"Normalized dataset loaded: {len(dataset.roads):,} roads, "
         f"{len(dataset.building_polygons):,} buildings, {len(dataset.forests):,} forests"

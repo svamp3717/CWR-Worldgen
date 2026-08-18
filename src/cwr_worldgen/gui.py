@@ -586,6 +586,8 @@ def build_fetch_command(values: dict[str, object], python: str | None = None) ->
         command.append("--refresh")
     if values.get("reference_map"):
         command.append("--reference-map")
+    if values.get("overture_buildings", True) is False:
+        command.append("--no-overture-buildings")
     return command
 
 
@@ -1813,7 +1815,7 @@ class WorldgenGui(tk.Tk):
             ("Bridge decks", "bridges", True),
             ("Procedural bridges (instead of Nogova)", "procedural_bridges", False),
             ("Fill empty residential areas", "residential_infill", True),
-            ("Use Overture buildings before randomly generated", "overture_buildings", True),
+            ("Download/merge Overture building data", "overture_buildings", True),
             ("Rural vegetation", "rural_vegetation", True),
             ("Tall grass in OSM meadows", "meadow_grass", True),
             ("Wetland reeds", "wetland_reeds", True),
@@ -2011,6 +2013,7 @@ class WorldgenGui(tk.Tk):
             "cell_size": self.vars["fetch_cell_size"].get(),
             "refresh": self.vars["fetch_refresh"].get(),
             "reference_map": self.vars["reference_map"].get(),
+            "overture_buildings": self.vars["overture_buildings"].get(),
         }
 
     def _validation_values(self) -> dict[str, object]:
@@ -2029,6 +2032,7 @@ class WorldgenGui(tk.Tk):
             "cell_size": self.vars["fetch_cell_size"].get(),
             "refresh": self.vars["fetch_refresh"].get(),
             "reference_map": self.vars["reference_map"].get(),
+            "overture_buildings": self.vars["overture_buildings"].get(),
         })
         return values
 

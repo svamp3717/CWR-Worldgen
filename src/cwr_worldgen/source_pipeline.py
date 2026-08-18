@@ -96,6 +96,7 @@ class SourceFetchSpec:
     cell_size: float = 25.0
     refresh: bool = False
     reference_map: bool = False
+    overture_buildings_enabled: bool = True
     dem_provider: str = "dem-stitcher"
     dem_name: str = "glo_30"
     overpass_urls: tuple[str, ...] = DEFAULT_OVERPASS_URLS
@@ -993,7 +994,8 @@ def fetch_sources(spec: SourceFetchSpec) -> FrozenSourceBundle:
     osm_dir = root / "osm"
     osm_dir.mkdir(parents=True, exist_ok=True)
     overture_dir = root / "overture"
-    overture_dir.mkdir(parents=True, exist_ok=True)
+    if spec.overture_buildings_enabled:
+        overture_dir.mkdir(parents=True, exist_ok=True)
     osm_json_path = osm_dir / "raw-overpass.json"
     query_path = osm_dir / "overpass-query.txt"
     osm_source = _fetch_overpass(
@@ -1010,22 +1012,33 @@ def fetch_sources(spec: SourceFetchSpec) -> FrozenSourceBundle:
     element_count = len(osm_document["elements"])
     report_progress(37, f"Frozen OpenStreetMap snapshot contains {element_count:,} elements")
 
-    report_progress(38, "Fetching optional Overture building fallback data")
-    overture_buildings_path = fetch_overture_buildings_geojson(
-        bbox,
-        overture_dir / "buildings.geojson",
-        refresh=spec.refresh,
-    )
+    overture_buildings_path: Path | None = None
     overture_document: dict[str, Any] | None = None
-    if overture_buildings_path is not None:
-        overture_document = {
-            "provider": "Overture Maps",
-            "buildings_geojson": _relative(root, overture_buildings_path),
-            "buildings_geojson_sha256": _sha256(overture_buildings_path),
-        }
-        report_progress(38, "Cached optional Overture building fallback data")
+    if spec.overture_buildings_enabled:
+        report_progress(38, "Fetching optional Overture building enrichment data")
+        # Keep partial Overture tiles outside the frozen source directory.
+        # Atomic source refreshes use a temporary sibling directory; a persistent
+        # sibling cache lets a failed large-world Overture run resume on the next
+        # refresh instead of discarding every completed tile with the staging tree.
+        overture_tile_cache = root.parent / ".cwr-worldgen-cache" / "overture"
+        overture_buildings_path = fetch_overture_buildings_geojson(
+            bbox,
+            overture_dir / "buildings.geojson",
+            refresh=spec.refresh,
+            tile_cache_dir=overture_tile_cache,
+        )
+        if overture_buildings_path is not None:
+            overture_document = {
+                "provider": "Overture Maps",
+                "purpose": "building enrichment and missing-building fallback",
+                "buildings_geojson": _relative(root, overture_buildings_path),
+                "buildings_geojson_sha256": _sha256(overture_buildings_path),
+            }
+            report_progress(38, "Cached optional Overture building enrichment data")
+        else:
+            report_progress(38, "Optional Overture building enrichment unavailable; continuing with OSM only")
     else:
-        report_progress(38, "Optional Overture building fallback data unavailable; continuing with OSM only")
+        report_progress(38, "Overture building download disabled; continuing with OSM only")
 
     if spec.dem_provider == "dem-stitcher":
         heightmap_path, raw_elevation, minimum, maximum, dem_product, resampling = _fetch_dem_stitcher_elevation(

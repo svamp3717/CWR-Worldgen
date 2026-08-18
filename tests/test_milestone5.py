@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 import tempfile
@@ -189,6 +190,39 @@ class Milestone5Tests(unittest.TestCase):
             self.assertTrue(any("Validating completed frozen source bundle" in stage for stage in stages))
             self.assertEqual(events[-1], (100, "OSM and heightmap source fetch complete"))
             self.assertGreater(len(events), 20)
+
+    def test_fetch_sources_uses_persistent_overture_tile_cache_outside_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "sources"
+            spec = self._cached_source(root)
+            overture_path = root / "overture" / "buildings.geojson"
+            with (
+                patch("urllib.request.urlopen", side_effect=AssertionError("network access")),
+                patch(
+                    "cwr_worldgen.source_pipeline.fetch_overture_buildings_geojson",
+                    return_value=overture_path,
+                ) as fetch_overture,
+            ):
+                fetch_sources(spec)
+            _args, kwargs = fetch_overture.call_args
+            self.assertEqual(
+                kwargs["tile_cache_dir"],
+                root.parent / ".cwr-worldgen-cache" / "overture",
+            )
+
+    def test_fetch_sources_can_skip_overture_download_completely(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "sources"
+            spec = replace(self._cached_source(root), overture_buildings_enabled=False)
+            with (
+                patch("urllib.request.urlopen", side_effect=AssertionError("network access")),
+                patch("cwr_worldgen.source_pipeline.fetch_overture_buildings_geojson") as fetch_overture,
+            ):
+                bundle = fetch_sources(spec)
+            fetch_overture.assert_not_called()
+            manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+            self.assertIsNone(manifest["overture"])
+            self.assertIsNone(bundle.overture_buildings_geojson_path)
 
     def test_fetches_from_cached_raw_files_without_network(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -305,6 +305,10 @@ _FAMILY_COLOURS: dict[str, tuple[int, int, int]] = {
 _ROOF_COLOURS: dict[str, tuple[int, int, int]] = {
     "flat": (76, 78, 73),
     "gabled": (104, 61, 46),
+    "hipped": (104, 61, 46),
+    "pyramidal": (104, 61, 46),
+    "dome": (94, 86, 71),
+    "onion": (91, 84, 69),
 }
 
 
@@ -1972,7 +1976,15 @@ def _roof_style(
     value = tags.get("roof:shape", "").casefold()
     if value in {"flat", "terrace", "skillion", "shed"}:
         return "flat"
-    if value in {"gabled", "gable", "half-hipped", "hipped", "pyramidal", "gambrel", "mansard"}:
+    if value in {"hipped", "half-hipped"}:
+        return "hipped"
+    if value in {"pyramidal", "pyramid"}:
+        return "pyramidal"
+    if value in {"dome", "domed"}:
+        return "dome"
+    if value in {"onion", "onion_dome"}:
+        return "onion"
+    if value in {"gabled", "gable", "gambrel", "mansard"}:
         return "gabled"
     if regional_style.startswith("middle_east_"):
         return "flat"
@@ -2040,6 +2052,134 @@ def footprint_from_polygon(points: Sequence[PointXZ]) -> _Footprint:
     width = min(edge[0] for edge in edges)
     heading = math.degrees(math.atan2(dx, dz)) % 180.0
     return _Footprint(max(0.1, width), max(0.1, length), heading)
+
+
+
+def decompose_footprint_rectangles(
+    points: Sequence[PointXZ],
+    *,
+    max_parts: int = 4,
+    minimum_part_size: float = 2.0,
+    rectangular_fill_threshold: float = 0.88,
+) -> tuple[tuple[PointXZ, ...], ...]:
+    """Decompose a simple orthogonal L/T/U footprint into adjoining rectangles.
+
+    The decomposition is deliberately conservative. Buildings whose outline is
+    already close to its minimum rotated rectangle, contains too many distinct
+    edge coordinates, or would require more than ``max_parts`` keep the legacy
+    one-rectangle model. This targets the common mapped L/T/U cases without
+    trying to turn every survey-grade polygon into a tiny model-per-corner maze.
+    """
+
+    if len(points) < 4 or max_parts < 2:
+        return ()
+    polygon = Polygon(points)
+    if polygon.is_empty or not polygon.is_valid or polygon.area <= 1.0:
+        return ()
+    footprint = footprint_from_polygon(points)
+    envelope_area = max(0.01, footprint.width_m * footprint.length_m)
+    if polygon.area / envelope_area >= rectangular_fill_threshold:
+        return ()
+
+    centre = polygon.centroid
+    centre_x, centre_z = float(centre.x), float(centre.y)
+    angle = math.radians(footprint.heading_degrees)
+    width_axis = (math.cos(angle), -math.sin(angle))
+    length_axis = (math.sin(angle), math.cos(angle))
+
+    def to_local(point: PointXZ) -> PointXZ:
+        dx, dz = point[0] - centre_x, point[1] - centre_z
+        return (
+            dx * width_axis[0] + dz * width_axis[1],
+            dx * length_axis[0] + dz * length_axis[1],
+        )
+
+    def to_world(point: PointXZ) -> PointXZ:
+        return (
+            centre_x + point[0] * width_axis[0] + point[1] * length_axis[0],
+            centre_z + point[0] * width_axis[1] + point[1] * length_axis[1],
+        )
+
+    local = Polygon([to_local(point) for point in points])
+    # Remove survey jitter that otherwise creates a dozen microscopic coordinate
+    # bands along a wall that is visually straight in CWA anyway.
+    local = local.simplify(0.35, preserve_topology=True)
+    if local.is_empty or local.geom_type != "Polygon":
+        return ()
+    coords = list(local.exterior.coords)[:-1]
+
+    def clustered(values: Sequence[float], tolerance: float = 0.55) -> list[float]:
+        result: list[list[float]] = []
+        for value in sorted(float(item) for item in values):
+            if result and abs(value - sum(result[-1]) / len(result[-1])) <= tolerance:
+                result[-1].append(value)
+            else:
+                result.append([value])
+        return [sum(group) / len(group) for group in result]
+
+    xs = clustered([point[0] for point in coords])
+    zs = clustered([point[1] for point in coords])
+    if len(xs) < 3 or len(zs) < 3 or len(xs) > 8 or len(zs) > 8:
+        return ()
+
+    filled: set[tuple[int, int]] = set()
+    for zi in range(len(zs) - 1):
+        z0, z1 = zs[zi], zs[zi + 1]
+        if z1 - z0 < 0.2:
+            continue
+        for xi in range(len(xs) - 1):
+            x0, x1 = xs[xi], xs[xi + 1]
+            if x1 - x0 < 0.2:
+                continue
+            cell = Polygon(((x0, z0), (x1, z0), (x1, z1), (x0, z1)))
+            intersection = local.intersection(cell).area
+            if intersection >= cell.area * 0.80:
+                filled.add((xi, zi))
+    if not filled:
+        return ()
+
+    remaining = set(filled)
+    rectangles: list[tuple[float, float, float, float]] = []
+    while remaining:
+        start_x, start_z = min(remaining, key=lambda item: (item[1], item[0]))
+        end_x = start_x
+        while (end_x + 1, start_z) in remaining:
+            end_x += 1
+        end_z = start_z
+        while True:
+            candidate_z = end_z + 1
+            if all((xi, candidate_z) in remaining for xi in range(start_x, end_x + 1)):
+                end_z = candidate_z
+            else:
+                break
+        cells = {
+            (xi, zi)
+            for zi in range(start_z, end_z + 1)
+            for xi in range(start_x, end_x + 1)
+        }
+        remaining.difference_update(cells)
+        x0, x1 = xs[start_x], xs[end_x + 1]
+        z0, z1 = zs[start_z], zs[end_z + 1]
+        if x1 - x0 >= minimum_part_size and z1 - z0 >= minimum_part_size:
+            rectangles.append((x0, z0, x1, z1))
+        if len(rectangles) > max_parts:
+            return ()
+
+    if len(rectangles) < 2:
+        return ()
+    rectangle_area = sum((x1 - x0) * (z1 - z0) for x0, z0, x1, z1 in rectangles)
+    if rectangle_area < polygon.area * 0.72:
+        return ()
+
+    result: list[tuple[PointXZ, ...]] = []
+    for x0, z0, x1, z1 in rectangles:
+        result.append(tuple(map(to_world, (
+            (x0, z0), (x1, z0), (x1, z1), (x0, z1),
+        ))))
+    result.sort(
+        key=lambda rectangle: -Polygon(rectangle).area
+    )
+    return tuple(result)
 
 
 def _cstring(value: str, size: int, label: str) -> bytes:
@@ -3795,6 +3935,152 @@ def _interior_paths_lod(
     )
 
 
+
+def _surface_normal(
+    points: Sequence[tuple[float, float, float]], indices: Sequence[int]
+) -> tuple[float, float, float]:
+    """Return a stable unit normal for one generated roof polygon."""
+
+    if len(indices) < 3:
+        return (0.0, 1.0, 0.0)
+    a = points[indices[0]]
+    b = points[indices[1]]
+    c = points[indices[2]]
+    ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+    vx, vy, vz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
+    nx = uy * vz - uz * vy
+    ny = uz * vx - ux * vz
+    nz = ux * vy - uy * vx
+    length = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if length <= 1.0e-9:
+        return (0.0, 1.0, 0.0)
+    return (nx / length, ny / length, nz / length)
+
+
+def _append_special_roof(
+    base: _Lod,
+    key: BuildingVariantKey,
+    roof_texture: str,
+    *,
+    eave_height: float,
+    roof_top_height: float,
+    vertical_offset: float = 0.0,
+) -> _Lod:
+    """Add hipped/pyramidal/dome/onion visual geometry above a flat wall shell.
+
+    The base flat top intentionally remains beneath the pitched/curved roof. It
+    acts as an attic ceiling and avoids introducing holes into enterable models.
+    """
+
+    points = list(base.points)
+    normals = list(base.normals)
+    faces = list(base.faces)
+    half_width = key.width_m * 0.5
+    half_length = key.length_m * 0.5
+    base_y = eave_height + vertical_offset
+    top_y = max(base_y + 0.25, roof_top_height + vertical_offset)
+    roof_faces: list[_Face] = []
+
+    def add_face(indices: tuple[int, ...]) -> None:
+        normal_index = len(normals)
+        normals.append(_surface_normal(points, indices))
+        if len(indices) == 3:
+            face = _triangle(roof_texture, indices, normal_index)
+        elif len(indices) == 4:
+            face = _quad(roof_texture, indices, normal_index, 1.0, 1.0)
+        else:
+            raise ValueError("special roof faces must be triangles or quads")
+        roof_faces.extend(_double_sided_faces((face,)))
+
+    # Eave corners follow the rectangular building shell exactly.
+    corner_start = len(points)
+    points.extend((
+        (-half_width, base_y, -half_length),
+        (half_width, base_y, -half_length),
+        (half_width, base_y, half_length),
+        (-half_width, base_y, half_length),
+    ))
+    c0, c1, c2, c3 = range(corner_start, corner_start + 4)
+
+    if key.roof_style == "hipped":
+        # For a long rectangle, shorten the ridge by roughly one half-width at
+        # each end. Near-square footprints naturally collapse to a pyramid.
+        ridge_half = max(0.0, half_length - half_width)
+        if ridge_half <= 0.25:
+            apex = len(points)
+            points.append((0.0, top_y, 0.0))
+            for tri in ((c0, apex, c1), (c1, apex, c2), (c2, apex, c3), (c3, apex, c0)):
+                add_face(tri)
+        else:
+            r0 = len(points)
+            r1 = r0 + 1
+            points.extend(((0.0, top_y, -ridge_half), (0.0, top_y, ridge_half)))
+            add_face((c0, r0, c1))
+            add_face((c1, r0, r1, c2))
+            add_face((c2, r1, c3))
+            add_face((c3, r1, r0, c0))
+    elif key.roof_style == "pyramidal":
+        apex = len(points)
+        points.append((0.0, top_y, 0.0))
+        for tri in ((c0, apex, c1), (c1, apex, c2), (c2, apex, c3), (c3, apex, c0)):
+            add_face(tri)
+    elif key.roof_style in {"dome", "onion"}:
+        sectors = 12
+        if key.roof_style == "dome":
+            # Bottom ring through three quarter-sphere bands to the crown.
+            bands = (
+                (0.0, 1.00),
+                (0.34, 0.94),
+                (0.66, 0.75),
+                (0.88, 0.42),
+            )
+        else:
+            # Characteristic onion silhouette: narrow foot, strong lower bulge,
+            # then a rapidly tapering shoulder into a pointed crown.
+            bands = (
+                (0.0, 0.62),
+                (0.18, 0.96),
+                (0.46, 0.86),
+                (0.72, 0.55),
+                (0.90, 0.24),
+            )
+        ring_indices: list[list[int]] = []
+        roof_rise = top_y - base_y
+        for vertical_fraction, radius_fraction in bands:
+            ring: list[int] = []
+            y = base_y + roof_rise * vertical_fraction
+            for sector in range(sectors):
+                angle = 2.0 * math.pi * sector / sectors
+                ring.append(len(points))
+                points.append((
+                    math.cos(angle) * half_width * radius_fraction,
+                    y,
+                    math.sin(angle) * half_length * radius_fraction,
+                ))
+            ring_indices.append(ring)
+        for lower, upper in zip(ring_indices, ring_indices[1:]):
+            for sector in range(sectors):
+                nxt = (sector + 1) % sectors
+                add_face((lower[sector], upper[sector], upper[nxt], lower[nxt]))
+        apex = len(points)
+        # Onion roofs get a slightly pointed finial-like top without becoming a
+        # separate decorative object. Domes retain a softer cap.
+        apex_extra = roof_rise * (0.10 if key.roof_style == "onion" else 0.0)
+        points.append((0.0, top_y + apex_extra, 0.0))
+        last = ring_indices[-1]
+        for sector in range(sectors):
+            nxt = (sector + 1) % sectors
+            add_face((last[sector], apex, last[nxt]))
+    else:
+        raise ValueError(f"unsupported special roof style: {key.roof_style}")
+
+    faces.extend(roof_faces)
+    return _Lod(
+        tuple(points), tuple(normals), tuple(faces), base.resolution,
+        base.mass_per_point, base.selections, base.properties,
+    )
+
+
 def _visual_lod(
     key: BuildingVariantKey,
     wall_texture: str,
@@ -3808,6 +4094,7 @@ def _visual_lod(
     window_trim_texture: str | None = None,
     plain_wall_texture: str | None = None,
     interior_storeys_override: int | None = None,
+    _main_height_override: float | None = None,
 ) -> _Lod:
     front_texture = front_texture or wall_texture
     foundation_texture = foundation_texture or wall_texture
@@ -3827,8 +4114,45 @@ def _visual_lod(
     )
     half_width = key.width_m / 2.0
     half_length = key.length_m / 2.0
-    main_height = _main_building_height(key)
+    main_height = (
+        _main_building_height(key)
+        if _main_height_override is None
+        else max(0.5, float(_main_height_override))
+    )
     ground_floor_height = min(3.0, main_height)
+
+    if key.roof_style in {"hipped", "pyramidal", "dome", "onion"}:
+        # Reuse the mature flat-wall/interior implementation for the occupied
+        # shell, then add the requested roof as separate visual geometry. This
+        # preserves doors, windows, Roadway/Geometry compatibility and foundation
+        # treatment instead of duplicating several hundred lines of wall logic.
+        eave_height, _roof_rise, _slope_length = _gabled_profile(
+            key,
+            roof_pitch_degrees,
+            interior_storeys_override=interior_storeys_override,
+        )
+        wall_key = replace(key, roof_style="flat")
+        base = _visual_lod(
+            wall_key, wall_texture, roof_texture, roof_pitch_degrees,
+            front_texture=front_texture,
+            foundation_texture=foundation_texture,
+            foundation_depth=foundation_depth,
+            church_plinth_height=church_plinth_height,
+            interior_texture=interior_texture,
+            window_trim_texture=window_trim_texture,
+            plain_wall_texture=plain_wall_texture,
+            interior_storeys_override=interior_storeys_override,
+            _main_height_override=eave_height,
+        )
+        plinth_offset = (
+            max(0.0, float(church_plinth_height)) if key.family == "church" else 0.0
+        )
+        return _append_special_roof(
+            base, key, roof_texture,
+            eave_height=eave_height,
+            roof_top_height=_main_building_height(key),
+            vertical_offset=plinth_offset,
+        )
 
     if key.roof_style == "flat":
         height = main_height
@@ -5259,13 +5583,16 @@ class ProceduralBuildingLibrary:
             for polygon in feature.polygons:
                 projected = [projection.to_world(point) for point in polygon.outer[:-1]]
                 if len(projected) >= 3:
-                    footprint = footprint_from_polygon(projected)
-                    centre_x = sum(point[0] for point in projected) / len(projected)
-                    centre_z = sum(point[1] for point in projected) / len(projected)
-                    yield self.key_for(
-                        feature.tags, footprint.width_m, footprint.length_m,
-                        settlement_context=self._settlement_context(centre_x, centre_z),
-                    )
+                    parts = decompose_footprint_rectangles(projected)
+                    key_footprints = parts if len(parts) > 1 else (tuple(projected),)
+                    for key_points in key_footprints:
+                        footprint = footprint_from_polygon(key_points)
+                        centre_x = sum(point[0] for point in key_points) / len(key_points)
+                        centre_z = sum(point[1] for point in key_points) / len(key_points)
+                        yield self.key_for(
+                            feature.tags, footprint.width_m, footprint.length_m,
+                            settlement_context=self._settlement_context(centre_x, centre_z),
+                        )
         for feature in dataset.building_points:
             x, z = projection.to_world(feature.point)
             yield self.key_for(
@@ -5523,7 +5850,8 @@ class ProceduralBuildingLibrary:
         return self._best_variant(requested, candidates)
 
     def plan_polygon(
-        self, tags: Mapping[str, str], points: Sequence[PointXZ], *, road_point: PointXZ | None = None
+        self, tags: Mapping[str, str], points: Sequence[PointXZ], *,
+        road_point: PointXZ | None = None, entrance_point: PointXZ | None = None,
     ) -> BuildingPlacement:
         footprint = footprint_from_polygon(points)
         centre_x = sum(point[0] for point in points) / len(points)
@@ -5547,21 +5875,25 @@ class ProceduralBuildingLibrary:
             second_storey=requested.second_storey,
         )
         heading = footprint.heading_degrees
+        # A mapped OSM entrance is stronger evidence of the actual frontage than
+        # proximity to a road. The generated door remains centred on that facade,
+        # but the facade itself now faces the mapped entrance when one is available.
+        frontage_point = entrance_point if entrance_point is not None else road_point
         if selected.family in HOUSE_ROAD_FACING_FAMILIES:
             heading = _house_heading_towards_road(
                 heading,
                 centre_x=centre_x,
                 centre_z=centre_z,
-                road_point=road_point,
+                road_point=frontage_point,
                 width_m=selected.width_m,
                 length_m=selected.length_m,
             )
-        elif road_point is not None:
+        elif frontage_point is not None:
             # Preserve the long-standing front/back road-facing behaviour for
             # non-house procedural families without freely rotating their
             # footprint. Houses get the stronger placement-aware rule above.
-            dx = road_point[0] - centre_x
-            dz = road_point[1] - centre_z
+            dx = frontage_point[0] - centre_x
+            dz = frontage_point[1] - centre_z
             front_x, front_z = _front_vector_for_heading(heading)
             if front_x * dx + front_z * dz < 0.0:
                 heading = (heading + 180.0) % 360.0
@@ -5751,7 +6083,10 @@ class ProceduralBuildingLibrary:
         return rf"{self.world_name}\d\{prefix}{code}.paa"
 
     def _roof_texture(self, roof_style: str, texture_variant: int = 0) -> str:
-        roof_index = {"flat": 0, "gabled": 1}[roof_style]
+        roof_index = {
+            "flat": 0, "gabled": 1, "hipped": 2,
+            "pyramidal": 3, "dome": 4, "onion": 5,
+        }[roof_style]
         value = roof_index * self.texture_variants
         value += _normalise_texture_variant(texture_variant, self.texture_variants)
         return rf"{self.world_name}\d\r{self._base36_code(value)}.paa"

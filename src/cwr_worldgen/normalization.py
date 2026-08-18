@@ -55,13 +55,14 @@ from .osm import (
 from .source_pipeline import FrozenSourceBundle, validate_source_bundle
 
 NORMALIZED_SCHEMA = "cwr-worldgen-normalized-bundle"
-NORMALIZED_SCHEMA_VERSION = 19
+NORMALIZED_SCHEMA_VERSION = 20
 _ROAD_CLIP_GUARD_METRES = 0.10
 _REQUIRED_FILES = (
     "roads.geojson",
     "gravel-roads.geojson",
     "road-junctions.geojson",
     "buildings.geojson",
+    "building-entrances.geojson",
     "forests.geojson",
     "forest-edges.geojson",
     "water.geojson",
@@ -1701,6 +1702,7 @@ def normalize_source_bundle(
     cutline_features: list[tuple[LineString, dict[str, Any]]] = []
     tree_row_features: list[tuple[LineString, dict[str, Any]]] = []
     individual_tree_features: list[tuple[Point, dict[str, Any]]] = []
+    building_entrance_features: list[tuple[Point, dict[str, Any]]] = []
     aeroway_line_features: list[tuple[LineString, dict[str, Any]]] = []
     aeroway_area_features: list[tuple[Polygon, dict[str, Any]]] = []
     utility_point_features: list[tuple[Point, dict[str, Any]]] = []
@@ -1776,6 +1778,19 @@ def normalize_source_bundle(
                 }))
 
         projected_points = _geometry_points(element, projection)
+        entrance_kind = tags.get("entrance", "").strip().casefold()
+        if (
+            entrance_kind
+            and entrance_kind not in {"no", "none"}
+            and projected_points
+        ):
+            point = Point(projected_points[0])
+            if boundary.covers(point):
+                building_entrance_features.append((point, {
+                    "entrance_id": "",
+                    "source_id": _osm_id(element),
+                    "kind": entrance_kind,
+                }))
         if tags.get("natural") == "tree" and projected_points:
             point = Point(projected_points[0]) if len(projected_points) == 1 else None
             if point is None:
@@ -1867,6 +1882,11 @@ def normalize_source_bundle(
     individual_tree_features.sort(key=lambda item: (item[0].x, item[0].y, item[1]["source_id"]))
     for index, (_, properties) in enumerate(individual_tree_features, start=1):
         properties["tree_id"] = f"tree-{index:06d}"
+    building_entrance_features.sort(
+        key=lambda item: (item[0].x, item[0].y, item[1]["source_id"])
+    )
+    for index, (_, properties) in enumerate(building_entrance_features, start=1):
+        properties["entrance_id"] = f"entrance-{index:06d}"
     aeroway_line_features.sort(key=lambda item: (item[1]["kind"], item[0].bounds, item[1]["source_id"]))
     aeroway_area_features.sort(key=lambda item: (item[1]["kind"], item[0].bounds, item[1]["source_id"]))
     for index, (_, properties) in enumerate(aeroway_line_features, start=1):
@@ -2144,6 +2164,10 @@ def normalize_source_bundle(
         barrier_documents = [_feature(line, properties, projection, spec.coordinate_precision) for line, properties in barrier_features]
         cutline_documents = [_feature(line, properties, projection, spec.coordinate_precision) for line, properties in cutline_features]
         tree_documents = [_feature(point, properties, projection, spec.coordinate_precision) for point, properties in individual_tree_features]
+        building_entrance_documents = [
+            _feature(point, properties, projection, spec.coordinate_precision)
+            for point, properties in building_entrance_features
+        ]
         aeroway_line_documents = [_feature(line, properties, projection, spec.coordinate_precision) for line, properties in aeroway_line_features]
         aeroway_area_documents = [_feature(polygon, properties, projection, spec.coordinate_precision) for polygon, properties in aeroway_area_features]
         utility_point_documents = [_feature(point, properties, projection, spec.coordinate_precision) for point, properties in utility_point_features]
@@ -2155,6 +2179,7 @@ def normalize_source_bundle(
             "gravel-roads.geojson": [(road.geometry, road.properties) for road in gravel_roads],
             "road-junctions.geojson": list(junctions),
             "buildings.geojson": [(item.geometry, item.properties) for item in buildings],
+            "building-entrances.geojson": list(building_entrance_features),
             "forests.geojson": [(item.geometry, item.properties) for item in forests],
             "forest-edges.geojson": [(item.geometry, item.properties) for item in forest_edges],
             "water.geojson": water_local_features,
@@ -2178,6 +2203,7 @@ def normalize_source_bundle(
             "gravel-roads.geojson": ("gravel-roads", gravel_road_features),
             "road-junctions.geojson": ("road-junctions", junction_features),
             "buildings.geojson": ("buildings", building_features),
+            "building-entrances.geojson": ("building-entrances", building_entrance_documents),
             "forests.geojson": ("forests", forest_features),
             "forest-edges.geojson": ("forest-edges", edge_features),
             "water.geojson": ("water", water_features),
@@ -2597,6 +2623,17 @@ def _parse_normalized_dataset(bundle: NormalizedBundle) -> OsmDataset:
         return tags
 
     buildings = polygon_features("buildings.geojson", building_tags)
+    building_entrances: list[OsmPointFeature] = []
+    for feature in _geojson_features(bundle.files["building-entrances.geojson"]):
+        geometry = shape(feature["geometry"])
+        properties = _properties(feature)
+        if geometry.geom_type != "Point":
+            continue
+        building_entrances.append(OsmPointFeature(
+            f"normalized/{properties.get('entrance_id', len(building_entrances) + 1)}",
+            {"entrance": str(properties.get("kind", "yes"))},
+            _point_ll(geometry.coords[0]),
+        ))
     forests = polygon_features("forests.geojson", lambda properties: {"landuse": "forest"})
     water = polygon_features("water.geojson", lambda properties: {"natural": "water", "water": properties.get("kind", "")})
     landuse_all = _geojson_features(bundle.files["landuse.geojson"])
@@ -2803,12 +2840,13 @@ def _parse_normalized_dataset(bundle: NormalizedBundle) -> OsmDataset:
         utility_points=tuple(utility_points),
         surface_areas=tuple(surface_areas),
         rural_vegetation=tuple(rural_vegetation),
+        building_entrances=tuple(building_entrances),
         normalized_fingerprint=bundle.normalized_fingerprint,
         parsed_cache_hit=False,
     )
 
 
-_PARSED_DATASET_CACHE_SCHEMA = 11
+_PARSED_DATASET_CACHE_SCHEMA = 12
 
 
 def load_normalized_dataset(
@@ -2820,7 +2858,7 @@ def load_normalized_dataset(
 ) -> OsmDataset:
     bundle = bundle_or_path if isinstance(bundle_or_path, NormalizedBundle) else validate_normalized_bundle(bundle_or_path)
     key = cache_key(
-        "normalized-dataset-v13-school-buildings-only",
+        "normalized-dataset-v14-building-entrances",
         {
             "schema": _PARSED_DATASET_CACHE_SCHEMA,
             "normalized_fingerprint": bundle.normalized_fingerprint,
