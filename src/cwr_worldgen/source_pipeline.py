@@ -95,6 +95,7 @@ class SourceFetchSpec:
     cells: int = 256
     cell_size: float = 25.0
     refresh: bool = False
+    replace_selection: bool = False
     reference_map: bool = False
     overture_buildings_enabled: bool = True
     dem_provider: str = "dem-stitcher"
@@ -111,6 +112,8 @@ class SourceFetchSpec:
         selected = sum(value is not None for value in (self.map_url, self.center, self.bbox))
         if selected != 1:
             raise ValueError("specify exactly one of map_url, center, or bbox")
+        if self.replace_selection and not self.refresh:
+            raise ValueError("replace_selection requires refresh=True")
         if self.cells < 16 or self.cells > 2048 or self.cells & (self.cells - 1):
             raise ValueError("cells must be a power of two between 16 and 2048")
         if not math.isfinite(self.cell_size) or self.cell_size <= 0:
@@ -947,7 +950,18 @@ def fetch_sources(spec: SourceFetchSpec) -> FrozenSourceBundle:
     manifest_path = root / "source.json"
 
     if manifest_path.is_file() and spec.refresh:
-        report_progress(2, "Preparing atomic refresh of existing frozen source bundle")
+        existing_document = _manifest_json(manifest_path)
+        same_selection = _source_selection_matches(existing_document, bbox, spec)
+        if not same_selection and not spec.replace_selection:
+            raise ValueError(
+                "refresh cannot change a frozen source selection; use another source directory "
+                "or pass --replace-selection explicitly"
+            )
+        report_progress(2, (
+            "Preparing atomic replacement of existing frozen source selection"
+            if not same_selection
+            else "Preparing atomic refresh of existing frozen source bundle"
+        ))
         root.parent.mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix=f".{root.name}.refresh-", dir=root.parent))
         backup = root.with_name(f".{root.name}.backup")

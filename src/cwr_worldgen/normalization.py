@@ -431,13 +431,14 @@ def _spatial_union_polygonal(geometries: Iterable[Any], *, dense_pair_factor: in
 
     pair_budget = max(len(items) * max(8, int(dense_pair_factor)), 4096)
     seen_pairs = 0
-    for index, geometry in enumerate(items):
-        candidates = tree.query(geometry, predicate="intersects")
+    # Query fixed-size arrays rather than crossing the Python/GEOS boundary once
+    # per polygon.  This matters enormously for six-figure building counts while
+    # keeping the same component-merging semantics and bounded peak memory.
+    for index, candidates in _batched_tree_groups(tree, items, predicate="intersects"):
         seen_pairs += len(candidates)
         if seen_pairs > pair_budget:
             return union_all(items)
-        for candidate in candidates:
-            candidate_index = int(candidate)
+        for candidate_index in candidates:
             if candidate_index > index:
                 merge(index, candidate_index)
 
@@ -1391,25 +1392,100 @@ def _normalize_forest(
     )
     original = _spatial_union_polygonal(repaired_original)
 
-    report(25, f"Building forest exclusions from {len(buildings):,} buildings")
-    if buildings:
-        building_buffers = vector_buffer(
-            [building.geometry for building in buildings],
-            spec.forest_building_clearance,
-            join_style="mitre",
-        )
-        building_priority = _spatial_union_polygonal(building_buffers)
-    else:
-        building_priority = GeometryCollection()
-    priorities = [
+    # Apply the map-wide non-building exclusions first.  On large worlds this is
+    # important: a dense city can contain tens of thousands of buildings in
+    # land-use that has already removed every possible forest polygon.  Those
+    # buildings must not participate in the much more expensive buffer/dissolve
+    # stage merely because they happen to exist in the source bundle.
+    non_building_priorities = [
         geometry
-        for geometry in (water, landuse_priority, road_corridor, cutline_corridor, building_priority)
+        for geometry in (water, landuse_priority, road_corridor, cutline_corridor)
         if not geometry.is_empty
     ]
-    exclusions = _union_geometries(priorities)
+    non_building_exclusions = _union_geometries(non_building_priorities)
+    remaining = (
+        original.difference(non_building_exclusions)
+        if not original.is_empty and not non_building_exclusions.is_empty
+        else original
+    )
 
-    report(45, "Subtracting water, roads, land use, cutlines and buildings from forests")
-    cleaned = original.difference(exclusions) if not original.is_empty else original
+    report(25, f"Filtering forest exclusions from {len(buildings):,} buildings")
+    building_priority = GeometryCollection()
+    effective_building_count = 0
+    if buildings and not remaining.is_empty:
+        remaining_polygons = list(_iter_polygons(remaining))
+        if remaining_polygons:
+            forest_tree = STRtree(remaining_polygons)
+            building_geometries = [
+                building.geometry
+                for building in buildings
+                if building.geometry is not None and not building.geometry.is_empty
+            ]
+
+            # A mitred polygon buffer can extend farther than the nominal buffer
+            # distance at acute corners.  Shapely's default mitre limit is 5,
+            # so use the same explicit value as a conservative coarse-search
+            # radius.  The second STRtree pass below tests the actual buffers,
+            # therefore false positives from this coarse pass are harmless.
+            clearance = max(0.0, float(spec.forest_building_clearance))
+            mitre_limit = 5.0
+            nearby_buildings: list[Any] = []
+            if clearance > 0.0:
+                groups = _batched_tree_groups(
+                    forest_tree,
+                    building_geometries,
+                    predicate="dwithin",
+                    distance=clearance * mitre_limit,
+                )
+            else:
+                groups = _batched_tree_groups(
+                    forest_tree, building_geometries, predicate="intersects"
+                )
+            for building_index, candidate_indexes in groups:
+                if candidate_indexes:
+                    nearby_buildings.append(building_geometries[building_index])
+
+            report(32, (
+                "Forest exclusion prefilter kept "
+                f"{len(nearby_buildings):,}/{len(building_geometries):,} buildings"
+            ))
+            if nearby_buildings:
+                report(35, f"Buffering {len(nearby_buildings):,} forest-adjacent buildings")
+                buffered = list(vector_buffer(
+                    nearby_buildings,
+                    clearance,
+                    join_style="mitre",
+                    mitre_limit=mitre_limit,
+                ))
+
+                # The coarse dwithin search intentionally over-selects to stay
+                # safe around mitred corners.  Keep only buffers that really do
+                # touch the surviving forest before dissolving them.  This exact
+                # pass is batched in GEOS rather than issuing one Python query
+                # per building.
+                effective_buffers: list[Any] = []
+                for buffer_index, candidate_indexes in _batched_tree_groups(
+                    forest_tree, buffered, predicate="intersects"
+                ):
+                    if candidate_indexes:
+                        effective_buffers.append(buffered[buffer_index])
+                effective_building_count = len(effective_buffers)
+                report(40, (
+                    "Dissolving forest exclusions from "
+                    f"{effective_building_count:,} effective buildings"
+                ))
+                if effective_buffers:
+                    building_priority = _spatial_union_polygonal(effective_buffers)
+
+    report(45, (
+        "Subtracting water, roads, land use, cutlines and "
+        f"{effective_building_count:,} building exclusions from forests"
+    ))
+    cleaned = (
+        remaining.difference(building_priority)
+        if not remaining.is_empty and not building_priority.is_empty
+        else remaining
+    )
     cleaned_polygons = _repair_polygonal(
         cleaned, boundary, minimum_area=spec.minimum_forest_area
     )

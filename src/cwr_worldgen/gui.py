@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import math
+import hashlib
 import os
 from pathlib import Path
 import queue
@@ -22,6 +23,7 @@ from PIL import Image, ImageTk
 from typing import Iterable, Mapping
 
 from ._version import __version__
+from .cache import resolve_cache_dir
 from .location_example import parse_opentopomap_link, square_bbox
 from .map_picker import AreaSelectionPlan, OsmAreaPicker, zoom_for_bbox
 from .model import DEFAULT_MAX_BUILDINGS, DEFAULT_MAX_FOREST_OBJECTS, DEFAULT_MAX_ROAD_OBJECTS, validate_world_identity
@@ -436,6 +438,9 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         ("--wetland-reed-spacing", "wetland_reed_spacing"),
         ("--max-meadow-grass-objects", "max_meadow_grass_objects"),
         ("--meadow-grass-spacing", "meadow_grass_spacing"),
+        ("--max-haybale-objects", "max_haybale_objects"),
+        ("--haybale-spacing", "haybale_spacing"),
+        ("--haybale-field-percent", "haybale_field_percent"),
         ("--cache-dir", "cache_dir"),
         ("--max-road-objects", "max_road_objects"),
         ("--max-buildings", "max_buildings"),
@@ -491,6 +496,7 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         "verify_regeneration": "--verify-regeneration",
         "procedural_building_interiors": "--procedural-building-interiors",
         "high_quality_building_textures": "--high-quality-building-textures",
+        "haybales": "--haybales",
     }
     for key, option in flags.items():
         if bool(values.get(key, False)):
@@ -501,8 +507,10 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     elif bus_stop_signs is False:
         command.append("--no-bus-stop-signs")
 
-    if bool(values.get("procedural_bridges", False)):
-        command.append("--procedural-bridges")
+    # Procedural bridges are the CLI default. Only emit a bridge-mode flag when
+    # the user explicitly chooses the stock Nogova bridge implementation.
+    if not bool(values.get("procedural_bridges", True)):
+        command.append("--stock-bridges")
 
     negative_flags = {
         "include_minor_roads": "--no-minor-roads",
@@ -584,6 +592,8 @@ def build_fetch_command(values: dict[str, object], python: str | None = None) ->
     ))
     if values.get("refresh"):
         command.append("--refresh")
+    if values.get("replace_selection"):
+        command.append("--replace-selection")
     if values.get("reference_map"):
         command.append("--reference-map")
     if values.get("overture_buildings", True) is False:
@@ -742,7 +752,7 @@ def default_gui_values() -> dict[str, object]:
         "ditch_grass": True,
         "barriers": True,
         "bridges": True,
-        "procedural_bridges": False,
+        "procedural_bridges": True,
         "bridge_module_length": "30",
         "bridge_deck_clearance": "1.25",
         "bridge_water_clearance": "18.0",
@@ -755,6 +765,10 @@ def default_gui_values() -> dict[str, object]:
         "meadow_grass": True,
         "max_meadow_grass_objects": "20000",
         "meadow_grass_spacing": "24",
+        "haybales": False,
+        "max_haybale_objects": "800",
+        "haybale_spacing": "110",
+        "haybale_field_percent": "25",
         "wetland_reeds": True,
         "max_wetland_reed_objects": "100000",
         "wetland_reed_spacing": "18",
@@ -831,6 +845,7 @@ def validate_wizard_step(step_index: int, values: dict[str, object], asset_roots
             "forest_severe_hill_trees_per_block",
             "max_steep_hill_bush_objects",
             "max_wetland_reed_objects",
+            "max_haybale_objects",
             "max_grave_objects",
             "max_residential_infill_buildings",
             "rocky_forest_rocks_per_patch",
@@ -861,6 +876,8 @@ def validate_wizard_step(step_index: int, values: dict[str, object], asset_roots
             "bridge_water_clearance",
             "residential_infill_spacing",
             "residential_infill_min_area",
+            "haybale_spacing",
+            "haybale_field_percent",
         )
         for key in integer_fields:
             if int(str(values.get(key, "0"))) <= 0:
@@ -868,6 +885,9 @@ def validate_wizard_step(step_index: int, values: dict[str, object], asset_roots
         for key in float_fields:
             if float(str(values.get(key, "0"))) < 0:
                 raise ValueError(f"{key.replace('_', ' ').title()} cannot be negative.")
+        hay_field_percent = float(str(values.get("haybale_field_percent", "25")))
+        if not 0.0 <= hay_field_percent <= 100.0:
+            raise ValueError("Hay Bale Field Percent must be within 0..100.")
         if float(str(values.get("bridge_module_length", "30"))) <= 0:
             raise ValueError("Bridge Module Length must be positive.")
         sink_fraction = float(str(values.get("forest_polygon_sink_fraction", "0.5")))
@@ -1813,11 +1833,12 @@ class WorldgenGui(tk.Tk):
             ("Forest undergrowth", "forest_undergrowth", True),
             ("Fences, walls and hedges", "barriers", True),
             ("Bridge decks", "bridges", True),
-            ("Procedural bridges (instead of Nogova)", "procedural_bridges", False),
+            ("Procedural bridges (instead of Nogova)", "procedural_bridges", True),
             ("Fill empty residential areas", "residential_infill", True),
             ("Download/merge Overture building data", "overture_buildings", True),
             ("Rural vegetation", "rural_vegetation", True),
             ("Tall grass in OSM meadows", "meadow_grass", True),
+            ("Hay bales in OSM farmland", "haybales", False),
             ("Wetland reeds", "wetland_reeds", True),
             ("Steep-hill bushes", "steep_hill_bushes", True),
             ("Rocky forest fallback", "rocky_forest_fallback", True),
@@ -1884,6 +1905,9 @@ class WorldgenGui(tk.Tk):
             ("Wetland reed spacing (m)", "wetland_reed_spacing", "18"),
             ("Meadow grass max", "max_meadow_grass_objects", "20000"),
             ("Meadow grass spacing (m)", "meadow_grass_spacing", "24"),
+            ("Hay bale max", "max_haybale_objects", "800"),
+            ("Hay bale candidate spacing (m)", "haybale_spacing", "110"),
+            ("Farmland fields with hay bales (%)", "haybale_field_percent", "25"),
             ("Maximum extra single trees at 6.4 km", "max_forest_single_tree_objects", "1000"),
             ("Geographic single-tree spacing (m)", "forest_single_tree_spacing", "45"),
             ("Individual-tree maximum float (m)", "forest_single_tree_max_float", "0.5"),
@@ -1924,7 +1948,7 @@ class WorldgenGui(tk.Tk):
         build_opts = ttk.LabelFrame(advanced.body, text="Build behavior", padding=10)
         build_opts.pack(fill="x", pady=(0, 10))
         option_values = (
-            ("Keep existing output", "keep_output"),
+            ("Prefer reuse when output exists", "keep_output"),
             ("Refresh matching cache entries", "cache_refresh"),
             ("Disable all caches", "no_cache"),
             ("Refresh normalized geometry", "normalization_refresh"),
@@ -2480,7 +2504,10 @@ class WorldgenGui(tk.Tk):
     def _run_fetch_only(self) -> None:
         try:
             validate_wizard_step(0, self._validation_values(), self.asset_roots)
-            command = build_fetch_command(self._collect_fetch_values())
+            fetch_values = self._collect_fetch_values()
+            if not self._confirm_source_selection_replacement(fetch_values):
+                return
+            command = build_fetch_command(fetch_values)
         except (ValueError, TypeError) as exc:
             messagebox.showerror(APP_TITLE, str(exc))
             return
@@ -2492,16 +2519,198 @@ class WorldgenGui(tk.Tk):
             show_progress_page=False,
         )
 
+    @staticmethod
+    def _requested_source_selection(fetch_values: Mapping[str, object]) -> tuple[tuple[float, float, float, float], int, float]:
+        cells = int(fetch_values.get("cells", DEFAULT_GUI_TERRAIN_CELLS))
+        cell_size = float(fetch_values.get("cell_size", DEFAULT_GUI_CELL_SIZE_METRES))
+        world_size = cells * cell_size
+        mode = str(fetch_values.get("selection_mode", "bbox"))
+        if mode == "map_url":
+            link = parse_opentopomap_link(str(fetch_values.get("map_url", "")).strip())
+            bbox = square_bbox(link.latitude, link.longitude, world_size)
+        elif mode == "center":
+            bbox = square_bbox(
+                float(fetch_values.get("center_lat", 0.0)),
+                float(fetch_values.get("center_lon", 0.0)),
+                world_size,
+            )
+        else:
+            bbox = tuple(float(fetch_values.get(key, 0.0)) for key in ("south", "west", "north", "east"))
+        return bbox, cells, cell_size  # type: ignore[return-value]
+
+    @staticmethod
+    def _existing_source_selection(source_dir: Path) -> tuple[tuple[float, float, float, float], int, float] | None:
+        manifest = source_dir / "source.json"
+        if not manifest.is_file():
+            return None
+        try:
+            document = json.loads(manifest.read_text(encoding="utf-8"))
+            selection = document["selection"]
+            bbox = tuple(float(value) for value in selection["bbox_south_west_north_east"])
+            cells = int(selection["cells"])
+            cell_size = float(selection["cell_size_metres"])
+            if len(bbox) != 4:
+                return None
+            return bbox, cells, cell_size  # type: ignore[return-value]
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            return None
+
+    def _confirm_source_selection_replacement(self, fetch_values: dict[str, object]) -> bool:
+        """Require explicit confirmation before refresh changes a frozen bbox/grid."""
+        if not bool(fetch_values.get("refresh", False)):
+            return True
+        source_text = str(fetch_values.get("source_dir", "")).strip()
+        if not source_text:
+            return True
+        existing = self._existing_source_selection(Path(source_text))
+        if existing is None:
+            return True
+        try:
+            requested = self._requested_source_selection(fetch_values)
+        except (ValueError, TypeError):
+            return True
+        old_bbox, old_cells, old_cell = existing
+        new_bbox, new_cells, new_cell = requested
+        same = (
+            old_cells == new_cells
+            and math.isclose(old_cell, new_cell, rel_tol=0.0, abs_tol=1.0e-12)
+            and all(math.isclose(a, b, rel_tol=0.0, abs_tol=1.0e-12) for a, b in zip(old_bbox, new_bbox))
+        )
+        if same:
+            fetch_values["replace_selection"] = False
+            return True
+        fmt = lambda box: ", ".join(f"{value:.8f}" for value in box)
+        confirmed = messagebox.askyesno(
+            APP_TITLE,
+            "This source directory already contains a frozen geographic selection.\n\n"
+            f"Existing bbox: {fmt(old_bbox)}\n"
+            f"Existing grid: {old_cells} x {old_cells} @ {old_cell:g} m\n\n"
+            f"Requested bbox: {fmt(new_bbox)}\n"
+            f"Requested grid: {new_cells} x {new_cells} @ {new_cell:g} m\n\n"
+            "Replacing it will move the world and change terrain, water, roads, buildings and place positions.\n\n"
+            "Replace this frozen source selection?",
+            default=messagebox.NO,
+        )
+        fetch_values["replace_selection"] = bool(confirmed)
+        return bool(confirmed)
+
+    @staticmethod
+    def _source_manifest_sha256(source_dir: Path) -> str | None:
+        path = source_dir / "source.json"
+        if not path.is_file():
+            return None
+        try:
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            return None
+
+    def _existing_build_source_matches(self, build_values: Mapping[str, object]) -> bool | None:
+        output_text = str(build_values.get("output", "")).strip()
+        source_text = str(build_values.get("source_dir", "")).strip()
+        if not output_text or not source_text:
+            return None
+        manifest_path = Path(output_text) / "manifest.json"
+        if not manifest_path.is_file():
+            return None
+        try:
+            document = json.loads(manifest_path.read_text(encoding="utf-8"))
+            recorded = str(document.get("source_bundle", {}).get("manifest_sha256", "")).strip()
+        except (OSError, TypeError, json.JSONDecodeError):
+            return None
+        current = self._source_manifest_sha256(Path(source_text))
+        if not recorded or current is None:
+            return None
+        return recorded == current
+
+    @staticmethod
+    def _build_folder_has_existing_contents(path: Path) -> bool:
+        """Return whether an output directory already contains build material.
+
+        Folder pickers often create or select an empty directory before the
+        first build. Empty directories therefore do not count as an existing
+        build and should not trigger a reuse prompt.
+        """
+        try:
+            return path.is_dir() and next(path.iterdir(), None) is not None
+        except OSError:
+            # If the directory exists but cannot be inspected, err on the safe
+            # side and ask before a build can delete it.
+            return path.exists()
+
+    def _confirm_existing_build_folder_reuse(self, build_values: dict[str, object]) -> bool:
+        """Ask whether an existing non-empty build folder should be reused.
+
+        Yes preserves the directory and emits ``--keep-output``. No keeps the
+        historical clean-build behaviour. Cancel leaves the folder untouched
+        and does not start the pipeline.
+        """
+        output_text = str(build_values.get("output", "")).strip()
+        if not output_text:
+            return True
+        output = Path(output_text)
+        if not self._build_folder_has_existing_contents(output):
+            return True
+
+        source_match = self._existing_build_source_matches(build_values)
+        if source_match is False:
+            clean = messagebox.askyesno(
+                APP_TITLE,
+                "This build folder was created from a different frozen source snapshot.\n\n"
+                "Reusing it could mix terrain and assets from different geographic areas.\n\n"
+                "Rebuild this folder clean with the currently selected source?",
+                default=messagebox.YES,
+            )
+            if not clean:
+                return False
+            build_values["keep_output"] = False
+            keep_var = self.vars.get("keep_output")
+            if keep_var is not None:
+                keep_var.set(False)
+            return True
+
+        prefer_reuse = bool(build_values.get("keep_output", False))
+        choice = messagebox.askyesnocancel(
+            APP_TITLE,
+            "This build folder already exists and is not empty:\n\n"
+            f"{output}\n\n"
+            "Reuse the existing build folder?\n\n"
+            "Yes = reuse it and keep existing output files.\n"
+            "No = delete the existing build folder and rebuild clean.\n"
+            "Cancel = do not start the build.",
+            default=messagebox.YES if prefer_reuse else messagebox.NO,
+        )
+        if choice is None:
+            return False
+
+        reuse = bool(choice)
+        build_values["keep_output"] = reuse
+        keep_var = self.vars.get("keep_output")
+        if keep_var is not None:
+            keep_var.set(reuse)
+        return True
+
     def _run_build_pipeline(self) -> None:
         values = self._validation_values()
         source_mode = str(self.vars["source_mode"].get())
         try:
             for step in range(3):
                 validate_wizard_step(step, values, self.asset_roots)
+            fetch_values = self._collect_fetch_values()
+            build_values = self._collect_build_values()
+        except (ValueError, TypeError) as exc:
+            messagebox.showerror(APP_TITLE, str(exc))
+            return
+
+        if source_mode == "new" and not self._confirm_source_selection_replacement(fetch_values):
+            return
+        if not self._confirm_existing_build_folder_reuse(build_values):
+            return
+
+        try:
             commands = build_wizard_pipeline_commands(
                 source_mode=source_mode,
-                fetch_values=self._collect_fetch_values(),
-                build_values=self._collect_build_values(),
+                fetch_values=fetch_values,
+                build_values=build_values,
             )
         except (ValueError, TypeError) as exc:
             messagebox.showerror(APP_TITLE, str(exc))
@@ -2835,7 +3044,9 @@ class WorldgenGui(tk.Tk):
 
     def _cache_path(self) -> Path:
         custom = str(self.vars["cache_dir"].get()).strip()
-        return resolve_gui_path(custom) if custom else resolve_gui_path(str(self.vars["source_dir"].get())) / ".cwr-cache"
+        if custom:
+            return resolve_gui_path(custom)
+        return resolve_cache_dir(resolve_gui_path(str(self.vars["source_dir"].get())), None)
 
     def _clear_cache(self) -> None:
         self._delete_path(self._cache_path(), "persistent cache")

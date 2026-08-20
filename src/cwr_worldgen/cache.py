@@ -12,6 +12,8 @@ import struct
 from typing import Any, Callable, TypeVar
 
 CACHE_SCHEMA_VERSION = 3
+DEFAULT_CACHE_DIRNAME = ".cwr-worldgen-source-cache"
+LEGACY_CACHE_DIRNAME = ".cwr-cache"
 T = TypeVar("T")
 
 
@@ -44,7 +46,23 @@ def cache_key(namespace: str, payload: Any) -> str:
 
 
 def resolve_cache_dir(source_dir: Path, requested: Path | None) -> Path:
-    return (requested if requested is not None else source_dir / ".cwr-cache").resolve()
+    """Resolve the persistent cache directory with legacy-name compatibility.
+
+    Explicit cache paths are never rewritten. For the implicit source-local
+    cache, new/fresh builds use ``.cwr-worldgen-source-cache``. Existing
+    ``.cwr-cache`` directories remain usable when the new directory has not
+    been created yet, avoiding an expensive forced cache migration. If both
+    exist, the new name wins.
+    """
+    if requested is not None:
+        return requested.resolve()
+
+    source_dir = source_dir.resolve()
+    current = source_dir / DEFAULT_CACHE_DIRNAME
+    legacy = source_dir / LEGACY_CACHE_DIRNAME
+    if current.exists() or not legacy.exists():
+        return current
+    return legacy
 
 
 def file_snapshot(path: Path | None) -> dict[str, Any] | None:
@@ -127,6 +145,61 @@ def load_or_create_pickle(
                 protocol=pickle.HIGHEST_PROTOCOL,
             ),
         )
+    return value, False
+
+
+def load_or_create_pickle_streaming(
+    *,
+    cache_path: Path | None,
+    producer: Callable[[], T],
+    enabled: bool,
+    refresh: bool,
+    stage_schema: int,
+    validator: Callable[[T], bool] | None = None,
+) -> tuple[T, bool]:
+    """Large-object variant of :func:`load_or_create_pickle`.
+
+    The ordinary helper intentionally uses ``read_bytes``/``pickle.dumps`` for
+    small cache entries. Large world datasets can be hundreds of megabytes, so
+    this variant streams pickle input/output directly through files and avoids
+    a second full-size bytes object during cache load/store.
+    """
+
+    if enabled and cache_path is not None and cache_path.is_file() and not refresh:
+        try:
+            with cache_path.open("rb") as stream:
+                envelope = pickle.load(stream)
+            if (
+                isinstance(envelope, dict)
+                and envelope.get("cache_schema") == CACHE_SCHEMA_VERSION
+                and envelope.get("stage_schema") == stage_schema
+                and "value" in envelope
+            ):
+                value = envelope["value"]
+                if validator is None or validator(value):
+                    return value, True
+        except (OSError, EOFError, ValueError, TypeError, AttributeError, pickle.PickleError):
+            pass
+    value = producer()
+    if enabled and cache_path is not None:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = cache_path.with_name(cache_path.name + ".tmp")
+        try:
+            with temporary.open("wb") as stream:
+                pickle.dump(
+                    {
+                        "cache_schema": CACHE_SCHEMA_VERSION,
+                        "stage_schema": stage_schema,
+                        "value": value,
+                    },
+                    stream,
+                    protocol=pickle.HIGHEST_PROTOCOL,
+                )
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, cache_path)
+        finally:
+            temporary.unlink(missing_ok=True)
     return value, False
 
 

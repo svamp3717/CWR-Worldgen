@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "GPL-3.0-or-later" }
 authors = [{ name = "CWR-CE contributors" }]
-dependencies = ["Pillow>=10", "Shapely>=2.0,<3"]
+dependencies = ["Pillow>=10", "Shapely>=2.0,<3", "numpy>=1.21"]
 
 [project.optional-dependencies]
 sources = [

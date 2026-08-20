@@ -600,8 +600,8 @@ class RoadPieceFittingTests(unittest.TestCase):
         )
         self.assertEqual(source_spec.max_road_objects, 1024000)
         self.assertEqual(runtime_spec.max_road_objects, 1024000)
-        self.assertEqual(source_spec.max_buildings, 100000)
-        self.assertEqual(runtime_spec.max_buildings, 100000)
+        self.assertEqual(source_spec.max_buildings, 1000000)
+        self.assertEqual(runtime_spec.max_buildings, 1000000)
         self.assertEqual(source_spec.max_forest_objects, 500000)
         self.assertEqual(runtime_spec.max_forest_objects, 500000)
         self.assertEqual(source_spec.forest_undergrowth_maximum_objects, 120000)
@@ -650,8 +650,8 @@ class RoadPieceFittingTests(unittest.TestCase):
         self.assertEqual(runtime_spec.forest_single_tree_footprint, 2.0)
         self.assertEqual(source_spec.forest_single_tree_maximum_float, 0.5)
         self.assertEqual(runtime_spec.forest_single_tree_maximum_float, 0.5)
-        self.assertFalse(source_spec.procedural_bridges)
-        self.assertFalse(runtime_spec.procedural_bridges)
+        self.assertTrue(source_spec.procedural_bridges)
+        self.assertTrue(runtime_spec.procedural_bridges)
 
     def test_milestone9_cli_uses_the_same_expanded_object_budgets(self) -> None:
         args = _parser().parse_args([
@@ -662,7 +662,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             "source-data/test",
         ])
         self.assertEqual(args.max_road_objects, 1024000)
-        self.assertEqual(args.max_buildings, 100000)
+        self.assertEqual(args.max_buildings, 1000000)
         self.assertEqual(args.max_forest_objects, 500000)
         self.assertEqual(args.forest_undergrowth_max_objects, 120000)
         self.assertTrue(args.include_minor_roads)
@@ -692,7 +692,7 @@ class RoadPieceFittingTests(unittest.TestCase):
         self.assertEqual(args.forest_severe_hill_trees_per_block, 10)
         self.assertEqual(args.forest_polygon_sink_fraction, 0.5)
         self.assertEqual(args.bridge_module_length, 30.0)
-        self.assertFalse(args.procedural_bridges)
+        self.assertTrue(args.procedural_bridges)
         self.assertAlmostEqual(args.bridge_deck_clearance, 1.25)
         self.assertFalse(args.procedural_building_interiors)
 
@@ -2632,28 +2632,30 @@ class SemanticFeatureTests(unittest.TestCase):
                 self.assertEqual(utility_key.family, family)
                 self.assertTrue(utility_key.interiors)
 
-        # Barns/warehouses and car-capable outbuildings use vehicle-scale
-        # openings. Outbuildings too small to contain a car are sheds with a
-        # pedestrian-size entrance, regardless of whether OSM called them a
-        # garage or shed.
+        # Explicit OSM outbuilding subtype is authoritative. Dimensions choose
+        # the subtype only for generic/self-inferred accessory buildings.
         house_door_half, house_door_height, _ = _door_dimensions(key)
         barn_key = enabled.key_for({"building": "barn"}, 14.0, 42.0)
-        garage_key = enabled.key_for({"building": "shed"}, 6.0, 8.0)
-        small_shed_key = enabled.key_for({"building": "garage"}, 2.0, 3.5)
+        shed_key = enabled.key_for({"building": "shed"}, 6.0, 8.0)
+        garage_key = enabled.key_for({"building": "garage"}, 2.0, 3.5)
+        inferred_garage = enabled.key_for({"building": "yes"}, 6.0, 8.0)
+        inferred_shed = enabled.key_for({"building": "yes"}, 2.0, 3.5)
         warehouse_key = enabled.key_for({"building": "warehouse"}, 24.0, 60.0)
         self.assertEqual(garage_key.outbuilding_kind, "garage")
-        self.assertEqual(small_shed_key.outbuilding_kind, "shed")
+        self.assertEqual(shed_key.outbuilding_kind, "shed")
+        self.assertEqual(inferred_garage.outbuilding_kind, "garage")
+        self.assertEqual(inferred_shed.outbuilding_kind, "shed")
         for utility_key in (barn_key, garage_key, warehouse_key):
             utility_half, utility_height, _ = _door_dimensions(utility_key)
             self.assertGreater(utility_half, house_door_half)
             self.assertGreater(utility_height, house_door_height)
-        shed_half, shed_height, _ = _door_dimensions(small_shed_key)
-        self.assertLess(shed_half, garage_key.width_m * 0.25)
+        shed_half, shed_height, _ = _door_dimensions(shed_key)
+        self.assertLess(shed_half, shed_key.width_m * 0.25)
         self.assertLess(shed_height, _door_dimensions(garage_key)[1])
         self.assertLess(shed_half, _door_dimensions(garage_key)[0])
 
-        # Untagged/default-height houses get an upper floor most, but not all,
-        # of the time. Selection is stable from tags and placement coordinates.
+        # Untagged/default-height houses whose facade is inferred as two storeys
+        # now receive a matching upper interior whenever geometry can support it.
         generic_house = enabled.key_for({"building": "house"}, 12.0, 16.0)
         mixed = [
             _placement_uses_second_storey(
@@ -2661,8 +2663,7 @@ class SemanticFeatureTests(unittest.TestCase):
             )
             for index in range(40)
         ]
-        self.assertGreater(sum(mixed), 20)
-        self.assertLess(sum(mixed), 40)
+        self.assertEqual(sum(mixed), 40)
         self.assertEqual(
             mixed,
             [
@@ -2973,6 +2974,82 @@ class SemanticFeatureTests(unittest.TestCase):
         # road access is the strongest evidence that an accessory building is a
         # genuine vehicle garage.
         self.assertEqual(kinds[-2:], ["shed", "shed"])
+
+    def test_inferred_garage_cluster_is_capped_at_three(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 240.0)
+        road = OsmLineFeature(
+            "way/service-cap", {"highway": "service"},
+            tuple(projection.to_latlon(point) for point in ((10.0, 20.0), (230.0, 20.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="garage-cap", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(road,),
+        )
+        library = ProceduralBuildingLibrary(world_name="garage_cap")
+        key = BuildingVariantKey(
+            "outbuilding", "gabled", 6.0, 8.0, 3.0,
+            outbuilding_kind="garage",
+        )
+        plans = []
+        for index in range(8):
+            x, z = 55.0 + index * 7.0, 28.0 + index * 4.0
+            placement = BuildingPlacement(library.model_path(key), 0.0, key, key)
+            plans.append(BuildingPlacementPlan(
+                osm_key=f"way/cap-{index}", geometry_index=0, geometry_kind="polygon",
+                x=x, z=z, heading_degrees=0.0, model_path=placement.model_path,
+                support_polygon=((x-3.0, z-4.0), (x+3.0, z-4.0), (x+3.0, z+4.0), (x-3.0, z+4.0)),
+                procedural_placement=placement, building_family="outbuilding",
+            ))
+        updated = _demote_dense_garage_clusters_to_sheds(
+            plans, dataset, projection, library
+        )
+        kinds = [plan.procedural_placement.selected.outbuilding_kind for plan in updated]
+        self.assertEqual(kinds.count("garage"), 3)
+        self.assertEqual(kinds.count("shed"), 5)
+
+    def test_explicit_osm_garages_are_never_demoted_by_cluster_heuristic(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        road = OsmLineFeature(
+            "way/explicit-service",
+            {"highway": "service"},
+            tuple(projection.to_latlon(point) for point in ((10.0, 20.0), (190.0, 20.0))),
+        )
+        locations = ((45.0, 25.0), (55.0, 34.0), (65.0, 43.0), (75.0, 52.0), (85.0, 61.0))
+        mapped = tuple(
+            OsmPointFeature(
+                f"way/explicit-garage-{index}",
+                {"building": "garage"},
+                projection.to_latlon((x, z)),
+            )
+            for index, (x, z) in enumerate(locations)
+        )
+        dataset = OsmDataset(
+            source_generator="explicit-garage-cluster", element_count=len(mapped) + 1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(road,),
+            building_points=mapped,
+        )
+        library = ProceduralBuildingLibrary(world_name="explicit_garage_cluster")
+        key = BuildingVariantKey(
+            "outbuilding", "gabled", 6.0, 8.0, 3.0,
+            outbuilding_kind="garage",
+        )
+        plans = []
+        for index, (x, z) in enumerate(locations):
+            placement = BuildingPlacement(library.model_path(key), 0.0, key, key)
+            plans.append(BuildingPlacementPlan(
+                osm_key=f"way/explicit-garage-{index}", geometry_index=0,
+                geometry_kind="polygon", x=x, z=z, heading_degrees=0.0,
+                model_path=placement.model_path,
+                support_polygon=((x-3.0, z-4.0), (x+3.0, z-4.0), (x+3.0, z+4.0), (x-3.0, z+4.0)),
+                procedural_placement=placement, building_family="outbuilding",
+            ))
+        updated = _demote_dense_garage_clusters_to_sheds(
+            plans, dataset, projection, library
+        )
+        self.assertEqual(
+            [plan.procedural_placement.selected.outbuilding_kind for plan in updated],
+            ["garage"] * len(locations),
+        )
 
     def test_utility_interiors_use_open_halls_and_bounded_collision(self) -> None:
         from cwr_worldgen import procedural_buildings as building_models
@@ -3579,7 +3656,10 @@ class SemanticFeatureTests(unittest.TestCase):
             ).regional_style
             for index in range(40)
         ]
-        self.assertEqual(styles.count("sweden_red"), 19)
+        # Explicit building=house no longer gets reclassified as agricultural
+        # merely because one footprint is long/narrow. That one former forced
+        # red barn-style case now remains a normal residential palette choice.
+        self.assertEqual(styles.count("sweden_red"), 18)
         self.assertLess(styles.count("sweden_red"), 24)
         explicit_red = library.key_for(
             {"building": "house", "building:colour": "red"}, 10.0, 16.0

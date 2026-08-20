@@ -155,7 +155,7 @@ def _add_playability_arguments(parser: argparse.ArgumentParser, *, default_seed:
     parser.add_argument("--asset-root", type=Path, action="append", default=[], help="game/addon directory or PBO to scan; repeatable")
     parser.add_argument("--strict-assets", action="store_true", help="fail when required selected models, external ground textures, or readable P3D dependencies are missing; Milestone 8 trusts its inherited Milestone 7 road references")
     parser.add_argument("--osm-asset-map", type=Path, help="JSON rules mapping OSM layers and tags to required P3D models and PAA/PAC textures; built-in current mappings remain the default")
-    parser.add_argument("--cache-dir", type=Path, help="persistent cache directory; defaults to SOURCE_DIR/.cwr-cache for frozen-source builds")
+    parser.add_argument("--cache-dir", type=Path, help="persistent cache directory; defaults to SOURCE_DIR/.cwr-worldgen-source-cache for frozen-source builds; existing .cwr-cache remains supported")
     parser.add_argument("--no-cache", action="store_true", help="disable all persistent pipeline caches, including DEM, terrain, placement, surfaces, overview, and PBO reuse")
     parser.add_argument("--cache-refresh", action="store_true", help="ignore matching cache entries and replace them")
     parser.add_argument("--verify-regeneration", action="store_true", help="run a second full generation and compare deterministic WRP/PBO output; slow and disabled by default")
@@ -295,7 +295,8 @@ def _add_fetch_source_arguments(parser: argparse.ArgumentParser) -> None:
     selection.add_argument("--bbox", type=float, nargs=4, metavar=("SOUTH", "WEST", "NORTH", "EAST"))
     parser.add_argument("--cells", type=int, default=256)
     parser.add_argument("--cell-size", type=float, default=25.0, help="metres")
-    parser.add_argument("--refresh", action="store_true", help="replace the frozen snapshot explicitly")
+    parser.add_argument("--refresh", action="store_true", help="refresh the existing frozen snapshot for the same geographic selection")
+    parser.add_argument("--replace-selection", action="store_true", help="with --refresh, explicitly allow replacing an existing source directory with a different bbox/grid selection")
     parser.add_argument("--reference-map", action="store_true", help="also freeze an OpenTopoMap comparison image")
     parser.add_argument(
         "--no-overture-buildings",
@@ -507,8 +508,8 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--no-bridges", action="store_false", dest="bridges_enabled", help="disable modular bridge decks on OSM bridge roads")
     milestone9.set_defaults(bridges_enabled=True)
     milestone9.add_argument("--procedural-bridges", action="store_true", dest="procedural_bridges", help="generate world-local bridge deck/rail models instead of using the stock Nogova bridge module")
-    milestone9.add_argument("--stock-bridges", action="store_false", dest="procedural_bridges", help="use the stock Nogova bridge module (default)")
-    milestone9.set_defaults(procedural_bridges=False)
+    milestone9.add_argument("--stock-bridges", action="store_false", dest="procedural_bridges", help="use the stock Nogova bridge module instead of procedural bridges")
+    milestone9.set_defaults(procedural_bridges=True)
     milestone9.add_argument("--max-bridge-objects", type=int, default=1000)
     milestone9.add_argument("--bridge-module-length", type=float, default=30.0, help="target module length for procedural bridges; stock Nogova bridges remain fixed at 30 m")
     milestone9.add_argument("--bridge-deck-clearance", type=float, default=1.25, help="minimum procedural bridge roadway clearance above the highest terrain under the full span; default 1.25 m")
@@ -531,6 +532,12 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.set_defaults(meadow_grass_enabled=True)
     milestone9.add_argument("--max-meadow-grass-objects", type=int, default=20000)
     milestone9.add_argument("--meadow-grass-spacing", type=float, default=24.0)
+    milestone9.add_argument("--haybales", action="store_true", dest="haybales_enabled", help="enable stock hay bales in selected OSM landuse=farmland fields")
+    milestone9.add_argument("--no-haybales", action="store_false", dest="haybales_enabled", help="disable stock hay bales in OSM landuse=farmland fields (default)")
+    milestone9.set_defaults(haybales_enabled=False)
+    milestone9.add_argument("--max-haybale-objects", type=int, default=800)
+    milestone9.add_argument("--haybale-spacing", type=float, default=110.0)
+    milestone9.add_argument("--haybale-field-percent", type=float, default=25.0, help="percentage of OSM farmland fields selected for hay bales")
     milestone9.add_argument("--no-wetland-reeds", action="store_false", dest="wetland_reeds_enabled", help="disable stock reed placement in mapped OSM wetlands")
     milestone9.set_defaults(wetland_reeds_enabled=True)
     milestone9.add_argument("--max-wetland-reed-objects", type=int, default=100000)
@@ -694,6 +701,7 @@ def main(argv: list[str] | None = None) -> int:
                 cells=args.cells,
                 cell_size=args.cell_size,
                 refresh=args.refresh,
+                replace_selection=args.replace_selection,
                 reference_map=args.reference_map,
                 overture_buildings_enabled=args.overture_buildings_enabled,
                 dem_provider=args.dem_provider,
@@ -1151,6 +1159,10 @@ def main(argv: list[str] | None = None) -> int:
                 meadow_grass_enabled=args.meadow_grass_enabled,
                 maximum_meadow_grass_objects=args.max_meadow_grass_objects,
                 meadow_grass_spacing=args.meadow_grass_spacing,
+                haybales_enabled=args.haybales_enabled,
+                maximum_haybale_objects=args.max_haybale_objects,
+                haybale_spacing=args.haybale_spacing,
+                haybale_field_percent=args.haybale_field_percent,
                 wetland_reeds_enabled=args.wetland_reeds_enabled,
                 maximum_wetland_reed_objects=args.max_wetland_reed_objects,
                 wetland_reed_spacing=args.wetland_reed_spacing,

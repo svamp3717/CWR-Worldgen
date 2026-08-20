@@ -91,8 +91,9 @@ HEDGE_DEFAULT_VERTICAL_ORIGIN_OFFSET_METRES = 0.85
 LARGE_BUILDING_ROAD_NUDGE_DISTANCE_METRES = 2.0
 LARGE_BUILDING_ROAD_NUDGE_MINIMUM_SPAN_METRES = 18.0
 GARAGE_CLUSTER_RADIUS_METRES = 45.0
-GARAGE_CLUSTER_MINIMUM_SIZE = 4
-GARAGE_CLUSTER_SHED_SHARE = 0.30
+# Only CWR-inferred outbuilding subtypes are subject to this cap. Explicit OSM
+# building=garage/garages remains authoritative regardless of local density.
+GARAGE_CLUSTER_MAXIMUM_GARAGES = 3
 ENTERABLE_BUILDING_MINIMUM_GROUND_CLEARANCE_METRES = 0.25
 ENTERABLE_BUILDING_ENTRANCE_APRON_DEPTH_METRES = 1.25
 ENTERABLE_BUILDING_ENTRANCE_APRON_INSET_METRES = 0.25
@@ -104,6 +105,23 @@ SMALL_SETTLEMENT_INFILL_RADIUS_METRES: Mapping[str, float] = {
     "hamlet": 95.0,
     "farm": 70.0,
     "isolated_dwelling": 36.0,
+}
+# OSM place nodes are labels for settlements/properties, not guaranteed building
+# centroids.  Before inventing a small-settlement residential patch, look much
+# farther than the patch itself for any source-backed building.  This prevents
+# an isolated_dwelling label beside its real farmstead (for example Amerika)
+# from receiving a synthetic bonus house merely because the label is 40-80 m
+# away from the mapped roof.
+SMALL_SETTLEMENT_EXISTING_BUILDING_GUARD_METRES: Mapping[str, float] = {
+    # Keep village/hamlet guards close to their existing synthetic footprint so
+    # legitimately missing buildings at the far side of a settlement can still
+    # use Overture fallback. Farm and isolated-dwelling labels are much more
+    # likely to sit at a property/driveway label rather than on a roof, so they
+    # get the larger offset tolerance.
+    "village": 150.0,
+    "hamlet": 120.0,
+    "farm": 110.0,
+    "isolated_dwelling": 100.0,
 }
 ROADSIDE_TREE_MODELS: tuple[str, ...] = (
     r"data3d\str smrk vysoky.p3d",
@@ -166,6 +184,14 @@ CHURCH_EXTRA_GROUND_CLEARANCE_METRES = 0.0
 # the outer unsampled strip can render as if terrain cuts through their lower
 # walls. Keep the complete model footprint just inside the directly sampled grid.
 BUILDING_TERRAIN_EDGE_MARGIN_METRES = 0.50
+# Synthetic residential infill must not appear as a second, invented house
+# immediately beside source-backed OSM/Overture buildings. Keep this larger
+# than synthetic-to-synthetic spacing because real source geometry wins.
+RESIDENTIAL_INFILL_SOURCE_BUILDING_CLEARANCE_METRES = 25.0
+# Unmatched Overture footprints can be slightly displaced from their OSM
+# counterpart. A conservative size-aware near-duplicate gate catches those
+# without broadly deleting legitimate neighbouring buildings.
+OVERTURE_FALLBACK_NEAR_DUPLICATE_MAXIMUM_DISTANCE_METRES = 10.0
 PROCEDURAL_BRIDGE_LAND_INSET_METRES = 12.0
 
 # Original OFP/Resistance terrain-object models. These are deliberately used
@@ -473,6 +499,10 @@ class ObjectGenerationResult:
     rural_vegetation_rejections: int = 0
     meadow_grass_objects: int = 0
     meadow_grass_rejections: int = 0
+    haybale_objects: int = 0
+    haybale_rejections: int = 0
+    haybale_fields_total: int = 0
+    haybale_fields_selected: int = 0
     meadow_grass_positions: tuple[PointXZ, ...] = ()
     meadow_grass_rejection_positions: tuple[PointXZ, ...] = ()
     rocky_forest_objects: int = 0
@@ -491,6 +521,14 @@ class IterativeGroundingReport:
     maximum_adjustment: float = 0.0
     mean_adjustment: float = 0.0
 
+
+HAYBALE_MODEL = r"o\misc\seno_balik.p3d"
+HAYBALE_ANCHOR_ACCEPTANCE = 0.45
+HAYBALE_FIELD_PERCENT = 25.0
+HAYBALE_CLUSTER_SINGLE_FRACTION = 0.70
+HAYBALE_CLUSTER_PAIR_FRACTION = 0.20
+HAYBALE_CLUSTER_RADIUS_MIN = 7.0
+HAYBALE_CLUSTER_RADIUS_MAX = 18.0
 
 _FOREST_LANDUSES = {"forest"}
 _FARMLAND_LANDUSES = {
@@ -1157,26 +1195,75 @@ class IndexedRoadCorridors(Sequence[RoadCorridor]):
         z0 = math.floor(minimum_z / bucket)
         x1 = math.floor(maximum_x / bucket)
         z1 = math.floor(maximum_z / bucket)
-        candidates: set[int] = set()
-        for bz in range(z0, z1 + 1):
-            for bx in range(x0, x1 + 1):
-                candidates.update(self.buckets.get((bx, bz), ()))
-        for index in sorted(candidates):
+
+        def intersects(index: int) -> bool:
             start, end, radius = self.corridors[index]
-            if _segment_intersects_rectangle(
+            return _segment_intersects_rectangle(
                 start,
                 end,
                 minimum_x - radius,
                 minimum_z - radius,
                 maximum_x + radius,
                 maximum_z + radius,
-            ):
-                return True
+            )
+
+        # Forest placement performs this query hundreds of thousands of times.
+        # Most 50 m footprints fit inside one 100 m spatial bucket, so avoid
+        # allocating and sorting a temporary set for the overwhelmingly common
+        # case. For multi-bucket queries, test each newly-seen segment
+        # immediately so road hits can return early. Query order cannot affect
+        # the boolean result.
+        if x0 == x1 and z0 == z1:
+            return any(intersects(index) for index in self.buckets.get((x0, z0), ()))
+
+        seen: set[int] = set()
+        for bz in range(z0, z1 + 1):
+            for bx in range(x0, x1 + 1):
+                for index in self.buckets.get((bx, bz), ()):
+                    if index in seen:
+                        continue
+                    seen.add(index)
+                    if intersects(index):
+                        return True
         return False
 
 
 _SPATIAL_CACHE_SCHEMA = 1
 _SPATIAL_INDEX_REGISTRY: dict[str, SpatialLookupIndex] = {}
+# Repeated nearest-road queries must not rebuild the content fingerprint for the
+# same in-memory dataset. The content-key registry remains the cross-object/cache
+# authority; this identity registry is only a fast path within one build.
+_SPATIAL_FAST_REGISTRY: dict[
+    tuple[int, float, float, float, float, float],
+    tuple[OsmDataset, SpatialLookupIndex],
+] = {}
+
+
+def _spatial_fast_key(
+    dataset: OsmDataset, projection: BboxProjection
+) -> tuple[int, float, float, float, float, float]:
+    return (
+        id(dataset),
+        float(projection.south), float(projection.west),
+        float(projection.north), float(projection.east),
+        float(projection.world_size),
+    )
+
+
+def _remember_spatial_index(
+    dataset: OsmDataset, projection: BboxProjection, index: SpatialLookupIndex
+) -> SpatialLookupIndex:
+    key = _spatial_fast_key(dataset, projection)
+    _SPATIAL_FAST_REGISTRY[key] = (dataset, index)
+    # Keep identity caching bounded so a long-lived GUI session does not retain
+    # every large OSM dataset it has ever generated. Eight active/recent worlds
+    # is ample for normal use and still prevents object-id reuse while cached.
+    while len(_SPATIAL_FAST_REGISTRY) > 8:
+        oldest = next(iter(_SPATIAL_FAST_REGISTRY))
+        if oldest == key and len(_SPATIAL_FAST_REGISTRY) > 1:
+            oldest = next(item for item in _SPATIAL_FAST_REGISTRY if item != key)
+        _SPATIAL_FAST_REGISTRY.pop(oldest, None)
+    return index
 
 
 def _spatial_registry_key(dataset: OsmDataset, projection: BboxProjection) -> str:
@@ -1223,13 +1310,14 @@ def prepare_spatial_index(
     if use_cache and not refresh and registry_key in _SPATIAL_INDEX_REGISTRY:
         previous = _SPATIAL_INDEX_REGISTRY[registry_key]
         progress(100, "Using in-memory spatial road index")
-        return SpatialLookupIndex(
+        loaded = SpatialLookupIndex(
             previous.fingerprint,
             previous.bucket_size,
             previous.road_segments,
             previous.road_buckets,
             True,
         )
+        return _remember_spatial_index(dataset, projection, loaded)
     disk_key = cache_key(
         "projected-spatial-index-v1",
         {
@@ -1258,6 +1346,7 @@ def prepare_spatial_index(
                     True,
                 )
                 _SPATIAL_INDEX_REGISTRY[registry_key] = loaded
+                _remember_spatial_index(dataset, projection, loaded)
                 progress(100, "Loaded spatial road index from cache")
                 return loaded
         except (OSError, ValueError, TypeError, pickle.PickleError, EOFError):
@@ -1293,6 +1382,7 @@ def prepare_spatial_index(
         cache_hit=False,
     )
     _SPATIAL_INDEX_REGISTRY[registry_key] = index
+    _remember_spatial_index(dataset, projection, index)
     if use_cache and cache_path is not None:
         atomic_write_bytes(
             cache_path,
@@ -1311,7 +1401,14 @@ def prepare_spatial_index(
 
 
 def get_spatial_index(dataset: OsmDataset, projection: BboxProjection) -> SpatialLookupIndex | None:
-    return _SPATIAL_INDEX_REGISTRY.get(_spatial_registry_key(dataset, projection))
+    fast_key = _spatial_fast_key(dataset, projection)
+    fast = _SPATIAL_FAST_REGISTRY.get(fast_key)
+    if fast is not None and fast[0] is dataset:
+        return fast[1]
+    index = _SPATIAL_INDEX_REGISTRY.get(_spatial_registry_key(dataset, projection))
+    if index is not None:
+        _remember_spatial_index(dataset, projection, index)
+    return index
 
 
 def nearest_road_point(
@@ -2382,6 +2479,31 @@ def _oriented_rectangle(
 
 
 
+
+def _procedural_support_polygon(
+    x: float,
+    z: float,
+    heading_degrees: float,
+    selected: Any,
+) -> tuple[PointXZ, ...]:
+    """Return the exact authored footprint of one procedural building model."""
+
+    local_vertices = tuple(getattr(selected, "footprint_vertices", ()) or ())
+    if not local_vertices:
+        return _oriented_rectangle(
+            x, z, float(selected.width_m), float(selected.length_m), heading_degrees
+        )
+    angle = math.radians(heading_degrees)
+    width_axis = (math.cos(angle), -math.sin(angle))
+    length_axis = (math.sin(angle), math.cos(angle))
+    return tuple(
+        (
+            x + float(local_x) * width_axis[0] + float(local_z) * length_axis[0],
+            z + float(local_x) * width_axis[1] + float(local_z) * length_axis[1],
+        )
+        for local_x, local_z in local_vertices
+    )
+
 def _nudge_building_inside_sampled_terrain(
     x: float,
     z: float,
@@ -2603,28 +2725,13 @@ def refine_iterative_grounding_terrain(
         for plan in building_placement_plans
         if not _building_plan_fully_submerged(plan, elevations, raster, spec)
     )
-    multipart_targets: dict[str, float] = {}
-    for plan in active_building_plans:
-        if plan.geometry_kind != "polygon_part":
-            continue
-        value = _maximum_polygon_elevation(
-            elevations, cells, cell_size, tuple(plan.support_polygon)
-        )
-        multipart_targets[plan.osm_key] = max(
-            multipart_targets.get(plan.osm_key, -math.inf), value
-        )
     for plan, obj in zip(active_building_plans, building_objects):
         footprint = tuple(plan.support_polygon)
-        # Enterable and closed procedural buildings now share exactly the same
-        # terrain support rule. Foundation stairs bridge the doorway down to the
-        # surrounding terrain, so the exterior apron must not lift or reshape an
-        # enterable building differently from its non-interior counterpart.
-        target = (
-            multipart_targets[plan.osm_key]
-            if plan.geometry_kind == "polygon_part" and plan.osm_key in multipart_targets
-            else _maximum_polygon_elevation(
-                elevations, cells, cell_size, footprint
-            )
+        # Every source footprint is one building object. Terrain support is
+        # therefore computed from that one final authored footprint, whether it
+        # is rectangular or polygon-native.
+        target = _maximum_polygon_elevation(
+            elevations, cells, cell_size, footprint
         )
         accepted = add_support(
             footprint,
@@ -3060,12 +3167,87 @@ def _square_elevation_samples(
         (maximum_x, maximum_z),
         (minimum_x, maximum_z),
     )
-    # Vegetation has no foundation skirt to hide a wrong interpolation choice.
-    # Keep both possible RVW4 triangle heights at every complete-footprint
-    # arrangement vertex so fitting can bound burial and floating exactly.
-    return _polygon_ground_elevation_samples(
-        elevations, cells, cell_size, polygon
+    world_limit = cells * cell_size - 0.001
+    if (
+        x - half < 0.0
+        or z - half < 0.0
+        or x + half > world_limit
+        or z + half > world_limit
+    ):
+        # Keep the generic clipping/boundary semantics for footprints touching
+        # the finite terrain edge. Primary forest blocks are guarded inland, so
+        # their hot path uses the specialized rectangle sampler below.
+        return _polygon_ground_elevation_samples(
+            elevations, cells, cell_size, polygon
+        )
+
+    # This is the same arrangement sampled by
+    # _polygon_ground_elevation_samples(), specialized for an axis-aligned
+    # rectangle. Forest placement calls it tens of thousands of times, while
+    # the generic path repeatedly performs point-in-polygon tests for grid and
+    # patch-centre points that are trivially inside this rectangle. Preserve
+    # the exact support-value multiset (and therefore min/max/median fitting)
+    # without that geometry bookkeeping.
+    x_breakpoints = _terrain_axis_breakpoints(
+        minimum_x, maximum_x, cells, cell_size
     )
+    z_breakpoints = _terrain_axis_breakpoints(
+        minimum_z, maximum_z, cells, cell_size
+    )
+    values: list[float] = []
+
+    for sample_x, sample_z in polygon:
+        values.extend(
+            _triangle_elevation_bounds(
+                elevations, cells, cell_size, sample_x, sample_z
+            )
+        )
+
+    # For this vertex ordering, the generic ray-cast includes the minimum X/Z
+    # boundaries and excludes the maximum boundaries. Polygon corners above
+    # already retain all four explicit corner samples, matching the old
+    # duplicate semantics used by the median-based terrain fit.
+    for sample_x in x_breakpoints:
+        if not (minimum_x <= sample_x < maximum_x):
+            continue
+        for sample_z in z_breakpoints:
+            if minimum_z <= sample_z < maximum_z:
+                values.extend(
+                    _triangle_elevation_bounds(
+                        elevations, cells, cell_size, sample_x, sample_z
+                    )
+                )
+
+    patch_xs = _terrain_patch_centres(
+        minimum_x, maximum_x, cells, cell_size
+    )
+    patch_zs = _terrain_patch_centres(
+        minimum_z, maximum_z, cells, cell_size
+    )
+    for sample_x in patch_xs:
+        if not (minimum_x <= sample_x < maximum_x):
+            continue
+        for sample_z in patch_zs:
+            if minimum_z <= sample_z < maximum_z:
+                values.extend(
+                    _triangle_elevation_bounds(
+                        elevations, cells, cell_size, sample_x, sample_z
+                    )
+                )
+
+    for start, end in zip(polygon, polygon[1:] + polygon[:1]):
+        values.extend(
+            _edge_ground_elevation_samples(
+                elevations,
+                cells,
+                cell_size,
+                start,
+                end,
+                x_breakpoints,
+                z_breakpoints,
+            )
+        )
+    return tuple(values)
 
 
 def _non_buried_vegetation_anchor(
@@ -3456,6 +3638,78 @@ def _polygon_contains_with_holes(
     )
 
 
+
+def _selected_haybale_field_keys(
+    features: Sequence[OsmPolygonFeature], seed: str, field_percent: float
+) -> frozenset[str]:
+    """Choose a deterministic field-level subset for hay-bale placement.
+
+    Selection is by OSM farmland feature rather than by individual candidate,
+    so a field either participates in the hay pass or does not.  The requested
+    percentage is converted to a deterministic quota and the quota is filled
+    by hashing each feature key with the world seed.
+    """
+    eligible = [
+        feature
+        for feature in features
+        if feature.tags.get("landuse", "").casefold() == "farmland" and feature.polygons
+    ]
+    if not eligible:
+        return frozenset()
+    percent = min(100.0, max(0.0, float(field_percent)))
+    if percent <= 0.0:
+        return frozenset()
+    target = int(math.floor(len(eligible) * percent / 100.0 + 0.5))
+    if target == 0:
+        target = 1
+    target = min(len(eligible), target)
+    ranked = sorted(
+        eligible,
+        key=lambda feature: (
+            hashlib.blake2s(
+                f"{seed}:haybale-field:{feature.osm_key}".encode("utf-8"), digest_size=8
+            ).digest(),
+            feature.osm_key,
+        ),
+    )
+    return frozenset(feature.osm_key for feature in ranked[:target])
+
+def _haybale_cluster_members(
+    seed: str, key: str, x: float, z: float, heading: float
+) -> tuple[tuple[float, float, float], ...]:
+    """Return a small deterministic single/pair/group around a farmland anchor.
+
+    Most anchors remain single bales, while a minority form pairs or loose
+    3-5 bale groups.  Member offsets are deliberately wider than the model
+    footprint so the result reads as farm storage rather than object overlap.
+    """
+    size_digest = hashlib.blake2s(
+        f"{seed}:haybale-group-size:{key}".encode("utf-8"), digest_size=4
+    ).digest()
+    roll = int.from_bytes(size_digest[:2], "little") / 65536.0
+    if roll < HAYBALE_CLUSTER_SINGLE_FRACTION:
+        count = 1
+    elif roll < HAYBALE_CLUSTER_SINGLE_FRACTION + HAYBALE_CLUSTER_PAIR_FRACTION:
+        count = 2
+    else:
+        count = 3 + (int.from_bytes(size_digest[2:], "little") % 3)
+
+    members: list[tuple[float, float, float]] = [(x, z, heading % 360.0)]
+    for member_index in range(1, count):
+        digest = hashlib.blake2s(
+            f"{seed}:haybale-group-member:{key}:{member_index}".encode("utf-8"),
+            digest_size=8,
+        ).digest()
+        angle = (int.from_bytes(digest[0:2], "little") / 65536.0) * math.tau
+        radius_fraction = int.from_bytes(digest[2:4], "little") / 65535.0
+        radius = HAYBALE_CLUSTER_RADIUS_MIN + radius_fraction * (
+            HAYBALE_CLUSTER_RADIUS_MAX - HAYBALE_CLUSTER_RADIUS_MIN
+        )
+        member_heading = (int.from_bytes(digest[4:6], "little") / 65536.0) * 360.0
+        members.append((x + math.cos(angle) * radius, z + math.sin(angle) * radius, member_heading))
+    return tuple(members)
+
+
 def _forest_border_candidates(
     dataset: OsmDataset,
     projection: BboxProjection,
@@ -3838,8 +4092,8 @@ def _roadside_vegetation_candidates(
     label: str,
     minimum_spacing: float,
     candidate_count: int,
-) -> tuple[tuple[float, float, float, int], ...]:
-    """Return deterministic blue-noise-like candidates inside one forest block.
+) -> Iterable[tuple[float, float, float, int]]:
+    """Yield deterministic blue-noise-like candidates inside one forest block.
 
     Candidate points come from hashes rather than a visible lattice. A greedy
     minimum-distance pass removes close pairs, leaving irregular gaps and small
@@ -3865,15 +4119,71 @@ def _roadside_vegetation_candidates(
     raw.sort(key=lambda item: item[0])
 
     accepted: list[tuple[float, float, float, int]] = []
-    minimum_distance2 = max(0.0, float(minimum_spacing)) ** 2
+    minimum_distance = max(0.0, float(minimum_spacing))
+    minimum_distance2 = minimum_distance * minimum_distance
+    if minimum_distance <= 0.0:
+        for _priority, candidate_x, candidate_z, heading, variant in raw:
+            yield candidate_x, candidate_z, heading, variant
+        return
+
+    # The old greedy blue-noise pass compared every new candidate with every
+    # previously accepted point. Road-cut forest blocks can run this hundreds
+    # of times per block, making the spacing filter quadratic. Bucket accepted
+    # points by the minimum spacing: any conflicting point must live in the
+    # candidate's own bucket or one of its eight neighbours. The greedy order
+    # and therefore the generated vegetation are unchanged.
+    inverse_spacing = 1.0 / minimum_distance
+    # Candidates are bounded to this one forest block, so a compact local grid
+    # is faster than a dictionary of global bucket coordinates. It also avoids
+    # nine hash lookups per raw candidate while preserving the exact greedy
+    # acceptance order.
+    span = half_span * 2.0
+    bucket_columns = max(1, int(math.floor(span * inverse_spacing)) + 1)
+    accepted_buckets: list[list[int]] = [
+        [] for _ in range(bucket_columns * bucket_columns)
+    ]
+    origin_x = x - half_span
+    origin_z = z - half_span
     for _priority, candidate_x, candidate_z, heading, variant in raw:
-        if minimum_distance2 and any(
-            (candidate_x - other_x) ** 2 + (candidate_z - other_z) ** 2 < minimum_distance2
-            for other_x, other_z, _other_heading, _other_variant in accepted
-        ):
+        bucket_x = min(
+            bucket_columns - 1,
+            max(0, int((candidate_x - origin_x) * inverse_spacing)),
+        )
+        bucket_z = min(
+            bucket_columns - 1,
+            max(0, int((candidate_z - origin_z) * inverse_spacing)),
+        )
+        too_close = False
+        neighbour_x0 = max(0, bucket_x - 1)
+        neighbour_x1 = min(bucket_columns - 1, bucket_x + 1)
+        neighbour_z0 = max(0, bucket_z - 1)
+        neighbour_z1 = min(bucket_columns - 1, bucket_z + 1)
+        for neighbour_z in range(neighbour_z0, neighbour_z1 + 1):
+            bucket_offset = neighbour_z * bucket_columns
+            for neighbour_x in range(neighbour_x0, neighbour_x1 + 1):
+                for accepted_index in accepted_buckets[bucket_offset + neighbour_x]:
+                    other_x, other_z, _other_heading, _other_variant = accepted[accepted_index]
+                    if (
+                        (candidate_x - other_x) ** 2 + (candidate_z - other_z) ** 2
+                        < minimum_distance2
+                    ):
+                        too_close = True
+                        break
+                if too_close:
+                    break
+            if too_close:
+                break
+        if too_close:
             continue
-        accepted.append((candidate_x, candidate_z, heading, variant))
-    return tuple(accepted)
+        accepted_index = len(accepted)
+        accepted_candidate = (candidate_x, candidate_z, heading, variant)
+        accepted.append(accepted_candidate)
+        accepted_buckets[bucket_z * bucket_columns + bucket_x].append(accepted_index)
+        # Yield immediately. Callers stop once a road-cut block has enough
+        # successfully grounded vegetation, so there is no reason to spacing-
+        # filter the tail of all 384/192 raw candidates first. Future candidates
+        # cannot affect whether an earlier greedy candidate was accepted.
+        yield accepted_candidate
 
 
 def _roadside_tree_candidates(
@@ -3883,7 +4193,7 @@ def _roadside_tree_candidates(
     x: float,
     z: float,
     block_size: float,
-) -> tuple[tuple[float, float, float, int], ...]:
+) -> Iterable[tuple[float, float, float, int]]:
     return _roadside_vegetation_candidates(
         seed, column, row, x, z, block_size,
         label="tree", minimum_spacing=3.75, candidate_count=384,
@@ -3897,7 +4207,7 @@ def _roadside_bush_candidates(
     x: float,
     z: float,
     block_size: float,
-) -> tuple[tuple[float, float, float, int], ...]:
+) -> Iterable[tuple[float, float, float, int]]:
     return _roadside_vegetation_candidates(
         seed, column, row, x, z, block_size,
         label="bush", minimum_spacing=2.25, candidate_count=192,
@@ -4820,6 +5130,30 @@ def _bbox_contains_point(bbox: tuple[float, float, float, float], x: float, z: f
     return bbox[0] <= x <= bbox[2] and bbox[1] <= z <= bbox[3]
 
 
+def _polygon_minimum_distance_squared(
+    a: Sequence[PointXZ],
+    b: Sequence[PointXZ],
+) -> float:
+    """Return the minimum horizontal separation between two polygons.
+
+    Zero includes touching/intersecting polygons. This intentionally uses the
+    existing lightweight segment geometry instead of requiring Shapely in the
+    normal building placement path.
+    """
+    if len(a) < 2 or len(b) < 2:
+        return float("inf")
+    if _polygons_intersect(a, b):
+        return 0.0
+    best = float("inf")
+    for point in a:
+        for start, end in zip(b, b[1:] + b[:1]):
+            best = min(best, _point_to_segment_distance_squared(point, start, end))
+    for point in b:
+        for start, end in zip(a, a[1:] + a[:1]):
+            best = min(best, _point_to_segment_distance_squared(point, start, end))
+    return best
+
+
 def _residential_area_has_mapped_building(
     dataset: OsmDataset,
     projection: BboxProjection,
@@ -4850,16 +5184,18 @@ def _mapped_building_near_world_point(
     x: float,
     z: float,
     radius: float,
+    *,
+    include_overture: bool = False,
 ) -> bool:
     radius_squared = radius * radius
     for feature in dataset.building_points:
-        if feature.tags.get("source") == "overturemaps":
+        if not include_overture and feature.tags.get("source") == "overturemaps":
             continue
         px, pz = projection.to_world(feature.point)
         if (px - x) * (px - x) + (pz - z) * (pz - z) <= radius_squared:
             return True
     for feature in dataset.building_polygons:
-        if feature.tags.get("source") == "overturemaps":
+        if not include_overture and feature.tags.get("source") == "overturemaps":
             continue
         for polygon in feature.polygons:
             projected = tuple(projection.to_world(point) for point in polygon.outer[:-1])
@@ -4942,6 +5278,14 @@ def _small_settlement_infill_feature(
     x, z = projection.to_world(place.point)
     world_size = float(getattr(spec, "world_size", projection.world_size))
     if not (0.0 <= x < world_size and 0.0 <= z < world_size):
+        return None
+    # The place label can be tens of metres from the actual dwelling roofs.
+    # Treat either OSM or accepted Overture buildings as evidence that this
+    # settlement already exists before creating a synthetic residential patch.
+    guard_radius = SMALL_SETTLEMENT_EXISTING_BUILDING_GUARD_METRES.get(kind, radius)
+    if _mapped_building_near_world_point(
+        dataset, projection, x, z, guard_radius, include_overture=True
+    ):
         return None
     min_x = max(0.0, x - radius)
     max_x = min(world_size, x + radius)
@@ -5173,14 +5517,55 @@ def _merge_overture_tags(
     return merged
 
 
-def _geojson_overture_building_polygons(path: Path) -> tuple[OsmPolygonFeature, ...]:
+def _load_overture_geojson_features(path: Path) -> list[Mapping[str, Any]]:
+    """Load a GeoJSON FeatureCollection without first materializing one giant text string.
+
+    ``json.load`` still parses the document in memory, but unlike ``read_text`` +
+    ``json.loads`` it avoids holding an additional copy of a 100-200+ MB source
+    string while the decoded feature tree is alive. Geometry conversion is kept
+    lazy by the conflation pass below, which is the much larger win on big worlds.
+    """
+
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        with path.open("r", encoding="utf-8") as stream:
+            document = json.load(stream)
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"cannot read Overture buildings GeoJSON {path}: {exc}") from exc
     features = document.get("features") if isinstance(document, Mapping) else None
     if not isinstance(features, list):
         raise ValueError(f"Overture buildings GeoJSON {path} does not contain a FeatureCollection")
+    return [feature for feature in features if isinstance(feature, Mapping)]
+
+
+def _overture_geojson_feature_identity(
+    feature: Mapping[str, Any], feature_index: int
+) -> tuple[str, str, Mapping[str, Any] | None]:
+    raw_properties = feature.get("properties")
+    properties = raw_properties if isinstance(raw_properties, Mapping) else None
+    source_id = (
+        str(properties.get("id"))
+        if properties is not None and properties.get("id")
+        else str(feature.get("id", feature_index))
+    )
+    return source_id, f"overture/{source_id}", properties
+
+
+def _overture_geojson_feature_tags(
+    feature: Mapping[str, Any], feature_index: int
+) -> tuple[str, dict[str, str], Mapping[str, Any] | None]:
+    source_id, osm_key, properties = _overture_geojson_feature_identity(feature, feature_index)
+    tags = {
+        "building": _overture_building_tag(properties),
+        "source": "overturemaps",
+        "cwr:synthetic": "overture_building",
+        **_overture_enrichment_tags(properties),
+    }
+    tags.setdefault("cwr:overture_id", source_id)
+    return osm_key, tags, properties
+
+
+def _overture_geojson_feature_polygons(feature: Mapping[str, Any]) -> tuple[GeoPolygon, ...]:
+    """Convert one Overture GeoJSON feature geometry only when geometry is needed."""
 
     def polygon_from_coordinates(coordinates: Any) -> GeoPolygon | None:
         if not isinstance(coordinates, list) or not coordinates:
@@ -5208,67 +5593,83 @@ def _geojson_overture_building_polygons(path: Path) -> tuple[OsmPolygonFeature, 
             return None
         return GeoPolygon(rings[0], tuple(rings[1:]))
 
-    buildings: list[OsmPolygonFeature] = []
-    for feature_index, feature in enumerate(features):
-        if not isinstance(feature, Mapping):
-            continue
-        geometry = feature.get("geometry")
-        if not isinstance(geometry, Mapping):
-            continue
-        geometry_type = str(geometry.get("type", ""))
-        coordinates = geometry.get("coordinates")
-        polygons: list[GeoPolygon] = []
-        if geometry_type == "Polygon":
-            polygon = polygon_from_coordinates(coordinates)
+    geometry = feature.get("geometry")
+    if not isinstance(geometry, Mapping):
+        return ()
+    geometry_type = str(geometry.get("type", ""))
+    coordinates = geometry.get("coordinates")
+    polygons: list[GeoPolygon] = []
+    if geometry_type == "Polygon":
+        polygon = polygon_from_coordinates(coordinates)
+        if polygon is not None:
+            polygons.append(polygon)
+    elif geometry_type == "MultiPolygon" and isinstance(coordinates, list):
+        for raw_polygon in coordinates:
+            polygon = polygon_from_coordinates(raw_polygon)
             if polygon is not None:
                 polygons.append(polygon)
-        elif geometry_type == "MultiPolygon" and isinstance(coordinates, list):
-            for raw_polygon in coordinates:
-                polygon = polygon_from_coordinates(raw_polygon)
-                if polygon is not None:
-                    polygons.append(polygon)
-        if not polygons:
-            continue
-        raw_properties = feature.get("properties")
-        properties = raw_properties if isinstance(raw_properties, Mapping) else None
-        source_id = (
-            str(properties.get("id"))
-            if properties is not None and properties.get("id")
-            else str(feature.get("id", feature_index))
-        )
-        tags = {
-            "building": _overture_building_tag(properties),
-            "source": "overturemaps",
-            "cwr:synthetic": "overture_building",
-            **_overture_enrichment_tags(properties),
-        }
-        tags.setdefault("cwr:overture_id", source_id)
-        buildings.append(OsmPolygonFeature(
-            f"overture/{source_id}",
-            tags,
-            tuple(polygons),
-        ))
-    return tuple(sorted(buildings, key=lambda item: item.osm_key))
+    return tuple(polygons)
 
+
+def _overture_geojson_building_feature(
+    feature: Mapping[str, Any], feature_index: int
+) -> OsmPolygonFeature | None:
+    polygons = _overture_geojson_feature_polygons(feature)
+    if not polygons:
+        return None
+    osm_key, tags, _properties = _overture_geojson_feature_tags(feature, feature_index)
+    return OsmPolygonFeature(osm_key, tags, polygons)
+
+
+def _geojson_overture_building_polygons(path: Path) -> tuple[OsmPolygonFeature, ...]:
+    """Compatibility helper used by tests/tools that still want a materialized tuple."""
+
+    buildings: list[OsmPolygonFeature] = []
+    for feature_index, feature in enumerate(_load_overture_geojson_features(path)):
+        building = _overture_geojson_building_feature(feature, feature_index)
+        if building is not None:
+            buildings.append(building)
+    return tuple(sorted(buildings, key=lambda item: item.osm_key))
 
 def augment_dataset_with_overture_buildings(
     dataset: OsmDataset,
     projection: BboxProjection,
     spec: OsmSpec,
     geojson_path: Path,
+    *,
+    progress_callback: Callable[[int, str], None] | None = None,
 ) -> OsmDataset:
-    """Merge Overture metadata into matching OSM buildings, then add true gaps.
+    """Merge Overture metadata into OSM buildings, then add true gaps.
 
-    OSM remains authoritative for footprint geometry and explicit tags. Overture
-    fills missing height/floor/roof/material metadata. Provenance-derived OSM IDs
-    are used first; remaining records use conservative footprint IoU matching.
-    Only Overture buildings that match neither route are considered for the
-    existing missing-building fallback areas.
+    Large-world optimization notes:
+    - GeoJSON features stay in their raw decoded form until geometry is needed.
+    - provenance/source-ID matches never convert coordinate rings at all.
+    - one Shapely STRtree replaces repeated map-wide building scans for geometry
+      matching, fallback occupancy, near-duplicate suppression and settlement
+      guards.
+    - Overture records retain the historical sorted-key processing order so the
+      optimized path remains deterministic and compatible with earlier output.
     """
 
-    overture_buildings = _geojson_overture_building_polygons(geojson_path)
-    if not overture_buildings:
+    def progress(percent: int, stage: str) -> None:
+        if progress_callback is not None:
+            progress_callback(max(0, min(100, int(percent))), stage)
+
+    try:
+        size_mb = geojson_path.stat().st_size / (1024.0 * 1024.0)
+    except OSError:
+        size_mb = 0.0
+    progress(0, f"Parsing Overture GeoJSON ({size_mb:.1f} MiB)")
+    overture_features = _load_overture_geojson_features(geojson_path)
+    if not overture_features:
+        progress(100, "Overture GeoJSON contains no buildings")
         return dataset
+
+    ordered_features = sorted(
+        enumerate(overture_features),
+        key=lambda item: _overture_geojson_feature_identity(item[1], item[0])[1],
+    )
+    progress(8, f"Loaded {len(ordered_features):,} Overture building records")
 
     polygon_buildings = list(dataset.building_polygons)
     point_buildings = list(dataset.building_points)
@@ -5280,12 +5681,16 @@ def augment_dataset_with_overture_buildings(
     exact_matches = 0
     spatial_matches = 0
 
-    # First use Overture's own source provenance. This is deterministic and
-    # avoids any ambiguity among tightly packed row houses.
-    for overture_index, overture in enumerate(overture_buildings):
-        source_keys = tuple(
-            key for key in str(overture.tags.get("cwr:overture_osm_keys", "")).split("|") if key
+    # Provenance is the cheapest and most reliable match. Crucially, inspect it
+    # before converting geometry: an Overture record that already says "OSM
+    # way/123" does not need thousands of coordinate floats copied into another
+    # Python polygon just to enrich way/123's tags.
+    progress(10, "Matching Overture provenance to OSM building IDs")
+    for overture_index, raw_feature in ordered_features:
+        _source_id, _overture_key, properties = _overture_geojson_feature_identity(
+            raw_feature, overture_index
         )
+        source_keys = _overture_source_osm_keys(properties)
         target_kind = ""
         target_index = -1
         for source_key in source_keys:
@@ -5297,11 +5702,14 @@ def augment_dataset_with_overture_buildings(
                 break
         if target_index < 0:
             continue
+        _osm_key, overture_tags, _properties = _overture_geojson_feature_tags(
+            raw_feature, overture_index
+        )
         if target_kind == "polygon":
             original = polygon_buildings[target_index]
             polygon_buildings[target_index] = OsmPolygonFeature(
                 original.osm_key,
-                _merge_overture_tags(original.tags, overture.tags, match_method="source-id"),
+                _merge_overture_tags(original.tags, overture_tags, match_method="source-id"),
                 original.polygons,
             )
             matched_polygon_indices.add(target_index)
@@ -5309,33 +5717,33 @@ def augment_dataset_with_overture_buildings(
             original = point_buildings[target_index]
             point_buildings[target_index] = OsmPointFeature(
                 original.osm_key,
-                _merge_overture_tags(original.tags, overture.tags, match_method="source-id"),
+                _merge_overture_tags(original.tags, overture_tags, match_method="source-id"),
                 original.point,
             )
             matched_point_indices.add(target_index)
         matched_overture.add(overture_index)
         exact_matches += 1
+    progress(
+        22,
+        f"Overture provenance matched {exact_matches:,}/{len(ordered_features):,} records; building spatial index",
+    )
 
-    # Build lightweight spatial buckets for the remaining polygon-to-polygon
-    # comparison. Shapely performs exact intersection/union area only for nearby
-    # candidates, avoiding a quadratic comparison across an entire city.
     try:
+        from shapely.geometry import Point as ShapelyPoint
         from shapely.geometry import Polygon as ShapelyPolygon
         from shapely.ops import unary_union
+        from shapely.strtree import STRtree
     except ImportError:
+        ShapelyPoint = None  # type: ignore[assignment]
         ShapelyPolygon = None  # type: ignore[assignment]
         unary_union = None  # type: ignore[assignment]
+        STRtree = None  # type: ignore[assignment]
 
-    polygon_shapes: list[Any] = []
-    polygon_bounds: list[tuple[float, float, float, float]] = []
-    bucket_size = 100.0
-    spatial_buckets: dict[tuple[int, int], list[int]] = defaultdict(list)
-
-    def shapely_feature(feature: OsmPolygonFeature):
+    def shape_from_polygons(polygons: Sequence[GeoPolygon]):
         if ShapelyPolygon is None or unary_union is None:
             return None
         shapes = []
-        for polygon in feature.polygons:
+        for polygon in polygons:
             outer = tuple(projection.to_world(point) for point in polygon.outer[:-1])
             holes = tuple(
                 tuple(projection.to_world(point) for point in hole[:-1])
@@ -5353,50 +5761,98 @@ def augment_dataset_with_overture_buildings(
                 continue
         if not shapes:
             return None
-        return unary_union(shapes)
+        try:
+            return shapes[0] if len(shapes) == 1 else unary_union(shapes)
+        except Exception:
+            return None
 
-    if ShapelyPolygon is not None:
+    def shape_from_world_polygon(
+        outer: Sequence[PointXZ], holes: Sequence[Sequence[PointXZ]] = ()
+    ):
+        if ShapelyPolygon is None or len(outer) < 3:
+            return None
+        try:
+            shape = ShapelyPolygon(outer, [hole for hole in holes if len(hole) >= 3])
+            if not shape.is_valid:
+                shape = shape.buffer(0)
+            return shape if not shape.is_empty else None
+        except Exception:
+            return None
+
+    polygon_shapes: list[Any] = [None] * len(polygon_buildings)
+    tree_shapes: list[Any] = []
+    tree_osm_indices: list[int] = []
+    polygon_tree = None
+    if STRtree is not None and ShapelyPolygon is not None:
         for osm_index, feature in enumerate(polygon_buildings):
-            shape = shapely_feature(feature)
-            polygon_shapes.append(shape)
-            if shape is None or shape.is_empty:
-                polygon_bounds.append((0.0, 0.0, 0.0, 0.0))
-                continue
-            bounds = tuple(float(value) for value in shape.bounds)
-            polygon_bounds.append(bounds)
-            min_x, min_z, max_x, max_z = bounds
-            for bz in range(math.floor(min_z / bucket_size), math.floor(max_z / bucket_size) + 1):
-                for bx in range(math.floor(min_x / bucket_size), math.floor(max_x / bucket_size) + 1):
-                    spatial_buckets[(bx, bz)].append(osm_index)
+            shape = shape_from_polygons(feature.polygons)
+            polygon_shapes[osm_index] = shape
+            if shape is not None and not shape.is_empty:
+                tree_shapes.append(shape)
+                tree_osm_indices.append(osm_index)
+        if tree_shapes:
+            polygon_tree = STRtree(tree_shapes)
 
-        for overture_index, overture in enumerate(overture_buildings):
+    point_shapes: list[Any] = []
+    point_world: list[PointXZ] = []
+    point_tree = None
+    if STRtree is not None and ShapelyPoint is not None:
+        for feature in point_buildings:
+            x, z = projection.to_world(feature.point)
+            point_world.append((x, z))
+            point_shapes.append(ShapelyPoint(x, z))
+        if point_shapes:
+            point_tree = STRtree(point_shapes)
+
+    def tree_positions(tree: Any, geometry: Any) -> tuple[int, ...]:
+        if tree is None or geometry is None:
+            return ()
+        try:
+            result = tree.query(geometry)
+        except Exception:
+            return ()
+        try:
+            return tuple(int(value) for value in result)
+        except TypeError:
+            return ()
+
+    # Remaining records need geometry. STRtree lookup turns the old broad bucket
+    # candidate collection into a direct native spatial query, while preserving
+    # the exact historical IoU/area/centroid thresholds and sorted processing.
+    progress(30, "Geometry-matching Overture records that lack OSM provenance")
+    geometry_examined = 0
+    if polygon_tree is not None:
+        for overture_index, raw_feature in ordered_features:
             if overture_index in matched_overture:
                 continue
-            shape = shapely_feature(overture)
+            overture = _overture_geojson_building_feature(raw_feature, overture_index)
+            if overture is None:
+                continue
+            shape = shape_from_polygons(overture.polygons)
             if shape is None or shape.is_empty or shape.area <= 0.01:
                 continue
-            min_x, min_z, max_x, max_z = (float(value) for value in shape.bounds)
-            candidate_indices: set[int] = set()
-            for bz in range(math.floor(min_z / bucket_size), math.floor(max_z / bucket_size) + 1):
-                for bx in range(math.floor(min_x / bucket_size), math.floor(max_x / bucket_size) + 1):
-                    candidate_indices.update(spatial_buckets.get((bx, bz), ()))
+            geometry_examined += 1
+            shape_area = float(shape.area)
+            shape_centroid = shape.centroid
             best: tuple[float, float, int] | None = None
-            for osm_index in candidate_indices:
+            for tree_position in tree_positions(polygon_tree, shape):
+                osm_index = tree_osm_indices[tree_position]
                 if osm_index in matched_polygon_indices:
                     continue
                 osm_shape = polygon_shapes[osm_index]
                 if osm_shape is None or osm_shape.is_empty:
                     continue
                 try:
-                    intersection = shape.intersection(osm_shape).area
+                    intersection = float(shape.intersection(osm_shape).area)
                     if intersection <= 0.0:
                         continue
-                    union = shape.union(osm_shape).area
-                    if union <= 0.0:
+                    osm_area = float(osm_shape.area)
+                    union_area = shape_area + osm_area - intersection
+                    if union_area <= 0.0:
                         continue
-                    iou = intersection / union
-                    area_ratio = min(shape.area, osm_shape.area) / max(shape.area, osm_shape.area)
-                    centroid_distance = shape.centroid.distance(osm_shape.centroid)
+                    iou = intersection / union_area
+                    area_ratio = min(shape_area, osm_area) / max(shape_area, osm_area)
+                    centroid_distance = float(shape_centroid.distance(osm_shape.centroid))
                 except Exception:
                     continue
                 accepted_match = (
@@ -5420,14 +5876,74 @@ def augment_dataset_with_overture_buildings(
             matched_overture.add(overture_index)
             matched_polygon_indices.add(osm_index)
             spatial_matches += 1
+    progress(
+        58,
+        f"Geometry matching examined {geometry_examined:,} records and matched {spatial_matches:,}",
+    )
 
-    # Preserve the original Overture-as-fallback behavior for records that did
-    # not correspond to an OSM building at all.
     merged_dataset = replace(
         dataset,
         building_polygons=tuple(polygon_buildings),
         building_points=tuple(point_buildings),
     )
+
+    # Reuse the same spatial index for fallback-area occupancy. These helpers are
+    # intentionally local to the Overture stage so ordinary OSM behavior stays
+    # untouched while the six-figure-building case avoids O(N*M) Python scans.
+    def area_has_mapped_building(
+        outer: Sequence[PointXZ], holes: Sequence[Sequence[PointXZ]]
+    ) -> bool:
+        area_shape = shape_from_world_polygon(outer, holes)
+        if area_shape is None or polygon_tree is None:
+            return _residential_area_has_mapped_building(
+                merged_dataset, projection, outer, holes
+            )
+        if point_tree is not None:
+            for point_index in tree_positions(point_tree, area_shape):
+                try:
+                    if area_shape.covers(point_shapes[point_index]):
+                        return True
+                except Exception:
+                    continue
+        for tree_position in tree_positions(polygon_tree, area_shape):
+            mapped = tree_shapes[tree_position]
+            try:
+                if area_shape.intersects(mapped):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def mapped_building_near(x: float, z: float, radius: float) -> bool:
+        if ShapelyPoint is None or polygon_tree is None:
+            return _mapped_building_near_world_point(
+                merged_dataset,
+                projection,
+                x,
+                z,
+                radius,
+                include_overture=True,
+            )
+        point = ShapelyPoint(x, z)
+        try:
+            search_shape = point.buffer(radius)
+        except Exception:
+            return False
+        if point_tree is not None:
+            for point_index in tree_positions(point_tree, search_shape):
+                px, pz = point_world[point_index]
+                if (px - x) * (px - x) + (pz - z) * (pz - z) <= radius * radius:
+                    return True
+        for tree_position in tree_positions(polygon_tree, search_shape):
+            mapped = tree_shapes[tree_position]
+            try:
+                if mapped.distance(point) <= radius:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    progress(62, "Finding genuinely empty Overture fallback areas")
     fallback_areas: list[
         tuple[tuple[PointXZ, ...], tuple[tuple[PointXZ, ...], ...], tuple[float, float, float, float]]
     ] = []
@@ -5436,56 +5952,198 @@ def augment_dataset_with_overture_buildings(
             continue
         for polygon in feature.polygons:
             outer = tuple(projection.to_world(point) for point in polygon.outer[:-1])
-            holes = tuple(tuple(projection.to_world(point) for point in hole[:-1]) for hole in polygon.holes)
-            if len(outer) >= 3 and not _residential_area_has_mapped_building(merged_dataset, projection, outer, holes):
+            holes = tuple(
+                tuple(projection.to_world(point) for point in hole[:-1])
+                for hole in polygon.holes
+            )
+            if len(outer) >= 3 and not area_has_mapped_building(outer, holes):
                 fallback_areas.append((outer, holes, _world_bbox(outer)))
-    for place in sorted(merged_dataset.places, key=lambda item: item.osm_key):
-        settlement = _small_settlement_infill_feature(place, merged_dataset, projection, spec)
-        if settlement is None:
-            continue
-        polygon = settlement.polygons[0]
-        outer = tuple(projection.to_world(point) for point in polygon.outer[:-1])
-        holes = tuple(tuple(projection.to_world(point) for point in hole[:-1]) for hole in polygon.holes)
-        if len(outer) >= 3 and not _residential_area_has_mapped_building(merged_dataset, projection, outer, holes):
-            fallback_areas.append((outer, holes, _world_bbox(outer)))
-    fallback_areas.extend(
-        (outer, holes, _world_bbox(outer))
-        for outer, holes in _overture_road_ending_fallback_areas(merged_dataset, projection, spec)
-    )
 
-    mapped_points = tuple(projection.to_world(feature.point) for feature in point_buildings)
-    mapped_polygons: list[tuple[tuple[PointXZ, ...], tuple[float, float, float, float]]] = []
-    for feature in polygon_buildings:
-        for polygon in feature.polygons:
-            projected = tuple(projection.to_world(point) for point in polygon.outer[:-1])
-            if len(projected) >= 3:
-                mapped_polygons.append((projected, _world_bbox(projected)))
+    for place in sorted(merged_dataset.places, key=lambda item: item.osm_key):
+        kind = str(place.tags.get("place", "")).strip().casefold()
+        radius = SMALL_SETTLEMENT_INFILL_RADIUS_METRES.get(kind)
+        if radius is None or _place_inside_residential_area(place, merged_dataset, projection):
+            continue
+        x, z = projection.to_world(place.point)
+        world_size = float(getattr(spec, "world_size", projection.world_size))
+        if not (0.0 <= x < world_size and 0.0 <= z < world_size):
+            continue
+        guard_radius = SMALL_SETTLEMENT_EXISTING_BUILDING_GUARD_METRES.get(kind, radius)
+        if mapped_building_near(x, z, guard_radius):
+            continue
+        min_x = max(0.0, x - radius)
+        max_x = min(world_size, x + radius)
+        min_z = max(0.0, z - radius)
+        max_z = min(world_size, z + radius)
+        if max_x - min_x < 24.0 or max_z - min_z < 24.0:
+            continue
+        outer = (
+            (min_x, min_z),
+            (max_x, min_z),
+            (max_x, max_z),
+            (min_x, max_z),
+        )
+        if not area_has_mapped_building(outer, ()):
+            fallback_areas.append((outer, (), _world_bbox(outer)))
+
+    # Road-ending fallback used to call a full building scan for every dangling
+    # endpoint. With 100k+ buildings that alone can dominate this stage.
+    world_size = float(getattr(spec, "world_size", projection.world_size))
+    endpoint_radius = 80.0
+    endpoint_counts: dict[tuple[int, int], int] = {}
+    endpoints: list[PointXZ] = []
+    for road in merged_dataset.roads:
+        if not road_is_supported(road.tags, include_minor=True) or len(road.points) < 2:
+            continue
+        for point_ll in (road.points[0], road.points[-1]):
+            x, z = projection.to_world(point_ll)
+            if not (0.0 <= x < world_size and 0.0 <= z < world_size):
+                continue
+            key = (round(x), round(z))
+            endpoint_counts[key] = endpoint_counts.get(key, 0) + 1
+            endpoints.append((x, z))
+    seen_endpoints: set[tuple[int, int]] = set()
+    for x, z in endpoints:
+        key = (round(x), round(z))
+        if key in seen_endpoints or endpoint_counts.get(key, 0) != 1:
+            continue
+        seen_endpoints.add(key)
+        if mapped_building_near(x, z, endpoint_radius):
+            continue
+        min_x = max(0.0, x - endpoint_radius)
+        max_x = min(world_size, x + endpoint_radius)
+        min_z = max(0.0, z - endpoint_radius)
+        max_z = min(world_size, z + endpoint_radius)
+        if max_x - min_x < 24.0 or max_z - min_z < 24.0:
+            continue
+        outer = (
+            (min_x, min_z),
+            (max_x, min_z),
+            (max_x, max_z),
+            (min_x, max_z),
+        )
+        fallback_areas.append((outer, (), _world_bbox(outer)))
+
+    fallback_shapes: list[Any] = []
+    fallback_tree = None
+    if STRtree is not None and ShapelyPolygon is not None:
+        for outer, holes, _bbox in fallback_areas:
+            shape = shape_from_world_polygon(outer, holes)
+            if shape is not None:
+                fallback_shapes.append(shape)
+        if fallback_shapes:
+            fallback_tree = STRtree(fallback_shapes)
+
+    def candidate_in_fallback_area(x: float, z: float, bbox: tuple[float, float, float, float]) -> bool:
+        if ShapelyPoint is not None and fallback_tree is not None:
+            point = ShapelyPoint(x, z)
+            for fallback_index in tree_positions(fallback_tree, point):
+                try:
+                    if fallback_shapes[fallback_index].covers(point):
+                        return True
+                except Exception:
+                    continue
+            return False
+        return any(
+            _bboxes_intersect(bbox, fallback_bbox)
+            and _polygon_contains_with_holes((x, z), outer, holes)
+            for outer, holes, fallback_bbox in fallback_areas
+        )
 
     def conflicts_with_mapped_building(
         projected: Sequence[PointXZ],
         bbox: tuple[float, float, float, float],
         cx: float,
         cz: float,
+        candidate_shape: Any,
     ) -> bool:
-        for point in mapped_points:
-            if _bbox_contains_point(bbox, point[0], point[1]) and _point_in_polygon(point, projected):
-                return True
-            if math.hypot(point[0] - cx, point[1] - cz) <= 6.0:
-                return True
-        for mapped, mapped_bbox in mapped_polygons:
-            if not _bboxes_intersect(bbox, mapped_bbox):
+        candidate_area, _candidate_cx, _candidate_cz = _polygon_area_centroid(projected)
+        candidate_scale = math.sqrt(max(0.01, candidate_area))
+        point_duplicate_radius = min(12.0, max(6.0, candidate_scale * 0.70))
+
+        if ShapelyPoint is None or polygon_tree is None or candidate_shape is None:
+            # Rare Shapely-unavailable fallback preserves the pre-optimization
+            # behavior even though it is intentionally slower.
+            mapped_points = tuple(projection.to_world(feature.point) for feature in point_buildings)
+            for point in mapped_points:
+                if _bbox_contains_point(bbox, point[0], point[1]) and _point_in_polygon(point, projected):
+                    return True
+                if math.hypot(point[0] - cx, point[1] - cz) <= point_duplicate_radius:
+                    return True
+            for osm_shape in polygon_shapes:
+                if osm_shape is None or osm_shape.is_empty:
+                    continue
+                try:
+                    if candidate_shape is not None and candidate_shape.intersects(osm_shape):
+                        return True
+                except Exception:
+                    continue
+            return False
+
+        centroid_point = ShapelyPoint(cx, cz)
+        if point_tree is not None:
+            try:
+                point_search = centroid_point.buffer(point_duplicate_radius)
+            except Exception:
+                point_search = candidate_shape
+            for point_index in tree_positions(point_tree, point_search):
+                px, pz = point_world[point_index]
+                try:
+                    if candidate_shape.covers(point_shapes[point_index]):
+                        return True
+                except Exception:
+                    pass
+                if math.hypot(px - cx, pz - cz) <= point_duplicate_radius:
+                    return True
+
+        try:
+            polygon_search = candidate_shape.buffer(
+                OVERTURE_FALLBACK_NEAR_DUPLICATE_MAXIMUM_DISTANCE_METRES
+            )
+        except Exception:
+            polygon_search = candidate_shape
+        for tree_position in tree_positions(polygon_tree, polygon_search):
+            mapped_shape = tree_shapes[tree_position]
+            try:
+                if candidate_shape.intersects(mapped_shape):
+                    return True
+                if mapped_shape.covers(centroid_point):
+                    return True
+                mapped_area = float(mapped_shape.area)
+                if candidate_area <= 0.01 or mapped_area <= 0.01:
+                    continue
+                area_ratio = min(candidate_area, mapped_area) / max(candidate_area, mapped_area)
+                mapped_bbox = tuple(float(value) for value in mapped_shape.bounds)
+                candidate_min_span = max(1.0, min(bbox[2] - bbox[0], bbox[3] - bbox[1]))
+                mapped_min_span = max(
+                    1.0,
+                    min(mapped_bbox[2] - mapped_bbox[0], mapped_bbox[3] - mapped_bbox[1]),
+                )
+                duplicate_radius = min(
+                    OVERTURE_FALLBACK_NEAR_DUPLICATE_MAXIMUM_DISTANCE_METRES,
+                    max(4.0, min(candidate_min_span, mapped_min_span) * 1.15),
+                )
+                mapped_centroid = mapped_shape.centroid
+                if (
+                    area_ratio >= 0.55
+                    and math.hypot(float(mapped_centroid.x) - cx, float(mapped_centroid.y) - cz)
+                    <= duplicate_radius
+                ):
+                    return True
+            except Exception:
                 continue
-            if _polygons_intersect(projected, mapped):
-                return True
-            if _point_in_polygon((cx, cz), mapped):
-                return True
         return False
 
     accepted: list[OsmPolygonFeature] = []
     seen_keys = {feature.osm_key for feature in polygon_buildings}
+    progress(76, f"Checking unmatched Overture buildings against {len(fallback_areas):,} fallback areas")
+    fallback_examined = 0
     if fallback_areas:
-        for overture_index, feature in enumerate(overture_buildings):
+        for overture_index, raw_feature in ordered_features:
             if overture_index in matched_overture:
+                continue
+            feature = _overture_geojson_building_feature(raw_feature, overture_index)
+            if feature is None:
                 continue
             kept_polygons: list[GeoPolygon] = []
             for polygon in feature.polygons:
@@ -5496,25 +6154,29 @@ def augment_dataset_with_overture_buildings(
                 area, x, z = _polygon_area_centroid(projected)
                 if area < getattr(spec, "building_minimum_area", 10.0):
                     continue
-                if conflicts_with_mapped_building(projected, bbox, x, z):
+                if not candidate_in_fallback_area(x, z, bbox):
                     continue
-                if any(
-                    _bboxes_intersect(bbox, fallback_bbox)
-                    and _polygon_contains_with_holes((x, z), outer, holes)
-                    for outer, holes, fallback_bbox in fallback_areas
-                ):
-                    kept_polygons.append(polygon)
+                fallback_examined += 1
+                candidate_shape = shape_from_polygons((polygon,))
+                if conflicts_with_mapped_building(projected, bbox, x, z, candidate_shape):
+                    continue
+                kept_polygons.append(polygon)
             if kept_polygons and feature.osm_key not in seen_keys:
                 accepted.append(OsmPolygonFeature(feature.osm_key, feature.tags, tuple(kept_polygons)))
                 seen_keys.add(feature.osm_key)
 
+    progress(
+        94,
+        f"Overture fallback examined {fallback_examined:,} candidates and accepted {len(accepted):,}",
+    )
     if exact_matches == 0 and spatial_matches == 0 and not accepted:
+        progress(100, "Overture enrichment made no dataset changes")
         return dataset
 
     final_polygons = tuple(sorted((*polygon_buildings, *accepted), key=lambda item: item.osm_key))
     final_points = tuple(sorted(point_buildings, key=lambda item: item.osm_key))
     overture_fingerprint = cache_key(
-        "overture-buildings-conflated-v4",
+        "overture-buildings-conflated-v5",
         {
             "base": dataset.normalized_fingerprint,
             "exact_matches": exact_matches,
@@ -5531,6 +6193,10 @@ def augment_dataset_with_overture_buildings(
             ),
         },
     )
+    progress(
+        100,
+        f"Overture enrichment complete: {exact_matches:,} provenance, {spatial_matches:,} geometry, {len(accepted):,} fallback",
+    )
     return replace(
         dataset,
         building_polygons=final_polygons,
@@ -5538,6 +6204,67 @@ def augment_dataset_with_overture_buildings(
         element_count=dataset.element_count + len(accepted),
         normalized_fingerprint=overture_fingerprint,
     )
+
+@dataclass(slots=True)
+class _PolygonBucketIndex:
+    """Dynamic bbox index for the small polygon collision tests in infill."""
+
+    bucket_size: float
+    polygons: list[tuple[PointXZ, ...]]
+    buckets: dict[tuple[int, int], set[int]]
+
+    @classmethod
+    def from_polygons(
+        cls, polygons: Sequence[Sequence[PointXZ]], *, bucket_size: float = 64.0
+    ) -> "_PolygonBucketIndex":
+        index = cls(max(8.0, float(bucket_size)), [], defaultdict(set))
+        for polygon in polygons:
+            index.add(polygon)
+        return index
+
+    def add(self, polygon: Sequence[PointXZ]) -> int:
+        stored = tuple(polygon)
+        index = len(self.polygons)
+        self.polygons.append(stored)
+        if not stored:
+            return index
+        minimum_x = min(point[0] for point in stored)
+        maximum_x = max(point[0] for point in stored)
+        minimum_z = min(point[1] for point in stored)
+        maximum_z = max(point[1] for point in stored)
+        for bz in range(
+            math.floor(minimum_z / self.bucket_size),
+            math.floor(maximum_z / self.bucket_size) + 1,
+        ):
+            for bx in range(
+                math.floor(minimum_x / self.bucket_size),
+                math.floor(maximum_x / self.bucket_size) + 1,
+            ):
+                self.buckets[(bx, bz)].add(index)
+        return index
+
+    def candidates(
+        self, polygon: Sequence[PointXZ], *, padding: float = 0.0
+    ) -> tuple[tuple[PointXZ, ...], ...]:
+        if not polygon or not self.polygons:
+            return ()
+        padding = max(0.0, float(padding))
+        minimum_x = min(point[0] for point in polygon) - padding
+        maximum_x = max(point[0] for point in polygon) + padding
+        minimum_z = min(point[1] for point in polygon) - padding
+        maximum_z = max(point[1] for point in polygon) + padding
+        indices: set[int] = set()
+        for bz in range(
+            math.floor(minimum_z / self.bucket_size),
+            math.floor(maximum_z / self.bucket_size) + 1,
+        ):
+            for bx in range(
+                math.floor(minimum_x / self.bucket_size),
+                math.floor(maximum_x / self.bucket_size) + 1,
+            ):
+                indices.update(self.buckets.get((bx, bz), ()))
+        return tuple(self.polygons[index] for index in sorted(indices))
+
 
 def _infill_candidate_rectangles(
     feature: OsmPolygonFeature,
@@ -5550,6 +6277,9 @@ def _infill_candidate_rectangles(
     road_corridors: Sequence[RoadCorridor],
     occupied: list[tuple[PointXZ, ...]],
     *,
+    source_occupied: Sequence[Sequence[PointXZ]] = (),
+    source_occupied_index: _PolygonBucketIndex | None = None,
+    occupied_index: _PolygonBucketIndex | None = None,
     budget: int,
 ) -> tuple[tuple[int, float, float, float, float, float, tuple[PointXZ, ...]], ...]:
     """Generate deterministic, sparse house footprints inside one empty residential area."""
@@ -5604,8 +6334,25 @@ def _infill_candidate_rectangles(
                 continue
             if polygon_intersects_road_corridors(road_corridors, footprint, clearance=road_clearance):
                 continue
+            source_clearance = RESIDENTIAL_INFILL_SOURCE_BUILDING_CLEARANCE_METRES
+            source_clearance_sq = source_clearance ** 2
+            nearby_source = (
+                source_occupied_index.candidates(footprint, padding=source_clearance)
+                if source_occupied_index is not None
+                else source_occupied
+            )
+            if any(
+                _polygon_minimum_distance_squared(footprint, prior) < source_clearance_sq
+                for prior in nearby_source
+            ):
+                continue
             expanded = _expand_polygon_from_centroid(footprint, building_clearance)
-            if any(_polygons_intersect(expanded, prior) for prior in occupied):
+            nearby_occupied = (
+                occupied_index.candidates(expanded)
+                if occupied_index is not None
+                else occupied
+            )
+            if any(_polygons_intersect(expanded, prior) for prior in nearby_occupied):
                 continue
             candidates.append((road_distance, digest[8:], index, x, z, heading, width, length, footprint))
     candidates.sort(key=lambda item: (item[0], item[1]))
@@ -5633,43 +6380,86 @@ def _demote_dense_garage_clusters_to_sheds(
     if building_asset_library is None:
         return tuple(plans)
 
+    # Explicit OSM semantics are authoritative. Cluster heuristics may only
+    # reinterpret an outbuilding whose subtype CWR inferred from an untyped or
+    # generic footprint. In particular, never demote building=garage/garages.
+    source_building_tags = {
+        feature.osm_key: str(feature.tags.get("building", "")).casefold()
+        for feature in (*dataset.building_polygons, *dataset.building_points)
+    }
     candidates: list[int] = []
     for index, plan in enumerate(plans):
         placement = plan.procedural_placement
         selected = getattr(placement, "selected", None) if placement is not None else None
+        source_building = source_building_tags.get(plan.osm_key, "")
+        subtype_is_inferred = (
+            plan.synthetic_infill
+            or source_building in {"", "yes", "outbuilding"}
+        )
         if (
             selected is not None
             and getattr(selected, "family", "") == "outbuilding"
             and getattr(selected, "outbuilding_kind", "") == "garage"
+            and subtype_is_inferred
         ):
             candidates.append(index)
-    if len(candidates) < GARAGE_CLUSTER_MINIMUM_SIZE:
+    if len(candidates) <= GARAGE_CLUSTER_MAXIMUM_GARAGES:
         return tuple(plans)
 
-    radius_sq = GARAGE_CLUSTER_RADIUS_METRES * GARAGE_CLUSTER_RADIUS_METRES
+    radius = GARAGE_CLUSTER_RADIUS_METRES
+    radius_sq = radius * radius
+    # Spatial buckets preserve the exact connected-component rule while avoiding
+    # a full scan of every remaining garage for every BFS node. Typical work is
+    # now proportional to nearby garages instead of degrading toward O(G^2).
+    bucket_size = max(1.0, radius)
+    candidate_buckets: dict[tuple[int, int], set[int]] = defaultdict(set)
+    for index in candidates:
+        plan = plans[index]
+        candidate_buckets[(
+            math.floor(plan.x / bucket_size),
+            math.floor(plan.z / bucket_size),
+        )].add(index)
+
     remaining = set(candidates)
     clusters: list[list[int]] = []
     while remaining:
         seed = min(remaining)
         remaining.remove(seed)
+        seed_plan = plans[seed]
+        candidate_buckets[(
+            math.floor(seed_plan.x / bucket_size),
+            math.floor(seed_plan.z / bucket_size),
+        )].discard(seed)
         cluster = [seed]
         queue = deque((seed,))
         while queue:
             current = queue.popleft()
             cx, cz = plans[current].x, plans[current].z
-            neighbours = [
-                other for other in remaining
-                if (plans[other].x - cx) ** 2 + (plans[other].z - cz) ** 2 <= radius_sq
-            ]
+            bucket_x = math.floor(cx / bucket_size)
+            bucket_z = math.floor(cz / bucket_size)
+            nearby: set[int] = set()
+            for dz in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    nearby.update(candidate_buckets.get((bucket_x + dx, bucket_z + dz), ()))
+            neighbours = sorted(
+                other for other in nearby
+                if other in remaining
+                and (plans[other].x - cx) ** 2 + (plans[other].z - cz) ** 2 <= radius_sq
+            )
             for other in neighbours:
                 remaining.remove(other)
+                other_plan = plans[other]
+                candidate_buckets[(
+                    math.floor(other_plan.x / bucket_size),
+                    math.floor(other_plan.z / bucket_size),
+                )].discard(other)
                 cluster.append(other)
                 queue.append(other)
         clusters.append(cluster)
 
     updated = list(plans)
     for cluster in clusters:
-        if len(cluster) < GARAGE_CLUSTER_MINIMUM_SIZE:
+        if len(cluster) <= GARAGE_CLUSTER_MAXIMUM_GARAGES:
             continue
         ranked: list[tuple[float, bytes, int]] = []
         for index in cluster:
@@ -5687,16 +6477,12 @@ def _demote_dense_garage_clusters_to_sheds(
             ranked.append((road_distance, digest, index))
         ranked.sort(key=lambda item: (item[0], item[1]))
 
-        # The nearest-to-road member is deliberately protected: that is the
-        # strongest candidate for the actual vehicle garage. Prefer demoting
-        # farther buildings, with a stable hash resolving similar distances.
-        shed_count = min(
-            len(cluster) - 1,
-            max(1, int(round(len(cluster) * GARAGE_CLUSTER_SHED_SHARE))),
-        )
-        demotion_pool = sorted(
-            ranked[1:], key=lambda item: (-item[0], item[1])
-        )[:shed_count]
+        # Keep at most the three strongest vehicle-garage candidates. Road
+        # proximity is the primary signal; the stable digest only breaks ties.
+        # Everything beyond that cap is an inferred shed. This is an actual
+        # maximum, unlike the old 30% demotion heuristic which could leave many
+        # more than four garages in a large cluster.
+        demotion_pool = ranked[GARAGE_CLUSTER_MAXIMUM_GARAGES:]
         for _distance, _digest, index in demotion_pool:
             plan = updated[index]
             placement = plan.procedural_placement
@@ -5717,12 +6503,66 @@ def _demote_dense_garage_clusters_to_sheds(
     return tuple(updated)
 
 
+@dataclass(frozen=True, slots=True)
+class _ProjectedBuildingEntranceIndex:
+    """Cheap world-space lookup for OSM building entrances.
+
+    Building placement used to project and scan every entrance for every
+    footprint. On dense extracts that becomes O(buildings * entrances), even
+    though only entrances within a few metres of a footprint can match.
+    """
+
+    points: tuple[PointXZ, ...]
+    features: tuple[OsmPointFeature, ...]
+    bucket_size: float
+    buckets: Mapping[tuple[int, int], tuple[int, ...]]
+
+    def candidates_for_footprint(
+        self, footprint: Sequence[PointXZ], padding: float
+    ) -> tuple[int, ...]:
+        if not footprint or not self.points:
+            return ()
+        minimum_x = min(point[0] for point in footprint) - padding
+        maximum_x = max(point[0] for point in footprint) + padding
+        minimum_z = min(point[1] for point in footprint) - padding
+        maximum_z = max(point[1] for point in footprint) + padding
+        indices: set[int] = set()
+        for bz in range(
+            math.floor(minimum_z / self.bucket_size),
+            math.floor(maximum_z / self.bucket_size) + 1,
+        ):
+            for bx in range(
+                math.floor(minimum_x / self.bucket_size),
+                math.floor(maximum_x / self.bucket_size) + 1,
+            ):
+                indices.update(self.buckets.get((bx, bz), ()))
+        return tuple(sorted(indices))
+
+
+def _project_building_entrances(
+    dataset: OsmDataset, projection: BboxProjection, *, bucket_size: float = 64.0
+) -> _ProjectedBuildingEntranceIndex:
+    bucket_size = max(8.0, float(bucket_size))
+    features = tuple(dataset.building_entrances)
+    points = tuple(projection.to_world(feature.point) for feature in features)
+    mutable: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for index, (x, z) in enumerate(points):
+        mutable[(math.floor(x / bucket_size), math.floor(z / bucket_size))].append(index)
+    return _ProjectedBuildingEntranceIndex(
+        points=points,
+        features=features,
+        bucket_size=bucket_size,
+        buckets={key: tuple(values) for key, values in mutable.items()},
+    )
+
+
 def _mapped_entrance_for_building(
     dataset: OsmDataset,
     projection: BboxProjection,
     footprint: Sequence[PointXZ],
     *,
     maximum_boundary_distance: float = 3.0,
+    entrance_index: _ProjectedBuildingEntranceIndex | None = None,
 ) -> PointXZ | None:
     """Return the best mapped OSM entrance associated with one building polygon.
 
@@ -5746,8 +6586,19 @@ def _mapped_entrance_for_building(
         "emergency": 4,
     }
     candidates: list[tuple[int, float, str, PointXZ]] = []
-    for feature in dataset.building_entrances:
-        point = projection.to_world(feature.point)
+    if entrance_index is None:
+        indexed_features = tuple(dataset.building_entrances)
+        indexed_points = tuple(projection.to_world(feature.point) for feature in indexed_features)
+        candidate_indices = range(len(indexed_features))
+    else:
+        indexed_features = entrance_index.features
+        indexed_points = entrance_index.points
+        candidate_indices = entrance_index.candidates_for_footprint(
+            polygon, max(0.0, float(maximum_boundary_distance))
+        )
+    for index in candidate_indices:
+        feature = indexed_features[index]
+        point = indexed_points[index]
         distance_sq = min(
             _point_to_segment_distance_squared(point, start, end)
             for start, end in zip(polygon, polygon[1:] + polygon[:1])
@@ -5767,6 +6618,7 @@ def plan_building_placements(
     raster: OsmRaster,
     spec: OsmSpec,
     building_asset_library: "ProceduralBuildingLibrary | None" = None,
+    progress_callback: Callable[[int, str], None] | None = None,
 ) -> tuple[tuple[BuildingPlacementPlan, ...], bool]:
     """Resolve final building models, headings, positions, and exact footprints.
 
@@ -5776,30 +6628,18 @@ def plan_building_placements(
     model somewhere else, a surprisingly effective recipe for hovering houses.
     """
 
+    def progress(percent: int, stage: str) -> None:
+        if progress_callback is not None:
+            progress_callback(max(0, min(100, int(percent))), stage)
+
+    progress(0, "Collecting mapped building candidates")
     candidates: list[tuple[int, str, int, str, Any, Any]] = []
     for feature in dataset.building_polygons:
         for polygon_index, polygon in enumerate(feature.polygons):
-            # Procedural buildings can preserve common orthogonal L/T/U shapes
-            # as a small assembly of adjoining rectangular wings. Stock-model
-            # mode keeps the legacy one-object behaviour because stock P3Ds do
-            # not have dimensions that can be fitted to the source parts.
-            if building_asset_library is not None:
-                from .procedural_buildings import decompose_footprint_rectangles
-                parent_projected = tuple(
-                    projection.to_world(point) for point in polygon.outer[:-1]
-                )
-                parts = decompose_footprint_rectangles(parent_projected)
-                if len(parts) > 1:
-                    for part_index, part in enumerate(parts):
-                        candidates.append((
-                            _building_placement_priority(feature.tags),
-                            feature.osm_key,
-                            polygon_index * 8 + part_index,
-                            "polygon_part",
-                            feature,
-                            (part, parent_projected),
-                        ))
-                    continue
+            # One mapped polygon always becomes at most one building object.
+            # Near-rectangles use one fitted rectangular model; supported
+            # irregular footprints may use one polygon-native model. We never
+            # decompose a source building into independently placed wings.
             candidates.append((
                 _building_placement_priority(feature.tags),
                 feature.osm_key,
@@ -5817,26 +6657,51 @@ def plan_building_placements(
             feature,
             feature.point,
         ))
+    progress(4, f"Sorting {len(candidates):,} mapped building candidates")
     candidates.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
 
+    progress(7, "Preparing building road and entrance lookups")
     building_road_corridors = project_road_corridors(dataset, projection, spec)
+    building_entrance_index = (
+        _project_building_entrances(dataset, projection)
+        if building_asset_library is not None and dataset.building_entrances
+        else None
+    )
     plans: list[BuildingPlacementPlan] = []
     truncated = False
-    for _priority, osm_key, geometry_index, geometry_kind, feature, geometry in candidates:
+    candidate_total = len(candidates)
+    progress_interval = max(1, candidate_total // 40)
+    for candidate_number, (_priority, osm_key, geometry_index, geometry_kind, feature, geometry) in enumerate(candidates, start=1):
+        if candidate_number == 1 or candidate_number == candidate_total or candidate_number % progress_interval == 0:
+            progress(
+                10 + round(72 * candidate_number / max(1, candidate_total)),
+                f"Resolving mapped buildings {candidate_number:,}/{candidate_total:,} ({len(plans):,} accepted)",
+            )
         if len(plans) >= spec.max_buildings:
             truncated = True
             break
 
         procedural_placement = None
         building_family = _building_family(feature.tags)
-        if geometry_kind in {"polygon", "polygon_part"}:
-            if geometry_kind == "polygon_part":
-                projected = list(geometry[0])
-                parent_projected = tuple(geometry[1])
+        if geometry_kind == "polygon":
+            projected = [projection.to_world(point) for point in geometry.outer[:-1]]
+            projected_holes = tuple(
+                tuple(projection.to_world(point) for point in ring[:-1])
+                for ring in geometry.holes
+                if len(ring) >= 4
+            )
+            parent_projected = tuple(projected)
+            if projected_holes:
+                from shapely.geometry import Polygon as ShapelyPolygon
+
+                source_shape = ShapelyPolygon(projected, projected_holes)
+                if source_shape.is_empty or not source_shape.is_valid:
+                    continue
+                area = float(source_shape.area)
+                source_centre = source_shape.centroid
+                x, z = float(source_centre.x), float(source_centre.y)
             else:
-                projected = [projection.to_world(point) for point in geometry.outer[:-1]]
-                parent_projected = tuple(projected)
-            area, x, z = _polygon_area_centroid(projected)
+                area, x, z = _polygon_area_centroid(projected)
             if area < spec.building_minimum_area or len(projected) < 3:
                 continue
             if not (0 <= x < spec.world_size and 0 <= z < spec.world_size):
@@ -5848,23 +6713,16 @@ def plan_building_placements(
             else:
                 road_point = nearest_road_point(dataset, projection, x, z)
                 entrance_point = _mapped_entrance_for_building(
-                    dataset, projection, parent_projected
+                    dataset, projection, parent_projected,
+                    entrance_index=building_entrance_index,
                 )
-                if entrance_point is not None and geometry_kind == "polygon_part":
-                    part_boundary_distance = min(
-                        _point_to_segment_distance_squared(entrance_point, start, end)
-                        for start, end in zip(projected, projected[1:] + projected[:1])
-                    )
-                    if (
-                        not _point_in_polygon(entrance_point, projected)
-                        and part_boundary_distance > 3.0 ** 2
-                    ):
-                        entrance_point = None
                 planner = getattr(building_asset_library, "plan_polygon", None)
                 procedural_placement = (
                     planner(
-                        feature.tags, projected, road_point=road_point,
+                        feature.tags, projected, holes=projected_holes,
+                        road_point=road_point,
                         entrance_point=entrance_point,
+                        allow_native_polygon=True,
                     )
                     if planner is not None
                     else building_asset_library.place_polygon(
@@ -5874,11 +6732,8 @@ def plan_building_placements(
                 heading = procedural_placement.heading_degrees
                 model_path = procedural_placement.model_path
                 building_family = str(getattr(procedural_placement.selected, "family", building_family))
-                support_polygon = _oriented_rectangle(
-                    x, z,
-                    procedural_placement.selected.width_m,
-                    procedural_placement.selected.length_m,
-                    heading,
+                support_polygon = _procedural_support_polygon(
+                    x, z, heading, procedural_placement.selected
                 )
         else:
             x, z = projection.to_world(geometry)
@@ -5915,10 +6770,7 @@ def plan_building_placements(
                 )
 
         road_nudged = False
-        if (
-            geometry_kind != "polygon_part"
-            and _polygon_maximum_span(support_polygon) >= LARGE_BUILDING_ROAD_NUDGE_MINIMUM_SPAN_METRES
-        ):
+        if _polygon_maximum_span(support_polygon) >= LARGE_BUILDING_ROAD_NUDGE_MINIMUM_SPAN_METRES:
             x, z, support_polygon, road_nudged = _nudge_building_footprint_off_roads(
                 dataset, projection, raster, spec, x, z, heading, support_polygon,
                 road_corridors=building_road_corridors,
@@ -5950,6 +6802,7 @@ def plan_building_placements(
     # the road-facing/road-nearest members as garages and make a minority of the
     # farther buildings sheds before any terrain grounding or model registration
     # occurs, so both the visuals and collision/door sizes use the final type.
+    progress(84, f"Post-processing {len(plans):,} mapped building placements")
     plans = list(_demote_dense_garage_clusters_to_sheds(
         plans, dataset, projection, building_asset_library
     ))
@@ -5959,6 +6812,7 @@ def plan_building_placements(
     # patch when OSM has no mapped buildings there. Infill comes after real OSM
     # buildings, so it can never consume the budget ahead of source data.
     if bool(getattr(spec, "residential_infill_enabled", False)) and len(plans) < spec.max_buildings:
+        progress(90, "Planning residential infill")
         infill_limit = max(0, int(getattr(spec, "maximum_residential_infill_buildings", 1500)))
         infill_sources: list[tuple[OsmPolygonFeature, int, GeoPolygon]] = []
         for feature in sorted(dataset.urban, key=lambda item: item.osm_key):
@@ -5971,7 +6825,10 @@ def plan_building_placements(
             if settlement is None:
                 continue
             infill_sources.append((settlement, 0, settlement.polygons[0]))
-        occupied = [tuple(plan.support_polygon) for plan in plans]
+        source_occupied = [tuple(plan.support_polygon) for plan in plans]
+        occupied = list(source_occupied)
+        source_occupied_index = _PolygonBucketIndex.from_polygons(source_occupied)
+        occupied_index = _PolygonBucketIndex.from_polygons(occupied)
         generated = 0
         for feature, polygon_index, polygon in infill_sources:
             remaining = min(infill_limit - generated, spec.max_buildings - len(plans))
@@ -5980,7 +6837,9 @@ def plan_building_placements(
                 break
             rectangles = _infill_candidate_rectangles(
                 feature, polygon_index, polygon, dataset, projection, raster, spec,
-                building_road_corridors, occupied, budget=remaining,
+                building_road_corridors, occupied, source_occupied=source_occupied,
+                source_occupied_index=source_occupied_index, occupied_index=occupied_index,
+                budget=remaining,
             )
             for candidate_index, x, z, heading, width, length, footprint in rectangles:
                 # Generated fallback footprints use the same generic building
@@ -6032,9 +6891,23 @@ def plan_building_placements(
                         clearance=max(0.0, float(getattr(spec, "residential_infill_road_clearance", 0.5))),
                     ):
                         continue
-                    if any(_polygons_intersect(
-                        _expand_polygon_from_centroid(final_footprint, max(1.0, float(getattr(spec, "residential_infill_building_clearance", 6.0)))), prior
-                    ) for prior in occupied):
+                    source_clearance = RESIDENTIAL_INFILL_SOURCE_BUILDING_CLEARANCE_METRES
+                    source_clearance_sq = source_clearance ** 2
+                    if any(
+                        _polygon_minimum_distance_squared(final_footprint, prior) < source_clearance_sq
+                        for prior in source_occupied_index.candidates(
+                            final_footprint, padding=source_clearance
+                        )
+                    ):
+                        continue
+                    expanded_final = _expand_polygon_from_centroid(
+                        final_footprint,
+                        max(1.0, float(getattr(spec, "residential_infill_building_clearance", 6.0))),
+                    )
+                    if any(
+                        _polygons_intersect(expanded_final, prior)
+                        for prior in occupied_index.candidates(expanded_final)
+                    ):
                         continue
                 if _polygon_fully_covered_by_mask(
                     raster.water, spec.cells, spec.world_size, final_footprint
@@ -6049,9 +6922,12 @@ def plan_building_placements(
                     building_family=family, synthetic_infill=True,
                 ))
                 occupied.append(tuple(final_footprint))
+                occupied_index.add(final_footprint)
                 generated += 1
             if generated >= infill_limit or len(plans) >= spec.max_buildings:
                 break
+    cap_note = f"; building cap {spec.max_buildings:,} reached" if truncated else ""
+    progress(100, f"Resolved {len(plans):,} final building footprints{cap_note}")
     return tuple(plans), truncated
 
 
@@ -6135,20 +7011,6 @@ def generate_world_objects(
     minimum_foundation_depth = max(0.0, float(getattr(spec, "building_foundation_depth", 0.5)))
     foundation_safety = max(0.0, float(getattr(spec, "building_foundation_safety", 0.20)))
 
-    multipart_ground_heights: dict[str, float] = {}
-    for grouped_plan in building_placement_plans:
-        if grouped_plan.geometry_kind != "polygon_part":
-            continue
-        if _building_plan_fully_submerged(grouped_plan, elevations, raster, spec):
-            continue
-        _minimum, grouped_maximum = _polygon_elevation_extrema(
-            elevations, spec.cells, spec.cell_size, tuple(grouped_plan.support_polygon)
-        )
-        multipart_ground_heights[grouped_plan.osm_key] = max(
-            multipart_ground_heights.get(grouped_plan.osm_key, -math.inf),
-            grouped_maximum,
-        )
-
     for plan in building_placement_plans:
         if _building_plan_fully_submerged(plan, elevations, raster, spec):
             building_fully_submerged_rejections += 1
@@ -6162,11 +7024,7 @@ def generate_world_objects(
         minimum_height, footprint_maximum_height = _polygon_elevation_extrema(
             elevations, spec.cells, spec.cell_size, grounding_polygon
         )
-        maximum_height = (
-            multipart_ground_heights.get(plan.osm_key, footprint_maximum_height)
-            if plan.geometry_kind == "polygon_part"
-            else footprint_maximum_height
-        )
+        maximum_height = footprint_maximum_height
         relief = maximum_height - minimum_height
         # Interior and non-interior variants use exactly the same world placement
         # and foundation calculation. Enterable variants now carry their own
@@ -6253,6 +7111,8 @@ def generate_world_objects(
     tree_row_objects = orchard_objects = vineyard_objects = scrub_objects = rural_rock_objects = 0
     rural_vegetation_rejections = 0
     meadow_grass_objects = meadow_grass_rejections = 0
+    haybale_objects = haybale_rejections = 0
+    haybale_fields_total = haybale_fields_selected = 0
     meadow_grass_positions: list[PointXZ] = []
     meadow_grass_rejection_positions: list[PointXZ] = []
     rocky_forest_objects = rocky_forest_rejections = 0
@@ -6403,8 +7263,18 @@ def generate_world_objects(
             0.0, float(getattr(spec, "forest_hillside_tree_maximum_relief", 2.5))
         )
         pending_hillside_trees: list[tuple[tuple[float, float, float, float], ...]] = []
+        total_primary_blocks = rows * columns
+        primary_progress_stride = max(1, rows // 20)
+        mask_scale = spec.cells / spec.world_size
 
         for row in range(rows):
+            if row % primary_progress_stride == 0:
+                processed = row * columns
+                progress(
+                    57,
+                    f"Placing primary forest blocks {processed:,}/{total_primary_blocks:,} "
+                    f"({forest_count:,} objects)",
+                )
             for column in range(columns):
                 if forest_count >= spec.max_forest_objects:
                     forest_truncated = True
@@ -6414,9 +7284,6 @@ def generate_world_objects(
                 block_edge_guard = max(forest_world_edge_margin, spacing * 0.58)
                 if not forest_point_inside_edge_guard(x, z, block_edge_guard):
                     continue
-                geographic_column, geographic_row = _geographic_lattice_identity(
-                    projection, x, z, spacing
-                )
                 samples = (
                     (x, z),
                     (x - clearance, z - clearance),
@@ -6424,20 +7291,42 @@ def generate_world_objects(
                     (x - clearance, z + clearance),
                     (x + clearance, z + clearance),
                 )
-                in_bounds_samples = tuple(
-                    (sx, sz)
+                # Convert the five lattice probes to raster indices once. The
+                # old path called _mask_at repeatedly for forest, water, roads
+                # and buildings, repeating bounds/division work up to 20 times
+                # for the same block.
+                sample_indices = tuple(
+                    min(spec.cells - 1, int(sz * mask_scale)) * spec.cells
+                    + min(spec.cells - 1, int(sx * mask_scale))
                     for sx, sz in samples
                     if 0 <= sx < spec.world_size and 0 <= sz < spec.world_size
                 )
-                forest_sample_count = sum(
-                    _mask_at(raster.forest, spec.cells, spec.world_size, sx, sz)
-                    for sx, sz in in_bounds_samples
-                )
+                forest_sample_count = sum(raster.forest[index] for index in sample_indices)
+
+                # Everon's road-cut fallback only needs blocks with at least two
+                # forest probes. Empty/non-forest lattice cells therefore do not
+                # need a road-index query at all. On a 50 km world this removes
+                # road lookups from most of the ~1,000,000 primary candidates.
+                if forest_profile == "everon" and forest_sample_count < 2:
+                    continue
+                if forest_profile != "everon" and forest_sample_count != len(samples):
+                    # Preserve legacy-profile accounting: it historically tests
+                    # road overlap before rejecting partial forest blocks.
+                    block_intersects_road = forest_block_intersects_road_corridors(
+                        road_corridors, x, z, block_size=spacing
+                    )
+                    if block_intersects_road:
+                        forest_road_rejections += 1
+                    continue
+
                 block_intersects_road = forest_block_intersects_road_corridors(
                     road_corridors, x, z, block_size=spacing
                 )
 
                 if block_intersects_road and forest_profile == "everon":
+                    geographic_column, geographic_row = _geographic_lattice_identity(
+                        projection, x, z, spacing
+                    )
                     # A 50 m stock forest block contains several baked-in tree
                     # proxies. Placing it across a road puts hidden trunks on the
                     # carriageway, but rejecting the whole block creates a square
@@ -6614,13 +7503,14 @@ def generate_world_objects(
                 if forest_sample_count != len(samples):
                     continue
                 if any(
-                    _mask_at(raster.water, spec.cells, spec.world_size, sx, sz)
-                    or _mask_at(raster.roads, spec.cells, spec.world_size, sx, sz)
-                    or _mask_at(raster.buildings, spec.cells, spec.world_size, sx, sz)
-                    for sx, sz in samples
+                    raster.water[index] or raster.roads[index] or raster.buildings[index]
+                    for index in sample_indices
                 ):
                     continue
 
+                geographic_column, geographic_row = _geographic_lattice_identity(
+                    projection, x, z, spacing
+                )
                 digest = hashlib.blake2s(
                     f"{seed}:forest:{geographic_column}:{geographic_row}".encode("utf-8"),
                     digest_size=2,
@@ -7165,6 +8055,7 @@ def generate_world_objects(
         # This deliberately uses a Resistance/Nogova spruce from O.pbo rather
         # than the Malden ``str_fikovnik`` model, whose texture commonly lives in
         # a separate Data package and therefore broke strict validation.
+        progress(57, f"Placed primary forest blocks ({forest_count:,} forest objects so far)")
         progress(60, "Scattering individual forest trees")
         extra_single_enabled = bool(getattr(spec, "forest_single_tree_enabled", True))
         extra_single_model = str(getattr(spec, "forest_single_tree_model", r"data3d\str smrk_medium.p3d"))
@@ -7804,7 +8695,7 @@ def generate_world_objects(
     progress(66, "Placing bridge modules")
     if bool(getattr(spec, "bridges_enabled", False)):
         bridge_limit = max(0, int(getattr(spec, "maximum_bridge_objects", 1000)))
-        procedural_bridges = bool(getattr(spec, "procedural_bridges", False))
+        procedural_bridges = bool(getattr(spec, "procedural_bridges", True))
         module_length = (
             max(3.0, float(getattr(spec, "bridge_module_length", 30.0)))
             if procedural_bridges
@@ -8035,13 +8926,14 @@ def generate_world_objects(
             if bridge_objects >= bridge_limit:
                 break
 
-    progress(67, "Placing meadow grass, rural vegetation, wetland reeds and rocks")
+    progress(67, "Placing meadow grass, hay bales, rural vegetation, wetland reeds and rocks")
     # Structured rural vegetation reuses a small cluster library. Rows stay rows;
     # orchards no longer become a vaguely green field and call the matter settled.
     rural_enabled = bool(getattr(spec, "rural_vegetation_enabled", False))
     wetland_enabled = bool(getattr(spec, "wetland_reeds_enabled", False))
     meadow_enabled = bool(getattr(spec, "meadow_grass_enabled", False))
-    if rural_enabled or wetland_enabled or meadow_enabled:
+    haybales_enabled = bool(getattr(spec, "haybales_enabled", False))
+    if rural_enabled or wetland_enabled or meadow_enabled or haybales_enabled:
         rural_limit = (
             max(0, int(getattr(spec, "maximum_rural_vegetation_objects", 3000)))
             if rural_enabled else 0
@@ -8086,6 +8978,122 @@ def generate_world_objects(
                         break
                 if meadow_grass_objects >= meadow_limit:
                     break
+        haybale_limit = max(0, int(getattr(spec, "maximum_haybale_objects", 800)))
+        haybale_spacing = max(40.0, float(getattr(spec, "haybale_spacing", 110.0)))
+        haybale_field_percent = min(
+            100.0, max(0.0, float(getattr(spec, "haybale_field_percent", HAYBALE_FIELD_PERCENT)))
+        )
+        if haybales_enabled and haybale_limit:
+            farmland_features = tuple(
+                feature
+                for feature in sorted(dataset.farmland, key=lambda item: item.osm_key)
+                if feature.tags.get("landuse", "").casefold() == "farmland" and feature.polygons
+            )
+            haybale_fields_total = len(farmland_features)
+            selected_field_keys = _selected_haybale_field_keys(
+                farmland_features, seed, haybale_field_percent
+            )
+            haybale_fields_selected = len(selected_field_keys)
+            haybale_candidates: list[tuple[str, float, float, float, tuple[PointXZ, ...], tuple[tuple[PointXZ, ...], ...]]] = []
+            for feature in farmland_features:
+                if feature.osm_key not in selected_field_keys:
+                    continue
+                field_candidates: list[tuple[str, float, float, float, tuple[PointXZ, ...], tuple[tuple[PointXZ, ...], ...]]] = []
+                accepted_field_candidates: list[tuple[str, float, float, float, tuple[PointXZ, ...], tuple[tuple[PointXZ, ...], ...]]] = []
+                for polygon_index, polygon in enumerate(feature.polygons):
+                    outer = tuple(projection.to_world(point) for point in polygon.outer[:-1])
+                    if len(outer) < 3:
+                        continue
+                    holes = tuple(
+                        tuple(projection.to_world(point) for point in hole[:-1])
+                        for hole in polygon.holes
+                        if len(hole) >= 4
+                    )
+                    for candidate_index, (x, z, heading) in enumerate(_polygon_grid_candidates(
+                        outer,
+                        haybale_spacing,
+                        f"{seed}:haybale:{feature.osm_key}:{polygon_index}",
+                        jitter_fraction=0.90,
+                        heading_jitter_degrees=360.0,
+                    )):
+                        if holes and not _polygon_contains_with_holes((x, z), outer, holes):
+                            continue
+                        key = f"{feature.osm_key}:{polygon_index}:{candidate_index}"
+                        item = (key, x, z, heading, outer, holes)
+                        field_candidates.append(item)
+                        density_digest = hashlib.blake2s(
+                            f"{seed}:haybale-density:{key}".encode("utf-8"), digest_size=2
+                        ).digest()
+                        if int.from_bytes(density_digest, "little") < int(65536 * HAYBALE_ANCHOR_ACCEPTANCE):
+                            accepted_field_candidates.append(item)
+                # A field selected for hay should visibly have hay whenever it has
+                # at least one geometric candidate.  If the density roll rejected
+                # all anchors, keep the deterministic best candidate for that field.
+                if not accepted_field_candidates and field_candidates:
+                    accepted_field_candidates.append(
+                        min(
+                            field_candidates,
+                            key=lambda item: (
+                                hashlib.blake2s(
+                                    f"{seed}:haybale-density:{item[0]}".encode("utf-8"),
+                                    digest_size=8,
+                                ).digest(),
+                                item[0],
+                            ),
+                        )
+                    )
+                haybale_candidates.extend(accepted_field_candidates)
+
+            haybale_candidates.sort(
+                key=lambda item: (
+                    hashlib.blake2s(
+                        f"{seed}:haybale-order:{item[0]}".encode("utf-8"), digest_size=8
+                    ).digest(),
+                    item[0],
+                )
+            )
+            for key, x, z, heading, outer, holes in haybale_candidates:
+                if haybale_objects >= haybale_limit:
+                    break
+                for member_x, member_z, member_heading in _haybale_cluster_members(
+                    seed, key, x, z, heading
+                ):
+                    if haybale_objects >= haybale_limit:
+                        break
+                    if not _polygon_contains_with_holes((member_x, member_z), outer, holes):
+                        haybale_rejections += 1
+                        continue
+                    if (
+                        _mask_at(raster.water, spec.cells, spec.world_size, member_x, member_z)
+                        or _mask_at(raster.roads, spec.cells, spec.world_size, member_x, member_z)
+                        or _mask_at(raster.buildings, spec.cells, spec.world_size, member_x, member_z)
+                        or forest_block_intersects_road_corridors(
+                            road_corridors, member_x, member_z, block_size=5.0
+                        )
+                    ):
+                        haybale_rejections += 1
+                        continue
+                    supports = _square_elevation_samples(
+                        elevations, spec.cells, spec.cell_size, member_x, member_z, 2.5
+                    )
+                    if max(supports) - min(supports) > 0.45:
+                        haybale_rejections += 1
+                        continue
+                    fitted = _terrain_fit_anchor(
+                        supports, clearance=0.03, maximum_burial=0.18, maximum_float=0.18
+                    )
+                    if fitted is None:
+                        haybale_rejections += 1
+                        continue
+                    anchor, _burial, _floating = fitted
+                    objects.append(
+                        WorldObject(
+                            next_id, HAYBALE_MODEL, member_x, anchor, member_z, member_heading
+                        )
+                    )
+                    next_id += 1
+                    haybale_objects += 1
+
         for feature in sorted(dataset.tree_rows, key=lambda item: item.osm_key):
             points = tuple(projection.to_world(point) for point in feature.points)
             for index, (x, z, heading, _length, _x0, _z0, _x1, _z1) in enumerate(_line_chunks(points, rural_spacing, endpoint_trim=2.0)):
@@ -8383,6 +9391,10 @@ def generate_world_objects(
         rural_vegetation_rejections=rural_vegetation_rejections,
         meadow_grass_objects=meadow_grass_objects,
         meadow_grass_rejections=meadow_grass_rejections,
+        haybale_objects=haybale_objects,
+        haybale_rejections=haybale_rejections,
+        haybale_fields_total=haybale_fields_total,
+        haybale_fields_selected=haybale_fields_selected,
         meadow_grass_positions=tuple(meadow_grass_positions),
         meadow_grass_rejection_positions=tuple(meadow_grass_rejection_positions),
         rocky_forest_objects=rocky_forest_objects,

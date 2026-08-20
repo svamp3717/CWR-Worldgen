@@ -9,6 +9,8 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
+import numpy as np
+from shapely import box as vectorized_box, intersects as vectorized_intersects, prepare as prepare_geometry
 from shapely.geometry import LineString, Point, Polygon, box
 
 from .model import ConstraintPlayabilitySpec
@@ -137,7 +139,6 @@ class _ConstraintField:
     strengths: list[float]
     hard: list[bool]
     categories: list[str]
-    counts: dict[str, set[int]]
 
     @classmethod
     def create(cls, size: int) -> "_ConstraintField":
@@ -147,7 +148,6 @@ class _ConstraintField:
             strengths=[0.0] * size,
             hard=[False] * size,
             categories=["natural"] * size,
-            counts={},
         )
 
     def apply(
@@ -181,7 +181,6 @@ class _ConstraintField:
                 self.categories[index] = category
         else:
             return
-        self.counts.setdefault(category, set()).add(index)
 
 
 def _sample_elevation(elevations: Sequence[float], cells: int, cell_size: float, x: float, z: float) -> float:
@@ -247,54 +246,131 @@ def _dry_osm_land_floor_cells(
     projection: BboxProjection,
     raster: OsmRaster,
     spec: ConstraintPlayabilitySpec,
-) -> tuple[int, ...]:
-    cells: set[int] = set()
-    for index, is_water in enumerate(raster.water):
-        if is_water:
-            continue
-        if (
-            raster.forest[index]
-            or raster.farmland[index]
-            or raster.urban[index]
-            or raster.roads[index]
-            or raster.buildings[index]
-        ):
-            cells.add(index)
+    *,
+    progress_callback: Callable[[str], None] | None = None,
+) -> np.ndarray:
+    """Return sorted terrain-cell indices backed by mapped non-water OSM land.
 
-    polygon_features = (
-        tuple(dataset.forests)
-        + tuple(dataset.farmland)
-        + tuple(dataset.urban)
-        + tuple(dataset.sites)
-        + tuple(dataset.surface_areas)
-        + tuple(dataset.rural_vegetation)
-        + tuple(dataset.aeroway_areas)
-    )
-    for feature in polygon_features:
-        for geo_polygon in feature.polygons:
-            geometry = _local_polygon(geo_polygon, projection)
-            if geometry.is_empty:
-                continue
-            for index in _candidate_cells(geometry.bounds, spec.cells, spec.cell_size):
-                if not raster.water[index] and _cell_polygon(index, spec.cells, spec.cell_size).intersects(geometry):
-                    cells.add(index)
+    This used to build a Python ``set[int]`` and then instantiate one Shapely
+    polygon for every candidate terrain cell. On multi-thousand-cell worlds that
+    produced millions of Python objects and hash-table insertions. Keep the exact
+    cell-intersection semantics, but do the mask combination and polygon tests in
+    vectorized C loops instead.
+    """
 
-    point_features = (
-        tuple(dataset.building_points)
-        + tuple(dataset.places)
-        + tuple(dataset.landmarks)
-        + tuple(dataset.individual_trees)
-        + tuple(dataset.utility_points)
+    total_cells = len(raster.water)
+    water = np.asarray(raster.water, dtype=np.bool_)
+    marked = np.asarray(raster.forest, dtype=np.bool_).copy()
+    for layer in (raster.farmland, raster.urban, raster.roads, raster.buildings):
+        np.logical_or(marked, np.asarray(layer, dtype=np.bool_), out=marked)
+    np.logical_and(marked, np.logical_not(water), out=marked)
+
+    polygon_groups = (
+        dataset.forests,
+        dataset.farmland,
+        dataset.urban,
+        dataset.sites,
+        dataset.surface_areas,
+        dataset.rural_vegetation,
+        dataset.aeroway_areas,
     )
+    polygon_feature_total = sum(len(group) for group in polygon_groups)
+    polygon_feature_index = 0
+    polygon_progress_interval = max(1, polygon_feature_total // 16)
+    half = spec.cell_size * 0.5
+    # Bound temporary Shapely arrays. 65k boxes is large enough to amortize the
+    # ufunc call but small enough to avoid ugly memory spikes on 50 km worlds.
+    chunk_size = 65_536
+
+    if progress_callback is not None:
+        progress_callback(
+            f"Collecting dry-land raster cells and {polygon_feature_total:,} mapped polygon features"
+        )
+
+    for group in polygon_groups:
+        for feature in group:
+            polygon_feature_index += 1
+            for geo_polygon in feature.polygons:
+                geometry = _local_polygon(geo_polygon, projection)
+                if geometry.is_empty:
+                    continue
+                prepare_geometry(geometry)
+                min_x, min_z, max_x, max_z = geometry.bounds
+                x0 = max(0, min(spec.cells - 1, int(math.ceil(min_x / spec.cell_size - 0.5))))
+                z0 = max(0, min(spec.cells - 1, int(math.ceil(min_z / spec.cell_size - 0.5))))
+                x1 = max(0, min(spec.cells - 1, int(math.floor(max_x / spec.cell_size + 0.5))))
+                z1 = max(0, min(spec.cells - 1, int(math.floor(max_z / spec.cell_size + 0.5))))
+                width = x1 - x0 + 1
+                height = z1 - z0 + 1
+                if width <= 0 or height <= 0:
+                    continue
+                candidate_count = width * height
+                for start in range(0, candidate_count, chunk_size):
+                    stop = min(candidate_count, start + chunk_size)
+                    offsets = np.arange(start, stop, dtype=np.int64)
+                    xs = x0 + offsets % width
+                    zs = z0 + offsets // width
+                    indices = zs * spec.cells + xs
+                    dry = np.logical_not(water[indices])
+                    if not np.any(dry):
+                        continue
+                    if not np.all(dry):
+                        xs = xs[dry]
+                        zs = zs[dry]
+                        indices = indices[dry]
+                    x_centres = xs.astype(np.float64) * spec.cell_size
+                    z_centres = zs.astype(np.float64) * spec.cell_size
+                    cell_boxes = vectorized_box(
+                        x_centres - half,
+                        z_centres - half,
+                        x_centres + half,
+                        z_centres + half,
+                    )
+                    hits = vectorized_intersects(geometry, cell_boxes)
+                    if np.any(hits):
+                        marked[indices[hits]] = True
+
+            if (
+                progress_callback is not None
+                and (
+                    polygon_feature_index == polygon_feature_total
+                    or polygon_feature_index % polygon_progress_interval == 0
+                )
+            ):
+                progress_callback(
+                    f"Collecting OSM dry-land polygons {polygon_feature_index:,}/{polygon_feature_total:,}"
+                )
+
+    point_groups = (
+        dataset.building_points,
+        dataset.places,
+        dataset.landmarks,
+        dataset.individual_trees,
+        dataset.utility_points,
+    )
+    point_total = sum(len(group) for group in point_groups)
+    point_index = 0
+    point_progress_interval = max(1, point_total // 8)
     point_radius = max(1.0, spec.cell_size * 0.55)
-    for feature in point_features:
-        x, z = projection.to_world(feature.point)
-        bounds = (x - point_radius, z - point_radius, x + point_radius, z + point_radius)
-        for index in _candidate_cells(bounds, spec.cells, spec.cell_size):
-            if not raster.water[index]:
-                cells.add(index)
+    if progress_callback is not None and point_total:
+        progress_callback(f"Collecting {point_total:,} mapped dry-land point features")
+    for group in point_groups:
+        for feature in group:
+            point_index += 1
+            x, z = projection.to_world(feature.point)
+            bounds = (x - point_radius, z - point_radius, x + point_radius, z + point_radius)
+            for index in _candidate_cells(bounds, spec.cells, spec.cell_size):
+                if not raster.water[index]:
+                    marked[index] = True
+            if (
+                progress_callback is not None
+                and (point_index == point_total or point_index % point_progress_interval == 0)
+            ):
+                progress_callback(f"Collecting OSM dry-land points {point_index:,}/{point_total:,}")
 
-    return tuple(sorted(cells))
+    if marked.size != total_cells:
+        raise ValueError("OSM raster size does not match terrain grid")
+    return np.flatnonzero(marked)
 
 
 def _components(mask: Sequence[bool], cells: int) -> list[list[int]]:
@@ -1061,18 +1137,35 @@ def solve_terrain_constraints(
     )
     osm_land_floor_cells = 0
     progress(20, "Lifting OSM dry-land cells above the global water plane")
-    for index in _dry_osm_land_floor_cells(dataset, projection, raster, spec):
-        if original[index] >= dry_land_floor:
-            continue
-        field.apply(
-            index,
-            dry_land_floor,
-            priority=PRIORITY_OSM_DRY_LAND,
-            strength=1.0,
-            hard=True,
-            category="osm-land-floor",
-        )
-        osm_land_floor_cells += 1
+    dry_land_indices = _dry_osm_land_floor_cells(
+        dataset,
+        projection,
+        raster,
+        spec,
+        progress_callback=lambda message: progress(20, message),
+    )
+    dry_land_total = len(dry_land_indices)
+    progress(21, f"Applying dry-land elevation floor to {dry_land_total:,} candidate cells")
+    dry_land_interval = max(1, dry_land_total // 16)
+    priorities = field.priorities
+    targets = field.targets
+    strengths = field.strengths
+    hard_constraints = field.hard
+    categories = field.categories
+    for position, raw_index in enumerate(dry_land_indices, start=1):
+        index = int(raw_index)
+        if original[index] < dry_land_floor:
+            # At this point only boundary/water constraints have been applied,
+            # so PRIORITY_OSM_DRY_LAND is guaranteed to replace the existing
+            # value. Avoid the generic method-call/branch path millions of times.
+            priorities[index] = PRIORITY_OSM_DRY_LAND
+            targets[index] = dry_land_floor
+            strengths[index] = 1.0
+            hard_constraints[index] = True
+            categories[index] = "osm-land-floor"
+            osm_land_floor_cells += 1
+        if position == dry_land_total or position % dry_land_interval == 0:
+            progress(21, f"Applying dry-land floor {position:,}/{dry_land_total:,} ({osm_land_floor_cells:,} lifted)")
 
     # 2-4. Road constraints, with explicit bridge/tunnel/embankment handling.
     progress(22, f"Preparing terrain profiles for {len(dataset.roads):,} roads")
@@ -1134,7 +1227,7 @@ def solve_terrain_constraints(
         shoulder = 0.0 if is_bridge else spec.road_grade_radius
         if is_bridge:
             bridge_segments += 1
-            if bool(getattr(spec, "procedural_bridges", False)):
+            if bool(getattr(spec, "procedural_bridges", True)):
                 # Generated bridges benefit from a modest terrain lift beneath
                 # the span so coarse DEM riverbeds and shoreline sinks do not
                 # leave the surrounding land unrealistically low. Keep a clear

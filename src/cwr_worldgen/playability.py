@@ -1321,7 +1321,7 @@ def _fit_stock_piece_road_objects(
             continue
         if (
             bool(getattr(spec, "bridges_enabled", True))
-            and not bool(getattr(spec, "procedural_bridges", False))
+            and not bool(getattr(spec, "procedural_bridges", True))
             and _road_is_explicit_bridge(feature.tags)
             and not road_bridge_crosses_ditch_only(feature, dataset, projection)
         ):

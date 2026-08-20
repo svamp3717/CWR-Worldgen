@@ -2076,6 +2076,7 @@ _PLACEMENT_CACHE_FIELDS = (
     "residential_infill_road_clearance", "residential_infill_building_clearance",
     "rural_vegetation_enabled", "maximum_rural_vegetation_objects", "rural_vegetation_spacing",
     "meadow_grass_enabled", "maximum_meadow_grass_objects", "meadow_grass_spacing",
+    "haybales_enabled", "maximum_haybale_objects", "haybale_spacing", "haybale_field_percent",
     "wetland_reeds_enabled", "maximum_wetland_reed_objects", "wetland_reed_spacing",
     "wetland_reed_maximum_relief", "wetland_reed_maximum_burial",
     "wetland_reed_maximum_float", "wetland_reed_ground_clearance", "wetland_reed_models",
@@ -2671,6 +2672,7 @@ def _assemble_world_objects(
         + nonroads.rural_rock_objects
         + nonroads.wetland_reed_objects
         + nonroads.meadow_grass_objects
+        + nonroads.haybale_objects
     )
     mapped_tree_count = nonroads.mapped_tree_objects
     utility_count = nonroads.utility_objects
@@ -2879,6 +2881,7 @@ def build_milestone4(
     report_progress(23, "Planning final building footprints")
     building_library: ProceduralBuildingLibrary | None = None
     if bool(getattr(spec, "procedural_buildings", False)):
+        report_progress(23, "Preparing procedural building variants")
         building_library = ProceduralBuildingLibrary(
             world_name=spec.name,
             width_quantum=float(getattr(spec, "building_width_quantum", 2.0)),
@@ -2908,8 +2911,10 @@ def build_milestone4(
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
         )
         building_library.prepare(dataset, projection, spec.point_building_footprint)
+    report_progress(23, "Resolving final building footprints and entrances")
     building_placement_plans, building_plans_truncated = plan_building_placements(
-        dataset, projection, raster, spec, building_library
+        dataset, projection, raster, spec, building_library,
+        progress_callback=_scaled_progress_callback(23, 24),
     )
     report_progress(24, f"Planned {len(building_placement_plans):,} final building footprints")
     grading, slopes, terrain_cache_hit, terrain_cache_key, terrain_cache_path = _load_terrain_solution(
@@ -3100,6 +3105,10 @@ def build_milestone4(
         rural_vegetation_rejections=nonroads.rural_vegetation_rejections,
         meadow_grass_objects=nonroads.meadow_grass_objects,
         meadow_grass_rejections=nonroads.meadow_grass_rejections,
+        haybale_objects=nonroads.haybale_objects,
+        haybale_rejections=nonroads.haybale_rejections,
+        haybale_fields_total=nonroads.haybale_fields_total,
+        haybale_fields_selected=nonroads.haybale_fields_selected,
         meadow_grass_positions=nonroads.meadow_grass_positions,
         meadow_grass_rejection_positions=nonroads.meadow_grass_rejection_positions,
         rocky_forest_objects=nonroads.rocky_forest_objects,
@@ -4006,6 +4015,10 @@ def build_milestone4(
             "rural_vegetation_rejections": nonroads.rural_vegetation_rejections,
             "meadow_grass_objects": nonroads.meadow_grass_objects,
             "meadow_grass_rejections": nonroads.meadow_grass_rejections,
+            "haybale_objects": nonroads.haybale_objects,
+            "haybale_rejections": nonroads.haybale_rejections,
+            "haybale_fields_total": nonroads.haybale_fields_total,
+            "haybale_fields_selected": nonroads.haybale_fields_selected,
             "rocky_forest_objects": nonroads.rocky_forest_objects,
             "rocky_forest_rejections": nonroads.rocky_forest_rejections,
             "mapped_tree_objects": nonroads.mapped_tree_objects,

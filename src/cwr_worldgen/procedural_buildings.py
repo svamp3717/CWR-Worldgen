@@ -13,7 +13,18 @@ import struct
 from typing import Any, Iterable, Mapping, Sequence
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
-from shapely.geometry import Point, Polygon
+from shapely.geometry import LineString, MultiPoint, Point, Polygon
+from shapely.ops import triangulate
+
+try:
+    # Shapely 2.1+ exposes GEOS constrained Delaunay triangulation. Ordinary
+    # Delaunay triangulation does not preserve concave polygon edges, so merely
+    # discarding triangles outside a footprint can leave valid OSM buildings
+    # with uncovered roof slivers. Keep this optional so Shapely 2.0 installs
+    # retain the deterministic ear-clipping fallback below.
+    from shapely import constrained_delaunay_triangles as _constrained_delaunay_triangles
+except ImportError:  # pragma: no cover - exercised only on older Shapely 2.0
+    _constrained_delaunay_triangles = None
 
 from .cache import cache_key, restore_or_create_file
 from .building_semantics import detect_region, is_actual_church
@@ -36,6 +47,12 @@ _PATHS_LOD = 4.0e15
 INTERIOR_DISTANCE_LOD_RESOLUTION = 20.0
 _MAX_GEOMETRY_COMPONENT_SPAN_M = 40.0
 DEFAULT_BUILDING_TEXTURE_VARIANTS = 10
+POLYGON_NATIVE_RECTANGULAR_FILL_THRESHOLD = 0.90
+POLYGON_NATIVE_SIMPLIFY_TOLERANCE_M = 0.50
+POLYGON_NATIVE_VERTEX_QUANTUM_M = 0.50
+POLYGON_NATIVE_MAXIMUM_VERTICES = 32
+POLYGON_NATIVE_MAXIMUM_VARIANTS = 2048
+POLYGON_NATIVE_ENTRANCE_FRACTION_QUANTUM = 0.01
 BUILDING_ASSET_TEXTURE_SIZE = 128
 HIGH_QUALITY_BUILDING_ASSET_TEXTURE_SIZE = 256
 _BUILDING_TEXTURE_LOGICAL_SIZE = 64
@@ -114,11 +131,37 @@ INTERIOR_SECOND_STOREY_STAIR_MAXIMUM_RUN_M = 4.5
 INTERIOR_SECOND_STOREY_STAIR_MINIMUM_WIDTH_M = 0.90
 INTERIOR_SECOND_STOREY_STAIR_MAXIMUM_WIDTH_M = 1.15
 INTERIOR_SECOND_STOREY_STAIR_STEPS = 16
-# Generic eligible houses use an upper interior level most, but not all, of the
-# time. Explicit OSM building:levels >= 2 always wins. Placement is deterministic
-# from source tags/coordinates, so rebuilds do not reshuffle which houses have
-# stairs.
-INTERIOR_SECOND_STOREY_DEFAULT_SHARE_PERCENT = 75
+# Once the facade system has decided that a house visibly has two storeys, an
+# enterable model that physically fits the upper floor should match that facade.
+# Older builds used a 75% lottery here, which produced two-storey exteriors with
+# a blank upper facade whenever the interior happened to be selected as one level.
+INTERIOR_SECOND_STOREY_DEFAULT_SHARE_PERCENT = 100
+# Keep a small visible plinth above the local model origin. Without a reveal,
+# correctly grounded buildings can still *look* as if the wall material simply
+# stops in mid-air on uneven terrain, especially once the world placement lifts
+# the shell by a small safety clearance.
+FOUNDATION_VISIBLE_REVEAL_M = 0.10
+# Short polygon-native wall runs should not squeeze an atlas window down until
+# it resembles a mail slot. Switch those runs to a plain wall treatment.
+MIN_NATIVE_EDGE_WINDOW_TEXTURE_SPAN_M = 3.25
+# Closed painted-window facades with very shallow upper bands or very narrow
+# spans produce absurdly tiny second-floor windows. In those cases fall back to
+# the matching plain facade instead of squeezing the atlas into nonsense.
+CLOSED_WINDOW_TEXTURE_MIN_SPAN_M = 6.25
+CLOSED_WINDOW_TEXTURE_MIN_UPPER_BAND_HEIGHT_M = 2.55
+# Upper-storey painted windows need more room than a full-height ground-floor
+# band. Otherwise the repeated atlas degenerates into tiny second-floor slots,
+# exactly the artifact visible on distant red houses in testing.
+CLOSED_WINDOW_TEXTURE_MIN_UPPER_BAND_SPAN_M = 7.50
+# Isolated cabins/dwellings are often legitimately narrower than suburban
+# houses. One normal ground-floor window still reads correctly at this span;
+# below it the side/back wall becomes plain, while the selected front keeps its
+# entrance atlas regardless.
+ISOLATED_DWELLING_WINDOW_TEXTURE_MIN_SPAN_M = 3.25
+ISOLATED_DWELLING_MINIMUM_FACADE_HEIGHT_M = 2.30
+VISIBLE_FACADE_STOREY_HEIGHT_M = 3.0
+MINIMUM_VISIBLE_FACADE_STOREY_HEIGHT_M = 2.55
+FACADE_WINDOW_UV_INSET = 1.0 / 256.0
 # Almost-square footprints can safely rotate freely to face a nearby road
 # without materially changing the occupied footprint. Longer rectangles keep
 # their source-aligned long axis and may only flip front/back.
@@ -130,7 +173,7 @@ HOUSE_ROAD_FACING_FREE_ROTATION_ASPECT_RATIO = 1.08
 OUTBUILDING_GARAGE_MINIMUM_WIDTH_M = 2.4
 OUTBUILDING_GARAGE_MINIMUM_LENGTH_M = 4.8
 FACADE_TILE_HEIGHT_M = 3.0
-PAINTED_WINDOW_MINIMUM_SILL_M = 1.0
+PAINTED_WINDOW_MINIMUM_SILL_M = 1.15
 _PAINTED_WINDOW_FAMILIES = frozenset({
     "residential", "townhouse", "urban", "church", "school",
 })
@@ -158,6 +201,31 @@ class BuildingVariantKey:
     interiors: bool = False
     second_storey: bool = False
     outbuilding_kind: str = ""
+    # Quantized local X/Z outline for one polygon-native exterior shell. Empty
+    # means the long-standing rectangular procedural model. Keeping the shape
+    # in the immutable variant key makes model reuse/cache identity deterministic.
+    footprint_vertices: tuple[PointXZ, ...] = ()
+    # Interior rings are authored courtyard/open-air holes.  They live in the
+    # same local coordinate system as ``footprint_vertices`` and are deliberately
+    # part of the cache key so two otherwise identical shells cannot accidentally
+    # share a roof/floor that fills the wrong courtyard.
+    footprint_holes: tuple[tuple[PointXZ, ...], ...] = ()
+    # Polygon-native facades have no universal "front" axis.  Store the actual
+    # exterior edge selected by a mapped entrance (or nearest road fallback) and
+    # a quantized lateral position along that edge.  Closed models can therefore
+    # paint the entrance where OSM put it instead of centring it by decree.
+    entrance_edge: int = -1
+    entrance_fraction: float = 0.5
+    # Number of window-bearing facade storeys. Zero means derive a conservative
+    # count from the model height for legacy/manual keys. Carrying this in the
+    # immutable model key prevents the renderer from inventing a third row of
+    # windows merely because a wall happens to be tall enough to repeat an
+    # atlas again.
+    facade_storeys: int = 0
+    # True when the footprint belongs to an explicit place=isolated_dwelling
+    # context. These small one-storey homes need a guaranteed entrance facade;
+    # generic narrow-wall anti-window heuristics must not erase the only door.
+    isolated_dwelling: bool = False
 
     def canonical(self) -> str:
         return json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
@@ -509,15 +577,16 @@ def _variant_colour(colour: tuple[int, int, int], texture_variant: int) -> tuple
     return tuple(max(0, min(255, channel + offsets[index])) for index, channel in enumerate(colour))
 
 
-def _placement_texture_variant(
-    tags: Mapping[str, str],
-    coordinates: Sequence[PointXZ],
-    *,
-    variant_count: int = DEFAULT_BUILDING_TEXTURE_VARIANTS,
+def _placement_hash_u32(
+    tags: Mapping[str, str], coordinates: Sequence[PointXZ]
 ) -> int:
-    """Select a stable façade variant from the building's tags and position."""
+    """Return the stable per-placement hash used by visual variation rules.
 
-    variant_count = max(1, int(variant_count))
+    Planning previously serialized and hashed the same tags/coordinates twice for
+    most houses: once for second-storey selection and again for texture choice.
+    Large worlds turn that innocent duplication into millions of JSON encodes.
+    """
+
     document = {
         "tags": sorted((str(key), str(value)) for key, value in tags.items()),
         "coordinates": [
@@ -526,32 +595,56 @@ def _placement_texture_variant(
     }
     canonical = json.dumps(document, sort_keys=True, separators=(",", ":"))
     digest = sha256(canonical.encode("utf-8")).digest()
-    return int.from_bytes(digest[:4], "little") % variant_count
+    return int.from_bytes(digest[:4], "little")
+
+
+def _placement_texture_variant(
+    tags: Mapping[str, str],
+    coordinates: Sequence[PointXZ],
+    *,
+    variant_count: int = DEFAULT_BUILDING_TEXTURE_VARIANTS,
+    placement_hash: int | None = None,
+) -> int:
+    """Select a stable façade variant from the building's tags and position."""
+
+    variant_count = max(1, int(variant_count))
+    if placement_hash is None:
+        placement_hash = _placement_hash_u32(tags, coordinates)
+    return int(placement_hash) % variant_count
 
 
 def _placement_uses_second_storey(
     tags: Mapping[str, str],
     coordinates: Sequence[PointXZ],
     key: "BuildingVariantKey",
+    *,
+    placement_hash: int | None = None,
 ) -> bool:
     """Choose whether an eligible house receives an upper interior floor.
 
-    Explicit source levels remain authoritative. Untagged/default-height houses
-    use a stable 75% placement share so neighbourhoods contain a mixture of
-    single- and two-floor interiors rather than every six-metre shell being
-    internally identical.
+    Explicit source levels remain authoritative. Inferred two-storey facades now
+    receive a matching upper interior whenever the footprint can support one;
+    visual and walkable storey counts should not disagree by random chance.
     """
 
+    levels = _parse_number(tags.get("building:levels"))
+    if levels is not None:
+        # Explicit OSM levels are authoritative in both directions. A mapped
+        # one-storey house must never fall through to the old 75% random upper
+        # floor selector merely because the shell is tall enough to hold one.
+        if levels < 2.0:
+            return False
+        return _supports_second_storey(key)
+    if _facade_storey_count(key, _main_building_height(key)) < 2:
+        return False
     if not _supports_second_storey(key):
         return False
-    levels = _parse_number(tags.get("building:levels"))
-    if levels is not None and levels >= 2.0:
-        return True
     if key.second_storey:
         return True
     return (
-        _placement_texture_variant(tags, coordinates, variant_count=100)
-        < INTERIOR_SECOND_STOREY_DEFAULT_SHARE_PERCENT
+        _placement_texture_variant(
+            tags, coordinates, variant_count=100, placement_hash=placement_hash
+        ) < INTERIOR_SECOND_STOREY_DEFAULT_SHARE_PERCENT
     )
 
 
@@ -1627,11 +1720,13 @@ def _family(
         "works", "storage_tank", "silo"
     }:
         return "industrial"
-    # Exact isolated-dwelling membership outranks the tiny-building shed
-    # heuristic. A lone mapped shed-shaped footprint can be the dwelling itself;
-    # explicit garage/carport/outbuilding tags remain non-residential.
+    # Exact isolated-dwelling membership may promote only an *untyped/generic*
+    # footprint that CWR would otherwise have to guess. Explicit OSM building
+    # semantics stay authoritative: a mapped shed is a shed, a garage is a
+    # garage, and a house remains a house rather than being silently relabelled
+    # as a cabin because of surrounding settlement context.
     if settlement_context == "isolated_dwelling_single" and building in {
-        "", "yes", "house", "residential", "detached", "cabin", "shed"
+        "", "yes"
     }:
         return "residential"
     if building in {"garage", "garages", "shed", "carport", "outbuilding"}:
@@ -1646,6 +1741,13 @@ def _family(
         "civic", "public", "government"
     }:
         return "urban"
+    if building in {"terrace", "terraced_house"}:
+        return "townhouse"
+    if building in {
+        "house", "residential", "detached", "semidetached_house",
+        "bungalow", "cabin"
+    }:
+        return "residential"
 
     minor = major = area = 0.0
     if width_m is not None and length_m is not None:
@@ -1704,6 +1806,24 @@ def _outbuilding_kind_from_dimensions(width_m: float, length_m: float) -> str:
     ):
         return "garage"
     return "shed"
+
+
+def _outbuilding_kind(
+    tags: Mapping[str, str], width_m: float, length_m: float
+) -> str:
+    """Return the outbuilding subtype without overriding explicit OSM tags.
+
+    Dimensions are useful only when CWR itself is inferring an accessory
+    building from ``building=yes``/an untyped footprint.  They must not turn an
+    explicit shed into a garage or vice versa.
+    """
+
+    building = str(tags.get("building", "")).casefold()
+    if building in {"garage", "garages", "carport"}:
+        return "garage"
+    if building == "shed":
+        return "shed"
+    return _outbuilding_kind_from_dimensions(width_m, length_m)
 
 
 def _outbuilding_is_garage(key: BuildingVariantKey) -> bool:
@@ -2018,7 +2138,10 @@ def _height(tags: Mapping[str, str], family: str, level_height: float) -> float:
         return levels * level_height
     defaults = {
         "residential": 6.0,
-        "townhouse": 9.0,
+        # Generic town-context houses should not silently become three-storey
+        # blocks. Three floors are still produced when OSM explicitly supplies
+        # building:levels=3 or a matching height.
+        "townhouse": 6.0,
         "urban": 12.0,
         "industrial": 7.0,
         "agricultural": 6.0,
@@ -2030,15 +2153,83 @@ def _height(tags: Mapping[str, str], family: str, level_height: float) -> float:
     return defaults[family]
 
 
+def _requested_facade_storeys(
+    tags: Mapping[str, str],
+    family: str,
+    requested_height: float,
+    level_height: float,
+) -> int:
+    """Return the intended number of visible window-bearing storeys.
+
+    OSM ``building:levels`` is authoritative when present. Explicit height is
+    converted conservatively. Untagged buildings use family defaults rather
+    than deriving an unlimited number of floors from a tall wall shell.
+    """
+
+    levels = _parse_number(tags.get("building:levels"))
+    if levels is not None and levels > 0.0:
+        return max(1, min(12, int(round(levels))))
+
+    explicit_height = _parse_number(tags.get("height"))
+    if explicit_height is not None and explicit_height > 0.0:
+        return max(
+            1,
+            min(
+                12,
+                int(math.floor((explicit_height + 0.15) / max(2.5, level_height))),
+            ),
+        )
+
+    defaults = {
+        "residential": 2,
+        "townhouse": 2,
+        "urban": 3,
+        "industrial": 1,
+        "agricultural": 1,
+        "outbuilding": 1,
+        "church": 1,
+        "school": 1,
+        "shop": 1,
+    }
+    return defaults.get(
+        family,
+        max(1, int(math.floor(requested_height / max(2.5, level_height)))),
+    )
+
+
+def _facade_storey_count(key: BuildingVariantKey, wall_height: float) -> int:
+    """Return the number of full realistic window bands that fit this wall."""
+
+    requested = int(key.facade_storeys)
+    if requested <= 0:
+        requested = max(
+            1,
+            int(
+                math.floor(
+                    (float(key.height_m) + 0.15) / VISIBLE_FACADE_STOREY_HEIGHT_M
+                )
+            ),
+        )
+        if key.family == "townhouse" and requested > 2:
+            requested = 2
+    maximum_that_fits = max(
+        1,
+        int(
+            math.floor(
+                (max(0.0, float(wall_height)) + 1.0e-6)
+                / MINIMUM_VISIBLE_FACADE_STOREY_HEIGHT_M
+            )
+        ),
+    )
+    return max(1, min(requested, maximum_that_fits))
+
+
 def _quantize(value: float, quantum: float, minimum: float, maximum: float) -> float:
     clamped = min(maximum, max(minimum, value))
     return round(round(clamped / quantum) * quantum, 3)
 
 
-def footprint_from_polygon(points: Sequence[PointXZ]) -> _Footprint:
-    if len(points) < 3:
-        raise ValueError("building footprint requires at least three points")
-    polygon = Polygon(points)
+def _footprint_from_polygon_object(polygon: Polygon) -> _Footprint:
     if polygon.is_empty or polygon.area <= 0:
         raise ValueError("building footprint has no usable area")
     rectangle = polygon.minimum_rotated_rectangle
@@ -2054,6 +2245,307 @@ def footprint_from_polygon(points: Sequence[PointXZ]) -> _Footprint:
     return _Footprint(max(0.1, width), max(0.1, length), heading)
 
 
+def _polygon_with_footprint(
+    points: Sequence[PointXZ],
+    holes: Sequence[Sequence[PointXZ]] = (),
+) -> tuple[Polygon, _Footprint]:
+    if len(points) < 3:
+        raise ValueError("building footprint requires at least three points")
+    polygon = Polygon(points, [tuple(hole) for hole in holes if len(hole) >= 3])
+    return polygon, _footprint_from_polygon_object(polygon)
+
+
+def footprint_from_polygon(points: Sequence[PointXZ]) -> _Footprint:
+    """Fit the minimum rotated rectangle for one mapped building polygon."""
+
+    return _polygon_with_footprint(points)[1]
+
+
+def _polygon_signed_area(points: Sequence[PointXZ]) -> float:
+    return 0.5 * sum(
+        float(a[0]) * float(b[1]) - float(b[0]) * float(a[1])
+        for a, b in zip(points, points[1:] + points[:1])
+    )
+
+
+def _canonical_cycle(points: Sequence[PointXZ]) -> tuple[PointXZ, ...]:
+    """Return a stable cyclic representation without changing the geometry."""
+
+    if not points:
+        return ()
+    values = tuple((round(float(x), 3), round(float(z), 3)) for x, z in points)
+    rotations = [values[index:] + values[:index] for index in range(len(values))]
+    return min(rotations)
+
+
+def _compact_quantized_ring(
+    points: Sequence[PointXZ], quantum: float, *, clockwise: bool,
+) -> tuple[PointXZ, ...]:
+    """Quantize one ring, remove collapsed corners, and canonicalize winding/start."""
+
+    compact: list[PointXZ] = []
+    for x, z in points:
+        point = (round(float(x) / quantum) * quantum, round(float(z) / quantum) * quantum)
+        if not compact or math.hypot(point[0] - compact[-1][0], point[1] - compact[-1][1]) > 1.0e-6:
+            compact.append(point)
+    if len(compact) >= 2 and math.hypot(
+        compact[0][0] - compact[-1][0], compact[0][1] - compact[-1][1]
+    ) <= 1.0e-6:
+        compact.pop()
+    if len(compact) < 3:
+        return ()
+    signed = _polygon_signed_area(compact)
+    if (clockwise and signed > 0.0) or (not clockwise and signed < 0.0):
+        compact.reverse()
+    return _canonical_cycle(compact)
+
+
+def _native_polygon_profile(
+    points: Sequence[PointXZ],
+    holes: Sequence[Sequence[PointXZ]] = (),
+    *,
+    footprint: _Footprint | None = None,
+    polygon: Polygon | None = None,
+    rectangular_fill_threshold: float = POLYGON_NATIVE_RECTANGULAR_FILL_THRESHOLD,
+    simplify_tolerance: float = POLYGON_NATIVE_SIMPLIFY_TOLERANCE_M,
+    vertex_quantum: float = POLYGON_NATIVE_VERTEX_QUANTUM_M,
+    maximum_vertices: int = POLYGON_NATIVE_MAXIMUM_VERTICES,
+) -> tuple[tuple[PointXZ, ...], tuple[tuple[PointXZ, ...], ...], float, float, float] | None:
+    """Return a reusable local outline, including courtyard holes, for one building.
+
+    Near-rectangles without holes deliberately stay on the mature rectangular
+    path.  Meaningfully irregular valid polygons are simplified and quantized in
+    model space.  Courtyard rings are preserved rather than filled, and a 180°
+    canonicalization lets rotated copies reuse the same P3D.
+    """
+
+    if len(points) < 4:
+        return None
+    if polygon is None:
+        polygon = Polygon(points, [tuple(hole) for hole in holes if len(hole) >= 3])
+    if polygon.is_empty or not polygon.is_valid or polygon.area <= 4.0:
+        return None
+    if footprint is None:
+        footprint = _footprint_from_polygon_object(polygon)
+
+    # Holes are intrinsically non-rectangular from the authored-building point of
+    # view, so never throw them away merely because the outer ring is rectangular.
+    envelope_area = max(0.01, footprint.width_m * footprint.length_m)
+    if not holes and polygon.area / envelope_area >= max(
+        0.0, min(1.0, rectangular_fill_threshold)
+    ):
+        return None
+
+    simplified = polygon.simplify(
+        max(0.0, float(simplify_tolerance)), preserve_topology=True
+    )
+    if simplified.is_empty or simplified.geom_type != "Polygon" or not simplified.is_valid:
+        return None
+
+    exterior = [(float(x), float(z)) for x, z in list(simplified.exterior.coords)[:-1]]
+    interiors = [
+        [(float(x), float(z)) for x, z in list(ring.coords)[:-1]]
+        for ring in simplified.interiors
+    ]
+    total_vertices = len(exterior) + sum(len(ring) for ring in interiors)
+    if len(exterior) < 4 or total_vertices > max(4, int(maximum_vertices)):
+        return None
+
+    centre = simplified.centroid
+    centre_x, centre_z = float(centre.x), float(centre.y)
+    heading = footprint.heading_degrees % 360.0
+    quantum = max(0.05, float(vertex_quantum))
+
+    def localize_ring(ring: Sequence[PointXZ], use_heading: float) -> list[PointXZ]:
+        a = math.radians(use_heading)
+        wx, wz = math.cos(a), -math.sin(a)
+        lx, lz = math.sin(a), math.cos(a)
+        result: list[PointXZ] = []
+        for world_x, world_z in ring:
+            dx = float(world_x) - centre_x
+            dz = float(world_z) - centre_z
+            result.append((dx * wx + dz * wz, dx * lx + dz * lz))
+        return result
+
+    outer = _compact_quantized_ring(localize_ring(exterior, heading), quantum, clockwise=False)
+    local_holes = tuple(
+        ring for ring in (
+            _compact_quantized_ring(localize_ring(interior, heading), quantum, clockwise=True)
+            for interior in interiors
+        ) if ring
+    )
+    if len(outer) < 4 or len(local_holes) != len(interiors):
+        return None
+
+    local_polygon = Polygon(outer, local_holes)
+    if local_polygon.is_empty or not local_polygon.is_valid or local_polygon.area <= 4.0:
+        return None
+
+    # Quantization can move the centroid slightly. Re-centre all rings once so
+    # the P3D origin and the world placement centroid remain aligned.
+    lc = local_polygon.centroid
+    shift_x, shift_z = float(lc.x), float(lc.y)
+    outer = _compact_quantized_ring(
+        [(x - shift_x, z - shift_z) for x, z in outer], quantum, clockwise=False
+    )
+    local_holes = tuple(
+        _compact_quantized_ring(
+            [(x - shift_x, z - shift_z) for x, z in ring], quantum, clockwise=True
+        )
+        for ring in local_holes
+    )
+    if not outer or any(not ring for ring in local_holes):
+        return None
+
+    def shape_signature(
+        candidate_outer: Sequence[PointXZ], candidate_holes: Sequence[Sequence[PointXZ]]
+    ) -> tuple[tuple[PointXZ, ...], tuple[tuple[PointXZ, ...], ...]]:
+        normalized_outer = _compact_quantized_ring(candidate_outer, quantum, clockwise=False)
+        normalized_holes = tuple(sorted(
+            _compact_quantized_ring(ring, quantum, clockwise=True)
+            for ring in candidate_holes
+        ))
+        return normalized_outer, normalized_holes
+
+    canonical_outer, canonical_holes = shape_signature(outer, local_holes)
+    rotated_outer, rotated_holes = shape_signature(
+        [(-x, -z) for x, z in outer],
+        [[(-x, -z) for x, z in ring] for ring in local_holes],
+    )
+    if (rotated_outer, rotated_holes) < (canonical_outer, canonical_holes):
+        canonical_outer, canonical_holes = rotated_outer, rotated_holes
+        heading = (heading + 180.0) % 360.0
+
+    final_polygon = Polygon(canonical_outer, canonical_holes)
+    if final_polygon.is_empty or not final_polygon.is_valid or final_polygon.area <= 4.0:
+        return None
+    min_x, min_z, max_x, max_z = final_polygon.bounds
+    return (
+        canonical_outer,
+        canonical_holes,
+        heading,
+        max(0.1, max_x - min_x),
+        max(0.1, max_z - min_z),
+    )
+
+
+def _triangulate_polygon_coordinates(
+    outer: Sequence[PointXZ], holes: Sequence[Sequence[PointXZ]] = (),
+) -> tuple[tuple[PointXZ, PointXZ, PointXZ], ...]:
+    """Triangulate a valid polygon, retaining courtyard holes exactly.
+
+    The historical implementation used unconstrained Delaunay triangles and
+    discarded every triangle crossing the footprint boundary. That is not a
+    valid triangulation strategy for strongly concave polygons: a Delaunay
+    diagonal can cross a notch, causing otherwise valid roof area to disappear.
+    Keep the old path first so existing simple assets remain byte-stable, then
+    use constrained triangulation or deterministic ear clipping as fallbacks.
+    """
+
+    normalized_holes = tuple(tuple(hole) for hole in holes if len(hole) >= 3)
+    shape = Polygon(outer, normalized_holes)
+    if shape.is_empty or not shape.is_valid or shape.area <= 0.0:
+        return ()
+
+    tolerance = max(0.05, shape.area * 1.0e-5)
+
+    def verified(geometries: Iterable[Any]) -> tuple[tuple[PointXZ, PointXZ, PointXZ], ...]:
+        result: list[tuple[PointXZ, PointXZ, PointXZ]] = []
+        for candidate in geometries:
+            if getattr(candidate, "geom_type", "") != "Polygon" or candidate.area <= 1.0e-8:
+                continue
+            coords = list(candidate.exterior.coords)[:-1]
+            if len(coords) != 3 or not shape.covers(candidate):
+                continue
+            result.append(tuple((float(x), float(z)) for x, z in coords))
+        covered = sum(abs(_polygon_signed_area(triangle)) for triangle in result)
+        if result and abs(covered - shape.area) <= tolerance:
+            return tuple(result)
+        return ()
+
+    # Preserve the old output for the common case. This succeeds for rectangles
+    # and many mildly concave footprints and avoids gratuitously changing every
+    # generated P3D merely because the robust fallback now exists.
+    legacy = verified(triangulate(shape))
+    if legacy:
+        return legacy
+
+    # GEOS constrained triangulation preserves the polygon boundary and holes,
+    # which is exactly what a roof/collision mesh needs. This fixes valid deeply
+    # concave OSM footprints that ordinary Delaunay triangulation cannot cover.
+    if _constrained_delaunay_triangles is not None:
+        constrained = _constrained_delaunay_triangles(shape)
+        robust = verified(getattr(constrained, "geoms", (constrained,)))
+        if robust:
+            return robust
+
+    # Shapely 2.0 lacks constrained_delaunay_triangles. For simple polygons,
+    # deterministic ear clipping still gives an exact triangulation using the
+    # source vertices and prevents one unusual building from aborting the build.
+    if not normalized_holes:
+        indices = _triangulate_simple_polygon(tuple((float(x), float(z)) for x, z in outer))
+        if indices:
+            points = tuple((float(x), float(z)) for x, z in outer)
+            result = tuple(tuple(points[index] for index in triangle) for triangle in indices)
+            covered = sum(abs(_polygon_signed_area(triangle)) for triangle in result)
+            if abs(covered - shape.area) <= tolerance:
+                return result
+
+    return ()
+
+def _triangulate_simple_polygon(points: Sequence[PointXZ]) -> tuple[tuple[int, int, int], ...]:
+    """Ear-clip a simple polygon into triangles using only existing vertices."""
+
+    if len(points) < 3:
+        return ()
+    values = list(points)
+    if _polygon_signed_area(values) < 0.0:
+        values.reverse()
+    # Map any reversed working order back to the caller's coordinate tuple by
+    # using coordinates as the stable identity. Native profiles reject duplicate
+    # adjacent vertices, and practical OSM building rings do not repeat corners.
+    lookup = {point: index for index, point in enumerate(points)}
+    indices = [lookup[point] for point in values]
+
+    def cross(a: PointXZ, b: PointXZ, c: PointXZ) -> float:
+        return (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+
+    def point_in_triangle(p: PointXZ, a: PointXZ, b: PointXZ, c: PointXZ) -> bool:
+        def side(p1: PointXZ, p2: PointXZ, p3: PointXZ) -> float:
+            return (p1[0] - p3[0]) * (p2[1] - p3[1]) - (p2[0] - p3[0]) * (p1[1] - p3[1])
+        d1, d2, d3 = side(p, a, b), side(p, b, c), side(p, c, a)
+        has_neg = d1 < -1.0e-7 or d2 < -1.0e-7 or d3 < -1.0e-7
+        has_pos = d1 > 1.0e-7 or d2 > 1.0e-7 or d3 > 1.0e-7
+        return not (has_neg and has_pos)
+
+    remaining = indices[:]
+    triangles: list[tuple[int, int, int]] = []
+    guard = len(remaining) * len(remaining) * 2
+    while len(remaining) > 3 and guard > 0:
+        guard -= 1
+        clipped = False
+        for position, current in enumerate(remaining):
+            previous = remaining[position - 1]
+            following = remaining[(position + 1) % len(remaining)]
+            a, b, c = points[previous], points[current], points[following]
+            if cross(a, b, c) <= 1.0e-7:
+                continue
+            if any(
+                other not in {previous, current, following}
+                and point_in_triangle(points[other], a, b, c)
+                for other in remaining
+            ):
+                continue
+            triangles.append((previous, current, following))
+            del remaining[position]
+            clipped = True
+            break
+        if not clipped:
+            return ()
+    if len(remaining) == 3:
+        triangles.append(tuple(remaining))
+    return tuple(triangles)
+
 
 def decompose_footprint_rectangles(
     points: Sequence[PointXZ],
@@ -2062,7 +2554,11 @@ def decompose_footprint_rectangles(
     minimum_part_size: float = 2.0,
     rectangular_fill_threshold: float = 0.88,
 ) -> tuple[tuple[PointXZ, ...], ...]:
-    """Decompose a simple orthogonal L/T/U footprint into adjoining rectangles.
+    """Legacy geometry helper for decomposing an orthogonal polygon.
+
+    Active procedural building placement no longer calls this helper: one source
+    footprint is always one world object. It remains available for compatibility
+    and geometry tests while older callers migrate away from multipart placement.
 
     The decomposition is deliberately conservative. Buildings whose outline is
     already close to its minimum rotated rectangle, contains too many distinct
@@ -2271,6 +2767,169 @@ def _wall_quad_ground_anchored(
     )
 
 
+def _closed_facade_texture(
+    key: BuildingVariantKey,
+    texture: str,
+    plain_texture: str,
+    *,
+    span_m: float,
+    height_m: float,
+    upper_band: bool = False,
+    gable: bool = False,
+) -> str:
+    """Prefer plain materials when painted windows would become implausible."""
+
+    if key.interiors:
+        return texture
+    if key.family not in _PAINTED_WINDOW_FAMILIES:
+        return texture
+    if gable:
+        return plain_texture
+    if (
+        key.isolated_dwelling
+        and not upper_band
+        and span_m >= ISOLATED_DWELLING_WINDOW_TEXTURE_MIN_SPAN_M
+    ):
+        return texture
+    if span_m < CLOSED_WINDOW_TEXTURE_MIN_SPAN_M:
+        return plain_texture
+    if upper_band and span_m < CLOSED_WINDOW_TEXTURE_MIN_UPPER_BAND_SPAN_M:
+        return plain_texture
+    if upper_band and height_m < CLOSED_WINDOW_TEXTURE_MIN_UPPER_BAND_HEIGHT_M:
+        return plain_texture
+    return texture
+
+
+def _closed_facade_bands(
+    key: BuildingVariantKey,
+    wall_height: float,
+    *,
+    span_m: float,
+    ground_texture: str,
+    upper_texture: str,
+    plain_texture: str,
+    preserve_ground_texture: bool = False,
+) -> tuple[tuple[float, float, str, bool], ...]:
+    """Return explicit non-repeating vertical facade bands.
+
+    The boolean marks a window-bearing atlas band. Any leftover wall above the
+    requested storeys is deliberately plain instead of becoming a fractional
+    extra floor through texture repetition.
+    """
+
+    height = max(0.0, float(wall_height))
+    if height <= 1.0e-6:
+        return ()
+    if key.interiors or key.family not in _PAINTED_WINDOW_FAMILIES:
+        return ((0.0, height, ground_texture, False),)
+
+    storeys = _facade_storey_count(key, height)
+    if storeys <= 0:
+        return ((0.0, height, plain_texture, False),)
+    band_height = min(
+        VISIBLE_FACADE_STOREY_HEIGHT_M,
+        height / max(1, storeys),
+    )
+    minimum_band_height = (
+        ISOLATED_DWELLING_MINIMUM_FACADE_HEIGHT_M
+        if key.isolated_dwelling and storeys == 1
+        else MINIMUM_VISIBLE_FACADE_STOREY_HEIGHT_M
+    )
+    if band_height < minimum_band_height - 1.0e-6:
+        return ((0.0, height, plain_texture, False),)
+
+    bands: list[tuple[float, float, str, bool]] = []
+    for storey in range(storeys):
+        y0 = storey * band_height
+        y1 = min(height, (storey + 1) * band_height)
+        requested_texture = ground_texture if storey == 0 else upper_texture
+        texture = (
+            requested_texture
+            if storey == 0 and preserve_ground_texture
+            else _closed_facade_texture(
+                key,
+                requested_texture,
+                plain_texture,
+                span_m=span_m,
+                height_m=y1 - y0,
+                upper_band=storey > 0,
+            )
+        )
+        bands.append((y0, y1, texture, texture != plain_texture))
+
+    used_top = min(height, storeys * band_height)
+    if height - used_top > 1.0e-5:
+        bands.append((used_top, height, plain_texture, False))
+    return tuple(bands)
+
+
+def _closed_wall_storey_faces(
+    key: BuildingVariantKey,
+    points: tuple[tuple[float, float, float], ...],
+    *,
+    lower_left: int,
+    upper_left: int,
+    upper_right: int,
+    lower_right: int,
+    wall_height: float,
+    span_m: float,
+    ground_texture: str,
+    upper_texture: str,
+    plain_texture: str,
+    normal: int,
+    u_scale: float,
+    ground_u_scale: float | None = None,
+    preserve_ground_texture: bool = False,
+) -> tuple[tuple[tuple[float, float, float], ...], tuple[_Face, ...]]:
+    """Split one closed wall into real storeys with non-wrapping window UVs."""
+
+    left = points[lower_left]
+    right = points[lower_right]
+    faces: list[_Face] = []
+    for y0, y1, texture, windowed in _closed_facade_bands(
+        key,
+        wall_height,
+        span_m=span_m,
+        ground_texture=ground_texture,
+        upper_texture=upper_texture,
+        plain_texture=plain_texture,
+        preserve_ground_texture=preserve_ground_texture,
+    ):
+        base = len(points)
+        points = points + (
+            (left[0], y0, left[2]),
+            (left[0], y1, left[2]),
+            (right[0], y1, right[2]),
+            (right[0], y0, right[2]),
+        )
+        indices = (base, base + 1, base + 2, base + 3)
+        band_u_scale = (
+            float(ground_u_scale)
+            if ground_u_scale is not None and y0 <= 1.0e-6
+            else float(u_scale)
+        )
+        if windowed:
+            inset = FACADE_WINDOW_UV_INSET
+            faces.append(_quad_uv(
+                texture,
+                indices,
+                normal,
+                u0=0.0,
+                u1=max(1.0, band_u_scale),
+                v0=inset,
+                v1=1.0 - inset,
+            ))
+        else:
+            faces.append(_quad(
+                texture,
+                indices,
+                normal,
+                max(1.0, band_u_scale),
+                max(0.25, (y1 - y0) / FACADE_TILE_HEIGHT_M),
+            ))
+    return points, tuple(faces)
+
+
 def _split_closed_wall_at_height(
     points: tuple[tuple[float, float, float], ...],
     *,
@@ -2355,9 +3014,8 @@ def _add_foundation_skirt(
     if depth <= 0.0 and top_height <= 0.0:
         return points, faces
     start = len(points)
-    # The skirt is a terrain-gap mask, not a decorative belt around the wall.
-    # Stop it exactly at the model origin (or church plinth top) so it cannot
-    # overlap the facade and create a visible above-ground foundation stripe.
+    # The skirt primarily hides terrain gaps, but a shallow visible reveal also
+    # helps grounded buildings read as properly founded rather than floating.
     top = max(0.0, float(top_height))
     bottom = -max(0.0, float(depth))
     points = points + (
@@ -2419,7 +3077,29 @@ def _interior_storey_count(
     footprint/height can hold a stable staircase with real headroom.
     """
 
+    visible_wall_top = (
+        _main_building_height(key) if wall_top is None else float(wall_top)
+    )
+    if _facade_storey_count(key, visible_wall_top) < 2:
+        return 1
     return 2 if key.second_storey and _supports_second_storey(key, wall_top=wall_top) else 1
+
+
+def _visible_window_storey_count(
+    key: BuildingVariantKey,
+    *,
+    wall_top: float,
+) -> int:
+    """Return visible window rows independently from walkable upper floors.
+
+    ``facade_storeys`` describes the exterior CWR/OSM decided to build. A
+    staircase only decides whether an upper level is walkable, not whether the
+    exterior second storey mysteriously loses all of its windows.
+    """
+
+    if key.family in UTILITY_INTERIOR_FAMILIES:
+        return 1
+    return max(1, _facade_storey_count(key, wall_top))
 
 
 def _second_storey_layout(key: BuildingVariantKey) -> _SecondStoreyLayout | None:
@@ -2489,6 +3169,15 @@ def _gabled_profile(
         if interior_storeys_override is None
         else max(1, int(interior_storeys_override))
     )
+    visible_storeys = _facade_storey_count(key, main_height)
+    if visible_storeys >= 2:
+        minimum_visible_eave = (
+            visible_storeys * MINIMUM_VISIBLE_FACADE_STOREY_HEIGHT_M
+        )
+        roof_rise = min(
+            roof_rise,
+            max(0.55, main_height - minimum_visible_eave),
+        )
     if interior_storeys >= 2:
         minimum_eave = (
             INTERIOR_SECOND_STOREY_FLOOR_Y_M
@@ -2521,7 +3210,8 @@ def _interior_window_openings(
 
     if key.family in UTILITY_INTERIOR_FAMILIES:
         return ()
-    storeys = _interior_storey_count(key, wall_top=wall_top)
+    storeys = _visible_window_storey_count(key, wall_top=wall_top)
+    walkable_storeys = _interior_storey_count(key, wall_top=wall_top)
     return _window_openings(
         horizontal_min,
         horizontal_max,
@@ -2529,7 +3219,9 @@ def _interior_window_openings(
         ground_exclusions=ground_exclusions,
         maximum_storeys=storeys,
         storey_height_m=(
-            INTERIOR_SECOND_STOREY_FLOOR_Y_M if storeys >= 2 else FACADE_TILE_HEIGHT_M
+            INTERIOR_SECOND_STOREY_FLOOR_Y_M
+            if walkable_storeys >= 2
+            else VISIBLE_FACADE_STOREY_HEIGHT_M
         ),
     )
 
@@ -3634,13 +4326,24 @@ def _door_dimensions(key: BuildingVariantKey) -> tuple[float, float, float]:
         door_half = min(1.80, max(1.40, half_width * 0.45))
         target_height = 2.6
     elif key.family == "outbuilding":
-        # Anything too small to contain a passenger car is a shed, even if the
-        # source tag happened to call it a garage. Keep its entrance human-sized.
+        # Shed-class outbuildings keep a human-sized entrance. Explicit OSM
+        # garage/garages/carport tags are resolved to the garage subtype before
+        # model generation and therefore take the vehicle-bay branch above.
         door_half = min(0.75, max(0.55, half_width * 0.18))
         target_height = 2.05
+    elif key.family in {"school", "shop", "urban"}:
+        # Public/commercial pedestrian doors are wider than domestic doors, but
+        # still remain recognisably human-scale rather than inheriting a fixed
+        # fraction of a broad facade.
+        door_half = min(0.70, max(0.58, half_width * 0.08))
+        target_height = 2.20
+    elif key.family == "townhouse":
+        door_half = min(0.58, max(0.50, half_width * 0.08))
+        target_height = 2.12
     else:
-        door_half = min(0.8, max(0.6, half_width * 0.18))
-        target_height = INTERIOR_DOOR_HEIGHT_M
+        # Typical detached-house entrance: roughly 0.96-1.08 m clear width.
+        door_half = min(0.54, max(0.48, half_width * 0.07))
+        target_height = 2.08
 
     # Always leave enough wall for stable jamb collision components. Vehicle
     # bays can use narrower jambs than pedestrian doors; this is important for
@@ -4156,6 +4859,37 @@ def _visual_lod(
 
     if key.roof_style == "flat":
         height = main_height
+        closed_front_ground_texture = _closed_facade_texture(
+            key,
+            front_texture,
+            plain_wall_texture,
+            span_m=key.width_m,
+            height_m=ground_floor_height,
+        )
+        closed_front_upper_texture = _closed_facade_texture(
+            key,
+            (
+                plain_wall_texture
+                if key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+                or (
+                    key.family in _PAINTED_WINDOW_FAMILIES
+                    and plain_wall_texture != wall_texture
+                )
+                else wall_texture
+            ),
+            plain_wall_texture,
+            span_m=key.width_m,
+            height_m=max(0.0, height - ground_floor_height),
+            upper_band=True,
+        )
+        closed_side_texture = _closed_facade_texture(
+            key, wall_texture, plain_wall_texture,
+            span_m=key.length_m, height_m=height,
+        )
+        closed_back_texture = _closed_facade_texture(
+            key, wall_texture, plain_wall_texture,
+            span_m=key.width_m, height_m=height,
+        )
         points = (
             (-half_width, 0.0, -half_length), (half_width, 0.0, -half_length),
             (half_width, 0.0, half_length), (-half_width, 0.0, half_length),
@@ -4185,6 +4919,25 @@ def _visual_lod(
                 ),
             )
             front_faces.extend(doorway_faces)
+        elif key.family in _PAINTED_WINDOW_FAMILIES and key.family != "church" and plain_wall_texture != wall_texture:
+            points, closed_front_faces = _closed_wall_storey_faces(
+                key,
+                points,
+                lower_left=0,
+                upper_left=4,
+                upper_right=5,
+                lower_right=1,
+                wall_height=height,
+                span_m=key.width_m,
+                ground_texture=front_texture,
+                upper_texture=wall_texture,
+                plain_texture=plain_wall_texture,
+                normal=0,
+                u_scale=key.width_m / 4.0,
+                ground_u_scale=1.0,
+                preserve_ground_texture=key.isolated_dwelling,
+            )
+            front_faces.extend(closed_front_faces)
         elif ground_floor_height < height - 1e-6:
             ground_left = len(points)
             ground_right = ground_left + 1
@@ -4197,15 +4950,11 @@ def _visual_lod(
             # neither repeat vertically nor stretch into the second floor.
             front_faces.extend((
                 _wall_quad_ground_anchored(
-                    front_texture, (0, ground_left, ground_right, 1), 0,
+                    closed_front_ground_texture, (0, ground_left, ground_right, 1), 0,
                     u_scale=1.0, vertical_min=0.0, vertical_max=ground_floor_height,
                 ),
                 _wall_quad_ground_anchored(
-                    (
-                        plain_wall_texture
-                        if key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
-                        else wall_texture
-                    ),
+                    closed_front_upper_texture,
                     (ground_left, 4, 5, ground_right), 0,
                     u_scale=key.width_m / 4.0,
                     vertical_min=ground_floor_height, vertical_max=height,
@@ -4213,7 +4962,7 @@ def _visual_lod(
             ))
         else:
             front_faces.append(_wall_quad_ground_anchored(
-                front_texture, (0, 4, 5, 1), 0,
+                closed_front_ground_texture, (0, 4, 5, 1), 0,
                 u_scale=1.0, vertical_min=0.0, vertical_max=height,
             ))
         if key.interiors:
@@ -4247,41 +4996,94 @@ def _visual_lod(
                 upper_texture_from_y=_interior_painted_facade_from_y(key),
             )
             exterior_side_faces = right_faces + back_faces + left_faces
+        elif key.family in _PAINTED_WINDOW_FAMILIES and key.family != "church" and plain_wall_texture != wall_texture:
+            points, right_faces = _closed_wall_storey_faces(
+                key,
+                points,
+                lower_left=1,
+                upper_left=5,
+                upper_right=6,
+                lower_right=2,
+                wall_height=height,
+                span_m=key.length_m,
+                ground_texture=wall_texture,
+                upper_texture=wall_texture,
+                plain_texture=plain_wall_texture,
+                normal=1,
+                u_scale=key.length_m / 4.0,
+            )
+            points, back_faces = _closed_wall_storey_faces(
+                key,
+                points,
+                lower_left=2,
+                upper_left=6,
+                upper_right=7,
+                lower_right=3,
+                wall_height=height,
+                span_m=key.width_m,
+                ground_texture=wall_texture,
+                upper_texture=wall_texture,
+                plain_texture=plain_wall_texture,
+                normal=2,
+                u_scale=key.width_m / 4.0,
+            )
+            points, left_faces = _closed_wall_storey_faces(
+                key,
+                points,
+                lower_left=3,
+                upper_left=7,
+                upper_right=4,
+                lower_right=0,
+                wall_height=height,
+                span_m=key.length_m,
+                ground_texture=wall_texture,
+                upper_texture=wall_texture,
+                plain_texture=plain_wall_texture,
+                normal=3,
+                u_scale=key.length_m / 4.0,
+            )
+            exterior_side_faces = right_faces + back_faces + left_faces
         elif (
-            key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+            (
+                key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+                or (
+                    key.family in _PAINTED_WINDOW_FAMILIES
+                    and plain_wall_texture != wall_texture
+                )
+            )
             and ground_floor_height < height - 1e-6
         ):
             points, right_faces = _split_closed_wall_at_height(
                 points, lower_left=1, upper_left=5, upper_right=6, lower_right=2,
                 split_height=ground_floor_height, wall_top=height,
-                lower_texture=wall_texture, upper_texture=plain_wall_texture,
+                lower_texture=closed_side_texture, upper_texture=plain_wall_texture,
                 normal=1, u_scale=key.length_m / 4.0,
             )
             points, back_faces = _split_closed_wall_at_height(
                 points, lower_left=2, upper_left=6, upper_right=7, lower_right=3,
                 split_height=ground_floor_height, wall_top=height,
-                lower_texture=wall_texture, upper_texture=plain_wall_texture,
+                lower_texture=closed_back_texture, upper_texture=plain_wall_texture,
                 normal=2, u_scale=key.width_m / 4.0,
             )
             points, left_faces = _split_closed_wall_at_height(
                 points, lower_left=3, upper_left=7, upper_right=4, lower_right=0,
                 split_height=ground_floor_height, wall_top=height,
-                lower_texture=wall_texture, upper_texture=plain_wall_texture,
+                lower_texture=closed_side_texture, upper_texture=plain_wall_texture,
                 normal=3, u_scale=key.length_m / 4.0,
             )
             exterior_side_faces = right_faces + back_faces + left_faces
         else:
             exterior_side_faces = (
                 _wall_quad_ground_anchored(
-                    wall_texture, (1, 5, 6, 2), 1,
+                    closed_side_texture, (1, 5, 6, 2), 1,
                     u_scale=key.length_m / 4.0, vertical_min=0.0, vertical_max=height,
                 ),
                 _wall_quad_ground_anchored(
-                    wall_texture, (2, 6, 7, 3), 2,
+                    closed_back_texture, (2, 6, 7, 3), 2,
                     u_scale=key.width_m / 4.0, vertical_min=0.0, vertical_max=height,
                 ),
                 _wall_quad_ground_anchored(
-                    wall_texture, (3, 7, 4, 0), 3,
+                    closed_side_texture, (3, 7, 4, 0), 3,
                     u_scale=key.length_m / 4.0, vertical_min=0.0, vertical_max=height,
                 ),
             )
@@ -4336,9 +5138,12 @@ def _visual_lod(
         plinth_height = max(0.0, float(church_plinth_height)) if key.family == "church" else 0.0
         if plinth_height > 0.0:
             points = tuple((x, y + plinth_height, z) for x, y, z in points)
+        foundation_top = plinth_height + (
+            FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0
+        )
         points, faces = _add_foundation_skirt(
             points, faces, half_width=half_width, half_length=half_length,
-            texture=foundation_texture, depth=foundation_depth, top_height=plinth_height,
+            texture=foundation_texture, depth=foundation_depth, top_height=foundation_top,
         )
         return _Lod(points, normals, _double_sided_faces(faces), 1.0)
 
@@ -4381,6 +5186,38 @@ def _visual_lod(
 
     front_faces: list[_Face] = []
     ground_floor_height = min(3.0, eave_height)
+    closed_front_ground_texture = _closed_facade_texture(
+        key,
+        front_texture,
+        plain_wall_texture,
+        span_m=key.width_m,
+        height_m=ground_floor_height,
+    )
+    closed_front_upper_texture = _closed_facade_texture(
+        key,
+        (
+            plain_wall_texture
+            if key.family == "church"
+            or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+            or (
+                key.family in _PAINTED_WINDOW_FAMILIES
+                and plain_wall_texture != wall_texture
+            )
+            else wall_texture
+        ),
+        plain_wall_texture,
+        span_m=key.width_m,
+        height_m=max(0.0, eave_height - ground_floor_height),
+        upper_band=True,
+    )
+    closed_side_texture = _closed_facade_texture(
+        key, wall_texture, plain_wall_texture,
+        span_m=key.length_m, height_m=eave_height,
+    )
+    closed_back_texture = _closed_facade_texture(
+        key, wall_texture, plain_wall_texture,
+        span_m=key.width_m, height_m=eave_height,
+    )
     if key.interiors:
         points, doorway_faces = _front_faces_with_doorway(
             key,
@@ -4396,6 +5233,29 @@ def _visual_lod(
             normal=0,
         )
         front_faces.extend(doorway_faces)
+    elif (
+        key.family in _PAINTED_WINDOW_FAMILIES
+        and key.family != "church"
+        and plain_wall_texture != wall_texture
+    ):
+        points, closed_front_faces = _closed_wall_storey_faces(
+            key,
+            points,
+            lower_left=0,
+            upper_left=4,
+            upper_right=5,
+            lower_right=1,
+            wall_height=eave_height,
+            span_m=key.width_m,
+            ground_texture=front_texture,
+            upper_texture=wall_texture,
+            plain_texture=plain_wall_texture,
+            normal=0,
+            u_scale=key.width_m / 4.0,
+            ground_u_scale=1.0,
+            preserve_ground_texture=key.isolated_dwelling,
+        )
+        front_faces.extend(closed_front_faces)
     elif ground_floor_height < eave_height - 1e-6:
         ground_left = len(points)
         ground_right = ground_left + 1
@@ -4405,16 +5265,11 @@ def _visual_lod(
         )
         front_faces.extend((
             _wall_quad_ground_anchored(
-                front_texture, (0, ground_left, ground_right, 1), 0,
+                closed_front_ground_texture, (0, ground_left, ground_right, 1), 0,
                 u_scale=1.0, vertical_min=0.0, vertical_max=ground_floor_height,
             ),
             _wall_quad_ground_anchored(
-                (
-                    plain_wall_texture
-                    if key.family == "church"
-                    or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
-                    else wall_texture
-                ),
+                closed_front_upper_texture,
                 (ground_left, 4, 5, ground_right), 0,
                 u_scale=key.width_m / 4.0,
                 vertical_min=ground_floor_height, vertical_max=eave_height,
@@ -4422,7 +5277,7 @@ def _visual_lod(
         ))
     else:
         front_faces.append(_wall_quad_ground_anchored(
-            front_texture, (0, 4, 5, 1), 0,
+            closed_front_ground_texture, (0, 4, 5, 1), 0,
             u_scale=1.0, vertical_min=0.0, vertical_max=eave_height,
         ))
 
@@ -4466,46 +5321,115 @@ def _visual_lod(
             _quad(plain_wall_texture, (m3, 7, 4, m0), 3, key.length_m / 4.0, max(1.0, (eave_height-ground_floor_height)/3.0)),
         )
     elif (
-        key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+        key.family in _PAINTED_WINDOW_FAMILIES
+        and key.family != "church"
+        and plain_wall_texture != wall_texture
+    ):
+        points, right_faces = _closed_wall_storey_faces(
+            key,
+            points,
+            lower_left=1,
+            upper_left=5,
+            upper_right=6,
+            lower_right=2,
+            wall_height=eave_height,
+            span_m=key.length_m,
+            ground_texture=wall_texture,
+            upper_texture=wall_texture,
+            plain_texture=plain_wall_texture,
+            normal=1,
+            u_scale=key.length_m / 4.0,
+        )
+        points, back_faces = _closed_wall_storey_faces(
+            key,
+            points,
+            lower_left=2,
+            upper_left=6,
+            upper_right=7,
+            lower_right=3,
+            wall_height=eave_height,
+            span_m=key.width_m,
+            ground_texture=wall_texture,
+            upper_texture=wall_texture,
+            plain_texture=plain_wall_texture,
+            normal=2,
+            u_scale=key.width_m / 4.0,
+        )
+        points, left_faces = _closed_wall_storey_faces(
+            key,
+            points,
+            lower_left=3,
+            upper_left=7,
+            upper_right=4,
+            lower_right=0,
+            wall_height=eave_height,
+            span_m=key.length_m,
+            ground_texture=wall_texture,
+            upper_texture=wall_texture,
+            plain_texture=plain_wall_texture,
+            normal=3,
+            u_scale=key.length_m / 4.0,
+        )
+    elif (
+        (
+            key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+            or (
+                key.family in _PAINTED_WINDOW_FAMILIES
+                and plain_wall_texture != wall_texture
+            )
+        )
         and ground_floor_height < eave_height - 1e-6
     ):
         points, right_faces = _split_closed_wall_at_height(
             points, lower_left=1, upper_left=5, upper_right=6, lower_right=2,
             split_height=ground_floor_height, wall_top=eave_height,
-            lower_texture=wall_texture, upper_texture=plain_wall_texture,
+            lower_texture=closed_side_texture, upper_texture=plain_wall_texture,
             normal=1, u_scale=key.length_m / 4.0,
         )
         points, back_faces = _split_closed_wall_at_height(
             points, lower_left=2, upper_left=6, upper_right=7, lower_right=3,
             split_height=ground_floor_height, wall_top=eave_height,
-            lower_texture=wall_texture, upper_texture=plain_wall_texture,
+            lower_texture=closed_back_texture, upper_texture=plain_wall_texture,
             normal=2, u_scale=key.width_m / 4.0,
         )
         points, left_faces = _split_closed_wall_at_height(
             points, lower_left=3, upper_left=7, upper_right=4, lower_right=0,
             split_height=ground_floor_height, wall_top=eave_height,
-            lower_texture=wall_texture, upper_texture=plain_wall_texture,
+            lower_texture=closed_side_texture, upper_texture=plain_wall_texture,
             normal=3, u_scale=key.length_m / 4.0,
         )
     else:
         right_faces = (_wall_quad_ground_anchored(
-            wall_texture, (1, 5, 6, 2), 1,
+            closed_side_texture, (1, 5, 6, 2), 1,
             u_scale=key.length_m / 4.0, vertical_min=0.0, vertical_max=eave_height,
         ),)
         back_faces = (_wall_quad_ground_anchored(
-            wall_texture, (2, 6, 7, 3), 2,
+            closed_back_texture, (2, 6, 7, 3), 2,
             u_scale=key.width_m / 4.0, vertical_min=0.0, vertical_max=eave_height,
         ),)
         left_faces = (_wall_quad_ground_anchored(
-            wall_texture, (3, 7, 4, 0), 3,
+            closed_side_texture, (3, 7, 4, 0), 3,
             u_scale=key.length_m / 4.0, vertical_min=0.0, vertical_max=eave_height,
         ),)
 
     gable_texture = (
-        plain_wall_texture
-        if key.family == "church"
-        or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
-        else wall_texture
+        _closed_facade_texture(
+            key,
+            wall_texture,
+            plain_wall_texture,
+            span_m=key.width_m,
+            height_m=roof_rise,
+            upper_band=True,
+            gable=(
+                key.family != "church"
+                and key.family not in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+            ),
+        )
+        if not (
+            key.family == "church"
+            or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+        )
+        else plain_wall_texture
     )
     if key.family == "church":
         # Cut the nave roof around the tower volume. Previously the complete roof
@@ -4664,11 +5588,1311 @@ def _visual_lod(
     plinth_height = max(0.0, float(church_plinth_height)) if key.family == "church" else 0.0
     if plinth_height > 0.0:
         points = tuple((x, y + plinth_height, z) for x, y, z in points)
+    foundation_top = plinth_height + (
+        FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0
+    )
     points, faces = _add_foundation_skirt(
         points, faces, half_width=half_width, half_length=half_length,
-        texture=foundation_texture, depth=foundation_depth, top_height=plinth_height,
+        texture=foundation_texture, depth=foundation_depth, top_height=foundation_top,
     )
     return _Lod(points, normals, _double_sided_faces(faces), 1.0)
+
+
+def _polygon_native_shape(key: BuildingVariantKey) -> Polygon:
+    return Polygon(
+        tuple(key.footprint_vertices),
+        [tuple(ring) for ring in key.footprint_holes if len(ring) >= 3],
+    )
+
+
+def _iter_polygonal_geometries(geometry: Any) -> Iterable[Polygon]:
+    if geometry is None or geometry.is_empty:
+        return
+    if geometry.geom_type == "Polygon":
+        yield geometry
+        return
+    for part in getattr(geometry, "geoms", ()):
+        yield from _iter_polygonal_geometries(part)
+
+
+def _ring_coordinates_from_geometry(geometry: Any) -> list[PointXZ]:
+    points: list[PointXZ] = []
+    for polygon in _iter_polygonal_geometries(geometry):
+        points.extend((float(x), float(z)) for x, z in list(polygon.exterior.coords)[:-1])
+        for interior in polygon.interiors:
+            points.extend((float(x), float(z)) for x, z in list(interior.coords)[:-1])
+        representative = polygon.representative_point()
+        points.append((float(representative.x), float(representative.y)))
+    return points
+
+
+def _line_sample_points_inside_shape(line_geometry: Any, spacing: float = 4.0) -> list[PointXZ]:
+    result: list[PointXZ] = []
+    geometries = (
+        tuple(getattr(line_geometry, "geoms", ()))
+        if getattr(line_geometry, "geom_type", "") in {"MultiLineString", "GeometryCollection"}
+        else (line_geometry,)
+    )
+    for geometry in geometries:
+        if getattr(geometry, "geom_type", "") == "LineString":
+            length = float(geometry.length)
+            if length <= 1.0e-8:
+                continue
+            count = max(1, int(math.ceil(length / max(0.5, spacing))))
+            for index in range(count + 1):
+                point = geometry.interpolate(length * index / count)
+                result.append((float(point.x), float(point.y)))
+        elif getattr(geometry, "geom_type", "") == "Point":
+            result.append((float(geometry.x), float(geometry.y)))
+    return result
+
+
+def _triangulate_polygon_with_samples(
+    shape: Polygon,
+    samples: Sequence[PointXZ],
+) -> tuple[tuple[PointXZ, PointXZ, PointXZ], ...]:
+    points: list[PointXZ] = [
+        (float(x), float(z)) for x, z in list(shape.exterior.coords)[:-1]
+    ]
+    for ring in shape.interiors:
+        points.extend((float(x), float(z)) for x, z in list(ring.coords)[:-1])
+    points.extend((float(x), float(z)) for x, z in samples)
+    # Stable de-duplication avoids feeding GEOS hundreds of coincident offset
+    # corners on small footprints.
+    unique = tuple(dict.fromkeys((round(x, 6), round(z, 6)) for x, z in points))
+    if len(unique) < 3:
+        return ()
+    triangles: list[tuple[PointXZ, PointXZ, PointXZ]] = []
+    for candidate in triangulate(MultiPoint(unique)):
+        if candidate.area <= 1.0e-8:
+            continue
+        clipped = candidate.intersection(shape)
+        for part in _iter_polygonal_geometries(clipped):
+            if part.area <= 1.0e-8:
+                continue
+            part_outer = tuple(
+                (float(x), float(z)) for x, z in list(part.exterior.coords)[:-1]
+            )
+            part_holes = tuple(
+                tuple((float(x), float(z)) for x, z in list(ring.coords)[:-1])
+                for ring in part.interiors
+            )
+            triangles.extend(
+                _triangulate_polygon_coordinates(part_outer, part_holes)
+            )
+    covered = sum(abs(_polygon_signed_area(triangle)) for triangle in triangles)
+    if not triangles or abs(covered - shape.area) > max(0.05, shape.area * 1.0e-5):
+        return ()
+    return tuple(triangles)
+
+
+def _polygon_native_sectioned_roof(
+    key: BuildingVariantKey,
+    shape: Polygon,
+    *,
+    eave_height: float,
+    roof_rise: float,
+    roof_pitch_degrees: float,
+) -> tuple[
+    tuple[tuple[PointXZ, PointXZ, PointXZ], ...],
+    Callable[[PointXZ], float],
+] | None:
+    """Build connected wing roofs for common orthogonal L/T/U footprints.
+
+    The legacy rectangle decomposition is used only as a *roof construction
+    guide*. The world still receives one semantic building/P3D. Taking the
+    maximum of each wing's local roof field naturally creates valley lines at
+    intersections without throwing a single ridge through the entire concave
+    outline.
+    """
+
+    if key.footprint_holes or key.roof_style not in {"gabled", "hipped", "pyramidal"}:
+        return None
+    rectangles = decompose_footprint_rectangles(
+        key.footprint_vertices,
+        max_parts=6,
+        minimum_part_size=2.0,
+        rectangular_fill_threshold=0.96,
+    )
+    if len(rectangles) < 2:
+        return None
+    bounds: list[tuple[float, float, float, float]] = []
+    coverage: Polygon | None = None
+    for rectangle in rectangles:
+        part = Polygon(rectangle).intersection(shape)
+        if part.is_empty or part.area < 3.0:
+            continue
+        bx0, bz0, bx1, bz1 = part.bounds
+        if bx1 - bx0 < 1.0 or bz1 - bz0 < 1.0:
+            continue
+        bounds.append((float(bx0), float(bz0), float(bx1), float(bz1)))
+        coverage = part if coverage is None else coverage.union(part)
+    if len(bounds) < 2 or coverage is None:
+        return None
+    # Do not use sectioned fields when the conservative decomposition missed a
+    # material part of the building. The generic sampled roof remains safer.
+    if shape.difference(coverage).area > max(0.5, shape.area * 0.035):
+        return None
+
+    pitch = math.tan(math.radians(max(1.0, roof_pitch_degrees)))
+    samples: list[PointXZ] = []
+    for x0, z0, x1, z1 in bounds:
+        sx, sz = x1 - x0, z1 - z0
+        cx, cz = (x0 + x1) * 0.5, (z0 + z1) * 0.5
+        half_short = max(0.05, min(sx, sz) * 0.5)
+        if sx <= sz:
+            if key.roof_style == "gabled":
+                ridge = LineString(((cx, z0), (cx, z1)))
+            else:
+                ridge = LineString(((cx, min(z1, z0 + half_short)), (cx, max(z0, z1 - half_short))))
+        else:
+            if key.roof_style == "gabled":
+                ridge = LineString(((x0, cz), (x1, cz)))
+            else:
+                ridge = LineString(((min(x1, x0 + half_short), cz), (max(x0, x1 - half_short), cz)))
+        samples.extend(_line_sample_points_inside_shape(ridge.intersection(shape), spacing=2.5))
+        samples.append((cx, cz))
+
+    tolerance = 0.08
+
+    def sectioned_height(point: PointXZ) -> float:
+        px, pz = float(point[0]), float(point[1])
+        heights: list[float] = []
+        for x0, z0, x1, z1 in bounds:
+            if not (x0 - tolerance <= px <= x1 + tolerance and z0 - tolerance <= pz <= z1 + tolerance):
+                continue
+            sx, sz = x1 - x0, z1 - z0
+            cx, cz = (x0 + x1) * 0.5, (z0 + z1) * 0.5
+            if key.roof_style == "gabled":
+                if sx <= sz:
+                    half = max(0.05, sx * 0.5)
+                    fraction = 1.0 - abs(px - cx) / half
+                else:
+                    half = max(0.05, sz * 0.5)
+                    fraction = 1.0 - abs(pz - cz) / half
+                local_rise = min(roof_rise, half * pitch)
+                heights.append(eave_height + local_rise * max(0.0, min(1.0, fraction)))
+            else:
+                distance = max(0.0, min(px - x0, x1 - px, pz - z0, z1 - pz))
+                local_rise = min(roof_rise, min(sx, sz) * 0.5 * pitch)
+                heights.append(eave_height + min(local_rise, distance * pitch))
+        return max(heights, default=eave_height)
+
+    triangles = _triangulate_polygon_with_samples(shape, samples)
+    if not triangles:
+        return None
+    return triangles, sectioned_height
+
+
+def _polygon_native_roof_mesh(
+    key: BuildingVariantKey,
+    roof_pitch_degrees: float,
+) -> tuple[float, tuple[tuple[PointXZ, PointXZ, PointXZ], ...], Callable[[PointXZ], float]]:
+    """Return eave height, roof triangles and a deterministic roof height field."""
+
+    shape = _polygon_native_shape(key)
+    if shape.is_empty or not shape.is_valid:
+        raise ValueError("polygon-native roof requires a valid footprint")
+    main_height = _main_building_height(key)
+    if key.roof_style == "flat":
+        triangles = _triangulate_polygon_coordinates(
+            key.footprint_vertices, key.footprint_holes
+        )
+        return main_height, triangles, lambda _point: main_height
+
+    eave_height, roof_rise, _slope = _gabled_profile(key, roof_pitch_degrees)
+    if roof_rise <= 1.0e-6:
+        triangles = _triangulate_polygon_coordinates(
+            key.footprint_vertices, key.footprint_holes
+        )
+        return eave_height, triangles, lambda _point: eave_height
+
+    sectioned = _polygon_native_sectioned_roof(
+        key,
+        shape,
+        eave_height=eave_height,
+        roof_rise=roof_rise,
+        roof_pitch_degrees=roof_pitch_degrees,
+    )
+    if sectioned is not None:
+        triangles, height_field = sectioned
+        return eave_height, triangles, height_field
+
+    min_x, min_z, max_x, max_z = shape.bounds
+    if key.roof_style == "gabled":
+        ridge_x = (min_x + max_x) * 0.5
+        half_span = max(0.1, (max_x - min_x) * 0.5)
+
+        def roof_height(point: PointXZ) -> float:
+            fraction = 1.0 - abs(float(point[0]) - ridge_x) / half_span
+            return eave_height + roof_rise * max(0.0, min(1.0, fraction))
+
+        ridge_line = LineString(((ridge_x, min_z - 2.0), (ridge_x, max_z + 2.0)))
+        samples = _line_sample_points_inside_shape(
+            ridge_line.intersection(shape), spacing=3.5
+        )
+        triangles = _triangulate_polygon_with_samples(shape, samples)
+        if triangles:
+            return eave_height, triangles, roof_height
+        triangles = _triangulate_polygon_coordinates(
+            key.footprint_vertices, key.footprint_holes
+        )
+        return main_height, triangles, lambda _point: main_height
+
+    pitch_tangent = math.tan(math.radians(max(1.0, roof_pitch_degrees)))
+    run_to_top = roof_rise / max(1.0e-6, pitch_tangent)
+
+    # A true single-apex pyramid is safe for convex footprints. Concave shells
+    # and courtyards use the same inward-distance field as a hip roof, which
+    # creates connected ridges/valleys instead of throwing triangles across air.
+    if key.roof_style == "pyramidal" and not key.footprint_holes and shape.equals(shape.convex_hull):
+        apex = shape.centroid
+        apex_point = (float(apex.x), float(apex.y))
+
+        def pyramidal_height(point: PointXZ) -> float:
+            if math.hypot(point[0] - apex_point[0], point[1] - apex_point[1]) <= 1.0e-5:
+                return eave_height + roof_rise
+            return eave_height
+
+        triangles = _triangulate_polygon_with_samples(shape, (apex_point,))
+        if triangles:
+            return eave_height, triangles, pyramidal_height
+
+    boundary = shape.boundary
+    samples: list[PointXZ] = []
+    for fraction in (0.25, 0.50, 0.75, 1.0):
+        distance = run_to_top * fraction
+        if distance <= 0.05:
+            continue
+        inset = shape.buffer(-distance, join_style=2)
+        samples.extend(_ring_coordinates_from_geometry(inset))
+    representative = shape.representative_point()
+    samples.append((float(representative.x), float(representative.y)))
+    maximum_sample_distance = max(
+        (
+            float(boundary.distance(Point(float(x), float(z))))
+            for x, z in samples
+        ),
+        default=0.0,
+    )
+    # Thin courtyard rings can have a smaller inradius than the nominal fitted
+    # width used to choose roof rise. Preserve the source/model total height by
+    # steepening the sampled hip just enough to reach the intended ridge rather
+    # than silently producing a building several metres too short.
+    effective_tangent = max(
+        pitch_tangent,
+        roof_rise / max(1.0e-6, maximum_sample_distance),
+    )
+
+    def hipped_height(point: PointXZ) -> float:
+        distance = float(boundary.distance(Point(float(point[0]), float(point[1]))))
+        return eave_height + min(roof_rise, distance * effective_tangent)
+
+    triangles = _triangulate_polygon_with_samples(shape, samples)
+    if triangles:
+        return eave_height, triangles, hipped_height
+
+    # Geometry that defeats the sampled roof mesh still stays one faithful
+    # building. A flat top is intentionally preferable to resurrecting multiple
+    # overlapping rectangular wings.
+    triangles = _triangulate_polygon_coordinates(
+        key.footprint_vertices, key.footprint_holes
+    )
+    return main_height, triangles, lambda _point: main_height
+
+
+def _polygon_native_front_edge(key: BuildingVariantKey) -> int:
+    """Return the selected exterior entrance edge for one native footprint."""
+
+    outer = tuple(key.footprint_vertices)
+    if not outer:
+        return -1
+    selected = int(key.entrance_edge)
+    if 0 <= selected < len(outer):
+        return selected
+    # Stable legacy fallback: favour the lowest local-Z wall, then its length.
+    return min(
+        range(len(outer)),
+        key=lambda index: (
+            (outer[index][1] + outer[(index + 1) % len(outer)][1]) * 0.5,
+            -math.hypot(
+                outer[(index + 1) % len(outer)][0] - outer[index][0],
+                outer[(index + 1) % len(outer)][1] - outer[index][1],
+            ),
+        ),
+    )
+
+
+def _polygon_native_edge_frame(
+    start: PointXZ, end: PointXZ
+) -> tuple[float, float, float, float, float]:
+    """Return span, tangent X/Z and filled-side inward normal X/Z."""
+
+    dx = float(end[0]) - float(start[0])
+    dz = float(end[1]) - float(start[1])
+    span = math.hypot(dx, dz)
+    if span <= 1.0e-8:
+        return 0.0, 1.0, 0.0, 0.0, 1.0
+    tx, tz = dx / span, dz / span
+    # Native outer rings are CCW and courtyard rings CW. In both cases the
+    # occupied building material lies to the left of the authored ring edge.
+    return span, tx, tz, -tz, tx
+
+
+def _polygon_native_door_opening(
+    key: BuildingVariantKey,
+    edge_index: int,
+    span: float,
+    wall_top: float,
+) -> tuple[float, float, float, float] | None:
+    if edge_index != _polygon_native_front_edge(key) or span < 1.35:
+        return None
+    door_half, door_height, _pivot = _door_dimensions(key)
+    jamb = 0.22 if key.family in UTILITY_INTERIOR_FAMILIES else 0.28
+    usable_half = max(0.42, min(door_half, span * 0.5 - jamb))
+    fraction = max(0.0, min(1.0, float(key.entrance_fraction)))
+    centre = fraction * span
+    centre = max(usable_half + jamb, min(span - usable_half - jamb, centre))
+    top = min(door_height, max(1.9, wall_top - 0.18))
+    return (centre - usable_half, centre + usable_half, 0.0, top)
+
+
+def _polygon_native_edge_openings(
+    key: BuildingVariantKey,
+    edge_index: int,
+    span: float,
+    wall_top: float,
+    *,
+    courtyard: bool = False,
+) -> tuple[tuple[float, float, float, float], ...]:
+    """Return realistic physical apertures along one arbitrary facade edge."""
+
+    if not key.interiors:
+        return ()
+    door = None if courtyard else _polygon_native_door_opening(
+        key, edge_index, span, wall_top
+    )
+    exclusions: tuple[tuple[float, float], ...] = ()
+    if door is not None:
+        exclusions = ((max(0.0, door[0] - 0.38), min(span, door[1] + 0.38)),)
+    windows: tuple[tuple[float, float, float, float], ...] = ()
+    if key.family not in UTILITY_INTERIOR_FAMILIES and span >= 2.4:
+        visible_storeys = _visible_window_storey_count(key, wall_top=wall_top)
+        windows = _window_openings(
+            0.0,
+            span,
+            wall_top,
+            ground_exclusions=exclusions,
+            maximum_storeys=visible_storeys,
+            storey_height_m=VISIBLE_FACADE_STOREY_HEIGHT_M,
+        )
+    return windows + ((door,) if door is not None else ())
+
+
+def _polygon_native_partition_segments(key: BuildingVariantKey) -> tuple[tuple[PointXZ, PointXZ], ...]:
+    """Return a conservative room divider clipped to the actual footprint."""
+
+    if key.family in UTILITY_INTERIOR_FAMILIES or not key.interiors:
+        return ()
+    shape = _polygon_native_shape(key)
+    inset = _interior_wall_thickness(key) + 0.08
+    inner = shape.buffer(-inset, join_style=2)
+    if inner.is_empty or inner.area < 24.0:
+        return ()
+    representative = inner.representative_point()
+    min_x, min_z, max_x, max_z = inner.bounds
+    # The native model's X axis follows the minimum rectangle's width axis, so
+    # a horizontal divider normally separates front/back rooms while remaining
+    # stable across L/T/U footprints. Clip it rather than inventing walls across
+    # courtyards or concave notches.
+    line = LineString(((min_x - 2.0, representative.y), (max_x + 2.0, representative.y)))
+    cut = inner.intersection(line)
+    geometries = (
+        tuple(getattr(cut, "geoms", ()))
+        if getattr(cut, "geom_type", "") in {"MultiLineString", "GeometryCollection"}
+        else (cut,)
+    )
+    segments: list[tuple[PointXZ, PointXZ]] = []
+    for geometry in geometries:
+        if getattr(geometry, "geom_type", "") != "LineString" or geometry.length < 3.0:
+            continue
+        coords = list(geometry.coords)
+        start = (float(coords[0][0]), float(coords[0][1]))
+        end = (float(coords[-1][0]), float(coords[-1][1]))
+        if math.hypot(end[0] - start[0], end[1] - start[1]) >= 3.0:
+            segments.append((start, end))
+    return tuple(segments[:2])
+
+
+def _polygon_native_visual_lod(
+    key: BuildingVariantKey,
+    wall_texture: str,
+    roof_texture: str,
+    *,
+    roof_pitch_degrees: float = 35.0,
+    front_texture: str | None = None,
+    foundation_texture: str | None = None,
+    foundation_depth: float = 0.0,
+    interior_texture: str | None = None,
+    window_trim_texture: str | None = None,
+    plain_wall_texture: str | None = None,
+    door_texture: str | None = None,
+) -> _Lod:
+    """Build one footprint-faithful shell, including a usable ground interior."""
+
+    outer = tuple(key.footprint_vertices)
+    holes = tuple(tuple(ring) for ring in key.footprint_holes)
+    if len(outer) < 3:
+        raise ValueError("polygon-native building requires an exterior footprint")
+    shape = _polygon_native_shape(key)
+    if shape.is_empty or not shape.is_valid or shape.area <= 0.0:
+        raise ValueError("polygon-native building requires a valid footprint")
+
+    wall_texture = wall_texture or ""
+    front_texture = front_texture or wall_texture
+    foundation_texture = foundation_texture or wall_texture
+    interior_texture = interior_texture or plain_wall_texture or wall_texture
+    door_texture = door_texture or front_texture
+    eave_height, roof_triangles, roof_height = _polygon_native_roof_mesh(
+        key, roof_pitch_degrees
+    )
+    if not roof_triangles:
+        raise ValueError("polygon-native building requires a triangulatable roof")
+
+    points: list[tuple[float, float, float]] = []
+    normals: list[tuple[float, float, float]] = []
+    faces: list[_Face] = []
+    selections: list[_NamedSelection] = []
+    selected_front_edge = _polygon_native_front_edge(key)
+    wall_thickness = _interior_wall_thickness(key) if key.interiors else 0.0
+
+    def edge_point(
+        start: PointXZ,
+        tx: float,
+        tz: float,
+        inward_x: float,
+        inward_z: float,
+        horizontal: float,
+        vertical: float,
+        inset: float = 0.0,
+    ) -> tuple[float, float, float]:
+        return (
+            float(start[0]) + tx * horizontal + inward_x * inset,
+            vertical,
+            float(start[1]) + tz * horizontal + inward_z * inset,
+        )
+
+    def add_edge_wall(
+        start: PointXZ,
+        end: PointXZ,
+        *,
+        ring_index: int,
+        edge_index: int,
+        bottom: float = 0.0,
+        top: float = eave_height,
+        openings: Sequence[tuple[float, float, float, float]] | None = None,
+        exterior_texture: str | None = None,
+        interior_wall_texture: str | None = None,
+    ) -> None:
+        span, tx, tz, inward_x, inward_z = _polygon_native_edge_frame(start, end)
+        if span <= 1.0e-5 or top <= bottom + 1.0e-6:
+            return
+        if openings is None:
+            openings = _polygon_native_edge_openings(
+                key, edge_index, span, top, courtyard=ring_index > 0
+            )
+        texture = exterior_texture or wall_texture
+        outer_normal = len(normals)
+        normals.append((-inward_x, 0.0, -inward_z))
+        inner_normal = len(normals)
+        normals.append((inward_x, 0.0, inward_z))
+
+        if (
+            not key.interiors
+            and not openings
+            and bottom >= -1.0e-6
+            and key.family in _PAINTED_WINDOW_FAMILIES
+            and plain_wall_texture
+        ):
+            ground_texture = wall_texture if ring_index == 0 else plain_wall_texture
+            upper_texture = wall_texture if ring_index == 0 else plain_wall_texture
+            for y0, y1, band_texture, windowed in _closed_facade_bands(
+                key,
+                top,
+                span_m=span,
+                ground_texture=ground_texture,
+                upper_texture=upper_texture,
+                plain_texture=plain_wall_texture,
+            ):
+                base = len(points)
+                points.extend((
+                    edge_point(start, tx, tz, inward_x, inward_z, 0.0, y0),
+                    edge_point(start, tx, tz, inward_x, inward_z, 0.0, y1),
+                    edge_point(start, tx, tz, inward_x, inward_z, span, y1),
+                    edge_point(start, tx, tz, inward_x, inward_z, span, y0),
+                ))
+                if windowed:
+                    inset = FACADE_WINDOW_UV_INSET
+                    faces.append(_Face(band_texture, (
+                        (base + 0, outer_normal, 0.0, 1.0 - inset),
+                        (base + 1, outer_normal, 0.0, inset),
+                        (base + 2, outer_normal, max(1.0, span / 4.0), inset),
+                        (base + 3, outer_normal, max(1.0, span / 4.0), 1.0 - inset),
+                    )))
+                else:
+                    faces.append(_Face(band_texture, (
+                        (base + 0, outer_normal, 0.0, max(0.25, (y1 - y0) / 3.0)),
+                        (base + 1, outer_normal, 0.0, 0.0),
+                        (base + 2, outer_normal, max(1.0, span / 4.0), 0.0),
+                        (base + 3, outer_normal, max(1.0, span / 4.0), max(0.25, (y1 - y0) / 3.0)),
+                    )))
+            return
+        if (
+            not openings
+            and plain_wall_texture
+            and texture == wall_texture
+            and ring_index == 0
+            and span < MIN_NATIVE_EDGE_WINDOW_TEXTURE_SPAN_M
+            and key.family in _PAINTED_WINDOW_FAMILIES
+        ):
+            texture = plain_wall_texture
+        if not openings and bottom < 0.0:
+            solid_rectangles = ((0.0, span, bottom, top),)
+        else:
+            solid_rectangles = _solid_wall_rectangles(0.0, span, top, openings)
+        for h0, h1, y0, y1 in solid_rectangles:
+            y0 = max(bottom, y0)
+            y1 = min(top, y1)
+            if h1 - h0 <= 1.0e-6 or y1 - y0 <= 1.0e-6:
+                continue
+            base = len(points)
+            points.extend((
+                edge_point(start, tx, tz, inward_x, inward_z, h0, y0),
+                edge_point(start, tx, tz, inward_x, inward_z, h0, y1),
+                edge_point(start, tx, tz, inward_x, inward_z, h1, y1),
+                edge_point(start, tx, tz, inward_x, inward_z, h1, y0),
+            ))
+            faces.append(_Face(texture, (
+                (base + 0, outer_normal, h0 / 4.0, (top - y0) / 3.0),
+                (base + 1, outer_normal, h0 / 4.0, (top - y1) / 3.0),
+                (base + 2, outer_normal, h1 / 4.0, (top - y1) / 3.0),
+                (base + 3, outer_normal, h1 / 4.0, (top - y0) / 3.0),
+            )))
+            if key.interiors:
+                inner_base = len(points)
+                points.extend((
+                    edge_point(start, tx, tz, inward_x, inward_z, h0, y0, wall_thickness),
+                    edge_point(start, tx, tz, inward_x, inward_z, h1, y0, wall_thickness),
+                    edge_point(start, tx, tz, inward_x, inward_z, h1, y1, wall_thickness),
+                    edge_point(start, tx, tz, inward_x, inward_z, h0, y1, wall_thickness),
+                ))
+                faces.append(_Face(interior_wall_texture or interior_texture, (
+                    (inner_base + 0, inner_normal, h0 / 4.0, (top - y0) / 3.0),
+                    (inner_base + 1, inner_normal, h1 / 4.0, (top - y0) / 3.0),
+                    (inner_base + 2, inner_normal, h1 / 4.0, (top - y1) / 3.0),
+                    (inner_base + 3, inner_normal, h0 / 4.0, (top - y1) / 3.0),
+                )))
+
+        if key.interiors and wall_thickness > 0.0:
+            # Add jamb/sill/lintel reveals for every genuine aperture. Doorways
+            # deliberately have no sill across the threshold.
+            for h0, h1, y0, y1 in openings:
+                reveal_normal = len(normals)
+                normals.append((0.0, 1.0, 0.0))
+                for horizontal, reverse in ((h0, False), (h1, True)):
+                    base = len(points)
+                    outer_low = edge_point(start, tx, tz, inward_x, inward_z, horizontal, y0)
+                    outer_high = edge_point(start, tx, tz, inward_x, inward_z, horizontal, y1)
+                    inner_low = edge_point(start, tx, tz, inward_x, inward_z, horizontal, y0, wall_thickness)
+                    inner_high = edge_point(start, tx, tz, inward_x, inward_z, horizontal, y1, wall_thickness)
+                    quad = (outer_low, outer_high, inner_high, inner_low)
+                    points.extend(reversed(quad) if reverse else quad)
+                    faces.append(_Face(interior_texture, tuple(
+                        (base + index, reveal_normal, (index & 1), (index >> 1))
+                        for index in range(4)
+                    )))
+                # Lintel.
+                base = len(points)
+                points.extend((
+                    edge_point(start, tx, tz, inward_x, inward_z, h0, y1),
+                    edge_point(start, tx, tz, inward_x, inward_z, h1, y1),
+                    edge_point(start, tx, tz, inward_x, inward_z, h1, y1, wall_thickness),
+                    edge_point(start, tx, tz, inward_x, inward_z, h0, y1, wall_thickness),
+                ))
+                faces.append(_Face(interior_texture, tuple(
+                    (base + index, reveal_normal, (index & 1), (index >> 1))
+                    for index in range(4)
+                )))
+                if y0 > 0.05:
+                    base = len(points)
+                    points.extend((
+                        edge_point(start, tx, tz, inward_x, inward_z, h0, y0),
+                        edge_point(start, tx, tz, inward_x, inward_z, h0, y0, wall_thickness),
+                        edge_point(start, tx, tz, inward_x, inward_z, h1, y0, wall_thickness),
+                        edge_point(start, tx, tz, inward_x, inward_z, h1, y0),
+                    ))
+                    faces.append(_Face(interior_texture, tuple(
+                        (base + index, reveal_normal, (index & 1), (index >> 1))
+                        for index in range(4)
+                    )))
+
+            # Native walls use physical window apertures, so give them physical
+            # frames too instead of relying on a rectangular facade atlas to
+            # imply scale. The strips are intentionally shallow and cheap.
+            trim_texture = window_trim_texture or interior_texture
+            frame_width = 0.075
+            mullion_width = 0.045
+            for h0, h1, y0, y1 in openings:
+                if y0 <= 0.05 or y1 - y0 < 0.55 or h1 - h0 < 0.55:
+                    continue
+                normal_index = len(normals)
+                normals.append((-inward_x, 0.0, -inward_z))
+
+                def add_trim_rect(th0: float, th1: float, ty0: float, ty1: float) -> None:
+                    if th1 <= th0 or ty1 <= ty0:
+                        return
+                    base = len(points)
+                    outward = -0.022
+                    points.extend((
+                        edge_point(start, tx, tz, inward_x, inward_z, th0, ty0, outward),
+                        edge_point(start, tx, tz, inward_x, inward_z, th0, ty1, outward),
+                        edge_point(start, tx, tz, inward_x, inward_z, th1, ty1, outward),
+                        edge_point(start, tx, tz, inward_x, inward_z, th1, ty0, outward),
+                    ))
+                    faces.append(_Face(trim_texture, (
+                        (base + 0, normal_index, 0.0, 1.0),
+                        (base + 1, normal_index, 0.0, 0.0),
+                        (base + 2, normal_index, 1.0, 0.0),
+                        (base + 3, normal_index, 1.0, 1.0),
+                    )))
+
+                add_trim_rect(h0 - frame_width, h0 + frame_width, y0 - frame_width, y1 + frame_width)
+                add_trim_rect(h1 - frame_width, h1 + frame_width, y0 - frame_width, y1 + frame_width)
+                add_trim_rect(h0, h1, y0 - frame_width, y0 + frame_width)
+                add_trim_rect(h0, h1, y1 - frame_width, y1 + frame_width)
+                centre_h = (h0 + h1) * 0.5
+                centre_y = (y0 + y1) * 0.5
+                add_trim_rect(centre_h - mullion_width, centre_h + mullion_width, y0, y1)
+                add_trim_rect(h0, h1, centre_y - mullion_width, centre_y + mullion_width)
+
+    rings = (outer, *holes)
+    for ring_index, ring in enumerate(rings):
+        for edge_index in range(len(ring)):
+            start = ring[edge_index]
+            end = ring[(edge_index + 1) % len(ring)]
+            add_edge_wall(start, end, ring_index=ring_index, edge_index=edge_index)
+
+            # Close any gable/hip rise above the common eave. Sampling the edge
+            # midpoint as well as its ends handles connected wing roofs much more
+            # reliably than the old one-global-ridge special case.
+            if key.roof_style != "flat":
+                span, tx, tz, _ix, _iz = _polygon_native_edge_frame(start, end)
+                sample_distances = [0.0, span * 0.5, span]
+                samples = [
+                    (start[0] + tx * distance, start[1] + tz * distance)
+                    for distance in sample_distances
+                ]
+                heights = [roof_height(sample) for sample in samples]
+                for index in range(2):
+                    if max(heights[index], heights[index + 1]) <= eave_height + 1.0e-5:
+                        continue
+                    a, b = samples[index], samples[index + 1]
+                    span2, tx2, tz2, inward_x2, inward_z2 = _polygon_native_edge_frame(a, b)
+                    if span2 <= 1.0e-6:
+                        continue
+                    base = len(points)
+                    points.extend((
+                        (a[0], eave_height, a[1]),
+                        (a[0], heights[index], a[1]),
+                        (b[0], heights[index + 1], b[1]),
+                        (b[0], eave_height, b[1]),
+                    ))
+                    normal_index = len(normals)
+                    normals.append((-inward_x2, 0.0, -inward_z2))
+                    gable_wall_texture = (
+                        plain_wall_texture
+                        if not key.interiors
+                        and key.family in _PAINTED_WINDOW_FAMILIES
+                        and plain_wall_texture
+                        else wall_texture
+                    )
+                    faces.append(_Face(gable_wall_texture, (
+                        (base + 0, normal_index, 0.0, 1.0),
+                        (base + 1, normal_index, 0.0, 0.0),
+                        (base + 2, normal_index, span2 / 4.0, 0.0),
+                        (base + 3, normal_index, span2 / 4.0, 1.0),
+                    )))
+
+    # Roof triangles follow the complete footprint and preserve courtyard holes.
+    for triangle in roof_triangles:
+        base = len(points)
+        roof_points = tuple(
+            (float(x), float(roof_height((x, z))), float(z)) for x, z in triangle
+        )
+        points.extend(roof_points)
+        normal_index = len(normals)
+        normals.append(_surface_normal(points, (base, base + 1, base + 2)))
+        faces.append(_Face(roof_texture, (
+            (base, normal_index, triangle[0][0] / 4.0, triangle[0][1] / 4.0),
+            (base + 1, normal_index, triangle[1][0] / 4.0, triangle[1][1] / 4.0),
+            (base + 2, normal_index, triangle[2][0] / 4.0, triangle[2][1] / 4.0),
+        )))
+
+    # Keep the shell watertight even if a sampled pitched-roof mesh leaves a
+    # tiny uncovered sliver near a ridge or valley. The cap sits just beneath
+    # the eaves, so it is invisible in normal cases and only appears when it is
+    # preventing a genuine hole from exposing the sky.
+    if key.roof_style != "flat":
+        cap_texture = interior_texture if key.interiors else (plain_wall_texture or wall_texture)
+        cap_y = max(0.05, eave_height - 0.03)
+        for triangle in _triangulate_polygon_coordinates(outer, holes):
+            base = len(points)
+            points.extend(((x, cap_y, z) for x, z in triangle))
+            up = len(normals)
+            normals.append((0.0, 1.0, 0.0))
+            faces.append(_Face(cap_texture, (
+                (base + 0, up, triangle[0][0] / 3.0, triangle[0][1] / 3.0),
+                (base + 1, up, triangle[1][0] / 3.0, triangle[1][1] / 3.0),
+                (base + 2, up, triangle[2][0] / 3.0, triangle[2][1] / 3.0),
+            )))
+
+    if key.interiors:
+        inner = shape.buffer(-max(0.08, wall_thickness), join_style=2)
+        ceiling_y = min(eave_height - 0.06, max(2.35, min(2.75, eave_height - 0.06)))
+        if not inner.is_empty and ceiling_y > 2.1:
+            for part in _iter_polygonal_geometries(inner):
+                part_outer = tuple((float(x), float(z)) for x, z in list(part.exterior.coords)[:-1])
+                part_holes = tuple(
+                    tuple((float(x), float(z)) for x, z in list(ring.coords)[:-1])
+                    for ring in part.interiors
+                )
+                for triangle in _triangulate_polygon_coordinates(part_outer, part_holes):
+                    # Walkable-looking visual floor. The actual character contact
+                    # is supplied by the Roadway LOD below.
+                    base = len(points)
+                    points.extend(tuple((x, INTERIOR_VISUAL_FLOOR_Y_M, z) for x, z in triangle))
+                    up = len(normals); normals.append((0.0, 1.0, 0.0))
+                    faces.append(_Face(foundation_texture, (
+                        (base + 0, up, triangle[0][0] / 3.0, triangle[0][1] / 3.0),
+                        (base + 1, up, triangle[1][0] / 3.0, triangle[1][1] / 3.0),
+                        (base + 2, up, triangle[2][0] / 3.0, triangle[2][1] / 3.0),
+                    )))
+                    base = len(points)
+                    points.extend(tuple((x, ceiling_y, z) for x, z in reversed(triangle)))
+                    down = len(normals); normals.append((0.0, -1.0, 0.0))
+                    faces.append(_Face(interior_texture, (
+                        (base + 0, down, 0.0, 0.0),
+                        (base + 1, down, 1.0, 0.0),
+                        (base + 2, down, 1.0, 1.0),
+                    )))
+
+            # A restrained room divider gives houses an actual interior layout
+            # without pretending we know survey-grade room boundaries from OSM.
+            for partition_start, partition_end in _polygon_native_partition_segments(key):
+                span, _tx, _tz, _ix, _iz = _polygon_native_edge_frame(partition_start, partition_end)
+                if span < 3.0:
+                    continue
+                doorway_half = min(0.48, max(0.42, span * 0.10))
+                centre = span * 0.5
+                openings = ((centre - doorway_half, centre + doorway_half, 0.0, 2.05),)
+                add_edge_wall(
+                    partition_start,
+                    partition_end,
+                    ring_index=0,
+                    edge_index=-999,
+                    top=ceiling_y,
+                    openings=openings,
+                    exterior_texture=interior_texture,
+                    interior_wall_texture=interior_texture,
+                )
+
+    # Add a correctly scaled entrance panel on the actual mapped facade. Closed
+    # native buildings use it as a shallow overlay; enterable models use the same
+    # panel as the animated door selected by door1.
+    if selected_front_edge >= 0:
+        start = outer[selected_front_edge]
+        end = outer[(selected_front_edge + 1) % len(outer)]
+        span, tx, tz, inward_x, inward_z = _polygon_native_edge_frame(start, end)
+        door = _polygon_native_door_opening(key, selected_front_edge, span, eave_height)
+        if door is None and span >= 1.35:
+            # Closed models still need a human-scale door even though they have
+            # no physical doorway aperture.
+            door_half, door_height, _ = _door_dimensions(key)
+            jamb = 0.28
+            usable_half = max(0.42, min(door_half, span * 0.5 - jamb))
+            centre = max(usable_half + jamb, min(span - usable_half - jamb, key.entrance_fraction * span))
+            door = (centre - usable_half, centre + usable_half, 0.0, min(door_height, eave_height - 0.12))
+        if door is not None:
+            h0, h1, _y0, y1 = door
+            outward = -0.018 if key.interiors else -0.025
+            base = len(points)
+            points.extend((
+                edge_point(start, tx, tz, inward_x, inward_z, h0, 0.03, outward),
+                edge_point(start, tx, tz, inward_x, inward_z, h0, y1 - 0.03, outward),
+                edge_point(start, tx, tz, inward_x, inward_z, h1, y1 - 0.03, outward),
+                edge_point(start, tx, tz, inward_x, inward_z, h1, 0.03, outward),
+            ))
+            normal_index = len(normals)
+            normals.append((-inward_x, 0.0, -inward_z))
+            face = _Face(door_texture, (
+                (base + 0, normal_index, 0.0, 1.0),
+                (base + 1, normal_index, 0.0, 0.0),
+                (base + 2, normal_index, 1.0, 0.0),
+                (base + 3, normal_index, 1.0, 1.0),
+            ))
+            faces.append(face)
+            if key.interiors:
+                point_weights = bytearray(len(points))
+                for index in range(base, base + 4):
+                    point_weights[index] = 1
+                # Selection face flags are finalized after double-sided faces are
+                # created below, so retain the original front-face index here.
+                selected_face_index = len(faces) - 1
+
+    depth = max(0.0, float(foundation_depth))
+    if depth > 0.0:
+        foundation_top = FOUNDATION_VISIBLE_REVEAL_M
+        for ring_index, ring in enumerate(rings):
+            for edge_index in range(len(ring)):
+                add_edge_wall(
+                    ring[edge_index], ring[(edge_index + 1) % len(ring)],
+                    ring_index=ring_index, edge_index=edge_index,
+                    bottom=-depth, top=foundation_top, openings=(),
+                    exterior_texture=foundation_texture,
+                    interior_wall_texture=foundation_texture,
+                )
+
+    doubled = _double_sided_faces(faces)
+    if key.interiors and 'selected_face_index' in locals():
+        # _double_sided_faces stores each original followed by its reverse.
+        face_flags = bytearray(len(doubled))
+        face_flags[selected_face_index * 2] = 1
+        face_flags[selected_face_index * 2 + 1] = 1
+        point_weights = bytearray(len(points))
+        for index in range(base, base + 4):
+            point_weights[index] = 1
+        selections.append(_NamedSelection("door1", bytes(point_weights), bytes(face_flags)))
+    return _Lod(tuple(points), tuple(normals), doubled, 1.0, selections=tuple(selections))
+
+def _polygon_native_hollow_geometry_lod(key: BuildingVariantKey) -> _Lod:
+    """Build an enterable arbitrary-footprint collision shell.
+
+    Each wall cell is one convex oriented box, so concave footprints and
+    courtyards never become one illegal concave Geometry component. Genuine
+    window/door openings use the same aperture layout as the visual LOD.
+    """
+
+    shape = _polygon_native_shape(key)
+    if shape.is_empty or not shape.is_valid:
+        raise ValueError("polygon-native interior collision requires a valid footprint")
+    eave_height, _triangles, _roof_height = _polygon_native_roof_mesh(key, 35.0)
+    wall_top = max(2.4, eave_height)
+    wall_thickness = _interior_wall_thickness(key)
+    points: list[tuple[float, float, float]] = []
+    faces: list[_Face] = []
+    component_ranges: list[tuple[range, range]] = []
+
+    def add_prism(
+        start: PointXZ,
+        end: PointXZ,
+        h0: float,
+        h1: float,
+        y0: float,
+        y1: float,
+        *,
+        thickness: float = wall_thickness,
+    ) -> tuple[range, range] | None:
+        span, tx, tz, inward_x, inward_z = _polygon_native_edge_frame(start, end)
+        if span <= 1.0e-6 or h1 <= h0 + 1.0e-6 or y1 <= y0 + 1.0e-6:
+            return None
+        # Keep arbitrary wall components inside the same practical legacy-engine
+        # span target as the old rectangular collision path.
+        count = max(1, int(math.ceil((h1 - h0) / (_MAX_GEOMETRY_COMPONENT_SPAN_M - 2.0))))
+        result: tuple[range, range] | None = None
+        for piece in range(count):
+            ph0 = h0 + (h1 - h0) * piece / count
+            ph1 = h0 + (h1 - h0) * (piece + 1) / count
+            outer0 = (start[0] + tx * ph0, start[1] + tz * ph0)
+            outer1 = (start[0] + tx * ph1, start[1] + tz * ph1)
+            inner0 = (outer0[0] + inward_x * thickness, outer0[1] + inward_z * thickness)
+            inner1 = (outer1[0] + inward_x * thickness, outer1[1] + inward_z * thickness)
+            point_start = len(points)
+            face_start = len(faces)
+            points.extend((
+                (outer0[0], y0, outer0[1]), (outer1[0], y0, outer1[1]),
+                (inner1[0], y0, inner1[1]), (inner0[0], y0, inner0[1]),
+                (outer0[0], y1, outer0[1]), (outer1[0], y1, outer1[1]),
+                (inner1[0], y1, inner1[1]), (inner0[0], y1, inner0[1]),
+            ))
+            for indices in (
+                (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3),
+                (3, 7, 4, 0), (4, 7, 6, 5), (0, 1, 2, 3),
+            ):
+                faces.append(_Face("", tuple(
+                    (point_start + index, -1, 0.0, 0.0) for index in indices
+                )))
+            result = (
+                range(point_start, point_start + 8),
+                range(face_start, face_start + 6),
+            )
+            component_ranges.append(result)
+        return result
+
+    outer = tuple(key.footprint_vertices)
+    rings = (outer, *tuple(tuple(ring) for ring in key.footprint_holes))
+    selected_front = _polygon_native_front_edge(key)
+    for ring_index, ring in enumerate(rings):
+        for edge_index in range(len(ring)):
+            start = ring[edge_index]
+            end = ring[(edge_index + 1) % len(ring)]
+            span, _tx, _tz, _ix, _iz = _polygon_native_edge_frame(start, end)
+            openings = _polygon_native_edge_openings(
+                key, edge_index, span, wall_top, courtyard=ring_index > 0
+            )
+            for h0, h1, y0, y1 in _solid_wall_rectangles(0.0, span, wall_top, openings):
+                add_prism(start, end, h0, h1, y0, y1)
+
+    # Add one conservative room divider for non-utility buildings. Its visual
+    # doorway and collision doorway share the same 0.84-0.96 m clear opening.
+    for partition_start, partition_end in _polygon_native_partition_segments(key):
+        span, _tx, _tz, _ix, _iz = _polygon_native_edge_frame(partition_start, partition_end)
+        doorway_half = min(0.48, max(0.42, span * 0.10))
+        centre = span * 0.5
+        partition_top = min(wall_top - 0.10, 2.70)
+        openings = ((centre - doorway_half, centre + doorway_half, 0.0, 2.10),)
+        for h0, h1, y0, y1 in _solid_wall_rectangles(0.0, span, partition_top, openings):
+            add_prism(partition_start, partition_end, h0, h1, y0, y1, thickness=max(0.10, wall_thickness * 0.75))
+
+    # Door is a separate selected collision component so the engine animation
+    # opens the physical doorway as well as the visual panel.
+    door_component: tuple[range, range] | None = None
+    if selected_front >= 0:
+        start = outer[selected_front]
+        end = outer[(selected_front + 1) % len(outer)]
+        span, _tx, _tz, _ix, _iz = _polygon_native_edge_frame(start, end)
+        door = _polygon_native_door_opening(key, selected_front, span, wall_top)
+        if door is not None:
+            door_component = add_prism(
+                start, end, door[0], door[1], 0.03, door[3] - 0.03,
+                thickness=INTERIOR_DOOR_THICKNESS_M,
+            )
+
+    selections: list[_NamedSelection] = []
+    for index, (point_range, face_range) in enumerate(component_ranges, start=1):
+        point_weights = bytearray(len(points))
+        face_flags = bytearray(len(faces))
+        for point_index in point_range:
+            point_weights[point_index] = 1
+        for face_index in face_range:
+            face_flags[face_index] = 1
+        selections.append(_NamedSelection(
+            f"component{index:02d}", bytes(point_weights), bytes(face_flags)
+        ))
+    if door_component is not None:
+        point_weights = bytearray(len(points))
+        face_flags = bytearray(len(faces))
+        for point_index in door_component[0]:
+            point_weights[point_index] = 1
+        for face_index in door_component[1]:
+            face_flags[face_index] = 1
+        selections.append(_NamedSelection("door1", bytes(point_weights), bytes(face_flags)))
+
+    total_mass = max(1000.0, float(shape.area) * max(1.0, wall_top) * 35.0)
+    mass_per_point = tuple(total_mass / max(1, len(points)) for _ in points)
+    return _Lod(
+        tuple(points), (), tuple(faces), _GEOMETRY_LOD,
+        mass_per_point, tuple(selections),
+        (("map", _map_symbol_for_family(key.family)), ("autocenter", "0")),
+    )
+
+
+def _polygon_native_geometry_lod(key: BuildingVariantKey) -> _Lod:
+    """Build collision from bounded convex pieces, preserving courtyards."""
+
+    if key.interiors:
+        return _polygon_native_hollow_geometry_lod(key)
+
+    shape = _polygon_native_shape(key)
+    triangles: list[tuple[PointXZ, PointXZ, PointXZ]] = []
+    min_x, min_z, max_x, max_z = shape.bounds
+    # A triangle inside a square can span the square diagonal. Keep the clipping
+    # cells below 40/sqrt(2) so every convex prism remains inside the same
+    # practical component span used by the rectangular collision generator.
+    cell_span = _MAX_GEOMETRY_COMPONENT_SPAN_M / math.sqrt(2.0)
+    x_segments = max(1, int(math.ceil((max_x - min_x) / cell_span)))
+    z_segments = max(1, int(math.ceil((max_z - min_z) / cell_span)))
+    x_step = max(1.0e-6, (max_x - min_x) / x_segments)
+    z_step = max(1.0e-6, (max_z - min_z) / z_segments)
+    for z_index in range(z_segments):
+        z0 = min_z + z_index * z_step
+        z1 = min_z + (z_index + 1) * z_step
+        for x_index in range(x_segments):
+            x0 = min_x + x_index * x_step
+            x1 = min_x + (x_index + 1) * x_step
+            clip = Polygon(((x0, z0), (x1, z0), (x1, z1), (x0, z1)))
+            clipped = shape.intersection(clip)
+            for part in _iter_polygonal_geometries(clipped):
+                part_outer = tuple(
+                    (float(x), float(z)) for x, z in list(part.exterior.coords)[:-1]
+                )
+                part_holes = tuple(
+                    tuple((float(x), float(z)) for x, z in list(ring.coords)[:-1])
+                    for ring in part.interiors
+                )
+                triangles.extend(_triangulate_polygon_coordinates(part_outer, part_holes))
+    if not triangles:
+        raise ValueError("polygon-native collision requires a triangulatable footprint")
+    height = _main_building_height(key)
+    points: list[tuple[float, float, float]] = []
+    faces: list[_Face] = []
+    component_ranges: list[tuple[range, range]] = []
+
+    for triangle in triangles:
+        point_start = len(points)
+        face_start = len(faces)
+        points.extend((
+            (triangle[0][0], 0.0, triangle[0][1]),
+            (triangle[1][0], 0.0, triangle[1][1]),
+            (triangle[2][0], 0.0, triangle[2][1]),
+            (triangle[0][0], height, triangle[0][1]),
+            (triangle[1][0], height, triangle[1][1]),
+            (triangle[2][0], height, triangle[2][1]),
+        ))
+        faces.extend((
+            _Face("", tuple((point_start + point, -1, 0.0, 0.0) for point in (0, 3, 4, 1))),
+            _Face("", tuple((point_start + point, -1, 0.0, 0.0) for point in (1, 4, 5, 2))),
+            _Face("", tuple((point_start + point, -1, 0.0, 0.0) for point in (2, 5, 3, 0))),
+            _Face("", tuple((point_start + point, -1, 0.0, 0.0) for point in (3, 5, 4))),
+            _Face("", tuple((point_start + point, -1, 0.0, 0.0) for point in (0, 1, 2))),
+        ))
+        component_ranges.append((
+            range(point_start, point_start + 6),
+            range(face_start, face_start + 5),
+        ))
+
+    selections: list[_NamedSelection] = []
+    for index, (point_range, face_range) in enumerate(component_ranges, start=1):
+        point_weights = bytearray(len(points))
+        face_flags = bytearray(len(faces))
+        for point_index in point_range:
+            point_weights[point_index] = 1
+        for face_index in face_range:
+            face_flags[face_index] = 1
+        selections.append(_NamedSelection(
+            f"component{index:02d}", bytes(point_weights), bytes(face_flags)
+        ))
+
+    polygon_area = max(1.0, float(shape.area))
+    total_mass = max(1000.0, polygon_area * max(1.0, height) * 60.0)
+    mass_per_point = tuple(total_mass / len(points) for _ in points)
+    return _Lod(
+        tuple(points), (), tuple(faces), _GEOMETRY_LOD,
+        mass_per_point,
+        tuple(selections),
+        (("map", _map_symbol_for_family(key.family)), ("autocenter", "0")),
+    )
+
+
+def _polygon_native_land_contact_lod(key: BuildingVariantKey) -> _Lod:
+    points: list[tuple[float, float, float]] = []
+
+    def append_ring(ring: Sequence[PointXZ]) -> None:
+        if not ring:
+            return
+        count = len(ring)
+        for index, start in enumerate(ring):
+            end = ring[(index + 1) % count]
+            points.append((float(start[0]), 0.0, float(start[1])))
+            mid_x = (float(start[0]) + float(end[0])) * 0.5
+            mid_z = (float(start[1]) + float(end[1])) * 0.5
+            points.append((mid_x, 0.0, mid_z))
+
+    append_ring(key.footprint_vertices)
+    for ring in key.footprint_holes:
+        append_ring(ring)
+    shape = _polygon_native_shape(key)
+    representative = shape.representative_point()
+    points.append((float(representative.x), 0.0, float(representative.y)))
+    # Stable de-duplication keeps the LOD compact while retaining useful edge
+    # support points for irregular outlines.
+    points = list(dict.fromkeys((round(x, 4), round(y, 4), round(z, 4)) for x, y, z in points))
+    return _Lod(tuple(points), (), (), _LAND_CONTACT_LOD)
+
+
+def _polygon_native_roadway_lod(
+    key: BuildingVariantKey, foundation_depth: float
+) -> _Lod | None:
+    """Return a walkable floor and entrance threshold for native interiors."""
+
+    if not key.interiors:
+        return None
+    shape = _polygon_native_shape(key)
+    inset = _interior_wall_thickness(key) + INTERIOR_ROADWAY_WALL_CLEARANCE_M
+    inner = shape.buffer(-inset, join_style=2)
+    if inner.is_empty:
+        inner = shape.buffer(-max(0.05, inset * 0.5), join_style=2)
+    points: list[tuple[float, float, float]] = []
+    faces: list[_Face] = []
+    roadway_y = INTERIOR_ROADWAY_Y_M
+    for part in _iter_polygonal_geometries(inner):
+        outer = tuple((float(x), float(z)) for x, z in list(part.exterior.coords)[:-1])
+        holes = tuple(
+            tuple((float(x), float(z)) for x, z in list(ring.coords)[:-1])
+            for ring in part.interiors
+        )
+        for triangle in _triangulate_polygon_coordinates(outer, holes):
+            start = len(points)
+            points.extend(tuple((x, roadway_y, z) for x, z in triangle))
+            faces.append(_Face("", tuple(
+                (start + index, 0, 0.0, 0.0) for index in (0, 2, 1)
+            )))
+
+    outer_ring = tuple(key.footprint_vertices)
+    edge_index = _polygon_native_front_edge(key)
+    if edge_index >= 0 and outer_ring:
+        start_edge = outer_ring[edge_index]
+        end_edge = outer_ring[(edge_index + 1) % len(outer_ring)]
+        span, tx, tz, inward_x, inward_z = _polygon_native_edge_frame(start_edge, end_edge)
+        door = _polygon_native_door_opening(key, edge_index, span, _main_building_height(key))
+        if door is not None:
+            h0, h1, _bottom, _top = door
+            margin = min(0.18, max(0.08, (h1 - h0) * 0.08))
+            h0 += margin
+            h1 -= margin
+            run = max(0.55, max(0.0, float(foundation_depth)) * INTERIOR_VEHICLE_RAMP_RUN_PER_RISE)
+            inside = _interior_wall_thickness(key) + 0.38
+            outside_y = roadway_y - max(0.0, float(foundation_depth))
+            base = len(points)
+            points.extend((
+                (
+                    start_edge[0] + tx * h0 - inward_x * run,
+                    outside_y,
+                    start_edge[1] + tz * h0 - inward_z * run,
+                ),
+                (
+                    start_edge[0] + tx * h1 - inward_x * run,
+                    outside_y,
+                    start_edge[1] + tz * h1 - inward_z * run,
+                ),
+                (
+                    start_edge[0] + tx * h1 + inward_x * inside,
+                    roadway_y,
+                    start_edge[1] + tz * h1 + inward_z * inside,
+                ),
+                (
+                    start_edge[0] + tx * h0 + inward_x * inside,
+                    roadway_y,
+                    start_edge[1] + tz * h0 + inward_z * inside,
+                ),
+            ))
+            faces.append(_Face("", tuple(
+                (base + index, 0, 0.0, 0.0) for index in (0, 3, 2, 1)
+            )))
+
+    if not faces:
+        return None
+    return _Lod(tuple(points), ((0.0, 1.0, 0.0),), tuple(faces), _ROADWAY_LOD)
+
+
+def _polygon_native_memory_lod(key: BuildingVariantKey) -> _Lod | None:
+    """Return door hinge/action points aligned to the mapped polygon facade."""
+
+    if not key.interiors or not key.footprint_vertices:
+        return None
+    outer = tuple(key.footprint_vertices)
+    edge_index = _polygon_native_front_edge(key)
+    if edge_index < 0:
+        return None
+    start = outer[edge_index]
+    end = outer[(edge_index + 1) % len(outer)]
+    span, tx, tz, inward_x, inward_z = _polygon_native_edge_frame(start, end)
+    door = _polygon_native_door_opening(key, edge_index, span, _main_building_height(key))
+    if door is None:
+        return None
+    h0, h1, _bottom, top = door
+    hinge_h = h0
+    action_h = (h0 + h1) * 0.5
+    points = (
+        (start[0] + tx * hinge_h, 0.02, start[1] + tz * hinge_h),
+        (start[0] + tx * hinge_h, top - 0.02, start[1] + tz * hinge_h),
+        (
+            start[0] + tx * action_h - inward_x * 0.32,
+            min(1.15, top * 0.55),
+            start[1] + tz * action_h - inward_z * 0.32,
+        ),
+    )
+    return _Lod(
+        points, (), (), _MEMORY_LOD,
+        selections=(
+            _NamedSelection("door1_axis", bytes((1, 1, 0)), b""),
+            _NamedSelection("door1_action", bytes((0, 0, 1)), b""),
+        ),
+    )
+
+
+def _polygon_native_paths_lod(
+    key: BuildingVariantKey, foundation_depth: float
+) -> _Lod | None:
+    """Return a small AI strip through the arbitrary entrance into the shell."""
+
+    if not key.interiors or not key.footprint_vertices:
+        return None
+    shape = _polygon_native_shape(key)
+    outer = tuple(key.footprint_vertices)
+    edge_index = _polygon_native_front_edge(key)
+    if edge_index < 0:
+        return None
+    start = outer[edge_index]
+    end = outer[(edge_index + 1) % len(outer)]
+    span, tx, tz, inward_x, inward_z = _polygon_native_edge_frame(start, end)
+    door = _polygon_native_door_opening(key, edge_index, span, _main_building_height(key))
+    if door is None:
+        return None
+    centre_h = (door[0] + door[1]) * 0.5
+    centre = (start[0] + tx * centre_h, start[1] + tz * centre_h)
+    half_path = min(INTERIOR_PATH_HALF_WIDTH_M, max(0.22, (door[1] - door[0]) * 0.28))
+    run = max(0.45, max(0.0, float(foundation_depth)) * 2.0)
+    stations: list[tuple[float, float, float]] = [
+        (
+            centre[0] - inward_x * run,
+            0.11 - max(0.0, float(foundation_depth)),
+            centre[1] - inward_z * run,
+        ),
+        (
+            centre[0] + inward_x * (_interior_wall_thickness(key) + 0.35),
+            0.11,
+            centre[1] + inward_z * (_interior_wall_thickness(key) + 0.35),
+        ),
+    ]
+    representative = shape.representative_point()
+    candidate = (float(representative.x), float(representative.y))
+    if shape.covers(LineString(((stations[-1][0], stations[-1][2]), candidate))):
+        stations.append((candidate[0], 0.11, candidate[1]))
+
+    points: list[tuple[float, float, float]] = []
+    for x, y, z in stations:
+        points.extend((
+            (x - tx * half_path, y, z - tz * half_path),
+            (x, y, z),
+            (x + tx * half_path, y, z + tz * half_path),
+        ))
+    faces: list[_Face] = []
+    for station_index in range(len(stations) - 1):
+        a = station_index * 3
+        b = (station_index + 1) * 3
+        for indices in ((a, a + 1, b + 1), (a, b + 1, b), (a + 1, a + 2, b + 2), (a + 1, b + 2, b + 1)):
+            faces.append(_Face("", tuple((index, 0, 0.0, 0.0) for index in indices)))
+    point_count = len(points)
+    face_count = len(faces)
+    selections: list[_NamedSelection] = []
+    for name, point_index in (("In1", 1), ("Pos1", 4), ("Pos2", len(points) - 2)):
+        weights = bytearray(point_count)
+        weights[point_index] = 1
+        selections.append(_NamedSelection(name, bytes(weights), bytes(face_count)))
+    return _Lod(
+        tuple(points), ((0.0, 1.0, 0.0),), tuple(faces), _PATHS_LOD,
+        selections=tuple(selections),
+    )
 
 def _land_contact_lod(key: BuildingVariantKey) -> _Lod:
     half_width = key.width_m / 2.0
@@ -4676,6 +6900,9 @@ def _land_contact_lod(key: BuildingVariantKey) -> _Lod:
     return _Lod((
         (-half_width, 0.0, -half_length), (half_width, 0.0, -half_length),
         (half_width, 0.0, half_length), (-half_width, 0.0, half_length),
+        (0.0, 0.0, -half_length), (half_width, 0.0, 0.0),
+        (0.0, 0.0, half_length), (-half_width, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
     ), (), (), _LAND_CONTACT_LOD)
 
 
@@ -5139,6 +7366,75 @@ def write_building_mlod(
     door_texture: str | None = None,
     distance_wall_texture: str | None = None,
 ) -> None:
+    if key.footprint_vertices and not _triangulate_polygon_coordinates(
+        key.footprint_vertices, key.footprint_holes
+    ):
+        # Last-resort build continuity: a malformed/GEOS-hostile native polygon
+        # must not destroy an otherwise complete seven-minute world build. The
+        # robust triangulator above handles valid concave footprints in normal
+        # operation; this path retains the building's semantic family, fitted
+        # dimensions, height, roof style and interior settings while using its
+        # fitted rectangle for the one pathological asset.
+        key = replace(
+            key,
+            footprint_vertices=(),
+            footprint_holes=(),
+            entrance_edge=-1,
+            entrance_fraction=0.5,
+        )
+
+    if key.footprint_vertices:
+        detail = _polygon_native_visual_lod(
+            key, wall_texture, roof_texture,
+            roof_pitch_degrees=roof_pitch_degrees,
+            front_texture=front_texture,
+            foundation_texture=foundation_texture,
+            foundation_depth=foundation_depth,
+            interior_texture=interior_texture,
+            window_trim_texture=window_trim_texture,
+            plain_wall_texture=plain_wall_texture,
+            door_texture=door_texture,
+        )
+        lods_list = [detail]
+        if key.interiors:
+            distance = _polygon_native_visual_lod(
+                replace(key, interiors=False, second_storey=False),
+                distance_wall_texture or plain_wall_texture or wall_texture,
+                roof_texture,
+                roof_pitch_degrees=roof_pitch_degrees,
+                front_texture=front_texture,
+                foundation_texture=foundation_texture,
+                foundation_depth=foundation_depth,
+                plain_wall_texture=(
+                    plain_wall_texture
+                    or distance_wall_texture
+                    or wall_texture
+                ),
+                door_texture=door_texture,
+            )
+            lods_list.append(replace(
+                distance, resolution=INTERIOR_DISTANCE_LOD_RESOLUTION,
+                selections=(),
+            ))
+        lods_list.append(_polygon_native_geometry_lod(key))
+        roadway = _polygon_native_roadway_lod(key, foundation_depth)
+        if roadway is not None:
+            lods_list.append(roadway)
+        memory = _polygon_native_memory_lod(key)
+        if memory is not None:
+            lods_list.append(memory)
+        paths = _polygon_native_paths_lod(key, foundation_depth)
+        if paths is not None:
+            lods_list.append(paths)
+        lods_list.append(_polygon_native_land_contact_lod(key))
+        lods = tuple(lods_list)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("wb") as stream:
+            stream.write(_MLOD_HEADER.pack(b"MLOD", 1, 1, 0, len(lods)))
+            for lod in lods:
+                _write_lod(stream, lod)
+        return
+
     detail = _visual_lod(
         key, wall_texture, roof_texture, roof_pitch_degrees, front_texture,
         foundation_texture, foundation_depth, church_plinth_height,
@@ -5156,18 +7452,19 @@ def write_building_mlod(
         # facade supplies a compact silhouette until the detailed LOD is close
         # enough to matter.
         distance = _visual_lod(
-            replace(key, interiors=False),
-            distance_wall_texture or plain_wall_texture or wall_texture,
+            replace(key, interiors=False, second_storey=False),
+            distance_wall_texture or wall_texture,
             roof_texture,
             roof_pitch_degrees,
-            front_texture,
-            foundation_texture,
-            foundation_depth,
-            church_plinth_height,
-            None,
-            None,
-            None,
-            _interior_storey_count(key),
+            front_texture=front_texture,
+            foundation_texture=foundation_texture,
+            foundation_depth=foundation_depth,
+            church_plinth_height=church_plinth_height,
+            plain_wall_texture=(
+                plain_wall_texture
+                or distance_wall_texture
+                or wall_texture
+            ),
         )
         lods_list.append(replace(distance, resolution=INTERIOR_DISTANCE_LOD_RESOLUTION))
 
@@ -5309,6 +7606,7 @@ class ProceduralBuildingLibrary:
         maximum_height: float = 48.0,
         default_level_height: float = 3.0,
         maximum_variants: int = 128,
+        maximum_polygon_variants: int = POLYGON_NATIVE_MAXIMUM_VARIANTS,
         roof_pitch_degrees: float = 35.0,
         foundation_depth: float = 0.5,
         maximum_foundation_depth: float = 2.5,
@@ -5333,6 +7631,7 @@ class ProceduralBuildingLibrary:
         self.maximum_height = maximum_height
         self.default_level_height = default_level_height
         self.maximum_variants = maximum_variants
+        self.maximum_polygon_variants = max(0, int(maximum_polygon_variants))
         self.roof_pitch_degrees = roof_pitch_degrees
         self.foundation_depth = foundation_depth
         self.maximum_foundation_depth = max(foundation_depth, maximum_foundation_depth)
@@ -5352,14 +7651,20 @@ class ProceduralBuildingLibrary:
         self.cache_misses = 0
         self._request_counts: Counter[BuildingVariantKey] = Counter()
         self._mapping: dict[BuildingVariantKey, BuildingVariantKey] = {}
+        self._selection_cache: dict[BuildingVariantKey, BuildingVariantKey] = {}
+        self._model_path_cache: dict[BuildingVariantKey, str] = {}
         self._usage: Counter[BuildingVariantKey] = Counter()
         self._prepared = False
         self.region_identifier: str | None = None
         self._urban_polygons: tuple[Polygon, ...] = ()
         self._settlement_points: tuple[tuple[float, float, float, str], ...] = ()
+        self._settlement_bucket_size = 1.0
+        self._settlement_buckets: dict[tuple[int, int], tuple[int, ...]] = {}
         self._isolated_dwelling_areas: tuple[Polygon, ...] = ()
+        self._isolated_dwelling_cabins: tuple[Polygon, ...] = ()
         self._settlement_scale_x = 1.0
         self._settlement_scale_z = 1.0
+        self._polygon_native_keys: set[BuildingVariantKey] = set()
 
     def _prepare_geographic_context(self, dataset: Any, projection: Any) -> None:
         tag_sources = [feature.tags for feature in getattr(dataset, "places", ())]
@@ -5431,17 +7736,13 @@ class ProceduralBuildingLibrary:
                     ))
                 plausible = [
                     geometry for geometry, building_kind in inside
-                    if building_kind in {"", "yes", "house", "residential", "detached", "cabin"}
+                    if building_kind in {"", "yes"}
                 ]
                 if len(plausible) == 1:
-                    # One plausible dwelling may coexist with explicit garages or
-                    # sheds; only the selected footprint receives cabin context.
+                    # One generic footprint may coexist with explicit garages,
+                    # sheds, houses, etc. Only the footprint whose semantic type
+                    # CWR actually has to infer receives cabin context.
                     isolated_dwelling_cabins.append(plausible[0])
-                elif len(plausible) == 0 and len(inside) == 1 and inside[0][1] == "shed":
-                    # Sparse OSM sometimes labels the only actual dwelling as a
-                    # shed. When it is literally the sole building inside the
-                    # mapped isolated-dwelling polygon, prefer the area semantic.
-                    isolated_dwelling_cabins.append(inside[0][0])
         self._isolated_dwelling_cabins = tuple(isolated_dwelling_cabins)
 
         settlement_points: list[tuple[float, float, float, str]] = []
@@ -5453,6 +7754,21 @@ class ProceduralBuildingLibrary:
             x, z = projection.to_world(feature.point)
             settlement_points.append((x, z, radius, kind))
         self._settlement_points = tuple(settlement_points)
+        # Settlement classification used to scan every place node for every
+        # building. Bucket the fixed-radius hints in world space and retain the
+        # exact distance test below, so semantics stay identical while dense
+        # regional extracts stop paying O(buildings * places).
+        self._settlement_bucket_size = max(
+            1.0, 1000.0 * self._settlement_scale_x, 1000.0 * self._settlement_scale_z
+        )
+        mutable_buckets: dict[tuple[int, int], list[int]] = {}
+        for index, (centre_x, centre_z, _radius, _kind) in enumerate(self._settlement_points):
+            key = (
+                math.floor(centre_x / self._settlement_bucket_size),
+                math.floor(centre_z / self._settlement_bucket_size),
+            )
+            mutable_buckets.setdefault(key, []).append(index)
+        self._settlement_buckets = {key: tuple(values) for key, values in mutable_buckets.items()}
 
     def _settlement_context(self, x: float | None, z: float | None) -> str:
         if x is None or z is None:
@@ -5468,7 +7784,15 @@ class ProceduralBuildingLibrary:
         # based settlement hint.
         if any(footprint.covers(point) for footprint in self._isolated_dwelling_cabins):
             return "isolated_dwelling_single"
-        for centre_x, centre_z, radius, kind in self._settlement_points:
+        bucket_size = self._settlement_bucket_size
+        bucket_x = math.floor(float(x) / bucket_size)
+        bucket_z = math.floor(float(z) / bucket_size)
+        candidate_indices: list[int] = []
+        for dz in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                candidate_indices.extend(self._settlement_buckets.get((bucket_x + dx, bucket_z + dz), ()))
+        for index in candidate_indices:
+            centre_x, centre_z, radius, kind = self._settlement_points[index]
             distance = math.hypot(
                 (float(x) - centre_x) / self._settlement_scale_x,
                 (float(z) - centre_z) / self._settlement_scale_z,
@@ -5521,6 +7845,13 @@ class ProceduralBuildingLibrary:
         )
         roof = _roof_style(tags, family, regional_style)
         requested_height = _height(tags, family, self.default_level_height)
+        explicit_levels = _parse_number(tags.get("building:levels"))
+        if (
+            str(tags.get("building", "")).casefold() == "cabin"
+            and _parse_number(tags.get("height")) is None
+            and _parse_number(tags.get("building:levels")) is None
+        ):
+            requested_height = self.default_level_height
         if (
             settlement_context == "isolated_dwelling_single"
             and family == "residential"
@@ -5530,6 +7861,15 @@ class ProceduralBuildingLibrary:
             # One-storey cabin rather than a six-metre generic house. Explicit
             # OSM height/levels still win when present.
             requested_height = self.default_level_height
+        facade_storeys = _requested_facade_storeys(
+            tags, family, requested_height, self.default_level_height
+        )
+        if (
+            explicit_levels is None
+            and _parse_number(tags.get("height")) is None
+            and requested_height <= self.default_level_height + 1.0e-6
+        ):
+            facade_storeys = 1
         quantized_height = _quantize(
             requested_height,
             self.height_quantum,
@@ -5553,15 +7893,24 @@ class ProceduralBuildingLibrary:
             and length <= interior_max_length
             and quantized_height <= interior_max_height
         )
-        explicit_levels = _parse_number(tags.get("building:levels"))
+        isolated_dwelling = (
+            settlement_context == "isolated_dwelling_single"
+            and family == "residential"
+        )
+        physically_supports_second_storey = (
+            width >= INTERIOR_SECOND_STOREY_MINIMUM_WIDTH_M
+            and length >= INTERIOR_SECOND_STOREY_MINIMUM_LENGTH_M
+            and quantized_height >= INTERIOR_SECOND_STOREY_MINIMUM_HEIGHT_M
+        )
         second_storey = (
             interiors
             and family in SECOND_STOREY_INTERIOR_FAMILIES
-            and explicit_levels is not None
-            and explicit_levels >= 2.0
+            and facade_storeys >= 2
+            and physically_supports_second_storey
+            and not (explicit_levels is not None and explicit_levels < 2.0)
         )
         outbuilding_kind = (
-            _outbuilding_kind_from_dimensions(width, length)
+            _outbuilding_kind(tags, width, length)
             if family == "outbuilding"
             else ""
         )
@@ -5576,6 +7925,8 @@ class ProceduralBuildingLibrary:
             interiors=interiors,
             second_storey=second_storey,
             outbuilding_kind=outbuilding_kind,
+            facade_storeys=facade_storeys,
+            isolated_dwelling=isolated_dwelling,
         )
 
     def _iter_dataset_keys(self, dataset: Any, projection: Any, point_footprint: float) -> Iterable[BuildingVariantKey]:
@@ -5583,16 +7934,22 @@ class ProceduralBuildingLibrary:
             for polygon in feature.polygons:
                 projected = [projection.to_world(point) for point in polygon.outer[:-1]]
                 if len(projected) >= 3:
-                    parts = decompose_footprint_rectangles(projected)
-                    key_footprints = parts if len(parts) > 1 else (tuple(projected),)
-                    for key_points in key_footprints:
-                        footprint = footprint_from_polygon(key_points)
-                        centre_x = sum(point[0] for point in key_points) / len(key_points)
-                        centre_z = sum(point[1] for point in key_points) / len(key_points)
-                        yield self.key_for(
-                            feature.tags, footprint.width_m, footprint.length_m,
-                            settlement_context=self._settlement_context(centre_x, centre_z),
-                        )
+                    projected_holes = tuple(
+                        tuple(projection.to_world(point) for point in ring[:-1])
+                        for ring in polygon.holes
+                        if len(ring) >= 4
+                    )
+                    # One mapped footprint always requests one building variant.
+                    # Irregular polygons may later receive one polygon-native
+                    # model, but they are never split into independent wings.
+                    polygon_geometry, footprint = _polygon_with_footprint(
+                        projected, projected_holes
+                    )
+                    centre = polygon_geometry.centroid
+                    yield self.key_for(
+                        feature.tags, footprint.width_m, footprint.length_m,
+                        settlement_context=self._settlement_context(float(centre.x), float(centre.y)),
+                    )
         for feature in dataset.building_points:
             x, z = projection.to_world(feature.point)
             yield self.key_for(
@@ -5747,7 +8104,10 @@ class ProceduralBuildingLibrary:
 
     def prepare(self, dataset: Any, projection: Any, point_footprint: float) -> None:
         self._mapping.clear()
+        self._selection_cache.clear()
+        self._model_path_cache.clear()
         self._usage.clear()
+        self._polygon_native_keys.clear()
         self._prepared = False
         self._prepare_geographic_context(dataset, projection)
         self._request_counts = Counter(self._iter_dataset_keys(dataset, projection, point_footprint))
@@ -5829,9 +8189,16 @@ class ProceduralBuildingLibrary:
     def model_path(self, key: BuildingVariantKey) -> str:
         # Land_<p3dName> config classes are global in CWA. Include a compact
         # world hash in the filename so two generated islands can coexist
-        # without their interactive-building classes colliding.
+        # without their interactive-building classes colliding. Model paths are
+        # requested for every placement but there are only a bounded number of
+        # variant keys, so cache the JSON/SHA work rather than redoing it 100k+.
+        cached = self._model_path_cache.get(key)
+        if cached is not None:
+            return cached
         world_code = sha256(self.world_name.encode("ascii")).hexdigest()[:4]
-        return rf"{self.world_name}\g\b_{world_code}_{key.digest}.p3d"
+        path = rf"{self.world_name}\g\b_{world_code}_{key.digest}.p3d"
+        self._model_path_cache[key] = path
+        return path
 
     def is_generated_model(self, path: str) -> bool:
         return path.casefold().startswith((self.world_name + r"\g\b_").casefold()) and path.casefold().endswith(".p3d")
@@ -5841,28 +8208,144 @@ class ProceduralBuildingLibrary:
             raise RuntimeError("procedural building library must be prepared before placement")
         if requested in self._mapping:
             return self._mapping[requested]
+        cached = self._selection_cache.get(requested)
+        if cached is not None:
+            return cached
         if not self._mapping:
             self._mapping[requested] = requested
             return requested
         candidates = self._reuse_candidates(
             requested, sorted(set(self._mapping.values()))
         )
-        return self._best_variant(requested, candidates)
+        selected = self._best_variant(requested, candidates)
+        self._selection_cache[requested] = selected
+        return selected
 
     def plan_polygon(
         self, tags: Mapping[str, str], points: Sequence[PointXZ], *,
+        holes: Sequence[Sequence[PointXZ]] = (),
         road_point: PointXZ | None = None, entrance_point: PointXZ | None = None,
+        allow_native_polygon: bool = True,
     ) -> BuildingPlacement:
-        footprint = footprint_from_polygon(points)
-        centre_x = sum(point[0] for point in points) / len(points)
-        centre_z = sum(point[1] for point in points) / len(points)
+        polygon, footprint = _polygon_with_footprint(points, holes)
+        centre = polygon.centroid
+        centre_x, centre_z = float(centre.x), float(centre.y)
+        hash_coordinates = tuple(points) + tuple(
+            point for ring in holes for point in ring
+        )
+        placement_hash = _placement_hash_u32(tags, hash_coordinates)
         requested = self.key_for(
             tags, footprint.width_m, footprint.length_m,
             settlement_context=self._settlement_context(centre_x, centre_z),
         )
+
+        native_profile = (
+            _native_polygon_profile(
+                points, holes, footprint=footprint, polygon=polygon
+            )
+            if allow_native_polygon
+            and requested.family != "church"
+            else None
+        )
+        if native_profile is not None:
+            (
+                native_vertices, native_holes, native_heading,
+                native_width, native_length,
+            ) = native_profile
+            native_requested = self.key_for(
+                tags, native_width, native_length,
+                settlement_context=self._settlement_context(centre_x, centre_z),
+            )
+            # Gabled/hipped/pyramidal roofs now follow the polygon. More exotic
+            # roof families still keep the exact building outline but deliberately
+            # fall back to a flat top; one slightly conservative roof is much less
+            # wrong than turning one source building into overlapping rectangles.
+            native_roof_style = (
+                native_requested.roof_style
+                if native_requested.roof_style in {"flat", "gabled", "hipped", "pyramidal"}
+                else "flat"
+            )
+
+            entrance_edge = -1
+            entrance_fraction = 0.5
+            frontage_point = entrance_point if entrance_point is not None else road_point
+            if frontage_point is not None and native_vertices:
+                angle = math.radians(native_heading)
+                dx = float(frontage_point[0]) - centre_x
+                dz = float(frontage_point[1]) - centre_z
+                local_frontage = (
+                    dx * math.cos(angle) - dz * math.sin(angle),
+                    dx * math.sin(angle) + dz * math.cos(angle),
+                )
+                ranked_edges: list[tuple[float, int, float]] = []
+                for edge_index, start in enumerate(native_vertices):
+                    end = native_vertices[(edge_index + 1) % len(native_vertices)]
+                    edge_x, edge_z = end[0] - start[0], end[1] - start[1]
+                    length_sq = edge_x * edge_x + edge_z * edge_z
+                    if length_sq <= 1.0e-8:
+                        continue
+                    fraction = max(0.0, min(1.0, (
+                        (local_frontage[0] - start[0]) * edge_x
+                        + (local_frontage[1] - start[1]) * edge_z
+                    ) / length_sq))
+                    nearest_x = start[0] + edge_x * fraction
+                    nearest_z = start[1] + edge_z * fraction
+                    distance_sq = (
+                        (local_frontage[0] - nearest_x) ** 2
+                        + (local_frontage[1] - nearest_z) ** 2
+                    )
+                    ranked_edges.append((distance_sq, edge_index, fraction))
+                if ranked_edges:
+                    _distance, entrance_edge, entrance_fraction = min(ranked_edges)
+                    quantum = POLYGON_NATIVE_ENTRANCE_FRACTION_QUANTUM
+                    entrance_fraction = max(0.0, min(1.0,
+                        round(entrance_fraction / quantum) * quantum
+                    ))
+
+            native_requested = replace(
+                native_requested,
+                roof_style=native_roof_style,
+                # Native shells now have a footprint-following ground-floor
+                # interior. Keep the normal family/dimension eligibility gate;
+                # second-storey polygon partitioning is deliberately deferred
+                # until stairs can be generated without crossing concave walls.
+                interiors=native_requested.interiors,
+                second_storey=False,
+                footprint_vertices=native_vertices,
+                footprint_holes=native_holes,
+                entrance_edge=entrance_edge,
+                entrance_fraction=entrance_fraction,
+            )
+            selected = replace(
+                native_requested,
+                texture_variant=_placement_texture_variant(
+                    tags, hash_coordinates, variant_count=(
+                        min(self.texture_variants, INTERIOR_MODEL_TEXTURE_VARIANTS)
+                        if native_requested.interiors else self.texture_variants
+                    ),
+                    placement_hash=placement_hash,
+                ),
+            )
+            if (
+                selected in self._polygon_native_keys
+                or len(self._polygon_native_keys) < self.maximum_polygon_variants
+            ):
+                self._polygon_native_keys.add(selected)
+                return BuildingPlacement(
+                    self.model_path(selected),
+                    native_heading,
+                    native_requested,
+                    selected,
+                )
+
+        # Rectangle fallback. This is intentionally ONE model even for L/T/U
+        # footprints. If the polygon is close enough to rectangular this is also
+        # the preferred path, avoiding bespoke P3Ds for trivial survey notches.
         requested = replace(
             requested,
-            second_storey=_placement_uses_second_storey(tags, points, requested),
+            second_storey=_placement_uses_second_storey(
+                tags, points, requested, placement_hash=placement_hash
+            ),
         )
         selected = replace(
             self._selected(requested),
@@ -5870,14 +8353,12 @@ class ProceduralBuildingLibrary:
                 tags, points, variant_count=(
                     min(self.texture_variants, INTERIOR_MODEL_TEXTURE_VARIANTS)
                     if requested.interiors else self.texture_variants
-                )
+                ),
+                placement_hash=placement_hash,
             ),
             second_storey=requested.second_storey,
         )
         heading = footprint.heading_degrees
-        # A mapped OSM entrance is stronger evidence of the actual frontage than
-        # proximity to a road. The generated door remains centred on that facade,
-        # but the facade itself now faces the mapped entrance when one is available.
         frontage_point = entrance_point if entrance_point is not None else road_point
         if selected.family in HOUSE_ROAD_FACING_FAMILIES:
             heading = _house_heading_towards_road(
@@ -5889,9 +8370,6 @@ class ProceduralBuildingLibrary:
                 length_m=selected.length_m,
             )
         elif frontage_point is not None:
-            # Preserve the long-standing front/back road-facing behaviour for
-            # non-house procedural families without freely rotating their
-            # footprint. Houses get the stronger placement-aware rule above.
             dx = frontage_point[0] - centre_x
             dz = frontage_point[1] - centre_z
             front_x, front_z = _front_vector_for_heading(heading)
@@ -5909,9 +8387,12 @@ class ProceduralBuildingLibrary:
             settlement_context=self._settlement_context(x, z),
         )
         coordinates = ((float(x), float(z)),) if x is not None and z is not None else ((float(footprint), float(heading_degrees)),)
+        placement_hash = _placement_hash_u32(tags, coordinates)
         requested = replace(
             requested,
-            second_storey=_placement_uses_second_storey(tags, coordinates, requested),
+            second_storey=_placement_uses_second_storey(
+                tags, coordinates, requested, placement_hash=placement_hash
+            ),
         )
         selected = replace(
             self._selected(requested),
@@ -5919,7 +8400,8 @@ class ProceduralBuildingLibrary:
                 tags, coordinates, variant_count=(
                     min(self.texture_variants, INTERIOR_MODEL_TEXTURE_VARIANTS)
                     if requested.interiors else self.texture_variants
-                )
+                ),
+                placement_hash=placement_hash,
             ),
             second_storey=requested.second_storey,
         )
@@ -6111,6 +8593,7 @@ class ProceduralBuildingLibrary:
             if key.interiors
             or key.family == "church"
             or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+            or key.family in _PAINTED_WINDOW_FAMILIES
         })
         used_interior_palette_variants = sorted({
             (key.family, key.regional_style, key.texture_variant)
@@ -6128,7 +8611,7 @@ class ProceduralBuildingLibrary:
         )
         used_door_variants: dict[str, tuple[str, str, int, str]] = {}
         for key in selected:
-            if not key.interiors:
+            if not key.interiors and not key.footprint_vertices:
                 continue
             path = self._door_texture(
                 key.family, key.regional_style, key.texture_variant,
@@ -6218,7 +8701,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-wall-v11-barn-bracing-selectable-quality",
+                    "procedural-building-wall-v12-window-sill-selectable-quality",
                     {
                         "family": family,
                         "regional_style": regional_style,
@@ -6322,7 +8805,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-front-v12-sectional-garage-selectable-quality",
+                    "procedural-building-front-v13-window-sill-selectable-quality",
                     {
                         "family": family,
                         "regional_style": regional_style,
@@ -6379,7 +8862,7 @@ class ProceduralBuildingLibrary:
             relative = model_path.split("\\", 1)[1].replace("\\", "/")
             file_path = source_dir / relative
             asset_key = cache_key(
-                "procedural-building-model-v42-solid-stair-clean-utility-front",
+                "procedural-building-model-v49-robust-polygon-roof-triangulation",
                 {
                     "world_name": self.world_name,
                     "variant": asdict(key),
@@ -6436,13 +8919,12 @@ class ProceduralBuildingLibrary:
                         self._open_wall_texture(
                             key.family, key.regional_style, key.texture_variant
                         )
-                        if key.interiors and key.family in UTILITY_INTERIOR_FAMILIES
-                        or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
-                        or key.family == "church"
-                        else self._wall_texture(
-                            key.family, key.regional_style, key.texture_variant
+                        if (
+                            key.interiors
+                            or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+                            or key.family == "church"
+                            or key.family in _PAINTED_WINDOW_FAMILIES
                         )
-                        if key.interiors
                         else None
                     ),
                     door_texture=(
@@ -6450,7 +8932,7 @@ class ProceduralBuildingLibrary:
                             key.family, key.regional_style, key.texture_variant,
                             key.outbuilding_kind,
                         )
-                        if key.interiors else None
+                        if key.interiors or key.footprint_vertices else None
                     ),
                     distance_wall_texture=(
                         self._wall_texture(
@@ -6490,8 +8972,12 @@ class ProceduralBuildingLibrary:
 
         placements = sum(self._usage.values())
         generated = len(model_assets)
+        polygon_native_variants = sum(1 for key in selected if key.footprint_vertices)
+        polygon_native_placements = sum(
+            self._usage[key] for key in selected if key.footprint_vertices
+        )
         document = {
-            "schema": 16,
+            "schema": 18,
             "generator": "cwr-worldgen procedural MLOD building library",
             "region": self.region_identifier or "default",
             "settings": {
@@ -6559,7 +9045,26 @@ class ProceduralBuildingLibrary:
                 "window_mullion_geometry": "flat-strips",
                 "double_sided_visual_shell": True,
                 "maximum_geometry_component_span_m": _MAX_GEOMETRY_COMPONENT_SPAN_M,
-                "grounding_footprint": "selected_model_oriented_rectangle",
+                "polygon_native_buildings": {
+                    "enabled": True,
+                    "roof_support": [
+                        "flat", "gabled", "hipped", "pyramidal",
+                        "unsupported-shapes-as-flat",
+                    ],
+                    "courtyard_holes": True,
+                    "mapped_entrance_lateral_position": True,
+                    "entrance_fraction_quantum": POLYGON_NATIVE_ENTRANCE_FRACTION_QUANTUM,
+                    "interiors": False,
+                    "maximum_vertices": POLYGON_NATIVE_MAXIMUM_VERTICES,
+                    "maximum_variants": self.maximum_polygon_variants,
+                    "rectangular_fill_threshold": POLYGON_NATIVE_RECTANGULAR_FILL_THRESHOLD,
+                    "simplify_tolerance_m": POLYGON_NATIVE_SIMPLIFY_TOLERANCE_M,
+                    "vertex_quantum_m": POLYGON_NATIVE_VERTEX_QUANTUM_M,
+                    "collision_component_span_m": _MAX_GEOMETRY_COMPONENT_SPAN_M,
+                    "whole_building_span_limit_m": None,
+                    "fallback": "one-fitted-rectangle-never-multipart",
+                },
+                "grounding_footprint": "selected_model_exact_polygon_or_oriented_rectangle",
                 "grounding_margin_m": 0.5,
                 "settlement_building_context": {
                     "town_city_radius_m": 1000.0,
@@ -6588,6 +9093,8 @@ class ProceduralBuildingLibrary:
             "placements": placements,
             "unique_requested_variants": len(self._request_counts),
             "generated_variants": generated,
+            "polygon_native_variants": polygon_native_variants,
+            "polygon_native_placements": polygon_native_placements,
             "reused_placements": max(0, placements - generated),
             "reuse_ratio": round((placements - generated) / placements, 6) if placements else 0.0,
             "capped_variants": max(0, len(self._request_counts) - generated),

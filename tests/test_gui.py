@@ -264,18 +264,18 @@ class GuiCommandTests(unittest.TestCase):
             build_milestone9_command(values, python="python"),
         )
 
-    def test_stock_nogova_bridges_are_default_with_procedural_opt_in(self) -> None:
+    def test_procedural_bridges_are_default_with_stock_opt_out(self) -> None:
         values = default_gui_values()
         self.assertTrue(values["bridges"])
-        self.assertFalse(values["procedural_bridges"])
+        self.assertTrue(values["procedural_bridges"])
         default_command = build_milestone9_command(values, python="python")
         self.assertNotIn("--procedural-bridges", default_command)
         self.assertNotIn("--stock-bridges", default_command)
         self.assertIn("--bridge-module-length", default_command)
         self.assertEqual(default_command[default_command.index("--bridge-module-length") + 1], "30")
-        values["procedural_bridges"] = True
+        values["procedural_bridges"] = False
         self.assertIn(
-            "--procedural-bridges",
+            "--stock-bridges",
             build_milestone9_command(values, python="python"),
         )
 
@@ -581,7 +581,7 @@ class GuiCommandTests(unittest.TestCase):
         self.assertEqual(values["building_ground_clearance"], "0.10")
         self.assertEqual(values["building_foundation_depth"], "0.50")
         self.assertEqual(values["max_road_objects"], "1024000")
-        self.assertEqual(values["max_buildings"], "100000")
+        self.assertEqual(values["max_buildings"], "1000000")
         self.assertEqual(values["max_forest_objects"], "500000")
         self.assertEqual(int(str(values["fetch_cells"])), 256)
         self.assertEqual(float(str(values["fetch_cell_size"])), 25.0)

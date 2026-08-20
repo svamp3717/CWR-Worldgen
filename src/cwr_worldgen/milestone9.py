@@ -10,7 +10,12 @@ import os
 import shutil
 from typing import Any
 
-from .cache import resolve_cache_dir
+from .cache import (
+    cache_key,
+    file_snapshot,
+    load_or_create_pickle_streaming,
+    resolve_cache_dir,
+)
 from ._version import GENERATOR_VERSION
 from .generator import BuildResult, build_milestone4
 from .overture import fetch_overture_buildings_geojson, overture_buildings_cache_path
@@ -239,7 +244,7 @@ class Milestone9Spec(Milestone8Spec):
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
     bridges_enabled: bool = True
-    procedural_bridges: bool = False
+    procedural_bridges: bool = True
     maximum_bridge_objects: int = 1000
     bridge_module_length: float = 30.0
     bridge_deck_clearance: float = 1.25
@@ -258,6 +263,10 @@ class Milestone9Spec(Milestone8Spec):
     meadow_grass_enabled: bool = True
     maximum_meadow_grass_objects: int = 20000
     meadow_grass_spacing: float = 24.0
+    haybales_enabled: bool = False
+    maximum_haybale_objects: int = 800
+    haybale_spacing: float = 110.0
+    haybale_field_percent: float = 25.0
     wetland_reeds_enabled: bool = True
     maximum_wetland_reed_objects: int = 100000
     wetland_reed_spacing: float = 18.0
@@ -366,6 +375,7 @@ class Milestone9Spec(Milestone8Spec):
             ("residential infill building clearance", self.residential_infill_building_clearance),
             ("rural vegetation spacing", self.rural_vegetation_spacing),
             ("meadow grass spacing", self.meadow_grass_spacing),
+            ("hay bale spacing", self.haybale_spacing),
             ("wetland reed spacing", self.wetland_reed_spacing),
             ("wetland reed maximum relief", self.wetland_reed_maximum_relief),
             ("rocky forest spread", self.rocky_forest_spread),
@@ -373,6 +383,12 @@ class Milestone9Spec(Milestone8Spec):
         ):
             if not isinstance(value, (int, float)) or not math.isfinite(float(value)) or value <= 0:
                 raise ValueError(f"{label} must be positive and finite")
+        if (
+            not isinstance(self.haybale_field_percent, (int, float))
+            or not math.isfinite(float(self.haybale_field_percent))
+            or not 0.0 <= float(self.haybale_field_percent) <= 100.0
+        ):
+            raise ValueError("hay bale field percent must be within 0..100")
         for label, value in (
             ("forest block maximum burial", self.forest_block_maximum_burial),
             ("forest block maximum float", self.forest_block_maximum_float),
@@ -427,6 +443,7 @@ class Milestone9Spec(Milestone8Spec):
             ("maximum residential infill buildings", self.maximum_residential_infill_buildings),
             ("maximum rural vegetation objects", self.maximum_rural_vegetation_objects),
             ("maximum meadow grass objects", self.maximum_meadow_grass_objects),
+            ("maximum hay bale objects", self.maximum_haybale_objects),
             ("maximum wetland reed objects", self.maximum_wetland_reed_objects),
             ("maximum rocky forest objects", self.maximum_rocky_forest_objects),
         ):
@@ -604,7 +621,7 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
     bridges_enabled: bool = True
-    procedural_bridges: bool = False
+    procedural_bridges: bool = True
     maximum_bridge_objects: int = 1000
     bridge_module_length: float = 30.0
     bridge_deck_clearance: float = 1.25
@@ -623,6 +640,10 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     meadow_grass_enabled: bool = True
     maximum_meadow_grass_objects: int = 20000
     meadow_grass_spacing: float = 24.0
+    haybales_enabled: bool = False
+    maximum_haybale_objects: int = 800
+    haybale_spacing: float = 110.0
+    haybale_field_percent: float = 25.0
     wetland_reeds_enabled: bool = True
     maximum_wetland_reed_objects: int = 100000
     wetland_reed_spacing: float = 18.0
@@ -912,7 +933,46 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
             1 for feature in dataset.building_points
             if feature.tags.get("cwr:overture_match")
         )
-        dataset = augment_dataset_with_overture_buildings(dataset, projection, spec, overture_path)
+        overture_cache_path = None
+        if spec.cache_enabled:
+            report_progress(9, f"Fingerprinting {overture_path.name} for Overture reuse cache")
+            overture_snapshot = file_snapshot(overture_path)
+            overture_cache_key = cache_key(
+                "overture-conflation-cache-v1",
+                {
+                    "generator": GENERATOR_VERSION,
+                    "base": dataset.normalized_fingerprint,
+                    "overture_sha256": (overture_snapshot or {}).get("sha256"),
+                    "overture_size": (overture_snapshot or {}).get("size"),
+                    "bbox": source.bbox,
+                    "world_size": projection.world_size,
+                    "building_minimum_area": spec.building_minimum_area,
+                },
+            )
+            overture_cache_path = (
+                cache_dir / "overture-conflation" / f"{overture_cache_key}.pickle"
+            )
+
+        def build_overture_enrichment():
+            return augment_dataset_with_overture_buildings(
+                dataset,
+                projection,
+                spec,
+                overture_path,
+                progress_callback=lambda _percent, stage: report_progress(9, stage),
+            )
+
+        dataset, overture_cache_hit = load_or_create_pickle_streaming(
+            cache_path=overture_cache_path,
+            producer=build_overture_enrichment,
+            enabled=spec.cache_enabled,
+            refresh=spec.cache_refresh,
+            stage_schema=1,
+            validator=lambda value: hasattr(value, "building_polygons")
+            and hasattr(value, "normalized_fingerprint"),
+        )
+        if overture_cache_hit:
+            report_progress(9, "Reusing cached Overture building enrichment")
         added = len(dataset.building_polygons) - before
         after_merged = sum(
             1 for feature in dataset.building_polygons
@@ -1063,6 +1123,10 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         meadow_grass_enabled=spec.meadow_grass_enabled,
         maximum_meadow_grass_objects=spec.maximum_meadow_grass_objects,
         meadow_grass_spacing=spec.meadow_grass_spacing,
+        haybales_enabled=spec.haybales_enabled,
+        maximum_haybale_objects=spec.maximum_haybale_objects,
+        haybale_spacing=spec.haybale_spacing,
+        haybale_field_percent=spec.haybale_field_percent,
         wetland_reeds_enabled=spec.wetland_reeds_enabled,
         maximum_wetland_reed_objects=spec.maximum_wetland_reed_objects,
         wetland_reed_spacing=spec.wetland_reed_spacing,

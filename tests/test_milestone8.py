@@ -72,16 +72,18 @@ class ProceduralBuildingTests(unittest.TestCase):
         self.assertEqual((barn.family, barn.roof_style, barn.height_m), ("agricultural", "gabled", 6.0))
         self.assertEqual(warehouse.family, "industrial")
 
-    def test_outbuilding_size_selects_shed_or_garage_frontage(self) -> None:
+    def test_explicit_outbuilding_type_is_authoritative_over_size(self) -> None:
         library = ProceduralBuildingLibrary(world_name="small_outbuildings")
         library.region_identifier = "sweden"
         tiny = library.key_for({"building": "garage"}, 2.0, 3.5)
-        garage = library.key_for({"building": "shed"}, 6.0, 8.0)
+        large_shed = library.key_for({"building": "shed"}, 6.0, 8.0)
+        inferred = library.key_for({"building": "yes"}, 6.0, 8.0)
         small_house = library.key_for({"building": "house"}, 6.0, 8.0)
 
         self.assertEqual((tiny.family, tiny.height_m, tiny.regional_style), ("outbuilding", 3.0, "sweden_red"))
-        self.assertEqual(tiny.outbuilding_kind, "shed")
-        self.assertEqual((garage.family, garage.outbuilding_kind), ("outbuilding", "garage"))
+        self.assertEqual(tiny.outbuilding_kind, "garage")
+        self.assertEqual((large_shed.family, large_shed.outbuilding_kind), ("outbuilding", "shed"))
+        self.assertEqual((inferred.family, inferred.outbuilding_kind), ("outbuilding", "garage"))
         self.assertFalse(tiny.interiors)
         self.assertEqual(small_house.family, "residential")
 
@@ -377,7 +379,7 @@ class ProceduralBuildingTests(unittest.TestCase):
         self.assertEqual(placement.requested.height_m, 3.0)
         self.assertEqual(placement.selected.height_m, 3.0)
 
-    def test_way_788104416_inside_unnamed_isolated_area_becomes_cabin(self) -> None:
+    def test_explicit_shed_inside_isolated_area_stays_shed(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
         building_ring = tuple(projection.to_latlon(point) for point in (
             (500.0, 500.0), (506.0, 500.0), (506.0, 507.0),
@@ -403,10 +405,10 @@ class ProceduralBuildingTests(unittest.TestCase):
         placement = library.plan_polygon(
             building.tags, [projection.to_world(point) for point in building_ring[:-1]],
         )
-        self.assertEqual(placement.requested.family, "residential")
-        self.assertEqual(placement.selected.family, "residential")
-        self.assertEqual(placement.requested.height_m, 3.0)
-        self.assertEqual(placement.selected.height_m, 3.0)
+        self.assertEqual(placement.requested.family, "outbuilding")
+        self.assertEqual(placement.selected.family, "outbuilding")
+        self.assertEqual(placement.requested.outbuilding_kind, "shed")
+        self.assertEqual(placement.selected.outbuilding_kind, "shed")
 
     def test_isolated_dwelling_polygon_does_not_capture_nearby_other_property(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
@@ -653,7 +655,7 @@ class ProceduralBuildingTests(unittest.TestCase):
         used_points = {point for face in foundation_faces for point, *_rest in face.vertices}
         heights = [lod.points[index][1] for index in used_points]
         self.assertAlmostEqual(min(heights), -0.75, places=6)
-        self.assertAlmostEqual(max(heights), 0.0, places=6)
+        self.assertGreater(max(heights), 0.0)
 
     def test_entrance_texture_is_confined_to_ground_floor(self) -> None:
         key = BuildingVariantKey("urban", "flat", 20.0, 30.0, 12.0)
