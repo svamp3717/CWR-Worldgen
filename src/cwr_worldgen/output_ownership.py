@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
@@ -193,82 +194,21 @@ def _unowned_reserved_conflicts(root: Path, world_name: str, owned: set[str]) ->
 
 
 def prepare_output_directory(root: Path, world_name: str, *, clean: bool) -> None:
-    """Prepare a build root without touching files the generator does not own.
+    """Prepare a build root for writing.
 
-    When ``clean`` is true, only exact paths recorded by the previous
-    cwr-worldgen ownership/legacy manifest are removed. Unknown files are never
-    deleted. If an unknown file occupies a namespace this build may need to
-    write, fail before generation rather than overwrite it.
+    The GUI is responsible for warning before destructive use of a non-empty
+    build folder. A clean build therefore removes the entire selected build
+    directory and recreates it. Incremental/reuse builds preserve existing
+    contents and allow normal writers to replace colliding generated paths.
+
+    Ownership manifests are still recorded for diagnostics and compatibility,
+    but they no longer gate overwrites.
     """
 
+    # Keep the historical absolute/normalized behaviour used by callers.
     root = root.resolve()
-    if not root.exists():
-        root.mkdir(parents=True, exist_ok=True)
-        return
-
-    _ownership_doc, owned = _ownership_document(root, world_name)
-    if clean:
-        removable_parents: set[Path] = set()
-        for relative_text in sorted(owned, key=lambda value: value.count("/"), reverse=True):
-            relative = _safe_relative(relative_text)
-            if relative is None:
-                continue
-            target = root / Path(*relative.parts)
-            try:
-                if target.is_symlink():
-                    # Unlink the directory entry itself; never follow its target.
-                    target.unlink()
-                    removable_parents.update(target.parents)
-                    continue
-                # If a parent component was replaced by a symlink, do not follow
-                # it outside the build root while cleaning an old ownership list.
-                target.parent.resolve().relative_to(root)
-            except (OSError, ValueError):
-                continue
-            try:
-                if target.is_file():
-                    target.unlink()
-                    removable_parents.update(target.parents)
-            except OSError:
-                # Preserve the existing build if a generated file is locked. The
-                # subsequent writer will surface the actionable error when it tries
-                # to replace that exact output.
-                continue
-
-        for directory in sorted(
-            (path for path in removable_parents if path != root),
-            key=lambda path: len(path.parts),
-            reverse=True,
-        ):
-            try:
-                directory.rmdir()
-            except OSError:
-                # Non-empty means it contains something we do not own. Leave it.
-                pass
-
-        # Every formerly owned file has now either been deleted or was locked.
-        # Anything that remains in a generated namespace is therefore unsafe to
-        # overwrite unless it is one of those still-owned locked files.
-        surviving_owned = {
-            rel for rel in owned
-            if (root / Path(*PurePosixPath(rel).parts)).exists()
-        }
-        conflicts = _unowned_reserved_conflicts(root, world_name, surviving_owned)
-    else:
-        # Incremental builds may replace previously recorded generated files,
-        # but still must not overwrite unrelated files.
-        conflicts = _unowned_reserved_conflicts(root, world_name, owned)
-
-    if conflicts:
-        preview = "\n  - ".join(conflicts[:12])
-        suffix = "\n  - ..." if len(conflicts) > 12 else ""
-        raise FileExistsError(
-            "refusing to overwrite files not owned by cwr-worldgen:\n  - "
-            + preview
-            + suffix
-            + "\nMove those files elsewhere, choose another build directory, or delete them explicitly."
-        )
-
+    if clean and root.exists():
+        shutil.rmtree(root)
     root.mkdir(parents=True, exist_ok=True)
 
 

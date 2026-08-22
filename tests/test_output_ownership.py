@@ -26,55 +26,54 @@ def _manifest(path: Path, world: str, outputs: dict[str, str]) -> None:
     )
 
 
-def test_clean_removes_only_recorded_worldgen_files() -> None:
+def test_clean_removes_everything_in_existing_build_folder() -> None:
     with tempfile.TemporaryDirectory() as temp:
-        root = Path(temp)
+        root = Path(temp) / "build"
         world = "safe_world"
         generated = root / "source" / world / "config.cpp"
         generated.parent.mkdir(parents=True)
         generated.write_text("generated", encoding="utf-8")
         unrelated = root / "notes.txt"
-        unrelated.write_text("keep me", encoding="utf-8")
+        unrelated.write_text("delete me too", encoding="utf-8")
         manifest = root / "manifest.json"
         _manifest(manifest, world, {"source/config.cpp": "deadbeef"})
         record_build_ownership(root, world, manifest, merge=False)
 
         prepare_output_directory(root, world, clean=True)
 
-        assert not generated.exists()
-        assert not manifest.exists()
-        assert not (root / OWNERSHIP_FILENAME).exists()
-        assert unrelated.read_text(encoding="utf-8") == "keep me"
+        assert root.is_dir()
+        assert list(root.iterdir()) == []
 
 
-def test_clean_refuses_unowned_file_inside_generated_world_namespace() -> None:
+def test_clean_allows_unowned_file_inside_generated_world_namespace() -> None:
     with tempfile.TemporaryDirectory() as temp:
-        root = Path(temp)
+        root = Path(temp) / "build"
         world = "safe_world"
         user_file = root / "source" / world / "custom-user-file.txt"
         user_file.parent.mkdir(parents=True)
         user_file.write_text("mine", encoding="utf-8")
 
-        with pytest.raises(FileExistsError, match="not owned by cwr-worldgen"):
-            prepare_output_directory(root, world, clean=True)
+        prepare_output_directory(root, world, clean=True)
 
-        assert user_file.read_text(encoding="utf-8") == "mine"
+        assert root.is_dir()
+        assert not user_file.exists()
 
 
-def test_clean_refuses_unowned_fixed_build_artifact() -> None:
+def test_clean_allows_unowned_fixed_build_artifact() -> None:
     with tempfile.TemporaryDirectory() as temp:
-        root = Path(temp)
+        root = Path(temp) / "build"
         world = "safe_world"
+        root.mkdir()
         preview = root / "preview.png"
         preview.write_bytes(b"not-worldgen")
 
-        with pytest.raises(FileExistsError, match="preview.png"):
-            prepare_output_directory(root, world, clean=True)
+        prepare_output_directory(root, world, clean=True)
 
-        assert preview.read_bytes() == b"not-worldgen"
+        assert root.is_dir()
+        assert not preview.exists()
 
 
-def test_incremental_build_may_replace_owned_but_not_unowned_files() -> None:
+def test_incremental_build_allows_owned_and_unowned_collisions() -> None:
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         world = "safe_world"
@@ -90,6 +89,5 @@ def test_incremental_build_may_replace_owned_but_not_unowned_files() -> None:
 
         user_file = root / "source" / world / "user.ini"
         user_file.write_text("mine", encoding="utf-8")
-        with pytest.raises(FileExistsError, match="user.ini"):
-            prepare_output_directory(root, world, clean=False)
+        prepare_output_directory(root, world, clean=False)
         assert user_file.read_text(encoding="utf-8") == "mine"

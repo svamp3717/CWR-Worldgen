@@ -2770,9 +2770,13 @@ class WorldgenGui(tk.Tk):
             clean = messagebox.askyesno(
                 APP_TITLE,
                 "This build folder was created from a different frozen source snapshot.\n\n"
+                f"Build folder:\n{output}\n\n"
                 "Reusing it could mix terrain and assets from different geographic areas.\n\n"
-                "Rebuild this folder clean with the currently selected source?",
-                default=messagebox.YES,
+                "A clean rebuild will PERMANENTLY DELETE EVERY FILE AND SUBFOLDER inside "
+                "the build folder above before writing the new build. The separate source-data "
+                "folder is not deleted.\n\n"
+                "Continue with a clean rebuild?",
+                default=messagebox.NO,
             )
             if not clean:
                 return False
@@ -2785,12 +2789,14 @@ class WorldgenGui(tk.Tk):
         prefer_reuse = bool(build_values.get("keep_output", False))
         choice = messagebox.askyesnocancel(
             APP_TITLE,
-            "This build folder already exists and is not empty:\n\n"
+            "CWR Worldgen is about to write into this non-empty build folder:\n\n"
             f"{output}\n\n"
-            "Reuse the existing build folder?\n\n"
-            "Yes = reuse it and keep existing output files.\n"
-            "No = delete the existing build folder and rebuild clean.\n"
-            "Cancel = do not start the build.",
+            "IMPORTANT: do not keep personal or unrelated files in this folder.\n\n"
+            "Yes = REUSE the folder. Existing files are kept, but any file whose path "
+            "collides with generated output may be OVERWRITTEN without another warning.\n\n"
+            "No = CLEAN REBUILD. EVERY FILE AND SUBFOLDER inside this build folder will be "
+            "PERMANENTLY DELETED before generation starts.\n\n"
+            "Cancel = leave the folder untouched and do not start the build.",
             default=messagebox.YES if prefer_reuse else messagebox.NO,
         )
         if choice is None:

@@ -96,21 +96,21 @@ class Milestone1Tests(unittest.TestCase):
             self.assertNotIn("[FAIL]", report)
             self.assertIn("Failures: 0", report)
 
-    def test_clean_rebuild_preserves_unrelated_files_in_build_root(self) -> None:
+    def test_clean_rebuild_clears_unrelated_files_in_build_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "build"
             output.mkdir(parents=True)
             unrelated = output / "my-notes.txt"
-            unrelated.write_text("do not delete", encoding="utf-8")
+            unrelated.write_text("delete on clean rebuild", encoding="utf-8")
 
             first = build_milestone1(output)
             self.assertTrue((output / ".cwr-worldgen-owned.json").is_file())
-            unrelated.write_text("still mine", encoding="utf-8")
+            unrelated.write_text("still delete me", encoding="utf-8")
             second = build_milestone1(output)
 
             self.assertTrue(first.wrp_path.is_file())
             self.assertTrue(second.wrp_path.is_file())
-            self.assertEqual(unrelated.read_text(encoding="utf-8"), "still mine")
+            self.assertFalse(unrelated.exists())
 
     def test_config_declares_world_owner_for_unsaved_editor_preview(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
