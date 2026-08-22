@@ -9,6 +9,14 @@ from cwr_worldgen.gui_entry import (
 )
 
 
+def test_frozen_worker_dispatch_happens_before_gui_import() -> None:
+    source = (Path(__file__).resolve().parents[1] / "src" / "cwr_worldgen" / "gui_entry.py").read_text(encoding="utf-8")
+    freeze_index = source.index("_multiprocessing.freeze_support()")
+    main_index = source.index("def main(")
+    gui_import_index = source.index("from . import gui")
+    assert freeze_index < main_index < gui_import_index
+
+
 def test_managed_replacement_updates_untouched_value() -> None:
     value, managed = managed_replacement("build/my_world", "build/my_world", "build/new_world")
     assert value == "build/new_world"

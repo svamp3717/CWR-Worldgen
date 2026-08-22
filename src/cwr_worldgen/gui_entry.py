@@ -1,9 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+import multiprocessing as _multiprocessing
+import sys
+
+# PyInstaller re-executes the frozen application to start multiprocessing workers.
+# Dispatch those worker command lines before the GUI can be imported, otherwise
+# each procedural-asset worker can start another application window. Keep normal
+# source runs untouched; PyInstaller sets sys.frozen before user code starts.
+if bool(getattr(sys, "frozen", False)):
+    _multiprocessing.freeze_support()
+
 import os
 from pathlib import Path
-import sys
 from typing import Any, Callable, Iterable
 
 FROZEN_CLI_MARKER = "--cwr-cli"
@@ -390,6 +399,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    import multiprocessing as _multiprocessing
-    _multiprocessing.freeze_support()
     raise SystemExit(main())
