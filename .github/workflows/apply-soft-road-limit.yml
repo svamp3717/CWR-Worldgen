@@ -1,0 +1,159 @@
+name: Apply soft road limit patch
+
+on:
+  push:
+    branches:
+      - fix/soft-road-object-limit
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Apply tested soft-road-limit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/soft-road-limit.patch <<'PATCH'
+          --- a/src/cwr_worldgen/playability.py
+          +++ b/src/cwr_worldgen/playability.py
+          @@ -1271,7 +1271,7 @@
+               starting_id: int = 1,
+               progress_callback: Callable[[int, str], None] | None = None,
+           ) -> RoadFitReport:
+          -    """Fit a complete stock-road network or reject an undersized object budget.
+          +    """Fit a complete stock-road network, treating a positive object budget as advisory.
+           
+               Ordinary degree-two OSM vertices stay inside one polyline run and do not
+               receive separate road-cap objects. Their corners are rounded locally and
+          @@ -1284,7 +1284,8 @@
+               Road objects are planned before any are emitted. Older releases placed all
+               junction caps first and then stopped as soon as ``max_road_objects`` was
+               reached, leaving isolated map stubs and silently omitting later asphalt
+          -    roads. A positive budget must now fit the entire planned network; zero still
+          +    roads. A positive ``max_road_objects`` value is now only a warning threshold:
+          +    exceeding it is logged and the complete network is still emitted. Zero still
+               means that road-object placement is deliberately disabled.
+               """
+           
+          @@ -1613,12 +1614,13 @@
+                       59,
+                       f"Road object plan requires {required_objects:,}; budget {spec.max_road_objects:,}",
+                   )
+          -    if required_objects > spec.max_road_objects:
+          -        raise ValueError(
+          -            "road object budget is too small for a complete network: "
+          -            f"requires {required_objects:,} objects, limit is {spec.max_road_objects:,}; "
+          -            f"increase --max-road-objects to at least {required_objects:,}. "
+          -            "Partial road networks are not emitted."
+          +    if required_objects > spec.max_road_objects and progress_callback is not None:
+          +        progress_callback(
+          +            59,
+          +            "WARNING: road object warning threshold exceeded: "
+          +            f"requires {required_objects:,} objects, configured threshold is "
+          +            f"{spec.max_road_objects:,}. Continuing with the complete road network; "
+          +            "--max-road-objects is advisory unless set to 0.",
+                   )
+           
+               objects: list[WorldObject] = []
+          --- a/src/cwr_worldgen/cli.py
+          +++ b/src/cwr_worldgen/cli.py
+          @@ -111,7 +111,7 @@
+               parser.add_argument("--water-depth", type=float, default=5.0, help="metres below sea level for OSM water")
+               parser.add_argument("--coast-blend-cells", type=int, default=2, help="shore smoothing distance")
+               parser.add_argument("--road-segment-length", type=float, default=24.5, help="road model spacing in metres")
+          -    parser.add_argument("--max-road-objects", type=int, default=DEFAULT_MAX_ROAD_OBJECTS, help=f"complete stock-road object ceiling (default: {DEFAULT_MAX_ROAD_OBJECTS:,})")
+          +    parser.add_argument("--max-road-objects", type=int, default=DEFAULT_MAX_ROAD_OBJECTS, help=f"stock-road warning threshold; exceeded values are logged but the complete network is still emitted; 0 disables road objects (default: {DEFAULT_MAX_ROAD_OBJECTS:,})")
+               parser.add_argument("--max-buildings", type=int, default=DEFAULT_MAX_BUILDINGS, help=f"maximum placed building footprints (default: {DEFAULT_MAX_BUILDINGS:,})")
+               parser.add_argument("--building-min-area", type=float, default=20.0, help="minimum OSM footprint area in world m2")
+               parser.add_argument("--forest-tree-spacing", type=float, default=50.0, help="classic stock forest-block spacing in metres")
+          @@ -171,7 +171,7 @@
+               parser.add_argument("--water-depth", type=float, default=5.0, help="metres below sea level for OSM water")
+               parser.add_argument("--coast-blend-cells", type=int, default=2, help="shore smoothing distance")
+               parser.add_argument("--road-segment-length", type=float, default=24.5, help="road model spacing in metres")
+          -    parser.add_argument("--max-road-objects", type=int, default=DEFAULT_MAX_ROAD_OBJECTS, help=f"complete stock-road object ceiling (default: {DEFAULT_MAX_ROAD_OBJECTS:,})")
+          +    parser.add_argument("--max-road-objects", type=int, default=DEFAULT_MAX_ROAD_OBJECTS, help=f"stock-road warning threshold; exceeded values are logged but the complete network is still emitted; 0 disables road objects (default: {DEFAULT_MAX_ROAD_OBJECTS:,})")
+               parser.add_argument("--max-buildings", type=int, default=DEFAULT_MAX_BUILDINGS, help=f"maximum placed building footprints (default: {DEFAULT_MAX_BUILDINGS:,})")
+               parser.add_argument("--building-min-area", type=float, default=20.0, help="minimum OSM footprint area in world m2")
+               parser.add_argument("--forest-tree-spacing", type=float, default=50.0, help="classic stock forest-block spacing in metres")
+          --- a/src/cwr_worldgen/gui.py
+          +++ b/src/cwr_worldgen/gui.py
+          @@ -2020,7 +2020,7 @@
+                       ("Rock scatter radius (m)", "rocky_forest_spread", "18"),
+                       ("Base lake smoothing at 6.4 km (cells)", "lake_shore_smoothing_cells", "8"),
+                       ("Maximum lake-bank slope (%)", "lake_shore_max_slope", "8"),
+          -            ("Maximum road objects", "max_road_objects", str(DEFAULT_MAX_ROAD_OBJECTS)),
+          +            ("Road object warning threshold", "max_road_objects", str(DEFAULT_MAX_ROAD_OBJECTS)),
+                       ("Maximum sidewalk objects", "max_sidewalk_objects", "30000"),
+                       ("Sidewalk nominal width / offset (m)", "sidewalk_width", "1.8"),
+                       ("Stock sidewalk tile spacing (m)", "sidewalk_segment_length", "5.0"),
+          --- a/src/cwr_worldgen/generator.py
+          +++ b/src/cwr_worldgen/generator.py
+          @@ -1670,7 +1670,7 @@
+                   ),
+               ))
+               checks.append((
+          -        "Road object budget covers the complete imported network",
+          +        "Road network emitted without object-budget truncation",
+                   (not road_fit.truncated) or spec.max_road_objects == 0,
+                   (
+                       f"objects={len(road_fit.objects)}, limit={spec.max_road_objects}, "
+          --- a/tests/test_milestone9.py
+          +++ b/tests/test_milestone9.py
+          @@ -848,7 +848,7 @@
+                   self.assertTrue(all(obj.model_path != NOGOVA_BRIDGE_MODEL for obj in stock.objects))
+           
+           
+          -    def test_stock_roads_reject_a_budget_that_would_emit_a_partial_network(self) -> None:
+          +    def test_stock_roads_log_and_ignore_an_exceeded_positive_budget(self) -> None:
+                   projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
+                   road = OsmLineFeature(
+                       "way/complete-network",
+          @@ -871,16 +871,21 @@
+                       max_road_objects=2,
+                       strict_assets=False,
+                   )
+          -        with self.assertRaisesRegex(
+          -            ValueError,
+          -            r"road object budget is too small.*requires .*increase --max-road-objects",
+          -        ):
+          -            fit_road_objects(
+          -                dataset,
+          -                projection,
+          -                [0.0] * (spec.cells * spec.cells),
+          -                spec,
+          -            )
+          +        progress: list[tuple[int, str]] = []
+          +        report = fit_road_objects(
+          +            dataset,
+          +            projection,
+          +            [0.0] * (spec.cells * spec.cells),
+          +            spec,
+          +            progress_callback=lambda percent, message: progress.append((percent, message)),
+          +        )
+          +        self.assertGreater(len(report.objects), spec.max_road_objects)
+          +        self.assertFalse(report.truncated)
+          +        self.assertTrue(any(
+          +            "WARNING: road object warning threshold exceeded" in message
+          +            and "Continuing with the complete road network" in message
+          +            for _percent, message in progress
+          +        ))
+           
+               def test_zero_road_budget_disables_roads_without_truncation(self) -> None:
+                   projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
+          PATCH
+          git apply /tmp/soft-road-limit.patch
+          rm .github/workflows/apply-soft-road-limit.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/cwr_worldgen/playability.py src/cwr_worldgen/cli.py src/cwr_worldgen/gui.py src/cwr_worldgen/generator.py tests/test_milestone9.py .github/workflows/apply-soft-road-limit.yml
+          git commit -m "Treat road object limit as warning threshold"
+          git push origin HEAD:fix/soft-road-object-limit
