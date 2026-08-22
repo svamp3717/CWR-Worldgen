@@ -14,7 +14,11 @@ from shapely import box as vectorized_box, intersects as vectorized_intersects, 
 from shapely.geometry import LineString, Point, Polygon, box
 
 from .model import ConstraintPlayabilitySpec
-from .osm import BuildingPlacementPlan, BboxProjection, GeoPolygon, OsmDataset, OsmLineFeature, OsmRaster, road_bridge_crosses_ditch_only, road_width_metres
+from .osm import (
+    BuildingPlacementPlan, BboxProjection, GeoPolygon, OsmDataset, OsmLineFeature, OsmRaster,
+    conservative_water_interior_mask, renderable_water_mask, road_bridge_crosses_ditch_only,
+    road_span_has_in_game_water, road_width_metres,
+)
 
 
 PRIORITY_BOUNDARY = 100
@@ -27,6 +31,14 @@ PRIORITY_SEMANTIC_BUILDING_CORE = 650
 PRIORITY_BRIDGE_TUNNEL = 700
 PRIORITY_WATER = 800
 PRIORITY_OSM_DRY_LAND = 850
+# A side-hill road platform must beat shoreline/dry-land shaping. Otherwise a
+# coastal bank can simply reintroduce the transverse slope through the rendered
+# road after the road bench has been detected correctly.
+PRIORITY_ROAD_SIDEHILL_BENCH = 870
+# Ordinary roads occasionally cross mapped water without an OSM bridge tag.
+# Give a narrow causeway fill permission to override the global water-bed rule,
+# while explicit bridges/tunnels keep their existing higher-priority behavior.
+PRIORITY_ROAD_WATER_FILL = 875
 PRIORITY_BRIDGE_SUPPORT = 900
 
 _MAJOR_HIGHWAYS = {
@@ -36,6 +48,17 @@ _MAJOR_HIGHWAYS = {
 
 TERRAIN_SMOOTHING_REFERENCE_WORLD_SIZE_METRES = 6_400.0
 OSM_DRY_LAND_MINIMUM_CLEARANCE_METRES = 7.0
+ROAD_WATER_MINIMUM_CLEARANCE_METRES = 0.35
+ROAD_WATER_BANK_WIDTH_CELLS = 0.75
+# Side-hill roads need a transverse bench, not a globally flatter longitudinal
+# profile. These thresholds intentionally key off the terrain gradient *across*
+# the road so a road climbing a steep hill is left alone, while one traversing
+# the same hill receives a narrow cut/fill platform beneath the carriageway.
+ROAD_SIDEHILL_TRIGGER_SLOPE_PERCENT = 35.0
+ROAD_SIDEHILL_FULL_BENCH_SLOPE_PERCENT = 70.0
+ROAD_SIDEHILL_BENCH_EXTRA_CELLS = 1.0
+ROAD_SIDEHILL_BLEND_CELLS = 1.25
+ROAD_SIDEHILL_MINIMUM_PLATFORM_MARGIN_METRES = 3.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +125,8 @@ class ConstraintTerrainReport:
     constrained_cells: int
     hard_constraint_cells: int
     water_cells: int
+    deep_water_cells: int
+    uncertain_water_cells_preserved: int
     protected_shore_cells: int
     shoreline_transition_cells: int
     coastal_water_components: int
@@ -115,6 +140,9 @@ class ConstraintTerrainReport:
     bridge_segments: int
     tunnel_segments_excluded: int
     embankment_segments: int
+    road_water_fill_cells: int
+    road_sidehill_segments: int
+    road_sidehill_bench_cells: int
     major_road_cells: int
     minor_road_cells: int
     watercourse_cells: int
@@ -536,6 +564,119 @@ def _profile_height(distance: float, distances: Sequence[float], heights: Sequen
 
 
 
+def _road_cross_slope_profile(
+    line: LineString,
+    original: Sequence[float],
+    spec: ConstraintPlayabilitySpec,
+    distances: Sequence[float],
+    width: float,
+) -> list[float]:
+    """Measure source-terrain slope perpendicular to a road centreline.
+
+    Longitudinal grade is deliberately ignored here. A road can climb a steep
+    mountain normally; this profile only detects the troublesome case where the
+    road runs along the side of that mountain and one edge is buried while the
+    opposite edge floats above the slope.
+
+    One cross-section sample is not reliable on coarse DEMs. A road can sit on
+    the narrow shoulder of a coastal ridge while both near samples still land on
+    that same shoulder, hiding the cliff immediately beyond it. Sample several
+    transverse spans and keep the steepest result. This catches the real
+    side-hill relief without confusing ordinary longitudinal hill climbing with
+    cross-slope.
+    """
+
+    if not distances:
+        return []
+    near_offset = max(
+        float(width) * 0.75,
+        float(spec.cell_size) * 0.65,
+        2.0,
+    )
+    sample_offsets = (
+        near_offset,
+        max(near_offset * 1.5, float(width) * 1.25, float(spec.cell_size) * 1.15),
+        max(near_offset * 2.5, float(width) * 2.0, float(spec.cell_size) * 2.0),
+    )
+    tangent_probe = max(2.0, min(12.0, float(spec.cell_size) * 0.5))
+    slopes: list[float] = []
+    for distance in distances:
+        before = line.interpolate(max(0.0, float(distance) - tangent_probe))
+        after = line.interpolate(min(line.length, float(distance) + tangent_probe))
+        dx = after.x - before.x
+        dz = after.y - before.y
+        magnitude = math.hypot(dx, dz)
+        if magnitude <= 1.0e-6:
+            slopes.append(0.0)
+            continue
+        # Unit normal in world X/Z. Sampling symmetrically cancels most of the
+        # longitudinal grade even around gentle curves.
+        nx = -dz / magnitude
+        nz = dx / magnitude
+        centre = line.interpolate(float(distance))
+        maximum_cross_slope = 0.0
+        for sample_offset in sample_offsets:
+            left_h = _sample_elevation(
+                original,
+                spec.cells,
+                spec.cell_size,
+                centre.x + nx * sample_offset,
+                centre.y + nz * sample_offset,
+            )
+            right_h = _sample_elevation(
+                original,
+                spec.cells,
+                spec.cell_size,
+                centre.x - nx * sample_offset,
+                centre.y - nz * sample_offset,
+            )
+            cross_slope = (
+                abs(left_h - right_h)
+                / max(0.01, sample_offset * 2.0)
+                * 100.0
+            )
+            maximum_cross_slope = max(maximum_cross_slope, cross_slope)
+        slopes.append(maximum_cross_slope)
+    return slopes
+
+
+def _road_corridor_intersects_mask(
+    line: LineString,
+    mask: Sequence[bool],
+    spec: ConstraintPlayabilitySpec,
+    width: float,
+) -> bool:
+    """Return whether a road-width corridor covers any selected terrain cell."""
+
+    radius = max(float(width) * 0.5, float(spec.cell_size) * 0.35)
+    corridor = line.buffer(radius, cap_style=2, join_style=2)
+    for index in _candidate_cells(corridor.bounds, spec.cells, spec.cell_size):
+        if not mask[index]:
+            continue
+        if corridor.covers(Point(_cell_center(index, spec.cells, spec.cell_size))):
+            return True
+    return False
+
+
+def _road_sidehill_factor(cross_slope_percent: float) -> float:
+    """Return a smooth 0..1 terrace strength for steep transverse slopes."""
+
+    if cross_slope_percent <= ROAD_SIDEHILL_TRIGGER_SLOPE_PERCENT:
+        return 0.0
+    span = max(
+        0.01,
+        ROAD_SIDEHILL_FULL_BENCH_SLOPE_PERCENT - ROAD_SIDEHILL_TRIGGER_SLOPE_PERCENT,
+    )
+    value = max(
+        0.0,
+        min(
+            1.0,
+            (cross_slope_percent - ROAD_SIDEHILL_TRIGGER_SLOPE_PERCENT) / span,
+        ),
+    )
+    return value * value * (3.0 - 2.0 * value)
+
+
 def _road_width(tags: Mapping[str, str]) -> float:
     raw = tags.get("width", "")
     try:
@@ -884,6 +1025,10 @@ def solve_terrain_constraints(
     if len(raw_original) != spec.cells * spec.cells:
         raise ValueError("constraint solver elevation grid has the wrong size")
     smoothing = _effective_terrain_smoothing(spec)
+    renderable_source_water = renderable_water_mask(
+        raw_original, raster, sea_level=spec.sea_level, water_depth=spec.water_depth
+    )
+    conservative_interior = conservative_water_interior_mask(raster)
     water_components = _components(raster.water, spec.cells)
     edge_water_components = [
         component for component in water_components
@@ -995,11 +1140,23 @@ def solve_terrain_constraints(
         else:
             elevated_inland_water_components.append(component)
 
-    coastal_water_mask = _mask_from_components(coastal_water_components, len(original))
-    recentered_edge_lake_mask = _mask_from_components(
+    selected_coastal_water_mask = _mask_from_components(coastal_water_components, len(original))
+    selected_recentered_edge_lake_mask = _mask_from_components(
         recentered_edge_lake_components, len(original)
     )
-    inland_water_mask = _mask_from_components(inland_water_components, len(original))
+    selected_inland_water_mask = _mask_from_components(inland_water_components, len(original))
+    coastal_water_mask = tuple(
+        selected and renderable_source_water[index]
+        for index, selected in enumerate(selected_coastal_water_mask)
+    )
+    recentered_edge_lake_mask = tuple(
+        selected and renderable_source_water[index]
+        for index, selected in enumerate(selected_recentered_edge_lake_mask)
+    )
+    inland_water_mask = tuple(
+        selected and renderable_source_water[index]
+        for index, selected in enumerate(selected_inland_water_mask)
+    )
     lake_water_mask = tuple(
         edge_lake or inland
         for edge_lake, inland in zip(recentered_edge_lake_mask, inland_water_mask)
@@ -1007,6 +1164,15 @@ def solve_terrain_constraints(
     active_water_mask = tuple(
         coastal or lake
         for coastal, lake in zip(coastal_water_mask, lake_water_mask)
+    )
+    deep_water_mask = tuple(
+        active and conservative_interior[index]
+        for index, active in enumerate(active_water_mask)
+    )
+    uncertain_water_cells_preserved = sum(
+        1
+        for index, is_water in enumerate(raster.water)
+        if is_water and not active_water_mask[index]
     )
     building_pad_groups: list[tuple[int, ...]] = []
     progress(5, (
@@ -1017,35 +1183,56 @@ def solve_terrain_constraints(
         "elevated water component(s) preserved at DEM height"
     ))
 
-    # 1. Water bodies. Coastal and near-sea inland water can use CWA/OFP's
-    # single global water plane. Elevated independent lakes cannot, so those
-    # components were excluded from active_water_mask above and keep their DEM.
+    # 1. Water bodies. Only conservative interior cells get the full depth.
+    # Low-confidence shoreline cells that are already near sea level are held
+    # just below the water plane, avoiding deep excavation of mixed land/water
+    # terrain vertices.
     water_target = spec.sea_level - spec.water_depth
-    progress(8, f"Applying water-bed constraints to {sum(active_water_mask):,} cells")
+    shallow_water_target = spec.sea_level - min(0.35, max(0.05, spec.water_depth * 0.10))
+    progress(8, f"Applying conservative water-bed constraints to {sum(active_water_mask):,} cells")
     for index, is_water in enumerate(active_water_mask):
-        if is_water:
-            field.apply(index, water_target, priority=PRIORITY_WATER, strength=1.0, hard=True, category="water")
-    progress(12, "Building coastal shoreline transition distances")
+        if not is_water:
+            continue
+        target = water_target if deep_water_mask[index] else shallow_water_target
+        field.apply(index, target, priority=PRIORITY_WATER, strength=1.0, hard=True, category="water")
+
+    # Build an adaptive coastal ramp. A fixed two-cell beach cannot possibly
+    # respect an 8% target when a coarse DEM shoreline vertex is 20 m high.
+    coastal_rise_per_cell = max(
+        spec.height_scale, spec.cell_size * spec.lake_shore_maximum_slope_percent / 100.0
+    )
+    first_coastal = _distance_from_mask(coastal_water_mask, spec.cells, 1)
+    first_ring_high = max(
+        (original[index] for index, distance in enumerate(first_coastal) if distance == 1),
+        default=spec.sea_level,
+    )
+    required_coastal_cells = int(math.ceil(
+        max(0.0, first_ring_high - spec.sea_level) / max(1.0e-9, coastal_rise_per_cell)
+    )) + 1
+    effective_coastal_shore_cells = min(
+        32, max(smoothing.shoreline_transition_cells, required_coastal_cells)
+    )
+    progress(12, f"Building coastal shoreline transition across {effective_coastal_shore_cells:,} cells")
     shore_distances = _distance_from_mask(
-        coastal_water_mask,
-        spec.cells,
-        smoothing.shoreline_transition_cells,
+        coastal_water_mask, spec.cells, effective_coastal_shore_cells
     )
     protected_shore_cells = 0
     for index, distance in enumerate(shore_distances):
-        if distance <= 0 or distance > smoothing.shoreline_transition_cells:
+        if distance <= 0 or distance > effective_coastal_shore_cells or active_water_mask[index]:
             continue
-        fraction = (distance - 1) / max(
-            1.0, smoothing.shoreline_transition_cells - 1.0
-        )
-        shore_target = max(spec.sea_level, original[index])
-        target = spec.sea_level * (1.0 - fraction) + shore_target * fraction
+        slope_limited = spec.sea_level + distance * coastal_rise_per_cell
+        shoreline_cut_budget = max(0.5, float(getattr(spec, "beach_height", 3.0)))
+        if original[index] > slope_limited + shoreline_cut_budget:
+            continue
+        target = max(spec.sea_level, min(original[index], slope_limited))
+        clipped_for_grade = original[index] > slope_limited + 1.0e-7
+        fraction = distance / max(1.0, float(effective_coastal_shore_cells))
         field.apply(
             index,
             target,
             priority=PRIORITY_WATER,
-            strength=max(0.35, 1.0 - fraction * 0.65),
-            hard=distance == 1,
+            strength=1.0 if clipped_for_grade else max(0.35, 0.9 - fraction * 0.55),
+            hard=clipped_for_grade or distance == 1,
             category="shoreline",
         )
         protected_shore_cells += 1
@@ -1082,7 +1269,7 @@ def solve_terrain_constraints(
             not math.isfinite(distance)
             or distance <= 0.0
             or distance > effective_lake_shore_cells
-            or raster.water[index]
+            or active_water_mask[index]
         ):
             continue
         lake_bank_mask[index] = True
@@ -1099,6 +1286,9 @@ def solve_terrain_constraints(
                         local_values.append(original[neighbour])
         local_smoothed = sum(local_values) / len(local_values)
         slope_limited = spec.sea_level + distance * lake_rise_per_cell
+        shoreline_cut_budget = max(0.5, float(getattr(spec, "beach_height", 3.0)))
+        if original[index] > slope_limited + shoreline_cut_budget:
+            continue
         target = max(
             spec.sea_level,
             min(original[index], local_smoothed, slope_limited),
@@ -1173,6 +1363,14 @@ def solve_terrain_constraints(
     tunnel_segments = 0
     embankment_segments = 0
     road_seed_cells: set[int] = set()
+    road_water_fill_cells: set[int] = set()
+    road_water_floor_cells: set[int] = set()
+    road_sidehill_segments = 0
+    road_sidehill_bench_cells: set[int] = set()
+    road_water_floor = float(spec.sea_level) + max(
+        ROAD_WATER_MINIMUM_CLEARANCE_METRES,
+        float(spec.height_scale) * 2.0,
+    )
     major_cells: set[int] = set()
     minor_cells: set[int] = set()
     road_total = len(dataset.roads)
@@ -1190,6 +1388,7 @@ def solve_terrain_constraints(
             continue
         bridge_value = str(tags.get("bridge", "")).casefold()
         width = _road_width(tags)
+        road_surface_width = max(6.0, width)
         is_bridge = (
             bridge_value not in {"", "no", "false", "0"}
             or str(tags.get("man_made", "")).casefold() == "bridge"
@@ -1198,26 +1397,32 @@ def solve_terrain_constraints(
             # Ditch crossings are intentionally ordinary roads, not bridge decks.
             # Grade them with the road network instead of preserving a bridge gap.
             is_bridge = False
+
+        # A bridge tag is only useful if CWA will actually show water beneath
+        # the span. Check both already-submerged source terrain and mapped water
+        # that this solver is about to lower below the global water plane. Dry
+        # bridge tags become ordinary roads and receive normal grade/bench work.
+        bridge_has_water = (
+            road_span_has_in_game_water(
+                tuple((float(x), float(z)) for x, z in line.coords),
+                original,
+                cells=spec.cells, cell_size=spec.cell_size,
+                sea_level=spec.sea_level, width=road_surface_width,
+            )
+            or _road_corridor_intersects_mask(
+                line, active_water_mask, spec, road_surface_width
+            )
+        )
+        if is_bridge and not bridge_has_water:
+            is_bridge = False
+
         if not is_bridge:
             try:
                 positive_layer = float(str(tags.get("layer", "0")).replace(",", ".")) > 0.0
             except ValueError:
                 positive_layer = False
-            if positive_layer:
-                water_probe = line.buffer(
-                    max(width * 0.5, spec.cell_size * 0.5),
-                    cap_style=2,
-                    join_style=2,
-                )
-                is_bridge = any(
-                    raster.water[index]
-                    for index in _candidate_cells(
-                        water_probe.bounds, spec.cells, spec.cell_size
-                    )
-                    if water_probe.covers(
-                        Point(_cell_center(index, spec.cells, spec.cell_size))
-                    )
-                )
+            if positive_layer and bridge_has_water:
+                is_bridge = True
         is_embankment = tags.get("embankment") not in {None, "", "no"}
         highway = tags.get("highway", "road")
         major = highway in _MAJOR_HIGHWAYS
@@ -1252,6 +1457,16 @@ def solve_terrain_constraints(
                     distance_to_line = line.distance(centre)
                     if distance_to_line > bridge_hard_radius + bridge_soft_shoulder:
                         continue
+                    # Preserve the actual water opening. The previous underfill
+                    # could raise an unmapped below-sea channel above CWA's
+                    # global water plane and then leave a perfectly good bridge
+                    # standing over dry ground. Only dry approach/support cells
+                    # receive the bridge-support terrace.
+                    if (
+                        active_water_mask[index]
+                        or original[index] < float(spec.sea_level) - 0.05
+                    ):
+                        continue
                     target = flat_underfill_target
                     if distance_to_line <= bridge_hard_radius:
                         strength = 1.0
@@ -1269,27 +1484,183 @@ def solve_terrain_constraints(
             distances, heights = _linear_profile(line, original, spec)
         else:
             distances, heights = _profile(line, original, spec, maximum_grade)
+        cross_slopes = _road_cross_slope_profile(
+            line, original, spec, distances, road_surface_width
+        )
+        maximum_sidehill_factor = max(
+            (_road_sidehill_factor(value) for value in cross_slopes),
+            default=0.0,
+        )
+        if maximum_sidehill_factor > 0.0:
+            road_sidehill_segments += 1
         # Bilinear terrain sampling uses the four surrounding WRP vertices. A
         # road corridor only as wide as the rendered model can therefore leave
         # one or more contributing cells unconstrained and create a steeper
         # interpolated centreline than either neighbouring cell. Cover the full
         # half-cell diagonal so every terrain sample beneath the road uses the
         # same grade-limited profile.
-        hard_radius = width * 0.5 + spec.cell_size * math.sqrt(0.5)
-        corridor = line.buffer(hard_radius + shoulder, cap_style=2, join_style=2)
+        hard_radius = road_surface_width * 0.5 + spec.cell_size * math.sqrt(0.5)
+        # If an ordinary road crosses active mapped water without a bridge tag,
+        # build a narrow terrain causeway instead of letting the higher-priority
+        # water-bed constraint sink the road model below the global water plane.
+        # The extra bank is intentionally much narrower than road_grade_radius:
+        # it only needs enough room to blend the raised carriageway back into the
+        # underwater bed without creating a razor-edged embankment.
+        water_floor = road_water_floor
+        water_bank_width = max(
+            road_surface_width,
+            float(spec.cell_size) * ROAD_WATER_BANK_WIDTH_CELLS,
+        )
+        sidehill_platform_margin = max(
+            ROAD_SIDEHILL_MINIMUM_PLATFORM_MARGIN_METRES,
+            road_surface_width * 0.5,
+            float(spec.cell_size) * ROAD_SIDEHILL_BENCH_EXTRA_CELLS,
+        )
+        maximum_sidehill_extra = (
+            0.0
+            if maximum_sidehill_factor <= 0.0
+            else sidehill_platform_margin * (0.55 + 0.45 * maximum_sidehill_factor)
+        )
+        maximum_sidehill_blend = (
+            0.0
+            if maximum_sidehill_factor <= 0.0
+            else max(
+                road_surface_width,
+                float(spec.cell_size) * ROAD_SIDEHILL_BLEND_CELLS,
+            ) * (0.65 + 0.35 * maximum_sidehill_factor)
+        )
+        corridor_radius = hard_radius + max(
+            shoulder,
+            water_bank_width,
+            maximum_sidehill_extra + maximum_sidehill_blend,
+        )
+        corridor = line.buffer(corridor_radius, cap_style=2, join_style=2)
         for index in _candidate_cells(corridor.bounds, spec.cells, spec.cell_size):
             centre = Point(_cell_center(index, spec.cells, spec.cell_size))
             distance_to_line = line.distance(centre)
-            if distance_to_line > hard_radius + shoulder:
+            if distance_to_line > corridor_radius:
                 continue
             along = line.project(centre)
-            target = _profile_height(along, distances, heights)
+            profile_target = _profile_height(along, distances, heights)
+
+            # Water itself normally outranks roads. This is the one deliberate
+            # exception: an untagged road through active water gets a compact
+            # causeway. Explicit bridges already exited above and are never
+            # filled here. The bank target blends from road level to the source
+            # bed so cells beyond the bank remain ordinary water.
+            if (
+                active_water_mask[index]
+                and distance_to_line <= hard_radius + water_bank_width
+            ):
+                raised_target = max(profile_target, water_floor)
+                if distance_to_line <= hard_radius:
+                    target = raised_target
+                    hard = True
+                else:
+                    bank_fraction = max(
+                        0.0,
+                        1.0 - (distance_to_line - hard_radius) / max(0.01, water_bank_width),
+                    )
+                    # Smoothstep avoids a visible angular shoulder at the water
+                    # edge while still reaching the full road elevation at the
+                    # hard corridor boundary.
+                    bank_fraction = bank_fraction * bank_fraction * (3.0 - 2.0 * bank_fraction)
+                    target = original[index] + (raised_target - original[index]) * bank_fraction
+                    hard = False
+                field.apply(
+                    index,
+                    target,
+                    priority=PRIORITY_ROAD_WATER_FILL,
+                    strength=1.0,
+                    hard=hard,
+                    category="road-water-fill",
+                )
+                road_water_fill_cells.add(index)
+                if hard:
+                    road_water_floor_cells.add(index)
+                road_seed_cells.add(index)
+                (major_cells if major else minor_cells).add(index)
+                continue
+
+            sidehill_factor = _road_sidehill_factor(
+                _profile_height(along, distances, cross_slopes)
+                if cross_slopes else 0.0
+            )
+            sidehill_extra = (
+                0.0
+                if sidehill_factor <= 0.0
+                else sidehill_platform_margin * (0.55 + 0.45 * sidehill_factor)
+            )
+            sidehill_blend = (
+                0.0
+                if sidehill_factor <= 0.0
+                else max(
+                    road_surface_width,
+                    float(spec.cell_size) * ROAD_SIDEHILL_BLEND_CELLS,
+                ) * (0.65 + 0.35 * sidehill_factor)
+            )
+            bench_radius = hard_radius + sidehill_extra
+            active_radius = max(
+                hard_radius + shoulder,
+                bench_radius + sidehill_blend,
+            )
+            if distance_to_line > active_radius:
+                continue
+
             hard = distance_to_line <= hard_radius
-            if hard:
+            strength = 1.0 if hard else 0.0
+            if not hard and shoulder > 0.0 and distance_to_line <= hard_radius + shoulder:
+                strength = max(
+                    strength,
+                    max(
+                        0.0,
+                        1.0 - (distance_to_line - hard_radius) / max(0.01, shoulder),
+                    ) ** 2,
+                )
+
+            # On a steep transverse hillside, extend the exact road platform
+            # beyond the normal interpolation guard. This creates a narrow
+            # cut/fill bench that follows the road's longitudinal profile while
+            # remaining flat across the carriageway. The outer band blends the
+            # bench back into the untouched hillside.
+            sidehill_bench = sidehill_factor > 0.0 and distance_to_line <= bench_radius
+            if sidehill_bench:
+                hard = True
                 strength = 1.0
-            else:
-                strength = max(0.0, 1.0 - (distance_to_line - hard_radius) / max(0.01, shoulder)) ** 2
-            field.apply(index, target, priority=priority, strength=strength, hard=hard, category=category)
+                road_sidehill_bench_cells.add(index)
+            elif (
+                sidehill_factor > 0.0
+                and sidehill_blend > 0.0
+                and distance_to_line <= bench_radius + sidehill_blend
+            ):
+                blend = max(
+                    0.0,
+                    1.0 - (distance_to_line - bench_radius) / sidehill_blend,
+                )
+                blend = blend * blend * (3.0 - 2.0 * blend)
+                strength = max(strength, blend)
+                if blend > 0.0:
+                    road_sidehill_bench_cells.add(index)
+
+            normal_target = max(profile_target, water_floor)
+            sidehill_owned = sidehill_factor > 0.0 and (
+                sidehill_bench
+                or distance_to_line <= bench_radius + sidehill_blend
+            )
+            field.apply(
+                index,
+                normal_target,
+                priority=(
+                    PRIORITY_ROAD_SIDEHILL_BENCH if sidehill_owned else priority
+                ),
+                strength=strength,
+                hard=hard,
+                category=("sidehill-road-bench" if sidehill_owned else category),
+            )
+            if profile_target < water_floor:
+                road_water_fill_cells.add(index)
+                if hard:
+                    road_water_floor_cells.add(index)
             road_seed_cells.add(index)
             (major_cells if major else minor_cells).add(index)
 
@@ -1485,40 +1856,65 @@ def solve_terrain_constraints(
     iterations = smoothing.solver_iterations
     progress(79, f"Relaxing terrain constraints: 0/{iterations:,} iterations")
     iteration_interval = max(1, iterations // 12)
+
+    # This relaxation used to perform four Python neighbour lookups plus several
+    # scalar branches for every cell on every iteration. A 2048² terrain with
+    # ~200 large-world iterations turns that into hundreds of millions of Python
+    # operations. Keep the same Jacobi update (all cells read the previous
+    # iteration), but perform the grid arithmetic in NumPy.
+    shape = (spec.cells, spec.cells)
+    current = np.asarray(result, dtype=np.float64).reshape(shape).copy()
+    original_grid = np.asarray(original, dtype=np.float64).reshape(shape)
+    priorities_grid = np.asarray(field.priorities, dtype=np.int32).reshape(shape)
+    targets_grid = np.asarray(field.targets, dtype=np.float64).reshape(shape)
+    strengths_grid = np.asarray(field.strengths, dtype=np.float64).reshape(shape)
+    hard_grid = np.asarray(field.hard, dtype=np.bool_).reshape(shape)
+    constrained_grid = priorities_grid > 0
+    water_grid = priorities_grid == PRIORITY_WATER
+    lower_grid = original_grid - spec.maximum_grade_adjustment
+    upper_grid = original_grid + spec.maximum_grade_adjustment
+    neighbour_count = np.full(shape, 4.0, dtype=np.float64)
+    neighbour_count[0, :] -= 1.0
+    neighbour_count[-1, :] -= 1.0
+    neighbour_count[:, 0] -= 1.0
+    neighbour_count[:, -1] -= 1.0
+    neighbour_sum = np.empty(shape, dtype=np.float64)
+    natural = np.empty(shape, dtype=np.float64)
+    candidate = np.empty(shape, dtype=np.float64)
+
     for iteration in range(iterations):
         if iteration == iterations - 1 or iteration % iteration_interval == 0:
             value = 79 + round(12 * (iteration + 1) / max(1, iterations))
             progress(value, f"Relaxing terrain constraints: {iteration + 1:,}/{iterations:,} iterations")
-        updated = list(result)
-        for index, value in enumerate(result):
-            if field.hard[index]:
-                updated[index] = field.targets[index]
-                continue
-            x, z = index % spec.cells, index // spec.cells
-            neighbours = [
-                result[nz * spec.cells + nx]
-                for nx, nz in ((x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1))
-                if 0 <= nx < spec.cells and 0 <= nz < spec.cells
-            ]
-            average = sum(neighbours) / len(neighbours) if neighbours else value
-            natural = value + (
-                average - value
-            ) * smoothing.natural_smoothing_strength
-            priority = field.priorities[index]
-            if priority > 0:
-                strength = field.strengths[index]
-                desired = field.targets[index]
-                candidate = natural * (1.0 - strength) + desired * strength
-            else:
-                candidate = natural * 0.65 + original[index] * 0.35
-                field.categories[index] = "natural"
-            if priority != PRIORITY_WATER:
-                candidate = max(
-                    original[index] - spec.maximum_grade_adjustment,
-                    min(original[index] + spec.maximum_grade_adjustment, candidate),
-                )
-            updated[index] = candidate
-        result = updated
+
+        neighbour_sum.fill(0.0)
+        # Preserve the historical neighbour order: left, right, up, down.
+        neighbour_sum[:, 1:] += current[:, :-1]
+        neighbour_sum[:, :-1] += current[:, 1:]
+        neighbour_sum[1:, :] += current[:-1, :]
+        neighbour_sum[:-1, :] += current[1:, :]
+        np.divide(neighbour_sum, neighbour_count, out=natural)
+        natural -= current
+        natural *= smoothing.natural_smoothing_strength
+        natural += current
+
+        # Natural cells relax towards their original DEM; constrained cells
+        # blend towards their winning target/strength.
+        np.multiply(natural, 0.65, out=candidate)
+        candidate += original_grid * 0.35
+        if np.any(constrained_grid):
+            candidate[constrained_grid] = (
+                natural[constrained_grid] * (1.0 - strengths_grid[constrained_grid])
+                + targets_grid[constrained_grid] * strengths_grid[constrained_grid]
+            )
+
+        non_water = ~water_grid
+        np.maximum(candidate, lower_grid, out=candidate, where=non_water)
+        np.minimum(candidate, upper_grid, out=candidate, where=non_water)
+        candidate[hard_grid] = targets_grid[hard_grid]
+        current, candidate = candidate, current
+
+    result = current.reshape(-1).tolist()
 
     progress(92, "Reasserting water and other hard terrain constraints")
     # Reassert hard constraints after relaxation. Water is uncapped because the
@@ -1561,6 +1957,18 @@ def solve_terrain_constraints(
                 break
         result = best
         road_slope_after = best_slope
+
+    # The grade stabilizer is allowed to attenuate ordinary road terrain toward
+    # the source DEM. Never let that safety pass push a road core back below the
+    # global water plane. Water-owned cells that did not receive a causeway keep
+    # their normal water constraint because they are absent from this set.
+    for index in road_water_floor_cells:
+        if field.categories[index] in {
+            "major-road", "minor-road", "road-water-fill", "osm-land-floor"
+        }:
+            result[index] = max(result[index], road_water_floor)
+    if road_water_floor_cells:
+        road_slope_after = _road_slope_percent(result, dataset, projection, spec)
 
     progress(96, "Calculating terrain cut, fill and slope diagnostics")
     changed = 0
@@ -1644,8 +2052,10 @@ def solve_terrain_constraints(
         constrained_cells=sum(priority > 0 for priority in field.priorities),
         hard_constraint_cells=sum(field.hard),
         water_cells=sum(active_water_mask),
+        deep_water_cells=sum(deep_water_mask),
+        uncertain_water_cells_preserved=uncertain_water_cells_preserved,
         protected_shore_cells=protected_shore_cells,
-        shoreline_transition_cells=smoothing.shoreline_transition_cells,
+        shoreline_transition_cells=effective_coastal_shore_cells,
         coastal_water_components=len(coastal_water_components),
         inland_water_components=len(inland_water_components) + len(recentered_edge_lake_components),
         lake_shore_cells=lake_shore_cells,
@@ -1657,6 +2067,9 @@ def solve_terrain_constraints(
         bridge_segments=bridge_segments,
         tunnel_segments_excluded=tunnel_segments,
         embankment_segments=embankment_segments,
+        road_water_fill_cells=len(road_water_fill_cells),
+        road_sidehill_segments=road_sidehill_segments,
+        road_sidehill_bench_cells=len(road_sidehill_bench_cells),
         major_road_cells=len(major_cells),
         minor_road_cells=len(minor_cells),
         watercourse_cells=len(watercourse_cells),
@@ -1674,8 +2087,10 @@ def solve_terrain_constraints(
         priority_order=(
             "water-bodies",
             "inland-lake-banks",
-            "osm-dry-land-floor",
             "bridges-and-tunnels",
+            "road-water-causeways",
+            "osm-dry-land-floor",
+            "sidehill-road-benches",
             "major-roads",
             "minor-roads",
             "buildings",

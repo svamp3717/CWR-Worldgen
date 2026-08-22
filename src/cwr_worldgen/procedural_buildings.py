@@ -28,7 +28,15 @@ except ImportError:  # pragma: no cover - exercised only on older Shapely 2.0
 
 from .cache import cache_key, restore_or_create_file
 from .building_semantics import detect_region, is_actual_church
+from .house_style_catalogue import (
+    HOUSE_STYLE_PRESET_AUTO,
+    default_roof_style,
+    house_style_preset_profile,
+    normalise_house_style_preset,
+    select_regional_style,
+)
 from .paa import inspect_paa, write_rgb_dxt1_paa
+from .parallel_assets import process_asset_tasks
 
 _MLOD_HEADER = struct.Struct("<4sBBHI")
 _SP3X_HEADER = struct.Struct("<4siiiiii")
@@ -162,6 +170,12 @@ ISOLATED_DWELLING_MINIMUM_FACADE_HEIGHT_M = 2.30
 VISIBLE_FACADE_STOREY_HEIGHT_M = 3.0
 MINIMUM_VISIBLE_FACADE_STOREY_HEIGHT_M = 2.55
 FACADE_WINDOW_UV_INSET = 1.0 / 256.0
+# Painted facade atlases are authored as complete horizontal bays. Fractional
+# U repeats slice the final bay at the wall end, which leaves half a window
+# wrapped around a building corner. Snap window-bearing bands to a whole number
+# of atlas repeats instead. The bay width is only a target: rounding lets the
+# texture breathe a little so a complete window always lands before each corner.
+FACADE_WINDOW_BAY_WIDTH_M = 4.0
 # Almost-square footprints can safely rotate freely to face a nearby road
 # without materially changing the occupied footprint. Longer rectangles keep
 # their source-aligned long axis and may only flip front/back.
@@ -453,6 +467,16 @@ def _pixel_canvas(
         return image, ImageDraw.Draw(image)
     return image, _ScaledImageDraw(image, scale)
 
+
+def _draw_context_for_image(
+    image: Image.Image,
+) -> ImageDraw.ImageDraw | _ScaledImageDraw:
+    scale = image.size[0] / _BUILDING_TEXTURE_LOGICAL_SIZE
+    if scale <= 1.0:
+        return ImageDraw.Draw(image)
+    return _ScaledImageDraw(image, scale)
+
+
 def _fine_texture_overlay(size: int, salt: int) -> Image.Image:
     """Return low-amplitude deterministic material variation for HQ exports.
 
@@ -550,6 +574,197 @@ def _draw_old_window(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], 
     draw.line((midx, y0 + 2, midx, y1 - 2), fill=_shade(frame, -12), width=1)
     draw.line((x0 + 2, midy, x1 - 2, midy), fill=_shade(frame, -12), width=1)
     draw.line((x0 + 4, y0 + 4, midx - 2, midy - 2), fill=(84, 96, 93), width=1)
+
+
+def _draw_arched_window(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    frame: tuple[int, int, int],
+) -> None:
+    x0, y0, x1, y1 = box
+    arch_bottom = y0 + max(4, (y1 - y0) // 3)
+    draw.ellipse((x0, y0, x1, arch_bottom + 5), fill=(44, 51, 51), outline=_shade(frame, -35), width=2)
+    draw.rectangle((x0, arch_bottom, x1, y1), fill=(44, 51, 51), outline=_shade(frame, -35), width=2)
+    draw.rectangle((x0 + 2, y0 + 3, x1 - 2, y1 - 2), fill=(54, 67, 69), outline=frame, width=1)
+    midx = (x0 + x1) // 2
+    draw.line((midx, y0 + 4, midx, y1 - 2), fill=_shade(frame, -12), width=1)
+    draw.line((x0 + 3, arch_bottom + 2, x1 - 3, arch_bottom + 2), fill=_shade(frame, -12), width=1)
+    draw.line((x0 + 4, y0 + 5, midx - 1, arch_bottom), fill=(84, 96, 93), width=1)
+
+
+def _draw_balcony_rail(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    colour: tuple[int, int, int],
+) -> None:
+    x0, y0, x1, y1 = box
+    draw.line((x0, y0, x1, y0), fill=colour, width=1)
+    draw.line((x0, y1, x1, y1), fill=_shade(colour, -8), width=1)
+    for x in range(x0 + 1, x1, 3):
+        draw.line((x, y0, x, y1), fill=_shade(colour, -4), width=1)
+
+
+_ARCED_URBAN_WINDOW_STYLES = frozenset({"middle_east_sandstone"})
+_PANEL_URBAN_STYLES = frozenset({"eastern_panel", "middle_east_concrete"})
+_BALCONY_URBAN_STYLES = frozenset({
+    "default", "western_stucco", "western_brick", "western_stone",
+    "eastern_brick", "eastern_plaster", "eastern_whitewash",
+    "africa_block", "africa_colour", "africa_whitewash",
+    "middle_east_concrete", "middle_east_whitewash",
+})
+
+
+_COMPACT_HOUSE_DETAIL_STYLES = frozenset({
+    "default", "western_stucco", "western_brick", "western_stone",
+    "eastern_brick", "eastern_plaster", "eastern_whitewash",
+    "africa_block", "africa_colour", "africa_whitewash",
+    "middle_east_concrete", "middle_east_whitewash",
+})
+
+
+def _overlay_compact_house_detail(
+    draw: ImageDraw.ImageDraw,
+    family: str,
+    regional_style: str,
+    texture_variant: int,
+    base: tuple[int, int, int],
+) -> None:
+    """Strengthen repeated residential/townhouse facade tiles.
+
+    Country and small-town presets still reuse a compact painted-window atlas in
+    many regions.  Give that shared material clearer window groupings, trim, and
+    floor/plinth cues so it reads like an intentional house facade instead of a
+    stretched mini-apartment block.
+    """
+
+    if regional_style not in _COMPACT_HOUSE_DETAIL_STYLES:
+        return
+
+    width = height = _BUILDING_TEXTURE_LOGICAL_SIZE
+    brick_like = regional_style in {"western_brick", "eastern_brick"}
+    trim = _shade(base, 18 if brick_like else 24)
+    accent = _shade(base, -18)
+    plinth = _shade(base, -27)
+    panel_fill = _shade(base, 4)
+    window_rows = (14,) if family == "residential" else (6, 20)
+    columns = 2 if family == "residential" else 3
+    shutter_styles = {"western_stucco", "western_stone", "eastern_whitewash", "middle_east_whitewash"}
+    balcony_styles = {"western_stucco", "western_brick", "western_stone", "middle_east_concrete"}
+
+    draw.rectangle((0, 54, width, height), fill=plinth)
+    draw.line((0, 52, width, 52), fill=_shade(base, -15), width=2)
+    if family == "townhouse":
+        draw.line((0, 27, width, 27), fill=_shade(base, -11), width=2)
+    else:
+        draw.line((0, 45, width, 45), fill=_shade(base, -9), width=1)
+
+    for idx in range(columns):
+        centre = int((idx + 1) * width / (columns + 1))
+        if family == "residential":
+            box = (centre - 9, window_rows[0], centre + 9, 39)
+            _draw_old_window(draw, box, trim)
+            draw.rectangle((centre - 11, 12, centre + 11, 14), fill=trim)
+            draw.rectangle((centre - 10, 39, centre + 10, 42), fill=trim)
+            if regional_style in shutter_styles:
+                draw.rectangle((centre - 14, 15, centre - 11, 38), fill=accent)
+                draw.rectangle((centre + 11, 15, centre + 14, 38), fill=accent)
+        else:
+            for row_index, row_top in enumerate(window_rows):
+                box = (centre - 6, row_top, centre + 6, row_top + 18)
+                _draw_old_window(draw, box, trim)
+                draw.rectangle((centre - 8, row_top - 2, centre + 8, row_top), fill=trim)
+                if row_index == 1:
+                    draw.rectangle((centre - 8, row_top + 18, centre + 8, row_top + 20), fill=trim)
+            if regional_style in balcony_styles and (idx + texture_variant) % 2 == 0:
+                _draw_balcony_rail(draw, (centre - 10, 41, centre + 10, 44), accent)
+
+    if family == "townhouse":
+        draw.line((0, 6, width, 6), fill=_shade(base, 8), width=1)
+        draw.line((0, 49, width, 49), fill=_shade(base, -7), width=1)
+
+
+def _overlay_midrise_urban_detail(
+    draw: ImageDraw.ImageDraw,
+    regional_style: str,
+    texture_variant: int,
+    base: tuple[int, int, int],
+) -> None:
+    """Paint a richer mid-rise apartment facade over generic urban atlases.
+
+    Many regional presets promote dense town/city footprints into the shared
+    ``urban`` family.  The original atlas was intentionally simple, but in-game
+    that simplicity reads as the same pale box turning up all over the planet.
+    Overlay a stronger bay rhythm, realistic window stacks, and
+    shallow balcony/service-core cues so common low-rise apartment blocks
+    look deliberate rather
+    than like placeholder geometry wearing optimism.
+    """
+
+    width = height = _BUILDING_TEXTURE_LOGICAL_SIZE
+    trim = _shade(base, 24 if regional_style not in {"western_brick", "eastern_brick"} else 12)
+    accent = _shade(base, -18)
+    panel_fill = _shade(base, 5)
+    darker_panel = _shade(base, -9)
+    plinth = _shade(base, -28)
+    row_tops = (8, 28)
+    row_height = 15
+    bay_count = 4 if regional_style in _PANEL_URBAN_STYLES or regional_style == "default" else 3
+    service_core = bay_count >= 4 and regional_style in _PANEL_URBAN_STYLES
+    arched = regional_style in _ARCED_URBAN_WINDOW_STYLES
+    balconies = regional_style in _BALCONY_URBAN_STYLES
+
+    # Reassert the plinth and floor bands after the base material has been drawn.
+    draw.rectangle((0, 54, width, height), fill=plinth)
+    draw.line((0, 52, width, 52), fill=_shade(base, -15), width=2)
+    draw.line((0, 4, width, 4), fill=_shade(base, 10), width=1)
+    draw.line((0, 24, width, 24), fill=_shade(base, -8), width=1)
+    draw.line((0, 46, width, 46), fill=_shade(base, -10), width=1)
+
+    if regional_style in {"western_stucco", "western_stone", "middle_east_whitewash"}:
+        draw.rectangle((0, 0, 3, 53), fill=trim)
+        draw.rectangle((width - 4, 0, width - 1, 53), fill=trim)
+
+    bay_width = width / bay_count
+    for boundary in range(1, bay_count):
+        x = round(boundary * bay_width)
+        pilaster = darker_panel if service_core and boundary in {bay_count // 2, bay_count // 2 + 1} else trim
+        draw.rectangle((x - 1, 5, x + 1, 52), fill=_shade(pilaster, -3))
+
+    for bay_index in range(bay_count):
+        bay_left = round(bay_index * bay_width) + 2
+        bay_right = round((bay_index + 1) * bay_width) - 2
+        if bay_right - bay_left < 9:
+            continue
+        core_bay = service_core and bay_index == bay_count // 2
+        fill = darker_panel if core_bay else panel_fill
+        draw.rectangle((bay_left, 6, bay_right, 46), fill=fill, outline=_shade(base, -11), width=1)
+        for row_index, row_top in enumerate(row_tops):
+            row_bottom = min(45, row_top + row_height)
+            window_left = bay_left + 2
+            window_right = bay_right - 2
+            if window_right - window_left > 12:
+                mid = (window_left + window_right) // 2
+                gap = 1
+                boxes = (
+                    (window_left, row_top + 1, mid - gap, row_bottom - 1),
+                    (mid + gap, row_top + 1, window_right, row_bottom - 1),
+                )
+            else:
+                boxes = ((window_left, row_top + 1, window_right, row_bottom - 1),)
+            for box in boxes:
+                if arched and row_index == 0:
+                    _draw_arched_window(draw, box, trim)
+                else:
+                    _draw_old_window(draw, box, trim)
+            if row_index == 1:
+                draw.rectangle((bay_left + 1, row_top - 2, bay_right - 1, row_top), fill=trim)
+                if balconies and (bay_index + texture_variant) % 2 == 0 and not core_bay:
+                    balcony_y = min(44, row_bottom + 1)
+                    _draw_balcony_rail(draw, (bay_left + 1, balcony_y, bay_right - 1, balcony_y + 3), accent)
+        if core_bay:
+            draw.rectangle((bay_left + 2, 7, bay_right - 2, 45), outline=trim, width=1)
+            draw.line((bay_left + 3, 16, bay_right - 3, 16), fill=trim, width=1)
+            draw.line((bay_left + 3, 36, bay_right - 3, 36), fill=trim, width=1)
 
 
 _TEXTURE_VARIANT_COLOUR_OFFSETS: tuple[tuple[int, int, int], ...] = (
@@ -1278,6 +1493,22 @@ def _wall_texture_image(
             draw.line((x, 7, x + 3, 24), fill=(102, 58, 39), width=2)
     if family in _PAINTED_WINDOW_FAMILIES:
         image = _raise_painted_windows_above_ground(image)
+    overlay_draw = _draw_context_for_image(image)
+    if family == "urban":
+        _overlay_midrise_urban_detail(
+            overlay_draw,
+            regional_style,
+            texture_variant,
+            base,
+        )
+    elif family in {"residential", "townhouse"}:
+        _overlay_compact_house_detail(
+            overlay_draw,
+            family,
+            regional_style,
+            texture_variant,
+            base,
+        )
     return _finish_pixel_texture(image, size)
 
 
@@ -1842,256 +2073,24 @@ def _regional_style(
     tags: Mapping[str, str],
     width_m: float,
     length_m: float,
+    *,
+    settlement_context: str = "rural",
 ) -> str:
-    material = str(tags.get("building:material", "")).casefold()
-    colour = str(tags.get("building:colour", "")).casefold()
-    supported = {
-        "residential", "townhouse", "urban", "agricultural", "outbuilding", "school", "shop"
-    }
+    """Return the regional facade style selected by ``house_styles/*.json``."""
 
-    identity = json.dumps(
-        {
-            "building": tags.get("building", ""),
-            "name": tags.get("name", ""),
-            "levels": tags.get("building:levels", ""),
-            "width": round(width_m, 2),
-            "length": round(length_m, 2),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+    return select_regional_style(
+        region_identifier, family, tags, width_m, length_m,
+        settlement_context=settlement_context,
     )
-    value = int.from_bytes(sha256(identity.encode("utf-8")).digest()[:2], "little") % 100
-
-    if region_identifier == "sweden" and family in {"residential", "townhouse", "urban", "agricultural", "outbuilding"}:
-        if colour in {"red", "dark_red", "brown-red", "brown_red"}:
-            return "sweden_red"
-        if colour in {"yellow", "ochre", "cream"}:
-            return "sweden_yellow"
-        if material in {"brick", "stone", "concrete"}:
-            return "default"
-        if family == "urban":
-            return "sweden_yellow" if value < 18 else "default"
-        if family == "townhouse" and value < 14:
-            return "sweden_yellow"
-        if family in {"agricultural", "outbuilding"}:
-            return "sweden_red"
-        # 0.9.80 reduces the automatic red-house share by one third:
-        # 72% -> 48%. The yellow share remains 16%; the released share
-        # becomes neutral/default regional façades.
-        if value < 48:
-            return "sweden_red"
-        if value < 64:
-            return "sweden_yellow"
-        return "default"
-
-    if region_identifier == "eastern_europe" and family in supported:
-        if material in {"prefabricated", "precast_concrete", "concrete", "cement_block"}:
-            return "eastern_panel" if family in {"urban", "townhouse", "school", "shop"} else "default"
-        if material in {"brick", "bricks"} or colour in {
-            "red", "dark_red", "brown", "brown-red", "brown_red", "terracotta"
-        }:
-            return "eastern_brick"
-        if material in {"plaster", "stucco", "render", "masonry"} or colour in {
-            "cream", "beige", "yellow", "ochre"
-        }:
-            return "eastern_plaster"
-        if colour in {"white", "off_white", "light_grey", "light_gray"}:
-            return "eastern_whitewash"
-        if material in {"stone", "wood", "timber", "metal", "glass"}:
-            return "default"
-        if family == "urban":
-            if value < 58:
-                return "eastern_panel"
-            if value < 86:
-                return "eastern_plaster"
-            if value < 95:
-                return "eastern_brick"
-            return "default"
-        if family in {"school", "shop"}:
-            if value < 52:
-                return "eastern_plaster"
-            if value < 82:
-                return "eastern_panel"
-            if value < 94:
-                return "eastern_brick"
-            return "default"
-        if family == "agricultural":
-            if value < 46:
-                return "eastern_brick"
-            if value < 77:
-                return "eastern_whitewash"
-            if value < 93:
-                return "eastern_plaster"
-            return "default"
-        if value < 45:
-            return "eastern_plaster"
-        if value < 68:
-            return "eastern_brick"
-        if value < 90:
-            return "eastern_whitewash"
-        return "default"
-
-    if region_identifier == "western_europe" and family in supported:
-        if material in {
-            "timber_framing", "timber_frame", "half_timbered", "half-timbered",
-            "fachwerk"
-        }:
-            return "western_half_timber"
-        if material in {"brick", "bricks"} or colour in {
-            "red", "dark_red", "brown", "brown-red", "brown_red", "terracotta"
-        }:
-            return "western_brick"
-        if material in {"stone", "limestone", "sandstone", "granite", "slate"}:
-            return "western_stone"
-        if material in {"plaster", "stucco", "render", "masonry"} or colour in {
-            "white", "off_white", "cream", "ivory", "beige", "yellow",
-            "ochre", "light_grey", "light_gray"
-        }:
-            return "western_stucco"
-        if material in {"wood", "timber", "metal", "glass", "concrete", "precast_concrete"}:
-            return "default"
-        if family == "urban":
-            if value < 45:
-                return "western_stucco"
-            if value < 76:
-                return "western_brick"
-            if value < 90:
-                return "western_stone"
-            return "default"
-        if family in {"townhouse", "shop", "school"}:
-            if value < 42:
-                return "western_stucco"
-            if value < 73:
-                return "western_brick"
-            if value < 87:
-                return "western_stone"
-            if value < 95:
-                return "western_half_timber"
-            return "default"
-        if family == "agricultural":
-            if value < 38:
-                return "western_stone"
-            if value < 68:
-                return "western_brick"
-            if value < 84:
-                return "western_half_timber"
-            if value < 95:
-                return "western_stucco"
-            return "default"
-        if value < 38:
-            return "western_stucco"
-        if value < 65:
-            return "western_brick"
-        if value < 84:
-            return "western_stone"
-        if value < 95:
-            return "western_half_timber"
-        return "default"
-
-    if region_identifier == "africa" and family in supported:
-        if material in {"mud", "adobe", "earth", "clay", "rammed_earth"}:
-            return "africa_earth"
-        if material in {"concrete", "cement_block", "concrete_blocks", "cinder_block"}:
-            return "africa_block"
-        if colour in {"white", "off_white", "cream", "ivory", "light_grey", "light_gray"}:
-            return "africa_whitewash"
-        if colour in {
-            "blue", "green", "turquoise", "cyan", "pink", "orange", "yellow",
-            "purple", "teal"
-        }:
-            return "africa_colour"
-        if material in {"plaster", "stucco", "render", "masonry", "limestone"}:
-            return "africa_whitewash"
-        if material in {"brick", "stone", "sandstone"} or colour in {
-            "brown", "red", "ochre", "beige", "sand"
-        }:
-            return "africa_earth"
-        if material in {"wood", "timber", "metal", "glass"}:
-            return "default"
-        if family == "urban":
-            if value < 55:
-                return "africa_block"
-            if value < 78:
-                return "africa_whitewash"
-            if value < 94:
-                return "africa_colour"
-            return "default"
-        if family in {"school", "shop", "townhouse"}:
-            if value < 34:
-                return "africa_whitewash"
-            if value < 63:
-                return "africa_block"
-            if value < 90:
-                return "africa_colour"
-            return "africa_earth"
-        if family == "agricultural":
-            if value < 52:
-                return "africa_earth"
-            if value < 77:
-                return "africa_block"
-            if value < 92:
-                return "africa_whitewash"
-            return "default"
-        if value < 43:
-            return "africa_earth"
-        if value < 68:
-            return "africa_whitewash"
-        if value < 88:
-            return "africa_colour"
-        return "africa_block"
-
-    if region_identifier == "middle_east" and family in supported:
-        if material in {"mud", "adobe", "earth", "clay", "rammed_earth"}:
-            return "middle_east_adobe"
-        if material in {"stone", "sandstone", "limestone", "masonry"}:
-            return "middle_east_sandstone"
-        if material in {"concrete", "cement_block", "concrete_blocks", "precast_concrete"}:
-            return "middle_east_concrete"
-        if colour in {"white", "off_white", "cream", "ivory", "light_grey", "light_gray"}:
-            return "middle_east_whitewash"
-        if colour in {"beige", "sand", "yellow", "ochre", "brown", "terracotta"}:
-            return "middle_east_sandstone"
-        if material in {"plaster", "stucco", "render"}:
-            return "middle_east_whitewash"
-        if material in {"wood", "timber", "metal", "glass"}:
-            return "default"
-        if family == "urban":
-            if value < 58:
-                return "middle_east_concrete"
-            if value < 82:
-                return "middle_east_sandstone"
-            if value < 94:
-                return "middle_east_whitewash"
-            return "default"
-        if family in {"school", "shop", "townhouse"}:
-            if value < 36:
-                return "middle_east_sandstone"
-            if value < 66:
-                return "middle_east_concrete"
-            if value < 89:
-                return "middle_east_whitewash"
-            return "middle_east_adobe"
-        if family == "agricultural":
-            if value < 51:
-                return "middle_east_adobe"
-            if value < 81:
-                return "middle_east_sandstone"
-            if value < 95:
-                return "middle_east_concrete"
-            return "default"
-        if value < 40:
-            return "middle_east_sandstone"
-        if value < 69:
-            return "middle_east_adobe"
-        if value < 90:
-            return "middle_east_whitewash"
-        return "middle_east_concrete"
-
-    return "default"
 
 
 def _roof_style(
-    tags: Mapping[str, str], family: str, regional_style: str = "default"
+    tags: Mapping[str, str],
+    family: str,
+    regional_style: str = "default",
+    region_identifier: str | None = None,
+    *,
+    settlement_context: str = "rural",
 ) -> str:
     value = tags.get("roof:shape", "").casefold()
     if value in {"flat", "terrace", "skillion", "shed"}:
@@ -2106,12 +2105,11 @@ def _roof_style(
         return "onion"
     if value in {"gabled", "gable", "gambrel", "mansard"}:
         return "gabled"
-    if regional_style.startswith("middle_east_"):
-        return "flat"
-    if regional_style == "africa_earth" and family in {"residential", "townhouse", "urban", "school", "shop"}:
-        return "flat"
-    if regional_style.startswith("africa_") and family in {"townhouse", "urban", "school", "shop"}:
-        return "flat"
+    configured = default_roof_style(
+        region_identifier, family, settlement_context=settlement_context
+    )
+    if configured is not None:
+        return configured
     return "flat" if family in {"urban", "industrial", "school", "shop"} else "gabled"
 
 
@@ -2253,6 +2251,61 @@ def _polygon_with_footprint(
         raise ValueError("building footprint requires at least three points")
     polygon = Polygon(points, [tuple(hole) for hole in holes if len(hole) >= 3])
     return polygon, _footprint_from_polygon_object(polygon)
+
+
+def _simple_rectangle_footprint(
+    points: Sequence[PointXZ],
+    holes: Sequence[Sequence[PointXZ]] = (),
+) -> tuple[_Footprint, float, float] | None:
+    """Return rectangle fit/centroid without constructing a Shapely polygon.
+
+    This intentionally accepts only an extremely clean four-corner rectangle.
+    Survey notches, trapezoids, courtyards and merely *near* rectangles stay on
+    the existing Shapely path, preserving polygon-native building semantics.
+    """
+
+    if holes or len(points) != 4:
+        return None
+    edges: list[tuple[float, float, float]] = []
+    for start, end in zip(points, points[1:] + points[:1]):
+        dx = float(end[0]) - float(start[0])
+        dz = float(end[1]) - float(start[1])
+        length = math.hypot(dx, dz)
+        if length <= 1.0e-6:
+            return None
+        edges.append((length, dx, dz))
+    tolerance = 1.0e-7
+    # Adjacent sides perpendicular and opposite sides parallel/equal.  Relative
+    # tests make this stable for both sheds and large industrial footprints.
+    for index in range(4):
+        length, dx, dz = edges[index]
+        next_length, next_dx, next_dz = edges[(index + 1) % 4]
+        if abs(dx * next_dx + dz * next_dz) > tolerance * length * next_length:
+            return None
+    for a, b in ((0, 2), (1, 3)):
+        la, dxa, dza = edges[a]
+        lb, dxb, dzb = edges[b]
+        if abs(la - lb) > tolerance * max(la, lb):
+            return None
+        # Opposite directed edges must cancel.
+        if math.hypot(dxa + dxb, dza + dzb) > tolerance * max(la, lb):
+            return None
+    # Diagonals of a parallelogram share a midpoint. This rejects the small
+    # class of malformed quads that can satisfy the local edge tests by accident.
+    midpoint_error = math.hypot(
+        (float(points[0][0]) + float(points[2][0]))
+        - (float(points[1][0]) + float(points[3][0])),
+        (float(points[0][1]) + float(points[2][1]))
+        - (float(points[1][1]) + float(points[3][1])),
+    )
+    if midpoint_error > tolerance * max(edge[0] for edge in edges):
+        return None
+    length, dx, dz = max(edges, key=lambda edge: (edge[0], abs(edge[2]), abs(edge[1])))
+    width = min(edge[0] for edge in edges)
+    heading = math.degrees(math.atan2(dx, dz)) % 180.0
+    centre_x = sum(float(point[0]) for point in points) * 0.25
+    centre_z = sum(float(point[1]) for point in points) * 0.25
+    return _Footprint(max(0.1, width), max(0.1, length), heading), centre_x, centre_z
 
 
 def footprint_from_polygon(points: Sequence[PointXZ]) -> _Footprint:
@@ -2767,6 +2820,28 @@ def _wall_quad_ground_anchored(
     )
 
 
+def _whole_window_bay_repeats(
+    span_m: float,
+    requested_scale: float | None = None,
+) -> float:
+    """Return a whole horizontal atlas repeat count for painted windows.
+
+    A non-integer UV endpoint is visually harmless for brick/render, but a
+    painted window atlas then terminates midway through its last window.  CWA
+    makes that especially conspicuous at outside corners.  Use the nearest
+    complete bay count and allow modest physical stretching instead.
+    """
+
+    desired = (
+        float(requested_scale)
+        if requested_scale is not None
+        else float(span_m) / FACADE_WINDOW_BAY_WIDTH_M
+    )
+    # Avoid Python's bankers-rounding at exactly N+0.5; facade bay counts should
+    # consistently round half-up so 6 m becomes two complete ~3 m bays.
+    return float(max(1, int(math.floor(max(1.0, desired) + 0.5))))
+
+
 def _closed_facade_texture(
     key: BuildingVariantKey,
     texture: str,
@@ -2915,7 +2990,7 @@ def _closed_wall_storey_faces(
                 indices,
                 normal,
                 u0=0.0,
-                u1=max(1.0, band_u_scale),
+                u1=_whole_window_bay_repeats(span_m, band_u_scale),
                 v0=inset,
                 v1=1.0 - inset,
             ))
@@ -4411,13 +4486,17 @@ def _interior_memory_lod(key: BuildingVariantKey) -> _Lod | None:
     points = (
         (-door_half, 0.02, pivot_z),
         (-door_half, door_height - 0.02, pivot_z),
-        (0.0, min(1.15, door_height * 0.55), -key.length_m * 0.5 - 0.30),
+        (0.0, min(1.15, door_height * 0.55), -key.length_m * 0.5 - 0.55),
+        (0.0, min(1.15, door_height * 0.55), -key.length_m * 0.5 + 0.55),
     )
-    axis_weights = bytes((1, 1, 0))
-    action_weights = bytes((0, 0, 1))
+    axis_weights = bytes((1, 1, 0, 0))
+    action_outside = bytes((0, 0, 1, 0))
+    action_inside = bytes((0, 0, 0, 1))
     selections = (
         _NamedSelection("door1_axis", axis_weights, b""),
-        _NamedSelection("door1_action", action_weights, b""),
+        _NamedSelection("door1_action", action_outside, b""),
+        _NamedSelection("door1_action_outside", action_outside, b""),
+        _NamedSelection("door1_action_inside", action_inside, b""),
     )
     return _Lod(points, (), (), _MEMORY_LOD, selections=selections)
 
@@ -6136,8 +6215,8 @@ def _polygon_native_visual_lod(
                     faces.append(_Face(band_texture, (
                         (base + 0, outer_normal, 0.0, 1.0 - inset),
                         (base + 1, outer_normal, 0.0, inset),
-                        (base + 2, outer_normal, max(1.0, span / 4.0), inset),
-                        (base + 3, outer_normal, max(1.0, span / 4.0), 1.0 - inset),
+                        (base + 2, outer_normal, _whole_window_bay_repeats(span), inset),
+                        (base + 3, outer_normal, _whole_window_bay_repeats(span), 1.0 - inset),
                     )))
                 else:
                     faces.append(_Face(band_texture, (
@@ -6816,16 +6895,23 @@ def _polygon_native_memory_lod(key: BuildingVariantKey) -> _Lod | None:
         (start[0] + tx * hinge_h, 0.02, start[1] + tz * hinge_h),
         (start[0] + tx * hinge_h, top - 0.02, start[1] + tz * hinge_h),
         (
-            start[0] + tx * action_h - inward_x * 0.32,
+            start[0] + tx * action_h - inward_x * 0.55,
             min(1.15, top * 0.55),
-            start[1] + tz * action_h - inward_z * 0.32,
+            start[1] + tz * action_h - inward_z * 0.55,
+        ),
+        (
+            start[0] + tx * action_h + inward_x * 0.55,
+            min(1.15, top * 0.55),
+            start[1] + tz * action_h + inward_z * 0.55,
         ),
     )
     return _Lod(
         points, (), (), _MEMORY_LOD,
         selections=(
-            _NamedSelection("door1_axis", bytes((1, 1, 0)), b""),
-            _NamedSelection("door1_action", bytes((0, 0, 1)), b""),
+            _NamedSelection("door1_axis", bytes((1, 1, 0, 0)), b""),
+            _NamedSelection("door1_action", bytes((0, 0, 1, 0)), b""),
+            _NamedSelection("door1_action_outside", bytes((0, 0, 1, 0)), b""),
+            _NamedSelection("door1_action_inside", bytes((0, 0, 0, 1)), b""),
         ),
     )
 
@@ -7590,6 +7676,80 @@ def inspect_mlod(path: Path) -> MlodSummary:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _BuildingAssetTask:
+    key: BuildingVariantKey
+    model_path: str
+    relative_path: str
+    file_path: Path
+    cache_path: Path | None
+    cache_enabled: bool
+    cache_refresh: bool
+    usage_count: int
+    wall_texture: str
+    front_texture: str
+    roof_texture: str
+    roof_pitch_degrees: float
+    foundation_texture: str | None
+    foundation_depth: float
+    church_plinth_height: float
+    interior_texture: str | None
+    window_trim_texture: str | None
+    plain_wall_texture: str | None
+    door_texture: str | None
+    distance_wall_texture: str | None
+
+
+def _write_building_asset_task(task: _BuildingAssetTask) -> tuple[GeneratedBuildingAsset, bool]:
+    """Generate/inspect one independent building P3D. Safe in a worker process."""
+    hit = restore_or_create_file(
+        cache_path=task.cache_path,
+        destination=task.file_path,
+        producer=lambda target: write_building_mlod(
+            target,
+            task.key,
+            wall_texture=task.wall_texture,
+            front_texture=task.front_texture,
+            roof_texture=task.roof_texture,
+            roof_pitch_degrees=task.roof_pitch_degrees,
+            foundation_texture=task.foundation_texture,
+            foundation_depth=task.foundation_depth,
+            church_plinth_height=task.church_plinth_height,
+            interior_texture=task.interior_texture,
+            window_trim_texture=task.window_trim_texture,
+            plain_wall_texture=task.plain_wall_texture,
+            door_texture=task.door_texture,
+            distance_wall_texture=task.distance_wall_texture,
+        ),
+        enabled=task.cache_enabled,
+        refresh=task.cache_refresh,
+    )
+    summary = inspect_mlod(task.file_path)
+    geometry_index = next(
+        index for index, resolution in enumerate(summary.resolutions)
+        if math.isclose(resolution, _GEOMETRY_LOD, rel_tol=1.0e-6)
+    )
+    geometry_selection_names = summary.selection_names[geometry_index]
+    asset = GeneratedBuildingAsset(
+        key=task.key,
+        model_path=task.model_path,
+        relative_path=task.relative_path,
+        usage_count=task.usage_count,
+        sha256=sha256(task.file_path.read_bytes()).hexdigest(),
+        lod_count=summary.lod_count,
+        point_count=summary.point_count,
+        face_count=summary.face_count,
+        texture_paths=summary.texture_paths,
+        visual_face_count=summary.face_counts[0],
+        geometry_component_count=sum(
+            name.startswith("component") for name in geometry_selection_names
+        ),
+        geometry_mass_point_count=summary.mass_point_counts[geometry_index],
+        map_symbol=dict(summary.named_properties[geometry_index])["map"],
+    )
+    return asset, hit
+
+
 class ProceduralBuildingLibrary:
     def __init__(
         self,
@@ -7615,6 +7775,7 @@ class ProceduralBuildingLibrary:
         generate_interiors: bool = False,
         high_quality_textures: bool = False,
         texture_variants: int = DEFAULT_BUILDING_TEXTURE_VARIANTS,
+        house_style_preset: str = HOUSE_STYLE_PRESET_AUTO,
         cache_dir: Path | None = None,
         cache_enabled: bool = True,
         cache_refresh: bool = False,
@@ -7644,6 +7805,7 @@ class ProceduralBuildingLibrary:
             if self.high_quality_textures else BUILDING_ASSET_TEXTURE_SIZE
         )
         self.texture_variants = max(1, min(10, int(texture_variants)))
+        self.house_style_preset = normalise_house_style_preset(house_style_preset)
         self.cache_dir = cache_dir
         self.cache_enabled = cache_enabled
         self.cache_refresh = cache_refresh
@@ -7656,6 +7818,8 @@ class ProceduralBuildingLibrary:
         self._usage: Counter[BuildingVariantKey] = Counter()
         self._prepared = False
         self.region_identifier: str | None = None
+        self.detected_house_style_identifier: str | None = None
+        self.house_style_identifier: str | None = None
         self._urban_polygons: tuple[Polygon, ...] = ()
         self._settlement_points: tuple[tuple[float, float, float, str], ...] = ()
         self._settlement_bucket_size = 1.0
@@ -7674,6 +7838,15 @@ class ProceduralBuildingLibrary:
             tag_sources,
         )
         self.region_identifier = profile.identifier if profile is not None else None
+        self.detected_house_style_identifier = (
+            profile.house_style_identifier if profile is not None else None
+        )
+        override_profile = house_style_preset_profile(self.house_style_preset)
+        self.house_style_identifier = (
+            override_profile.house_style_identifier
+            if override_profile is not None
+            else self.detected_house_style_identifier
+        )
 
         # Residential, commercial, and industrial land-use polygons are not
         # reliable evidence that a footprint belongs to a town. They occur in
@@ -7775,15 +7948,13 @@ class ProceduralBuildingLibrary:
             return "rural"
         matches: list[tuple[int, float, str]] = []
         priority = {"city": 0, "town": 1, "village": 2, "hamlet": 3}
-        point = Point(float(x), float(z))
-        # Exact polygon membership is authoritative. 0.9.205 added the cabin
-        # footprint to the match list with lower priority than a nearby hamlet,
-        # so real isolated-dwelling buildings such as ways 788104416/420 were
-        # still classified as tiny outbuildings. A building selected by the
-        # containing place=isolated_dwelling polygon must win over any radius-
-        # based settlement hint.
-        if any(footprint.covers(point) for footprint in self._isolated_dwelling_cabins):
-            return "isolated_dwelling_single"
+        # Creating a Shapely Point for every building is wasted work on the vast
+        # majority of worlds, which contain no isolated-dwelling area polygons.
+        if self._isolated_dwelling_cabins:
+            point = Point(float(x), float(z))
+            # Exact polygon membership is authoritative.
+            if any(footprint.covers(point) for footprint in self._isolated_dwelling_cabins):
+                return "isolated_dwelling_single"
         bucket_size = self._settlement_bucket_size
         bucket_x = math.floor(float(x) / bucket_size)
         bucket_z = math.floor(float(z) / bucket_size)
@@ -7840,10 +8011,15 @@ class ProceduralBuildingLibrary:
             tags, width_m, length_m, settlement_context=settlement_context
         )
         width, length = sorted((max(0.1, width_m), max(0.1, length_m)))
+        style_region = self.house_style_identifier or self.region_identifier
         regional_style = _regional_style(
-            self.region_identifier, family, tags, width, length
+            style_region, family, tags, width, length,
+            settlement_context=settlement_context,
         )
-        roof = _roof_style(tags, family, regional_style)
+        roof = _roof_style(
+            tags, family, regional_style, style_region,
+            settlement_context=settlement_context,
+        )
         requested_height = _height(tags, family, self.default_level_height)
         explicit_levels = _parse_number(tags.get("building:levels"))
         if (
@@ -7942,13 +8118,18 @@ class ProceduralBuildingLibrary:
                     # One mapped footprint always requests one building variant.
                     # Irregular polygons may later receive one polygon-native
                     # model, but they are never split into independent wings.
-                    polygon_geometry, footprint = _polygon_with_footprint(
-                        projected, projected_holes
-                    )
-                    centre = polygon_geometry.centroid
+                    rectangle = _simple_rectangle_footprint(projected, projected_holes)
+                    if rectangle is not None:
+                        footprint, centre_x, centre_z = rectangle
+                    else:
+                        polygon_geometry, footprint = _polygon_with_footprint(
+                            projected, projected_holes
+                        )
+                        centre = polygon_geometry.centroid
+                        centre_x, centre_z = float(centre.x), float(centre.y)
                     yield self.key_for(
                         feature.tags, footprint.width_m, footprint.length_m,
-                        settlement_context=self._settlement_context(float(centre.x), float(centre.y)),
+                        settlement_context=self._settlement_context(centre_x, centre_z),
                     )
         for feature in dataset.building_points:
             x, z = projection.to_world(feature.point)
@@ -8227,9 +8408,15 @@ class ProceduralBuildingLibrary:
         road_point: PointXZ | None = None, entrance_point: PointXZ | None = None,
         allow_native_polygon: bool = True,
     ) -> BuildingPlacement:
-        polygon, footprint = _polygon_with_footprint(points, holes)
-        centre = polygon.centroid
-        centre_x, centre_z = float(centre.x), float(centre.y)
+        rectangle = _simple_rectangle_footprint(points, holes)
+        polygon: Polygon | None
+        if rectangle is not None:
+            footprint, centre_x, centre_z = rectangle
+            polygon = None
+        else:
+            polygon, footprint = _polygon_with_footprint(points, holes)
+            centre = polygon.centroid
+            centre_x, centre_z = float(centre.x), float(centre.y)
         hash_coordinates = tuple(points) + tuple(
             point for ring in holes for point in ring
         )
@@ -8243,7 +8430,8 @@ class ProceduralBuildingLibrary:
             _native_polygon_profile(
                 points, holes, footprint=footprint, polygon=polygon
             )
-            if allow_native_polygon
+            if polygon is not None
+            and allow_native_polygon
             and requested.family != "church"
             else None
         )
@@ -8857,6 +9045,7 @@ class ProceduralBuildingLibrary:
                 inspect_paa(file_path)
                 texture_files.append(relative)
 
+        model_tasks: list[_BuildingAssetTask] = []
         for key in selected:
             model_path = self.model_path(key)
             relative = model_path.split("\\", 1)[1].replace("\\", "/")
@@ -8872,103 +9061,76 @@ class ProceduralBuildingLibrary:
                 },
             )
             cached = self.cache_dir / "procedural-assets" / f"{asset_key}.p3d" if self.cache_dir else None
-            hit = restore_or_create_file(
-                cache_path=cached,
-                destination=file_path,
-                producer=lambda target, key=key: write_building_mlod(
-                    target,
-                    key,
-                    wall_texture=(
-                        self._wall_texture(
-                            key.family, key.regional_style, key.texture_variant
-                        )
-                        if key.interiors and key.family in UTILITY_INTERIOR_FAMILIES
-                        else self._open_wall_texture(
-                            key.family, key.regional_style, key.texture_variant
-                        )
-                        if key.interiors
-                        else self._wall_texture(
-                            key.family, key.regional_style, key.texture_variant
-                        )
-                    ),
-                    front_texture=self._front_texture(
-                        key.family, key.regional_style, key.texture_variant,
-                        key.outbuilding_kind,
-                    ),
-                    roof_texture=self._roof_texture(
-                        key.roof_style, key.texture_variant
-                    ),
-                    roof_pitch_degrees=self.roof_pitch_degrees,
-                    foundation_texture=self._foundation_texture() if key.foundation_depth_m > 0.0 or key.family == "church" else None,
-                    foundation_depth=key.foundation_depth_m,
-                    church_plinth_height=self.church_plinth_height,
-                    interior_texture=(
-                        self._interior_wall_texture(
-                            key.family, key.regional_style, key.texture_variant
-                        )
-                        if key.interiors else None
-                    ),
-                    window_trim_texture=(
-                        self._white_window_trim_texture()
-                        if key.interiors
-                        and key.family not in UTILITY_INTERIOR_FAMILIES
-                        and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
-                        else None
-                    ),
-                    plain_wall_texture=(
-                        self._open_wall_texture(
-                            key.family, key.regional_style, key.texture_variant
-                        )
-                        if (
-                            key.interiors
-                            or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
-                            or key.family == "church"
-                            or key.family in _PAINTED_WINDOW_FAMILIES
-                        )
-                        else None
-                    ),
-                    door_texture=(
-                        self._door_texture(
-                            key.family, key.regional_style, key.texture_variant,
-                            key.outbuilding_kind,
-                        )
-                        if key.interiors or key.footprint_vertices else None
-                    ),
-                    distance_wall_texture=(
-                        self._wall_texture(
-                            key.family, key.regional_style, key.texture_variant
-                        )
-                        if key.interiors else None
-                    ),
-                ),
-                enabled=self.cache_enabled,
-                refresh=self.cache_refresh,
+            wall_texture = (
+                self._wall_texture(key.family, key.regional_style, key.texture_variant)
+                if key.interiors and key.family in UTILITY_INTERIOR_FAMILIES
+                else self._open_wall_texture(key.family, key.regional_style, key.texture_variant)
+                if key.interiors
+                else self._wall_texture(key.family, key.regional_style, key.texture_variant)
             )
-            self.cache_hits += int(hit)
-            self.cache_misses += int(not hit)
-            summary = inspect_mlod(file_path)
-            geometry_index = next(
-                index for index, resolution in enumerate(summary.resolutions)
-                if math.isclose(resolution, _GEOMETRY_LOD, rel_tol=1.0e-6)
-            )
-            geometry_selection_names = summary.selection_names[geometry_index]
-            model_assets.append(GeneratedBuildingAsset(
+            model_tasks.append(_BuildingAssetTask(
                 key=key,
                 model_path=model_path,
                 relative_path=relative,
+                file_path=file_path,
+                cache_path=cached,
+                cache_enabled=self.cache_enabled,
+                cache_refresh=self.cache_refresh,
                 usage_count=self._usage[key],
-                sha256=sha256(file_path.read_bytes()).hexdigest(),
-                lod_count=summary.lod_count,
-                point_count=summary.point_count,
-                face_count=summary.face_count,
-                texture_paths=summary.texture_paths,
-                visual_face_count=summary.face_counts[0],
-                geometry_component_count=sum(
-                    name.startswith("component") for name in geometry_selection_names
+                wall_texture=wall_texture,
+                front_texture=self._front_texture(
+                    key.family, key.regional_style, key.texture_variant, key.outbuilding_kind
                 ),
-                geometry_mass_point_count=summary.mass_point_counts[geometry_index],
-                map_symbol=dict(summary.named_properties[geometry_index])["map"],
+                roof_texture=self._roof_texture(key.roof_style, key.texture_variant),
+                roof_pitch_degrees=self.roof_pitch_degrees,
+                foundation_texture=(
+                    self._foundation_texture()
+                    if key.foundation_depth_m > 0.0 or key.family == "church" else None
+                ),
+                foundation_depth=key.foundation_depth_m,
+                church_plinth_height=self.church_plinth_height,
+                interior_texture=(
+                    self._interior_wall_texture(key.family, key.regional_style, key.texture_variant)
+                    if key.interiors else None
+                ),
+                window_trim_texture=(
+                    self._white_window_trim_texture()
+                    if key.interiors
+                    and key.family not in UTILITY_INTERIOR_FAMILIES
+                    and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+                    else None
+                ),
+                plain_wall_texture=(
+                    self._open_wall_texture(key.family, key.regional_style, key.texture_variant)
+                    if (
+                        key.interiors
+                        or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
+                        or key.family == "church"
+                        or key.family in _PAINTED_WINDOW_FAMILIES
+                    ) else None
+                ),
+                door_texture=(
+                    self._door_texture(
+                        key.family, key.regional_style, key.texture_variant, key.outbuilding_kind
+                    ) if key.interiors or key.footprint_vertices else None
+                ),
+                distance_wall_texture=(
+                    self._wall_texture(key.family, key.regional_style, key.texture_variant)
+                    if key.interiors else None
+                ),
             ))
+
+        polygon_task_count = sum(bool(task.key.footprint_vertices) for task in model_tasks)
+        model_results = process_asset_tasks(
+            _write_building_asset_task,
+            model_tasks,
+            minimum_parallel_tasks=(32 if polygon_task_count >= 32 else 768),
+        )
+
+        for asset, hit in model_results:
+            self.cache_hits += int(hit)
+            self.cache_misses += int(not hit)
+            model_assets.append(asset)
 
         placements = sum(self._usage.values())
         generated = len(model_assets)
@@ -8980,6 +9142,9 @@ class ProceduralBuildingLibrary:
             "schema": 18,
             "generator": "cwr-worldgen procedural MLOD building library",
             "region": self.region_identifier or "default",
+            "detected_house_style_region": self.detected_house_style_identifier or "default",
+            "house_style_region": self.house_style_identifier or self.region_identifier or "default",
+            "house_style_preset": self.house_style_preset,
             "settings": {
                 "width_quantum_m": self.width_quantum,
                 "length_quantum_m": self.length_quantum,

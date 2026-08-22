@@ -9,6 +9,7 @@ import math
 from typing import Callable, Mapping, Sequence
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+import numpy as np
 
 from .osm import (
     BboxProjection,
@@ -201,6 +202,43 @@ def _stable_fraction(seed: str, feature_id: str, label: str, *values: int) -> fl
     return _stable_u32(seed, feature_id, label, *values) / 0xFFFFFFFF
 
 
+
+
+def _stable_grid_fraction(seed: str, feature_id: str, label: str, cells: int) -> np.ndarray:
+    """Return a deterministic [0, 1] pseudo-random field without per-cell hashing.
+
+    Surface classification used to call BLAKE2 once for every natural terrain
+    cell. On 2048² maps that means millions of Python hash constructions before
+    land-use work even begins. Seed one 64-bit field from BLAKE2, then use a
+    SplitMix-style integer mixer over x/z coordinates entirely in NumPy.
+    """
+    seed_bytes = blake2s(f"{seed}:{feature_id}:{label}".encode("utf-8"), digest_size=8).digest()
+    base = np.uint64(int.from_bytes(seed_bytes, "little"))
+    x = np.arange(cells, dtype=np.uint64)[None, :]
+    z = np.arange(cells, dtype=np.uint64)[:, None]
+    value = base ^ (x * np.uint64(0x9E3779B97F4A7C15)) ^ (z * np.uint64(0xD1B54A32D192ED03))
+    value ^= value >> np.uint64(30)
+    value *= np.uint64(0xBF58476D1CE4E5B9)
+    value ^= value >> np.uint64(27)
+    value *= np.uint64(0x94D049BB133111EB)
+    value ^= value >> np.uint64(31)
+    return value.astype(np.float64) / float(np.iinfo(np.uint64).max)
+
+
+def _feature_boundary_mask(grid: np.ndarray) -> np.ndarray:
+    """Vectorized equivalent of :func:`_feature_boundary` for a whole grid."""
+    selected = grid != 0
+    boundary = np.zeros(grid.shape, dtype=np.bool_)
+    boundary[0, :] |= selected[0, :]
+    boundary[-1, :] |= selected[-1, :]
+    boundary[:, 0] |= selected[:, 0]
+    boundary[:, -1] |= selected[:, -1]
+    boundary[:, 1:] |= selected[:, 1:] & (grid[:, 1:] != grid[:, :-1])
+    boundary[:, :-1] |= selected[:, :-1] & (grid[:, :-1] != grid[:, 1:])
+    boundary[1:, :] |= selected[1:, :] & (grid[1:, :] != grid[:-1, :])
+    boundary[:-1, :] |= selected[:-1, :] & (grid[:-1, :] != grid[1:, :])
+    return boundary
+
 def _draw_polygon(
     draw: ImageDraw.ImageDraw,
     feature: OsmPolygonFeature,
@@ -223,25 +261,25 @@ def _image_values(image: Image.Image):
     return getter() if getter is not None else image.getdata()
 
 
-def _image_to_wrp_values(image: Image.Image, cells: int) -> tuple[int, ...]:
+def _image_to_wrp_values(image: Image.Image, cells: int) -> np.ndarray:
     if image.size != (cells, cells):
         image = image.resize((cells, cells), Image.Resampling.NEAREST)
-    values = tuple(int(value) for value in _image_values(image))
-    return tuple(values[(cells - 1 - z) * cells + x] for z in range(cells) for x in range(cells))
+    values = np.asarray(image, dtype=np.int32)
+    return np.flipud(values).reshape(-1).copy()
 
 
-def _image_to_wrp_mask(image: Image.Image, cells: int, *, threshold: int = 64) -> tuple[bool, ...]:
+def _image_to_wrp_mask(image: Image.Image, cells: int, *, threshold: int = 64) -> np.ndarray:
     if image.size != (cells, cells):
         image = image.resize((cells, cells), Image.Resampling.BOX)
-    values = tuple(int(value) >= threshold for value in _image_values(image))
-    return tuple(values[(cells - 1 - z) * cells + x] for z in range(cells) for x in range(cells))
+    values = np.asarray(image, dtype=np.uint8)
+    return (np.flipud(values) >= threshold).reshape(-1).copy()
 
 
 def _feature_grid(
     features: Sequence[OsmPolygonFeature],
     projection: BboxProjection,
     cells: int,
-) -> tuple[tuple[int, ...], tuple[str, ...]]:
+) -> tuple[np.ndarray, tuple[str, ...]]:
     image = Image.new("I", (cells, cells), 0)
     draw = ImageDraw.Draw(image)
     feature_ids = [""]
@@ -255,7 +293,7 @@ def _polygon_mask(
     features: Sequence[OsmPolygonFeature],
     projection: BboxProjection,
     cells: int,
-) -> tuple[bool, ...]:
+) -> np.ndarray:
     image = Image.new("L", (cells * 4, cells * 4), 0)
     draw = ImageDraw.Draw(image)
     for feature in features:
@@ -267,7 +305,7 @@ def _aeroway_mask(
     dataset: OsmDataset,
     projection: BboxProjection,
     cells: int,
-) -> tuple[bool, ...]:
+) -> np.ndarray:
     resolution = cells * 8
     image = Image.new("L", (resolution, resolution), 0)
     draw = ImageDraw.Draw(image)
@@ -338,6 +376,40 @@ def _road_masks(
     return tuple(_image_to_wrp_mask(image, cells, threshold=20) for image in images)  # type: ignore[return-value]
 
 
+@dataclass(frozen=True, slots=True)
+class _OwnerField:
+    ranks: np.ndarray
+    labels: tuple[str, ...]
+
+    def __getitem__(self, index: int) -> str:
+        rank = int(self.ranks[index])
+        return self.labels[rank] if rank >= 0 else ""
+
+
+def _distance_array_from_mask(
+    mask: Sequence[bool], cells: int, maximum: int
+) -> np.ndarray:
+    """Bounded Manhattan distance using vectorized wavefront dilation."""
+    infinity = cells * cells + 1
+    selected = np.asarray(mask, dtype=np.bool_).reshape((cells, cells))
+    distances = np.full((cells, cells), infinity, dtype=np.int32)
+    distances[selected] = 0
+    frontier = selected.copy()
+    unseen = ~selected
+    for distance in range(1, maximum + 1):
+        expanded = np.zeros_like(frontier)
+        expanded[:, 1:] |= frontier[:, :-1]
+        expanded[:, :-1] |= frontier[:, 1:]
+        expanded[1:, :] |= frontier[:-1, :]
+        expanded[:-1, :] |= frontier[1:, :]
+        frontier = expanded & unseen
+        if not np.any(frontier):
+            break
+        distances[frontier] = distance
+        unseen[frontier] = False
+    return distances.reshape(-1)
+
+
 def _nearest_feature_owners(
     mask: Sequence[bool],
     feature_grid: Sequence[int],
@@ -345,48 +417,68 @@ def _nearest_feature_owners(
     cells: int,
     maximum: int,
     fallback_feature_id: str,
-) -> tuple[str, ...]:
-    """Propagate the nearest source feature ID into a bounded transition band.
+) -> _OwnerField:
+    """Propagate nearest source ownership across a shallow transition band.
 
-    Ties are resolved lexicographically, so ownership is stable even when two
-    polygons are equally close to a terrain cell. Coastline flood-fill water has
-    no polygon ID and therefore uses a deterministic coastline feature signature.
+    Ownership used to be a Python string plus deque entry for every selected
+    terrain cell. Large forest/water masks made that one of the heaviest parts
+    of the surface pass. Propagate compact lexical ranks over the already-bounded
+    distance field instead; ties still choose the lexicographically smaller ID.
     """
-    owners = [""] * (cells * cells)
-    distances = [cells * cells + 1] * (cells * cells)
-    queue: deque[int] = deque()
-    for index, selected in enumerate(mask):
-        if not selected:
+    selected = np.asarray(mask, dtype=np.bool_).reshape(-1)
+    grid = np.asarray(feature_grid, dtype=np.int32).reshape(-1)
+    distances = _distance_array_from_mask(selected, cells, maximum).reshape((cells, cells))
+
+    labels = tuple(sorted(set(feature_ids[1:]) | {fallback_feature_id}))
+    label_rank = {label: rank for rank, label in enumerate(labels)}
+    fallback_rank = label_rank[fallback_feature_id]
+    feature_ranks = np.full(max(1, len(feature_ids)), fallback_rank, dtype=np.int32)
+    for feature_number in range(1, len(feature_ids)):
+        feature_ranks[feature_number] = label_rank[feature_ids[feature_number]]
+
+    ranks = np.full(cells * cells, -1, dtype=np.int32)
+    if np.any(selected):
+        selected_numbers = grid[selected]
+        valid = (selected_numbers > 0) & (selected_numbers < len(feature_ranks))
+        seeded = np.full(selected_numbers.shape, fallback_rank, dtype=np.int32)
+        seeded[valid] = feature_ranks[selected_numbers[valid]]
+        ranks[selected] = seeded
+    ranks_grid = ranks.reshape((cells, cells))
+    sentinel = np.iinfo(np.int32).max
+
+    for distance in range(1, maximum + 1):
+        current = distances == distance
+        if not np.any(current):
             continue
-        feature_number = feature_grid[index] if index < len(feature_grid) else 0
-        owner = feature_ids[feature_number] if 0 < feature_number < len(feature_ids) else fallback_feature_id
-        owners[index] = owner
-        distances[index] = 0
-        queue.append(index)
-    while queue:
-        index = queue.popleft()
-        distance = distances[index]
-        if distance >= maximum:
-            continue
-        x, z = index % cells, index // cells
-        for nx, nz in ((x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)):
-            if not (0 <= nx < cells and 0 <= nz < cells):
-                continue
-            neighbour = nz * cells + nx
-            candidate_distance = distance + 1
-            candidate_owner = owners[index]
-            if candidate_distance < distances[neighbour]:
-                distances[neighbour] = candidate_distance
-                owners[neighbour] = candidate_owner
-                queue.append(neighbour)
-            elif candidate_distance == distances[neighbour] and candidate_owner and (not owners[neighbour] or candidate_owner < owners[neighbour]):
-                owners[neighbour] = candidate_owner
-                queue.append(neighbour)
-    return tuple(owners)
+        best = np.full((cells, cells), sentinel, dtype=np.int32)
+
+        valid = distances[:, :-1] == distance - 1
+        candidate = np.where(valid, ranks_grid[:, :-1], sentinel)
+        np.minimum(best[:, 1:], candidate, out=best[:, 1:])
+
+        valid = distances[:, 1:] == distance - 1
+        candidate = np.where(valid, ranks_grid[:, 1:], sentinel)
+        np.minimum(best[:, :-1], candidate, out=best[:, :-1])
+
+        valid = distances[:-1, :] == distance - 1
+        candidate = np.where(valid, ranks_grid[:-1, :], sentinel)
+        np.minimum(best[1:, :], candidate, out=best[1:, :])
+
+        valid = distances[1:, :] == distance - 1
+        candidate = np.where(valid, ranks_grid[1:, :], sentinel)
+        np.minimum(best[:-1, :], candidate, out=best[:-1, :])
+
+        assign = current & (best != sentinel)
+        ranks_grid[assign] = best[assign]
+
+    return _OwnerField(ranks_grid.reshape(-1), labels)
 
 
 def _distance_from_mask(mask: Sequence[bool], cells: int, maximum: int | None = None) -> tuple[int, ...]:
     infinity = cells * cells + 1
+    if maximum is not None:
+        return tuple(int(value) for value in _distance_array_from_mask(mask, cells, maximum))
+
     distances = [infinity] * len(mask)
     queue: deque[int] = deque()
     for index, selected in enumerate(mask):
@@ -396,8 +488,6 @@ def _distance_from_mask(mask: Sequence[bool], cells: int, maximum: int | None = 
     while queue:
         index = queue.popleft()
         distance = distances[index]
-        if maximum is not None and distance >= maximum:
-            continue
         x, z = index % cells, index // cells
         for nx, nz in ((x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)):
             if not (0 <= nx < cells and 0 <= nz < cells):
@@ -500,9 +590,9 @@ def build_surface_pass(
     # The OSM mask may contain elevated ponds that the terrain solver correctly
     # preserved because CWA has no elevated water surfaces. Treat mapped water as
     # actual surface water only where the solved terrain reaches the global plane.
-    surface_water = tuple(
-        bool(mapped) and float(elevation) <= float(spec.sea_level) + 1.0e-7
-        for mapped, elevation in zip(raster.water, elevations)
+    surface_water = (
+        np.asarray(raster.water, dtype=np.bool_)
+        & (np.asarray(elevations, dtype=np.float64) <= float(spec.sea_level) + 1.0e-7)
     )
 
     wet_cells = int(getattr(spec, "surface_shoreline_wet_cells", 1))
@@ -568,141 +658,187 @@ def build_surface_pass(
         dirt_blend_metres,
     )
     maximum_shore_distance = wet_cells + sand_cells + transition_cells
-    water_distance = _distance_from_mask(surface_water, cells, maximum_shore_distance)
+    water_distance = _distance_array_from_mask(surface_water, cells, maximum_shore_distance)
     coastline_signature = "coastline:" + "|".join(sorted(feature.osm_key for feature in dataset.coastlines))
     if coastline_signature == "coastline:":
         coastline_signature = "water-mask"
     water_owners = _nearest_feature_owners(
         surface_water, water_grid, water_ids, cells, maximum_shore_distance, coastline_signature
     )
-    outside_forest = tuple(not value for value in raster.forest)
-    forest_inside_distance = _distance_from_mask(outside_forest, cells, forest_edge_cells + 1)
-    forest_distance = _distance_from_mask(raster.forest, cells, forest_edge_cells + 1)
+    outside_forest = np.logical_not(np.asarray(raster.forest, dtype=np.bool_))
+    forest_inside_distance = _distance_array_from_mask(outside_forest, cells, forest_edge_cells + 1)
+    forest_distance = _distance_array_from_mask(raster.forest, cells, forest_edge_cells + 1)
     forest_owners = _nearest_feature_owners(
         raster.forest, forest_grid, forest_ids, cells, forest_edge_cells + 1, "forest-mask"
     )
     reference = _load_reference(reference_path, cells)
 
-    result = [MATERIAL_INDEX["g"]] * expected
-    reference_cells = 0
+    # Keep classification grids in compact NumPy arrays. The old implementation
+    # repeatedly walked several-million-element Python tuples for every material
+    # layer; most of these layers are simple boolean masks and are far cheaper in
+    # vectorized form.
+    result = np.full(expected, MATERIAL_INDEX["g"], dtype=np.int16)
+    water_np = np.asarray(surface_water, dtype=np.bool_)
+    elevations_np = np.asarray(elevations, dtype=np.float64)
+    slopes_np = np.asarray(slopes, dtype=np.float64)
+    buildings_np = np.asarray(raster.buildings, dtype=np.bool_)
+    roads_np = np.asarray(raster.roads, dtype=np.bool_)
+    farmland_raster_np = np.asarray(raster.farmland, dtype=np.bool_)
+    forest_raster_np = np.asarray(raster.forest, dtype=np.bool_)
+    urban_raster_np = np.asarray(raster.urban, dtype=np.bool_)
+    farmland_grid_np = np.asarray(farmland_grid, dtype=np.int32)
+    forest_grid_np = np.asarray(forest_grid, dtype=np.int32)
+    urban_grid_np = np.asarray(urban_grid, dtype=np.int32)
     feature_seed_ids: set[str] = set()
 
-    # Natural base, including height and steep-slope materials.
-    for index, (elevation, slope) in enumerate(zip(elevations, slopes)):
-        if surface_water[index] or elevation <= spec.sea_level:
-            result[index] = MATERIAL_INDEX["w"]
-        elif slope >= steep_slope:
-            result[index] = MATERIAL_INDEX["k"]
-        elif slope >= spec.rock_slope_degrees:
-            result[index] = MATERIAL_INDEX["r"]
-        else:
-            dryness = _stable_fraction(seed, "world", "dry-grass", index % cells, index // cells)
-            result[index] = MATERIAL_INDEX["h"] if dryness < 0.18 else MATERIAL_INDEX["g"]
-            if reference is not None and reference_strength > 0:
-                result[index] = _reference_natural_material(result[index], reference[index], reference_strength)
-                reference_cells += 1
+    # Natural base. The visual dry-grass breakup remains deterministic, but is
+    # generated as one vectorized integer field rather than millions of BLAKE2
+    # calls. This intentionally changes only the pseudo-random micro-pattern.
+    base_water = water_np | (elevations_np <= spec.sea_level)
+    steep_mask = (~base_water) & (slopes_np >= steep_slope)
+    rock_mask = (~base_water) & (~steep_mask) & (slopes_np >= spec.rock_slope_degrees)
+    natural_mask = ~(base_water | steep_mask | rock_mask)
+    result[base_water] = MATERIAL_INDEX["w"]
+    result[steep_mask] = MATERIAL_INDEX["k"]
+    result[rock_mask] = MATERIAL_INDEX["r"]
+    dryness = _stable_grid_fraction(seed, "world", "dry-grass", cells).reshape(-1)
+    result[natural_mask] = np.where(
+        dryness[natural_mask] < 0.18, MATERIAL_INDEX["h"], MATERIAL_INDEX["g"]
+    )
+    reference_cells = 0
+    if reference is not None and reference_strength > 0:
+        for index in np.flatnonzero(natural_mask):
+            result[index] = _reference_natural_material(
+                int(result[index]), reference[int(index)], reference_strength
+            )
+            reference_cells += 1
 
-    # Farmland subdivisions are owned by the source feature ID, not global RNG.
-    for index, feature_number in enumerate(farmland_grid):
-        if feature_number <= 0 or surface_water[index] or result[index] in {MATERIAL_INDEX["r"], MATERIAL_INDEX["k"]}:
+    # Farmland subdivisions. Work feature-by-feature so orientation/phase hashing
+    # occurs once per OSM field rather than once per cell.
+    x_grid = np.tile(np.arange(cells, dtype=np.int32), cells)
+    z_grid = np.repeat(np.arange(cells, dtype=np.int32), cells)
+    farmland_boundary = _feature_boundary_mask(farmland_grid_np.reshape((cells, cells))).reshape(-1)
+    farmland_valid = (
+        (farmland_grid_np > 0)
+        & (~water_np)
+        & (result != MATERIAL_INDEX["r"])
+        & (result != MATERIAL_INDEX["k"])
+    )
+    for feature_number in np.unique(farmland_grid_np[farmland_valid]):
+        if feature_number <= 0:
             continue
-        feature_id = farmland_ids[feature_number]
+        feature_id = farmland_ids[int(feature_number)]
         feature_seed_ids.add(feature_id)
-        x, z = index % cells, index // cells
+        selected = farmland_valid & (farmland_grid_np == feature_number)
+        boundary = selected & farmland_boundary
+        result[boundary] = MATERIAL_INDEX["c"]
+        interior = selected & (~farmland_boundary)
+        if not np.any(interior):
+            continue
         orientation = _stable_u32(seed, feature_id, "field-orientation") % 4
         if orientation == 0:
-            coordinate = x
+            coordinate = x_grid
         elif orientation == 1:
-            coordinate = z
+            coordinate = z_grid
         elif orientation == 2:
-            coordinate = x + z
+            coordinate = x_grid + z_grid
         else:
-            coordinate = x - z
+            coordinate = x_grid - z_grid
         phase = _stable_u32(seed, feature_id, "field-phase") % max(1, field_width * 2)
-        stripe = math.floor((coordinate + phase) / max(1, field_width))
-        if _feature_boundary(farmland_grid, cells, index):
-            result[index] = MATERIAL_INDEX["c"]
-        else:
-            result[index] = MATERIAL_INDEX["a" if stripe % 2 == 0 else "b"]
+        stripe_even = ((coordinate + phase) // max(1, field_width)) % 2 == 0
+        result[interior & stripe_even] = MATERIAL_INDEX["a"]
+        result[interior & (~stripe_even)] = MATERIAL_INDEX["b"]
 
-    # Forest interior and its ground edge band.
-    for index, feature_number in enumerate(forest_grid):
-        if feature_number <= 0 or surface_water[index] or result[index] in {MATERIAL_INDEX["r"], MATERIAL_INDEX["k"]}:
-            continue
-        feature_id = forest_ids[feature_number]
+    # Forest interior and ground-edge band.
+    forest_inside_np = np.asarray(forest_inside_distance, dtype=np.int32)
+    forest_valid = (
+        (forest_grid_np > 0)
+        & (~water_np)
+        & (result != MATERIAL_INDEX["r"])
+        & (result != MATERIAL_INDEX["k"])
+    )
+    result[forest_valid & (forest_inside_np <= forest_edge_cells)] = MATERIAL_INDEX["e"]
+    result[forest_valid & (forest_inside_np > forest_edge_cells)] = MATERIAL_INDEX["f"]
+    for feature_number in np.unique(forest_grid_np[forest_valid]):
+        if feature_number > 0:
+            feature_seed_ids.add(forest_ids[int(feature_number)])
+    forest_distance_np = np.asarray(forest_distance, dtype=np.int32)
+    outer_candidates = np.flatnonzero(
+        (forest_distance_np == 1)
+        & (~water_np)
+        & (~forest_raster_np)
+        & (~farmland_raster_np)
+        & (~urban_raster_np)
+    )
+    for raw_index in outer_candidates:
+        index = int(raw_index)
+        feature_id = forest_owners[index] or "forest-mask"
         feature_seed_ids.add(feature_id)
-        if forest_inside_distance[index] <= forest_edge_cells:
+        if _stable_fraction(seed, feature_id, "forest-outer-edge", index % cells, index // cells) < 0.68:
             result[index] = MATERIAL_INDEX["e"]
-        else:
-            result[index] = MATERIAL_INDEX["f"]
-    for index, distance in enumerate(forest_distance):
-        if distance == 1 and not surface_water[index] and not raster.forest[index] and not raster.farmland[index] and not raster.urban[index]:
-            feature_id = forest_owners[index] or "forest-mask"
-            feature_seed_ids.add(feature_id)
-            if _stable_fraction(seed, feature_id, "forest-outer-edge", index % cells, index // cells) < 0.68:
-                result[index] = MATERIAL_INDEX["e"]
 
-    # Urban areas are deterministic solid surfaces; industrial tags and industrial
-    # building footprints select a darker, rougher material.
+    # Urban areas. Solid interiors are vectorized; only stochastic polygon-edge
+    # breakup requires per-cell hashing.
+    industrial_np = np.asarray(industrial_mask, dtype=np.bool_) | np.asarray(industrial_building_mask, dtype=np.bool_)
+    urban_valid = (urban_grid_np > 0) & (~water_np)
+    result[urban_valid & industrial_np] = MATERIAL_INDEX["i"]
+    result[urban_valid & (~industrial_np)] = MATERIAL_INDEX["u"]
+    for feature_number in np.unique(urban_grid_np[urban_valid]):
+        if feature_number > 0:
+            feature_seed_ids.add(urban_ids[int(feature_number)])
     softened = 0
-    for index, feature_number in enumerate(urban_grid):
-        if feature_number <= 0 or surface_water[index]:
-            continue
-        feature_id = urban_ids[feature_number]
-        feature_seed_ids.add(feature_id)
-        industrial = industrial_mask[index] or industrial_building_mask[index]
-        selected = MATERIAL_INDEX["i" if industrial else "u"]
-        if _feature_boundary(urban_grid, cells, index):
-            # Stable edge breakup prevents perfect 50 m polygon steps.
-            if _stable_fraction(seed, feature_id, "urban-edge", index % cells, index // cells) < 0.24:
-                selected = MATERIAL_INDEX["g"]
-                softened += 1
-        result[index] = selected
-    for index, building in enumerate(raster.buildings):
-        if building and not surface_water[index] and urban_grid[index] == 0:
-            result[index] = MATERIAL_INDEX["i" if industrial_building_mask[index] else "u"]
-
-    # Explicit OSM natural/leisure surface polygons override broad land-use
-    # categories, while buildings remain solid. Parks inside residential areas
-    # therefore stay green instead of being paved by the surrounding polygon.
-    grassland_count = park_count = sports_count = mapped_sand_count = 0
-    for index in range(expected):
-        if surface_water[index] or raster.buildings[index]:
-            continue
-        if mapped_beach_mask[index]:
-            result[index] = MATERIAL_INDEX["x"]
-            mapped_sand_count += 1
-        elif mapped_sand_mask[index]:
-            result[index] = MATERIAL_INDEX["s"]
-            mapped_sand_count += 1
-        elif sports_mask[index]:
-            # Sports pitches use the standard grass terrain slot directly. Do
-            # not paint a generated semantic slab over the pitch; this also
-            # covers pitches such as ice-hockey Way 239731757 regardless of
-            # surface=asphalt.
-            result[index] = MATERIAL_INDEX["y"]
-            sports_count += 1
-        elif park_mask[index]:
-            result[index] = MATERIAL_INDEX["j"]
-            park_count += 1
-        elif grassland_mask[index]:
+    urban_boundary = _feature_boundary_mask(urban_grid_np.reshape((cells, cells))).reshape(-1)
+    for raw_index in np.flatnonzero(urban_valid & urban_boundary):
+        index = int(raw_index)
+        feature_id = urban_ids[int(urban_grid_np[index])]
+        if _stable_fraction(seed, feature_id, "urban-edge", index % cells, index // cells) < 0.24:
             result[index] = MATERIAL_INDEX["g"]
-            grassland_count += 1
+            softened += 1
+    nonurban_buildings = buildings_np & (~water_np) & (urban_grid_np == 0)
+    result[nonurban_buildings & industrial_np] = MATERIAL_INDEX["i"]
+    result[nonurban_buildings & (~industrial_np)] = MATERIAL_INDEX["u"]
 
-    # Runways, taxiways, aprons and helipads are paved surfaces. An aerodrome
-    # boundary itself is deliberately not painted as one enormous slab.
-    aeroway_count = 0
-    for index, selected in enumerate(aeroway_mask):
-        if selected and not surface_water[index] and not raster.buildings[index]:
-            result[index] = MATERIAL_INDEX["p"]
-            aeroway_count += 1
+    # Explicit OSM natural/leisure polygons, preserving the historical priority.
+    eligible = (~water_np) & (~buildings_np)
+    beach_np = np.asarray(mapped_beach_mask, dtype=np.bool_)
+    sand_np = np.asarray(mapped_sand_mask, dtype=np.bool_)
+    sports_np = np.asarray(sports_mask, dtype=np.bool_)
+    park_np = np.asarray(park_mask, dtype=np.bool_)
+    grass_np = np.asarray(grassland_mask, dtype=np.bool_)
+    beach_selected = eligible & beach_np
+    sand_selected = eligible & (~beach_np) & sand_np
+    sports_selected = eligible & (~beach_np) & (~sand_np) & sports_np
+    park_selected = eligible & (~beach_np) & (~sand_np) & (~sports_np) & park_np
+    grass_selected = eligible & (~beach_np) & (~sand_np) & (~sports_np) & (~park_np) & grass_np
+    result[grass_selected] = MATERIAL_INDEX["g"]
+    result[park_selected] = MATERIAL_INDEX["j"]
+    result[sports_selected] = MATERIAL_INDEX["y"]
+    result[sand_selected] = MATERIAL_INDEX["s"]
+    result[beach_selected] = MATERIAL_INDEX["x"]
+    grassland_count = int(np.count_nonzero(grass_selected))
+    park_count = int(np.count_nonzero(park_selected))
+    sports_count = int(np.count_nonzero(sports_selected))
+    mapped_sand_count = int(np.count_nonzero(beach_selected | sand_selected))
 
-    # Multi-band shoreline. Band-edge dither is stable per world cell.
+    aeroway_np = np.asarray(aeroway_mask, dtype=np.bool_)
+    aeroway_selected = aeroway_np & (~water_np) & (~buildings_np)
+    result[aeroway_selected] = MATERIAL_INDEX["p"]
+    aeroway_count = int(np.count_nonzero(aeroway_selected))
+
+    # Multi-band shoreline. This region is normally only a thin perimeter, so
+    # keep source-owner hashing on the candidate cells while avoiding a full-grid
+    # Python scan.
     wet_count = 0
     dry_count = 0
-    for index, distance in enumerate(water_distance):
-        if surface_water[index] or raster.roads[index] or raster.buildings[index] or distance <= 0:
-            continue
+    water_distance_np = np.asarray(water_distance, dtype=np.int32)
+    shore_candidates = np.flatnonzero(
+        (~water_np) & (~roads_np) & (~buildings_np)
+        & (water_distance_np > 0)
+        & (water_distance_np <= maximum_shore_distance)
+    )
+    for raw_index in shore_candidates:
+        index = int(raw_index)
+        distance = int(water_distance_np[index])
         feature_id = water_owners[index] or coastline_signature
         feature_seed_ids.add(feature_id)
         jitter = _stable_fraction(seed, feature_id, "shoreline-band", index % cells, index // cells) - 0.5
@@ -718,50 +854,34 @@ def build_surface_pass(
                 result[index] = MATERIAL_INDEX["h"]
                 softened += 1
 
-    # Road blends are below road centres but above natural and land-use surfaces.
-    shoulder_count = 0
-    dirt_blend_count = 0
+    # Roads and shoulders are pure mask overlays.
+    paved_np = np.asarray(paved, dtype=np.bool_)
+    paved_expanded_np = np.asarray(paved_expanded, dtype=np.bool_)
+    dirt_np = np.asarray(dirt, dtype=np.bool_)
+    dirt_expanded_np = np.asarray(dirt_expanded, dtype=np.bool_)
+    gravel_np = np.asarray(gravel, dtype=np.bool_)
+    valid_road_ground = (~water_np) & (~buildings_np)
+    paved_shoulder = valid_road_ground & paved_expanded_np & (~paved_np) & (~dirt_np)
+    dirt_shoulder = valid_road_ground & dirt_expanded_np & (~dirt_np) & (~paved_np) & (~gravel_np)
+    result[paved_shoulder] = MATERIAL_INDEX["o"]
+    result[dirt_shoulder] = MATERIAL_INDEX["t"]
+    shoulder_count = int(np.count_nonzero(paved_shoulder))
+    dirt_blend_count = int(np.count_nonzero(dirt_shoulder))
     gravel_blend_count = 0
-    for index in range(expected):
-        if surface_water[index] or raster.buildings[index]:
-            continue
-        if paved_expanded[index] and not paved[index] and not dirt[index]:
-            result[index] = MATERIAL_INDEX["o"]
-            shoulder_count += 1
-        if dirt_expanded[index] and not dirt[index] and not paved[index] and not gravel[index]:
-            result[index] = MATERIAL_INDEX["t"]
-            dirt_blend_count += 1
-        # Gravel intentionally has no generated terrain shoulder. The visible
-        # road ribbon recedes irregularly and lets the world's existing ground
-        # material show through at the verge, matching the stock dirt-road idea.
-    paved_count = 0
-    dirt_count = 0
-    gravel_count = 0
-    for index in range(expected):
-        if surface_water[index]:
-            continue
-        # Gravel road objects deliberately leave the underlying world terrain
-        # material intact. Their irregular visual ribbon supplies the aggregate,
-        # while exposed verge pixels show the game's real grass/soil/farmland.
-        # Dirt and paved roads retain their existing terrain replacement rules.
-        if dirt[index] and not paved[index]:
-            result[index] = MATERIAL_INDEX["d"]
-        if paved[index]:
-            result[index] = MATERIAL_INDEX["p"]
 
-        if paved[index]:
-            paved_count += 1
-        elif dirt[index]:
-            dirt_count += 1
-        elif gravel[index]:
-            gravel_count += 1
-    for index, water in enumerate(surface_water):
-        if water:
-            result[index] = MATERIAL_INDEX["w"]
+    dirt_centres = (~water_np) & dirt_np & (~paved_np)
+    paved_centres = (~water_np) & paved_np
+    result[dirt_centres] = MATERIAL_INDEX["d"]
+    result[paved_centres] = MATERIAL_INDEX["p"]
+    result[water_np] = MATERIAL_INDEX["w"]
+    paved_count = int(np.count_nonzero((~water_np) & paved_np))
+    dirt_count = int(np.count_nonzero((~water_np) & (~paved_np) & dirt_np))
+    gravel_count = int(np.count_nonzero((~water_np) & (~paved_np) & (~dirt_np) & gravel_np))
 
-    counts = {code: result.count(material_index) for code, material_index in MATERIAL_INDEX.items()}
+    counts_array = np.bincount(result.astype(np.int32), minlength=len(MILESTONE9_MATERIALS))
+    counts = {code: int(counts_array[material_index]) for code, material_index in MATERIAL_INDEX.items()}
     return SurfacePassReport(
-        indices=tuple(result),
+        indices=tuple(int(value) for value in result),
         shoreline_cells=wet_count + dry_count,
         softened_landuse_cells=softened,
         wet_shoreline_cells=wet_count,

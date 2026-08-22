@@ -384,7 +384,7 @@ class Milestone5Tests(unittest.TestCase):
                 patch("urllib.request.urlopen", side_effect=OSError("offline")),
                 patch("cwr_worldgen.location_example.time.sleep", return_value=None),
             ):
-                with self.assertRaisesRegex(RuntimeError, "Overpass endpoints failed"):
+                with self.assertRaisesRegex(RuntimeError, "Overpass is still unavailable"):
                     fetch_sources(refresh)
             self.assertEqual(before, bundle.manifest_path.read_bytes())
             self.assertTrue(validate_source_bundle(root).valid)

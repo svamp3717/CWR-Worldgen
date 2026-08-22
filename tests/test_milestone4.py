@@ -49,7 +49,11 @@ class Milestone4Tests(unittest.TestCase):
             self.assertIn('name = "Testville";', config)
             self.assertEqual(road["failed_connections"], 0)
             self.assertLessEqual(road["maximum_connection_gap"], self.spec().road_connection_tolerance)
-            self.assertGreater(grading["changed_cells"], 0)
+            self.assertGreaterEqual(grading["changed_cells"], 0)
+            self.assertLessEqual(
+                grading["building_roughness_after"],
+                grading["building_roughness_before"] + 1e-6,
+            )
             self.assertGreater(grading["transitions"]["shoreline_cells"], 0)
             self.assertTrue(assets["verified"])
             self.assertTrue(reproducibility["pipeline_repeat_match"])

@@ -1,0 +1,544 @@
+{
+  "schema_version": 2,
+  "map_region_number": 4,
+  "identifier": "caribbean",
+  "display_name": "Caribbean",
+  "priority": 60,
+  "match": {
+    "country_aliases": [
+      "cu",
+      "cub",
+      "cuba",
+      "jm",
+      "jam",
+      "jamaica",
+      "ht",
+      "hti",
+      "haiti",
+      "do",
+      "dom",
+      "dominican republic",
+      "bs",
+      "bhs",
+      "bahamas",
+      "bb",
+      "brb",
+      "barbados",
+      "tt",
+      "tto",
+      "trinidad and tobago",
+      "ag",
+      "atg",
+      "antigua and barbuda",
+      "dm",
+      "dma",
+      "dominica",
+      "gd",
+      "grd",
+      "grenada",
+      "kn",
+      "kna",
+      "saint kitts and nevis",
+      "lc",
+      "lca",
+      "saint lucia",
+      "vc",
+      "vct",
+      "saint vincent and the grenadines",
+      "pr",
+      "pri",
+      "puerto rico"
+    ],
+    "polygon_lon_lat": [],
+    "envelopes_lon_lat": [
+      [
+        -86,
+        9,
+        -59,
+        28
+      ]
+    ]
+  },
+  "contexts": {
+    "rural": {
+      "description": "Tropical wood or concrete house with veranda and shutters.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [
+          {
+            "field": "building:material",
+            "values": [
+              "timber_framing",
+              "timber_frame",
+              "half_timbered",
+              "half-timbered",
+              "fachwerk"
+            ],
+            "style": "western_half_timber"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "brick",
+              "bricks"
+            ],
+            "style": "western_brick"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "red",
+              "dark_red",
+              "brown",
+              "brown-red",
+              "brown_red",
+              "terracotta"
+            ],
+            "style": "western_brick"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "stone",
+              "limestone",
+              "sandstone",
+              "granite",
+              "slate"
+            ],
+            "style": "western_stone"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "plaster",
+              "stucco",
+              "render",
+              "masonry"
+            ],
+            "style": "western_stucco"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "white",
+              "off_white",
+              "cream",
+              "ivory",
+              "beige",
+              "yellow",
+              "ochre",
+              "light_grey",
+              "light_gray"
+            ],
+            "style": "western_stucco"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "wood",
+              "timber",
+              "metal",
+              "glass",
+              "concrete",
+              "precast_concrete"
+            ],
+            "style": "default"
+          }
+        ],
+        "family_distributions": {
+          "urban": [
+            {
+              "lt": 45,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 76,
+              "style": "western_brick"
+            },
+            {
+              "lt": 90,
+              "style": "western_stone"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 42,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 73,
+              "style": "western_brick"
+            },
+            {
+              "lt": 87,
+              "style": "western_stone"
+            },
+            {
+              "lt": 95,
+              "style": "western_half_timber"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "shop": [
+            {
+              "lt": 42,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 73,
+              "style": "western_brick"
+            },
+            {
+              "lt": 87,
+              "style": "western_stone"
+            },
+            {
+              "lt": 95,
+              "style": "western_half_timber"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "school": [
+            {
+              "lt": 42,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 73,
+              "style": "western_brick"
+            },
+            {
+              "lt": 87,
+              "style": "western_stone"
+            },
+            {
+              "lt": 95,
+              "style": "western_half_timber"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "agricultural": [
+            {
+              "lt": 38,
+              "style": "western_stone"
+            },
+            {
+              "lt": 68,
+              "style": "western_brick"
+            },
+            {
+              "lt": 84,
+              "style": "western_half_timber"
+            },
+            {
+              "lt": 95,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "*": [
+            {
+              "lt": 68,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 77,
+              "style": "western_brick"
+            },
+            {
+              "lt": 88,
+              "style": "western_stone"
+            },
+            {
+              "lt": 92,
+              "style": "western_half_timber"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    },
+    "town_city": {
+      "description": "Tropical townhouses and low-rise homes with verandas and shutters.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [
+          {
+            "field": "building:material",
+            "values": [
+              "timber_framing",
+              "timber_frame",
+              "half_timbered",
+              "half-timbered",
+              "fachwerk"
+            ],
+            "style": "western_half_timber"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "brick",
+              "bricks"
+            ],
+            "style": "western_brick"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "red",
+              "dark_red",
+              "brown",
+              "brown-red",
+              "brown_red",
+              "terracotta"
+            ],
+            "style": "western_brick"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "stone",
+              "limestone",
+              "sandstone",
+              "granite",
+              "slate"
+            ],
+            "style": "western_stone"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "plaster",
+              "stucco",
+              "render",
+              "masonry"
+            ],
+            "style": "western_stucco"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "white",
+              "off_white",
+              "cream",
+              "ivory",
+              "beige",
+              "yellow",
+              "ochre",
+              "light_grey",
+              "light_gray"
+            ],
+            "style": "western_stucco"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "wood",
+              "timber",
+              "metal",
+              "glass",
+              "concrete",
+              "precast_concrete"
+            ],
+            "style": "default"
+          }
+        ],
+        "family_distributions": {
+          "urban": [
+            {
+              "lt": 45,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 76,
+              "style": "western_brick"
+            },
+            {
+              "lt": 90,
+              "style": "western_stone"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 42,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 73,
+              "style": "western_brick"
+            },
+            {
+              "lt": 87,
+              "style": "western_stone"
+            },
+            {
+              "lt": 95,
+              "style": "western_half_timber"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "shop": [
+            {
+              "lt": 42,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 73,
+              "style": "western_brick"
+            },
+            {
+              "lt": 87,
+              "style": "western_stone"
+            },
+            {
+              "lt": 95,
+              "style": "western_half_timber"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "school": [
+            {
+              "lt": 42,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 73,
+              "style": "western_brick"
+            },
+            {
+              "lt": 87,
+              "style": "western_stone"
+            },
+            {
+              "lt": 95,
+              "style": "western_half_timber"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "agricultural": [
+            {
+              "lt": 38,
+              "style": "western_stone"
+            },
+            {
+              "lt": 68,
+              "style": "western_brick"
+            },
+            {
+              "lt": 84,
+              "style": "western_half_timber"
+            },
+            {
+              "lt": 95,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "*": [
+            {
+              "lt": 68,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 77,
+              "style": "western_brick"
+            },
+            {
+              "lt": 88,
+              "style": "western_stone"
+            },
+            {
+              "lt": 92,
+              "style": "western_half_timber"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "residential": [
+            {
+              "lt": 42,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 73,
+              "style": "western_brick"
+            },
+            {
+              "lt": 87,
+              "style": "western_stone"
+            },
+            {
+              "lt": 95,
+              "style": "western_half_timber"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    }
+  }
+}

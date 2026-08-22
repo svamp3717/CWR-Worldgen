@@ -96,6 +96,22 @@ class Milestone1Tests(unittest.TestCase):
             self.assertNotIn("[FAIL]", report)
             self.assertIn("Failures: 0", report)
 
+    def test_clean_rebuild_preserves_unrelated_files_in_build_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "build"
+            output.mkdir(parents=True)
+            unrelated = output / "my-notes.txt"
+            unrelated.write_text("do not delete", encoding="utf-8")
+
+            first = build_milestone1(output)
+            self.assertTrue((output / ".cwr-worldgen-owned.json").is_file())
+            unrelated.write_text("still mine", encoding="utf-8")
+            second = build_milestone1(output)
+
+            self.assertTrue(first.wrp_path.is_file())
+            self.assertTrue(second.wrp_path.is_file())
+            self.assertEqual(unrelated.read_text(encoding="utf-8"), "still mine")
+
     def test_config_declares_world_owner_for_unsaved_editor_preview(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             result = build_milestone1(Path(temp) / "build")
@@ -142,7 +158,8 @@ class Milestone1Tests(unittest.TestCase):
         self.assertIn('position = "door1_action";', config)
         self.assertIn('displayName = "Open door";', config)
         self.assertIn('displayName = "Close door";', config)
-        self.assertEqual(config.count("radius = 4.0;"), 2)
+        self.assertIn('position = "door1_action_inside";', config)
+        self.assertEqual(config.count("radius = 5.0;"), 4)
         self.assertIn('statement = "this animate [""Door1"", 1]";', config)
         self.assertIn('statement = "this animate [""Door1"", 0]";', config)
 

@@ -10,6 +10,7 @@ import math
 from typing import Iterable, Mapping
 
 from .cache import cache_key, restore_or_create_file
+from .parallel_assets import process_asset_tasks
 from .procedural_buildings import (
     _Face,
     _Lod,
@@ -573,6 +574,47 @@ def write_forest_cluster_mlod(path: Path, variant: ForestClusterVariant, grade: 
             _write_lod(stream, lod)
 
 
+@dataclass(frozen=True, slots=True)
+class _ForestAssetTask:
+    key: ForestClusterModelKey
+    variant: ForestClusterVariant
+    wire: str
+    relative: str
+    destination: Path
+    cache_path: Path | None
+    cache_enabled: bool
+    cache_refresh: bool
+    usage_count: int
+
+
+def _write_forest_asset_task(task: _ForestAssetTask) -> tuple[dict[str, object], bool]:
+    hit = restore_or_create_file(
+        cache_path=task.cache_path,
+        destination=task.destination,
+        producer=lambda target: write_forest_cluster_mlod(target, task.variant, task.key.grade),
+        enabled=task.cache_enabled,
+        refresh=task.cache_refresh,
+    )
+    summary = inspect_mlod(task.destination)
+    proxy_names = tuple(
+        name
+        for lod_names in summary.selection_names
+        for name in lod_names
+        if name.casefold().startswith("proxy:")
+    )
+    if len(proxy_names) != len(task.variant.proxy_layout):
+        raise ValueError(f"forest cluster {task.key.variant!r} lost proxy selections")
+    return ({
+        "key": asdict(task.key),
+        "model_path": task.wire,
+        "relative_path": task.relative,
+        "usage_count": task.usage_count,
+        "proxy_count": len(proxy_names),
+        "proxy_models": sorted({entry[0] for entry in task.variant.proxy_layout}),
+        "sha256": sha256(task.destination.read_bytes()).hexdigest(),
+    }, hit)
+
+
 class ProceduralForestClusterLibrary:
     def __init__(
         self,
@@ -596,12 +638,16 @@ class ProceduralForestClusterLibrary:
         self.cache_misses = 0
         self._usage: Counter[ForestClusterModelKey] = Counter()
 
-    def register_model(self, model_path: str) -> None:
-        if not self.is_generated_model(model_path):
+    def register_model_usage(self, model_path: str, count: int = 1) -> None:
+        count = max(0, int(count))
+        if count == 0 or not self.is_generated_model(model_path):
             return
         stem = model_path.rsplit("\\", 1)[-1][2:-4]
         variant_name, grade_label = stem.rsplit("_", 1)
-        self._usage[ForestClusterModelKey(variant_name, int(grade_label) / 100.0)] += 1
+        self._usage[ForestClusterModelKey(variant_name, int(grade_label) / 100.0)] += count
+
+    def register_model(self, model_path: str) -> None:
+        self.register_model_usage(model_path, 1)
 
     def register_models(self, model_paths: Iterable[str]) -> None:
         for model_path in model_paths:
@@ -618,7 +664,7 @@ class ProceduralForestClusterLibrary:
         return tuple(sorted(models, key=str.casefold))
 
     def write_assets(self, source_dir: Path, catalogue_path: Path) -> ForestClusterAssetResult:
-        models: list[dict[str, object]] = []
+        model_tasks: list[_ForestAssetTask] = []
         for key in sorted(self._usage):
             variant = _profiled_cluster_variant(cluster_variant(key.variant), self.proxy_profile)
             wire = cluster_model_path(self.world_name, key.variant, key.grade)
@@ -635,33 +681,19 @@ class ProceduralForestClusterLibrary:
                 },
             )
             cached = self.cache_dir / "procedural-assets" / f"{asset_key}.p3d" if self.cache_dir else None
-            hit = restore_or_create_file(
-                cache_path=cached,
-                destination=destination,
-                producer=lambda target, variant=variant, grade=key.grade: write_forest_cluster_mlod(target, variant, grade),
-                enabled=self.cache_enabled,
-                refresh=self.cache_refresh,
-            )
+            model_tasks.append(_ForestAssetTask(
+                key=key, variant=variant, wire=wire, relative=relative,
+                destination=destination, cache_path=cached,
+                cache_enabled=self.cache_enabled, cache_refresh=self.cache_refresh,
+                usage_count=self._usage[key],
+            ))
+
+        model_results = process_asset_tasks(_write_forest_asset_task, model_tasks)
+        models: list[dict[str, object]] = []
+        for model, hit in model_results:
             self.cache_hits += int(hit)
             self.cache_misses += int(not hit)
-            summary = inspect_mlod(destination)
-            proxy_names = tuple(
-                name
-                for lod_names in summary.selection_names
-                for name in lod_names
-                if name.casefold().startswith("proxy:")
-            )
-            if len(proxy_names) != len(variant.proxy_layout):
-                raise ValueError(f"forest cluster {key.variant!r} lost proxy selections")
-            models.append({
-                "key": asdict(key),
-                "model_path": wire,
-                "relative_path": relative,
-                "usage_count": self._usage[key],
-                "proxy_count": len(proxy_names),
-                "proxy_models": sorted({entry[0] for entry in variant.proxy_layout}),
-                "sha256": sha256(destination.read_bytes()).hexdigest(),
-            })
+            models.append(model)
 
         document: dict[str, object] = {
             "schema": 1,

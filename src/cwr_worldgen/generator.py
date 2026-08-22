@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePath
+from itertools import chain
 import hashlib
 import json
 import math
@@ -13,13 +15,14 @@ from PIL import Image
 
 from .cache import (
     cache_key, file_snapshot, float_sequence_sha256, int_sequence_sha256,
-    load_or_create_pickle, restore_bundle, store_bundle,
+    load_or_create_pickle, restore_bundle, store_bundle, streaming_hash,
 )
 from .images import HeightmapLoadResult, load_heightmap, load_material_mask
 from .model import ConstraintPlayabilitySpec, HeightmapSpec, OsmSpec, PlayabilitySpec, WorldObject, WorldSpec
 from .paa import inspect_paa, write_rgb_dxt1_paa, write_solid_dxt1_paa
 from .pbo import PboPackResult, pack_directory, pack_directory_cached, read_pbo
 from ._version import GENERATOR_VERSION
+from .output_ownership import prepare_output_directory, record_build_ownership
 from .assets import canonical_asset_path, scan_assets, write_asset_catalogue
 from .asset_mapping import (
     collect_osm_asset_requirements,
@@ -81,6 +84,8 @@ from .osm import (
     NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS,
     NOGOVA_PINE_INDIVIDUAL_TREE_MODELS,
     STOCK_STONE_MODELS,
+    STOCK_FARMLAND_FENCE_MODELS,
+    STOCK_SETTLEMENT_DETAIL_MODELS,
     apply_water_elevations,
     attribution_text,
     forest_block_intersects_road_corridors,
@@ -454,8 +459,7 @@ def build_milestone1(output_dir: Path, spec: WorldSpec | None = None, *, clean: 
     spec = spec or WorldSpec()
     spec.validate()
     output_dir = output_dir.resolve()
-    if clean and output_dir.exists():
-        shutil.rmtree(output_dir)
+    prepare_output_directory(output_dir, spec.name, clean=clean)
 
     source_dir = output_dir / "source" / spec.name
     wrp_path = source_dir / f"{spec.name}.wrp"
@@ -559,6 +563,7 @@ def build_milestone1(output_dir: Path, spec: WorldSpec | None = None, *, clean: 
 
     lines = _validate_milestone1(result, spec)
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    record_build_ownership(output_dir, spec.name, manifest_path, merge=False)
     report_progress(100, "Build complete")
     return result
 
@@ -566,8 +571,7 @@ def build_milestone1(output_dir: Path, spec: WorldSpec | None = None, *, clean: 
 def build_milestone2(output_dir: Path, spec: HeightmapSpec, *, clean: bool = True) -> BuildResult:
     spec.validate()
     output_dir = output_dir.resolve()
-    if clean and output_dir.exists():
-        shutil.rmtree(output_dir)
+    prepare_output_directory(output_dir, spec.name, clean=clean)
 
     source_dir = output_dir / "source" / spec.name
     wrp_path = source_dir / f"{spec.name}.wrp"
@@ -767,6 +771,7 @@ def build_milestone2(output_dir: Path, spec: HeightmapSpec, *, clean: bool = Tru
 
     lines = _validate_milestone2(result, spec, loaded, elevations, material_indices, spawn)
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    record_build_ownership(output_dir, spec.name, manifest_path, merge=False)
     report_progress(100, "Build complete")
     return result
 
@@ -996,6 +1001,15 @@ def _validate_milestone3(
                 f"floating={generated.maximum_forest_float:.3f}/{maximum_float:.3f}m"
             ),
         ))
+        checks.append((
+            "Final vegetation grounding audit has no tree/proxy violations",
+            generated.vegetation_audit_violations == 0,
+            (
+                f"violations={generated.vegetation_audit_violations}, "
+                f"tree-float={generated.vegetation_audit_maximum_tree_float:.3f}m, "
+                f"bush-float={generated.vegetation_audit_maximum_bush_float:.3f}m"
+            ),
+        ))
     checks.append((
         "RVW4 object terminator present",
         summary.has_object_terminator,
@@ -1101,8 +1115,7 @@ def _validate_milestone3(
 def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> BuildResult:
     spec.validate()
     output_dir = output_dir.resolve()
-    if clean and output_dir.exists():
-        shutil.rmtree(output_dir)
+    prepare_output_directory(output_dir, spec.name, clean=clean)
 
     source_dir = output_dir / "source" / spec.name
     wrp_path = source_dir / f"{spec.name}.wrp"
@@ -1161,6 +1174,8 @@ def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> 
         water_depth=spec.water_depth,
         beach_height=spec.beach_height,
         blend_cells=spec.coastline_blend_cells,
+        cell_size=spec.cell_size,
+        maximum_shore_slope_percent=float(getattr(spec, "lake_shore_maximum_slope_percent", 8.0)),
     )
     for elevation in elevations:
         quantize_height(elevation, spec.height_scale)
@@ -1424,6 +1439,7 @@ def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> 
         generated,
     )
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    record_build_ownership(output_dir, spec.name, manifest_path, merge=False)
     report_progress(100, "Build complete")
     return result
 
@@ -1465,18 +1481,20 @@ def _generation_fingerprint(
     heightmap_sha256: str,
     osm_sha256: str,
 ) -> str:
-    document = {
-        "seed": spec.deterministic_seed,
-        "heightmap_sha256": heightmap_sha256,
-        "osm_sha256": osm_sha256,
-        "height_scale": spec.height_scale,
-        "elevations": [quantize_height(value, spec.height_scale) for value in elevations],
-        "materials": list(material_indices),
-        "objects": [asdict(value) for value in objects],
-        "towns": [asdict(value) for value in towns],
-    }
-    payload = _json_dumps(document, compact=True).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
+    # Do not turn a million compact objects into a million dictionaries and one
+    # enormous JSON/UTF-8 buffer merely to hash them. The versioned streaming
+    # encoding walks dataclasses and generators directly.
+    return streaming_hash(
+        "generation-fingerprint-v2",
+        spec.deterministic_seed,
+        heightmap_sha256,
+        osm_sha256,
+        spec.height_scale,
+        (quantize_height(value, spec.height_scale) for value in elevations),
+        material_indices,
+        objects,
+        towns,
+    )
 
 
 def _ground_texture_profile(spec: PlayabilitySpec) -> str:
@@ -1589,8 +1607,15 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
     if milestone_number >= 9 and bool(getattr(spec, "barriers_enabled", False)):
         trusted.update(
             canonical_asset_path(str(path))
-            for path in (*getattr(spec, "stock_hedge_models", ()), *getattr(spec, "stock_wall_models", ()), *getattr(spec, "stock_metal_fence_models", ()))
+            for path in (
+                *getattr(spec, "stock_hedge_models", ()),
+                *getattr(spec, "stock_wall_models", ()),
+                *getattr(spec, "stock_metal_fence_models", ()),
+                *STOCK_FARMLAND_FENCE_MODELS,
+            )
         )
+    if milestone_number >= 9 and bool(getattr(spec, "street_furniture_enabled", False)):
+        trusted.update(canonical_asset_path(path) for path in STOCK_SETTLEMENT_DETAIL_MODELS)
     return tuple(sorted(path for path in trusted if path))
 
 
@@ -1719,8 +1744,8 @@ def _validate_milestone4(
         ),
     ))
     checks.append((
-        "Material transitions generated",
-        transitions.shoreline_cells + transitions.softened_landuse_cells > 0 if spec.transition_cells > 0 else True,
+        "Material transition accounting is valid",
+        transitions.shoreline_cells >= 0 and transitions.softened_landuse_cells >= 0,
         f"shore={transitions.shoreline_cells}, landuse={transitions.softened_landuse_cells}",
     ))
     checks.append((
@@ -1899,6 +1924,15 @@ def _validate_milestone4(
                 f"floating={generated.maximum_forest_float:.3f}/{maximum_float:.3f}m"
             ),
         ))
+        checks.append((
+            "Final vegetation grounding audit has no tree/proxy violations",
+            generated.vegetation_audit_violations == 0,
+            (
+                f"violations={generated.vegetation_audit_violations}, "
+                f"tree-float={generated.vegetation_audit_maximum_tree_float:.3f}m, "
+                f"bush-float={generated.vegetation_audit_maximum_bush_float:.3f}m"
+            ),
+        ))
     checks.append((
         "All final elevations fit RVW4 int16 storage",
         all(-32768 <= quantize_height(value, spec.height_scale) <= 32767 for value in elevations),
@@ -1966,7 +2000,7 @@ def _write_float_heightmap(path: Path, elevations: Sequence[float], cells: int) 
 
 
 
-_STAGE_CACHE_SCHEMA = 2
+_STAGE_CACHE_SCHEMA = 3
 
 
 def _cache_settings(spec: object) -> tuple[Path | None, bool, bool]:
@@ -2018,7 +2052,7 @@ _PLACEMENT_CACHE_FIELDS = (
     "max_buildings", "building_minimum_area", "building_ground_clearance",
     "point_building_footprint", "generic_building_model", "urban_building_model",
     "industrial_building_model", "procedural_buildings", "procedural_building_interiors",
-    "high_quality_building_textures",
+    "high_quality_building_textures", "house_style_preset",
     "building_width_quantum",
     "building_length_quantum", "building_height_quantum", "building_minimum_width",
     "building_maximum_width", "building_minimum_length", "building_maximum_length",
@@ -2028,7 +2062,7 @@ _PLACEMENT_CACHE_FIELDS = (
     "building_foundation_safety", "building_maximum_pad_relief",
     "church_ground_clearance",
     "max_forest_objects", "forest_tree_spacing", "forest_road_clearance",
-    "forest_ground_clearance", "forest_profile", "forest_tree_model",
+    "forest_ground_clearance", "forest_profile", "forest_individual_objects_only", "forest_tree_model",
     "forest_low_anchor", "forest_maximum_block_relief",
     "forest_block_maximum_burial", "forest_block_maximum_float",
     "forest_block_maximum_ground_sink",
@@ -2041,6 +2075,7 @@ _PLACEMENT_CACHE_FIELDS = (
     "forest_cluster_fallback",
     "forest_cluster_search_radius", "forest_cluster_maximum_relief",
     "forest_cluster_maximum_burial", "forest_cluster_maximum_float",
+    "forest_cluster_tree_maximum_float", "forest_cluster_bush_maximum_float",
     "forest_cluster_footprint_margin", "forest_undergrowth_enabled",
     "forest_undergrowth_maximum_objects", "forest_undergrowth_spacing",
     "forest_undergrowth_maximum_relief", "forest_undergrowth_maximum_burial",
@@ -2059,7 +2094,9 @@ _PLACEMENT_CACHE_FIELDS = (
     "forest_roadside_bush_footprint",
     "maximum_forest_single_tree_objects", "forest_single_tree_spacing",
     "forest_single_tree_footprint", "forest_single_tree_maximum_relief",
-    "forest_single_tree_maximum_float",
+    "forest_single_tree_root_sink", "forest_single_tree_maximum_burial",
+    "forest_single_tree_maximum_float", "forest_gap_infill_enabled",
+    "forest_gap_infill_spacing",
     "ditch_grass_enabled", "maximum_ditch_grass_objects",
     "ditch_grass_spacing", "ditch_grass_endpoint_trim",
     "ditch_grass_maximum_relief", "ditch_grass_maximum_burial",
@@ -2069,6 +2106,11 @@ _PLACEMENT_CACHE_FIELDS = (
     "forest_hillside_tree_maximum_relief",
     "barriers_enabled", "maximum_barrier_objects", "barrier_segment_length",
     "stock_hedge_models", "stock_wall_models", "stock_metal_fence_models",
+    "sidewalks_enabled", "maximum_sidewalk_objects", "sidewalk_width",
+    "sidewalk_segment_length", "street_furniture_enabled",
+    "maximum_street_furniture_objects", "street_light_spacing",
+    "street_bench_every", "street_bin_every",
+    "match_nearby_building_textures", "nearby_building_texture_match_distance",
     "bridges_enabled", "procedural_bridges", "maximum_bridge_objects", "bridge_module_length",
     "bridge_deck_clearance", "bridge_water_clearance",
     "residential_infill_enabled", "maximum_residential_infill_buildings",
@@ -2177,7 +2219,7 @@ def _load_osm_raster(
         "cells": spec.cells,
         "include_minor_roads": spec.include_minor_roads,
     }
-    key = cache_key("osm-raster-v1", payload)
+    key = cache_key("osm-raster-v2-conservative-water-coverage", payload)
     path = cache_dir / "spatial" / f"raster-{key}.pickle" if cache_dir is not None else None
     if progress_callback is not None:
         progress_callback(0, "Checking OpenStreetMap raster cache")
@@ -2217,15 +2259,11 @@ def _load_terrain_solution(
         "dataset": dataset_identity,
         "spec": _spec_fields(spec, _TERRAIN_CACHE_FIELDS),
         "out_of_bounds_dem": file_snapshot(getattr(spec, "out_of_bounds_dem_path", None)),
-        "building_plans": hashlib.sha256(
-            json.dumps(
-                [asdict(plan) for plan in building_placement_plans],
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest(),
+        "building_plans": streaming_hash(
+            "terrain-building-plans-v2", building_placement_plans
+        ),
     }
-    key = cache_key("terrain-solution-v22-stock-nogova-bridge-default", payload)
+    key = cache_key("terrain-solution-v26-road-platform-dry-bridge-filter", payload)
     path = cache_dir / "terrain" / f"{key}.pickle" if cache_dir is not None else None
 
     def produce():
@@ -2246,6 +2284,8 @@ def _load_terrain_solution(
                 water_depth=spec.water_depth,
                 beach_height=spec.beach_height,
                 blend_cells=spec.coastline_blend_cells,
+                cell_size=spec.cell_size,
+                maximum_shore_slope_percent=float(getattr(spec, "lake_shore_maximum_slope_percent", 8.0)),
             )
             if progress_callback is not None:
                 progress_callback(45, "Grading roads and building pads")
@@ -2364,7 +2404,7 @@ def _load_surface_pipeline(
         "colour_reference": file_snapshot(getattr(spec, "surface_colour_reference_path", None)),
         "spec": _spec_fields(spec, _SURFACE_CACHE_FIELDS),
     }
-    key = cache_key("surface-pipeline-v10-sports-standard-grass-no-site-slab", payload)
+    key = cache_key("surface-pipeline-v11-vectorized-material-pass", payload)
     path = cache_dir / "surfaces" / f"{key}.pickle" if cache_dir is not None else None
     if progress_callback is not None:
         progress_callback(0, "Checking surface-mask cache")
@@ -2415,18 +2455,6 @@ def _placement_driven_surface_overlay(
     result = list(indices)
     forest_mask = [False] * len(result)
     rocky_mask = [False] * len(result)
-    forest_models = {
-        str(spec.forest_tree_model).casefold(),
-        str(getattr(spec, "forest_everon_steep_model", "")).casefold(),
-        str(getattr(spec, "forest_single_tree_model", "")).casefold(),
-        str(getattr(spec, "forest_hillside_tree_model", "")).casefold(),
-        str(getattr(spec, "forest_roadside_tree_model", "")).casefold(),
-        *(str(model).casefold() for model in getattr(spec, "forest_roadside_tree_models", ())),
-    }
-    forest_models.discard("")
-    compact_prefix = (spec.name + r"\f\c_").casefold()
-    rock_prefix = (spec.name + r"\i\rock_").casefold()
-    stock_rock_models = {path.casefold() for path in STOCK_STONE_MODELS}
     forest_radius = max(spec.cell_size * 0.55, float(getattr(spec, "forest_tree_spacing", 50.0)) * 0.48)
     # One failed 50 m forest block is a rocky *patch*, not a ten-metre coin
     # beneath one object. Paint enough of the rejected patch to make the stock
@@ -2461,17 +2489,47 @@ def _placement_driven_surface_overlay(
                     continue
                 mask[idx] = True
 
-    for obj in nonroads.objects:
-        model = obj.model_path.casefold()
-        if model in forest_models or model.startswith(compact_prefix):
-            paint(forest_mask, obj.x, obj.z, forest_radius, require_forest=True)
-        elif model.startswith(rock_prefix) or model in stock_rock_models:
-            col = min(spec.cells - 1, max(0, int(obj.x // spec.cell_size)))
-            row = min(spec.cells - 1, max(0, int(obj.z // spec.cell_size)))
-            index = row * spec.cells + col
-            minimum_rock_slope = float(getattr(spec, "rock_slope_degrees", 44.0))
-            if slopes[index] >= minimum_rock_slope:
-                paint(rocky_mask, obj.x, obj.z, rock_radius, require_forest=False)
+    # Placement now records only the coordinates relevant to this overlay while
+    # objects are emitted. Avoid another million-object pass and repeated path
+    # casefold/prefix classification here. Direct API/tests may still construct
+    # ObjectGenerationResult manually, so retain a compatibility fallback when
+    # no emission-time model aggregate exists.
+    if getattr(nonroads, "model_usage", ()) or not getattr(nonroads, "objects", ()):
+        forest_positions = tuple(getattr(nonroads, "surface_forest_positions", ()))
+        rock_positions = tuple(getattr(nonroads, "surface_rock_positions", ()))
+    else:
+        forest_models = {
+            str(spec.forest_tree_model).casefold(),
+            str(getattr(spec, "forest_everon_steep_model", "")).casefold(),
+            str(getattr(spec, "forest_single_tree_model", "")).casefold(),
+            str(getattr(spec, "forest_hillside_tree_model", "")).casefold(),
+            str(getattr(spec, "forest_roadside_tree_model", "")).casefold(),
+            *(str(model).casefold() for model in getattr(spec, "forest_roadside_tree_models", ())),
+        }
+        forest_models.discard("")
+        compact_prefix = (spec.name + r"\f\c_").casefold()
+        rock_prefix = (spec.name + r"\i\rock_").casefold()
+        stock_rock_models = {path.casefold() for path in STOCK_STONE_MODELS}
+        fallback_forest: list[tuple[float, float]] = []
+        fallback_rock: list[tuple[float, float]] = []
+        for obj in nonroads.objects:
+            model = obj.model_path.casefold()
+            if model in forest_models or model.startswith(compact_prefix):
+                fallback_forest.append((obj.x, obj.z))
+            elif model.startswith(rock_prefix) or model in stock_rock_models:
+                fallback_rock.append((obj.x, obj.z))
+        forest_positions = tuple(fallback_forest)
+        rock_positions = tuple(fallback_rock)
+
+    for x, z in forest_positions:
+        paint(forest_mask, x, z, forest_radius, require_forest=True)
+    minimum_rock_slope = float(getattr(spec, "rock_slope_degrees", 44.0))
+    for x, z in rock_positions:
+        col = min(spec.cells - 1, max(0, int(x // spec.cell_size)))
+        row = min(spec.cells - 1, max(0, int(z // spec.cell_size)))
+        index = row * spec.cells + col
+        if slopes[index] >= minimum_rock_slope:
+            paint(rocky_mask, x, z, rock_radius, require_forest=False)
 
     # Forest blocks often fail on sharply broken terrain. Do not leave those
     # holes as inexplicable bright grass. Where an OSM forest cell has no
@@ -2599,7 +2657,7 @@ def _load_nonroad_objects(
         "starting_object_id": starting_object_id,
         "spec": _spec_fields(spec, _PLACEMENT_CACHE_FIELDS),
     }
-    key = cache_key("nonroad-object-placement-v80-garage-clusters-single-bridges", payload)
+    key = cache_key("nonroad-object-placement-v95-generated-barn-clutter", payload)
     path = cache_dir / "placements" / f"{key}.pickle" if cache_dir is not None else None
 
     def produce():
@@ -2640,19 +2698,21 @@ def _assemble_world_objects(
     road_objects: Sequence[WorldObject],
     nonroads: ObjectGenerationResult,
     semantic_objects: Sequence[WorldObject],
+    *,
+    renumber: bool = True,
 ) -> tuple[WorldObject, ...]:
-    """Order static WRP records by gameplay importance and renumber IDs.
+    """Order static WRP records by gameplay importance.
 
-    ``generate_world_objects`` internally creates buildings before vegetation because
-    the building library is prepared first.  The RVW4 stream does not require that
-    construction order, however.  Forest blocks, forest clusters, individual trees,
-    and mapped rural vegetation are intentionally serialized before houses so that
-    vegetation is not the last large category encountered by the engine.
+    Build-scale callers pass ``renumber=False`` and let :func:`write_rvw4`
+    assign the final sequential wire IDs.  That avoids cloning up to a million
+    frozen ``WorldObject`` instances solely to change one integer.  The default
+    remains the historical renumbered result for direct/API callers and tests.
     """
 
     if nonroads.road_objects:
         raise ValueError("non-road object assembly received embedded road objects")
 
+    urban_detail_count = nonroads.sidewalk_objects + nonroads.street_furniture_objects
     building_count = nonroads.building_objects
     forest_count = (
         nonroads.forest_objects
@@ -2677,9 +2737,9 @@ def _assemble_world_objects(
     mapped_tree_count = nonroads.mapped_tree_objects
     utility_count = nonroads.utility_objects
 
-    objects = tuple(nonroads.objects)
+    objects = nonroads.objects
     expected_count = (
-        building_count + forest_count + ditch_count + barrier_count
+        urban_detail_count + building_count + forest_count + ditch_count + barrier_count
         + bridge_count + rural_count + mapped_tree_count + utility_count
     )
     if expected_count != len(objects):
@@ -2689,6 +2749,8 @@ def _assemble_world_objects(
         )
 
     cursor = 0
+    urban_details = objects[cursor : cursor + urban_detail_count]
+    cursor += urban_detail_count
     buildings = objects[cursor : cursor + building_count]
     cursor += building_count
     forests_and_trees = objects[cursor : cursor + forest_count]
@@ -2705,25 +2767,34 @@ def _assemble_world_objects(
     cursor += mapped_tree_count
     utilities = objects[cursor : cursor + utility_count]
 
-    ordered = (
-        tuple(road_objects)
-        + forests_and_trees
-        + mapped_trees
-        + rural_vegetation
-        + buildings
-        + ditch
-        + barriers
-        + bridges
-        + utilities
-        + tuple(semantic_objects)
+    # One tuple allocation instead of a chain of tuple concatenations.  Repeated
+    # ``+`` copies an ever-growing prefix and gets surprisingly expensive at the
+    # million-object cap.
+    ordered = tuple(chain(
+        road_objects,
+        urban_details,
+        forests_and_trees,
+        mapped_trees,
+        rural_vegetation,
+        buildings,
+        ditch,
+        barriers,
+        bridges,
+        utilities,
+        semantic_objects,
+    ))
+    if not renumber:
+        return ordered
+    return tuple(
+        replace(obj, object_id=index)
+        for index, obj in enumerate(ordered, 1)
     )
-    return tuple(replace(obj, object_id=index) for index, obj in enumerate(ordered, 1))
 
 
 def _road_object_fingerprint(objects: Sequence[object]) -> str:
-    return cache_key(
-        "road-objects-v1",
-        [
+    return streaming_hash(
+        "road-objects-v2",
+        (
             (
                 getattr(obj, "model_path", ""),
                 round(float(getattr(obj, "x", 0.0)), 6),
@@ -2733,7 +2804,7 @@ def _road_object_fingerprint(objects: Sequence[object]) -> str:
                 round(float(getattr(obj, "pitch_degrees", 0.0)), 6),
             )
             for obj in objects
-        ],
+        ),
     )
 
 
@@ -2802,8 +2873,7 @@ def build_milestone4(
 ) -> BuildResult:
     spec.validate()
     output_dir = output_dir.resolve()
-    if clean and output_dir.exists():
-        shutil.rmtree(output_dir)
+    prepare_output_directory(output_dir, spec.name, clean=clean)
 
     source_dir = output_dir / "source" / spec.name
     wrp_path = source_dir / f"{spec.name}.wrp"
@@ -2906,6 +2976,7 @@ def build_milestone4(
             high_quality_textures=bool(
                 getattr(spec, "high_quality_building_textures", False)
             ),
+            house_style_preset=str(getattr(spec, "house_style_preset", "auto")),
             cache_dir=getattr(spec, "cache_dir", None),
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
@@ -2926,7 +2997,7 @@ def build_milestone4(
     report_progress(31, "Finalizing terrain at RVW4 height precision")
     solver_elevations = tuple(grading.elevations)
     elevations = quantize_elevations(solver_elevations, spec.height_scale)
-    report_progress(32, "Running provisional building and tree grounding")
+    report_progress(32, "Running provisional building grounding")
     elevations, iterative_grounding, terrain_cache_key = _iterative_grounding_pass(
         elevations,
         dataset,
@@ -2955,6 +3026,8 @@ def build_milestone4(
             water_depth=spec.water_depth,
             beach_height=spec.beach_height,
             blend_cells=spec.coastline_blend_cells,
+            cell_size=spec.cell_size,
+            maximum_shore_slope_percent=float(getattr(spec, "lake_shore_maximum_slope_percent", 8.0)),
         )
 
     surface_cached, surface_cache_hit, surface_cache_key, surface_cache_path = _load_surface_pipeline(
@@ -3034,7 +3107,14 @@ def build_milestone4(
         else SemanticGenerationResult((), 0, 0, 0, 0, 0, 0.0)
     )
     report_progress(71, "Ordering roads, trees, buildings and infrastructure")
-    all_objects = _assemble_world_objects(road_fit.objects, nonroads, semantic.objects)
+    all_objects = _assemble_world_objects(
+        road_fit.objects, nonroads, semantic.objects, renumber=False
+    )
+    combined_model_usage: Counter[str] = Counter(dict(nonroads.model_usage))
+    # Roads and semantic objects are much smaller populations than dense forest/
+    # placement output. Scan each once, then use the aggregate everywhere else.
+    combined_model_usage.update(obj.model_path for obj in road_fit.objects)
+    combined_model_usage.update(obj.model_path for obj in semantic.objects)
     generated = ObjectGenerationResult(
         objects=all_objects,
         road_objects=len(road_fit.objects),
@@ -3081,6 +3161,7 @@ def build_milestone4(
         forest_border_maximum_burial=nonroads.forest_border_maximum_burial,
         forest_border_maximum_float=nonroads.forest_border_maximum_float,
         forest_single_tree_objects=nonroads.forest_single_tree_objects,
+        forest_gap_infill_tree_objects=nonroads.forest_gap_infill_tree_objects,
         ditch_grass_objects=nonroads.ditch_grass_objects,
         ditch_grass_rejections=nonroads.ditch_grass_rejections,
         ditch_grass_maximum_burial=nonroads.ditch_grass_maximum_burial,
@@ -3117,6 +3198,15 @@ def build_milestone4(
         mapped_tree_rejections=nonroads.mapped_tree_rejections,
         utility_objects=nonroads.utility_objects,
         utility_rejections=nonroads.utility_rejections,
+        vegetation_audit_tree_objects=nonroads.vegetation_audit_tree_objects,
+        vegetation_audit_cluster_tree_proxies=nonroads.vegetation_audit_cluster_tree_proxies,
+        vegetation_audit_cluster_bush_proxies=nonroads.vegetation_audit_cluster_bush_proxies,
+        vegetation_audit_violations=nonroads.vegetation_audit_violations,
+        vegetation_audit_maximum_tree_float=nonroads.vegetation_audit_maximum_tree_float,
+        vegetation_audit_maximum_bush_float=nonroads.vegetation_audit_maximum_bush_float,
+        model_usage=tuple(sorted(combined_model_usage.items(), key=lambda item: item[0].casefold())),
+        surface_forest_positions=nonroads.surface_forest_positions,
+        surface_rock_positions=nonroads.surface_rock_positions,
     )
     building_generation: BuildingGenerationResult | None = None
     report_progress(73, "Generating procedural building assets")
@@ -3130,11 +3220,12 @@ def build_milestone4(
     report_progress(77, "Generating forest cluster assets")
     forest_cluster_library: ProceduralForestClusterLibrary | None = None
     forest_cluster_generation: ForestClusterAssetResult | None = None
-    generated_cluster_paths = tuple(
-        obj.model_path for obj in nonroads.objects
-        if milestone_number >= 9 and is_generated_cluster_model(spec.name, obj.model_path)
+    generated_cluster_usage = tuple(
+        (model_path, count)
+        for model_path, count in nonroads.model_usage
+        if milestone_number >= 9 and is_generated_cluster_model(spec.name, model_path)
     )
-    if generated_cluster_paths:
+    if generated_cluster_usage:
         forest_cluster_library = ProceduralForestClusterLibrary(
             spec.name,
             proxy_profile=_forest_proxy_profile(spec),
@@ -3142,7 +3233,8 @@ def build_milestone4(
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
         )
-        forest_cluster_library.register_models(generated_cluster_paths)
+        for model_path, count in generated_cluster_usage:
+            forest_cluster_library.register_model_usage(model_path, count)
         forest_cluster_generation = forest_cluster_library.write_assets(
             source_dir, forest_cluster_catalogue_path
         )
@@ -3150,11 +3242,13 @@ def build_milestone4(
     report_progress(79, "Generating infrastructure and rock assets")
     infrastructure_library: ProceduralInfrastructureLibrary | None = None
     infrastructure_generation: InfrastructureAssetResult | None = None
-    generated_infrastructure_paths = tuple(
-        obj.model_path for obj in all_objects
-        if milestone_number >= 9 and obj.model_path.casefold().startswith((spec.name + "\\i\\").casefold())
+    infrastructure_prefix = (spec.name + "\\i\\").casefold()
+    generated_infrastructure_usage = tuple(
+        (model_path, count)
+        for model_path, count in combined_model_usage.items()
+        if milestone_number >= 9 and model_path.casefold().startswith(infrastructure_prefix)
     )
-    if generated_infrastructure_paths:
+    if generated_infrastructure_usage:
         infrastructure_library = ProceduralInfrastructureLibrary(
             spec.name,
             road_segment_length=spec.road_segment_length,
@@ -3162,14 +3256,15 @@ def build_milestone4(
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
         )
-        infrastructure_library.register_models(generated_infrastructure_paths)
+        for model_path, count in generated_infrastructure_usage:
+            infrastructure_library.register_model_usage(model_path, count)
         infrastructure_generation = infrastructure_library.write_assets(
             source_dir, infrastructure_catalogue_path
         )
 
     report_progress(81, "Collecting towns and external asset dependencies")
     towns = town_locations(dataset, projection, spec.town_name_limit)
-    selected_models = sorted({obj.model_path for obj in all_objects})
+    selected_models = sorted(combined_model_usage)
     externally_selected_models = [
         model for model in selected_models
         if (building_library is None or not building_library.is_generated_model(model))
@@ -3288,6 +3383,7 @@ def build_milestone4(
         texture_table_paths,
         all_objects,
         height_scale=spec.height_scale,
+        renumber_object_ids=True,
     )
 
     surface_manifest: dict[str, object] | None = None
@@ -3538,6 +3634,7 @@ def build_milestone4(
                 generate_interiors=building_library.generate_interiors,
                 high_quality_textures=building_library.high_quality_textures,
                 texture_variants=building_library.texture_variants,
+                house_style_preset=building_library.house_style_preset,
                 cache_dir=building_library.cache_dir,
                 cache_enabled=building_library.cache_enabled,
                 cache_refresh=building_library.cache_refresh,
@@ -3614,7 +3711,7 @@ def build_milestone4(
             else SemanticGenerationResult((), 0, 0, 0, 0, 0, 0.0)
         )
         repeat_objects = _assemble_world_objects(
-            repeat_roads.objects, repeat_nonroads, repeat_semantic.objects
+            repeat_roads.objects, repeat_nonroads, repeat_semantic.objects, renumber=False
         )
         repeat_fingerprint = _generation_fingerprint(
             spec,
@@ -3638,6 +3735,7 @@ def build_milestone4(
             texture_table_paths,
             repeat_objects,
             height_scale=spec.height_scale,
+            renumber_object_ids=True,
         )
         shutil.copy2(source_dir / "config.cpp", temp_source / "config.cpp")
         generated_directories = {"g", "d"} if repeat_building_library is not None else set()
@@ -3858,7 +3956,7 @@ def build_milestone4(
             "final_maximum_metres": max(elevations),
         },
         "iterative_grounding": {
-            "mode": "six-stage-buildings-and-trees",
+            "mode": "six-stage-buildings-only",
             **asdict(iterative_grounding),
         },
         "material_mask": mask_metadata,
@@ -3972,6 +4070,7 @@ def build_milestone4(
             "forest_block_objects": nonroads.forest_block_objects,
             "forest_hillside_tree_objects": nonroads.forest_hillside_tree_objects,
             "forest_single_tree_objects": nonroads.forest_single_tree_objects,
+            "forest_gap_infill_tree_objects": nonroads.forest_gap_infill_tree_objects,
             "forest_hillside_fallback_blocks": nonroads.forest_hillside_fallback_blocks,
             "forest_hillside_unfilled_blocks": nonroads.forest_hillside_unfilled_blocks,
             "forest_hillside_candidate_rejections": nonroads.forest_hillside_candidate_rejections,
@@ -4049,6 +4148,16 @@ def build_milestone4(
                 "forest_clearance_metres": spec.forest_ground_clearance,
                 "maximum_building_raise_metres": nonroads.maximum_building_grounding_raise,
                 "maximum_forest_raise_metres": nonroads.maximum_forest_grounding_raise,
+                "vegetation_audit": {
+                    "tree_objects": nonroads.vegetation_audit_tree_objects,
+                    "cluster_tree_proxies": nonroads.vegetation_audit_cluster_tree_proxies,
+                    "cluster_bush_proxies": nonroads.vegetation_audit_cluster_bush_proxies,
+                    "violations": nonroads.vegetation_audit_violations,
+                    "maximum_tree_float_metres": nonroads.vegetation_audit_maximum_tree_float,
+                    "maximum_bush_float_metres": nonroads.vegetation_audit_maximum_bush_float,
+                    "tree_limit_metres": float(getattr(spec, "forest_cluster_tree_maximum_float", getattr(spec, "forest_single_tree_maximum_float", 0.15))),
+                    "bush_limit_metres": float(getattr(spec, "forest_cluster_bush_maximum_float", 0.60)),
+                },
             },
             "models": selected_models,
             "truncated": {
@@ -4103,6 +4212,7 @@ def build_milestone4(
             "osm-source.json": _sha256(osm_source_path),
             "overpass-query.txt": _sha256(osm_query_path),
             "OSM-ATTRIBUTION.txt": _sha256(attribution_path),
+            f"{mod_directory_name}/OSM-ATTRIBUTION.txt": _sha256(mod_attribution_path),
             "asset-catalogue.json": _sha256(asset_catalogue_path),
             "road-fit-report.json": _sha256(road_report_path),
             "terrain-grading-report.json": _sha256(grading_report_path),
@@ -4207,5 +4317,6 @@ def build_milestone4(
     else:
         _write_json(manifest_path, manifest)
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    record_build_ownership(output_dir, spec.name, manifest_path, merge=False)
     report_progress(100, "Build complete")
     return result

@@ -1,0 +1,118 @@
+{
+  "schema_version": 2,
+  "map_region_number": 21,
+  "identifier": "australia_new_zealand",
+  "display_name": "Australia & New Zealand",
+  "priority": 45,
+  "match": {
+    "country_aliases": [
+      "au",
+      "aus",
+      "australia",
+      "nz",
+      "nzl",
+      "new zealand"
+    ],
+    "polygon_lon_lat": [],
+    "envelopes_lon_lat": [
+      [
+        111,
+        -45,
+        155,
+        -9
+      ],
+      [
+        165,
+        -48,
+        179,
+        -33
+      ]
+    ]
+  },
+  "contexts": {
+    "rural": {
+      "description": "Queenslander or weatherboard house with veranda.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [],
+        "family_distributions": {
+          "*": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    },
+    "town_city": {
+      "description": "Terraces, weatherboard homes, and low-rise apartment buildings.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [],
+        "family_distributions": {
+          "*": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "residential": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "urban": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "shop": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "school": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    }
+  }
+}

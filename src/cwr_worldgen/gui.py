@@ -24,6 +24,11 @@ from typing import Iterable, Mapping
 
 from ._version import __version__
 from .cache import resolve_cache_dir
+from .house_style_catalogue import (
+    HOUSE_STYLE_PRESET_AUTO,
+    HOUSE_STYLE_PRESET_IDENTIFIERS,
+    HOUSE_STYLE_PRESET_OPTIONS,
+)
 from .location_example import parse_opentopomap_link, square_bbox
 from .map_picker import AreaSelectionPlan, OsmAreaPicker, zoom_for_bbox
 from .model import DEFAULT_MAX_BUILDINGS, DEFAULT_MAX_FOREST_OBJECTS, DEFAULT_MAX_ROAD_OBJECTS, validate_world_identity
@@ -51,6 +56,18 @@ APPEARANCE_PRESETS = (
     "Generated ground textures",
     "Custom",
 )
+HOUSE_STYLE_AUTO_LABEL = "Automatic (area / country)"
+HOUSE_STYLE_PRESET_LABELS = (
+    HOUSE_STYLE_AUTO_LABEL,
+    *(f"{index:02d}. {display_name}" for index, (_identifier, display_name) in enumerate(HOUSE_STYLE_PRESET_OPTIONS, start=1)),
+)
+_HOUSE_STYLE_LABEL_TO_IDENTIFIER = {
+    label: identifier
+    for label, (identifier, _display_name) in zip(HOUSE_STYLE_PRESET_LABELS[1:], HOUSE_STYLE_PRESET_OPTIONS)
+}
+_HOUSE_STYLE_IDENTIFIER_TO_LABEL = {
+    identifier: label for label, identifier in _HOUSE_STYLE_LABEL_TO_IDENTIFIER.items()
+}
 NOGOVA_FOREST_BLOCK_MODEL = r"o\tree\les_nw_ctver_pruhozi_T1.p3d"
 NOGOVA_FOREST_STEEP_MODEL = r"o\tree\les_nw_trojuhelnik.p3d"
 NOGOVA_PINE_FOREST_BLOCK_MODEL = r"o\tree\les_nw_jehl_ctver_pruhozi.p3d"
@@ -103,6 +120,30 @@ def default_gui_path(relative: str | Path) -> str:
     if bool(getattr(sys, "frozen", False)):
         return str(resolve_gui_path(path))
     return str(path)
+
+
+def gui_house_style_preset_identifier(value: object) -> str:
+    """Translate the human-readable building-preset dropdown to a CLI identifier."""
+
+    text = str(value or "").strip()
+    if not text or text == HOUSE_STYLE_AUTO_LABEL or text.casefold() == HOUSE_STYLE_PRESET_AUTO:
+        return HOUSE_STYLE_PRESET_AUTO
+    identifier = _HOUSE_STYLE_LABEL_TO_IDENTIFIER.get(text)
+    if identifier is not None:
+        return identifier
+    folded = text.casefold()
+    if folded in HOUSE_STYLE_PRESET_IDENTIFIERS:
+        return folded
+    raise ValueError(f"Unknown building preset: {text}")
+
+
+def gui_house_style_preset_label(value: object) -> str:
+    """Return the dropdown label for an auto or catalogue preset identifier."""
+
+    identifier = gui_house_style_preset_identifier(value)
+    if identifier == HOUSE_STYLE_PRESET_AUTO:
+        return HOUSE_STYLE_AUTO_LABEL
+    return _HOUSE_STYLE_IDENTIFIER_TO_LABEL[identifier]
 
 
 SOURCE_PREVIEW_MAX_WIDTH = 720
@@ -417,6 +458,10 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
 
     command = cli_command_prefix(python) + ["milestone9"]
     command.extend(("--surface-ground-mode", "milestone9"))
+    command.extend((
+        "--house-style-preset",
+        gui_house_style_preset_identifier(values.get("house_style_preset", HOUSE_STYLE_AUTO_LABEL)),
+    ))
     pairs = (
         ("--source-dir", "source_dir"),
         ("--output", "output"),
@@ -456,6 +501,14 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         ("--bridge-module-length", "bridge_module_length"),
         ("--bridge-deck-clearance", "bridge_deck_clearance"),
         ("--bridge-water-clearance", "bridge_water_clearance"),
+        ("--max-sidewalk-objects", "max_sidewalk_objects"),
+        ("--sidewalk-width", "sidewalk_width"),
+        ("--sidewalk-segment-length", "sidewalk_segment_length"),
+        ("--max-street-furniture-objects", "max_street_furniture_objects"),
+        ("--street-light-spacing", "street_light_spacing"),
+        ("--street-bench-every", "street_bench_every"),
+        ("--street-bin-every", "street_bin_every"),
+        ("--building-texture-match-distance", "nearby_building_texture_match_distance"),
         ("--max-residential-infill-buildings", "max_residential_infill_buildings"),
         ("--residential-infill-spacing", "residential_infill_spacing"),
         ("--residential-infill-min-area", "residential_infill_min_area"),
@@ -496,7 +549,9 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         "verify_regeneration": "--verify-regeneration",
         "procedural_building_interiors": "--procedural-building-interiors",
         "high_quality_building_textures": "--high-quality-building-textures",
+        "forest_individual_objects_only": "--replace-forest-polygons-with-clusters",
         "haybales": "--haybales",
+        "match_nearby_building_textures": "--match-nearby-building-textures",
     }
     for key, option in flags.items():
         if bool(values.get(key, False)):
@@ -521,6 +576,8 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         "forest_single_trees": "--no-forest-single-trees",
         "ditch_grass": "--no-ditch-grass",
         "barriers": "--no-barriers",
+        "sidewalks": "--no-sidewalks",
+        "street_furniture": "--no-street-furniture",
         "bridges": "--no-bridges",
         "residential_infill": "--no-residential-infill",
         "overture_buildings": "--no-overture-buildings",
@@ -715,6 +772,7 @@ def default_gui_values() -> dict[str, object]:
         "display_name": "My CWA World",
         "profile": "cwr-ce",
         "appearance_preset": RECOMMENDED_APPEARANCE_PRESET,
+        "house_style_preset": HOUSE_STYLE_AUTO_LABEL,
         "ground_textures": "nogova",
         "forest_profile": "everon",
         "strict_assets": False,
@@ -732,6 +790,7 @@ def default_gui_values() -> dict[str, object]:
         "verify_regeneration": False,
         "procedural_building_interiors": False,
         "high_quality_building_textures": False,
+        "forest_individual_objects_only": False,
         "forest_clusters": True,
         "forest_severe_hill_fallback": True,
         "forest_severe_hill_relief": "5",
@@ -748,9 +807,20 @@ def default_gui_values() -> dict[str, object]:
         "forest_single_tree_model": r"data3d\str smrk_medium.p3d",
         "max_forest_single_tree_objects": "1000",
         "forest_single_tree_spacing": "45",
-        "forest_single_tree_max_float": "0.5",
+        "forest_single_tree_max_float": "0.15",
         "ditch_grass": True,
         "barriers": True,
+        "sidewalks": False,
+        "max_sidewalk_objects": "30000",
+        "sidewalk_width": "1.8",
+        "sidewalk_segment_length": "5.0",
+        "street_furniture": True,
+        "max_street_furniture_objects": "12000",
+        "street_light_spacing": "32",
+        "street_bench_every": "4",
+        "street_bin_every": "6",
+        "match_nearby_building_textures": False,
+        "nearby_building_texture_match_distance": "90",
         "bridges": True,
         "procedural_bridges": True,
         "bridge_module_length": "30",
@@ -785,12 +855,12 @@ def default_gui_values() -> dict[str, object]:
         "rocky_forest_spread": "18",
         "lake_shore_smoothing_cells": "8",
         "lake_shore_max_slope": "8",
-        "forest_max_block_relief": "8",
+        "forest_max_block_relief": "3",
         "forest_block_max_ground_sink": "0",
-        "forest_steep_max_relief": "18",
-        "forest_polygon_sink_fraction": "0.5",
+        "forest_steep_max_relief": "8",
+        "forest_polygon_sink_fraction": "0",
         "forest_steep_max_ground_sink": "0",
-        "forest_cluster_max_relief": "48",
+        "forest_cluster_max_relief": "24",
         "max_road_objects": str(DEFAULT_MAX_ROAD_OBJECTS),
         "max_buildings": str(DEFAULT_MAX_BUILDINGS),
         "building_ground_clearance": "0.10",
@@ -839,6 +909,10 @@ def validate_wizard_step(step_index: int, values: dict[str, object], asset_roots
             raise ValueError("The OSM asset mapping JSON file does not exist.")
         integer_fields = (
             "max_road_objects",
+            "max_sidewalk_objects",
+            "max_street_furniture_objects",
+            "street_bench_every",
+            "street_bin_every",
             "max_buildings",
             "max_forest_objects",
             "forest_undergrowth_max_objects",
@@ -874,6 +948,9 @@ def validate_wizard_step(step_index: int, values: dict[str, object], asset_roots
             "bridge_module_length",
             "bridge_deck_clearance",
             "bridge_water_clearance",
+            "sidewalk_width",
+            "sidewalk_segment_length",
+            "street_light_spacing",
             "residential_infill_spacing",
             "residential_infill_min_area",
             "haybale_spacing",
@@ -1822,7 +1899,21 @@ class WorldgenGui(tk.Tk):
             text="The recommended preset mixes Nogova/Resistance ground textures with stock Everon forest and tree models. Nogova Resistance leaf forests uses the ordinary Resistance broadleaf forest family and Resistance leaf trees. Nogova Resistance pine forests uses the separate jehl conifer polygons and Resistance pine/spruce trees.",
             style="Hint.TLabel",
             wraplength=700,
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 10))
+        ttk.Label(preset, text="Building preset").grid(row=2, column=0, sticky="w", padx=(0, 10), pady=3)
+        ttk.Combobox(
+            preset,
+            textvariable=self._var("house_style_preset", HOUSE_STYLE_AUTO_LABEL),
+            values=HOUSE_STYLE_PRESET_LABELS,
+            state="readonly",
+            width=48,
+        ).grid(row=2, column=1, sticky="w", pady=3)
+        ttk.Label(
+            preset,
+            text="Automatic uses the selected map area/country. Choose one of the 23 regional presets here to override procedural building façades and roof defaults for the entire world.",
+            style="Hint.TLabel",
+            wraplength=700,
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         common = ttk.LabelFrame(body, text="Common choices", style="Section.TLabelframe", padding=12)
         common.pack(fill="x", pady=(12, 0))
@@ -1830,15 +1921,18 @@ class WorldgenGui(tk.Tk):
             ("Include minor roads", "include_minor_roads", True),
             ("Enterable procedural-building interiors", "procedural_building_interiors", False),
             ("Higher-quality building textures (256 px)", "high_quality_building_textures", False),
+            ("Match nearby same-shape town/city building textures", "match_nearby_building_textures", False),
             ("Forest undergrowth", "forest_undergrowth", True),
             ("Fences, walls and hedges", "barriers", True),
+            ("Stock urban pavement / sidewalks (disabled for now)", "sidewalks", False),
+            ("Settlement + residential-area street furniture", "street_furniture", True),
             ("Bridge decks", "bridges", True),
             ("Procedural bridges (instead of Nogova)", "procedural_bridges", True),
             ("Fill empty residential areas", "residential_infill", True),
             ("Download/merge Overture building data", "overture_buildings", True),
             ("Rural vegetation", "rural_vegetation", True),
             ("Tall grass in OSM meadows", "meadow_grass", True),
-            ("Hay bales in OSM farmland", "haybales", False),
+            ("Field hay bales (disabled; barn-only clutter)", "haybales", False),
             ("Wetland reeds", "wetland_reeds", True),
             ("Steep-hill bushes", "steep_hill_bushes", True),
             ("Rocky forest fallback", "rocky_forest_fallback", True),
@@ -1846,7 +1940,16 @@ class WorldgenGui(tk.Tk):
             ("Cemetery gravestones", "cemeteries", True),
         )
         for index, (label, key, default) in enumerate(choices):
-            ttk.Checkbutton(common, text=label, variable=self._var(key, default, boolean=True)).grid(
+            variable = self._var(key, default, boolean=True)
+            if key in {"sidewalks", "haybales"}:
+                # Sidewalks are paused, and free-field hay bales are retired.
+                # Hay bales now exist only as barn-adjacent settlement clutter.
+                # Force old saved profiles back off as well.
+                variable.set(False)
+            control = ttk.Checkbutton(common, text=label, variable=variable)
+            if key in {"sidewalks", "haybales"}:
+                control.state(["disabled"])
+            control.grid(
                 row=index // 2,
                 column=index % 2,
                 sticky="w",
@@ -1874,6 +1977,7 @@ class WorldgenGui(tk.Tk):
         features = ttk.LabelFrame(advanced.body, text="Additional generated features", padding=10)
         features.pack(fill="x", pady=(0, 10))
         feature_values = (
+            ("Replace stock forest polygons with clusters", "forest_individual_objects_only"),
             ("Steep forest clusters", "forest_clusters"),
             ("Steep/severe underbrush/tree fallback", "forest_severe_hill_fallback"),
             ("Extra single forest trees", "forest_single_trees"),
@@ -1881,7 +1985,8 @@ class WorldgenGui(tk.Tk):
             ("Ditch grass", "ditch_grass"),
         )
         for index, (label, key) in enumerate(feature_values):
-            check = ttk.Checkbutton(features, text=label, variable=self._var(key, True, boolean=True))
+            default_enabled = False if key == "forest_individual_objects_only" else True
+            check = ttk.Checkbutton(features, text=label, variable=self._var(key, default_enabled, boolean=True))
             check.grid(row=index // 3, column=index % 3, sticky="w", padx=(0, 24))
             self._register_advanced_setting(
                 key, check, normal_style="TCheckbutton", changed_style="AdvancedChanged.TCheckbutton"
@@ -1890,12 +1995,12 @@ class WorldgenGui(tk.Tk):
         tuning = ttk.LabelFrame(advanced.body, text="Limits and solver", padding=10)
         tuning.pack(fill="x", pady=(0, 10))
         fields = (
-            ("Square forest max relief", "forest_max_block_relief", "8"),
-            ("Triangle forest max relief", "forest_steep_max_relief", "18"),
-            ("All-slope triangle sink fraction", "forest_polygon_sink_fraction", "0.5"),
+            ("Square forest max relief", "forest_max_block_relief", "3"),
+            ("Triangle forest max relief", "forest_steep_max_relief", "8"),
+            ("All-slope triangle sink fraction", "forest_polygon_sink_fraction", "0"),
             ("Triangle-unavailable fallback relief", "forest_severe_hill_relief", "5"),
             ("Steep fallback trees/block", "forest_severe_hill_trees_per_block", "10"),
-            ("Cluster max relief", "forest_cluster_max_relief", "48"),
+            ("Cluster max relief", "forest_cluster_max_relief", "24"),
             ("Interior undergrowth max", "forest_undergrowth_max_objects", "120000"),
             ("Interior undergrowth spacing (m)", "forest_undergrowth_spacing", "30"),
             ("Steep-hill bushes max", "max_steep_hill_bush_objects", "80000"),
@@ -1910,12 +2015,20 @@ class WorldgenGui(tk.Tk):
             ("Farmland fields with hay bales (%)", "haybale_field_percent", "25"),
             ("Maximum extra single trees at 6.4 km", "max_forest_single_tree_objects", "1000"),
             ("Geographic single-tree spacing (m)", "forest_single_tree_spacing", "45"),
-            ("Individual-tree maximum float (m)", "forest_single_tree_max_float", "0.5"),
+            ("Individual-tree maximum float (m)", "forest_single_tree_max_float", "0.15"),
             ("Rocks per rejected forest patch", "rocky_forest_rocks_per_patch", "3"),
             ("Rock scatter radius (m)", "rocky_forest_spread", "18"),
             ("Base lake smoothing at 6.4 km (cells)", "lake_shore_smoothing_cells", "8"),
             ("Maximum lake-bank slope (%)", "lake_shore_max_slope", "8"),
             ("Maximum road objects", "max_road_objects", str(DEFAULT_MAX_ROAD_OBJECTS)),
+            ("Maximum sidewalk objects", "max_sidewalk_objects", "30000"),
+            ("Sidewalk nominal width / offset (m)", "sidewalk_width", "1.8"),
+            ("Stock sidewalk tile spacing (m)", "sidewalk_segment_length", "5.0"),
+            ("Maximum street furniture", "max_street_furniture_objects", "12000"),
+            ("Street light spacing (m)", "street_light_spacing", "32"),
+            ("Bench every N light positions", "street_bench_every", "4"),
+            ("Bin every N light positions", "street_bin_every", "6"),
+            ("Same-shape texture match distance (m)", "nearby_building_texture_match_distance", "90"),
             ("Maximum buildings", "max_buildings", str(DEFAULT_MAX_BUILDINGS)),
             ("Visible building foundation (m)", "building_ground_clearance", "0.10"),
             ("Church minimum foundation depth (m)", "church_ground_clearance", "3.00"),
@@ -2300,6 +2413,7 @@ class WorldgenGui(tk.Tk):
             f"Deploy: {self.vars['deploy_mod_dir'].get() if self.vars['deploy_to_mod_folder'].get() else 'disabled'}\n"
             f"Profile: {self.vars['profile'].get()}\n"
             f"Appearance: {self.vars['appearance_preset'].get()}\n"
+            f"Building preset: {self.vars['house_style_preset'].get()}\n"
             f"Undergrowth: half amount\n"
             f"Lake banks: {self.vars['lake_shore_smoothing_cells'].get()} cells, max {self.vars['lake_shore_max_slope'].get()}% rise\n"
             f"Buildings: {self.vars['building_ground_clearance'].get()} m visible foundation, {self.vars['church_ground_clearance'].get()} m church minimum foundation, {self.vars['building_foundation_depth'].get()} m minimum skirt depth\n"
@@ -3104,6 +3218,9 @@ class WorldgenGui(tk.Tk):
             for key, value in values.items():
                 if key in self.vars:
                     self.vars[key].set(value)
+            loaded_house_style = values.get("house_style_preset")
+            if loaded_house_style is not None:
+                self.vars["house_style_preset"].set(gui_house_style_preset_label(loaded_house_style))
             loaded_preset = str(values.get("appearance_preset", "")).strip()
             if loaded_preset in {LEGACY_NOGOVA_APPEARANCE_PRESET, LEGACY_RESISTANCE_APPEARANCE_PRESET}:
                 # Historical generic Resistance/Nogova presets now map to the

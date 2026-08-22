@@ -167,26 +167,35 @@ class Milestone9Spec(Milestone8Spec):
     surface_texture_size: int = 512
     surface_ground_mode: str = "milestone9"
     forest_profile: str = "everon"
+    # Optional safety mode. The field name is retained for 0.9.252 CLI/config
+    # compatibility, but the mode now disables only the rigid stock square/triangle
+    # forest polygon models. Generated clusters and rooted fallback vegetation remain.
+    forest_individual_objects_only: bool = False
     forest_tree_model: str = EVERON_FOREST_BLOCK_MODEL
-    forest_maximum_block_relief: float = 8.0
-    forest_block_maximum_burial: float = 8.0
-    forest_block_maximum_float: float = 0.5
+    # Vegetation is grounded onto the final RVW4 terrain. Keep root clearance
+    # tiny and reject rigid forest models early when the terrain is not a fit.
+    forest_ground_clearance: float = 0.02
+    forest_maximum_block_relief: float = 3.0
+    forest_block_maximum_burial: float = 2.0
+    forest_block_maximum_float: float = 0.20
     forest_block_maximum_ground_sink: float = 0.0
     forest_everon_steep_model: str = r"data3d\les trojuhelnik pruchozi.p3d"
     forest_everon_steep_footprint: float = 35.0
-    forest_everon_steep_maximum_relief: float = 18.0
-    forest_everon_steep_maximum_burial: float = 18.0
-    forest_everon_steep_maximum_float: float = 0.5
+    forest_everon_steep_maximum_relief: float = 8.0
+    forest_everon_steep_maximum_burial: float = 3.0
+    forest_everon_steep_maximum_float: float = 0.20
     forest_everon_steep_maximum_ground_sink: float = 0.0
-    forest_polygon_sink_fraction: float = 0.5
+    forest_polygon_sink_fraction: float = 0.0
     forest_severe_hill_fallback: bool = True
     forest_severe_hill_relief: float = 5.0
     forest_severe_hill_trees_per_block: int = 10
     forest_cluster_fallback: bool = True
     forest_cluster_search_radius: float = 10.0
-    forest_cluster_maximum_relief: float = 48.0
-    forest_cluster_maximum_burial: float = 1.25
-    forest_cluster_maximum_float: float = 1.25
+    forest_cluster_maximum_relief: float = 24.0
+    forest_cluster_maximum_burial: float = 0.75
+    forest_cluster_maximum_float: float = 0.60
+    forest_cluster_tree_maximum_float: float = 0.20
+    forest_cluster_bush_maximum_float: float = 0.60
     forest_cluster_footprint_margin: float = 0.75
     forest_undergrowth_enabled: bool = True
     forest_undergrowth_maximum_objects: int = 120000
@@ -223,7 +232,15 @@ class Milestone9Spec(Milestone8Spec):
     forest_single_tree_spacing: float = 45.0
     forest_single_tree_footprint: float = 2.0
     forest_single_tree_maximum_relief: float = 8.0
-    forest_single_tree_maximum_float: float = 0.5
+    # Trees are point-like objects. Prefer a slightly buried root over rejecting
+    # most hill placements because the unbinarized terrain format does not store
+    # an explicit quad diagonal. The burial cap prevents absurd trunk loss while
+    # still allowing trees to hug steep terrain without floating.
+    forest_single_tree_root_sink: float = 0.05
+    forest_single_tree_maximum_burial: float = 1.50
+    forest_single_tree_maximum_float: float = 0.15
+    forest_gap_infill_enabled: bool = True
+    forest_gap_infill_spacing: float = 25.0
     ditch_grass_enabled: bool = True
     maximum_ditch_grass_objects: int = 2000
     ditch_grass_spacing: float = 18.0
@@ -243,6 +260,17 @@ class Milestone9Spec(Milestone8Spec):
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
+    sidewalks_enabled: bool = False
+    maximum_sidewalk_objects: int = 30000
+    sidewalk_width: float = 1.8
+    sidewalk_segment_length: float = 5.0
+    street_furniture_enabled: bool = True
+    maximum_street_furniture_objects: int = 12000
+    street_light_spacing: float = 32.0
+    street_bench_every: int = 4
+    street_bin_every: int = 6
+    match_nearby_building_textures: bool = False
+    nearby_building_texture_match_distance: float = 90.0
     bridges_enabled: bool = True
     procedural_bridges: bool = True
     maximum_bridge_objects: int = 1000
@@ -365,6 +393,7 @@ class Milestone9Spec(Milestone8Spec):
             ("forest single-tree footprint", self.forest_single_tree_footprint),
             ("forest single-tree maximum relief", self.forest_single_tree_maximum_relief),
             ("forest single-tree maximum float", self.forest_single_tree_maximum_float),
+            ("forest gap infill spacing", self.forest_gap_infill_spacing),
             ("ditch grass spacing", self.ditch_grass_spacing),
             ("ditch grass maximum relief", self.ditch_grass_maximum_relief),
             ("barrier segment length", self.barrier_segment_length),
@@ -399,6 +428,8 @@ class Milestone9Spec(Milestone8Spec):
             ("forest cluster search radius", self.forest_cluster_search_radius),
             ("forest cluster maximum burial", self.forest_cluster_maximum_burial),
             ("forest cluster maximum float", self.forest_cluster_maximum_float),
+            ("forest cluster tree maximum float", self.forest_cluster_tree_maximum_float),
+            ("forest cluster bush maximum float", self.forest_cluster_bush_maximum_float),
             ("forest cluster footprint margin", self.forest_cluster_footprint_margin),
             ("forest undergrowth maximum burial", self.forest_undergrowth_maximum_burial),
             ("forest undergrowth maximum float", self.forest_undergrowth_maximum_float),
@@ -408,6 +439,8 @@ class Milestone9Spec(Milestone8Spec):
             ("steep hill bush ground clearance", self.steep_hill_bush_ground_clearance),
             ("forest border maximum burial", self.forest_border_maximum_burial),
             ("forest border maximum float", self.forest_border_maximum_float),
+            ("forest single-tree root sink", self.forest_single_tree_root_sink),
+            ("forest single-tree maximum burial", self.forest_single_tree_maximum_burial),
             ("ditch grass endpoint trim", self.ditch_grass_endpoint_trim),
             ("ditch grass maximum burial", self.ditch_grass_maximum_burial),
             ("ditch grass maximum float", self.ditch_grass_maximum_float),
@@ -424,8 +457,8 @@ class Milestone9Spec(Milestone8Spec):
                 raise ValueError(f"{label} must be finite and non-negative")
         if not isinstance(self.forest_hillside_trees_per_block, int) or not 0 <= self.forest_hillside_trees_per_block <= 12:
             raise ValueError("hillside trees per block must be within 0..12")
-        if not isinstance(self.forest_severe_hill_trees_per_block, int) or not 1 <= self.forest_severe_hill_trees_per_block <= 12:
-            raise ValueError("severe hill trees per block must be within 1..12")
+        if not isinstance(self.forest_severe_hill_trees_per_block, int) or not 1 <= self.forest_severe_hill_trees_per_block <= 32:
+            raise ValueError("severe hill trees per block must be within 1..32")
         if not isinstance(self.forest_roadside_trees_per_cut_block, int) or not 0 <= self.forest_roadside_trees_per_cut_block <= 128:
             raise ValueError("forest roadside trees per cut block must be within 0..128")
         if not isinstance(self.forest_roadside_bushes_per_cut_block, int) or not 0 <= self.forest_roadside_bushes_per_cut_block <= 128:
@@ -439,6 +472,8 @@ class Milestone9Spec(Milestone8Spec):
             ("maximum forest single-tree objects", self.maximum_forest_single_tree_objects),
             ("maximum ditch grass objects", self.maximum_ditch_grass_objects),
             ("maximum barrier objects", self.maximum_barrier_objects),
+            ("maximum sidewalk objects", self.maximum_sidewalk_objects),
+            ("maximum street furniture objects", self.maximum_street_furniture_objects),
             ("maximum bridge objects", self.maximum_bridge_objects),
             ("maximum residential infill buildings", self.maximum_residential_infill_buildings),
             ("maximum rural vegetation objects", self.maximum_rural_vegetation_objects),
@@ -488,6 +523,17 @@ class Milestone9Spec(Milestone8Spec):
             raise ValueError("stock wall models must contain at least one model")
         if len(self.stock_metal_fence_models) < 1:
             raise ValueError("stock metal fence models must contain at least one model")
+        for label, value in (
+            ("sidewalk width", self.sidewalk_width),
+            ("sidewalk segment length", self.sidewalk_segment_length),
+            ("street light spacing", self.street_light_spacing),
+            ("nearby building texture match distance", self.nearby_building_texture_match_distance),
+        ):
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{label} must be positive and finite")
+        for label, value in (("street bench every", self.street_bench_every), ("street bin every", self.street_bin_every)):
+            if not isinstance(value, int) or value < 1:
+                raise ValueError(f"{label} must be a positive integer")
         if not isinstance(self.maximum_landmark_objects, int) or self.maximum_landmark_objects < 0:
             raise ValueError("maximum landmark objects must be a non-negative integer")
         if not math.isfinite(self.bus_stop_footprint) or self.bus_stop_footprint <= 0.0:
@@ -544,26 +590,33 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     stock_road_piece_fitting: bool = True
     forest_low_anchor: bool = True
     forest_profile: str = "everon"
+    # Optional safety mode. The field name is retained for 0.9.252 CLI/config
+    # compatibility, but the mode now disables only the rigid stock square/triangle
+    # forest polygon models. Generated clusters and rooted fallback vegetation remain.
+    forest_individual_objects_only: bool = False
     forest_tree_model: str = EVERON_FOREST_BLOCK_MODEL
-    forest_maximum_block_relief: float = 8.0
-    forest_block_maximum_burial: float = 8.0
-    forest_block_maximum_float: float = 0.5
+    forest_ground_clearance: float = 0.02
+    forest_maximum_block_relief: float = 3.0
+    forest_block_maximum_burial: float = 2.0
+    forest_block_maximum_float: float = 0.20
     forest_block_maximum_ground_sink: float = 0.0
     forest_everon_steep_model: str = r"data3d\les trojuhelnik pruchozi.p3d"
     forest_everon_steep_footprint: float = 35.0
-    forest_everon_steep_maximum_relief: float = 18.0
-    forest_everon_steep_maximum_burial: float = 18.0
-    forest_everon_steep_maximum_float: float = 0.5
+    forest_everon_steep_maximum_relief: float = 8.0
+    forest_everon_steep_maximum_burial: float = 3.0
+    forest_everon_steep_maximum_float: float = 0.20
     forest_everon_steep_maximum_ground_sink: float = 0.0
-    forest_polygon_sink_fraction: float = 0.5
+    forest_polygon_sink_fraction: float = 0.0
     forest_severe_hill_fallback: bool = True
     forest_severe_hill_relief: float = 5.0
     forest_severe_hill_trees_per_block: int = 10
     forest_cluster_fallback: bool = True
     forest_cluster_search_radius: float = 10.0
-    forest_cluster_maximum_relief: float = 48.0
-    forest_cluster_maximum_burial: float = 1.25
-    forest_cluster_maximum_float: float = 1.25
+    forest_cluster_maximum_relief: float = 24.0
+    forest_cluster_maximum_burial: float = 0.75
+    forest_cluster_maximum_float: float = 0.60
+    forest_cluster_tree_maximum_float: float = 0.20
+    forest_cluster_bush_maximum_float: float = 0.60
     forest_cluster_footprint_margin: float = 0.75
     forest_undergrowth_enabled: bool = True
     forest_undergrowth_maximum_objects: int = 120000
@@ -600,7 +653,15 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     forest_single_tree_spacing: float = 45.0
     forest_single_tree_footprint: float = 2.0
     forest_single_tree_maximum_relief: float = 8.0
-    forest_single_tree_maximum_float: float = 0.5
+    # Trees are point-like objects. Prefer a slightly buried root over rejecting
+    # most hill placements because the unbinarized terrain format does not store
+    # an explicit quad diagonal. The burial cap prevents absurd trunk loss while
+    # still allowing trees to hug steep terrain without floating.
+    forest_single_tree_root_sink: float = 0.05
+    forest_single_tree_maximum_burial: float = 1.50
+    forest_single_tree_maximum_float: float = 0.15
+    forest_gap_infill_enabled: bool = True
+    forest_gap_infill_spacing: float = 25.0
     ditch_grass_enabled: bool = True
     maximum_ditch_grass_objects: int = 2000
     ditch_grass_spacing: float = 18.0
@@ -620,6 +681,17 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
+    sidewalks_enabled: bool = False
+    maximum_sidewalk_objects: int = 30000
+    sidewalk_width: float = 1.8
+    sidewalk_segment_length: float = 5.0
+    street_furniture_enabled: bool = True
+    maximum_street_furniture_objects: int = 12000
+    street_light_spacing: float = 32.0
+    street_bench_every: int = 4
+    street_bin_every: int = 6
+    match_nearby_building_textures: bool = False
+    nearby_building_texture_match_distance: float = 90.0
     bridges_enabled: bool = True
     procedural_bridges: bool = True
     maximum_bridge_objects: int = 1000
@@ -1029,6 +1101,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         point_building_footprint=spec.point_building_footprint,
         max_forest_objects=spec.max_forest_objects,
         forest_profile=spec.forest_profile,
+        forest_individual_objects_only=spec.forest_individual_objects_only,
         forest_tree_model=str(forest_models["forest_tree_model"]),
         forest_maximum_block_relief=spec.forest_maximum_block_relief,
         forest_block_maximum_burial=spec.forest_block_maximum_burial,
@@ -1049,6 +1122,8 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         forest_cluster_maximum_relief=spec.forest_cluster_maximum_relief,
         forest_cluster_maximum_burial=spec.forest_cluster_maximum_burial,
         forest_cluster_maximum_float=spec.forest_cluster_maximum_float,
+        forest_cluster_tree_maximum_float=spec.forest_cluster_tree_maximum_float,
+        forest_cluster_bush_maximum_float=spec.forest_cluster_bush_maximum_float,
         forest_cluster_footprint_margin=spec.forest_cluster_footprint_margin,
         forest_undergrowth_enabled=spec.forest_undergrowth_enabled,
         forest_undergrowth_maximum_objects=spec.forest_undergrowth_maximum_objects,
@@ -1085,7 +1160,11 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         forest_single_tree_spacing=spec.forest_single_tree_spacing,
         forest_single_tree_footprint=spec.forest_single_tree_footprint,
         forest_single_tree_maximum_relief=spec.forest_single_tree_maximum_relief,
+        forest_single_tree_root_sink=spec.forest_single_tree_root_sink,
+        forest_single_tree_maximum_burial=spec.forest_single_tree_maximum_burial,
         forest_single_tree_maximum_float=spec.forest_single_tree_maximum_float,
+        forest_gap_infill_enabled=spec.forest_gap_infill_enabled,
+        forest_gap_infill_spacing=spec.forest_gap_infill_spacing,
         ditch_grass_enabled=spec.ditch_grass_enabled,
         maximum_ditch_grass_objects=spec.maximum_ditch_grass_objects,
         ditch_grass_spacing=spec.ditch_grass_spacing,
@@ -1105,6 +1184,17 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         stock_hedge_models=spec.stock_hedge_models,
         stock_wall_models=spec.stock_wall_models,
         stock_metal_fence_models=spec.stock_metal_fence_models,
+        sidewalks_enabled=spec.sidewalks_enabled,
+        maximum_sidewalk_objects=spec.maximum_sidewalk_objects,
+        sidewalk_width=spec.sidewalk_width,
+        sidewalk_segment_length=spec.sidewalk_segment_length,
+        street_furniture_enabled=spec.street_furniture_enabled,
+        maximum_street_furniture_objects=spec.maximum_street_furniture_objects,
+        street_light_spacing=spec.street_light_spacing,
+        street_bench_every=spec.street_bench_every,
+        street_bin_every=spec.street_bin_every,
+        match_nearby_building_textures=spec.match_nearby_building_textures,
+        nearby_building_texture_match_distance=spec.nearby_building_texture_match_distance,
         bridges_enabled=spec.bridges_enabled,
         procedural_bridges=spec.procedural_bridges,
         maximum_bridge_objects=spec.maximum_bridge_objects,
@@ -1193,6 +1283,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         procedural_buildings=spec.procedural_buildings,
         procedural_building_interiors=spec.procedural_building_interiors,
         high_quality_building_textures=spec.high_quality_building_textures,
+        house_style_preset=spec.house_style_preset,
         building_width_quantum=spec.building_width_quantum,
         building_length_quantum=spec.building_length_quantum,
         building_height_quantum=spec.building_height_quantum,

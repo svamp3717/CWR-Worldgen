@@ -14,6 +14,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 from .cache import cache_key, restore_or_create_file
 from .paa import inspect_paa, write_rgb_dxt1_paa, write_rgba_dxt1_paa
+from .parallel_assets import process_asset_tasks
 from .procedural_buildings import (
     _Face,
     _Lod,
@@ -752,6 +753,42 @@ def is_generated_gravel_road_model(model_path: str) -> bool:
     return re.fullmatch(r"gravel(?:25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d", filename, re.IGNORECASE) is not None
 
 
+@dataclass(frozen=True, slots=True)
+class _InfrastructureAssetTask:
+    key: InfrastructureModelKey
+    wire: str
+    relative: str
+    destination: Path
+    texture: str
+    cache_path: Path | None
+    cache_enabled: bool
+    cache_refresh: bool
+    usage_count: int
+
+
+def _write_infrastructure_asset_task(task: _InfrastructureAssetTask) -> tuple[dict[str, object], bool]:
+    hit = restore_or_create_file(
+        cache_path=task.cache_path,
+        destination=task.destination,
+        producer=lambda target: write_infrastructure_mlod(target, task.key, task.texture),
+        enabled=task.cache_enabled,
+        refresh=task.cache_refresh,
+    )
+    summary = inspect_mlod(task.destination)
+    if task.key.kind in {"bridge", "road"} and not any(
+        math.isclose(value, _ROADWAY_LOD, rel_tol=1e-6) for value in summary.resolutions
+    ):
+        raise ValueError(f"generated {task.key.kind} lost its Roadway LOD")
+    return ({
+        "key": asdict(task.key),
+        "model_path": task.wire,
+        "relative_path": task.relative,
+        "usage_count": task.usage_count,
+        "sha256": sha256(task.destination.read_bytes()).hexdigest(),
+        "lod_resolutions": summary.resolutions,
+    }, hit)
+
+
 class ProceduralInfrastructureLibrary:
     _PATTERN = re.compile(r"^(bar|br|rock)_([a-z0-9_]+)_w(\d+)_l(\d+)\.p3d$", re.IGNORECASE)
     _GRAVEL_PATTERN = re.compile(r"^gravel(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.IGNORECASE)
@@ -779,6 +816,8 @@ class ProceduralInfrastructureLibrary:
         return rf"{self.world_name}\i\{prefix}_{key.subtype}_w{key.width_dm:03d}_l{key.length_dm:03d}.p3d"
 
     def barrier_model(self, subtype: str, length_m: float = 6.0) -> str:
+        if subtype.casefold() == "fence":
+            raise ValueError("fences must use stock OFP/CWA models")
         key = InfrastructureModelKey("barrier", subtype, 0, max(10, int(round(length_m * 10.0))))
         self._usage[key] += 1
         return self.model_path(key)
@@ -812,7 +851,10 @@ class ProceduralInfrastructureLibrary:
         prefix = (self.world_name + "\\i\\").casefold()
         return model_path.casefold().startswith(prefix) and model_path.casefold().endswith(".p3d")
 
-    def register_model(self, model_path: str) -> None:
+    def register_model_usage(self, model_path: str, count: int = 1) -> None:
+        count = max(0, int(count))
+        if count == 0:
+            return
         if not self.is_generated_model(model_path):
             return
         filename = model_path.rsplit("\\", 1)[-1]
@@ -823,7 +865,7 @@ class ProceduralInfrastructureLibrary:
                 "road", filename[:-4].casefold(),
                 int(round(GENERATED_GRAVEL_HALF_WIDTH_METRES * 20.0)),
                 54 if degree == 3 else 60,
-            )] += 1
+            )] += count
             return
         gravel_match = self._GRAVEL_PATTERN.fullmatch(filename)
         if gravel_match:
@@ -831,21 +873,24 @@ class ProceduralInfrastructureLibrary:
             actual_length = self.road_segment_length * nominal / 25.0
             self._usage[InfrastructureModelKey(
                 "road", filename[:-4].casefold(), int(round(GENERATED_GRAVEL_HALF_WIDTH_METRES * 20.0)), max(10, int(round(actual_length * 10.0)))
-            )] += 1
+            )] += count
             return
         utility_match = self._UTILITY_PATTERN.fullmatch(filename)
         if utility_match:
             subtype = utility_match.group(1).casefold()
             dimensions = {"power_pole": (40, 40), "power_tower": (90, 90), "water_tower": (65, 65)}
             width, length = dimensions[subtype]
-            self._usage[InfrastructureModelKey("utility", subtype, width, length)] += 1
+            self._usage[InfrastructureModelKey("utility", subtype, width, length)] += count
             return
         match = self._PATTERN.fullmatch(filename)
         if not match:
             raise ValueError(f"invalid generated infrastructure model path: {model_path}")
         prefix, subtype, width, length = match.groups()
         kind = {"bar": "barrier", "br": "bridge", "rock": "rock"}[prefix.casefold()]
-        self._usage[InfrastructureModelKey(kind, subtype.casefold(), int(width), int(length))] += 1
+        self._usage[InfrastructureModelKey(kind, subtype.casefold(), int(width), int(length))] += count
+
+    def register_model(self, model_path: str) -> None:
+        self.register_model_usage(model_path, 1)
 
     def register_models(self, model_paths: Iterable[str]) -> None:
         for model_path in model_paths:
@@ -932,8 +977,7 @@ class ProceduralInfrastructureLibrary:
                 "embedded_surface_rules": "i/gravel-source-surfaces.txt",
             }
 
-        models: list[dict[str, object]] = []
-        model_files: list[str] = []
+        model_tasks: list[_InfrastructureAssetTask] = []
         for key in sorted(self._usage):
             wire = self.model_path(key)
             relative = wire.split("\\", 1)[1].replace("\\", "/")
@@ -946,16 +990,25 @@ class ProceduralInfrastructureLibrary:
                 if key.kind == "bridge"
                 else "procedural-infrastructure-model-v5-osm-utilities"
             )
-            asset_key = cache_key(model_cache_version, {"world": self.world_name, "key": asdict(key), "texture": texture})
+            asset_key = cache_key(
+                model_cache_version,
+                {"world": self.world_name, "key": asdict(key), "texture": texture},
+            )
             cached = self.cache_dir / "procedural-assets" / f"{asset_key}.p3d" if self.cache_dir else None
-            hit = restore_or_create_file(cache_path=cached, destination=destination, producer=lambda target, key=key, texture=texture: write_infrastructure_mlod(target, key, texture), enabled=self.cache_enabled, refresh=self.cache_refresh)
+            model_tasks.append(_InfrastructureAssetTask(
+                key=key, wire=wire, relative=relative, destination=destination,
+                texture=texture, cache_path=cached, cache_enabled=self.cache_enabled,
+                cache_refresh=self.cache_refresh, usage_count=self._usage[key],
+            ))
+
+        model_results = process_asset_tasks(_write_infrastructure_asset_task, model_tasks)
+        models: list[dict[str, object]] = []
+        model_files: list[str] = []
+        for model, hit in model_results:
             self.cache_hits += int(hit)
             self.cache_misses += int(not hit)
-            summary = inspect_mlod(destination)
-            if key.kind in {"bridge", "road"} and not any(math.isclose(value, _ROADWAY_LOD, rel_tol=1e-6) for value in summary.resolutions):
-                raise ValueError(f"generated {key.kind} lost its Roadway LOD")
-            models.append({"key": asdict(key), "model_path": wire, "relative_path": relative, "usage_count": self._usage[key], "sha256": sha256(destination.read_bytes()).hexdigest(), "lod_resolutions": summary.resolutions})
-            model_files.append(relative)
+            models.append(model)
+            model_files.append(str(model["relative_path"]))
 
         document: dict[str, object] = {
             "schema": 1,

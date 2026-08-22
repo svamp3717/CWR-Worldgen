@@ -34,6 +34,7 @@ from .osm import (
     project_road_corridors,
 )
 from .paa import inspect_paa, write_rgb_dxt1_paa
+from .parallel_assets import process_asset_tasks
 from .procedural_buildings import footprint_from_polygon
 
 _MLOD_HEADER = struct.Struct("<4sBBHI")
@@ -193,6 +194,36 @@ def _site_texture(kind: str, size: int = 128) -> Image.Image:
     return image
 
 
+@dataclass(frozen=True, slots=True)
+class _SiteAssetTask:
+    key: SiteVariantKey
+    wire: str
+    relative: str
+    path: Path
+    texture: str
+    cache_path: Path | None
+    cache_enabled: bool
+    cache_refresh: bool
+    usage_count: int
+
+
+def _write_site_asset_task(task: _SiteAssetTask) -> tuple[dict[str, object], bool]:
+    hit = restore_or_create_file(
+        cache_path=task.cache_path,
+        destination=task.path,
+        producer=lambda target: _write_site_mlod(target, task.key, task.texture),
+        enabled=task.cache_enabled,
+        refresh=task.cache_refresh,
+    )
+    return ({
+        "key": asdict(task.key),
+        "model_path": task.wire,
+        "relative_path": task.relative,
+        "usage_count": task.usage_count,
+        "sha256": sha256(task.path.read_bytes()).hexdigest(),
+    }, hit)
+
+
 class ProceduralSiteLibrary:
     def __init__(
         self,
@@ -275,7 +306,7 @@ class ProceduralSiteLibrary:
             self.cache_misses += int(not hit)
             inspect_paa(path)
             texture_files.append(relative)
-        models = []
+        model_tasks: list[_SiteAssetTask] = []
         for key in sorted(self._usage):
             wire = self.model_path(key)
             relative = wire.split("\\", 1)[1].replace("\\", "/")
@@ -285,22 +316,19 @@ class ProceduralSiteLibrary:
                 {"world_name": self.world_name, "variant": asdict(key)},
             )
             cached = self.cache_dir / "procedural-assets" / f"{asset_key}.p3d" if self.cache_dir else None
-            hit = restore_or_create_file(
-                cache_path=cached,
-                destination=path,
-                producer=lambda target, key=key: _write_site_mlod(target, key, self._texture_path(key.kind)),
-                enabled=self.cache_enabled,
-                refresh=self.cache_refresh,
-            )
+            model_tasks.append(_SiteAssetTask(
+                key=key, wire=wire, relative=relative, path=path,
+                texture=self._texture_path(key.kind), cache_path=cached,
+                cache_enabled=self.cache_enabled, cache_refresh=self.cache_refresh,
+                usage_count=self._usage[key],
+            ))
+        model_results = process_asset_tasks(_write_site_asset_task, model_tasks)
+        models: list[dict[str, object]] = []
+        for model, hit in model_results:
             self.cache_hits += int(hit)
             self.cache_misses += int(not hit)
-            models.append({
-                "key": asdict(key),
-                "model_path": wire,
-                "relative_path": relative,
-                "usage_count": self._usage[key],
-                "sha256": sha256(path.read_bytes()).hexdigest(),
-            })
+            models.append(model)
+
         document = {
             "schema": 1,
             "generator": "cwr-worldgen procedural semantic sites",

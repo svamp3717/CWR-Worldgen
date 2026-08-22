@@ -10,6 +10,8 @@ from cwr_worldgen.gui import (
     WIZARD_STEPS,
     FROZEN_CLI_MARKER,
     APPEARANCE_PRESETS,
+    HOUSE_STYLE_AUTO_LABEL,
+    HOUSE_STYLE_PRESET_LABELS,
     RECOMMENDED_APPEARANCE_PRESET,
     RESISTANCE_APPEARANCE_PRESET,
     PINE_NOGOVA_APPEARANCE_PRESET,
@@ -31,6 +33,7 @@ from cwr_worldgen.gui import (
     defaults_with_recent_source,
     existing_source_preview_path,
     format_wizard_world_size,
+    gui_house_style_preset_identifier,
     increment_trailing_number,
     main as gui_main,
     load_gui_state,
@@ -141,6 +144,7 @@ class GuiCommandTests(unittest.TestCase):
             "poseidon_tools": "C:/tools/PoseidonTools.exe",
             "asset_roots": ["DTA_unpacked", "O.pbo"],
             "strict_assets": True,
+            "forest_individual_objects_only": True,
             "forest_clusters": True,
             "forest_undergrowth": False,
             "overture_buildings": False,
@@ -156,6 +160,7 @@ class GuiCommandTests(unittest.TestCase):
         self.assertEqual(command[:4], ["python", "-m", "cwr_worldgen", "milestone9"])
         self.assertEqual(command.count("--asset-root"), 2)
         self.assertIn("--strict-assets", command)
+        self.assertIn("--replace-forest-polygons-with-clusters", command)
         self.assertIn("--pbo-backend", command)
         self.assertIn("poseidon", command)
         self.assertIn("--poseidon-tools", command)
@@ -171,6 +176,23 @@ class GuiCommandTests(unittest.TestCase):
         self.assertNotIn("--no-forest-clusters", command)
         self.assertNotIn("--verify-regeneration", command)
         self.assertEqual(command[-2:], ["--max-barrier-objects", "123"])
+
+    def test_building_preset_defaults_to_area_country_auto_detection(self) -> None:
+        values = default_gui_values()
+        self.assertEqual(values["house_style_preset"], HOUSE_STYLE_AUTO_LABEL)
+        self.assertEqual(len(HOUSE_STYLE_PRESET_LABELS), 25)
+        command = build_milestone9_command(values, python="python")
+        index = command.index("--house-style-preset")
+        self.assertEqual(command[index + 1], "auto")
+
+    def test_building_preset_dropdown_can_override_detected_region(self) -> None:
+        values = default_gui_values()
+        east_asia_label = next(label for label in HOUSE_STYLE_PRESET_LABELS if "East Asia" in label)
+        values["house_style_preset"] = east_asia_label
+        self.assertEqual(gui_house_style_preset_identifier(east_asia_label), "east_asia")
+        command = build_milestone9_command(values, python="python")
+        index = command.index("--house-style-preset")
+        self.assertEqual(command[index + 1], "east_asia")
 
     def test_build_command_accepts_desert_ground_texture_profile(self) -> None:
         values = default_gui_values()
@@ -343,9 +365,11 @@ class GuiCommandTests(unittest.TestCase):
     def test_vegetation_defaults_emit_dense_interior_hillside_and_wetland_options(self) -> None:
         values = default_gui_values()
         command = build_milestone9_command(values, python="python")
+        self.assertFalse(values["forest_individual_objects_only"])
+        self.assertNotIn("--replace-forest-polygons-with-clusters", command)
         self.assertEqual(values["forest_undergrowth_max_objects"], "120000")
         self.assertEqual(values["forest_undergrowth_spacing"], "30")
-        self.assertEqual(values["forest_polygon_sink_fraction"], "0.5")
+        self.assertEqual(values["forest_polygon_sink_fraction"], "0")
         self.assertEqual(values["max_steep_hill_bush_objects"], "80000")
         self.assertEqual(values["steep_hill_bush_spacing"], "24")
         self.assertEqual(values["max_wetland_reed_objects"], "100000")

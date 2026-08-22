@@ -9,6 +9,7 @@ import sys
 
 from ._version import GENERATOR_VERSION
 from .generator import build_milestone1, build_milestone2, build_milestone3, build_milestone4
+from .house_style_catalogue import HOUSE_STYLE_PRESET_AUTO, HOUSE_STYLE_PRESET_IDENTIFIERS
 from .model import (
     DEFAULT_MAX_BUILDINGS,
     DEFAULT_MAX_FOREST_OBJECTS,
@@ -231,6 +232,14 @@ def _add_procedural_building_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="use optional 256px procedural building textures instead of the default legacy-style 128px textures",
     )
+    parser.add_argument(
+        "--house-style-preset",
+        "--building-preset",
+        dest="house_style_preset",
+        choices=(HOUSE_STYLE_PRESET_AUTO, *HOUSE_STYLE_PRESET_IDENTIFIERS),
+        default=HOUSE_STYLE_PRESET_AUTO,
+        help="override the geographically detected procedural-building style; auto uses the selected area/country",
+    )
     parser.add_argument("--building-width-quantum", type=float, default=2.0, help="width reuse bucket in metres")
     parser.add_argument("--building-length-quantum", type=float, default=2.0, help="length reuse bucket in metres")
     parser.add_argument("--building-height-quantum", type=float, default=3.0, help="height reuse bucket in metres")
@@ -437,28 +446,32 @@ def _parser() -> argparse.ArgumentParser:
     _add_procedural_building_arguments(milestone9)
     _add_surface_pass_arguments(milestone9)
     milestone9.add_argument("--forest-profile", choices=("everon", "malden"), default="everon", help="Everon square/triangle/cluster ladder by default; malden restores the older block plus individual-tree fallback")
+    milestone9.add_argument("--replace-forest-polygons-with-clusters", "--no-forest-polygons", "--forest-individual-objects-only", dest="forest_individual_objects_only", action="store_true", help="replace stock square/triangle forest polygon models with tiled generated clusters; individually grounded trees fill patches where no safe cluster fits (default: off)")
+    milestone9.set_defaults(forest_ground_clearance=0.02)
     milestone9.add_argument("--forest-block-model", default=r"data3d\les ctverec pruchozi_T1.p3d", help="primary stock forest block model")
-    milestone9.add_argument("--forest-max-block-relief", type=float, default=8.0, help="maximum relief for the primary stock square before the triangle fallback")
-    milestone9.add_argument("--forest-block-max-burial", type=float, default=8.0, help="maximum terrain burial under a stock square forest block")
-    milestone9.add_argument("--forest-block-max-float", type=float, default=0.5, help="maximum low-side floating under a stock square forest block")
+    milestone9.add_argument("--forest-max-block-relief", type=float, default=3.0, help="maximum relief for the primary stock square before the triangle fallback")
+    milestone9.add_argument("--forest-block-max-burial", type=float, default=2.0, help="maximum terrain burial under a stock square forest block")
+    milestone9.add_argument("--forest-block-max-float", type=float, default=0.20, help="maximum low-side floating under a stock square forest block")
     milestone9.add_argument("--forest-block-max-ground-sink", type=float, default=0.0, help="deprecated compatibility option; rigid stock polygons are no longer hill-sunk")
     milestone9.add_argument("--forest-steep-model", default=r"data3d\les trojuhelnik pruchozi.p3d", help="smaller Everon forest model used on moderate slopes")
     milestone9.add_argument("--forest-steep-footprint", type=float, default=35.0, help="support/clearance footprint for the Everon triangle forest model")
-    milestone9.add_argument("--forest-steep-max-relief", type=float, default=18.0, help="maximum local relief allowed beneath the stock Everon triangle")
-    milestone9.add_argument("--forest-steep-max-burial", type=float, default=18.0, help="maximum burial under the stock Everon triangle")
-    milestone9.add_argument("--forest-steep-max-float", type=float, default=0.5, help="maximum low-side floating under the stock Everon triangle")
+    milestone9.add_argument("--forest-steep-max-relief", type=float, default=8.0, help="maximum local relief allowed beneath the stock Everon triangle")
+    milestone9.add_argument("--forest-steep-max-burial", type=float, default=3.0, help="maximum burial under the stock Everon triangle")
+    milestone9.add_argument("--forest-steep-max-float", type=float, default=0.20, help="maximum low-side floating under the stock Everon triangle")
     milestone9.add_argument("--forest-steep-max-ground-sink", type=float, default=0.0, help="deprecated compatibility option; rigid stock polygons are no longer hill-sunk")
-    milestone9.add_argument("--forest-polygon-sink-fraction", type=float, default=0.5, help="fraction of local relief used to lower every non-flat Everon triangle polygon")
-    milestone9.add_argument("--no-severe-hill-forest-fallback", action="store_false", dest="forest_severe_hill_fallback", help="disable the sunk-polygon and individual-tree tiers for severe terrain")
+    milestone9.add_argument("--forest-polygon-sink-fraction", type=float, default=0.0, help="fraction of local relief used to lower every non-flat Everon triangle polygon")
+    milestone9.add_argument("--no-severe-hill-forest-fallback", action="store_false", dest="forest_severe_hill_fallback", help="disable the individually grounded tree/underbrush refill tiers for rejected severe hill forest patches")
     milestone9.set_defaults(forest_severe_hill_fallback=True)
     milestone9.add_argument("--forest-severe-hill-relief", type=float, default=5.0, help="compatibility threshold used only when a triangle polygon cannot be placed; all placed non-flat triangles use the configured sink")
-    milestone9.add_argument("--forest-severe-hill-trees-per-block", type=int, default=10, help="individually grounded trees used for each severe or too-steep rigid-forest rejection")
+    milestone9.add_argument("--forest-severe-hill-trees-per-block", type=int, default=10, help="target individually grounded trees used to refill each rejected rigid or grouped hill-forest patch")
     milestone9.add_argument("--no-forest-clusters", action="store_false", dest="forest_cluster_fallback", help="disable generated reusable steep-slope forest clusters")
     milestone9.set_defaults(forest_cluster_fallback=True)
     milestone9.add_argument("--forest-cluster-search-radius", type=float, default=10.0, help="candidate search radius for a steep-slope cluster")
-    milestone9.add_argument("--forest-cluster-max-relief", type=float, default=48.0, help="maximum footprint relief considered for generated clusters")
-    milestone9.add_argument("--forest-cluster-max-burial", type=float, default=1.25, help="maximum buried trunk-base depth in generated clusters")
-    milestone9.add_argument("--forest-cluster-max-float", type=float, default=1.25, help="maximum floating trunk-base height in generated clusters")
+    milestone9.add_argument("--forest-cluster-max-relief", type=float, default=24.0, help="maximum footprint relief considered for generated clusters")
+    milestone9.add_argument("--forest-cluster-max-burial", type=float, default=0.75, help="maximum buried trunk-base depth in generated clusters")
+    milestone9.add_argument("--forest-cluster-max-float", type=float, default=0.60, help="maximum floating trunk-base height in generated clusters")
+    milestone9.add_argument("--forest-cluster-tree-max-float", type=float, default=0.20, help="maximum floating base for any tree proxy inside a generated cluster")
+    milestone9.add_argument("--forest-cluster-bush-max-float", type=float, default=0.60, help="maximum floating base for bush/grass proxies inside a generated cluster")
     milestone9.add_argument("--no-forest-undergrowth", action="store_false", dest="forest_undergrowth_enabled", help="disable reusable interior bush and small-spruce clusters")
     milestone9.set_defaults(forest_undergrowth_enabled=True)
     milestone9.add_argument("--forest-undergrowth-max-objects", type=int, default=120000, help="maximum interior undergrowth cluster objects")
@@ -491,7 +504,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--forest-single-tree-spacing", type=float, default=45.0, help="geographically anchored individual-tree spacing in metres at every world size")
     milestone9.add_argument("--forest-single-tree-footprint", type=float, default=2.0)
     milestone9.add_argument("--forest-single-tree-max-relief", type=float, default=8.0)
-    milestone9.add_argument("--forest-single-tree-max-float", type=float, default=0.5, help="maximum triangle-ambiguity lift for individual trees; unsafe candidates are skipped")
+    milestone9.add_argument("--forest-single-tree-max-float", type=float, default=0.15, help="maximum triangle-ambiguity lift for individual trees; unsafe candidates are skipped")
     milestone9.add_argument("--no-ditch-grass", action="store_false", dest="ditch_grass_enabled", help="disable reusable tall-grass strips along OSM ditches")
     milestone9.set_defaults(ditch_grass_enabled=True)
     milestone9.add_argument("--max-ditch-grass-objects", type=int, default=2000)
@@ -505,6 +518,23 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.set_defaults(barriers_enabled=True)
     milestone9.add_argument("--max-barrier-objects", type=int, default=4000)
     milestone9.add_argument("--barrier-segment-length", type=float, default=6.0)
+    milestone9.add_argument("--sidewalks", action="store_true", dest="sidewalks_enabled", help="reserved sidewalk option; sidewalk placement is temporarily disabled")
+    milestone9.add_argument("--no-sidewalks", action="store_false", dest="sidewalks_enabled", help="keep sidewalk placement disabled (current default)")
+    milestone9.set_defaults(sidewalks_enabled=False)
+    milestone9.add_argument("--max-sidewalk-objects", type=int, default=30000)
+    milestone9.add_argument("--sidewalk-width", type=float, default=1.8, help="nominal sidewalk width used for stock pavement offset")
+    milestone9.add_argument("--sidewalk-segment-length", type=float, default=5.0, help="spacing of stock pavement tiles along roads")
+    milestone9.add_argument("--street-furniture", action="store_true", dest="street_furniture_enabled", help="place stock OFP/CWA settlement furniture in cities, towns, villages, hamlets and residential landuse (default)")
+    milestone9.add_argument("--no-street-furniture", action="store_false", dest="street_furniture_enabled", help="disable urban street furniture")
+    milestone9.set_defaults(street_furniture_enabled=True)
+    milestone9.add_argument("--max-street-furniture-objects", type=int, default=12000)
+    milestone9.add_argument("--street-light-spacing", type=float, default=32.0)
+    milestone9.add_argument("--street-bench-every", type=int, default=4, help="place roughly one bench per N street-light positions")
+    milestone9.add_argument("--street-bin-every", type=int, default=6, help="place roughly one bin per N street-light positions")
+    milestone9.add_argument("--match-nearby-building-textures", action="store_true", dest="match_nearby_building_textures", help="give clusters of 3+ nearby same-shape town/city buildings the same facade texture")
+    milestone9.add_argument("--no-match-nearby-building-textures", action="store_false", dest="match_nearby_building_textures", help="keep nearby same-shape building facade variants independent (default)")
+    milestone9.set_defaults(match_nearby_building_textures=False)
+    milestone9.add_argument("--building-texture-match-distance", type=float, default=90.0, dest="nearby_building_texture_match_distance", help="maximum neighbour distance in metres for matching same-shape building textures")
     milestone9.add_argument("--no-bridges", action="store_false", dest="bridges_enabled", help="disable modular bridge decks on OSM bridge roads")
     milestone9.set_defaults(bridges_enabled=True)
     milestone9.add_argument("--procedural-bridges", action="store_true", dest="procedural_bridges", help="generate world-local bridge deck/rail models instead of using the stock Nogova bridge module")
@@ -532,12 +562,12 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.set_defaults(meadow_grass_enabled=True)
     milestone9.add_argument("--max-meadow-grass-objects", type=int, default=20000)
     milestone9.add_argument("--meadow-grass-spacing", type=float, default=24.0)
-    milestone9.add_argument("--haybales", action="store_true", dest="haybales_enabled", help="enable stock hay bales in selected OSM landuse=farmland fields")
-    milestone9.add_argument("--no-haybales", action="store_false", dest="haybales_enabled", help="disable stock hay bales in OSM landuse=farmland fields (default)")
+    milestone9.add_argument("--haybales", action="store_true", dest="haybales_enabled", help="legacy option retained for profile compatibility; field hay-bale placement is disabled (hay bales are barn-only settlement clutter)")
+    milestone9.add_argument("--no-haybales", action="store_false", dest="haybales_enabled", help="keep legacy field hay-bale placement disabled (default; hay bales are barn-only settlement clutter)")
     milestone9.set_defaults(haybales_enabled=False)
     milestone9.add_argument("--max-haybale-objects", type=int, default=800)
     milestone9.add_argument("--haybale-spacing", type=float, default=110.0)
-    milestone9.add_argument("--haybale-field-percent", type=float, default=25.0, help="percentage of OSM farmland fields selected for hay bales")
+    milestone9.add_argument("--haybale-field-percent", type=float, default=25.0, help="legacy ignored setting; field hay-bale placement is disabled")
     milestone9.add_argument("--no-wetland-reeds", action="store_false", dest="wetland_reeds_enabled", help="disable stock reed placement in mapped OSM wetlands")
     milestone9.set_defaults(wetland_reeds_enabled=True)
     milestone9.add_argument("--max-wetland-reed-objects", type=int, default=100000)
@@ -980,6 +1010,7 @@ def main(argv: list[str] | None = None) -> int:
                 building_width_quantum=args.building_width_quantum,
                 procedural_building_interiors=args.procedural_building_interiors,
                 high_quality_building_textures=args.high_quality_building_textures,
+                house_style_preset=args.house_style_preset,
                 building_length_quantum=args.building_length_quantum,
                 building_height_quantum=args.building_height_quantum,
                 building_minimum_width=args.building_min_width,
@@ -1057,6 +1088,7 @@ def main(argv: list[str] | None = None) -> int:
                 building_width_quantum=args.building_width_quantum,
                 procedural_building_interiors=args.procedural_building_interiors,
                 high_quality_building_textures=args.high_quality_building_textures,
+                house_style_preset=args.house_style_preset,
                 building_length_quantum=args.building_length_quantum,
                 building_height_quantum=args.building_height_quantum,
                 building_minimum_width=args.building_min_width,
@@ -1075,6 +1107,7 @@ def main(argv: list[str] | None = None) -> int:
                 building_foundation_safety=args.building_foundation_safety,
                 building_maximum_pad_relief=args.building_max_pad_relief,
                 forest_profile=args.forest_profile,
+                forest_individual_objects_only=args.forest_individual_objects_only,
                 forest_tree_model=args.forest_block_model,
                 forest_maximum_block_relief=args.forest_max_block_relief,
                 forest_block_maximum_burial=args.forest_block_max_burial,
@@ -1095,6 +1128,8 @@ def main(argv: list[str] | None = None) -> int:
                 forest_cluster_maximum_relief=args.forest_cluster_max_relief,
                 forest_cluster_maximum_burial=args.forest_cluster_max_burial,
                 forest_cluster_maximum_float=args.forest_cluster_max_float,
+                forest_cluster_tree_maximum_float=args.forest_cluster_tree_max_float,
+                forest_cluster_bush_maximum_float=args.forest_cluster_bush_max_float,
                 forest_undergrowth_enabled=args.forest_undergrowth_enabled,
                 forest_undergrowth_maximum_objects=args.forest_undergrowth_max_objects,
                 forest_undergrowth_spacing=args.forest_undergrowth_spacing,
@@ -1139,6 +1174,17 @@ def main(argv: list[str] | None = None) -> int:
                 barriers_enabled=args.barriers_enabled,
                 maximum_barrier_objects=args.max_barrier_objects,
                 barrier_segment_length=args.barrier_segment_length,
+                sidewalks_enabled=args.sidewalks_enabled,
+                maximum_sidewalk_objects=args.max_sidewalk_objects,
+                sidewalk_width=args.sidewalk_width,
+                sidewalk_segment_length=args.sidewalk_segment_length,
+                street_furniture_enabled=args.street_furniture_enabled,
+                maximum_street_furniture_objects=args.max_street_furniture_objects,
+                street_light_spacing=args.street_light_spacing,
+                street_bench_every=args.street_bench_every,
+                street_bin_every=args.street_bin_every,
+                match_nearby_building_textures=args.match_nearby_building_textures,
+                nearby_building_texture_match_distance=args.nearby_building_texture_match_distance,
                 bridges_enabled=args.bridges_enabled,
                 procedural_bridges=args.procedural_bridges,
                 maximum_bridge_objects=args.max_bridge_objects,

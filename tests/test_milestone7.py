@@ -235,13 +235,16 @@ class ConstraintSolverTests(unittest.TestCase):
             raster,
             spec,
         )
+        # CWA has one global water plane. A synthetic lake at 30 m is therefore
+        # preserved at DEM height rather than excavated to sea level.
         self.assertEqual(result.coastal_water_components, 0)
-        self.assertEqual(result.inland_water_components, 1)
-        self.assertGreater(result.lake_shore_cells, 0)
-        self.assertGreater(result.maximum_lake_shore_slope_before_percent, 50.0)
-        self.assertLessEqual(result.maximum_lake_shore_slope_after_percent, 8.000001)
-        self.assertEqual(result.elevations[15 * cells + 14], -5.0)
-        self.assertAlmostEqual(result.elevations[15 * cells + 13], 4.0)
+        self.assertEqual(result.inland_water_components, 0)
+        self.assertEqual(result.water_cells, 0)
+        self.assertEqual(result.deep_water_cells, 0)
+        self.assertEqual(result.uncertain_water_cells_preserved, 16)
+        self.assertEqual(result.lake_shore_cells, 0)
+        self.assertEqual(result.elevations[15 * cells + 14], 30.0)
+        self.assertEqual(result.elevations[15 * cells + 13], 30.0)
 
     def test_unified_solver_enforces_priority_constraints(self) -> None:
         cells = 32
@@ -326,10 +329,16 @@ class ConstraintSolverTests(unittest.TestCase):
         first = solve_terrain_constraints(original, dataset, projection, raster, spec)
         second = solve_terrain_constraints(original, dataset, projection, raster, spec)
         self.assertEqual(first.elevations, second.elevations)
-        self.assertEqual(first.water_roughness_after, 0.0)
+        # The mapped water in this synthetic fixture sits ~15-20 m above sea
+        # level, so it is preserved instead of being flattened into CWA water.
+        self.assertEqual(first.water_cells, 0)
+        self.assertGreater(first.uncertain_water_cells_preserved, 0)
+        self.assertLessEqual(first.water_roughness_after, first.water_roughness_before + 1e-6)
         self.assertLessEqual(first.building_roughness_after, 0.1)
         self.assertLessEqual(first.downhill_violations_after, first.downhill_violations_before)
-        self.assertEqual(first.bridge_segments, 1)
+        # The synthetic bridge-tagged service road never reaches the global
+        # water plane, so it is intentionally treated as an ordinary road.
+        self.assertEqual(first.bridge_segments, 0)
         self.assertEqual(first.tunnel_segments_excluded, 1)
         self.assertEqual(first.embankment_segments, 1)
         self.assertGreater(first.major_road_cells, 0)
@@ -445,7 +454,12 @@ class Milestone7BuildTests(unittest.TestCase):
             report = json.loads(first.grading_report_path.read_text(encoding="utf-8"))
             manifest = json.loads(first.manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(report["solver"], "unified-priority-constraint-relaxation")
-            self.assertEqual(report["water_roughness_after"], 0.0)
+            self.assertEqual(report["water_cells"], 0)
+            self.assertGreater(report["uncertain_water_cells_preserved"], 0)
+            self.assertLessEqual(
+                report["water_roughness_after"],
+                report["water_roughness_before"] + 1e-6,
+            )
             self.assertIn("category_adjustments", report)
             self.assertEqual(manifest["milestone"], 7)
             self.assertIn("constraint_terrain_solver", manifest)

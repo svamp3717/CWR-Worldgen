@@ -11,6 +11,7 @@ from typing import Any
 
 from ._version import GENERATOR_VERSION
 from .generator import BuildResult, build_milestone4
+from .house_style_catalogue import HOUSE_STYLE_PRESET_AUTO, normalise_house_style_preset
 from .milestone6 import Milestone6Spec
 from .model import ConstraintPlayabilitySpec, validate_world_identity
 from .normalization import NormalizationSpec, load_normalized_dataset, normalize_source_bundle
@@ -35,6 +36,7 @@ class Milestone8Spec(Milestone6Spec):
     procedural_buildings: bool = True
     procedural_building_interiors: bool = False
     high_quality_building_textures: bool = False
+    house_style_preset: str = HOUSE_STYLE_PRESET_AUTO
     building_ground_clearance: float = 0.10
     church_ground_clearance: float = 3.00
     building_width_quantum: float = 2.0
@@ -58,6 +60,7 @@ class Milestone8Spec(Milestone6Spec):
 
     def validate(self) -> None:
         validate_world_identity(name=self.name, display_name=self.display_name, profile=self.profile)
+        normalise_house_style_preset(self.house_style_preset)
         for label, value in (
             ("building width quantum", self.building_width_quantum),
             ("building length quantum", self.building_length_quantum),
@@ -104,6 +107,7 @@ class _Milestone8PlayabilitySpec(ConstraintPlayabilitySpec):
     procedural_buildings: bool = True
     procedural_building_interiors: bool = False
     high_quality_building_textures: bool = False
+    house_style_preset: str = HOUSE_STYLE_PRESET_AUTO
     building_ground_clearance: float = 0.10
     church_ground_clearance: float = 3.00
     building_pad_margin: float = 2.0
@@ -242,6 +246,7 @@ def build_milestone8(output_dir: Path, spec: Milestone8Spec, *, clean: bool = Tr
         procedural_buildings=spec.procedural_buildings,
         procedural_building_interiors=spec.procedural_building_interiors,
         high_quality_building_textures=spec.high_quality_building_textures,
+        house_style_preset=spec.house_style_preset,
         building_width_quantum=spec.building_width_quantum,
         building_length_quantum=spec.building_length_quantum,
         building_height_quantum=spec.building_height_quantum,

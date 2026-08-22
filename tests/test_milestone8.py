@@ -1197,6 +1197,53 @@ class ProceduralBuildingTests(unittest.TestCase):
         self.assertEqual(front.getpixel((64, 40)), (66, 58, 47))
         self.assertNotEqual(front.getpixel((64, 116)), townhouse.getpixel((64, 116)))
 
+    def test_closed_painted_facades_end_on_complete_window_bays(self) -> None:
+        from cwr_worldgen.procedural_buildings import (
+            BuildingVariantKey,
+            _closed_wall_storey_faces,
+            _whole_window_bay_repeats,
+        )
+
+        # A 10 m wall previously used 2.5 horizontal atlas repeats. The last
+        # half-repeat visibly cut a painted window at the corner. Windowed bands
+        # now end on an integer UV boundary instead.
+        self.assertEqual(_whole_window_bay_repeats(10.0, 2.5), 3.0)
+        self.assertEqual(_whole_window_bay_repeats(6.0, 1.5), 2.0)
+
+        key = BuildingVariantKey(
+            family="townhouse",
+            roof_style="flat",
+            width_m=10.0,
+            length_m=8.0,
+            height_m=3.0,
+            facade_storeys=1,
+        )
+        points = (
+            (-5.0, 0.0, 0.0),
+            (-5.0, 3.0, 0.0),
+            (5.0, 3.0, 0.0),
+            (5.0, 0.0, 0.0),
+        )
+        _points, faces = _closed_wall_storey_faces(
+            key,
+            points,
+            lower_left=0,
+            upper_left=1,
+            upper_right=2,
+            lower_right=3,
+            wall_height=3.0,
+            span_m=10.0,
+            ground_texture="painted.paa",
+            upper_texture="painted.paa",
+            plain_texture="plain.paa",
+            normal=0,
+            u_scale=2.5,
+        )
+        self.assertEqual(len(faces), 1)
+        u_values = [vertex[2] for vertex in faces[0].vertices]
+        self.assertEqual(max(u_values), 3.0)
+        self.assertTrue(all(float(value).is_integer() for value in u_values))
+
     def test_default_shop_texture_reads_as_intact_storefront(self) -> None:
         from cwr_worldgen.procedural_buildings import (
             _open_wall_texture_image,

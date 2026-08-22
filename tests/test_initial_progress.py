@@ -131,7 +131,7 @@ class InitialProgressTests(unittest.TestCase):
             spec,
             progress_callback=lambda percent, stage: events.append((percent, stage)),
         )
-        self.assertTrue(any("water components" in stage for _percent, stage in events))
+        self.assertTrue(any("coastal" in stage and "water" in stage for _percent, stage in events))
         self.assertTrue(any("6/6 iterations" in stage for _percent, stage in events))
         self.assertEqual(events[-1], (100, "Terrain constraint solution ready"))
         self.assertEqual([percent for percent, _stage in events], sorted(percent for percent, _stage in events))

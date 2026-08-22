@@ -2943,7 +2943,8 @@ def load_normalized_dataset(
     cache_path = cache_dir / "sources" / f"{key}.pickle" if cache_dir is not None else None
     if use_cache and not refresh and cache_path is not None and cache_path.is_file():
         try:
-            payload = pickle.loads(cache_path.read_bytes())
+            with cache_path.open("rb") as stream:
+                payload = pickle.load(stream)
             if (
                 isinstance(payload, dict)
                 and payload.get("schema") == CACHE_SCHEMA_VERSION
@@ -2952,21 +2953,26 @@ def load_normalized_dataset(
                 and isinstance(payload.get("dataset"), OsmDataset)
             ):
                 return replace(payload["dataset"], parsed_cache_hit=True)
-        except (OSError, ValueError, TypeError, pickle.PickleError, EOFError):
+        except (OSError, ValueError, TypeError, AttributeError, pickle.PickleError, EOFError):
             pass
 
     dataset = _parse_normalized_dataset(bundle)
     if use_cache and cache_path is not None:
-        atomic_write_bytes(
-            cache_path,
-            pickle.dumps(
-                {
-                    "schema": CACHE_SCHEMA_VERSION,
-                    "dataset_schema": _PARSED_DATASET_CACHE_SCHEMA,
-                    "normalized_fingerprint": bundle.normalized_fingerprint,
-                    "dataset": dataset,
-                },
-                protocol=pickle.HIGHEST_PROTOCOL,
-            ),
-        )
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = cache_path.with_name(cache_path.name + ".tmp")
+        try:
+            with temporary.open("wb") as stream:
+                pickle.dump(
+                    {
+                        "schema": CACHE_SCHEMA_VERSION,
+                        "dataset_schema": _PARSED_DATASET_CACHE_SCHEMA,
+                        "normalized_fingerprint": bundle.normalized_fingerprint,
+                        "dataset": dataset,
+                    },
+                    stream,
+                    protocol=pickle.HIGHEST_PROTOCOL,
+                )
+            temporary.replace(cache_path)
+        finally:
+            temporary.unlink(missing_ok=True)
     return dataset

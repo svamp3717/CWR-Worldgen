@@ -1,0 +1,380 @@
+{
+  "schema_version": 2,
+  "map_region_number": 8,
+  "identifier": "northern_europe",
+  "display_name": "Northern Europe",
+  "priority": 65,
+  "match": {
+    "country_aliases": [
+      "no",
+      "nor",
+      "norway",
+      "norge",
+      "fi",
+      "fin",
+      "finland",
+      "suomi",
+      "dk",
+      "dnk",
+      "denmark",
+      "danmark",
+      "is",
+      "isl",
+      "iceland",
+      "ísland",
+      "island"
+    ],
+    "polygon_lon_lat": [],
+    "envelopes_lon_lat": [
+      [
+        -25,
+        54,
+        32,
+        71
+      ]
+    ]
+  },
+  "contexts": {
+    "rural": {
+      "description": "Timber or masonry house with steep roof and chimney.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding"
+        ],
+        "tag_rules": [
+          {
+            "field": "building:material",
+            "values": [
+              "brick",
+              "bricks"
+            ],
+            "style": "western_brick"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "stone",
+              "limestone",
+              "sandstone",
+              "granite",
+              "slate"
+            ],
+            "style": "western_stone"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "plaster",
+              "stucco",
+              "render",
+              "masonry"
+            ],
+            "style": "western_stucco"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "wood",
+              "timber",
+              "concrete",
+              "metal",
+              "glass"
+            ],
+            "style": "default"
+          }
+        ],
+        "family_distributions": {
+          "urban": [
+            {
+              "lt": 35,
+              "style": "western_brick"
+            },
+            {
+              "lt": 55,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 70,
+              "style": "western_stone"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 40,
+              "style": "western_brick"
+            },
+            {
+              "lt": 60,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 78,
+              "style": "western_stone"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "agricultural": [
+            {
+              "lt": 25,
+              "style": "western_stone"
+            },
+            {
+              "lt": 45,
+              "style": "western_brick"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "outbuilding": [
+            {
+              "lt": 15,
+              "style": "western_brick"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "*": [
+            {
+              "lt": 28,
+              "style": "western_brick"
+            },
+            {
+              "lt": 46,
+              "style": "western_stone"
+            },
+            {
+              "lt": 62,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    },
+    "town_city": {
+      "description": "Brick rowhouses and compact urban apartment buildings.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding"
+        ],
+        "tag_rules": [
+          {
+            "field": "building:material",
+            "values": [
+              "brick",
+              "bricks"
+            ],
+            "style": "western_brick"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "stone",
+              "limestone",
+              "sandstone",
+              "granite",
+              "slate"
+            ],
+            "style": "western_stone"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "plaster",
+              "stucco",
+              "render",
+              "masonry"
+            ],
+            "style": "western_stucco"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "prefabricated",
+              "precast_concrete",
+              "concrete",
+              "cement_block"
+            ],
+            "families": [
+              "urban",
+              "townhouse",
+              "school",
+              "shop"
+            ],
+            "style": "eastern_panel"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "wood",
+              "timber",
+              "metal",
+              "glass"
+            ],
+            "style": "default"
+          }
+        ],
+        "family_distributions": {
+          "urban": [
+            {
+              "lt": 45,
+              "style": "western_brick"
+            },
+            {
+              "lt": 72,
+              "style": "eastern_panel"
+            },
+            {
+              "lt": 90,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 64,
+              "style": "western_brick"
+            },
+            {
+              "lt": 80,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 92,
+              "style": "western_stone"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "agricultural": [
+            {
+              "lt": 28,
+              "style": "western_stone"
+            },
+            {
+              "lt": 50,
+              "style": "western_brick"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "outbuilding": [
+            {
+              "lt": 20,
+              "style": "western_brick"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "*": [
+            {
+              "lt": 42,
+              "style": "western_brick"
+            },
+            {
+              "lt": 66,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 82,
+              "style": "western_stone"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "residential": [
+            {
+              "lt": 60,
+              "style": "western_brick"
+            },
+            {
+              "lt": 78,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 90,
+              "style": "western_stone"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "shop": [
+            {
+              "lt": 60,
+              "style": "western_brick"
+            },
+            {
+              "lt": 82,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 94,
+              "style": "western_stone"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "school": [
+            {
+              "lt": 28,
+              "style": "western_brick"
+            },
+            {
+              "lt": 48,
+              "style": "western_stucco"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    }
+  }
+}

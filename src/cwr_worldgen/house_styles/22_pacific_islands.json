@@ -1,0 +1,148 @@
+{
+  "schema_version": 2,
+  "map_region_number": 22,
+  "identifier": "pacific_islands",
+  "display_name": "Pacific Islands",
+  "priority": 35,
+  "match": {
+    "country_aliases": [
+      "fj",
+      "fji",
+      "fiji",
+      "pg",
+      "png",
+      "papua new guinea",
+      "sb",
+      "slb",
+      "solomon islands",
+      "vu",
+      "vut",
+      "vanuatu",
+      "ws",
+      "wsm",
+      "samoa",
+      "to",
+      "ton",
+      "tonga",
+      "ki",
+      "kir",
+      "kiribati",
+      "tv",
+      "tuv",
+      "tuvalu",
+      "nr",
+      "nru",
+      "nauru",
+      "pw",
+      "plw",
+      "palau",
+      "fm",
+      "fsm",
+      "micronesia",
+      "mh",
+      "mhl",
+      "marshall islands"
+    ],
+    "polygon_lon_lat": [],
+    "envelopes_lon_lat": [
+      [
+        130,
+        -30,
+        180,
+        15
+      ],
+      [
+        -180,
+        -30,
+        -130,
+        15
+      ]
+    ]
+  },
+  "contexts": {
+    "rural": {
+      "description": "Thatched tropical dwelling or simple island house.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [],
+        "family_distributions": {
+          "*": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    },
+    "town_city": {
+      "description": "Compact tropical town housing and small mixed-use buildings.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [],
+        "family_distributions": {
+          "*": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "residential": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "urban": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "shop": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "school": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    }
+  }
+}

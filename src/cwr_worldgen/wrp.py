@@ -4,8 +4,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import io
+import math
+import os
 import struct
+import tempfile
 from typing import Iterable, Sequence
+
+import numpy as np
 
 from .model import WorldObject, encode_wire_path
 
@@ -51,6 +56,80 @@ def quantize_elevations(elevations: Sequence[float], scale: float) -> tuple[floa
     return tuple(quantize_height(float(value), scale) * scale for value in elevations)
 
 
+def _height_grid_bytes(elevations: Sequence[float], scale: float) -> bytes:
+    """Vectorized RVW4 int16 quantization with ``round``-compatible ties-to-even."""
+
+    if scale <= 0:
+        raise ValueError("height scale must be positive")
+    values = np.asarray(elevations, dtype=np.float64)
+    if values.ndim != 1:
+        values = values.reshape(-1)
+    if not np.all(np.isfinite(values)):
+        raise ValueError("terrain elevations must be finite")
+    raw = np.rint(values / float(scale))
+    if raw.size and (float(raw.min()) < -32768.0 or float(raw.max()) > 32767.0):
+        # Preserve the useful per-value error from the scalar contract.
+        for value in elevations:
+            quantize_height(float(value), scale)
+        raise ValueError("terrain elevation cannot be represented at requested scale")
+    return raw.astype("<i2", copy=False).tobytes(order="C")
+
+
+def _texture_grid_bytes(texture_indices: Sequence[int], maximum_index: int) -> bytes:
+    values = np.asarray(texture_indices)
+    if values.ndim != 1:
+        values = values.reshape(-1)
+    if values.dtype.kind not in {"b", "i", "u"}:
+        # Do not silently truncate float/object values; ``struct.pack('<h', x)``
+        # historically rejected them as well.
+        for index in texture_indices:
+            if not isinstance(index, (int, np.integer, bool)):
+                raise TypeError("RVW4 texture indices must be integers")
+        values = np.asarray(texture_indices, dtype=np.int64)
+    if values.size:
+        minimum = int(values.min())
+        maximum = int(values.max())
+        if minimum < 0 or maximum > maximum_index:
+            bad = minimum if minimum < 0 else maximum
+            raise ValueError(f"texture index {bad} is outside 0..{maximum_index}")
+    return values.astype("<i2", copy=False).tobytes(order="C")
+
+
+def _object_matrix_4x3_fast(obj: WorldObject) -> tuple[float, ...]:
+    """Inline transform fast path used by the million-record WRP serializer."""
+
+    heading = math.radians(obj.heading_degrees)
+    cosine_heading = math.cos(heading)
+    sine_heading = math.sin(heading)
+    if obj.pitch_degrees == 0.0:
+        # Preserve the exact signed-zero bytes produced by WorldObject.matrix_4x3.
+        # RVW4 does not care about +/-0.0, but byte-identical regeneration does.
+        sine_pitch = 0.0
+        return (
+            cosine_heading, 0.0, -sine_heading,
+            -sine_heading * sine_pitch, 1.0, -cosine_heading * sine_pitch,
+            sine_heading, sine_pitch, cosine_heading,
+            obj.x, obj.y, obj.z,
+        )
+    pitch = math.radians(obj.pitch_degrees)
+    cosine_pitch = math.cos(pitch)
+    sine_pitch = math.sin(pitch)
+    return (
+        cosine_heading,
+        0.0,
+        -sine_heading,
+        -sine_heading * sine_pitch,
+        cosine_pitch,
+        -cosine_heading * sine_pitch,
+        sine_heading * cosine_pitch,
+        sine_pitch,
+        cosine_heading * cosine_pitch,
+        obj.x,
+        obj.y,
+        obj.z,
+    )
+
+
 def write_rvw4(
     path: Path,
     width: int,
@@ -61,6 +140,7 @@ def write_rvw4(
     objects: Iterable[WorldObject],
     *,
     height_scale: float,
+    renumber_object_ids: bool = False,
 ) -> None:
     expected = width * height
     if width <= 0 or height <= 0:
@@ -77,39 +157,90 @@ def write_rvw4(
         for value in texture_paths
     ]
     maximum_index = len(texture_paths) - 1
-    for index in texture_indices:
-        if not 0 <= index <= maximum_index:
-            raise ValueError(f"texture index {index} is outside 0..{maximum_index}")
-
-    checked_objects = list(objects)
-    seen_ids: set[int] = set()
-    for obj in checked_objects:
-        obj.validate()
-        if obj.object_id in seen_ids:
-            raise ValueError(f"duplicate object ID {obj.object_id}")
-        seen_ids.add(obj.object_id)
+    height_bytes = _height_grid_bytes(elevations, height_scale)
+    texture_bytes = _texture_grid_bytes(texture_indices, maximum_index)
+    texture_table = b"".join(
+        (encoded_textures[slot] if slot < len(encoded_textures) else b"").ljust(
+            _TEXTURE_PATH_BYTES, b"\0"
+        )
+        for slot in range(_TEXTURE_RECORDS)
+    )
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("wb") as stream:
-        stream.write(_RVW4_HEADER.pack(b"4WVR", width, height))
-        for elevation in elevations:
-            stream.write(struct.pack("<h", quantize_height(elevation, height_scale)))
-        for index in texture_indices:
-            # The engine reads this field as a signed short. Valid texture slots
-            # are non-negative, so the wire representation is identical.
-            stream.write(struct.pack("<h", index))
-        for slot in range(_TEXTURE_RECORDS):
-            encoded = encoded_textures[slot] if slot < len(encoded_textures) else b""
-            stream.write(encoded.ljust(_TEXTURE_PATH_BYTES, b"\0"))
-        for obj in checked_objects:
-            model = encode_wire_path(obj.model_path, 75, "model path").ljust(76, b"\0")
-            stream.write(_RVW4_OBJECT.pack(*obj.matrix_4x3(), obj.object_id, model))
+    temporary_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
+        ) as stream:
+            temporary_name = stream.name
+            stream.write(_RVW4_HEADER.pack(b"4WVR", width, height))
+            stream.write(height_bytes)
+            stream.write(texture_bytes)
+            stream.write(texture_table)
 
-        # Landscape::SaveData always writes a complete empty SingleObject4
-        # record to terminate the object list, even when the map has no objects.
-        # Reaching physical EOF instead leaves the input stream in a failed
-        # state and is not a serializer-compatible 4WVR file.
-        stream.write(bytes(_RVW4_OBJECT.size))
+            # One megabyte keeps syscall count tiny without allocating a second
+            # 128 MB object stream for a million-object world.
+            records_per_chunk = 8192
+            record_buffer = bytearray(_RVW4_OBJECT.size * records_per_chunk)
+            offset = 0
+            model_cache: dict[str, bytes] = {}
+            seen_ids: set[int] | None = set() if not renumber_object_ids else None
+
+            for wire_id, obj in enumerate(objects, 1):
+                if obj.object_id < 0:
+                    raise ValueError("object IDs must be non-negative")
+                if seen_ids is not None:
+                    if obj.object_id in seen_ids:
+                        raise ValueError(f"duplicate object ID {obj.object_id}")
+                    seen_ids.add(obj.object_id)
+                    object_id = obj.object_id
+                else:
+                    object_id = wire_id
+
+                for label, value in (("x", obj.x), ("y", obj.y), ("z", obj.z)):
+                    if not math.isfinite(value):
+                        raise ValueError(f"object {label} coordinate must be finite")
+                if not math.isfinite(obj.heading_degrees):
+                    raise ValueError("object heading must be finite")
+                if not math.isfinite(obj.pitch_degrees) or not -89.0 < obj.pitch_degrees < 89.0:
+                    raise ValueError("object pitch must be finite and within -89..89 degrees")
+
+                model = model_cache.get(obj.model_path)
+                if model is None:
+                    model = encode_wire_path(obj.model_path, 75, "model path").ljust(76, b"\0")
+                    # Generated worlds normally have hundreds or a few thousand
+                    # models. Cap pathological unique-model input so the cache
+                    # itself cannot become a million-entry memory problem.
+                    if len(model_cache) < 16384:
+                        model_cache[obj.model_path] = model
+
+                _RVW4_OBJECT.pack_into(
+                    record_buffer,
+                    offset,
+                    *_object_matrix_4x3_fast(obj),
+                    object_id,
+                    model,
+                )
+                offset += _RVW4_OBJECT.size
+                if offset == len(record_buffer):
+                    stream.write(record_buffer)
+                    offset = 0
+            if offset:
+                stream.write(memoryview(record_buffer)[:offset])
+
+            # Landscape::SaveData always writes a complete empty SingleObject4
+            # record to terminate the object list, even when the map has no objects.
+            stream.write(bytes(_RVW4_OBJECT.size))
+
+        assert temporary_name is not None
+        os.replace(temporary_name, path)
+        temporary_name = None
+    finally:
+        if temporary_name is not None:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
 
 
 def inspect_rvw4(path: Path, *, height_scale: float) -> WrpSummary:

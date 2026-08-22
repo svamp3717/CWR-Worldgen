@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, fields, is_dataclass
 from hashlib import sha256
-from pathlib import Path
+from pathlib import Path, PurePath
 import json
 import os
 import pickle
 import shutil
 import struct
+from collections.abc import Iterable, Mapping
 from typing import Any, Callable, TypeVar
 
 CACHE_SCHEMA_VERSION = 3
@@ -42,6 +43,113 @@ def cache_key(namespace: str, payload: Any) -> str:
     digest.update(namespace.encode("ascii"))
     digest.update(b"\0")
     digest.update(canonical_json_bytes(payload))
+    return digest.hexdigest()
+
+
+
+def _hash_length(digest: Any, length: int) -> None:
+    digest.update(struct.pack("<Q", max(0, int(length))))
+
+
+def _hash_bytes(digest: Any, marker: bytes, data: bytes) -> None:
+    digest.update(marker)
+    _hash_length(digest, len(data))
+    digest.update(data)
+
+
+def _update_stable_hash(digest: Any, value: Any) -> None:
+    """Feed one Python value into a deterministic hash without materializing it.
+
+    This deliberately encodes type markers and lengths so heterogeneous values
+    cannot collide through concatenation.  Dataclasses are walked field-by-field
+    instead of calling ``asdict()``, and generic iterables are consumed lazily.
+    The format is private and versioned by each caller's namespace.
+    """
+
+    if value is None:
+        digest.update(b"N")
+        return
+    if isinstance(value, bool):
+        digest.update(b"B\1" if value else b"B\0")
+        return
+    if isinstance(value, int):
+        _hash_bytes(digest, b"I", str(value).encode("ascii"))
+        return
+    if isinstance(value, float):
+        digest.update(b"F")
+        digest.update(struct.pack("<d", value))
+        return
+    if isinstance(value, str):
+        _hash_bytes(digest, b"S", value.encode("utf-8"))
+        return
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        data = bytes(value)
+        _hash_bytes(digest, b"Y", data)
+        return
+    if isinstance(value, PurePath):
+        _hash_bytes(digest, b"P", str(value).encode("utf-8"))
+        return
+    if is_dataclass(value) and not isinstance(value, type):
+        _hash_bytes(
+            digest, b"D",
+            f"{value.__class__.__module__}.{value.__class__.__qualname__}".encode("utf-8"),
+        )
+        dataclass_fields = fields(value)
+        _hash_length(digest, len(dataclass_fields))
+        for field in dataclass_fields:
+            _hash_bytes(digest, b"K", field.name.encode("utf-8"))
+            _update_stable_hash(digest, getattr(value, field.name))
+        return
+    if isinstance(value, Mapping):
+        digest.update(b"M")
+        _hash_length(digest, len(value))
+        # Cache payload mappings are normally tiny. Sorting only their keys keeps
+        # the potentially huge *values* streaming and deterministic.
+        items = sorted(
+            value.items(),
+            key=lambda item: (type(item[0]).__module__, type(item[0]).__qualname__, repr(item[0])),
+        )
+        for key, item in items:
+            _update_stable_hash(digest, key)
+            _update_stable_hash(digest, item)
+        return
+    if isinstance(value, tuple):
+        digest.update(b"T")
+        _hash_length(digest, len(value))
+        for item in value:
+            _update_stable_hash(digest, item)
+        return
+    if isinstance(value, list):
+        digest.update(b"L")
+        _hash_length(digest, len(value))
+        for item in value:
+            _update_stable_hash(digest, item)
+        return
+    if isinstance(value, (set, frozenset)):
+        digest.update(b"E")
+        _hash_length(digest, len(value))
+        for item in sorted(value, key=lambda item: (type(item).__module__, type(item).__qualname__, repr(item))):
+            _update_stable_hash(digest, item)
+        return
+    if isinstance(value, Iterable):
+        # Generators are the important case for million-record fingerprints.
+        # An explicit terminator makes the stream unambiguous without requiring
+        # a preliminary pass just to count elements.
+        digest.update(b"G")
+        for item in value:
+            _update_stable_hash(digest, item)
+        digest.update(b"Z")
+        return
+    _hash_bytes(digest, b"R", repr(value).encode("utf-8"))
+
+
+def streaming_hash(namespace: str, *values: Any) -> str:
+    """Return a deterministic SHA-256 while keeping large iterables streaming."""
+
+    digest = sha256()
+    _hash_bytes(digest, b"V", namespace.encode("utf-8"))
+    for value in values:
+        _update_stable_hash(digest, value)
     return digest.hexdigest()
 
 
@@ -118,52 +226,7 @@ def load_or_create_pickle(
     stage_schema: int,
     validator: Callable[[T], bool] | None = None,
 ) -> tuple[T, bool]:
-    if enabled and cache_path is not None and cache_path.is_file() and not refresh:
-        try:
-            envelope = pickle.loads(cache_path.read_bytes())
-            if (
-                isinstance(envelope, dict)
-                and envelope.get("cache_schema") == CACHE_SCHEMA_VERSION
-                and envelope.get("stage_schema") == stage_schema
-                and "value" in envelope
-            ):
-                value = envelope["value"]
-                if validator is None or validator(value):
-                    return value, True
-        except (OSError, EOFError, ValueError, TypeError, AttributeError, pickle.PickleError):
-            pass
-    value = producer()
-    if enabled and cache_path is not None:
-        atomic_write_bytes(
-            cache_path,
-            pickle.dumps(
-                {
-                    "cache_schema": CACHE_SCHEMA_VERSION,
-                    "stage_schema": stage_schema,
-                    "value": value,
-                },
-                protocol=pickle.HIGHEST_PROTOCOL,
-            ),
-        )
-    return value, False
-
-
-def load_or_create_pickle_streaming(
-    *,
-    cache_path: Path | None,
-    producer: Callable[[], T],
-    enabled: bool,
-    refresh: bool,
-    stage_schema: int,
-    validator: Callable[[T], bool] | None = None,
-) -> tuple[T, bool]:
-    """Large-object variant of :func:`load_or_create_pickle`.
-
-    The ordinary helper intentionally uses ``read_bytes``/``pickle.dumps`` for
-    small cache entries. Large world datasets can be hundreds of megabytes, so
-    this variant streams pickle input/output directly through files and avoids
-    a second full-size bytes object during cache load/store.
-    """
+    """Load/store a pickle cache without duplicating its serialized bytes in RAM."""
 
     if enabled and cache_path is not None and cache_path.is_file() and not refresh:
         try:
@@ -202,6 +265,22 @@ def load_or_create_pickle_streaming(
             temporary.unlink(missing_ok=True)
     return value, False
 
+
+def load_or_create_pickle_streaming(
+    *,
+    cache_path: Path | None,
+    producer: Callable[[], T],
+    enabled: bool,
+    refresh: bool,
+    stage_schema: int,
+    validator: Callable[[T], bool] | None = None,
+) -> tuple[T, bool]:
+    """Compatibility alias; pickle caches are streaming by default now."""
+
+    return load_or_create_pickle(
+        cache_path=cache_path, producer=producer, enabled=enabled, refresh=refresh,
+        stage_schema=stage_schema, validator=validator,
+    )
 
 def restore_or_create_file(
     *,

@@ -1,0 +1,514 @@
+{
+  "schema_version": 2,
+  "map_region_number": 16,
+  "identifier": "middle_east",
+  "display_name": "Middle East",
+  "priority": 60,
+  "match": {
+    "country_aliases": [
+      "bh",
+      "bhr",
+      "bahrain",
+      "ir",
+      "irn",
+      "iran",
+      "iran, islamic republic of",
+      "ایران",
+      "iq",
+      "irq",
+      "iraq",
+      "العراق",
+      "il",
+      "isr",
+      "israel",
+      "ישראל",
+      "jo",
+      "jor",
+      "jordan",
+      "الأردن",
+      "kw",
+      "kwt",
+      "kuwait",
+      "الكويت",
+      "lb",
+      "lbn",
+      "lebanon",
+      "لبنان",
+      "om",
+      "omn",
+      "oman",
+      "عمان",
+      "ps",
+      "pse",
+      "palestine",
+      "state of palestine",
+      "فلسطين",
+      "qa",
+      "qat",
+      "qatar",
+      "قطر",
+      "sa",
+      "sau",
+      "saudi arabia",
+      "السعودية",
+      "sy",
+      "syr",
+      "syria",
+      "syrian arab republic",
+      "سوريا",
+      "tr",
+      "tur",
+      "turkey",
+      "türkiye",
+      "turkiye",
+      "ae",
+      "are",
+      "united arab emirates",
+      "uae",
+      "الإمارات",
+      "ye",
+      "yem",
+      "yemen",
+      "اليمن"
+    ],
+    "polygon_lon_lat": [],
+    "envelopes_lon_lat": [
+      [
+        34,
+        12,
+        63.5,
+        42.5
+      ]
+    ]
+  },
+  "legacy_identifier": "middle_east",
+  "legacy_default": true,
+  "contexts": {
+    "rural": {
+      "description": "Flat-roof courtyard house with stone or stucco walls.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [
+          {
+            "field": "building:material",
+            "values": [
+              "mud",
+              "adobe",
+              "earth",
+              "clay",
+              "rammed_earth"
+            ],
+            "style": "middle_east_adobe"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "stone",
+              "sandstone",
+              "limestone",
+              "masonry"
+            ],
+            "style": "middle_east_sandstone"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "concrete",
+              "cement_block",
+              "concrete_blocks",
+              "precast_concrete"
+            ],
+            "style": "middle_east_concrete"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "white",
+              "off_white",
+              "cream",
+              "ivory",
+              "light_grey",
+              "light_gray"
+            ],
+            "style": "middle_east_whitewash"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "beige",
+              "sand",
+              "yellow",
+              "ochre",
+              "brown",
+              "terracotta"
+            ],
+            "style": "middle_east_sandstone"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "plaster",
+              "stucco",
+              "render"
+            ],
+            "style": "middle_east_whitewash"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "wood",
+              "timber",
+              "metal",
+              "glass"
+            ],
+            "style": "default"
+          }
+        ],
+        "family_distributions": {
+          "urban": [
+            {
+              "lt": 58,
+              "style": "middle_east_concrete"
+            },
+            {
+              "lt": 82,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 94,
+              "style": "middle_east_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "school": [
+            {
+              "lt": 36,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 66,
+              "style": "middle_east_concrete"
+            },
+            {
+              "lt": 89,
+              "style": "middle_east_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "middle_east_adobe"
+            }
+          ],
+          "shop": [
+            {
+              "lt": 36,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 66,
+              "style": "middle_east_concrete"
+            },
+            {
+              "lt": 89,
+              "style": "middle_east_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "middle_east_adobe"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 36,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 66,
+              "style": "middle_east_concrete"
+            },
+            {
+              "lt": 89,
+              "style": "middle_east_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "middle_east_adobe"
+            }
+          ],
+          "agricultural": [
+            {
+              "lt": 51,
+              "style": "middle_east_adobe"
+            },
+            {
+              "lt": 81,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 95,
+              "style": "middle_east_concrete"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "*": [
+            {
+              "lt": 40,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 69,
+              "style": "middle_east_adobe"
+            },
+            {
+              "lt": 90,
+              "style": "middle_east_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "middle_east_concrete"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "flat"
+      }
+    },
+    "town_city": {
+      "description": "Flat-roof townhouses and courtyard-based urban blocks.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [
+          {
+            "field": "building:material",
+            "values": [
+              "mud",
+              "adobe",
+              "earth",
+              "clay",
+              "rammed_earth"
+            ],
+            "style": "middle_east_adobe"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "stone",
+              "sandstone",
+              "limestone",
+              "masonry"
+            ],
+            "style": "middle_east_sandstone"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "concrete",
+              "cement_block",
+              "concrete_blocks",
+              "precast_concrete"
+            ],
+            "style": "middle_east_concrete"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "white",
+              "off_white",
+              "cream",
+              "ivory",
+              "light_grey",
+              "light_gray"
+            ],
+            "style": "middle_east_whitewash"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "beige",
+              "sand",
+              "yellow",
+              "ochre",
+              "brown",
+              "terracotta"
+            ],
+            "style": "middle_east_sandstone"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "plaster",
+              "stucco",
+              "render"
+            ],
+            "style": "middle_east_whitewash"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "wood",
+              "timber",
+              "metal",
+              "glass"
+            ],
+            "style": "default"
+          }
+        ],
+        "family_distributions": {
+          "urban": [
+            {
+              "lt": 58,
+              "style": "middle_east_concrete"
+            },
+            {
+              "lt": 82,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 94,
+              "style": "middle_east_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "school": [
+            {
+              "lt": 36,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 66,
+              "style": "middle_east_concrete"
+            },
+            {
+              "lt": 89,
+              "style": "middle_east_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "middle_east_adobe"
+            }
+          ],
+          "shop": [
+            {
+              "lt": 36,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 66,
+              "style": "middle_east_concrete"
+            },
+            {
+              "lt": 89,
+              "style": "middle_east_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "middle_east_adobe"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 36,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 66,
+              "style": "middle_east_concrete"
+            },
+            {
+              "lt": 89,
+              "style": "middle_east_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "middle_east_adobe"
+            }
+          ],
+          "agricultural": [
+            {
+              "lt": 51,
+              "style": "middle_east_adobe"
+            },
+            {
+              "lt": 81,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 95,
+              "style": "middle_east_concrete"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "*": [
+            {
+              "lt": 40,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 69,
+              "style": "middle_east_adobe"
+            },
+            {
+              "lt": 90,
+              "style": "middle_east_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "middle_east_concrete"
+            }
+          ],
+          "residential": [
+            {
+              "lt": 36,
+              "style": "middle_east_sandstone"
+            },
+            {
+              "lt": 66,
+              "style": "middle_east_concrete"
+            },
+            {
+              "lt": 89,
+              "style": "middle_east_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "middle_east_adobe"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "flat"
+      }
+    }
+  }
+}

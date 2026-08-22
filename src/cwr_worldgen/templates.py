@@ -92,7 +92,7 @@ class CfgVehicles
             {{
                 displayName = "Open door";
                 position = "door1_action";
-                radius = 4.0;
+                radius = 5.0;
                 condition = "this animationPhase ""Door1"" < 0.5";
                 statement = "this animate [""Door1"", 1]";
                 onlyForPlayer = 1;
@@ -101,7 +101,25 @@ class CfgVehicles
             {{
                 displayName = "Close door";
                 position = "door1_action";
-                radius = 4.0;
+                radius = 5.0;
+                condition = "this animationPhase ""Door1"" >= 0.5";
+                statement = "this animate [""Door1"", 0]";
+                onlyForPlayer = 1;
+            }};
+            class OpenDoor1Inside
+            {{
+                displayName = "Open door";
+                position = "door1_action_inside";
+                radius = 5.0;
+                condition = "this animationPhase ""Door1"" < 0.5";
+                statement = "this animate [""Door1"", 1]";
+                onlyForPlayer = 1;
+            }};
+            class CloseDoor1Inside
+            {{
+                displayName = "Close door";
+                position = "door1_action_inside";
+                radius = 5.0;
                 condition = "this animationPhase ""Door1"" >= 0.5";
                 statement = "this animate [""Door1"", 0]";
                 onlyForPlayer = 1;

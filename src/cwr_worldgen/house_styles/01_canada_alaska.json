@@ -1,0 +1,115 @@
+{
+  "schema_version": 2,
+  "map_region_number": 1,
+  "identifier": "canada_alaska",
+  "display_name": "Canada & Alaska",
+  "priority": 50,
+  "match": {
+    "country_aliases": [
+      "ca",
+      "can",
+      "canada"
+    ],
+    "polygon_lon_lat": [],
+    "envelopes_lon_lat": [
+      [
+        -141,
+        41.5,
+        -52,
+        83.5
+      ],
+      [
+        -170,
+        51,
+        -129,
+        72
+      ]
+    ]
+  },
+  "contexts": {
+    "rural": {
+      "description": "Insulated timber house with steep roof for snow.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [],
+        "family_distributions": {
+          "*": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    },
+    "town_city": {
+      "description": "Cold-climate detached homes or low-rise apartments with steep roofs.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [],
+        "family_distributions": {
+          "*": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "residential": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "urban": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "shop": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "school": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    }
+  }
+}

@@ -1,0 +1,141 @@
+{
+  "schema_version": 2,
+  "map_region_number": 20,
+  "identifier": "southeast_asia",
+  "display_name": "Southeast Asia",
+  "priority": 55,
+  "match": {
+    "country_aliases": [
+      "mm",
+      "mmr",
+      "myanmar",
+      "burma",
+      "th",
+      "tha",
+      "thailand",
+      "la",
+      "lao",
+      "laos",
+      "kh",
+      "khm",
+      "cambodia",
+      "vn",
+      "vnm",
+      "vietnam",
+      "my",
+      "mys",
+      "malaysia",
+      "sg",
+      "sgp",
+      "singapore",
+      "id",
+      "idn",
+      "indonesia",
+      "ph",
+      "phl",
+      "philippines",
+      "bn",
+      "brn",
+      "brunei",
+      "tl",
+      "tls",
+      "timor-leste",
+      "east timor"
+    ],
+    "polygon_lon_lat": [],
+    "envelopes_lon_lat": [
+      [
+        92,
+        -12,
+        141,
+        24
+      ]
+    ]
+  },
+  "contexts": {
+    "rural": {
+      "description": "Raised stilt house of wood or bamboo with steep roof.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [],
+        "family_distributions": {
+          "*": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    },
+    "town_city": {
+      "description": "Shophouses and narrow mixed-use urban row buildings.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [],
+        "family_distributions": {
+          "*": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "residential": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "urban": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "shop": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "school": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    }
+  }
+}

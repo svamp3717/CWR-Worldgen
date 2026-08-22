@@ -1,0 +1,513 @@
+{
+  "schema_version": 2,
+  "map_region_number": 14,
+  "identifier": "east_africa",
+  "display_name": "East Africa",
+  "priority": 50,
+  "match": {
+    "country_aliases": [
+      "et",
+      "eth",
+      "ethiopia",
+      "er",
+      "eri",
+      "eritrea",
+      "dj",
+      "dji",
+      "djibouti",
+      "so",
+      "som",
+      "somalia",
+      "ke",
+      "ken",
+      "kenya",
+      "ug",
+      "uga",
+      "uganda",
+      "rw",
+      "rwa",
+      "rwanda",
+      "bi",
+      "bdi",
+      "burundi",
+      "tz",
+      "tza",
+      "tanzania",
+      "united republic of tanzania",
+      "ss",
+      "ssd",
+      "south sudan",
+      "sd",
+      "sdn",
+      "sudan"
+    ],
+    "polygon_lon_lat": [],
+    "envelopes_lon_lat": [
+      [
+        22,
+        -13,
+        52,
+        19
+      ]
+    ]
+  },
+  "legacy_identifier": "africa",
+  "contexts": {
+    "rural": {
+      "description": "Stone or brick house with veranda or corrugated roof.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [
+          {
+            "field": "building:material",
+            "values": [
+              "mud",
+              "adobe",
+              "earth",
+              "clay",
+              "rammed_earth"
+            ],
+            "style": "africa_earth"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "concrete",
+              "cement_block",
+              "concrete_blocks",
+              "cinder_block"
+            ],
+            "style": "africa_block"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "white",
+              "off_white",
+              "cream",
+              "ivory",
+              "light_grey",
+              "light_gray"
+            ],
+            "style": "africa_whitewash"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "blue",
+              "green",
+              "turquoise",
+              "cyan",
+              "pink",
+              "orange",
+              "yellow",
+              "purple",
+              "teal"
+            ],
+            "style": "africa_colour"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "plaster",
+              "stucco",
+              "render",
+              "masonry",
+              "limestone"
+            ],
+            "style": "africa_whitewash"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "brick",
+              "stone",
+              "sandstone"
+            ],
+            "style": "africa_earth"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "brown",
+              "red",
+              "ochre",
+              "beige",
+              "sand"
+            ],
+            "style": "africa_earth"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "wood",
+              "timber",
+              "metal",
+              "glass"
+            ],
+            "style": "default"
+          }
+        ],
+        "family_distributions": {
+          "urban": [
+            {
+              "lt": 55,
+              "style": "africa_block"
+            },
+            {
+              "lt": 78,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 94,
+              "style": "africa_colour"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "school": [
+            {
+              "lt": 34,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 63,
+              "style": "africa_block"
+            },
+            {
+              "lt": 90,
+              "style": "africa_colour"
+            },
+            {
+              "lt": 100,
+              "style": "africa_earth"
+            }
+          ],
+          "shop": [
+            {
+              "lt": 34,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 63,
+              "style": "africa_block"
+            },
+            {
+              "lt": 90,
+              "style": "africa_colour"
+            },
+            {
+              "lt": 100,
+              "style": "africa_earth"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 34,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 63,
+              "style": "africa_block"
+            },
+            {
+              "lt": 90,
+              "style": "africa_colour"
+            },
+            {
+              "lt": 100,
+              "style": "africa_earth"
+            }
+          ],
+          "agricultural": [
+            {
+              "lt": 52,
+              "style": "africa_earth"
+            },
+            {
+              "lt": 77,
+              "style": "africa_block"
+            },
+            {
+              "lt": 92,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "*": [
+            {
+              "lt": 43,
+              "style": "africa_earth"
+            },
+            {
+              "lt": 68,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 88,
+              "style": "africa_colour"
+            },
+            {
+              "lt": 100,
+              "style": "africa_block"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    },
+    "town_city": {
+      "description": "Stone or concrete townhouses and mixed-use neighborhood buildings.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [
+          {
+            "field": "building:material",
+            "values": [
+              "mud",
+              "adobe",
+              "earth",
+              "clay",
+              "rammed_earth"
+            ],
+            "style": "africa_earth"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "concrete",
+              "cement_block",
+              "concrete_blocks",
+              "cinder_block"
+            ],
+            "style": "africa_block"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "white",
+              "off_white",
+              "cream",
+              "ivory",
+              "light_grey",
+              "light_gray"
+            ],
+            "style": "africa_whitewash"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "blue",
+              "green",
+              "turquoise",
+              "cyan",
+              "pink",
+              "orange",
+              "yellow",
+              "purple",
+              "teal"
+            ],
+            "style": "africa_colour"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "plaster",
+              "stucco",
+              "render",
+              "masonry",
+              "limestone"
+            ],
+            "style": "africa_whitewash"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "brick",
+              "stone",
+              "sandstone"
+            ],
+            "style": "africa_earth"
+          },
+          {
+            "field": "building:colour",
+            "values": [
+              "brown",
+              "red",
+              "ochre",
+              "beige",
+              "sand"
+            ],
+            "style": "africa_earth"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "wood",
+              "timber",
+              "metal",
+              "glass"
+            ],
+            "style": "default"
+          }
+        ],
+        "family_distributions": {
+          "urban": [
+            {
+              "lt": 55,
+              "style": "africa_block"
+            },
+            {
+              "lt": 78,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 94,
+              "style": "africa_colour"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "school": [
+            {
+              "lt": 34,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 63,
+              "style": "africa_block"
+            },
+            {
+              "lt": 90,
+              "style": "africa_colour"
+            },
+            {
+              "lt": 100,
+              "style": "africa_earth"
+            }
+          ],
+          "shop": [
+            {
+              "lt": 34,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 63,
+              "style": "africa_block"
+            },
+            {
+              "lt": 90,
+              "style": "africa_colour"
+            },
+            {
+              "lt": 100,
+              "style": "africa_earth"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 34,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 63,
+              "style": "africa_block"
+            },
+            {
+              "lt": 90,
+              "style": "africa_colour"
+            },
+            {
+              "lt": 100,
+              "style": "africa_earth"
+            }
+          ],
+          "agricultural": [
+            {
+              "lt": 52,
+              "style": "africa_earth"
+            },
+            {
+              "lt": 77,
+              "style": "africa_block"
+            },
+            {
+              "lt": 92,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "*": [
+            {
+              "lt": 43,
+              "style": "africa_earth"
+            },
+            {
+              "lt": 68,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 88,
+              "style": "africa_colour"
+            },
+            {
+              "lt": 100,
+              "style": "africa_block"
+            }
+          ],
+          "residential": [
+            {
+              "lt": 34,
+              "style": "africa_whitewash"
+            },
+            {
+              "lt": 63,
+              "style": "africa_block"
+            },
+            {
+              "lt": 90,
+              "style": "africa_colour"
+            },
+            {
+              "lt": 100,
+              "style": "africa_earth"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    }
+  }
+}

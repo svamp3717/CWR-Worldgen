@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, replace
 from pathlib import Path
 import hashlib
+import heapq
 import json
 import pickle
 import math
@@ -15,7 +16,7 @@ from urllib import error, parse, request
 from PIL import Image, ImageDraw
 
 from ._version import __version__
-from .cache import CACHE_SCHEMA_VERSION, atomic_write_bytes, cache_key
+from .cache import CACHE_SCHEMA_VERSION, atomic_write_bytes, cache_key, streaming_hash
 from .building_semantics import is_actual_church
 from .model import OsmSpec, WorldObject
 from .network import (
@@ -40,6 +41,7 @@ from .procedural_forests import (
     RURAL_VEGETATION_VARIANTS,
     ForestClusterVariant,
     cluster_model_path,
+    cluster_variant,
     quantize_cluster_grade,
 )
 
@@ -68,6 +70,111 @@ STOCK_WALL_MODELS: tuple[str, ...] = (
 STOCK_METAL_FENCE_MODELS: tuple[str, ...] = (
     r"O\Hous\DD_pletivo.p3d",
 )
+
+# Stock OFP/CWA fence objects used for occasional farmland boundaries. These are
+# original game models, not generated infrastructure. ``ohrada_sama`` is the
+# rural/pasture-looking fence; ``plot_provizorni`` is the stock wire fence.
+STOCK_FARMLAND_FENCE_MODELS: tuple[str, ...] = (
+    r"data3d\ohrada_sama.p3d",
+    r"data3d\plot_provizorni.p3d",
+)
+FARMLAND_FENCE_FIELD_PERCENT = 25.0
+FARMLAND_FENCE_SEGMENT_LENGTH_METRES = 5.0
+FARMLAND_FENCE_MINIMUM_FIELD_AREA_M2 = 1600.0
+FARMLAND_FENCE_HEADING_OFFSET_DEGREES = 90.0
+FARMLAND_FENCE_DUPLICATE_DISTANCE_METRES = 2.4
+FARMLAND_FENCE_DUPLICATE_MINIMUM_OVERLAP_METRES = 1.0
+FARMLAND_FENCE_DUPLICATE_HEADING_TOLERANCE_DEGREES = 12.0
+RURAL_FENCE_LANDUSES = frozenset({"farmland", "meadow"})
+RURAL_FENCE_NATURALS = frozenset({"grassland"})
+
+# Urban-detail assets. Keep this layer vanilla-only: every model below ships
+# with OFP/Cold War Assault. The base game does not provide a modern modular
+# narrow sidewalk kit, so ``Nam_dlazba`` (the stock cobbled-square pavement
+# object) is tiled along suitable road edges instead of generating new P3Ds.
+STOCK_SIDEWALK_MODELS: tuple[str, ...] = (r"O\Hous\Nam_dlazba.p3d",)
+STOCK_STREET_LIGHT_MODELS: tuple[str, ...] = (
+    r"data3d\lampazel.p3d",
+    r"o\misc\vo_seda.p3d",
+    r"data3d\lampadrevo.p3d",
+    r"o\misc\vo_stara1.p3d",
+)
+STOCK_STREET_BENCH_MODELS: tuple[str, ...] = (r"o\misc\lavicka_1.p3d",)
+STOCK_STREET_BIN_MODELS: tuple[str, ...] = (
+    r"o\misc\popelnice.p3d",
+    r"o\misc\kos_hist.p3d",
+)
+STOCK_STREET_NOTICEBOARD_MODELS: tuple[str, ...] = (
+    r"o\misc\nastenka1.p3d",
+    r"o\misc\nastenka2.p3d",
+    r"o\misc\nastenka3.p3d",
+    r"o\misc\cedule_info.p3d",
+)
+STOCK_STREET_BICYCLE_MODELS: tuple[str, ...] = (r"kolo\koloslozeny.p3d",)
+STOCK_STREET_BUS_SHELTER_MODELS: tuple[str, ...] = (r"O\Misc\aut_zast.p3d",)
+STOCK_STREET_TREE_SURROUND_MODELS: tuple[str, ...] = (r"O\Hous\Nam_okruzi.p3d",)
+STOCK_STREET_TREE_MODELS: tuple[str, ...] = (
+    r"O\Tree\Javor01.p3d",
+    r"O\Tree\Javor02.p3d",
+)
+STOCK_SETTLEMENT_UTILITY_POLE_MODELS: tuple[str, ...] = (
+    r"data3d\sloupyelA.p3d",
+    r"data3d\sloupyell.p3d",
+    r"O\Hous\stozarvn_1.p3d",
+)
+STOCK_SETTLEMENT_FRUIT_TREE_MODELS: tuple[str, ...] = (
+    r"data3d\jablon.p3d",
+    r"data3d\hrusen.p3d",
+    r"data3d\str_jablon.p3d",
+)
+# Barn-only stock clutter. These are deliberately never scattered in fields,
+# house yards, sheds, stables, or generic agricultural buildings.
+STOCK_SETTLEMENT_BARN_CLUTTER_MODELS: tuple[str, ...] = (
+    r"O\Misc\seno_balik.p3d",
+    r"data3d\drevo_hromada.p3d",
+    r"O\Misc\sekyraspalek.p3d",
+    r"data3d\paletyC.p3d",
+)
+STOCK_SETTLEMENT_DRIVEWAY_MODEL = r"O\Road\ces6.p3d"
+STOCK_SETTLEMENT_DETAIL_MODELS: tuple[str, ...] = tuple(dict.fromkeys((
+    *STOCK_SETTLEMENT_UTILITY_POLE_MODELS,
+    *STOCK_STREET_NOTICEBOARD_MODELS,
+    *STOCK_STREET_BENCH_MODELS,
+    *STOCK_STREET_BIN_MODELS,
+    *STOCK_STREET_BICYCLE_MODELS,
+    *STOCK_HEDGE_MODELS,
+    *STOCK_FARMLAND_FENCE_MODELS,
+    *STOCK_SETTLEMENT_FRUIT_TREE_MODELS,
+    *STOCK_SETTLEMENT_BARN_CLUTTER_MODELS,
+    STOCK_SETTLEMENT_DRIVEWAY_MODEL,
+)))
+
+SETTLEMENT_DETAIL_RADIUS_METRES: Mapping[str, float] = {
+    "city": 1600.0,
+    "town": 800.0,
+    "village": 420.0,
+    "hamlet": 240.0,
+}
+SETTLEMENT_UTILITY_POLE_SPACING_METRES: Mapping[str, float] = {
+    # Sparse cues only, roughly one third as many poles as the first pass.
+    "city": 280.0,
+    "town": 240.0,
+    "residential": 240.0,
+    "village": 190.0,
+    "hamlet": 210.0,
+}
+SETTLEMENT_DETAIL_MINIMUM_SEPARATION_METRES = 3.5
+SIDEWALK_DEFAULT_WIDTH_METRES = 1.8
+SIDEWALK_DEFAULT_SEGMENT_LENGTH_METRES = 5.0
+SIDEWALK_CURB_GAP_METRES = 0.12
+SIDEWALKS_TEMPORARILY_DISABLED = True
+STREET_FURNITURE_MINIMUM_SEPARATION_METRES = 7.0
+STREET_FURNITURE_GROUND_CLEARANCE_METRES = 0.04
+TOWN_STREET_FURNITURE_RADIUS_METRES = 800.0
+CITY_STREET_FURNITURE_RADIUS_METRES = 1600.0
+PEDESTRIAN_ONLY_HIGHWAYS = frozenset({"path", "footway", "cycleway", "bridleway", "pedestrian", "steps"})
+DEFAULT_NEARBY_BUILDING_TEXTURE_MATCH_DISTANCE_METRES = 90.0
+MINIMUM_NEARBY_BUILDING_TEXTURE_MATCH_CLUSTER = 3
 
 HEDGE_MODEL_HEADING_OFFSET_DEGREES = 90.0
 WALL_MODEL_HEADING_OFFSET_DEGREES = 90.0
@@ -281,6 +388,56 @@ def stock_metal_fence_model(
     return models[int.from_bytes(digest, "little") % len(models)]
 
 
+def stock_farmland_fence_model(
+    identity: str,
+    models: Sequence[str] = STOCK_FARMLAND_FENCE_MODELS,
+) -> str:
+    """Choose one original OFP/CWA fence family deterministically.
+
+    This chooser is intended to run once per farmland field, not once per
+    segment. A selected field therefore uses either the rural/pasture fence or
+    the stock wire fence around its whole perimeter, never a patchwork.
+    """
+    if not models:
+        raise ValueError("stock farmland fence model list must contain at least one model")
+    digest = hashlib.blake2s(identity.encode("utf-8"), digest_size=2).digest()
+    roll = int.from_bytes(digest, "little") / 65535.0
+    if len(models) == 1 or roll < 0.78:
+        return models[0]
+    return models[1 + (int.from_bytes(digest, "little") % (len(models) - 1))]
+
+
+def _rural_fence_segments_duplicate(
+    candidate: tuple[float, float, float, float],
+    existing: tuple[float, float, float, float],
+) -> bool:
+    """Return whether two nearby field-fence chunks are redundant parallels."""
+
+    x0, z0, x1, z1 = candidate
+    ex0, ez0, ex1, ez1 = existing
+    dx, dz = x1 - x0, z1 - z0
+    edx, edz = ex1 - ex0, ez1 - ez0
+    length = math.hypot(dx, dz)
+    existing_length = math.hypot(edx, edz)
+    if length <= 1.0e-6 or existing_length <= 1.0e-6:
+        return False
+    ux, uz = dx / length, dz / length
+    eux, euz = edx / existing_length, edz / existing_length
+    parallel = abs(ux * eux + uz * euz)
+    if parallel < math.cos(math.radians(FARMLAND_FENCE_DUPLICATE_HEADING_TOLERANCE_DEGREES)):
+        return False
+
+    nx, nz = -uz, ux
+    t0 = (ex0 - x0) * ux + (ez0 - z0) * uz
+    t1 = (ex1 - x0) * ux + (ez1 - z0) * uz
+    c0 = (ex0 - x0) * nx + (ez0 - z0) * nz
+    c1 = (ex1 - x0) * nx + (ez1 - z0) * nz
+    if max(abs(c0), abs(c1)) > FARMLAND_FENCE_DUPLICATE_DISTANCE_METRES:
+        return False
+    overlap = min(length, max(t0, t1)) - max(0.0, min(t0, t1))
+    return overlap >= FARMLAND_FENCE_DUPLICATE_MINIMUM_OVERLAP_METRES
+
+
 @dataclass(frozen=True, slots=True)
 class GeoPolygon:
     outer: tuple[PointLL, ...]
@@ -374,21 +531,20 @@ class BboxProjection:
 
     def to_world(self, point: PointLL) -> PointXZ:
         latitude, longitude = point
-        middle_latitude = math.radians((self.south + self.north) / 2.0)
-        source_x = EARTH_RADIUS_METRES * math.radians(longitude - self.west) * math.cos(middle_latitude)
-        source_z = EARTH_RADIUS_METRES * math.radians(latitude - self.south)
-        return source_x * self.scale_x, source_z * self.scale_z
+        # ``create`` uses the same constant-latitude equirectangular projection
+        # for width and scale, so the Earth-radius/trig terms cancel exactly.
+        # Keep the hot path as two affine transforms.
+        return (
+            (longitude - self.west) * self.world_size / (self.east - self.west),
+            (latitude - self.south) * self.world_size / (self.north - self.south),
+        )
 
     def to_latlon(self, point: PointXZ) -> PointLL:
         x, z = point
-        middle_latitude = math.radians((self.south + self.north) / 2.0)
-        source_x = x / self.scale_x
-        source_z = z / self.scale_z
-        latitude = self.south + math.degrees(source_z / EARTH_RADIUS_METRES)
-        longitude = self.west + math.degrees(
-            source_x / (EARTH_RADIUS_METRES * math.cos(middle_latitude))
+        return (
+            self.south + z * (self.north - self.south) / self.world_size,
+            self.west + x * (self.east - self.west) / self.world_size,
         )
-        return latitude, longitude
 
     def to_pixel(self, point: PointLL, resolution: int) -> tuple[float, float]:
         x, z = self.to_world(point)
@@ -410,6 +566,95 @@ class OsmRaster:
     buildings: tuple[bool, ...]
     high_resolution: int
     coastline_seed_count: int
+    # Terrain vertices near a coarse shoreline can be marked as water even when
+    # most of the supersampled cell is dry land. Keep a second conservative mask
+    # so only strongly water-covered vertices are eligible for full-depth carving.
+    water_interior: tuple[bool, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CompactOrientedRectangle(Sequence[PointXZ]):
+    """Four-corner support footprint stored as five scalars instead of 13 objects.
+
+    Million-building worlds are dominated by Python container overhead. Most
+    procedural supports are rectangles, so calculate their four points lazily
+    when a polygon consumer actually asks for them.
+    """
+
+    x: float
+    z: float
+    width: float
+    length: float
+    heading_degrees: float
+
+    def __len__(self) -> int:
+        return 4
+
+    def _point(self, index: int) -> PointXZ:
+        if index < 0:
+            index += 4
+        if not 0 <= index < 4:
+            raise IndexError(index)
+        half_width = max(0.05, self.width * 0.5)
+        half_length = max(0.05, self.length * 0.5)
+        angle = math.radians(self.heading_degrees)
+        cosine = math.cos(angle)
+        sine = math.sin(angle)
+        width_sign, length_sign = ((-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0))[index]
+        return (
+            self.x + width_sign * half_width * cosine + length_sign * half_length * sine,
+            self.z - width_sign * half_width * sine + length_sign * half_length * cosine,
+        )
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return tuple(self)[index]
+        return self._point(int(index))
+
+    def __iter__(self):
+        # Iteration is the common polygon-consumer path. Compute trig once for
+        # all four corners rather than paying for four separate ``_point`` calls.
+        half_width = max(0.05, self.width * 0.5)
+        half_length = max(0.05, self.length * 0.5)
+        angle = math.radians(self.heading_degrees)
+        cosine = math.cos(angle)
+        sine = math.sin(angle)
+        for width_sign, length_sign in ((-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)):
+            yield (
+                self.x + width_sign * half_width * cosine + length_sign * half_length * sine,
+                self.z - width_sign * half_width * sine + length_sign * half_length * cosine,
+            )
+
+
+def _compact_support_polygon(
+    points: Sequence[PointXZ], x: float, z: float, heading_degrees: float
+) -> Sequence[PointXZ]:
+    """Compress a support polygon when it is the expected oriented rectangle."""
+
+    if len(points) != 4:
+        return tuple(points)
+    angle = math.radians(heading_degrees)
+    cosine = math.cos(angle)
+    sine = math.sin(angle)
+    local: list[PointXZ] = []
+    for px, pz in points:
+        dx, dz = float(px) - x, float(pz) - z
+        local.append((dx * cosine - dz * sine, dx * sine + dz * cosine))
+    half_width = max(abs(px) for px, _pz in local)
+    half_length = max(abs(pz) for _px, pz in local)
+    if half_width <= 1.0e-9 or half_length <= 1.0e-9:
+        return tuple(points)
+    tolerance = max(1.0e-5, max(half_width, half_length) * 1.0e-7)
+    corners: set[tuple[int, int]] = set()
+    for local_x, local_z in local:
+        if abs(abs(local_x) - half_width) > tolerance or abs(abs(local_z) - half_length) > tolerance:
+            return tuple(points)
+        corners.add((1 if local_x >= 0.0 else -1, 1 if local_z >= 0.0 else -1))
+    if len(corners) != 4:
+        return tuple(points)
+    return CompactOrientedRectangle(
+        float(x), float(z), half_width * 2.0, half_length * 2.0, float(heading_degrees)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -421,7 +666,7 @@ class BuildingPlacementPlan:
     z: float
     heading_degrees: float
     model_path: str
-    support_polygon: tuple[PointXZ, ...]
+    support_polygon: Sequence[PointXZ]
     procedural_placement: "BuildingPlacement | None" = None
     road_nudged: bool = False
     building_family: str = ""
@@ -475,6 +720,7 @@ class ObjectGenerationResult:
     forest_border_maximum_burial: float = 0.0
     forest_border_maximum_float: float = 0.0
     forest_single_tree_objects: int = 0
+    forest_gap_infill_tree_objects: int = 0
     ditch_grass_objects: int = 0
     ditch_grass_rejections: int = 0
     ditch_grass_maximum_burial: float = 0.0
@@ -511,6 +757,28 @@ class ObjectGenerationResult:
     mapped_tree_rejections: int = 0
     utility_objects: int = 0
     utility_rejections: int = 0
+    sidewalk_objects: int = 0
+    street_furniture_objects: int = 0
+    street_light_objects: int = 0
+    street_bench_objects: int = 0
+    street_bin_objects: int = 0
+    street_noticeboard_objects: int = 0
+    street_bicycle_objects: int = 0
+    street_bus_shelter_objects: int = 0
+    street_tree_objects: int = 0
+    urban_detail_rejections: int = 0
+    vegetation_audit_tree_objects: int = 0
+    vegetation_audit_cluster_tree_proxies: int = 0
+    vegetation_audit_cluster_bush_proxies: int = 0
+    vegetation_audit_violations: int = 0
+    vegetation_audit_maximum_tree_float: float = 0.0
+    vegetation_audit_maximum_bush_float: float = 0.0
+    # Aggregates accumulated at emission time. They let later build stages use
+    # unique-model counts and surface-relevant coordinates without rescanning
+    # and reclassifying every WorldObject.
+    model_usage: tuple[tuple[str, int], ...] = ()
+    surface_forest_positions: tuple[PointXZ, ...] = ()
+    surface_rock_positions: tuple[PointXZ, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -604,6 +872,7 @@ def build_overpass_query(bbox: tuple[float, float, float, float], *, timeout_sec
   nwr["landuse"~"^(reservoir|basin)$"];
   nwr["natural"="wood"];
   nwr["natural"="wetland"];
+  nwr["natural"="grassland"];
   nwr["landcover"="trees"];
   nwr["landuse"~"^(forest|farmland|meadow|orchard|vineyard|grass|allotments|plant_nursery|greenhouse_horticulture|recreation_ground|village_green|residential|commercial|industrial|retail|construction|farmyard|garages|railway|education|institutional|civic)$"];
   way["highway"];
@@ -872,7 +1141,7 @@ def parse_overpass_json(
         is_forest = natural == "wood" or landuse in _FOREST_LANDUSES or landcover == "trees"
         if is_forest and polygons:
             forests.append(OsmPolygonFeature(key, tags, polygons))
-        elif landuse in _FARMLAND_LANDUSES and polygons:
+        elif (landuse in _FARMLAND_LANDUSES or natural == "grassland") and polygons:
             farmland.append(OsmPolygonFeature(key, tags, polygons))
         elif landuse in _URBAN_LANDUSES and polygons:
             urban.append(OsmPolygonFeature(key, tags, polygons))
@@ -1057,6 +1326,60 @@ def road_width_metres(tags: Mapping[str, str]) -> float:
     return 2.5
 
 
+def _urban_detail_road_eligible(tags: Mapping[str, str]) -> bool:
+    highway = tags.get("highway", "").casefold()
+    if tags.get("tunnel") not in {None, "", "no"}:
+        return False
+    if tags.get("bridge") not in {None, "", "no"}:
+        return False
+    if highway in {"motorway", "motorway_link", "trunk", "trunk_link", "track"}:
+        return False
+    return highway in {
+        "primary", "primary_link", "secondary", "secondary_link",
+        "tertiary", "tertiary_link", "unclassified", "residential",
+        "living_street", "service", "road",
+    }
+
+
+def _sidewalk_sides(tags: Mapping[str, str], *, inferred: bool) -> tuple[int, ...]:
+    """Return -1 for left and +1 for right relative to OSM way direction."""
+
+    value = tags.get("sidewalk", "").strip().casefold().replace("-", "_")
+    left = tags.get("sidewalk:left", "").strip().casefold()
+    right = tags.get("sidewalk:right", "").strip().casefold()
+    negative = {"no", "none", "separate"}
+    positive = {"yes", "designated"}
+    if value in negative and left not in positive and right not in positive:
+        return ()
+    sides: list[int] = []
+    if value in {"left"} or left in positive:
+        sides.append(-1)
+    if value in {"right"} or right in positive:
+        sides.append(1)
+    if value in {"both", "yes"}:
+        return (-1, 1)
+    if sides:
+        return tuple(sides)
+    return (-1, 1) if inferred else ()
+
+
+def _stock_street_light_model(tags: Mapping[str, str], identity: str) -> str:
+    highway = tags.get("highway", "").casefold()
+    digest = hashlib.blake2s(identity.encode("utf-8"), digest_size=2).digest()
+    roll = int.from_bytes(digest, "little") % 100
+    if highway in {"primary", "secondary", "tertiary"}:
+        if roll < 58:
+            return STOCK_STREET_LIGHT_MODELS[1]
+        if roll < 88:
+            return STOCK_STREET_LIGHT_MODELS[0]
+        return STOCK_STREET_LIGHT_MODELS[3]
+    if roll < 68:
+        return STOCK_STREET_LIGHT_MODELS[0]
+    if roll < 91:
+        return STOCK_STREET_LIGHT_MODELS[2]
+    return STOCK_STREET_LIGHT_MODELS[3]
+
+
 def road_is_gravel(tags: Mapping[str, str]) -> bool:
     """Return whether OSM surface tagging selects the generated gravel family.
 
@@ -1068,8 +1391,15 @@ def road_is_gravel(tags: Mapping[str, str]) -> bool:
 
 
 def road_model_for_tags(spec: OsmSpec, tags: Mapping[str, str]) -> str:
-    """Select the paved, dirt, or dedicated gravel model family for one road."""
+    """Select the paved, dirt, or dedicated gravel model family for one road.
 
+    Pedestrian-only OSM ways must never become the stock asphalt vehicle road.
+    Even an explicitly paved footway is represented with the narrow dirt-path
+    fallback until a dedicated pedestrian-path asset family exists.
+    """
+
+    if tags.get("highway", "").strip().casefold() in PEDESTRIAN_ONLY_HIGHWAYS:
+        return spec.dirt_road_model
     if road_is_gravel(tags):
         if bool(getattr(spec, "procedural_gravel_roads", False)):
             return gravel_road_model_path(spec.name, 25)
@@ -1154,6 +1484,7 @@ class SpatialLookupIndex:
     bucket_size: float
     road_segments: tuple[ProjectedRoadSegment, ...]
     road_buckets: Mapping[tuple[int, int], tuple[int, ...]]
+    road_polylines: tuple[tuple[PointXZ, ...], ...]
     cache_hit: bool = False
 
     def candidate_segment_indices(
@@ -1228,7 +1559,7 @@ class IndexedRoadCorridors(Sequence[RoadCorridor]):
         return False
 
 
-_SPATIAL_CACHE_SCHEMA = 1
+_SPATIAL_CACHE_SCHEMA = 2
 _SPATIAL_INDEX_REGISTRY: dict[str, SpatialLookupIndex] = {}
 # Repeated nearest-road queries must not rebuild the content fingerprint for the
 # same in-memory dataset. The content-key registry remains the cross-object/cache
@@ -1237,6 +1568,10 @@ _SPATIAL_FAST_REGISTRY: dict[
     tuple[int, float, float, float, float, float],
     tuple[OsmDataset, SpatialLookupIndex],
 ] = {}
+# Road corridors are derived entirely from the canonical spatial index plus two
+# spec knobs. Several placement passes request the same structure, so retain a
+# small bounded in-memory cache instead of rebuilding its tuples and buckets.
+_ROAD_CORRIDOR_REGISTRY: dict[tuple[str, bool, float], IndexedRoadCorridors] = {}
 
 
 def _spatial_fast_key(
@@ -1270,16 +1605,16 @@ def _spatial_registry_key(dataset: OsmDataset, projection: BboxProjection) -> st
     if dataset.normalized_fingerprint:
         dataset_identity = dataset.normalized_fingerprint
     else:
-        dataset_identity = cache_key(
-            "osm-dataset-road-content-v1",
-            [
-                {
-                    "key": feature.osm_key,
-                    "tags": sorted((str(key), str(value)) for key, value in feature.tags.items()),
-                    "points": feature.points,
-                }
+        dataset_identity = streaming_hash(
+            "osm-dataset-road-content-v2",
+            (
+                (
+                    feature.osm_key,
+                    tuple(sorted((str(key), str(value)) for key, value in feature.tags.items())),
+                    feature.points,
+                )
                 for feature in dataset.roads
-            ],
+            ),
         )
     return cache_key(
         "spatial-index-registry-v1",
@@ -1315,6 +1650,7 @@ def prepare_spatial_index(
             previous.bucket_size,
             previous.road_segments,
             previous.road_buckets,
+            previous.road_polylines,
             True,
         )
         return _remember_spatial_index(dataset, projection, loaded)
@@ -1329,7 +1665,8 @@ def prepare_spatial_index(
     cache_path = cache_dir / "spatial" / f"{disk_key}.pickle" if cache_dir is not None else None
     if use_cache and not refresh and cache_path is not None and cache_path.is_file():
         try:
-            payload = pickle.loads(cache_path.read_bytes())
+            with cache_path.open("rb") as stream:
+                payload = pickle.load(stream)
             index = payload.get("index") if isinstance(payload, dict) else None
             if (
                 isinstance(payload, dict)
@@ -1343,16 +1680,18 @@ def prepare_spatial_index(
                     index.bucket_size,
                     index.road_segments,
                     index.road_buckets,
+                    index.road_polylines,
                     True,
                 )
                 _SPATIAL_INDEX_REGISTRY[registry_key] = loaded
                 _remember_spatial_index(dataset, projection, loaded)
                 progress(100, "Loaded spatial road index from cache")
                 return loaded
-        except (OSError, ValueError, TypeError, pickle.PickleError, EOFError):
+        except (OSError, ValueError, TypeError, AttributeError, pickle.PickleError, EOFError):
             pass
 
     segments: list[ProjectedRoadSegment] = []
+    road_polylines: list[tuple[PointXZ, ...]] = []
     mutable_buckets: dict[tuple[int, int], list[int]] = defaultdict(list)
     road_total = len(dataset.roads)
     road_interval = max(1, road_total // 16)
@@ -1360,7 +1699,8 @@ def prepare_spatial_index(
         if road_index == road_total or road_index % road_interval == 0:
             value = 5 + round(82 * road_index / max(1, road_total))
             progress(value, f"Indexing projected roads {road_index:,}/{road_total:,}")
-        points = [projection.to_world(point) for point in feature.points]
+        points = tuple(projection.to_world(point) for point in feature.points)
+        road_polylines.append(points)
         tags = tuple(sorted((str(key), str(value)) for key, value in feature.tags.items()))
         for start, end in zip(points, points[1:]):
             if math.hypot(end[0] - start[0], end[1] - start[1]) <= 0.01:
@@ -1379,23 +1719,29 @@ def prepare_spatial_index(
         bucket_size=bucket_size,
         road_segments=tuple(segments),
         road_buckets=frozen_buckets,
+        road_polylines=tuple(road_polylines),
         cache_hit=False,
     )
     _SPATIAL_INDEX_REGISTRY[registry_key] = index
     _remember_spatial_index(dataset, projection, index)
     if use_cache and cache_path is not None:
-        atomic_write_bytes(
-            cache_path,
-            pickle.dumps(
-                {
-                    "schema": CACHE_SCHEMA_VERSION,
-                    "spatial_schema": _SPATIAL_CACHE_SCHEMA,
-                    "registry_key": registry_key,
-                    "index": index,
-                },
-                protocol=pickle.HIGHEST_PROTOCOL,
-            ),
-        )
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = cache_path.with_name(cache_path.name + ".tmp")
+        try:
+            with temporary.open("wb") as stream:
+                pickle.dump(
+                    {
+                        "schema": CACHE_SCHEMA_VERSION,
+                        "spatial_schema": _SPATIAL_CACHE_SCHEMA,
+                        "registry_key": registry_key,
+                        "index": index,
+                    },
+                    stream,
+                    protocol=pickle.HIGHEST_PROTOCOL,
+                )
+            temporary.replace(cache_path)
+        finally:
+            temporary.unlink(missing_ok=True)
     progress(100, f"Spatial road index ready: {len(segments):,} segments")
     return index
 
@@ -1409,6 +1755,23 @@ def get_spatial_index(dataset: OsmDataset, projection: BboxProjection) -> Spatia
     if index is not None:
         _remember_spatial_index(dataset, projection, index)
     return index
+
+
+def projected_road_polylines(
+    dataset: OsmDataset, projection: BboxProjection
+) -> tuple[tuple[PointXZ, ...], ...]:
+    """Return the one canonical world-space projection of every OSM road."""
+
+    spatial = get_spatial_index(dataset, projection)
+    if spatial is None:
+        spatial = prepare_spatial_index(dataset, projection, use_cache=False)
+    if len(spatial.road_polylines) != len(dataset.roads):
+        # Defensive fallback for manually constructed/legacy indexes.
+        return tuple(
+            tuple(projection.to_world(point) for point in feature.points)
+            for feature in dataset.roads
+        )
+    return spatial.road_polylines
 
 
 def nearest_road_point(
@@ -1874,6 +2237,14 @@ def project_road_corridors(
     spatial = get_spatial_index(dataset, projection)
     if spatial is None:
         spatial = prepare_spatial_index(dataset, projection, use_cache=False)
+    registry_key = (
+        spatial.fingerprint,
+        bool(spec.include_minor_roads),
+        float(spec.forest_road_clearance),
+    )
+    cached = _ROAD_CORRIDOR_REGISTRY.get(registry_key)
+    if cached is not None:
+        return cached
     corridors: list[RoadCorridor] = []
     buckets: dict[tuple[int, int], list[int]] = defaultdict(list)
     for segment in spatial.road_segments:
@@ -1891,11 +2262,15 @@ def project_road_corridors(
         for bz in range(math.floor(minimum_z / spatial.bucket_size), math.floor(maximum_z / spatial.bucket_size) + 1):
             for bx in range(math.floor(minimum_x / spatial.bucket_size), math.floor(maximum_x / spatial.bucket_size) + 1):
                 buckets[(bx, bz)].append(corridor_index)
-    return IndexedRoadCorridors(
+    result = IndexedRoadCorridors(
         tuple(corridors),
         spatial.bucket_size,
         {key: tuple(sorted(set(values))) for key, values in buckets.items()},
     )
+    _ROAD_CORRIDOR_REGISTRY[registry_key] = result
+    while len(_ROAD_CORRIDOR_REGISTRY) > 16:
+        _ROAD_CORRIDOR_REGISTRY.pop(next(iter(_ROAD_CORRIDOR_REGISTRY)))
+    return result
 
 
 def forest_block_intersects_road_corridors(
@@ -1964,11 +2339,13 @@ def _draw_polygon(
             draw.polygon(points, fill=0)
 
 
-def _mask_to_cells(image: Image.Image, cells: int, *, threshold: int = 64) -> tuple[bool, ...]:
+def _mask_coverage_to_cells(image: Image.Image, cells: int) -> tuple[float, ...]:
+    """Return supersampled coverage fractions in WRP row order."""
+
     reduced = image.resize((cells, cells), resample=Image.Resampling.BOX)
     getter = getattr(reduced, "get_flattened_data", None)
     values = getter() if getter is not None else reduced.getdata()
-    pixels = tuple(int(value) >= threshold for value in values)
+    pixels = tuple(max(0.0, min(1.0, int(value) / 255.0)) for value in values)
     # WRP rows increase from south to north while image rows increase from
     # north to south. Store masks in WRP order and flip only for previews.
     return tuple(
@@ -1976,6 +2353,12 @@ def _mask_to_cells(image: Image.Image, cells: int, *, threshold: int = 64) -> tu
         for z in range(cells)
         for x in range(cells)
     )
+
+
+def _mask_to_cells(image: Image.Image, cells: int, *, threshold: int = 64) -> tuple[bool, ...]:
+    coverage = _mask_coverage_to_cells(image, cells)
+    fraction = max(0.0, min(1.0, int(threshold) / 255.0))
+    return tuple(value >= fraction for value in coverage)
 
 
 def _coastline_water_mask(
@@ -2116,7 +2499,14 @@ def rasterize_osm(
         progress(90, "Rasterizing roads: none")
 
     progress(91, f"Downsampling raster layers to {cells}×{cells} terrain cells")
-    water_mask = _mask_to_cells(water_image, cells)
+    water_coverage = _mask_coverage_to_cells(water_image, cells)
+    # The ordinary water mask remains permissive enough to preserve small bays
+    # and narrow mapped water. Full-depth terrain carving is restricted to the
+    # conservative interior mask. This prevents a mostly-dry 25 m shoreline
+    # vertex from being excavated several tens of metres merely because a sliver
+    # of the supersampled cell intersects water.
+    water_mask = tuple(value >= (64.0 / 255.0) for value in water_coverage)
+    water_interior_mask = tuple(value >= (224.0 / 255.0) for value in water_coverage)
     progress(93, "Downsampling forest and farmland masks")
     forest_mask = _mask_to_cells(forest_image, cells)
     farmland_mask = _mask_to_cells(farmland_image, cells)
@@ -2135,8 +2525,83 @@ def rasterize_osm(
         buildings=building_mask,
         high_resolution=resolution,
         coastline_seed_count=seed_count,
+        water_interior=water_interior_mask,
     )
 
+
+
+def conservative_water_interior_mask(raster: OsmRaster) -> tuple[bool, ...]:
+    """Return cells safe to excavate to the configured deep-water floor.
+
+    New raster snapshots carry supersampled coverage. Old cached rasters do not,
+    so fall back to a one-cell cardinal erosion instead of treating every coarse
+    shoreline hit as deep water.
+    """
+
+    expected = raster.cells * raster.cells
+    if len(raster.water_interior) == expected:
+        return tuple(bool(value) for value in raster.water_interior)
+    result = [False] * expected
+    cells = raster.cells
+    for index, is_water in enumerate(raster.water):
+        if not is_water:
+            continue
+        x, z = index % cells, index // cells
+        if x <= 0 or z <= 0 or x >= cells - 1 or z >= cells - 1:
+            continue
+        neighbours = (index - 1, index + 1, index - cells, index + cells)
+        result[index] = all(raster.water[n] for n in neighbours)
+    return tuple(result)
+
+
+def renderable_water_mask(
+    elevations: Sequence[float],
+    raster: OsmRaster,
+    *,
+    sea_level: float,
+    water_depth: float,
+) -> tuple[bool, ...]:
+    """Return water cells that can plausibly meet CWA's global water plane.
+
+    Strongly covered interior cells are always retained. Uncertain shoreline
+    cells are retained only when their DEM sample is already near sea level.
+    This prevents a 25 m mixed land/water vertex from being excavated to -5 m.
+    """
+
+    expected = raster.cells * raster.cells
+    if len(elevations) != expected:
+        raise ValueError("elevation grid does not match OSM raster")
+    interior = conservative_water_interior_mask(raster)
+    depth = max(0.0, float(water_depth))
+    boundary_ceiling = float(sea_level) + max(0.75, min(2.0, depth * 0.40))
+    interior_ceiling = float(sea_level) + max(1.5, min(3.0, depth * 0.60))
+    return tuple(
+        bool(is_water)
+        and float(elevations[index]) <= (interior_ceiling if interior[index] else boundary_ceiling)
+        for index, is_water in enumerate(raster.water)
+    )
+
+
+def _cardinal_distance_from_mask(mask: Sequence[bool], cells: int, maximum: int) -> tuple[int, ...]:
+    distances = [-1] * (cells * cells)
+    queue: deque[int] = deque()
+    for index, value in enumerate(mask):
+        if value:
+            distances[index] = 0
+            queue.append(index)
+    while queue:
+        index = queue.popleft()
+        distance = distances[index]
+        if distance >= maximum:
+            continue
+        x, z = index % cells, index // cells
+        for nx, nz in ((x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)):
+            if 0 <= nx < cells and 0 <= nz < cells:
+                neighbour = nz * cells + nx
+                if distances[neighbour] < 0:
+                    distances[neighbour] = distance + 1
+                    queue.append(neighbour)
+    return tuple(distances)
 
 def apply_water_elevations(
     elevations: Sequence[float],
@@ -2146,38 +2611,67 @@ def apply_water_elevations(
     water_depth: float,
     beach_height: float,
     blend_cells: int,
+    cell_size: float = 25.0,
+    maximum_shore_slope_percent: float = 8.0,
 ) -> tuple[float, ...]:
+    """Apply conservative water beds plus an adaptive shoreline ramp.
+
+    Only strongly water-covered cells receive the full water-depth excavation.
+    Low, uncertain shoreline cells are kept just under the global water plane.
+    Dry terrain is lowered only as much as needed to satisfy the requested
+    shoreline grade, up to the engine-oriented 32-cell safety cap.
+    """
+
     cells = raster.cells
-    if len(elevations) != cells * cells:
+    expected = cells * cells
+    if len(elevations) != expected:
         raise ValueError("elevation grid does not match OSM raster")
-    result = list(elevations)
-    water_indices = {index for index, value in enumerate(raster.water) if value}
-    for index in water_indices:
-        result[index] = min(result[index], sea_level - water_depth)
-    if blend_cells <= 0 or not water_indices:
+    result = [float(value) for value in elevations]
+    active = renderable_water_mask(
+        elevations, raster, sea_level=sea_level, water_depth=water_depth
+    )
+    deep = conservative_water_interior_mask(raster)
+    if not any(active):
         return tuple(result)
 
-    frontier = set(water_indices)
-    visited = set(water_indices)
-    for distance in range(1, blend_cells + 1):
-        expanded: set[int] = set()
-        for index in frontier:
-            x = index % cells
-            z = index // cells
-            for nx, nz in ((x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)):
-                if 0 <= nx < cells and 0 <= nz < cells:
-                    neighbour = nz * cells + nx
-                    if neighbour not in visited:
-                        visited.add(neighbour)
-                        expanded.add(neighbour)
-        target = sea_level + beach_height * distance / max(1, blend_cells)
-        for index in expanded:
-            result[index] = min(result[index], target)
-        frontier = expanded
-        if not frontier:
-            break
-    return tuple(result)
+    deep_target = float(sea_level) - max(0.0, float(water_depth))
+    shallow_depth = min(0.35, max(0.05, max(0.0, float(water_depth)) * 0.10))
+    shallow_target = float(sea_level) - shallow_depth
+    for index, is_active in enumerate(active):
+        if not is_active:
+            continue
+        target = deep_target if deep[index] else shallow_target
+        result[index] = min(result[index], target)
 
+    slope_percent = max(0.1, float(maximum_shore_slope_percent))
+    rise_per_cell = max(0.05, float(cell_size) * slope_percent / 100.0)
+    configured = max(0, int(blend_cells))
+    # Inspect the first dry ring. A mixed shoreline vertex can be tens of metres
+    # above sea level; determine the transition width from that actual rise.
+    first = _cardinal_distance_from_mask(active, cells, 1)
+    first_ring_high = max(
+        (float(elevations[i]) for i, d in enumerate(first) if d == 1),
+        default=float(sea_level),
+    )
+    required = int(math.ceil(max(0.0, first_ring_high - float(sea_level)) / rise_per_cell)) + 1
+    effective = min(32, max(configured, required))
+    if effective <= 0:
+        return tuple(result)
+    distances = _cardinal_distance_from_mask(active, cells, effective)
+    for index, distance in enumerate(distances):
+        if distance <= 0 or distance > effective:
+            continue
+        slope_target = float(sea_level) + rise_per_cell * distance
+        # Never bulldoze a real coastal bluff merely to make the numerical slope
+        # target true. Adaptive width handles ordinary low banks; cells more than
+        # one beach-height above the ideal ramp are preserved as natural cliffs.
+        cut_budget = max(0.5, max(0.0, float(beach_height)))
+        if float(elevations[index]) > slope_target + cut_budget:
+            continue
+        configured_target = float(sea_level) + max(0.0, float(beach_height)) * distance / max(1, effective)
+        target = max(slope_target, configured_target)
+        result[index] = min(result[index], target)
+    return tuple(result)
 
 def overlay_materials(base_indices: Sequence[int], raster: OsmRaster) -> tuple[int, ...]:
     if len(base_indices) != raster.cells * raster.cells:
@@ -2639,14 +3133,12 @@ def refine_iterative_grounding_terrain(
     """Run the object-aware terrain correction stage of the six-step pass.
 
     Buildings receive a flat support target at the highest provisional terrain
-    beneath their complete footprint. Enterable models use the same support rule
-    as closed models; their generated exterior stairs bridge foundation height
-    differences at the doorway. Rigid square/triangle forests are eased toward their provisional
-    support plane; generated sloped clusters retain their encoded grade, and
-    individual trees contribute only their small local support patch.
+    beneath their complete footprint. Vegetation deliberately contributes no
+    terrain constraints: after terrain quantization, trees and forest proxies must
+    fit the final terrain or be rejected/fallen back rather than reshaping it.
 
     Road and water cells are immutable here. Corrections are blended and capped
-    so the second pass improves contact without turning hills into large shelves.
+    so the second pass improves structural contact without creating tree shelves.
     """
 
     cells = int(spec.cells)
@@ -2741,120 +3233,8 @@ def refine_iterative_grounding_terrain(
         )
         building_supports += int(accepted)
 
-    square_model = str(getattr(spec, "forest_tree_model", "")).casefold()
-    triangle_model = str(
-        getattr(spec, "forest_everon_steep_model", r"data3d\les trojuhelnik pruchozi.p3d")
-    ).casefold()
-    forest_clearance = max(0.0, float(getattr(spec, "forest_ground_clearance", 0.15)))
-    spacing = max(1.0, float(getattr(spec, "forest_tree_spacing", 50.0)))
-    triangle_footprint = max(
-        8.0, float(getattr(spec, "forest_everon_steep_footprint", 35.0))
-    )
-    individual_footprint = max(
-        0.5, float(getattr(spec, "forest_single_tree_footprint", 2.0))
-    )
-    cluster_variants = (
-        *FOREST_CLUSTER_VARIANTS,
-        *FOREST_BORDER_VARIANTS,
-        *FOREST_UNDERGROWTH_VARIANTS,
-        *DITCH_GRASS_VARIANTS,
-        *RURAL_VEGETATION_VARIANTS,
-    )
-    cluster_models: dict[str, tuple[ForestClusterVariant, float]] = {}
-    individual_models = {value.casefold() for value in OSM_INDIVIDUAL_TREE_MODELS}
-    individual_models.update(
-        str(getattr(spec, field, "")).casefold()
-        for field in (
-            "forest_single_tree_model",
-            "forest_hillside_tree_model",
-            "forest_roadside_tree_model",
-        )
-        if getattr(spec, field, "")
-    )
-    individual_models.update(
-        str(value).casefold()
-        for value in getattr(spec, "forest_roadside_tree_models", ROADSIDE_TREE_MODELS)
-    )
-    for variant in cluster_variants:
-        if variant.category not in {"interior", "rural"}:
-            continue
-        for grade in FOREST_CLUSTER_GRADES:
-            cluster_models[
-                cluster_model_path(str(getattr(spec, "name", "cwr_world")), variant.name, grade).casefold()
-            ] = (variant, grade)
-
-    for obj in provisional.objects[provisional.building_objects:]:
-        model = obj.model_path.casefold()
-        polygon: tuple[PointXZ, ...] | None = None
-        target_at: Callable[[float, float], float] | None = None
-        if model == square_model:
-            polygon = _oriented_rectangle(
-                obj.x, obj.z, spacing, spacing, obj.heading_degrees
-            )
-            target = obj.y - forest_clearance
-            target_at = lambda _x, _z, value=target: value
-        elif model == triangle_model:
-            polygon = _oriented_rectangle(
-                obj.x,
-                obj.z,
-                triangle_footprint * 0.58,
-                triangle_footprint,
-                obj.heading_degrees,
-            )
-            target = obj.y - forest_clearance
-            target_at = lambda _x, _z, value=target: value
-        elif model in cluster_models:
-            variant, grade = cluster_models[model]
-            margin = max(
-                0.0, float(getattr(spec, "forest_cluster_footprint_margin", 0.75))
-            )
-            polygon = _oriented_rectangle(
-                obj.x,
-                obj.z,
-                variant.width_m,
-                variant.length_m,
-                obj.heading_degrees,
-                margin=margin,
-            )
-            angle = math.radians(obj.heading_degrees)
-            width_axis = (math.cos(angle), -math.sin(angle))
-            length_axis = (math.sin(angle), math.cos(angle))
-
-            def cluster_target(
-                x: float,
-                z: float,
-                *,
-                origin_x: float = obj.x,
-                origin_z: float = obj.z,
-                origin_y: float = obj.y - (
-                    0.03 if variant.category == "rural" else forest_clearance
-                ),
-                slope: float = grade,
-                slope_axis: str = variant.slope_axis,
-                wx: PointXZ = width_axis,
-                lx: PointXZ = length_axis,
-            ) -> float:
-                dx = x - origin_x
-                dz = z - origin_z
-                local = dx * wx[0] + dz * wx[1] if slope_axis == "width" else dx * lx[0] + dz * lx[1]
-                return origin_y + slope * local
-
-            target_at = cluster_target
-        elif model.startswith("data3d\\str") or model in individual_models:
-            polygon = _oriented_rectangle(
-                obj.x,
-                obj.z,
-                individual_footprint,
-                individual_footprint,
-                obj.heading_degrees,
-            )
-            target = obj.y - min(forest_clearance, 0.05)
-            target_at = lambda _x, _z, value=target: value
-
-        if polygon is not None and target_at is not None and add_support(
-            polygon, target_at, priority=1, exclude_buildings=True
-        ):
-            tree_supports += 1
+    # Vegetation is grounded only after this terrain is final.
+    tree_supports = 0
 
     refined = [float(value) for value in elevations]
     adjustments: list[float] = []
@@ -2892,15 +3272,10 @@ def plan_iterative_grounding_objects(
     *,
     progress_callback: Callable[[int, str], None] | None = None,
 ) -> ObjectGenerationResult:
-    """Plan only the rigid supports needed by iterative terrain grounding.
+    """Plan structural supports needed by iterative terrain grounding.
 
-    The former provisional pass called :func:`generate_world_objects`, which
-    constructed buildings, every forest fallback, grass, barriers, bridges and
-    rural objects before discarding them.  Ground refinement only needs final
-    building footprints and the large rigid square/triangle forest anchors.
-    This compact planner deliberately creates placeholder ``WorldObject``
-    records for those supports and leaves the complete placement pass to run
-    once, after the terrain has been corrected and quantized.
+    Vegetation is intentionally excluded. Buildings may engineer terrain; trees
+    must accept the final terrain and are rejected or decomposed when they cannot.
     """
 
     def progress(percent: int, stage: str) -> None:
@@ -2930,168 +3305,10 @@ def plan_iterative_grounding_objects(
         )
         next_id += 1
 
-    progress(20, "Planning primary forest grounding supports")
+    # Terrain refinement deliberately stops at structures. Forest placement is
+    # performed only after the quantized terrain is final, so no tree or proxy
+    # can create a terrain shelf merely to make its model fit.
     forest_count = 0
-    if spec.max_forest_objects > 0:
-        road_corridors = project_road_corridors(dataset, projection, spec)
-        spacing = max(1.0, float(spec.forest_tree_spacing))
-        columns = max(1, int(math.ceil(spec.world_size / spacing)))
-        rows = columns
-        half = spacing * 0.5
-        clearance = min(half * 0.7, max(1.0, spec.cell_size * 0.45))
-        seed = str(getattr(spec, "deterministic_seed", "cwr-worldgen"))
-        low_anchor = bool(getattr(spec, "forest_low_anchor", False))
-        maximum_allowed_relief = max(
-            0.0, float(getattr(spec, "forest_maximum_block_relief", 8.0))
-        )
-        block_maximum_burial = max(
-            0.0, float(getattr(spec, "forest_block_maximum_burial", 8.0))
-        )
-        block_maximum_float = max(
-            0.0, float(getattr(spec, "forest_block_maximum_float", 0.5))
-        )
-        triangle_model = str(
-            getattr(
-                spec,
-                "forest_everon_steep_model",
-                r"data3d\les trojuhelnik pruchozi.p3d",
-            )
-        )
-        triangle_footprint = max(
-            8.0, float(getattr(spec, "forest_everon_steep_footprint", 35.0))
-        )
-        triangle_maximum_relief = max(
-            0.0,
-            float(getattr(spec, "forest_everon_steep_maximum_relief", 18.0)),
-        )
-        triangle_maximum_burial = max(
-            0.0,
-            float(getattr(spec, "forest_everon_steep_maximum_burial", 18.0)),
-        )
-        triangle_maximum_float = max(
-            0.0,
-            float(getattr(spec, "forest_everon_steep_maximum_float", 0.5)),
-        )
-        severe_fallback_enabled = bool(
-            getattr(spec, "forest_severe_hill_fallback", True)
-        )
-        polygon_sink_fraction = min(
-            1.0,
-            max(0.0, float(getattr(spec, "forest_polygon_sink_fraction", 0.5))),
-        )
-        total_rows = max(1, rows)
-
-        for row in range(rows):
-            if row == rows - 1 or row % max(1, rows // 12) == 0:
-                progress(
-                    20 + round(80 * (row + 1) / total_rows),
-                    f"Planning primary forest supports {row + 1:,}/{rows:,} rows",
-                )
-            for column in range(columns):
-                if forest_count >= spec.max_forest_objects:
-                    break
-                x = min(spec.world_size - 0.001, (column + 0.5) * spacing)
-                z = min(spec.world_size - 0.001, (row + 0.5) * spacing)
-                samples = (
-                    (x, z),
-                    (x - clearance, z - clearance),
-                    (x + clearance, z - clearance),
-                    (x - clearance, z + clearance),
-                    (x + clearance, z + clearance),
-                )
-                if any(
-                    not (0.0 <= sx < spec.world_size and 0.0 <= sz < spec.world_size)
-                    or not _mask_at(raster.forest, spec.cells, spec.world_size, sx, sz)
-                    or _mask_at(raster.water, spec.cells, spec.world_size, sx, sz)
-                    or _mask_at(raster.roads, spec.cells, spec.world_size, sx, sz)
-                    or _mask_at(raster.buildings, spec.cells, spec.world_size, sx, sz)
-                    for sx, sz in samples
-                ):
-                    continue
-                if forest_block_intersects_road_corridors(
-                    road_corridors, x, z, block_size=spacing
-                ):
-                    continue
-
-                geographic_column, geographic_row = _geographic_lattice_identity(
-                    projection, x, z, spacing
-                )
-                digest = hashlib.blake2s(
-                    f"{seed}:forest:{geographic_column}:{geographic_row}".encode(
-                        "utf-8"
-                    ),
-                    digest_size=2,
-                ).digest()
-                heading = float((int.from_bytes(digest, "little") % 4) * 90)
-                block_supports = _square_elevation_samples(
-                    elevations, spec.cells, spec.cell_size, x, z, spacing
-                )
-                relief = max(block_supports) - min(block_supports)
-                anchor: float | None
-                if not low_anchor:
-                    anchor = max(block_supports) + spec.forest_ground_clearance
-                else:
-                    fit = (
-                        _terrain_fit_anchor(
-                            block_supports,
-                            clearance=spec.forest_ground_clearance,
-                            maximum_burial=block_maximum_burial,
-                            maximum_float=block_maximum_float,
-                        )
-                        if relief <= maximum_allowed_relief
-                        else None
-                    )
-                    anchor = fit[0] if fit is not None else None
-                model = str(spec.forest_tree_model)
-                if anchor is None and str(
-                    getattr(spec, "forest_profile", "malden")
-                ).casefold() == "everon":
-                    gradient_x, gradient_z = _local_terrain_gradient(
-                        elevations, spec.cells, spec.cell_size, x, z
-                    )
-                    if abs(gradient_x) + abs(gradient_z) > 1.0e-9:
-                        heading = math.degrees(
-                            math.atan2(-gradient_z, gradient_x)
-                        ) % 360.0
-                    triangle_supports = _oriented_footprint_elevation_samples(
-                        elevations,
-                        spec.cells,
-                        spec.cell_size,
-                        x,
-                        z,
-                        triangle_footprint * 0.58,
-                        triangle_footprint,
-                        heading,
-                    )
-                    triangle_relief = max(triangle_supports) - min(
-                        triangle_supports
-                    )
-                    triangle_fit = (
-                        _terrain_fit_anchor(
-                            triangle_supports,
-                            clearance=spec.forest_ground_clearance,
-                            maximum_burial=triangle_maximum_burial,
-                            maximum_float=triangle_maximum_float,
-                        )
-                        if triangle_relief <= triangle_maximum_relief
-                        else None
-                    )
-                    if triangle_fit is not None:
-                        model = triangle_model
-                        anchor = triangle_fit[0]
-                        if (
-                            severe_fallback_enabled
-                            and polygon_sink_fraction > 0.0
-                            and triangle_relief > 1.0e-9
-                        ):
-                            anchor -= triangle_relief * polygon_sink_fraction
-                if anchor is None:
-                    continue
-                objects.append(WorldObject(next_id, model, x, anchor, z, heading))
-                next_id += 1
-                forest_count += 1
-            if forest_count >= spec.max_forest_objects:
-                break
 
     progress(100, "Grounding support plan ready")
     return ObjectGenerationResult(
@@ -3101,7 +3318,7 @@ def plan_iterative_grounding_objects(
         forest_objects=forest_count,
         road_objects_truncated=False,
         building_objects_truncated=False,
-        forest_objects_truncated=forest_count >= spec.max_forest_objects,
+        forest_objects_truncated=False,
     )
 
 
@@ -3272,6 +3489,35 @@ def _non_buried_vegetation_fit(
     return anchor, floating
 
 
+def _rooted_tree_fit(
+    supports: Sequence[float], *, root_sink: float, maximum_burial: float
+) -> tuple[float, float] | None:
+    """Ground a tree root conservatively without creating a visible air gap.
+
+    4WVR stores only the four corner elevations of a terrain quad, not an
+    explicit diagonal.  The two possible rendered triangle surfaces can differ
+    substantially on a saddle/steep cell.  Treating a tree like a rigid building
+    and lifting it above *both* surfaces rejects most useful hillside positions.
+
+    Trees are point-like and tolerate a modest amount of trunk burial much
+    better than any floating root.  Anchor at the lower possible surface, sink
+    the root a few centimetres, and reject only when the alternate surface would
+    bury more than ``maximum_burial``.  This guarantees zero positive root float
+    whichever terrain diagonal the engine chooses.
+    """
+
+    if not supports:
+        raise ValueError("tree grounding requires at least one support")
+    lower = min(float(value) for value in supports)
+    upper = max(float(value) for value in supports)
+    sink = max(0.0, float(root_sink))
+    anchor = lower - sink
+    burial = max(0.0, upper - anchor)
+    if burial > max(0.0, float(maximum_burial)) + 1.0e-9:
+        return None
+    return anchor, burial
+
+
 def _cluster_heading_and_grade(
     gradient_x: float,
     gradient_z: float,
@@ -3339,6 +3585,126 @@ def _cluster_supports(
         return None
     return tuple(supports)
 
+
+
+def _forest_proxy_is_tree(model_path: str) -> bool:
+    folded = str(model_path).replace("/", "\\").casefold()
+    # Known bushes/ground vegetation receive the looser bush tolerance. Unknown
+    # vegetation is treated as a tree, which is intentionally conservative.
+    bush_tokens = ("\\ker", "bush", "rakosi", "travy", "grass", "reed")
+    return not any(token in folded for token in bush_tokens)
+
+
+def _cluster_proxy_floats(
+    variant: ForestClusterVariant,
+    *,
+    grade: float,
+    heading: float,
+    x: float,
+    y: float,
+    z: float,
+    elevations: Sequence[float],
+    cells: int,
+    cell_size: float,
+) -> tuple[float, float, int, int]:
+    angle = math.radians(heading)
+    width_axis = (math.cos(angle), -math.sin(angle))
+    length_axis = (math.sin(angle), math.cos(angle))
+    maximum_tree_float = 0.0
+    maximum_bush_float = 0.0
+    tree_count = 0
+    bush_count = 0
+    for model, local_x, local_z, _scale, _proxy_heading in variant.proxy_layout:
+        world_x = x + local_x * width_axis[0] + local_z * length_axis[0]
+        world_z = z + local_x * width_axis[1] + local_z * length_axis[1]
+        local_y = grade * (local_x if variant.slope_axis == "width" else local_z)
+        minimum_ground, _maximum_ground = _triangle_elevation_bounds(
+            elevations, cells, cell_size, world_x, world_z
+        )
+        floating = max(0.0, (y + local_y) - minimum_ground)
+        if _forest_proxy_is_tree(model):
+            tree_count += 1
+            maximum_tree_float = max(maximum_tree_float, floating)
+        else:
+            bush_count += 1
+            maximum_bush_float = max(maximum_bush_float, floating)
+    return maximum_tree_float, maximum_bush_float, tree_count, bush_count
+
+
+def _parse_generated_cluster_model(model_path: str, world_name: str) -> tuple[ForestClusterVariant, float] | None:
+    folded = str(model_path).replace("/", "\\")
+    prefix = world_name + "\\f\\"
+    if not folded.casefold().startswith(prefix.casefold()) or not folded.casefold().endswith(".p3d"):
+        return None
+    stem = folded.rsplit("\\", 1)[-1][:-4]
+    if len(stem) < 5 or stem[1] != "_":
+        return None
+    body = stem[2:]
+    try:
+        variant_name, grade_label = body.rsplit("_", 1)
+        variant = cluster_variant(variant_name)
+        grade = quantize_cluster_grade(int(grade_label) / 100.0)
+    except (ValueError, KeyError):
+        return None
+    return variant, grade
+
+
+def _audit_vegetation_grounding(
+    objects: Sequence[WorldObject],
+    elevations: Sequence[float],
+    spec: object,
+) -> tuple[int, int, int, int, float, float]:
+    cells = int(getattr(spec, "cells"))
+    cell_size = float(getattr(spec, "cell_size"))
+    world_name = str(getattr(spec, "name", "cwr_world"))
+    tree_limit = max(0.0, float(getattr(spec, "forest_single_tree_maximum_float", 0.15)))
+    cluster_tree_limit = max(0.0, float(getattr(spec, "forest_cluster_tree_maximum_float", 0.20)))
+    cluster_bush_limit = max(0.0, float(getattr(spec, "forest_cluster_bush_maximum_float", 0.60)))
+    individual_models = {value.casefold() for value in OSM_INDIVIDUAL_TREE_MODELS}
+    individual_models.update(
+        str(getattr(spec, field, "")).casefold()
+        for field in ("forest_single_tree_model", "forest_hillside_tree_model", "forest_roadside_tree_model")
+        if getattr(spec, field, "")
+    )
+    individual_models.update(
+        str(value).casefold() for value in getattr(spec, "forest_roadside_tree_models", ROADSIDE_TREE_MODELS)
+    )
+    tree_objects = cluster_trees = cluster_bushes = violations = 0
+    maximum_tree_float = maximum_bush_float = 0.0
+    parsed_model_cache: dict[str, tuple[ForestClusterVariant, float] | None] = {}
+    folded_model_cache: dict[str, str] = {}
+    for obj in objects:
+        if obj.model_path in parsed_model_cache:
+            parsed = parsed_model_cache[obj.model_path]
+        else:
+            parsed = _parse_generated_cluster_model(obj.model_path, world_name)
+            parsed_model_cache[obj.model_path] = parsed
+        if parsed is not None:
+            variant, grade = parsed
+            tree_float, bush_float, trees, bushes = _cluster_proxy_floats(
+                variant, grade=grade, heading=obj.heading_degrees, x=obj.x, y=obj.y, z=obj.z,
+                elevations=elevations, cells=cells, cell_size=cell_size,
+            )
+            cluster_trees += trees
+            cluster_bushes += bushes
+            maximum_tree_float = max(maximum_tree_float, tree_float)
+            maximum_bush_float = max(maximum_bush_float, bush_float)
+            violations += int(trees > 0 and tree_float > cluster_tree_limit + 1.0e-6)
+            violations += int(bushes > 0 and bush_float > cluster_bush_limit + 1.0e-6)
+            continue
+        model = folded_model_cache.get(obj.model_path)
+        if model is None:
+            model = obj.model_path.casefold()
+            folded_model_cache[obj.model_path] = model
+        if model.startswith("data3d\\str") or model in individual_models:
+            tree_objects += 1
+            minimum_ground, _maximum_ground = _triangle_elevation_bounds(
+                elevations, cells, cell_size, obj.x, obj.z
+            )
+            floating = max(0.0, obj.y - minimum_ground)
+            maximum_tree_float = max(maximum_tree_float, floating)
+            violations += int(floating > tree_limit + 1.0e-6)
+    return tree_objects, cluster_trees, cluster_bushes, violations, maximum_tree_float, maximum_bush_float
 
 def _place_cluster_at(
     *,
@@ -3435,6 +3801,26 @@ def _place_cluster_at(
         if fitted is None:
             return None
         anchor, burial, floating = fitted
+
+    # A single fitted plane is only acceptable when every tree proxy remains
+    # close to the rendered terrain. Bushes/grass can tolerate a larger gap.
+    tree_float, bush_float, tree_count, bush_count = _cluster_proxy_floats(
+        variant, grade=grade, heading=heading, x=x, y=anchor, z=z,
+        elevations=elevations, cells=cells, cell_size=cell_size,
+    )
+    tree_limit = min(
+        max(0.0, maximum_float),
+        max(0.0, float(getattr(spec, "forest_cluster_tree_maximum_float", 0.20))),
+    )
+    bush_limit = min(
+        max(0.0, maximum_float),
+        max(0.0, float(getattr(spec, "forest_cluster_bush_maximum_float", 0.60))),
+    )
+    if (tree_count and tree_float > tree_limit + 1.0e-9) or (
+        bush_count and bush_float > bush_limit + 1.0e-9
+    ):
+        return None
+    floating = max(floating, tree_float, bush_float)
     return (
         cluster_model_path(world_name, variant.name, grade),
         x,
@@ -3492,10 +3878,15 @@ def _forest_cluster_placement(
     row: int,
     x: float,
     z: float,
+    search_radius_override: float | None = None,
 ) -> tuple[str, float, float, float, float, str, float, float, float] | None:
-    """Find one reusable small forest cluster for a steep rejected block."""
+    """Find one reusable small forest cluster for a rejected forest patch."""
 
-    search_radius = max(0.0, float(getattr(spec, "forest_cluster_search_radius", 10.0)))
+    search_radius = (
+        max(0.0, float(search_radius_override))
+        if search_radius_override is not None
+        else max(0.0, float(getattr(spec, "forest_cluster_search_radius", 10.0)))
+    )
     maximum_relief = max(0.0, float(getattr(spec, "forest_cluster_maximum_relief", 36.0)))
     maximum_burial = max(0.0, float(getattr(spec, "forest_cluster_maximum_burial", 1.25)))
     maximum_float = max(0.0, float(getattr(spec, "forest_cluster_maximum_float", 1.25)))
@@ -3549,6 +3940,96 @@ def _forest_cluster_placement(
             if placed is not None:
                 return placed
     return None
+
+
+def _forest_polygon_replacement_clusters(
+    *,
+    elevations: Sequence[float],
+    raster: OsmRaster,
+    road_corridors: Sequence[object],
+    spec: object,
+    seed: str,
+    column: int,
+    row: int,
+    x: float,
+    z: float,
+    spacing: float,
+    maximum_clusters: int = 4,
+) -> tuple[tuple[str, float, float, float, float, str, float, float, float], ...]:
+    """Tile generated clusters across one skipped stock forest footprint.
+
+    A stock square/triangle P3D visually covers a much larger patch than one
+    generated proxy cluster.  Replacing the stock model with a single cluster
+    therefore leaves most of the former footprint visually empty while the
+    coverage bookkeeping can still suppress gap infill.  Use a deterministic
+    2x2 pattern of independently terrain-fitted clusters instead.
+    """
+
+    maximum_clusters = max(0, int(maximum_clusters))
+    if maximum_clusters <= 0:
+        return ()
+    offset = max(5.0, min(float(spacing) * 0.20, 12.0))
+    digest = hashlib.blake2s(
+        f"{seed}:forest-polygon-replacement:{column}:{row}".encode("utf-8"),
+        digest_size=4,
+    ).digest()
+    # Rotate the quarter-patch pattern so the generated clusters do not form a
+    # conspicuous world-aligned checkerboard on broad forests.
+    angle = (int.from_bytes(digest[:2], "little") / 65535.0) * (math.pi * 0.5)
+    cosine = math.cos(angle)
+    sine = math.sin(angle)
+    local_offsets = ((-offset, -offset), (offset, -offset), (-offset, offset), (offset, offset))
+    placements: list[tuple[str, float, float, float, float, str, float, float, float]] = []
+    centres: list[PointXZ] = []
+    for slot, (local_x, local_z) in enumerate(local_offsets):
+        if len(placements) >= maximum_clusters:
+            break
+        candidate_x = x + local_x * cosine + local_z * sine
+        candidate_z = z - local_x * sine + local_z * cosine
+        placed = _forest_cluster_placement(
+            elevations=elevations,
+            raster=raster,
+            road_corridors=road_corridors,
+            spec=spec,
+            seed=f"{seed}:polygon-replacement:{slot}",
+            column=column,
+            row=row,
+            x=candidate_x,
+            z=candidate_z,
+            # Keep each replacement near its quarter of the old rigid footprint
+            # instead of letting all four searches drift back toward the centre.
+            search_radius_override=min(4.0, max(0.0, float(spacing) * 0.08)),
+        )
+        if placed is None:
+            continue
+        placed_x, placed_z = placed[1], placed[3]
+        if any((placed_x - px) ** 2 + (placed_z - pz) ** 2 < 7.0 ** 2 for px, pz in centres):
+            continue
+        placements.append(placed)
+        centres.append((placed_x, placed_z))
+
+    # Small maps and forest edges can make the quarter-patch centres invalid.
+    # Still try one central cluster before handing the patch to tree fallback.
+    if not placements:
+        central = _forest_cluster_placement(
+            elevations=elevations, raster=raster, road_corridors=road_corridors, spec=spec,
+            seed=f"{seed}:polygon-replacement:center", column=column, row=row, x=x, z=z,
+        )
+        if central is not None:
+            placements.append(central)
+    return tuple(placements)
+
+
+def _replacement_cluster_coverage_radius(variant_name: str) -> float:
+    """Conservative visual coverage for replacement clusters.
+
+    Do not mark a 20+ metre disk as covered merely because a small generated
+    cluster contains two or three proxies.  Under-marking is intentional: the
+    later gap-infill pass can add grounded trees between clusters.
+    """
+
+    variant = cluster_variant(variant_name)
+    return max(5.0, min(9.0, min(variant.width_m, variant.length_m) * 0.38))
 
 
 def _severe_hill_underbrush_placement(
@@ -3637,6 +4118,40 @@ def _polygon_contains_with_holes(
         _point_in_polygon(point, hole) for hole in holes if len(hole) >= 3
     )
 
+
+
+def _selected_farmland_fence_field_keys(
+    features: Sequence[OsmPolygonFeature], seed: str, field_percent: float
+) -> frozenset[str]:
+    """Choose a stable random-looking subset of eligible farmland/meadow features."""
+    eligible = [
+        feature
+        for feature in features
+        if feature.polygons
+        and (
+            feature.tags.get("landuse", "").casefold() in RURAL_FENCE_LANDUSES
+            or feature.tags.get("natural", "").casefold() in RURAL_FENCE_NATURALS
+        )
+    ]
+    if not eligible:
+        return frozenset()
+    percent = min(100.0, max(0.0, float(field_percent)))
+    if percent <= 0.0:
+        return frozenset()
+    target = int(math.floor(len(eligible) * percent / 100.0 + 0.5))
+    if target == 0:
+        target = 1
+    ranked = sorted(
+        eligible,
+        key=lambda feature: (
+            hashlib.blake2s(
+                f"{seed}:farmland-fence-field:{feature.osm_key}".encode("utf-8"),
+                digest_size=8,
+            ).digest(),
+            feature.osm_key,
+        ),
+    )
+    return frozenset(feature.osm_key for feature in ranked[: min(target, len(ranked))])
 
 
 def _selected_haybale_field_keys(
@@ -4212,6 +4727,41 @@ def _roadside_bush_candidates(
         seed, column, row, x, z, block_size,
         label="bush", minimum_spacing=2.25, candidate_count=192,
     )
+
+
+def _dense_hillside_tree_candidates(
+    seed: str,
+    column: int,
+    row: int,
+    x: float,
+    z: float,
+    block_size: float,
+) -> Iterable[tuple[float, float, float]]:
+    """Yield a dense deterministic pool for rejected hill-forest patches.
+
+    Rigid square/triangle forests and grouped proxy clusters are intentionally
+    rejected when they cannot hug the final RVW4 terrain safely. Refill those
+    patches with individually grounded trees instead of leaving a conspicuous
+    bald square. Candidates use the same fast deterministic blue-noise sampler
+    as road-cut vegetation, but stay inset from the 50 m block edge so adjacent
+    rejected blocks do not form double-density seams. The caller still performs
+    the final per-tree terrain/road/water/building checks before placement.
+    """
+
+    candidate_span = max(8.0, float(block_size) * 0.90)
+    minimum_spacing = max(4.5, min(7.0, float(block_size) * 0.12))
+    for candidate_x, candidate_z, heading, _variant in _roadside_vegetation_candidates(
+        seed,
+        column,
+        row,
+        x,
+        z,
+        candidate_span,
+        label="hillside-dense",
+        minimum_spacing=minimum_spacing,
+        candidate_count=256,
+    ):
+        yield candidate_x, candidate_z, heading
 
 
 def _hillside_tree_candidates(
@@ -4794,6 +5344,53 @@ def _numeric_tag(tags: Mapping[str, str], key: str, default: float = 0.0) -> flo
 
 
 BRIDGE_DITCH_CROSSING_TOLERANCE_METRES = 2.0
+BRIDGE_WATER_EPSILON_METRES = 0.05
+
+
+def road_span_has_in_game_water(
+    points: Sequence[PointXZ],
+    elevations: Sequence[float],
+    *,
+    cells: int,
+    cell_size: float,
+    sea_level: float,
+    width: float = 6.0,
+) -> bool:
+    """Return whether CWA's global water plane is visible below a road span.
+
+    OSM ``bridge=yes`` is not enough on its own. Some datasets retain bridge
+    tagging after a stream is culverted, rerouted, seasonal, or simply absent
+    from the generated world's water. Since CWA renders water wherever terrain
+    falls below the global sea plane, sample the *final terrain* under the road
+    centre and both carriageway edges. A bridge is only useful when at least one
+    of those samples is genuinely underwater in game.
+    """
+
+    if len(points) < 2 or not elevations:
+        return False
+    half_width = max(1.5, float(width) * 0.5)
+    spacing = max(2.0, min(8.0, float(cell_size) * 0.30, half_width))
+    threshold = float(sea_level) - BRIDGE_WATER_EPSILON_METRES
+    for start, end in zip(points, points[1:]):
+        dx = float(end[0]) - float(start[0])
+        dz = float(end[1]) - float(start[1])
+        length = math.hypot(dx, dz)
+        if length <= 0.05:
+            continue
+        nx, nz = -dz / length, dx / length
+        count = max(1, int(math.ceil(length / spacing)))
+        for index in range(count + 1):
+            fraction = index / count
+            x = float(start[0]) + dx * fraction
+            z = float(start[1]) + dz * fraction
+            for offset in (0.0, half_width, -half_width):
+                height = _sample_elevation(
+                    elevations, cells, cell_size,
+                    x + nx * offset, z + nz * offset,
+                )
+                if height < threshold:
+                    return True
+    return False
 
 
 def road_bridge_crosses_ditch_only(
@@ -4847,20 +5444,27 @@ def _road_needs_bridge_deck(
     chunks: Sequence[tuple[float, float, float, float, float, float, float, float]],
     raster: OsmRaster,
     spec,
+    elevations: Sequence[float],
 ) -> bool:
     bridge = str(feature.tags.get("bridge", "")).strip().casefold()
-    if bridge not in {"", "no", "false", "0", "none"}:
-        return True
-    if str(feature.tags.get("man_made", "")).strip().casefold() == "bridge":
-        return True
-    if str(feature.tags.get("special", "")).strip().casefold() == "bridge":
-        return True
-    if _numeric_tag(feature.tags, "layer", 0.0) <= 0.0:
+    explicit = (
+        bridge not in {"", "no", "false", "0", "none"}
+        or str(feature.tags.get("man_made", "")).strip().casefold() == "bridge"
+        or str(feature.tags.get("special", "")).strip().casefold() == "bridge"
+    )
+    elevated = _numeric_tag(feature.tags, "layer", 0.0) > 0.0
+    if not explicit and not elevated:
         return False
-    return any(
-        _mask_at(raster.water, spec.cells, spec.world_size, sx, sz)
-        for chunk in chunks
-        for sx, sz in ((chunk[4], chunk[5]), (chunk[0], chunk[1]), (chunk[6], chunk[7]))
+    if not chunks:
+        return False
+
+    points: list[PointXZ] = [(chunks[0][4], chunks[0][5])]
+    points.extend((chunk[6], chunk[7]) for chunk in chunks)
+    width = max(6.0, road_width_metres(feature.tags))
+    return road_span_has_in_game_water(
+        points, elevations,
+        cells=spec.cells, cell_size=spec.cell_size,
+        sea_level=spec.sea_level, width=width,
     )
 
 
@@ -6612,6 +7216,104 @@ def _mapped_entrance_for_building(
     return min(candidates)[3]
 
 
+def _match_nearby_same_shape_building_textures(
+    plans: Sequence[BuildingPlacementPlan],
+    building_asset_library: "ProceduralBuildingLibrary | None",
+    *,
+    enabled: bool,
+    distance_metres: float,
+) -> tuple[BuildingPlacementPlan, ...]:
+    """Give local clusters of identical town/city buildings one facade variant.
+
+    Shape identity is deliberately strict: every selected procedural key field
+    except ``texture_variant`` must match. Connected groups need at least three
+    buildings and every member must resolve to town/city settlement context.
+    This makes repeated terraces/estate houses read as one development without
+    synchronising unrelated matching buildings across an entire world.
+    """
+
+    if not enabled or building_asset_library is None or len(plans) < MINIMUM_NEARBY_BUILDING_TEXTURE_MATCH_CLUSTER:
+        return tuple(plans)
+    radius = max(10.0, float(distance_metres))
+    radius2 = radius * radius
+    candidates: list[int] = []
+    signatures: dict[int, object] = {}
+    for index, plan in enumerate(plans):
+        placement = plan.procedural_placement
+        if placement is None:
+            continue
+        context = building_asset_library._settlement_context(plan.x, plan.z)
+        if context not in {"town", "city"}:
+            continue
+        selected = placement.selected
+        signatures[index] = replace(selected, texture_variant=0)
+        candidates.append(index)
+    if len(candidates) < MINIMUM_NEARBY_BUILDING_TEXTURE_MATCH_CLUSTER:
+        return tuple(plans)
+
+    bucket_size = radius
+    buckets: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for index in candidates:
+        plan = plans[index]
+        buckets[(math.floor(plan.x / bucket_size), math.floor(plan.z / bucket_size))].append(index)
+
+    adjacency: dict[int, list[int]] = defaultdict(list)
+    for index in candidates:
+        plan = plans[index]
+        bx = math.floor(plan.x / bucket_size)
+        bz = math.floor(plan.z / bucket_size)
+        signature = signatures[index]
+        for dx in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                for other in buckets.get((bx + dx, bz + dz), ()):
+                    if other <= index or signatures.get(other) != signature:
+                        continue
+                    candidate = plans[other]
+                    if (plan.x - candidate.x) ** 2 + (plan.z - candidate.z) ** 2 <= radius2:
+                        adjacency[index].append(other)
+                        adjacency[other].append(index)
+
+    updated = list(plans)
+    visited: set[int] = set()
+    from .procedural_buildings import BuildingPlacement
+    for start in candidates:
+        if start in visited:
+            continue
+        stack = [start]
+        component: list[int] = []
+        visited.add(start)
+        while stack:
+            current = stack.pop()
+            component.append(current)
+            for other in adjacency.get(current, ()):
+                if other not in visited:
+                    visited.add(other)
+                    stack.append(other)
+        if len(component) < MINIMUM_NEARBY_BUILDING_TEXTURE_MATCH_CLUSTER:
+            continue
+        leader = min(component, key=lambda idx: (plans[idx].osm_key, plans[idx].geometry_index))
+        leader_placement = plans[leader].procedural_placement
+        assert leader_placement is not None
+        texture_variant = leader_placement.selected.texture_variant
+        for index in component:
+            plan = updated[index]
+            placement = plan.procedural_placement
+            assert placement is not None
+            selected = replace(placement.selected, texture_variant=texture_variant)
+            replacement = BuildingPlacement(
+                building_asset_library.model_path(selected),
+                placement.heading_degrees,
+                placement.requested,
+                selected,
+            )
+            updated[index] = replace(
+                plan,
+                model_path=replacement.model_path,
+                procedural_placement=replacement,
+            )
+    return tuple(updated)
+
+
 def plan_building_placements(
     dataset: OsmDataset,
     projection: BboxProjection,
@@ -6632,33 +7334,34 @@ def plan_building_placements(
         if progress_callback is not None:
             progress_callback(max(0, min(100, int(percent))), stage)
 
-    progress(0, "Collecting mapped building candidates")
-    candidates: list[tuple[int, str, int, str, Any, Any]] = []
-    for feature in dataset.building_polygons:
-        for polygon_index, polygon in enumerate(feature.polygons):
-            # One mapped polygon always becomes at most one building object.
-            # Near-rectangles use one fitted rectangular model; supported
-            # irregular footprints may use one polygon-native model. We never
-            # decompose a source building into independently placed wings.
-            candidates.append((
-                _building_placement_priority(feature.tags),
-                feature.osm_key,
-                polygon_index,
-                "polygon",
-                feature,
-                polygon,
-            ))
-    for feature in dataset.building_points:
-        candidates.append((
-            _building_placement_priority(feature.tags),
-            feature.osm_key,
-            0,
-            "point",
-            feature,
-            feature.point,
-        ))
-    progress(4, f"Sorting {len(candidates):,} mapped building candidates")
-    candidates.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+    progress(0, "Counting mapped building candidates")
+    candidate_total = sum(len(feature.polygons) for feature in dataset.building_polygons) + len(dataset.building_points)
+
+    def candidates_for_priority(priority: int):
+        # Both source feature collections are already sorted by OSM key. Merge
+        # them lazily inside each of the five priority bands instead of allocating
+        # and globally sorting a six-tuple for every building geometry.
+        polygons = (
+            (feature.osm_key, polygon_index, "polygon", feature, polygon)
+            for feature in dataset.building_polygons
+            if _building_placement_priority(feature.tags) == priority
+            for polygon_index, polygon in enumerate(feature.polygons)
+        )
+        points = (
+            (feature.osm_key, 0, "point", feature, feature.point)
+            for feature in dataset.building_points
+            if _building_placement_priority(feature.tags) == priority
+        )
+        yield from heapq.merge(
+            polygons, points, key=lambda item: (item[0], item[1], item[2])
+        )
+
+    candidates = (
+        (priority, *candidate)
+        for priority in range(5)
+        for candidate in candidates_for_priority(priority)
+    )
+    progress(4, f"Streaming {candidate_total:,} mapped building candidates by priority")
 
     progress(7, "Preparing building road and entrance lookups")
     building_road_corridors = project_road_corridors(dataset, projection, spec)
@@ -6669,7 +7372,6 @@ def plan_building_placements(
     )
     plans: list[BuildingPlacementPlan] = []
     truncated = False
-    candidate_total = len(candidates)
     progress_interval = max(1, candidate_total // 40)
     for candidate_number, (_priority, osm_key, geometry_index, geometry_kind, feature, geometry) in enumerate(candidates, start=1):
         if candidate_number == 1 or candidate_number == candidate_total or candidate_number % progress_interval == 0:
@@ -6792,7 +7494,7 @@ def plan_building_placements(
             z=z,
             heading_degrees=heading,
             model_path=model_path,
-            support_polygon=tuple(support_polygon),
+            support_polygon=_compact_support_polygon(support_polygon, x, z, heading),
             procedural_placement=procedural_placement,
             road_nudged=road_nudged,
             building_family=building_family,
@@ -6825,7 +7527,7 @@ def plan_building_placements(
             if settlement is None:
                 continue
             infill_sources.append((settlement, 0, settlement.polygons[0]))
-        source_occupied = [tuple(plan.support_polygon) for plan in plans]
+        source_occupied = [plan.support_polygon for plan in plans]
         occupied = list(source_occupied)
         source_occupied_index = _PolygonBucketIndex.from_polygons(source_occupied)
         occupied_index = _PolygonBucketIndex.from_polygons(occupied)
@@ -6917,7 +7619,9 @@ def plan_building_placements(
                 plans.append(BuildingPlacementPlan(
                     osm_key=key, geometry_index=candidate_index, geometry_kind="synthetic",
                     x=x, z=z, heading_degrees=final_heading, model_path=model_path,
-                    support_polygon=tuple(final_footprint),
+                    support_polygon=_compact_support_polygon(
+                        final_footprint, x, z, final_heading
+                    ),
                     procedural_placement=procedural_placement, road_nudged=False,
                     building_family=family, synthetic_infill=True,
                 ))
@@ -6926,6 +7630,16 @@ def plan_building_placements(
                 generated += 1
             if generated >= infill_limit or len(plans) >= spec.max_buildings:
                 break
+    plans = list(_match_nearby_same_shape_building_textures(
+        plans,
+        building_asset_library,
+        enabled=bool(getattr(spec, "match_nearby_building_textures", False)),
+        distance_metres=float(getattr(
+            spec,
+            "nearby_building_texture_match_distance",
+            DEFAULT_NEARBY_BUILDING_TEXTURE_MATCH_DISTANCE_METRES,
+        )),
+    ))
     cap_note = f"; building cap {spec.max_buildings:,} reached" if truncated else ""
     progress(100, f"Resolved {len(plans):,} final building footprints{cap_note}")
     return tuple(plans), truncated
@@ -6946,6 +7660,46 @@ def generate_world_objects(
     progress_callback: Callable[[int, str], None] | None = None,
 ) -> ObjectGenerationResult:
     objects: list[WorldObject] = []
+    model_usage: Counter[str] = Counter()
+    surface_forest_positions: list[PointXZ] = []
+    surface_rock_positions: list[PointXZ] = []
+    surface_tracking = bool(getattr(spec, "surface_pass_enabled", False))
+    surface_forest_models = {
+        str(getattr(spec, "forest_tree_model", "")).casefold(),
+        str(getattr(spec, "forest_everon_steep_model", "")).casefold(),
+        str(getattr(spec, "forest_single_tree_model", "")).casefold(),
+        str(getattr(spec, "forest_hillside_tree_model", "")).casefold(),
+        str(getattr(spec, "forest_roadside_tree_model", "")).casefold(),
+        *(str(model).casefold() for model in getattr(spec, "forest_roadside_tree_models", ())),
+    }
+    surface_forest_models.discard("")
+    surface_compact_prefix = (str(getattr(spec, "name", "cwr_world")) + r"\f\c_").casefold()
+    surface_rock_prefix = (str(getattr(spec, "name", "cwr_world")) + r"\i\rock_").casefold()
+    surface_stock_rock_models = {path.casefold() for path in STOCK_STONE_MODELS}
+    surface_class_cache: dict[str, int] = {}
+
+    def emit(obj: WorldObject) -> None:
+        objects.append(obj)
+        model_usage[obj.model_path] += 1
+        if not surface_tracking:
+            return
+        kind = surface_class_cache.get(obj.model_path)
+        if kind is None:
+            folded = obj.model_path.casefold()
+            kind = (
+                1 if folded in surface_forest_models or folded.startswith(surface_compact_prefix)
+                else 2 if folded.startswith(surface_rock_prefix) or folded in surface_stock_rock_models
+                else 0
+            )
+            # Store 3 for the ordinary/non-surface case so ``dict.get`` can use
+            # None as its missing sentinel.
+            surface_class_cache[obj.model_path] = kind or 3
+        elif kind == 3:
+            kind = 0
+        if kind == 1:
+            surface_forest_positions.append((obj.x, obj.z))
+        elif kind == 2:
+            surface_rock_positions.append((obj.x, obj.z))
 
     def progress(percent: int, stage: str) -> None:
         if progress_callback is not None:
@@ -6958,10 +7712,10 @@ def generate_world_objects(
     road_truncated = False
 
     road_features = dataset.roads if include_roads else ()
-    for feature in road_features:
+    road_polylines = projected_road_polylines(dataset, projection) if include_roads else ()
+    for feature, points in zip(road_features, road_polylines):
         if not road_is_supported(feature.tags, include_minor=spec.include_minor_roads):
             continue
-        points = [projection.to_world(point) for point in feature.points]
         model = road_model_for_tags(spec, feature.tags)
         for start, end in zip(points, points[1:]):
             dx = end[0] - start[0]
@@ -6983,13 +7737,365 @@ def generate_world_objects(
                     continue
                 heading = math.degrees(math.atan2(dx, dz)) % 360.0
                 y = _sample_elevation(elevations, spec.cells, spec.cell_size, x, z) + 0.05
-                objects.append(WorldObject(next_id, model, x, y, z, heading))
+                emit(WorldObject(next_id, model, x, y, z, heading))
                 next_id += 1
                 road_count += 1
             if road_truncated:
                 break
         if road_truncated:
             break
+
+    # Urban-detail pass: stock OFP/CWA pavement and street furniture only.
+    # Sidewalks remain disabled; furniture is allowed in mapped towns/cities and
+    # explicit landuse=residential areas, but not generic village/rural roads.
+    sidewalk_objects = 0
+    street_furniture_objects = 0
+    street_light_objects = 0
+    street_bench_objects = 0
+    street_bin_objects = 0
+    street_noticeboard_objects = 0
+    street_bicycle_objects = 0
+    street_bus_shelter_objects = 0
+    street_tree_objects = 0
+    urban_detail_rejections = 0
+    sidewalks_enabled = (
+        bool(getattr(spec, "sidewalks_enabled", False))
+        and not SIDEWALKS_TEMPORARILY_DISABLED
+    )
+    street_furniture_enabled = bool(getattr(spec, "street_furniture_enabled", False))
+    maximum_sidewalk_objects = max(0, int(getattr(spec, "maximum_sidewalk_objects", 30000)))
+    maximum_street_furniture_objects = max(0, int(getattr(spec, "maximum_street_furniture_objects", 12000)))
+    sidewalk_width = max(0.8, float(getattr(spec, "sidewalk_width", SIDEWALK_DEFAULT_WIDTH_METRES)))
+    sidewalk_segment_length = max(2.0, float(getattr(spec, "sidewalk_segment_length", SIDEWALK_DEFAULT_SEGMENT_LENGTH_METRES)))
+    street_light_spacing = max(14.0, float(getattr(spec, "street_light_spacing", 32.0)))
+    street_bench_every = max(1, int(getattr(spec, "street_bench_every", 4)))
+    street_bin_every = max(1, int(getattr(spec, "street_bin_every", 6)))
+
+    settlement_place_centres: list[tuple[str, float, float, float]] = []
+    for place in dataset.places:
+        kind = place.tags.get("place", "").casefold()
+        radius = float(SETTLEMENT_DETAIL_RADIUS_METRES.get(kind, 0.0))
+        if radius <= 0.0:
+            continue
+        px, pz = projection.to_world(place.point)
+        settlement_place_centres.append((kind, px, pz, radius))
+
+    settlement_polygons: list[tuple[str, tuple[PointXZ, ...], tuple[tuple[PointXZ, ...], ...]]] = []
+    residential_polygons: list[tuple[tuple[PointXZ, ...], tuple[tuple[PointXZ, ...], ...]]] = []
+    for feature in getattr(dataset, "urban", ()):
+        if feature.tags.get("landuse", "").casefold() != "residential":
+            continue
+        for polygon in feature.polygons:
+            outer = tuple(projection.to_world(point) for point in polygon.outer[:-1])
+            holes = tuple(
+                tuple(projection.to_world(point) for point in ring[:-1])
+                for ring in polygon.holes
+                if len(ring) >= 4
+            )
+            if len(outer) >= 3:
+                residential_polygons.append((outer, holes))
+    for place_area in getattr(dataset, "place_areas", ()):
+        kind = place_area.tags.get("place", "").casefold()
+        if kind not in SETTLEMENT_DETAIL_RADIUS_METRES:
+            continue
+        for polygon in place_area.polygons:
+            outer = tuple(projection.to_world(point) for point in polygon.outer[:-1])
+            holes = tuple(
+                tuple(projection.to_world(point) for point in ring[:-1])
+                for ring in polygon.holes
+                if len(ring) >= 4
+            )
+            if len(outer) >= 3:
+                settlement_polygons.append((kind, outer, holes))
+
+    def settlement_kind_at(x: float, z: float) -> str:
+        # Prefer explicit place polygons over the conventional point-radius
+        # fallback. Denser settlement classes win when overlapping labels exist.
+        priority = {"city": 4, "town": 3, "village": 2, "hamlet": 1}
+        matches = [
+            kind for kind, outer, holes in settlement_polygons
+            if _polygon_contains_with_holes((x, z), outer, holes)
+        ]
+        if matches:
+            return max(matches, key=lambda item: priority[item])
+        point_matches = [
+            kind for kind, px, pz, radius in settlement_place_centres
+            if (x - px) ** 2 + (z - pz) ** 2 <= radius * radius
+        ]
+        if point_matches:
+            return max(point_matches, key=lambda item: priority[item])
+        return "residential" if residential_position(x, z) else ""
+
+    def town_city_position(x: float, z: float) -> bool:
+        return settlement_kind_at(x, z) in {"town", "city"}
+
+    def village_hamlet_position(x: float, z: float) -> bool:
+        return settlement_kind_at(x, z) in {"village", "hamlet"}
+
+    def residential_position(x: float, z: float) -> bool:
+        return any(
+            _polygon_contains_with_holes((x, z), outer, holes)
+            for outer, holes in residential_polygons
+        )
+
+    def furniture_position(x: float, z: float) -> bool:
+        return town_city_position(x, z) or residential_position(x, z)
+
+    def urban_detail_position(x: float, z: float) -> bool:
+        return furniture_position(x, z) or _mask_at(
+            raster.urban, spec.cells, spec.world_size, x, z
+        )
+
+    lamp_grid_size = STREET_FURNITURE_MINIMUM_SEPARATION_METRES
+    lamp_grid: dict[tuple[int, int], list[PointXZ]] = defaultdict(list)
+
+    def lamp_position_available(x: float, z: float) -> bool:
+        gx, gz = int(math.floor(x / lamp_grid_size)), int(math.floor(z / lamp_grid_size))
+        limit2 = STREET_FURNITURE_MINIMUM_SEPARATION_METRES ** 2
+        for ix in range(gx - 1, gx + 2):
+            for iz in range(gz - 1, gz + 2):
+                for ox, oz in lamp_grid.get((ix, iz), ()):
+                    if (x - ox) ** 2 + (z - oz) ** 2 < limit2:
+                        return False
+        lamp_grid[(gx, gz)].append((x, z))
+        return True
+
+    if sidewalks_enabled or street_furniture_enabled:
+        detail_road_features = dataset.roads
+        detail_road_polylines = projected_road_polylines(dataset, projection)
+        for feature, points in zip(detail_road_features, detail_road_polylines):
+            if not road_is_supported(feature.tags, include_minor=spec.include_minor_roads):
+                continue
+            if not _urban_detail_road_eligible(feature.tags):
+                continue
+            highway = feature.tags.get("highway", "").casefold()
+            explicit_sidewalk = any(
+                key in feature.tags for key in ("sidewalk", "sidewalk:left", "sidewalk:right")
+            )
+            # Dirt/gravel streets only receive sidewalks when OSM explicitly
+            # says they exist. This avoids paving rural tracks merely because a
+            # coarse residential landuse polygon happens to cover them.
+            surface_allows_inference = not road_is_dirt(feature.tags) and not road_is_gravel(feature.tags)
+            road_half_width = max(2.0, road_width_metres(feature.tags) * 0.5)
+
+            if sidewalks_enabled and sidewalk_objects < maximum_sidewalk_objects:
+                for chunk_index, (x, z, heading, length, x0, z0, x1, z1) in enumerate(
+                    _line_chunks(points, sidewalk_segment_length)
+                ):
+                    inferred = urban_detail_position(x, z) and surface_allows_inference and highway != "service"
+                    sides = _sidewalk_sides(feature.tags, inferred=inferred)
+                    if not sides:
+                        continue
+                    dx, dz = x1 - x0, z1 - z0
+                    line_length = max(1.0e-6, math.hypot(dx, dz))
+                    ux, uz = dx / line_length, dz / line_length
+                    right_x, right_z = uz, -ux
+                    offset = road_half_width + SIDEWALK_CURB_GAP_METRES + sidewalk_width * 0.5
+                    for side in sides:
+                        if sidewalk_objects >= maximum_sidewalk_objects:
+                            break
+                        sx = x + right_x * offset * side
+                        sz = z + right_z * offset * side
+                        sx0 = x0 + right_x * offset * side
+                        sz0 = z0 + right_z * offset * side
+                        sx1 = x1 + right_x * offset * side
+                        sz1 = z1 + right_z * offset * side
+                        if not (0.0 <= sx < spec.world_size and 0.0 <= sz < spec.world_size):
+                            urban_detail_rejections += 1
+                            continue
+                        if (
+                            _mask_at(raster.water, spec.cells, spec.world_size, sx, sz)
+                            or _mask_at(raster.buildings, spec.cells, spec.world_size, sx, sz)
+                            or _mask_at(raster.buildings, spec.cells, spec.world_size, sx0, sz0)
+                            or _mask_at(raster.buildings, spec.cells, spec.world_size, sx1, sz1)
+                        ):
+                            urban_detail_rejections += 1
+                            continue
+                        y, pitch = _infrastructure_anchor(
+                            elevations, spec.cells, spec.cell_size, sx0, sz0, sx1, sz1, clearance=0.0
+                        )
+                        if abs(pitch) > 28.0:
+                            urban_detail_rejections += 1
+                            continue
+                        # Vanilla-only sidewalk: tile the stock cobbled-square
+                        # pavement object along the road edge. It cannot be scaled,
+                        # so width/segment settings control spacing/offset rather
+                        # than generating a bespoke mesh.
+                        model = STOCK_SIDEWALK_MODELS[0]
+                        emit(WorldObject(next_id, model, sx, y, sz, heading, pitch_degrees=pitch))
+                        next_id += 1
+                        sidewalk_objects += 1
+
+            if (
+                not street_furniture_enabled
+                or street_furniture_objects >= maximum_street_furniture_objects
+                or highway == "service"
+            ):
+                continue
+
+            for furniture_index, (x, z, heading, _length, x0, z0, x1, z1) in enumerate(
+                _line_chunks(points, street_light_spacing, endpoint_trim=2.5)
+            ):
+                if street_furniture_objects >= maximum_street_furniture_objects:
+                    break
+                if not furniture_position(x, z):
+                    continue
+                dx, dz = x1 - x0, z1 - z0
+                line_length = max(1.0e-6, math.hypot(dx, dz))
+                ux, uz = dx / line_length, dz / line_length
+                right_x, right_z = uz, -ux
+                identity = f"{getattr(spec, 'deterministic_seed', 'cwr-worldgen')}:street:{feature.osm_key}:{furniture_index}"
+                digest = hashlib.blake2s(identity.encode("utf-8"), digest_size=4).digest()
+                side = -1 if digest[0] & 1 else 1
+                furniture_offset = road_half_width + (sidewalk_width + 0.55 if sidewalks_enabled else 1.25)
+                fx = x + right_x * furniture_offset * side
+                fz = z + right_z * furniture_offset * side
+                if not (0.0 <= fx < spec.world_size and 0.0 <= fz < spec.world_size):
+                    urban_detail_rejections += 1
+                    continue
+                if (
+                    _mask_at(raster.water, spec.cells, spec.world_size, fx, fz)
+                    or _mask_at(raster.buildings, spec.cells, spec.world_size, fx, fz)
+                    or not lamp_position_available(fx, fz)
+                ):
+                    urban_detail_rejections += 1
+                    continue
+                _minimum, maximum = _square_elevation_extrema(
+                    elevations, spec.cells, spec.cell_size, fx, fz, 0.9
+                )
+                lamp_model = _stock_street_light_model(feature.tags, identity)
+                emit(WorldObject(next_id, lamp_model, fx, maximum + STREET_FURNITURE_GROUND_CLEARANCE_METRES, fz, heading))
+                next_id += 1
+                street_furniture_objects += 1
+                street_light_objects += 1
+
+                # Benches and bins are much sparser than lights. Shift them
+                # along the sidewalk so they do not occupy exactly the same
+                # origin as a lamp post.
+                if street_furniture_objects < maximum_street_furniture_objects and furniture_index % street_bench_every == 0:
+                    bx = fx + ux * 2.0
+                    bz = fz + uz * 2.0
+                    if (
+                        0.0 <= bx < spec.world_size and 0.0 <= bz < spec.world_size
+                        and not _mask_at(raster.water, spec.cells, spec.world_size, bx, bz)
+                        and not _mask_at(raster.buildings, spec.cells, spec.world_size, bx, bz)
+                    ):
+                        _mn, bmax = _square_elevation_extrema(elevations, spec.cells, spec.cell_size, bx, bz, 1.8)
+                        emit(WorldObject(next_id, STOCK_STREET_BENCH_MODELS[0], bx, bmax + 0.03, bz, (heading + 90.0) % 360.0))
+                        next_id += 1
+                        street_furniture_objects += 1
+                        street_bench_objects += 1
+                if street_furniture_objects < maximum_street_furniture_objects and furniture_index % street_bin_every == 2:
+                    qx = fx - ux * 1.35
+                    qz = fz - uz * 1.35
+                    if (
+                        0.0 <= qx < spec.world_size and 0.0 <= qz < spec.world_size
+                        and not _mask_at(raster.water, spec.cells, spec.world_size, qx, qz)
+                        and not _mask_at(raster.buildings, spec.cells, spec.world_size, qx, qz)
+                    ):
+                        qy = _sample_elevation(elevations, spec.cells, spec.cell_size, qx, qz)
+                        bin_model = STOCK_STREET_BIN_MODELS[digest[1] % len(STOCK_STREET_BIN_MODELS)]
+                        emit(WorldObject(next_id, bin_model, qx, qy + 0.03, qz, float(digest[1] % 360)))
+                        next_id += 1
+                        street_furniture_objects += 1
+                        street_bin_objects += 1
+
+                # Additional vanilla town/city clutter. These are intentionally
+                # sparse and deterministic so the world feels occupied without
+                # converting every pavement into an object-count stress test.
+                if street_furniture_objects < maximum_street_furniture_objects and furniture_index % 11 == 3:
+                    nx = fx + ux * 3.2
+                    nz = fz + uz * 3.2
+                    if (
+                        0.0 <= nx < spec.world_size and 0.0 <= nz < spec.world_size
+                        and not _mask_at(raster.water, spec.cells, spec.world_size, nx, nz)
+                        and not _mask_at(raster.buildings, spec.cells, spec.world_size, nx, nz)
+                    ):
+                        ny = _sample_elevation(elevations, spec.cells, spec.cell_size, nx, nz)
+                        notice_model = STOCK_STREET_NOTICEBOARD_MODELS[digest[2] % len(STOCK_STREET_NOTICEBOARD_MODELS)]
+                        emit(WorldObject(next_id, notice_model, nx, ny + 0.04, nz, (heading + 90.0) % 360.0))
+                        next_id += 1
+                        street_furniture_objects += 1
+                        street_noticeboard_objects += 1
+
+                if street_furniture_objects < maximum_street_furniture_objects and furniture_index % 7 == 4:
+                    cx = fx - ux * 2.7
+                    cz = fz - uz * 2.7
+                    if (
+                        0.0 <= cx < spec.world_size and 0.0 <= cz < spec.world_size
+                        and not _mask_at(raster.water, spec.cells, spec.world_size, cx, cz)
+                        and not _mask_at(raster.buildings, spec.cells, spec.world_size, cx, cz)
+                    ):
+                        cy = _sample_elevation(elevations, spec.cells, spec.cell_size, cx, cz)
+                        emit(WorldObject(next_id, STOCK_STREET_BICYCLE_MODELS[0], cx, cy + 0.03, cz, heading))
+                        next_id += 1
+                        street_furniture_objects += 1
+                        street_bicycle_objects += 1
+
+                # Every few lamp intervals add a stock pavement tree surround
+                # plus a vanilla maple. This is furniture/streetscape, so it is
+                # limited to the mapped settlement/residential envelope above.
+                if street_furniture_objects + 1 < maximum_street_furniture_objects and furniture_index % 5 == 1:
+                    tree_side = -side
+                    tx = x + right_x * (road_half_width + sidewalk_width + 1.05) * tree_side
+                    tz = z + right_z * (road_half_width + sidewalk_width + 1.05) * tree_side
+                    if (
+                        0.0 <= tx < spec.world_size and 0.0 <= tz < spec.world_size
+                        and not _mask_at(raster.water, spec.cells, spec.world_size, tx, tz)
+                        and not _mask_at(raster.buildings, spec.cells, spec.world_size, tx, tz)
+                    ):
+                        ty = _sample_elevation(elevations, spec.cells, spec.cell_size, tx, tz)
+                        emit(WorldObject(next_id, STOCK_STREET_TREE_SURROUND_MODELS[0], tx, ty + 0.02, tz, heading))
+                        next_id += 1
+                        tree_model = STOCK_STREET_TREE_MODELS[digest[3] % len(STOCK_STREET_TREE_MODELS)]
+                        emit(WorldObject(next_id, tree_model, tx, ty + 0.05, tz, float(digest[2] % 360)))
+                        next_id += 1
+                        street_furniture_objects += 2
+                        street_tree_objects += 1
+
+    # Mapped bus stops already receive the stock sign through the semantic
+    # pass. In towns/cities or mapped residential landuse, street-furniture mode
+    # may also add the vanilla bus shelter. Rural bus stops remain sign-only.
+    if street_furniture_enabled and street_furniture_objects < maximum_street_furniture_objects:
+        for landmark in sorted(dataset.landmarks, key=lambda item: item.osm_key):
+            if street_furniture_objects >= maximum_street_furniture_objects:
+                break
+            if landmark.tags.get("landmark") != "bus_stop":
+                continue
+            bx, bz = projection.to_world(landmark.point)
+            if not furniture_position(bx, bz):
+                continue
+            road_heading = nearest_road_heading(dataset, projection, bx, bz)
+            bx, bz = nudge_point_away_from_road(
+                dataset,
+                projection,
+                bx,
+                bz,
+                distance=2.6,
+                fallback_heading=road_heading,
+                world_size=spec.world_size,
+            )
+            if (
+                not (0.0 <= bx < spec.world_size and 0.0 <= bz < spec.world_size)
+                or _mask_at(raster.water, spec.cells, spec.world_size, bx, bz)
+                or _mask_at(raster.buildings, spec.cells, spec.world_size, bx, bz)
+            ):
+                urban_detail_rejections += 1
+                continue
+            _minimum, by = _square_elevation_extrema(
+                elevations, spec.cells, spec.cell_size, bx, bz, 1.8
+            )
+            emit(WorldObject(
+                next_id,
+                STOCK_STREET_BUS_SHELTER_MODELS[0],
+                bx,
+                by + STREET_FURNITURE_GROUND_CLEARANCE_METRES,
+                bz,
+                (road_heading + 90.0) % 360.0,
+            ))
+            next_id += 1
+            street_furniture_objects += 1
+            street_bus_shelter_objects += 1
 
     progress(54, "Placing buildings")
     building_count = 0
@@ -7007,6 +8113,398 @@ def generate_world_objects(
             dataset, projection, raster, spec, building_asset_library
         )
         building_truncated = building_truncated or planned_truncated
+
+    # Settlement-detail pass.  Unlike the generic town/city streetscape above,
+    # this layer also serves villages and hamlets with domestic/farm clutter.
+    # Every model is stock OFP/CWA; fences remain vanilla-only by construction.
+    if street_furniture_enabled and street_furniture_objects < maximum_street_furniture_objects:
+        settlement_seed = str(getattr(spec, "deterministic_seed", "cwr-worldgen"))
+        building_supports = tuple(
+            tuple(plan.support_polygon) for plan in building_placement_plans
+            if len(plan.support_polygon) >= 3
+        )
+        support_index = _PolygonBucketIndex.from_polygons(building_supports)
+        detail_grid_size = SETTLEMENT_DETAIL_MINIMUM_SEPARATION_METRES
+        detail_grid: dict[tuple[int, int], list[PointXZ]] = defaultdict(list)
+
+        def stable_roll(identity: str, modulus: int = 100) -> int:
+            return int.from_bytes(
+                hashlib.blake2s(identity.encode("utf-8"), digest_size=4).digest(), "little"
+            ) % max(1, modulus)
+
+        def plan_radius(plan: BuildingPlacementPlan) -> float:
+            return max(
+                (math.hypot(px - plan.x, pz - plan.z) for px, pz in plan.support_polygon),
+                default=3.0,
+            )
+
+        def prop_position_available(x: float, z: float, footprint: float = 0.8) -> bool:
+            if not (0.5 <= x < spec.world_size - 0.5 and 0.5 <= z < spec.world_size - 0.5):
+                return False
+            if _mask_at(raster.water, spec.cells, spec.world_size, x, z):
+                return False
+            footprint = max(0.25, float(footprint))
+            square = (
+                (x - footprint, z - footprint), (x + footprint, z - footprint),
+                (x + footprint, z + footprint), (x - footprint, z + footprint),
+            )
+            for polygon in support_index.candidates(square, padding=1.0):
+                if _polygons_intersect(square, polygon):
+                    return False
+            gx = int(math.floor(x / detail_grid_size))
+            gz = int(math.floor(z / detail_grid_size))
+            limit2 = detail_grid_size * detail_grid_size
+            for ix in range(gx - 1, gx + 2):
+                for iz in range(gz - 1, gz + 2):
+                    for ox, oz in detail_grid.get((ix, iz), ()):
+                        if (x - ox) ** 2 + (z - oz) ** 2 < limit2:
+                            return False
+            return True
+
+        def emit_prop(
+            model: str,
+            x: float,
+            z: float,
+            heading: float,
+            *,
+            footprint: float = 0.8,
+            clearance: float = 0.03,
+            hedge_segment: tuple[PointXZ, PointXZ] | None = None,
+            line_segment: tuple[PointXZ, PointXZ] | None = None,
+        ) -> bool:
+            nonlocal next_id, street_furniture_objects, urban_detail_rejections
+            if street_furniture_objects >= maximum_street_furniture_objects:
+                return False
+            if not prop_position_available(x, z, footprint):
+                urban_detail_rejections += 1
+                return False
+            if hedge_segment is not None:
+                y = _hedge_anchor_height(
+                    elevations, spec.cells, spec.cell_size,
+                    hedge_segment[0][0], hedge_segment[0][1],
+                    hedge_segment[1][0], hedge_segment[1][1],
+                    model_path=model,
+                )
+                pitch = 0.0
+            elif line_segment is not None:
+                y, pitch = _infrastructure_anchor(
+                    elevations, spec.cells, spec.cell_size,
+                    line_segment[0][0], line_segment[0][1],
+                    line_segment[1][0], line_segment[1][1],
+                )
+                if abs(pitch) > 38.0:
+                    urban_detail_rejections += 1
+                    return False
+            else:
+                minimum, maximum = _square_elevation_extrema(
+                    elevations, spec.cells, spec.cell_size, x, z, footprint
+                )
+                if maximum - minimum > 2.5:
+                    urban_detail_rejections += 1
+                    return False
+                y = maximum + clearance
+                pitch = 0.0
+            emit(WorldObject(next_id, model, x, y, z, heading % 360.0, pitch_degrees=pitch))
+            next_id += 1
+            street_furniture_objects += 1
+            gx = int(math.floor(x / detail_grid_size))
+            gz = int(math.floor(z / detail_grid_size))
+            detail_grid[(gx, gz)].append((x, z))
+            return True
+
+        # Stock telegraph/utility poles follow inhabited minor roads very
+        # sparsely. They are visual cues, not a continuous picket line.
+        settlement_roads = projected_road_polylines(dataset, projection)
+        for feature, points in zip(dataset.roads, settlement_roads):
+            if street_furniture_objects >= maximum_street_furniture_objects:
+                break
+            highway = feature.tags.get("highway", "").casefold()
+            if not _urban_detail_road_eligible(feature.tags):
+                continue
+            if highway not in {"tertiary", "unclassified", "residential", "living_street", "service", "road"}:
+                continue
+            for pole_index, (x, z, heading, _length, x0, z0, x1, z1) in enumerate(_line_chunks(points, 56.0)):
+                kind = settlement_kind_at(x, z)
+                if not kind:
+                    continue
+                if kind in {"city", "town", "residential"} and highway not in {"unclassified", "residential", "living_street", "service", "road"}:
+                    continue
+                requested_spacing = SETTLEMENT_UTILITY_POLE_SPACING_METRES.get(kind, 240.0)
+                skip_factor = max(1, int(round(requested_spacing / 56.0)))
+                # OSM often fragments one street into many short ways. Starting
+                # every way at pole #0 would still create a forest of poles even
+                # with large spacing. Give each way a deterministic phase so
+                # short fragments only contribute at the intended sparse rate.
+                phase = stable_roll(
+                    f"{settlement_seed}:settlement-pole-phase:{feature.osm_key}",
+                    skip_factor,
+                )
+                if pole_index % skip_factor != phase:
+                    continue
+                dx, dz = x1 - x0, z1 - z0
+                line_length = max(1.0e-6, math.hypot(dx, dz))
+                ux, uz = dx / line_length, dz / line_length
+                right_x, right_z = uz, -ux
+                identity = f"{settlement_seed}:settlement-pole:{feature.osm_key}:{pole_index}"
+                side = -1 if stable_roll(identity, 2) == 0 else 1
+                offset = road_width_metres(feature.tags) * 0.5 + 2.0
+                px = x + right_x * offset * side
+                pz = z + right_z * offset * side
+                model = STOCK_SETTLEMENT_UTILITY_POLE_MODELS[
+                    stable_roll(identity + ":model", len(STOCK_SETTLEMENT_UTILITY_POLE_MODELS))
+                ]
+                emit_prop(model, px, pz, heading, footprint=0.55, clearance=0.04)
+
+        building_tags: dict[str, Mapping[str, str]] = {}
+        for feature in (*dataset.building_polygons, *dataset.building_points):
+            building_tags.setdefault(feature.osm_key, feature.tags)
+
+        def front_detail_position(plan: BuildingPlacementPlan, extra: float = 2.2) -> tuple[float, float, float, float]:
+            road_point = nearest_road_point(dataset, projection, plan.x, plan.z)
+            if road_point is not None:
+                dx, dz = road_point[0] - plan.x, road_point[1] - plan.z
+                length = math.hypot(dx, dz)
+            else:
+                length = 0.0
+            if length > 1.0e-6:
+                ux, uz = dx / length, dz / length
+            else:
+                angle = math.radians(plan.heading_degrees)
+                ux, uz = math.sin(angle), math.cos(angle)
+            radius = plan_radius(plan)
+            x = plan.x + ux * (radius + extra)
+            z = plan.z + uz * (radius + extra)
+            return x, z, ux, uz
+
+        # Community anchors get the sort of sparse civic clutter visible in
+        # small OFP settlements: noticeboard/bench, with shops also receiving a
+        # few bins and bicycles.  The same rule applies in towns/cities.
+        community_amenities = {
+            "community_centre", "townhall", "library", "post_office",
+            "clinic", "doctors", "pharmacy", "social_facility",
+        }
+        for plan in building_placement_plans:
+            if street_furniture_objects >= maximum_street_furniture_objects:
+                break
+            kind = settlement_kind_at(plan.x, plan.z)
+            if not kind:
+                continue
+            tags = building_tags.get(plan.osm_key, {})
+            amenity = str(tags.get("amenity", "")).casefold()
+            is_community = plan.building_family in {"church", "shop", "school"} or amenity in community_amenities
+            if not is_community:
+                continue
+            identity = f"{settlement_seed}:community:{plan.osm_key}:{plan.geometry_index}"
+            x, z, ux, uz = front_detail_position(plan)
+            right_x, right_z = uz, -ux
+            notice_model = STOCK_STREET_NOTICEBOARD_MODELS[
+                stable_roll(identity + ":notice", len(STOCK_STREET_NOTICEBOARD_MODELS))
+            ]
+            if emit_prop(notice_model, x + right_x * 1.4, z + right_z * 1.4, plan.heading_degrees + 90.0, footprint=0.7):
+                street_noticeboard_objects += 1
+            if emit_prop(STOCK_STREET_BENCH_MODELS[0], x - right_x * 2.4, z - right_z * 2.4, plan.heading_degrees + 90.0, footprint=0.9):
+                street_bench_objects += 1
+            if plan.building_family == "shop":
+                sparse_factor = {"hamlet": 18, "village": 32, "town": 62, "city": 72, "residential": 48}.get(kind, 30)
+                if stable_roll(identity + ":bin") < sparse_factor:
+                    model = STOCK_STREET_BIN_MODELS[stable_roll(identity + ":bin-model", len(STOCK_STREET_BIN_MODELS))]
+                    if emit_prop(model, x + ux * 1.6, z + uz * 1.6, stable_roll(identity + ":bin-heading", 360), footprint=0.5):
+                        street_bin_objects += 1
+                if stable_roll(identity + ":bike") < max(8, sparse_factor // 2):
+                    if emit_prop(STOCK_STREET_BICYCLE_MODELS[0], x - ux * 1.8, z - uz * 1.8, plan.heading_degrees, footprint=0.7):
+                        street_bicycle_objects += 1
+
+        # One civic-looking cluster near the central road junction of each named
+        # settlement.  This avoids carpeting every three-way junction in signs.
+        junction_degree: Counter[tuple[int, int]] = Counter()
+        junction_points: dict[tuple[int, int], PointXZ] = {}
+        for feature, points in zip(dataset.roads, settlement_roads):
+            if not _urban_detail_road_eligible(feature.tags):
+                continue
+            for start, end in zip(points, points[1:]):
+                for point in (start, end):
+                    key = (round(point[0]), round(point[1]))
+                    junction_degree[key] += 1
+                    junction_points.setdefault(key, point)
+        junction_candidates = [junction_points[key] for key, degree in junction_degree.items() if degree >= 3]
+        for kind, cx, cz, radius in settlement_place_centres:
+            if not junction_candidates or street_furniture_objects >= maximum_street_furniture_objects:
+                break
+            nearest = min(junction_candidates, key=lambda point: (point[0] - cx) ** 2 + (point[1] - cz) ** 2)
+            if (nearest[0] - cx) ** 2 + (nearest[1] - cz) ** 2 > (radius * 0.55) ** 2:
+                continue
+            identity = f"{settlement_seed}:central-junction:{kind}:{round(cx,1)}:{round(cz,1)}"
+            angle = math.radians(stable_roll(identity, 360))
+            ux, uz = math.sin(angle), math.cos(angle)
+            nx, nz = nearest[0] + ux * 5.0, nearest[1] + uz * 5.0
+            model = STOCK_STREET_NOTICEBOARD_MODELS[
+                stable_roll(identity + ":model", len(STOCK_STREET_NOTICEBOARD_MODELS))
+            ]
+            if emit_prop(model, nx, nz, math.degrees(angle) + 90.0, footprint=0.7):
+                street_noticeboard_objects += 1
+            if emit_prop(STOCK_STREET_BENCH_MODELS[0], nx + uz * 2.3, nz - ux * 2.3, math.degrees(angle), footprint=0.9):
+                street_bench_objects += 1
+
+        # Residential yards: sparse stock hedges/fences, fruit trees, and a
+        # short stock dirt-road entrance. Never place stock sheds/barns here.
+        yard_probability = {"hamlet": 64, "village": 58, "town": 36, "city": 16, "residential": 34}
+        residential_plans: list[BuildingPlacementPlan] = []
+        for plan in building_placement_plans:
+            if street_furniture_objects >= maximum_street_furniture_objects:
+                break
+            if plan.building_family not in {"residential", "townhouse"}:
+                continue
+            kind = settlement_kind_at(plan.x, plan.z)
+            if not kind:
+                continue
+            residential_plans.append(plan)
+            identity = f"{settlement_seed}:yard:{plan.osm_key}:{plan.geometry_index}"
+            if stable_roll(identity + ":select") >= yard_probability.get(kind, 25):
+                continue
+            angle = math.radians(plan.heading_degrees)
+            forward_x, forward_z = math.sin(angle), math.cos(angle)
+            right_x, right_z = math.cos(angle), -math.sin(angle)
+            radius = plan_radius(plan)
+            rear_x = plan.x - forward_x * (radius + 4.0)
+            rear_z = plan.z - forward_z * (radius + 4.0)
+
+            # One boundary family per yard: hedge OR stock fence, never a mixed
+            # little catalogue around the same property.
+            if stable_roll(identity + ":boundary") < 62:
+                hedge = stable_roll(identity + ":hedge") < 62
+                model = (
+                    STOCK_HEDGE_MODELS[stable_roll(identity + ":hedge-model", len(STOCK_HEDGE_MODELS))]
+                    if hedge else stock_farmland_fence_model(identity + ":fence-model")
+                )
+                for segment in (-1, 1):
+                    sx = rear_x + right_x * segment * 2.4
+                    sz = rear_z + right_z * segment * 2.4
+                    start = (sx - right_x * 2.3, sz - right_z * 2.3)
+                    end = (sx + right_x * 2.3, sz + right_z * 2.3)
+                    if hedge:
+                        emit_prop(model, sx, sz, plan.heading_degrees + 90.0 + HEDGE_MODEL_HEADING_OFFSET_DEGREES, footprint=0.7, hedge_segment=(start, end))
+                    else:
+                        emit_prop(model, sx, sz, plan.heading_degrees + 90.0 + FARMLAND_FENCE_HEADING_OFFSET_DEGREES, footprint=0.6, line_segment=(start, end))
+
+            tree_count = 1 + stable_roll(identity + ":tree-count", 3)
+            for tree_index in range(tree_count):
+                tree_angle = math.radians(stable_roll(identity + f":tree:{tree_index}:angle", 360))
+                distance = radius + 5.0 + stable_roll(identity + f":tree:{tree_index}:distance", 50) / 10.0
+                tx = plan.x + math.sin(tree_angle) * distance
+                tz = plan.z + math.cos(tree_angle) * distance
+                tree_model = STOCK_SETTLEMENT_FRUIT_TREE_MODELS[
+                    stable_roll(identity + f":tree:{tree_index}:model", len(STOCK_SETTLEMENT_FRUIT_TREE_MODELS))
+                ]
+                if emit_prop(tree_model, tx, tz, stable_roll(identity + f":tree:{tree_index}:heading", 360), footprint=1.3, clearance=0.05):
+                    street_tree_objects += 1
+
+            road_point = nearest_road_point(dataset, projection, plan.x, plan.z)
+            if road_point is not None and stable_roll(identity + ":driveway") < 44:
+                dx, dz = road_point[0] - plan.x, road_point[1] - plan.z
+                distance = math.hypot(dx, dz)
+                if radius + 2.5 < distance <= radius + 18.0:
+                    ux, uz = dx / distance, dz / distance
+                    driveway_x = plan.x + ux * (radius + 3.0)
+                    driveway_z = plan.z + uz * (radius + 3.0)
+                    driveway_heading = math.degrees(math.atan2(dx, dz)) % 360.0
+                    emit_prop(STOCK_SETTLEMENT_DRIVEWAY_MODEL, driveway_x, driveway_z, driveway_heading, footprint=1.3, clearance=0.025)
+
+        # Small fruit-tree groups in the gaps between close residential houses.
+        # Pair each house once, keeping this much sparser in cities.
+        paired: set[int] = set()
+        for index, plan in enumerate(residential_plans):
+            if index in paired or street_furniture_objects >= maximum_street_furniture_objects:
+                continue
+            kind = settlement_kind_at(plan.x, plan.z)
+            pair_probability = {"hamlet": 45, "village": 42, "town": 25, "city": 8, "residential": 22}.get(kind, 15)
+            identity = f"{settlement_seed}:between-yard:{plan.osm_key}:{plan.geometry_index}"
+            if stable_roll(identity) >= pair_probability:
+                continue
+            best_index = -1
+            best_distance2 = float("inf")
+            for other_index in range(index + 1, len(residential_plans)):
+                if other_index in paired:
+                    continue
+                other = residential_plans[other_index]
+                distance2 = (other.x - plan.x) ** 2 + (other.z - plan.z) ** 2
+                if 18.0 ** 2 <= distance2 <= 48.0 ** 2 and distance2 < best_distance2:
+                    best_index, best_distance2 = other_index, distance2
+            if best_index < 0:
+                continue
+            paired.update({index, best_index})
+            other = residential_plans[best_index]
+            mx, mz = (plan.x + other.x) * 0.5, (plan.z + other.z) * 0.5
+            dx, dz = other.x - plan.x, other.z - plan.z
+            length = max(1.0, math.hypot(dx, dz))
+            right_x, right_z = dz / length, -dx / length
+            for tree_index, side in enumerate((-1.0, 1.0)):
+                tx, tz = mx + right_x * side * 2.8, mz + right_z * side * 2.8
+                model = STOCK_SETTLEMENT_FRUIT_TREE_MODELS[
+                    stable_roll(identity + f":pair-tree:{tree_index}", len(STOCK_SETTLEMENT_FRUIT_TREE_MODELS))
+                ]
+                if emit_prop(model, tx, tz, stable_roll(identity + f":pair-heading:{tree_index}", 360), footprint=1.3, clearance=0.05):
+                    street_tree_objects += 1
+
+        # Barn-only clutter. Hay bales, wood piles, axes/stumps, and pallets
+        # belong beside explicit OSM barns and synthetic infill that actually
+        # resolved to the agricultural/barn family. Generic mapped agricultural
+        # buildings, sheds, stables, outbuildings, and fields still receive none.
+        farm_probability = {"hamlet": 76, "village": 70, "town": 46, "city": 18, "residential": 36}
+        for plan in building_placement_plans:
+            if street_furniture_objects >= maximum_street_furniture_objects:
+                break
+            tags = building_tags.get(plan.osm_key, {})
+            explicit_barn = str(tags.get("building", "")).casefold() == "barn"
+            generated_barn = plan.synthetic_infill and plan.building_family.casefold() == "agricultural"
+            if not (explicit_barn or generated_barn):
+                continue
+            kind = settlement_kind_at(plan.x, plan.z)
+            if not kind:
+                continue
+            identity = f"{settlement_seed}:barn-clutter:{plan.osm_key}:{plan.geometry_index}"
+            if stable_roll(identity) >= farm_probability.get(kind, 30):
+                continue
+            angle = math.radians(plan.heading_degrees)
+            forward_x, forward_z = math.sin(angle), math.cos(angle)
+            right_x, right_z = math.cos(angle), -math.sin(angle)
+            radius = plan_radius(plan)
+            count = 2 + stable_roll(identity + ":count", 3)
+            for clutter_index in range(count):
+                side = -1.0 if clutter_index % 2 else 1.0
+                x = plan.x - forward_x * (radius + 3.0 + clutter_index * 1.7) + right_x * side * (3.0 + clutter_index)
+                z = plan.z - forward_z * (radius + 3.0 + clutter_index * 1.7) + right_z * side * (3.0 + clutter_index)
+                model = STOCK_SETTLEMENT_BARN_CLUTTER_MODELS[
+                    stable_roll(identity + f":model:{clutter_index}", len(STOCK_SETTLEMENT_BARN_CLUTTER_MODELS))
+                ]
+                emit_prop(model, x, z, stable_roll(identity + f":heading:{clutter_index}", 360), footprint=1.1, clearance=0.03)
+
+        # Village/hamlet bus stops stay modest: no mandatory city shelter, just
+        # occasional bin/bicycle clutter. Town/city stops can receive the same
+        # details in addition to the shelter already placed above.
+        for landmark in sorted(dataset.landmarks, key=lambda item: item.osm_key):
+            if street_furniture_objects >= maximum_street_furniture_objects:
+                break
+            if landmark.tags.get("landmark") != "bus_stop":
+                continue
+            bx, bz = projection.to_world(landmark.point)
+            kind = settlement_kind_at(bx, bz)
+            if not kind:
+                continue
+            identity = f"{settlement_seed}:stop-clutter:{landmark.osm_key}"
+            heading = nearest_road_heading(dataset, projection, bx, bz)
+            bx, bz = nudge_point_away_from_road(
+                dataset, projection, bx, bz, distance=2.8,
+                fallback_heading=heading, world_size=spec.world_size,
+            )
+            bin_chance = {"hamlet": 18, "village": 30, "town": 58, "city": 68, "residential": 42}.get(kind, 25)
+            bike_chance = {"hamlet": 8, "village": 18, "town": 38, "city": 48, "residential": 28}.get(kind, 15)
+            if stable_roll(identity + ":bin") < bin_chance:
+                model = STOCK_STREET_BIN_MODELS[stable_roll(identity + ":bin-model", len(STOCK_STREET_BIN_MODELS))]
+                if emit_prop(model, bx + 1.6, bz, heading, footprint=0.5):
+                    street_bin_objects += 1
+            if stable_roll(identity + ":bike") < bike_chance:
+                if emit_prop(STOCK_STREET_BICYCLE_MODELS[0], bx - 1.8, bz, heading, footprint=0.7):
+                    street_bicycle_objects += 1
 
     minimum_foundation_depth = max(0.0, float(getattr(spec, "building_foundation_depth", 0.5)))
     foundation_safety = max(0.0, float(getattr(spec, "building_foundation_safety", 0.20)))
@@ -7059,7 +8557,7 @@ def generate_world_objects(
             maximum_building_foundation_depth, required_foundation_depth
         )
         y = maximum_height + ground_clearance
-        objects.append(WorldObject(
+        emit(WorldObject(
             next_id, model_path, plan.x, y, plan.z, plan.heading_degrees
         ))
         next_id += 1
@@ -7102,6 +8600,7 @@ def generate_world_objects(
     forest_border_maximum_burial = 0.0
     forest_border_maximum_float = 0.0
     forest_single_tree_objects = 0
+    forest_gap_infill_tree_objects = 0
     ditch_grass_objects = 0
     ditch_grass_rejections = 0
     ditch_grass_maximum_burial = 0.0
@@ -7123,9 +8622,23 @@ def generate_world_objects(
     seed = str(getattr(spec, "deterministic_seed", "cwr-worldgen"))
     low_anchor = bool(getattr(spec, "forest_low_anchor", False))
     forest_profile = str(getattr(spec, "forest_profile", "malden")).casefold()
+    # Legacy field name from 0.9.252. In 0.9.254+ this means "replace the
+    # rigid stock square/triangle forest polygon models with tiled generated
+    # clusters". Individually grounded trees remain the last-resort fallback.
+    forest_polygon_models_disabled = bool(
+        getattr(spec, "forest_individual_objects_only", False)
+    )
+    individual_tree_root_sink = max(
+        0.0,
+        float(getattr(spec, "forest_single_tree_root_sink", 0.05)),
+    )
+    individual_tree_maximum_burial = max(
+        0.0,
+        float(getattr(spec, "forest_single_tree_maximum_burial", 1.50)),
+    )
     individual_tree_maximum_float = max(
         0.0,
-        float(getattr(spec, "forest_single_tree_maximum_float", 0.5)),
+        float(getattr(spec, "forest_single_tree_maximum_float", 0.15)),
     )
     accepted_forest_cells: set[int] = set()
     rocky_forest_cells: set[int] = set()
@@ -7204,7 +8717,9 @@ def generate_world_objects(
         severe_fallback_tree_target = max(
             1, int(getattr(spec, "forest_severe_hill_trees_per_block", 10))
         )
-        forest_clusters_enabled = bool(getattr(spec, "forest_cluster_fallback", False))
+        forest_clusters_enabled = bool(
+            getattr(spec, "forest_cluster_fallback", False)
+        )
         legacy_roadside_tree_model = str(
             getattr(spec, "forest_roadside_tree_model", ROADSIDE_LARGE_TREE_MODEL)
         )
@@ -7384,7 +8899,7 @@ def generate_world_objects(
                         if tree_relief > roadside_tree_maximum_relief:
                             continue
                         tree_model = roadside_tree_models[tree_variant % len(roadside_tree_models)]
-                        tree_fit = _non_buried_vegetation_fit(
+                        tree_fit = _rooted_tree_fit(
                             _triangle_elevation_bounds(
                                 elevations,
                                 spec.cells,
@@ -7392,13 +8907,13 @@ def generate_world_objects(
                                 tree_x,
                                 tree_z,
                             ),
-                            clearance=spec.forest_ground_clearance,
-                            maximum_float=individual_tree_maximum_float,
+                            root_sink=individual_tree_root_sink,
+                            maximum_burial=individual_tree_maximum_burial,
                         )
                         if tree_fit is None:
                             continue
-                        tree_y, _tree_float = tree_fit
-                        objects.append(
+                        tree_y, _tree_burial = tree_fit
+                        emit(
                             WorldObject(
                                 next_id,
                                 tree_model,
@@ -7479,7 +8994,7 @@ def generate_world_objects(
                             if bush_fit is None:
                                 continue
                             bush_y, _bush_float = bush_fit
-                            objects.append(
+                            emit(
                                 WorldObject(
                                     next_id,
                                     bush_model,
@@ -7516,6 +9031,165 @@ def generate_world_objects(
                     digest_size=2,
                 ).digest()
                 heading = float((int.from_bytes(digest, "little") % 4) * 90)
+
+                # Optional stock-polygon replacement mode.  A single generated
+                # cluster is much smaller than the stock square/triangle model it
+                # replaces, so tile several independently fitted clusters across
+                # the former footprint.  Remaining holes are deliberately left
+                # visible to the later individual-tree gap-infill pass.
+                if forest_polygon_models_disabled:
+                    replacements = _forest_polygon_replacement_clusters(
+                        elevations=elevations,
+                        raster=raster,
+                        road_corridors=road_corridors,
+                        spec=spec,
+                        seed=seed,
+                        column=geographic_column,
+                        row=geographic_row,
+                        x=x,
+                        z=z,
+                        spacing=spacing,
+                        maximum_clusters=min(4, max(0, spec.max_forest_objects - forest_count)),
+                    )
+                    for cluster in replacements:
+                        (
+                            cluster_model,
+                            cluster_x,
+                            cluster_y,
+                            cluster_z,
+                            cluster_heading,
+                            cluster_variant,
+                            cluster_relief,
+                            cluster_burial,
+                            cluster_float,
+                        ) = cluster
+                        emit(
+                            WorldObject(
+                                next_id, cluster_model, cluster_x, cluster_y,
+                                cluster_z, cluster_heading,
+                            )
+                        )
+                        next_id += 1
+                        forest_count += 1
+                        forest_cluster_objects += 1
+                        forest_cluster_variant_counts[cluster_variant] += 1
+                        mark_accepted_forest(
+                            cluster_x, cluster_z,
+                            _replacement_cluster_coverage_radius(cluster_variant),
+                        )
+                        forest_cluster_maximum_burial = max(
+                            forest_cluster_maximum_burial, cluster_burial
+                        )
+                        forest_cluster_maximum_float = max(
+                            forest_cluster_maximum_float, cluster_float
+                        )
+                        maximum_forest_burial = max(
+                            maximum_forest_burial, cluster_burial
+                        )
+                        maximum_forest_float = max(
+                            maximum_forest_float, cluster_float
+                        )
+                        maximum_hillside_tree_relief = max(
+                            maximum_hillside_tree_relief, cluster_relief
+                        )
+
+                    if replacements:
+                        forest_hillside_fallback_blocks += 1
+                        if forest_count >= spec.max_forest_objects:
+                            forest_truncated = True
+                        continue
+
+                    # A particular patch can still be too rough for a safe planar
+                    # cluster.  Keep the existing individually grounded fallback
+                    # rather than restoring a rigid floating forest object.
+                    forest_cluster_rejections += 1
+                    individual_placed = 0
+                    for tree_x, tree_z, tree_heading in _dense_hillside_tree_candidates(
+                        f"{seed}:no-stock-polygons",
+                        geographic_column,
+                        geographic_row,
+                        x,
+                        z,
+                        spacing,
+                    ):
+                        if (
+                            individual_placed >= steep_infill_tree_target
+                            or forest_count >= spec.max_forest_objects
+                        ):
+                            break
+                        if not (
+                            0 <= tree_x < spec.world_size
+                            and 0 <= tree_z < spec.world_size
+                            and _mask_at(raster.forest, spec.cells, spec.world_size, tree_x, tree_z)
+                            and not _mask_at(raster.water, spec.cells, spec.world_size, tree_x, tree_z)
+                            and not _mask_at(raster.roads, spec.cells, spec.world_size, tree_x, tree_z)
+                            and not _mask_at(raster.buildings, spec.cells, spec.world_size, tree_x, tree_z)
+                        ):
+                            continue
+                        if forest_block_intersects_road_corridors(
+                            road_corridors,
+                            tree_x,
+                            tree_z,
+                            block_size=roadside_tree_footprint,
+                        ):
+                            continue
+                        tree_supports = _square_elevation_samples(
+                            elevations,
+                            spec.cells,
+                            spec.cell_size,
+                            tree_x,
+                            tree_z,
+                            roadside_tree_footprint,
+                        )
+                        tree_relief = max(tree_supports) - min(tree_supports)
+                        maximum_hillside_tree_relief = max(
+                            maximum_hillside_tree_relief, tree_relief
+                        )
+                        if tree_relief > roadside_tree_maximum_relief:
+                            continue
+                        tree_fit = _rooted_tree_fit(
+                            _triangle_elevation_bounds(
+                                elevations,
+                                spec.cells,
+                                spec.cell_size,
+                                tree_x,
+                                tree_z,
+                            ),
+                            root_sink=individual_tree_root_sink,
+                            maximum_burial=individual_tree_maximum_burial,
+                        )
+                        if tree_fit is None:
+                            continue
+                        tree_y, _tree_burial = tree_fit
+                        tree_model = roadside_tree_models[
+                            (
+                                geographic_column * 17
+                                + geographic_row * 31
+                                + individual_placed
+                            )
+                            % len(roadside_tree_models)
+                        ]
+                        emit(
+                            WorldObject(
+                                next_id,
+                                tree_model,
+                                tree_x,
+                                tree_y,
+                                tree_z,
+                                tree_heading,
+                            )
+                        )
+                        next_id += 1
+                        forest_count += 1
+                        forest_hillside_tree_objects += 1
+                        individual_placed += 1
+                        mark_accepted_forest(tree_x, tree_z, spacing * 0.22)
+                    if individual_placed:
+                        forest_hillside_fallback_blocks += 1
+                    else:
+                        forest_hillside_unfilled_blocks += 1
+                    continue
+
                 centre_height = _sample_elevation(
                     elevations, spec.cells, spec.cell_size, x, z
                 )
@@ -7532,7 +9206,7 @@ def generate_world_objects(
                     maximum_forest_grounding_raise = max(
                         maximum_forest_grounding_raise, support_height - centre_height
                     )
-                    objects.append(
+                    emit(
                         WorldObject(
                             next_id,
                             spec.forest_tree_model,
@@ -7560,7 +9234,7 @@ def generate_world_objects(
                 )
                 if block_fit is not None:
                     anchor, burial, floating = block_fit
-                    objects.append(
+                    emit(
                         WorldObject(next_id, spec.forest_tree_model, x, anchor, z, heading)
                     )
                     next_id += 1
@@ -7635,7 +9309,7 @@ def generate_world_objects(
                         anchor = base_anchor - sink_depth
                         burial += sink_depth
                         floating = max(0.0, floating - sink_depth)
-                        objects.append(
+                        emit(
                             WorldObject(
                                 next_id, everon_steep_model, x, anchor, z, heading
                             )
@@ -7680,7 +9354,7 @@ def generate_world_objects(
                             cluster_burial,
                             cluster_float,
                         ) = cluster
-                        objects.append(
+                        emit(
                             WorldObject(
                                 next_id,
                                 cluster_model,
@@ -7756,7 +9430,7 @@ def generate_world_objects(
                                     underbrush_burial,
                                     underbrush_float,
                                 ) = underbrush
-                                objects.append(
+                                emit(
                                     WorldObject(
                                         next_id,
                                         underbrush_model,
@@ -7837,7 +9511,7 @@ def generate_world_objects(
                             rock_model = STOCK_STONE_MODELS[
                                 (geographic_column + geographic_row + rocky_placed) % len(STOCK_STONE_MODELS)
                             ]
-                            objects.append(WorldObject(next_id, rock_model, rock_x, rock_anchor, rock_z, rock_heading))
+                            emit(WorldObject(next_id, rock_model, rock_x, rock_anchor, rock_z, rock_heading))
                             next_id += 1
                             rocky_forest_objects += 1
                             rock_col = min(spec.cells - 1, max(0, int(rock_x // spec.cell_size)))
@@ -7849,7 +9523,12 @@ def generate_world_objects(
                                 rocky_enabled and not severe_rigid_fallback
                             )
                         steep_tree_placed = 0
-                        for tree_x, tree_z, tree_heading in _hillside_tree_candidates(
+                        # Refill every rejected rigid/cluster hill patch with a
+                        # larger pool of individually grounded trees. The old
+                        # fixed 12-point pattern often ran out of valid candidates
+                        # after water/road/relief checks, making wooded hills look
+                        # noticeably thinner after the grounding-safety changes.
+                        for tree_x, tree_z, tree_heading in _dense_hillside_tree_candidates(
                             f"{seed}:steep-infill",
                             geographic_column,
                             geographic_row,
@@ -7880,7 +9559,7 @@ def generate_world_objects(
                             )
                             if max(tree_supports) - min(tree_supports) > roadside_tree_maximum_relief:
                                 continue
-                            tree_fit = _non_buried_vegetation_fit(
+                            tree_fit = _rooted_tree_fit(
                                 _triangle_elevation_bounds(
                                     elevations,
                                     spec.cells,
@@ -7888,12 +9567,12 @@ def generate_world_objects(
                                     tree_x,
                                     tree_z,
                                 ),
-                                clearance=spec.forest_ground_clearance,
-                                maximum_float=individual_tree_maximum_float,
+                                root_sink=individual_tree_root_sink,
+                                maximum_burial=individual_tree_maximum_burial,
                             )
                             if tree_fit is None:
                                 continue
-                            tree_y, _tree_float = tree_fit
+                            tree_y, _tree_burial = tree_fit
                             tree_model = roadside_tree_models[
                                 (
                                     geographic_column * 17
@@ -7902,7 +9581,7 @@ def generate_world_objects(
                                 )
                                 % len(roadside_tree_models)
                             ]
-                            objects.append(WorldObject(
+                            emit(WorldObject(
                                 next_id, tree_model, tree_x, tree_y, tree_z, tree_heading
                             ))
                             next_id += 1
@@ -7981,7 +9660,7 @@ def generate_world_objects(
                         if tree_relief > hillside_maximum_relief:
                             forest_hillside_candidate_rejections += 1
                             continue
-                        tree_fit = _non_buried_vegetation_fit(
+                        tree_fit = _rooted_tree_fit(
                             _triangle_elevation_bounds(
                                 elevations,
                                 spec.cells,
@@ -7989,19 +9668,19 @@ def generate_world_objects(
                                 tree_x,
                                 tree_z,
                             ),
-                            clearance=spec.forest_ground_clearance,
-                            maximum_float=individual_tree_maximum_float,
+                            root_sink=individual_tree_root_sink,
+                            maximum_burial=individual_tree_maximum_burial,
                         )
                         if tree_fit is None:
                             forest_hillside_candidate_rejections += 1
                             continue
-                        tree_y, _tree_float = tree_fit
+                        tree_y, _tree_burial = tree_fit
                         accepted_candidates.append(
                             (tree_x, tree_z, tree_heading, tree_y)
                         )
                 if accepted_candidates:
                     tree_x, tree_z, tree_heading, tree_y = accepted_candidates[0]
-                    objects.append(
+                    emit(
                         WorldObject(
                             next_id,
                             hillside_model,
@@ -8034,7 +9713,7 @@ def generate_world_objects(
                         forest_truncated = True
                         break
                     tree_x, tree_z, tree_heading, tree_y = candidates[extra_index]
-                    objects.append(
+                    emit(
                         WorldObject(
                             next_id,
                             hillside_model,
@@ -8056,7 +9735,6 @@ def generate_world_objects(
         # than the Malden ``str_fikovnik`` model, whose texture commonly lives in
         # a separate Data package and therefore broke strict validation.
         progress(57, f"Placed primary forest blocks ({forest_count:,} forest objects so far)")
-        progress(60, "Scattering individual forest trees")
         extra_single_enabled = bool(getattr(spec, "forest_single_tree_enabled", True))
         extra_single_model = str(getattr(spec, "forest_single_tree_model", r"data3d\str smrk_medium.p3d"))
         extra_single_limit = _scaled_synthetic_tree_limit(
@@ -8070,6 +9748,102 @@ def generate_world_objects(
         extra_single_footprint = max(1.5, float(getattr(spec, "forest_single_tree_footprint", 2.0)))
         extra_single_relief = max(1.5, float(getattr(spec, "forest_single_tree_maximum_relief", 8.0)))
         extra_single_candidates_per_cell = 1
+
+        # Fill mapped-forest cells that no accepted square, triangle, cluster,
+        # road-cut tree, or hillside fallback actually covers. The historical
+        # extra-single pass below deliberately required an *already accepted*
+        # forest cell, so it could soften existing stands but could never repair
+        # the conspicuous bald holes left by rejected rigid models.
+        gap_infill_enabled = bool(getattr(spec, "forest_gap_infill_enabled", True))
+        gap_infill_spacing = max(
+            spec.cell_size,
+            float(getattr(spec, "forest_gap_infill_spacing", spec.cell_size)),
+        )
+        if (
+            (forest_profile == "everon" or forest_polygon_models_disabled)
+            and gap_infill_enabled
+            and not forest_truncated
+            and forest_count < spec.max_forest_objects
+        ):
+            progress(59, "Filling uncovered mapped forest with rooted trees")
+            gap_columns = max(1, int(math.ceil(spec.world_size / gap_infill_spacing)))
+            for grid_index in _distributed_grid_indices(
+                gap_columns, seed, "forest-gap-tree-infill"
+            ):
+                if forest_count >= spec.max_forest_objects:
+                    forest_truncated = True
+                    break
+                gap_row, gap_column = divmod(grid_index, gap_columns)
+                digest = hashlib.blake2s(
+                    f"{seed}:forest-gap-tree:{gap_column}:{gap_row}".encode("utf-8"),
+                    digest_size=8,
+                ).digest()
+                jitter_x = (
+                    int.from_bytes(digest[:2], "little") / 65535.0 - 0.5
+                ) * gap_infill_spacing * 0.50
+                jitter_z = (
+                    int.from_bytes(digest[2:4], "little") / 65535.0 - 0.5
+                ) * gap_infill_spacing * 0.50
+                tree_x = min(
+                    spec.world_size - 0.001,
+                    max(0.0, (gap_column + 0.5) * gap_infill_spacing + jitter_x),
+                )
+                tree_z = min(
+                    spec.world_size - 0.001,
+                    max(0.0, (gap_row + 0.5) * gap_infill_spacing + jitter_z),
+                )
+                tree_col = min(spec.cells - 1, max(0, int(tree_x // spec.cell_size)))
+                tree_row = min(spec.cells - 1, max(0, int(tree_z // spec.cell_size)))
+                tree_index = tree_row * spec.cells + tree_col
+                if tree_index in accepted_forest_cells:
+                    continue
+                if (
+                    not raster.forest[tree_index]
+                    or raster.water[tree_index]
+                    or raster.roads[tree_index]
+                    or raster.buildings[tree_index]
+                ):
+                    continue
+                if forest_block_intersects_road_corridors(
+                    road_corridors, tree_x, tree_z, block_size=extra_single_footprint
+                ):
+                    continue
+                tree_samples = _square_elevation_samples(
+                    elevations, spec.cells, spec.cell_size,
+                    tree_x, tree_z, extra_single_footprint,
+                )
+                if max(tree_samples) - min(tree_samples) > extra_single_relief:
+                    continue
+                tree_fit = _rooted_tree_fit(
+                    _triangle_elevation_bounds(
+                        elevations, spec.cells, spec.cell_size, tree_x, tree_z
+                    ),
+                    root_sink=individual_tree_root_sink,
+                    maximum_burial=individual_tree_maximum_burial,
+                )
+                if tree_fit is None:
+                    continue
+                tree_y, _tree_burial = tree_fit
+                tree_model = roadside_tree_models[
+                    int.from_bytes(digest[4:6], "little") % len(roadside_tree_models)
+                ]
+                tree_heading = float(int.from_bytes(digest[6:], "little") % 360)
+                emit(WorldObject(
+                    next_id, tree_model, tree_x, tree_y, tree_z, tree_heading
+                ))
+                next_id += 1
+                forest_count += 1
+                forest_single_tree_objects += 1
+                forest_gap_infill_tree_objects += 1
+                # Mark the source raster cell itself without swallowing adjacent
+                # 25 m cells. Adjacent gaps may therefore receive their own tree,
+                # producing a natural ~20-30 m hillside spacing instead of a
+                # second 50 m bald lattice.
+                mark_accepted_forest(
+                    tree_x, tree_z, max(8.0, gap_infill_spacing * 0.42)
+                )
+
+        progress(60, "Scattering individual forest trees")
         if (
             forest_profile == "everon"
             and extra_single_enabled
@@ -8120,7 +9894,7 @@ def generate_world_objects(
                     tree_relief = max(tree_samples) - min(tree_samples)
                     if tree_relief > extra_single_relief:
                         continue
-                    tree_fit = _non_buried_vegetation_fit(
+                    tree_fit = _rooted_tree_fit(
                         _triangle_elevation_bounds(
                             elevations,
                             spec.cells,
@@ -8128,12 +9902,12 @@ def generate_world_objects(
                             tree_x,
                             tree_z,
                         ),
-                        clearance=spec.forest_ground_clearance,
-                        maximum_float=individual_tree_maximum_float,
+                        root_sink=individual_tree_root_sink,
+                        maximum_burial=individual_tree_maximum_burial,
                     )
                     if tree_fit is None:
                         continue
-                    tree_y, _tree_float = tree_fit
+                    tree_y, _tree_burial = tree_fit
                     rank = _forest_single_tree_rank(
                         seed, single_column, single_row
                     )
@@ -8161,7 +9935,7 @@ def generate_world_objects(
                 tree_z,
                 tree_heading,
             ) in eligible_extra_single_trees[:extra_single_available]:
-                objects.append(WorldObject(
+                emit(WorldObject(
                     next_id,
                     extra_single_model,
                     tree_x,
@@ -8260,7 +10034,7 @@ def generate_world_objects(
                         rock_model = STOCK_STONE_MODELS[
                             (gap_column + gap_row + placed_here) % len(STOCK_STONE_MODELS)
                         ]
-                        objects.append(WorldObject(next_id, rock_model, rock_x, rock_anchor, rock_z, rock_heading))
+                        emit(WorldObject(next_id, rock_model, rock_x, rock_anchor, rock_z, rock_heading))
                         next_id += 1
                         rocky_forest_objects += 1
                         remaining_rocks -= 1
@@ -8274,7 +10048,9 @@ def generate_world_objects(
         # Dense reusable undergrowth islands fill the complete forest interior.
         # A deterministic modular walk distributes capped placement over the
         # whole world instead of exhausting a row-major allowance in one corner.
-        if bool(getattr(spec, "forest_undergrowth_enabled", False)):
+        if (
+            bool(getattr(spec, "forest_undergrowth_enabled", False))
+        ):
             undergrowth_base_limit = max(0, int(getattr(spec, "forest_undergrowth_maximum_objects", 120000)))
             undergrowth_limit = (undergrowth_base_limit + 1) // 2
             undergrowth_spacing = max(10.0, float(getattr(spec, "forest_undergrowth_spacing", 30.0)))
@@ -8328,7 +10104,7 @@ def generate_world_objects(
                     model_path, placed_x, placed_y, placed_z, placed_heading,
                     variant_name, _relief, burial, floating,
                 ) = placed
-                objects.append(WorldObject(next_id, model_path, placed_x, placed_y, placed_z, placed_heading))
+                emit(WorldObject(next_id, model_path, placed_x, placed_y, placed_z, placed_heading))
                 next_id += 1
                 forest_undergrowth_objects += 1
                 forest_cluster_variant_counts[variant_name] += 1
@@ -8401,14 +10177,16 @@ def generate_world_objects(
                 bush_anchor, _bush_float = bush_fit
                 bush_model = bush_models[int.from_bytes(digest[4:6], "little") % len(bush_models)]
                 bush_heading = float(int.from_bytes(digest[6:], "little") % 360)
-                objects.append(WorldObject(next_id, bush_model, bush_x, bush_anchor, bush_z, bush_heading))
+                emit(WorldObject(next_id, bush_model, bush_x, bush_anchor, bush_z, bush_heading))
                 next_id += 1
                 steep_hill_bush_objects += 1
 
         progress(64, "Softening forest borders")
         # Nogova-style soft borders are a separate sparse pass along actual OSM
         # forest boundaries. They use reusable proxy clusters, not rows of WRP trees.
-        if bool(getattr(spec, "forest_border_enabled", False)):
+        if (
+            bool(getattr(spec, "forest_border_enabled", False))
+        ):
             border_limit = max(0, int(getattr(spec, "forest_border_maximum_objects", 2000)))
             border_spacing = max(
                 8.0, float(getattr(spec, "forest_border_spacing", 34.0))
@@ -8472,7 +10250,7 @@ def generate_world_objects(
                     burial,
                     floating,
                 ) = placed
-                objects.append(
+                emit(
                     WorldObject(
                         next_id,
                         model_path,
@@ -8556,7 +10334,7 @@ def generate_world_objects(
                 burial,
                 floating,
             ) = placed
-            objects.append(
+            emit(
                 WorldObject(
                     next_id,
                     model_path,
@@ -8584,6 +10362,21 @@ def generate_world_objects(
             subtype = feature.tags.get("barrier", "fence").casefold()
             subtype = "wall" if subtype in {"wall", "retaining_wall"} else "hedge" if subtype == "hedge" else "fence"
             metal_fence = subtype == "fence" and osm_fence_is_metal(feature.tags)
+            # Every fence now uses a stock OFP/CWA model. Pick the non-metal
+            # fence family once per mapped feature so a single OSM fence never
+            # alternates between pasture and wire pieces from segment to segment.
+            stock_fence_model = (
+                stock_metal_fence_model(
+                    f"{seed}:mapped-fence-style:{feature.osm_key}",
+                    stock_metal_fence_models,
+                )
+                if metal_fence
+                else stock_farmland_fence_model(
+                    f"{seed}:mapped-fence-style:{feature.osm_key}"
+                )
+                if subtype == "fence"
+                else ""
+            )
             points = tuple(projection.to_world(point) for point in feature.points)
             fitted_length = STOCK_WALL_EFFECTIVE_LENGTH_METRES if subtype == "wall" else barrier_length
             for chunk_index, (x, z, heading, length, x0, z0, x1, z1) in enumerate(_line_chunks(points, fitted_length)):
@@ -8600,10 +10393,8 @@ def generate_world_objects(
                     model = stock_hedge_model(length, identity, stock_hedge_models)
                 elif subtype == "wall":
                     model = stock_wall_model(identity, stock_wall_models)
-                elif metal_fence:
-                    model = stock_metal_fence_model(identity, stock_metal_fence_models)
                 else:
-                    model = infrastructure_library.barrier_model(subtype, length)
+                    model = stock_fence_model
                 placed_x, placed_z = x, z
                 placed_x0, placed_z0, placed_x1, placed_z1 = x0, z0, x1, z1
                 placed_heading = heading
@@ -8622,11 +10413,13 @@ def generate_world_objects(
                     ):
                         barrier_rejections += 1
                         continue
-                elif subtype == "hedge" or metal_fence:
+                elif subtype == "hedge" or subtype == "fence":
                     heading_offset = (
                         HEDGE_MODEL_HEADING_OFFSET_DEGREES
                         if subtype == "hedge"
                         else METAL_FENCE_MODEL_HEADING_OFFSET_DEGREES
+                        if metal_fence
+                        else FARMLAND_FENCE_HEADING_OFFSET_DEGREES
                     )
                     placed_heading = (heading + heading_offset) % 360.0
                     shifted = offset_line_clear_of_roads(
@@ -8679,7 +10472,7 @@ def generate_world_objects(
                         barrier_rejections += 1
                         continue
                 placed_pitch = pitch
-                objects.append(WorldObject(next_id, model, placed_x, y, placed_z, placed_heading, pitch_degrees=placed_pitch))
+                emit(WorldObject(next_id, model, placed_x, y, placed_z, placed_heading, pitch_degrees=placed_pitch))
                 next_id += 1
                 barrier_objects += 1
                 fence_objects += int(subtype == "fence")
@@ -8687,6 +10480,132 @@ def generate_world_objects(
                 hedge_objects += int(subtype == "hedge")
             if barrier_objects >= barrier_limit:
                 break
+
+        # Add a sparse, deterministic set of stock rural fences around whole
+        # farmland/meadow polygons. This deliberately uses only original OFP/CWA P3Ds;
+        # generated barrier meshes are reserved for explicitly mapped barriers.
+        # Road intersections are omitted, naturally leaving gate-sized openings.
+        if barrier_objects < barrier_limit:
+            farmland_features = tuple(
+                feature
+                for feature in sorted(dataset.farmland, key=lambda item: item.osm_key)
+                if feature.polygons
+                and (
+                    feature.tags.get("landuse", "").casefold() in RURAL_FENCE_LANDUSES
+                    or feature.tags.get("natural", "").casefold() in RURAL_FENCE_NATURALS
+                )
+            )
+            selected_farmland_fences = _selected_farmland_fence_field_keys(
+                farmland_features, seed, FARMLAND_FENCE_FIELD_PERCENT
+            )
+            rural_fence_grid_size = max(
+                FARMLAND_FENCE_SEGMENT_LENGTH_METRES
+                + 2.0 * FARMLAND_FENCE_DUPLICATE_DISTANCE_METRES,
+                8.0,
+            )
+            rural_fence_grid: dict[
+                tuple[int, int],
+                list[tuple[str, str, tuple[float, float, float, float]]],
+            ] = defaultdict(list)
+            for feature in farmland_features:
+                if feature.osm_key not in selected_farmland_fences:
+                    continue
+                # Pick the stock fence family once for the whole field. Do not
+                # vary by segment: a perimeter is either rural/pasture fence or
+                # wire fence, never an accidental alternating catalogue demo.
+                field_fence_model = stock_farmland_fence_model(
+                    f"{seed}:farmland-fence-style:{feature.osm_key}"
+                )
+                for polygon_index, polygon in enumerate(feature.polygons):
+                    boundary = tuple(
+                        projection.to_world(point) for point in polygon.outer[:-1]
+                    )
+                    if len(boundary) < 3:
+                        continue
+                    area, _cx, _cz = _polygon_area_centroid(boundary)
+                    if area < FARMLAND_FENCE_MINIMUM_FIELD_AREA_M2:
+                        continue
+                    closed_boundary = boundary + (boundary[0],)
+                    for chunk_index, (x, z, heading, _length, x0, z0, x1, z1) in enumerate(
+                        _line_chunks(closed_boundary, FARMLAND_FENCE_SEGMENT_LENGTH_METRES)
+                    ):
+                        if barrier_objects >= barrier_limit:
+                            break
+                        if not (0.0 <= x < spec.world_size and 0.0 <= z < spec.world_size):
+                            barrier_rejections += 1
+                            continue
+                        if (
+                            _mask_at(raster.water, spec.cells, spec.world_size, x, z)
+                            or _mask_at(raster.buildings, spec.cells, spec.world_size, x, z)
+                        ):
+                            barrier_rejections += 1
+                            continue
+                        if line_intersects_road_corridors(
+                            road_corridors,
+                            (x0, z0),
+                            (x1, z1),
+                            clearance=0.75,
+                        ):
+                            # Keep a practical entrance wherever a road/track
+                            # meets the field instead of fencing straight across.
+                            continue
+                        model = field_fence_model
+                        candidate_segment = (x0, z0, x1, z1)
+                        grid_x = int(math.floor(x / rural_fence_grid_size))
+                        grid_z = int(math.floor(z / rural_fence_grid_size))
+                        duplicate = False
+                        for ix in range(grid_x - 1, grid_x + 2):
+                            if duplicate:
+                                break
+                            for iz in range(grid_z - 1, grid_z + 2):
+                                for existing_field, existing_model, existing_segment in rural_fence_grid.get((ix, iz), ()):
+                                    if existing_field == feature.osm_key:
+                                        continue
+                                    if existing_model.casefold() != model.casefold():
+                                        continue
+                                    if _rural_fence_segments_duplicate(candidate_segment, existing_segment):
+                                        duplicate = True
+                                        break
+                                if duplicate:
+                                    break
+                        if duplicate:
+                            # Adjacent selected fields can encode essentially the
+                            # same shared boundary twice. If both chose the same
+                            # stock fence family, keep only the first line.
+                            continue
+                        y, pitch = _infrastructure_anchor(
+                            elevations,
+                            spec.cells,
+                            spec.cell_size,
+                            x0,
+                            z0,
+                            x1,
+                            z1,
+                        )
+                        if abs(pitch) > 32.0:
+                            barrier_rejections += 1
+                            continue
+                        emit(
+                            WorldObject(
+                                next_id,
+                                model,
+                                x,
+                                y,
+                                z,
+                                (heading + FARMLAND_FENCE_HEADING_OFFSET_DEGREES) % 360.0,
+                                pitch_degrees=pitch,
+                            )
+                        )
+                        next_id += 1
+                        barrier_objects += 1
+                        fence_objects += 1
+                        rural_fence_grid[(grid_x, grid_z)].append(
+                            (feature.osm_key, model, candidate_segment)
+                        )
+                    if barrier_objects >= barrier_limit:
+                        break
+                if barrier_objects >= barrier_limit:
+                    break
 
     # Bridge-tagged roads use the original Nogova 30 m bridge module by default.
     # Procedural mode remains available as an opt-in fallback. Stock bridge ways
@@ -8701,17 +10620,18 @@ def generate_world_objects(
             if procedural_bridges
             else NOGOVA_BRIDGE_MODULE_LENGTH_METRES
         )
-        for feature in sorted(dataset.roads, key=lambda item: item.osm_key):
+        for feature, points in zip(dataset.roads, projected_road_polylines(dataset, projection)):
             # A mapped bridge over waterway=ditch stays an ordinary road. The
             # stock 30 m bridge is absurdly large for a farm/roadside ditch, and
             # the ordinary road fitter already follows the graded terrain cleanly.
             if road_bridge_crosses_ditch_only(feature, dataset, projection):
                 continue
-            points = tuple(projection.to_world(point) for point in feature.points)
             source_chunks = _bridge_module_chunks(points, module_length)
             if not source_chunks:
                 continue
-            if not _road_needs_bridge_deck(feature, source_chunks, raster, spec):
+            if not _road_needs_bridge_deck(
+                feature, source_chunks, raster, spec, elevations
+            ):
                 continue
             # OSM bridge ways often begin only after the ordinary road has
             # already started descending toward the shoreline. Extend both stock
@@ -8912,7 +10832,7 @@ def generate_world_objects(
                     model = NOGOVA_BRIDGE_MODEL
                 bridge_plan.append((model, x, y, z, heading, pitch))
             for model, x, y, z, heading, pitch in bridge_plan:
-                objects.append(WorldObject(
+                emit(WorldObject(
                     next_id,
                     model,
                     x,
@@ -8926,13 +10846,15 @@ def generate_world_objects(
             if bridge_objects >= bridge_limit:
                 break
 
-    progress(67, "Placing meadow grass, hay bales, rural vegetation, wetland reeds and rocks")
+    progress(67, "Placing meadow grass, rural vegetation, wetland reeds and rocks")
     # Structured rural vegetation reuses a small cluster library. Rows stay rows;
     # orchards no longer become a vaguely green field and call the matter settled.
     rural_enabled = bool(getattr(spec, "rural_vegetation_enabled", False))
     wetland_enabled = bool(getattr(spec, "wetland_reeds_enabled", False))
     meadow_enabled = bool(getattr(spec, "meadow_grass_enabled", False))
-    haybales_enabled = bool(getattr(spec, "haybales_enabled", False))
+    # Legacy field-hay scattering is disabled. Hay bales are barn-only
+    # settlement clutter, even if an old profile still passes --haybales.
+    haybales_enabled = False
     if rural_enabled or wetland_enabled or meadow_enabled or haybales_enabled:
         rural_limit = (
             max(0, int(getattr(spec, "maximum_rural_vegetation_objects", 3000)))
@@ -8971,7 +10893,7 @@ def generate_world_objects(
                                 meadow_grass_rejection_positions.append((x, z))
                             continue
                         model, px, py, pz, ph, _vn, _relief, _burial, _floating = placed
-                        objects.append(WorldObject(next_id, model, px, py, pz, ph)); next_id += 1
+                        emit(WorldObject(next_id, model, px, py, pz, ph)); next_id += 1
                         meadow_grass_objects += 1
                         meadow_grass_positions.append((px, pz))
                     if meadow_grass_objects >= meadow_limit:
@@ -9086,7 +11008,7 @@ def generate_world_objects(
                         haybale_rejections += 1
                         continue
                     anchor, _burial, _floating = fitted
-                    objects.append(
+                    emit(
                         WorldObject(
                             next_id, HAYBALE_MODEL, member_x, anchor, member_z, member_heading
                         )
@@ -9110,7 +11032,7 @@ def generate_world_objects(
                     rural_vegetation_rejections += 1
                     continue
                 model, px, py, pz, ph, _vn, _relief, _burial, _floating = placed
-                objects.append(WorldObject(next_id, model, px, py, pz, ph)); next_id += 1
+                emit(WorldObject(next_id, model, px, py, pz, ph)); next_id += 1
                 tree_row_objects += 1
 
         wetland_limit = max(0, int(getattr(spec, "maximum_wetland_reed_objects", 100000)))
@@ -9193,7 +11115,7 @@ def generate_world_objects(
                         ).digest()
                         model = wetland_models[int.from_bytes(digest[:2], "little") % len(wetland_models)]
                         reed_heading = float(int.from_bytes(digest[2:], "little") % 360)
-                        objects.append(WorldObject(next_id, model, x, anchor, z, reed_heading))
+                        emit(WorldObject(next_id, model, x, anchor, z, reed_heading))
                         next_id += 1
                         wetland_reed_objects += 1
                         continue
@@ -9208,7 +11130,7 @@ def generate_world_objects(
                             continue
                         anchor, _burial, _floating = fitted
                         model = STOCK_STONE_MODELS[candidate_index % len(STOCK_STONE_MODELS)]
-                        objects.append(WorldObject(next_id, model, x, anchor, z, heading)); next_id += 1
+                        emit(WorldObject(next_id, model, x, anchor, z, heading)); next_id += 1
                         rural_rock_objects += 1
                         continue
                     if category == "scrub":
@@ -9230,7 +11152,7 @@ def generate_world_objects(
                         rural_vegetation_rejections += 1
                         continue
                     model, px, py, pz, ph, _vn, _relief, _burial, _floating = placed
-                    objects.append(WorldObject(next_id, model, px, py, pz, ph)); next_id += 1
+                    emit(WorldObject(next_id, model, px, py, pz, ph)); next_id += 1
                     orchard_objects += int(category == "orchard")
                     vineyard_objects += int(category == "vineyard")
                     scrub_objects += int(category == "scrub")
@@ -9271,18 +11193,18 @@ def generate_world_objects(
         digest = hashlib.blake2s(f"{seed}:mapped-tree:{feature.osm_key}".encode("utf-8"), digest_size=4).digest()
         model = models[int.from_bytes(digest[:2], "little") % len(models)]
         heading = float(int.from_bytes(digest[2:], "little") % 360)
-        tree_fit = _non_buried_vegetation_fit(
+        tree_fit = _rooted_tree_fit(
             _triangle_elevation_bounds(
                 elevations, spec.cells, spec.cell_size, x, z
             ),
-            clearance=mapped_tree_clearance,
-            maximum_float=individual_tree_maximum_float,
+            root_sink=max(individual_tree_root_sink, mapped_tree_clearance),
+            maximum_burial=individual_tree_maximum_burial,
         )
         if tree_fit is None:
             mapped_tree_rejections += 1
             continue
-        anchor, _tree_float = tree_fit
-        objects.append(WorldObject(next_id, model, x, anchor, z, heading))
+        anchor, _tree_burial = tree_fit
+        emit(WorldObject(next_id, model, x, anchor, z, heading))
         next_id += 1
         mapped_tree_objects += 1
 
@@ -9317,9 +11239,18 @@ def generate_world_objects(
         model = infrastructure_library.utility_model(kind)
         heading_digest = hashlib.blake2s(f"{seed}:utility:{feature.osm_key}".encode("utf-8"), digest_size=2).digest()
         heading = float(int.from_bytes(heading_digest, "little") % 360)
-        objects.append(WorldObject(next_id, model, x, maximum + utility_clearance, z, heading))
+        emit(WorldObject(next_id, model, x, maximum + utility_clearance, z, heading))
         next_id += 1
         utility_objects += 1
+
+    (
+        vegetation_audit_tree_objects,
+        vegetation_audit_cluster_tree_proxies,
+        vegetation_audit_cluster_bush_proxies,
+        vegetation_audit_violations,
+        vegetation_audit_maximum_tree_float,
+        vegetation_audit_maximum_bush_float,
+    ) = _audit_vegetation_grounding(objects, elevations, spec)
 
     return ObjectGenerationResult(
         objects=tuple(objects),
@@ -9367,6 +11298,7 @@ def generate_world_objects(
         forest_border_maximum_burial=forest_border_maximum_burial,
         forest_border_maximum_float=forest_border_maximum_float,
         forest_single_tree_objects=forest_single_tree_objects,
+        forest_gap_infill_tree_objects=forest_gap_infill_tree_objects,
         ditch_grass_objects=ditch_grass_objects,
         ditch_grass_rejections=ditch_grass_rejections,
         ditch_grass_maximum_burial=ditch_grass_maximum_burial,
@@ -9403,6 +11335,25 @@ def generate_world_objects(
         mapped_tree_rejections=mapped_tree_rejections,
         utility_objects=utility_objects,
         utility_rejections=utility_rejections,
+        sidewalk_objects=sidewalk_objects,
+        street_furniture_objects=street_furniture_objects,
+        street_light_objects=street_light_objects,
+        street_bench_objects=street_bench_objects,
+        street_bin_objects=street_bin_objects,
+        street_noticeboard_objects=street_noticeboard_objects,
+        street_bicycle_objects=street_bicycle_objects,
+        street_bus_shelter_objects=street_bus_shelter_objects,
+        street_tree_objects=street_tree_objects,
+        urban_detail_rejections=urban_detail_rejections,
+        vegetation_audit_tree_objects=vegetation_audit_tree_objects,
+        vegetation_audit_cluster_tree_proxies=vegetation_audit_cluster_tree_proxies,
+        vegetation_audit_cluster_bush_proxies=vegetation_audit_cluster_bush_proxies,
+        vegetation_audit_violations=vegetation_audit_violations,
+        vegetation_audit_maximum_tree_float=vegetation_audit_maximum_tree_float,
+        vegetation_audit_maximum_bush_float=vegetation_audit_maximum_bush_float,
+        model_usage=tuple(sorted(model_usage.items(), key=lambda item: item[0].casefold())),
+        surface_forest_positions=tuple(surface_forest_positions),
+        surface_rock_positions=tuple(surface_rock_positions),
     )
 
 

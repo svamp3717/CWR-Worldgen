@@ -1,0 +1,115 @@
+{
+  "schema_version": 2,
+  "map_region_number": 23,
+  "identifier": "arctic_polar",
+  "display_name": "Arctic / Polar Regions",
+  "priority": 100,
+  "match": {
+    "country_aliases": [
+      "gl",
+      "grl",
+      "greenland"
+    ],
+    "polygon_lon_lat": [],
+    "envelopes_lon_lat": [
+      [
+        -180,
+        70,
+        180,
+        90
+      ],
+      [
+        -180,
+        -90,
+        180,
+        -60
+      ]
+    ]
+  },
+  "contexts": {
+    "rural": {
+      "description": "Compact insulated house for extreme cold, with igloo as a historic reference.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [],
+        "family_distributions": {
+          "*": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    },
+    "town_city": {
+      "description": "Compact insulated town housing for extreme cold.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [],
+        "family_distributions": {
+          "*": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "residential": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "urban": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "shop": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ],
+          "school": [
+            {
+              "lt": 100,
+              "style": "default"
+            }
+          ]
+        },
+        "default_style": "default"
+      },
+      "roof_defaults": {
+        "*": "gabled"
+      }
+    }
+  }
+}

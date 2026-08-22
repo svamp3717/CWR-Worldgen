@@ -390,4 +390,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    import multiprocessing as _multiprocessing
+    _multiprocessing.freeze_support()
     raise SystemExit(main())

@@ -10,6 +10,7 @@ import math
 import re
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -67,12 +68,14 @@ from cwr_worldgen.osm import (
     _non_buried_vegetation_anchor,
     _non_buried_vegetation_fit,
     _distributed_grid_indices,
+    _dense_hillside_tree_candidates,
     _forest_single_tree_candidates,
     _forest_single_tree_rank,
     _geographic_forest_single_tree_cells,
     _scaled_synthetic_tree_limit,
     _bridge_module_chunks,
     _demote_dense_garage_clusters_to_sheds,
+    _match_nearby_same_shape_building_textures,
     ObjectGenerationResult,
     augment_dataset_with_overture_buildings,
     NOGOVA_BRIDGE_MODEL,
@@ -85,6 +88,21 @@ from cwr_worldgen.osm import (
     NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS,
     NOGOVA_PINE_INDIVIDUAL_TREE_MODELS,
     STOCK_HEDGE_MODELS,
+    STOCK_FARMLAND_FENCE_MODELS,
+    STOCK_SIDEWALK_MODELS,
+    STOCK_STREET_LIGHT_MODELS,
+    STOCK_STREET_BENCH_MODELS,
+    STOCK_STREET_BIN_MODELS,
+    STOCK_STREET_NOTICEBOARD_MODELS,
+    STOCK_STREET_BICYCLE_MODELS,
+    STOCK_STREET_BUS_SHELTER_MODELS,
+    STOCK_STREET_TREE_SURROUND_MODELS,
+    STOCK_STREET_TREE_MODELS,
+    STOCK_SETTLEMENT_DETAIL_MODELS,
+    STOCK_SETTLEMENT_UTILITY_POLE_MODELS,
+    STOCK_SETTLEMENT_FRUIT_TREE_MODELS,
+    STOCK_SETTLEMENT_BARN_CLUTTER_MODELS,
+    STOCK_SETTLEMENT_DRIVEWAY_MODEL,
     STOCK_STONE_MODELS,
     ROADSIDE_BARRIER_CLEARANCE_METRES,
     line_intersects_road_corridors,
@@ -277,6 +295,12 @@ class SurfacePassTests(unittest.TestCase):
         dataset, projection = self._dataset()
         raster = rasterize_osm(dataset, projection, cells=32, include_minor_roads=True)
         elevations = [60.0] * (32 * 32)
+        # Surface shoreline classes are defined only around water that can
+        # actually render at CWA's global water plane. Keep the synthetic
+        # mapped-water cells at sea level instead of inventing a 60 m lake.
+        for index, is_water in enumerate(raster.water):
+            if is_water:
+                elevations[index] = -0.20
         slopes = [4.0] * (32 * 32)
         elevations[31 * 32 + 31] = 130.0
         slopes[30 * 32 + 31] = 33.0
@@ -485,6 +509,9 @@ class SurfacePassTests(unittest.TestCase):
         self.assertEqual(paths[MATERIAL_INDEX["b"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["c"]], grass)
 
+    def test_sidewalks_are_disabled_by_default(self) -> None:
+        self.assertFalse(Milestone9Spec(source_dir=Path("unused")).sidewalks_enabled)
+
     def test_malden_forest_profile_resolves_original_cwc_vegetation_defaults(self) -> None:
         spec = Milestone9Spec(source_dir=Path("unused"), forest_profile="malden")
         resolved = _resolved_forest_profile_models(spec)
@@ -648,10 +675,32 @@ class RoadPieceFittingTests(unittest.TestCase):
         self.assertEqual(source_spec.forest_building_clearance, 1.0)
         self.assertEqual(source_spec.forest_single_tree_footprint, 2.0)
         self.assertEqual(runtime_spec.forest_single_tree_footprint, 2.0)
-        self.assertEqual(source_spec.forest_single_tree_maximum_float, 0.5)
-        self.assertEqual(runtime_spec.forest_single_tree_maximum_float, 0.5)
+        self.assertEqual(source_spec.forest_ground_clearance, 0.02)
+        self.assertEqual(runtime_spec.forest_ground_clearance, 0.02)
+        self.assertFalse(source_spec.forest_individual_objects_only)
+        self.assertFalse(runtime_spec.forest_individual_objects_only)
+        self.assertEqual(source_spec.forest_single_tree_maximum_float, 0.15)
+        self.assertEqual(runtime_spec.forest_single_tree_maximum_float, 0.15)
+        self.assertEqual(source_spec.forest_cluster_tree_maximum_float, 0.20)
+        self.assertEqual(runtime_spec.forest_cluster_tree_maximum_float, 0.20)
+        self.assertEqual(source_spec.forest_cluster_bush_maximum_float, 0.60)
+        self.assertEqual(runtime_spec.forest_cluster_bush_maximum_float, 0.60)
         self.assertTrue(source_spec.procedural_bridges)
         self.assertTrue(runtime_spec.procedural_bridges)
+
+    def test_forest_polygon_replacement_cli_is_optional_and_keeps_legacy_aliases(self) -> None:
+        parser = _parser()
+        base = [
+            "milestone9", "--output", "build/test", "--source-dir", "source-data/test",
+        ]
+        self.assertFalse(parser.parse_args(base).forest_individual_objects_only)
+        self.assertTrue(
+            parser.parse_args(base + ["--replace-forest-polygons-with-clusters"]).forest_individual_objects_only
+        )
+        self.assertTrue(parser.parse_args(base + ["--no-forest-polygons"]).forest_individual_objects_only)
+        self.assertTrue(
+            parser.parse_args(base + ["--forest-individual-objects-only"]).forest_individual_objects_only
+        )
 
     def test_milestone9_cli_uses_the_same_expanded_object_budgets(self) -> None:
         args = _parser().parse_args([
@@ -664,6 +713,7 @@ class RoadPieceFittingTests(unittest.TestCase):
         self.assertEqual(args.max_road_objects, 1024000)
         self.assertEqual(args.max_buildings, 1000000)
         self.assertEqual(args.max_forest_objects, 500000)
+        self.assertFalse(args.forest_individual_objects_only)
         self.assertEqual(args.forest_undergrowth_max_objects, 120000)
         self.assertTrue(args.include_minor_roads)
         self.assertEqual(args.ground_textures, "nogova")
@@ -686,11 +736,14 @@ class RoadPieceFittingTests(unittest.TestCase):
         self.assertEqual(args.forest_road_clearance, 0.0)
         self.assertEqual(args.forest_building_clearance, 1.0)
         self.assertEqual(args.forest_single_tree_footprint, 2.0)
-        self.assertEqual(args.forest_single_tree_max_float, 0.5)
+        self.assertEqual(args.forest_ground_clearance, 0.02)
+        self.assertEqual(args.forest_single_tree_max_float, 0.15)
+        self.assertEqual(args.forest_cluster_tree_max_float, 0.20)
+        self.assertEqual(args.forest_cluster_bush_max_float, 0.60)
         self.assertTrue(args.forest_severe_hill_fallback)
         self.assertEqual(args.forest_severe_hill_relief, 5.0)
         self.assertEqual(args.forest_severe_hill_trees_per_block, 10)
-        self.assertEqual(args.forest_polygon_sink_fraction, 0.5)
+        self.assertEqual(args.forest_polygon_sink_fraction, 0.0)
         self.assertEqual(args.bridge_module_length, 30.0)
         self.assertTrue(args.procedural_bridges)
         self.assertAlmostEqual(args.bridge_deck_clearance, 1.25)
@@ -767,12 +820,33 @@ class RoadPieceFittingTests(unittest.TestCase):
             bbox=(0.0, 0.0, 1.0, 1.0), cells=8, cell_size=25.0,
             max_road_objects=100, procedural_bridges=False, strict_assets=False,
         )
-        stock = fit_road_objects(dataset, projection, (0.0,) * 64, spec)
+        stock = fit_road_objects(dataset, projection, (-2.0,) * 64, spec)
         self.assertEqual(stock.objects, ())
         procedural = fit_road_objects(
             dataset, projection, (0.0,) * 64, replace(spec, procedural_bridges=True)
         )
         self.assertGreater(len(procedural.objects), 0)
+
+    def test_dry_bridge_tag_keeps_ordinary_road_pieces(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        bridge = OsmLineFeature(
+            "way/dry-stock-bridge-road",
+            {"highway": "secondary", "bridge": "yes", "surface": "asphalt"},
+            tuple(projection.to_latlon(point) for point in ((20.0, 100.0), (180.0, 100.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="dry-stock-bridge-road", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(bridge,),
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="cwr_dry_stock_bridge_road", heightmap_path=Path("unused.png"),
+            bbox=(0.0, 0.0, 1.0, 1.0), cells=8, cell_size=25.0, sea_level=0.0,
+            max_road_objects=100, procedural_bridges=False, strict_assets=False,
+        )
+        stock = fit_road_objects(dataset, projection, (5.0,) * 64, spec)
+        self.assertGreater(len(stock.objects), 0)
+        self.assertTrue(all(obj.model_path != NOGOVA_BRIDGE_MODEL for obj in stock.objects))
+
 
     def test_stock_roads_reject_a_budget_that_would_emit_a_partial_network(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
@@ -866,6 +940,20 @@ class RoadPieceFittingTests(unittest.TestCase):
             spec.paved_road_model,
         )
 
+    def test_pedestrian_only_highways_never_use_asphalt_road_model(self) -> None:
+        spec = _Milestone9PlayabilitySpec(
+            name="cwr_footpaths", heightmap_path=Path("unused.png"),
+            bbox=(0.0, 0.0, 1.0, 1.0), cells=40, cell_size=25.0,
+            strict_assets=False,
+        )
+        for highway in ("path", "footway", "cycleway", "bridleway", "pedestrian", "steps"):
+            for surface in (None, "asphalt", "paved", "concrete"):
+                tags = {"highway": highway}
+                if surface is not None:
+                    tags["surface"] = surface
+                self.assertEqual(road_model_for_tags(spec, tags), spec.dirt_road_model)
+                self.assertNotEqual(road_model_for_tags(spec, tags), spec.paved_road_model)
+
     def test_generated_gravel_assets_are_embedded_in_the_world_pbo(self) -> None:
         from cwr_worldgen.pbo import pack_directory
         from cwr_worldgen.procedural_infrastructure import ProceduralInfrastructureLibrary
@@ -956,7 +1044,8 @@ class RoadPieceFittingTests(unittest.TestCase):
             root = Path(temp)
             library = ProceduralInfrastructureLibrary(world_name)
             library.register_model(rf"{world_name}\i\gravel6.p3d")
-            library.barrier_model("fence", 6.0)
+            with self.assertRaisesRegex(ValueError, "stock OFP/CWA"):
+                library.barrier_model("fence", 6.0)
             library.barrier_model("wall", 6.0)
             library.barrier_model("hedge", 6.0)
             library.bridge_model("single", 7.0, 18.0)
@@ -965,7 +1054,6 @@ class RoadPieceFittingTests(unittest.TestCase):
             assets = library.write_assets(root, root / "infrastructure.json")
             self.assertIn("i/g.paa", assets.texture_files)
             self.assertIn("i/b.paa", assets.texture_files)
-            self.assertIn("i/f.paa", assets.texture_files)
             self.assertIn("i/w.paa", assets.texture_files)
             self.assertIn("i/h.paa", assets.texture_files)
             for relative in assets.model_files:
@@ -1958,6 +2046,52 @@ class RoadPieceFittingTests(unittest.TestCase):
         )
         self.assertEqual(steep.objects, repeated.objects)
 
+    def test_no_forest_polygon_mode_replaces_stock_blocks_with_cluster_tiles(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 100.0)
+        forest_polygon = OsmPolygonFeature(
+            osm_key="way/forest", tags={"landuse": "forest"},
+            polygons=(GeoPolygon(((0.05, 0.05), (0.05, 0.95), (0.95, 0.95), (0.95, 0.05))),),
+        )
+        dataset = OsmDataset(
+            source_generator="no-forest-polygons", element_count=1, coastlines=(),
+            water=(), forests=(forest_polygon,), farmland=(), urban=(), roads=(),
+            building_polygons=(), building_points=(), places=(),
+        )
+        raster = OsmRaster(
+            cells=4, water=(False,) * 16, forest=(True,) * 16, farmland=(False,) * 16,
+            urban=(False,) * 16, roads=(False,) * 16, buildings=(False,) * 16,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="cwr_no_forest_polygons",
+            heightmap_path=Path("unused.png"), bbox=(0.0, 0.0, 1.0, 1.0),
+            cells=4, cell_size=25.0, forest_tree_spacing=50.0,
+            max_road_objects=0, max_buildings=0, max_forest_objects=100,
+            forest_individual_objects_only=True,
+            forest_severe_hill_trees_per_block=3,
+            forest_cluster_fallback=True, forest_undergrowth_enabled=True,
+            forest_border_enabled=True, forest_single_tree_enabled=False,
+            forest_gap_infill_enabled=False, steep_hill_bushes_enabled=False,
+            rocky_forest_fallback_enabled=False, ditch_grass_enabled=False,
+            strict_assets=False,
+        )
+        result = generate_world_objects(
+            dataset, projection, raster, (0.0,) * 16, spec, include_roads=False
+        )
+        self.assertEqual(result.forest_block_objects, 0)
+        self.assertEqual(result.forest_everon_steep_objects, 0)
+        # One generated cluster is much smaller than the stock forest block it
+        # replaces. The replacement mode therefore tiles several clusters over
+        # accepted primary patches instead of leaving a small cluster in a large
+        # visually empty footprint.
+        self.assertGreaterEqual(result.forest_cluster_objects, 4)
+        self.assertGreater(result.forest_undergrowth_objects, 0)
+        self.assertGreater(result.forest_border_objects, 0)
+        self.assertTrue(result.objects)
+        self.assertTrue(all(obj.model_path != spec.forest_tree_model for obj in result.objects))
+        self.assertTrue(all(obj.model_path != spec.forest_everon_steep_model for obj in result.objects))
+        self.assertTrue(any("\\f\\" in obj.model_path.casefold() for obj in result.objects))
+
     def test_custom_primary_forest_model_is_not_replaced(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 100.0)
         dataset = OsmDataset(
@@ -2006,11 +2140,30 @@ class RoadPieceFittingTests(unittest.TestCase):
         result = generate_world_objects(
             dataset, projection, raster, rolling_heights, spec, include_roads=False
         )
-        self.assertEqual(result.forest_block_objects, 4)
-        self.assertEqual(result.forest_everon_steep_objects, 0)
+        # The stricter grounding policy no longer forces every 50 m square
+        # onto rolling terrain. The rougher half uses the smaller triangle.
+        self.assertEqual(result.forest_block_objects, 2)
+        self.assertEqual(result.forest_everon_steep_objects, 2)
         self.assertEqual(result.forest_sunk_polygon_objects, 0)
         self.assertLessEqual(result.maximum_forest_burial, spec.forest_block_maximum_burial + 1e-6)
         self.assertLessEqual(result.maximum_forest_float, spec.forest_block_maximum_float + 1e-6)
+        self.assertEqual(result.vegetation_audit_violations, 0)
+
+    def test_dense_hillside_candidate_pool_is_deterministic_and_well_spaced(self) -> None:
+        first = tuple(_dense_hillside_tree_candidates(
+            "dense-hill", 7, 11, 100.0, 100.0, 50.0
+        ))
+        repeated = tuple(_dense_hillside_tree_candidates(
+            "dense-hill", 7, 11, 100.0, 100.0, 50.0
+        ))
+        self.assertEqual(first, repeated)
+        self.assertGreaterEqual(len(first), 24)
+        # The 50 m block uses a 45 m candidate span and six-metre blue-noise
+        # spacing. This leaves an edge inset between adjacent lattice blocks.
+        self.assertTrue(all(79.0 <= x <= 121.0 and 79.0 <= z <= 121.0 for x, z, _ in first))
+        for index, (x, z, _heading) in enumerate(first):
+            for other_x, other_z, _other_heading in first[index + 1:]:
+                self.assertGreaterEqual(math.hypot(x - other_x, z - other_z), 6.0 - 1e-9)
 
     def test_32_metre_hill_uses_sunk_polygon_before_individual_tree_fallback(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 100.0)
@@ -2027,7 +2180,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             name="cwr_32m_forest_hill", heightmap_path=Path("unused.png"),
             bbox=(0.0, 0.0, 1.0, 1.0), cells=4, cell_size=25.0,
             forest_tree_spacing=50.0, max_road_objects=0, max_buildings=0,
-            max_forest_objects=40, forest_undergrowth_enabled=False,
+            max_forest_objects=100, forest_undergrowth_enabled=False,
             forest_single_tree_enabled=False,
             forest_border_enabled=False, steep_hill_bushes_enabled=False,
             ditch_grass_enabled=False, strict_assets=False,
@@ -2037,64 +2190,38 @@ class RoadPieceFittingTests(unittest.TestCase):
             dataset, projection, raster, hill, spec, include_roads=False
         )
         self.assertEqual(grounded.forest_block_objects, 0)
-        self.assertEqual(grounded.forest_everon_steep_objects, 4)
-        self.assertEqual(grounded.forest_sunk_polygon_objects, 4)
-        self.assertEqual(grounded.forest_cluster_objects, 0)
-        self.assertEqual(grounded.forest_undergrowth_objects, 0)
-        self.assertEqual(grounded.forest_hillside_tree_objects, 0)
-        self.assertTrue(all(obj.model_path == spec.forest_everon_steep_model for obj in grounded.objects))
+        self.assertEqual(grounded.forest_everon_steep_objects, 0)
+        self.assertEqual(grounded.forest_sunk_polygon_objects, 0)
+        # A 32 m rise is no longer hidden by sinking a rigid polygon into the
+        # hillside. It falls through to smaller clusters/individually grounded
+        # hillside trees, all of which must pass the final grounding audit.
+        self.assertEqual(grounded.forest_hillside_fallback_blocks, 4)
+        # The conservative default still restores meaningful hill-tree density
+        # after the rigid square/triangle/cluster tiers are rejected.
+        self.assertGreaterEqual(grounded.forest_hillside_tree_objects, 20)
+        self.assertEqual(grounded.vegetation_audit_violations, 0)
+        self.assertEqual(grounded.forest_sunk_polygon_objects, 0)
 
-        normal_triangle = generate_world_objects(
-            dataset,
-            projection,
-            raster,
-            hill,
-            replace(spec, forest_severe_hill_fallback=False),
-            include_roads=False,
-        )
-        self.assertEqual(normal_triangle.forest_sunk_polygon_objects, 0)
-        maximum_expected_sink = grounded.maximum_hillside_tree_relief * 0.5
-        for normal, sunk in zip(normal_triangle.objects, grounded.objects, strict=True):
-            self.assertGreater(normal.y - sunk.y, 0.0)
-            self.assertLessEqual(normal.y - sunk.y, maximum_expected_sink + 1e-6)
-
+        # Changing the old severe-hill threshold must never re-enable polygon
+        # sinking. The safe fallback remains deterministic.
         below_old_severe_threshold = generate_world_objects(
-            dataset,
-            projection,
-            raster,
-            hill,
+            dataset, projection, raster, hill,
             replace(spec, forest_severe_hill_relief=100.0),
             include_roads=False,
         )
-        self.assertEqual(below_old_severe_threshold.forest_sunk_polygon_objects, 4)
-        self.assertEqual(below_old_severe_threshold.objects, grounded.objects)
+        self.assertEqual(below_old_severe_threshold.forest_sunk_polygon_objects, 0)
+        self.assertEqual(below_old_severe_threshold.vegetation_audit_violations, 0)
 
+        # The provisional terrain-grounding planner is now structural only.
         grounding_plan = plan_iterative_grounding_objects(
             dataset, projection, raster, hill, spec, ()
         )
-        self.assertEqual(grounding_plan.objects, grounded.objects)
+        self.assertEqual(grounding_plan.objects, ())
+        self.assertEqual(grounding_plan.forest_objects, 0)
         repeated = generate_world_objects(
             dataset, projection, raster, hill, spec, include_roads=False
         )
         self.assertEqual(grounded.objects, repeated.objects)
-
-        too_steep_for_polygon = generate_world_objects(
-            dataset,
-            projection,
-            raster,
-            hill,
-            replace(
-                spec,
-                forest_severe_hill_relief=100.0,
-                forest_everon_steep_maximum_relief=1.0,
-            ),
-            include_roads=False,
-        )
-        self.assertEqual(too_steep_for_polygon.forest_everon_steep_objects, 0)
-        self.assertEqual(too_steep_for_polygon.forest_sunk_polygon_objects, 0)
-        self.assertEqual(too_steep_for_polygon.forest_cluster_objects, 0)
-        self.assertEqual(too_steep_for_polygon.forest_undergrowth_objects, 4)
-        self.assertEqual(too_steep_for_polygon.forest_hillside_tree_objects, 40)
 
     def test_35_and_43_metre_hills_allow_configured_polygon_tiers(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 100.0)
@@ -2252,6 +2379,14 @@ class RoadPieceFittingTests(unittest.TestCase):
                 forest_block_maximum_burial=0.0, forest_block_maximum_float=0.0,
                 forest_everon_steep_maximum_burial=0.0,
                 forest_everon_steep_maximum_float=0.0,
+                # This test exercises generated-cluster packaging rather than
+                # production grounding policy, so deliberately relax the proxy
+                # limits enough to force reusable interior cluster generation.
+                forest_cluster_maximum_relief=100.0,
+                forest_cluster_maximum_burial=100.0,
+                forest_cluster_maximum_float=100.0,
+                forest_cluster_tree_maximum_float=100.0,
+                forest_cluster_bush_maximum_float=100.0,
                 forest_undergrowth_enabled=True, forest_undergrowth_maximum_objects=4,
                 forest_undergrowth_spacing=40.0, forest_border_enabled=False, ditch_grass_enabled=False,
                 semantic_landmarks=False, ground_texture_profile="everon",
@@ -2271,10 +2406,9 @@ class RoadPieceFittingTests(unittest.TestCase):
             self.assertNotIn(r"f\v.paa", entries)
             self.assertNotIn(r"f\t.paa", entries)
             self.assertNotIn(r"f\g.paa", entries)
-            self.assertTrue(any(name.startswith(r"f\c_") and name.endswith(".p3d") for name in entries))
             self.assertTrue(any(name.startswith(r"f\u_") and name.endswith(".p3d") for name in entries))
             generated_name = next(
-                name for name in entries if name.startswith(r"f\c_") and name.endswith(".p3d")
+                name for name in entries if name.startswith(r"f\u_") and name.endswith(".p3d")
             )
             generated_path = root / "generated-forest.p3d"
             generated_path.write_bytes(packed_entries[generated_name])
@@ -2286,7 +2420,6 @@ class RoadPieceFittingTests(unittest.TestCase):
             self.assertTrue(proxy_names)
             self.assertFalse(generated_summary.texture_paths)
             wrp = inspect_rvw4(result.wrp_path, height_scale=0.05)
-            self.assertTrue(any(path.startswith(r"cwr_m9_clusters\f\c_") for path in wrp.object_models))
             self.assertTrue(any(path.startswith(r"cwr_m9_clusters\f\u_") for path in wrp.object_models))
             stock_ground = {
                 r"Eden\tn.paa", r"Eden\zbh.paa", r"Eden\bak\bah.pac",
@@ -2384,7 +2517,13 @@ class RoadPieceFittingTests(unittest.TestCase):
             )
 
             surface = json.loads(first.surface_report_path.read_text(encoding="utf-8"))
-            self.assertGreater(surface["wet_shoreline_cells"] + surface["dry_shoreline_cells"], 0)
+            # Elevated mapped water is intentionally not painted as CWA water.
+            # The fixture may therefore have no renderable shoreline; the
+            # accounting must still be internally consistent.
+            self.assertEqual(
+                surface["wet_shoreline_cells"] + surface["dry_shoreline_cells"],
+                surface["shoreline_cells"],
+            )
             self.assertGreater(surface["forest_edge_cells"], 0)
             self.assertGreater(surface["paved_road_cells"] + surface["dirt_road_cells"], 0)
             self.assertEqual(set(surface["material_cells"]), {material.code for material in MILESTONE9_MATERIALS})
@@ -2408,8 +2547,11 @@ class RoadPieceFittingTests(unittest.TestCase):
             self.assertNotIn("cache", manifest)
             first_cache = json.loads(first.cache_report_path.read_text(encoding="utf-8"))
             second_cache = json.loads(second.cache_report_path.read_text(encoding="utf-8"))
+            # Frozen normalized source bundles are loaded directly rather than
+            # through the legacy parsed-source cache. The expensive downstream
+            # stages must still hit on the second build.
             self.assertFalse(first_cache["parsed_source"]["hit"])
-            self.assertTrue(second_cache["parsed_source"]["hit"])
+            self.assertFalse(second_cache["parsed_source"]["hit"])
             self.assertTrue(second_cache["spatial_index"]["hit"])
             self.assertTrue(second_cache["processed_dem"]["hit"])
             self.assertTrue(second_cache["osm_raster"]["hit"])
@@ -2923,6 +3065,8 @@ class SemanticFeatureTests(unittest.TestCase):
             self.assertIn("door1", summary.selection_names[geometry_index])
             self.assertIn("door1_axis", summary.selection_names[memory_index])
             self.assertIn("door1_action", summary.selection_names[memory_index])
+            self.assertIn("door1_action_outside", summary.selection_names[memory_index])
+            self.assertIn("door1_action_inside", summary.selection_names[memory_index])
             self.assertIn("In1", summary.selection_names[paths_index])
             self.assertIn("In2", summary.selection_names[paths_index])
             self.assertIn("Pos1", summary.selection_names[paths_index])
@@ -3192,7 +3336,9 @@ class SemanticFeatureTests(unittest.TestCase):
             plans, dataset, projection, library
         )
         kinds = [plan.procedural_placement.selected.outbuilding_kind for plan in updated]
-        self.assertEqual(kinds, ["garage", "shed"])
+        # The cluster policy is a maximum of three inferred garages, so a
+        # two-member pair is left intact. Explicit OSM types remain authoritative.
+        self.assertEqual(kinds, ["garage", "garage"])
 
     def test_enterable_building_uses_house_grounding_and_foundation_stairs(self) -> None:
         cells = 20
@@ -3319,7 +3465,7 @@ class SemanticFeatureTests(unittest.TestCase):
             elevations, provisional, (building,), raster, spec
         )
         self.assertEqual(report.building_supports, 1)
-        self.assertEqual(report.tree_supports, 1)
+        self.assertEqual(report.tree_supports, 0)
         self.assertGreater(report.adjusted_cells, 0)
         self.assertLessEqual(report.maximum_adjustment, 1.4 + 1e-9)
         self.assertNotEqual(refined, elevations)
@@ -3358,12 +3504,12 @@ class SemanticFeatureTests(unittest.TestCase):
             progress_callback=lambda percent, stage: events.append((percent, stage)),
         )
         self.assertEqual(result.building_objects, 1)
-        self.assertGreater(result.forest_objects, 0)
-        self.assertEqual(len(result.objects), result.building_objects + result.forest_objects)
+        self.assertEqual(result.forest_objects, 0)
+        self.assertEqual(len(result.objects), result.building_objects)
         self.assertEqual(result.forest_undergrowth_objects, 0)
         self.assertEqual(result.bridge_objects, 0)
-        self.assertTrue(any("Planning primary forest supports" in stage for _, stage in events))
-        self.assertFalse(any(stage == "Placing primary forest blocks" for _, stage in events))
+        self.assertTrue(any("Planning building grounding supports" in stage for _, stage in events))
+        self.assertFalse(any("forest supports" in stage.casefold() for _, stage in events))
 
     def test_only_fully_water_covered_below_sea_buildings_are_omitted(self) -> None:
         cells = 4
@@ -3636,6 +3782,29 @@ class SemanticFeatureTests(unittest.TestCase):
         )
         self.assertEqual(pool, [close_size_other_palette])
         self.assertEqual(library._best_variant(requested, pool), close_size_other_palette)
+
+    def test_explicit_house_style_preset_overrides_detected_geography(self) -> None:
+        from cwr_worldgen.procedural_buildings import ProceduralBuildingLibrary
+
+        projection = BboxProjection.create((59.20, 17.90, 59.30, 18.10), 1000.0)
+        dataset = OsmDataset(
+            source_generator="sweden-region-override", element_count=0,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(),
+        )
+        library = ProceduralBuildingLibrary(
+            world_name="forced_east_asia", maximum_variants=64,
+            house_style_preset="east_asia",
+        )
+        library.prepare(dataset, projection, 12.0)
+
+        self.assertEqual(library.region_identifier, "sweden")
+        self.assertEqual(library.detected_house_style_identifier, "sweden")
+        self.assertEqual(library.house_style_identifier, "east_asia")
+        key = library.key_for(
+            {"building": "apartments", "building:material": "concrete"},
+            22.0, 38.0, settlement_context="city",
+        )
+        self.assertEqual(key.regional_style, "eastern_panel")
 
     def test_sweden_region_biases_houses_toward_red_timber_styles(self) -> None:
         from cwr_worldgen.procedural_buildings import ProceduralBuildingLibrary
@@ -4382,7 +4551,369 @@ class SemanticImportTests(unittest.TestCase):
         self.assertAlmostEqual(GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0, 4.60, places=6)
 
 
+class NearbyBuildingTextureTests(unittest.TestCase):
+    class _Library:
+        def _settlement_context(self, x: float, z: float) -> str:
+            return "town" if x < 500.0 else "rural"
+
+        def model_path(self, key: BuildingVariantKey) -> str:
+            return rf"texture_test\g\b_{key.digest}.p3d"
+
+    @staticmethod
+    def _plan(index: int, x: float, z: float, texture: int, *, width: float = 10.0) -> BuildingPlacementPlan:
+        key = BuildingVariantKey(
+            family="residential", roof_style="gabled", width_m=width,
+            length_m=14.0, height_m=6.0, texture_variant=texture,
+        )
+        placement = BuildingPlacement(
+            rf"texture_test\g\old_{index}.p3d", 0.0, key, key,
+        )
+        return BuildingPlacementPlan(
+            osm_key=f"way/{index}", geometry_index=0, geometry_kind="polygon",
+            x=x, z=z, heading_degrees=0.0, model_path=placement.model_path,
+            support_polygon=((x-5,z-7),(x+5,z-7),(x+5,z+7),(x-5,z+7)),
+            procedural_placement=placement, building_family="residential",
+        )
+
+    def test_optional_nearby_same_shape_town_texture_matching(self) -> None:
+        plans = (
+            self._plan(1, 100.0, 100.0, 1),
+            self._plan(2, 145.0, 100.0, 4),
+            self._plan(3, 185.0, 105.0, 7),
+            self._plan(4, 700.0, 100.0, 3),
+            self._plan(5, 120.0, 150.0, 8, width=12.0),
+        )
+        untouched = _match_nearby_same_shape_building_textures(
+            plans, self._Library(), enabled=False, distance_metres=90.0
+        )
+        self.assertEqual(
+            [p.procedural_placement.selected.texture_variant for p in untouched],
+            [1, 4, 7, 3, 8],
+        )
+        matched = _match_nearby_same_shape_building_textures(
+            plans, self._Library(), enabled=True, distance_metres=90.0
+        )
+        variants = [p.procedural_placement.selected.texture_variant for p in matched]
+        self.assertEqual(variants[:3], [1, 1, 1])
+        self.assertEqual(variants[3:], [3, 8])
+        self.assertEqual(len({p.model_path for p in matched[:3]}), 1)
+
+
 class InfrastructureAndRuralTests(unittest.TestCase):
+    def test_sidewalks_are_temporarily_disabled_but_town_city_furniture_remains(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        road = OsmLineFeature(
+            "way/urban-road", {"highway": "residential"},
+            tuple(projection.to_latlon(point) for point in ((20.0, 100.0), (180.0, 100.0))),
+        )
+        city = OsmPointFeature(
+            "node/city", {"place": "city"}, projection.to_latlon((100.0, 100.0))
+        )
+        bus_stop = OsmPointFeature(
+            "node/bus", {"landmark": "bus_stop", "highway": "bus_stop"},
+            projection.to_latlon((76.0, 100.0)),
+        )
+        dataset = OsmDataset(
+            source_generator="urban-detail", element_count=3, coastlines=(), water=(),
+            forests=(), farmland=(), urban=(), roads=(road,), places=(city,),
+            landmarks=(bus_stop,),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(False,) * 64, farmland=(False,) * 64,
+            urban=(True,) * 64, roads=(True,) * 64, buildings=(False,) * 64,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="urban_detail", heightmap_path=Path("unused.png"), bbox=(0,0,1,1),
+            cells=8, cell_size=25.0, include_minor_roads=True, max_road_objects=0,
+            max_buildings=0, max_forest_objects=0, sidewalks_enabled=True,
+            maximum_sidewalk_objects=200, street_furniture_enabled=True,
+            maximum_street_furniture_objects=100, street_light_spacing=24.0,
+            rural_vegetation_enabled=False, meadow_grass_enabled=False, wetland_reeds_enabled=False,
+            barriers_enabled=False, bridges_enabled=False, forest_undergrowth_enabled=False,
+            forest_border_enabled=False, rocky_forest_fallback_enabled=False,
+            steep_hill_bushes_enabled=False, strict_assets=False,
+        )
+        result = generate_world_objects(
+            dataset, projection, raster, (5.0,) * 64, spec, include_roads=False,
+            building_placement_plans=(),
+        )
+        self.assertEqual(result.sidewalk_objects, 0)
+        self.assertFalse(any(obj.model_path in STOCK_SIDEWALK_MODELS for obj in result.objects))
+        self.assertGreater(result.street_light_objects, 0)
+        self.assertGreater(result.street_furniture_objects, result.street_light_objects)
+        self.assertGreater(result.street_noticeboard_objects, 0)
+        self.assertGreater(result.street_bicycle_objects, 0)
+        self.assertGreater(result.street_tree_objects, 0)
+        self.assertEqual(result.street_bus_shelter_objects, 1)
+        self.assertFalse(any(r"\i\sw_" in obj.model_path.casefold() for obj in result.objects))
+        allowed = set().union(
+            STOCK_STREET_LIGHT_MODELS,
+            STOCK_STREET_BENCH_MODELS,
+            STOCK_STREET_BIN_MODELS,
+            STOCK_STREET_NOTICEBOARD_MODELS,
+            STOCK_STREET_BICYCLE_MODELS,
+            STOCK_STREET_BUS_SHELTER_MODELS,
+            STOCK_STREET_TREE_SURROUND_MODELS,
+            STOCK_STREET_TREE_MODELS,
+            STOCK_SETTLEMENT_DETAIL_MODELS,
+        )
+        self.assertTrue(all(obj.model_path in allowed for obj in result.objects))
+
+    def test_street_furniture_is_inferred_in_residential_landuse(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        road = OsmLineFeature(
+            "way/residential-road", {"highway": "residential"},
+            tuple(projection.to_latlon(point) for point in ((20.0, 100.0), (180.0, 100.0))),
+        )
+        ring = tuple(projection.to_latlon(point) for point in (
+            (5.0, 55.0), (195.0, 55.0), (195.0, 145.0), (5.0, 145.0), (5.0, 55.0)
+        ))
+        residential = OsmPolygonFeature(
+            "way/residential-area", {"landuse": "residential"}, (GeoPolygon(ring),)
+        )
+        dataset = OsmDataset(
+            source_generator="residential-detail", element_count=2, coastlines=(), water=(),
+            forests=(), farmland=(), urban=(residential,), roads=(road,), places=(), landmarks=(),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(False,) * 64, farmland=(False,) * 64,
+            urban=(True,) * 64, roads=(True,) * 64, buildings=(False,) * 64,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="residential_detail", heightmap_path=Path("unused.png"), bbox=(0,0,1,1),
+            cells=8, cell_size=25.0, include_minor_roads=True, max_road_objects=0,
+            max_buildings=0, max_forest_objects=0, sidewalks_enabled=False,
+            street_furniture_enabled=True, maximum_street_furniture_objects=100,
+            street_light_spacing=24.0, rural_vegetation_enabled=False,
+            meadow_grass_enabled=False, wetland_reeds_enabled=False, barriers_enabled=False,
+            bridges_enabled=False, forest_undergrowth_enabled=False, forest_border_enabled=False,
+            rocky_forest_fallback_enabled=False, steep_hill_bushes_enabled=False,
+            strict_assets=False,
+        )
+        result = generate_world_objects(
+            dataset, projection, raster, (5.0,) * 64, spec, include_roads=False,
+            building_placement_plans=(),
+        )
+        self.assertGreater(result.street_furniture_objects, 0)
+        self.assertGreater(result.street_light_objects, 0)
+
+    def test_villages_receive_sparse_settlement_detail_without_city_lamps(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        road = OsmLineFeature(
+            "way/village-road", {"highway": "residential"},
+            tuple(projection.to_latlon(point) for point in ((20.0, 100.0), (180.0, 100.0))),
+        )
+        village = OsmPointFeature(
+            "node/village", {"place": "village"}, projection.to_latlon((100.0, 100.0))
+        )
+        dataset = OsmDataset(
+            source_generator="village-detail", element_count=2, coastlines=(), water=(),
+            forests=(), farmland=(), urban=(), roads=(road,), places=(village,),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(False,) * 64, farmland=(False,) * 64,
+            urban=(True,) * 64, roads=(True,) * 64, buildings=(False,) * 64,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="village_detail", heightmap_path=Path("unused.png"), bbox=(0,0,1,1),
+            cells=8, cell_size=25.0, include_minor_roads=True, max_road_objects=0,
+            max_buildings=0, max_forest_objects=0, sidewalks_enabled=True,
+            maximum_sidewalk_objects=200, street_furniture_enabled=True,
+            maximum_street_furniture_objects=100, street_light_spacing=24.0,
+            rural_vegetation_enabled=False, meadow_grass_enabled=False, wetland_reeds_enabled=False,
+            barriers_enabled=False, bridges_enabled=False, forest_undergrowth_enabled=False,
+            forest_border_enabled=False, rocky_forest_fallback_enabled=False,
+            steep_hill_bushes_enabled=False, strict_assets=False,
+        )
+        result = generate_world_objects(
+            dataset, projection, raster, (5.0,) * 64, spec, include_roads=False,
+            building_placement_plans=(),
+        )
+        # Sidewalks remain disabled and the generic city-lamp pass stays out of
+        # villages, but the settlement-detail layer adds sparse stock utility poles.
+        self.assertEqual(result.sidewalk_objects, 0)
+        self.assertEqual(result.street_light_objects, 0)
+        self.assertGreater(result.street_furniture_objects, 0)
+        self.assertTrue(any(obj.model_path in STOCK_SETTLEMENT_UTILITY_POLE_MODELS for obj in result.objects))
+
+    def test_village_building_clutter_uses_stock_assets_only(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 320.0)
+        road = OsmLineFeature(
+            "way/main", {"highway": "residential"},
+            tuple(projection.to_latlon(point) for point in ((20.0, 160.0), (300.0, 160.0))),
+        )
+        village = OsmPointFeature(
+            "node/village", {"place": "village"}, projection.to_latlon((160.0, 160.0))
+        )
+        building_features = tuple(
+            OsmPointFeature(f"node/house-{index}", {"building": "house"}, projection.to_latlon((70.0 + index * 18.0, 118.0)))
+            for index in range(8)
+        )
+        shop = OsmPointFeature("node/shop", {"building": "retail", "shop": "convenience"}, projection.to_latlon((150.0, 205.0)))
+        barn = OsmPointFeature("node/barn", {"building": "barn"}, projection.to_latlon((225.0, 205.0)))
+        dataset = OsmDataset(
+            source_generator="village-clutter", element_count=12, coastlines=(), water=(), forests=(), farmland=(), urban=(),
+            roads=(road,), places=(village,), building_points=(*building_features, shop, barn), landmarks=(),
+        )
+        raster = OsmRaster(
+            cells=16, water=(False,) * 256, forest=(False,) * 256, farmland=(False,) * 256,
+            urban=(False,) * 256, roads=(False,) * 256, buildings=(False,) * 256, high_resolution=16, coastline_seed_count=0,
+        )
+        plans = []
+        for index, feature in enumerate(building_features):
+            x, z = projection.to_world(feature.point)
+            plans.append(BuildingPlacementPlan(
+                feature.osm_key, 0, "point", x, z, 0.0, r"test\house.p3d",
+                ((x-4,z-5),(x+4,z-5),(x+4,z+5),(x-4,z+5)), building_family="residential",
+            ))
+        for feature, family in ((shop, "shop"), (barn, "agricultural")):
+            x, z = projection.to_world(feature.point)
+            plans.append(BuildingPlacementPlan(
+                feature.osm_key, 0, "point", x, z, 0.0, rf"test\{family}.p3d",
+                ((x-5,z-6),(x+5,z-6),(x+5,z+6),(x-5,z+6)), building_family=family,
+            ))
+        spec = _Milestone9PlayabilitySpec(
+            name="village_clutter", heightmap_path=Path("unused.png"), bbox=(0,0,1,1),
+            cells=16, cell_size=20.0, include_minor_roads=True, max_road_objects=0, max_buildings=0, max_forest_objects=0,
+            sidewalks_enabled=False, street_furniture_enabled=True, maximum_street_furniture_objects=300, street_light_spacing=28.0,
+            rural_vegetation_enabled=False, meadow_grass_enabled=False, wetland_reeds_enabled=False, barriers_enabled=False, bridges_enabled=False,
+            forest_undergrowth_enabled=False, forest_border_enabled=False, rocky_forest_fallback_enabled=False, steep_hill_bushes_enabled=False,
+            strict_assets=False, deterministic_seed="village-clutter-test",
+        )
+        result = generate_world_objects(
+            dataset, projection, raster, (5.0,) * 256, spec, include_roads=False, building_placement_plans=tuple(plans),
+        )
+        self.assertGreater(result.street_furniture_objects, 0)
+        self.assertEqual(result.street_light_objects, 0)
+        models = {obj.model_path for obj in result.objects}
+        self.assertTrue(models.intersection(STOCK_SETTLEMENT_UTILITY_POLE_MODELS))
+        self.assertTrue(models.intersection(STOCK_SETTLEMENT_FRUIT_TREE_MODELS))
+        self.assertTrue(models.intersection(STOCK_STREET_NOTICEBOARD_MODELS))
+        self.assertTrue(models.intersection(STOCK_STREET_BENCH_MODELS))
+        # Barn-only clutter is allowed here because this fixture contains an
+        # explicit building=barn. Residential yards no longer spawn stock sheds.
+        self.assertTrue(models.intersection(STOCK_SETTLEMENT_BARN_CLUTTER_MODELS))
+        self.assertNotIn(r"data3d\Statek_kulna.p3d", models)
+        self.assertNotIn(r"data3d\Pristresek_mensi.p3d", models)
+        settlement_stock = set(STOCK_SETTLEMENT_DETAIL_MODELS)
+        clutter_models = {model for model in models if not model.casefold().startswith("test\\")}
+        self.assertTrue(all(model in settlement_stock for model in clutter_models))
+
+    def test_settlement_farm_clutter_is_strictly_barn_only(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 240.0)
+        village = OsmPointFeature(
+            "node/village", {"place": "village"}, projection.to_latlon((120.0, 120.0))
+        )
+        barn = OsmPointFeature(
+            "node/barn", {"building": "barn"}, projection.to_latlon((95.0, 120.0))
+        )
+        stable = OsmPointFeature(
+            "node/stable", {"building": "stable"}, projection.to_latlon((155.0, 120.0))
+        )
+        dataset = OsmDataset(
+            source_generator="barn-only-clutter", element_count=3, coastlines=(), water=(), forests=(),
+            farmland=(), urban=(), roads=(), places=(village,), building_points=(barn, stable), landmarks=(),
+        )
+        raster = OsmRaster(
+            cells=12, water=(False,) * 144, forest=(False,) * 144, farmland=(False,) * 144,
+            urban=(False,) * 144, roads=(False,) * 144, buildings=(False,) * 144,
+            high_resolution=12, coastline_seed_count=0,
+        )
+        plans = []
+        for feature in (barn, stable):
+            x, z = projection.to_world(feature.point)
+            plans.append(BuildingPlacementPlan(
+                feature.osm_key, 0, "point", x, z, 0.0, r"test\agricultural.p3d",
+                ((x-5,z-6),(x+5,z-6),(x+5,z+6),(x-5,z+6)), building_family="agricultural",
+            ))
+        spec = _Milestone9PlayabilitySpec(
+            name="barn_only_clutter", heightmap_path=Path("unused.png"), bbox=(0,0,1,1),
+            cells=12, cell_size=20.0, include_minor_roads=True, max_road_objects=0,
+            max_buildings=0, max_forest_objects=0, sidewalks_enabled=False,
+            street_furniture_enabled=True, maximum_street_furniture_objects=100,
+            rural_vegetation_enabled=False, meadow_grass_enabled=False, haybales_enabled=True,
+            wetland_reeds_enabled=False, barriers_enabled=False, bridges_enabled=False,
+            forest_undergrowth_enabled=False, forest_border_enabled=False,
+            rocky_forest_fallback_enabled=False, steep_hill_bushes_enabled=False,
+            strict_assets=False, deterministic_seed="village-clutter-test",
+        )
+        result = generate_world_objects(
+            dataset, projection, raster, (5.0,) * 144, spec, include_roads=False,
+            building_placement_plans=tuple(plans),
+        )
+        barn_clutter = [
+            obj for obj in result.objects if obj.model_path in STOCK_SETTLEMENT_BARN_CLUTTER_MODELS
+        ]
+        self.assertTrue(barn_clutter)
+        # The retired free-field hay-bale flag cannot scatter hay away from barns.
+        self.assertEqual(result.haybale_objects, 0)
+        # Every clutter object is close to the explicit barn, not the stable.
+        bx, bz = projection.to_world(barn.point)
+        sx, sz = projection.to_world(stable.point)
+        for obj in barn_clutter:
+            self.assertLess((obj.x - bx) ** 2 + (obj.z - bz) ** 2, 30.0 ** 2)
+            self.assertGreater((obj.x - sx) ** 2 + (obj.z - sz) ** 2, 30.0 ** 2)
+
+    def test_generated_barn_gets_same_barn_clutter_as_explicit_osm_barn(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 240.0)
+        village = OsmPointFeature(
+            "node/village", {"place": "village"}, projection.to_latlon((120.0, 120.0))
+        )
+        generic_agricultural = OsmPointFeature(
+            "node/stable", {"building": "stable"}, projection.to_latlon((175.0, 120.0))
+        )
+        dataset = OsmDataset(
+            source_generator="generated-barn-clutter", element_count=2,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(),
+            places=(village,), building_points=(generic_agricultural,), landmarks=(),
+        )
+        raster = OsmRaster(
+            cells=12, water=(False,) * 144, forest=(False,) * 144,
+            farmland=(False,) * 144, urban=(False,) * 144, roads=(False,) * 144,
+            buildings=(False,) * 144, high_resolution=12, coastline_seed_count=0,
+        )
+        generated_x, generated_z = 70.0, 120.0
+        generated_barn = BuildingPlacementPlan(
+            "infill/test/1", 0, "synthetic", generated_x, generated_z, 0.0,
+            r"test\generated_barn.p3d",
+            ((generated_x-5,generated_z-6),(generated_x+5,generated_z-6),
+             (generated_x+5,generated_z+6),(generated_x-5,generated_z+6)),
+            building_family="agricultural", synthetic_infill=True,
+        )
+        stable_x, stable_z = projection.to_world(generic_agricultural.point)
+        mapped_stable = BuildingPlacementPlan(
+            generic_agricultural.osm_key, 0, "point", stable_x, stable_z, 0.0,
+            r"test\mapped_stable.p3d",
+            ((stable_x-5,stable_z-6),(stable_x+5,stable_z-6),
+             (stable_x+5,stable_z+6),(stable_x-5,stable_z+6)),
+            building_family="agricultural",
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="generated_barn_clutter", heightmap_path=Path("unused.png"), bbox=(0,0,1,1),
+            cells=12, cell_size=20.0, include_minor_roads=True, max_road_objects=0,
+            max_buildings=0, max_forest_objects=0, sidewalks_enabled=False,
+            street_furniture_enabled=True, maximum_street_furniture_objects=100,
+            rural_vegetation_enabled=False, meadow_grass_enabled=False,
+            wetland_reeds_enabled=False, barriers_enabled=False, bridges_enabled=False,
+            forest_undergrowth_enabled=False, forest_border_enabled=False,
+            rocky_forest_fallback_enabled=False, steep_hill_bushes_enabled=False,
+            strict_assets=False, deterministic_seed="village-clutter-test",
+        )
+        result = generate_world_objects(
+            dataset, projection, raster, (5.0,) * 144, spec, include_roads=False,
+            building_placement_plans=(generated_barn, mapped_stable),
+        )
+        barn_clutter = [
+            obj for obj in result.objects if obj.model_path in STOCK_SETTLEMENT_BARN_CLUTTER_MODELS
+        ]
+        self.assertTrue(barn_clutter)
+        for obj in barn_clutter:
+            self.assertLess((obj.x - generated_x) ** 2 + (obj.z - generated_z) ** 2, 30.0 ** 2)
+            self.assertGreater((obj.x - stable_x) ** 2 + (obj.z - stable_z) ** 2, 30.0 ** 2)
+
     @staticmethod
     def _polygon(projection: BboxProjection, key: str, tags: dict[str, str], bounds: tuple[float, float, float, float]) -> OsmPolygonFeature:
         x0, z0, x1, z1 = bounds
@@ -4397,6 +4928,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         self.assertIn('["natural"="tree_row"]', query)
         self.assertIn('["natural"~"^(scrub|bare_rock|rock|scree)$"]', query)
         self.assertIn('["natural"="wetland"]', query)
+        self.assertIn('["natural"="grassland"]', query)
         self.assertIn('["natural"="tree"]', query)
         self.assertIn('["aeroway"~"^(aerodrome|runway|taxiway|apron|helipad)$"]', query)
         self.assertIn('["power"~"^(pole|tower)$"]', query)
@@ -4478,7 +5010,9 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             if obj.model_path in OSM_INDIVIDUAL_TREE_MODELS
         ]
         self.assertEqual(len(mapped_trees), 1)
-        self.assertAlmostEqual(mapped_trees[0].y, 10.04)
+        # Tree roots now prefer a small controlled burial so terrain-diagonal
+        # ambiguity cannot leave them visibly floating on hills.
+        self.assertAlmostEqual(mapped_trees[0].y, 9.95)
         self.assertTrue(any(obj.model_path.casefold().endswith(r"\i\util_power_pole.p3d") for obj in result.objects))
         self.assertTrue(any(obj.model_path.casefold().endswith(r"\i\util_power_tower.p3d") for obj in result.objects))
         self.assertTrue(any(obj.model_path.casefold().endswith(r"\i\util_water_tower.p3d") for obj in result.objects))
@@ -5118,6 +5652,294 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         self.assertGreaterEqual(report.elevations[15], spec.sea_level + 7.00)
         self.assertLess(report.elevations[10], spec.sea_level)
 
+    def test_ordinary_road_through_active_water_raises_narrow_causeway(self) -> None:
+        from cwr_worldgen.terrain_solver import (
+            ROAD_WATER_MINIMUM_CLEARANCE_METRES,
+            solve_terrain_constraints,
+        )
+
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        road = OsmLineFeature(
+            "way/submerged-road",
+            {"highway": "residential", "lanes": "2"},
+            tuple(projection.to_latlon(p) for p in ((20.0, 100.0), (180.0, 100.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="submerged-road-causeway", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(road,),
+        )
+        water = [False] * 64
+        for row in range(2, 7):
+            for col in range(1, 7):
+                water[row * 8 + col] = True
+        roads = [False] * 64
+        for col in range(1, 7):
+            roads[4 * 8 + col] = True
+        raster = OsmRaster(
+            cells=8, water=tuple(water), forest=(False,) * 64,
+            farmland=(False,) * 64, urban=(False,) * 64, roads=tuple(roads),
+            buildings=(False,) * 64, high_resolution=8, coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="submerged_road_causeway", heightmap_path=Path("unused.png"),
+            bbox=(0, 0, 1, 1), cells=8, cell_size=25.0, sea_level=0.0,
+            water_depth=5.0, solver_iterations=0, max_road_objects=0,
+            max_buildings=0, max_forest_objects=0, strict_assets=False,
+        )
+        report = solve_terrain_constraints(
+            (-3.0,) * 64, dataset, projection, raster, spec,
+        )
+        centre = report.elevations[4 * 8 + 4]
+        self.assertGreaterEqual(
+            centre, spec.sea_level + ROAD_WATER_MINIMUM_CLEARANCE_METRES
+        )
+        self.assertGreater(report.road_water_fill_cells, 0)
+        self.assertIn("road-water-fill", report.category_adjustments)
+        # Water more than one bank-width away remains submerged, so the fix is
+        # a causeway rather than a rectangular land reclamation project.
+        self.assertLess(report.elevations[2 * 8 + 4], spec.sea_level)
+
+    def test_sidehill_road_gets_cross_slope_bench_without_flattening_longitudinal_grade(self) -> None:
+        from cwr_worldgen.terrain_solver import solve_terrain_constraints
+
+        cells = 12
+        cell_size = 10.0
+        world_size = cells * cell_size
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), world_size)
+        road = OsmLineFeature(
+            "way/sidehill-road",
+            {"highway": "residential", "width": "6"},
+            tuple(projection.to_latlon(p) for p in ((10.0, 55.0), (110.0, 55.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="sidehill-road", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(road,),
+        )
+        raster = OsmRaster(
+            cells=cells, water=(False,) * (cells * cells),
+            forest=(False,) * (cells * cells), farmland=(False,) * (cells * cells),
+            urban=(False,) * (cells * cells), roads=(False,) * (cells * cells),
+            buildings=(False,) * (cells * cells), high_resolution=cells,
+            coastline_seed_count=0,
+        )
+        # 60% terrain slope across the road, but zero slope along it. This is
+        # the exact side-of-a-hill case the bench pass is meant to catch.
+        original = tuple((index // cells) * 6.0 for index in range(cells * cells))
+        spec = _Milestone9PlayabilitySpec(
+            name="sidehill_road", heightmap_path=Path("unused.png"),
+            bbox=(0, 0, 1, 1), cells=cells, cell_size=cell_size, sea_level=-100.0,
+            solver_iterations=0, road_grade_radius=10.0, maximum_grade_adjustment=30.0,
+            max_road_objects=0, max_buildings=0, max_forest_objects=0,
+            strict_assets=False,
+        )
+        report = solve_terrain_constraints(original, dataset, projection, raster, spec)
+        before_low = _sample_elevation(original, cells, cell_size, 60.0, 45.0)
+        before_high = _sample_elevation(original, cells, cell_size, 60.0, 65.0)
+        after_low = _sample_elevation(report.elevations, cells, cell_size, 60.0, 45.0)
+        after_high = _sample_elevation(report.elevations, cells, cell_size, 60.0, 65.0)
+        self.assertGreater(before_high - before_low, 10.0)
+        self.assertLess(abs(after_high - after_low), 0.1)
+        self.assertGreater(report.road_sidehill_segments, 0)
+        self.assertGreater(report.road_sidehill_bench_cells, 0)
+
+    def test_sidehill_detector_catches_cliff_beyond_near_road_shoulder(self) -> None:
+        from cwr_worldgen.terrain_solver import (
+            _line_geometry,
+            _profile,
+            _road_cross_slope_profile,
+            _road_sidehill_factor,
+        )
+
+        cells = 12
+        cell_size = 10.0
+        world_size = cells * cell_size
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), world_size)
+        road = OsmLineFeature(
+            "way/coastal-shelf-road",
+            {"highway": "residential", "width": "6"},
+            tuple(projection.to_latlon(p) for p in ((10.0, 55.0), (110.0, 55.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="coastal-shelf-road", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(road,),
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="coastal_shelf_road", heightmap_path=Path("unused.png"),
+            bbox=(0, 0, 1, 1), cells=cells, cell_size=cell_size, sea_level=-100.0,
+            solver_iterations=0, road_grade_radius=10.0, maximum_grade_adjustment=30.0,
+            max_road_objects=0, max_buildings=0, max_forest_objects=0,
+            strict_assets=False,
+        )
+        line = _line_geometry(road, projection)
+        self.assertIsNotNone(line)
+        # The road lies on a narrow flat shelf. The old single ~0.85-cell
+        # cross-section saw 50 m on both sides and reported 0% slope, even
+        # though a cliff begins only another cell beyond the downhill edge.
+        original = tuple(
+            50.0 if index // cells <= 7 else 0.0
+            for index in range(cells * cells)
+        )
+        distances, _heights = _profile(
+            line, original, spec, spec.maximum_road_grade_percent
+        )
+        cross_slopes = _road_cross_slope_profile(
+            line, original, spec, distances, 6.0
+        )
+        self.assertGreater(max(cross_slopes), 60.0)
+        self.assertGreater(_road_sidehill_factor(max(cross_slopes)), 0.0)
+
+    def test_coastal_sidehill_platform_overrides_shoreline_through_full_road_width(self) -> None:
+        from cwr_worldgen.terrain_solver import _sample_elevation, solve_terrain_constraints
+
+        cells = 12
+        cell_size = 10.0
+        world_size = cells * cell_size
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), world_size)
+        road = OsmLineFeature(
+            "way/coastal-sidehill-road",
+            {"highway": "residential", "width": "6"},
+            tuple(projection.to_latlon(p) for p in ((10.0, 55.0), (110.0, 55.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="coastal-sidehill-road", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(road,),
+        )
+        water = [False] * (cells * cells)
+        for row in range(8, cells):
+            for col in range(cells):
+                water[row * cells + col] = True
+        road_mask = [False] * (cells * cells)
+        for col in range(cells):
+            road_mask[5 * cells + col] = True
+        raster = OsmRaster(
+            cells=cells, water=tuple(water), forest=(False,) * (cells * cells),
+            farmland=(False,) * (cells * cells), urban=(False,) * (cells * cells),
+            roads=tuple(road_mask), buildings=(False,) * (cells * cells),
+            high_resolution=cells, coastline_seed_count=0,
+        )
+        row_heights = (45.0, 40.0, 35.0, 30.0, 25.0, 20.0, 12.0, 4.0, -3.0, -3.0, -3.0, -3.0)
+        original = tuple(row_heights[index // cells] for index in range(cells * cells))
+        spec = _Milestone9PlayabilitySpec(
+            name="coastal_sidehill_platform", heightmap_path=Path("unused.png"),
+            bbox=(0, 0, 1, 1), cells=cells, cell_size=cell_size, sea_level=0.0,
+            water_depth=5.0, solver_iterations=0, road_grade_radius=10.0,
+            maximum_grade_adjustment=50.0, max_road_objects=0, max_buildings=0,
+            max_forest_objects=0, strict_assets=False,
+        )
+        report = solve_terrain_constraints(original, dataset, projection, raster, spec)
+        # The full rendered-road platform and safety shoulder must be planar
+        # even where the coastal shoreline has a higher ordinary terrain priority.
+        samples = [
+            _sample_elevation(report.elevations, cells, cell_size, 60.0, z)
+            for z in (45.0, 50.0, 55.0, 60.0, 65.0)
+        ]
+        self.assertLess(max(samples) - min(samples), 0.1)
+        self.assertGreater(report.road_sidehill_segments, 0)
+        self.assertIn("sidehill-road-bench", report.category_adjustments)
+
+    def test_steep_road_climbing_hill_does_not_trigger_sidehill_bench(self) -> None:
+        from cwr_worldgen.terrain_solver import solve_terrain_constraints
+
+        cells = 12
+        cell_size = 10.0
+        world_size = cells * cell_size
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), world_size)
+        road = OsmLineFeature(
+            "way/uphill-road",
+            {"highway": "residential", "width": "6"},
+            tuple(projection.to_latlon(p) for p in ((55.0, 10.0), (55.0, 110.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="uphill-road", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(road,),
+        )
+        raster = OsmRaster(
+            cells=cells, water=(False,) * (cells * cells),
+            forest=(False,) * (cells * cells), farmland=(False,) * (cells * cells),
+            urban=(False,) * (cells * cells), roads=(False,) * (cells * cells),
+            buildings=(False,) * (cells * cells), high_resolution=cells,
+            coastline_seed_count=0,
+        )
+        original = tuple((index // cells) * 6.0 for index in range(cells * cells))
+        spec = _Milestone9PlayabilitySpec(
+            name="uphill_road", heightmap_path=Path("unused.png"),
+            bbox=(0, 0, 1, 1), cells=cells, cell_size=cell_size, sea_level=-100.0,
+            solver_iterations=0, road_grade_radius=10.0, maximum_grade_adjustment=30.0,
+            max_road_objects=0, max_buildings=0, max_forest_objects=0,
+            strict_assets=False,
+        )
+        report = solve_terrain_constraints(original, dataset, projection, raster, spec)
+        self.assertEqual(report.road_sidehill_segments, 0)
+        self.assertEqual(report.road_sidehill_bench_cells, 0)
+
+    def test_ordinary_road_below_global_water_plane_is_lifted_without_water_mask(self) -> None:
+        from cwr_worldgen.terrain_solver import (
+            ROAD_WATER_MINIMUM_CLEARANCE_METRES,
+            solve_terrain_constraints,
+        )
+
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        road = OsmLineFeature(
+            "way/unmapped-submerged-road",
+            {"highway": "residential"},
+            tuple(projection.to_latlon(p) for p in ((20.0, 100.0), (180.0, 100.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="unmapped-submerged-road", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(road,),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(False,) * 64,
+            farmland=(False,) * 64, urban=(False,) * 64, roads=(False,) * 64,
+            buildings=(False,) * 64, high_resolution=8, coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="unmapped_submerged_road", heightmap_path=Path("unused.png"),
+            bbox=(0, 0, 1, 1), cells=8, cell_size=25.0, sea_level=0.0,
+            solver_iterations=0, max_road_objects=0, max_buildings=0,
+            max_forest_objects=0, strict_assets=False,
+        )
+        report = solve_terrain_constraints(
+            (-2.0,) * 64, dataset, projection, raster, spec,
+        )
+        self.assertGreaterEqual(
+            report.elevations[4 * 8 + 4],
+            spec.sea_level + ROAD_WATER_MINIMUM_CLEARANCE_METRES,
+        )
+        self.assertGreater(report.road_water_fill_cells, 0)
+
+    def test_dry_explicit_bridge_emits_no_bridge_object(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        bridge = OsmLineFeature(
+            "way/dry-bridge", {"highway": "secondary", "bridge": "yes"},
+            tuple(projection.to_latlon(p) for p in ((20.0, 100.0), (180.0, 100.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="dry-bridge", element_count=1, coastlines=(), water=(),
+            forests=(), farmland=(), urban=(), roads=(bridge,),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(False,) * 64, farmland=(False,) * 64,
+            urban=(False,) * 64, roads=(False,) * 64, buildings=(False,) * 64,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        for procedural in (False, True):
+            spec = _Milestone9PlayabilitySpec(
+                name=f"dry_bridge_{int(procedural)}", heightmap_path=Path("unused.png"),
+                bbox=(0, 0, 1, 1), cells=8, cell_size=25.0, sea_level=0.0,
+                max_road_objects=0, max_buildings=0, max_forest_objects=0,
+                procedural_bridges=procedural, strict_assets=False,
+            )
+            result = generate_world_objects(
+                dataset, projection, raster, (5.0,) * 64, spec, include_roads=False
+            )
+            self.assertEqual(result.bridge_segments, 0)
+            self.assertEqual(result.bridge_objects, 0)
+            self.assertFalse(any(
+                obj.model_path == NOGOVA_BRIDGE_MODEL or r"\i\br_" in obj.model_path.casefold()
+                for obj in result.objects
+            ))
+
     def test_stock_nogova_bridge_stays_near_road_level_over_water(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
         bridge = OsmLineFeature(
@@ -5193,37 +6015,47 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         self.assertNotIn("bridge-support", report.category_adjustments)
         self.assertEqual(report.elevations, baseline.elevations)
 
-    def test_procedural_bridge_uses_flat_raised_underfill(self) -> None:
+    def test_procedural_bridge_preserves_water_and_only_underfills_dry_approaches(self) -> None:
         from cwr_worldgen.terrain_solver import solve_terrain_constraints
 
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
         bridge = OsmLineFeature(
-            "way/procedural-flat-underfill",
+            "way/procedural-water-underfill",
             {"highway": "secondary", "bridge": "yes"},
             tuple(projection.to_latlon(p) for p in ((20.0, 100.0), (180.0, 100.0))),
         )
         dataset = OsmDataset(
-            source_generator="bridge-flat-underfill", element_count=1,
+            source_generator="bridge-water-underfill", element_count=1,
             coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(bridge,),
         )
+        water = [False] * 64
+        for row in range(3, 5):
+            for col in range(2, 6):
+                water[row * 8 + col] = True
         raster = OsmRaster(
-            cells=8, water=(False,) * 64, forest=(False,) * 64, farmland=(False,) * 64,
+            cells=8, water=tuple(water), forest=(False,) * 64, farmland=(False,) * 64,
             urban=(False,) * 64, roads=(True,) * 64, buildings=(False,) * 64,
             high_resolution=8, coastline_seed_count=0,
         )
-        original = tuple(8.0 if 2 <= (index % 8) <= 5 else 12.0 for index in range(64))
+        original = tuple(
+            -3.0 if water[index] else 12.0
+            for index in range(64)
+        )
         spec = _Milestone9PlayabilitySpec(
-            name="bridge_flat_fill", heightmap_path=Path("unused.png"), bbox=(0, 0, 1, 1),
-            cells=8, cell_size=25.0, sea_level=0.0, solver_iterations=0,
+            name="bridge_water_fill", heightmap_path=Path("unused.png"), bbox=(0, 0, 1, 1),
+            cells=8, cell_size=25.0, sea_level=0.0, water_depth=5.0, solver_iterations=0,
             procedural_bridges=True, max_road_objects=0, max_buildings=0,
             max_forest_objects=0, strict_assets=False,
         )
         report = solve_terrain_constraints(original, dataset, projection, raster, spec)
         self.assertIn("bridge-underfill", report.category_adjustments)
+        self.assertIn("water", report.category_adjustments)
+        # The actual bridge opening stays below the global water plane while
+        # dry approach/support cells receive the flat support terrace.
         centre_row = report.elevations[4 * 8:5 * 8]
-        bridge_values = centre_row[1:7]
-        self.assertLess(max(bridge_values) - min(bridge_values), 0.06)
-        self.assertGreater(min(bridge_values), 10.9)
+        self.assertTrue(all(value < spec.sea_level for value in centre_row[2:6]))
+        self.assertTrue(all(value > spec.sea_level for value in (centre_row[1], centre_row[6])))
+
 
     def test_stock_nogova_bridge_only_clamps_just_above_water_without_mask(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
@@ -5295,7 +6127,13 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             barriers_enabled=False, rural_vegetation_enabled=False, wetland_reeds_enabled=False,
             rocky_forest_fallback_enabled=False, steep_hill_bushes_enabled=False, strict_assets=False,
         )
-        result = generate_world_objects(dataset, projection, raster, (0.0,) * 64, spec, include_roads=False)
+        elevations = [0.0] * 64
+        for row in range(3, 5):
+            for col in range(2, 6):
+                elevations[row * 8 + col] = -2.0
+        result = generate_world_objects(
+            dataset, projection, raster, tuple(elevations), spec, include_roads=False
+        )
         bridge_objects = [obj for obj in result.objects if obj.model_path == NOGOVA_BRIDGE_MODEL]
         self.assertGreater(len(bridge_objects), 0)
 
@@ -5328,7 +6166,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             strict_assets=False,
         )
         result = generate_world_objects(
-            dataset, projection, raster, (0.0,) * 64, spec, include_roads=False
+            dataset, projection, raster, (-2.0,) * 64, spec, include_roads=False
         )
         bridge_objects = [
             obj for obj in result.objects
@@ -5341,7 +6179,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         paths = {obj.model_path.casefold() for obj in bridge_objects}
         self.assertTrue(all("br_single_" in path for path in paths))
         self.assertTrue(all("_w" in path and "_l" in path for path in paths))
-        expected_origin = spec.bridge_deck_clearance - GENERATED_BRIDGE_ROADWAY_HEIGHT_METRES
+        expected_origin = spec.sea_level + 0.35 - GENERATED_BRIDGE_ROADWAY_HEIGHT_METRES
         self.assertTrue(all(abs(obj.y - expected_origin) < 1e-6 for obj in bridge_objects))
         self.assertTrue(all(abs(obj.pitch_degrees) < 1e-9 for obj in bridge_objects))
         self.assertTrue(all(abs(obj.pitch_degrees) < 1e-9 for obj in bridge_objects))
@@ -5490,11 +6328,11 @@ class InfrastructureAndRuralTests(unittest.TestCase):
                 if world_x < 65.0 or world_x > 185.0:
                     value = 6.0
                 elif world_x < 95.0:
-                    value = 6.0 - (world_x - 65.0) / 30.0 * 4.0
+                    value = 6.0 - (world_x - 65.0) / 30.0 * 8.0
                 elif world_x > 155.0:
-                    value = 2.0 + (world_x - 155.0) / 30.0 * 4.0
+                    value = -2.0 + (world_x - 155.0) / 30.0 * 8.0
                 else:
-                    value = 2.0
+                    value = -2.0
                 elevations.append(value)
         spec = _Milestone9PlayabilitySpec(
             name="cwr_beach_bridge", heightmap_path=Path("unused.png"), bbox=(0, 0, 1, 1),
@@ -5697,7 +6535,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             strict_assets=False,
         )
         result = generate_world_objects(
-            dataset, projection, raster, (0.0,) * 64, spec, include_roads=False
+            dataset, projection, raster, (-2.0,) * 64, spec, include_roads=False
         )
         bridge_objects = [
             obj for obj in result.objects if obj.model_path == NOGOVA_BRIDGE_MODEL
@@ -5717,7 +6555,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             ),
             projection,
             raster,
-            (0.0,) * 64,
+            (-2.0,) * 64,
             replace(spec, maximum_bridge_objects=3),
             include_roads=False,
         )
@@ -5745,6 +6583,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         for row in range(3, 6):
             for col in range(2, 6):
                 elevations[row * 8 + col] = 6.0
+        elevations[4 * 8 + 4] = -2.0
         spec = _Milestone9PlayabilitySpec(
             name="cwr_bridge_footprint", heightmap_path=Path("unused.png"),
             bbox=(0, 0, 1, 1), cells=8, cell_size=25.0, sea_level=0.0,
@@ -5788,7 +6627,10 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         raster = OsmRaster(cells=8, water=(False,)*64, forest=(False,)*64, farmland=(False,)*64, urban=(False,)*64, roads=(False,)*64, buildings=(False,)*64, high_resolution=8, coastline_seed_count=0)
         spec = _Milestone9PlayabilitySpec(name="cwr_m14_features", heightmap_path=Path("unused.png"), bbox=(0,0,1,1), cells=8, cell_size=25.0, max_road_objects=0, max_buildings=0, max_forest_objects=0,
             procedural_bridges=False, forest_undergrowth_enabled=False, forest_border_enabled=False, ditch_grass_enabled=False, strict_assets=False)
-        elevations = tuple(5.0 + (x * 0.1) for _z in range(8) for x in range(8))
+        elevations = tuple(
+            -2.0 if z == 4 and 2 <= x <= 5 else 5.0 + (x * 0.1)
+            for z in range(8) for x in range(8)
+        )
         first = generate_world_objects(dataset, projection, raster, elevations, spec, include_roads=False)
         second = generate_world_objects(dataset, projection, raster, elevations, spec, include_roads=False)
         self.assertEqual(first.objects, second.objects)
@@ -5825,6 +6667,201 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             # world-local bridge/rock infrastructure models.
             self.assertEqual(assets.generated_variants, 0)
             self.assertFalse(any("/br_" in path for path in assets.model_files))
+
+    def test_mapped_nonmetal_fences_use_only_stock_models(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        fence = OsmLineFeature(
+            "way/mapped-fence",
+            {"barrier": "fence", "fence_type": "post_and_rail", "material": "wood"},
+            tuple(projection.to_latlon(point) for point in ((20.0, 100.0), (180.0, 100.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="stock-mapped-fence", element_count=1,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(),
+            barriers=(fence,),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(False,) * 64,
+            farmland=(False,) * 64, urban=(False,) * 64, roads=(False,) * 64,
+            buildings=(False,) * 64, high_resolution=8, coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="mapped_stock_fence", heightmap_path=Path("unused.png"),
+            bbox=(0, 0, 1, 1), cells=8, cell_size=25.0,
+            max_road_objects=0, max_buildings=0, max_forest_objects=0,
+            barriers_enabled=True, maximum_barrier_objects=100,
+            forest_undergrowth_enabled=False, forest_border_enabled=False,
+            ditch_grass_enabled=False, rural_vegetation_enabled=False,
+            bridges_enabled=False, strict_assets=False,
+        )
+        result = generate_world_objects(
+            dataset, projection, raster, (2.0,) * 64, spec, include_roads=False
+        )
+        fences = [obj for obj in result.objects if obj.model_path in STOCK_FARMLAND_FENCE_MODELS]
+        self.assertTrue(fences)
+        self.assertEqual(len({obj.model_path for obj in fences}), 1)
+        self.assertFalse(any(r"\i\bar_fence_" in obj.model_path.casefold() for obj in result.objects))
+
+    def test_farmland_boundaries_use_only_stock_fence_models_and_leave_road_gap(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        ll = projection.to_latlon
+        field = self._polygon(
+            projection,
+            "way/field",
+            {"landuse": "farmland"},
+            (20.0, 20.0, 180.0, 180.0),
+        )
+        road = OsmLineFeature(
+            "way/farm-track",
+            {"highway": "track"},
+            tuple(ll(point) for point in ((100.0, 0.0), (100.0, 200.0))),
+        )
+        dataset = OsmDataset(
+            source_generator="stock-field-fence",
+            element_count=2,
+            coastlines=(),
+            water=(),
+            forests=(),
+            farmland=(field,),
+            urban=(),
+            roads=(road,),
+            barriers=(),
+        )
+        raster = OsmRaster(
+            cells=8,
+            water=(False,) * 64,
+            forest=(False,) * 64,
+            farmland=(True,) * 64,
+            urban=(False,) * 64,
+            roads=(False,) * 64,
+            buildings=(False,) * 64,
+            high_resolution=8,
+            coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="cwr_stock_field_fence",
+            heightmap_path=Path("unused.png"),
+            bbox=(0, 0, 1, 1),
+            cells=8,
+            cell_size=25.0,
+            max_road_objects=0,
+            max_buildings=0,
+            max_forest_objects=0,
+            forest_undergrowth_enabled=False,
+            forest_border_enabled=False,
+            ditch_grass_enabled=False,
+            rural_vegetation_enabled=False,
+            bridges_enabled=False,
+            strict_assets=False,
+        )
+        first = generate_world_objects(
+            dataset, projection, raster, (2.0,) * 64, spec, include_roads=False
+        )
+        second = generate_world_objects(
+            dataset, projection, raster, (2.0,) * 64, spec, include_roads=False
+        )
+        self.assertEqual(first.objects, second.objects)
+        fences = [obj for obj in first.objects if obj.model_path in STOCK_FARMLAND_FENCE_MODELS]
+        self.assertTrue(fences)
+        fence_models = {obj.model_path for obj in fences}
+        self.assertTrue(fence_models.issubset(set(STOCK_FARMLAND_FENCE_MODELS)))
+        self.assertEqual(
+            len(fence_models), 1,
+            "one farmland field must use one stock fence family around its full perimeter",
+        )
+        self.assertFalse(any("\\i\\bar" in obj.model_path.casefold() for obj in fences))
+        # The vertical farm track crosses the north/south field boundaries at
+        # x=100. Segments around those crossings are omitted instead of placing
+        # an invisible vehicle trap across the track.
+        crossing_band = [obj for obj in fences if 94.0 <= obj.x <= 106.0]
+        self.assertFalse(crossing_band)
+
+    def test_adjacent_fields_do_not_get_parallel_same_type_fences(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        left = self._polygon(
+            projection, "way/left", {"landuse": "farmland"}, (20.0, 20.0, 100.0, 180.0)
+        )
+        right = self._polygon(
+            projection, "way/right", {"landuse": "farmland"}, (101.0, 20.0, 180.0, 180.0)
+        )
+        dataset = OsmDataset(
+            source_generator="adjacent-field-fences", element_count=2,
+            coastlines=(), water=(), forests=(), farmland=(left, right), urban=(), roads=(),
+            barriers=(),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(False,) * 64, farmland=(True,) * 64,
+            urban=(False,) * 64, roads=(False,) * 64, buildings=(False,) * 64,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="adjacent_field_fences", heightmap_path=Path("unused.png"),
+            bbox=(0, 0, 1, 1), cells=8, cell_size=25.0, max_road_objects=0,
+            max_buildings=0, max_forest_objects=0, barriers_enabled=True,
+            maximum_barrier_objects=1000, forest_undergrowth_enabled=False,
+            forest_border_enabled=False, ditch_grass_enabled=False,
+            rural_vegetation_enabled=False, bridges_enabled=False, strict_assets=False,
+        )
+        with (
+            patch(
+                "cwr_worldgen.osm._selected_farmland_fence_field_keys",
+                return_value=frozenset({"way/left", "way/right"}),
+            ),
+            patch(
+                "cwr_worldgen.osm.stock_farmland_fence_model",
+                return_value=STOCK_FARMLAND_FENCE_MODELS[0],
+            ),
+        ):
+            result = generate_world_objects(
+                dataset, projection, raster, (2.0,) * 64, spec, include_roads=False
+            )
+
+        shared_boundary = [
+            obj for obj in result.objects
+            if obj.model_path == STOCK_FARMLAND_FENCE_MODELS[0]
+            and 98.0 <= obj.x <= 103.0
+            and 25.0 <= obj.z <= 175.0
+        ]
+        self.assertTrue(shared_boundary)
+        self.assertEqual(
+            len({round(obj.x, 1) for obj in shared_boundary}),
+            1,
+            "same-type adjacent field fences should collapse to one shared line",
+        )
+
+    def test_farmland_fence_default_selects_quarter_of_fields(self) -> None:
+        from cwr_worldgen.osm import (
+            FARMLAND_FENCE_FIELD_PERCENT,
+            _selected_farmland_fence_field_keys,
+        )
+
+        ring = GeoPolygon(((0.0, 0.0), (0.0, 0.001), (0.001, 0.001), (0.001, 0.0), (0.0, 0.0)))
+        features = tuple(
+            OsmPolygonFeature(
+                f"way/field-{index}",
+                {"landuse": "farmland"},
+                (ring,),
+            )
+            for index in range(20)
+        )
+        selected = _selected_farmland_fence_field_keys(
+            features, "quarter-fields", FARMLAND_FENCE_FIELD_PERCENT
+        )
+        self.assertEqual(FARMLAND_FENCE_FIELD_PERCENT, 25.0)
+        self.assertEqual(len(selected), 5)
+
+    def test_meadows_and_natural_grassland_are_eligible_for_stock_field_fences(self) -> None:
+        from cwr_worldgen.osm import _selected_farmland_fence_field_keys
+
+        ring = GeoPolygon(((0.0, 0.0), (0.0, 0.001), (0.001, 0.001), (0.001, 0.0), (0.0, 0.0)))
+        features = (
+            OsmPolygonFeature("way/farm", {"landuse": "farmland"}, (ring,)),
+            OsmPolygonFeature("way/meadow", {"landuse": "meadow"}, (ring,)),
+            OsmPolygonFeature("way/grassland", {"natural": "grassland"}, (ring,)),
+            OsmPolygonFeature("way/orchard", {"landuse": "orchard"}, (ring,)),
+        )
+        selected = _selected_farmland_fence_field_keys(features, "all-rural-fences", 100.0)
+        self.assertEqual(selected, frozenset({"way/farm", "way/meadow", "way/grassland"}))
 
     def test_hedge_grounding_uses_full_widened_footprint(self) -> None:
         from cwr_worldgen.osm import _hedge_anchor_height, _infrastructure_anchor
@@ -6324,26 +7361,38 @@ class InfrastructureAndRuralTests(unittest.TestCase):
 
     def test_default_hill_thresholds_use_performance_polygon_ladder(self) -> None:
         spec = Milestone9Spec(source_dir=Path("unused"))
-        self.assertEqual(spec.forest_maximum_block_relief, 8.0)
-        self.assertEqual(spec.forest_everon_steep_maximum_relief, 18.0)
-        self.assertEqual(spec.forest_block_maximum_burial, 8.0)
+        self.assertEqual(spec.forest_ground_clearance, 0.02)
+        self.assertEqual(spec.forest_maximum_block_relief, 3.0)
+        self.assertEqual(spec.forest_everon_steep_maximum_relief, 8.0)
+        self.assertEqual(spec.forest_block_maximum_burial, 2.0)
+        self.assertEqual(spec.forest_block_maximum_float, 0.20)
         self.assertEqual(spec.forest_block_maximum_ground_sink, 0.0)
-        self.assertEqual(spec.forest_everon_steep_maximum_burial, 18.0)
+        self.assertEqual(spec.forest_everon_steep_maximum_burial, 3.0)
+        self.assertEqual(spec.forest_everon_steep_maximum_float, 0.20)
         self.assertEqual(spec.forest_everon_steep_maximum_ground_sink, 0.0)
         self.assertTrue(spec.forest_severe_hill_fallback)
         self.assertEqual(spec.forest_severe_hill_relief, 5.0)
         self.assertEqual(spec.forest_severe_hill_trees_per_block, 10)
-        self.assertEqual(spec.forest_polygon_sink_fraction, 0.5)
-        self.assertEqual(spec.forest_single_tree_maximum_float, 0.5)
+        self.assertEqual(spec.forest_polygon_sink_fraction, 0.0)
+        self.assertEqual(spec.forest_single_tree_root_sink, 0.05)
+        self.assertEqual(spec.forest_single_tree_maximum_burial, 1.50)
+        self.assertEqual(spec.forest_single_tree_maximum_float, 0.15)
+        self.assertTrue(spec.forest_gap_infill_enabled)
+        self.assertEqual(spec.forest_gap_infill_spacing, 25.0)
         self.assertEqual(spec.bridge_module_length, 30.0)
-        self.assertFalse(spec.procedural_bridges)
-        self.assertEqual(spec.forest_cluster_maximum_relief, 48.0)
+        self.assertTrue(spec.procedural_bridges)
+        self.assertEqual(spec.forest_cluster_maximum_relief, 24.0)
+        self.assertEqual(spec.forest_cluster_tree_maximum_float, 0.20)
+        self.assertEqual(spec.forest_cluster_bush_maximum_float, 0.60)
         self.assertEqual(spec.rocky_forest_rocks_per_patch, 3)
         self.assertEqual(spec.rocky_forest_spread, 18.0)
         with self.assertRaises(ValueError):
             replace(spec, rocky_forest_rocks_per_patch=0).validate()
         with self.assertRaises(ValueError):
             replace(spec, forest_polygon_sink_fraction=1.01).validate()
+        replace(spec, forest_severe_hill_trees_per_block=32).validate()
+        with self.assertRaises(ValueError):
+            replace(spec, forest_severe_hill_trees_per_block=33).validate()
 
 
     def test_road_fitting_reports_granular_progress_without_changing_output(self) -> None:

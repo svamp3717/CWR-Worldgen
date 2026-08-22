@@ -28,10 +28,12 @@ from .osm import (
     _maximum_polygon_elevation,
     _oriented_rectangle,
     road_bridge_crosses_ditch_only,
+    road_span_has_in_game_water,
     road_is_dirt,
     road_is_gravel,
     road_model_for_tags,
     road_is_supported,
+    projected_road_polylines,
     road_width_metres,
 )
 
@@ -506,12 +508,15 @@ def _fit_terrain_patch_road_objects(
     if progress_callback is not None:
         progress_callback(0, f"Projecting {total_roads:,} normalized road lines")
     progress_step = max(1, total_roads // 20)
-    for feature_index, feature in enumerate(dataset.roads, start=1):
+    road_polylines = projected_road_polylines(dataset, projection)
+    for feature_index, (feature, projected_points) in enumerate(
+        zip(dataset.roads, road_polylines), start=1
+    ):
         if progress_callback is not None and (feature_index == total_roads or feature_index % progress_step == 0):
             progress_callback(min(18, round(feature_index / max(1, total_roads) * 18)), f"Projected road lines {feature_index:,}/{total_roads:,}")
         if not road_is_supported(feature.tags, include_minor=spec.include_minor_roads):
             continue
-        points = _clean_road_points([projection.to_world(point) for point in feature.points])
+        points = _clean_road_points(projected_points)
         if len(points) < 2:
             continue
         model = road_model_for_tags(spec, feature.tags)
@@ -1309,7 +1314,10 @@ def _fit_stock_piece_road_objects(
     if progress_callback is not None:
         progress_callback(0, f"Projecting {total_roads:,} normalized road lines")
     projection_step = max(1, total_roads // 20)
-    for feature_index, feature in enumerate(dataset.roads, start=1):
+    road_polylines = projected_road_polylines(dataset, projection)
+    for feature_index, (feature, projected_points) in enumerate(
+        zip(dataset.roads, road_polylines), start=1
+    ):
         if progress_callback is not None and (
             feature_index == total_roads or feature_index % projection_step == 0
         ):
@@ -1319,18 +1327,24 @@ def _fit_stock_piece_road_objects(
             )
         if not road_is_supported(feature.tags, include_minor=spec.include_minor_roads):
             continue
+        points = tuple(_clean_road_points(projected_points))
+        if len(points) < 2:
+            continue
         if (
             bool(getattr(spec, "bridges_enabled", True))
             and not bool(getattr(spec, "procedural_bridges", True))
             and _road_is_explicit_bridge(feature.tags)
             and not road_bridge_crosses_ditch_only(feature, dataset, projection)
+            and road_span_has_in_game_water(
+                points, elevations,
+                cells=spec.cells, cell_size=spec.cell_size,
+                sea_level=spec.sea_level,
+                width=max(6.0, road_width_metres(feature.tags)),
+            )
         ):
             # most_stred30 is the actual stock bridge/road model. Do not also
-            # lay sil/kos road pieces through the same OSM bridge span; the
-            # overlapping road simulations can fight for rendering/road links.
-            continue
-        points = tuple(_clean_road_points([projection.to_world(point) for point in feature.points]))
-        if len(points) < 2:
+            # lay sil/kos road pieces through a span that genuinely has CWA
+            # water below it. Dry bridge tags fall through to ordinary roads.
             continue
         dirt = road_is_dirt(feature.tags)
         model = road_model_for_tags(spec, feature.tags)
@@ -1790,10 +1804,9 @@ def _road_seed_targets(
     values: dict[int, list[float]] = {}
     max_rise_ratio = spec.maximum_road_grade_percent / 100.0
     sample_spacing = max(2.0, spec.cell_size * 0.45)
-    for feature in dataset.roads:
+    for feature, points in zip(dataset.roads, projected_road_polylines(dataset, projection)):
         if not road_is_supported(feature.tags, include_minor=spec.include_minor_roads):
             continue
-        points = [projection.to_world(point) for point in feature.points]
         samples: list[tuple[float, float, float, float]] = []
         cumulative = 0.0
         for start, end in zip(points, points[1:]):
@@ -1893,10 +1906,9 @@ def _road_slope_percent(
 ) -> float:
     maximum = 0.0
     spacing = max(2.0, spec.cell_size * 0.35)
-    for feature in dataset.roads:
+    for feature, points in zip(dataset.roads, projected_road_polylines(dataset, projection)):
         if not road_is_supported(feature.tags, include_minor=spec.include_minor_roads):
             continue
-        points = [projection.to_world(point) for point in feature.points]
         for start, end in zip(points, points[1:]):
             length = math.dist(start, end)
             if length < 1.0:
