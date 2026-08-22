@@ -1670,7 +1670,7 @@ def _validate_milestone4(
         ),
     ))
     checks.append((
-        "Road object budget covers the complete imported network",
+        "Road network emitted without object-budget truncation",
         (not road_fit.truncated) or spec.max_road_objects == 0,
         (
             f"objects={len(road_fit.objects)}, limit={spec.max_road_objects}, "

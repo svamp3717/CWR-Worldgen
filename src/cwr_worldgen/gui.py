@@ -2020,7 +2020,7 @@ class WorldgenGui(tk.Tk):
             ("Rock scatter radius (m)", "rocky_forest_spread", "18"),
             ("Base lake smoothing at 6.4 km (cells)", "lake_shore_smoothing_cells", "8"),
             ("Maximum lake-bank slope (%)", "lake_shore_max_slope", "8"),
-            ("Maximum road objects", "max_road_objects", str(DEFAULT_MAX_ROAD_OBJECTS)),
+            ("Road object warning threshold", "max_road_objects", str(DEFAULT_MAX_ROAD_OBJECTS)),
             ("Maximum sidewalk objects", "max_sidewalk_objects", "30000"),
             ("Sidewalk nominal width / offset (m)", "sidewalk_width", "1.8"),
             ("Stock sidewalk tile spacing (m)", "sidewalk_segment_length", "5.0"),

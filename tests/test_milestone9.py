@@ -848,7 +848,7 @@ class RoadPieceFittingTests(unittest.TestCase):
         self.assertTrue(all(obj.model_path != NOGOVA_BRIDGE_MODEL for obj in stock.objects))
 
 
-    def test_stock_roads_reject_a_budget_that_would_emit_a_partial_network(self) -> None:
+    def test_stock_roads_log_and_ignore_an_exceeded_positive_budget(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
         road = OsmLineFeature(
             "way/complete-network",
@@ -871,16 +871,21 @@ class RoadPieceFittingTests(unittest.TestCase):
             max_road_objects=2,
             strict_assets=False,
         )
-        with self.assertRaisesRegex(
-            ValueError,
-            r"road object budget is too small.*requires .*increase --max-road-objects",
-        ):
-            fit_road_objects(
-                dataset,
-                projection,
-                [0.0] * (spec.cells * spec.cells),
-                spec,
-            )
+        progress: list[tuple[int, str]] = []
+        report = fit_road_objects(
+            dataset,
+            projection,
+            [0.0] * (spec.cells * spec.cells),
+            spec,
+            progress_callback=lambda percent, message: progress.append((percent, message)),
+        )
+        self.assertGreater(len(report.objects), spec.max_road_objects)
+        self.assertFalse(report.truncated)
+        self.assertTrue(any(
+            "WARNING: road object warning threshold exceeded" in message
+            and "Continuing with the complete road network" in message
+            for _percent, message in progress
+        ))
 
     def test_zero_road_budget_disables_roads_without_truncation(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 0.01, 0.01), 1000.0)
