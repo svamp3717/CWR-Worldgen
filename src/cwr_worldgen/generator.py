@@ -88,6 +88,7 @@ from .osm import (
     STOCK_SETTLEMENT_DETAIL_MODELS,
     apply_water_elevations,
     attribution_text,
+    _object_threshold_warning,
     forest_block_intersects_road_corridors,
     generate_world_objects,
     plan_building_placements,
@@ -3088,6 +3089,30 @@ def build_milestone4(
         building_placement_plans=building_placement_plans,
         building_plans_truncated=building_plans_truncated,
     )
+    if placement_cache_hit and bool(getattr(spec, "advisory_object_limits", False)):
+        cached_thresholds = (
+            ("sidewalk object", nonroads.sidewalk_objects, getattr(spec, "maximum_sidewalk_objects", 30000)),
+            ("street furniture object", nonroads.street_furniture_objects, getattr(spec, "maximum_street_furniture_objects", 12000)),
+            ("primary forest object", nonroads.forest_objects, spec.max_forest_objects),
+            ("forest undergrowth object", nonroads.forest_undergrowth_objects, getattr(spec, "forest_undergrowth_maximum_objects", 120000)),
+            ("steep-hill bush object", nonroads.steep_hill_bush_objects, getattr(spec, "maximum_steep_hill_bush_objects", 80000)),
+            ("forest border object", nonroads.forest_border_objects, getattr(spec, "forest_border_maximum_objects", 2000)),
+            ("ditch grass object", nonroads.ditch_grass_objects, getattr(spec, "maximum_ditch_grass_objects", 2000)),
+            ("barrier object", nonroads.barrier_objects, getattr(spec, "maximum_barrier_objects", 4000)),
+            ("bridge object", nonroads.bridge_objects, getattr(spec, "maximum_bridge_objects", 1000)),
+            ("residential infill building", nonroads.residential_infill_objects, getattr(spec, "maximum_residential_infill_buildings", 1500)),
+            ("rural vegetation object", nonroads.tree_row_objects + nonroads.orchard_objects + nonroads.vineyard_objects + nonroads.scrub_objects + nonroads.rural_rock_objects, getattr(spec, "maximum_rural_vegetation_objects", 3000)),
+            ("meadow grass object", nonroads.meadow_grass_objects, getattr(spec, "maximum_meadow_grass_objects", 20000)),
+            ("hay bale object", nonroads.haybale_objects, getattr(spec, "maximum_haybale_objects", 800)),
+            ("wetland reed object", nonroads.wetland_reed_objects, getattr(spec, "maximum_wetland_reed_objects", 100000)),
+            ("rocky forest object", nonroads.rocky_forest_objects, getattr(spec, "maximum_rocky_forest_objects", 1200)),
+            ("mapped tree object", nonroads.mapped_tree_objects, getattr(spec, "maximum_mapped_tree_objects", 5000)),
+            ("utility object", nonroads.utility_objects, getattr(spec, "maximum_utility_objects", 3000)),
+        )
+        for label, generated_count, configured_threshold in cached_thresholds:
+            warning = _object_threshold_warning(label, generated_count, configured_threshold)
+            if warning is not None:
+                report_progress(66, warning)
     report_progress(67, "Applying forest and rocky terrain materials")
     material_indices, surface_report, placement_surface_counts = _placement_driven_surface_overlay(
         material_indices, surface_report, nonroads, raster, spec, slopes=slopes
@@ -3106,6 +3131,15 @@ def build_milestone4(
         if site_library is not None
         else SemanticGenerationResult((), 0, 0, 0, 0, 0, 0.0)
     )
+    if bool(getattr(spec, "advisory_object_limits", False)):
+        semantic_thresholds = (
+            ("semantic landmark object", semantic.bus_stop_objects, getattr(spec, "maximum_landmark_objects", 1000)),
+            ("cemetery grave object", semantic.grave_objects, getattr(spec, "maximum_grave_objects", 12000)),
+        )
+        for label, generated_count, configured_threshold in semantic_thresholds:
+            warning = _object_threshold_warning(label, generated_count, configured_threshold)
+            if warning is not None:
+                report_progress(70, warning)
     report_progress(71, "Ordering roads, trees, buildings and infrastructure")
     all_objects = _assemble_world_objects(
         road_fit.objects, nonroads, semantic.objects, renumber=False

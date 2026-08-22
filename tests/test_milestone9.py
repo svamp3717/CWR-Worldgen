@@ -869,6 +869,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             cells=40,
             cell_size=25.0,
             max_road_objects=2,
+            advisory_object_limits=True,
             strict_assets=False,
         )
         progress: list[tuple[int, str]] = []

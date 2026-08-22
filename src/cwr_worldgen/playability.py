@@ -25,6 +25,7 @@ from .osm import (
     OsmDataset,
     OsmLineFeature,
     OsmRaster,
+    _advisory_object_limit,
     _maximum_polygon_elevation,
     _oriented_rectangle,
     road_bridge_crosses_ditch_only,
@@ -500,6 +501,10 @@ def _fit_terrain_patch_road_objects(
     chain_count = 0
     truncated = False
     next_id = starting_id
+    road_limit = _advisory_object_limit(
+        spec.max_road_objects,
+        enabled=bool(getattr(spec, "advisory_object_limits", False)),
+    )
     skipped_short_runs = 0
     maximum_clearance = 0.0
 
@@ -580,7 +585,7 @@ def _fit_terrain_patch_road_objects(
 
             run_chain: list[WorldObject] = []
             for axis_start, axis_end in axis_ranges:
-                if len(objects) >= spec.max_road_objects:
+                if len(objects) >= road_limit:
                     truncated = True
                     break
                 start_x, start_z, _ = measure.point(axis_start)
@@ -1614,14 +1619,22 @@ def _fit_stock_piece_road_objects(
             59,
             f"Road object plan requires {required_objects:,}; budget {spec.max_road_objects:,}",
         )
-    if required_objects > spec.max_road_objects and progress_callback is not None:
-        progress_callback(
-            59,
-            "WARNING: road object warning threshold exceeded: "
-            f"requires {required_objects:,} objects, configured threshold is "
-            f"{spec.max_road_objects:,}. Continuing with the complete road network; "
-            "--max-road-objects is advisory unless set to 0.",
-        )
+    if required_objects > spec.max_road_objects:
+        if bool(getattr(spec, "advisory_object_limits", False)):
+            if progress_callback is not None:
+                progress_callback(
+                    59,
+                    "WARNING: road object warning threshold exceeded: "
+                    f"requires {required_objects:,} objects, configured threshold is "
+                    f"{spec.max_road_objects:,}. Continuing with the complete road network.",
+                )
+        else:
+            raise ValueError(
+                "road object budget is too small for a complete network: "
+                f"requires {required_objects:,} objects, limit is {spec.max_road_objects:,}; "
+                f"increase --max-road-objects to at least {required_objects:,}. "
+                "Partial road networks are not emitted."
+            )
 
     objects: list[WorldObject] = []
     next_id = starting_id

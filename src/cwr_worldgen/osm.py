@@ -180,6 +180,28 @@ PEDESTRIAN_ONLY_HIGHWAYS = frozenset({"path", "footway", "cycleway", "bridleway"
 DEFAULT_NEARBY_BUILDING_TEXTURE_MATCH_DISTANCE_METRES = 90.0
 MINIMUM_NEARBY_BUILDING_TEXTURE_MATCH_CLUSTER = 3
 
+# User-configurable object-count "maximums" are advisory thresholds.  A positive
+# value warns when generation exceeds it but never truncates the category; zero
+# retains the existing explicit meaning of disabling that category.
+_ADVISORY_OBJECT_LIMIT_SENTINEL = 1 << 60
+
+
+def _advisory_object_limit(value: object, *, enabled: bool = False) -> int:
+    configured = max(0, int(value))
+    if configured == 0:
+        return 0
+    return _ADVISORY_OBJECT_LIMIT_SENTINEL if enabled else configured
+
+
+def _object_threshold_warning(label: str, generated: int, configured: object) -> str | None:
+    threshold = max(0, int(configured))
+    if threshold <= 0 or generated <= threshold:
+        return None
+    return (
+        f"WARNING: {label} warning threshold exceeded: generated {generated:,}, "
+        f"configured threshold {threshold:,}; continuing with the complete category."
+    )
+
 HEDGE_MODEL_HEADING_OFFSET_DEGREES = 90.0
 WALL_MODEL_HEADING_OFFSET_DEGREES = 90.0
 METAL_FENCE_MODEL_HEADING_OFFSET_DEGREES = 90.0
@@ -7417,6 +7439,9 @@ def plan_building_placements(
     )
     plans: list[BuildingPlacementPlan] = []
     truncated = False
+    advisory_limits = bool(getattr(spec, "advisory_object_limits", False))
+    building_warning_threshold = max(0, int(spec.max_buildings))
+    building_limit = _advisory_object_limit(building_warning_threshold, enabled=advisory_limits)
     progress_interval = max(1, candidate_total // 40)
     for candidate_number, (_priority, osm_key, geometry_index, geometry_kind, feature, geometry) in enumerate(candidates, start=1):
         if candidate_number == 1 or candidate_number == candidate_total or candidate_number % progress_interval == 0:
@@ -7424,7 +7449,7 @@ def plan_building_placements(
                 10 + round(72 * candidate_number / max(1, candidate_total)),
                 f"Resolving mapped buildings {candidate_number:,}/{candidate_total:,} ({len(plans):,} accepted)",
             )
-        if len(plans) >= spec.max_buildings:
+        if len(plans) >= building_limit:
             truncated = True
             break
 
@@ -7558,9 +7583,10 @@ def plan_building_placements(
     # and named village/hamlet-style places get a modest synthetic residential
     # patch when OSM has no mapped buildings there. Infill comes after real OSM
     # buildings, so it can never consume the budget ahead of source data.
-    if bool(getattr(spec, "residential_infill_enabled", False)) and len(plans) < spec.max_buildings:
+    if bool(getattr(spec, "residential_infill_enabled", False)) and len(plans) < building_limit:
         progress(90, "Planning residential infill")
-        infill_limit = max(0, int(getattr(spec, "maximum_residential_infill_buildings", 1500)))
+        infill_warning_threshold = max(0, int(getattr(spec, "maximum_residential_infill_buildings", 1500)))
+        infill_limit = _advisory_object_limit(infill_warning_threshold, enabled=advisory_limits)
         infill_sources: list[tuple[OsmPolygonFeature, int, GeoPolygon]] = []
         for feature in sorted(dataset.urban, key=lambda item: item.osm_key):
             if feature.tags.get("landuse", "").casefold() != "residential":
@@ -7578,7 +7604,7 @@ def plan_building_placements(
         occupied_index = _PolygonBucketIndex.from_polygons(occupied)
         generated = 0
         for feature, polygon_index, polygon in infill_sources:
-            remaining = min(infill_limit - generated, spec.max_buildings - len(plans))
+            remaining = min(infill_limit - generated, building_limit - len(plans))
             if remaining <= 0:
                 truncated = truncated or generated >= infill_limit
                 break
@@ -7673,7 +7699,7 @@ def plan_building_placements(
                 occupied.append(tuple(final_footprint))
                 occupied_index.add(final_footprint)
                 generated += 1
-            if generated >= infill_limit or len(plans) >= spec.max_buildings:
+            if generated >= infill_limit or len(plans) >= building_limit:
                 break
     plans = list(_match_nearby_same_shape_building_textures(
         plans,
@@ -7685,7 +7711,21 @@ def plan_building_placements(
             DEFAULT_NEARBY_BUILDING_TEXTURE_MATCH_DISTANCE_METRES,
         )),
     ))
-    cap_note = f"; building cap {spec.max_buildings:,} reached" if truncated else ""
+    building_warning = _object_threshold_warning(
+        "building footprint", len(plans), building_warning_threshold
+    )
+    if advisory_limits and building_warning is not None:
+        progress(99, building_warning)
+    if bool(getattr(spec, "residential_infill_enabled", False)):
+        infill_count = sum(1 for plan in plans if plan.synthetic_infill)
+        infill_warning = _object_threshold_warning(
+            "residential infill building",
+            infill_count,
+            getattr(spec, "maximum_residential_infill_buildings", 1500),
+        )
+        if advisory_limits and infill_warning is not None:
+            progress(99, infill_warning)
+    cap_note = "; building placement disabled" if building_warning_threshold == 0 and candidate_total else ""
     progress(100, f"Resolved {len(plans):,} final building footprints{cap_note}")
     return tuple(plans), truncated
 
@@ -7755,6 +7795,9 @@ def generate_world_objects(
     next_id = starting_object_id
     road_count = 0
     road_truncated = False
+    advisory_limits = bool(getattr(spec, "advisory_object_limits", False))
+    road_warning_threshold = max(0, int(spec.max_road_objects))
+    road_limit = _advisory_object_limit(road_warning_threshold, enabled=advisory_limits)
 
     road_features = dataset.roads if include_roads else ()
     road_polylines = projected_road_polylines(dataset, projection) if include_roads else ()
@@ -7770,7 +7813,7 @@ def generate_world_objects(
                 continue
             count = max(1, int(round(length / spec.road_segment_length)))
             for segment in range(count):
-                if road_count >= spec.max_road_objects:
+                if road_count >= road_limit:
                     road_truncated = True
                     break
                 fraction = (segment + 0.5) / count
@@ -7808,8 +7851,10 @@ def generate_world_objects(
         and not SIDEWALKS_TEMPORARILY_DISABLED
     )
     street_furniture_enabled = bool(getattr(spec, "street_furniture_enabled", False))
-    maximum_sidewalk_objects = max(0, int(getattr(spec, "maximum_sidewalk_objects", 30000)))
-    maximum_street_furniture_objects = max(0, int(getattr(spec, "maximum_street_furniture_objects", 12000)))
+    sidewalk_warning_threshold = max(0, int(getattr(spec, "maximum_sidewalk_objects", 30000)))
+    street_furniture_warning_threshold = max(0, int(getattr(spec, "maximum_street_furniture_objects", 12000)))
+    maximum_sidewalk_objects = _advisory_object_limit(sidewalk_warning_threshold, enabled=advisory_limits)
+    maximum_street_furniture_objects = _advisory_object_limit(street_furniture_warning_threshold, enabled=advisory_limits)
     sidewalk_width = max(0.8, float(getattr(spec, "sidewalk_width", SIDEWALK_DEFAULT_WIDTH_METRES)))
     sidewalk_segment_length = max(2.0, float(getattr(spec, "sidewalk_segment_length", SIDEWALK_DEFAULT_SEGMENT_LENGTH_METRES)))
     street_light_spacing = max(14.0, float(getattr(spec, "street_light_spacing", 32.0)))
@@ -8783,7 +8828,9 @@ def generate_world_objects(
                 if raster.forest[accepted_index] and (centre_x - x) ** 2 + (centre_z - z) ** 2 <= rr:
                     accepted_forest_cells.add(accepted_index)
 
-    if spec.max_forest_objects > 0:
+    forest_warning_threshold = max(0, int(spec.max_forest_objects))
+    forest_limit = _advisory_object_limit(forest_warning_threshold, enabled=advisory_limits)
+    if forest_limit > 0:
         # Performance-oriented ladder: broad stock square, then the smaller
         # stock triangle, then one reusable grouped fallback cluster.
         spacing = spec.forest_tree_spacing
@@ -8902,7 +8949,7 @@ def generate_world_objects(
                     f"({forest_count:,} objects)",
                 )
             for column in range(columns):
-                if forest_count >= spec.max_forest_objects:
+                if forest_count >= forest_limit:
                     forest_truncated = True
                     break
                 x = min(spec.world_size - 0.001, (column + 0.5) * spacing)
@@ -8968,7 +9015,7 @@ def generate_world_objects(
                     ):
                         if (
                             roadside_placed >= roadside_trees_per_cut_block
-                            or forest_count >= spec.max_forest_objects
+                            or forest_count >= forest_limit
                         ):
                             break
                         if not (
@@ -9048,7 +9095,7 @@ def generate_world_objects(
                         ):
                             if (
                                 roadside_bushes_placed >= roadside_bushes_per_cut_block
-                                or forest_count >= spec.max_forest_objects
+                                or forest_count >= forest_limit
                             ):
                                 break
                             if any(
@@ -9118,7 +9165,7 @@ def generate_world_objects(
                             next_id += 1
                             forest_count += 1
                             roadside_bushes_placed += 1
-                    if forest_count >= spec.max_forest_objects:
+                    if forest_count >= forest_limit:
                         forest_truncated = True
                     continue
 
@@ -9160,7 +9207,7 @@ def generate_world_objects(
                         x=x,
                         z=z,
                         spacing=spacing,
-                        maximum_clusters=min(4, max(0, spec.max_forest_objects - forest_count)),
+                        maximum_clusters=min(4, max(0, forest_limit - forest_count)),
                     )
                     for cluster in replacements:
                         (
@@ -9206,7 +9253,7 @@ def generate_world_objects(
 
                     if replacements:
                         forest_hillside_fallback_blocks += 1
-                        if forest_count >= spec.max_forest_objects:
+                        if forest_count >= forest_limit:
                             forest_truncated = True
                         continue
 
@@ -9225,7 +9272,7 @@ def generate_world_objects(
                     ):
                         if (
                             individual_placed >= steep_infill_tree_target
-                            or forest_count >= spec.max_forest_objects
+                            or forest_count >= forest_limit
                         ):
                             break
                         if not (
@@ -9502,15 +9549,9 @@ def generate_world_objects(
                         severe_underbrush_placed = False
                         if severe_rigid_fallback:
                             underbrush_limit = (
-                                max(
-                                    0,
-                                    int(
-                                        getattr(
-                                            spec,
-                                            "forest_undergrowth_maximum_objects",
-                                            120000,
-                                        )
-                                    ),
+                                _advisory_object_limit(
+                                    getattr(spec, "forest_undergrowth_maximum_objects", 120000),
+                                    enabled=advisory_limits,
                                 )
                                 + 1
                             ) // 2
@@ -9574,7 +9615,8 @@ def generate_world_objects(
                                     underbrush_x, underbrush_z, spacing * 0.32
                                 )
                                 severe_underbrush_placed = True
-                        rocky_limit = max(0, int(getattr(spec, "maximum_rocky_forest_objects", 1200)))
+                        rocky_warning_threshold = max(0, int(getattr(spec, "maximum_rocky_forest_objects", 1200)))
+                        rocky_limit = _advisory_object_limit(rocky_warning_threshold, enabled=advisory_limits)
                         rocky_enabled = bool(getattr(spec, "rocky_forest_fallback_enabled", False))
                         rocks_per_patch = max(1, int(getattr(spec, "rocky_forest_rocks_per_patch", 3)))
                         rock_spread = min(
@@ -9649,7 +9691,7 @@ def generate_world_objects(
                         ):
                             if (
                                 steep_tree_placed >= steep_infill_tree_target
-                                or forest_count >= spec.max_forest_objects
+                                or forest_count >= forest_limit
                             ):
                                 break
                             if not (
@@ -9820,7 +9862,7 @@ def generate_world_objects(
                 for candidates in pending_hillside_trees:
                     if extra_index >= len(candidates):
                         continue
-                    if forest_count >= spec.max_forest_objects:
+                    if forest_count >= forest_limit:
                         forest_truncated = True
                         break
                     tree_x, tree_z, tree_heading, tree_y = candidates[extra_index]
@@ -9848,10 +9890,11 @@ def generate_world_objects(
         progress(57, f"Placed primary forest blocks ({forest_count:,} forest objects so far)")
         extra_single_enabled = bool(getattr(spec, "forest_single_tree_enabled", True))
         extra_single_model = str(getattr(spec, "forest_single_tree_model", r"data3d\str smrk_medium.p3d"))
-        extra_single_limit = _scaled_synthetic_tree_limit(
+        extra_single_warning_threshold = _scaled_synthetic_tree_limit(
             int(getattr(spec, "maximum_forest_single_tree_objects", 1000)),
             spec.world_size,
         )
+        extra_single_limit = _advisory_object_limit(extra_single_warning_threshold, enabled=advisory_limits)
         extra_single_spacing = max(
             20.0,
             float(getattr(spec, "forest_single_tree_spacing", 45.0)),
@@ -9874,14 +9917,14 @@ def generate_world_objects(
             (forest_profile == "everon" or forest_polygon_models_disabled)
             and gap_infill_enabled
             and not forest_truncated
-            and forest_count < spec.max_forest_objects
+            and forest_count < forest_limit
         ):
             progress(59, "Filling uncovered mapped forest with rooted trees")
             gap_columns = max(1, int(math.ceil(spec.world_size / gap_infill_spacing)))
             for grid_index in _distributed_grid_indices(
                 gap_columns, seed, "forest-gap-tree-infill"
             ):
-                if forest_count >= spec.max_forest_objects:
+                if forest_count >= forest_limit:
                     forest_truncated = True
                     break
                 gap_row, gap_column = divmod(grid_index, gap_columns)
@@ -9960,7 +10003,7 @@ def generate_world_objects(
             and extra_single_enabled
             and extra_single_limit > 0
             and not forest_truncated
-            and forest_count < spec.max_forest_objects
+            and forest_count < forest_limit
         ):
             eligible_extra_single_trees: list[
                 tuple[int, int, int, float, float, float, float]
@@ -10035,7 +10078,7 @@ def generate_world_objects(
             eligible_extra_single_trees.sort(key=lambda item: item[:3])
             extra_single_available = min(
                 extra_single_limit,
-                max(0, spec.max_forest_objects - forest_count),
+                max(0, forest_limit - forest_count),
             )
             for (
                 _rank,
@@ -10059,14 +10102,15 @@ def generate_world_objects(
                 forest_single_tree_objects += 1
                 mark_accepted_forest(tree_x, tree_z, max(spec.cell_size * 0.35, extra_single_spacing * 0.20))
             if (
-                forest_count >= spec.max_forest_objects
+                forest_count >= forest_limit
                 and len(eligible_extra_single_trees) > extra_single_available
             ):
                 forest_truncated = True
 
         progress(61, "Adding rocky outcrops to uncovered forest hills")
         if bool(getattr(spec, "rocky_forest_fallback_enabled", False)):
-            rocky_limit = max(0, int(getattr(spec, "maximum_rocky_forest_objects", 1200)))
+            rocky_warning_threshold = max(0, int(getattr(spec, "maximum_rocky_forest_objects", 1200)))
+            rocky_limit = _advisory_object_limit(rocky_warning_threshold, enabled=advisory_limits)
             remaining_rocks = max(0, rocky_limit - rocky_forest_objects)
             if remaining_rocks > 0:
                 gap_spacing = max(spec.cell_size, min(64.0, float(getattr(spec, "forest_tree_spacing", 50.0)) * 0.90))
@@ -10162,7 +10206,8 @@ def generate_world_objects(
         if (
             bool(getattr(spec, "forest_undergrowth_enabled", False))
         ):
-            undergrowth_base_limit = max(0, int(getattr(spec, "forest_undergrowth_maximum_objects", 120000)))
+            undergrowth_warning_threshold = max(0, int(getattr(spec, "forest_undergrowth_maximum_objects", 120000)))
+            undergrowth_base_limit = _advisory_object_limit(undergrowth_warning_threshold, enabled=advisory_limits)
             undergrowth_limit = (undergrowth_base_limit + 1) // 2
             undergrowth_spacing = max(10.0, float(getattr(spec, "forest_undergrowth_spacing", 30.0)))
             undergrowth_maximum_relief = max(0.0, float(getattr(spec, "forest_undergrowth_maximum_relief", 20.0)))
@@ -10226,7 +10271,8 @@ def generate_world_objects(
 
         progress(63, "Adding stock bushes to steep forested hills")
         if bool(getattr(spec, "steep_hill_bushes_enabled", False)):
-            bush_limit = max(0, int(getattr(spec, "maximum_steep_hill_bush_objects", 80000)))
+            bush_warning_threshold = max(0, int(getattr(spec, "maximum_steep_hill_bush_objects", 80000)))
+            bush_limit = _advisory_object_limit(bush_warning_threshold, enabled=advisory_limits)
             bush_spacing = max(8.0, float(getattr(spec, "steep_hill_bush_spacing", 24.0)))
             bush_minimum_slope = max(0.1, float(getattr(spec, "steep_hill_bush_minimum_slope_degrees", 16.0)))
             bush_maximum_relief = max(0.0, float(getattr(spec, "steep_hill_bush_maximum_relief", 8.0)))
@@ -10298,7 +10344,8 @@ def generate_world_objects(
         if (
             bool(getattr(spec, "forest_border_enabled", False))
         ):
-            border_limit = max(0, int(getattr(spec, "forest_border_maximum_objects", 2000)))
+            forest_border_warning_threshold = max(0, int(getattr(spec, "forest_border_maximum_objects", 2000)))
+            border_limit = _advisory_object_limit(forest_border_warning_threshold, enabled=advisory_limits)
             border_spacing = max(
                 8.0, float(getattr(spec, "forest_border_spacing", 34.0))
             )
@@ -10387,7 +10434,8 @@ def generate_world_objects(
     # Tall grass follows explicitly mapped OSM ditches. It has its own budget so
     # a dense drainage network cannot consume the forest object allowance.
     if bool(getattr(spec, "ditch_grass_enabled", False)):
-        ditch_limit = max(0, int(getattr(spec, "maximum_ditch_grass_objects", 2000)))
+        ditch_warning_threshold = max(0, int(getattr(spec, "maximum_ditch_grass_objects", 2000)))
+        ditch_limit = _advisory_object_limit(ditch_warning_threshold, enabled=advisory_limits)
         ditch_spacing = max(6.0, float(getattr(spec, "ditch_grass_spacing", 18.0)))
         ditch_trim = max(0.0, float(getattr(spec, "ditch_grass_endpoint_trim", 6.0)))
         ditch_maximum_relief = max(
@@ -10464,7 +10512,8 @@ def generate_world_objects(
     # enthusiasts can map every hedge in Europe, but the dedicated cap remains sovereign.
     progress(65, "Placing fences, walls and hedges")
     if bool(getattr(spec, "barriers_enabled", False)):
-        barrier_limit = max(0, int(getattr(spec, "maximum_barrier_objects", 4000)))
+        barrier_warning_threshold = max(0, int(getattr(spec, "maximum_barrier_objects", 4000)))
+        barrier_limit = _advisory_object_limit(barrier_warning_threshold, enabled=advisory_limits)
         barrier_length = max(2.0, float(getattr(spec, "barrier_segment_length", 6.0)))
         stock_hedge_models = tuple(getattr(spec, "stock_hedge_models", STOCK_HEDGE_MODELS))
         stock_wall_models = tuple(getattr(spec, "stock_wall_models", STOCK_WALL_MODELS))
@@ -10724,7 +10773,8 @@ def generate_world_objects(
     # two overlapping road simulations across the same span.
     progress(66, "Placing bridge modules")
     if bool(getattr(spec, "bridges_enabled", False)):
-        bridge_limit = max(0, int(getattr(spec, "maximum_bridge_objects", 1000)))
+        bridge_warning_threshold = max(0, int(getattr(spec, "maximum_bridge_objects", 1000)))
+        bridge_limit = _advisory_object_limit(bridge_warning_threshold, enabled=advisory_limits)
         procedural_bridges = bool(getattr(spec, "procedural_bridges", True))
         module_length = (
             max(3.0, float(getattr(spec, "bridge_module_length", 30.0)))
@@ -10967,13 +11017,15 @@ def generate_world_objects(
     # settlement clutter, even if an old profile still passes --haybales.
     haybales_enabled = False
     if rural_enabled or wetland_enabled or meadow_enabled or haybales_enabled:
+        rural_warning_threshold = max(0, int(getattr(spec, "maximum_rural_vegetation_objects", 3000)))
         rural_limit = (
-            max(0, int(getattr(spec, "maximum_rural_vegetation_objects", 3000)))
+            _advisory_object_limit(getattr(spec, "maximum_rural_vegetation_objects", 3000), enabled=advisory_limits)
             if rural_enabled else 0
         )
         rural_spacing = max(10.0, float(getattr(spec, "rural_vegetation_spacing", 28.0)))
         variants = {variant.name: variant for variant in RURAL_VEGETATION_VARIANTS}
-        meadow_limit = max(0, int(getattr(spec, "maximum_meadow_grass_objects", 20000)))
+        meadow_warning_threshold = max(0, int(getattr(spec, "maximum_meadow_grass_objects", 20000)))
+        meadow_limit = _advisory_object_limit(meadow_warning_threshold, enabled=advisory_limits)
         meadow_spacing = max(10.0, float(getattr(spec, "meadow_grass_spacing", 24.0)))
         if meadow_enabled and meadow_limit:
             meadow_variant = DITCH_GRASS_VARIANTS[0]
@@ -11011,7 +11063,8 @@ def generate_world_objects(
                         break
                 if meadow_grass_objects >= meadow_limit:
                     break
-        haybale_limit = max(0, int(getattr(spec, "maximum_haybale_objects", 800)))
+        haybale_warning_threshold = max(0, int(getattr(spec, "maximum_haybale_objects", 800)))
+        haybale_limit = _advisory_object_limit(haybale_warning_threshold, enabled=advisory_limits)
         haybale_spacing = max(40.0, float(getattr(spec, "haybale_spacing", 110.0)))
         haybale_field_percent = min(
             100.0, max(0.0, float(getattr(spec, "haybale_field_percent", HAYBALE_FIELD_PERCENT)))
@@ -11146,7 +11199,8 @@ def generate_world_objects(
                 emit(WorldObject(next_id, model, px, py, pz, ph)); next_id += 1
                 tree_row_objects += 1
 
-        wetland_limit = max(0, int(getattr(spec, "maximum_wetland_reed_objects", 100000)))
+        wetland_warning_threshold = max(0, int(getattr(spec, "maximum_wetland_reed_objects", 100000)))
+        wetland_limit = _advisory_object_limit(wetland_warning_threshold, enabled=advisory_limits)
         wetland_spacing = max(6.0, float(getattr(spec, "wetland_reed_spacing", 18.0)))
         wetland_maximum_relief = max(0.0, float(getattr(spec, "wetland_reed_maximum_relief", 4.0)))
         wetland_maximum_float = max(0.0, float(getattr(spec, "wetland_reed_maximum_float", 1.0)))
@@ -11269,7 +11323,8 @@ def generate_world_objects(
                     scrub_objects += int(category == "scrub")
 
     progress(69, "Placing mapped trees and utility infrastructure")
-    mapped_tree_limit = max(0, int(getattr(spec, "maximum_mapped_tree_objects", 5000)))
+    mapped_tree_warning_threshold = max(0, int(getattr(spec, "maximum_mapped_tree_objects", 5000)))
+    mapped_tree_limit = _advisory_object_limit(mapped_tree_warning_threshold, enabled=advisory_limits)
     mapped_tree_clearance = max(0.0, float(getattr(spec, "mapped_tree_ground_clearance", 0.04)))
     for mapped_tree_index, feature in enumerate(sorted(dataset.individual_trees, key=lambda item: item.osm_key)):
         if mapped_tree_objects >= mapped_tree_limit:
@@ -11319,7 +11374,8 @@ def generate_world_objects(
         next_id += 1
         mapped_tree_objects += 1
 
-    utility_limit = max(0, int(getattr(spec, "maximum_utility_objects", 3000)))
+    utility_warning_threshold = max(0, int(getattr(spec, "maximum_utility_objects", 3000)))
+    utility_limit = _advisory_object_limit(utility_warning_threshold, enabled=advisory_limits)
     utility_clearance = max(0.0, float(getattr(spec, "utility_ground_clearance", 0.05)))
     utility_sizes = {"power_pole": 1.0, "power_tower": 9.0, "water_tower": 6.5}
     for feature in sorted(dataset.utility_points, key=lambda item: item.osm_key):
@@ -11353,6 +11409,33 @@ def generate_world_objects(
         emit(WorldObject(next_id, model, x, maximum + utility_clearance, z, heading))
         next_id += 1
         utility_objects += 1
+
+    advisory_counts = (
+        ("legacy road object", road_count, road_warning_threshold),
+        ("sidewalk object", sidewalk_objects, sidewalk_warning_threshold),
+        ("street furniture object", street_furniture_objects, street_furniture_warning_threshold),
+        ("primary forest object", forest_count, forest_warning_threshold),
+        ("forest undergrowth object", forest_undergrowth_objects, getattr(spec, "forest_undergrowth_maximum_objects", 120000)),
+        ("steep-hill bush object", steep_hill_bush_objects, getattr(spec, "maximum_steep_hill_bush_objects", 80000)),
+        ("forest border object", forest_border_objects, getattr(spec, "forest_border_maximum_objects", 2000)),
+        ("extra forest single-tree object", forest_single_tree_objects, extra_single_warning_threshold if 'extra_single_warning_threshold' in locals() else getattr(spec, "maximum_forest_single_tree_objects", 1000)),
+        ("ditch grass object", ditch_grass_objects, getattr(spec, "maximum_ditch_grass_objects", 2000)),
+        ("barrier object", barrier_objects, getattr(spec, "maximum_barrier_objects", 4000)),
+        ("bridge object", bridge_objects, getattr(spec, "maximum_bridge_objects", 1000)),
+        ("residential infill building", sum(1 for plan in building_placement_plans if plan.synthetic_infill), getattr(spec, "maximum_residential_infill_buildings", 1500)),
+        ("rural vegetation object", tree_row_objects + orchard_objects + vineyard_objects + scrub_objects + rural_rock_objects, getattr(spec, "maximum_rural_vegetation_objects", 3000)),
+        ("meadow grass object", meadow_grass_objects, getattr(spec, "maximum_meadow_grass_objects", 20000)),
+        ("hay bale object", haybale_objects, getattr(spec, "maximum_haybale_objects", 800)),
+        ("wetland reed object", wetland_reed_objects, getattr(spec, "maximum_wetland_reed_objects", 100000)),
+        ("rocky forest object", rocky_forest_objects, getattr(spec, "maximum_rocky_forest_objects", 1200)),
+        ("mapped tree object", mapped_tree_objects, getattr(spec, "maximum_mapped_tree_objects", 5000)),
+        ("utility object", utility_objects, getattr(spec, "maximum_utility_objects", 3000)),
+    )
+    if advisory_limits:
+        for label, generated_count, configured_threshold in advisory_counts:
+            warning = _object_threshold_warning(label, generated_count, configured_threshold)
+            if warning is not None:
+                progress(70, warning)
 
     (
         vegetation_audit_tree_objects,
@@ -11596,7 +11679,7 @@ def write_meadow_grass_placement_preview(
     )
     legend.text(
         (14, size + 52),
-        f"enabled={enabled}  spacing={spacing:g}m  object cap={limit}  rejected points shown={len(generated.meadow_grass_rejection_positions)}",
+        f"enabled={enabled}  spacing={spacing:g}m  warning threshold={limit}  rejected points shown={len(generated.meadow_grass_rejection_positions)}",
         fill=(205, 205, 205),
     )
     legend.rectangle((14, size + 75, 26, size + 87), fill=(255, 224, 48), outline=(255, 238, 78))
