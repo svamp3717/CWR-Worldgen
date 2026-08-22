@@ -4739,6 +4739,72 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         self.assertGreater(result.street_furniture_objects, 0)
         self.assertTrue(any(obj.model_path in STOCK_SETTLEMENT_UTILITY_POLE_MODELS for obj in result.objects))
 
+    def test_town_and_village_clutter_stays_off_vehicle_road_centrelines(self) -> None:
+        # Use two residential roads sharing a real OSM-style junction node. The
+        # old central-junction clutter pass could put its noticeboard directly
+        # in either carriageway, and town street furniture also had no final
+        # cross-road collision check.
+        for kind in ("village", "town"):
+            with self.subTest(kind=kind):
+                projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 240.0)
+                roads = (
+                    OsmLineFeature(
+                        "way/horizontal", {"highway": "residential"},
+                        tuple(projection.to_latlon(point) for point in (
+                            (10.0, 120.0), (120.0, 120.0), (230.0, 120.0),
+                        )),
+                    ),
+                    OsmLineFeature(
+                        "way/vertical", {"highway": "residential"},
+                        tuple(projection.to_latlon(point) for point in (
+                            (120.0, 10.0), (120.0, 120.0), (120.0, 230.0),
+                        )),
+                    ),
+                )
+                place = OsmPointFeature(
+                    f"node/{kind}", {"place": kind}, projection.to_latlon((120.0, 120.0))
+                )
+                dataset = OsmDataset(
+                    source_generator=f"{kind}-road-safe-clutter", element_count=3,
+                    coastlines=(), water=(), forests=(), farmland=(), urban=(),
+                    roads=roads, places=(place,),
+                )
+                raster = OsmRaster(
+                    cells=12, water=(False,) * 144, forest=(False,) * 144,
+                    farmland=(False,) * 144, urban=(False,) * 144, roads=(False,) * 144,
+                    buildings=(False,) * 144, high_resolution=12, coastline_seed_count=0,
+                )
+                spec = _Milestone9PlayabilitySpec(
+                    name=f"{kind}_road_safe_clutter", heightmap_path=Path("unused.png"),
+                    bbox=(0,0,1,1), cells=12, cell_size=20.0, include_minor_roads=True,
+                    max_road_objects=0, max_buildings=0, max_forest_objects=0,
+                    sidewalks_enabled=False, street_furniture_enabled=True,
+                    maximum_street_furniture_objects=200, street_light_spacing=24.0,
+                    rural_vegetation_enabled=False, meadow_grass_enabled=False,
+                    wetland_reeds_enabled=False, barriers_enabled=False, bridges_enabled=False,
+                    forest_undergrowth_enabled=False, forest_border_enabled=False,
+                    rocky_forest_fallback_enabled=False, steep_hill_bushes_enabled=False,
+                    strict_assets=False, deterministic_seed="road-clutter-test",
+                )
+                result = generate_world_objects(
+                    dataset, projection, raster, (5.0,) * 144, spec, include_roads=False,
+                    building_placement_plans=(),
+                )
+                self.assertGreater(result.street_furniture_objects, 0)
+                # residential roads are 6 m wide, so their asphalt extends 3 m
+                # from each centreline. The extra 0.35 m verifies the shared
+                # clutter road-edge margin rather than merely checking object origins.
+                for obj in result.objects:
+                    if obj.model_path == STOCK_SETTLEMENT_DRIVEWAY_MODEL:
+                        continue
+                    distance_to_either_centreline = min(
+                        abs(obj.x - 120.0), abs(obj.z - 120.0)
+                    )
+                    self.assertGreaterEqual(
+                        distance_to_either_centreline, 3.35 - 1.0e-6,
+                        msg=f"{kind} clutter {obj.model_path} landed on a road at ({obj.x:.2f}, {obj.z:.2f})",
+                    )
+
     def test_village_building_clutter_uses_stock_assets_only(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 320.0)
         road = OsmLineFeature(

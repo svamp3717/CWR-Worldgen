@@ -170,6 +170,10 @@ SIDEWALK_CURB_GAP_METRES = 0.12
 SIDEWALKS_TEMPORARILY_DISABLED = True
 STREET_FURNITURE_MINIMUM_SEPARATION_METRES = 7.0
 STREET_FURNITURE_GROUND_CLEARANCE_METRES = 0.04
+# Keep stock settlement/town props fully outside the drivable carriageway, with
+# a small shoulder margin.  Individual prop footprints are added on top of this
+# value by the placement checks below.
+STREET_FURNITURE_ROAD_CLEARANCE_METRES = 0.35
 TOWN_STREET_FURNITURE_RADIUS_METRES = 800.0
 CITY_STREET_FURNITURE_RADIUS_METRES = 1600.0
 PEDESTRIAN_ONLY_HIGHWAYS = frozenset({"path", "footway", "cycleway", "bridleway", "pedestrian", "steps"})
@@ -2229,6 +2233,47 @@ def nudge_line_centre_away_from_road(
         if 0.0 <= candidate_x < world_size and 0.0 <= candidate_z < world_size:
             return candidate_x, candidate_z
     return x, z
+
+
+def _project_vehicle_road_corridors(
+    dataset: OsmDataset, projection: BboxProjection
+) -> IndexedRoadCorridors:
+    """Project indexed carriageway corridors for road-safe settlement clutter.
+
+    This deliberately excludes pedestrian-only ways and uses the physical road
+    half-width without the forest-clearance padding used by
+    :func:`project_road_corridors`.  Street furniture should stay off asphalt,
+    not disappear several metres into nearby gardens.
+    """
+
+    spatial = get_spatial_index(dataset, projection)
+    if spatial is None:
+        spatial = prepare_spatial_index(dataset, projection, use_cache=False)
+    corridors: list[RoadCorridor] = []
+    buckets: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for segment in spatial.road_segments:
+        tags = dict(segment.tags)
+        highway = tags.get("highway", "").casefold()
+        if tags.get("tunnel") not in {None, "", "no"}:
+            continue
+        if highway in PEDESTRIAN_ONLY_HIGHWAYS or highway not in _MAJOR_HIGHWAYS:
+            continue
+        radius = max(0.0, road_width_metres(tags) * 0.5)
+        corridor_index = len(corridors)
+        corridors.append((segment.start, segment.end, radius))
+        minimum_x, minimum_z, maximum_x, maximum_z = segment.bounds
+        minimum_x -= radius
+        minimum_z -= radius
+        maximum_x += radius
+        maximum_z += radius
+        for bz in range(math.floor(minimum_z / spatial.bucket_size), math.floor(maximum_z / spatial.bucket_size) + 1):
+            for bx in range(math.floor(minimum_x / spatial.bucket_size), math.floor(maximum_x / spatial.bucket_size) + 1):
+                buckets[(bx, bz)].append(corridor_index)
+    return IndexedRoadCorridors(
+        tuple(corridors),
+        spatial.bucket_size,
+        {key: tuple(sorted(set(values))) for key, values in buckets.items()},
+    )
 
 
 def project_road_corridors(
@@ -7770,6 +7815,39 @@ def generate_world_objects(
     street_light_spacing = max(14.0, float(getattr(spec, "street_light_spacing", 32.0)))
     street_bench_every = max(1, int(getattr(spec, "street_bench_every", 4)))
     street_bin_every = max(1, int(getattr(spec, "street_bin_every", 6)))
+    street_furniture_road_corridors = (
+        _project_vehicle_road_corridors(dataset, projection)
+        if street_furniture_enabled else None
+    )
+
+    def street_detail_clear_of_roads(
+        x: float,
+        z: float,
+        footprint: float,
+        *,
+        line_segment: tuple[PointXZ, PointXZ] | None = None,
+    ) -> bool:
+        if street_furniture_road_corridors is None or not street_furniture_road_corridors:
+            return True
+        footprint = max(0.0, float(footprint))
+        if line_segment is not None:
+            return not line_intersects_road_corridors(
+                street_furniture_road_corridors,
+                line_segment[0],
+                line_segment[1],
+                clearance=footprint + STREET_FURNITURE_ROAD_CLEARANCE_METRES,
+            )
+        square = (
+            (x - footprint, z - footprint),
+            (x + footprint, z - footprint),
+            (x + footprint, z + footprint),
+            (x - footprint, z + footprint),
+        )
+        return not polygon_intersects_road_corridors(
+            street_furniture_road_corridors,
+            square,
+            clearance=STREET_FURNITURE_ROAD_CLEARANCE_METRES,
+        )
 
     settlement_place_centres: list[tuple[str, float, float, float]] = []
     for place in dataset.places:
@@ -7956,6 +8034,7 @@ def generate_world_objects(
                 if (
                     _mask_at(raster.water, spec.cells, spec.world_size, fx, fz)
                     or _mask_at(raster.buildings, spec.cells, spec.world_size, fx, fz)
+                    or not street_detail_clear_of_roads(fx, fz, 0.55)
                     or not lamp_position_available(fx, fz)
                 ):
                     urban_detail_rejections += 1
@@ -7979,6 +8058,7 @@ def generate_world_objects(
                         0.0 <= bx < spec.world_size and 0.0 <= bz < spec.world_size
                         and not _mask_at(raster.water, spec.cells, spec.world_size, bx, bz)
                         and not _mask_at(raster.buildings, spec.cells, spec.world_size, bx, bz)
+                        and street_detail_clear_of_roads(bx, bz, 0.9)
                     ):
                         _mn, bmax = _square_elevation_extrema(elevations, spec.cells, spec.cell_size, bx, bz, 1.8)
                         emit(WorldObject(next_id, STOCK_STREET_BENCH_MODELS[0], bx, bmax + 0.03, bz, (heading + 90.0) % 360.0))
@@ -7992,6 +8072,7 @@ def generate_world_objects(
                         0.0 <= qx < spec.world_size and 0.0 <= qz < spec.world_size
                         and not _mask_at(raster.water, spec.cells, spec.world_size, qx, qz)
                         and not _mask_at(raster.buildings, spec.cells, spec.world_size, qx, qz)
+                        and street_detail_clear_of_roads(qx, qz, 0.5)
                     ):
                         qy = _sample_elevation(elevations, spec.cells, spec.cell_size, qx, qz)
                         bin_model = STOCK_STREET_BIN_MODELS[digest[1] % len(STOCK_STREET_BIN_MODELS)]
@@ -8010,6 +8091,7 @@ def generate_world_objects(
                         0.0 <= nx < spec.world_size and 0.0 <= nz < spec.world_size
                         and not _mask_at(raster.water, spec.cells, spec.world_size, nx, nz)
                         and not _mask_at(raster.buildings, spec.cells, spec.world_size, nx, nz)
+                        and street_detail_clear_of_roads(nx, nz, 0.7)
                     ):
                         ny = _sample_elevation(elevations, spec.cells, spec.cell_size, nx, nz)
                         notice_model = STOCK_STREET_NOTICEBOARD_MODELS[digest[2] % len(STOCK_STREET_NOTICEBOARD_MODELS)]
@@ -8025,6 +8107,7 @@ def generate_world_objects(
                         0.0 <= cx < spec.world_size and 0.0 <= cz < spec.world_size
                         and not _mask_at(raster.water, spec.cells, spec.world_size, cx, cz)
                         and not _mask_at(raster.buildings, spec.cells, spec.world_size, cx, cz)
+                        and street_detail_clear_of_roads(cx, cz, 0.7)
                     ):
                         cy = _sample_elevation(elevations, spec.cells, spec.cell_size, cx, cz)
                         emit(WorldObject(next_id, STOCK_STREET_BICYCLE_MODELS[0], cx, cy + 0.03, cz, heading))
@@ -8043,6 +8126,7 @@ def generate_world_objects(
                         0.0 <= tx < spec.world_size and 0.0 <= tz < spec.world_size
                         and not _mask_at(raster.water, spec.cells, spec.world_size, tx, tz)
                         and not _mask_at(raster.buildings, spec.cells, spec.world_size, tx, tz)
+                        and street_detail_clear_of_roads(tx, tz, 1.3)
                     ):
                         ty = _sample_elevation(elevations, spec.cells, spec.cell_size, tx, tz)
                         emit(WorldObject(next_id, STOCK_STREET_TREE_SURROUND_MODELS[0], tx, ty + 0.02, tz, heading))
@@ -8071,7 +8155,10 @@ def generate_world_objects(
                 projection,
                 bx,
                 bz,
-                distance=2.6,
+                # A bus-stop node is commonly mapped on the road centreline.
+                # Seven metres clears even a 9 m primary/secondary carriageway
+                # plus the stock shelter footprint and safety margin.
+                distance=7.0,
                 fallback_heading=road_heading,
                 world_size=spec.world_size,
             )
@@ -8079,6 +8166,7 @@ def generate_world_objects(
                 not (0.0 <= bx < spec.world_size and 0.0 <= bz < spec.world_size)
                 or _mask_at(raster.water, spec.cells, spec.world_size, bx, bz)
                 or _mask_at(raster.buildings, spec.cells, spec.world_size, bx, bz)
+                or not street_detail_clear_of_roads(bx, bz, 1.8)
             ):
                 urban_detail_rejections += 1
                 continue
@@ -8138,7 +8226,14 @@ def generate_world_objects(
                 default=3.0,
             )
 
-        def prop_position_available(x: float, z: float, footprint: float = 0.8) -> bool:
+        def prop_position_available(
+            x: float,
+            z: float,
+            footprint: float = 0.8,
+            *,
+            road_segment: tuple[PointXZ, PointXZ] | None = None,
+            allow_road_overlap: bool = False,
+        ) -> bool:
             if not (0.5 <= x < spec.world_size - 0.5 and 0.5 <= z < spec.world_size - 0.5):
                 return False
             if _mask_at(raster.water, spec.cells, spec.world_size, x, z):
@@ -8148,6 +8243,10 @@ def generate_world_objects(
                 (x - footprint, z - footprint), (x + footprint, z - footprint),
                 (x + footprint, z + footprint), (x - footprint, z + footprint),
             )
+            if not allow_road_overlap and not street_detail_clear_of_roads(
+                x, z, footprint, line_segment=road_segment
+            ):
+                return False
             for polygon in support_index.candidates(square, padding=1.0):
                 if _polygons_intersect(square, polygon):
                     return False
@@ -8171,11 +8270,17 @@ def generate_world_objects(
             clearance: float = 0.03,
             hedge_segment: tuple[PointXZ, PointXZ] | None = None,
             line_segment: tuple[PointXZ, PointXZ] | None = None,
+            allow_road_overlap: bool = False,
         ) -> bool:
             nonlocal next_id, street_furniture_objects, urban_detail_rejections
             if street_furniture_objects >= maximum_street_furniture_objects:
                 return False
-            if not prop_position_available(x, z, footprint):
+            road_segment = hedge_segment if hedge_segment is not None else line_segment
+            if not prop_position_available(
+                x, z, footprint,
+                road_segment=road_segment,
+                allow_road_overlap=allow_road_overlap,
+            ):
                 urban_detail_rejections += 1
                 return False
             if hedge_segment is not None:
@@ -8407,7 +8512,13 @@ def generate_world_objects(
                     driveway_x = plan.x + ux * (radius + 3.0)
                     driveway_z = plan.z + uz * (radius + 3.0)
                     driveway_heading = math.degrees(math.atan2(dx, dz)) % 360.0
-                    emit_prop(STOCK_SETTLEMENT_DRIVEWAY_MODEL, driveway_x, driveway_z, driveway_heading, footprint=1.3, clearance=0.025)
+                    # This is itself a short road-surface object whose purpose is
+                    # to meet the mapped carriageway, so it is the sole settlement
+                    # detail allowed to overlap the road corridor deliberately.
+                    emit_prop(
+                        STOCK_SETTLEMENT_DRIVEWAY_MODEL, driveway_x, driveway_z, driveway_heading,
+                        footprint=1.3, clearance=0.025, allow_road_overlap=True,
+                    )
 
         # Small fruit-tree groups in the gaps between close residential houses.
         # Pair each house once, keeping this much sparser in cities.
@@ -8493,7 +8604,7 @@ def generate_world_objects(
             identity = f"{settlement_seed}:stop-clutter:{landmark.osm_key}"
             heading = nearest_road_heading(dataset, projection, bx, bz)
             bx, bz = nudge_point_away_from_road(
-                dataset, projection, bx, bz, distance=2.8,
+                dataset, projection, bx, bz, distance=6.0,
                 fallback_heading=heading, world_size=spec.world_size,
             )
             bin_chance = {"hamlet": 18, "village": 30, "town": 58, "city": 68, "residential": 42}.get(kind, 25)

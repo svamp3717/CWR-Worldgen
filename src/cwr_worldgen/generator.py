@@ -2657,7 +2657,7 @@ def _load_nonroad_objects(
         "starting_object_id": starting_object_id,
         "spec": _spec_fields(spec, _PLACEMENT_CACHE_FIELDS),
     }
-    key = cache_key("nonroad-object-placement-v95-generated-barn-clutter", payload)
+    key = cache_key("nonroad-object-placement-v96-road-safe-settlement-clutter", payload)
     path = cache_dir / "placements" / f"{key}.pickle" if cache_dir is not None else None
 
     def produce():
