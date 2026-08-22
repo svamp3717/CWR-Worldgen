@@ -4704,6 +4704,48 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         )
         self.assertGreater(result.street_furniture_objects, 0)
         self.assertGreater(result.street_light_objects, 0)
+        self.assertEqual(result.street_bench_objects, 0)
+
+    def test_city_community_anchor_can_still_receive_a_bench(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        city = OsmPointFeature(
+            "node/city-bench", {"place": "city"}, projection.to_latlon((100.0, 100.0))
+        )
+        shop = OsmPointFeature(
+            "node/city-shop", {"building": "retail", "shop": "convenience"},
+            projection.to_latlon((100.0, 100.0)),
+        )
+        dataset = OsmDataset(
+            source_generator="city-bench", element_count=2, coastlines=(), water=(),
+            forests=(), farmland=(), urban=(), roads=(), places=(city,),
+            building_points=(shop,), landmarks=(),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(False,) * 64, farmland=(False,) * 64,
+            urban=(False,) * 64, roads=(False,) * 64, buildings=(False,) * 64,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        x, z = projection.to_world(shop.point)
+        plan = BuildingPlacementPlan(
+            shop.osm_key, 0, "point", x, z, 0.0, r"test\shop.p3d",
+            ((x-5,z-6),(x+5,z-6),(x+5,z+6),(x-5,z+6)), building_family="shop",
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="city_bench", heightmap_path=Path("unused.png"), bbox=(0,0,1,1),
+            cells=8, cell_size=25.0, include_minor_roads=True, max_road_objects=0,
+            max_buildings=0, max_forest_objects=0, sidewalks_enabled=False,
+            street_furniture_enabled=True, maximum_street_furniture_objects=100,
+            rural_vegetation_enabled=False, meadow_grass_enabled=False, wetland_reeds_enabled=False,
+            barriers_enabled=False, bridges_enabled=False, forest_undergrowth_enabled=False,
+            forest_border_enabled=False, rocky_forest_fallback_enabled=False,
+            steep_hill_bushes_enabled=False, strict_assets=False,
+        )
+        result = generate_world_objects(
+            dataset, projection, raster, (5.0,) * 64, spec, include_roads=False,
+            building_placement_plans=(plan,),
+        )
+        self.assertGreater(result.street_bench_objects, 0)
+        self.assertTrue(any(obj.model_path in STOCK_STREET_BENCH_MODELS for obj in result.objects))
 
     def test_villages_receive_sparse_settlement_detail_without_city_lamps(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
@@ -4743,6 +4785,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         self.assertEqual(result.sidewalk_objects, 0)
         self.assertEqual(result.street_light_objects, 0)
         self.assertGreater(result.street_furniture_objects, 0)
+        self.assertEqual(result.street_bench_objects, 0)
         self.assertTrue(any(obj.model_path in STOCK_SETTLEMENT_UTILITY_POLE_MODELS for obj in result.objects))
 
     def test_town_and_village_clutter_stays_off_vehicle_road_centrelines(self) -> None:
@@ -4864,7 +4907,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
         self.assertTrue(models.intersection(STOCK_SETTLEMENT_UTILITY_POLE_MODELS))
         self.assertTrue(models.intersection(STOCK_SETTLEMENT_FRUIT_TREE_MODELS))
         self.assertTrue(models.intersection(STOCK_STREET_NOTICEBOARD_MODELS))
-        self.assertTrue(models.intersection(STOCK_STREET_BENCH_MODELS))
+        self.assertFalse(models.intersection(STOCK_STREET_BENCH_MODELS))
         # Barn-only clutter is allowed here because this fixture contains an
         # explicit building=barn. Residential yards no longer spawn stock sheds.
         self.assertTrue(models.intersection(STOCK_SETTLEMENT_BARN_CLUTTER_MODELS))

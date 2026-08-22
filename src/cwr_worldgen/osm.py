@@ -8100,7 +8100,8 @@ def generate_world_objects(
                     bx = fx + ux * 2.0
                     bz = fz + uz * 2.0
                     if (
-                        0.0 <= bx < spec.world_size and 0.0 <= bz < spec.world_size
+                        town_city_position(bx, bz)
+                        and 0.0 <= bx < spec.world_size and 0.0 <= bz < spec.world_size
                         and not _mask_at(raster.water, spec.cells, spec.world_size, bx, bz)
                         and not _mask_at(raster.buildings, spec.cells, spec.world_size, bx, bz)
                         and street_detail_clear_of_roads(bx, bz, 0.9)
@@ -8452,7 +8453,12 @@ def generate_world_objects(
             ]
             if emit_prop(notice_model, x + right_x * 1.4, z + right_z * 1.4, plan.heading_degrees + 90.0, footprint=0.7):
                 street_noticeboard_objects += 1
-            if emit_prop(STOCK_STREET_BENCH_MODELS[0], x - right_x * 2.4, z - right_z * 2.4, plan.heading_degrees + 90.0, footprint=0.9):
+            bench_x = x - right_x * 2.4
+            bench_z = z - right_z * 2.4
+            if town_city_position(bench_x, bench_z) and emit_prop(
+                STOCK_STREET_BENCH_MODELS[0], bench_x, bench_z,
+                plan.heading_degrees + 90.0, footprint=0.9,
+            ):
                 street_bench_objects += 1
             if plan.building_family == "shop":
                 sparse_factor = {"hamlet": 18, "village": 32, "town": 62, "city": 72, "residential": 48}.get(kind, 30)
@@ -8492,7 +8498,11 @@ def generate_world_objects(
             ]
             if emit_prop(model, nx, nz, math.degrees(angle) + 90.0, footprint=0.7):
                 street_noticeboard_objects += 1
-            if emit_prop(STOCK_STREET_BENCH_MODELS[0], nx + uz * 2.3, nz - ux * 2.3, math.degrees(angle), footprint=0.9):
+            bench_x = nx + uz * 2.3
+            bench_z = nz - ux * 2.3
+            if kind in {"town", "city"} and town_city_position(bench_x, bench_z) and emit_prop(
+                STOCK_STREET_BENCH_MODELS[0], bench_x, bench_z, math.degrees(angle), footprint=0.9,
+            ):
                 street_bench_objects += 1
 
         # Residential yards: sparse stock hedges/fences, fruit trees, and a
