@@ -23,6 +23,7 @@ from .osm import (
     OsmLineFeature,
     OsmRaster,
     ROADSIDE_NUDGE_DISTANCE_METRES,
+    _advisory_object_limit,
     _mask_at,
     _sample_elevation,
     _oriented_rectangle,
@@ -447,7 +448,9 @@ def generate_semantic_objects(
     bus_model = str(getattr(spec, "bus_stop_model", r"o\misc\aut_z_st.p3d"))
     bus_footprint = max(0.5, float(getattr(spec, "bus_stop_footprint", 1.6)))
     bus_clearance = max(0.0, float(getattr(spec, "bus_stop_ground_clearance", 0.12)))
-    max_landmarks = int(getattr(spec, "maximum_landmark_objects", 1000))
+    landmark_warning_threshold = max(0, int(getattr(spec, "maximum_landmark_objects", 1000)))
+    advisory_limits = bool(getattr(spec, "advisory_object_limits", False))
+    max_landmarks = _advisory_object_limit(landmark_warning_threshold, enabled=advisory_limits)
     if bool(getattr(spec, "bus_stops_enabled", False)):
         for landmark in sorted(dataset.landmarks, key=lambda item: item.osm_key):
             if bus_count >= max_landmarks:
@@ -482,7 +485,8 @@ def generate_semantic_objects(
 
     if bool(getattr(spec, "cemeteries_enabled", True)):
         grave_models = tuple(getattr(spec, "grave_models", GRAVE_MODELS)) or GRAVE_MODELS
-        grave_limit = max(0, int(getattr(spec, "maximum_grave_objects", 12000)))
+        grave_warning_threshold = max(0, int(getattr(spec, "maximum_grave_objects", 12000)))
+        grave_limit = _advisory_object_limit(grave_warning_threshold, enabled=advisory_limits)
         grave_spacing = max(2.0, float(getattr(spec, "grave_spacing", 3.5)))
         grave_inset = max(0.0, float(getattr(spec, "grave_inset", 2.0)))
         grave_footprint = max(0.5, float(getattr(spec, "grave_footprint", 1.2)))

@@ -291,6 +291,9 @@ class OsmSpec(HeightmapSpec):
     iterative_grounding_strength: float = 0.70
     point_building_footprint: float = 12.0
     max_forest_objects: int = DEFAULT_MAX_FOREST_OBJECTS
+    # CLI/GUI builds opt into advisory object-count thresholds. Direct Python
+    # callers retain the historical hard/truncating limits unless they opt in.
+    advisory_object_limits: bool = False
     include_minor_roads: bool = False
     procedural_gravel_roads: bool = False
     paved_road_model: str = r"o\road\sil25.p3d"

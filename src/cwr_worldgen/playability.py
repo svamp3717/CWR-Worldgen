@@ -25,6 +25,7 @@ from .osm import (
     OsmDataset,
     OsmLineFeature,
     OsmRaster,
+    _advisory_object_limit,
     _maximum_polygon_elevation,
     _oriented_rectangle,
     road_bridge_crosses_ditch_only,
@@ -500,6 +501,10 @@ def _fit_terrain_patch_road_objects(
     chain_count = 0
     truncated = False
     next_id = starting_id
+    road_limit = _advisory_object_limit(
+        spec.max_road_objects,
+        enabled=bool(getattr(spec, "advisory_object_limits", False)),
+    )
     skipped_short_runs = 0
     maximum_clearance = 0.0
 
@@ -580,7 +585,7 @@ def _fit_terrain_patch_road_objects(
 
             run_chain: list[WorldObject] = []
             for axis_start, axis_end in axis_ranges:
-                if len(objects) >= spec.max_road_objects:
+                if len(objects) >= road_limit:
                     truncated = True
                     break
                 start_x, start_z, _ = measure.point(axis_start)
@@ -1271,7 +1276,7 @@ def _fit_stock_piece_road_objects(
     starting_id: int = 1,
     progress_callback: Callable[[int, str], None] | None = None,
 ) -> RoadFitReport:
-    """Fit a complete stock-road network or reject an undersized object budget.
+    """Fit a complete stock-road network, treating a positive object budget as advisory.
 
     Ordinary degree-two OSM vertices stay inside one polyline run and do not
     receive separate road-cap objects. Their corners are rounded locally and
@@ -1284,7 +1289,8 @@ def _fit_stock_piece_road_objects(
     Road objects are planned before any are emitted. Older releases placed all
     junction caps first and then stopped as soon as ``max_road_objects`` was
     reached, leaving isolated map stubs and silently omitting later asphalt
-    roads. A positive budget must now fit the entire planned network; zero still
+    roads. A positive ``max_road_objects`` value is now only a warning threshold:
+    exceeding it is logged and the complete network is still emitted. Zero still
     means that road-object placement is deliberately disabled.
     """
 
@@ -1614,12 +1620,21 @@ def _fit_stock_piece_road_objects(
             f"Road object plan requires {required_objects:,}; budget {spec.max_road_objects:,}",
         )
     if required_objects > spec.max_road_objects:
-        raise ValueError(
-            "road object budget is too small for a complete network: "
-            f"requires {required_objects:,} objects, limit is {spec.max_road_objects:,}; "
-            f"increase --max-road-objects to at least {required_objects:,}. "
-            "Partial road networks are not emitted."
-        )
+        if bool(getattr(spec, "advisory_object_limits", False)):
+            if progress_callback is not None:
+                progress_callback(
+                    59,
+                    "WARNING: road object warning threshold exceeded: "
+                    f"requires {required_objects:,} objects, configured threshold is "
+                    f"{spec.max_road_objects:,}. Continuing with the complete road network.",
+                )
+        else:
+            raise ValueError(
+                "road object budget is too small for a complete network: "
+                f"requires {required_objects:,} objects, limit is {spec.max_road_objects:,}; "
+                f"increase --max-road-objects to at least {required_objects:,}. "
+                "Partial road networks are not emitted."
+            )
 
     objects: list[WorldObject] = []
     next_id = starting_id
