@@ -45,6 +45,9 @@ from .milestone9_advisory_policy import (
 )
 
 _install_milestone9_advisory_policy()
+from .grid_default_policy import install_default_grid_policy as _install_default_grid_policy
+
+_install_default_grid_policy()
 from .network import install_overture_release_resolution as _install_overture_release_resolution
 
 _install_overture_release_resolution()
