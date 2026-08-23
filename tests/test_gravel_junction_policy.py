@@ -160,3 +160,31 @@ def test_bucketed_arm_still_keeps_hidden_overlap_for_54_degree_source_branch() -
     # existing 0.90 m lowered visual tip.
     assert exit_distance >= 3.9
     assert 0.70 + GENERATED_GRAVEL_VISUAL_OVERLAP_METRES >= 1.5
+
+
+def test_skew_three_way_family_rotation_minimizes_all_arm_errors() -> None:
+    # Synthetic copy of a problematic shape, shifted/rotated away from any real
+    # map coordinates. The gaps are about 98, 151 and 111 degrees, so there is
+    # no genuinely straight main-road pair to use as a rotation anchor.
+    headings = (0.0, 98.0, 249.0)
+    directions = tuple(_heading_direction(value) for value in headings)
+    variant, axis = gravel_junction_variant_for_directions(directions)
+    assert variant == "t90"
+
+    axis_heading = math.degrees(math.atan2(axis[0], axis[1])) % 360.0
+    model_headings = tuple(
+        (axis_heading + value) % 360.0
+        for value in gravel_junction_template_headings(variant)
+    )
+
+    def angular_error(left, right):
+        return abs((left - right + 180.0) % 360.0 - 180.0)
+
+    best_maximum = min(
+        max(angular_error(model, actual) for model, actual in zip(model_headings, ordering))
+        for ordering in __import__("itertools").permutations(headings)
+    )
+    # The reusable 90-degree T can cover this skewed geometry when it is rotated
+    # to balance all three arms, instead of being pinned to one imperfectly
+    # opposite road pair.
+    assert best_maximum <= 21.0
