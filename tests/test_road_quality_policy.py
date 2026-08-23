@@ -26,7 +26,7 @@ def _flat_context(*, cells: int = 4, cell_size: float = 25.0):
 
 def test_policy_is_installed_for_playability_and_generator() -> None:
     assert playability.fit_road_objects is generator.fit_road_objects
-    assert playability.fit_road_objects.__module__ == "cwr_worldgen.road_quality_policy"
+    assert playability.fit_road_objects.__module__ == "cwr_worldgen.gravel_family_policy"
 
 
 def test_diagonal_junction_trim_uses_oriented_hub_edge() -> None:
