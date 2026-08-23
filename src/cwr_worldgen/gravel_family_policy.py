@@ -310,6 +310,19 @@ def _register_model_usage(self, model_path: str, count: int = 1) -> None:
     if count == 0:
         return
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
+    legacy = re.fullmatch(r"gravel_j([34])\.p3d", filename, re.IGNORECASE)
+    if legacy and self.is_generated_model(model_path):
+        # Keep the historical filename but change the registered geometry key.
+        # length_dm=80 is part of the procedural-asset cache key, so old short
+        # 2.45/3.0 m hubs cannot be restored after the family adopts 4 m arms.
+        degree = int(legacy.group(1))
+        self._usage[_pi.InfrastructureModelKey(
+            "road",
+            f"gravel_j{degree}",
+            int(round(_pi.GENERATED_GRAVEL_HALF_WIDTH_METRES * 20.0)),
+            int(round(GRAVEL_JUNCTION_ARM_EXTENT_METRES * 20.0)),
+        )] += count
+        return
     match = _FAMILY_PATTERN.fullmatch(filename)
     if match and self.is_generated_model(model_path):
         degree = int(match.group("degree"))
