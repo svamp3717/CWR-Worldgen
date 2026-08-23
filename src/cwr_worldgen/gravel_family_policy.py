@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from functools import wraps
+import itertools
 import math
 import re
 from typing import Iterable
@@ -63,59 +64,72 @@ def _bucket(value: float, candidates: tuple[int, ...]) -> int:
     return min(candidates, key=lambda candidate: (abs(float(candidate) - value), candidate))
 
 
+def _angular_distance_degrees(left: float, right: float) -> float:
+    return abs((float(left) - float(right) + 180.0) % 360.0 - 180.0)
+
+
+def _direction_from_heading(heading_degrees: float) -> tuple[float, float]:
+    angle = math.radians(float(heading_degrees))
+    return (math.sin(angle), math.cos(angle))
+
+
 def gravel_junction_variant_for_directions(
     directions: Iterable[tuple[float, float]],
 ) -> tuple[str, tuple[float, float]]:
-    """Return ``(fixed_model_variant, local_plus_z_world_axis)`` for a junction."""
+    """Return the best reusable junction shape and its local +Z world axis.
+
+    Do not assume that a three-way junction contains a truly straight 180-degree
+    main road. Real OSM service/track junctions often have three skewed arms.
+    Evaluate the complete fixed family and rotate each candidate to minimize the
+    worst arm-heading error, then use RMS error as the deterministic tiebreaker.
+    """
 
     cleaned = tuple(_unit(direction) for direction in directions)
-    if len(cleaned) not in {3, 4}:
+    degree = len(cleaned)
+    if degree not in {3, 4}:
         raise ValueError("gravel junction requires three or four directions")
 
-    def opposition_error(a, b) -> float:
-        dot = max(-1.0, min(1.0, a[0] * b[0] + a[1] * b[1]))
-        return abs(180.0 - math.degrees(math.acos(dot)))
-
-    pairs = sorted(
-        (
-            (opposition_error(cleaned[i], cleaned[j]), i, j)
-            for i in range(len(cleaned))
-            for j in range(i + 1, len(cleaned))
-        ),
-        key=lambda item: (item[0], item[1], item[2]),
+    actual_headings = tuple(_heading(direction) for direction in cleaned)
+    variants = tuple(
+        variant for variant in GRAVEL_JUNCTION_VARIANTS
+        if (4 if variant.startswith("x") else 3) == degree
     )
+    variant_rank = {variant: index for index, variant in enumerate(variants)}
 
-    if len(cleaned) == 3:
-        error, first, second = pairs[0]
-        if error <= 35.0:
-            branch_index = next(index for index in range(3) if index not in {first, second})
-            branch = cleaned[branch_index]
-            choices = []
-            for index in (first, second):
-                axis = cleaned[index]
-                signed = _signed_angle(axis, branch)
-                choices.append((abs(signed), index, signed, axis))
-            _absolute, _index, signed, axis = min(choices)
-            angle = min(90.0, max(30.0, abs(signed)))
-            bucket = _bucket(angle, GRAVEL_T_JUNCTION_ANGLES)
-            if bucket == 90:
-                return "t90", axis
-            return f"t{bucket:02d}{'r' if signed > 0.0 else 'l'}", axis
+    best: tuple[float, float, int, float, str] | None = None
+    for variant in variants:
+        template = gravel_junction_template_headings(variant)
+        # An optimum rotation can always be represented by aligning at least one
+        # model arm with one observed road arm. Degree is <=4, so exhaustively
+        # checking the tiny assignment space is both clearer and cheaper than
+        # carrying another geometry dependency into this hot path.
+        rotations = {
+            (actual - local) % 360.0
+            for actual in actual_headings
+            for local in template
+        }
+        for rotation in rotations:
+            rotated = tuple((local + rotation) % 360.0 for local in template)
+            for assignment in itertools.permutations(actual_headings):
+                errors = tuple(
+                    _angular_distance_degrees(model_heading, actual_heading)
+                    for model_heading, actual_heading in zip(rotated, assignment)
+                )
+                maximum_error = max(errors)
+                squared_error = sum(error * error for error in errors)
+                candidate = (
+                    maximum_error,
+                    squared_error,
+                    variant_rank[variant],
+                    rotation,
+                    variant,
+                )
+                if best is None or candidate < best:
+                    best = candidate
 
-        # A true Y has no near-opposite main-road pair. The symmetric 120 model
-        # is deliberately reusable for these less common three-arm layouts.
-        axis = min(cleaned, key=_heading)
-        return "y120", axis
-
-    _error, first, second = pairs[0]
-    axis = cleaned[first]
-    remaining = [cleaned[index] for index in range(4) if index not in {first, second}]
-    crossing_angles = []
-    for direction in remaining:
-        signed = abs(_signed_angle(axis, direction))
-        crossing_angles.append(min(signed, 180.0 - signed))
-    crossing = min(90.0, max(30.0, min(crossing_angles)))
-    return f"x{_bucket(crossing, GRAVEL_X_JUNCTION_ANGLES):02d}", axis
+    assert best is not None
+    _maximum_error, _squared_error, _rank, rotation, variant = best
+    return variant, _direction_from_heading(rotation)
 
 
 def gravel_junction_template_headings(variant: str) -> tuple[float, ...]:
