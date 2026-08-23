@@ -157,8 +157,10 @@ def gravel_junction_model_path(world_name: str, degree: int, variant: str) -> st
     if degree != expected:
         raise ValueError("gravel junction degree does not match variant")
     gravel_junction_template_headings(normalized)  # validate spelling
-    # Reuse the existing generic 90-degree hubs for the two orthogonal family
-    # members. Only the skew/Y shapes require additional P3Ds.
+    # Keep the historical orthogonal model paths for compatibility, but the
+    # family policy rebuilds those two P3Ds with the same 4.0 m arm contract as
+    # every skew/Y member. This preserves old references without preserving the
+    # old short 2.45/3.0 m geometry that opened visible seams.
     if (degree, normalized) in {(3, "t90"), (4, "x90")}:
         return rf"{world_name}\i\gravel_j{degree}.p3d"
     return rf"{world_name}\i\gravel_j{degree}_{normalized}.p3d"
@@ -291,6 +293,13 @@ def _family_junction_lods(key, texture: str):
 
 
 def _road_lods(key, texture: str):
+    subtype = key.subtype.casefold()
+    if subtype == "gravel_j3":
+        family_key = replace(key, subtype="gravel_j3_t90", length_dm=int(round(GRAVEL_JUNCTION_ARM_EXTENT_METRES * 20.0)))
+        return _family_junction_lods(family_key, texture)
+    if subtype == "gravel_j4":
+        family_key = replace(key, subtype="gravel_j4_x90", length_dm=int(round(GRAVEL_JUNCTION_ARM_EXTENT_METRES * 20.0)))
+        return _family_junction_lods(family_key, texture)
     if re.fullmatch(r"gravel_j[34]_.+", key.subtype, re.IGNORECASE):
         return _family_junction_lods(key, texture)
     return _ORIGINAL_ROAD_LODS(key, texture)
