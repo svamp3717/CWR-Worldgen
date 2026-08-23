@@ -25,6 +25,9 @@ from .model import HeightmapSpec, OsmSpec, PlayabilitySpec, WorldSpec
 from .stock_utility_policy import install_stock_utility_policy as _install_stock_utility_policy
 
 _install_stock_utility_policy()
+from .road_quality_policy import install_road_quality_policy as _install_road_quality_policy
+
+_install_road_quality_policy()
 
 # Public Overpass servers sometimes all return transient 5xx/timeout errors at
 # once. Install the bounded retry wrapper before milestone modules import the
