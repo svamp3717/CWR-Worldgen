@@ -32,6 +32,9 @@ class Milestone6Spec(Milestone5Spec):
     forest_building_clearance: float = 1.0
     minimum_forest_area: float = 200.0
     coordinate_precision: int = 8
+    # External milestone specs mirror the runtime playability policy. GUI/CLI
+    # callers enable this so positive object limits warn instead of truncating.
+    advisory_object_limits: bool = False
 
 
 def _sha256(path: Path) -> str:
@@ -91,6 +94,7 @@ def build_milestone6(output_dir: Path, spec: Milestone6Spec, *, clean: bool = Tr
         forest_ground_clearance=spec.forest_ground_clearance,
         point_building_footprint=spec.point_building_footprint,
         max_forest_objects=spec.max_forest_objects,
+        advisory_object_limits=spec.advisory_object_limits,
         include_minor_roads=spec.include_minor_roads,
         road_connection_tolerance=spec.road_connection_tolerance,
         maximum_road_grade_percent=spec.maximum_road_grade_percent,

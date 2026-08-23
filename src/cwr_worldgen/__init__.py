@@ -25,6 +25,18 @@ from .model import HeightmapSpec, OsmSpec, PlayabilitySpec, WorldSpec
 from .stock_utility_policy import install_stock_utility_policy as _install_stock_utility_policy
 
 _install_stock_utility_policy()
+from .road_quality_policy import install_road_quality_policy as _install_road_quality_policy
+
+_install_road_quality_policy()
+from .gravel_junction_policy import install_gravel_junction_policy as _install_gravel_junction_policy
+
+_install_gravel_junction_policy()
+from .gravel_gap_policy import install_gravel_gap_policy as _install_gravel_gap_policy
+
+_install_gravel_gap_policy()
+from .gravel_family_policy import install_gravel_family_policy as _install_gravel_family_policy
+
+_install_gravel_family_policy()
 
 # Public Overpass servers sometimes all return transient 5xx/timeout errors at
 # once. Install the bounded retry wrapper before milestone modules import the
@@ -37,6 +49,14 @@ from .milestone6 import Milestone6Spec, build_milestone6
 from .milestone7 import Milestone7Spec, build_milestone7
 from .milestone8 import Milestone8Spec, build_milestone8
 from .milestone9 import Milestone9Spec, build_milestone9
+from .milestone9_advisory_policy import (
+    install_milestone9_advisory_policy as _install_milestone9_advisory_policy,
+)
+
+_install_milestone9_advisory_policy()
+from .grid_default_policy import install_default_grid_policy as _install_default_grid_policy
+
+_install_default_grid_policy()
 from .network import install_overture_release_resolution as _install_overture_release_resolution
 
 _install_overture_release_resolution()
