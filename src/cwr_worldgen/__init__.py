@@ -31,6 +31,9 @@ _install_road_quality_policy()
 from .gravel_junction_policy import install_gravel_junction_policy as _install_gravel_junction_policy
 
 _install_gravel_junction_policy()
+from .gravel_gap_policy import install_gravel_gap_policy as _install_gravel_gap_policy
+
+_install_gravel_gap_policy()
 
 # Public Overpass servers sometimes all return transient 5xx/timeout errors at
 # once. Install the bounded retry wrapper before milestone modules import the
