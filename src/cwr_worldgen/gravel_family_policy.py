@@ -99,10 +99,6 @@ def gravel_junction_variant_for_directions(
     best: tuple[float, float, int, float, str] | None = None
     for variant in variants:
         template = gravel_junction_template_headings(variant)
-        # An optimum rotation can always be represented by aligning at least one
-        # model arm with one observed road arm. Degree is <=4, so exhaustively
-        # checking the tiny assignment space is both clearer and cheaper than
-        # carrying another geometry dependency into this hot path.
         rotations = {
             (actual - local) % 360.0
             for actual in actual_headings
@@ -156,11 +152,7 @@ def gravel_junction_model_path(world_name: str, degree: int, variant: str) -> st
     expected = 4 if normalized.startswith("x") else 3
     if degree != expected:
         raise ValueError("gravel junction degree does not match variant")
-    gravel_junction_template_headings(normalized)  # validate spelling
-    # Keep the historical orthogonal model paths for compatibility, but the
-    # family policy rebuilds those two P3Ds with the same 4.0 m arm contract as
-    # every skew/Y member. This preserves old references without preserving the
-    # old short 2.45/3.0 m geometry that opened visible seams.
+    gravel_junction_template_headings(normalized)
     if (degree, normalized) in {(3, "t90"), (4, "x90")}:
         return rf"{world_name}\i\gravel_j{degree}.p3d"
     return rf"{world_name}\i\gravel_j{degree}_{normalized}.p3d"
@@ -176,8 +168,6 @@ def gravel_junction_ray_exit_distance(
     axis: tuple[float, float],
     direction: tuple[float, float],
 ) -> float:
-    """Distance from the node to the rendered fixed-family footprint on a ray."""
-
     ray = _unit(direction)
     axis = _unit(axis)
     right = (axis[1], -axis[0])
@@ -276,12 +266,8 @@ def _family_junction_lods(key, texture: str):
         texture=texture,
         resolution=_pi._VISUAL_LOD,
     )
-    boundary = tuple(
-        (float(x), 0.0, float(z)) for x, z in tuple(polygon.exterior.coords)[:-1]
-    )
-    map_geometry = _pi._Lod(
-        boundary, (), (), _pi._GEOMETRY_LOD, properties=(("map", "road"),)
-    )
+    boundary = tuple((float(x), 0.0, float(z)) for x, z in tuple(polygon.exterior.coords)[:-1])
+    map_geometry = _pi._Lod(boundary, (), (), _pi._GEOMETRY_LOD, properties=(("map", "road"),))
     roadway = _triangulated_lod(
         polygon,
         y=_pi.GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES,
@@ -312,9 +298,6 @@ def _register_model_usage(self, model_path: str, count: int = 1) -> None:
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
     legacy = re.fullmatch(r"gravel_j([34])\.p3d", filename, re.IGNORECASE)
     if legacy and self.is_generated_model(model_path):
-        # Keep the historical filename but change the registered geometry key.
-        # length_dm=80 is part of the procedural-asset cache key, so old short
-        # 2.45/3.0 m hubs cannot be restored after the family adopts 4 m arms.
         degree = int(legacy.group(1))
         self._usage[_pi.InfrastructureModelKey(
             "road",
@@ -397,10 +380,6 @@ def install_gravel_family_policy() -> None:
     global _ORIGINAL_FIT, _INSTALLED
     if _INSTALLED:
         return
-    # Capture the current outer fitter at installation time. The module is
-    # imported earlier by gravel_junction_policy, before gravel_gap_policy is
-    # installed, so capturing at import time would accidentally bypass that
-    # later repair layer.
     _ORIGINAL_FIT = _p.fit_road_objects
     _pi._road_lods = _road_lods
     _pi.ProceduralInfrastructureLibrary.register_model_usage = _register_model_usage
