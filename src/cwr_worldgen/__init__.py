@@ -40,6 +40,11 @@ from .milestone6 import Milestone6Spec, build_milestone6
 from .milestone7 import Milestone7Spec, build_milestone7
 from .milestone8 import Milestone8Spec, build_milestone8
 from .milestone9 import Milestone9Spec, build_milestone9
+from .milestone9_advisory_policy import (
+    install_milestone9_advisory_policy as _install_milestone9_advisory_policy,
+)
+
+_install_milestone9_advisory_policy()
 from .network import install_overture_release_resolution as _install_overture_release_resolution
 
 _install_overture_release_resolution()
