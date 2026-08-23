@@ -18,6 +18,9 @@ _HUB_HALF_WIDTH = 3.0
 _STOCK_BULGE_LIMIT = 0.10
 _GRAVEL_BULGE_LIMIT = 0.075
 _LOOKAHEAD_DEPTH = 2
+_AUDIT_BUCKET_METRES = 32.0
+_AUDIT_ALIGNMENT_COSINE = math.cos(math.radians(28.0))
+_PIECE_LENGTH_PATTERN = re.compile(r"(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,39 +292,86 @@ def _quality_chain(measure, pieces, *, start_distance, preferred_end_distance, m
 
 def _piece_length(model_path: str, configured_long_length: float) -> float:
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
-    match = re.search(r"(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", filename)
+    match = _PIECE_LENGTH_PATTERN.search(filename)
     return configured_long_length if match is None else configured_long_length * int(match.group(1)) / 25.0
 
 
 def _audit(report, context: _Context):
+    """Re-audit junction coverage without scanning the whole road network per arm.
+
+    The first road-quality version compared every junction direction against every
+    emitted road object. On large maps that made the UI appear to hang *after*
+    the base fitter had already logged "Stock road fitting complete". A junction
+    only needs nearby road axes, so index axis midpoints in a small spatial hash.
+    Any axis close enough to satisfy the connection tolerance is guaranteed to
+    have its midpoint inside ``cover + tolerance + half_length`` of the node.
+    """
     if not context.junctions or not report.objects:
         return report
     spec = context.spec
-    axes = [
-        (obj, _p._model_axis(obj, _piece_length(obj.model_path, spec.road_segment_length)))
-        for obj in report.objects[report.junction_cap_objects:]
-    ]
+    bucket_size = _AUDIT_BUCKET_METRES
+    length_cache: dict[str, float] = {}
+    buckets: dict[tuple[int, int], list[tuple[float, float, tuple[tuple[float, float], tuple[float, float]]]]] = {}
+    maximum_half_length = 0.0
+
+    for obj in report.objects[report.junction_cap_objects:]:
+        model_key = obj.model_path.casefold()
+        length = length_cache.get(model_key)
+        if length is None:
+            length = _piece_length(obj.model_path, spec.road_segment_length)
+            length_cache[model_key] = length
+        axis = _p._model_axis(obj, length)
+        dx = axis[1][0] - axis[0][0]
+        dz = axis[1][1] - axis[0][1]
+        axis_length = math.hypot(dx, dz)
+        if axis_length <= 1.0e-9:
+            continue
+        maximum_half_length = max(maximum_half_length, axis_length * 0.5)
+        ux, uz = dx / axis_length, dz / axis_length
+        midpoint_x = (axis[0][0] + axis[1][0]) * 0.5
+        midpoint_z = (axis[0][1] + axis[1][1]) * 0.5
+        key = (math.floor(midpoint_x / bucket_size), math.floor(midpoint_z / bucket_size))
+        buckets.setdefault(key, []).append((ux, uz, axis))
+
     failed = 0
-    maximum_gap = 0.0
+    maximum_gap = report.maximum_connection_gap
     maximum_cover = 0.0
+    tolerance = float(spec.road_connection_tolerance)
     for junction in context.junctions.values():
+        point_x, point_z = junction.point
         for direction in junction.directions:
             cover = _exit_distance(junction, direction) + _JUNCTION_MARGIN
             maximum_cover = max(maximum_cover, cover)
-            heading = math.degrees(math.atan2(direction[0], direction[1])) % 360.0
+            # Searching to this radius is sufficient for every axis that could
+            # possibly pass the connection tolerance, regardless of piece length.
+            radius = cover + tolerance + maximum_half_length + 0.05
+            bx0 = math.floor((point_x - radius) / bucket_size)
+            bx1 = math.floor((point_x + radius) / bucket_size)
+            bz0 = math.floor((point_z - radius) / bucket_size)
+            bz1 = math.floor((point_z + radius) / bucket_size)
             best = math.inf
-            for obj, axis in axes:
-                forward = _p._heading_difference(obj.heading_degrees, heading)
-                reverse = _p._heading_difference((obj.heading_degrees + 180.0) % 360.0, heading)
-                if min(forward, reverse) > 28.0:
-                    continue
-                best = min(best, _p._point_segment_distance(junction.point, axis[0], axis[1]))
+            dx, dz = direction
+            for bx in range(bx0, bx1 + 1):
+                for bz in range(bz0, bz1 + 1):
+                    for ux, uz, axis in buckets.get((bx, bz), ()):
+                        if abs(ux * dx + uz * dz) < _AUDIT_ALIGNMENT_COSINE:
+                            continue
+                        distance = _p._point_segment_distance(junction.point, axis[0], axis[1])
+                        if distance < best:
+                            best = distance
+                            if best <= cover:
+                                break
+                    if best <= cover:
+                        break
+                if best <= cover:
+                    break
             if not math.isfinite(best):
                 failed += 1
+                maximum_gap = max(maximum_gap, tolerance + 1.0e-6)
                 continue
             uncovered = max(0.0, best - cover)
             maximum_gap = max(maximum_gap, uncovered)
-            if uncovered > spec.road_connection_tolerance:
+            if uncovered > tolerance:
                 failed += 1
     return replace(
         report,
@@ -338,15 +388,32 @@ def _fit(dataset, projection, elevations, spec, *, starting_id: int = 1, progres
             starting_id=starting_id, progress_callback=progress_callback,
         )
     context = _Context(elevations, spec, _junction_geometry(dataset, projection, spec))
+    deferred_completion: tuple[int, str] | None = None
+
+    def _progress(value: int, message: str) -> None:
+        nonlocal deferred_completion
+        if value >= 100 and message.startswith("Stock road fitting complete:"):
+            deferred_completion = (value, message)
+            return
+        if progress_callback is not None:
+            progress_callback(value, message)
+
     token = _CONTEXT.set(context)
     try:
         report = _ORIGINAL_FIT(
             dataset, projection, elevations, spec,
-            starting_id=starting_id, progress_callback=progress_callback,
+            starting_id=starting_id,
+            progress_callback=_progress if progress_callback is not None else None,
         )
     finally:
         _CONTEXT.reset(token)
-    return _audit(report, context)
+
+    if progress_callback is not None and context.junctions:
+        progress_callback(99, f"Auditing {len(context.junctions):,} road junctions")
+    report = _audit(report, context)
+    if progress_callback is not None and deferred_completion is not None:
+        progress_callback(*deferred_completion)
+    return report
 
 
 def install_road_quality_policy() -> None:
