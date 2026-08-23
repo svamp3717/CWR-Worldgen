@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import replace
 import math
 from typing import Callable
@@ -9,6 +11,7 @@ from typing import Callable
 from . import asset_mapping as _asset_mapping
 from . import generator as _generator
 from . import osm as _osm
+from . import procedural_infrastructure as _procedural_infrastructure
 
 STOCK_POWER_POLE_MODELS: tuple[str, ...] = (
     r"data3d\sloupyelA.p3d",
@@ -24,13 +27,42 @@ _POLE_FOOTPRINT_METRES = 3.0
 _TOWER_FOOTPRINT_METRES = 9.0
 _POLE_TARGET_CLEARANCE_FROM_ROAD_CENTRE_METRES = 7.0
 _TOWER_TARGET_CLEARANCE_FROM_ROAD_CENTRE_METRES = 10.0
+_MAPPED_TOWER_MATCH_DISTANCE_METRES = 1.0
 
 _INSTALLED = False
+_STOCK_POWER_UTILITY_GENERATION: ContextVar[bool] = ContextVar(
+    "cwr_stock_power_utility_generation", default=False
+)
 
 
 def _stock_pole_model(object_id: int) -> str:
     # Stable and cheap. The WRP object id is deterministic for a given placement plan.
     return STOCK_POWER_POLE_MODELS[int(object_id) % len(STOCK_POWER_POLE_MODELS)]
+
+
+def _stock_utility_model(original):
+    """Return original-game pole/tower models before procedural usage is registered."""
+
+    def wrapped(self, subtype: str) -> str:
+        kind = str(subtype).casefold()
+        if _STOCK_POWER_UTILITY_GENERATION.get():
+            if kind == "power_pole":
+                return STOCK_POWER_POLE_MODELS[0]
+            if kind == "power_tower":
+                return STOCK_POWER_TOWER_MODELS[0]
+        return original(self, subtype)
+
+    wrapped._cwr_stock_utility_policy = True  # type: ignore[attr-defined]
+    return wrapped
+
+
+@contextmanager
+def _stock_power_utility_generation():
+    token = _STOCK_POWER_UTILITY_GENERATION.set(True)
+    try:
+        yield
+    finally:
+        _STOCK_POWER_UTILITY_GENERATION.reset(token)
 
 
 def _utility_kind(model_path: str) -> str:
@@ -42,11 +74,9 @@ def _utility_kind(model_path: str) -> str:
     if folded in {path.casefold() for path in STOCK_POWER_POLE_MODELS}:
         return "stock_power_pole"
     if folded in {path.casefold() for path in STOCK_POWER_TOWER_MODELS}:
-        # Before this policy, the settlement clutter pool could also choose the
-        # large stock high-voltage mast as a generic roadside pole. Treat an
-        # already-stock mast as settlement clutter; explicit mapped towers reach
-        # us through the generated util_power_tower path above.
-        return "settlement_power_tower"
+        # This stock mast may be an explicit mapped tower or historical settlement
+        # clutter. The dataset-aware rewrite below disambiguates those cases.
+        return "stock_power_tower"
     return ""
 
 
@@ -127,11 +157,25 @@ def _road_safe_position(
     return None
 
 
+def _mapped_power_tower_positions(dataset, projection) -> tuple[tuple[float, float], ...]:
+    return tuple(
+        projection.to_world(feature.point)
+        for feature in getattr(dataset, "utility_points", ())
+        if feature.tags.get("utility", "").casefold() == "power_tower"
+    )
+
+
+def _matches_mapped_tower(x: float, z: float, positions: tuple[tuple[float, float], ...]) -> bool:
+    limit2 = _MAPPED_TOWER_MATCH_DISTANCE_METRES ** 2
+    return any((x - tx) ** 2 + (z - tz) ** 2 <= limit2 for tx, tz in positions)
+
+
 def _rewrite_stock_utilities(result, dataset, projection, raster, elevations, spec, progress: Callable[[int, str], None] | None = None):
     if not getattr(result, "objects", ()):
         return result
 
     corridors = _osm._project_vehicle_road_corridors(dataset, projection)
+    mapped_tower_positions = _mapped_power_tower_positions(dataset, projection)
     rewritten = []
     changed = 0
     unresolved = 0
@@ -142,13 +186,20 @@ def _rewrite_stock_utilities(result, dataset, projection, raster, elevations, sp
             rewritten.append(obj)
             continue
 
+        if kind == "stock_power_tower":
+            kind = (
+                "mapped_power_tower"
+                if _matches_mapped_tower(obj.x, obj.z, mapped_tower_positions)
+                else "settlement_power_tower"
+            )
+
         if kind == "mapped_power_tower":
             model = STOCK_POWER_TOWER_MODELS[0]
             footprint = _TOWER_FOOTPRINT_METRES
             target_distance = _TOWER_TARGET_CLEARANCE_FROM_ROAD_CENTRE_METRES
         else:
-            # Generated power poles, ordinary stock poles, and the oversized mast
-            # accidentally used as settlement clutter all normalize to a normal
+            # Legacy generated power poles, ordinary stock poles, and the oversized
+            # mast accidentally used as settlement clutter all normalize to a normal
             # original-game pole family.
             model = _stock_pole_model(obj.object_id)
             footprint = _POLE_FOOTPRINT_METRES
@@ -213,10 +264,17 @@ def install_stock_utility_policy() -> None:
     if _INSTALLED:
         return
 
+    original_utility_model = _procedural_infrastructure.ProceduralInfrastructureLibrary.utility_model
+    if not getattr(original_utility_model, "_cwr_stock_utility_policy", False):
+        _procedural_infrastructure.ProceduralInfrastructureLibrary.utility_model = _stock_utility_model(
+            original_utility_model
+        )
+
     original_loader = _generator._load_nonroad_objects
 
     def load_nonroad_objects(*args, **kwargs):
-        value = original_loader(*args, **kwargs)
+        with _stock_power_utility_generation():
+            value = original_loader(*args, **kwargs)
         result, cached_library, hit, key, path = value
         bound = {
             "dataset": args[0] if len(args) > 0 else kwargs["dataset"],
