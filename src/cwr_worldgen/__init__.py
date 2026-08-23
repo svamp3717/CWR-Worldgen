@@ -28,6 +28,9 @@ _install_stock_utility_policy()
 from .road_quality_policy import install_road_quality_policy as _install_road_quality_policy
 
 _install_road_quality_policy()
+from .gravel_junction_policy import install_gravel_junction_policy as _install_gravel_junction_policy
+
+_install_gravel_junction_policy()
 
 # Public Overpass servers sometimes all return transient 5xx/timeout errors at
 # once. Install the bounded retry wrapper before milestone modules import the
