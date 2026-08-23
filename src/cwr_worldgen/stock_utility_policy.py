@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import replace
 import math
 from typing import Callable
@@ -28,6 +30,9 @@ _TOWER_TARGET_CLEARANCE_FROM_ROAD_CENTRE_METRES = 10.0
 _MAPPED_TOWER_MATCH_DISTANCE_METRES = 1.0
 
 _INSTALLED = False
+_STOCK_POWER_UTILITY_GENERATION: ContextVar[bool] = ContextVar(
+    "cwr_stock_power_utility_generation", default=False
+)
 
 
 def _stock_pole_model(object_id: int) -> str:
@@ -40,14 +45,24 @@ def _stock_utility_model(original):
 
     def wrapped(self, subtype: str) -> str:
         kind = str(subtype).casefold()
-        if kind == "power_pole":
-            return STOCK_POWER_POLE_MODELS[0]
-        if kind == "power_tower":
-            return STOCK_POWER_TOWER_MODELS[0]
+        if _STOCK_POWER_UTILITY_GENERATION.get():
+            if kind == "power_pole":
+                return STOCK_POWER_POLE_MODELS[0]
+            if kind == "power_tower":
+                return STOCK_POWER_TOWER_MODELS[0]
         return original(self, subtype)
 
     wrapped._cwr_stock_utility_policy = True  # type: ignore[attr-defined]
     return wrapped
+
+
+@contextmanager
+def _stock_power_utility_generation():
+    token = _STOCK_POWER_UTILITY_GENERATION.set(True)
+    try:
+        yield
+    finally:
+        _STOCK_POWER_UTILITY_GENERATION.reset(token)
 
 
 def _utility_kind(model_path: str) -> str:
@@ -258,7 +273,8 @@ def install_stock_utility_policy() -> None:
     original_loader = _generator._load_nonroad_objects
 
     def load_nonroad_objects(*args, **kwargs):
-        value = original_loader(*args, **kwargs)
+        with _stock_power_utility_generation():
+            value = original_loader(*args, **kwargs)
         result, cached_library, hit, key, path = value
         bound = {
             "dataset": args[0] if len(args) > 0 else kwargs["dataset"],
