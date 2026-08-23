@@ -18,6 +18,7 @@ from cwr_worldgen.stock_utility_policy import (
     STOCK_POWER_POLE_MODELS,
     STOCK_POWER_TOWER_MODELS,
     _rewrite_stock_utilities,
+    _stock_power_utility_generation,
 )
 
 
@@ -55,12 +56,16 @@ def test_build_loader_is_wrapped_by_stock_utility_policy() -> None:
     assert getattr(ProceduralInfrastructureLibrary.utility_model, "_cwr_stock_utility_policy", False)
 
 
-def test_procedural_library_does_not_register_power_pole_or_tower_assets() -> None:
-    library = ProceduralInfrastructureLibrary("utility_policy_test", cache_enabled=False)
+def test_production_context_does_not_register_power_pole_or_tower_assets() -> None:
+    legacy = ProceduralInfrastructureLibrary("legacy_utility_api", cache_enabled=False)
+    assert legacy.utility_model("power_pole").endswith(r"\i\util_power_pole.p3d")
+    assert legacy.utility_model("power_tower").endswith(r"\i\util_power_tower.p3d")
 
-    pole = library.utility_model("power_pole")
-    tower = library.utility_model("power_tower")
-    water = library.utility_model("water_tower")
+    library = ProceduralInfrastructureLibrary("utility_policy_test", cache_enabled=False)
+    with _stock_power_utility_generation():
+        pole = library.utility_model("power_pole")
+        tower = library.utility_model("power_tower")
+        water = library.utility_model("water_tower")
 
     assert pole in STOCK_POWER_POLE_MODELS
     assert tower in STOCK_POWER_TOWER_MODELS
@@ -79,7 +84,7 @@ def test_default_asset_mapping_uses_stock_power_models() -> None:
     assert not any("util_power_" in model.casefold() for model in rule.models)
 
 
-def test_direct_generation_uses_stock_power_pole_before_postprocessing() -> None:
+def test_production_generation_uses_stock_power_pole_before_postprocessing() -> None:
     bbox = (0.0, 0.0, 1.0, 1.0)
     cells = 8
     projection = BboxProjection.create(bbox, cells * 25.0)
@@ -92,10 +97,11 @@ def test_direct_generation_uses_stock_power_pole_before_postprocessing() -> None
         utility_points=(pole,),
     )
     spec = _spec(bbox, cells)
-    result = generate_world_objects(
-        dataset, projection, _empty_raster(cells), (5.0,) * (cells * cells), spec,
-        include_roads=False, building_placement_plans=(),
-    )
+    with _stock_power_utility_generation():
+        result = generate_world_objects(
+            dataset, projection, _empty_raster(cells), (5.0,) * (cells * cells), spec,
+            include_roads=False, building_placement_plans=(),
+        )
 
     assert result.utility_objects == 1
     assert result.objects[0].model_path in STOCK_POWER_POLE_MODELS
@@ -156,10 +162,11 @@ def test_mapped_stock_power_tower_remains_a_tower_after_rewrite() -> None:
     )
     spec = _spec(bbox, cells)
     elevations = (5.0,) * (cells * cells)
-    result = generate_world_objects(
-        dataset, projection, _empty_raster(cells), elevations, spec,
-        include_roads=False, building_placement_plans=(),
-    )
+    with _stock_power_utility_generation():
+        result = generate_world_objects(
+            dataset, projection, _empty_raster(cells), elevations, spec,
+            include_roads=False, building_placement_plans=(),
+        )
 
     assert result.objects[0].model_path in STOCK_POWER_TOWER_MODELS
     rewritten = _rewrite_stock_utilities(
