@@ -80,6 +80,23 @@ def create_gravel_road_texture_image(size: int = 512) -> Image.Image:
             pixels[x, y] = (r, g, b, alpha)
     return image
 
+
+def create_gravel_junction_texture_image(size: int = 512) -> Image.Image:
+    """Build an opaque gravel texture for generated junction polygons.
+
+    Straight/curved gravel ribbons intentionally use transparent texture edges so
+    the world terrain can blend into their outside verges. Junction meshes tile
+    UVs over a two-dimensional polygon, however, so those repeating alpha edges
+    become narrow strips of visible terrain *inside* the road surface. Reuse the
+    exact same gravel photograph for junctions, but keep every texel opaque.
+    """
+
+    size = int(size)
+    if size < 32:
+        raise ValueError("gravel junction texture size must be at least 32 pixels")
+    source = Image.open(_GRAVEL_REFERENCE_TEXTURE).convert("RGB")
+    return source.resize((size, size), Image.Resampling.LANCZOS)
+
 def _eden_gravel_surface_rules() -> dict[str, float]:
     rules: dict[str, float] = {}
     for raw_line in _EDEN_GRAVEL_SURFACES.read_text(encoding="ascii").splitlines():
@@ -143,6 +160,7 @@ _TEXTURE_FILE_STEMS = {
     "hedge": "h",
     "bridge": "b",
     "gravel": "g",
+    "gravel_junction": "gj",
     "power_pole": "up",
     "power_tower": "ut",
     "water_tower": "uw",
@@ -161,6 +179,7 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         "bridge": (112, 105, 91),
         "rock": (118, 116, 107),
         "gravel": (126, 119, 103),
+        "gravel_junction": (126, 119, 103),
         "power_pole": (116, 102, 78),
         "power_tower": (118, 120, 119),
         "water_tower": (142, 148, 151),
@@ -194,6 +213,8 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
             draw.line((0, y, size, y), fill=(145, 136, 117), width=2)
     elif kind == "gravel":
         return create_gravel_road_texture_image(size)
+    elif kind == "gravel_junction":
+        return create_gravel_junction_texture_image(size)
     else:
         for y in range(size):
             for x in range(size):
@@ -789,6 +810,16 @@ def _write_infrastructure_asset_task(task: _InfrastructureAssetTask) -> tuple[di
     }, hit)
 
 
+def _infrastructure_texture_kind(key: InfrastructureModelKey) -> str:
+    """Return the generated texture family used by one infrastructure model."""
+    if key.kind == "road":
+        # Junction polygons tile their UV coordinates in two dimensions. They
+        # must not use the alpha-edged ribbon texture, otherwise each texture
+        # wrap reveals a thin strip of grass through the middle of the junction.
+        return "gravel_junction" if key.subtype.casefold().startswith("gravel_j") else "gravel"
+    return key.subtype if key.kind in {"barrier", "utility"} else key.kind
+
+
 class ProceduralInfrastructureLibrary:
     _PATTERN = re.compile(r"^(bar|br|rock)_([a-z0-9_]+)_w(\d+)_l(\d+)\.p3d$", re.IGNORECASE)
     _GRAVEL_PATTERN = re.compile(r"^gravel(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.IGNORECASE)
@@ -902,15 +933,12 @@ class ProceduralInfrastructureLibrary:
             # generating a mismatched grey object texture. Alternate the two
             # verified rock tiles across deterministic rock-group variants.
             return r"o\lom2.paa" if key.subtype.casefold().endswith("_1") else r"o\l1.paa"
-        if key.kind == "road":
-            kind = "gravel"
-        else:
-            kind = key.subtype if key.kind in {"barrier", "utility"} else key.kind
+        kind = _infrastructure_texture_kind(key)
         return rf"{self.world_name}\i\{_texture_file_stem(kind)}.paa"
 
     def write_assets(self, source_dir: Path, catalogue_path: Path) -> InfrastructureAssetResult:
         used_texture_kind_set = {
-            "gravel" if key.kind == "road" else (key.subtype if key.kind in {"barrier", "utility"} else key.kind)
+            _infrastructure_texture_kind(key)
             for key in self._usage
             if key.kind != "rock"
         }
@@ -927,6 +955,14 @@ class ProceduralInfrastructureLibrary:
                 )
                 producer = lambda target: write_rgba_dxt1_paa(
                     target, create_gravel_road_texture_image(512)
+                )
+            elif kind == "gravel_junction":
+                asset_key = cache_key(
+                    "procedural-infrastructure-texture-v16-reference-gravel-junction-opaque",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-opaque-junction-v1"},
+                )
+                producer = lambda target: write_rgb_dxt1_paa(
+                    target, create_gravel_junction_texture_image(512)
                 )
             else:
                 texture_size = 256 if kind == "bridge" else 128
@@ -954,7 +990,7 @@ class ProceduralInfrastructureLibrary:
             texture_files.append(relative)
 
         gravel_source: dict[str, object] | None = None
-        if "gravel" in used_texture_kinds:
+        if {"gravel", "gravel_junction"} & set(used_texture_kinds):
             stale_edge = source_dir / "i" / "ge.paa"
             if stale_edge.exists():
                 stale_edge.unlink()
@@ -976,6 +1012,12 @@ class ProceduralInfrastructureLibrary:
                 "surface_rule_values": source_rules,
                 "embedded_surface_rules": "i/gravel-source-surfaces.txt",
             }
+            if "gravel_junction" in used_texture_kinds:
+                gravel_source.update({
+                    "junction_texture": f"i/{_texture_file_stem('gravel_junction')}.paa",
+                    "junction_texture_recipe": "reference-gravel-photo-opaque-junction-v1",
+                    "junction_texture_alpha": "opaque",
+                })
 
         model_tasks: list[_InfrastructureAssetTask] = []
         for key in sorted(self._usage):
