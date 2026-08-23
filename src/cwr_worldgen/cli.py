@@ -111,15 +111,15 @@ def _add_osm_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--water-depth", type=float, default=5.0, help="metres below sea level for OSM water")
     parser.add_argument("--coast-blend-cells", type=int, default=2, help="shore smoothing distance")
     parser.add_argument("--road-segment-length", type=float, default=24.5, help="road model spacing in metres")
-    parser.add_argument("--max-road-objects", type=int, default=DEFAULT_MAX_ROAD_OBJECTS, help=f"complete stock-road object ceiling (default: {DEFAULT_MAX_ROAD_OBJECTS:,})")
-    parser.add_argument("--max-buildings", type=int, default=DEFAULT_MAX_BUILDINGS, help=f"maximum placed building footprints (default: {DEFAULT_MAX_BUILDINGS:,})")
+    parser.add_argument("--max-road-objects", type=int, default=DEFAULT_MAX_ROAD_OBJECTS, help=f"stock-road warning threshold; exceeded values are logged but the complete network is still emitted; 0 disables road objects (default: {DEFAULT_MAX_ROAD_OBJECTS:,})")
+    parser.add_argument("--max-buildings", type=int, default=DEFAULT_MAX_BUILDINGS, help=f"building-footprint warning threshold; exceeded values are logged and generation continues; 0 disables buildings (default: {DEFAULT_MAX_BUILDINGS:,})")
     parser.add_argument("--building-min-area", type=float, default=20.0, help="minimum OSM footprint area in world m2")
     parser.add_argument("--forest-tree-spacing", type=float, default=50.0, help="classic stock forest-block spacing in metres")
     parser.add_argument("--forest-road-clearance", type=float, default=0.0, help="extra clearance beyond the mapped road edge; zero still rejects tree footprints that touch the road")
     parser.add_argument("--building-ground-clearance", type=float, default=0.10, help="small visible foundation reveal above the highest final model-footprint terrain")
     parser.add_argument("--forest-ground-clearance", type=float, default=0.15, help="vertical clearance above the highest sampled forest-block terrain")
     parser.add_argument("--point-building-footprint", type=float, default=12.0, help="assumed square footprint for OSM building nodes in metres")
-    parser.add_argument("--max-forest-objects", type=int, default=DEFAULT_MAX_FOREST_OBJECTS, help=f"maximum placed primary forest and tree objects (default: {DEFAULT_MAX_FOREST_OBJECTS:,})")
+    parser.add_argument("--max-forest-objects", type=int, default=DEFAULT_MAX_FOREST_OBJECTS, help=f"primary-forest object warning threshold; exceeded values are logged and generation continues; 0 disables primary forest objects (default: {DEFAULT_MAX_FOREST_OBJECTS:,})")
     parser.add_argument("--include-minor-roads", action="store_true", help="also import paths, footways, cycleways, bridleways, and pedestrian ways")
 
 
@@ -142,6 +142,7 @@ def _osm_kwargs(args: argparse.Namespace) -> dict[str, object]:
         "forest_ground_clearance": args.forest_ground_clearance,
         "point_building_footprint": args.point_building_footprint,
         "max_forest_objects": args.max_forest_objects,
+        "advisory_object_limits": True,
         "include_minor_roads": args.include_minor_roads,
     }
 
@@ -171,15 +172,15 @@ def _add_source_feature_arguments(
     parser.add_argument("--water-depth", type=float, default=5.0, help="metres below sea level for OSM water")
     parser.add_argument("--coast-blend-cells", type=int, default=2, help="shore smoothing distance")
     parser.add_argument("--road-segment-length", type=float, default=24.5, help="road model spacing in metres")
-    parser.add_argument("--max-road-objects", type=int, default=DEFAULT_MAX_ROAD_OBJECTS, help=f"complete stock-road object ceiling (default: {DEFAULT_MAX_ROAD_OBJECTS:,})")
-    parser.add_argument("--max-buildings", type=int, default=DEFAULT_MAX_BUILDINGS, help=f"maximum placed building footprints (default: {DEFAULT_MAX_BUILDINGS:,})")
+    parser.add_argument("--max-road-objects", type=int, default=DEFAULT_MAX_ROAD_OBJECTS, help=f"stock-road warning threshold; exceeded values are logged but the complete network is still emitted; 0 disables road objects (default: {DEFAULT_MAX_ROAD_OBJECTS:,})")
+    parser.add_argument("--max-buildings", type=int, default=DEFAULT_MAX_BUILDINGS, help=f"building-footprint warning threshold; exceeded values are logged and generation continues; 0 disables buildings (default: {DEFAULT_MAX_BUILDINGS:,})")
     parser.add_argument("--building-min-area", type=float, default=20.0, help="minimum OSM footprint area in world m2")
     parser.add_argument("--forest-tree-spacing", type=float, default=50.0, help="classic stock forest-block spacing in metres")
     parser.add_argument("--forest-road-clearance", type=float, default=0.0, help="extra clearance beyond mapped road edges; zero still rejects tree footprints that touch roads")
     parser.add_argument("--building-ground-clearance", type=float, default=0.10, help="small visible foundation reveal above the highest final model-footprint terrain")
     parser.add_argument("--forest-ground-clearance", type=float, default=0.15, help="vertical clearance above the highest sampled forest-block terrain")
     parser.add_argument("--point-building-footprint", type=float, default=12.0, help="assumed square footprint for OSM building nodes in metres")
-    parser.add_argument("--max-forest-objects", type=int, default=DEFAULT_MAX_FOREST_OBJECTS, help=f"maximum placed primary forest and tree objects (default: {DEFAULT_MAX_FOREST_OBJECTS:,})")
+    parser.add_argument("--max-forest-objects", type=int, default=DEFAULT_MAX_FOREST_OBJECTS, help=f"primary-forest object warning threshold; exceeded values are logged and generation continues; 0 disables primary forest objects (default: {DEFAULT_MAX_FOREST_OBJECTS:,})")
     parser.add_argument("--include-minor-roads", action="store_true", dest="include_minor_roads", help="include service, track and other minor OSM roads")
     parser.add_argument("--no-minor-roads", action="store_false", dest="include_minor_roads", help="exclude service, track and other minor OSM roads")
     parser.set_defaults(include_minor_roads=include_minor_roads_default)
@@ -474,7 +475,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--forest-cluster-bush-max-float", type=float, default=0.60, help="maximum floating base for bush/grass proxies inside a generated cluster")
     milestone9.add_argument("--no-forest-undergrowth", action="store_false", dest="forest_undergrowth_enabled", help="disable reusable interior bush and small-spruce clusters")
     milestone9.set_defaults(forest_undergrowth_enabled=True)
-    milestone9.add_argument("--forest-undergrowth-max-objects", type=int, default=120000, help="maximum interior undergrowth cluster objects")
+    milestone9.add_argument("--forest-undergrowth-max-objects", type=int, default=120000, help="interior-undergrowth warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--forest-undergrowth-spacing", type=float, default=30.0, help="interior undergrowth grid spacing in metres")
     milestone9.add_argument("--forest-undergrowth-max-relief", type=float, default=20.0)
     milestone9.add_argument("--forest-undergrowth-max-burial", type=float, default=0.8)
@@ -482,7 +483,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--forest-undergrowth-ground-clearance", type=float, default=0.03)
     milestone9.add_argument("--no-steep-hill-bushes", action="store_false", dest="steep_hill_bushes_enabled", help="disable extra stock bushes on steep forested hills")
     milestone9.set_defaults(steep_hill_bushes_enabled=True)
-    milestone9.add_argument("--max-steep-hill-bush-objects", type=int, default=80000)
+    milestone9.add_argument("--max-steep-hill-bush-objects", type=int, default=80000, help="steep-hill bush warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--steep-hill-bush-spacing", type=float, default=24.0)
     milestone9.add_argument("--steep-hill-bush-min-slope", type=float, default=16.0)
     milestone9.add_argument("--steep-hill-bush-max-relief", type=float, default=8.0)
@@ -491,7 +492,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--steep-hill-bush-ground-clearance", type=float, default=0.03)
     milestone9.add_argument("--no-forest-borders", action="store_false", dest="forest_border_enabled", help="disable Nogova-style forest brush borders")
     milestone9.set_defaults(forest_border_enabled=True)
-    milestone9.add_argument("--forest-border-max-objects", type=int, default=2000)
+    milestone9.add_argument("--forest-border-max-objects", type=int, default=2000, help="forest-border warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--forest-border-spacing", type=float, default=34.0)
     milestone9.add_argument("--forest-border-inset", type=float, default=5.0)
     milestone9.add_argument("--forest-border-max-relief", type=float, default=24.0)
@@ -500,14 +501,14 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--no-forest-single-trees", action="store_false", dest="forest_single_tree_enabled", help="disable sparse individual spruce trees inside Everon forests")
     milestone9.set_defaults(forest_single_tree_enabled=True)
     milestone9.add_argument("--forest-single-tree-model", default=r"data3d\str smrk_medium.p3d", help="stock individual tree model used by the Everon forest scatter pass")
-    milestone9.add_argument("--max-forest-single-tree-objects", type=int, default=1000, help="extra single-tree safety limit for a 6.4 km world; scales by physical world area (4000 at 12.8 km)")
+    milestone9.add_argument("--max-forest-single-tree-objects", type=int, default=1000, help="extra single-tree warning threshold for a 6.4 km world; scales by physical world area; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--forest-single-tree-spacing", type=float, default=45.0, help="geographically anchored individual-tree spacing in metres at every world size")
     milestone9.add_argument("--forest-single-tree-footprint", type=float, default=2.0)
     milestone9.add_argument("--forest-single-tree-max-relief", type=float, default=8.0)
     milestone9.add_argument("--forest-single-tree-max-float", type=float, default=0.15, help="maximum triangle-ambiguity lift for individual trees; unsafe candidates are skipped")
     milestone9.add_argument("--no-ditch-grass", action="store_false", dest="ditch_grass_enabled", help="disable reusable tall-grass strips along OSM ditches")
     milestone9.set_defaults(ditch_grass_enabled=True)
-    milestone9.add_argument("--max-ditch-grass-objects", type=int, default=2000)
+    milestone9.add_argument("--max-ditch-grass-objects", type=int, default=2000, help="ditch-grass warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--ditch-grass-spacing", type=float, default=18.0)
     milestone9.add_argument("--ditch-grass-endpoint-trim", type=float, default=6.0)
     milestone9.add_argument("--ditch-grass-max-relief", type=float, default=18.0)
@@ -516,18 +517,18 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--ditch-grass-ground-clearance", type=float, default=0.05)
     milestone9.add_argument("--no-barriers", action="store_false", dest="barriers_enabled", help="disable OSM fences, walls and hedges")
     milestone9.set_defaults(barriers_enabled=True)
-    milestone9.add_argument("--max-barrier-objects", type=int, default=4000)
+    milestone9.add_argument("--max-barrier-objects", type=int, default=4000, help="barrier-object warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--barrier-segment-length", type=float, default=6.0)
     milestone9.add_argument("--sidewalks", action="store_true", dest="sidewalks_enabled", help="reserved sidewalk option; sidewalk placement is temporarily disabled")
     milestone9.add_argument("--no-sidewalks", action="store_false", dest="sidewalks_enabled", help="keep sidewalk placement disabled (current default)")
     milestone9.set_defaults(sidewalks_enabled=False)
-    milestone9.add_argument("--max-sidewalk-objects", type=int, default=30000)
+    milestone9.add_argument("--max-sidewalk-objects", type=int, default=30000, help="sidewalk-object warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--sidewalk-width", type=float, default=1.8, help="nominal sidewalk width used for stock pavement offset")
     milestone9.add_argument("--sidewalk-segment-length", type=float, default=5.0, help="spacing of stock pavement tiles along roads")
     milestone9.add_argument("--street-furniture", action="store_true", dest="street_furniture_enabled", help="place stock OFP/CWA settlement furniture in cities, towns, villages, hamlets and residential landuse (default)")
     milestone9.add_argument("--no-street-furniture", action="store_false", dest="street_furniture_enabled", help="disable urban street furniture")
     milestone9.set_defaults(street_furniture_enabled=True)
-    milestone9.add_argument("--max-street-furniture-objects", type=int, default=12000)
+    milestone9.add_argument("--max-street-furniture-objects", type=int, default=12000, help="street-furniture warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--street-light-spacing", type=float, default=32.0)
     milestone9.add_argument("--street-bench-every", type=int, default=4, help="place roughly one bench per N street-light positions")
     milestone9.add_argument("--street-bin-every", type=int, default=6, help="place roughly one bin per N street-light positions")
@@ -540,13 +541,13 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--procedural-bridges", action="store_true", dest="procedural_bridges", help="generate world-local bridge deck/rail models instead of using the stock Nogova bridge module")
     milestone9.add_argument("--stock-bridges", action="store_false", dest="procedural_bridges", help="use the stock Nogova bridge module instead of procedural bridges")
     milestone9.set_defaults(procedural_bridges=True)
-    milestone9.add_argument("--max-bridge-objects", type=int, default=1000)
+    milestone9.add_argument("--max-bridge-objects", type=int, default=1000, help="bridge-object warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--bridge-module-length", type=float, default=30.0, help="target module length for procedural bridges; stock Nogova bridges remain fixed at 30 m")
     milestone9.add_argument("--bridge-deck-clearance", type=float, default=1.25, help="minimum procedural bridge roadway clearance above the highest terrain under the full span; default 1.25 m")
     milestone9.add_argument("--bridge-water-clearance", type=float, default=18.0, help="empty clearance above the global water plane beneath the lowest bridge geometry; values below the 18 m safety floor are raised to 18 m")
     milestone9.add_argument("--no-residential-infill", action="store_false", dest="residential_infill_enabled", help="disable deterministic fallback houses in completely empty residential OSM polygons")
     milestone9.set_defaults(residential_infill_enabled=True)
-    milestone9.add_argument("--max-residential-infill-buildings", type=int, default=1500)
+    milestone9.add_argument("--max-residential-infill-buildings", type=int, default=1500, help="residential-infill warning threshold; exceeded values are logged and generation continues; 0 disables infill")
     milestone9.add_argument("--residential-infill-spacing", type=float, default=68.0)
     milestone9.add_argument("--residential-infill-min-area", type=float, default=1800.0)
     milestone9.add_argument("--residential-infill-road-clearance", type=float, default=0.5)
@@ -556,21 +557,21 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--overture-buildings-geojson", type=Path, default=None, help="pre-downloaded Overture building GeoJSON to merge into OSM buildings and use for missing-building fallback")
     milestone9.add_argument("--no-rural-vegetation", action="store_false", dest="rural_vegetation_enabled", help="disable tree rows, orchards, vineyards, scrub and mapped rock areas")
     milestone9.set_defaults(rural_vegetation_enabled=True)
-    milestone9.add_argument("--max-rural-vegetation-objects", type=int, default=3000)
+    milestone9.add_argument("--max-rural-vegetation-objects", type=int, default=3000, help="rural-vegetation warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--rural-vegetation-spacing", type=float, default=28.0)
     milestone9.add_argument("--no-meadow-grass", action="store_false", dest="meadow_grass_enabled", help="disable randomized tall-grass clusters in OSM landuse=meadow polygons")
     milestone9.set_defaults(meadow_grass_enabled=True)
-    milestone9.add_argument("--max-meadow-grass-objects", type=int, default=20000)
+    milestone9.add_argument("--max-meadow-grass-objects", type=int, default=20000, help="meadow-grass warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--meadow-grass-spacing", type=float, default=24.0)
     milestone9.add_argument("--haybales", action="store_true", dest="haybales_enabled", help="legacy option retained for profile compatibility; field hay-bale placement is disabled (hay bales are barn-only settlement clutter)")
     milestone9.add_argument("--no-haybales", action="store_false", dest="haybales_enabled", help="keep legacy field hay-bale placement disabled (default; hay bales are barn-only settlement clutter)")
     milestone9.set_defaults(haybales_enabled=False)
-    milestone9.add_argument("--max-haybale-objects", type=int, default=800)
+    milestone9.add_argument("--max-haybale-objects", type=int, default=800, help="hay-bale warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--haybale-spacing", type=float, default=110.0)
     milestone9.add_argument("--haybale-field-percent", type=float, default=25.0, help="legacy ignored setting; field hay-bale placement is disabled")
     milestone9.add_argument("--no-wetland-reeds", action="store_false", dest="wetland_reeds_enabled", help="disable stock reed placement in mapped OSM wetlands")
     milestone9.set_defaults(wetland_reeds_enabled=True)
-    milestone9.add_argument("--max-wetland-reed-objects", type=int, default=100000)
+    milestone9.add_argument("--max-wetland-reed-objects", type=int, default=100000, help="wetland-reed warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--wetland-reed-spacing", type=float, default=18.0)
     milestone9.add_argument("--wetland-reed-max-relief", type=float, default=4.0)
     milestone9.add_argument("--wetland-reed-max-burial", type=float, default=0.5)
@@ -578,7 +579,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--wetland-reed-ground-clearance", type=float, default=0.03)
     milestone9.add_argument("--no-rocky-forest-fallback", action="store_false", dest="rocky_forest_fallback_enabled", help="disable sparse rocks on forest cells too steep for all forest tiers")
     milestone9.set_defaults(rocky_forest_fallback_enabled=True)
-    milestone9.add_argument("--max-rocky-forest-objects", type=int, default=1200)
+    milestone9.add_argument("--max-rocky-forest-objects", type=int, default=1200, help="rocky-forest warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--rocky-forest-rocks-per-patch", type=int, default=3, help="deterministic rock groups placed across each forest patch rejected by every tree tier")
     milestone9.add_argument("--rocky-forest-spread", type=float, default=18.0, help="maximum scatter radius for rocks inside one rejected forest patch")
     milestone9.add_argument("--rocky-forest-max-relief", type=float, default=42.0)
@@ -594,10 +595,10 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--bus-stop-model", default=r"o\misc\aut_z_st.p3d", help="stock bus-stop sign model placed at OSM bus stops")
     milestone9.add_argument("--bus-stop-footprint", type=float, default=1.6, help="terrain support footprint sampled beneath bus-stop signs in metres")
     milestone9.add_argument("--bus-stop-ground-clearance", type=float, default=0.12, help="vertical clearance above the highest terrain sample beneath bus-stop signs")
-    milestone9.add_argument("--max-landmark-objects", type=int, default=1000, help="maximum bus-stop and semantic landmark objects")
+    milestone9.add_argument("--max-landmark-objects", type=int, default=1000, help="semantic-landmark warning threshold; exceeded values are logged and generation continues; 0 disables landmark objects")
     milestone9.add_argument("--no-cemeteries", action="store_false", dest="cemeteries_enabled", help="disable grave placement in OSM cemeteries and graveyards")
     milestone9.set_defaults(cemeteries_enabled=True)
-    milestone9.add_argument("--max-grave-objects", type=int, default=12000, help="maximum stock gravestones placed inside mapped cemeteries")
+    milestone9.add_argument("--max-grave-objects", type=int, default=12000, help="cemetery-grave warning threshold; exceeded values are logged and generation continues; 0 disables grave objects")
     milestone9.add_argument("--grave-spacing", type=float, default=3.5, help="average row spacing for cemetery gravestones in metres")
     milestone9.add_argument("--grave-inset", type=float, default=2.0, help="clear margin inside cemetery boundaries in metres")
     milestone9.add_argument("--grave-ground-clearance", type=float, default=0.12, help="vertical clearance above the highest terrain sample beneath each gravestone")
@@ -825,6 +826,7 @@ def main(argv: list[str] | None = None) -> int:
                 building_minimum_area=args.building_min_area,
                 forest_tree_spacing=args.forest_tree_spacing,
                 max_forest_objects=args.max_forest_objects,
+                advisory_object_limits=True,
                 forest_profile=args.forest_profile,
                 forest_tree_model=args.forest_block_model,
                 forest_maximum_block_relief=args.forest_max_block_relief,
@@ -871,6 +873,7 @@ def main(argv: list[str] | None = None) -> int:
                 building_minimum_area=args.building_min_area,
                 forest_tree_spacing=args.forest_tree_spacing,
                 max_forest_objects=args.max_forest_objects,
+                advisory_object_limits=True,
                 road_connection_tolerance=args.road_connection_tolerance,
                 maximum_road_grade_percent=args.maximum_road_grade,
                 road_grade_radius=args.road_grade_radius,
@@ -916,6 +919,7 @@ def main(argv: list[str] | None = None) -> int:
                 building_minimum_area=args.building_min_area,
                 forest_tree_spacing=args.forest_tree_spacing,
                 max_forest_objects=args.max_forest_objects,
+                advisory_object_limits=True,
                 road_connection_tolerance=args.road_connection_tolerance,
                 maximum_road_grade_percent=args.maximum_road_grade,
                 road_grade_radius=args.road_grade_radius,
@@ -972,6 +976,7 @@ def main(argv: list[str] | None = None) -> int:
                 building_minimum_area=args.building_min_area,
                 forest_tree_spacing=args.forest_tree_spacing,
                 max_forest_objects=args.max_forest_objects,
+                advisory_object_limits=True,
                 road_connection_tolerance=args.road_connection_tolerance,
                 maximum_road_grade_percent=args.maximum_road_grade,
                 road_grade_radius=args.road_grade_radius,
@@ -1050,6 +1055,7 @@ def main(argv: list[str] | None = None) -> int:
                 building_minimum_area=args.building_min_area,
                 forest_tree_spacing=args.forest_tree_spacing,
                 max_forest_objects=args.max_forest_objects,
+                advisory_object_limits=True,
                 road_connection_tolerance=args.road_connection_tolerance,
                 maximum_road_grade_percent=args.maximum_road_grade,
                 road_grade_radius=args.road_grade_radius,

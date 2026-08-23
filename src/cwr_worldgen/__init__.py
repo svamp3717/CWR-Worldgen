@@ -22,6 +22,9 @@ from .network import install_network_compatibility as _install_network_compatibi
 _install_network_compatibility()
 from .generator import BuildResult, build_milestone1, build_milestone2, build_milestone3, build_milestone4
 from .model import HeightmapSpec, OsmSpec, PlayabilitySpec, WorldSpec
+from .stock_utility_policy import install_stock_utility_policy as _install_stock_utility_policy
+
+_install_stock_utility_policy()
 
 # Public Overpass servers sometimes all return transient 5xx/timeout errors at
 # once. Install the bounded retry wrapper before milestone modules import the
