@@ -1,0 +1,203 @@
+name: Apply stock utility pole replacement
+
+on:
+  push:
+    branches:
+      - fix/soft-road-object-limit
+    paths:
+      - .github/workflows/apply-stock-utility-poles.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/soft-road-object-limit
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Replace procedural power utilities with stock models
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          osm_path = Path('src/cwr_worldgen/osm.py')
+          text = osm_path.read_text(encoding='utf-8')
+
+          old_constants = r'''STOCK_SETTLEMENT_UTILITY_POLE_MODELS: tuple[str, ...] = (
+              r"data3d\sloupyelA.p3d",
+              r"data3d\sloupyell.p3d",
+              r"O\Hous\stozarvn_1.p3d",
+          )'''
+          new_constants = r'''# Original OFP/CWA electrical infrastructure. Mapped OSM power utilities use
+          # these stock assets directly; no world-local procedural pole/tower P3Ds are needed.
+          STOCK_POWER_POLE_MODELS: tuple[str, ...] = (
+              r"data3d\sloupyelA.p3d",
+              r"data3d\sloupyell.p3d",
+          )
+          STOCK_POWER_TOWER_MODELS: tuple[str, ...] = (
+              r"O\Hous\stozarvn_1.p3d",
+          )
+          STOCK_SETTLEMENT_UTILITY_POLE_MODELS: tuple[str, ...] = (
+              *STOCK_POWER_POLE_MODELS,
+              *STOCK_POWER_TOWER_MODELS,
+          )'''
+          if old_constants not in text:
+              raise SystemExit('expected stock utility constant block not found')
+          text = text.replace(old_constants, new_constants, 1)
+
+          old_placement = r'''        model = infrastructure_library.utility_model(kind)
+                  heading_digest = hashlib.blake2s(f"{seed}:utility:{feature.osm_key}".encode("utf-8"), digest_size=2).digest()
+                  heading = float(int.from_bytes(heading_digest, "little") % 360)'''
+          new_placement = r'''        heading_digest = hashlib.blake2s(f"{seed}:utility:{feature.osm_key}".encode("utf-8"), digest_size=2).digest()
+                  if kind == "power_pole":
+                      model = STOCK_POWER_POLE_MODELS[
+                          int.from_bytes(heading_digest, "little") % len(STOCK_POWER_POLE_MODELS)
+                      ]
+                  elif kind == "power_tower":
+                      model = STOCK_POWER_TOWER_MODELS[0]
+                  else:
+                      # Water towers remain procedural; only pole/tower electrical utilities
+                      # are replaced with original game assets.
+                      model = infrastructure_library.utility_model(kind)
+                  heading = float(int.from_bytes(heading_digest, "little") % 360)'''
+          if old_placement not in text:
+              raise SystemExit('expected procedural utility placement block not found')
+          text = text.replace(old_placement, new_placement, 1)
+          osm_path.write_text(text, encoding='utf-8')
+
+          mapping_path = Path('src/cwr_worldgen/asset_mapping.py')
+          mapping = mapping_path.read_text(encoding='utf-8')
+          old_mapping = r'''        rules.append(_rule(
+                      "osm-power-utilities", ("utility_points",), {"utility": ("power_pole", "power_tower")},
+                      models=(rf"{world_name}\i\util_power_pole.p3d", rf"{world_name}\i\util_power_tower.p3d"),
+                      geometry="point", description="Generated power pole/tower models",
+                  ))'''
+          new_mapping = r'''        rules.append(_rule(
+                      "osm-power-utilities", ("utility_points",), {"utility": ("power_pole", "power_tower")},
+                      models=(
+                          r"data3d\sloupyelA.p3d",
+                          r"data3d\sloupyell.p3d",
+                          r"O\Hous\stozarvn_1.p3d",
+                      ),
+                      geometry="point", description="Stock OFP/CWA power pole and high-voltage tower models",
+                  ))'''
+          if old_mapping not in mapping:
+              raise SystemExit('expected generated power utility mapping block not found')
+          mapping = mapping.replace(old_mapping, new_mapping, 1)
+          mapping_path.write_text(mapping, encoding='utf-8')
+
+          test_path = Path('tests/test_stock_utility_poles.py')
+          test_path.write_text(r'''from pathlib import Path
+          from types import SimpleNamespace
+
+          from cwr_worldgen.asset_mapping import default_osm_asset_mapping
+          from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
+          from cwr_worldgen.osm import (
+              BboxProjection,
+              OsmDataset,
+              OsmPointFeature,
+              OsmRaster,
+              STOCK_POWER_POLE_MODELS,
+              STOCK_POWER_TOWER_MODELS,
+              generate_world_objects,
+          )
+
+
+def _empty_raster(cells: int) -> OsmRaster:
+    empty = (False,) * (cells * cells)
+    return OsmRaster(cells, empty, empty, empty, empty, empty, empty, cells, 0)
+
+
+def test_mapped_power_utilities_use_stock_models_only() -> None:
+    bbox = (0.0, 0.0, 1.0, 1.0)
+    cells = 8
+    projection = BboxProjection.create(bbox, cells * 25.0)
+    utilities = (
+        OsmPointFeature("node/pole", {"utility": "power_pole"}, projection.to_latlon((45.0, 100.0))),
+        OsmPointFeature("node/tower", {"utility": "power_tower"}, projection.to_latlon((100.0, 100.0))),
+        OsmPointFeature("node/water", {"utility": "water_tower"}, projection.to_latlon((155.0, 100.0))),
+    )
+    dataset = OsmDataset(
+        source_generator="stock-utility-test",
+        element_count=3,
+        coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(),
+        utility_points=utilities,
+    )
+    spec = _Milestone9PlayabilitySpec(
+        name="stock_utility_test",
+        heightmap_path=Path("unused.png"),
+        bbox=bbox,
+        cells=cells,
+        cell_size=25.0,
+        max_road_objects=0,
+        max_buildings=0,
+        max_forest_objects=0,
+        maximum_utility_objects=10,
+        street_furniture_enabled=False,
+        rural_vegetation_enabled=False,
+        meadow_grass_enabled=False,
+        wetland_reeds_enabled=False,
+        barriers_enabled=False,
+        bridges_enabled=False,
+        forest_undergrowth_enabled=False,
+        forest_border_enabled=False,
+        rocky_forest_fallback_enabled=False,
+        steep_hill_bushes_enabled=False,
+        strict_assets=False,
+    )
+    result = generate_world_objects(
+        dataset,
+        projection,
+        _empty_raster(cells),
+        (5.0,) * (cells * cells),
+        spec,
+        include_roads=False,
+        building_placement_plans=(),
+    )
+    models = {obj.model_path for obj in result.objects}
+    assert models.intersection(STOCK_POWER_POLE_MODELS)
+    assert models.intersection(STOCK_POWER_TOWER_MODELS)
+    assert not any(model.casefold().endswith(r"\util_power_pole.p3d") for model in models)
+    assert not any(model.casefold().endswith(r"\util_power_tower.p3d") for model in models)
+    assert any(model.casefold().endswith(r"\util_water_tower.p3d") for model in models)
+
+
+def test_default_asset_mapping_requires_stock_power_utility_models() -> None:
+    mapping = default_osm_asset_mapping(SimpleNamespace(name="mapping_test"), 9)
+    rule = next(rule for rule in mapping.rules if rule.rule_id == "osm-power-utilities")
+    assert set(rule.models) == {
+        r"data3d\sloupyelA.p3d",
+        r"data3d\sloupyell.p3d",
+        r"O\Hous\stozarvn_1.p3d",
+    }
+    assert not any("util_power_" in model.casefold() for model in rule.models)
+'''.replace('\n          ', '\n'), encoding='utf-8')
+          PY
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+
+      - name: Run tests
+        run: |
+          python -m pytest -q
+
+      - name: Commit tested replacement and remove helper workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/apply-stock-utility-poles.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Use stock models for power poles and towers"
+          git push origin HEAD:fix/soft-road-object-limit
