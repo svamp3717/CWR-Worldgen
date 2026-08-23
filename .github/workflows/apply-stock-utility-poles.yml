@@ -196,7 +196,6 @@ def _spec(bbox, cells):
         max_road_objects=0,
         max_buildings=0,
         max_forest_objects=0,
-        maximum_utility_objects=10,
         street_furniture_enabled=False,
         rural_vegetation_enabled=False,
         meadow_grass_enabled=False,
@@ -260,9 +259,6 @@ def test_mapped_power_pole_is_moved_fully_off_residential_road() -> None:
     )
     poles = [obj for obj in result.objects if obj.model_path in STOCK_POWER_POLE_MODELS]
     assert len(poles) == 1
-    # Residential roads are 6 m wide here. A 3 m pole footprint needs its
-    # centre at least 4.5 m from the road centreline; the 5 m nudge is the first
-    # deterministic candidate that fully clears it.
     assert abs(poles[0].x - 100.0) >= 5.0 - 1e-6
 
 
