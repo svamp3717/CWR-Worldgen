@@ -188,3 +188,25 @@ def test_skew_three_way_family_rotation_minimizes_all_arm_errors() -> None:
     # to balance all three arms, instead of being pinned to one imperfectly
     # opposite road pair.
     assert best_maximum <= 21.0
+
+
+def test_orthogonal_family_hubs_use_full_length_family_models() -> None:
+    from cwr_worldgen.gravel_family_policy import gravel_junction_model_path
+
+    assert gravel_junction_model_path("synthetic", 3, "t90").endswith(
+        r"\gravel_j3.p3d"
+    )
+    assert gravel_junction_model_path("synthetic", 4, "x90").endswith(
+        r"\gravel_j4.p3d"
+    )
+
+    for degree, variant in ((3, "t90"), (4, "x90")):
+        subtype = f"gravel_j{degree}"
+        visual, _map_geometry, roadway, _land = _road_lods(
+            InfrastructureModelKey("road", subtype, 46, 80),
+            r"synthetic\i\g.paa",
+        )
+        visual_radius = max(math.hypot(x, z) for x, _y, z in visual.points)
+        roadway_radius = max(math.hypot(x, z) for x, _y, z in roadway.points)
+        assert visual_radius >= GRAVEL_JUNCTION_ARM_EXTENT_METRES
+        assert roadway_radius >= GRAVEL_JUNCTION_ARM_EXTENT_METRES
