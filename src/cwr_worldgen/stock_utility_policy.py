@@ -15,7 +15,7 @@ from . import procedural_infrastructure as _procedural_infrastructure
 
 STOCK_POWER_POLE_MODELS: tuple[str, ...] = (
     r"data3d\sloupyelA.p3d",
-    r"data3d\sloupyell.p3d",
+    r"data3d\sloupyeli.p3d",
 )
 STOCK_POWER_TOWER_MODELS: tuple[str, ...] = (
     r"O\Hous\stozarvn_1.p3d",
