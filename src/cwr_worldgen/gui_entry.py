@@ -18,6 +18,19 @@ from typing import Any, Callable, Iterable
 FROZEN_CLI_MARKER = "--cwr-cli"
 OVERTURE_CLI_MARKER = "--cwr-overture"
 CONSOLE_LOG_FILENAME = "cwr-worldgen-console.log"
+WORLD_NAME_PREFIX = "wg_"
+LEGACY_WORLD_NAME_PREFIXES = ("cwa_", "cwr_")
+
+
+def generated_world_identifier(value: str) -> str:
+    """Return the auto-managed world identifier using the current ``wg_`` prefix."""
+    slug = str(value).strip().casefold()
+    for prefix in (WORLD_NAME_PREFIX, *LEGACY_WORLD_NAME_PREFIXES):
+        if slug.startswith(prefix):
+            slug = slug[len(prefix):]
+            break
+    slug = slug or "my_world"
+    return WORLD_NAME_PREFIX + slug
 
 
 def storage_base_dir() -> Path:
@@ -166,6 +179,47 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
     """Apply stable storage and world-name synchronization to the GUI module."""
     gui.application_base_dir = lambda: base_dir
 
+    original_default_gui_values = gui.default_gui_values
+    original_defaults_with_recent_source = gui.defaults_with_recent_source
+
+    def default_gui_values() -> dict[str, object]:
+        values = original_default_gui_values()
+        values["name"] = generated_world_identifier("my_world")
+        return values
+
+    def defaults_with_recent_source(
+        defaults: dict[str, object], state: dict[str, object]
+    ) -> dict[str, object]:
+        values = original_defaults_with_recent_source(defaults, state)
+        name = str(values.get("name", "")).strip()
+        folded = name.casefold()
+        if any(folded.startswith(prefix) for prefix in LEGACY_WORLD_NAME_PREFIXES):
+            values["name"] = generated_world_identifier(name)
+            if not str(state.get("last_world_output", "")).strip():
+                output = Path(str(values.get("output", "")))
+                values["output"] = str(output.parent / str(values["name"])[len(WORLD_NAME_PREFIX):])
+        return values
+
+    def suggested_world_values(
+        display_name: str,
+        *,
+        source_mode: str,
+        source_dir: str,
+    ) -> dict[str, str]:
+        slug = gui.slugify_world_name(display_name)
+        values = {
+            "name": generated_world_identifier(slug),
+            "output": gui.default_gui_path(Path("build") / slug),
+            "source_dir": source_dir,
+        }
+        if source_mode == "new":
+            values["source_dir"] = gui.default_gui_path(Path("source-data") / slug)
+        return values
+
+    gui.default_gui_values = default_gui_values
+    gui.defaults_with_recent_source = defaults_with_recent_source
+    gui.suggested_world_values = suggested_world_values
+
     def normalize_path(value: str) -> str:
         if not value:
             return ""
@@ -174,7 +228,7 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
     def generated_values(display_name: str) -> dict[str, str]:
         slug = gui.slugify_world_name(display_name)
         return {
-            "name": "cwr_" + slug if not slug.startswith("cwr_") else slug,
+            "name": generated_world_identifier(slug),
             "output": gui.default_gui_path(Path("build") / slug),
             "source_dir": gui.default_gui_path(Path("source-data") / slug),
         }
