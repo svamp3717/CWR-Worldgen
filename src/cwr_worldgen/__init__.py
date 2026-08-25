@@ -52,6 +52,11 @@ from .milestone6 import Milestone6Spec, build_milestone6
 from .milestone7 import Milestone7Spec, build_milestone7
 from .milestone8 import Milestone8Spec, build_milestone8
 from .milestone9 import Milestone9Spec, build_milestone9
+from .settlement_data_gap_policy import (
+    install_settlement_data_gap_policy as _install_settlement_data_gap_policy,
+)
+
+_install_settlement_data_gap_policy()
 from .milestone9_advisory_policy import (
     install_milestone9_advisory_policy as _install_milestone9_advisory_policy,
 )
