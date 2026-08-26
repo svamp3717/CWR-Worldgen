@@ -56,20 +56,42 @@ class _TerrainMeasure:
             return None
         start_x, start_z, _ = self._measure.point(start_distance)
         start_height = self._height(start_x, start_z)
-        horizontal = float(chord_length)
+
+        # Estimate the local grade before asking the base measure for a full flat
+        # connector chord. Near a trimmed road end, the flatter full-length query
+        # may not fit inside ``maximum_distance`` even though the correctly
+        # shortened horizontal projection does.
+        probe_distance = min(
+            maximum_distance,
+            start_distance + max(0.05, float(chord_length)),
+        )
+        probe_x, probe_z, _ = self._measure.point(probe_distance)
+        probe_horizontal = math.dist((start_x, start_z), (probe_x, probe_z))
+        probe_height = self._height(probe_x, probe_z)
+        grade = (
+            (probe_height - start_height) / probe_horizontal
+            if probe_horizontal > 1.0e-6
+            else 0.0
+        )
+        horizontal = float(chord_length) / math.sqrt(1.0 + grade * grade)
+        horizontal = max(0.02, min(float(chord_length), horizontal))
+
         endpoint = None
         for _ in range(8):
             endpoint = self._measure.chord_endpoint(
                 start_distance, horizontal, maximum_distance
             )
             if endpoint is None:
-                return None
+                # Back off a little when a curve or trimmed end cannot contain
+                # the current horizontal request. The next iteration then uses
+                # the actual sampled grade at that shorter chord.
+                horizontal *= 0.97
+                if horizontal <= 0.02:
+                    return None
+                continue
             _distance, end_x, end_z, _heading = endpoint
             delta_height = self._height(end_x, end_z) - start_height
             if abs(delta_height) >= chord_length * 0.98:
-                # A near-vertical road is outside the intended stock-road use
-                # case. Preserve the mature horizontal fitter instead of
-                # manufacturing a degenerate connector.
                 return self._measure.chord_endpoint(
                     start_distance, chord_length, maximum_distance
                 )
@@ -98,7 +120,8 @@ def _three_dimensional_length(context, start, end) -> float:
 
 def _chain_is_seam_safe(measure, fitted) -> bool:
     context = _quality._CONTEXT.get()
-    if context is None or _ORIGINAL_CHAIN_IS_SEAM_SAFE is None:
+    if context is None:
+        assert _ORIGINAL_CHAIN_IS_SEAM_SAFE is not None
         return _ORIGINAL_CHAIN_IS_SEAM_SAFE(measure, fitted)
 
     previous_end = None
