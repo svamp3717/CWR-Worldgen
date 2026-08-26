@@ -62,7 +62,6 @@ jobs:
 
           elevation = source / "elevation" / "raw"
           elevation.mkdir(parents=True, exist_ok=True)
-          # Tiny deterministic HGT fixture with a gentle grade across the lab.
           values = (8, 9, 10, 6, 7, 8, 4, 5, 6)
           payload = b"".join(value.to_bytes(2, "big", signed=True) for value in values)
           with ZipFile(elevation / "N00E000.hgt.zip", "w") as archive:
@@ -83,9 +82,6 @@ jobs:
                   "geometry": geometry(points),
               }
 
-          # 100 m-radius right bend sampled every five degrees, with straight
-          # approaches. This is intentionally dense enough that the conditioner
-          # must preserve coherent curvature for the native 10-degree CWA pieces.
           curve = [(500.0, 300.0), (500.0, 400.0), (500.0, 500.0)]
           for degrees in range(5, 41, 5):
               angle = math.radians(degrees)
@@ -102,24 +98,17 @@ jobs:
 
           elements = [
               way(100, {"highway": "primary", "surface": "asphalt", "name": "Native Curve Lab"}, curve),
-              # Same-family 45-degree T: approaches should run underneath the
-              # slightly raised central stock overlay without a grass wedge.
               way(110, {"highway": "primary", "surface": "asphalt", "name": "Skew Main"},
                   ((1100.0, 700.0), (1300.0, 700.0), (1500.0, 700.0))),
               way(111, {"highway": "primary", "surface": "asphalt", "name": "Skew Branch"},
                   ((1300.0, 700.0), (1450.0, 850.0))),
-              # Paved-through / generated-gravel T exercises the layered mixed
-              # junction and gravel continuation underneath a normal paved cap.
               way(120, {"highway": "primary", "surface": "asphalt", "name": "Mixed Main"},
                   ((1300.0, 1100.0), (1300.0, 1300.0), (1300.0, 1500.0))),
               way(121, {"highway": "track", "surface": "gravel", "name": "Mixed Gravel Branch"},
                   ((1300.0, 1300.0), (1080.0, 1300.0))),
-              # Alternating sub-metre source noise should become an ordinary
-              # continuous straight rather than a staircase of six-metre slabs.
               way(130, {"highway": "primary", "surface": "asphalt", "name": "Wiggle Lab"},
                   ((450.0, 1600.0), (451.0, 1650.0), (450.0, 1700.0),
                    (449.0, 1750.0), (450.0, 1800.0))),
-              # Source-backed obstacles near, but not on, the road corridor.
               way(140, {"barrier": "hedge"},
                   ((610.0, 470.0), (650.0, 610.0))),
               way(141, {"natural": "tree_row"},
@@ -177,10 +166,79 @@ jobs:
           assert road_report["maximum_model_overlap_metres"] <= 0.01, road_report
           assert result.pbo_path.is_file()
 
+          def smoke_mission(title, x, z, heading=0.0):
+              return f'''version=11;
+          class Mission
+          {{
+              addOns[]={{"wg_roadlab"}};
+              addOnsAuto[]={{"wg_roadlab"}};
+              randomSeed=1234;
+              class Intel
+              {{
+                  briefingName="{title}";
+                  briefingDescription="WG Stock Road Lab direct-spawn visual and drive test";
+                  startWeather=0.200000;
+                  forecastWeather=0.200000;
+                  year=1985;
+                  month=6;
+                  day=1;
+                  hour=12;
+                  minute=0;
+              }};
+              class Groups
+              {{
+                  items=1;
+                  class Item0
+                  {{
+                      side="WEST";
+                      class Vehicles
+                      {{
+                          items=1;
+                          class Item0
+                          {{
+                              position[]={{{x:.3f},0.000,{z:.3f}}};
+                              azimut={heading:.6f};
+                              id=0;
+                              side="WEST";
+                              vehicle="SoldierWB";
+                              player="PLAYER COMMANDER";
+                              leader=1;
+                              skill=0.600000;
+                          }};
+                      }};
+                  }};
+              }};
+          }};
+          class Intro {{ randomSeed=1; class Intel {{}}; }};
+          class OutroWin {{ randomSeed=2; class Intel {{}}; }};
+          class OutroLoose {{ randomSeed=3; class Intel {{}}; }};
+          '''
+
+          missions = root / "build" / "Missions"
+          targets = (
+              ("roadlab_curve.wg_roadlab", "Road Lab - Native Curve", 470.0, 470.0, 0.0),
+              ("roadlab_skew_t.wg_roadlab", "Road Lab - 45deg Paved T", 1260.0, 660.0, 90.0),
+              ("roadlab_mixed_t.wg_roadlab", "Road Lab - Paved Gravel T", 1260.0, 1260.0, 0.0),
+              ("roadlab_wiggle.wg_roadlab", "Road Lab - Source Wiggle", 420.0, 1660.0, 0.0),
+          )
+          for folder_name, title, x, z, heading in targets:
+              folder = missions / folder_name
+              folder.mkdir(parents=True, exist_ok=True)
+              (folder / "mission.sqm").write_text(
+                  smoke_mission(title, x, z, heading), encoding="ascii"
+              )
+
           readme = root / "build" / "ROADLAB.txt"
           readme.write_text(
               "WG Stock Road Lab\n"
               f"Commit: {os.environ.get('GITHUB_SHA', 'local')}\n\n"
+              "Install @CWR-Milestone9 as a normal CWA/OFP mod folder.\n"
+              "Copy the Missions folders into the game's Missions directory if needed.\n\n"
+              "Direct-spawn missions:\n"
+              "  roadlab_curve.wg_roadlab      - native 100 m stock curve\n"
+              "  roadlab_skew_t.wg_roadlab     - 45-degree paved T\n"
+              "  roadlab_mixed_t.wg_roadlab    - paved/gravel T\n"
+              "  roadlab_wiggle.wg_roadlab     - source-wiggle straight\n\n"
               "Inspection areas in world X/Z metres:\n"
               "  Native 100 m curve: 500,500\n"
               "  45-degree paved T: 1300,700\n"
