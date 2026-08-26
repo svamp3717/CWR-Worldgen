@@ -2,17 +2,16 @@
 """Locally relax skewed mixed-road approaches onto native junction connectors.
 
 Native CWA junction meshes have fixed connector directions. Merely replacing a
-legacy straight cap with a native T mesh is not enough when the source OSM arms
-are noticeably skewed: the first road pieces are still fitted to the original
-OSM tangents and therefore meet the native mesh at the wrong angle.
+legacy straight cap with a native T mesh is not enough when the source arms are
+noticeably skewed: the first road pieces are still fitted to the original source
+tangents and therefore meet the native mesh at the wrong angle.
 
 This policy adjusts only the first few metres of eligible mixed paved/gravel T
-junction arms before the ordinary road fitter runs. The junction centre stays
-fixed. A synthetic point is inserted just beyond the native connector radius in
-the exact connector direction, after which the polyline returns to the original
-OSM geometry. The adjustment is bounded to less than one metre laterally, which
-keeps it inside the existing six-metre road corridor rather than moving the road
-toward buildings, poles, fences, or other roadside objects.
+junction arms before the ordinary road fitter runs. The junction center stays
+fixed. A synthetic point is inserted just beyond the measured 6.25 m connector
+radius in the exact connector direction, after which the polyline returns to the
+original geometry. The adjustment is bounded to two metres laterally, which is
+inside the 2.30 m half-width of the generated gravel road.
 """
 from __future__ import annotations
 
@@ -25,7 +24,7 @@ from . import playability as _p
 from . import stock_road_junction_policy as _junction
 from . import stock_road_skew_policy as _skew
 
-MAXIMUM_APPROACH_LATERAL_RELAXATION_METRES = 0.98
+MAXIMUM_APPROACH_LATERAL_RELAXATION_METRES = 2.0
 APPROACH_CONNECTOR_MARGIN_METRES = 0.20
 
 _ORIGINAL_FIT = None
@@ -55,7 +54,7 @@ def _angular_distance(first: float, second: float) -> float:
 
 
 def _native_t_targets(incidents, native) -> tuple[float, ...] | None:
-    """Map three incident arms to the native T's world-space connector headings."""
+    """Map three incident arms to the measured native T connector headings."""
     if len(incidents) != 3:
         return None
     pair = _junction._dominant_pair(incidents)
@@ -66,7 +65,7 @@ def _native_t_targets(incidents, native) -> tuple[float, ...] | None:
     rotation = float(native.heading_degrees) % 360.0
     target_zero = rotation
     target_180 = (rotation + 180.0) % 360.0
-    target_branch = (rotation + 90.0) % 360.0
+    target_branch = (rotation + 270.0) % 360.0
 
     actual_first = _heading(incidents[first].direction)
     actual_second = _heading(incidents[second].direction)
@@ -106,8 +105,6 @@ def _relaxed_arm_point(
     if error <= 1.0e-6:
         length = min(desired, distance * 0.45)
     else:
-        # Keep the synthetic point under one metre from the original arm. This
-        # is deliberately tighter than a normal three-metre road half-width.
         safe_length = MAXIMUM_APPROACH_LATERAL_RELAXATION_METRES / max(
             1.0e-6, math.sin(math.radians(min(89.0, error)))
         )
@@ -128,9 +125,6 @@ def _collect_relaxations(dataset, projection, projected, spec):
     for feature_index, (feature, points_raw) in enumerate(zip(dataset.roads, projected)):
         if not _p.road_is_supported(feature.tags, include_minor=spec.include_minor_roads):
             continue
-        # Keep original projected indices here. The core fitter is free to clean
-        # duplicate points later, but relaxation keys must address the exact
-        # source tuple that _apply_relaxations edits.
         points = tuple(points_raw)
         if len(points) < 2:
             continue
@@ -156,9 +150,6 @@ def _collect_relaxations(dataset, projection, projected, spec):
             positions.setdefault(start_key, start)
             positions.setdefault(end_key, end)
 
-    # Native stock T/X meshes mate with real six-metre stock road connectors.
-    # WRP transforms do not scale P3Ds, so this is exactly 3.0 m rather than
-    # half of the old 5.88 m effective spacing.
     connector_half = _junction._connector_half_extent(spec)
     result = {}
     for key, values in raw.items():
