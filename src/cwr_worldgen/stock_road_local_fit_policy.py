@@ -25,6 +25,7 @@ from dataclasses import replace
 import math
 
 from . import gravel_junction_policy as _gravel_junction
+from . import playability as _p
 from . import road_quality_policy as _quality
 from . import stock_road_connector_policy as _connector
 from . import stock_road_junction_policy as _junction
@@ -141,8 +142,8 @@ def _quality_window(
     if not pieces:
         return start_distance, preferred_end, minimum_end, maximum_end
 
-    start_junction = context.junctions.get(_quality._p._road_node_key(measure.points[0]))
-    end_junction = context.junctions.get(_quality._p._road_node_key(measure.points[-1]))
+    start_junction = context.junctions.get(_p._road_node_key(measure.points[0]))
+    end_junction = context.junctions.get(_p._road_node_key(measure.points[-1]))
     shortest = min(float(piece.length_metres) for piece in pieces)
 
     if start_junction is not None and not _gravel_junction._is_gravel_junction(start_junction):
