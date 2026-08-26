@@ -7,16 +7,20 @@ from types import SimpleNamespace
 from cwr_worldgen import playability as _p
 from cwr_worldgen.gravel_asphalt_transition_policy import (
     _native_t_junction,
+    _quality_window,
     _relaxation_eligible,
 )
-from cwr_worldgen.road_quality_policy import _Context
+from cwr_worldgen.road_quality_policy import _Context, _Junction
 from cwr_worldgen.stock_road_3d_connector_policy import (
     _TerrainMeasure,
     _curve_world_point,
     _solve_curve_transform,
 )
 from cwr_worldgen.stock_road_junction_policy import _Incident
-from cwr_worldgen.stock_road_model_geometry import stock_curve_connectors
+from cwr_worldgen.stock_road_model_geometry import (
+    STOCK_JUNCTION_CONNECTOR_RADIUS_METRES,
+    stock_curve_connectors,
+)
 
 
 def _direction(heading_degrees: float) -> tuple[float, float]:
@@ -102,3 +106,37 @@ def test_generated_gravel_branch_uses_normal_paved_overlay_without_connector_sna
     assert native.model_path == r"o\road\sil12.p3d"
     assert "kr_new" not in native.model_path.casefold()
     assert not _relaxation_eligible(incidents)
+
+
+def test_generated_gravel_continues_to_node_under_paved_overlay():
+    measure = _p._PolylineMeasure.create(((0.0, 0.0), (0.0, 20.0)))
+    end_key = _p._road_node_key(measure.points[-1])
+    extent = STOCK_JUNCTION_CONNECTOR_RADIUS_METRES
+    junction = _Junction(
+        point=measure.points[-1],
+        axis=(0.0, 1.0),
+        half_length=extent,
+        half_width=extent,
+        directions=((0.0, -1.0), (0.0, 1.0), (1.0, 0.0)),
+    )
+    context = _Context(
+        elevations=(),
+        spec=SimpleNamespace(cells=1, cell_size=1.0),
+        junctions={end_key: junction},
+    )
+    pieces = (_p._RoadPiece(r"synthetic\i\gravel6.p3d", 6.0, 6),)
+
+    start, preferred_end, minimum_end, maximum_end = _quality_window(
+        measure,
+        pieces,
+        0.0,
+        20.0,
+        20.0,
+        20.0,
+        context,
+    )
+
+    assert start == 0.0
+    assert math.isclose(preferred_end, measure.total, abs_tol=1.0e-9)
+    assert minimum_end >= measure.total - 0.25 - 1.0e-9
+    assert maximum_end >= measure.total + 3.0 - 1.0e-9
