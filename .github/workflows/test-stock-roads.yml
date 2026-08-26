@@ -39,40 +39,164 @@ jobs:
             tests/test_stock_road_path_conditioning_policy.py \
             tests/test_stock_road_obstacle_policy.py \
             tests/test_stock_road_curve_preservation_policy.py
-      - name: Build in-game road smoke world
+      - name: Build targeted in-game road lab
         run: |
           python - <<'PY'
           from pathlib import Path
-          import sys
+          from zipfile import ZipFile
+          import json
+          import math
+          import os
 
-          sys.path.insert(0, str(Path("tests").resolve()))
-          from test_milestone8 import Milestone8BuildTests
           from cwr_worldgen.milestone9 import Milestone9Spec, build_milestone9
+          from cwr_worldgen.osm import BboxProjection
+          from cwr_worldgen.source_pipeline import SourceFetchSpec, fetch_sources
 
           root = Path("ci-ingame")
-          source = Milestone8BuildTests()._source(root / "source")
+          source = root / "source"
+          bbox = (0.0, 0.0, 0.01, 0.01)
+          cells = 64
+          cell_size = 50.0
+          world_size = cells * cell_size
+          projection = BboxProjection.create(bbox, world_size)
+
+          elevation = source / "elevation" / "raw"
+          elevation.mkdir(parents=True, exist_ok=True)
+          # Tiny deterministic HGT fixture with a gentle grade across the lab.
+          values = (8, 9, 10, 6, 7, 8, 4, 5, 6)
+          payload = b"".join(value.to_bytes(2, "big", signed=True) for value in values)
+          with ZipFile(elevation / "N00E000.hgt.zip", "w") as archive:
+              archive.writestr("N00E000.hgt", payload)
+
+          def geometry(points):
+              result = []
+              for point in points:
+                  lat, lon = projection.to_latlon(point)
+                  result.append({"lat": lat, "lon": lon})
+              return result
+
+          def way(way_id, tags, points):
+              return {
+                  "type": "way",
+                  "id": way_id,
+                  "tags": tags,
+                  "geometry": geometry(points),
+              }
+
+          # 100 m-radius right bend sampled every five degrees, with straight
+          # approaches. This is intentionally dense enough that the conditioner
+          # must preserve coherent curvature for the native 10-degree CWA pieces.
+          curve = [(500.0, 300.0), (500.0, 400.0), (500.0, 500.0)]
+          for degrees in range(5, 41, 5):
+              angle = math.radians(degrees)
+              curve.append((
+                  500.0 + 100.0 * (1.0 - math.cos(angle)),
+                  500.0 + 100.0 * math.sin(angle),
+              ))
+          end = curve[-1]
+          tangent = (math.sin(math.radians(40.0)), math.cos(math.radians(40.0)))
+          curve.extend((
+              (end[0] + tangent[0] * 100.0, end[1] + tangent[1] * 100.0),
+              (end[0] + tangent[0] * 200.0, end[1] + tangent[1] * 200.0),
+          ))
+
+          elements = [
+              way(100, {"highway": "primary", "surface": "asphalt", "name": "Native Curve Lab"}, curve),
+              # Same-family 45-degree T: approaches should run underneath the
+              # slightly raised central stock overlay without a grass wedge.
+              way(110, {"highway": "primary", "surface": "asphalt", "name": "Skew Main"},
+                  ((1100.0, 700.0), (1300.0, 700.0), (1500.0, 700.0))),
+              way(111, {"highway": "primary", "surface": "asphalt", "name": "Skew Branch"},
+                  ((1300.0, 700.0), (1450.0, 850.0))),
+              # Paved-through / generated-gravel T exercises the layered mixed
+              # junction and gravel continuation underneath a normal paved cap.
+              way(120, {"highway": "primary", "surface": "asphalt", "name": "Mixed Main"},
+                  ((1300.0, 1100.0), (1300.0, 1300.0), (1300.0, 1500.0))),
+              way(121, {"highway": "track", "surface": "gravel", "name": "Mixed Gravel Branch"},
+                  ((1300.0, 1300.0), (1080.0, 1300.0))),
+              # Alternating sub-metre source noise should become an ordinary
+              # continuous straight rather than a staircase of six-metre slabs.
+              way(130, {"highway": "primary", "surface": "asphalt", "name": "Wiggle Lab"},
+                  ((450.0, 1600.0), (451.0, 1650.0), (450.0, 1700.0),
+                   (449.0, 1750.0), (450.0, 1800.0))),
+              # Source-backed obstacles near, but not on, the road corridor.
+              way(140, {"barrier": "hedge"},
+                  ((610.0, 470.0), (650.0, 610.0))),
+              way(141, {"natural": "tree_row"},
+                  ((1030.0, 1240.0), (1030.0, 1380.0))),
+              {
+                  "type": "node",
+                  "id": 900,
+                  "lat": projection.to_latlon((800.0, 1000.0))[0],
+                  "lon": projection.to_latlon((800.0, 1000.0))[1],
+                  "tags": {"place": "village", "name": "Road Lab"},
+              },
+          ]
+
+          osm = source / "osm"
+          osm.mkdir(parents=True, exist_ok=True)
+          (osm / "raw-overpass.json").write_text(
+              json.dumps({"version": 0.6, "generator": "stock-road-ingame-lab", "elements": elements}),
+              encoding="utf-8",
+          )
+          overture = source / "overture"
+          overture.mkdir(parents=True, exist_ok=True)
+          (overture / "buildings.geojson").write_text(
+              '{"type":"FeatureCollection","features":[]}', encoding="utf-8"
+          )
+          fetch_sources(SourceFetchSpec(
+              source_dir=source,
+              bbox=bbox,
+              cells=cells,
+              cell_size=cell_size,
+              dem_provider="hgt",
+              reference_map=False,
+          ))
+
           result = build_milestone9(
               root / "build",
               Milestone9Spec(
                   source_dir=source,
-                  name="wg_roadtest",
-                  display_name="WG Road Test",
+                  name="wg_roadlab",
+                  display_name="WG Stock Road Lab",
                   solver_iterations=4,
                   world_edge_blend_cells=2,
                   max_forest_objects=0,
+                  max_buildings=0,
+                  road_connection_tolerance=0.35,
+                  procedural_gravel_roads=True,
                   ground_texture_profile="generated",
-                  surface_overview_size=128,
-                  surface_texture_size=32,
+                  surface_overview_size=256,
+                  surface_texture_size=64,
                   verify_regeneration=False,
               ),
           )
+          road_report = json.loads(result.road_report_path.read_text(encoding="utf-8"))
+          assert road_report["failed_connections"] == 0, road_report
+          assert road_report["maximum_connection_gap"] <= 0.35, road_report
+          assert road_report["maximum_model_overlap_metres"] <= 0.01, road_report
+          assert result.pbo_path.is_file()
+
+          readme = root / "build" / "ROADLAB.txt"
+          readme.write_text(
+              "WG Stock Road Lab\n"
+              f"Commit: {os.environ.get('GITHUB_SHA', 'local')}\n\n"
+              "Inspection areas in world X/Z metres:\n"
+              "  Native 100 m curve: 500,500\n"
+              "  45-degree paved T: 1300,700\n"
+              "  Paved/gravel T: 1300,1300\n"
+              "  Source-wiggle straight: 450,1700\n\n"
+              "Check for grass wedges, road-surface clipping, z-fighting, visible slab seams, "
+              "wrong curve handedness, and gravel showing through the paved main road.\n",
+              encoding="utf-8",
+          )
           print(f"In-game PBO: {result.pbo_path}")
-          print(f"Build root: {root / 'build'}")
+          print(json.dumps(road_report, indent=2, sort_keys=True))
           PY
-      - name: Upload in-game road smoke build
+      - name: Upload in-game road lab build
         uses: actions/upload-artifact@v4
         with:
-          name: wg-roadtest-${{ github.sha }}
+          name: wg-roadlab-${{ github.sha }}
           path: ci-ingame/build
           if-no-files-found: error
           retention-days: 14
