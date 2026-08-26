@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+from cwr_worldgen.playability import _unique_incidents
 from cwr_worldgen.stock_road_path_conditioning_policy import (
     _merge_compatible_paths,
     _protected_node_keys,
@@ -53,6 +54,22 @@ def test_main_road_can_merge_through_different_surface_branch():
     # The shared node stays as a real vertex, so later junction discovery still
     # sees the branch even though the main road is fitted as one continuous run.
     assert (10.0, 0.0) in merged[0]
+
+
+def test_merged_through_road_keeps_both_incident_directions_at_t_node():
+    # After two source ways are merged, both main-road segments inherit the
+    # owner's OSM key. Junction discovery must still count them separately: the
+    # incident deduper is geometric, so opposite directions cannot collapse.
+    values = (
+        ((1.0, 0.0), False, r"o\road\sil25.p3d", "owner/000000", "owner"),
+        ((-1.0, 0.0), False, r"o\road\sil25.p3d", "owner/000001", "owner"),
+        ((0.0, 1.0), False, r"o\road\asf25.p3d", "branch/000000", "branch"),
+    )
+
+    unique = _unique_incidents(values)
+
+    assert len(unique) == 3
+    assert {value[0] for value in unique} == {(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0)}
 
 
 def test_half_metre_source_noise_is_removed_before_piece_fitting():
