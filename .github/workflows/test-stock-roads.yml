@@ -38,4 +38,5 @@ jobs:
             tests/test_stock_road_local_fit_policy.py \
             tests/test_stock_road_relaxation_transaction_policy.py \
             tests/test_stock_road_path_conditioning_policy.py \
-            tests/test_stock_road_obstacle_policy.py
+            tests/test_stock_road_obstacle_policy.py \
+            tests/test_stock_road_curve_preservation_policy.py
