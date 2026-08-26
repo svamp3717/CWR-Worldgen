@@ -37,7 +37,7 @@ def test_skewed_mixed_t_gets_exact_native_connector_targets():
 def test_relaxed_approach_stays_inside_existing_road_corridor():
     node = (0.0, 0.0)
     neighbour = (0.0, 20.0)
-    connector_half_extent = 24.5 * 6.0 / 25.0 * 0.5
+    connector_half_extent = 3.0
 
     point = _relaxed_arm_point(node, neighbour, 17.0, connector_half_extent)
 
@@ -47,7 +47,7 @@ def test_relaxed_approach_stays_inside_existing_road_corridor():
 
 
 def test_very_short_arm_is_not_forced_into_relaxation():
-    connector_half_extent = 24.5 * 6.0 / 25.0 * 0.5
+    connector_half_extent = 3.0
 
     assert _relaxed_arm_point(
         (0.0, 0.0),
