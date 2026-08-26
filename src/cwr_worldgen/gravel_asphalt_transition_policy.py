@@ -6,9 +6,10 @@ geometry surrogate so the Resistance T-junction matcher can orient the native
 mesh. Rendering that literal paved/dirt model inserts a brown dirt strip between
 the generated gravel branch and the paved main road.
 
-The same-surface T meshes share the same measured connector geometry. Replace
-only the visible central model with the paved main-family T; the generated gravel
-chain still terminates at the measured branch connector.
+The same-surface T meshes share the measured 6.25 m connector layout with their
+mixed-surface siblings. Replace only the visible central model with the paved
+main-family T; the generated gravel chain still terminates at the same measured
+branch connector.
 """
 from __future__ import annotations
 
@@ -50,7 +51,5 @@ def install_gravel_asphalt_transition_policy() -> None:
         return
     _ORIGINAL_NATIVE_T = _measured._native_t_junction
     _measured._native_t_junction = _native_t_junction
-    # Measured-junction installation also published the function on the base
-    # junction module. Keep direct callers consistent with the wrapped path.
     _junction._native_t_junction = _native_t_junction
     _INSTALLED = True
