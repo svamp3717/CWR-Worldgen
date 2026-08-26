@@ -29,7 +29,11 @@ from . import road_quality_policy as _quality
 from . import stock_road_model_geometry as _geometry
 
 MINIMUM_CONNECTOR_COVER_GAP_METRES = 0.05
-MAXIMUM_CONNECTOR_COVER_GAP_METRES = 3.25
+# A physical 6.25 m stock short piece can safely bridge a gap up to five metres
+# while still overlapping both the branch and junction by more than half a metre.
+# Larger nearest-endpoint distances are much more likely to mean that connector
+# has no matching emitted branch, so leave them untouched rather than guessing.
+MAXIMUM_CONNECTOR_COVER_GAP_METRES = 5.00
 CONNECTOR_COVER_SPAN_METRES = 6.00
 CONNECTOR_COVER_VERTICAL_BIAS_METRES = 0.003
 _ENDPOINT_BUCKET_METRES = 4.0
