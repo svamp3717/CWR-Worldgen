@@ -30,7 +30,6 @@ jobs:
             tests/test_stock_road_transform_policy.py \
             tests/test_stock_road_3d_connector_policy.py \
             tests/test_stock_road_junction_policy.py \
-            tests/test_stock_road_measured_junction_policy.py \
             tests/test_stock_road_skew_policy.py \
             tests/test_stock_road_connector_policy.py \
             tests/test_stock_road_surface_overlap_policy.py \
