@@ -2,18 +2,19 @@
 """Allow native stock junctions to absorb bounded mixed-surface skew.
 
 The ordinary native-junction matcher intentionally accepts only near-orthogonal
-T/X nodes. A mixed paved/gravel T can still be visually better represented by a
-purpose-built paved/dirt junction when the connector mismatch stays inside the
-existing road surfaces. This policy enables that one narrow exception without
-making all stock intersections globally more permissive.
+T/X nodes. A mixed paved/gravel T can still use the measured stock T connector
+geometry when the mismatch stays inside the existing road surfaces. This policy
+enables that one narrow exception without making all stock intersections
+globally more permissive.
 
-Generated gravel is treated as the dirt (``ces``) connector family only for
-selecting the central native T mesh; the surrounding branch remains generated
-gravel. A relaxed match is attempted only when exactly one generated-gravel arm
-joins two same-family paved/asphalt/cobble arms, and the maximum connector
-heading error remains within 18 degrees. The measured native connector radius is
-6.25 m, so the maximum lateral correction is about 1.93 m, inside the 2.30 m
-half-width of the generated gravel road.
+Generated gravel is treated as the dirt (``ces``) family only as a connector-
+geometry surrogate during matching. A later transition policy keeps the visible
+central apron paved, so no brown dirt road is inserted between generated gravel
+and the paved main road. A relaxed match is attempted only when exactly one
+generated-gravel arm joins two same-family paved/asphalt/cobble arms, and the
+maximum connector heading error remains within 18 degrees. The measured native
+connector radius is 6.25 m, so the maximum lateral correction is about 1.93 m,
+inside the 2.30 m half-width of the generated gravel road.
 """
 from __future__ import annotations
 
@@ -44,10 +45,9 @@ def _family_with_generated_gravel(model_path: str) -> str | None:
     if family is not None:
         return family
     if _is_generated_gravel_model(model_path):
-        # The Resistance mixed T family has no generated-gravel material. The
-        # dirt connector is the closest native visual/geometry match and is only
-        # used for the small central junction mesh; the branch remains generated
-        # gravel immediately outside it.
+        # Resistance has no generated-gravel T family. Reuse ces only as the
+        # connector-geometry surrogate; the visible apron is replaced with the
+        # paved main-family T model by gravel_asphalt_transition_policy.
         return "ces"
     return None
 
