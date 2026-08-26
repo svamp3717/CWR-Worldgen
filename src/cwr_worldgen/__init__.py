@@ -95,6 +95,14 @@ from .stock_road_local_fit_policy import (
 )
 
 _install_stock_road_local_fit_policy()
+# A relaxed junction is only a proposal until every moved arm clears the source
+# obstacle corridor and the resulting geometry passes the ordinary strict native
+# matcher. Never let planning tolerance leak into final junction placement.
+from .stock_road_relaxation_transaction_policy import (
+    install_stock_road_relaxation_transaction_policy as _install_stock_road_relaxation_transaction_policy,
+)
+
+_install_stock_road_relaxation_transaction_policy()
 from .raceway_policy import install_raceway_policy as _install_raceway_policy
 
 _install_raceway_policy()
