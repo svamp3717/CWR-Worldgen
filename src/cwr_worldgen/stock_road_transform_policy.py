@@ -10,6 +10,7 @@ centerline endpoints.
 from __future__ import annotations
 
 from dataclasses import replace
+import math
 
 from . import playability as _p
 from . import stock_road_curve_policy as _curve
@@ -30,8 +31,8 @@ def _road_object_on_slope(*args, **kwargs):
     if geometry is None:
         return obj
 
-    start = args[2] if len(args) > 2 else kwargs["start"]
-    end = args[3] if len(args) > 3 else kwargs["end"]
+    start = tuple(args[2] if len(args) > 2 else kwargs["start"])
+    end = tuple(args[3] if len(args) > 3 else kwargs["end"])
 
     # The earlier curve policy records handedness by reversing traversal through
     # the same right-hand P3D. Read that flag from the object it just emitted,
@@ -39,8 +40,28 @@ def _road_object_on_slope(*args, **kwargs):
     reverse = _curve._curve_object_key(obj) in _curve._REVERSED_CURVE_KEYS
     local_begin = geometry.end if reverse else geometry.begin
     local_end = geometry.begin if reverse else geometry.end
+
+    # The terrain-aware connector policy, installed outside this wrapper,
+    # deliberately shortens the *horizontal* chord on a slope so the rigid
+    # P3D's full three-dimensional connector distance stays equal to the model
+    # Memory-LOD chord. A planar solve cannot represent that pitch and used to
+    # raise before the outer 3D solver got a chance to run. Defer any genuine
+    # horizontal-length mismatch to that outer solver. On flat terrain the
+    # lengths still match and this planar transform remains the exact fast path.
+    local_length = math.dist(local_begin, local_end)
+    world_horizontal_length = math.dist(start, end)
+    if not math.isclose(
+        local_length,
+        world_horizontal_length,
+        rel_tol=0.0,
+        abs_tol=1.0e-3,
+    ):
+        if reverse:
+            _REVERSED_FINAL_KEYS.add(_curve._curve_object_key(obj))
+        return obj
+
     origin, heading = _geometry.solve_planar_connector_transform(
-        tuple(start), tuple(end), local_begin, local_end
+        start, end, local_begin, local_end
     )
     fixed = replace(
         obj,
