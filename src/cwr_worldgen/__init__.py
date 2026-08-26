@@ -72,8 +72,8 @@ _install_gravel_asphalt_transition_policy()
 from .stock_road_connector_policy import install_stock_road_connector_policy as _install_stock_road_connector_policy
 
 _install_stock_road_connector_policy()
-# Visible road edges need overlap at angled straight-piece seams and underneath
-# measured junction caps even when their logical Memory-LOD connectors coincide.
+# Measure the final fitted branch/cap geometry and bridge only connector gaps
+# that still remain in the actual road-object report.
 from .stock_road_surface_overlap_policy import (
     install_stock_road_surface_overlap_policy as _install_stock_road_surface_overlap_policy,
 )
