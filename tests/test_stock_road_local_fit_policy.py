@@ -27,9 +27,8 @@ def _empty_obstacles() -> _ObstacleIndex:
 
 
 def test_shallow_dogleg_inside_corridor_is_simplified():
-    # About twelve degrees of heading change, but less than 0.75 m away from
-    # the direct chord. This should be one longer fitted run rather than two
-    # visibly mitred short slabs.
+    # A synthetic shallow dog-leg: enough angular noise to create a visible
+    # miter with short rigid slabs, but still well inside the allowed corridor.
     points = ((0.0, 0.0), (0.0, 6.25), (1.25, 12.40))
 
     simplified = _simplify_open_run(points, _empty_obstacles())
@@ -50,10 +49,11 @@ def test_large_visual_bend_is_not_flattened_even_below_heading_gate():
 
 
 def test_same_family_paved_skew_t_can_use_native_junction():
+    # Deliberately synthetic skew, not copied from a generated world.
     incidents = (
-        _Incident(_direction(94.0), "sil", r"o\road\sil25.p3d"),
-        _Incident(_direction(253.0), "sil", r"o\road\sil25.p3d"),
-        _Incident(_direction(341.0), "sil", r"o\road\sil25.p3d"),
+        _Incident(_direction(95.0), "sil", r"o\road\sil25.p3d"),
+        _Incident(_direction(255.0), "sil", r"o\road\sil25.p3d"),
+        _Incident(_direction(342.0), "sil", r"o\road\sil25.p3d"),
     )
 
     assert _same_family_paved_t(incidents)
