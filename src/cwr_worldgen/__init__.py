@@ -79,6 +79,14 @@ from .stock_road_surface_overlap_policy import (
 )
 
 _install_stock_road_surface_overlap_policy()
+# In open space, spend a small amount of source-line fidelity to prefer longer
+# stock pieces. Source-backed obstacles veto every local shortcut, and the final
+# seam pass avoids adding repair slabs when a larger road already covers a node.
+from .stock_road_relaxation_policy import (
+    install_stock_road_relaxation_policy as _install_stock_road_relaxation_policy,
+)
+
+_install_stock_road_relaxation_policy()
 from .raceway_policy import install_raceway_policy as _install_raceway_policy
 
 _install_raceway_policy()
