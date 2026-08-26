@@ -2,9 +2,9 @@
 """Condition stock-road centerlines before rigid CWA P3Ds are fitted.
 
 Arma-style terrain pipelines get markedly better roads when source geometry is
-cleaned before the game-specific representation is generated.  CWA cannot hand a
+cleaned before the game-specific representation is generated. CWA cannot hand a
 polyline to the engine like newer Arma versions can; it must place rigid road P3Ds
-itself.  That makes pre-fitting conditioning even more valuable:
+itself. That makes pre-fitting conditioning even more valuable:
 
 * compatible OSM way fragments are merged into one continuous path where their
   endpoints have one unambiguous same-type continuation;
@@ -13,7 +13,7 @@ itself.  That makes pre-fitting conditioning even more valuable:
 * real junctions, surface transitions and sharp corners remain explicit anchors.
 
 The simplifier never moves an endpoint and only replaces an existing sub-path by
-its chord.  The chord must remain within a 0.50 m source corridor and pass the
+its chord. The chord must remain within a 0.50 m source corridor and pass the
 same source-backed obstacle check used by the later road-relaxation policy.
 """
 from __future__ import annotations
@@ -25,6 +25,7 @@ from typing import Sequence
 from . import generator as _generator
 from . import playability as _p
 from . import stock_road_connector_policy as _connector
+from . import stock_road_model_geometry as _geometry
 from . import stock_road_relaxation_policy as _relax
 
 MAXIMUM_PRE_FIT_DEVIATION_METRES = 0.50
@@ -57,13 +58,15 @@ def _compatibility_key(feature, spec):
     ):
         return None
     model = _p.road_model_for_tags(spec, feature.tags)
-    # Generated gravel already has its own flexible curve family.  This policy
-    # targets the rigid stock sil/ces/asf/kos network that creates visible slab
-    # seams when tiny OSM way fragments are fitted independently.
-    if _p.is_generated_gravel_road_model(model):
+    # Only the verified stock straight families participate. Generated gravel has
+    # its own flexible curve family, and custom models must not silently inherit
+    # assumptions measured from the CWA O\Road assets.
+    stock = _geometry.stock_straight_match(str(model))
+    if stock is None:
         return None
     width = float(_p.road_width_metres(feature.tags))
     return (
+        stock.group("family").casefold(),
         str(model).replace("/", "\\").casefold(),
         round(width, 3),
         bool(_p.road_is_dirt(feature.tags)),
@@ -88,7 +91,7 @@ def _merge_two(first_points, first_side: int, second_points, second_side: int):
         return tuple(a or b)
     if _p._road_node_key(a[-1]) != _p._road_node_key(b[0]):
         raise ValueError("road merge endpoints do not share a node")
-    # Projection of the same OSM node should be identical.  When floating point
+    # Projection of the same OSM node should be identical. When floating point
     # conversion leaves a tiny discrepancy, keep the first path's exact endpoint
     # rather than introducing a new averaged source position.
     b[0] = a[-1]
@@ -98,11 +101,9 @@ def _merge_two(first_points, first_side: int, second_points, second_side: int):
 def _merge_compatible_paths(projected, compatibility):
     """Merge chains at nodes with exactly one compatible continuation.
 
-    This mirrors the useful part of ArmaRealMap's road merging while retaining a
-    one-entry-per-source-feature return shape: the lowest source index owns the
-    merged chain and absorbed entries become empty.  Junction vertices are not
-    discarded; a branch of another road type can therefore still meet an
-    intermediate node on the merged main road.
+    The lowest source index owns the merged chain and absorbed entries become
+    empty. Junction vertices are not discarded; a branch of another road type
+    can therefore still meet an intermediate node on the merged main road.
     """
 
     output = [tuple(points) for points in projected]
@@ -192,7 +193,7 @@ def _protected_node_keys(paths, compatibility) -> set[tuple[int, int]]:
 
     for node, values in incidents.items():
         # Degree-one endpoints, T/X junctions, and changes of fitting class are
-        # anchors.  Only a degree-two continuation of one road class is eligible
+        # anchors. Only a degree-two continuation of one road class is eligible
         # to disappear as harmless source-line detail.
         if len(values) != 2 or len(set(values)) != 1:
             protected.add(node)
