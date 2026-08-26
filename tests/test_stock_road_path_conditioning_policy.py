@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from cwr_worldgen.playability import _unique_incidents
 from cwr_worldgen.stock_road_path_conditioning_policy import (
+    _condition_paths_with_count,
     _merge_compatible_paths,
     _protected_node_keys,
     _simplify_path,
@@ -78,6 +79,17 @@ def test_half_metre_source_noise_is_removed_before_piece_fitting():
     simplified = _simplify_path(points, set(), _empty_obstacles())
 
     assert simplified == (points[0], points[-1])
+
+
+def test_conditioned_degree_two_vertices_remain_reportable_as_suppressed_caps():
+    points = tuple((float(index) * 10.0, 0.0) for index in range(6))
+
+    conditioned, suppressed = _condition_paths_with_count(
+        (points,), (("sil",),), _empty_obstacles()
+    )
+
+    assert conditioned == ((points[0], points[-1]),)
+    assert suppressed == 4
 
 
 def test_surface_transition_node_is_a_simplification_anchor():
