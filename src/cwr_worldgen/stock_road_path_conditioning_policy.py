@@ -26,6 +26,7 @@ from . import generator as _generator
 from . import playability as _p
 from . import stock_road_connector_policy as _connector
 from . import stock_road_model_geometry as _geometry
+from . import stock_road_obstacle_policy as _obstacles
 from . import stock_road_relaxation_policy as _relax
 
 MAXIMUM_PRE_FIT_DEVIATION_METRES = 0.50
@@ -290,6 +291,9 @@ def install_stock_road_path_conditioning_policy() -> None:
     if _connector._ORIGINAL_PROJECTED_ROADS is None:
         raise RuntimeError("stock road connector policy must be installed first")
 
+    # Add mapped fences/walls/hedges and tree rows to the same obstacle index
+    # before any pre-fit or junction relaxation can consume it.
+    _obstacles.install_stock_road_obstacle_policy()
     _ORIGINAL_FIT = _p.fit_road_objects
     _ORIGINAL_PROJECTED_ROADS = _connector._ORIGINAL_PROJECTED_ROADS
     _connector._ORIGINAL_PROJECTED_ROADS = _projected_road_polylines
