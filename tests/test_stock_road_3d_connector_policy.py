@@ -21,6 +21,19 @@ def _direction(heading_degrees: float) -> tuple[float, float]:
     return math.sin(angle), math.cos(angle)
 
 
+def test_flat_straight_keeps_full_horizontal_connector_length():
+    cells = 64
+    spec = SimpleNamespace(cells=cells, cell_size=1.0)
+    context = _Context((0.0,) * (cells * cells), spec, {})
+    measure = _p._PolylineMeasure.create(((10.0, 10.0), (10.0, 50.0)))
+
+    endpoint = _TerrainMeasure(measure, context).chord_endpoint(0.0, 25.0, 30.0)
+
+    assert endpoint is not None
+    _distance, end_x, end_z, _heading = endpoint
+    assert math.isclose(math.dist((10.0, 10.0), (end_x, end_z)), 25.0, abs_tol=1.0e-6)
+
+
 def test_sloped_straight_uses_three_dimensional_connector_length():
     cells = 128
     cell_size = 1.0
