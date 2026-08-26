@@ -7,10 +7,10 @@ a small plan-view gap: the horizontal projection shrinks by ``cos(pitch)``. On
 gentle grades this is only centimetres, but that is enough for terrain to show
 through the seam.
 
-This policy makes the road fitter solve each connector chord in 3D using the
-already-graded terrain. Native stock curves then receive the exact yaw, pitch,
-and origin that map their measured Memory-LOD connectors onto those fitted 3D
-endpoints, rather than a planar transform followed by an unrelated pitch.
+This policy makes known rigid stock/generated-gravel road families solve each
+connector chord in 3D using the already-graded terrain. Unknown custom roads keep
+the generic fitter's configured planar-length semantics; measured CWA geometry
+must not silently leak into arbitrary third-party assets.
 """
 from __future__ import annotations
 
@@ -138,11 +138,21 @@ def _chain_is_seam_safe(measure, fitted) -> bool:
     return True
 
 
+def _uses_measured_rigid_connectors(pieces) -> bool:
+    """Limit 3D chord semantics to road families whose connectors we know."""
+
+    return any(
+        _model_geometry.stock_straight_match(str(piece.model_path)) is not None
+        or _p.is_generated_gravel_road_model(str(piece.model_path))
+        for piece in pieces
+    )
+
+
 def _stock_piece_chain(measure, pieces, **kwargs):
     if _ORIGINAL_CHAIN is None:
         raise RuntimeError("3D stock-road connector policy is not installed")
     context = _quality._CONTEXT.get()
-    if context is None:
+    if context is None or not _uses_measured_rigid_connectors(pieces):
         return _ORIGINAL_CHAIN(measure, pieces, **kwargs)
     return _ORIGINAL_CHAIN(_TerrainMeasure(measure, context), pieces, **kwargs)
 
