@@ -24,11 +24,7 @@ def _direction(heading_degrees: float) -> tuple[float, float]:
 def test_sloped_straight_uses_three_dimensional_connector_length():
     cells = 128
     cell_size = 1.0
-    elevations = tuple(
-        z * 0.05
-        for z in range(cells)
-        for _x in range(cells)
-    )
+    elevations = tuple(z * 0.05 for z in range(cells) for _x in range(cells))
     spec = SimpleNamespace(cells=cells, cell_size=cell_size)
     context = _Context(elevations, spec, {})
     measure = _p._PolylineMeasure.create(((10.0, 10.0), (10.0, 100.0)))
