@@ -39,5 +39,42 @@ jobs:
             tests/test_stock_road_path_conditioning_policy.py \
             tests/test_stock_road_obstacle_policy.py \
             tests/test_stock_road_curve_preservation_policy.py
+      - name: Build in-game road smoke world
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import sys
+
+          sys.path.insert(0, str(Path("tests").resolve()))
+          from test_milestone8 import Milestone8BuildTests
+          from cwr_worldgen.milestone9 import Milestone9Spec, build_milestone9
+
+          root = Path("ci-ingame")
+          source = Milestone8BuildTests()._source(root / "source")
+          result = build_milestone9(
+              root / "build",
+              Milestone9Spec(
+                  source_dir=source,
+                  name="wg_roadtest",
+                  display_name="WG Road Test",
+                  solver_iterations=4,
+                  world_edge_blend_cells=2,
+                  max_forest_objects=0,
+                  ground_texture_profile="generated",
+                  surface_overview_size=128,
+                  surface_texture_size=32,
+                  verify_regeneration=False,
+              ),
+          )
+          print(f"In-game PBO: {result.pbo_path}")
+          print(f"Build root: {root / 'build'}")
+          PY
+      - name: Upload in-game road smoke build
+        uses: actions/upload-artifact@v4
+        with:
+          name: wg-roadtest-${{ github.sha }}
+          path: ci-ingame/build
+          if-no-files-found: error
+          retention-days: 14
       - name: Run full test suite
         run: python -m pytest -q
