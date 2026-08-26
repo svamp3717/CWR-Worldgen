@@ -32,8 +32,8 @@ def _report(*objects, caps: int):
 
 
 def test_native_t_connector_gap_gets_same_family_underlay():
-    # The sil/sil T logical center is +0.85 m in local X. Shift the object
-    # origin so the synthetic logical intersection is world (0, 0).
+    # The stock T's logical center is offset in local X. Shift this synthetic
+    # object origin so that the logical intersection is world (0, 0).
     cap = WorldObject(
         1,
         r"o\road\kr_new_sil_sil_t.p3d",
