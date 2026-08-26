@@ -3,17 +3,17 @@
 
 The ordinary native-junction matcher intentionally accepts only near-orthogonal
 T/X nodes. A mixed paved/gravel T can still be visually better represented by a
-purpose-built paved/dirt junction when the connector mismatch stays well inside
-the road corridor. This policy enables that one narrow exception without making
-all stock intersections globally more permissive.
+purpose-built paved/dirt junction when the connector mismatch stays inside the
+existing road surfaces. This policy enables that one narrow exception without
+making all stock intersections globally more permissive.
 
-The junction centre is never translated. Generated gravel is treated as the dirt
-(``ces``) connector family only for selecting the small central native T mesh.
-The surrounding branch remains generated gravel. A relaxed match is attempted
-only when exactly one generated-gravel arm joins two same-family paved/asphalt/
-cobble arms, and the maximum connector heading error remains within 18 degrees.
-At the default 2.94 m connector radius that is less than one metre of lateral
-mismatch, inside a normal three-metre road half-width.
+Generated gravel is treated as the dirt (``ces``) connector family only for
+selecting the central native T mesh; the surrounding branch remains generated
+gravel. A relaxed match is attempted only when exactly one generated-gravel arm
+joins two same-family paved/asphalt/cobble arms, and the maximum connector
+heading error remains within 18 degrees. The measured native connector radius is
+6.25 m, so the maximum lateral correction is about 1.93 m, inside the 2.30 m
+half-width of the generated gravel road.
 """
 from __future__ import annotations
 
@@ -74,14 +74,10 @@ def _native_junction_with_bounded_mixed_skew(incidents):
     if _ORIGINAL_NATIVE_JUNCTION_FOR_INCIDENTS is None:
         raise RuntimeError("stock road skew policy is not installed")
 
-    # Preserve the conservative matcher for every ordinary junction.
     native = _ORIGINAL_NATIVE_JUNCTION_FOR_INCIDENTS(incidents)
     if native is not None or not _eligible_relaxed_mixed_t(incidents):
         return native
 
-    # The native T matcher reads its threshold from the module global. Raise it
-    # only for this one call and restore it immediately, rather than weakening
-    # every intersection in the world.
     original_limit = _junction.MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES
     try:
         _junction.MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = (
