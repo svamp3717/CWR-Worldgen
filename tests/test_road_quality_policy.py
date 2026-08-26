@@ -25,11 +25,13 @@ def _flat_context(*, cells: int = 4, cell_size: float = 25.0):
 
 
 def test_policy_is_installed_for_playability_and_generator() -> None:
+    # The final fitter is deliberately wrapped by several stock-road policies.
+    # The stable integration contract is that both public call sites use the
+    # same composed fitter, not which intermediate wrapper happens to be last.
     assert playability.fit_road_objects is generator.fit_road_objects
-    assert playability.fit_road_objects.__module__ == "cwr_worldgen.gravel_family_policy"
 
 
-def test_diagonal_junction_trim_uses_oriented_hub_edge() -> None:
+def test_stock_overlay_allows_diagonal_approach_to_continue_under_cap() -> None:
     diagonal = (math.sqrt(0.5), math.sqrt(0.5))
     junction = _Junction(
         point=(0.0, 0.0),
@@ -62,8 +64,10 @@ def test_diagonal_junction_trim_uses_oriented_hub_edge() -> None:
     )
     exit_distance = _exit_distance(junction, diagonal)
     assert exit_distance > 4.2
-    assert adjusted[0] > 3.9
-    assert math.isclose(exit_distance - adjusted[0], 0.22, abs_tol=1e-6)
+    # A stock straight cap is a surface overlay, not a hard trimming boundary.
+    # Running the approach to the node underneath it avoids a visible triangular
+    # hole at skew junctions; the cap's vertical bias determines visible priority.
+    assert adjusted[0] == 0.0
 
 
 def test_chain_lookahead_avoids_awkward_final_overshoot() -> None:
@@ -120,7 +124,7 @@ def test_terrain_profile_prefers_shorter_rigid_pieces_over_midspan_clipping() ->
     assert fitted[-1][2] == (0.0, 50.0)
 
 
-def test_diagonal_t_junction_keeps_small_controlled_overlap_and_zero_gap() -> None:
+def test_diagonal_t_junction_runs_branch_under_raised_same_family_cap() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     main = OsmLineFeature(
@@ -177,7 +181,9 @@ def test_diagonal_t_junction_keeps_small_controlled_overlap_and_zero_gap() -> No
     axis = playability._model_axis(branch_obj, length)
     node = (500.0, 500.0)
     inner_distance = min(math.dist(node, axis[0]), math.dist(node, axis[1]))
-    half = spec.road_segment_length * 6.0 / 25.0 * 0.5
-    expected_exit = math.sqrt(half * half + 3.0 * 3.0)
-    overlap = expected_exit - inner_distance
-    assert 0.15 <= overlap <= 0.30
+
+    # The approach deliberately reaches the node underneath the overlay rather
+    # than stopping at the oriented hub edge. The raised cap wins the z-buffer,
+    # leaving no grass wedge while preserving one continuous drivable surface.
+    assert inner_distance <= 0.05
+    assert cap.y >= branch_obj.y + 0.005
