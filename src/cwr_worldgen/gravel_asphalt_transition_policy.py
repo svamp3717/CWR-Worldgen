@@ -4,13 +4,14 @@
 Generated gravel is classified as the stock ``ces`` family only as an internal
 connector surrogate. It must never make the visible paved road turn into a dirt
 junction. At a mixed paved/gravel T, keep the paved main road visually ordinary:
-place a normal 12.5 m stock straight across the node and let the generated gravel
-chain continue underneath it.
+place one normal 6.25 m stock straight over the immediate node while the generated
+gravel and paved approaches continue underneath it.
 
-The straight overlay also provides a rectangular paved footprint over small
-heading disagreement between the two paved approaches. That is deliberately more
-forgiving than a stock T mesh with fixed connector cut-outs and avoids exposing
-terrain wedges when the source through-road bends slightly at the junction.
+The short overlay is only a central surface cover. Approach roads are deliberately
+allowed beneath it by the surface-overlap policy, so the visible rectangle does
+not need to span all the way to the measured 6.25 m junction connectors. This
+keeps white road edges and texture seams from making a conspicuous 12.5 m patch
+through an otherwise ordinary paved road.
 """
 from __future__ import annotations
 
@@ -81,7 +82,7 @@ def _native_t_junction(incidents):
         return _ORIGINAL_NATIVE_T(incidents)
 
     return _junction._NativeJunction(
-        rf"o\road\{family}12.p3d",
+        rf"o\road\{family}6.p3d",
         rotation,
         maximum_error,
         family,
