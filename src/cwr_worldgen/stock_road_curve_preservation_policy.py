@@ -14,6 +14,7 @@ curve selection. Existing obstacle checks remain authoritative.
 """
 from __future__ import annotations
 
+from functools import lru_cache
 import math
 
 from . import playability as _p
@@ -96,12 +97,14 @@ def _candidate_is_sustained_curve(points, first: int, last: int) -> bool:
     return significant_turns >= 2
 
 
-def _curve_anchor_points(points) -> set[tuple[float, float]]:
-    """Protect samples participating in consecutive same-direction turns."""
+@lru_cache(maxsize=2048)
+def _curve_anchor_points_cached(
+    cleaned: tuple[tuple[float, float], ...],
+) -> frozenset[tuple[float, float]]:
+    """Return repeated-curvature samples once per immutable source polyline."""
 
-    cleaned = tuple(_p._clean_road_points(points))
     if len(cleaned) < 4:
-        return set()
+        return frozenset()
     turns = [0.0] * len(cleaned)
     for index in range(1, len(cleaned) - 1):
         turns[index] = _signed_turn(cleaned[index - 1], cleaned[index], cleaned[index + 1])
@@ -123,7 +126,14 @@ def _curve_anchor_points(points) -> set[tuple[float, float]]:
             for value in neighbours
         ):
             protected.add(cleaned[index])
-    return protected
+    return frozenset(protected)
+
+
+def _curve_anchor_points(points) -> frozenset[tuple[float, float]]:
+    """Protect samples participating in consecutive same-direction turns."""
+
+    cleaned = tuple(_p._clean_road_points(points))
+    return _curve_anchor_points_cached(cleaned)
 
 
 def _candidate_contains_curve_anchor(points, first: int, last: int) -> bool:
