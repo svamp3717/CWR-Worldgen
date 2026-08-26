@@ -15,6 +15,7 @@ from cwr_worldgen.stock_road_3d_connector_policy import (
     _TerrainMeasure,
     _curve_world_point,
     _solve_curve_transform,
+    _uses_measured_rigid_connectors,
 )
 from cwr_worldgen.stock_road_junction_policy import _Incident
 from cwr_worldgen.stock_road_model_geometry import (
@@ -64,6 +65,19 @@ def test_sloped_straight_uses_three_dimensional_connector_length():
         rel_tol=0.0,
         abs_tol=2.0e-4,
     )
+
+
+def test_3d_connector_semantics_do_not_leak_into_unknown_custom_roads():
+    custom = (
+        _p._RoadPiece(r"custom\road25.p3d", 25.0, 25),
+        _p._RoadPiece(r"custom\road12.p3d", 12.5, 12),
+    )
+    stock = (_p._RoadPiece(r"o\road\sil25.p3d", 25.0, 25),)
+    gravel = (_p._RoadPiece(r"synthetic\i\gravel6.p3d", 6.0, 6),)
+
+    assert not _uses_measured_rigid_connectors(custom)
+    assert _uses_measured_rigid_connectors(stock)
+    assert _uses_measured_rigid_connectors(gravel)
 
 
 def test_native_curve_transform_maps_both_connectors_in_3d():
