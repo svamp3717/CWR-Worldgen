@@ -103,6 +103,14 @@ from .stock_road_relaxation_transaction_policy import (
 )
 
 _install_stock_road_relaxation_transaction_policy()
+# Condition stock-road source geometry before rigid pieces are chosen: merge
+# unambiguous same-type OSM fragments, remove sub-metre noise inside the existing
+# obstacle-safe corridor, and retain real junction/surface/sharp-corner anchors.
+from .stock_road_path_conditioning_policy import (
+    install_stock_road_path_conditioning_policy as _install_stock_road_path_conditioning_policy,
+)
+
+_install_stock_road_path_conditioning_policy()
 from .raceway_policy import install_raceway_policy as _install_raceway_policy
 
 _install_raceway_policy()
