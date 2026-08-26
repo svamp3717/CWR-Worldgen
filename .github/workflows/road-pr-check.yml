@@ -1,0 +1,25 @@
+name: Focused road PR check
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  road-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install . pytest
+      - run: >-
+          pytest -q
+          tests/test_stock_road_model_geometry.py
+          tests/test_stock_road_curve_policy.py
+          tests/test_stock_road_geometry_policy.py
+          tests/test_stock_road_junction_policy.py
+          tests/test_stock_road_skew_policy.py
+          tests/test_stock_road_connector_policy.py
