@@ -19,6 +19,7 @@ same source-backed obstacle check used by the later road-relaxation policy.
 from __future__ import annotations
 
 from contextvars import ContextVar
+from dataclasses import replace
 import math
 from typing import Sequence
 
@@ -36,6 +37,9 @@ SHARP_CORNER_ANCHOR_DEGREES = 45.0
 
 _SPEC: ContextVar[object | None] = ContextVar(
     "cwr_stock_road_path_conditioning_spec", default=None
+)
+_SUPPRESSED_BY_CONDITIONING: ContextVar[int] = ContextVar(
+    "cwr_stock_road_conditioning_suppressed_degree_two", default=0
 )
 _ORIGINAL_FIT = None
 _ORIGINAL_PROJECTED_ROADS = None
@@ -242,16 +246,33 @@ def _simplify_path(points_raw, protected, obstacles):
     return tuple(result)
 
 
-def _condition_paths(projected, compatibility, obstacles):
+def _condition_paths_with_count(projected, compatibility, obstacles):
+    """Return conditioned paths and degree-two vertices removed before fitting."""
+
     merged = _merge_compatible_paths(projected, compatibility)
     protected = _protected_node_keys(merged, compatibility)
     output = []
-    for points, key in zip(merged, compatibility):
+    suppressed = 0
+    for points_raw, key in zip(merged, compatibility):
+        points = _clean(points_raw)
         if key is None or len(points) < 3:
-            output.append(tuple(points))
+            simplified = points
         else:
-            output.append(_simplify_path(points, protected, obstacles))
-    return tuple(output)
+            simplified = _simplify_path(points, protected, obstacles)
+            # Every removable interior point survived the network-anchor pass,
+            # so it represents the same degree-two cap the old fitter would
+            # later have counted as suppressed. Preserve that report meaning
+            # even though preprocessing now removes it earlier.
+            suppressed += max(0, len(points) - len(simplified))
+        output.append(tuple(simplified))
+    return tuple(output), suppressed
+
+
+def _condition_paths(projected, compatibility, obstacles):
+    conditioned, _suppressed = _condition_paths_with_count(
+        projected, compatibility, obstacles
+    )
+    return conditioned
 
 
 def _projected_road_polylines(dataset, projection):
@@ -264,15 +285,23 @@ def _projected_road_polylines(dataset, projection):
     compatibility = tuple(_compatibility_key(feature, spec) for feature in dataset.roads)
     context = _relax._CONTEXT.get()
     obstacles = None if context is None else context.obstacles
-    return _condition_paths(projected, compatibility, obstacles)
+    conditioned, suppressed = _condition_paths_with_count(
+        projected, compatibility, obstacles
+    )
+    # Several downstream policies may request projected roads during one fit.
+    # Overwrite rather than accumulate because every request describes the same
+    # source network and would otherwise count the preprocessing repeatedly.
+    _SUPPRESSED_BY_CONDITIONING.set(suppressed)
+    return conditioned
 
 
 def _fit(dataset, projection, elevations, spec, *, starting_id=1, progress_callback=None):
     if _ORIGINAL_FIT is None:
         raise RuntimeError("stock road path conditioning policy is not installed")
-    token = _SPEC.set(spec)
+    spec_token = _SPEC.set(spec)
+    count_token = _SUPPRESSED_BY_CONDITIONING.set(0)
     try:
-        return _ORIGINAL_FIT(
+        report = _ORIGINAL_FIT(
             dataset,
             projection,
             elevations,
@@ -280,8 +309,19 @@ def _fit(dataset, projection, elevations, spec, *, starting_id=1, progress_callb
             starting_id=starting_id,
             progress_callback=progress_callback,
         )
+        suppressed = _SUPPRESSED_BY_CONDITIONING.get()
+        if suppressed:
+            report = replace(
+                report,
+                suppressed_degree_two_caps=(
+                    int(getattr(report, "suppressed_degree_two_caps", 0))
+                    + suppressed
+                ),
+            )
+        return report
     finally:
-        _SPEC.reset(token)
+        _SUPPRESSED_BY_CONDITIONING.reset(count_token)
+        _SPEC.reset(spec_token)
 
 
 def install_stock_road_path_conditioning_policy() -> None:
