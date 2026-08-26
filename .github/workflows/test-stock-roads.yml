@@ -1,0 +1,39 @@
+name: Test stock road policies
+
+on:
+  push:
+    branches:
+      - fix/stock-road-curves
+
+permissions:
+  contents: read
+
+jobs:
+  stock-road-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Run focused road tests
+        run: |
+          python -m pytest -q \
+            tests/test_stock_road_curve_policy.py \
+            tests/test_stock_road_geometry_policy.py \
+            tests/test_stock_road_transform_policy.py \
+            tests/test_stock_road_3d_connector_policy.py \
+            tests/test_stock_road_junction_policy.py \
+            tests/test_stock_road_measured_junction_policy.py \
+            tests/test_stock_road_skew_policy.py \
+            tests/test_stock_road_connector_policy.py \
+            tests/test_stock_road_surface_overlap_policy.py \
+            tests/test_stock_road_relaxation_policy.py \
+            tests/test_stock_road_local_fit_policy.py \
+            tests/test_stock_road_relaxation_transaction_policy.py
