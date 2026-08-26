@@ -41,13 +41,6 @@ def _heading_direction(heading):
     return (math.sin(angle), math.cos(angle))
 
 
-def test_policy_is_layered_on_top_of_general_road_quality_policy() -> None:
-    assert road_quality._junction_geometry is gravel_policy._junction_geometry
-    assert road_quality._exit_distance is gravel_policy._exit_distance
-    assert road_quality._quality_window is gravel_policy._quality_window
-    assert playability.fit_road_objects.__module__ == "cwr_worldgen.gravel_family_policy"
-
-
 def test_fixed_gravel_junction_catalogue_has_fifteen_reusable_shapes() -> None:
     assert len(GRAVEL_JUNCTION_VARIANTS) == 15
     for variant in GRAVEL_JUNCTION_VARIANTS:
@@ -65,6 +58,9 @@ def test_fixed_gravel_junction_catalogue_has_fifteen_reusable_shapes() -> None:
 
 
 def test_uploaded_lundby_junction_selects_reusable_60_degree_t_model() -> None:
+    # This is the integration test for policy composition. It deliberately calls
+    # the final road_quality entry points rather than asserting which monkey-patch
+    # function object happens to sit at the top of the wrapper stack.
     bbox = (59.4012347, 16.8211928, 59.4587912, 16.9343614)
     projection = BboxProjection.create(bbox, 6400.0)
     centre = (3943.500087480133, 2295.750436527429)
