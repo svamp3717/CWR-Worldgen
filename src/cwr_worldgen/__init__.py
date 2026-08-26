@@ -37,6 +37,7 @@ _install_stock_road_geometry_policy()
 from .stock_road_transform_policy import install_stock_road_transform_policy as _install_stock_road_transform_policy
 
 _install_stock_road_transform_policy()
+# Fit rigid stock connectors in 3D after their measured planar geometry is known.
 from .stock_road_3d_connector_policy import (
     install_stock_road_3d_connector_policy as _install_stock_road_3d_connector_policy,
 )
@@ -62,6 +63,7 @@ _install_stock_road_measured_junction_policy()
 from .stock_road_skew_policy import install_stock_road_skew_policy as _install_stock_road_skew_policy
 
 _install_stock_road_skew_policy()
+# Generated gravel borrows stock dirt connector geometry, but not its brown surface.
 from .gravel_asphalt_transition_policy import (
     install_gravel_asphalt_transition_policy as _install_gravel_asphalt_transition_policy,
 )
