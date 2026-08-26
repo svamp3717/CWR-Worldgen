@@ -93,7 +93,7 @@ def test_native_curve_transform_maps_both_connectors_in_3d():
         assert math.isclose(actual, expected, rel_tol=0.0, abs_tol=1.0e-6)
 
 
-def test_generated_gravel_branch_uses_normal_paved_overlay_without_connector_snapping():
+def test_generated_gravel_branch_uses_short_normal_paved_overlay_without_connector_snapping():
     incidents = (
         _Incident(_direction(0.0), "sil", r"O\Road\sil25.p3d"),
         _Incident(_direction(180.0), "sil", r"O\Road\sil25.p3d"),
@@ -103,7 +103,7 @@ def test_generated_gravel_branch_uses_normal_paved_overlay_without_connector_sna
     native = _native_t_junction(incidents)
 
     assert native is not None
-    assert native.model_path == r"o\road\sil12.p3d"
+    assert native.model_path == r"o\road\sil6.p3d"
     assert "kr_new" not in native.model_path.casefold()
     assert not _relaxation_eligible(incidents)
 
