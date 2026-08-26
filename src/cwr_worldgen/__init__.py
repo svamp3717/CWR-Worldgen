@@ -87,6 +87,14 @@ from .stock_road_relaxation_policy import (
 )
 
 _install_stock_road_relaxation_policy()
+# Use the same obstacle-aware freedom at shallow bends and skewed paved T nodes,
+# and keep fallback junction approaches underneath their cap instead of adding
+# lateral six-metre repair slabs across the carriageway.
+from .stock_road_local_fit_policy import (
+    install_stock_road_local_fit_policy as _install_stock_road_local_fit_policy,
+)
+
+_install_stock_road_local_fit_policy()
 from .raceway_policy import install_raceway_policy as _install_raceway_policy
 
 _install_raceway_policy()
