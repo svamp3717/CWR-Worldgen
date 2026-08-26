@@ -5,7 +5,10 @@ import math
 from types import SimpleNamespace
 
 from cwr_worldgen import playability as _p
-from cwr_worldgen.gravel_asphalt_transition_policy import _native_t_junction
+from cwr_worldgen.gravel_asphalt_transition_policy import (
+    _native_t_junction,
+    _relaxation_eligible,
+)
 from cwr_worldgen.road_quality_policy import _Context
 from cwr_worldgen.stock_road_3d_connector_policy import (
     _TerrainMeasure,
@@ -86,7 +89,7 @@ def test_native_curve_transform_maps_both_connectors_in_3d():
         assert math.isclose(actual, expected, rel_tol=0.0, abs_tol=1.0e-6)
 
 
-def test_generated_gravel_branch_uses_paved_apron_not_dirt_transition():
+def test_generated_gravel_branch_uses_normal_paved_overlay_without_connector_snapping():
     incidents = (
         _Incident(_direction(0.0), "sil", r"O\Road\sil25.p3d"),
         _Incident(_direction(180.0), "sil", r"O\Road\sil25.p3d"),
@@ -96,5 +99,6 @@ def test_generated_gravel_branch_uses_paved_apron_not_dirt_transition():
     native = _native_t_junction(incidents)
 
     assert native is not None
-    assert native.model_path == r"o\road\kr_new_sil_sil_t.p3d"
-    assert "_ces_" not in native.model_path.casefold()
+    assert native.model_path == r"o\road\sil12.p3d"
+    assert "kr_new" not in native.model_path.casefold()
+    assert not _relaxation_eligible(incidents)
