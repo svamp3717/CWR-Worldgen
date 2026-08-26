@@ -63,17 +63,15 @@ def test_stock_curve_geometry_is_ten_degrees_not_ten_metres():
     )
 
 
-def test_stock_models_use_real_connectors_even_when_spacing_setting_is_24_5():
+def test_stock_models_use_measured_connectors_even_when_spacing_setting_is_24_5():
     pieces = _p.road_model_variants(r"O\Road\sil25.p3d", 24.5)
 
     assert [(piece.nominal_length, piece.length_metres) for piece in pieces] == [
         (25, 25.0),
-        (12, 12.0),
-        (6, 6.0),
+        (12, 12.5),
+        (6, 6.25),
     ]
 
-    # The P3D itself is never scaled by WRP placement, so curve radii/chords are
-    # likewise physical model dimensions rather than 24.5/25-shrunk spacing.
     expected = {
         25: 2.0 * 25.0 * math.sin(math.radians(5.0)),
         50: 2.0 * 50.0 * math.sin(math.radians(5.0)),
