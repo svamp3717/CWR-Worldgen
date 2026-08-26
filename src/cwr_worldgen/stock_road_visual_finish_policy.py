@@ -12,8 +12,9 @@ whole road strip, not just its centreline. Two engine-visible defects can remain
 
 This final policy does not move source geometry. It aligns every legacy stock cap
 with the most nearly continuous incident pair, and tightens native-curve
-acceptance so a curve is only retained when its rendered tangent joins the next
-piece closely enough for the road edges to remain closed.
+acceptance at curve/straight and mixed-radius seams. Consecutive copies of one
+native curve model are left alone: their rigid ten-degree geometry is internally
+continuous even when coarse source sampling makes a tangent estimate noisy.
 """
 from __future__ import annotations
 
@@ -22,7 +23,6 @@ import math
 
 from . import generator as _generator
 from . import playability as _p
-from . import stock_road_curve_policy as _curve
 from . import stock_road_geometry_policy as _geometry
 from . import stock_road_junction_policy as _junction
 from . import stock_road_local_fit_policy as _local_fit
@@ -93,10 +93,7 @@ def _dominant_cap_heading(incidents, family: str) -> float | None:
     if pair is None:
         return None
     first, second = pair
-    if (
-        incidents[first].family != family
-        or incidents[second].family != family
-    ):
+    if incidents[first].family != family or incidents[second].family != family:
         return None
     return _junction._heading(incidents[first].direction)
 
@@ -192,6 +189,21 @@ def _piece_tangents(measure, piece, start, end) -> tuple[float, float]:
     return (chord - half_turn) % 360.0, (chord + half_turn) % 360.0
 
 
+def _same_native_curve(previous_piece, current_piece) -> bool:
+    """Return whether one rigid native curve shape continues into itself."""
+
+    if previous_piece is None:
+        return False
+    previous = _model_geometry.stock_curve_match(previous_piece.model_path)
+    current = _model_geometry.stock_curve_match(current_piece.model_path)
+    return (
+        previous is not None
+        and current is not None
+        and str(previous_piece.model_path).casefold()
+        == str(current_piece.model_path).casefold()
+    )
+
+
 def _chain_is_visually_seam_safe(measure, fitted) -> bool:
     """Reject curve choices whose road-strip edges would open at a seam."""
 
@@ -200,6 +212,7 @@ def _chain_is_visually_seam_safe(measure, fitted) -> bool:
     if not _ORIGINAL_CHAIN_IS_SEAM_SAFE(measure, fitted):
         return False
 
+    previous_piece = None
     previous_end_tangent = None
     previous_was_curve = False
     for piece, start, end in fitted:
@@ -208,10 +221,12 @@ def _chain_is_visually_seam_safe(measure, fitted) -> bool:
         if (
             previous_end_tangent is not None
             and (previous_was_curve or is_curve)
+            and not _same_native_curve(previous_piece, piece)
             and _p._heading_difference(previous_end_tangent, start_tangent)
             > MAXIMUM_VISUAL_SEAM_TANGENT_ERROR_DEGREES
         ):
             return False
+        previous_piece = piece
         previous_end_tangent = end_tangent
         previous_was_curve = is_curve
     return True
