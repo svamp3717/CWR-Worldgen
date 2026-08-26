@@ -119,6 +119,14 @@ from .stock_road_path_conditioning_policy import (
 )
 
 _install_stock_road_path_conditioning_policy()
+# A smooth ten-degree source arc can sit less than half a metre from its chord.
+# Preserve coherent one-direction curvature through both simplification stages so
+# the native CWA curve selector actually gets a chance to use curved P3Ds.
+from .stock_road_curve_preservation_policy import (
+    install_stock_road_curve_preservation_policy as _install_stock_road_curve_preservation_policy,
+)
+
+_install_stock_road_curve_preservation_policy()
 from .raceway_policy import install_raceway_policy as _install_raceway_policy
 
 _install_raceway_policy()
