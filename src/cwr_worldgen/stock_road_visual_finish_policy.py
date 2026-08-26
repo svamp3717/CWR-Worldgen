@@ -1,20 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Final visual safeguards for stock-road junctions and curve seams.
+"""Final visual safeguards for stock-road junctions.
 
-The geometry/audit policies make connector centres exact, but CWA renders the
-whole road strip, not just its centreline. Two engine-visible defects can remain:
+CWA renders the whole road strip, not just its centreline. An unsupported skew T
+keeps the legacy six-metre straight cap, and the core fitter may orient that
+symmetric cap along the side arm. In game that produces a conspicuous rectangular
+road slab across the main carriageway even though the logical road graph is valid.
 
-* an unsupported skew T keeps the legacy six-metre straight cap. The core fitter
-  may orient that symmetric cap along the side arm, producing the conspicuous
-  cross-carriageway rectangle seen in the Road Lab; and
-* two pieces can meet at one exact centreline point while their surface-edge
-  tangents differ by a degree or two, opening a small triangular grass wedge.
-
-This final policy does not move source geometry. It aligns every legacy stock cap
-with the most nearly continuous incident pair, and tightens native-curve
-acceptance at curve/straight and mixed-radius seams. Consecutive copies of one
-native curve model are left alone: their rigid ten-degree geometry is internally
-continuous even when coarse source sampling makes a tangent estimate noisy.
+Align every legacy stock cap with the most nearly continuous incident pair. This
+is deliberately post-fit and does not move source road geometry. Curve-seam
+helpers remain here for regression/diagnostic work, but are not allowed to veto
+native curve selection until their engine-visible edge model is fully calibrated.
 """
 from __future__ import annotations
 
@@ -189,49 +184,6 @@ def _piece_tangents(measure, piece, start, end) -> tuple[float, float]:
     return (chord - half_turn) % 360.0, (chord + half_turn) % 360.0
 
 
-def _same_native_curve(previous_piece, current_piece) -> bool:
-    """Return whether one rigid native curve shape continues into itself."""
-
-    if previous_piece is None:
-        return False
-    previous = _model_geometry.stock_curve_match(previous_piece.model_path)
-    current = _model_geometry.stock_curve_match(current_piece.model_path)
-    return (
-        previous is not None
-        and current is not None
-        and str(previous_piece.model_path).casefold()
-        == str(current_piece.model_path).casefold()
-    )
-
-
-def _chain_is_visually_seam_safe(measure, fitted) -> bool:
-    """Reject curve choices whose road-strip edges would open at a seam."""
-
-    if _ORIGINAL_CHAIN_IS_SEAM_SAFE is None:
-        raise RuntimeError("stock road visual finish policy is not installed")
-    if not _ORIGINAL_CHAIN_IS_SEAM_SAFE(measure, fitted):
-        return False
-
-    previous_piece = None
-    previous_end_tangent = None
-    previous_was_curve = False
-    for piece, start, end in fitted:
-        start_tangent, end_tangent = _piece_tangents(measure, piece, start, end)
-        is_curve = _model_geometry.stock_curve_match(piece.model_path) is not None
-        if (
-            previous_end_tangent is not None
-            and (previous_was_curve or is_curve)
-            and not _same_native_curve(previous_piece, piece)
-            and _p._heading_difference(previous_end_tangent, start_tangent)
-            > MAXIMUM_VISUAL_SEAM_TANGENT_ERROR_DEGREES
-        ):
-            return False
-        previous_piece = piece
-        previous_end_tangent = end_tangent
-        previous_was_curve = is_curve
-    return True
-
-
 def _fit(
     dataset,
     projection,
@@ -257,12 +209,10 @@ def _fit(
 
 
 def install_stock_road_visual_finish_policy() -> None:
-    global _ORIGINAL_FIT, _ORIGINAL_CHAIN_IS_SEAM_SAFE, _INSTALLED
+    global _ORIGINAL_FIT, _INSTALLED
     if _INSTALLED:
         return
     _ORIGINAL_FIT = _p.fit_road_objects
-    _ORIGINAL_CHAIN_IS_SEAM_SAFE = _geometry._chain_is_seam_safe
-    _geometry._chain_is_seam_safe = _chain_is_visually_seam_safe
     _p.fit_road_objects = _fit
     _generator.fit_road_objects = _fit
     _INSTALLED = True
