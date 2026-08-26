@@ -8,9 +8,9 @@ gentle grades this is only centimetres, but that is enough for terrain to show
 through the seam.
 
 This policy makes the road fitter solve each connector chord in 3D using the
-already-graded terrain. It also upgrades native stock curves from a planar
-connector transform to the exact yaw/pitch/origin that maps their measured
-Memory-LOD connectors onto the fitted 3D endpoints.
+already-graded terrain. Native stock curves then receive the exact yaw, pitch,
+and origin that map their measured Memory-LOD connectors onto those fitted 3D
+endpoints, rather than a planar transform followed by an unrelated pitch.
 """
 from __future__ import annotations
 
@@ -56,11 +56,6 @@ class _TerrainMeasure:
             return None
         start_x, start_z, _ = self._measure.point(start_distance)
         start_height = self._height(start_x, start_z)
-
-        # Estimate the local grade before asking the base measure for a full flat
-        # connector chord. Near a trimmed road end, the flatter full-length query
-        # may not fit inside ``maximum_distance`` even though the correctly
-        # shortened horizontal projection does.
         probe_distance = min(
             maximum_distance,
             start_distance + max(0.05, float(chord_length)),
@@ -82,9 +77,6 @@ class _TerrainMeasure:
                 start_distance, horizontal, maximum_distance
             )
             if endpoint is None:
-                # Back off a little when a curve or trimmed end cannot contain
-                # the current horizontal request. The next iteration then uses
-                # the actual sampled grade at that shorter chord.
                 horizontal *= 0.97
                 if horizontal <= 0.02:
                     return None
