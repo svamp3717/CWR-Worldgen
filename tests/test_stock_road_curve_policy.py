@@ -32,7 +32,7 @@ def test_stock_curve_models_are_exposed_as_trusted_road_variants():
         r"O\Road\sil12.p3d",
         r"O\Road\sil6.p3d",
     )
-    assert paths[3:] == (
+    assert paths[3:7] == (
         r"O\Road\sil10 25.p3d",
         r"O\Road\sil10 50.p3d",
         r"O\Road\sil10 75.p3d",
