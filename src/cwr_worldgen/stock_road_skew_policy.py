@@ -45,9 +45,6 @@ def _family_with_generated_gravel(model_path: str) -> str | None:
     if family is not None:
         return family
     if _is_generated_gravel_model(model_path):
-        # Resistance has no generated-gravel T family. Reuse ces only as the
-        # connector-geometry surrogate; the visible apron is replaced with the
-        # paved main-family T model by gravel_asphalt_transition_policy.
         return "ces"
     return None
 
