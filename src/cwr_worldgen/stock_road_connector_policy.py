@@ -156,7 +156,10 @@ def _collect_relaxations(dataset, projection, projected, spec):
             positions.setdefault(start_key, start)
             positions.setdefault(end_key, end)
 
-    connector_half = float(spec.road_segment_length) * 6.0 / 25.0 * 0.5
+    # Native stock T/X meshes mate with real six-metre stock road connectors.
+    # WRP transforms do not scale P3Ds, so this is exactly 3.0 m rather than
+    # half of the old 5.88 m effective spacing.
+    connector_half = _junction._connector_half_extent(spec)
     result = {}
     for key, values in raw.items():
         unique = _p._unique_incidents(values)
