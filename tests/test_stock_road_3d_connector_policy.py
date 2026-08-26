@@ -10,6 +10,7 @@ from cwr_worldgen.gravel_asphalt_transition_policy import (
     _quality_window,
     _relaxation_eligible,
 )
+from cwr_worldgen.model import WorldObject
 from cwr_worldgen.road_quality_policy import _Context, _Junction
 from cwr_worldgen.stock_road_3d_connector_policy import (
     _TerrainMeasure,
@@ -64,6 +65,27 @@ def test_sloped_straight_uses_three_dimensional_connector_length():
         25.0,
         rel_tol=0.0,
         abs_tol=2.0e-4,
+    )
+
+
+def test_pitched_stock_straight_axis_uses_horizontal_connector_projection():
+    obj = WorldObject(
+        1,
+        r"o\road\sil25.p3d",
+        100.0,
+        5.0,
+        200.0,
+        0.0,
+        10.0,
+    )
+
+    start, end = _p._model_axis(obj, 25.0)
+
+    assert math.isclose(
+        math.dist(start, end),
+        25.0 * math.cos(math.radians(10.0)),
+        rel_tol=0.0,
+        abs_tol=1.0e-9,
     )
 
 
