@@ -21,6 +21,8 @@ from . import playability as _p
 from . import road_quality_policy as _quality
 from . import stock_road_junction_policy as _junction
 from . import stock_road_measured_junction_policy as _measured
+from . import stock_road_skew_policy as _skew
+from . import stock_road_model_geometry as _model_geometry
 from .stock_road_model_geometry import STOCK_JUNCTION_CONNECTOR_RADIUS_METRES
 
 MAXIMUM_LAYERED_MAIN_HEADING_ERROR_DEGREES = 30.0
@@ -28,6 +30,7 @@ _GRAVEL_END_TOLERANCE_METRES = 0.25
 
 _ORIGINAL_NATIVE_T = None
 _ORIGINAL_QUALITY_WINDOW = None
+_ORIGINAL_RELAXATION_ELIGIBILITY = None
 _INSTALLED = False
 
 
@@ -83,6 +86,19 @@ def _native_t_junction(incidents):
         maximum_error,
         family,
     )
+
+
+def _relaxation_eligible(incidents) -> bool:
+    """Keep connector snapping for real T meshes, never for a straight overlay."""
+
+    if _ORIGINAL_RELAXATION_ELIGIBILITY is None:
+        raise RuntimeError("gravel/paved transition policy is not installed")
+    if not _ORIGINAL_RELAXATION_ELIGIBILITY(incidents):
+        return False
+    native = _native_t_junction(incidents)
+    if native is None:
+        return True
+    return _model_geometry.stock_straight_match(native.model_path) is None
 
 
 def _is_layered_stock_junction(junction) -> bool:
@@ -150,12 +166,15 @@ def _quality_window(
 
 
 def install_gravel_asphalt_transition_policy() -> None:
-    global _ORIGINAL_NATIVE_T, _ORIGINAL_QUALITY_WINDOW, _INSTALLED
+    global _ORIGINAL_NATIVE_T, _ORIGINAL_QUALITY_WINDOW
+    global _ORIGINAL_RELAXATION_ELIGIBILITY, _INSTALLED
     if _INSTALLED:
         return
     _ORIGINAL_NATIVE_T = _measured._native_t_junction
     _ORIGINAL_QUALITY_WINDOW = _quality._quality_window
+    _ORIGINAL_RELAXATION_ELIGIBILITY = _skew._eligible_relaxed_mixed_t
     _measured._native_t_junction = _native_t_junction
     _junction._native_t_junction = _native_t_junction
     _quality._quality_window = _quality_window
+    _skew._eligible_relaxed_mixed_t = _relaxation_eligible
     _INSTALLED = True
