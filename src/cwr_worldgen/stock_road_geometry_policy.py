@@ -1,19 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Authoritative physical geometry for OFP/CWA stock road pieces.
 
-Stock P3Ds are not scaled when they are placed in a WRP. A ``sil25`` mesh is a
-25 metre piece even when ``road_segment_length`` is configured as 24.5. Treating
-24.5 as the physical connector spacing deliberately overlapped every stock road
-mesh; on bends those overlaps become visible transverse bands and shoulder
-wedges. Stock straights and native curves therefore use their real model-space
-connector geometry here.
-
-Ordinary OSM bends are also rounded with constant-radius circular fillets. The
-previous quadratic fillet has continuously changing curvature, so a fixed-radius
-native 10-degree road P3D almost never matches it and the fitter falls back to
-rotated ``sil6``/``ces6`` rectangles. Circular fillets preferentially use one of
-the native 25/50/75/100 metre radii while keeping the centreline change tightly
-inside the existing road corridor.
+Stock P3Ds are not scaled when they are placed in a WRP. Their fitted connector
+spacing therefore has to come from the actual model geometry, not from the
+configurable long-piece spacing used by custom roads. Ordinary bends are rounded
+with bounded constant-radius fillets so the native ten-degree curves can be used
+without pulling the road far away from the source centerline.
 """
 from __future__ import annotations
 
@@ -24,8 +16,9 @@ import re
 from . import playability as _p
 from . import road_quality_policy as _quality
 from . import stock_road_curve_policy as _curve
+from . import stock_road_model_geometry as _model_geometry
 
-STOCK_CURVE_ANGLE_DEGREES = 10.0
+STOCK_CURVE_ANGLE_DEGREES = _model_geometry.STOCK_CURVE_ANGLE_DEGREES
 _MAXIMUM_TANGENT_TURN_ERROR_DEGREES = 3.0
 _MAXIMUM_STOCK_FILLET_DEVIATION_METRES = 0.45
 _MAXIMUM_MICRO_BEND_DEVIATION_METRES = 0.35
@@ -45,12 +38,10 @@ _INSTALLED = False
 
 
 def stock_curve_geometry(radius_nominal: int, scale: float = 1.0) -> tuple[float, float, float]:
-    """Return the real connector chord, turn angle and sagitta of a stock curve.
+    """Return the measured connector chord, turn angle and sagitta of a stock curve.
 
-    ``scale`` is retained for compatibility with callers that historically
-    passed ``road_segment_length / 25``. It is deliberately *not* applied: WRP
-    placement rotates/translates a P3D but does not scale it. A ``sil10 50``
-    model is therefore always a ten-degree curve at a 50 metre radius.
+    ``scale`` is retained for compatibility with older callers but deliberately
+    ignored. WRP transforms do not scale P3Ds.
     """
 
     if radius_nominal <= 0:
@@ -72,13 +63,19 @@ def _exact_stock_variants(model_path: str, configured_long_length: float):
     pieces = _ORIGINAL_VARIANTS(model_path, configured_long_length)
     if _is_stock_straight(model_path) is None:
         return pieces
-    return tuple(replace(piece, length_metres=float(piece.nominal_length)) for piece in pieces)
+    return tuple(
+        replace(
+            piece,
+            length_metres=_model_geometry.STOCK_STRAIGHT_LENGTHS_METRES[piece.nominal_length],
+        )
+        for piece in pieces
+    )
 
 
 def _exact_piece_length(model_path: str, configured_long_length: float) -> float:
-    straight = _is_stock_straight(model_path)
-    if straight is not None:
-        return float(straight.group("length"))
+    straight_length = _model_geometry.stock_straight_length(model_path)
+    if straight_length is not None:
+        return straight_length
     curve = _curve._curve_match(str(model_path))
     if curve is not None:
         chord, _turn, _sagitta = stock_curve_geometry(int(curve.group("radius")))
@@ -158,7 +155,7 @@ def _point_segment_distance(point, start, end) -> float:
 
 
 def _simplify_micro_bends(points):
-    """Remove tiny OSM heading noise instead of serialising rotated road slabs."""
+    """Remove tiny source heading noise instead of serialising rotated road slabs."""
 
     result = list(_p._clean_road_points(points))
     changed = True
@@ -189,9 +186,6 @@ def _corner_fillet_radius(turn_radians: float, available_tangent: float) -> floa
         return None
     for radius in _STOCK_RADII_METRES:
         tangent = radius * tangent_factor
-        # Distance from the original hard corner to the circular arc along the
-        # angle bisector. Bound it tightly so the relaxed road stays in the
-        # already-cleared road corridor rather than wandering toward objects.
         deviation = radius * (1.0 / math.cos(turn_radians * 0.5) - 1.0)
         if (
             tangent <= available_tangent + 1.0e-9
@@ -243,8 +237,6 @@ def _circular_road_run(
         )
         radius = _corner_fillet_radius(turn, available)
         if radius is None:
-            # Keep the mature quadratic fallback for corners that cannot fit a
-            # native-radius arc inside the conservative displacement envelope.
             fallback = _ORIGINAL_ROUNDED_ROAD_RUN(
                 (previous, corner, following),
                 minimum_turn_degrees=minimum_turn_degrees,
@@ -274,9 +266,6 @@ def _circular_road_run(
 
         if math.dist(rounded[-1], entry) > 0.05:
             rounded.append(entry)
-        # Fine samples make nearest-segment headings approximate true tangents,
-        # while the constant radius lets the fitter recognise 10-degree native
-        # curve chords instead of seeing a variable-curvature quadratic.
         sections = max(samples_per_corner, int(math.ceil(turn_degrees / 2.5)))
         for sample in range(1, sections):
             fraction = sample / sections
