@@ -28,12 +28,6 @@ _install_stock_utility_policy()
 from .road_quality_policy import install_road_quality_policy as _install_road_quality_policy
 
 _install_road_quality_policy()
-from .stock_road_curve_policy import install_stock_road_curve_policy as _install_stock_road_curve_policy
-
-_install_stock_road_curve_policy()
-from .stock_road_geometry_policy import install_stock_road_geometry_policy as _install_stock_road_geometry_policy
-
-_install_stock_road_geometry_policy()
 from .gravel_junction_policy import install_gravel_junction_policy as _install_gravel_junction_policy
 
 _install_gravel_junction_policy()
@@ -43,20 +37,6 @@ _install_gravel_gap_policy()
 from .gravel_family_policy import install_gravel_family_policy as _install_gravel_family_policy
 
 _install_gravel_family_policy()
-from .stock_road_junction_policy import install_stock_road_junction_policy as _install_stock_road_junction_policy
-
-_install_stock_road_junction_policy()
-from .stock_road_skew_policy import install_stock_road_skew_policy as _install_stock_road_skew_policy
-
-_install_stock_road_skew_policy()
-from .stock_road_connector_policy import install_stock_road_connector_policy as _install_stock_road_connector_policy
-
-_install_stock_road_connector_policy()
-from .stock_road_junction_recovery_policy import (
-    install_stock_road_junction_recovery_policy as _install_stock_road_junction_recovery_policy,
-)
-
-_install_stock_road_junction_recovery_policy()
 from .raceway_policy import install_raceway_policy as _install_raceway_policy
 
 _install_raceway_policy()
