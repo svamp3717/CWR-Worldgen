@@ -88,7 +88,7 @@ def test_exact_native_connector_does_not_add_redundant_underlay():
     assert _connector_cover_plans(_report(cap, branch, caps=1)) == ()
 
 
-def test_plain_paved_cap_connector_gap_is_covered_without_dirt_model():
+def test_plain_paved_cap_uses_underlying_approach_without_extra_repair():
     cap = WorldObject(
         1,
         r"o\road\sil6.p3d",
@@ -108,11 +108,10 @@ def test_plain_paved_cap_connector_gap_is_covered_without_dirt_model():
         0.0,
     )
 
-    plans = _connector_cover_plans(_report(cap, branch, caps=1))
-
-    assert len(plans) == 1
-    assert plans[0].model_path.casefold() == r"o\road\sil6.p3d"
-    assert math.isclose(plans[0].centre[1], 3.5625, abs_tol=1.0e-6)
+    # Straight fallback/mixed caps are surface overlays, not measured connector
+    # meshes. Their approach roads are deliberately fitted underneath to the
+    # node, so another six-metre repair slab would only add overlap/clipping.
+    assert _connector_cover_plans(_report(cap, branch, caps=1)) == ()
 
 
 def test_connector_underlay_is_appended_after_existing_road_objects():
