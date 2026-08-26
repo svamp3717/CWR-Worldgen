@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Preserve sustained source curvature while removing stock-road line noise.
 
-CWA stock road curves are rigid ten-degree P3Ds.  A correctly sampled shallow
+CWA stock road curves are rigid ten-degree P3Ds. A correctly sampled shallow
 arc can lie only a few decimetres from its endpoint chord, which makes a generic
-Douglas-Peucker-style tolerance liable to misclassify the arc as source noise.
-Once that happens the curve selector never sees the curvature and has no choice
-but to facet the run with short straight slabs.
+sub-metre simplifier liable to misclassify the arc as source noise. Once that
+happens the curve selector never sees the curvature and has no choice but to
+facet the run with short straight slabs.
 
-Keep a candidate sub-path when it has a meaningful change between its entry and
-exit tangents, bends consistently to one side of its chord, and has visible
-curvature rather than a millimetric wobble.  The existing simplifiers remain in
-charge of ordinary nearly-straight noise and obstacle safety.
+Keep samples that participate in repeated same-direction turning. A one-off
+three-point dog-leg is still ordinary simplification material; a sequence of
+same-sign turns is a real curve signal and remains dense enough for native CWA
+curve selection. Existing obstacle checks remain authoritative.
 """
 from __future__ import annotations
 
@@ -48,15 +48,14 @@ def _signed_chord_offset(point, start, end) -> float:
     length = math.hypot(dx, dz)
     if length <= 1.0e-9:
         return 0.0
-    # Signed perpendicular distance to the infinite chord. Interior source
-    # samples of an ordinary circular bend should all have the same sign.
     return (dx * (point[1] - start[1]) - dz * (point[0] - start[0])) / length
 
 
 def _candidate_is_sustained_curve(points, first: int, last: int) -> bool:
-    """Return whether a shortcut would erase coherent one-direction curvature."""
+    """Return whether a shortcut would erase coherent repeated curvature."""
 
-    if last <= first + 1:
+    if last <= first + 2:
+        # One interior vertex is a dog-leg/corner, not a sustained curve run.
         return False
     start, end = points[first], points[last]
     if math.dist(start, end) <= 0.10:
@@ -79,16 +78,12 @@ def _candidate_is_sustained_curve(points, first: int, last: int) -> bool:
         elif offset < -CURVE_SIDE_EPSILON_METRES:
             negative = True
         if positive and negative:
-            # An S-shaped wobble is exactly the sort of geometry the ordinary
-            # simplifier should still be free to remove.
             return False
     if maximum_offset < MINIMUM_CURVE_SIGNAL_DEVIATION_METRES:
         return False
 
-    # Reject a candidate dominated by alternating local turns even if numerical
-    # chord offsets happen to remain on one side. A real sustained bend should
-    # not repeatedly reverse steering direction.
     turn_sign = 0
+    significant_turns = 0
     for index in range(first + 1, last):
         turn = _signed_turn(points[index - 1], points[index], points[index + 1])
         if abs(turn) < MINIMUM_LOCAL_SUSTAINED_TURN_DEGREES:
@@ -97,27 +92,12 @@ def _candidate_is_sustained_curve(points, first: int, last: int) -> bool:
         if turn_sign and sign != turn_sign:
             return False
         turn_sign = sign
-    return turn_sign != 0
-
-
-def _candidate_is_relaxable(points, first: int, last: int, obstacles) -> bool:
-    if _ORIGINAL_RELAXABLE is None:
-        raise RuntimeError("stock road curve preservation policy is not installed")
-    if _candidate_is_sustained_curve(points, first, last):
-        return False
-    return _ORIGINAL_RELAXABLE(points, first, last, obstacles)
-
-
-def _shortcut_is_safe(points, first, last, protected, obstacles) -> bool:
-    if _ORIGINAL_PATH_SHORTCUT_SAFE is None:
-        raise RuntimeError("stock road curve preservation policy is not installed")
-    if _candidate_is_sustained_curve(points, first, last):
-        return False
-    return _ORIGINAL_PATH_SHORTCUT_SAFE(points, first, last, protected, obstacles)
+        significant_turns += 1
+    return significant_turns >= 2
 
 
 def _curve_anchor_points(points) -> set[tuple[float, float]]:
-    """Protect samples participating in two consecutive same-direction turns."""
+    """Protect samples participating in consecutive same-direction turns."""
 
     cleaned = tuple(_p._clean_road_points(points))
     if len(cleaned) < 4:
@@ -132,11 +112,11 @@ def _curve_anchor_points(points) -> set[tuple[float, float]]:
         if abs(current) < MINIMUM_LOCAL_SUSTAINED_TURN_DEGREES:
             continue
         sign = 1 if current > 0.0 else -1
-        neighbours = ()
+        neighbours = []
         if index > 1:
-            neighbours += (turns[index - 1],)
+            neighbours.append(turns[index - 1])
         if index + 1 < len(cleaned) - 1:
-            neighbours += (turns[index + 1],)
+            neighbours.append(turns[index + 1])
         if any(
             abs(value) >= MINIMUM_LOCAL_SUSTAINED_TURN_DEGREES
             and (1 if value > 0.0 else -1) == sign
@@ -144,6 +124,35 @@ def _curve_anchor_points(points) -> set[tuple[float, float]]:
         ):
             protected.add(cleaned[index])
     return protected
+
+
+def _candidate_contains_curve_anchor(points, first: int, last: int) -> bool:
+    if last <= first + 1:
+        return False
+    anchors = _curve_anchor_points(points)
+    return any(points[index] in anchors for index in range(first + 1, last))
+
+
+def _candidate_is_relaxable(points, first: int, last: int, obstacles) -> bool:
+    if _ORIGINAL_RELAXABLE is None:
+        raise RuntimeError("stock road curve preservation policy is not installed")
+    if (
+        _candidate_is_sustained_curve(points, first, last)
+        or _candidate_contains_curve_anchor(points, first, last)
+    ):
+        return False
+    return _ORIGINAL_RELAXABLE(points, first, last, obstacles)
+
+
+def _shortcut_is_safe(points, first, last, protected, obstacles) -> bool:
+    if _ORIGINAL_PATH_SHORTCUT_SAFE is None:
+        raise RuntimeError("stock road curve preservation policy is not installed")
+    if (
+        _candidate_is_sustained_curve(points, first, last)
+        or _candidate_contains_curve_anchor(points, first, last)
+    ):
+        return False
+    return _ORIGINAL_PATH_SHORTCUT_SAFE(points, first, last, protected, obstacles)
 
 
 def _simplify_micro_bends(points):
