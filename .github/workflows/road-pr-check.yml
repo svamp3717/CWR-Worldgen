@@ -26,3 +26,5 @@ jobs:
           tests/test_stock_road_junction_policy.py
           tests/test_stock_road_skew_policy.py
           tests/test_stock_road_connector_policy.py
+
+# Temporary branch-only workflow; remove after the focused check runs.
