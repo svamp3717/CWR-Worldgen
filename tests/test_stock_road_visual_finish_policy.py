@@ -62,6 +62,7 @@ def _object(object_id, model_path, x, z, heading):
         object_id=object_id,
         model_path=model_path,
         x=float(x),
+        y=0.0,
         z=float(z),
         heading_degrees=float(heading),
         pitch_degrees=0.0,
