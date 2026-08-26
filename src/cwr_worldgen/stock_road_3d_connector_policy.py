@@ -263,22 +263,36 @@ def _road_object_on_slope(*args, **kwargs):
 def _model_axis(obj, length: float):
     if _ORIGINAL_MODEL_AXIS is None:
         raise RuntimeError("3D stock-road connector policy is not installed")
-    geometry = _model_geometry.stock_curve_connectors(obj.model_path)
-    if geometry is None:
-        return _ORIGINAL_MODEL_AXIS(obj, length)
 
-    origin = (float(obj.x), float(obj.y), float(obj.z))
-    begin = _curve_world_point(
-        geometry.begin, origin, obj.heading_degrees, obj.pitch_degrees
-    )
-    end = _curve_world_point(
-        geometry.end, origin, obj.heading_degrees, obj.pitch_degrees
-    )
-    begin_xz = (begin[0], begin[2])
-    end_xz = (end[0], end[2])
-    if _curve._curve_object_key(obj) in _transform._REVERSED_FINAL_KEYS:
-        return end_xz, begin_xz
-    return begin_xz, end_xz
+    geometry = _model_geometry.stock_curve_connectors(obj.model_path)
+    if geometry is not None:
+        origin = (float(obj.x), float(obj.y), float(obj.z))
+        begin = _curve_world_point(
+            geometry.begin, origin, obj.heading_degrees, obj.pitch_degrees
+        )
+        end = _curve_world_point(
+            geometry.end, origin, obj.heading_degrees, obj.pitch_degrees
+        )
+        begin_xz = (begin[0], begin[2])
+        end_xz = (end[0], end[2])
+        if _curve._curve_object_key(obj) in _transform._REVERSED_FINAL_KEYS:
+            return end_xz, begin_xz
+        return begin_xz, end_xz
+
+    stock_length = _model_geometry.stock_straight_length(obj.model_path)
+    if stock_length is not None:
+        # A pitched rigid straight still has ``stock_length`` in model space,
+        # but only L*cos(pitch) of that connector axis exists in world X/Z.
+        # Audits and seam coverage must use the physical horizontal projection,
+        # otherwise they report an overlap equal to the missing cosine term.
+        horizontal = stock_length * abs(math.cos(math.radians(float(obj.pitch_degrees))))
+        return _ORIGINAL_MODEL_AXIS(obj, horizontal)
+
+    if _p.is_generated_gravel_road_model(str(obj.model_path)):
+        horizontal = float(length) * abs(math.cos(math.radians(float(obj.pitch_degrees))))
+        return _ORIGINAL_MODEL_AXIS(obj, horizontal)
+
+    return _ORIGINAL_MODEL_AXIS(obj, length)
 
 
 def install_stock_road_3d_connector_policy() -> None:
