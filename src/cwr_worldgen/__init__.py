@@ -52,6 +52,11 @@ _install_stock_road_skew_policy()
 from .stock_road_connector_policy import install_stock_road_connector_policy as _install_stock_road_connector_policy
 
 _install_stock_road_connector_policy()
+from .stock_road_junction_recovery_policy import (
+    install_stock_road_junction_recovery_policy as _install_stock_road_junction_recovery_policy,
+)
+
+_install_stock_road_junction_recovery_policy()
 from .raceway_policy import install_raceway_policy as _install_raceway_policy
 
 _install_raceway_policy()
