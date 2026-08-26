@@ -87,6 +87,14 @@ from .stock_road_relaxation_policy import (
 )
 
 _install_stock_road_relaxation_policy()
+# Extend the same relaxation obstacle index to mapped fences, walls, hedges,
+# retaining walls and tree rows before any later local/junction fitting policy
+# plans geometry changes.
+from .stock_road_obstacle_policy import (
+    install_stock_road_obstacle_policy as _install_stock_road_obstacle_policy,
+)
+
+_install_stock_road_obstacle_policy()
 # Use the same obstacle-aware freedom at shallow bends and skewed paved T nodes,
 # and keep fallback junction approaches underneath their cap instead of adding
 # lateral six-metre repair slabs across the carriageway.
