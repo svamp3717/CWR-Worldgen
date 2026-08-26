@@ -4,6 +4,8 @@ from __future__ import annotations
 import math
 
 from cwr_worldgen import stock_road_junction_policy as _junction
+from cwr_worldgen.stock_road_model_geometry import STOCK_JUNCTION_CONNECTOR_RADIUS_METRES
+from cwr_worldgen.stock_road_measured_junction_policy import MAXIMUM_RELAXED_APPROACH_METRES
 from cwr_worldgen.stock_road_skew_policy import (
     MAXIMUM_RELAXED_JUNCTION_HEADING_ERROR_DEGREES,
     _family_with_generated_gravel,
@@ -21,9 +23,7 @@ def test_generated_gravel_is_a_dirt_connector_for_mixed_native_t():
     assert _family_with_generated_gravel(r"O\Road\sil25.p3d") == "sil"
 
 
-def test_skewed_mixed_t_uses_native_paved_gravel_junction():
-    # Deliberately synthetic headings exercise a large but bounded skew without
-    # encoding geometry from any user-supplied world.
+def test_skewed_mixed_t_uses_native_paved_gravel_junction_with_bounded_relaxation():
     incidents = (
         _junction._Incident(_direction(280.0), "sil", r"O\Road\sil25.p3d"),
         _junction._Incident(_direction(135.0), "sil", r"O\Road\sil25.p3d"),
@@ -38,14 +38,16 @@ def test_skewed_mixed_t_uses_native_paved_gravel_junction():
     assert 17.0 < native.maximum_heading_error_degrees < 18.0
     assert native.maximum_heading_error_degrees <= MAXIMUM_RELAXED_JUNCTION_HEADING_ERROR_DEGREES
 
-    lateral = 3.0 * math.sin(math.radians(native.maximum_heading_error_degrees))
-    assert lateral < 1.0
+    lateral = STOCK_JUNCTION_CONNECTOR_RADIUS_METRES * math.sin(
+        math.radians(native.maximum_heading_error_degrees)
+    )
+    assert lateral < MAXIMUM_RELAXED_APPROACH_METRES
 
 
 def test_more_extreme_skew_still_keeps_safe_fallback():
     incidents = (
         _junction._Incident(_direction(0.0), "sil", r"O\Road\sil25.p3d"),
-        _junction._Incident(_direction(145.0), "sil", r"O\Road\sil25.p3d"),
+        _junction._Incident(_direction(140.0), "sil", r"O\Road\sil25.p3d"),
         _junction._Incident(_direction(70.0), "ces", r"wg_test\i\gravel3.p3d"),
     )
 
