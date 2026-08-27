@@ -33,11 +33,12 @@ def _fit(chain, measure, pieces):
     )
 
 
+def _is_curve(piece) -> bool:
+    return _model_geometry.stock_curve_match(str(piece.model_path)) is not None
+
+
 def _curve_count(fitted) -> int:
-    return sum(
-        _model_geometry.stock_curve_match(str(piece.model_path)) is not None
-        for piece, _start, _end in fitted
-    )
+    return sum(_is_curve(piece) for piece, _start, _end in fitted)
 
 
 def test_lundby_sharp_asphalt_turn_uses_native_curves_instead_of_sil6_facets():
@@ -53,6 +54,37 @@ def test_lundby_sharp_asphalt_turn_uses_native_curves_instead_of_sil6_facets():
     assert _curve_count(fitted) > _curve_count(baseline)
     for previous, current in zip(fitted, fitted[1:]):
         assert math.dist(previous[2], current[1]) <= 1.0e-4
+
+
+def test_reported_lundby_seams_are_not_straight_to_straight_miters():
+    """The two in-game bug coordinates must no longer land on a faceted miter."""
+
+    points = _lundby_sharp_turn_points()
+    measure = _p._PolylineMeasure.create(_p._rounded_road_run(points))
+    pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
+    fitted = _fit(_p._stock_piece_chain, measure, pieces)
+    seams = tuple(zip(fitted, fitted[1:]))
+
+    for reported in ((3211.0, 3176.0), (3143.0, 3187.0)):
+        previous, current = min(
+            seams,
+            key=lambda pair: math.dist(pair[0][2], reported),
+        )
+        assert math.dist(previous[2], current[1]) <= 1.0e-4
+        previous_heading = _sharp._heading(previous[1], previous[2])
+        current_heading = _sharp._heading(current[1], current[2])
+        heading_change = _p._heading_difference(previous_heading, current_heading)
+        assert (
+            _is_curve(previous[0])
+            or _is_curve(current[0])
+            or heading_change <= 1.0
+        ), (
+            reported,
+            previous[0].model_path,
+            current[0].model_path,
+            heading_change,
+            previous[2],
+        )
 
 
 def test_lundby_locked_path_stays_inside_narrow_source_corridor():
