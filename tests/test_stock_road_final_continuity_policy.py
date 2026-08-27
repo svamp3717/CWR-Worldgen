@@ -65,7 +65,7 @@ def test_roadlab_curve_chain_prefers_100m_native_radius():
     measure = _p._PolylineMeasure.create(points)
     pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
 
-    fitted = _final._coherent_curve_chain(
+    fitted = _p._stock_piece_chain(
         measure,
         pieces,
         start_distance=0.0,
