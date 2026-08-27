@@ -3,15 +3,15 @@
 
 A difficult real-world bend can be too irregular for the single-radius curve
 regularizer while still being perfectly representable by a short sequence of
-stock straights and ten-degree curves.  Falling all the way back to rotated
+stock straights and ten-degree curves. Falling all the way back to rotated
 ``sil6``/``sil12`` rectangles makes every heading change a visible mitre: the
 road surface clips and the painted borders no longer meet.
 
-This policy is intentionally narrow.  It only considers stock paved families
+This policy is intentionally narrow. It only considers stock paved families
 (sil/asf/kos), only sustained same-direction bends, and only spans where the
-existing fitter has not already placed a useful native-curve sequence.  A small
-beam search propagates the *actual connector pose* from piece to piece, so every
-accepted internal seam has one common position and tangent.  Candidates must
+existing fitter has not already placed a useful native-curve sequence. A small
+beam search propagates the actual connector pose from piece to piece, so every
+accepted internal seam has one common position and tangent. Candidates must
 stay within a sub-metre corridor around the already-conditioned centreline.
 Dirt, gravel, junction selection and terrain are untouched.
 """
@@ -115,7 +115,8 @@ def _sharp_turn_spans(points):
             start = max(0, first_significant - 1)
             end = last_significant
             length = sum(
-                math.dist(a, b) for a, b in zip(cleaned[start:end], cleaned[start + 1 : end + 1])
+                math.dist(a, b)
+                for a, b in zip(cleaned[start:end], cleaned[start + 1 : end + 1])
             )
             if length <= _MAXIMUM_SPAN_METRES:
                 spans.append((start, end, sign))
@@ -246,7 +247,6 @@ def _nearest_forward(measure, point, minimum_distance: float, maximum_distance: 
 
 
 def _advance(state: _State, action: _Action):
-    start = (state.x, state.z)
     if action.turn_sign == 0:
         length = float(action.piece.length_metres)
         angle = math.radians(state.heading_degrees)
@@ -425,23 +425,58 @@ def _beam_stock_path(source_points, turn_sign: int, entry_heading: float, exit_h
     return tuple(result)
 
 
-def _curve_midpoint_distances(fitted, measure) -> tuple[float, ...]:
-    result = []
+def _piece_midpoint_distance(measure, start, end) -> float | None:
+    midpoint = ((start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5)
+    nearest = _nearest_forward(measure, midpoint, 0.0, measure.total)
+    return nearest[1] if nearest is not None else None
+
+
+def _has_coherent_native_curve_run(
+    fitted,
+    measure,
+    span_start: float,
+    span_end: float,
+    *,
+    minimum_count: int = 2,
+) -> bool:
+    """True only for adjacent same-radius native curves inside one bend span.
+
+    Isolated curve pieces separated by short straights are exactly the visual
+    failure this policy exists to repair. Counting all native curves in a span
+    therefore gives the wrong answer. A bend is already satisfactory only when
+    the baseline contains a connector-neighbouring run of the same stock curve
+    radius, with no straight facet between those curve pieces.
+    """
+
+    run_key = None
+    run_count = 0
     for piece, start, end in fitted:
-        if _model_geometry.stock_curve_match(str(piece.model_path)) is None:
+        distance = _piece_midpoint_distance(measure, start, end)
+        match = _model_geometry.stock_curve_match(str(piece.model_path))
+        if (
+            distance is None
+            or distance < span_start - 0.5
+            or distance > span_end + 0.5
+            or match is None
+        ):
+            run_key = None
+            run_count = 0
             continue
-        midpoint = ((start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5)
-        nearest = _nearest_forward(measure, midpoint, 0.0, measure.total)
-        if nearest is not None:
-            result.append(nearest[1])
-    return tuple(result)
+        key = (match.group("family").casefold(), int(match.group("radius")))
+        if key == run_key:
+            run_count += 1
+        else:
+            run_key = key
+            run_count = 1
+        if run_count >= minimum_count:
+            return True
+    return False
 
 
 def _locked_measure(measure, pieces, baseline):
     spans = _sharp_turn_spans(measure.points)
     if not spans:
         return None
-    curve_distances = _curve_midpoint_distances(baseline, measure)
     replacements = []
     occupied_until = -1
     for start_index, end_index, turn_sign in spans:
@@ -449,8 +484,7 @@ def _locked_measure(measure, pieces, baseline):
             continue
         span_start = float(measure.cumulative[start_index])
         span_end = float(measure.cumulative[end_index])
-        native_count = sum(span_start - 0.5 <= value <= span_end + 0.5 for value in curve_distances)
-        if native_count >= 2:
+        if _has_coherent_native_curve_run(baseline, measure, span_start, span_end):
             continue
 
         entry_heading = (
