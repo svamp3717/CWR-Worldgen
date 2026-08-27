@@ -101,9 +101,9 @@ def test_roadlab_curve_chain_prefers_100m_native_radius():
 
 
 def test_roadlab_curve_chain_stays_coherent_after_production_rounding():
-    # This is the regression the generated WRP exposed.  The old per-corner
+    # This is the regression the generated WRP exposed. The old per-corner
     # fillet changed the quantized 100 m arc into 75/50/straight/75 pieces even
-    # though the selector handled the unrounded source correctly.  Production
+    # though the selector handled the unrounded source correctly. Production
     # rounding now snaps the full forty-degree bend to four native sections.
     measure, pieces = _roadlab_curve_fixture(rounded=True)
     _assert_coherent_100m_curve(_fit_fixture(measure, pieces), minimum_count=4)
@@ -165,30 +165,39 @@ def test_roadlab_curve_chain_stays_coherent_with_flat_terrain_context():
     _assert_coherent_100m_curve(fitted, minimum_count=4)
 
 
-def test_45_degree_sil_t_uses_measured_minus_x_branch_side():
+def test_45_degree_sil_t_keeps_legacy_fallback_instead_of_rigid_t():
     incidents = (
         _incident(90.0),
         _incident(270.0),
         _incident(45.0),
     )
 
+    # A 45-degree arm can put the rigid T's connector centre inside the broad
+    # SIL strip, but the rendered tongue still points 45 degrees away from the
+    # source road. The late skew policy deliberately rejects that visible slab.
+    assert _final._same_family_paved_skew_t(incidents, "sil") is None
+
+
+def test_near_orthogonal_sil_t_still_uses_measured_minus_x_branch_side():
+    incidents = (
+        _incident(90.0),
+        _incident(270.0),
+        _incident(10.0),
+    )
+
     native = _final._same_family_paved_skew_t(incidents, "sil")
 
     assert native is not None
     assert native.model_path == r"o\road\kr_new_sil_sil_t.p3d"
-    # The Resistance T branch connector is local -X (270 degrees).  Keeping the
-    # east/west through road exact therefore requires a 90-degree model yaw so
-    # the branch tongue points north, on the same side as the northeast source
-    # arm.  The old +X assumption returned 270 degrees and pointed it south.
     assert math.isclose(native.heading_degrees, 90.0, abs_tol=1.0e-9)
     branch_connector_heading = (native.heading_degrees + 270.0) % 360.0
     assert math.isclose(branch_connector_heading, 0.0, abs_tol=1.0e-9)
     assert math.isclose(
-        _junction._angular_distance(branch_connector_heading, 45.0),
-        45.0,
+        _junction._angular_distance(branch_connector_heading, 10.0),
+        10.0,
         abs_tol=1.0e-9,
     )
-    assert math.isclose(native.maximum_heading_error_degrees, 45.0, abs_tol=1.0e-9)
+    assert math.isclose(native.maximum_heading_error_degrees, 10.0, abs_tol=1.0e-9)
 
 
 def test_too_skewed_branch_keeps_legacy_fallback():

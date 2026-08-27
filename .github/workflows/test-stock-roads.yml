@@ -25,6 +25,7 @@ jobs:
       - name: Run focused road tests
         run: |
           python -m pytest -q \
+            tests/test_cwa_rvw4_height_policy.py \
             tests/test_stock_road_curve_policy.py \
             tests/test_stock_road_geometry_policy.py \
             tests/test_stock_road_transform_policy.py \
@@ -40,6 +41,7 @@ jobs:
             tests/test_stock_road_path_conditioning_policy.py \
             tests/test_stock_road_obstacle_policy.py \
             tests/test_stock_road_curve_preservation_policy.py \
+            tests/test_stock_road_visual_finish_policy.py \
             tests/test_stock_road_final_continuity_policy.py
       - name: Build targeted in-game road lab
         run: |
@@ -51,13 +53,10 @@ jobs:
           import os
           import struct
 
+          from cwr_worldgen.cwa_rvw4_height_policy import CWA_RVW4_HEIGHT_SCALE_METRES
           from cwr_worldgen.milestone9 import Milestone9Spec, build_milestone9
           from cwr_worldgen.osm import BboxProjection
           from cwr_worldgen.source_pipeline import SourceFetchSpec, fetch_sources
-          from cwr_worldgen.stock_road_model_geometry import (
-              native_junction_intersection_offset,
-              rotate_local,
-          )
 
           root = Path("ci-ingame")
           source = root / "source"
@@ -71,9 +70,9 @@ jobs:
 
           elevation = source / "elevation" / "raw"
           elevation.mkdir(parents=True, exist_ok=True)
-          # Put the geometry lab on an unmistakably high flat plateau.  Earlier
-          # 24 m builds serialized correctly but two direct-spawn missions still
-          # appeared underwater in CWA, so leave no plausible sea-level ambiguity.
+          # Use one flat, high plateau for every case. Keeping all four visual
+          # labs in the same first-kilometre region also removes world-edge/grid
+          # ambiguity while the generated WRP contract is being verified in CWA.
           values = (lab_elevation_metres,) * 9
           payload = b"".join(value.to_bytes(2, "big", signed=True) for value in values)
           with ZipFile(elevation / "N00E000.hgt.zip", "w") as archive:
@@ -111,25 +110,25 @@ jobs:
           elements = [
               way(100, {"highway": "primary", "surface": "asphalt", "name": "Native Curve Lab"}, curve),
               way(110, {"highway": "primary", "surface": "asphalt", "name": "Skew Main"},
-                  ((1100.0, 700.0), (1300.0, 700.0), (1500.0, 700.0))),
+                  ((700.0, 550.0), (850.0, 550.0), (1000.0, 550.0))),
               way(111, {"highway": "primary", "surface": "asphalt", "name": "Skew Branch"},
-                  ((1300.0, 700.0), (1450.0, 850.0))),
+                  ((850.0, 550.0), (970.0, 670.0))),
               way(120, {"highway": "primary", "surface": "asphalt", "name": "Mixed Main"},
-                  ((1300.0, 1100.0), (1300.0, 1300.0), (1300.0, 1500.0))),
+                  ((850.0, 150.0), (850.0, 300.0), (850.0, 450.0))),
               way(121, {"highway": "track", "surface": "gravel", "name": "Mixed Gravel Branch"},
-                  ((1300.0, 1300.0), (1080.0, 1300.0))),
+                  ((850.0, 300.0), (680.0, 300.0))),
               way(130, {"highway": "primary", "surface": "asphalt", "name": "Wiggle Lab"},
-                  ((450.0, 1600.0), (451.0, 1650.0), (450.0, 1700.0),
-                   (449.0, 1750.0), (450.0, 1800.0))),
+                  ((350.0, 750.0), (351.0, 800.0), (350.0, 850.0),
+                   (349.0, 900.0), (350.0, 950.0))),
               way(140, {"barrier": "hedge"},
                   ((610.0, 470.0), (650.0, 610.0))),
               way(141, {"natural": "tree_row"},
-                  ((1030.0, 1240.0), (1030.0, 1380.0))),
+                  ((620.0, 180.0), (620.0, 360.0))),
               {
                   "type": "node",
                   "id": 900,
-                  "lat": projection.to_latlon((800.0, 1000.0))[0],
-                  "lon": projection.to_latlon((800.0, 1000.0))[1],
+                  "lat": projection.to_latlon((800.0, 800.0))[0],
+                  "lon": projection.to_latlon((800.0, 800.0))[1],
                   "tags": {"place": "village", "name": "Road Lab"},
               },
           ]
@@ -179,8 +178,6 @@ jobs:
           assert result.pbo_path.is_file()
 
           # Audit the serialized WRP, not just the pre-serialization selector.
-          # Previous regressions passed unit tests but the production stack still
-          # emitted mixed curve radii and a T whose tongue missed the diagonal arm.
           wrp_path = root / "build" / "source" / "wg_roadlab" / "wg_roadlab.wrp"
           wrp_bytes = wrp_path.read_bytes()
           header = struct.Struct("<4sii")
@@ -188,12 +185,16 @@ jobs:
           magic, width, height = header.unpack_from(wrp_bytes, 0)
           assert magic == b"4WVR"
           raw_heights = struct.unpack_from(f"<{width * height}h", wrp_bytes, header.size)
-          # Default Milestone 9 RVW4 scale is 0.05 m, so 96 m serializes as 1920.
-          assert min(raw_heights) >= 1900, min(raw_heights)
+          expected_raw = round(lab_elevation_metres / CWA_RVW4_HEIGHT_SCALE_METRES)
+          assert min(raw_heights) == max(raw_heights) == expected_raw, (
+              min(raw_heights), max(raw_heights), expected_raw
+          )
+          assert abs(expected_raw * CWA_RVW4_HEIGHT_SCALE_METRES - lab_elevation_metres) <= 0.03
 
           offset = header.size + width * height * 4 + 512 * 32
           curve_headings = []
           native_skew_t = []
+          skew_fallback_caps = []
           while offset + object_record.size <= len(wrp_bytes):
               values = object_record.unpack_from(wrp_bytes, offset)
               offset += object_record.size
@@ -202,42 +203,25 @@ jobs:
                   break
               model = model.decode("ascii")
               heading = math.degrees(math.atan2(values[6], values[0])) % 360.0
+              x, z = float(values[9]), float(values[11])
               if model == r"o\road\sil10 100.p3d":
                   curve_headings.append(heading)
               elif model == r"o\road\kr_new_sil_sil_t.p3d":
-                  native_skew_t.append((heading, float(values[9]), float(values[11])))
+                  native_skew_t.append((heading, x, z))
+              elif model == r"o\road\sil6.p3d" and math.hypot(x - 850.0, z - 550.0) <= 1.0:
+                  skew_fallback_caps.append((heading, x, z))
               assert model not in {r"o\road\sil10 75.p3d", r"o\road\sil10 50.p3d"}
           assert len(curve_headings) == 4, curve_headings
-          assert len(native_skew_t) == 1, native_skew_t
+          assert native_skew_t == [], native_skew_t
+          assert len(skew_fallback_caps) == 1, skew_fallback_caps
           for previous, current in zip(curve_headings, curve_headings[1:]):
               delta = (current - previous + 180.0) % 360.0 - 180.0
               assert abs(delta - 10.0) <= 0.05, curve_headings
 
-          skew_heading, skew_x, skew_z = native_skew_t[0]
-          skew_heading_error = abs((skew_heading - 90.0 + 180.0) % 360.0 - 180.0)
-          assert skew_heading_error <= 0.05, native_skew_t
-          local_center = native_junction_intersection_offset(r"o\road\kr_new_sil_sil_t.p3d")
-          assert local_center is not None
-          center_offset = rotate_local(local_center, skew_heading)
-          skew_center = (skew_x + center_offset[0], skew_z + center_offset[1])
-          # For this 45-degree northeast arm the rigid T slides one 6.25 m
-          # connector radius east. Its north connector then lies on x-z=600,
-          # the source branch centreline through 1300,700.
-          assert 1305.5 <= skew_center[0] <= 1306.5, skew_center
-          assert 699.2 <= skew_center[1] <= 700.3, skew_center
-          branch_connector_heading = (skew_heading + 270.0) % 360.0
-          branch_unit = (
-              math.sin(math.radians(branch_connector_heading)),
-              math.cos(math.radians(branch_connector_heading)),
-          )
-          branch_connector = (
-              skew_center[0] + branch_unit[0] * 6.25,
-              skew_center[1] + branch_unit[1] * 6.25,
-          )
-          assert abs((branch_connector[0] - branch_connector[1]) - 600.0) <= 0.10, (
-              skew_center,
-              branch_connector,
-          )
+          skew_heading, skew_x, skew_z = skew_fallback_caps[0]
+          axis_error = abs((skew_heading - 90.0 + 90.0) % 180.0 - 90.0)
+          assert axis_error <= 0.05, skew_fallback_caps
+          assert math.hypot(skew_x - 850.0, skew_z - 550.0) <= 0.05, skew_fallback_caps
 
           def smoke_mission(title, x, z, heading=0.0):
               return f'''version=11;
@@ -290,9 +274,9 @@ jobs:
           missions = root / "build" / "Missions"
           targets = (
               ("roadlab_curve.wg_roadlab", "Road Lab - Native Curve", 500.0, 470.0, 0.0),
-              ("roadlab_skew_t.wg_roadlab", "Road Lab - 45deg Paved T", 1260.0, 700.0, 90.0),
-              ("roadlab_mixed_t.wg_roadlab", "Road Lab - Paved Gravel T", 1300.0, 1260.0, 0.0),
-              ("roadlab_wiggle.wg_roadlab", "Road Lab - Source Wiggle", 450.0, 1660.0, 0.0),
+              ("roadlab_skew_t.wg_roadlab", "Road Lab - 45deg Paved T Fallback", 810.0, 550.0, 90.0),
+              ("roadlab_mixed_t.wg_roadlab", "Road Lab - Paved Gravel T", 850.0, 260.0, 0.0),
+              ("roadlab_wiggle.wg_roadlab", "Road Lab - Source Wiggle", 350.0, 810.0, 0.0),
           )
           for folder_name, title, x, z, heading in targets:
               folder = missions / folder_name
@@ -309,19 +293,21 @@ jobs:
               "WG Stock Road Lab\n"
               f"Commit: {os.environ.get('GITHUB_SHA', 'local')}\n"
               f"Flat lab elevation: {lab_elevation_metres} m\n"
+              f"CWA RVW4 height scale: {CWA_RVW4_HEIGHT_SCALE_METRES:.3f} m/unit\n"
               f"Player spawn altitude ASL: {player_altitude_metres} m\n\n"
               "Install @CWR-Milestone9 as a normal CWA/OFP mod folder.\n"
               "Copy the Missions folders into the game's Missions directory if needed.\n\n"
               "Direct-spawn missions:\n"
               "  roadlab_curve.wg_roadlab      - native 100 m stock curve\n"
-              "  roadlab_skew_t.wg_roadlab     - 45-degree paved T\n"
+              "  roadlab_skew_t.wg_roadlab     - 45-degree paved T using small fallback cap\n"
               "  roadlab_mixed_t.wg_roadlab    - paved/gravel T\n"
               "  roadlab_wiggle.wg_roadlab     - source-wiggle straight\n\n"
               "Inspection areas in world X/Z metres:\n"
               "  Native 100 m curve: 500,500\n"
-              "  45-degree paved T: 1300,700\n"
-              "  Paved/gravel T: 1300,1300\n"
-              "  Source-wiggle straight: 450,1700\n\n"
+              "  45-degree paved T: 850,550\n"
+              "  Paved/gravel T: 850,300\n"
+              "  Source-wiggle straight: 350,850\n\n"
+              "All four labs now sit inside the same first-kilometre terrain region.\n"
               "Check for grass wedges, road-surface clipping, z-fighting, visible slab seams, "
               "wrong curve handedness, wrong T placement, and gravel showing through the paved main road.\n",
               encoding="utf-8",

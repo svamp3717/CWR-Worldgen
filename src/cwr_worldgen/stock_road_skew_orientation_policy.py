@@ -2,17 +2,17 @@
 """Keep late skew-T replacement aligned with measured Memory-LOD geometry.
 
 Resistance T junctions use local 0/180 degrees for the through road and local
--X (270 degrees) for the branch.  A strongly skewed source T therefore has two
-independent placement requirements: choose the correct side of the model, then
-slide the rigid T along the through road until its fixed branch connector lies
-on the diagonal source branch centreline.
+-X (270 degrees) for the branch. That rigid geometry is useful only while a
+source T remains reasonably close to perpendicular. Once the branch is strongly
+skewed, sliding the model can put its connector centre on the source line but
+cannot rotate the visible asphalt tongue to match that line. The resulting
+surface is the broad rectangular slab seen in RoadLab.
 
-The longitudinal slide does not move the T away from the through-road axis.  It
-only uses the degree of freedom that a straight main road already provides.  At
-a 45-degree branch the required shift is exactly one measured connector radius,
-6.25 m; a near-perpendicular branch needs almost no shift.  The fitted source
-approaches continue underneath the raised junction mesh, so the shifted native
-surface covers the real merge instead of leaving its tongue behind the branch.
+Keep the measured native T for bounded near-orthogonal nodes, including its
+small longitudinal slide. Strongly skewed same-family paved T nodes instead keep
+the legacy six-metre cap aligned with the dominant through road. The fitted road
+arms already continue to the logical node underneath that small cap, avoiding a
+large false junction surface while preserving drivable overlap.
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from . import stock_road_junction_policy as _junction
 from . import stock_road_model_geometry as _model_geometry
 from . import stock_road_visual_finish_policy as _finish
 
+MAXIMUM_NATIVE_T_BRANCH_ERROR_DEGREES = 20.0
 _ORIGINAL_FINAL_REALIGN = None
 _INSTALLED = False
 
@@ -61,6 +62,12 @@ def _same_family_paved_skew_t(incidents, family: str):
 
     branch_error, main_error, rotation = min(candidates)
     if main_error > _final.MAXIMUM_SKEW_T_MAIN_AXIS_ERROR_DEGREES:
+        return None
+
+    # A connector centre can still lie inside the road strip at much larger
+    # angles, but the rendered T tongue cannot. Cap the visible angular error
+    # explicitly instead of treating half-width containment as sufficient.
+    if branch_error > MAXIMUM_NATIVE_T_BRANCH_ERROR_DEGREES:
         return None
 
     half_width = float(_model_geometry.STOCK_HALF_WIDTHS_METRES[family])
@@ -134,7 +141,7 @@ def _logical_intersection(obj) -> tuple[float, float] | None:
 
 
 def _realign_and_shift_skew_t_caps(report, dataset, projection, elevations, spec):
-    """Run the final cap replacement, then align skew T connectors longitudinally."""
+    """Run final cap selection, then align accepted near-orthogonal native Ts."""
 
     if _ORIGINAL_FINAL_REALIGN is None:
         raise RuntimeError("skew orientation policy is not installed")

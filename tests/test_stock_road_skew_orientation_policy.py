@@ -35,11 +35,21 @@ def _distance_to_line(point, origin, direction) -> float:
     return math.dist((float(point[0]), float(point[1])), nearest)
 
 
-def test_45_degree_t_uses_measured_branch_side_and_one_radius_slide() -> None:
+def test_45_degree_t_rejects_rigid_native_surface() -> None:
     incidents = (
         _incident(90.0),
         _incident(270.0),
         _incident(45.0),
+    )
+
+    assert _skew._same_family_paved_skew_t(incidents, "sil") is None
+
+
+def test_near_orthogonal_t_keeps_measured_branch_side_and_small_slide() -> None:
+    incidents = (
+        _incident(90.0),
+        _incident(270.0),
+        _incident(10.0),
     )
 
     native = _skew._same_family_paved_skew_t(incidents, "sil")
@@ -47,18 +57,19 @@ def test_45_degree_t_uses_measured_branch_side_and_one_radius_slide() -> None:
     assert native is not None
     assert native.model_path == r"o\road\kr_new_sil_sil_t.p3d"
     assert math.isclose(native.heading_degrees, 90.0, abs_tol=1.0e-9)
+    assert math.isclose(native.maximum_heading_error_degrees, 10.0, abs_tol=1.0e-9)
     assert math.isclose(
         _skew._skew_t_longitudinal_shift(incidents, native),
-        6.25,
+        6.25 * math.tan(math.radians(10.0)),
         abs_tol=1.0e-9,
     )
 
 
-def test_longitudinal_slide_puts_native_branch_connector_on_source_centerline() -> None:
+def test_longitudinal_slide_puts_accepted_branch_connector_on_source_centerline() -> None:
     incidents = (
         _incident(90.0),
         _incident(270.0),
-        _incident(45.0),
+        _incident(10.0),
     )
     native = _skew._same_family_paved_skew_t(incidents, "sil")
     assert native is not None
@@ -77,7 +88,7 @@ def test_longitudinal_slide_puts_native_branch_connector_on_source_centerline() 
     assert _distance_to_line(connector_point, node, incidents[2].direction) < 1.0e-9
 
 
-def test_production_fit_shifts_diagonal_t_without_moving_off_main_axis() -> None:
+def test_production_fit_keeps_small_main_axis_fallback_for_45_degree_t() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     main = OsmLineFeature(
@@ -97,7 +108,7 @@ def test_production_fit_shifts_diagonal_t_without_moving_off_main_axis() -> None
         ),
     )
     dataset = OsmDataset(
-        source_generator="skew-t-longitudinal-alignment",
+        source_generator="skew-t-fallback",
         element_count=2,
         coastlines=(),
         water=(),
@@ -117,40 +128,20 @@ def test_production_fit_shifts_diagonal_t_without_moving_off_main_axis() -> None
     )
 
     report = _p.fit_road_objects(dataset, projection, [0.0] * (40 * 40), spec)
+    assert report.junction_cap_objects >= 1
     cap = report.objects[0]
-    assert cap.model_path.casefold() == r"o\road\kr_new_sil_sil_t.p3d"
+    assert cap.model_path.casefold() == r"o\road\sil6.p3d"
 
     incident_map = _finish._junction_incident_map(dataset, projection, spec)
     source_node, incidents = next(iter(incident_map.values()))
-    native = _skew._same_family_paved_skew_t(incidents, "sil")
-    assert native is not None
-    shift = _skew._skew_t_longitudinal_shift(incidents, native)
-    main_unit = _skew._unit_heading(native.heading_degrees)
-    expected_center = (
-        source_node[0] + main_unit[0] * shift,
-        source_node[1] + main_unit[1] * shift,
-    )
-    actual_center = _skew._logical_intersection(cap)
-    assert actual_center is not None
-    assert math.dist(actual_center, expected_center) < 1.0e-6
-
-    # Sliding along the dominant through-road is allowed; lateral displacement is not.
-    main_axis = incidents[_junction._dominant_pair(incidents)[0]].direction
-    normal = (-main_axis[1], main_axis[0])
-    lateral = (
-        (actual_center[0] - source_node[0]) * normal[0]
-        + (actual_center[1] - source_node[1]) * normal[1]
-    )
-    assert abs(lateral) < 1.0e-6
-
-    connector_unit = _skew._unit_heading((native.heading_degrees + 270.0) % 360.0)
-    connector_point = (
-        actual_center[0] + connector_unit[0] * 6.25,
-        actual_center[1] + connector_unit[1] * 6.25,
-    )
+    assert math.dist((cap.x, cap.z), source_node) < 0.05
     pair = _junction._dominant_pair(incidents)
     assert pair is not None
-    branch_index = next(index for index in range(3) if index not in pair)
-    assert _distance_to_line(
-        connector_point, source_node, incidents[branch_index].direction
-    ) < 1.0e-6
+    main_heading = _junction._heading(incidents[pair[0]].direction)
+    assert _finish._axis_heading_difference(cap.heading_degrees, main_heading) < 0.05
+
+    # Most importantly, the visible 90-degree T slab never enters the report.
+    assert all(
+        obj.model_path.casefold() != r"o\road\kr_new_sil_sil_t.p3d"
+        for obj in report.objects
+    )

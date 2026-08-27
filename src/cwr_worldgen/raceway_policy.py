@@ -47,6 +47,13 @@ def install_raceway_policy() -> None:
     if _INSTALLED:
         return
 
+    # RVW4 carries no terrain scale field. CWA expands each stored height short
+    # by its hard-coded 0.045 m LANDDATA_SCALE, so install that contract before
+    # any milestone build evaluates a spec's height_scale property.
+    from .cwa_rvw4_height_policy import install_cwa_rvw4_height_scale_policy
+
+    install_cwa_rvw4_height_scale_policy()
+
     # The direct Overpass importer and normalized source-bundle path keep their
     # own supported-highway sets. Update both so GUI/source builds and direct
     # Python builds agree about raceways.
@@ -86,8 +93,8 @@ def install_raceway_policy() -> None:
     install_stock_road_final_continuity_policy()
     # The final-continuity skew chooser is later than the measured-junction
     # installer, so restate the verified local -X branch side here at the true
-    # end of the policy stack.  Otherwise the correct T model is rotated onto
-    # the opposite side of the logical intersection.
+    # end of the policy stack. Near-orthogonal T nodes may still use the native
+    # model; strongly skewed ones keep the much smaller through-axis fallback.
     from .stock_road_skew_orientation_policy import (
         install_stock_road_skew_orientation_policy,
     )
