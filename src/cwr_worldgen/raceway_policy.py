@@ -98,6 +98,14 @@ def install_raceway_policy() -> None:
     from .stock_road_sharp_turn_policy import install_stock_road_sharp_turn_policy
 
     install_stock_road_sharp_turn_policy()
+    # On short junction-to-junction paved bends the generic sharp policy can
+    # find the right native curves and then lose their tangent continuity when
+    # it sends the sampled line back through the greedy fitter.  Accept the
+    # beam's exact stock sequence directly in that narrow case so the road edges
+    # meet instead of leaving a triangular grass wedge at each heading change.
+    from .stock_road_sharp_exact_policy import install_stock_road_sharp_exact_policy
+
+    install_stock_road_sharp_exact_policy()
     # The final-continuity skew chooser is later than the measured-junction
     # installer, so restate the verified local -X branch side here at the true
     # end of the policy stack. Near-orthogonal T nodes may still use the native
