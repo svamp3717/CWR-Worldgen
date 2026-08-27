@@ -1,0 +1,552 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Replace faceted sharp paved bends with connector-locked stock curve chains.
+
+A difficult real-world bend can be too irregular for the single-radius curve
+regularizer while still being perfectly representable by a short sequence of
+stock straights and ten-degree curves.  Falling all the way back to rotated
+``sil6``/``sil12`` rectangles makes every heading change a visible mitre: the
+road surface clips and the painted borders no longer meet.
+
+This policy is intentionally narrow.  It only considers stock paved families
+(sil/asf/kos), only sustained same-direction bends, and only spans where the
+existing fitter has not already placed a useful native-curve sequence.  A small
+beam search propagates the *actual connector pose* from piece to piece, so every
+accepted internal seam has one common position and tangent.  Candidates must
+stay within a sub-metre corridor around the already-conditioned centreline.
+Dirt, gravel, junction selection and terrain are untouched.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import bisect
+import math
+import re
+
+from . import playability as _p
+from . import stock_road_model_geometry as _model_geometry
+
+_MINIMUM_SIGNIFICANT_TURN_DEGREES = 0.70
+_MAXIMUM_LOCAL_SUSTAINED_TURN_DEGREES = 18.0
+_MINIMUM_SUSTAINED_TOTAL_TURN_DEGREES = 18.0
+_MAXIMUM_QUIET_DISTANCE_METRES = 35.0
+_MAXIMUM_LOCKED_CORRIDOR_METRES = 0.60
+_MAXIMUM_LOCKED_END_ERROR_METRES = 1.25
+_MAXIMUM_LOCKED_BOUNDARY_TANGENT_ERROR_DEGREES = 3.0
+_MAXIMUM_CANDIDATE_TANGENT_ERROR_DEGREES = 9.0
+_BEAM_WIDTH = 256
+_MAXIMUM_SPAN_METRES = 180.0
+_CURVE_SAMPLE_COUNT = 4
+
+_STOCK_PAVED_STRAIGHT = re.compile(
+    r"^(?P<prefix>.*[\\/])(?P<family>sil|asf|kos)(?P<length>25|12|6)\.p3d$",
+    re.IGNORECASE,
+)
+
+_ORIGINAL_CHAIN = None
+_INSTALLED = False
+
+
+@dataclass(frozen=True, slots=True)
+class _Action:
+    piece: object
+    turn_sign: int
+    radius_metres: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class _Step:
+    piece: object
+    start: tuple[float, float]
+    end: tuple[float, float]
+    samples: tuple[tuple[float, float], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _State:
+    score: float
+    x: float
+    z: float
+    heading_degrees: float
+    progress: float
+    steps: tuple[_Step, ...]
+    curve_count: int
+
+
+def _heading(start, end) -> float:
+    return math.degrees(
+        math.atan2(float(end[0]) - float(start[0]), float(end[1]) - float(start[1]))
+    ) % 360.0
+
+
+def _signed_turn(previous, point, following) -> float:
+    return _p._signed_heading_delta(
+        _heading(previous, point),
+        _heading(point, following),
+    )
+
+
+def _sharp_turn_spans(points):
+    """Return sustained same-direction bend spans, splitting long quiet gaps."""
+
+    cleaned = tuple(points)
+    if len(cleaned) < 4:
+        return ()
+    turns = [0.0] * len(cleaned)
+    for index in range(1, len(cleaned) - 1):
+        turns[index] = _signed_turn(cleaned[index - 1], cleaned[index], cleaned[index + 1])
+
+    spans = []
+    sign = 0
+    first_significant = None
+    last_significant = None
+    significant_count = 0
+    accumulated_turn = 0.0
+    quiet_distance = 0.0
+
+    def finish() -> None:
+        nonlocal sign, first_significant, last_significant
+        nonlocal significant_count, accumulated_turn, quiet_distance
+        if (
+            first_significant is not None
+            and last_significant is not None
+            and significant_count >= 2
+            and abs(accumulated_turn) >= _MINIMUM_SUSTAINED_TOTAL_TURN_DEGREES
+        ):
+            start = max(0, first_significant - 1)
+            end = last_significant
+            length = sum(
+                math.dist(a, b) for a, b in zip(cleaned[start:end], cleaned[start + 1 : end + 1])
+            )
+            if length <= _MAXIMUM_SPAN_METRES:
+                spans.append((start, end, sign))
+        sign = 0
+        first_significant = None
+        last_significant = None
+        significant_count = 0
+        accumulated_turn = 0.0
+        quiet_distance = 0.0
+
+    for index in range(1, len(cleaned) - 1):
+        turn = turns[index]
+        magnitude = abs(turn)
+        if magnitude > _MAXIMUM_LOCAL_SUSTAINED_TURN_DEGREES:
+            finish()
+            continue
+        if magnitude >= _MINIMUM_SIGNIFICANT_TURN_DEGREES:
+            current_sign = 1 if turn > 0.0 else -1
+            if sign and current_sign != sign:
+                finish()
+            if not sign:
+                sign = current_sign
+                first_significant = index
+            last_significant = index
+            significant_count += 1
+            accumulated_turn += turn
+            quiet_distance = 0.0
+            continue
+        if sign:
+            accumulated_turn += turn
+            quiet_distance += math.dist(cleaned[index - 1], cleaned[index])
+            if quiet_distance > _MAXIMUM_QUIET_DISTANCE_METRES:
+                finish()
+
+    finish()
+    return tuple(spans)
+
+
+def _paved_family(pieces) -> tuple[str, str] | None:
+    family = None
+    prefix = None
+    found = False
+    for piece in pieces:
+        match = _STOCK_PAVED_STRAIGHT.fullmatch(str(piece.model_path).replace("/", "\\"))
+        if match is None:
+            continue
+        current_family = match.group("family").casefold()
+        current_prefix = match.group("prefix")
+        if family is None:
+            family = current_family
+            prefix = current_prefix
+        elif current_family != family or current_prefix.casefold() != str(prefix).casefold():
+            return None
+        found = True
+    if not found or family is None or prefix is None:
+        return None
+    return prefix, family
+
+
+def _actions(pieces, prefix: str, family: str, turn_sign: int) -> tuple[_Action, ...]:
+    result: list[_Action] = []
+    straights = []
+    for piece in pieces:
+        match = _STOCK_PAVED_STRAIGHT.fullmatch(str(piece.model_path).replace("/", "\\"))
+        if match is None or match.group("family").casefold() != family:
+            continue
+        straights.append(piece)
+    for piece in sorted(
+        straights, key=lambda item: (-float(item.length_metres), str(item.model_path).casefold())
+    ):
+        result.append(_Action(piece, 0, None))
+
+    for radius in (100, 75, 50, 25):
+        model_path = f"{prefix}{family}10 {radius}.p3d"
+        geometry = _model_geometry.stock_curve_connectors(model_path)
+        if geometry is None:
+            continue
+        result.append(
+            _Action(
+                _p._RoadPiece(model_path, geometry.chord_length_metres, 10),
+                turn_sign,
+                float(radius),
+            )
+        )
+    return tuple(result)
+
+
+def _nearest_forward(measure, point, minimum_distance: float, maximum_distance: float):
+    """Project a point onto a bounded forward interval of one polyline measure."""
+
+    minimum = max(0.0, min(float(measure.total), float(minimum_distance)))
+    maximum = max(minimum, min(float(measure.total), float(maximum_distance)))
+    first = max(0, bisect.bisect_right(measure.cumulative, minimum) - 2)
+    last = min(
+        len(measure.points) - 2,
+        bisect.bisect_right(measure.cumulative, maximum),
+    )
+    best = None
+    for index in range(first, last + 1):
+        segment_start = float(measure.cumulative[index])
+        segment_end = float(measure.cumulative[index + 1])
+        low = max(minimum, segment_start)
+        high = min(maximum, segment_end)
+        if high < low - 1.0e-9:
+            continue
+        start = measure.points[index]
+        end = measure.points[index + 1]
+        dx = float(end[0]) - float(start[0])
+        dz = float(end[1]) - float(start[1])
+        length = max(1.0e-9, segment_end - segment_start)
+        denominator = dx * dx + dz * dz
+        if denominator <= 1.0e-12:
+            continue
+        low_t = max(0.0, min(1.0, (low - segment_start) / length))
+        high_t = max(low_t, min(1.0, (high - segment_start) / length))
+        t = (
+            (float(point[0]) - float(start[0])) * dx
+            + (float(point[1]) - float(start[1])) * dz
+        ) / denominator
+        t = max(low_t, min(high_t, t))
+        projected = (float(start[0]) + dx * t, float(start[1]) + dz * t)
+        distance = math.dist((float(point[0]), float(point[1])), projected)
+        along = segment_start + length * t
+        candidate = (distance, along)
+        if best is None or candidate < best:
+            best = candidate
+    return best
+
+
+def _advance(state: _State, action: _Action):
+    start = (state.x, state.z)
+    if action.turn_sign == 0:
+        length = float(action.piece.length_metres)
+        angle = math.radians(state.heading_degrees)
+        end = (
+            state.x + math.sin(angle) * length,
+            state.z + math.cos(angle) * length,
+        )
+        samples = tuple(
+            (
+                state.x + (end[0] - state.x) * (sample / _CURVE_SAMPLE_COUNT),
+                state.z + (end[1] - state.z) * (sample / _CURVE_SAMPLE_COUNT),
+            )
+            for sample in range(1, _CURVE_SAMPLE_COUNT + 1)
+        )
+        return end, state.heading_degrees, samples
+
+    radius = float(action.radius_metres)
+    heading = math.radians(state.heading_degrees)
+    right = (math.cos(heading), -math.sin(heading))
+    centre = (
+        state.x + right[0] * radius * action.turn_sign,
+        state.z + right[1] * radius * action.turn_sign,
+    )
+    vector = (state.x - centre[0], state.z - centre[1])
+    turn = 10.0 * action.turn_sign
+    samples = []
+    for sample in range(1, _CURVE_SAMPLE_COUNT + 1):
+        angle = -math.radians(turn * (sample / _CURVE_SAMPLE_COUNT))
+        cosine = math.cos(angle)
+        sine = math.sin(angle)
+        rotated = (
+            cosine * vector[0] - sine * vector[1],
+            sine * vector[0] + cosine * vector[1],
+        )
+        samples.append((centre[0] + rotated[0], centre[1] + rotated[1]))
+    return samples[-1], (state.heading_degrees + turn) % 360.0, tuple(samples)
+
+
+def _beam_stock_path(source_points, turn_sign: int, entry_heading: float, exit_heading: float, pieces):
+    """Fit one exact-pose stock sequence through a difficult paved bend."""
+
+    measure = _p._PolylineMeasure.create(source_points)
+    if measure.total <= 1.0:
+        return None
+    family = _paved_family(pieces)
+    if family is None:
+        return None
+    prefix, family_name = family
+    actions = _actions(pieces, prefix, family_name, turn_sign)
+    if not actions:
+        return None
+
+    start = source_points[0]
+    beam = (
+        _State(0.0, float(start[0]), float(start[1]), entry_heading, 0.0, (), 0),
+    )
+    best = None
+    shortest = min(float(action.piece.length_metres) for action in actions)
+    maximum_steps = max(3, int(math.ceil(measure.total / shortest)) + 5)
+
+    for _step_index in range(maximum_steps):
+        candidates: list[_State] = []
+        for state in beam:
+            for action in actions:
+                end, end_heading, samples = _advance(state, action)
+                progress = state.progress
+                maximum_deviation = 0.0
+                lookahead = max(12.0, float(action.piece.length_metres) * 2.0 + 8.0)
+                valid = True
+                for sample in samples:
+                    nearest = _nearest_forward(
+                        measure,
+                        sample,
+                        progress,
+                        min(measure.total, state.progress + lookahead),
+                    )
+                    if nearest is None or nearest[0] > _MAXIMUM_LOCKED_CORRIDOR_METRES:
+                        valid = False
+                        break
+                    maximum_deviation = max(maximum_deviation, nearest[0])
+                    progress = max(progress, nearest[1])
+                if not valid or progress <= state.progress + 0.40:
+                    continue
+
+                source_heading = measure.point(progress)[2]
+                tangent_error = _p._heading_difference(end_heading, source_heading)
+                if tangent_error > _MAXIMUM_CANDIDATE_TANGENT_ERROR_DEGREES:
+                    continue
+                source_turn = _p._heading_difference(state.heading_degrees, source_heading)
+                action_turn = 10.0 if action.turn_sign else 0.0
+                turn_mismatch = abs(source_turn - action_turn)
+                endpoint_nearest = _nearest_forward(
+                    measure,
+                    end,
+                    state.progress,
+                    min(measure.total, state.progress + lookahead),
+                )
+                endpoint_error = endpoint_nearest[0] if endpoint_nearest is not None else math.inf
+                if endpoint_error > _MAXIMUM_LOCKED_CORRIDOR_METRES:
+                    continue
+
+                score = (
+                    state.score
+                    + maximum_deviation * maximum_deviation * 7.0
+                    + endpoint_error * endpoint_error * 3.0
+                    + (tangent_error / 5.0) ** 2
+                    + (turn_mismatch / 5.0) ** 2
+                    + 0.03
+                )
+                step = _Step(action.piece, (state.x, state.z), end, samples)
+                candidate = _State(
+                    score,
+                    end[0],
+                    end[1],
+                    end_heading,
+                    progress,
+                    (*state.steps, step),
+                    state.curve_count + int(action.turn_sign != 0),
+                )
+
+                remaining = measure.total - progress
+                end_error = math.dist(end, source_points[-1])
+                boundary_error = _p._heading_difference(end_heading, exit_heading)
+                if (
+                    remaining <= _MAXIMUM_LOCKED_END_ERROR_METRES
+                    and end_error <= _MAXIMUM_LOCKED_END_ERROR_METRES
+                    and boundary_error <= _MAXIMUM_LOCKED_BOUNDARY_TANGENT_ERROR_DEGREES
+                    and candidate.curve_count >= 2
+                ):
+                    final_score = (
+                        score
+                        + end_error * end_error * 3.0
+                        + (boundary_error / 3.0) ** 2
+                    )
+                    if best is None or final_score < best[0]:
+                        best = (final_score, candidate)
+
+                if progress < measure.total - 0.05:
+                    candidates.append(candidate)
+
+        if best is not None:
+            break
+        if not candidates:
+            break
+
+        candidates.sort(
+            key=lambda item: (
+                item.score + (measure.total - item.progress) * 0.01,
+                item.score,
+                -item.progress,
+            )
+        )
+        beam_list = []
+        seen: dict[tuple[int, int], int] = {}
+        for candidate in candidates:
+            key = (
+                int(candidate.progress / 2.5),
+                int(round(candidate.heading_degrees / 2.5)) % 144,
+            )
+            if seen.get(key, 0) >= 2:
+                continue
+            seen[key] = seen.get(key, 0) + 1
+            beam_list.append(candidate)
+            if len(beam_list) >= _BEAM_WIDTH:
+                break
+        beam = tuple(beam_list)
+
+    if best is None:
+        return None
+    state = best[1]
+    result = [source_points[0]]
+    for step in state.steps:
+        for point in step.samples:
+            if math.dist(result[-1], point) > 0.05:
+                result.append(point)
+    return tuple(result)
+
+
+def _curve_midpoint_distances(fitted, measure) -> tuple[float, ...]:
+    result = []
+    for piece, start, end in fitted:
+        if _model_geometry.stock_curve_match(str(piece.model_path)) is None:
+            continue
+        midpoint = ((start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5)
+        nearest = _nearest_forward(measure, midpoint, 0.0, measure.total)
+        if nearest is not None:
+            result.append(nearest[1])
+    return tuple(result)
+
+
+def _locked_measure(measure, pieces, baseline):
+    spans = _sharp_turn_spans(measure.points)
+    if not spans:
+        return None
+    curve_distances = _curve_midpoint_distances(baseline, measure)
+    replacements = []
+    occupied_until = -1
+    for start_index, end_index, turn_sign in spans:
+        if start_index <= occupied_until or end_index + 1 >= len(measure.points):
+            continue
+        span_start = float(measure.cumulative[start_index])
+        span_end = float(measure.cumulative[end_index])
+        native_count = sum(span_start - 0.5 <= value <= span_end + 0.5 for value in curve_distances)
+        if native_count >= 2:
+            continue
+
+        entry_heading = (
+            _heading(measure.points[start_index - 1], measure.points[start_index])
+            if start_index > 0
+            else _heading(measure.points[start_index], measure.points[start_index + 1])
+        )
+        exit_heading = _heading(measure.points[end_index], measure.points[end_index + 1])
+        source_span = measure.points[start_index : end_index + 1]
+        locked = _beam_stock_path(source_span, turn_sign, entry_heading, exit_heading, pieces)
+        if locked is None:
+            continue
+        replacements.append((start_index, end_index, locked))
+        occupied_until = end_index
+
+    if not replacements:
+        return None
+
+    result = []
+    cursor = 0
+    for start_index, end_index, locked in replacements:
+        for point in measure.points[cursor:start_index]:
+            if not result or math.dist(result[-1], point) > 0.05:
+                result.append(point)
+        for point in locked:
+            if not result or math.dist(result[-1], point) > 0.05:
+                result.append(point)
+        cursor = end_index + 1
+    for point in measure.points[cursor:]:
+        if not result or math.dist(result[-1], point) > 0.05:
+            result.append(point)
+    if len(result) < 2:
+        return None
+    return _p._PolylineMeasure.create(tuple(result))
+
+
+def _sharp_turn_chain(
+    measure,
+    pieces,
+    *,
+    start_distance,
+    preferred_end_distance,
+    minimum_end_distance,
+    maximum_end_distance,
+):
+    if _ORIGINAL_CHAIN is None:
+        raise RuntimeError("stock road sharp-turn policy is not installed")
+
+    baseline = _ORIGINAL_CHAIN(
+        measure,
+        pieces,
+        start_distance=start_distance,
+        preferred_end_distance=preferred_end_distance,
+        minimum_end_distance=minimum_end_distance,
+        maximum_end_distance=maximum_end_distance,
+    )
+    if _paved_family(pieces) is None:
+        return baseline
+
+    locked = _locked_measure(measure, pieces, baseline)
+    if locked is None:
+        return baseline
+
+    tail_preferred = float(measure.total) - float(preferred_end_distance)
+    tail_minimum = float(measure.total) - float(minimum_end_distance)
+    tail_maximum = float(maximum_end_distance) - float(measure.total)
+    new_start = min(float(locked.total), float(start_distance))
+    new_preferred = max(new_start, float(locked.total) - tail_preferred)
+    new_minimum = max(new_start, float(locked.total) - tail_minimum)
+    new_maximum = max(new_preferred, float(locked.total) + tail_maximum)
+
+    fitted = _ORIGINAL_CHAIN(
+        locked,
+        pieces,
+        start_distance=new_start,
+        preferred_end_distance=new_preferred,
+        minimum_end_distance=new_minimum,
+        maximum_end_distance=new_maximum,
+    )
+    if not fitted:
+        return baseline
+    locked_curves = sum(
+        _model_geometry.stock_curve_match(str(piece.model_path)) is not None
+        for piece, _start, _end in fitted
+    )
+    baseline_curves = sum(
+        _model_geometry.stock_curve_match(str(piece.model_path)) is not None
+        for piece, _start, _end in baseline
+    )
+    return fitted if locked_curves > baseline_curves else baseline
+
+
+def install_stock_road_sharp_turn_policy() -> None:
+    global _ORIGINAL_CHAIN, _INSTALLED
+    if _INSTALLED:
+        return
+    _ORIGINAL_CHAIN = _p._stock_piece_chain
+    _p._stock_piece_chain = _sharp_turn_chain
+    _INSTALLED = True
