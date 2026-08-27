@@ -5,6 +5,7 @@ import math
 
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_model_geometry as _model_geometry
+from cwr_worldgen import stock_road_sharp_exact_policy as _exact
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 
 
@@ -22,6 +23,12 @@ def _lundby_sharp_turn_points():
     )
 
 
+def _lundby_junction_to_junction_turn_points():
+    # The production network splits D957 at the junction at 3126.75/3188.999.
+    # This is the exact short run that contains both reported grass wedges.
+    return _lundby_sharp_turn_points()[:-1]
+
+
 def _fit(chain, measure, pieces):
     return chain(
         measure,
@@ -33,12 +40,46 @@ def _fit(chain, measure, pieces):
     )
 
 
+def _fit_with_production_junction_cover(chain, measure, pieces):
+    # A stock sil6 junction cap is 6.25 m long. Production trims each branch to
+    # 3.125 - 0.70 m and accepts coverage out to 3.125 + 0.15 m.
+    trim = 3.125 - 0.70
+    cover = 3.125 + 0.15
+    return chain(
+        measure,
+        pieces,
+        start_distance=trim,
+        preferred_end_distance=measure.total - trim,
+        minimum_end_distance=measure.total - cover,
+        maximum_end_distance=measure.total + 0.70,
+    )
+
+
 def _is_curve(piece) -> bool:
     return _model_geometry.stock_curve_match(str(piece.model_path)) is not None
 
 
 def _curve_count(fitted) -> int:
     return sum(_is_curve(piece) for piece, _start, _end in fitted)
+
+
+def _right_turn_tangents(item):
+    piece, start, end = item
+    chord_heading = _sharp._heading(start, end)
+    if _is_curve(piece):
+        # Stock curve connectors traverse a ten-degree right turn. Their chord
+        # heading is exactly halfway between the two endpoint tangents.
+        return (chord_heading - 5.0) % 360.0, (chord_heading + 5.0) % 360.0
+    return chord_heading, chord_heading
+
+
+def _seam_tangent_errors(fitted):
+    errors = []
+    for previous, current in zip(fitted, fitted[1:]):
+        previous_end = _right_turn_tangents(previous)[1]
+        current_start = _right_turn_tangents(current)[0]
+        errors.append(_p._heading_difference(previous_end, current_start))
+    return tuple(errors)
 
 
 def test_lundby_sharp_asphalt_turn_uses_native_curves_instead_of_sil6_facets():
@@ -85,6 +126,44 @@ def test_reported_lundby_seams_are_not_straight_to_straight_miters():
             heading_change,
             previous[2],
         )
+
+
+def test_lundby_production_split_has_no_exposed_tangent_miters():
+    """The actual split D957 run must have tangent-continuous interior seams.
+
+    Matching only centreline endpoints is insufficient: two road rectangles can
+    share the same centre point while their outer edges diverge into a triangular
+    grass wedge. The production replacement therefore has to match the tangent
+    on both sides of every exposed internal connector.
+    """
+
+    points = _lundby_junction_to_junction_turn_points()
+    measure = _p._PolylineMeasure.create(_p._rounded_road_run(points))
+    pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
+
+    baseline = _fit_with_production_junction_cover(_exact._ORIGINAL_CHAIN, measure, pieces)
+    fitted = _fit_with_production_junction_cover(_p._stock_piece_chain, measure, pieces)
+
+    assert _curve_count(fitted) >= 4, [piece.model_path for piece, _a, _b in fitted]
+    assert _curve_count(fitted) > _curve_count(baseline)
+    assert len(fitted) <= len(baseline)
+
+    # The old greedy result contains several 2-5 degree tangent discontinuities,
+    # which are the visible half-road grass wedges reported in CWA.
+    assert max(_seam_tangent_errors(baseline)) > 2.0
+
+    for previous, current in zip(fitted, fitted[1:]):
+        assert math.dist(previous[2], current[1]) <= 1.0e-4
+    assert max(_seam_tangent_errors(fitted), default=0.0) <= 1.0e-4
+
+    # Do not cure the visual seam by moving the road somewhere else. Every
+    # connector stays in the same narrow source-centreline corridor used by the
+    # sharp-turn beam search.
+    for _piece, start, end in fitted:
+        for point in (start, end):
+            nearest = _sharp._nearest_forward(measure, point, 0.0, measure.total)
+            assert nearest is not None
+            assert nearest[0] <= _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES + 1.0e-9
 
 
 def test_lundby_locked_path_stays_inside_narrow_source_corridor():
