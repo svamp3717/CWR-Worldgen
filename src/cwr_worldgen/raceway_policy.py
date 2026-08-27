@@ -68,11 +68,17 @@ def install_raceway_policy() -> None:
         _generator.default_osm_asset_mapping = wrapped_mapping
 
     # Raceway policy is the final installer imported by cwr_worldgen.__init__.
-    # Use that stable end-of-stack point to attach the purely visual stock-road
-    # safeguards after every geometry/junction wrapper has composed itself.
+    # Use that stable end-of-stack point to attach the stock-road visual and
+    # continuity safeguards after every geometry/junction wrapper has composed
+    # itself.
     from .stock_road_visual_finish_policy import install_stock_road_visual_finish_policy
 
     install_stock_road_visual_finish_policy()
+    from .stock_road_curve_regularization_policy import (
+        install_stock_road_curve_regularization_policy,
+    )
+
+    install_stock_road_curve_regularization_policy()
     from .stock_road_final_continuity_policy import (
         install_stock_road_final_continuity_policy,
     )
