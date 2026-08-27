@@ -91,6 +91,13 @@ def install_raceway_policy() -> None:
     )
 
     install_stock_road_final_continuity_policy()
+    # Some real paved bends cannot be represented by one fixed-radius arc but
+    # are still well approximated by a connector-locked sequence of stock
+    # curves and straights. Fit those only after the ordinary coherent-curve
+    # path has had first refusal, so already-correct curves remain untouched.
+    from .stock_road_sharp_turn_policy import install_stock_road_sharp_turn_policy
+
+    install_stock_road_sharp_turn_policy()
     # The final-continuity skew chooser is later than the measured-junction
     # installer, so restate the verified local -X branch side here at the true
     # end of the policy stack. Near-orthogonal T nodes may still use the native
