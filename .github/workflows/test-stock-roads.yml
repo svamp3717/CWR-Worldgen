@@ -61,12 +61,14 @@ jobs:
           cell_size = 50.0
           world_size = cells * cell_size
           projection = BboxProjection.create(bbox, world_size)
+          lab_elevation_metres = 96
 
           elevation = source / "elevation" / "raw"
           elevation.mkdir(parents=True, exist_ok=True)
-          # Keep every visual target comfortably above CWA's water plane.  The
-          # road lab is for inspecting meshes, not practising amphibious QA.
-          values = (24, 24, 24, 24, 24, 24, 24, 24, 24)
+          # Put the geometry lab on an unmistakably high flat plateau.  Earlier
+          # 24 m builds serialized correctly but two direct-spawn missions still
+          # appeared underwater in CWA, so leave no plausible sea-level ambiguity.
+          values = (lab_elevation_metres,) * 9
           payload = b"".join(value.to_bytes(2, "big", signed=True) for value in values)
           with ZipFile(elevation / "N00E000.hgt.zip", "w") as archive:
               archive.writestr("N00E000.hgt", payload)
@@ -172,16 +174,21 @@ jobs:
 
           # Audit the serialized WRP, not just the pre-serialization selector.
           # Previous regressions passed unit tests but the production rounding
-          # stack still emitted mixed 75/50 m curve meshes.
+          # stack still emitted mixed curve radii and a T rotated onto the wrong side.
           wrp_path = root / "build" / "source" / "wg_roadlab" / "wg_roadlab.wrp"
           wrp_bytes = wrp_path.read_bytes()
           header = struct.Struct("<4sii")
           object_record = struct.Struct("<12fi76s")
           magic, width, height = header.unpack_from(wrp_bytes, 0)
           assert magic == b"4WVR"
+          raw_heights = struct.unpack_from(f"<{width * height}h", wrp_bytes, header.size)
+          # Default Milestone 9 RVW4 scale is 0.05 m, so 96 m serializes as 1920.
+          # This catches accidental reintroduction of a sea-level lab before upload.
+          assert min(raw_heights) >= 1900, min(raw_heights)
+
           offset = header.size + width * height * 4 + 512 * 32
           curve_headings = []
-          native_skew_t = 0
+          native_skew_t_headings = []
           while offset + object_record.size <= len(wrp_bytes):
               values = object_record.unpack_from(wrp_bytes, offset)
               offset += object_record.size
@@ -189,16 +196,27 @@ jobs:
               if not model:
                   break
               model = model.decode("ascii")
+              heading = math.degrees(math.atan2(values[6], values[0])) % 360.0
               if model == r"o\road\sil10 100.p3d":
-                  curve_headings.append(math.degrees(math.atan2(values[6], values[0])) % 360.0)
+                  curve_headings.append(heading)
               elif model == r"o\road\kr_new_sil_sil_t.p3d":
-                  native_skew_t += 1
+                  native_skew_t_headings.append(heading)
               assert model not in {r"o\road\sil10 75.p3d", r"o\road\sil10 50.p3d"}
           assert len(curve_headings) == 4, curve_headings
-          assert native_skew_t == 1, native_skew_t
+          assert len(native_skew_t_headings) == 1, native_skew_t_headings
           for previous, current in zip(curve_headings, curve_headings[1:]):
               delta = (current - previous + 180.0) % 360.0 - 180.0
               assert abs(delta - 10.0) <= 0.05, curve_headings
+
+          skew_heading = native_skew_t_headings[0]
+          skew_heading_error = abs((skew_heading - 90.0 + 180.0) % 360.0 - 180.0)
+          assert skew_heading_error <= 0.05, native_skew_t_headings
+          # The measured T branch is local -X / 270 degrees.  With the through
+          # road held east-west, the branch connector must therefore point north,
+          # toward the northeast source arm, never south onto the opposite side.
+          branch_connector_heading = (skew_heading + 270.0) % 360.0
+          branch_side_error = abs((branch_connector_heading - 45.0 + 180.0) % 360.0 - 180.0)
+          assert branch_side_error <= 45.05, (skew_heading, branch_connector_heading)
 
           def smoke_mission(title, x, z, heading=0.0):
               return f'''version=11;
@@ -249,11 +267,13 @@ jobs:
           '''
 
           missions = root / "build" / "Missions"
+          # Spawn directly on the relevant road instead of tens of metres away.
+          # That keeps visual QA about road geometry rather than shoreline hunting.
           targets = (
-              ("roadlab_curve.wg_roadlab", "Road Lab - Native Curve", 470.0, 470.0, 0.0),
-              ("roadlab_skew_t.wg_roadlab", "Road Lab - 45deg Paved T", 1260.0, 660.0, 90.0),
-              ("roadlab_mixed_t.wg_roadlab", "Road Lab - Paved Gravel T", 1260.0, 1260.0, 0.0),
-              ("roadlab_wiggle.wg_roadlab", "Road Lab - Source Wiggle", 420.0, 1660.0, 0.0),
+              ("roadlab_curve.wg_roadlab", "Road Lab - Native Curve", 500.0, 470.0, 0.0),
+              ("roadlab_skew_t.wg_roadlab", "Road Lab - 45deg Paved T", 1260.0, 700.0, 90.0),
+              ("roadlab_mixed_t.wg_roadlab", "Road Lab - Paved Gravel T", 1300.0, 1260.0, 0.0),
+              ("roadlab_wiggle.wg_roadlab", "Road Lab - Source Wiggle", 450.0, 1660.0, 0.0),
           )
           for folder_name, title, x, z, heading in targets:
               folder = missions / folder_name
@@ -265,7 +285,8 @@ jobs:
           readme = root / "build" / "ROADLAB.txt"
           readme.write_text(
               "WG Stock Road Lab\n"
-              f"Commit: {os.environ.get('GITHUB_SHA', 'local')}\n\n"
+              f"Commit: {os.environ.get('GITHUB_SHA', 'local')}\n"
+              f"Flat lab elevation: {lab_elevation_metres} m\n\n"
               "Install @CWR-Milestone9 as a normal CWA/OFP mod folder.\n"
               "Copy the Missions folders into the game's Missions directory if needed.\n\n"
               "Direct-spawn missions:\n"
@@ -279,7 +300,7 @@ jobs:
               "  Paved/gravel T: 1300,1300\n"
               "  Source-wiggle straight: 450,1700\n\n"
               "Check for grass wedges, road-surface clipping, z-fighting, visible slab seams, "
-              "wrong curve handedness, and gravel showing through the paved main road.\n",
+              "wrong curve handedness, wrong T branch side, and gravel showing through the paved main road.\n",
               encoding="utf-8",
           )
           print(f"In-game PBO: {result.pbo_path}")
