@@ -75,9 +75,9 @@ def _roadlab_curve_fixture(*, rounded: bool = False):
     return measure, pieces
 
 
-def _assert_coherent_100m_curve(fitted):
+def _assert_coherent_100m_curve(fitted, *, minimum_count: int = 3):
     models = [piece.model_path.casefold() for piece, _start, _end in fitted]
-    assert models.count(r"o\road\sil10 100.p3d") >= 3, models
+    assert models.count(r"o\road\sil10 100.p3d") >= minimum_count, models
     assert r"o\road\sil10 75.p3d" not in models, models
     assert r"o\road\sil10 50.p3d" not in models, models
 
@@ -103,9 +103,10 @@ def test_roadlab_curve_chain_prefers_100m_native_radius():
 def test_roadlab_curve_chain_stays_coherent_after_production_rounding():
     # This is the regression the generated WRP exposed.  The old per-corner
     # fillet changed the quantized 100 m arc into 75/50/straight/75 pieces even
-    # though the selector handled the unrounded source correctly.
+    # though the selector handled the unrounded source correctly.  Production
+    # rounding now snaps the full forty-degree bend to four native sections.
     measure, pieces = _roadlab_curve_fixture(rounded=True)
-    _assert_coherent_100m_curve(_fit_fixture(measure, pieces))
+    _assert_coherent_100m_curve(_fit_fixture(measure, pieces), minimum_count=4)
 
 
 def test_roadlab_regularized_arc_stays_inside_existing_fillet_corridor():
@@ -114,8 +115,11 @@ def test_roadlab_regularized_arc_stays_inside_existing_fillet_corridor():
     assert (2, 10, 1) in spans
     arc = _regular._regularized_stock_arc(points, 2, 10, 1)
     assert arc is not None
-    assert arc[0] == points[2]
-    assert arc[-1] == points[10]
+    # Four exact ten-degree stock sections sampled every 2.5 degrees.
+    assert len(arc) == 17
+    maximum_allowed = _geometry._MAXIMUM_STOCK_FILLET_DEVIATION_METRES
+    assert math.dist(arc[0], points[2]) <= maximum_allowed + 1.0e-9
+    assert math.dist(arc[-1], points[10]) <= maximum_allowed + 1.0e-9
 
     maximum = 0.0
     for point in points[2:11]:
@@ -124,7 +128,7 @@ def test_roadlab_regularized_arc_stays_inside_existing_fillet_corridor():
             for start, end in zip(arc, arc[1:])
         )
         maximum = max(maximum, nearest)
-    assert maximum <= _geometry._MAXIMUM_STOCK_FILLET_DEVIATION_METRES + 1.0e-9
+    assert maximum <= maximum_allowed + 1.0e-9
 
 
 def test_curve_regularizer_leaves_small_source_wiggle_to_existing_rounder():
@@ -158,7 +162,7 @@ def test_roadlab_curve_chain_stays_coherent_with_flat_terrain_context():
         fitted = _fit_fixture(measure, pieces)
     finally:
         _quality._CONTEXT.reset(token)
-    _assert_coherent_100m_curve(fitted)
+    _assert_coherent_100m_curve(fitted, minimum_count=4)
 
 
 def test_45_degree_sil_t_uses_native_mesh_when_connector_stays_inside_branch():
