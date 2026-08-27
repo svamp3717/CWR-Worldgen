@@ -42,7 +42,8 @@ jobs:
             tests/test_stock_road_obstacle_policy.py \
             tests/test_stock_road_curve_preservation_policy.py \
             tests/test_stock_road_visual_finish_policy.py \
-            tests/test_stock_road_final_continuity_policy.py
+            tests/test_stock_road_final_continuity_policy.py \
+            tests/test_stock_road_sharp_turn_policy.py
       - name: Build targeted in-game road lab
         run: |
           python - <<'PY'
@@ -51,6 +52,7 @@ jobs:
           import json
           import math
           import os
+          import re
           import struct
 
           from cwr_worldgen.cwa_rvw4_height_policy import CWA_RVW4_HEIGHT_SCALE_METRES
@@ -70,9 +72,9 @@ jobs:
 
           elevation = source / "elevation" / "raw"
           elevation.mkdir(parents=True, exist_ok=True)
-          # Use one flat, high plateau for every case. Keeping all four visual
-          # labs in the same first-kilometre region also removes world-edge/grid
-          # ambiguity while the generated WRP contract is being verified in CWA.
+          # One flat, high plateau removes terrain/water ambiguity from visual
+          # road inspection. The sharp-turn case below is a translated copy of
+          # the real normalized Lundby D957 bend that exposed the seam failure.
           values = (lab_elevation_metres,) * 9
           payload = b"".join(value.to_bytes(2, "big", signed=True) for value in values)
           with ZipFile(elevation / "N00E000.hgt.zip", "w") as archive:
@@ -107,6 +109,16 @@ jobs:
               (end[0] + tangent[0] * 200.0, end[1] + tangent[1] * 200.0),
           ))
 
+          lundby_sharp = (
+              (1150.0000, 850.0000),
+              (1132.7500, 844.7500),
+              (1109.5000, 842.5000),
+              (1087.7500, 844.7500),
+              (1067.5000, 850.0000),
+              (1053.2500, 857.4990),
+              (1012.0000, 882.2500),
+          )
+
           elements = [
               way(100, {"highway": "primary", "surface": "asphalt", "name": "Native Curve Lab"}, curve),
               way(110, {"highway": "primary", "surface": "asphalt", "name": "Skew Main"},
@@ -120,6 +132,8 @@ jobs:
               way(130, {"highway": "primary", "surface": "asphalt", "name": "Wiggle Lab"},
                   ((350.0, 750.0), (351.0, 800.0), (350.0, 850.0),
                    (349.0, 900.0), (350.0, 950.0))),
+              way(150, {"highway": "primary", "surface": "asphalt", "name": "Lundby Sharp Turn"},
+                  lundby_sharp),
               way(140, {"barrier": "hedge"},
                   ((610.0, 470.0), (650.0, 610.0))),
               way(141, {"natural": "tree_row"},
@@ -193,8 +207,10 @@ jobs:
 
           offset = header.size + width * height * 4 + 512 * 32
           curve_headings = []
+          sharp_curves = []
           native_skew_t = []
           skew_fallback_caps = []
+          stock_curve_re = re.compile(r"^o\\road\\sil10 (?:25|50|75|100)\.p3d$", re.I)
           while offset + object_record.size <= len(wrp_bytes):
               values = object_record.unpack_from(wrp_bytes, offset)
               offset += object_record.size
@@ -204,14 +220,22 @@ jobs:
               model = model.decode("ascii")
               heading = math.degrees(math.atan2(values[6], values[0])) % 360.0
               x, z = float(values[9]), float(values[11])
-              if model == r"o\road\sil10 100.p3d":
+
+              in_smooth_curve_lab = 450.0 <= x <= 700.0 and 450.0 <= z <= 760.0
+              in_sharp_lab = 980.0 <= x <= 1180.0 and 810.0 <= z <= 920.0
+              if model == r"o\road\sil10 100.p3d" and in_smooth_curve_lab:
                   curve_headings.append(heading)
-              elif model == r"o\road\kr_new_sil_sil_t.p3d":
+              if in_smooth_curve_lab:
+                  assert model not in {r"o\road\sil10 75.p3d", r"o\road\sil10 50.p3d"}
+              if in_sharp_lab and stock_curve_re.fullmatch(model):
+                  sharp_curves.append((model, heading, x, z))
+              if model == r"o\road\kr_new_sil_sil_t.p3d":
                   native_skew_t.append((heading, x, z))
               elif model == r"o\road\sil6.p3d" and math.hypot(x - 850.0, z - 550.0) <= 1.0:
                   skew_fallback_caps.append((heading, x, z))
-              assert model not in {r"o\road\sil10 75.p3d", r"o\road\sil10 50.p3d"}
+
           assert len(curve_headings) == 4, curve_headings
+          assert len(sharp_curves) >= 3, sharp_curves
           assert native_skew_t == [], native_skew_t
           assert len(skew_fallback_caps) == 1, skew_fallback_caps
           for previous, current in zip(curve_headings, curve_headings[1:]):
@@ -280,6 +304,7 @@ jobs:
               ("roadlab_skew_t.wg_roadlab", "Road Lab - 45deg Paved T Fallback", 810.0, 550.0, 90.0),
               ("roadlab_mixed_t.wg_roadlab", "Road Lab - Paved Gravel T", 850.0, 260.0, 0.0),
               ("roadlab_wiggle.wg_roadlab", "Road Lab - Source Wiggle", 350.0, 810.0, 0.0),
+              ("roadlab_lundby_sharp.wg_roadlab", "Road Lab - Lundby Sharp Turn", 1160.0, 840.0, 250.0),
           )
           for folder_name, title, x, z, heading in targets:
               folder = missions / folder_name
@@ -301,23 +326,28 @@ jobs:
               "Install @CWR-Milestone9 as a normal CWA/OFP mod folder.\n"
               "Copy the Missions folders into the game's Missions directory if needed.\n\n"
               "Direct-spawn missions:\n"
-              "  roadlab_curve.wg_roadlab      - native 100 m stock curve\n"
-              "  roadlab_skew_t.wg_roadlab     - 45-degree paved T using small fallback cap\n"
-              "  roadlab_mixed_t.wg_roadlab    - paved/gravel T\n"
-              "  roadlab_wiggle.wg_roadlab     - source-wiggle straight\n\n"
+              "  roadlab_curve.wg_roadlab        - native 100 m stock curve\n"
+              "  roadlab_skew_t.wg_roadlab       - 45-degree paved T using small fallback cap\n"
+              "  roadlab_mixed_t.wg_roadlab      - paved/gravel T\n"
+              "  roadlab_wiggle.wg_roadlab       - source-wiggle straight\n"
+              "  roadlab_lundby_sharp.wg_roadlab - translated real Lundby D957 sharp bend\n\n"
               "Inspection areas in world X/Z metres:\n"
               "  Native 100 m curve: 500,500\n"
               "  45-degree paved T: 850,550\n"
               "  Paved/gravel T: 850,300\n"
-              "  Source-wiggle straight: 350,850\n\n"
-              "All four labs now sit inside the same first-kilometre terrain region.\n"
+              "  Source-wiggle straight: 350,850\n"
+              "  Lundby sharp bend: 1100,850\n\n"
+              "The sharp-bend geometry preserves the exact relative coordinates from the real Lundby failure.\n"
               "Check for grass wedges, road-surface clipping, z-fighting, visible slab seams, "
               "wrong curve handedness, wrong T placement, and gravel showing through the paved main road.\n",
               encoding="utf-8",
           )
           print(f"In-game PBO: {result.pbo_path}")
+          print("Sharp-turn native curves:", sharp_curves)
           print(json.dumps(road_report, indent=2, sort_keys=True))
           PY
+      - name: Package branch wheel for real-source replay
+        run: python -m pip wheel . --no-deps -w ci-ingame/build/python-dist
       - name: Upload in-game road lab build
         uses: actions/upload-artifact@v4
         with:
