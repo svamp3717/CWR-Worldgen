@@ -3,24 +3,26 @@
 
 Two engine-visible failures remain after centreline fitting:
 
-* stock curves have a rigid ten-degree connector frame.  Measuring source
+* stock curves have a rigid ten-degree connector frame. Measuring source
   headings from one polyline segment at a time can make a smooth sampled arc
   look like a sequence of different radii, producing mixed curve/straight
   pieces whose painted borders do not line up; and
 * a same-family paved T can be too skewed for the conservative native-junction
   matcher even when the physical branch road still fully covers the native
-  connector.  Falling back to a six-metre straight cap then looks like two
+  connector. Falling back to a six-metre straight cap then looks like two
   crossing roads rather than an intersection.
 
-Use a short symmetric tangent window while curve candidates are chosen and while
-final curve turn error is audited.  This removes sampling quantisation without
-moving the source centreline.  Curve seam underlays are disabled: a wrong curve
+Reconstruct vertex tangents from adjacent source chords while curve candidates
+are chosen and while final curve turn error is audited. For a constant-radius
+sampled arc, chord headings sit halfway between true vertex tangents; averaging
+interior chords and extrapolating the end chords recovers those tangents without
+moving the source centreline. Curve seam underlays are disabled: a wrong curve
 choice must be fixed at selection time rather than hidden under another visible
 road slab.
 
 For a fallback same-family paved T, keep the dominant through-road axis exact and
 use the native T mesh only when its branch connector centre still lies inside the
-actual branch road width.  The ordinary fitted approaches already continue under
+actual branch road width. The ordinary fitted approaches already continue under
 the cap, so the overlap closes the skew connector without inventing a lateral
 repair piece.
 """
@@ -29,13 +31,11 @@ from __future__ import annotations
 import math
 
 from . import playability as _p
-from . import stock_road_curve_policy as _curve
 from . import stock_road_geometry_policy as _geometry
 from . import stock_road_junction_policy as _junction
 from . import stock_road_model_geometry as _model_geometry
 from . import stock_road_visual_finish_policy as _finish
 
-SMOOTHED_TANGENT_HALF_WINDOW_METRES = 2.5
 MAXIMUM_FINAL_CURVE_TURN_ERROR_DEGREES = 1.75
 SKEW_T_CONNECTOR_EDGE_MARGIN_METRES = 0.05
 MAXIMUM_SKEW_T_MAIN_AXIS_ERROR_DEGREES = 7.5
@@ -46,7 +46,7 @@ _INSTALLED = False
 
 
 class _SmoothedHeadingMeasure:
-    """Delegate polyline geometry while returning a stable local tangent."""
+    """Delegate polyline geometry while returning a reconstructed tangent."""
 
     def __init__(self, measure):
         self._measure = measure
@@ -66,13 +66,47 @@ def _heading(start, end) -> float:
     ) % 360.0
 
 
+def _vertex_tangent_headings(measure) -> tuple[float, ...]:
+    segment_headings = tuple(
+        _heading(start, end) for start, end in zip(measure.points, measure.points[1:])
+    )
+    if not segment_headings:
+        return (0.0,)
+    if len(segment_headings) == 1:
+        return (segment_headings[0], segment_headings[0])
+
+    first_delta = _p._signed_heading_delta(segment_headings[0], segment_headings[1])
+    result = [(segment_headings[0] - first_delta * 0.5) % 360.0]
+    for previous, following in zip(segment_headings, segment_headings[1:]):
+        delta = _p._signed_heading_delta(previous, following)
+        result.append((previous + delta * 0.5) % 360.0)
+    last_delta = _p._signed_heading_delta(segment_headings[-2], segment_headings[-1])
+    result.append((segment_headings[-1] + last_delta * 0.5) % 360.0)
+    return tuple(result)
+
+
 def _smoothed_measure_heading(measure, distance: float) -> float:
-    half = SMOOTHED_TANGENT_HALF_WINDOW_METRES
-    before = measure.point(float(distance) - half)
-    after = measure.point(float(distance) + half)
-    if math.dist((before[0], before[1]), (after[0], after[1])) <= 1.0e-9:
-        return float(measure.point(distance)[2]) % 360.0
-    return _heading(before, after)
+    """Interpolate reconstructed vertex tangents along one source segment."""
+
+    tangents = _vertex_tangent_headings(measure)
+    if len(measure.points) < 2:
+        return tangents[0]
+    if distance <= 0.0:
+        return tangents[0]
+    if distance >= float(measure.total):
+        return tangents[-1]
+
+    segment = 0
+    for index in range(len(measure.cumulative) - 1):
+        if float(measure.cumulative[index + 1]) >= float(distance) - 1.0e-12:
+            segment = index
+            break
+    start_distance = float(measure.cumulative[segment])
+    end_distance = float(measure.cumulative[segment + 1])
+    length = max(1.0e-9, end_distance - start_distance)
+    fraction = max(0.0, min(1.0, (float(distance) - start_distance) / length))
+    delta = _p._signed_heading_delta(tangents[segment], tangents[segment + 1])
+    return (tangents[segment] + delta * fraction) % 360.0
 
 
 def _distance_on_measure(measure, point) -> float:
