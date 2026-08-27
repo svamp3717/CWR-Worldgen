@@ -44,6 +44,42 @@ def test_sampled_100m_arc_has_stable_ten_degree_tangent_change():
     ) < 0.8
 
 
+def test_roadlab_curve_chain_prefers_100m_native_radius():
+    # Use the post-normalization RoadLab coordinates, including the first 5-degree
+    # sample whose sub-metre lateral offset was rounded onto the entry straight.
+    points = (
+        (500.2496, 300.0),
+        (500.2496, 399.7504),
+        (500.2496, 500.2496),
+        (500.2496, 508.4992),
+        (501.7504, 517.5008),
+        (503.2512, 525.7504),
+        (506.2496, 534.0),
+        (509.2512, 542.2496),
+        (513.7504, 549.7504),
+        (518.2496, 557.2512),
+        (523.5008, 564.0),
+        (588.0, 641.2512),
+        (651.7504, 717.7504),
+    )
+    measure = _p._PolylineMeasure.create(points)
+    pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
+
+    fitted = _final._coherent_curve_chain(
+        measure,
+        pieces,
+        start_distance=0.0,
+        preferred_end_distance=measure.total,
+        minimum_end_distance=max(0.0, measure.total - 0.35),
+        maximum_end_distance=measure.total + 3.125,
+    )
+    models = [piece.model_path.casefold() for piece, _start, _end in fitted]
+
+    assert models.count(r"o\road\sil10 100.p3d") >= 3, models
+    assert r"o\road\sil10 75.p3d" not in models, models
+    assert r"o\road\sil10 50.p3d" not in models, models
+
+
 def test_45_degree_sil_t_uses_native_mesh_when_connector_stays_inside_branch():
     incidents = (
         _incident(90.0),
