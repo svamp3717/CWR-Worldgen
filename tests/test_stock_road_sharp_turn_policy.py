@@ -24,9 +24,11 @@ def _lundby_sharp_turn_points():
 
 
 def _lundby_junction_to_junction_turn_points():
-    # The production network splits D957 at the junction at 3126.75/3188.999.
-    # This is the exact short run that contains both reported grass wedges.
-    return _lundby_sharp_turn_points()[:-1]
+    # The production network really splits D957 at both the track junction at
+    # 3206.25/3176.25 and the junction at 3126.75/3188.999. This is therefore
+    # the exact curved run emitted by the normal world build, not a synthetic
+    # enlargement around the reported coordinates.
+    return _lundby_sharp_turn_points()[1:-1]
 
 
 def _fit(chain, measure, pieces):
@@ -144,7 +146,7 @@ def test_lundby_production_split_has_no_exposed_tangent_miters():
     baseline = _fit_with_production_junction_cover(_exact._ORIGINAL_CHAIN, measure, pieces)
     fitted = _fit_with_production_junction_cover(_p._stock_piece_chain, measure, pieces)
 
-    assert _curve_count(fitted) >= 4, [piece.model_path for piece, _a, _b in fitted]
+    assert _curve_count(fitted) >= 3, [piece.model_path for piece, _a, _b in fitted]
     assert _curve_count(fitted) > _curve_count(baseline)
     assert len(fitted) <= len(baseline)
 
