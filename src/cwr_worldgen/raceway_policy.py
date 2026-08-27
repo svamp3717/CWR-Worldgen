@@ -84,4 +84,13 @@ def install_raceway_policy() -> None:
     )
 
     install_stock_road_final_continuity_policy()
+    # The final-continuity skew chooser is later than the measured-junction
+    # installer, so restate the verified local -X branch side here at the true
+    # end of the policy stack.  Otherwise the correct T model is rotated onto
+    # the opposite side of the logical intersection.
+    from .stock_road_skew_orientation_policy import (
+        install_stock_road_skew_orientation_policy,
+    )
+
+    install_stock_road_skew_orientation_policy()
     _INSTALLED = True
