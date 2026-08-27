@@ -1,46 +1,43 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Final continuity rules for stock curves and strongly skewed paved T nodes.
 
-Two engine-visible failures remain after centreline fitting:
+Stock curve P3Ds have fixed ten-degree connector geometry.  A sampled source arc
+therefore has two distinct quantities that matter: its true tangent change and
+its radius.  Earlier selection used nearest segment headings and a permissive
+sagitta tolerance, which let a smooth 100 m arc become a mixture of 75 m, 50 m
+and straight pieces.  Those pieces meet at their centre connectors but their
+painted borders do not form one continuous curve.
 
-* stock curves have a rigid ten-degree connector frame. Measuring source
-  headings from one polyline segment at a time can make a smooth sampled arc
-  look like a sequence of different radii, producing mixed curve/straight
-  pieces whose painted borders do not line up; and
-* a same-family paved T can be too skewed for the conservative native-junction
-  matcher even when the physical branch road still fully covers the native
-  connector. Falling back to a six-metre straight cap then looks like two
-  crossing roads rather than an intersection.
-
-Reconstruct vertex tangents from adjacent source chords while curve candidates
-are chosen and while final curve turn error is audited. For a constant-radius
-sampled arc, chord headings sit halfway between true vertex tangents; averaging
-interior chords and extrapolating the end chords recovers those tangents without
-moving the source centreline. Curve seam underlays are disabled: a wrong curve
-choice must be fixed at selection time rather than hidden under another visible
-road slab.
+Reconstruct vertex tangents from adjacent source chords and score a native curve
+against the radius implied by those tangents.  A coherent 100 m source arc now
+stays on the 100 m stock family; a curve whose radius cannot be represented
+closely falls back to ordinary short straights rather than mixing incompatible
+native radii.  Curve seam underlays are disabled because a wrong curve choice
+must be fixed at selection time instead of hidden under another road slab.
 
 For a fallback same-family paved T, keep the dominant through-road axis exact and
 use the native T mesh only when its branch connector centre still lies inside the
-actual branch road width. The ordinary fitted approaches already continue under
-the cap, so the overlap closes the skew connector without inventing a lateral
-repair piece.
+actual branch road width.  The ordinary fitted approaches already continue under
+the cap, so this overlap closes a 45-degree skew connector without inventing a
+lateral repair piece.
 """
 from __future__ import annotations
 
 import math
 
 from . import playability as _p
+from . import road_quality_policy as _quality
+from . import stock_road_curve_policy as _curve
 from . import stock_road_geometry_policy as _geometry
 from . import stock_road_junction_policy as _junction
 from . import stock_road_model_geometry as _model_geometry
 from . import stock_road_visual_finish_policy as _finish
 
 MAXIMUM_FINAL_CURVE_TURN_ERROR_DEGREES = 1.75
+MAXIMUM_NATIVE_RADIUS_ERROR_RATIO = 0.12
 SKEW_T_CONNECTOR_EDGE_MARGIN_METRES = 0.05
 MAXIMUM_SKEW_T_MAIN_AXIS_ERROR_DEGREES = 7.5
 
-_ORIGINAL_CURVE_CHAIN = None
 _ORIGINAL_REALIGN_LEGACY_CAPS = None
 _INSTALLED = False
 
@@ -146,10 +143,270 @@ def _smoothed_curve_turn_error_degrees(run, start, end) -> float:
     return abs(source_turn - _model_geometry.STOCK_CURVE_ANGLE_DEGREES)
 
 
-def _smoothed_curve_chain(measure, pieces, **kwargs):
-    if _ORIGINAL_CURVE_CHAIN is None:
-        raise RuntimeError("final stock-road continuity policy is not installed")
-    return _ORIGINAL_CURVE_CHAIN(_SmoothedHeadingMeasure(measure), pieces, **kwargs)
+def _implied_radius(chord_length: float, turn_degrees: float) -> float:
+    if turn_degrees <= 0.10:
+        return math.inf
+    sine = math.sin(math.radians(turn_degrees) * 0.5)
+    if abs(sine) <= 1.0e-9:
+        return math.inf
+    return float(chord_length) / (2.0 * sine)
+
+
+def _coherent_curve_chain(
+    measure,
+    pieces,
+    *,
+    start_distance,
+    preferred_end_distance,
+    minimum_end_distance,
+    maximum_end_distance,
+):
+    """Fit stock pieces while requiring native curves to match source radius."""
+
+    _curve._REVERSED_CURVE_KEYS.clear()
+    curves = _curve._curve_pieces(pieces)
+    if not curves:
+        return _curve._ORIGINAL_CHAIN(
+            measure,
+            pieces,
+            start_distance=start_distance,
+            preferred_end_distance=preferred_end_distance,
+            minimum_end_distance=minimum_end_distance,
+            maximum_end_distance=maximum_end_distance,
+        )
+
+    context = _quality._CONTEXT.get()
+    if context is not None:
+        (
+            start_distance,
+            preferred_end_distance,
+            minimum_end_distance,
+            maximum_end_distance,
+        ) = _quality._quality_window(
+            measure,
+            pieces,
+            start_distance,
+            preferred_end_distance,
+            minimum_end_distance,
+            maximum_end_distance,
+            context,
+        )
+
+    if not pieces or preferred_end_distance <= start_distance + 0.05:
+        return ()
+
+    measured = _SmoothedHeadingMeasure(measure)
+    ordered = tuple(
+        sorted(pieces, key=lambda piece: (-piece.length_metres, piece.model_path.casefold()))
+    )
+    shortest = min(piece.length_metres for piece in ordered)
+    longest = max(
+        max(piece.length_metres for piece in ordered),
+        max(piece.length_metres for piece, _turn, _sagitta in curves),
+    )
+    lengths = tuple(
+        dict.fromkeys(
+            [piece.length_metres for piece in ordered]
+            + [piece.length_metres for piece, _turn, _sagitta in curves]
+        )
+    )
+    current = start_distance
+    fitted = []
+    maximum_objects = max(
+        1, int(math.ceil((maximum_end_distance - start_distance) / shortest)) + 2
+    )
+
+    for _ in range(maximum_objects):
+        if current >= preferred_end_distance - 0.05:
+            break
+        remaining = preferred_end_distance - current
+        if current >= minimum_end_distance - 0.05 and remaining < shortest * 0.45:
+            break
+
+        preferred = _p._road_piece_sequence(remaining, ordered)
+        preferred_piece = preferred[0] if preferred else ordered[-1]
+        start_x, start_z, start_heading = measured.point(current)
+        near_end = remaining <= longest * 2.25
+        candidates = []
+
+        for piece in ordered:
+            endpoint = measure.chord_endpoint(
+                current, piece.length_metres, maximum_end_distance
+            )
+            if endpoint is None:
+                continue
+            end_distance, end_x, end_z, chord_heading = endpoint
+            end_heading = measured.point(end_distance)[2]
+            signed_turn = _p._signed_heading_delta(start_heading, end_heading)
+            turn = max(
+                _p._heading_difference(chord_heading, start_heading),
+                _p._heading_difference(chord_heading, end_heading),
+            )
+            deviation = measure.maximum_chord_deviation(
+                current, end_distance, (start_x, start_z), (end_x, end_z)
+            )
+            if piece.nominal_length >= 25:
+                turn_limit, deviation_limit = 7.0, 0.45
+            elif piece.nominal_length >= 12:
+                turn_limit, deviation_limit = 11.0, 0.30
+            else:
+                turn_limit, deviation_limit = 18.0, 0.22
+            fidelity_penalty = int(turn > turn_limit or deviation > deviation_limit)
+            curve_preference = int(abs(signed_turn) >= _curve._MINIMUM_CURVE_TURN_DEGREES)
+            geometry_ratio = max(turn / turn_limit, deviation / deviation_limit)
+            terrain_penalty = 0
+            terrain_ratio = 0.0
+            if context is not None:
+                bulge = _quality._terrain_bulge(
+                    context, (start_x, start_z), (end_x, end_z), piece.nominal_length
+                )
+                terrain_penalty = int(bulge > _quality._STOCK_BULGE_LIMIT)
+                terrain_ratio = bulge / max(0.001, _quality._STOCK_BULGE_LIMIT)
+            tail_error = (
+                _curve._tail_error(
+                    measure,
+                    lengths,
+                    end_distance,
+                    preferred_end_distance,
+                    maximum_end_distance,
+                    _quality._LOOKAHEAD_DEPTH,
+                )
+                if near_end
+                else 0.0
+            )
+            tail_tolerance = (
+                max(
+                    0.20,
+                    float(getattr(context.spec, "road_connection_tolerance", 0.35)),
+                )
+                if context is not None
+                else 0.35
+            )
+            tail_penalty = int(near_end and tail_error > tail_tolerance)
+            score = (
+                fidelity_penalty,
+                tail_penalty,
+                terrain_penalty,
+                curve_preference,
+                geometry_ratio,
+                terrain_ratio,
+                tail_error,
+                0 if piece == preferred_piece else 1,
+                abs(preferred_end_distance - end_distance),
+                -piece.length_metres,
+            )
+            candidates.append((score, piece, endpoint))
+
+        for piece, expected_turn, expected_sagitta in curves:
+            endpoint = measure.chord_endpoint(
+                current, piece.length_metres, maximum_end_distance
+            )
+            if endpoint is None:
+                continue
+            end_distance, end_x, end_z, _chord_heading = endpoint
+            end_heading = measured.point(end_distance)[2]
+            turn = abs(_p._signed_heading_delta(start_heading, end_heading))
+            deviation = measure.maximum_chord_deviation(
+                current, end_distance, (start_x, start_z), (end_x, end_z)
+            )
+            model_match = _model_geometry.stock_curve_match(piece.model_path)
+            if model_match is None:
+                continue
+            model_radius = float(model_match.group("radius"))
+            source_radius = _implied_radius(piece.length_metres, turn)
+            radius_error_ratio = (
+                abs(source_radius - model_radius) / model_radius
+                if math.isfinite(source_radius)
+                else math.inf
+            )
+            turn_error = abs(turn - expected_turn)
+            sagitta_tolerance = max(0.12, expected_sagitta * 0.45)
+            sagitta_error = abs(deviation - expected_sagitta)
+            fidelity_penalty = int(
+                turn < _curve._MINIMUM_CURVE_TURN_DEGREES
+                or turn_error > MAXIMUM_FINAL_CURVE_TURN_ERROR_DEGREES
+                or radius_error_ratio > MAXIMUM_NATIVE_RADIUS_ERROR_RATIO
+                or sagitta_error > sagitta_tolerance
+            )
+            geometry_ratio = max(
+                turn_error / MAXIMUM_FINAL_CURVE_TURN_ERROR_DEGREES,
+                radius_error_ratio / MAXIMUM_NATIVE_RADIUS_ERROR_RATIO,
+                sagitta_error / sagitta_tolerance,
+            )
+            terrain_penalty = 0
+            terrain_ratio = 0.0
+            if context is not None:
+                bulge = _quality._terrain_bulge(
+                    context, (start_x, start_z), (end_x, end_z), 10
+                )
+                terrain_penalty = int(bulge > _quality._STOCK_BULGE_LIMIT)
+                terrain_ratio = bulge / max(0.001, _quality._STOCK_BULGE_LIMIT)
+            tail_error = (
+                _curve._tail_error(
+                    measure,
+                    lengths,
+                    end_distance,
+                    preferred_end_distance,
+                    maximum_end_distance,
+                    _quality._LOOKAHEAD_DEPTH,
+                )
+                if near_end
+                else 0.0
+            )
+            tail_tolerance = (
+                max(
+                    0.20,
+                    float(getattr(context.spec, "road_connection_tolerance", 0.35)),
+                )
+                if context is not None
+                else 0.35
+            )
+            tail_penalty = int(near_end and tail_error > tail_tolerance)
+            score = (
+                fidelity_penalty,
+                tail_penalty,
+                terrain_penalty,
+                0,
+                geometry_ratio,
+                terrain_ratio,
+                tail_error,
+                0,
+                abs(preferred_end_distance - end_distance),
+                -piece.length_metres,
+            )
+            candidates.append((score, piece, endpoint))
+
+        if not candidates:
+            if current >= minimum_end_distance - 0.05:
+                break
+            piece = ordered[-1]
+            target_distance = min(preferred_end_distance, measure.total)
+            target_x, target_z, target_heading = measured.point(target_distance)
+            dx, dz = target_x - start_x, target_z - start_z
+            length = math.hypot(dx, dz)
+            if length <= 1.0e-9:
+                angle = math.radians(target_heading)
+                dx, dz, length = math.sin(angle), math.cos(angle), 1.0
+            fitted.append(
+                (
+                    piece,
+                    (start_x, start_z),
+                    (
+                        start_x + dx / length * piece.length_metres,
+                        start_z + dz / length * piece.length_metres,
+                    ),
+                )
+            )
+            break
+
+        _score, piece, endpoint = min(candidates, key=lambda item: item[0])
+        end_distance, end_x, end_z, _heading_value = endpoint
+        fitted.append((piece, (start_x, start_z), (end_x, end_z)))
+        if end_distance <= current + 1.0e-7:
+            break
+        current = end_distance
+
+    return tuple(fitted)
 
 
 def _same_family_paved_skew_t(incidents, family: str):
@@ -254,19 +511,15 @@ def _disable_curve_seam_underlays(report, elevations, spec):
 
 
 def install_stock_road_final_continuity_policy() -> None:
-    global _ORIGINAL_CURVE_CHAIN, _ORIGINAL_REALIGN_LEGACY_CAPS, _INSTALLED
+    global _ORIGINAL_REALIGN_LEGACY_CAPS, _INSTALLED
     if _INSTALLED:
         return
 
-    _ORIGINAL_CURVE_CHAIN = _geometry._ORIGINAL_CURVE_CHAIN
     _ORIGINAL_REALIGN_LEGACY_CAPS = _finish._realign_legacy_caps
-    if _ORIGINAL_CURVE_CHAIN is None or _ORIGINAL_REALIGN_LEGACY_CAPS is None:
-        raise RuntimeError("stock road geometry and visual-finish policies must install first")
+    if _ORIGINAL_REALIGN_LEGACY_CAPS is None:
+        raise RuntimeError("stock road visual-finish policy must install first")
 
-    # The geometry wrapper calls this captured chain at run time, so replacing
-    # the capture preserves every outer terrain/connector wrapper while giving
-    # curve selection stable tangent observations.
-    _geometry._ORIGINAL_CURVE_CHAIN = _smoothed_curve_chain
+    _geometry._ORIGINAL_CURVE_CHAIN = _coherent_curve_chain
     _geometry._curve_turn_error_degrees = _smoothed_curve_turn_error_degrees
     _geometry._MAXIMUM_TANGENT_TURN_ERROR_DEGREES = (
         MAXIMUM_FINAL_CURVE_TURN_ERROR_DEGREES
