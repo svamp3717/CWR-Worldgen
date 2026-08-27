@@ -31,6 +31,7 @@ jobs:
             tests/test_stock_road_3d_connector_policy.py \
             tests/test_stock_road_junction_policy.py \
             tests/test_stock_road_skew_policy.py \
+            tests/test_stock_road_skew_orientation_policy.py \
             tests/test_stock_road_connector_policy.py \
             tests/test_stock_road_surface_overlap_policy.py \
             tests/test_stock_road_relaxation_policy.py \
@@ -53,6 +54,10 @@ jobs:
           from cwr_worldgen.milestone9 import Milestone9Spec, build_milestone9
           from cwr_worldgen.osm import BboxProjection
           from cwr_worldgen.source_pipeline import SourceFetchSpec, fetch_sources
+          from cwr_worldgen.stock_road_model_geometry import (
+              native_junction_intersection_offset,
+              rotate_local,
+          )
 
           root = Path("ci-ingame")
           source = root / "source"
@@ -62,6 +67,7 @@ jobs:
           world_size = cells * cell_size
           projection = BboxProjection.create(bbox, world_size)
           lab_elevation_metres = 96
+          player_altitude_metres = lab_elevation_metres + 1
 
           elevation = source / "elevation" / "raw"
           elevation.mkdir(parents=True, exist_ok=True)
@@ -173,8 +179,8 @@ jobs:
           assert result.pbo_path.is_file()
 
           # Audit the serialized WRP, not just the pre-serialization selector.
-          # Previous regressions passed unit tests but the production rounding
-          # stack still emitted mixed curve radii and a T rotated onto the wrong side.
+          # Previous regressions passed unit tests but the production stack still
+          # emitted mixed curve radii and a T whose tongue missed the diagonal arm.
           wrp_path = root / "build" / "source" / "wg_roadlab" / "wg_roadlab.wrp"
           wrp_bytes = wrp_path.read_bytes()
           header = struct.Struct("<4sii")
@@ -183,12 +189,11 @@ jobs:
           assert magic == b"4WVR"
           raw_heights = struct.unpack_from(f"<{width * height}h", wrp_bytes, header.size)
           # Default Milestone 9 RVW4 scale is 0.05 m, so 96 m serializes as 1920.
-          # This catches accidental reintroduction of a sea-level lab before upload.
           assert min(raw_heights) >= 1900, min(raw_heights)
 
           offset = header.size + width * height * 4 + 512 * 32
           curve_headings = []
-          native_skew_t_headings = []
+          native_skew_t = []
           while offset + object_record.size <= len(wrp_bytes):
               values = object_record.unpack_from(wrp_bytes, offset)
               offset += object_record.size
@@ -200,23 +205,39 @@ jobs:
               if model == r"o\road\sil10 100.p3d":
                   curve_headings.append(heading)
               elif model == r"o\road\kr_new_sil_sil_t.p3d":
-                  native_skew_t_headings.append(heading)
+                  native_skew_t.append((heading, float(values[9]), float(values[11])))
               assert model not in {r"o\road\sil10 75.p3d", r"o\road\sil10 50.p3d"}
           assert len(curve_headings) == 4, curve_headings
-          assert len(native_skew_t_headings) == 1, native_skew_t_headings
+          assert len(native_skew_t) == 1, native_skew_t
           for previous, current in zip(curve_headings, curve_headings[1:]):
               delta = (current - previous + 180.0) % 360.0 - 180.0
               assert abs(delta - 10.0) <= 0.05, curve_headings
 
-          skew_heading = native_skew_t_headings[0]
+          skew_heading, skew_x, skew_z = native_skew_t[0]
           skew_heading_error = abs((skew_heading - 90.0 + 180.0) % 360.0 - 180.0)
-          assert skew_heading_error <= 0.05, native_skew_t_headings
-          # The measured T branch is local -X / 270 degrees.  With the through
-          # road held east-west, the branch connector must therefore point north,
-          # toward the northeast source arm, never south onto the opposite side.
+          assert skew_heading_error <= 0.05, native_skew_t
+          local_center = native_junction_intersection_offset(r"o\road\kr_new_sil_sil_t.p3d")
+          assert local_center is not None
+          center_offset = rotate_local(local_center, skew_heading)
+          skew_center = (skew_x + center_offset[0], skew_z + center_offset[1])
+          # For this 45-degree northeast arm the rigid T slides one 6.25 m
+          # connector radius east. Its north connector then lies on x-z=600,
+          # the source branch centreline through 1300,700.
+          assert 1305.5 <= skew_center[0] <= 1306.5, skew_center
+          assert 699.2 <= skew_center[1] <= 700.3, skew_center
           branch_connector_heading = (skew_heading + 270.0) % 360.0
-          branch_side_error = abs((branch_connector_heading - 45.0 + 180.0) % 360.0 - 180.0)
-          assert branch_side_error <= 45.05, (skew_heading, branch_connector_heading)
+          branch_unit = (
+              math.sin(math.radians(branch_connector_heading)),
+              math.cos(math.radians(branch_connector_heading)),
+          )
+          branch_connector = (
+              skew_center[0] + branch_unit[0] * 6.25,
+              skew_center[1] + branch_unit[1] * 6.25,
+          )
+          assert abs((branch_connector[0] - branch_connector[1]) - 600.0) <= 0.10, (
+              skew_center,
+              branch_connector,
+          )
 
           def smoke_mission(title, x, z, heading=0.0):
               return f'''version=11;
@@ -248,7 +269,7 @@ jobs:
                           items=1;
                           class Item0
                           {{
-                              position[]={{{x:.3f},0.000,{z:.3f}}};
+                              position[]={{{x:.3f},{player_altitude_metres:.3f},{z:.3f}}};
                               azimut={heading:.6f};
                               id=0;
                               side="WEST";
@@ -267,8 +288,6 @@ jobs:
           '''
 
           missions = root / "build" / "Missions"
-          # Spawn directly on the relevant road instead of tens of metres away.
-          # That keeps visual QA about road geometry rather than shoreline hunting.
           targets = (
               ("roadlab_curve.wg_roadlab", "Road Lab - Native Curve", 500.0, 470.0, 0.0),
               ("roadlab_skew_t.wg_roadlab", "Road Lab - 45deg Paved T", 1260.0, 700.0, 90.0),
@@ -278,15 +297,19 @@ jobs:
           for folder_name, title, x, z, heading in targets:
               folder = missions / folder_name
               folder.mkdir(parents=True, exist_ok=True)
-              (folder / "mission.sqm").write_text(
-                  smoke_mission(title, x, z, heading), encoding="ascii"
+              mission_text = smoke_mission(title, x, z, heading)
+              expected_position = (
+                  f"position[]={{{x:.3f},{player_altitude_metres:.3f},{z:.3f}}};"
               )
+              assert expected_position in mission_text
+              (folder / "mission.sqm").write_text(mission_text, encoding="ascii")
 
           readme = root / "build" / "ROADLAB.txt"
           readme.write_text(
               "WG Stock Road Lab\n"
               f"Commit: {os.environ.get('GITHUB_SHA', 'local')}\n"
-              f"Flat lab elevation: {lab_elevation_metres} m\n\n"
+              f"Flat lab elevation: {lab_elevation_metres} m\n"
+              f"Player spawn altitude ASL: {player_altitude_metres} m\n\n"
               "Install @CWR-Milestone9 as a normal CWA/OFP mod folder.\n"
               "Copy the Missions folders into the game's Missions directory if needed.\n\n"
               "Direct-spawn missions:\n"
@@ -300,7 +323,7 @@ jobs:
               "  Paved/gravel T: 1300,1300\n"
               "  Source-wiggle straight: 450,1700\n\n"
               "Check for grass wedges, road-surface clipping, z-fighting, visible slab seams, "
-              "wrong curve handedness, wrong T branch side, and gravel showing through the paved main road.\n",
+              "wrong curve handedness, wrong T placement, and gravel showing through the paved main road.\n",
               encoding="utf-8",
           )
           print(f"In-game PBO: {result.pbo_path}")
