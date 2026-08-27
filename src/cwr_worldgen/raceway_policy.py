@@ -73,4 +73,9 @@ def install_raceway_policy() -> None:
     from .stock_road_visual_finish_policy import install_stock_road_visual_finish_policy
 
     install_stock_road_visual_finish_policy()
+    from .stock_road_final_continuity_policy import (
+        install_stock_road_final_continuity_policy,
+    )
+
+    install_stock_road_final_continuity_policy()
     _INSTALLED = True
