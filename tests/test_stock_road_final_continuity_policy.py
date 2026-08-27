@@ -165,7 +165,7 @@ def test_roadlab_curve_chain_stays_coherent_with_flat_terrain_context():
     _assert_coherent_100m_curve(fitted, minimum_count=4)
 
 
-def test_45_degree_sil_t_uses_native_mesh_when_connector_stays_inside_branch():
+def test_45_degree_sil_t_uses_measured_minus_x_branch_side():
     incidents = (
         _incident(90.0),
         _incident(270.0),
@@ -176,7 +176,18 @@ def test_45_degree_sil_t_uses_native_mesh_when_connector_stays_inside_branch():
 
     assert native is not None
     assert native.model_path == r"o\road\kr_new_sil_sil_t.p3d"
-    assert math.isclose(native.heading_degrees, 270.0, abs_tol=1.0e-9)
+    # The Resistance T branch connector is local -X (270 degrees).  Keeping the
+    # east/west through road exact therefore requires a 90-degree model yaw so
+    # the branch tongue points north, on the same side as the northeast source
+    # arm.  The old +X assumption returned 270 degrees and pointed it south.
+    assert math.isclose(native.heading_degrees, 90.0, abs_tol=1.0e-9)
+    branch_connector_heading = (native.heading_degrees + 270.0) % 360.0
+    assert math.isclose(branch_connector_heading, 0.0, abs_tol=1.0e-9)
+    assert math.isclose(
+        _junction._angular_distance(branch_connector_heading, 45.0),
+        45.0,
+        abs_tol=1.0e-9,
+    )
     assert math.isclose(native.maximum_heading_error_degrees, 45.0, abs_tol=1.0e-9)
 
 
