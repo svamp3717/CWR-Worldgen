@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 
 from cwr_worldgen import playability as _p
+from cwr_worldgen import road_quality_policy as _quality
 from cwr_worldgen import stock_road_final_continuity_policy as _final
 from cwr_worldgen import stock_road_junction_policy as _junction
 
@@ -44,9 +46,7 @@ def test_sampled_100m_arc_has_stable_ten_degree_tangent_change():
     ) < 0.8
 
 
-def test_roadlab_curve_chain_prefers_100m_native_radius():
-    # Use the post-normalization RoadLab coordinates, including the first 5-degree
-    # sample whose sub-metre lateral offset was rounded onto the entry straight.
+def _roadlab_curve_fixture():
     points = (
         (500.2496, 300.0),
         (500.2496, 399.7504),
@@ -64,7 +64,20 @@ def test_roadlab_curve_chain_prefers_100m_native_radius():
     )
     measure = _p._PolylineMeasure.create(points)
     pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
+    return measure, pieces
 
+
+def _assert_coherent_100m_curve(fitted):
+    models = [piece.model_path.casefold() for piece, _start, _end in fitted]
+    assert models.count(r"o\road\sil10 100.p3d") >= 3, models
+    assert r"o\road\sil10 75.p3d" not in models, models
+    assert r"o\road\sil10 50.p3d" not in models, models
+
+
+def test_roadlab_curve_chain_prefers_100m_native_radius():
+    # Use the post-normalization RoadLab coordinates, including the first 5-degree
+    # sample whose sub-metre lateral offset was rounded onto the entry straight.
+    measure, pieces = _roadlab_curve_fixture()
     fitted = _p._stock_piece_chain(
         measure,
         pieces,
@@ -73,11 +86,30 @@ def test_roadlab_curve_chain_prefers_100m_native_radius():
         minimum_end_distance=max(0.0, measure.total - 0.35),
         maximum_end_distance=measure.total + 3.125,
     )
-    models = [piece.model_path.casefold() for piece, _start, _end in fitted]
+    _assert_coherent_100m_curve(fitted)
 
-    assert models.count(r"o\road\sil10 100.p3d") >= 3, models
-    assert r"o\road\sil10 75.p3d" not in models, models
-    assert r"o\road\sil10 50.p3d" not in models, models
+
+def test_roadlab_curve_chain_stays_coherent_with_flat_terrain_context():
+    measure, pieces = _roadlab_curve_fixture()
+    spec = SimpleNamespace(cells=64, cell_size=50.0, road_connection_tolerance=0.35)
+    context = _quality._Context(
+        elevations=(24.0,) * (64 * 64),
+        spec=spec,
+        junctions={},
+    )
+    token = _quality._CONTEXT.set(context)
+    try:
+        fitted = _p._stock_piece_chain(
+            measure,
+            pieces,
+            start_distance=0.0,
+            preferred_end_distance=measure.total,
+            minimum_end_distance=max(0.0, measure.total - 0.35),
+            maximum_end_distance=measure.total + 3.125,
+        )
+    finally:
+        _quality._CONTEXT.reset(token)
+    _assert_coherent_100m_curve(fitted)
 
 
 def test_45_degree_sil_t_uses_native_mesh_when_connector_stays_inside_branch():
