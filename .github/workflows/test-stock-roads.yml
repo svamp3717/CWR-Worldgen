@@ -38,7 +38,8 @@ jobs:
             tests/test_stock_road_relaxation_transaction_policy.py \
             tests/test_stock_road_path_conditioning_policy.py \
             tests/test_stock_road_obstacle_policy.py \
-            tests/test_stock_road_curve_preservation_policy.py
+            tests/test_stock_road_curve_preservation_policy.py \
+            tests/test_stock_road_final_continuity_policy.py
       - name: Build targeted in-game road lab
         run: |
           python - <<'PY'
@@ -62,7 +63,9 @@ jobs:
 
           elevation = source / "elevation" / "raw"
           elevation.mkdir(parents=True, exist_ok=True)
-          values = (8, 9, 10, 6, 7, 8, 4, 5, 6)
+          # Keep every visual target comfortably above CWA's water plane.  The
+          # road lab is for inspecting meshes, not practising amphibious QA.
+          values = (24, 24, 24, 24, 24, 24, 24, 24, 24)
           payload = b"".join(value.to_bytes(2, "big", signed=True) for value in values)
           with ZipFile(elevation / "N00E000.hgt.zip", "w") as archive:
               archive.writestr("N00E000.hgt", payload)
@@ -149,7 +152,7 @@ jobs:
                   name="wg_roadlab",
                   display_name="WG Stock Road Lab",
                   solver_iterations=4,
-                  world_edge_blend_cells=2,
+                  world_edge_blend_cells=0,
                   max_forest_objects=0,
                   max_buildings=0,
                   road_connection_tolerance=0.35,
