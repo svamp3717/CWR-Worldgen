@@ -23,6 +23,7 @@ sources = [
 
 [project.scripts]
 cwr-worldgen = "cwr_worldgen.cli:main"
+worldgen = "cwr_worldgen.build_cli:main"
 
 [project.gui-scripts]
 cwr-worldgen-gui = "cwr_worldgen.gui_entry:main"
