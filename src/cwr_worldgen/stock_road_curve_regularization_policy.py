@@ -12,8 +12,13 @@ Before the local fillet stage, detect only sustained same-direction curvature an
 ask whether the affected source samples can lie on one verified stock radius
 (25/50/75/100 m) without moving more than the existing 0.45 m fillet corridor.
 The candidate must also keep source order on the arc and match both entry and
-exit tangents.  Accepted spans are resampled uniformly on that exact circle;
-ordinary corners, S-bends and source wiggles continue through the existing
+exit tangents.  When the observed turn is already close to a whole number of
+native ten-degree sections, distribute the normalizer error across both arc
+boundaries and snap to that exact stock angle.  This lets adjacent curve P3Ds
+share both radius and tangent instead of leaving the final few degrees to short
+faceted straights.
+
+Ordinary corners, S-bends and source wiggles continue through the existing
 rounding implementation unchanged.
 """
 from __future__ import annotations
@@ -31,7 +36,10 @@ MINIMUM_SUSTAINED_CURVE_TOTAL_TURN_DEGREES = 15.0
 MAXIMUM_REGULARIZED_ARC_DEGREES = 135.0
 MAXIMUM_REGULARIZED_TANGENT_ERROR_DEGREES = 3.0
 MAXIMUM_REGULARIZED_TURN_ERROR_DEGREES = 3.0
+MAXIMUM_STOCK_ANGLE_SNAP_ERROR_DEGREES = 1.5
 REGULARIZED_ARC_SAMPLE_DEGREES = 2.5
+_FIXED_RADIUS_FIT_ITERATIONS = 8
+_FIXED_RADIUS_MAXIMUM_STEP_METRES = 2.0
 
 _ORIGINAL_ROUNDED = None
 _INSTALLED = False
@@ -155,6 +163,124 @@ def _circle_tangent_heading(point, centre, turn_sign: int) -> float:
     return math.degrees(math.atan2(tangent_x, tangent_z)) % 360.0
 
 
+def _fit_fixed_radius_centre(points, radius: float, initial_centre):
+    """Gauss-Newton fit of one known stock radius to source samples."""
+
+    cx, cz = float(initial_centre[0]), float(initial_centre[1])
+    for _ in range(_FIXED_RADIUS_FIT_ITERATIONS):
+        hxx = hxz = hzz = 0.0
+        gx = gz = 0.0
+        for point in points:
+            dx = cx - float(point[0])
+            dz = cz - float(point[1])
+            distance = math.hypot(dx, dz)
+            if distance <= 1.0e-9:
+                continue
+            jx = dx / distance
+            jz = dz / distance
+            residual = distance - radius
+            hxx += jx * jx
+            hxz += jx * jz
+            hzz += jz * jz
+            gx += jx * residual
+            gz += jz * residual
+        determinant = hxx * hzz - hxz * hxz
+        if abs(determinant) <= 1.0e-12:
+            break
+        move_x = (-gx * hzz + hxz * gz) / determinant
+        move_z = (hxz * gx - hxx * gz) / determinant
+        movement = math.hypot(move_x, move_z)
+        if movement > _FIXED_RADIUS_MAXIMUM_STEP_METRES:
+            scale = _FIXED_RADIUS_MAXIMUM_STEP_METRES / movement
+            move_x *= scale
+            move_z *= scale
+        cx += move_x
+        cz += move_z
+        if math.hypot(move_x, move_z) <= 1.0e-8:
+            break
+    return cx, cz
+
+
+def _uniform_arc(centre, radius: float, origin_angle: float, turn_sign: int, arc_degrees: float):
+    sections = max(2, int(round(arc_degrees / REGULARIZED_ARC_SAMPLE_DEGREES)))
+    angular_sign = -1.0 if turn_sign > 0 else 1.0
+    arc_radians = math.radians(arc_degrees)
+    result = []
+    for sample in range(sections + 1):
+        angle = origin_angle + angular_sign * arc_radians * (sample / sections)
+        result.append(
+            (
+                centre[0] + math.cos(angle) * radius,
+                centre[1] + math.sin(angle) * radius,
+            )
+        )
+    return tuple(result)
+
+
+def _snapped_stock_arc(
+    source_span,
+    radius: float,
+    initial_centre,
+    turn_sign: int,
+    entry_heading: float,
+    exit_heading: float,
+    observed_turn: float,
+    maximum_deviation: float,
+):
+    native_sections = max(1, int(round(observed_turn / _geometry.STOCK_CURVE_ANGLE_DEGREES)))
+    snapped_turn = native_sections * _geometry.STOCK_CURVE_ANGLE_DEGREES
+    if not (
+        MINIMUM_SUSTAINED_CURVE_TOTAL_TURN_DEGREES
+        <= snapped_turn
+        <= MAXIMUM_REGULARIZED_ARC_DEGREES
+    ):
+        return None
+    if abs(snapped_turn - observed_turn) > MAXIMUM_STOCK_ANGLE_SNAP_ERROR_DEGREES:
+        return None
+
+    centre = _fit_fixed_radius_centre(source_span, radius, initial_centre)
+    radial_deviations = [abs(math.dist(point, centre) - radius) for point in source_span]
+    if max(radial_deviations, default=0.0) > maximum_deviation + 1.0e-9:
+        return None
+
+    first_angle = math.atan2(
+        float(source_span[0][1]) - centre[1], float(source_span[0][0]) - centre[0]
+    )
+    source_arc = _directed_arc_degrees(source_span[-1], centre, first_angle, turn_sign)
+    slack = snapped_turn - source_arc
+    # A slightly longer stock arc can distribute quantization error across both
+    # boundaries.  Do not trim a meaningfully longer source arc to force a fit.
+    if slack < -0.05:
+        return None
+    angular_sign = -1.0 if turn_sign > 0 else 1.0
+    origin_angle = first_angle - angular_sign * math.radians(slack * 0.5)
+    arc = _uniform_arc(centre, radius, origin_angle, turn_sign, snapped_turn)
+
+    if math.dist(source_span[0], arc[0]) > maximum_deviation + 1.0e-9:
+        return None
+    if math.dist(source_span[-1], arc[-1]) > maximum_deviation + 1.0e-9:
+        return None
+
+    entry_error = _p._heading_difference(
+        entry_heading, _circle_tangent_heading(arc[0], centre, turn_sign)
+    )
+    exit_error = _p._heading_difference(
+        exit_heading, _circle_tangent_heading(arc[-1], centre, turn_sign)
+    )
+    if max(entry_error, exit_error) > MAXIMUM_REGULARIZED_TANGENT_ERROR_DEGREES:
+        return None
+
+    progress = [
+        _directed_arc_degrees(point, centre, origin_angle, turn_sign)
+        for point in source_span
+    ]
+    if any(following + 0.25 < previous for previous, following in zip(progress, progress[1:])):
+        return None
+    if any(value > snapped_turn + 0.25 for value in progress):
+        return None
+    return arc
+
+
 def _regularized_stock_arc(points, start_index: int, end_index: int, turn_sign: int):
     if end_index <= start_index + 1:
         return None
@@ -237,21 +363,21 @@ def _regularized_stock_arc(points, start_index: int, end_index: int, turn_sign: 
         return None
 
     _score, centre, radius, arc_degrees = best
-    sections = max(2, int(math.ceil(arc_degrees / REGULARIZED_ARC_SAMPLE_DEGREES)))
+    snapped = _snapped_stock_arc(
+        source_span,
+        radius,
+        centre,
+        turn_sign,
+        entry_heading,
+        exit_heading,
+        observed_turn,
+        maximum_deviation,
+    )
+    if snapped is not None:
+        return snapped
+
     origin_angle = math.atan2(float(start[1]) - centre[1], float(start[0]) - centre[0])
-    angular_sign = -1.0 if turn_sign > 0 else 1.0
-    arc_radians = math.radians(arc_degrees)
-    result = [start]
-    for sample in range(1, sections):
-        angle = origin_angle + angular_sign * arc_radians * (sample / sections)
-        result.append(
-            (
-                centre[0] + math.cos(angle) * radius,
-                centre[1] + math.sin(angle) * radius,
-            )
-        )
-    result.append(end)
-    return tuple(result)
+    return _uniform_arc(centre, radius, origin_angle, turn_sign, arc_degrees)
 
 
 def _append_unique(target, values) -> None:
@@ -285,17 +411,19 @@ def _curve_regularized_rounded_run(points, **kwargs):
     cursor = 0
     for start_index, end_index, arc in accepted:
         if start_index > cursor:
-            _append_unique(
-                result,
-                _ORIGINAL_ROUNDED(cleaned[cursor : start_index + 1], **kwargs),
-            )
+            chunk = list(cleaned[cursor : start_index + 1])
+            if result:
+                chunk[0] = result[-1]
+            chunk[-1] = arc[0]
+            _append_unique(result, _ORIGINAL_ROUNDED(tuple(chunk), **kwargs))
         elif not result:
-            _append_unique(result, (cleaned[start_index],))
+            _append_unique(result, (arc[0],))
         _append_unique(result, arc)
         cursor = end_index
 
     if cursor < len(cleaned) - 1:
-        _append_unique(result, _ORIGINAL_ROUNDED(cleaned[cursor:], **kwargs))
+        chunk = [result[-1], *cleaned[cursor + 1 :]]
+        _append_unique(result, _ORIGINAL_ROUNDED(tuple(chunk), **kwargs))
     return tuple(result)
 
 
