@@ -63,7 +63,7 @@ def test_too_skewed_branch_keeps_legacy_fallback():
     incidents = (
         _incident(90.0),
         _incident(270.0),
-        _incident(30.0),
+        _incident(60.0),
     )
 
     assert _final._same_family_paved_skew_t(incidents, "sil") is None
