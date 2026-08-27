@@ -48,6 +48,7 @@ jobs:
           import json
           import math
           import os
+          import struct
 
           from cwr_worldgen.milestone9 import Milestone9Spec, build_milestone9
           from cwr_worldgen.osm import BboxProjection
@@ -168,6 +169,36 @@ jobs:
           assert road_report["maximum_connection_gap"] <= 0.35, road_report
           assert road_report["maximum_model_overlap_metres"] <= 0.01, road_report
           assert result.pbo_path.is_file()
+
+          # Audit the serialized WRP, not just the pre-serialization selector.
+          # Previous regressions passed unit tests but the production rounding
+          # stack still emitted mixed 75/50 m curve meshes.
+          wrp_path = root / "build" / "source" / "wg_roadlab" / "wg_roadlab.wrp"
+          wrp_bytes = wrp_path.read_bytes()
+          header = struct.Struct("<4sii")
+          object_record = struct.Struct("<12fi76s")
+          magic, width, height = header.unpack_from(wrp_bytes, 0)
+          assert magic == b"4WVR"
+          offset = header.size + width * height * 4 + 512 * 32
+          curve_headings = []
+          native_skew_t = 0
+          while offset + object_record.size <= len(wrp_bytes):
+              values = object_record.unpack_from(wrp_bytes, offset)
+              offset += object_record.size
+              model = values[13].split(b"\0", 1)[0]
+              if not model:
+                  break
+              model = model.decode("ascii")
+              if model == r"o\road\sil10 100.p3d":
+                  curve_headings.append(math.degrees(math.atan2(values[6], values[0])) % 360.0)
+              elif model == r"o\road\kr_new_sil_sil_t.p3d":
+                  native_skew_t += 1
+              assert model not in {r"o\road\sil10 75.p3d", r"o\road\sil10 50.p3d"}
+          assert len(curve_headings) == 4, curve_headings
+          assert native_skew_t == 1, native_skew_t
+          for previous, current in zip(curve_headings, curve_headings[1:]):
+              delta = (current - previous + 180.0) % 360.0 - 180.0
+              assert abs(delta - 10.0) <= 0.05, curve_headings
 
           def smoke_mission(title, x, z, heading=0.0):
               return f'''version=11;
