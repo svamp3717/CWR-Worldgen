@@ -6,7 +6,9 @@ from types import SimpleNamespace
 
 from cwr_worldgen import playability as _p
 from cwr_worldgen import road_quality_policy as _quality
+from cwr_worldgen import stock_road_curve_regularization_policy as _regular
 from cwr_worldgen import stock_road_final_continuity_policy as _final
+from cwr_worldgen import stock_road_geometry_policy as _geometry
 from cwr_worldgen import stock_road_junction_policy as _junction
 
 
@@ -46,8 +48,8 @@ def test_sampled_100m_arc_has_stable_ten_degree_tangent_change():
     ) < 0.8
 
 
-def _roadlab_curve_fixture():
-    points = (
+def _roadlab_curve_points():
+    return (
         (500.2496, 300.0),
         (500.2496, 399.7504),
         (500.2496, 500.2496),
@@ -62,6 +64,12 @@ def _roadlab_curve_fixture():
         (588.0, 641.2512),
         (651.7504, 717.7504),
     )
+
+
+def _roadlab_curve_fixture(*, rounded: bool = False):
+    points = _roadlab_curve_points()
+    if rounded:
+        points = _p._rounded_road_run(points)
     measure = _p._PolylineMeasure.create(points)
     pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
     return measure, pieces
@@ -74,11 +82,8 @@ def _assert_coherent_100m_curve(fitted):
     assert r"o\road\sil10 50.p3d" not in models, models
 
 
-def test_roadlab_curve_chain_prefers_100m_native_radius():
-    # Use the post-normalization RoadLab coordinates, including the first 5-degree
-    # sample whose sub-metre lateral offset was rounded onto the entry straight.
-    measure, pieces = _roadlab_curve_fixture()
-    fitted = _p._stock_piece_chain(
+def _fit_fixture(measure, pieces):
+    return _p._stock_piece_chain(
         measure,
         pieces,
         start_distance=0.0,
@@ -86,11 +91,62 @@ def test_roadlab_curve_chain_prefers_100m_native_radius():
         minimum_end_distance=max(0.0, measure.total - 0.35),
         maximum_end_distance=measure.total + 3.125,
     )
-    _assert_coherent_100m_curve(fitted)
+
+
+def test_roadlab_curve_chain_prefers_100m_native_radius():
+    # Use the post-normalization RoadLab coordinates, including the first 5-degree
+    # sample whose sub-metre lateral offset was rounded onto the entry straight.
+    measure, pieces = _roadlab_curve_fixture()
+    _assert_coherent_100m_curve(_fit_fixture(measure, pieces))
+
+
+def test_roadlab_curve_chain_stays_coherent_after_production_rounding():
+    # This is the regression the generated WRP exposed.  The old per-corner
+    # fillet changed the quantized 100 m arc into 75/50/straight/75 pieces even
+    # though the selector handled the unrounded source correctly.
+    measure, pieces = _roadlab_curve_fixture(rounded=True)
+    _assert_coherent_100m_curve(_fit_fixture(measure, pieces))
+
+
+def test_roadlab_regularized_arc_stays_inside_existing_fillet_corridor():
+    points = _roadlab_curve_points()
+    spans = _regular._sustained_curve_spans(points)
+    assert (2, 10, 1) in spans
+    arc = _regular._regularized_stock_arc(points, 2, 10, 1)
+    assert arc is not None
+    assert arc[0] == points[2]
+    assert arc[-1] == points[10]
+
+    maximum = 0.0
+    for point in points[2:11]:
+        nearest = min(
+            _geometry._point_segment_distance(point, start, end)
+            for start, end in zip(arc, arc[1:])
+        )
+        maximum = max(maximum, nearest)
+    assert maximum <= _geometry._MAXIMUM_STOCK_FILLET_DEVIATION_METRES + 1.0e-9
+
+
+def test_curve_regularizer_leaves_small_source_wiggle_to_existing_rounder():
+    points = (
+        (450.0, 1600.0),
+        (451.0, 1650.0),
+        (450.0, 1700.0),
+        (449.0, 1750.0),
+        (450.0, 1800.0),
+    )
+    assert _regular._sustained_curve_spans(points) == ()
+    assert _regular._curve_regularized_rounded_run(points) == _regular._ORIGINAL_ROUNDED(points)
+
+
+def test_curve_regularizer_leaves_one_hard_corner_to_existing_rounder():
+    points = ((0.0, 0.0), (0.0, 50.0), (25.0, 93.3012701892))
+    assert _regular._sustained_curve_spans(points) == ()
+    assert _regular._curve_regularized_rounded_run(points) == _regular._ORIGINAL_ROUNDED(points)
 
 
 def test_roadlab_curve_chain_stays_coherent_with_flat_terrain_context():
-    measure, pieces = _roadlab_curve_fixture()
+    measure, pieces = _roadlab_curve_fixture(rounded=True)
     spec = SimpleNamespace(cells=64, cell_size=50.0, road_connection_tolerance=0.35)
     context = _quality._Context(
         elevations=(24.0,) * (64 * 64),
@@ -99,14 +155,7 @@ def test_roadlab_curve_chain_stays_coherent_with_flat_terrain_context():
     )
     token = _quality._CONTEXT.set(context)
     try:
-        fitted = _p._stock_piece_chain(
-            measure,
-            pieces,
-            start_distance=0.0,
-            preferred_end_distance=measure.total,
-            minimum_end_distance=max(0.0, measure.total - 0.35),
-            maximum_end_distance=measure.total + 3.125,
-        )
+        fitted = _fit_fixture(measure, pieces)
     finally:
         _quality._CONTEXT.reset(token)
     _assert_coherent_100m_curve(fitted)
