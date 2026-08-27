@@ -124,7 +124,7 @@ def test_terrain_profile_prefers_shorter_rigid_pieces_over_midspan_clipping() ->
     assert fitted[-1][2] == (0.0, 50.0)
 
 
-def test_diagonal_t_junction_runs_branch_under_raised_same_family_cap() -> None:
+def test_diagonal_t_junction_uses_native_mesh_and_keeps_branch_covered() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     main = OsmLineFeature(
@@ -170,7 +170,7 @@ def test_diagonal_t_junction_runs_branch_under_raised_same_family_cap() -> None:
     assert report.maximum_connection_gap <= spec.road_connection_tolerance
 
     cap = report.objects[0]
-    assert cap.model_path.casefold().endswith(r"\sil6.p3d")
+    assert cap.model_path.casefold() == r"o\road\kr_new_sil_sil_t.p3d"
     branch_obj = next(
         obj
         for obj in report.objects[report.junction_cap_objects :]
@@ -182,8 +182,8 @@ def test_diagonal_t_junction_runs_branch_under_raised_same_family_cap() -> None:
     node = (500.0, 500.0)
     inner_distance = min(math.dist(node, axis[0]), math.dist(node, axis[1]))
 
-    # The approach deliberately reaches the node underneath the overlay rather
-    # than stopping at the oriented hub edge. The raised cap wins the z-buffer,
-    # leaving no grass wedge while preserving one continuous drivable surface.
+    # The 45-degree branch still reaches the logical node underneath the native
+    # T mesh.  The raised native mesh wins the z-buffer there, closing the skew
+    # connector without reverting to the old straight-slab pseudo-intersection.
     assert inner_distance <= 0.05
     assert cap.y >= branch_obj.y + 0.005
