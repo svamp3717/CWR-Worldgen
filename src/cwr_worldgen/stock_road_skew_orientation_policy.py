@@ -8,11 +8,13 @@ skewed, sliding the model can put its connector centre on the source line but
 cannot rotate the visible asphalt tongue to match that line. The resulting
 surface is the broad rectangular slab seen in RoadLab.
 
-Keep the measured native T for bounded near-orthogonal nodes, including its
-small longitudinal slide. Strongly skewed same-family paved T nodes instead keep
-the legacy six-metre cap aligned with the dominant through road. The fitted road
-arms already continue to the logical node underneath that small cap, avoiding a
-large false junction surface while preserving drivable overlap.
+A second residual case occurs when the *through* road itself turns at the
+intersection. Aligning a legacy six-metre cap to only one arm puts the entire
+heading change on the opposite road edge. For bounded paved T nodes, use the
+otherwise-unused native same-family T mesh and choose a minimax rotation across
+all three measured connectors. This splits a modest through-road bend across the
+intersection instead of leaving one large edge mismatch. Strongly skewed nodes
+still retain the small legacy cap.
 """
 from __future__ import annotations
 
@@ -26,8 +28,83 @@ from . import stock_road_model_geometry as _model_geometry
 from . import stock_road_visual_finish_policy as _finish
 
 MAXIMUM_NATIVE_T_BRANCH_ERROR_DEGREES = 20.0
+MINIMUM_TURNING_T_MAIN_BEND_DEGREES = 2.0
+MAXIMUM_TURNING_T_MAIN_BEND_DEGREES = 25.0
+MAXIMUM_TURNING_T_CONNECTOR_ERROR_DEGREES = 12.5
 _ORIGINAL_FINAL_REALIGN = None
 _INSTALLED = False
+
+
+def _turning_main_bend_degrees(incidents, pair) -> float:
+    first, second = pair
+    first_heading = _junction._heading(incidents[first].direction)
+    second_heading = _junction._heading(incidents[second].direction)
+    separation = _junction._angular_distance(first_heading, second_heading)
+    return abs(180.0 - separation)
+
+
+def _balanced_turning_t(incidents, family: str, model: str, pair, branch):
+    """Fit a native T by sharing a modest through-road bend over all connectors."""
+
+    bend = _turning_main_bend_degrees(incidents, pair)
+    if not (
+        MINIMUM_TURNING_T_MAIN_BEND_DEGREES
+        <= bend
+        <= MAXIMUM_TURNING_T_MAIN_BEND_DEGREES
+    ):
+        return None
+
+    first, second = pair
+    branch_heading = _junction._heading(incidents[branch].direction)
+    candidates = []
+    for zero, opposite in ((first, second), (second, first)):
+        actual = (
+            _junction._heading(incidents[zero].direction),
+            _junction._heading(incidents[opposite].direction),
+            branch_heading,
+        )
+        rotation, _maximum = _junction._best_rotation(
+            (
+                (0.0, actual[0]),
+                (180.0, actual[1]),
+                (270.0, actual[2]),
+            )
+        )
+        errors = (
+            _junction._angular_distance(rotation, actual[0]),
+            _junction._angular_distance((rotation + 180.0) % 360.0, actual[1]),
+            _junction._angular_distance((rotation + 270.0) % 360.0, actual[2]),
+        )
+        candidates.append(
+            (
+                max(errors),
+                sum(error * error for error in errors),
+                rotation % 360.0,
+                errors,
+            )
+        )
+
+    maximum_error, _sum_squared, rotation, errors = min(candidates)
+    if maximum_error > MAXIMUM_TURNING_T_CONNECTOR_ERROR_DEGREES:
+        return None
+
+    # Heading error is only useful when the physical connector still lands well
+    # inside the source carriageway. Check all three arms, not merely the branch.
+    half_width = float(_model_geometry.STOCK_HALF_WIDTHS_METRES[family])
+    usable_half_width = half_width - _final.SKEW_T_CONNECTOR_EDGE_MARGIN_METRES
+    radius = float(_model_geometry.STOCK_JUNCTION_CONNECTOR_RADIUS_METRES)
+    if any(
+        radius * math.sin(math.radians(error)) > usable_half_width
+        for error in errors
+    ):
+        return None
+
+    return _junction._NativeJunction(
+        model_path=model,
+        heading_degrees=rotation,
+        maximum_heading_error_degrees=maximum_error,
+        cap_family=family,
+    )
 
 
 def _same_family_paved_skew_t(incidents, family: str):
@@ -44,8 +121,15 @@ def _same_family_paved_skew_t(incidents, family: str):
         return None
     first, second = pair
     branch = next(index for index in range(3) if index not in pair)
-    branch_heading = _junction._heading(incidents[branch].direction)
 
+    # When the through road bends at the node, a cap aligned to one side leaves
+    # the whole angle on the other road edge. A balanced native T is visibly
+    # better when every rigid connector remains within a small, bounded error.
+    turning = _balanced_turning_t(incidents, family, model, pair, branch)
+    if turning is not None:
+        return turning
+
+    branch_heading = _junction._heading(incidents[branch].direction)
     candidates = []
     for zero, opposite in ((first, second), (second, first)):
         rotation, main_error = _junction._best_rotation(
