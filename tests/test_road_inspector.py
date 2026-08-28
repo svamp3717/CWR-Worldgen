@@ -6,7 +6,7 @@ from pathlib import Path
 
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.pbo import PboEntry, write_pbo
-from cwr_worldgen.road_inspector import inspect_road_geometry, write_inspection_report
+from cwr_worldgen.road_inspector_entry import inspect_road_geometry, write_inspection_report
 from cwr_worldgen.wrp import write_rvw4
 
 
@@ -99,7 +99,7 @@ def test_normalized_roads_flag_visible_straight_cap_on_turning_intersection(tmp_
     wrp = tmp_path / "junction.wrp"
     node = (100.0, 100.0)
     # Legacy visible cap follows north/south while the southern approach is
-    # already turning southwest.  The three approaches terminate on the node.
+    # already turning southwest. The three approaches terminate on the node.
     cap = WorldObject(1, r"o\road\sil6.p3d", node[0], 0.041, node[1], 0.0)
     north = _straight_to_end(2, node, 0.0)
     southwest = _straight_to_end(3, node, 190.0)
@@ -141,6 +141,7 @@ def test_normalized_roads_flag_visible_straight_cap_on_turning_intersection(tmp_
     assert issue.z == 100.0
     assert issue.metrics["through_turn_degrees"] > 9.0
     assert issue.metrics["cap_below_approach_margin_metres"] < 0.0
+    assert issue.metrics["maximum_approach_heading_error_degrees"] < 0.5
 
 
 def test_writes_self_contained_html_json_csv_and_summary(tmp_path: Path) -> None:
