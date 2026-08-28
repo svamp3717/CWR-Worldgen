@@ -5,7 +5,7 @@ import cwr_worldgen.road_inspector_entry  # noqa: F401
 from cwr_worldgen import road_inspector as _core
 
 
-def test_html_report_contains_stock_road_edge_geometry() -> None:
+def test_html_report_contains_stock_road_edge_geometry_and_search_controls() -> None:
     first = _core.RoadEndpoint(
         object_id=7,
         model_path=r"o\road\sil6.p3d",
@@ -42,12 +42,25 @@ def test_html_report_contains_stock_road_edge_geometry() -> None:
         logical_center=(100.0, 103.125),
         endpoints=(first, second),
     )
+    issue = _core.RoadIssue(
+        issue_id="RI-00001",
+        severity="high",
+        score=60.0,
+        category="straight_miter",
+        x=100.0,
+        z=106.25,
+        object_ids=(7, 8),
+        models=(r"o\road\sil6.p3d", r"o\road\sil6.p3d"),
+        message="test seam",
+        candidate_fix="test fix",
+        metrics={"source_road_ids": "road-000280", "edge_gap_max_metres": 0.42},
+    )
     result = _core.InspectionResult(
         input_path="sample.wrp",
         wrp_entry="sample.wrp",
         road_object_count=1,
         source_junction_count=0,
-        issues=(),
+        issues=(issue,),
         road_objects=(road,),
     )
 
@@ -58,3 +71,6 @@ def test_html_report_contains_stock_road_edge_geometry() -> None:
     assert ".road.edge" in document
     assert "r.half_width" in document
     assert "svg.insertBefore(line,svg.firstChild)" in document
+    assert "issue-search" in document
+    assert "Issue metrics" in document
+    assert "source_road_ids" in document
