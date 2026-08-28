@@ -7,11 +7,13 @@ from typing import Sequence
 
 from . import road_inspector as _core
 from . import road_inspector_runtime as _runtime
+from . import road_inspector_source_context as _source_context
 
 
-# Keep every correction confined to the inspector process.  Importing the normal
+# Keep every correction confined to the inspector process. Importing the normal
 # world generator does not install any of these diagnostics or change road output.
 _runtime.install()
+_source_context.install()
 
 RoadIssue = _core.RoadIssue
 InspectionResult = _core.InspectionResult
