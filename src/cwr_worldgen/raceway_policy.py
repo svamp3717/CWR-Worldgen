@@ -116,11 +116,21 @@ def install_raceway_policy() -> None:
     install_stock_road_skew_orientation_policy()
     # When a bend cannot use native curves, short rectangular paved pieces can
     # still share a centreline connector while their outer edges open into a
-    # triangular grass wedge. Install the low same-family seam underlay last so
-    # no later continuity wrapper can disable this strictly visual fallback.
+    # triangular grass wedge. Install the low same-family seam underlay late so
+    # no continuity wrapper can disable this strictly visual fallback.
     from .stock_road_straight_seam_policy import (
         install_stock_road_straight_seam_policy,
     )
 
     install_stock_road_straight_seam_policy()
+    # The supplied Lundby18 screenshots show that the same failure can survive
+    # at a curve-to-straight connector. Final continuity used to disable curve
+    # seam underlays on the assumption that selection had made every curve seam
+    # tangent-continuous. Re-enable that fallback for paved roads only, after
+    # straight coverage, while leaving dirt/gravel and junctions untouched.
+    from .stock_road_curve_seam_fallback_policy import (
+        install_stock_road_curve_seam_fallback_policy,
+    )
+
+    install_stock_road_curve_seam_fallback_policy()
     _INSTALLED = True
