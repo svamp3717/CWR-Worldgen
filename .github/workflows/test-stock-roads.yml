@@ -39,6 +39,7 @@ jobs:
             tests/test_stock_road_connector_policy.py \
             tests/test_stock_road_curve_policy.py \
             tests/test_stock_road_curve_preservation_policy.py \
+            tests/test_stock_road_curve_seam_fallback_policy.py \
             tests/test_stock_road_curve_usage_policy.py \
             tests/test_stock_road_final_continuity_policy.py \
             tests/test_stock_road_geometry_policy.py \
