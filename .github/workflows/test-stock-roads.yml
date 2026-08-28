@@ -52,6 +52,7 @@ jobs:
             tests/test_stock_road_relaxation_policy.py \
             tests/test_stock_road_relaxation_transaction_policy.py \
             tests/test_stock_road_sharp_turn_policy.py \
+            tests/test_stock_road_s_bend_policy.py \
             tests/test_stock_road_skew_orientation_policy.py \
             tests/test_stock_road_skew_policy.py \
             tests/test_stock_road_surface_overlap_policy.py \
