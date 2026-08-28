@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Attach normalized source-road context to Road Inspector findings.
 
-This is diagnostic metadata only.  It makes a reported WRP defect traceable back
+This is diagnostic metadata only. It makes a reported WRP defect traceable back
 to the exact normalized road feature without changing any generated object.
 """
 from __future__ import annotations
@@ -16,6 +16,7 @@ from . import road_inspector_runtime as _runtime
 
 
 _SOURCE_CONTEXT_RADIUS_METRES = 1.00
+_SOURCE_BUCKET_METRES = 50.0
 _ORIGINAL_INSPECT = None
 _INSTALLED = False
 
@@ -27,6 +28,12 @@ class _SourceSegment:
     road_id: str
     highway: str
     surface: str
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceIndex:
+    segments: tuple[_SourceSegment, ...]
+    buckets: dict[tuple[int, int], tuple[int, ...]]
 
 
 def _segments(path: Path | None) -> tuple[_SourceSegment, ...]:
@@ -60,10 +67,28 @@ def _segments(path: Path | None) -> tuple[_SourceSegment, ...]:
             for start, end in zip(points, points[1:]):
                 if math.dist(start, end) <= 0.01:
                     continue
-                result.append(
-                    _SourceSegment(start, end, road_id, highway, surface)
-                )
+                result.append(_SourceSegment(start, end, road_id, highway, surface))
     return tuple(result)
+
+
+def _bucket(value: float) -> int:
+    return math.floor(float(value) / _SOURCE_BUCKET_METRES)
+
+
+def _build_index(segments: tuple[_SourceSegment, ...]) -> _SourceIndex:
+    mutable: dict[tuple[int, int], list[int]] = {}
+    for index, segment in enumerate(segments):
+        min_x = min(segment.start[0], segment.end[0]) - _SOURCE_CONTEXT_RADIUS_METRES
+        max_x = max(segment.start[0], segment.end[0]) + _SOURCE_CONTEXT_RADIUS_METRES
+        min_z = min(segment.start[1], segment.end[1]) - _SOURCE_CONTEXT_RADIUS_METRES
+        max_z = max(segment.start[1], segment.end[1]) + _SOURCE_CONTEXT_RADIUS_METRES
+        for bx in range(_bucket(min_x), _bucket(max_x) + 1):
+            for bz in range(_bucket(min_z), _bucket(max_z) + 1):
+                mutable.setdefault((bx, bz), []).append(index)
+    return _SourceIndex(
+        segments,
+        {key: tuple(values) for key, values in mutable.items()},
+    )
 
 
 def _point_segment_distance(
@@ -76,29 +101,34 @@ def _point_segment_distance(
     denominator = dx * dx + dz * dz
     if denominator <= 1.0e-12:
         return math.dist(point, start)
-    fraction = (
-        (point[0] - start[0]) * dx + (point[1] - start[1]) * dz
-    ) / denominator
+    fraction = ((point[0] - start[0]) * dx + (point[1] - start[1]) * dz) / denominator
     fraction = max(0.0, min(1.0, fraction))
     projected = (start[0] + dx * fraction, start[1] + dz * fraction)
     return math.dist(point, projected)
 
 
-def _context_metrics(issue, segments: tuple[_SourceSegment, ...]):
-    if not segments:
+def _candidate_segments(index: _SourceIndex, point: tuple[float, float]) -> tuple[_SourceSegment, ...]:
+    bx, bz = _bucket(point[0]), _bucket(point[1])
+    indices = set()
+    for dx in (-1, 0, 1):
+        for dz in (-1, 0, 1):
+            indices.update(index.buckets.get((bx + dx, bz + dz), ()))
+    if not indices:
+        return index.segments
+    return tuple(index.segments[value] for value in sorted(indices))
+
+
+def _metrics_from_candidates(issue, candidates: tuple[_SourceSegment, ...]):
+    if not candidates:
         return {}
     point = (float(issue.x), float(issue.z))
-    distances = [(_point_segment_distance(point, segment.start, segment.end), segment) for segment in segments]
-    nearest_distance, nearest = min(distances, key=lambda value: value[0])
-    close_limit = max(
-        _SOURCE_CONTEXT_RADIUS_METRES,
-        nearest_distance + 0.10,
-    )
-    nearby = [
-        segment
-        for distance, segment in distances
-        if distance <= close_limit
+    distances = [
+        (_point_segment_distance(point, segment.start, segment.end), segment)
+        for segment in candidates
     ]
+    nearest_distance, nearest = min(distances, key=lambda value: value[0])
+    close_limit = max(_SOURCE_CONTEXT_RADIUS_METRES, nearest_distance + 0.10)
+    nearby = [segment for distance, segment in distances if distance <= close_limit]
     road_ids = sorted({segment.road_id for segment in nearby if segment.road_id})
     highways = sorted({segment.highway for segment in nearby if segment.highway})
     surfaces = sorted({segment.surface for segment in nearby if segment.surface})
@@ -118,6 +148,16 @@ def _context_metrics(issue, segments: tuple[_SourceSegment, ...]):
     elif nearest.surface:
         metrics["source_surfaces"] = nearest.surface
     return metrics
+
+
+def _context_metrics(issue, segments: tuple[_SourceSegment, ...]):
+    """Compatibility helper used by focused tests and small direct callers."""
+    return _metrics_from_candidates(issue, segments)
+
+
+def _indexed_context_metrics(issue, index: _SourceIndex):
+    point = (float(issue.x), float(issue.z))
+    return _metrics_from_candidates(issue, _candidate_segments(index, point))
 
 
 def inspect_road_geometry(
@@ -142,12 +182,13 @@ def inspect_road_geometry(
     source_segments = _segments(roads_geojson)
     if not source_segments or not result.issues:
         return result
+    source_index = _build_index(source_segments)
     issues = tuple(
         replace(
             issue,
             metrics={
                 **issue.metrics,
-                **_context_metrics(issue, source_segments),
+                **_indexed_context_metrics(issue, source_index),
             },
         )
         for issue in result.issues
