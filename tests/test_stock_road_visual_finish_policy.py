@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_junction_policy as _junction
 from cwr_worldgen import stock_road_model_geometry as _geometry
+from cwr_worldgen import stock_road_straight_seam_policy as _straight
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
 
 
@@ -113,3 +114,43 @@ def test_continuous_native_curve_run_does_not_get_seam_cover():
     plans = _finish._curve_seam_cover_plans(report)
 
     assert plans == ()
+
+
+def _straight_miter_report(family: str, heading: float):
+    half = _geometry.STOCK_STRAIGHT_LENGTHS_METRES[6] * 0.5
+    first = _object(1, rf"o\road\{family}6.p3d", 0.0, -half, 0.0)
+    angle = math.radians(heading)
+    direction = (math.sin(angle), math.cos(angle))
+    second = _object(
+        2,
+        rf"o\road\{family}6.p3d",
+        direction[0] * half,
+        direction[1] * half,
+        heading,
+    )
+    return SimpleNamespace(objects=(first, second), junction_cap_objects=0)
+
+
+def test_paved_straight_facet_miter_gets_low_seam_cover():
+    plans = _straight._straight_seam_cover_plans(_straight_miter_report("sil", 8.0))
+
+    assert len(plans) == 1
+    assert plans[0].model_path.casefold() == r"o\road\sil6.p3d"
+    assert math.dist(plans[0].centre, (0.0, 0.0)) < 1.0e-9
+    assert math.isclose(plans[0].tangent_axis_degrees, 4.0, abs_tol=1.0e-9)
+
+
+def test_tiny_straight_heading_noise_does_not_add_underlay():
+    plans = _straight._straight_seam_cover_plans(_straight_miter_report("sil", 0.5))
+
+    assert plans == ()
+
+
+def test_narrow_ces_road_does_not_get_paved_miter_underlay():
+    plans = _straight._straight_seam_cover_plans(_straight_miter_report("ces", 8.0))
+
+    assert plans == ()
+
+
+def test_straight_seam_policy_is_the_final_visual_hook():
+    assert _finish._apply_curve_seam_covers is _straight._apply_straight_seam_covers
