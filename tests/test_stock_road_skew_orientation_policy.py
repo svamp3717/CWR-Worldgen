@@ -65,6 +65,39 @@ def test_near_orthogonal_t_keeps_measured_branch_side_and_small_slide() -> None:
     )
 
 
+def test_lundby_turning_main_t_uses_balanced_native_surface() -> None:
+    # Real incident headings at Lundby's all-asphalt T near 3223.50/3181.50.
+    # The through road turns 20.66 degrees at the intersection. A legacy sil6
+    # cap aligned to either side therefore puts the full bend on one road edge.
+    incidents = (
+        _incident(93.732),
+        _incident(340.710),
+        _incident(253.070),
+    )
+
+    native = _skew._same_family_paved_skew_t(incidents, "sil")
+
+    assert native is not None
+    assert native.model_path == r"o\road\kr_new_sil_sil_t.p3d"
+    assert native.maximum_heading_error_degrees <= 11.52
+    assert math.isclose(native.heading_degrees, 82.221, abs_tol=0.01)
+
+    pair = _junction._dominant_pair(incidents)
+    assert pair is not None
+    main_bend = _skew._turning_main_bend_degrees(incidents, pair)
+    assert 20.65 <= main_bend <= 20.67
+
+
+def test_turning_main_t_still_rejects_excessive_connector_error() -> None:
+    incidents = (
+        _incident(110.0),
+        _incident(350.0),
+        _incident(250.0),
+    )
+
+    assert _skew._same_family_paved_skew_t(incidents, "sil") is None
+
+
 def test_longitudinal_slide_puts_accepted_branch_connector_on_source_centerline() -> None:
     incidents = (
         _incident(90.0),
@@ -86,6 +119,53 @@ def test_longitudinal_slide_puts_accepted_branch_connector_on_source_centerline(
     )
 
     assert _distance_to_line(connector_point, node, incidents[2].direction) < 1.0e-9
+
+
+def test_production_fit_uses_native_t_for_lundby_turning_main_geometry() -> None:
+    bbox = (0.0, 0.0, 0.01, 0.01)
+    projection = BboxProjection.create(bbox, 1000.0)
+    node = (500.0, 500.0)
+
+    roads = []
+    for index, heading in enumerate((93.732, 340.710, 253.070)):
+        direction = _direction(heading)
+        endpoint = (
+            node[0] + direction[0] * 80.0,
+            node[1] + direction[1] * 80.0,
+        )
+        roads.append(
+            OsmLineFeature(
+                f"way/turning-{index}",
+                {"highway": "tertiary", "surface": "asphalt"},
+                tuple(projection.to_latlon(point) for point in (node, endpoint)),
+            )
+        )
+
+    dataset = OsmDataset(
+        source_generator="lundby-turning-t",
+        element_count=3,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=tuple(roads),
+    )
+    spec = _Milestone9PlayabilitySpec(
+        name="lundby_turning_t",
+        heightmap_path=Path("unused.png"),
+        bbox=bbox,
+        cells=40,
+        cell_size=25.0,
+        max_road_objects=10000,
+        strict_assets=False,
+    )
+
+    report = _p.fit_road_objects(dataset, projection, [0.0] * (40 * 40), spec)
+    assert report.junction_cap_objects >= 1
+    cap = report.objects[0]
+    assert cap.model_path.casefold() == r"o\road\kr_new_sil_sil_t.p3d"
+    assert _junction._angular_distance(cap.heading_degrees, 82.221) <= 0.05
 
 
 def test_production_fit_keeps_small_main_axis_fallback_for_45_degree_t() -> None:
