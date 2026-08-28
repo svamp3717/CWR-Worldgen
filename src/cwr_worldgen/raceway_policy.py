@@ -112,6 +112,13 @@ def install_raceway_policy() -> None:
     from .stock_road_micro_bend_policy import install_stock_road_micro_bend_policy
 
     install_stock_road_micro_bend_policy()
+    # Consecutive bend spans can reverse direction at one shared vertex. The
+    # one-sign sharp fitter cannot repair that local S-bend as a unit, so allow
+    # one road-only beam to use both handednesses while keeping the same source
+    # corridor and exact stock connector geometry.
+    from .stock_road_s_bend_policy import install_stock_road_s_bend_policy
+
+    install_stock_road_s_bend_policy()
     # The final-continuity skew chooser is later than the measured-junction
     # installer, so restate the verified local -X branch side here at the true
     # end of the policy stack. Near-orthogonal T nodes may still use the native
