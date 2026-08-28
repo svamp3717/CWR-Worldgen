@@ -9,6 +9,7 @@ from . import road_inspector as _core
 from . import road_inspector_runtime as _runtime
 from . import road_inspector_source_context as _source_context
 from . import road_inspector_edge_view as _edge_view
+from . import road_inspector_report_ui as _report_ui
 
 
 # Keep every correction confined to the inspector process. Importing the normal
@@ -16,6 +17,7 @@ from . import road_inspector_edge_view as _edge_view
 _runtime.install()
 _source_context.install()
 _edge_view.install()
+_report_ui.install()
 
 RoadIssue = _core.RoadIssue
 InspectionResult = _core.InspectionResult
