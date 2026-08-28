@@ -100,7 +100,7 @@ def install_raceway_policy() -> None:
     install_stock_road_sharp_turn_policy()
     # On short junction-to-junction paved bends the generic sharp policy can
     # find the right native curves and then lose their tangent continuity when
-    # it sends the sampled line back through the greedy fitter.  Accept the
+    # it sends the sampled line back through the greedy fitter. Accept the
     # beam's exact stock sequence directly in that narrow case so the road edges
     # meet instead of leaving a triangular grass wedge at each heading change.
     from .stock_road_sharp_exact_policy import install_stock_road_sharp_exact_policy
@@ -115,4 +115,13 @@ def install_raceway_policy() -> None:
     )
 
     install_stock_road_skew_orientation_policy()
+    # When a bend cannot use native curves, short rectangular paved pieces can
+    # still share a centreline connector while their outer edges open into a
+    # triangular grass wedge. Install the low same-family seam underlay last so
+    # no later continuity wrapper can disable this strictly visual fallback.
+    from .stock_road_straight_seam_policy import (
+        install_stock_road_straight_seam_policy,
+    )
+
+    install_stock_road_straight_seam_policy()
     _INSTALLED = True
