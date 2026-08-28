@@ -33,6 +33,7 @@ jobs:
       - name: Run focused road tests
         run: |
           python -m pytest -q \
+            tests/test_road_inspector.py \
             tests/test_road_quality_policy.py \
             tests/test_gravel_junction_policy.py \
             tests/test_stock_road_3d_connector_policy.py \
