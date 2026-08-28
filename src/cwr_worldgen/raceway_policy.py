@@ -99,6 +99,12 @@ def install_raceway_policy() -> None:
     from .stock_road_sharp_exact_policy import install_stock_road_sharp_exact_policy
 
     install_stock_road_sharp_exact_policy()
+    # Promote a broader set of coherent paved bends to the same exact-pose
+    # stock-curve representation. This is still road-only and keeps every
+    # accepted connector inside the existing sharp-turn source corridor.
+    from .stock_road_curve_usage_policy import install_stock_road_curve_usage_policy
+
+    install_stock_road_curve_usage_policy()
     # The final-continuity skew chooser is later than the measured-junction
     # installer, so restate the verified local -X branch side here at the true
     # end of the policy stack. Near-orthogonal T nodes may still use the native
