@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import replace
 import math
 
+from . import generator as _generator
 from . import playability as _p
 from . import stock_road_junction_policy as _junction
 from . import stock_road_model_geometry as _geometry
@@ -319,4 +320,7 @@ def install_stock_road_intersection_edge_policy() -> None:
         return
     _ORIGINAL_FIT = _p.fit_road_objects
     _p.fit_road_objects = _fit
+    # generator.py imports the fitter directly.  Keep both public call sites on
+    # the same final wrapper just like the earlier road policies do.
+    _generator.fit_road_objects = _fit
     _INSTALLED = True
