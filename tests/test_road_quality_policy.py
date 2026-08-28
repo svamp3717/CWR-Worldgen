@@ -124,7 +124,7 @@ def test_terrain_profile_prefers_shorter_rigid_pieces_over_midspan_clipping() ->
     assert fitted[-1][2] == (0.0, 50.0)
 
 
-def test_diagonal_t_junction_uses_native_mesh_and_keeps_branch_covered() -> None:
+def test_diagonal_t_junction_uses_low_fallback_and_incident_edge_underlay() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     main = OsmLineFeature(
@@ -169,21 +169,39 @@ def test_diagonal_t_junction_uses_native_mesh_and_keeps_branch_covered() -> None
     assert report.failed_connections == 0
     assert report.maximum_connection_gap <= spec.road_connection_tolerance
 
+    node = (500.0, 500.0)
     cap = report.objects[0]
-    assert cap.model_path.casefold() == r"o\road\kr_new_sil_sil_t.p3d"
+    # A 45-degree side arm is too skewed for the rigid 90-degree stock T mesh.
+    # The fallback cap therefore stays a short straight, but it is now below the
+    # real approach roads instead of replacing their visible edges.
+    assert cap.model_path.casefold() == r"o\road\sil6.p3d"
+    assert cap.y < playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
+
     branch_obj = next(
         obj
         for obj in report.objects[report.junction_cap_objects :]
-        if abs(((obj.heading_degrees - 45.0 + 180.0) % 360.0) - 180.0) < 1.0
+        if obj.y >= playability._STOCK_ROAD_VERTICAL_OFFSET_METRES - 1.0e-6
+        and abs(((obj.heading_degrees - 45.0 + 180.0) % 360.0) - 180.0) < 1.0
     )
     nominal = int(branch_obj.model_path.casefold().rsplit("sil", 1)[1].split(".p3d", 1)[0])
     length = spec.road_segment_length * nominal / 25.0
     axis = playability._model_axis(branch_obj, length)
-    node = (500.0, 500.0)
     inner_distance = min(math.dist(node, axis[0]), math.dist(node, axis[1]))
-
-    # The 45-degree branch still reaches the logical node underneath the native
-    # T mesh.  The raised native mesh wins the z-buffer there, closing the skew
-    # connector without reverting to the old straight-slab pseudo-intersection.
     assert inner_distance <= 0.05
-    assert cap.y >= branch_obj.y + 0.005
+
+    # The new low incident-aligned helper fills the triangular branch/cap hole
+    # without becoming the visible top road.  It must be both near the node and
+    # aligned with the 45-degree side arm.
+    helpers = [
+        obj
+        for obj in report.objects[report.junction_cap_objects :]
+        if obj.model_path.casefold() == r"o\road\sil6.p3d"
+        and obj.y < playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
+        and math.dist((obj.x, obj.z), node) < 5.0
+    ]
+    assert helpers
+    assert any(
+        abs(((obj.heading_degrees - 45.0 + 180.0) % 360.0) - 180.0) < 1.0
+        for obj in helpers
+    )
+    assert max(obj.y for obj in helpers) < branch_obj.y
