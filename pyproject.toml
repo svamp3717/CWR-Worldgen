@@ -23,7 +23,7 @@ sources = [
 
 [project.scripts]
 cwr-worldgen = "cwr_worldgen.cli:main"
-cwr-road-inspector = "cwr_worldgen.road_inspector:main"
+cwr-road-inspector = "cwr_worldgen.road_inspector_entry:main"
 
 [project.gui-scripts]
 cwr-worldgen-gui = "cwr_worldgen.gui_entry:main"
