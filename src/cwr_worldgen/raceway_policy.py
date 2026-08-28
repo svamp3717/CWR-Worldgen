@@ -105,6 +105,13 @@ def install_raceway_policy() -> None:
     from .stock_road_curve_usage_policy import install_stock_road_curve_usage_policy
 
     install_stock_road_curve_usage_policy()
+    # Gentle 8-15 degree bends are a separate residual seam class: they can be
+    # spread over several short straight slabs but need only one stock 10-degree
+    # curve. Let the same connector-locked beam accept that one-curve solution
+    # before visual seam fallbacks are considered.
+    from .stock_road_micro_bend_policy import install_stock_road_micro_bend_policy
+
+    install_stock_road_micro_bend_policy()
     # The final-continuity skew chooser is later than the measured-junction
     # installer, so restate the verified local -X branch side here at the true
     # end of the policy stack. Near-orthogonal T nodes may still use the native
