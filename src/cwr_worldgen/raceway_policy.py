@@ -47,13 +47,6 @@ def install_raceway_policy() -> None:
     if _INSTALLED:
         return
 
-    # RVW4 carries no terrain scale field. CWA expands each stored height short
-    # by its hard-coded 0.045 m LANDDATA_SCALE, so install that contract before
-    # any milestone build evaluates a spec's height_scale property.
-    from .cwa_rvw4_height_policy import install_cwa_rvw4_height_scale_policy
-
-    install_cwa_rvw4_height_scale_policy()
-
     # The direct Overpass importer and normalized source-bundle path keep their
     # own supported-highway sets. Update both so GUI/source builds and direct
     # Python builds agree about raceways.
