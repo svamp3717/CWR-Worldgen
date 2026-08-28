@@ -147,4 +147,14 @@ def install_raceway_policy() -> None:
     )
 
     install_stock_road_curve_seam_fallback_policy()
+    # A legacy sil/asf/kos six-metre cap is a poor visible surface for skewed
+    # or turning intersections. Keep it below the real approach pieces and add
+    # low incident-aligned tongues only where its axis does not cover an arm.
+    # This final road-only pass lets the approach geometry own the visible road
+    # edges instead of one rectangular fallback slab.
+    from .stock_road_intersection_edge_policy import (
+        install_stock_road_intersection_edge_policy,
+    )
+
+    install_stock_road_intersection_edge_policy()
     _INSTALLED = True
