@@ -52,6 +52,14 @@ def _straight_to_end(object_id: int, end, outward_heading: float, *, length: flo
     )
 
 
+def _local_to_wgs84(point, bbox, world_size: float):
+    west, south, east, north = bbox
+    return [
+        west + float(point[0]) / world_size * (east - west),
+        south + float(point[1]) / world_size * (north - south),
+    ]
+
+
 def test_detects_visible_straight_miter_edge_discontinuity(tmp_path: Path) -> None:
     wrp = tmp_path / "miter.wrp"
     seam = (0.0, 6.25)
@@ -142,6 +150,115 @@ def test_normalized_roads_flag_visible_straight_cap_on_turning_intersection(tmp_
     assert issue.metrics["through_turn_degrees"] > 9.0
     assert issue.metrics["cap_below_approach_margin_metres"] < 0.0
     assert issue.metrics["maximum_approach_heading_error_degrees"] < 0.5
+
+
+def test_normalized_wgs84_roads_are_projected_into_wrp_metres(tmp_path: Path) -> None:
+    wrp = tmp_path / "junction_wgs84.wrp"
+    node = (500.0, 500.0)
+    cap = WorldObject(1, r"o\road\sil6.p3d", node[0], 0.041, node[1], 0.0)
+    north = _straight_to_end(2, node, 0.0)
+    southwest = _straight_to_end(3, node, 190.0)
+    east = _straight_to_end(4, node, 90.0)
+    _write_world(wrp, (cap, north, southwest, east))
+
+    bbox = [10.0, 20.0, 12.0, 22.0]
+    roads = tmp_path / "roads-wgs84.geojson"
+    roads.write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "bbox": bbox,
+                "cwr_world": {
+                    "coordinate_reference": "WGS84 longitude/latitude",
+                    "world_size_metres": 1000.0,
+                    "grid_cells": 40,
+                    "cell_size_metres": 25.0,
+                },
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {"road_id": "main"},
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [
+                                _local_to_wgs84((498.2635, 490.1519), bbox, 1000.0),
+                                _local_to_wgs84(node, bbox, 1000.0),
+                                _local_to_wgs84((500.0, 620.0), bbox, 1000.0),
+                            ],
+                        },
+                    },
+                    {
+                        "type": "Feature",
+                        "properties": {"road_id": "branch"},
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [
+                                _local_to_wgs84(node, bbox, 1000.0),
+                                _local_to_wgs84((620.0, 500.0), bbox, 1000.0),
+                            ],
+                        },
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = inspect_road_geometry(wrp, roads_geojson=roads)
+
+    assert result.source_junction_count == 1
+    issue = next(issue for issue in result.issues if issue.category == "turning_intersection_cap")
+    assert math.isclose(issue.x, 500.0, abs_tol=0.01)
+    assert math.isclose(issue.z, 500.0, abs_tol=0.01)
+    assert issue.metrics["maximum_approach_heading_error_degrees"] < 0.5
+
+
+def test_pitched_straights_use_rvw4_horizontal_connector_positions(tmp_path: Path) -> None:
+    wrp = tmp_path / "pitched.wrp"
+    pitch = 10.0
+    horizontal = 6.25 * math.cos(math.radians(pitch))
+    first = WorldObject(
+        1,
+        r"o\road\sil6.p3d",
+        0.0,
+        0.035,
+        horizontal * 0.5,
+        0.0,
+        pitch,
+    )
+    second = WorldObject(
+        2,
+        r"o\road\sil6.p3d",
+        0.0,
+        0.035,
+        horizontal * 1.5,
+        0.0,
+        pitch,
+    )
+    _write_world(wrp, (first, second))
+
+    result = inspect_road_geometry(wrp)
+
+    assert not [
+        issue
+        for issue in result.issues
+        if issue.category in {"straight_miter", "connector_gap", "curve_transition"}
+    ]
+
+
+def test_nearby_facing_connectors_are_reported_even_outside_cluster_tolerance(tmp_path: Path) -> None:
+    wrp = tmp_path / "connector-gap.wrp"
+    first = WorldObject(1, r"o\road\sil6.p3d", 0.0, 0.035, 3.125, 0.0)
+    second = _straight_from_begin(2, (0.0, 6.70), 0.0)
+    _write_world(wrp, (first, second))
+
+    result = inspect_road_geometry(wrp)
+
+    issue = next(issue for issue in result.issues if issue.category == "connector_gap")
+    assert 0.44 < issue.metrics["center_gap_metres"] < 0.46
+    assert issue.metrics["detector"] == "nearby_unmatched_connector"
+    assert issue.metrics["gap_alignment_first_degrees"] < 0.1
+    assert issue.metrics["gap_alignment_second_degrees"] < 0.1
 
 
 def test_writes_self_contained_html_json_csv_and_summary(tmp_path: Path) -> None:
