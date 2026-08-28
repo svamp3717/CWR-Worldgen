@@ -2,48 +2,16 @@
 """Stable command entry for the read-only post-build Road Inspector."""
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from typing import Sequence
 
 from . import road_inspector as _core
+from . import road_inspector_runtime as _runtime
 
 
-_ORIGINAL_SOURCE_INTERSECTION_ISSUES = _core._source_intersection_issues
-
-
-def _source_intersection_issues(roads, junctions, *, match_tolerance):
-    """Compare source outward headings with the direction from node into a piece.
-
-    ``RoadEndpoint.outward_heading_degrees`` is outward from the *piece*.  At an
-    approach endpoint sitting on an intersection that direction points toward
-    the node, so the source road's incident direction is its opposite.  Native
-    junction connectors already point outward from the junction and are left
-    unchanged.
-    """
-    corrected = []
-    for road in roads:
-        if road.kind in {"junction_t", "junction_x"}:
-            corrected.append(road)
-            continue
-        endpoints = tuple(
-            replace(
-                endpoint,
-                outward_heading_degrees=(float(endpoint.outward_heading_degrees) + 180.0) % 360.0,
-            )
-            for endpoint in road.endpoints
-        )
-        corrected.append(replace(road, endpoints=endpoints))
-    return _ORIGINAL_SOURCE_INTERSECTION_ISSUES(
-        tuple(corrected),
-        junctions,
-        match_tolerance=match_tolerance,
-    )
-
-
-# Patch only the inspector's own diagnostic function. This module changes no
-# generator, road fitter, terrain or object-placement behavior.
-_core._source_intersection_issues = _source_intersection_issues
+# Keep every correction confined to the inspector process.  Importing the normal
+# world generator does not install any of these diagnostics or change road output.
+_runtime.install()
 
 RoadIssue = _core.RoadIssue
 InspectionResult = _core.InspectionResult
