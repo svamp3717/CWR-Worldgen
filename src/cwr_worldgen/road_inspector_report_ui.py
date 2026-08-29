@@ -56,7 +56,7 @@ _UI_SCRIPT = r"""
   }
 
   function matchesSurfaceWord(value,words){
-    return words.some(word=>value===word||value.includes(word));
+    return words.some(word=>value===word||value.startsWith(`${word}:`));
   }
 
   function isDirtOnlyIntersection(issue){
