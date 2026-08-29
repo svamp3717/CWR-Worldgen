@@ -17,6 +17,7 @@ from cwr_worldgen import stock_road_curve_seam_fallback_policy as _curve_seam_fa
 from cwr_worldgen import stock_road_intersection_edge_policy as _intersection_edge
 from cwr_worldgen import stock_road_emitted_seam_policy as _emitted_seam
 from cwr_worldgen import stock_road_emitted_seam_refinement_policy as _emitted_refinement
+from cwr_worldgen import stock_road_fit_first_policy as _fit_first
 from cwr_worldgen import stock_road_late_policy_stack as _stack
 
 
@@ -37,6 +38,7 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
         _intersection_edge,
         _emitted_seam,
         _emitted_refinement,
+        _fit_first,
     )
 
     assert _stack._INSTALLED
@@ -44,19 +46,42 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
 
 
 def test_final_wrappers_are_not_left_disconnected() -> None:
-    # The emitted-geometry audit must be truly outermost so it sees every object
-    # replacement/addition made by the intersection and continuity wrappers.
+    # The emitted-geometry wrapper remains outermost so it still measures the
+    # exact final pitched WorldObjects. Its application hook is now a no-op: a
+    # detected defect must go back through stock-piece fitting instead of being
+    # hidden beneath a new road object.
     assert _p.fit_road_objects is _emitted_seam._fit
     assert _emitted_seam._ORIGINAL_FIT is _intersection_edge._fit
     assert (
         _emitted_seam._emitted_seam_cover_plans
         is _emitted_refinement._refined_emitted_seam_cover_plans
     )
+    assert (
+        _emitted_seam._apply_emitted_seam_covers
+        is _fit_first._preserve_fitted_emitted_seam
+    )
 
-    # Residual curve coverage intentionally wraps the straight-seam pass, which
-    # itself wraps final-continuity's disabled generic curve cover.
-    assert _visual_finish._apply_curve_seam_covers is _curve_seam_fallback._apply_paved_curve_seam_fallback
+    # Keep the older seam planners wired for regression analysis, but the final
+    # production visual hook must preserve the fitted objects rather than append
+    # their low straight/curve underlays.
+    assert (
+        _fit_first._ORIGINAL_VISUAL_SEAM_APPLY
+        is _curve_seam_fallback._apply_paved_curve_seam_fallback
+    )
+    assert (
+        _visual_finish._apply_curve_seam_covers
+        is _fit_first._preserve_fitted_visual_seam
+    )
     assert _curve_seam_fallback._ORIGINAL_FINISH is _straight_seam._apply_straight_seam_covers
+
+    # The same rule applies after native junction fitting: the historical edge
+    # policy remains in the wrapper chain, but it may no longer append overlapping
+    # tongue pieces when no rigid stock junction fits cleanly.
+    assert (
+        _intersection_edge._seal_legacy_paved_intersections
+        is _fit_first._preserve_fitted_intersection
+    )
+    assert _fit_first._ORIGINAL_INTERSECTION_EDGE_APPLY is not None
 
     # Native T placement uses the later measured skew/orientation chooser rather
     # than the earlier centre-only fallback, with the Lundby turning-T bound
