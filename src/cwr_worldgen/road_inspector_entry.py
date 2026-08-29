@@ -15,6 +15,7 @@ from . import road_inspector_coordinate_log as _coordinate_log
 from . import road_inspector_surface_coverage as _surface_coverage
 from . import road_inspector_surface_height as _surface_height
 from . import road_inspector_overlap_filter as _overlap_filter
+from . import road_inspector_grass_wedge as _grass_wedge
 
 
 # Keep every correction confined to the inspector process. Importing the normal
@@ -29,6 +30,8 @@ _coordinate_log.install()
 _surface_coverage.install()
 _surface_height.install()
 _overlap_filter.install()
+# Classify only the seam findings that survive the visual-coverage filters.
+_grass_wedge.install()
 
 RoadIssue = _core.RoadIssue
 InspectionResult = _core.InspectionResult
