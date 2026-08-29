@@ -7,6 +7,7 @@ from cwr_worldgen import stock_road_sharp_turn_policy as _sharp_turn
 from cwr_worldgen import stock_road_sharp_exact_policy as _sharp_exact
 from cwr_worldgen import stock_road_s_bend_policy as _s_bend
 from cwr_worldgen import stock_road_micro_bend_policy as _micro_bend
+from cwr_worldgen import stock_road_long_s_bend_policy as _long_s_bend
 from cwr_worldgen import stock_road_single_vertex_bend_policy as _single_vertex_bend
 from cwr_worldgen import stock_road_curve_usage_policy as _curve_usage
 from cwr_worldgen import stock_road_junction_endpoint_policy as _junction_endpoint
@@ -30,6 +31,7 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
         _sharp_exact,
         _s_bend,
         _micro_bend,
+        _long_s_bend,
         _single_vertex_bend,
         _curve_usage,
         _junction_endpoint,
