@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Keep connector-locked stock actions for short paved S-bends.
+"""Keep connector-locked stock actions for endpoint-covered paved S-bends.
 
 The S-bend beam already searches real stock straights and 10-degree curves in
 connector space. Historically it returned only a sampled centreline, after
@@ -7,15 +7,17 @@ which the ordinary greedy fitter was free to turn that solution back into
 independently rotated short straights. That recreates the grass wedges the beam
 was meant to remove.
 
-For short paved junction-to-junction runs with a genuine direction reversal,
-retain the beam's recovered stock-piece actions directly. The beam keeps every
-sample inside the existing 0.60 m source corridor; endpoint heading quantisation
-is allowed only where the normal junction trims cover the boundary. No extra or
-overlapping repair road objects are emitted.
+For paved runs whose two boundary errors are hidden by normal junction trims,
+retain the beam's recovered stock-piece actions directly. The ordinary S-bend
+pass keeps its shorter search cap; this exact pass may search a longer covered
+run because there is no exposed endpoint seam to protect. The beam still keeps
+every sample inside the existing 0.60 m source corridor. No extra or overlapping
+repair road objects are emitted.
 """
 from __future__ import annotations
 
 import math
+import threading
 
 from . import playability as _p
 from . import stock_road_curve_policy as _curve
@@ -24,7 +26,7 @@ from . import stock_road_s_bend_policy as _s_bend
 from . import stock_road_sharp_exact_policy as _exact
 from . import stock_road_sharp_turn_policy as _sharp
 
-MAXIMUM_EXACT_S_BEND_RUN_METRES = 230.0
+MAXIMUM_EXACT_S_BEND_RUN_METRES = 360.0
 MINIMUM_EXACT_S_BEND_ENDPOINT_COVER_METRES = 0.40
 MINIMUM_EXACT_S_BEND_SHORT_STRAIGHTS = 4
 MINIMUM_EXACT_S_BEND_CURVES = 3
@@ -37,6 +39,7 @@ _ACTION_LENGTH_TOLERANCE_METRES = 1.0e-4
 
 _ORIGINAL_CHAIN = None
 _INSTALLED = False
+_BEAM_LIMIT_LOCK = threading.Lock()
 
 
 def _has_direction_reversal(points) -> bool:
@@ -121,6 +124,26 @@ def _quantised_exit_heading(entry_heading: float, source_exit_heading: float) ->
     return (float(entry_heading) + float(steps) * 10.0) % 360.0
 
 
+def _long_exact_s_bend_path(source_points, entry_heading, exit_heading, pieces):
+    """Run the existing beam with a larger cap only for this covered exact pass."""
+
+    with _BEAM_LIMIT_LOCK:
+        previous_limit = float(_s_bend._MAXIMUM_S_BEND_SPAN_METRES)
+        _s_bend._MAXIMUM_S_BEND_SPAN_METRES = max(
+            previous_limit,
+            MAXIMUM_EXACT_S_BEND_RUN_METRES,
+        )
+        try:
+            return _s_bend._beam_s_bend_path(
+                source_points,
+                entry_heading,
+                exit_heading,
+                pieces,
+            )
+        finally:
+            _s_bend._MAXIMUM_S_BEND_SPAN_METRES = previous_limit
+
+
 def _exact_s_bend_chain(
     measure,
     pieces,
@@ -167,7 +190,7 @@ def _exact_s_bend_chain(
         measure, start, end
     )
     stock_exit_heading = _quantised_exit_heading(entry_heading, source_exit_heading)
-    locked_path = _s_bend._beam_s_bend_path(
+    locked_path = _long_exact_s_bend_path(
         source_points,
         entry_heading,
         stock_exit_heading,
