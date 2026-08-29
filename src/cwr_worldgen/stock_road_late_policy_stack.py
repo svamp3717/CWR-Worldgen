@@ -15,6 +15,7 @@ from . import stock_road_sharp_exact_policy as _sharp_exact
 from . import stock_road_s_bend_policy as _s_bend
 from . import stock_road_micro_bend_policy as _micro_bend
 from . import stock_road_s_bend_exact_policy as _s_bend_exact
+from . import stock_road_long_s_bend_policy as _long_s_bend
 from . import stock_road_single_vertex_bend_policy as _single_vertex_bend
 from . import stock_road_curve_usage_policy as _curve_usage
 from . import stock_road_junction_endpoint_policy as _junction_endpoint
@@ -51,6 +52,10 @@ def install_stock_road_late_policy_stack() -> None:
     # fitter. Preserve its real stock actions after the micro-bend wrapper so a
     # successful alternating-curve fit cannot be re-faceted into short slabs.
     _s_bend_exact.install_stock_road_s_bend_exact_policy()
+    # Lundby32 contains a covered paved S-bend a little over one kilometre long.
+    # Keep the exact fitter's existing acceptance gates but let that already-safe
+    # junction-to-junction case reach the beam instead of failing the old 360 m cap.
+    _long_s_bend.install_stock_road_long_s_bend_policy()
     # Lundby28 exposes isolated source corners that the sustained-turn detector
     # never handed to the curve beam. Give those corners the same exact connector
     # search before broader curve promotion runs.
