@@ -14,6 +14,7 @@ from . import stock_road_sharp_turn_policy as _sharp_turn
 from . import stock_road_sharp_exact_policy as _sharp_exact
 from . import stock_road_s_bend_policy as _s_bend
 from . import stock_road_micro_bend_policy as _micro_bend
+from . import stock_road_single_vertex_bend_policy as _single_vertex_bend
 from . import stock_road_curve_usage_policy as _curve_usage
 from . import stock_road_visual_finish_policy as _visual_finish
 from . import stock_road_final_continuity_policy as _final_continuity
@@ -44,6 +45,10 @@ def install_stock_road_late_policy_stack() -> None:
     _sharp_exact.install_stock_road_sharp_exact_policy()
     _s_bend.install_stock_road_s_bend_policy()
     _micro_bend.install_stock_road_micro_bend_policy()
+    # Lundby28 exposes isolated source corners that the sustained-turn detector
+    # never handed to the curve beam. Give those corners the same exact connector
+    # search before broader curve promotion runs.
+    _single_vertex_bend.install_stock_road_single_vertex_bend_policy()
     _curve_usage.install_stock_road_curve_usage_policy()
 
     # Final visual/physical passes. The dependency comments in these modules
