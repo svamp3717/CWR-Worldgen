@@ -17,6 +17,7 @@ from . import stock_road_micro_bend_policy as _micro_bend
 from . import stock_road_s_bend_exact_policy as _s_bend_exact
 from . import stock_road_single_vertex_bend_policy as _single_vertex_bend
 from . import stock_road_curve_usage_policy as _curve_usage
+from . import stock_road_junction_endpoint_policy as _junction_endpoint
 from . import stock_road_visual_finish_policy as _visual_finish
 from . import stock_road_final_continuity_policy as _final_continuity
 from . import stock_road_skew_orientation_policy as _skew_orientation
@@ -55,6 +56,11 @@ def install_stock_road_late_policy_stack() -> None:
     # search before broader curve promotion runs.
     _single_vertex_bend.install_stock_road_single_vertex_bend_policy()
     _curve_usage.install_stock_road_curve_usage_policy()
+    # Exact policies above can return their recovered actions directly. Keep the
+    # original junction cover information for acceptance, but reject a late fit
+    # that accidentally restores the old trimmed endpoint instead of reaching
+    # the logical node underneath its cap.
+    _junction_endpoint.install_stock_road_junction_endpoint_policy()
 
     # Final visual/physical passes. The dependency comments in these modules
     # are deliberate: visual finish must precede final continuity; skew
