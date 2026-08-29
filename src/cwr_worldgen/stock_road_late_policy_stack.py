@@ -24,6 +24,7 @@ from . import stock_road_curve_seam_fallback_policy as _curve_seam_fallback
 from . import stock_road_intersection_edge_policy as _intersection_edge
 from . import stock_road_emitted_seam_policy as _emitted_seam
 from . import stock_road_emitted_seam_refinement_policy as _emitted_seam_refinement
+from . import stock_road_fit_first_policy as _fit_first
 
 
 _INSTALLED = False
@@ -47,12 +48,9 @@ def install_stock_road_late_policy_stack() -> None:
 
     # Final visual/physical passes. The dependency comments in these modules
     # are deliberate: visual finish must precede final continuity; skew
-    # orientation must precede the turning-T acceptance clamp; straight seam
-    # coverage follows final continuity; residual curve coverage follows straight
-    # coverage; intersection edge fill runs after junction placement. The emitted
-    # seam pass is intentionally outermost so it measures the exact final pitched
-    # WorldObjects that will be serialized into the WRP. The Lundby25 refinement
-    # changes only that final planner, after the wrapper itself is installed.
+    # orientation must precede the turning-T acceptance clamp; straight/curve
+    # seam and intersection-edge policies retain their planners as regression
+    # evidence; the emitted pass still measures final pitched WRP geometry.
     _visual_finish.install_stock_road_visual_finish_policy()
     _final_continuity.install_stock_road_final_continuity_policy()
     _skew_orientation.install_stock_road_skew_orientation_policy()
@@ -62,5 +60,11 @@ def install_stock_road_late_policy_stack() -> None:
     _intersection_edge.install_stock_road_intersection_edge_policy()
     _emitted_seam.install_stock_road_emitted_seam_policy()
     _emitted_seam_refinement.install_stock_road_emitted_seam_refinement_policy()
+
+    # Production builds must end with fitting, not camouflage.  Once every
+    # measured straight, native curve, exact curve chain, and junction policy has
+    # had its chance, do not append low overlapping road objects to hide defects.
+    # Unresolved geometry remains visible to Road Inspector for a real fitter fix.
+    _fit_first.install_stock_road_fit_first_policy()
 
     _INSTALLED = True
