@@ -8,10 +8,8 @@ def test_report_ui_defaults_to_paved_only_finding_focus() -> None:
     assert "nonPavedFindingIds" in script
     assert "source_surfaces" in script
     assert "dirtSurfaceWords" in script
-    assert "isMixedStockFamilyFinding" in script
-    assert "families.has('ces')" in script
-    assert "Array.from(pavedFamilies).some" in script
-    assert "if(surfaces.some(value=>matchesSurfaceWord(value,dirtSurfaceWords))) return true;" in script
+    assert "surfaces.some(value=>matchesSurfaceWord(value,dirtSurfaceWords))" in script
+    assert "involvedRoads(issue).some(road=>String(road.family||'').toLowerCase()==='ces')" in script
     assert "!showDirt&&nonPavedFindingIds.has" in script
 
 
