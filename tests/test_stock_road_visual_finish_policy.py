@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_curve_seam_fallback_policy as _curve_seam_fallback
+from cwr_worldgen import stock_road_fit_first_policy as _fit_first
 from cwr_worldgen import stock_road_junction_policy as _junction
 from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen import stock_road_straight_seam_policy as _straight
@@ -153,9 +154,13 @@ def test_narrow_ces_road_does_not_get_paved_miter_underlay():
     assert plans == ()
 
 
-def test_paved_curve_seam_fallback_is_the_final_visual_hook():
+def test_fit_first_policy_is_the_final_visual_hook():
     assert (
         _finish._apply_curve_seam_covers
+        is _fit_first._preserve_fitted_visual_seam
+    )
+    assert (
+        _fit_first._ORIGINAL_VISUAL_SEAM_APPLY
         is _curve_seam_fallback._apply_paved_curve_seam_fallback
     )
     assert _curve_seam_fallback._ORIGINAL_FINISH is _straight._apply_straight_seam_covers
