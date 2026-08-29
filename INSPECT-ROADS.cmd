@@ -4,7 +4,7 @@ cd /d "%~dp0"
 rem Always inspect with this checkout's source tree, not a stale installed package.
 set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
 
-if "%~1"=="" goto :usage
+if "%~1"=="" goto :gui
 
 set "INPUT=%~f1"
 set "ROADS="
@@ -32,12 +32,10 @@ echo.
 echo Road Inspector report: %OUT%\report.html
 exit /b 0
 
-:usage
-echo Usage:
-echo   INSPECT-ROADS.cmd world.wrp-or-pbo [normalized\roads.geojson]
-echo.
-echo You can also drag a generated WRP or PBO onto this file.
-exit /b 2
+:gui
+py -m cwr_worldgen.road_inspector_gui
+if errorlevel 1 goto :failed
+exit /b 0
 
 :failed
 echo.
