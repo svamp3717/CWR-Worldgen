@@ -22,6 +22,7 @@ from . import stock_road_turning_t_fallback_policy as _turning_t_fallback
 from . import stock_road_straight_seam_policy as _straight_seam
 from . import stock_road_curve_seam_fallback_policy as _curve_seam_fallback
 from . import stock_road_intersection_edge_policy as _intersection_edge
+from . import stock_road_emitted_seam_policy as _emitted_seam
 
 
 _INSTALLED = False
@@ -47,7 +48,9 @@ def install_stock_road_late_policy_stack() -> None:
     # are deliberate: visual finish must precede final continuity; skew
     # orientation must precede the turning-T acceptance clamp; straight seam
     # coverage follows final continuity; residual curve coverage follows straight
-    # coverage; intersection edge fill is the outermost report pass.
+    # coverage; intersection edge fill runs after junction placement. The emitted
+    # seam pass is intentionally outermost so it measures the exact final pitched
+    # WorldObjects that will be serialized into the WRP.
     _visual_finish.install_stock_road_visual_finish_policy()
     _final_continuity.install_stock_road_final_continuity_policy()
     _skew_orientation.install_stock_road_skew_orientation_policy()
@@ -55,5 +58,6 @@ def install_stock_road_late_policy_stack() -> None:
     _straight_seam.install_stock_road_straight_seam_policy()
     _curve_seam_fallback.install_stock_road_curve_seam_fallback_policy()
     _intersection_edge.install_stock_road_intersection_edge_policy()
+    _emitted_seam.install_stock_road_emitted_seam_policy()
 
     _INSTALLED = True
