@@ -124,7 +124,7 @@ def test_terrain_profile_prefers_shorter_rigid_pieces_over_midspan_clipping() ->
     assert fitted[-1][2] == (0.0, 50.0)
 
 
-def test_diagonal_t_junction_uses_low_fallback_and_incident_edge_underlay() -> None:
+def test_diagonal_t_junction_does_not_add_overlap_repair_pieces() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     main = OsmLineFeature(
@@ -172,10 +172,10 @@ def test_diagonal_t_junction_uses_low_fallback_and_incident_edge_underlay() -> N
     node = (500.0, 500.0)
     cap = report.objects[0]
     # A 45-degree side arm is too skewed for the rigid 90-degree stock T mesh.
-    # The fallback cap therefore stays a short straight, but it is now below the
-    # real approach roads instead of replacing their visible edges.
+    # Keep the best fitted short cap and approaches, but do not lower the cap or
+    # append extra incident-aligned road slabs to camouflage the mismatch.
     assert cap.model_path.casefold() == r"o\road\sil6.p3d"
-    assert cap.y < playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
+    assert cap.y >= playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
 
     branch_obj = next(
         obj
@@ -189,19 +189,11 @@ def test_diagonal_t_junction_uses_low_fallback_and_incident_edge_underlay() -> N
     inner_distance = min(math.dist(node, axis[0]), math.dist(node, axis[1]))
     assert inner_distance <= 0.05
 
-    # The new low incident-aligned helper fills the triangular branch/cap hole
-    # without becoming the visible top road.  It must be both near the node and
-    # aligned with the 45-degree side arm.
-    helpers = [
+    overlap_helpers = [
         obj
         for obj in report.objects[report.junction_cap_objects :]
         if obj.model_path.casefold() == r"o\road\sil6.p3d"
         and obj.y < playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
         and math.dist((obj.x, obj.z), node) < 5.0
     ]
-    assert helpers
-    assert any(
-        abs(((obj.heading_degrees - 45.0 + 180.0) % 360.0) - 180.0) < 1.0
-        for obj in helpers
-    )
-    assert max(obj.y for obj in helpers) < branch_obj.y
+    assert overlap_helpers == []
