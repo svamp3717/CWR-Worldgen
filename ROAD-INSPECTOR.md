@@ -72,6 +72,14 @@ summary.json
 
 `report.html` is self-contained. Click an issue to zoom to its position and highlight the involved road objects. Filters can limit the list by severity or issue category.
 
+Every issue also includes copy-ready CWA debug-console teleport commands. **Finding** teleports to the measured defect coordinate, while each **Road N** entry teleports to the center of that specific involved road object. The generated command uses CWA/OFP syntax:
+
+```text
+player setPos [worldX, worldZ, 0]
+```
+
+The inspector's WRP X/Z plane corresponds to the game's horizontal X/Y position array, so the report deliberately writes the inspected world Z value into the second `setPos` coordinate. A height of `0` places the player on the terrain surface.
+
 `issues.json` is intended for future automated road-repair experiments. The first versions of Road Inspector remain deliberately read-only until the measurements have been compared against enough in-game failures.
 
 ## Geometry accuracy
