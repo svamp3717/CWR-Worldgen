@@ -72,6 +72,8 @@ summary.json
 
 `report.html` is self-contained. Click an issue to zoom to its position and highlight the involved road objects. Filters can limit the list by severity or issue category.
 
+The HTML report now defaults to **paved focus** for intersection diagnostics. Dirt-only intersections are hidden from the issue list and map markers by default, because those measurements are useful reference data but have not corresponded to visible defects in current in-game checks. Use **Show dirt intersections** to reveal them. When normalized source `surface` metadata is available it takes priority; otherwise stock road families are used (`sil`, `asf`, and `kos` are treated as paved, while dirt-only `ces` intersections are de-emphasized). Mixed paved/dirt intersections remain visible. This is only a report-view filter: `issues.json`, `issues.csv`, and the underlying measurements still contain every finding.
+
 Every issue also includes copy-ready CWA debug-console teleport commands. **Finding** teleports to the measured defect coordinate, while each **Road N** entry teleports to the center of that specific involved road object. The generated command uses CWA/OFP syntax:
 
 ```text
