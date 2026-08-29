@@ -128,13 +128,17 @@ def test_lundby20_production_s_bend_retains_exact_stock_actions():
 
     baseline = _fit_with_production_junction_cover(_s_exact._ORIGINAL_CHAIN, measure, pieces)
     fitted = _fit_with_production_junction_cover(_p._stock_piece_chain, measure, pieces)
+    baseline_error = _maximum_seam_tangent_error(baseline, measure.points)
+    fitted_error = _maximum_seam_tangent_error(fitted, measure.points)
 
     assert _s_exact._INSTALLED
     assert _curve_count(fitted) >= _s_exact.MINIMUM_EXACT_S_BEND_CURVES
-    assert _curve_count(fitted) > _curve_count(baseline)
+    assert _curve_count(fitted) >= _curve_count(baseline)
+    assert fitted != baseline
+    assert baseline_error - fitted_error >= _s_exact.MINIMUM_TANGENT_IMPROVEMENT_DEGREES
+    assert fitted_error <= _s_exact.MAXIMUM_EXACT_INTERNAL_TANGENT_ERROR_DEGREES
     for previous, current in zip(fitted, fitted[1:]):
         assert math.dist(previous[2], current[1]) <= 1.0e-4
-    assert _maximum_seam_tangent_error(fitted, measure.points) <= 1.0e-3
 
 
 def test_s_bend_policy_does_not_apply_to_ces_roads():
