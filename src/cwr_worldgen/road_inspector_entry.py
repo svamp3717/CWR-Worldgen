@@ -11,6 +11,7 @@ from . import road_inspector_intersection_context as _intersection_context
 from . import road_inspector_source_context as _source_context
 from . import road_inspector_edge_view as _edge_view
 from . import road_inspector_report_ui as _report_ui
+from . import road_inspector_coordinate_log as _coordinate_log
 
 
 # Keep every correction confined to the inspector process. Importing the normal
@@ -20,6 +21,7 @@ _intersection_context.install()
 _source_context.install()
 _edge_view.install()
 _report_ui.install()
+_coordinate_log.install()
 
 RoadIssue = _core.RoadIssue
 InspectionResult = _core.InspectionResult
