@@ -56,6 +56,7 @@ jobs:
             tests/test_stock_road_fit_first_policy.py \
             tests/test_stock_road_geometry_policy.py \
             tests/test_stock_road_intersection_edge_policy.py \
+            tests/test_stock_road_junction_endpoint_policy.py \
             tests/test_stock_road_junction_policy.py \
             tests/test_stock_road_late_policy_stack.py \
             tests/test_stock_road_local_fit_policy.py \
