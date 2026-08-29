@@ -69,11 +69,12 @@ def test_detects_visible_straight_miter_edge_discontinuity(tmp_path: Path) -> No
 
     result = inspect_road_geometry(wrp)
 
-    issue = next(issue for issue in result.issues if issue.category == "straight_miter")
+    issue = next(issue for issue in result.issues if issue.category == "grass_wedge")
     assert issue.object_ids == (1, 2)
     assert issue.metrics["center_gap_metres"] < 0.001
     assert issue.metrics["tangent_error_degrees"] > 5.9
     assert issue.metrics["edge_gap_max_metres"] > 0.45
+    assert issue.metrics["grass_wedge_area_square_metres"] > 0.001
     assert "connector-locked" in issue.candidate_fix
 
 
@@ -85,7 +86,7 @@ def test_tangent_continuous_straights_do_not_raise_seam_issue(tmp_path: Path) ->
 
     result = inspect_road_geometry(wrp)
 
-    assert not [issue for issue in result.issues if issue.category in {"straight_miter", "connector_gap", "curve_transition"}]
+    assert not [issue for issue in result.issues if issue.category in {"straight_miter", "grass_wedge", "connector_gap", "curve_transition"}]
 
 
 def test_reads_real_wrp_entry_from_generated_pbo(tmp_path: Path) -> None:
@@ -100,7 +101,7 @@ def test_reads_real_wrp_entry_from_generated_pbo(tmp_path: Path) -> None:
 
     assert result.wrp_entry == "sample.wrp"
     assert result.road_object_count == 2
-    assert any(issue.category == "straight_miter" for issue in result.issues)
+    assert any(issue.category == "grass_wedge" for issue in result.issues)
 
 
 def test_normalized_roads_flag_visible_straight_cap_on_turning_intersection(tmp_path: Path) -> None:
@@ -242,7 +243,7 @@ def test_pitched_straights_use_rvw4_horizontal_connector_positions(tmp_path: Pat
     assert not [
         issue
         for issue in result.issues
-        if issue.category in {"straight_miter", "connector_gap", "curve_transition"}
+        if issue.category in {"straight_miter", "grass_wedge", "connector_gap", "curve_transition"}
     ]
 
 
@@ -277,7 +278,7 @@ def test_writes_self_contained_html_json_csv_and_summary(tmp_path: Path) -> None
     assert summary["issue_count"] >= 1
     html_text = paths["html"].read_text(encoding="utf-8")
     assert "Road Inspector" in html_text
-    assert "straight_miter" in html_text
+    assert "grass_wedge" in html_text
     assert "Reset map" in html_text
     assert "Copy teleport" in html_text
     assert "player setPos [" in html_text
