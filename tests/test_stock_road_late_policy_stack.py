@@ -9,6 +9,7 @@ from cwr_worldgen import stock_road_s_bend_policy as _s_bend
 from cwr_worldgen import stock_road_micro_bend_policy as _micro_bend
 from cwr_worldgen import stock_road_single_vertex_bend_policy as _single_vertex_bend
 from cwr_worldgen import stock_road_curve_usage_policy as _curve_usage
+from cwr_worldgen import stock_road_junction_endpoint_policy as _junction_endpoint
 from cwr_worldgen import stock_road_visual_finish_policy as _visual_finish
 from cwr_worldgen import stock_road_final_continuity_policy as _final_continuity
 from cwr_worldgen import stock_road_skew_orientation_policy as _skew_orientation
@@ -31,6 +32,7 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
         _micro_bend,
         _single_vertex_bend,
         _curve_usage,
+        _junction_endpoint,
         _visual_finish,
         _final_continuity,
         _skew_orientation,
@@ -46,6 +48,7 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
     assert _stack._INSTALLED
     assert all(policy._INSTALLED for policy in policies)
     assert _sharp_turn._sharp_turn_spans is _single_vertex_bend._single_vertex_sharp_turn_spans
+    assert _p._stock_piece_chain is _junction_endpoint._junction_endpoint_chain
 
 
 def test_final_wrappers_are_not_left_disconnected() -> None:
