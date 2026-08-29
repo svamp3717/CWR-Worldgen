@@ -4,13 +4,15 @@ Road Inspector is a read-only post-build diagnostic for the road geometry that i
 
 ## Quick start on Windows
 
-After pulling `fix/stock-road-curves`, drag a generated `.pbo` or `.wrp` onto:
+After pulling `fix/stock-road-curves`, double-click:
 
 ```text
 INSPECT-ROADS.cmd
 ```
 
-The launcher looks for a nearby `normalized\roads.geojson`. If the source bundle is elsewhere, run:
+With no arguments the launcher opens the Road Inspector GUI. Choose a generated `.pbo` or `.wrp`, optionally select `normalized\roads.geojson`, choose the report folder, and click **Run inspection**. The GUI automatically looks for a nearby `normalized\roads.geojson`, keeps the diagnostic thresholds editable, and can open the HTML report or its output folder when the audit finishes.
+
+The existing drag-and-drop workflow still works: drag a generated `.pbo` or `.wrp` onto `INSPECT-ROADS.cmd` to run the inspector immediately. The launcher looks for a nearby `normalized\roads.geojson`. If the source bundle is elsewhere, run:
 
 ```bat
 INSPECT-ROADS.cmd "G:\path\wg_lundby.pbo" "G:\path\lundby\normalized\roads.geojson"
@@ -18,7 +20,13 @@ INSPECT-ROADS.cmd "G:\path\wg_lundby.pbo" "G:\path\lundby\normalized\roads.geojs
 
 The report is written beside the inspected world as `<world-name>-road-inspector\report.html` and is opened in the default browser.
 
-The installed command can also be used directly:
+The installed GUI can also be opened directly:
+
+```bat
+cwr-road-inspector-gui
+```
+
+The installed command-line inspector remains available:
 
 ```bat
 cwr-road-inspector "G:\path\wg_lundby.pbo" --roads "G:\path\lundby\normalized\roads.geojson" --output "G:\path\road-inspector"
