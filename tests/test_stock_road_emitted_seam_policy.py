@@ -135,6 +135,87 @@ def test_large_straight_miter_uses_two_tangent_aligned_underlays():
     assert headings == [0.0, 12.0]
 
 
+def test_lundby34_compiled_grass_wedges_receive_final_underlays():
+    """Regress representative straight, mixed, and curve seams from Lundby34."""
+
+    cases = (
+        (
+            (
+                _object(
+                    7740,
+                    r"o\road\sil6.p3d",
+                    4666.94384765625,
+                    4628.9404296875,
+                    340.2384706417884,
+                    pitch=1.4365560450584551,
+                    y=23.183277130126953,
+                ),
+                _object(
+                    7741,
+                    r"o\road\sil6.p3d",
+                    4663.43310546875,
+                    4633.814453125,
+                    308.2403992415925,
+                    pitch=0.09258072651614063,
+                    y=23.26667022705078,
+                ),
+            ),
+            2,
+        ),
+        (
+            (
+                _object(
+                    7708,
+                    r"o\road\sil6.p3d",
+                    334.6238708496094,
+                    6365.3916015625,
+                    353.3420158342863,
+                    y=16.684999465942383,
+                ),
+                _object(
+                    7709,
+                    r"o\road\sil10 25.p3d",
+                    333.6912536621094,
+                    6370.19189453125,
+                    154.21315842768192,
+                    y=16.684999465942383,
+                ),
+            ),
+            1,
+        ),
+        (
+            (
+                _object(
+                    8738,
+                    r"o\road\sil10 50.p3d",
+                    3218.660888671875,
+                    4948.8486328125,
+                    348.3063195744053,
+                    pitch=-0.035445535762980804,
+                    y=10.746047973632812,
+                ),
+                _object(
+                    8739,
+                    r"o\road\sil10 100.p3d",
+                    3222.28125,
+                    4936.3740234375,
+                    333.41577386280625,
+                    pitch=-0.13692661349488416,
+                    y=10.768783569335938,
+                ),
+            ),
+            1,
+        ),
+    )
+
+    for objects, expected_plans in cases:
+        report = SimpleNamespace(objects=objects, junction_cap_objects=0)
+        plans = _emitted._emitted_seam_cover_plans(report)
+
+        assert len(plans) == expected_plans
+        assert all(plan.model_path.casefold() == r"o\road\sil6.p3d" for plan in plans)
+
+
 def test_unambiguous_legacy_paved_cap_endpoint_can_be_sealed():
     cap = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
     approach = _straight_from_start(2, (0.0, 0.15), 0.0)

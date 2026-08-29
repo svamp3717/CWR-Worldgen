@@ -9,16 +9,18 @@ from cwr_worldgen import stock_road_intersection_edge_policy as _intersection_ed
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
 
 
-def test_fit_first_guard_owns_all_post_fit_overlap_hooks() -> None:
+def test_fit_first_guard_keeps_only_final_physical_seam_hook() -> None:
     assert _fit_first._INSTALLED
     assert _finish._apply_curve_seam_covers is _fit_first._preserve_fitted_visual_seam
     assert (
         _intersection_edge._seal_legacy_paved_intersections
         is _fit_first._preserve_fitted_intersection
     )
-    assert (
-        _emitted._apply_emitted_seam_covers
-        is _fit_first._preserve_fitted_emitted_seam
+    assert _emitted._apply_emitted_seam_covers is (
+        _fit_first._ORIGINAL_EMITTED_SEAM_APPLY
+    )
+    assert _emitted._apply_emitted_seam_covers is not (
+        _fit_first._preserve_fitted_emitted_seam
     )
 
 
@@ -63,7 +65,7 @@ def test_intersection_guard_does_not_append_overlap_tongues() -> None:
     assert result.short_piece_objects == 3
 
 
-def test_emitted_seam_guard_does_not_append_final_underlays() -> None:
+def test_obsolete_emitted_seam_guard_remains_a_noop_for_regression_analysis() -> None:
     report = SimpleNamespace(objects=("fitted-road",), short_piece_objects=2)
 
     result = _fit_first._preserve_fitted_emitted_seam(report, (), None)

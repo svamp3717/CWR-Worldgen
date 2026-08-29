@@ -9,15 +9,22 @@ pieces after that fitting work had finished.  Those pieces can hide a visual
 hole, but they also turn one geometry problem into a stack of road surfaces and
 make the generated WRP harder to reason about.
 
-Do not manufacture a paved-road fix by adding another overlapping road object.
-The existing model-selection and connector-locked fitting passes get the first
-and only chance to solve the geometry.  If they cannot represent a seam or
-junction cleanly, preserve the fitted objects unchanged and let Road Inspector
-report the unresolved case so the fitting policy can be improved instead.
+Do not manufacture an intermediate paved-road fix by adding another overlapping
+road object.  The existing model-selection and connector-locked fitting passes
+get the first chance to solve the geometry, and legacy intersection tongues stay
+disabled.
+
+The final emitted-seam pass is different: it measures the pitch-projected
+``WorldObject`` connectors that will actually be serialized.  The Lundby34 Road
+Inspector report proved that disabling this last bounded, paved-only fallback
+left 80 visible grass wedges.  Keep that final physical audit active while the
+older intermediate visual and junction repair hooks remain disabled.  Its
+same-family six-metre pieces sit below the visible carriageway and are emitted
+only for unambiguous seams not already covered by paved surface.
 
 The older planners remain installed and testable because they are useful
-regression evidence.  This final production guard only disables their object-
-appending application hooks.
+regression evidence.  This final production guard disables only their
+intermediate object-appending application hooks.
 """
 from __future__ import annotations
 
@@ -57,7 +64,7 @@ def _preserve_fitted_emitted_seam(report, elevations, spec):
 
 
 def install_stock_road_fit_first_policy() -> None:
-    """Install the final no-overlap guard after every stock fitting policy."""
+    """Disable intermediate overlap repairs but retain the final seam audit."""
 
     global _ORIGINAL_VISUAL_SEAM_APPLY
     global _ORIGINAL_INTERSECTION_EDGE_APPLY
@@ -79,12 +86,15 @@ def install_stock_road_fit_first_policy() -> None:
     )
     _ORIGINAL_EMITTED_SEAM_APPLY = _emitted._apply_emitted_seam_covers
 
-    # These calls happen only after the native straight/curve/junction fitting
-    # stack has run.  Leaving a defect visible here is intentional: it forces the
-    # next fix into model selection or connector fitting rather than another slab.
+    # These intermediate calls happen after the native straight/curve/junction
+    # fitting stack has run.  Keep their broad overlap repairs disabled.
     _finish._apply_curve_seam_covers = _preserve_fitted_visual_seam
     _intersection_edge._seal_legacy_paved_intersections = (
         _preserve_fitted_intersection
     )
-    _emitted._apply_emitted_seam_covers = _preserve_fitted_emitted_seam
+
+    # Do not replace the final emitted hook.  It is the only pass that measures
+    # pitch-projected physical connectors, and its refined planner is bounded to
+    # unambiguous same-family paved seams.  Disabling it was the direct cause of
+    # the surviving Lundby34 grass wedges.
     _INSTALLED = True

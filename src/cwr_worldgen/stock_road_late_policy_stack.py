@@ -82,10 +82,9 @@ def install_stock_road_late_policy_stack() -> None:
     _emitted_seam.install_stock_road_emitted_seam_policy()
     _emitted_seam_refinement.install_stock_road_emitted_seam_refinement_policy()
 
-    # Production builds must end with fitting, not camouflage.  Once every
-    # measured straight, native curve, exact curve chain, and junction policy has
-    # had its chance, do not append low overlapping road objects to hide defects.
-    # Unresolved geometry remains visible to Road Inspector for a real fitter fix.
+    # Production builds keep fitting first. Disable the older intermediate seam
+    # and junction overlap helpers, but leave the final pitch-aware emitted-seam
+    # audit active so unambiguous residual paved wedges are not serialized open.
     _fit_first.install_stock_road_fit_first_policy()
 
     _INSTALLED = True

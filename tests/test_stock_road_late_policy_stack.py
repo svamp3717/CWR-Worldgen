@@ -55,9 +55,8 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
 
 def test_final_wrappers_are_not_left_disconnected() -> None:
     # The emitted-geometry wrapper remains outermost so it still measures the
-    # exact final pitched WorldObjects. Its application hook is now a no-op: a
-    # detected defect must go back through stock-piece fitting instead of being
-    # hidden beneath a new road object.
+    # exact final pitched WorldObjects. Its bounded paved-only application hook
+    # remains active so residual grass wedges are sealed after fitting.
     assert _p.fit_road_objects is _emitted_seam._fit
     assert _emitted_seam._ORIGINAL_FIT is _intersection_edge._fit
     assert (
@@ -66,7 +65,7 @@ def test_final_wrappers_are_not_left_disconnected() -> None:
     )
     assert (
         _emitted_seam._apply_emitted_seam_covers
-        is _fit_first._preserve_fitted_emitted_seam
+        is _fit_first._ORIGINAL_EMITTED_SEAM_APPLY
     )
 
     # Keep the older seam planners wired for regression analysis, but the final
