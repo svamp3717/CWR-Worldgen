@@ -45,7 +45,8 @@ def _straight_from_start(object_id, start, heading, *, pitch=0.0):
 def test_final_pass_sees_pitch_projected_straight_gap():
     # Build the objects from their *physical* WRP horizontal spans. The older
     # intermediate hook could miss this class because it ran before the final
-    # pitched objects existed.
+    # pitched objects existed. An eight-degree miter now receives one low helper
+    # along each visible tangent rather than one average-heading rectangle.
     first_pitch = 8.0
     first_length = 6.25 * math.cos(math.radians(first_pitch))
     first = _object(
@@ -61,9 +62,10 @@ def test_final_pass_sees_pitch_projected_straight_gap():
 
     plans = _emitted._emitted_seam_cover_plans(report)
 
-    assert len(plans) == 1
-    assert plans[0].model_path.casefold() == r"o\road\sil6.p3d"
-    assert math.dist(plans[0].centre, (0.09, 0.0)) < 0.01
+    assert len(plans) == 2
+    assert all(plan.model_path.casefold() == r"o\road\sil6.p3d" for plan in plans)
+    assert all(math.dist(plan.centre, (0.09, 0.0)) < 0.01 for plan in plans)
+    assert sorted(round(plan.tangent_axis_degrees, 6) for plan in plans) == [0.0, 8.0]
 
 
 def test_final_curve_gap_uses_straight_side_tangent():
