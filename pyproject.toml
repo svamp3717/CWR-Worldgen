@@ -27,6 +27,7 @@ cwr-road-inspector = "cwr_worldgen.road_inspector_entry:main"
 
 [project.gui-scripts]
 cwr-worldgen-gui = "cwr_worldgen.gui_entry:main"
+cwr-road-inspector-gui = "cwr_worldgen.road_inspector_gui:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
