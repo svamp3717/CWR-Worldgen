@@ -38,16 +38,7 @@ _UI_SCRIPT = r"""
   controls.insertBefore(search,reset||null);
   const byId=new Map(issues.map(i=>[i.issue_id,i]));
   const roadById=new Map((typeof roads==='undefined'?[]:roads).map(r=>[Number(r.object_id),r]));
-  const intersectionCategories=new Set([
-    'junction_connector_mismatch',
-    'wrong_intersection_model',
-    'intersection_connector_orientation',
-    'turning_intersection_cap',
-    'intersection_approach_mismatch',
-    'intersection_missing_cap'
-  ]);
   const seamCategories=new Set(['straight_miter','curve_transition','connector_gap']);
-  const pavedFamilies=new Set(['sil','asf','kos']);
   const dirtSurfaceWords=['dirt','earth','ground','gravel','fine_gravel','compacted','unpaved','sand','mud','grass'];
   const mixedJunctionRadiusMetres=7.0;
 
@@ -62,14 +53,6 @@ _UI_SCRIPT = r"""
 
   function involvedRoads(issue){
     return (issue.object_ids||[]).map(id=>roadById.get(Number(id))).filter(Boolean);
-  }
-
-  function isMixedStockFamilyFinding(issue){
-    const families=new Set(
-      involvedRoads(issue).map(road=>String(road.family||'').toLowerCase()).filter(Boolean)
-    );
-    if(!families.has('ces')) return false;
-    return Array.from(pavedFamilies).some(family=>families.has(family));
   }
 
   function isNativeMixedJunction(road){
@@ -91,12 +74,14 @@ _UI_SCRIPT = r"""
   }
 
   function isDirtOrMixedFinding(issue){
-    if(isMixedStockFamilyFinding(issue)) return true;
-    if(intersectionCategories.has(issue.category)){
-      const surfaces=surfaceTokens(issue);
-      if(surfaces.some(value=>matchesSurfaceWord(value,dirtSurfaceWords))) return true;
-      if(involvedRoads(issue).some(road=>String(road.family||'').toLowerCase()==='ces')) return true;
-    }
+    const surfaces=surfaceTokens(issue);
+    if(surfaces.some(value=>matchesSurfaceWord(value,dirtSurfaceWords))) return true;
+
+    // ``ces`` is the stock dirt/service-road family in this inspector. Paved
+    // focus therefore hides every ces-only diagnostic as well as ces/paved
+    // transitions, not merely intersection categories. Raw JSON/CSV stays intact.
+    if(involvedRoads(issue).some(road=>String(road.family||'').toLowerCase()==='ces')) return true;
+
     // A paved-looking seam can still be one arm of a native sil/ces T. Lundby33
     // exposed this immediately beside the mixed junction even though the two
     // objects named by the seam were both sil. Keep that out of paved-only focus.
