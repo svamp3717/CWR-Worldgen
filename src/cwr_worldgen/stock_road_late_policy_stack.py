@@ -3,7 +3,7 @@
 
 The road fitter is intentionally layered: early policies establish measured stock
 geometry and obstacle-safe source conditioning, while these later policies repair
-engine-visible paved-road failures found in generated Lundby WRPs.  Keeping the
+engine-visible paved-road failures found in generated Lundby WRPs. Keeping the
 ordering in one place prevents a policy from existing in source and tests without
 ever participating in a normal world build.
 """
@@ -18,6 +18,7 @@ from . import stock_road_curve_usage_policy as _curve_usage
 from . import stock_road_visual_finish_policy as _visual_finish
 from . import stock_road_final_continuity_policy as _final_continuity
 from . import stock_road_skew_orientation_policy as _skew_orientation
+from . import stock_road_turning_t_fallback_policy as _turning_t_fallback
 from . import stock_road_straight_seam_policy as _straight_seam
 from . import stock_road_curve_seam_fallback_policy as _curve_seam_fallback
 from . import stock_road_intersection_edge_policy as _intersection_edge
@@ -34,7 +35,7 @@ def install_stock_road_late_policy_stack() -> None:
         return
 
     # Preserve and regularize coherent source curvature before exact-pose bend
-    # promotion.  These passes are paved-only where they alter stock piece use.
+    # promotion. These passes are paved-only where they alter stock piece use.
     _curve_regularization.install_stock_road_curve_regularization_policy()
     _sharp_turn.install_stock_road_sharp_turn_policy()
     _sharp_exact.install_stock_road_sharp_exact_policy()
@@ -42,13 +43,15 @@ def install_stock_road_late_policy_stack() -> None:
     _micro_bend.install_stock_road_micro_bend_policy()
     _curve_usage.install_stock_road_curve_usage_policy()
 
-    # Final visual/physical passes.  The dependency comments in these modules
-    # are deliberate: visual finish must precede final continuity; straight seam
+    # Final visual/physical passes. The dependency comments in these modules
+    # are deliberate: visual finish must precede final continuity; skew
+    # orientation must precede the turning-T acceptance clamp; straight seam
     # coverage follows final continuity; residual curve coverage follows straight
     # coverage; intersection edge fill is the outermost report pass.
     _visual_finish.install_stock_road_visual_finish_policy()
     _final_continuity.install_stock_road_final_continuity_policy()
     _skew_orientation.install_stock_road_skew_orientation_policy()
+    _turning_t_fallback.install_stock_road_turning_t_fallback_policy()
     _straight_seam.install_stock_road_straight_seam_policy()
     _curve_seam_fallback.install_stock_road_curve_seam_fallback_policy()
     _intersection_edge.install_stock_road_intersection_edge_policy()
