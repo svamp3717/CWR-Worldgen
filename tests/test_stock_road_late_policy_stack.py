@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+from __future__ import annotations
+
+from cwr_worldgen import playability as _p
+from cwr_worldgen import stock_road_curve_regularization_policy as _regularization
+from cwr_worldgen import stock_road_sharp_turn_policy as _sharp_turn
+from cwr_worldgen import stock_road_sharp_exact_policy as _sharp_exact
+from cwr_worldgen import stock_road_s_bend_policy as _s_bend
+from cwr_worldgen import stock_road_micro_bend_policy as _micro_bend
+from cwr_worldgen import stock_road_curve_usage_policy as _curve_usage
+from cwr_worldgen import stock_road_visual_finish_policy as _visual_finish
+from cwr_worldgen import stock_road_final_continuity_policy as _final_continuity
+from cwr_worldgen import stock_road_skew_orientation_policy as _skew_orientation
+from cwr_worldgen import stock_road_straight_seam_policy as _straight_seam
+from cwr_worldgen import stock_road_curve_seam_fallback_policy as _curve_seam_fallback
+from cwr_worldgen import stock_road_intersection_edge_policy as _intersection_edge
+from cwr_worldgen import stock_road_late_policy_stack as _stack
+
+
+def test_late_stock_road_policies_are_active_on_package_import() -> None:
+    policies = (
+        _regularization,
+        _sharp_turn,
+        _sharp_exact,
+        _s_bend,
+        _micro_bend,
+        _curve_usage,
+        _visual_finish,
+        _final_continuity,
+        _skew_orientation,
+        _straight_seam,
+        _curve_seam_fallback,
+        _intersection_edge,
+    )
+
+    assert _stack._INSTALLED
+    assert all(policy._INSTALLED for policy in policies)
+
+
+def test_final_wrappers_are_not_left_disconnected() -> None:
+    # The last paved-intersection pass must own the public fitter entry point.
+    assert _p.fit_road_objects is _intersection_edge._fit
+
+    # Residual curve coverage intentionally wraps the straight-seam pass, which
+    # itself wraps final-continuity's disabled generic curve cover.
+    assert _visual_finish._apply_curve_seam_covers is _curve_seam_fallback._apply_paved_curve_seam_fallback
+    assert _curve_seam_fallback._ORIGINAL_FINISH is _straight_seam._apply_straight_seam_covers
+
+    # Native T placement uses the later measured skew/orientation chooser rather
+    # than the earlier centre-only fallback.
+    assert _final_continuity._same_family_paved_skew_t is _skew_orientation._same_family_paved_skew_t
