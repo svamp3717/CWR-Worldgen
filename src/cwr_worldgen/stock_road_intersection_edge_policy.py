@@ -28,10 +28,14 @@ from . import stock_road_visual_finish_policy as _finish
 _PAVED_FAMILIES = {"sil", "asf", "kos"}
 
 # A legacy cap is useful as a central fill, but it must not win the z-buffer
-# over the actual approach pieces.  Tongues sit one millimetre higher than the
-# central fill so the directionally correct arm wins where both underlays meet.
-INTERSECTION_CAP_UNDERLAY_BIAS_METRES = -0.004
-INTERSECTION_TONGUE_UNDERLAY_BIAS_METRES = -0.003
+# over the actual approach pieces. Lundby24 showed that a four-millimetre model-
+# space bias can shrink to less than one millimetre at the logical node after
+# the independently pitched approaches are transformed into WRP space. Keep a
+# full centimetre of nominal underlay bias instead. Tongues remain one millimetre
+# higher than the central fill so the directionally correct arm wins where both
+# underlays meet, while both stay safely below the visible approaches.
+INTERSECTION_CAP_UNDERLAY_BIAS_METRES = -0.010
+INTERSECTION_TONGUE_UNDERLAY_BIAS_METRES = -0.009
 
 # A 6.25 m stock short piece is shifted slightly out from the node.  It still
 # reaches 1.75 m behind the logical intersection while overlapping 4.50 m of
