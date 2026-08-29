@@ -8,7 +8,6 @@ on:
     paths:
       - "src/cwr_worldgen/*road*.py"
       - "src/cwr_worldgen/raceway_policy.py"
-      - "src/cwr_worldgen/gravel_*policy.py"
       - "tests/test_*road*.py"
       - "tests/test_gravel_*.py"
       - ".github/workflows/test-stock-roads.yml"
@@ -37,6 +36,7 @@ jobs:
             tests/test_road_inspector_source_context.py \
             tests/test_road_inspector_edge_view.py \
             tests/test_road_inspector_intersection_context.py \
+            tests/test_road_inspector_surface_coverage.py \
             tests/test_road_quality_policy.py \
             tests/test_gravel_junction_policy.py \
             tests/test_stock_road_3d_connector_policy.py \
@@ -59,6 +59,7 @@ jobs:
             tests/test_stock_road_sharp_turn_policy.py \
             tests/test_stock_road_s_bend_policy.py \
             tests/test_stock_road_skew_orientation_policy.py \
+            tests/test_stock_road_straight_seam_gap_policy.py \
             tests/test_stock_road_skew_policy.py \
             tests/test_stock_road_surface_overlap_policy.py \
             tests/test_stock_road_transform_policy.py \
