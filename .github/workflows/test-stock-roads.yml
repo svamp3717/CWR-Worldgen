@@ -37,6 +37,7 @@ jobs:
             tests/test_road_inspector_edge_view.py \
             tests/test_road_inspector_intersection_context.py \
             tests/test_road_inspector_surface_coverage.py \
+            tests/test_road_inspector_surface_height.py \
             tests/test_road_quality_policy.py \
             tests/test_gravel_junction_policy.py \
             tests/test_stock_road_3d_connector_policy.py \
@@ -45,10 +46,12 @@ jobs:
             tests/test_stock_road_curve_preservation_policy.py \
             tests/test_stock_road_curve_seam_fallback_policy.py \
             tests/test_stock_road_curve_usage_policy.py \
+            tests/test_stock_road_emitted_seam_policy.py \
             tests/test_stock_road_final_continuity_policy.py \
             tests/test_stock_road_geometry_policy.py \
             tests/test_stock_road_intersection_edge_policy.py \
             tests/test_stock_road_junction_policy.py \
+            tests/test_stock_road_late_policy_stack.py \
             tests/test_stock_road_local_fit_policy.py \
             tests/test_stock_road_micro_bend_policy.py \
             tests/test_stock_road_model_geometry.py \
