@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 
 from . import playability as _p
+from . import stock_road_curve_policy as _curve
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_s_bend_policy as _s_bend
 from . import stock_road_sharp_exact_policy as _exact
@@ -29,6 +30,8 @@ MINIMUM_EXACT_S_BEND_SHORT_STRAIGHTS = 4
 MINIMUM_EXACT_S_BEND_CURVES = 3
 MAXIMUM_EXACT_S_BEND_EXTRA_PIECES = 3
 MINIMUM_SIGNIFICANT_REVERSAL_DEGREES = 0.45
+MINIMUM_TANGENT_IMPROVEMENT_DEGREES = 0.25
+MAXIMUM_EXACT_INTERNAL_TANGENT_ERROR_DEGREES = 1.0e-3
 END_PROGRESS_TOLERANCE_METRES = 0.20
 _ACTION_LENGTH_TOLERANCE_METRES = 1.0e-4
 
@@ -90,6 +93,26 @@ def _curve_count(fitted) -> int:
         _geometry.stock_curve_match(str(piece.model_path)) is not None
         for piece, _start, _end in fitted
     )
+
+
+def _piece_tangents(item, source_points):
+    piece, start, end = item
+    chord = _sharp._heading(start, end)
+    if _geometry.stock_curve_match(str(piece.model_path)) is None:
+        return chord, chord
+    reverse = _curve._curve_reverse_for_run(source_points, start, end)
+    if reverse:
+        return (chord + 5.0) % 360.0, (chord - 5.0) % 360.0
+    return (chord - 5.0) % 360.0, (chord + 5.0) % 360.0
+
+
+def _maximum_internal_tangent_error(fitted, source_points) -> float:
+    maximum = 0.0
+    for previous, current in zip(fitted, fitted[1:]):
+        previous_end = _piece_tangents(previous, source_points)[1]
+        current_start = _piece_tangents(current, source_points)[0]
+        maximum = max(maximum, _p._heading_difference(previous_end, current_start))
+    return maximum
 
 
 def _quantised_exit_heading(entry_heading: float, source_exit_heading: float) -> float:
@@ -158,9 +181,20 @@ def _exact_s_bend_chain(
         return baseline
     exact_curves = _curve_count(exact)
     baseline_curves = _curve_count(baseline)
-    if exact_curves < MINIMUM_EXACT_S_BEND_CURVES or exact_curves <= baseline_curves:
+    if exact_curves < MINIMUM_EXACT_S_BEND_CURVES or exact_curves < baseline_curves:
         return baseline
     if len(exact) > len(baseline) + MAXIMUM_EXACT_S_BEND_EXTRA_PIECES:
+        return baseline
+
+    exact_tangent_error = _maximum_internal_tangent_error(exact, source_points)
+    baseline_tangent_error = _maximum_internal_tangent_error(baseline, measure.points)
+    if exact_tangent_error > MAXIMUM_EXACT_INTERNAL_TANGENT_ERROR_DEGREES:
+        return baseline
+    if (
+        exact_curves == baseline_curves
+        and baseline_tangent_error - exact_tangent_error
+        < MINIMUM_TANGENT_IMPROVEMENT_DEGREES
+    ):
         return baseline
 
     start_point = measure.point(start)[:2]
