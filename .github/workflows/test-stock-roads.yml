@@ -43,6 +43,7 @@ jobs:
             tests/test_road_inspector_overlap_filter.py \
             tests/test_road_inspector_grass_wedge.py \
             tests/test_road_inspector_surface_height.py \
+            tests/test_road_inspector_report_ui.py \
             tests/test_road_quality_policy.py \
             tests/test_gravel_junction_policy.py \
             tests/test_stock_road_3d_connector_policy.py \
