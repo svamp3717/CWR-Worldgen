@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Add practical filtering and metric details to the inspector HTML report."""
+"""Add practical filtering, metric details, and CWA teleport helpers to reports."""
 from __future__ import annotations
 
 from . import road_inspector as _core
@@ -13,6 +13,12 @@ _UI_CSS = r"""
 .issue details { margin-top:7px; color:#bbb; }
 .issue details pre { white-space:pre-wrap; word-break:break-word; margin:5px 0 0; font-size:11px; }
 .source-context { margin-top:5px; color:#9dc6a7; font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+.teleports { margin-top:9px; padding-top:8px; border-top:1px solid #383838; display:grid; gap:6px; }
+.teleport-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.teleport-label { min-width:88px; color:#9ec9ff; font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+.teleport-command { flex:1; min-width:230px; padding:5px 7px; border:1px solid #444; border-radius:4px; background:#131313; color:#d8f4d8; font-family:ui-monospace,Consolas,monospace; font-size:12px; user-select:all; }
+.teleport-copy { white-space:nowrap; cursor:pointer; }
+.teleport-copy.copied { border-color:#6a9d6a; color:#bff0bf; }
 """
 
 _UI_SCRIPT = r"""
@@ -28,11 +34,75 @@ _UI_SCRIPT = r"""
   const reset=document.getElementById('reset');
   controls.insertBefore(search,reset||null);
   const byId=new Map(issues.map(i=>[i.issue_id,i]));
+  const roadById=new Map((typeof roads==='undefined'?[]:roads).map(r=>[Number(r.object_id),r]));
 
   function searchable(i){
     return [i.issue_id,i.severity,i.category,i.x,i.z,(i.object_ids||[]).join(' '),(i.models||[]).join(' '),i.message,i.candidate_fix,JSON.stringify(i.metrics||{})].join(' ').toLowerCase();
   }
   const textById=new Map(issues.map(i=>[i.issue_id,searchable(i)]));
+
+  function coord(value){
+    const number=Number(value);
+    if(!Number.isFinite(number)) return '0';
+    return number.toFixed(2).replace(/\.00$/,'');
+  }
+
+  function teleportCommand(x,z){
+    return `player setPos [${coord(x)}, ${coord(z)}, 0]`;
+  }
+
+  function fallbackCopy(text){
+    const area=document.createElement('textarea');
+    area.value=text;
+    area.setAttribute('readonly','');
+    area.style.position='absolute';
+    area.style.left='-9999px';
+    document.body.appendChild(area);
+    area.select();
+    let copied=false;
+    try{ copied=document.execCommand('copy'); }catch(_error){ copied=false; }
+    area.remove();
+    return copied;
+  }
+
+  async function copyTeleport(text,button){
+    let copied=false;
+    try{
+      if(navigator.clipboard&&window.isSecureContext){
+        await navigator.clipboard.writeText(text);
+        copied=true;
+      }
+    }catch(_error){ copied=false; }
+    if(!copied) copied=fallbackCopy(text);
+    const old=button.textContent;
+    button.textContent=copied?'Copied':'Select command';
+    if(copied) button.classList.add('copied');
+    window.setTimeout(()=>{button.textContent=old;button.classList.remove('copied');},1400);
+  }
+
+  function teleportRow(label,x,z){
+    const command=teleportCommand(x,z);
+    const row=document.createElement('div');
+    row.className='teleport-row';
+    const caption=document.createElement('span');
+    caption.className='teleport-label';
+    caption.textContent=label;
+    const code=document.createElement('code');
+    code.className='teleport-command';
+    code.textContent=command;
+    code.title='CWA/OFP debug-console command';
+    const button=document.createElement('button');
+    button.type='button';
+    button.className='teleport-copy';
+    button.textContent='Copy teleport';
+    button.addEventListener('click',event=>{
+      event.stopPropagation();
+      copyTeleport(command,button);
+    });
+    code.addEventListener('click',event=>event.stopPropagation());
+    row.appendChild(caption); row.appendChild(code); row.appendChild(button);
+    return row;
+  }
 
   function decorateRows(){
     for(const row of list.querySelectorAll('.issue')){
@@ -51,6 +121,17 @@ _UI_SCRIPT = r"""
         source.textContent=parts.join(' · ');
         row.appendChild(source);
       }
+
+      const teleports=document.createElement('div');
+      teleports.className='teleports';
+      teleports.appendChild(teleportRow('Finding',issue.x,issue.z));
+      for(const objectId of issue.object_ids||[]){
+        const road=roadById.get(Number(objectId));
+        if(!road||!Array.isArray(road.center)||road.center.length<2) continue;
+        teleports.appendChild(teleportRow(`Road ${objectId}`,road.center[0],road.center[1]));
+      }
+      row.appendChild(teleports);
+
       const details=document.createElement('details');
       const summary=document.createElement('summary');
       summary.textContent='Issue metrics';
