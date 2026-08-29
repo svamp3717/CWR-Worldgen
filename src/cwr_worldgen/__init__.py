@@ -127,6 +127,15 @@ from .stock_road_curve_preservation_policy import (
 )
 
 _install_stock_road_curve_preservation_policy()
+# Late Lundby-specific continuity policies were historically present in source
+# and regression tests but never reached normal package startup. Install them as
+# one ordered stack so production builds actually use the paved bend, seam and
+# intersection fixes they were written to provide.
+from .stock_road_late_policy_stack import (
+    install_stock_road_late_policy_stack as _install_stock_road_late_policy_stack,
+)
+
+_install_stock_road_late_policy_stack()
 from .raceway_policy import install_raceway_policy as _install_raceway_policy
 
 _install_raceway_policy()
