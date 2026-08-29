@@ -13,6 +13,7 @@ from . import road_inspector_edge_view as _edge_view
 from . import road_inspector_report_ui as _report_ui
 from . import road_inspector_coordinate_log as _coordinate_log
 from . import road_inspector_surface_coverage as _surface_coverage
+from . import road_inspector_surface_height as _surface_height
 
 
 # Keep every correction confined to the inspector process. Importing the normal
@@ -23,9 +24,9 @@ _source_context.install()
 _edge_view.install()
 _report_ui.install()
 _coordinate_log.install()
-# Install last so coverage is evaluated after runtime gap detection and source
-# context have produced the complete issue list.
+# Final read-only filters operate on the complete runtime/source issue list.
 _surface_coverage.install()
+_surface_height.install()
 
 RoadIssue = _core.RoadIssue
 InspectionResult = _core.InspectionResult
