@@ -4,7 +4,9 @@ from __future__ import annotations
 import math
 
 from cwr_worldgen import playability as _p
+from cwr_worldgen import stock_road_curve_policy as _curve
 from cwr_worldgen import stock_road_model_geometry as _geometry
+from cwr_worldgen import stock_road_s_bend_exact_policy as _s_exact
 from cwr_worldgen import stock_road_s_bend_policy as _s_bend
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 
@@ -45,11 +47,44 @@ def _fit(chain, measure, pieces):
     )
 
 
+def _fit_with_production_junction_cover(chain, measure, pieces):
+    trim = 3.125 - 0.70
+    cover = 3.125 + 0.15
+    return chain(
+        measure,
+        pieces,
+        start_distance=trim,
+        preferred_end_distance=measure.total - trim,
+        minimum_end_distance=measure.total - cover,
+        maximum_end_distance=measure.total + 0.70,
+    )
+
+
 def _curve_count(fitted):
     return sum(
         _geometry.stock_curve_match(str(piece.model_path)) is not None
         for piece, _start, _end in fitted
     )
+
+
+def _piece_tangents(item, source_points):
+    piece, start, end = item
+    chord = _sharp._heading(start, end)
+    if _geometry.stock_curve_match(str(piece.model_path)) is None:
+        return chord, chord
+    reverse = _curve._curve_reverse_for_run(source_points, start, end)
+    if reverse:
+        return (chord + 5.0) % 360.0, (chord - 5.0) % 360.0
+    return (chord - 5.0) % 360.0, (chord + 5.0) % 360.0
+
+
+def _maximum_seam_tangent_error(fitted, source_points):
+    maximum = 0.0
+    for previous, current in zip(fitted, fitted[1:]):
+        previous_end = _piece_tangents(previous, source_points)[1]
+        current_start = _piece_tangents(current, source_points)[0]
+        maximum = max(maximum, _p._heading_difference(previous_end, current_start))
+    return maximum
 
 
 def test_lundby20_local_s_bend_gets_native_curve_geometry():
@@ -84,6 +119,22 @@ def test_lundby20_local_s_bend_gets_native_curve_geometry():
         heading_change,
         previous[2],
     )
+
+
+def test_lundby20_production_s_bend_retains_exact_stock_actions():
+    points = _lundby20_bad_turn_points()
+    measure = _p._PolylineMeasure.create(_p._rounded_road_run(points))
+    pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
+
+    baseline = _fit_with_production_junction_cover(_s_exact._ORIGINAL_CHAIN, measure, pieces)
+    fitted = _fit_with_production_junction_cover(_p._stock_piece_chain, measure, pieces)
+
+    assert _s_exact._INSTALLED
+    assert _curve_count(fitted) >= _s_exact.MINIMUM_EXACT_S_BEND_CURVES
+    assert _curve_count(fitted) > _curve_count(baseline)
+    for previous, current in zip(fitted, fitted[1:]):
+        assert math.dist(previous[2], current[1]) <= 1.0e-4
+    assert _maximum_seam_tangent_error(fitted, measure.points) <= 1.0e-3
 
 
 def test_s_bend_policy_does_not_apply_to_ces_roads():
