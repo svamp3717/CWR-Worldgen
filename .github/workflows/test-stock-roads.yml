@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - "src/cwr_worldgen/*road*.py"
+      - "src/cwr_worldgen/gui_entry.py"
       - "src/cwr_worldgen/raceway_policy.py"
       - "tests/test_*road*.py"
       - "tests/test_gravel_*.py"
@@ -32,7 +33,9 @@ jobs:
       - name: Run focused road tests
         run: |
           python -m pytest -q \
+            tests/test_gui_road_inspector_autorun.py \
             tests/test_road_inspector.py \
+            tests/test_road_inspector_postbuild.py \
             tests/test_road_inspector_source_context.py \
             tests/test_road_inspector_edge_view.py \
             tests/test_road_inspector_intersection_context.py \
