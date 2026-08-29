@@ -7,6 +7,7 @@ from pathlib import Path
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_junction_policy as _junction
 from cwr_worldgen import stock_road_skew_orientation_policy as _skew
+from cwr_worldgen import stock_road_turning_t_fallback_policy as _turning_fallback
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
 from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
 from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
@@ -65,27 +66,39 @@ def test_near_orthogonal_t_keeps_measured_branch_side_and_small_slide() -> None:
     )
 
 
-def test_lundby_turning_main_t_uses_balanced_native_surface() -> None:
+def test_lundby_turning_main_t_rejects_rigid_native_surface() -> None:
     # Real incident headings at Lundby's all-asphalt T near 3223.50/3181.50.
-    # The through road turns 20.66 degrees at the intersection. A legacy sil6
-    # cap aligned to either side therefore puts the full bend on one road edge.
+    # Lundby23 proves that balancing this 20.66-degree through bend over the
+    # rigid T still leaves its measured connectors roughly 1-2 m from the actual
+    # approach pieces. Keep the visible approaches and low fallback fill instead.
     incidents = (
         _incident(93.732),
         _incident(340.710),
         _incident(253.070),
     )
 
-    native = _skew._same_family_paved_skew_t(incidents, "sil")
-
-    assert native is not None
-    assert native.model_path == r"o\road\kr_new_sil_sil_t.p3d"
-    assert native.maximum_heading_error_degrees <= 11.52
-    assert math.isclose(native.heading_degrees, 82.221, abs_tol=0.01)
-
     pair = _junction._dominant_pair(incidents)
     assert pair is not None
     main_bend = _skew._turning_main_bend_degrees(incidents, pair)
     assert 20.65 <= main_bend <= 20.67
+    assert main_bend > _turning_fallback.MAXIMUM_BALANCED_NATIVE_MAIN_BEND_DEGREES
+    assert _skew._same_family_paved_skew_t(incidents, "sil") is None
+
+
+def test_moderate_turning_main_t_can_still_use_balanced_native_surface() -> None:
+    incidents = (
+        _incident(84.0),
+        _incident(276.0),
+        _incident(0.0),
+    )
+
+    pair = _junction._dominant_pair(incidents)
+    assert pair is not None
+    main_bend = _skew._turning_main_bend_degrees(incidents, pair)
+    assert math.isclose(main_bend, 12.0, abs_tol=1.0e-9)
+    native = _skew._same_family_paved_skew_t(incidents, "sil")
+    assert native is not None
+    assert native.model_path == r"o\road\kr_new_sil_sil_t.p3d"
 
 
 def test_turning_main_t_still_rejects_excessive_connector_error() -> None:
@@ -121,7 +134,7 @@ def test_longitudinal_slide_puts_accepted_branch_connector_on_source_centerline(
     assert _distance_to_line(connector_point, node, incidents[2].direction) < 1.0e-9
 
 
-def test_production_fit_uses_native_t_for_lundby_turning_main_geometry() -> None:
+def test_production_fit_uses_low_fallback_for_lundby_turning_main_geometry() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     node = (500.0, 500.0)
@@ -164,8 +177,15 @@ def test_production_fit_uses_native_t_for_lundby_turning_main_geometry() -> None
     report = _p.fit_road_objects(dataset, projection, [0.0] * (40 * 40), spec)
     assert report.junction_cap_objects >= 1
     cap = report.objects[0]
-    assert cap.model_path.casefold() == r"o\road\kr_new_sil_sil_t.p3d"
-    assert _junction._angular_distance(cap.heading_degrees, 82.221) <= 0.05
+    assert cap.model_path.casefold() == r"o\road\sil6.p3d"
+
+    # The fallback cap remains at the actual source node while the approach
+    # pieces own the visible turning road surface.
+    assert math.dist((cap.x, cap.z), node) < 0.05
+    assert all(
+        obj.model_path.casefold() != r"o\road\kr_new_sil_sil_t.p3d"
+        for obj in report.objects
+    )
 
 
 def test_production_fit_keeps_small_main_axis_fallback_for_45_degree_t() -> None:
