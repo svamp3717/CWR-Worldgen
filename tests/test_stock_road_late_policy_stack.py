@@ -15,6 +15,7 @@ from cwr_worldgen import stock_road_turning_t_fallback_policy as _turning_t_fall
 from cwr_worldgen import stock_road_straight_seam_policy as _straight_seam
 from cwr_worldgen import stock_road_curve_seam_fallback_policy as _curve_seam_fallback
 from cwr_worldgen import stock_road_intersection_edge_policy as _intersection_edge
+from cwr_worldgen import stock_road_emitted_seam_policy as _emitted_seam
 from cwr_worldgen import stock_road_late_policy_stack as _stack
 
 
@@ -33,6 +34,7 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
         _straight_seam,
         _curve_seam_fallback,
         _intersection_edge,
+        _emitted_seam,
     )
 
     assert _stack._INSTALLED
@@ -40,8 +42,10 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
 
 
 def test_final_wrappers_are_not_left_disconnected() -> None:
-    # The last paved-intersection pass must own the public fitter entry point.
-    assert _p.fit_road_objects is _intersection_edge._fit
+    # The emitted-geometry audit must be truly outermost so it sees every object
+    # replacement/addition made by the intersection and continuity wrappers.
+    assert _p.fit_road_objects is _emitted_seam._fit
+    assert _emitted_seam._ORIGINAL_FIT is _intersection_edge._fit
 
     # Residual curve coverage intentionally wraps the straight-seam pass, which
     # itself wraps final-continuity's disabled generic curve cover.
