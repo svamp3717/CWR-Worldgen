@@ -49,6 +49,7 @@ jobs:
             tests/test_stock_road_curve_usage_policy.py \
             tests/test_stock_road_emitted_seam_policy.py \
             tests/test_stock_road_final_continuity_policy.py \
+            tests/test_stock_road_fit_first_policy.py \
             tests/test_stock_road_geometry_policy.py \
             tests/test_stock_road_intersection_edge_policy.py \
             tests/test_stock_road_junction_policy.py \
