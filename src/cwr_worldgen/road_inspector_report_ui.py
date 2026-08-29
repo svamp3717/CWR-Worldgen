@@ -47,7 +47,6 @@ _UI_SCRIPT = r"""
     'intersection_missing_cap'
   ]);
   const pavedFamilies=new Set(['sil','asf','kos']);
-  const pavedSurfaceWords=['asphalt','paved','concrete','paving_stones','sett','cobblestone'];
   const dirtSurfaceWords=['dirt','earth','ground','gravel','fine_gravel','compacted','unpaved','sand','mud','grass'];
 
   function surfaceTokens(issue){
@@ -59,18 +58,17 @@ _UI_SCRIPT = r"""
     return words.some(word=>value===word||value.startsWith(`${word}:`));
   }
 
-  function isDirtOnlyIntersection(issue){
+  function isDirtOrMixedIntersection(issue){
     if(!intersectionCategories.has(issue.category)) return false;
     const surfaces=surfaceTokens(issue);
-    if(surfaces.some(value=>matchesSurfaceWord(value,pavedSurfaceWords))) return false;
-    if(surfaces.length&&surfaces.every(value=>matchesSurfaceWord(value,dirtSurfaceWords))) return true;
+    if(surfaces.some(value=>matchesSurfaceWord(value,dirtSurfaceWords))) return true;
     const involved=(issue.object_ids||[]).map(id=>roadById.get(Number(id))).filter(Boolean);
-    if(involved.some(road=>pavedFamilies.has(String(road.family||'').toLowerCase()))) return false;
-    return involved.length>0&&involved.every(road=>String(road.family||'').toLowerCase()==='ces');
+    if(involved.some(road=>String(road.family||'').toLowerCase()==='ces')) return true;
+    return false;
   }
 
-  const dirtIntersectionIds=new Set(
-    issues.filter(isDirtOnlyIntersection).map(issue=>issue.issue_id)
+  const nonPavedIntersectionIds=new Set(
+    issues.filter(isDirtOrMixedIntersection).map(issue=>issue.issue_id)
   );
   const dirtToggle=document.createElement('label');
   dirtToggle.className='surface-focus-toggle';
@@ -78,13 +76,13 @@ _UI_SCRIPT = r"""
   dirtCheckbox.type='checkbox';
   dirtCheckbox.id='show-dirt-intersections';
   const dirtCaption=document.createElement('span');
-  dirtCaption.textContent=`Show dirt intersections (${dirtIntersectionIds.size})`;
+  dirtCaption.textContent=`Show dirt/mixed intersections (${nonPavedIntersectionIds.size})`;
   dirtToggle.appendChild(dirtCheckbox);
   dirtToggle.appendChild(dirtCaption);
   controls.insertBefore(dirtToggle,reset||null);
 
   function searchable(i){
-    const scope=dirtIntersectionIds.has(i.issue_id)?'dirt-only intersection':'paved-or-general';
+    const scope=nonPavedIntersectionIds.has(i.issue_id)?'dirt-or-mixed intersection':'paved-only-or-general';
     return [i.issue_id,i.severity,i.category,i.x,i.z,(i.object_ids||[]).join(' '),(i.models||[]).join(' '),i.message,i.candidate_fix,scope,JSON.stringify(i.metrics||{})].join(' ').toLowerCase();
   }
   const textById=new Map(issues.map(i=>[i.issue_id,searchable(i)]));
@@ -159,11 +157,11 @@ _UI_SCRIPT = r"""
       const issue=byId.get(row.dataset.row);
       if(!issue) continue;
       const metrics=issue.metrics||{};
-      if(dirtIntersectionIds.has(issue.issue_id)){
+      if(nonPavedIntersectionIds.has(issue.issue_id)){
         row.dataset.dirtIntersection='1';
         const note=document.createElement('div');
         note.className='dirt-intersection-note';
-        note.textContent='Dirt-only intersection diagnostic · hidden by default in paved focus';
+        note.textContent='Dirt or mixed paved/dirt intersection diagnostic · hidden by default in paved-only focus';
         row.appendChild(note);
       }
       if(metrics.source_road_ids||metrics.source_highways||metrics.source_surfaces){
@@ -203,12 +201,12 @@ _UI_SCRIPT = r"""
     for(const row of list.querySelectorAll('.issue')){
       const text=textById.get(row.dataset.row)||'';
       const matches=!query||text.includes(query);
-      const hiddenDirt=!showDirt&&dirtIntersectionIds.has(row.dataset.row);
+      const hiddenDirt=!showDirt&&nonPavedIntersectionIds.has(row.dataset.row);
       row.style.display=(matches&&!hiddenDirt)?'':'none';
     }
     if(typeof svg!=='undefined'){
       for(const marker of svg.querySelectorAll('.marker')){
-        marker.style.display=(!showDirt&&dirtIntersectionIds.has(marker.dataset.issue))?'none':'';
+        marker.style.display=(!showDirt&&nonPavedIntersectionIds.has(marker.dataset.issue))?'none':'';
       }
     }
   }
