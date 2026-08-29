@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Add practical filtering, metric details, and CWA teleport helpers to reports."""
+"""Add practical filtering, paved focus, metric details, and CWA teleport helpers."""
 from __future__ import annotations
 
 from . import road_inspector as _core
@@ -13,6 +13,9 @@ _UI_CSS = r"""
 .issue details { margin-top:7px; color:#bbb; }
 .issue details pre { white-space:pre-wrap; word-break:break-word; margin:5px 0 0; font-size:11px; }
 .source-context { margin-top:5px; color:#9dc6a7; font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+.surface-focus-toggle { display:inline-flex; align-items:center; gap:6px; padding:5px 8px; border:1px solid #555; border-radius:5px; background:#202020; color:#ddd; font-size:12px; }
+.surface-focus-toggle input { margin:0; }
+.dirt-intersection-note { margin-top:6px; color:#c9b58b; font-size:12px; }
 .teleports { margin-top:9px; padding-top:8px; border-top:1px solid #383838; display:grid; gap:6px; }
 .teleport-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
 .teleport-label { min-width:88px; color:#9ec9ff; font-family:ui-monospace,Consolas,monospace; font-size:12px; }
@@ -35,9 +38,54 @@ _UI_SCRIPT = r"""
   controls.insertBefore(search,reset||null);
   const byId=new Map(issues.map(i=>[i.issue_id,i]));
   const roadById=new Map((typeof roads==='undefined'?[]:roads).map(r=>[Number(r.object_id),r]));
+  const intersectionCategories=new Set([
+    'junction_connector_mismatch',
+    'wrong_intersection_model',
+    'intersection_connector_orientation',
+    'turning_intersection_cap',
+    'intersection_approach_mismatch',
+    'intersection_missing_cap'
+  ]);
+  const pavedFamilies=new Set(['sil','asf','kos']);
+  const pavedSurfaceWords=['asphalt','paved','concrete','paving_stones','sett','cobblestone'];
+  const dirtSurfaceWords=['dirt','earth','ground','gravel','fine_gravel','compacted','unpaved','sand','mud','grass'];
+
+  function surfaceTokens(issue){
+    const value=String((issue.metrics||{}).source_surfaces||'').toLowerCase();
+    return value.split(';').map(v=>v.trim()).filter(Boolean);
+  }
+
+  function matchesSurfaceWord(value,words){
+    return words.some(word=>value===word||value.includes(word));
+  }
+
+  function isDirtOnlyIntersection(issue){
+    if(!intersectionCategories.has(issue.category)) return false;
+    const surfaces=surfaceTokens(issue);
+    if(surfaces.some(value=>matchesSurfaceWord(value,pavedSurfaceWords))) return false;
+    if(surfaces.length&&surfaces.every(value=>matchesSurfaceWord(value,dirtSurfaceWords))) return true;
+    const involved=(issue.object_ids||[]).map(id=>roadById.get(Number(id))).filter(Boolean);
+    if(involved.some(road=>pavedFamilies.has(String(road.family||'').toLowerCase()))) return false;
+    return involved.length>0&&involved.every(road=>String(road.family||'').toLowerCase()==='ces');
+  }
+
+  const dirtIntersectionIds=new Set(
+    issues.filter(isDirtOnlyIntersection).map(issue=>issue.issue_id)
+  );
+  const dirtToggle=document.createElement('label');
+  dirtToggle.className='surface-focus-toggle';
+  const dirtCheckbox=document.createElement('input');
+  dirtCheckbox.type='checkbox';
+  dirtCheckbox.id='show-dirt-intersections';
+  const dirtCaption=document.createElement('span');
+  dirtCaption.textContent=`Show dirt intersections (${dirtIntersectionIds.size})`;
+  dirtToggle.appendChild(dirtCheckbox);
+  dirtToggle.appendChild(dirtCaption);
+  controls.insertBefore(dirtToggle,reset||null);
 
   function searchable(i){
-    return [i.issue_id,i.severity,i.category,i.x,i.z,(i.object_ids||[]).join(' '),(i.models||[]).join(' '),i.message,i.candidate_fix,JSON.stringify(i.metrics||{})].join(' ').toLowerCase();
+    const scope=dirtIntersectionIds.has(i.issue_id)?'dirt-only intersection':'paved-or-general';
+    return [i.issue_id,i.severity,i.category,i.x,i.z,(i.object_ids||[]).join(' '),(i.models||[]).join(' '),i.message,i.candidate_fix,scope,JSON.stringify(i.metrics||{})].join(' ').toLowerCase();
   }
   const textById=new Map(issues.map(i=>[i.issue_id,searchable(i)]));
 
@@ -111,6 +159,13 @@ _UI_SCRIPT = r"""
       const issue=byId.get(row.dataset.row);
       if(!issue) continue;
       const metrics=issue.metrics||{};
+      if(dirtIntersectionIds.has(issue.issue_id)){
+        row.dataset.dirtIntersection='1';
+        const note=document.createElement('div');
+        note.className='dirt-intersection-note';
+        note.textContent='Dirt-only intersection diagnostic · hidden by default in paved focus';
+        row.appendChild(note);
+      }
       if(metrics.source_road_ids||metrics.source_highways||metrics.source_surfaces){
         const source=document.createElement('div');
         source.className='source-context';
@@ -144,15 +199,24 @@ _UI_SCRIPT = r"""
 
   function applySearch(){
     const query=search.value.trim().toLowerCase();
+    const showDirt=dirtCheckbox.checked;
     for(const row of list.querySelectorAll('.issue')){
       const text=textById.get(row.dataset.row)||'';
-      row.style.display=(!query||text.includes(query))?'':'none';
+      const matches=!query||text.includes(query);
+      const hiddenDirt=!showDirt&&dirtIntersectionIds.has(row.dataset.row);
+      row.style.display=(matches&&!hiddenDirt)?'':'none';
+    }
+    if(typeof svg!=='undefined'){
+      for(const marker of svg.querySelectorAll('.marker')){
+        marker.style.display=(!showDirt&&dirtIntersectionIds.has(marker.dataset.issue))?'none':'';
+      }
     }
   }
 
   const observer=new MutationObserver(decorateRows);
   observer.observe(list,{childList:true});
   search.addEventListener('input',applySearch);
+  dirtCheckbox.addEventListener('change',applySearch);
   decorateRows();
 })();
 </script>
