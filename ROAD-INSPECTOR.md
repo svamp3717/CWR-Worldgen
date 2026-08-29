@@ -68,7 +68,10 @@ report.html
 issues.json
 issues.csv
 summary.json
+ingame-coordinates.csv
 ```
+
+`ingame-coordinates.csv` is the upload-friendly coordinate log. It contains one row for every inspector finding and one row for every inspected road object, including world X/Z, road family/kind/model, related issue IDs, normalized source context where available, and a ready-to-paste `player setPos [...]` command. Upload this single CSV when you want the inspection coordinates reviewed without having to reconstruct them from the HTML report.
 
 `report.html` is self-contained. Click an issue to zoom to its position and highlight the involved road objects. Filters can limit the list by severity or issue category.
 
