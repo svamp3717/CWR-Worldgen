@@ -46,8 +46,10 @@ _UI_SCRIPT = r"""
     'intersection_approach_mismatch',
     'intersection_missing_cap'
   ]);
+  const seamCategories=new Set(['straight_miter','curve_transition','connector_gap']);
   const pavedFamilies=new Set(['sil','asf','kos']);
   const dirtSurfaceWords=['dirt','earth','ground','gravel','fine_gravel','compacted','unpaved','sand','mud','grass'];
+  const mixedJunctionRadiusMetres=7.0;
 
   function surfaceTokens(issue){
     const value=String((issue.metrics||{}).source_surfaces||'').toLowerCase();
@@ -58,31 +60,66 @@ _UI_SCRIPT = r"""
     return words.some(word=>value===word||value.startsWith(`${word}:`));
   }
 
-  function isDirtOrMixedIntersection(issue){
-    if(!intersectionCategories.has(issue.category)) return false;
-    const surfaces=surfaceTokens(issue);
-    if(surfaces.some(value=>matchesSurfaceWord(value,dirtSurfaceWords))) return true;
-    const involved=(issue.object_ids||[]).map(id=>roadById.get(Number(id))).filter(Boolean);
-    if(involved.some(road=>String(road.family||'').toLowerCase()==='ces')) return true;
+  function involvedRoads(issue){
+    return (issue.object_ids||[]).map(id=>roadById.get(Number(id))).filter(Boolean);
+  }
+
+  function isMixedStockFamilyFinding(issue){
+    const families=new Set(
+      involvedRoads(issue).map(road=>String(road.family||'').toLowerCase()).filter(Boolean)
+    );
+    if(!families.has('ces')) return false;
+    return Array.from(pavedFamilies).some(family=>families.has(family));
+  }
+
+  function isNativeMixedJunction(road){
+    if(String(road.kind||'').toLowerCase()!=='junction_t') return false;
+    const model=String(road.model||'').replaceAll('/','\\');
+    return /kr_new_(?:sil|asf|kos)_ces_t\.p3d$/i.test(model);
+  }
+
+  const nativeMixedJunctions=Array.from(roadById.values()).filter(isNativeMixedJunction);
+
+  function nearNativeMixedJunction(issue){
+    if(!seamCategories.has(issue.category)) return false;
+    const x=Number(issue.x), z=Number(issue.z);
+    if(!Number.isFinite(x)||!Number.isFinite(z)) return false;
+    return nativeMixedJunctions.some(road=>{
+      if(!Array.isArray(road.center)||road.center.length<2) return false;
+      return Math.hypot(x-Number(road.center[0]),z-Number(road.center[1]))<=mixedJunctionRadiusMetres;
+    });
+  }
+
+  function isDirtOrMixedFinding(issue){
+    if(isMixedStockFamilyFinding(issue)) return true;
+    if(intersectionCategories.has(issue.category)){
+      const surfaces=surfaceTokens(issue);
+      if(surfaces.some(value=>matchesSurfaceWord(value,dirtSurfaceWords))) return true;
+      if(involvedRoads(issue).some(road=>String(road.family||'').toLowerCase()==='ces')) return true;
+    }
+    // A paved-looking seam can still be one arm of a native sil/ces T. Lundby33
+    // exposed this immediately beside the mixed junction even though the two
+    // objects named by the seam were both sil. Keep that out of paved-only focus.
+    if(nearNativeMixedJunction(issue)) return true;
     return false;
   }
 
-  const nonPavedIntersectionIds=new Set(
-    issues.filter(isDirtOrMixedIntersection).map(issue=>issue.issue_id)
+  const nonPavedFindingIds=new Set(
+    issues.filter(isDirtOrMixedFinding).map(issue=>issue.issue_id)
   );
   const dirtToggle=document.createElement('label');
   dirtToggle.className='surface-focus-toggle';
   const dirtCheckbox=document.createElement('input');
   dirtCheckbox.type='checkbox';
-  dirtCheckbox.id='show-dirt-intersections';
+  dirtCheckbox.id='show-dirt-mixed-findings';
   const dirtCaption=document.createElement('span');
-  dirtCaption.textContent=`Show dirt/mixed intersections (${nonPavedIntersectionIds.size})`;
+  dirtCaption.textContent=`Show dirt/mixed findings (${nonPavedFindingIds.size})`;
   dirtToggle.appendChild(dirtCheckbox);
   dirtToggle.appendChild(dirtCaption);
   controls.insertBefore(dirtToggle,reset||null);
 
   function searchable(i){
-    const scope=nonPavedIntersectionIds.has(i.issue_id)?'dirt-or-mixed intersection':'paved-only-or-general';
+    const scope=nonPavedFindingIds.has(i.issue_id)?'dirt-or-mixed finding':'paved-only-or-general';
     return [i.issue_id,i.severity,i.category,i.x,i.z,(i.object_ids||[]).join(' '),(i.models||[]).join(' '),i.message,i.candidate_fix,scope,JSON.stringify(i.metrics||{})].join(' ').toLowerCase();
   }
   const textById=new Map(issues.map(i=>[i.issue_id,searchable(i)]));
@@ -157,11 +194,11 @@ _UI_SCRIPT = r"""
       const issue=byId.get(row.dataset.row);
       if(!issue) continue;
       const metrics=issue.metrics||{};
-      if(nonPavedIntersectionIds.has(issue.issue_id)){
-        row.dataset.dirtIntersection='1';
+      if(nonPavedFindingIds.has(issue.issue_id)){
+        row.dataset.dirtMixedFinding='1';
         const note=document.createElement('div');
         note.className='dirt-intersection-note';
-        note.textContent='Dirt or mixed paved/dirt intersection diagnostic · hidden by default in paved-only focus';
+        note.textContent='Dirt or mixed paved/dirt diagnostic · hidden by default in paved-only focus';
         row.appendChild(note);
       }
       if(metrics.source_road_ids||metrics.source_highways||metrics.source_surfaces){
@@ -201,12 +238,12 @@ _UI_SCRIPT = r"""
     for(const row of list.querySelectorAll('.issue')){
       const text=textById.get(row.dataset.row)||'';
       const matches=!query||text.includes(query);
-      const hiddenDirt=!showDirt&&nonPavedIntersectionIds.has(row.dataset.row);
+      const hiddenDirt=!showDirt&&nonPavedFindingIds.has(row.dataset.row);
       row.style.display=(matches&&!hiddenDirt)?'':'none';
     }
     if(typeof svg!=='undefined'){
       for(const marker of svg.querySelectorAll('.marker')){
-        marker.style.display=(!showDirt&&nonPavedIntersectionIds.has(marker.dataset.issue))?'none':'';
+        marker.style.display=(!showDirt&&nonPavedFindingIds.has(marker.dataset.issue))?'none':'';
       }
     }
   }
