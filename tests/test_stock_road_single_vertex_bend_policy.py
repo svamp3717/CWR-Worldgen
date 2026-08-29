@@ -26,14 +26,16 @@ def _isolated_corner(turn_degrees: float):
     )
 
 
-def _fit(chain, measure, pieces):
+def _fit_with_production_cover(chain, measure, pieces):
+    trim = 3.125 - 0.70
+    cover = 3.125 + 0.15
     return chain(
         measure,
         pieces,
-        start_distance=0.0,
-        preferred_end_distance=measure.total,
-        minimum_end_distance=max(0.0, measure.total - 0.35),
-        maximum_end_distance=measure.total + 3.125,
+        start_distance=trim,
+        preferred_end_distance=measure.total - trim,
+        minimum_end_distance=measure.total - cover,
+        maximum_end_distance=measure.total + 0.70,
     )
 
 
@@ -65,12 +67,14 @@ def test_isolated_twelve_degree_corner_changes_production_fit_to_native_curve() 
     measure = _p._PolylineMeasure.create(_p._rounded_road_run(points))
     pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
 
-    baseline = _fit(_sharp._ORIGINAL_CHAIN, measure, pieces)
-    fitted = _fit(_p._stock_piece_chain, measure, pieces)
+    baseline = _fit_with_production_cover(_sharp._ORIGINAL_CHAIN, measure, pieces)
+    fitted = _fit_with_production_cover(_p._stock_piece_chain, measure, pieces)
 
     assert _curve_count(fitted) > _curve_count(baseline), [
         piece.model_path for piece, _start, _end in fitted
     ]
+    for previous, current in zip(fitted, fitted[1:]):
+        assert math.dist(previous[2], current[1]) <= 1.0e-4
 
 
 def test_isolated_thirty_two_degree_corner_changes_production_fit_to_native_curves() -> None:
@@ -78,12 +82,14 @@ def test_isolated_thirty_two_degree_corner_changes_production_fit_to_native_curv
     measure = _p._PolylineMeasure.create(_p._rounded_road_run(points))
     pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
 
-    baseline = _fit(_sharp._ORIGINAL_CHAIN, measure, pieces)
-    fitted = _fit(_p._stock_piece_chain, measure, pieces)
+    baseline = _fit_with_production_cover(_sharp._ORIGINAL_CHAIN, measure, pieces)
+    fitted = _fit_with_production_cover(_p._stock_piece_chain, measure, pieces)
 
     assert _curve_count(fitted) >= _curve_count(baseline) + 2, [
         piece.model_path for piece, _start, _end in fitted
     ]
+    for previous, current in zip(fitted, fitted[1:]):
+        assert math.dist(previous[2], current[1]) <= 1.0e-4
 
 
 def test_small_heading_noise_is_not_promoted_to_stock_curve_span() -> None:
