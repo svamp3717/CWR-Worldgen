@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 
 from cwr_worldgen import road_inspector as _core
+from cwr_worldgen import road_inspector_overlap_filter as _overlap
 from cwr_worldgen import road_inspector_surface_coverage as _coverage
 from cwr_worldgen import stock_road_model_geometry as _geometry
 
@@ -165,3 +167,42 @@ def test_dirt_seams_are_not_filtered_by_paved_surface_coverage():
     assert not _coverage._covered_by_other_paved_surface(
         _issue(family="ces"), (first, second, cover)
     )
+
+
+def _overlap_road(object_id, x, z, heading, *, family="sil", y=0.0):
+    return SimpleNamespace(
+        object_id=int(object_id),
+        family=family,
+        kind="straight",
+        x=float(x),
+        y=float(y),
+        z=float(z),
+        heading_degrees=float(heading),
+    )
+
+
+def test_near_coincident_paved_straights_are_not_reported_as_seam():
+    roads = (
+        _overlap_road(1, 100.0, 200.0, 15.0),
+        _overlap_road(2, 100.18, 200.03, 15.4),
+    )
+
+    assert _overlap._overlapping_paved_pair(_issue(), roads)
+
+
+def test_normal_end_to_end_paved_straights_are_not_overlap_filtered():
+    roads = (
+        _overlap_road(1, 100.0, 200.0, 15.0),
+        _overlap_road(2, 101.6, 206.0, 15.2),
+    )
+
+    assert not _overlap._overlapping_paved_pair(_issue(), roads)
+
+
+def test_near_coincident_dirt_straights_remain_visible_to_inspector():
+    roads = (
+        _overlap_road(1, 100.0, 200.0, 15.0, family="ces"),
+        _overlap_road(2, 100.18, 200.03, 15.4, family="ces"),
+    )
+
+    assert not _overlap._overlapping_paved_pair(_issue(family="ces"), roads)
