@@ -17,6 +17,7 @@ from typing import Any, Callable, Iterable
 
 FROZEN_CLI_MARKER = "--cwr-cli"
 OVERTURE_CLI_MARKER = "--cwr-overture"
+ROAD_INSPECTOR_CLI_MARKER = "--cwr-road-inspector-postbuild"
 CONSOLE_LOG_FILENAME = "cwr-worldgen-console.log"
 WORLD_NAME_PREFIX = "wg_"
 LEGACY_WORLD_NAME_PREFIXES = ("cwa_", "cwr_")
@@ -131,6 +132,29 @@ def generated_mod_folder(output_dir: Path) -> Path | None:
     return candidates[0]
 
 
+def road_inspector_postbuild_command(
+    build_dir: str | Path,
+    world_name: str,
+    source_dir: str | Path | None = None,
+    *,
+    frozen: bool | None = None,
+    executable: str | None = None,
+) -> list[str]:
+    """Return a post-build inspector command for source and frozen GUI builds."""
+
+    if frozen is None:
+        frozen = bool(getattr(sys, "frozen", False))
+    launcher = executable or sys.executable
+    if frozen:
+        command = [launcher, ROAD_INSPECTOR_CLI_MARKER]
+    else:
+        command = [launcher, "-m", "cwr_worldgen.road_inspector_postbuild"]
+    command.extend(("--build-dir", str(build_dir), "--world-name", str(world_name)))
+    if source_dir is not None and str(source_dir).strip():
+        command.extend(("--source-dir", str(source_dir)))
+    return command
+
+
 def _install_frozen_dem_cache(base_dir: Path) -> None:
     """Make dem-stitcher localize remote DEM tiles before merging them."""
     import dem_stitcher
@@ -185,6 +209,7 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
     def default_gui_values() -> dict[str, object]:
         values = original_default_gui_values()
         values["name"] = generated_world_identifier("my_world")
+        values["run_road_inspector_after_build"] = False
         return values
 
     def defaults_with_recent_source(
@@ -236,7 +261,7 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
     original_class = gui.WorldgenGui
 
     class SyncedWorldgenGui(original_class):
-        """Keep generated paths aligned, mirror logs, and expose the finished runtime."""
+        """Keep generated paths aligned, mirror logs, and expose finished diagnostics."""
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self._auto_world_guard = True
@@ -259,6 +284,36 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
                 command=self._open_generated_mod_folder,
             )
             self._update_navigation()
+
+        def _build_world_page(self) -> None:
+            super()._build_world_page()
+            page = self.page_frames[-1]
+            children = page.winfo_children()
+            body = getattr(children[0], "body", None) if children else None
+            if body is None:
+                return
+            checks = gui.ttk.LabelFrame(
+                body,
+                text="Post-build checks",
+                style="Section.TLabelframe",
+                padding=12,
+            )
+            checks.pack(fill="x", pady=(12, 0))
+            gui.ttk.Checkbutton(
+                checks,
+                text="Run Road Inspector after a successful build",
+                variable=self._var("run_road_inspector_after_build", False, boolean=True),
+            ).pack(anchor="w")
+            gui.ttk.Label(
+                checks,
+                text=(
+                    "Writes report.html, issues.json, issues.csv, summary.json and "
+                    "ingame-coordinates.csv to <world build folder>/road-inspector/. "
+                    "Inspector errors are logged there but do not mark a completed world build as failed."
+                ),
+                style="Hint.TLabel",
+                wraplength=700,
+            ).pack(anchor="w", pady=(5, 0))
 
         def _clear_remembered_deploy_default(self) -> None:
             """Start deployment disabled and migrate away any remembered machine path."""
@@ -286,11 +341,46 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
             output_dir = gui.resolve_gui_path(output_text) if output_text else None
             return console_log_paths(source_dir, output_dir)
 
-        def _start_pipeline(self, *args: Any, **kwargs: Any) -> None:
+        def _start_pipeline(
+            self,
+            jobs: list[tuple[list[str], str]],
+            *args: Any,
+            **kwargs: Any,
+        ) -> None:
             if self.process is None and not self._pipeline_active:
                 self._console_log_text = ""
                 self._console_log_initialized.clear()
-            super()._start_pipeline(*args, **kwargs)
+
+            inspector_var = self.vars.get("run_road_inspector_after_build")
+            if (
+                kwargs.get("kind") == "build"
+                and inspector_var is not None
+                and bool(inspector_var.get())
+            ):
+                jobs = list(jobs)
+                already_added = any(
+                    ROAD_INSPECTOR_CLI_MARKER in command
+                    or "cwr_worldgen.road_inspector_postbuild" in command
+                    for command, _description in jobs
+                )
+                if not already_added:
+                    output_text = str(self.vars["output"].get()).strip()
+                    world_name = str(self.vars["name"].get()).strip()
+                    source_text = str(self.vars["source_dir"].get()).strip()
+                    if output_text and world_name:
+                        output_dir = gui.resolve_gui_path(output_text)
+                        source_dir = gui.resolve_gui_path(source_text) if source_text else None
+                        jobs.append(
+                            (
+                                road_inspector_postbuild_command(
+                                    output_dir,
+                                    world_name,
+                                    source_dir,
+                                ),
+                                "Running Road Inspector",
+                            )
+                        )
+            super()._start_pipeline(jobs, *args, **kwargs)
 
         def _append_log(self, text: str) -> None:
             super()._append_log(text)
@@ -438,6 +528,12 @@ def main(argv: list[str] | None = None) -> int:
     base_dir = storage_base_dir()
     os.environ.setdefault("CWR_WORLDGEN_GUI_STATE", str(base_dir / "config" / "gui-state.json"))
     os.environ.setdefault("CWR_WORLDGEN_RUNTIME_DIR", "CWR-Worldgen")
+
+    if args and args[0] == ROAD_INSPECTOR_CLI_MARKER:
+        _ensure_cli_streams()
+        from .road_inspector_postbuild import main as run_postbuild_road_inspector
+
+        return run_postbuild_road_inspector(args[1:])
 
     if args and args[0] == OVERTURE_CLI_MARKER:
         return _run_bundled_overture_cli(args[1:])
