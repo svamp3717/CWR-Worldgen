@@ -279,3 +279,6 @@ def test_writes_self_contained_html_json_csv_and_summary(tmp_path: Path) -> None
     assert "Road Inspector" in html_text
     assert "straight_miter" in html_text
     assert "Reset map" in html_text
+    assert "Copy teleport" in html_text
+    assert "player setPos [" in html_text
+    assert "roadById" in html_text
