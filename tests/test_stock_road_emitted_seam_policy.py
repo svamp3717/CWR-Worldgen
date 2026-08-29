@@ -135,6 +135,18 @@ def test_large_straight_miter_uses_two_tangent_aligned_underlays():
     assert headings == [0.0, 12.0]
 
 
+def test_coincident_straight_miter_uses_one_bisecting_underlay():
+    first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
+    second = _straight_from_start(2, (0.0, 0.0), 12.0)
+    report = SimpleNamespace(objects=(first, second), junction_cap_objects=0)
+
+    plans = _refinement._refined_emitted_seam_cover_plans(report)
+
+    assert len(plans) == 1
+    assert math.isclose(plans[0].tangent_axis_degrees, 6.0, abs_tol=1.0e-9)
+    assert math.dist(plans[0].centre, (0.0, 0.0)) < 1.0e-9
+
+
 def test_lundby34_compiled_grass_wedges_receive_final_underlays():
     """Regress representative straight, mixed, and curve seams from Lundby34."""
 
@@ -160,7 +172,7 @@ def test_lundby34_compiled_grass_wedges_receive_final_underlays():
                     y=23.26667022705078,
                 ),
             ),
-            2,
+            1,
         ),
         (
             (

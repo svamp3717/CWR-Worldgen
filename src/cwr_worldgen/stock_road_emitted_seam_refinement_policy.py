@@ -8,8 +8,10 @@ legacy-cap-to-approach seam.  Keep the successful final pass and narrow only
 those cases:
 
 * a real physical gap may need coverage even when tangent error is almost zero;
-* a straight mitre above five degrees is safer with two low underlays following
-  the two visible road tangents than one average slab; and
+* a physically open straight mitre above five degrees is safer with two low
+  underlays following the two visible road tangents than one average slab;
+* a coincident straight mitre uses one bisecting underlay so two bordered stock
+  road pieces do not overlap at different angles; and
 * a paved six-metre legacy cap may participate when one endpoint has an
   unambiguous same-family mate.
 
@@ -166,6 +168,7 @@ def _refined_emitted_seam_cover_plans(report):
         model_path = rf"o\road\{first.family}6.p3d"
         if (
             not curve_seam
+            and distance >= MINIMUM_PHYSICAL_OPEN_GAP_METRES
             and tangent_error >= DUAL_UNDERLAY_TANGENT_ERROR_DEGREES
         ):
             headings = []
