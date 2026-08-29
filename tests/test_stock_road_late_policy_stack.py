@@ -11,6 +11,7 @@ from cwr_worldgen import stock_road_curve_usage_policy as _curve_usage
 from cwr_worldgen import stock_road_visual_finish_policy as _visual_finish
 from cwr_worldgen import stock_road_final_continuity_policy as _final_continuity
 from cwr_worldgen import stock_road_skew_orientation_policy as _skew_orientation
+from cwr_worldgen import stock_road_turning_t_fallback_policy as _turning_t_fallback
 from cwr_worldgen import stock_road_straight_seam_policy as _straight_seam
 from cwr_worldgen import stock_road_curve_seam_fallback_policy as _curve_seam_fallback
 from cwr_worldgen import stock_road_intersection_edge_policy as _intersection_edge
@@ -28,6 +29,7 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
         _visual_finish,
         _final_continuity,
         _skew_orientation,
+        _turning_t_fallback,
         _straight_seam,
         _curve_seam_fallback,
         _intersection_edge,
@@ -47,5 +49,10 @@ def test_final_wrappers_are_not_left_disconnected() -> None:
     assert _curve_seam_fallback._ORIGINAL_FINISH is _straight_seam._apply_straight_seam_covers
 
     # Native T placement uses the later measured skew/orientation chooser rather
-    # than the earlier centre-only fallback.
+    # than the earlier centre-only fallback, with the Lundby turning-T bound
+    # applied after that chooser is installed.
     assert _final_continuity._same_family_paved_skew_t is _skew_orientation._same_family_paved_skew_t
+    assert (
+        _skew_orientation.MAXIMUM_TURNING_T_MAIN_BEND_DEGREES
+        == _turning_t_fallback.MAXIMUM_BALANCED_NATIVE_MAIN_BEND_DEGREES
+    )
