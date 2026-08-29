@@ -44,8 +44,9 @@ The inspector reconstructs stock `sil`, `asf`, `kos`, and `ces` road objects fro
 
 It currently reports:
 
-- `straight_miter`: touching straight pieces whose center connectors meet but whose headings open a visible edge wedge;
-- `curve_transition`: curve/straight or curve/curve seams with incompatible rendered tangents or edges;
+- `grass_wedge`: an ordinary same-family paved turn where the two emitted outer road edges form a forward miter triangle large enough for terrain/grass to show through. The finding includes triangular area, maximum wedge depth, edge opening, miter coordinate, and turn angle;
+- `straight_miter`: touching straight pieces whose center connectors meet but whose headings open a visible edge wedge when the explicit grass-wedge geometry test is not satisfied;
+- `curve_transition`: curve/straight or curve/curve seams with incompatible rendered tangents or edges when the explicit grass-wedge geometry test is not satisfied;
 - `connector_gap`: physically separated connectors, including mutually-facing gaps outside the normal seam-clustering tolerance;
 - `surface_family_mismatch`: connected stock pieces using different road families where the transition should be checked;
 - `junction_connector_mismatch`: a native junction connector that does not line up with its emitted approach;
@@ -56,6 +57,8 @@ It currently reports:
 - `intersection_missing_cap`: a normalized multi-arm intersection has no nearby stock cap/junction and the emitted approaches do not explain it cleanly.
 
 For every issue the report includes world X/Z coordinates, object IDs, P3D names, a severity score, measured center/tangent/edge errors when applicable, and a suggested class of road-fitting fix.
+
+`grass_wedge` is a geometric visibility diagnostic rather than another tangent threshold. For a surviving paved seam, Road Inspector extends the two physical outer edge rays beyond their emitted connectors. If both rays meet forward of the road pieces, the triangle between those two connector-edge points and the miter intersection is the potential exposed terrain patch. Seams already proven covered by another paved surface are filtered before this classification, and source-intersection neighborhoods remain under the dedicated junction diagnostics. The recommended repair is always to fit a stock curve or connector-locked curve chain, never to hide the wedge with overlapping road pieces.
 
 When `normalized\roads.geojson` is supplied, WGS84 source coordinates are projected back into the generated world's metre coordinate system using the bundle's `bbox` and `cwr_world` metadata. Findings are then annotated with nearby normalized `road_id`, `highway`, and `surface` values so a bad WRP object can be traced back to the source feature.
 
@@ -91,8 +94,11 @@ The inspector's WRP X/Z plane corresponds to the game's horizontal X/Y position 
 
 Road Inspector reads the yaw and pitch actually serialized in the RVW4 transform. This matters on graded roads: using nominal P3D length only in horizontal X/Z space can manufacture false connector gaps. Curves and native junction connectors are likewise projected through the stored yaw/pitch matrix before seam measurements are made.
 
+Grass-wedge geometry uses those same pitch-corrected physical connectors and edge headings. The reported coordinate is the centroid of the estimated exposed triangle, making the existing `player setPos [...]` command useful for inspecting the actual wedge rather than merely the centerline seam.
+
 ## Current limitations
 
 - It recognizes the stock road P3Ds and native junction models currently supported by the generator. Generated custom gravel geometry needs a separate footprint model before it can receive the same edge-level analysis.
-- The HTML overview currently draws road center geometry and highlights the objects involved in a finding. Edge-gap numbers are measured numerically, but full rendered road-strip footprints are a planned visualization improvement.
+- `grass_wedge` currently targets ordinary same-family paved seams. Intersections remain under the junction-specific diagnostics because a native T/X or fallback cap has a different surface footprint from an ordinary turn.
+- The HTML overview currently draws road center geometry and highlights the objects involved in a finding. Edge-gap and grass-wedge numbers are measured numerically, but full rendered road-strip footprints are still a planned visualization improvement.
 - Candidate fixes are recommendations, not automatic WRP edits. The inspector should first prove that its top-ranked findings correspond to visible CWA defects.
