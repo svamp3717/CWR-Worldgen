@@ -13,11 +13,8 @@ from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 
 
 def _lundby20_bad_turn_points():
-    # Real normalized D957 source geometry around the screenshot at roughly
-    # (879.27, 3535.87). The road first bends right, then reverses immediately.
-    # Lundby20 rendered this section almost entirely from independently rotated
-    # sil6/sil12 rectangles, making the underlay helpers visibly look like
-    # mismatched road pieces along the inside edge.
+    # Real normalized D957 geometry from the bend around the historical
+    # screenshot location near (879.27, 3535.87).
     return (
         (1053.750, 3564.750),
         (1012.500, 3559.500),
@@ -128,7 +125,7 @@ def test_lundby20_production_s_bend_retains_exact_stock_actions():
     points = _lundby20_bad_turn_points()
     measure = _p._PolylineMeasure.create(_p._rounded_road_run(points))
     pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
-    start, preferred, minimum, maximum = _production_window(measure)
+    start, preferred, _minimum, _maximum = _production_window(measure)
 
     source_points, entry_heading, source_exit_heading = _exact._measure_slice(
         measure, start, preferred
@@ -136,16 +133,10 @@ def test_lundby20_production_s_bend_retains_exact_stock_actions():
     stock_exit_heading = _s_exact._quantised_exit_heading(
         entry_heading, source_exit_heading
     )
-    locked_path = _s_bend._beam_s_bend_path(
+    locked_path = _s_exact._long_exact_s_bend_path(
         source_points, entry_heading, stock_exit_heading, pieces
     )
-    assert locked_path is not None, (
-        entry_heading,
-        source_exit_heading,
-        stock_exit_heading,
-        len(source_points),
-        measure.total,
-    )
+    assert locked_path is not None
     exact_actions = _s_exact._recover_exact_actions(locked_path, pieces)
     assert exact_actions is not None
     assert _curve_count(exact_actions) >= _s_exact.MINIMUM_EXACT_S_BEND_CURVES
