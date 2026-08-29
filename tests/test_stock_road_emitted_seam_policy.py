@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_emitted_seam_policy as _emitted
+from cwr_worldgen import stock_road_emitted_seam_refinement_policy as _refinement
 from cwr_worldgen import stock_road_model_geometry as _geometry
 
 
@@ -106,3 +107,46 @@ def test_existing_paved_underlay_prevents_duplicate_cover():
     )
 
     assert _emitted._emitted_seam_cover_plans(report) == ()
+
+
+def test_aligned_physical_gap_gets_underlay_even_without_tangent_error():
+    first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
+    second = _straight_from_start(2, (0.0, 0.18), 0.0)
+    report = SimpleNamespace(objects=(first, second), junction_cap_objects=0)
+
+    plans = _refinement._refined_emitted_seam_cover_plans(report)
+
+    assert len(plans) == 1
+    assert math.isclose(plans[0].tangent_axis_degrees, 0.0, abs_tol=1.0e-9)
+    assert math.dist(plans[0].centre, (0.0, 0.09)) < 1.0e-9
+
+
+def test_large_straight_miter_uses_two_tangent_aligned_underlays():
+    first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
+    second = _straight_from_start(2, (0.12, 0.0), 12.0)
+    report = SimpleNamespace(objects=(first, second), junction_cap_objects=0)
+
+    plans = _refinement._refined_emitted_seam_cover_plans(report)
+
+    assert len(plans) == 2
+    headings = sorted(round(plan.tangent_axis_degrees, 6) for plan in plans)
+    assert headings == [0.0, 12.0]
+
+
+def test_unambiguous_legacy_paved_cap_endpoint_can_be_sealed():
+    cap = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
+    approach = _straight_from_start(2, (0.0, 0.15), 0.0)
+    report = SimpleNamespace(objects=(cap, approach), junction_cap_objects=1)
+
+    plans = _refinement._refined_emitted_seam_cover_plans(report)
+
+    assert len(plans) == 1
+    assert math.dist(plans[0].centre, (0.0, 0.075)) < 1.0e-9
+
+
+def test_near_coincident_overlapping_pieces_are_not_treated_as_seam():
+    cap = _object(1, r"o\road\sil6.p3d", 0.0, 0.0, 0.0)
+    overlapping = _object(2, r"o\road\sil6.p3d", 0.18, 0.02, 0.4)
+    report = SimpleNamespace(objects=(cap, overlapping), junction_cap_objects=1)
+
+    assert _refinement._refined_emitted_seam_cover_plans(report) == ()
