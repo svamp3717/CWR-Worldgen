@@ -33,6 +33,7 @@ from . import stock_road_emitted_seam_refinement_policy as _emitted_seam_refinem
 from . import stock_road_stock_paved_only_policy as _stock_paved_only
 from . import stock_road_paved_junction_completion_policy as _paved_junctions
 from . import stock_road_fit_first_policy as _fit_first
+from . import stock_road_native_junction_ownership_policy as _native_junction_ownership
 
 
 _INSTALLED = False
@@ -104,5 +105,11 @@ def install_stock_road_late_policy_stack() -> None:
     # and junction overlap helpers, but leave the final pitch-aware emitted-seam
     # audit active so unambiguous residual paved wedges are not serialized open.
     _fit_first.install_stock_road_fit_first_policy()
+
+    # Once a purpose-built native T/X is selected, it owns the entire visible
+    # intersection centre. Restore the measured connector trim after every older
+    # fallback layer has been composed, and re-enable the transaction-checked
+    # connector alignment for skewed all-paved T junctions.
+    _native_junction_ownership.install_stock_road_native_junction_ownership_policy()
 
     _INSTALLED = True
