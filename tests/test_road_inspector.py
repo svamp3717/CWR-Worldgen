@@ -78,14 +78,40 @@ def test_detects_visible_straight_miter_edge_discontinuity(tmp_path: Path) -> No
     assert "connector-locked" in issue.candidate_fix
 
 
-def test_borderless_paved_fill_covers_straight_miter(tmp_path: Path) -> None:
-    wrp = tmp_path / "filled-miter.wrp"
+def test_circular_paved_fill_does_not_hide_straight_miter(tmp_path: Path) -> None:
+    wrp = tmp_path / "circular-filled-miter.wrp"
     seam = (0.0, 6.25)
     first = WorldObject(1, r"o\road\sil6.p3d", 0.0, 0.035, 3.125, 0.0)
     second = _straight_from_begin(2, seam, 6.0)
     fill = WorldObject(
         3,
         r"wg_test\i\paved_fill.p3d",
+        seam[0],
+        0.025,
+        seam[1],
+        3.0,
+    )
+    _write_world(wrp, (first, second, fill))
+
+    result = inspect_road_geometry(wrp)
+
+    assert result.road_object_count == 3
+    assert [
+        issue
+        for issue in result.issues
+        if issue.category == "grass_wedge"
+        and set(issue.object_ids) == {1, 2}
+    ]
+
+
+def test_angle_matched_paved_miter_covers_straight_miter(tmp_path: Path) -> None:
+    wrp = tmp_path / "miter-filled-turn.wrp"
+    seam = (0.0, 6.25)
+    first = WorldObject(1, r"o\road\sil6.p3d", 0.0, 0.035, 3.125, 0.0)
+    second = _straight_from_begin(2, seam, 6.0)
+    fill = WorldObject(
+        3,
+        r"wg_test\i\paved_miter_q024.p3d",
         seam[0],
         0.025,
         seam[1],

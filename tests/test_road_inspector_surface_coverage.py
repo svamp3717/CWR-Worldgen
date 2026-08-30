@@ -93,7 +93,7 @@ def _issue(*, family: str = "sil"):
     )
 
 
-def test_same_family_underlay_cover_suppresses_raw_paved_miter():
+def test_bisecting_straight_does_not_reach_outer_miter_apex():
     seam = (0.0, 0.0)
     first = _straight(1, seam=seam, heading=340.0, seam_endpoint=1)
     second = _straight(2, seam=seam, heading=308.0, seam_endpoint=0)
@@ -142,12 +142,12 @@ def test_same_family_underlay_cover_suppresses_raw_paved_miter():
         ),
     )
 
-    assert _coverage._covered_by_other_paved_surface(
+    assert not _coverage._covered_by_other_paved_surface(
         _issue(), (first, second, center_cover)
     )
 
 
-def test_borderless_paved_fill_suppresses_raw_paved_miter():
+def test_circular_paved_fill_does_not_hide_outside_miter_wedge():
     seam = (0.0, 0.0)
     first = _straight(1, seam=seam, heading=340.0, seam_endpoint=1)
     second = _straight(2, seam=seam, heading=308.0, seam_endpoint=0)
@@ -166,8 +166,32 @@ def test_borderless_paved_fill_suppresses_raw_paved_miter():
         (),
     )
 
-    assert _coverage._covered_by_other_paved_surface(
+    assert not _coverage._covered_by_other_paved_surface(
         _issue(), (first, second, fill)
+    )
+
+
+def test_angle_matched_paved_miter_suppresses_raw_paved_miter():
+    seam = (0.0, 0.0)
+    first = _straight(1, seam=seam, heading=340.0, seam_endpoint=1)
+    second = _straight(2, seam=seam, heading=308.0, seam_endpoint=0)
+    miter = _core.RoadObject(
+        3,
+        r"wg_test\i\paved_miter_q128.p3d",
+        seam[0],
+        -0.01,
+        seam[1],
+        144.0,
+        0.0,
+        "sil",
+        "paved_miter",
+        9.5,
+        seam,
+        (),
+    )
+
+    assert _coverage._covered_by_other_paved_surface(
+        _issue(), (first, second, miter)
     )
 
 

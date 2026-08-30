@@ -48,6 +48,7 @@ class _SeamCoverPlan:
     model_path: str
     centre: tuple[float, float]
     tangent_axis_degrees: float
+    turn_degrees: float = 0.0
 
 
 def _axis_heading_difference(first: float, second: float) -> float:

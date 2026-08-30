@@ -8,10 +8,8 @@ legacy-cap-to-approach seam.  Keep the successful final pass and narrow only
 those cases:
 
 * a real physical gap may need coverage even when tangent error is almost zero;
-* a physically open straight mitre above five degrees is safer with two low
-  underlays following the two visible road tangents than one average slab;
-* a coincident straight mitre uses one bisecting underlay so two bordered stock
-  road pieces do not overlap at different angles; and
+* both physically open and coincident straight mitres use one angle-matched,
+  borderless fill on the road-axis bisector;
 * a paved six-metre legacy cap may participate when one endpoint has an
   unambiguous same-family mate.
 
@@ -28,7 +26,6 @@ from . import stock_road_model_geometry as _geometry
 from . import stock_road_visual_finish_policy as _finish
 
 MINIMUM_PHYSICAL_OPEN_GAP_METRES = 0.04
-DUAL_UNDERLAY_TANGENT_ERROR_DEGREES = 5.0
 OVERLAPPING_CENTRE_DISTANCE_METRES = 0.50
 OVERLAPPING_TANGENT_ERROR_DEGREES = 2.0
 OVERLAPPING_VERTICAL_DISTANCE_METRES = 0.15
@@ -110,11 +107,12 @@ def _overlapping_pair(report, first, second) -> bool:
     )
 
 
-def _plan(model_path: str, centre, heading: float):
+def _plan(model_path: str, centre, heading: float, turn_degrees: float):
     return _finish._SeamCoverPlan(
         model_path=model_path,
         centre=(float(centre[0]), float(centre[1])),
         tangent_axis_degrees=float(heading) % 180.0,
+        turn_degrees=float(turn_degrees),
     )
 
 
@@ -166,27 +164,14 @@ def _refined_emitted_seam_cover_plans(report):
             (float(first.point[1]) + float(second.point[1])) * 0.5,
         )
         model_path = rf"o\road\{first.family}6.p3d"
-        if (
-            not curve_seam
-            and distance >= MINIMUM_PHYSICAL_OPEN_GAP_METRES
-            and tangent_error >= DUAL_UNDERLAY_TANGENT_ERROR_DEGREES
-        ):
-            headings = []
-            for value in (
-                first.tangent_axis_degrees,
-                second.tangent_axis_degrees,
-            ):
-                if not any(_axis_error(value, existing) <= 0.25 for existing in headings):
-                    headings.append(float(value))
-            plans.extend(_plan(model_path, centre, heading) for heading in headings)
-        else:
-            plans.append(
-                _plan(
-                    model_path,
-                    centre,
-                    _emitted._plan_heading(first, second),
-                )
+        plans.append(
+            _plan(
+                model_path,
+                centre,
+                _emitted._plan_heading(first, second),
+                tangent_error,
             )
+        )
     return tuple(plans)
 
 

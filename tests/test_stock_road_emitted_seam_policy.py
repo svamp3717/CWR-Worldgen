@@ -8,6 +8,7 @@ from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_emitted_seam_policy as _emitted
 from cwr_worldgen import stock_road_emitted_seam_refinement_policy as _refinement
 from cwr_worldgen import stock_road_model_geometry as _geometry
+from cwr_worldgen import stock_road_visual_finish_policy as _finish
 
 
 def _object(object_id, model, x, z, heading, *, pitch=0.0, y=0.0):
@@ -45,8 +46,8 @@ def _straight_from_start(object_id, start, heading, *, pitch=0.0):
 def test_final_pass_sees_pitch_projected_straight_gap():
     # Build the objects from their *physical* WRP horizontal spans. The older
     # intermediate hook could miss this class because it ran before the final
-    # pitched objects existed. An eight-degree miter now receives one low helper
-    # along each visible tangent rather than one average-heading rectangle.
+    # pitched objects existed. An eight-degree miter now receives one
+    # angle-matched borderless helper on the road-axis bisector.
     first_pitch = 8.0
     first_length = 6.25 * math.cos(math.radians(first_pitch))
     first = _object(
@@ -62,13 +63,14 @@ def test_final_pass_sees_pitch_projected_straight_gap():
 
     plans = _emitted._emitted_seam_cover_plans(report)
 
-    assert len(plans) == 2
+    assert len(plans) == 1
     assert all(plan.model_path.casefold() == r"o\road\sil6.p3d" for plan in plans)
     assert all(math.dist(plan.centre, (0.09, 0.0)) < 0.01 for plan in plans)
-    assert sorted(round(plan.tangent_axis_degrees, 6) for plan in plans) == [0.0, 8.0]
+    assert math.isclose(plans[0].tangent_axis_degrees, 4.0, abs_tol=1.0e-6)
+    assert math.isclose(plans[0].turn_degrees, 8.0, abs_tol=1.0e-6)
 
 
-def test_final_curve_gap_uses_straight_side_tangent():
+def test_final_curve_gap_uses_miter_bisector():
     model = r"o\road\sil10 50.p3d"
     geometry = _geometry.stock_curve_connectors(model)
     assert geometry is not None
@@ -91,11 +93,11 @@ def test_final_curve_gap_uses_straight_side_tangent():
     plans = _emitted._emitted_seam_cover_plans(report)
 
     assert len(plans) == 1
-    assert math.isclose(
-        plans[0].tangent_axis_degrees,
+    expected = _finish._average_axis_heading(
+        _geometry.STOCK_CURVE_ANGLE_DEGREES,
         straight_heading,
-        abs_tol=1.0e-6,
     )
+    assert math.isclose(plans[0].tangent_axis_degrees, expected, abs_tol=1.0e-6)
 
 
 def test_existing_paved_underlay_prevents_duplicate_cover():
@@ -123,16 +125,16 @@ def test_aligned_physical_gap_gets_underlay_even_without_tangent_error():
     assert math.dist(plans[0].centre, (0.0, 0.09)) < 1.0e-9
 
 
-def test_large_straight_miter_uses_two_tangent_aligned_underlays():
+def test_large_straight_miter_uses_one_angle_matched_underlay():
     first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
     second = _straight_from_start(2, (0.12, 0.0), 12.0)
     report = SimpleNamespace(objects=(first, second), junction_cap_objects=0)
 
     plans = _refinement._refined_emitted_seam_cover_plans(report)
 
-    assert len(plans) == 2
-    headings = sorted(round(plan.tangent_axis_degrees, 6) for plan in plans)
-    assert headings == [0.0, 12.0]
+    assert len(plans) == 1
+    assert math.isclose(plans[0].tangent_axis_degrees, 6.0, abs_tol=1.0e-9)
+    assert math.isclose(plans[0].turn_degrees, 12.0, abs_tol=1.0e-9)
 
 
 def test_coincident_straight_miter_uses_one_bisecting_underlay():
@@ -144,6 +146,7 @@ def test_coincident_straight_miter_uses_one_bisecting_underlay():
 
     assert len(plans) == 1
     assert math.isclose(plans[0].tangent_axis_degrees, 6.0, abs_tol=1.0e-9)
+    assert math.isclose(plans[0].turn_degrees, 12.0, abs_tol=1.0e-9)
     assert math.dist(plans[0].centre, (0.0, 0.0)) < 1.0e-9
 
 
@@ -171,7 +174,7 @@ def test_paved_seam_plan_emits_borderless_world_local_fill():
 
     assert len(fixed.objects) == 3
     helper = fixed.objects[-1]
-    assert helper.model_path.casefold() == r"wg_test\i\paved_fill.p3d"
+    assert helper.model_path.casefold() == r"wg_test\i\paved_miter_q048.p3d"
     assert math.dist((helper.x, helper.z), (0.0, 0.0)) < 1.0e-9
     assert fixed.short_piece_objects == 1
 

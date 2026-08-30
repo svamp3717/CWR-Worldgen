@@ -24,6 +24,11 @@ from typing import Iterable, Sequence
 
 from .pbo import read_pbo
 from . import stock_road_model_geometry as _geometry
+from .procedural_infrastructure import (
+    GENERATED_PAVED_FILL_RADIUS_METRES,
+    GENERATED_PAVED_MITER_SAFETY_METRES,
+    paved_miter_angle_degrees,
+)
 
 
 _RVW4_HEADER = struct.Struct("<4sii")
@@ -40,6 +45,10 @@ _X_JUNCTION = re.compile(
 )
 _PAVED_FILL = re.compile(
     r"^(?:.*[\\/])paved_fill\.p3d$",
+    re.IGNORECASE,
+)
+_PAVED_MITER = re.compile(
+    r"^(?:.*[\\/])paved_miter_q\d{3}\.p3d$",
     re.IGNORECASE,
 )
 _PAVED_FAMILIES = {"sil", "asf", "kos"}
@@ -137,6 +146,44 @@ def _transform_local(
     return _geometry.transform_local(point, origin, heading_degrees)
 
 
+def _paved_miter_contains(
+    road: RoadObject,
+    point: tuple[float, float],
+    *,
+    margin: float = 0.0,
+) -> bool:
+    turn = paved_miter_angle_degrees(road.model_path)
+    if turn is None:
+        return False
+    dx = float(point[0]) - float(road.logical_center[0])
+    dz = float(point[1]) - float(road.logical_center[1])
+    heading = math.radians(float(road.heading_degrees))
+    local_x = dx * math.cos(heading) - dz * math.sin(heading)
+    local_z = dx * math.sin(heading) + dz * math.cos(heading)
+    radius = (
+        GENERATED_PAVED_FILL_RADIUS_METRES
+        + GENERATED_PAVED_MITER_SAFETY_METRES
+    )
+    margin = max(0.0, float(margin))
+    if math.hypot(local_x, local_z) <= radius + margin:
+        return True
+    half_angle = math.radians(float(turn) * 0.5)
+    cosine = math.cos(half_angle)
+    if cosine <= 1.0e-9:
+        return False
+    base_x = radius * cosine
+    apex_x = radius / cosine
+    absolute_x = abs(local_x)
+    if absolute_x < base_x - margin or absolute_x > apex_x + margin:
+        return False
+    depth = apex_x - base_x
+    if depth <= 1.0e-9:
+        return False
+    base_half_height = radius * math.sin(half_angle)
+    fraction = max(0.0, min(1.0, (apex_x - absolute_x) / depth))
+    return abs(local_z) <= base_half_height * fraction + margin
+
+
 def _endpoint(
     *,
     object_id: int,
@@ -189,6 +236,30 @@ def _road_object_from_record(values) -> RoadObject | None:
             "sil",
             "paved_fill",
             float(_geometry.STOCK_HALF_WIDTHS_METRES["sil"]) * 2.0,
+            origin,
+            (),
+        )
+
+    if _PAVED_MITER.fullmatch(normalized) is not None:
+        turn = paved_miter_angle_degrees(normalized)
+        if turn is None:
+            return None
+        half_angle = math.radians(turn * 0.5)
+        apex = (
+            GENERATED_PAVED_FILL_RADIUS_METRES
+            + GENERATED_PAVED_MITER_SAFETY_METRES
+        ) / math.cos(half_angle)
+        return RoadObject(
+            object_id,
+            model_path,
+            x,
+            y,
+            z,
+            heading,
+            pitch,
+            "sil",
+            "paved_miter",
+            apex * 2.0,
             origin,
             (),
         )

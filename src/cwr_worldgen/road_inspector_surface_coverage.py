@@ -20,6 +20,7 @@ import math
 from pathlib import Path
 
 from . import road_inspector as _core
+from . import road_inspector_grass_wedge as _wedge
 
 _COVERABLE_CATEGORIES = frozenset({"straight_miter", "curve_transition", "connector_gap"})
 _PAVED_FAMILIES = frozenset({"sil", "asf", "kos"})
@@ -66,13 +67,27 @@ def _gap_samples(first, second):
     for start, end in _matched_edge_pairs(first, second):
         samples.extend(_segment_samples(start, end))
     samples.extend(_segment_samples(first.point, second.point))
+    wedge = _wedge._grass_wedge_geometry(first, second)
+    if wedge is not None:
+        apex = wedge[3]
+        centroid = wedge[4]
+        samples.extend((apex, centroid))
     return tuple(samples)
 
 
 def _straight_contains(road, point: tuple[float, float]) -> bool:
     if road.kind == "paved_fill":
         radius = float(_core._geometry.STOCK_HALF_WIDTHS_METRES["sil"])
-        return math.dist(road.logical_center, point) <= radius + _SURFACE_MARGIN_METRES
+        # A circular fill stops at the nominal road edge. Do not apply the
+        # general surface margin here: even a shallow turn has a real miter
+        # apex just beyond this radius.
+        return math.dist(road.logical_center, point) <= radius + 1.0e-3
+    if road.kind == "paved_miter":
+        return _core._paved_miter_contains(
+            road,
+            point,
+            margin=_SURFACE_MARGIN_METRES,
+        )
     if road.kind != "straight" or len(road.endpoints) != 2:
         return False
     start = road.endpoints[0].point
@@ -121,7 +136,7 @@ def _covered_by_other_paved_surface(issue, roads) -> bool:
         if (
             int(road.object_id) not in issue.object_ids
             and road.family == first_road.family
-            and road.kind in {"straight", "paved_fill"}
+            and road.kind in {"straight", "paved_fill", "paved_miter"}
             and minimum_y <= float(road.y) <= maximum_y
         )
     )

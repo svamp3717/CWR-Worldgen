@@ -11,11 +11,11 @@ seen.
 This policy is deliberately the outermost stock-road fit wrapper.  It inspects
 the final ``WorldObject`` geometry through ``_p._model_axis`` (which already uses
 measured 3D stock connectors), ignores gaps already covered by another
-same-family paved straight, and adds only low six-metre underlays.  Straight
-mitres use the same 0.20 m physical connector radius as Road Inspector.  Residual
-curve seams may bridge up to 1.50 m when the mutually-nearest connector pair has
-a modest tangent error; the underlay follows the straight-side tangent when one
-is available, avoiding a diagonal slab across the carriageway.
+same-family paved surface, and adds low angle-matched borderless miter fills.
+Straight mitres use the same 0.20 m physical connector radius as Road Inspector.
+Residual curve seams may bridge up to 1.50 m when the mutually-nearest pair has
+a modest tangent error; the fill follows the straight-side tangent when one is
+available, avoiding a diagonal patch across the carriageway.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from . import generator as _generator
 from . import playability as _p
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_visual_finish_policy as _finish
-from .procedural_infrastructure import paved_fill_model_path
+from .procedural_infrastructure import paved_miter_model_path
 
 MAXIMUM_EMITTED_STRAIGHT_GAP_METRES = 0.20
 MAXIMUM_EMITTED_CURVE_GAP_METRES = 1.50
@@ -236,9 +236,6 @@ def _pair_is_unambiguous(endpoints, first, second, distance: float) -> bool:
 
 
 def _plan_heading(first, second) -> float:
-    if first.is_curve != second.is_curve:
-        straight = second if first.is_curve else first
-        return float(straight.tangent_axis_degrees) % 180.0
     return _finish._average_axis_heading(
         first.tangent_axis_degrees,
         second.tangent_axis_degrees,
@@ -291,6 +288,7 @@ def _emitted_seam_cover_plans(report):
                     (float(first.point[1]) + float(second.point[1])) * 0.5,
                 ),
                 tangent_axis_degrees=_plan_heading(first, second),
+                turn_degrees=tangent_error,
             )
         )
     return tuple(plans)
@@ -327,8 +325,9 @@ def _apply_emitted_seam_covers(report, elevations, spec):
         )
         model_path = plan.model_path
         if str(model_path).replace("/", "\\").casefold() == r"o\road\sil6.p3d":
-            model_path = paved_fill_model_path(
-                str(getattr(spec, "name", "cwr_worldgen"))
+            model_path = paved_miter_model_path(
+                str(getattr(spec, "name", "cwr_worldgen")),
+                float(getattr(plan, "turn_degrees", 0.0)),
             )
         objects.append(
             _p._road_object_on_slope(

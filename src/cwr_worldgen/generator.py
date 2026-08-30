@@ -2845,6 +2845,7 @@ def _verify_single_world_pbo_layout(
         if (
             entry.casefold().startswith("i\\gravel")
             or entry.casefold() == "i\\paved_fill.p3d"
+            or entry.casefold().startswith("i\\paved_miter_q")
         )
         and entry.casefold().endswith(".p3d")
     )

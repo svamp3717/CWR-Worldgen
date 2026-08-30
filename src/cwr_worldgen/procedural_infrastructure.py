@@ -45,6 +45,9 @@ GENERATED_GRAVEL_EDGE_WIDTH_METRES = 0.18
 GENERATED_GRAVEL_EDGE_JITTER_METRES = 0.06
 GENERATED_GRAVEL_EDGE_SECTION_METRES = 0.65
 GENERATED_PAVED_FILL_RADIUS_METRES = 4.55
+GENERATED_PAVED_MITER_SAFETY_METRES = 0.003
+GENERATED_PAVED_MITER_STEP_DEGREES = 0.25
+GENERATED_PAVED_MITER_MAXIMUM_DEGREES = 35.0
 GENERATED_BRIDGE_MAXIMUM_DEPTH_METRES = 0.8
 GENERATED_BRIDGE_RAIL_OVERHANG_METRES = 0.16
 GENERATED_BRIDGE_ROADWAY_HEIGHT_METRES = 0.20
@@ -638,7 +641,55 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
     return visual, map_geometry, roadway, land
 
 
-def _paved_fill_lods(texture: str) -> tuple[_Lod, ...]:
+def _paved_surface_lods(
+    texture: str,
+    perimeter: tuple[tuple[float, float, float], ...],
+) -> tuple[_Lod, ...]:
+    points = ((0.0, 0.0, 0.0), *perimeter)
+    extent = max(
+        max(abs(point[0]), abs(point[2]))
+        for point in perimeter
+    )
+    visual_faces = []
+    roadway_faces = []
+    for index in range(len(perimeter)):
+        first = 1 + index
+        second = 1 + ((index + 1) % len(perimeter))
+        first_point = points[first]
+        second_point = points[second]
+        visual_faces.append(_Face(
+            texture,
+            (
+                (0, 0, 0.5, 0.5),
+                (first, 0, 0.5 + first_point[0] / (2.0 * extent), 0.5 + first_point[2] / (2.0 * extent)),
+                (second, 0, 0.5 + second_point[0] / (2.0 * extent), 0.5 + second_point[2] / (2.0 * extent)),
+            ),
+        ))
+        roadway_faces.append(_Face(
+            "",
+            ((0, 0, 0.5, 0.5), (first, 0, 0.0, 0.0), (second, 0, 1.0, 0.0)),
+        ))
+
+    visual = _Lod(
+        points, ((0.0, 1.0, 0.0),), tuple(visual_faces), _VISUAL_LOD,
+        properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
+    )
+    map_geometry = _Lod(
+        ((-extent, 0.0, -extent), (extent, 0.0, -extent),
+         (extent, 0.0, extent), (-extent, 0.0, extent)),
+        (), (), _GEOMETRY_LOD, properties=(("map", "road"),),
+    )
+    roadway = _Lod(
+        points, ((0.0, 1.0, 0.0),), tuple(roadway_faces), _ROADWAY_LOD,
+    )
+    land = _Lod(perimeter, (), (), _LAND_CONTACT_LOD)
+    return visual, map_geometry, roadway, land
+
+
+def _paved_fill_lods(
+    texture: str,
+    radius: float = GENERATED_PAVED_FILL_RADIUS_METRES,
+) -> tuple[_Lod, ...]:
     """Build a borderless circular paved surface at a stock-road connector.
 
     A radius equal to the measured ``sil`` half-width is tangent to both road
@@ -647,49 +698,66 @@ def _paved_fill_lods(texture: str) -> tuple[_Lod, ...]:
     all-paved turning intersection.
     """
 
-    radius = GENERATED_PAVED_FILL_RADIUS_METRES
+    radius = float(radius)
     sections = 32
-    points = [(0.0, 0.0, 0.0)]
+    perimeter = []
     for index in range(sections):
         angle = math.tau * index / sections
-        points.append((math.sin(angle) * radius, 0.0, math.cos(angle) * radius))
+        perimeter.append(
+            (math.sin(angle) * radius, 0.0, math.cos(angle) * radius)
+        )
+    return _paved_surface_lods(texture, tuple(perimeter))
 
-    visual_faces = []
-    roadway_faces = []
-    for index in range(sections):
-        first = 1 + index
-        second = 1 + ((index + 1) % sections)
-        first_point = points[first]
-        second_point = points[second]
-        visual_faces.append(_Face(
-            texture,
-            (
-                (0, 0, 0.5, 0.5),
-                (first, 0, 0.5 + first_point[0] / (2.0 * radius), 0.5 + first_point[2] / (2.0 * radius)),
-                (second, 0, 0.5 + second_point[0] / (2.0 * radius), 0.5 + second_point[2] / (2.0 * radius)),
-            ),
-        ))
-        roadway_faces.append(_Face("", ((0, 0, 0.5, 0.5), (first, 0, 0.0, 0.0), (second, 0, 1.0, 0.0))))
 
-    visual = _Lod(
-        tuple(points), ((0.0, 1.0, 0.0),), tuple(visual_faces), _VISUAL_LOD,
-        properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
+def _paved_miter_lods(
+    texture: str,
+    turn_degrees: float,
+) -> tuple[_Lod, ...]:
+    """Build a disk whose two sides reach the exact road-edge miter apexes."""
+
+    turn = max(
+        0.0,
+        min(float(turn_degrees), GENERATED_PAVED_MITER_MAXIMUM_DEGREES),
     )
-    map_geometry = _Lod(
-        ((-radius, 0.0, -radius), (radius, 0.0, -radius),
-         (radius, 0.0, radius), (-radius, 0.0, radius)),
-        (), (), _GEOMETRY_LOD, properties=(("map", "road"),),
+    radius = (
+        GENERATED_PAVED_FILL_RADIUS_METRES
+        + GENERATED_PAVED_MITER_SAFETY_METRES
     )
-    roadway = _Lod(
-        tuple(points), ((0.0, 1.0, 0.0),), tuple(roadway_faces), _ROADWAY_LOD,
+    if turn <= 1.0e-9:
+        return _paved_fill_lods(texture, radius)
+    half_angle = math.radians(turn * 0.5)
+    apex = radius / math.cos(half_angle)
+    arc_sections = 16
+    arc_span = math.pi - 2.0 * half_angle
+    perimeter = [(apex, 0.0, 0.0)]
+    perimeter.extend(
+        (
+            math.cos(-half_angle - arc_span * index / arc_sections) * radius,
+            0.0,
+            math.sin(-half_angle - arc_span * index / arc_sections) * radius,
+        )
+        for index in range(arc_sections + 1)
     )
-    land = _Lod(tuple(points[1:]), (), (), _LAND_CONTACT_LOD)
-    return visual, map_geometry, roadway, land
+    perimeter.append((-apex, 0.0, 0.0))
+    perimeter.extend(
+        (
+            math.cos(-math.pi - half_angle - arc_span * index / arc_sections)
+            * radius,
+            0.0,
+            math.sin(-math.pi - half_angle - arc_span * index / arc_sections)
+            * radius,
+        )
+        for index in range(arc_sections + 1)
+    )
+    return _paved_surface_lods(texture, tuple(perimeter))
 
 
 def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
     if key.subtype.casefold() == "paved_fill":
         return _paved_fill_lods(texture)
+    miter_angle = paved_miter_angle_degrees(key.subtype + ".p3d")
+    if miter_angle is not None:
+        return _paved_miter_lods(texture, miter_angle)
     if key.subtype.casefold() in {"gravel_j3", "gravel_j4"}:
         return _gravel_junction_lods(key, texture)
     width = key.width_m
@@ -840,6 +908,31 @@ def paved_fill_model_path(world_name: str) -> str:
     return rf"{world_name}\i\paved_fill.p3d"
 
 
+_PAVED_MITER_FILENAME_RE = re.compile(
+    r"^paved_miter_q(?P<quarter>\d{3})\.p3d$",
+    re.IGNORECASE,
+)
+
+
+def paved_miter_angle_degrees(model_path: str) -> float | None:
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
+    match = _PAVED_MITER_FILENAME_RE.fullmatch(filename)
+    if match is None:
+        return None
+    return int(match.group("quarter")) * GENERATED_PAVED_MITER_STEP_DEGREES
+
+
+def paved_miter_model_path(world_name: str, turn_degrees: float) -> str:
+    turn = max(
+        0.0,
+        min(float(turn_degrees), GENERATED_PAVED_MITER_MAXIMUM_DEGREES),
+    )
+    quarter = int(math.ceil(
+        turn / GENERATED_PAVED_MITER_STEP_DEGREES - 1.0e-9
+    ))
+    return rf"{world_name}\i\paved_miter_q{quarter:03d}.p3d"
+
+
 def is_generated_paved_fill_model(model_path: str) -> bool:
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
     return filename.casefold() == "paved_fill.p3d"
@@ -905,7 +998,10 @@ def _write_infrastructure_asset_task(task: _InfrastructureAssetTask) -> tuple[di
 def _infrastructure_texture_kind(key: InfrastructureModelKey) -> str:
     """Return the generated texture family used by one infrastructure model."""
     if key.kind == "road":
-        if key.subtype.casefold() == "paved_fill":
+        if (
+            key.subtype.casefold() == "paved_fill"
+            or paved_miter_angle_degrees(key.subtype + ".p3d") is not None
+        ):
             return "paved_fill"
         # Junction polygons tile their UV coordinates in two dimensions. They
         # must not use the alpha-edged ribbon texture, otherwise each texture
@@ -919,6 +1015,7 @@ class ProceduralInfrastructureLibrary:
     _GRAVEL_PATTERN = re.compile(r"^gravel(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.IGNORECASE)
     _GRAVEL_JUNCTION_PATTERN = re.compile(r"^gravel_j([34])\.p3d$", re.IGNORECASE)
     _PAVED_FILL_PATTERN = re.compile(r"^paved_fill\.p3d$", re.IGNORECASE)
+    _PAVED_MITER_PATTERN = _PAVED_MITER_FILENAME_RE
     _UTILITY_PATTERN = re.compile(r"^util_(power_pole|power_tower|water_tower)\.p3d$", re.IGNORECASE)
 
     def __init__(self, world_name: str, *, road_segment_length: float = 24.5, cache_dir: Path | None = None, cache_enabled: bool = True, cache_refresh: bool = False) -> None:
@@ -988,6 +1085,12 @@ class ProceduralInfrastructureLibrary:
             diameter_dm = int(round(GENERATED_PAVED_FILL_RADIUS_METRES * 20.0))
             self._usage[InfrastructureModelKey(
                 "road", "paved_fill", diameter_dm, diameter_dm,
+            )] += count
+            return
+        if self._PAVED_MITER_PATTERN.fullmatch(filename):
+            diameter_dm = int(round(GENERATED_PAVED_FILL_RADIUS_METRES * 20.0))
+            self._usage[InfrastructureModelKey(
+                "road", filename[:-4].casefold(), diameter_dm, diameter_dm,
             )] += count
             return
         junction_match = self._GRAVEL_JUNCTION_PATTERN.fullmatch(filename)
@@ -1135,7 +1238,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v15-safe-junction-uvs"
+                "procedural-infrastructure-model-v16-angle-matched-paved-miters"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"

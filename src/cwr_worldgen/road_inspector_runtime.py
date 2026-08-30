@@ -104,6 +104,30 @@ def _road_object_from_record(values):
             (),
         )
 
+    if _core._PAVED_MITER.fullmatch(normalized) is not None:
+        turn = _core.paved_miter_angle_degrees(normalized)
+        if turn is None:
+            return None
+        half_angle = math.radians(turn * 0.5)
+        apex = (
+            _core.GENERATED_PAVED_FILL_RADIUS_METRES
+            + _core.GENERATED_PAVED_MITER_SAFETY_METRES
+        ) / math.cos(half_angle)
+        return _core.RoadObject(
+            object_id,
+            model_path,
+            x,
+            y,
+            z,
+            heading,
+            pitch,
+            "sil",
+            "paved_miter",
+            apex * 2.0,
+            origin,
+            (),
+        )
+
     straight = _geometry.stock_straight_match(normalized)
     if straight is not None:
         family = straight.group("family").casefold()
