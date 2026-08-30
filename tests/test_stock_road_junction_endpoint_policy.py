@@ -57,6 +57,39 @@ def test_trimmed_late_result_is_retried_with_effective_junction_window(monkeypat
     assert fitted[-1][2] == (0.0, 20.0)
 
 
+def test_native_inward_trim_is_authoritative_over_exact_baseline(monkeypatch) -> None:
+    calls = []
+
+    def fake_chain(
+        measure,
+        pieces,
+        *,
+        start_distance,
+        preferred_end_distance,
+        minimum_end_distance,
+        maximum_end_distance,
+    ):
+        calls.append((float(start_distance), float(preferred_end_distance)))
+        return ((
+            pieces[0],
+            (0.0, float(start_distance)),
+            (0.0, float(preferred_end_distance)),
+        ),)
+
+    monkeypatch.setattr(_endpoint, "_ORIGINAL_CHAIN", fake_chain)
+    monkeypatch.setattr(
+        _endpoint,
+        "_effective_window",
+        lambda *_args: (6.03, 13.97, 13.61, 14.19),
+    )
+
+    fitted = _run(_endpoint._junction_endpoint_chain)
+
+    assert calls == [(2.425, 17.575), (6.03, 13.97)]
+    assert fitted[0][1] == (0.0, 6.03)
+    assert fitted[-1][2] == (0.0, 13.97)
+
+
 def test_exact_result_that_already_reaches_junction_is_kept(monkeypatch) -> None:
     calls = []
 
