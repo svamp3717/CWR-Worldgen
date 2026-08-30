@@ -26,12 +26,13 @@ _source_context.install()
 _edge_view.install()
 _report_ui.install()
 _coordinate_log.install()
-# Final read-only filters operate on the complete runtime/source issue list.
+# First prove genuinely covered paved seams invisible, then classify surviving
+# physical outside wedges. Only after that may the generic overlap filter remove
+# ordinary connector diagnostics; it deliberately does not suppress grass_wedge.
 _surface_coverage.install()
 _surface_height.install()
-_overlap_filter.install()
-# Classify only the seam findings that survive the visual-coverage filters.
 _grass_wedge.install()
+_overlap_filter.install()
 
 RoadIssue = _core.RoadIssue
 InspectionResult = _core.InspectionResult
