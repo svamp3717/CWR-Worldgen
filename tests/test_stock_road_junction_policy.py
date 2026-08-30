@@ -5,6 +5,7 @@ import math
 from types import SimpleNamespace
 
 from cwr_worldgen import playability as _p
+from cwr_worldgen import gravel_asphalt_transition_policy as _mixed
 from cwr_worldgen.stock_road_junction_policy import (
     MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES,
     NATIVE_JUNCTION_VERTICAL_BIAS_METRES,
@@ -77,15 +78,22 @@ def test_nearly_aligned_mixed_highway_dirt_t_keeps_native_transition():
     assert native.maximum_heading_error_degrees <= 1.5
 
 
-def test_visibly_skewed_mixed_highway_dirt_t_uses_stock_main_overlay():
-    native = _native_junction_for_incidents(
-        (_incident(0.0, "sil"), _incident(180.0, "sil"), _incident(266.0, "ces"))
+def test_bounded_skewed_mixed_highway_dirt_t_uses_one_native_transition():
+    incidents = (
+        _incident(0.0, "sil"),
+        _incident(180.0, "sil"),
+        _incident(266.0, "ces"),
     )
+    native = _native_junction_for_incidents(incidents)
 
     assert native is not None
-    assert native.model_path == r"o\road\sil6.p3d"
+    assert native.model_path == r"o\road\kr_new_sil_ces_t.p3d"
     assert native.cap_family == "sil"
-    assert native.maximum_heading_error_degrees < 1.0e-9
+    assert math.isclose(native.maximum_heading_error_degrees, 2.0, abs_tol=1.0e-9)
+    assert native.maximum_heading_error_degrees <= (
+        _mixed.MAXIMUM_STOCK_CES_NATIVE_HEADING_ERROR_DEGREES
+    )
+    assert _mixed._relaxation_eligible(incidents)
 
 
 def test_small_skew_is_shared_between_measured_connectors_inside_road_surface():
