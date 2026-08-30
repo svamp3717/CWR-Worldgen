@@ -29,6 +29,7 @@ from . import stock_road_intersection_edge_policy as _intersection_edge
 from . import stock_road_emitted_seam_policy as _emitted_seam
 from . import stock_road_paved_wedge_policy as _paved_wedge
 from . import stock_road_emitted_seam_refinement_policy as _emitted_seam_refinement
+from . import stock_road_stock_paved_only_policy as _stock_paved_only
 from . import stock_road_fit_first_policy as _fit_first
 
 
@@ -81,10 +82,12 @@ def install_stock_road_late_policy_stack() -> None:
     _curve_seam_fallback.install_stock_road_curve_seam_fallback_policy()
     _intersection_edge.install_stock_road_intersection_edge_policy()
     _emitted_seam.install_stock_road_emitted_seam_policy()
-    # Complete the final terrain-clear outside-wedge audit for all paved stock
-    # families (sil/asf/kos). Dirt/gravel remains deliberately untouched.
+    # Keep the physical endpoint reconstruction from the paved-wedge work. It is
+    # still useful for measuring the real WRP seams, but production must no
+    # longer serialize any world-local paved helper P3Ds.
     _paved_wedge.install_stock_road_paved_wedge_policy()
     _emitted_seam_refinement.install_stock_road_emitted_seam_refinement_policy()
+    _stock_paved_only.install_stock_road_stock_paved_only_policy()
 
     # Production builds keep fitting first. Disable the older intermediate seam
     # and junction overlap helpers, but leave the final pitch-aware emitted-seam
