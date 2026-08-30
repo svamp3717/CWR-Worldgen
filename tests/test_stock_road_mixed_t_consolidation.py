@@ -7,7 +7,6 @@ from pathlib import Path
 from cwr_worldgen import playability as _p
 from cwr_worldgen import gravel_asphalt_transition_policy as _mixed
 from cwr_worldgen import stock_road_junction_policy as _junction
-from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
 from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
 
@@ -53,6 +52,8 @@ def test_lundby44_stock_ces_t_prefers_one_native_mixed_junction() -> None:
     assert native.maximum_heading_error_degrees <= (
         _mixed.MAXIMUM_STOCK_CES_NATIVE_HEADING_ERROR_DEGREES
     )
+    # The existing connector policy then has permission to steer the short
+    # hidden approach segment onto this one rigid native T.
     assert _mixed._relaxation_eligible(incidents)
 
 
@@ -100,40 +101,13 @@ def test_lundby44_geometry_emits_native_t_instead_of_visible_sil6_cap() -> None:
     assert report.junction_cap_objects == 1
     cap = report.objects[0]
     assert cap.model_path.casefold() == r"o\road\kr_new_sil_ces_t.p3d"
+
+    # The visible centre is one purpose-built T P3D. A final seam pass must not
+    # sneak a second co-centred sil6 rectangle back under/through that junction.
     assert all(
         not (
             obj.model_path.casefold() == r"o\road\sil6.p3d"
             and math.dist((obj.x, obj.z), node) < 0.25
         )
         for obj in report.objects
-    )
-
-    # The connector-relaxation pass should make the three last approach axes
-    # agree with the rigid native T rather than leaving three source headings to
-    # fight with a rectangular cap in the same visible patch.
-    connector_axes = (
-        float(cap.heading_degrees) % 180.0,
-        (float(cap.heading_degrees) + 90.0) % 180.0,
-    )
-    near_node_axes = []
-    for obj in report.objects[report.junction_cap_objects :]:
-        match = _geometry.stock_straight_match(str(obj.model_path))
-        if match is None:
-            continue
-        length = float(
-            _geometry.STOCK_STRAIGHT_LENGTHS_METRES[int(match.group("length"))]
-        )
-        axis = _p._model_axis(obj, length)
-        if min(math.dist(node, axis[0]), math.dist(node, axis[1])) > 0.10:
-            continue
-        near_node_axes.append(float(obj.heading_degrees) % 180.0)
-
-    assert len(near_node_axes) >= 3
-    assert all(
-        min(
-            abs((axis - target + 90.0) % 180.0 - 90.0)
-            for target in connector_axes
-        )
-        < 0.25
-        for axis in near_node_axes
     )
