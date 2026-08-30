@@ -40,6 +40,7 @@ jobs:
             tests/test_road_inspector_edge_view.py \
             tests/test_road_inspector_intersection_context.py \
             tests/test_road_inspector_wrptool_catalogue.py \
+            tests/test_road_inspector_native_junction_overlap.py \
             tests/test_road_inspector_surface_coverage.py \
             tests/test_road_inspector_overlap_filter.py \
             tests/test_road_inspector_grass_wedge.py \
@@ -68,6 +69,7 @@ jobs:
             tests/test_stock_road_junction_policy.py \
             tests/test_stock_road_mixed_t_consolidation.py \
             tests/test_stock_road_wrptool_catalogue.py \
+            tests/test_stock_road_native_junction_ownership.py \
             tests/test_stock_road_late_policy_stack.py \
             tests/test_stock_road_local_fit_policy.py \
             tests/test_stock_road_long_s_bend_policy.py \
