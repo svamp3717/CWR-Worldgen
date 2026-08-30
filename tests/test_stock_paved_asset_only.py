@@ -68,7 +68,7 @@ def test_final_paved_turn_fallback_serializes_stock_assets_only():
 
     assert len(fixed.objects) > len(report.objects)
     added = fixed.objects[len(report.objects):]
-    assert all(obj.model_path.casefold().startswith(r"o\road\") for obj in added)
+    assert all(obj.model_path.casefold().startswith("o\\road\\") for obj in added)
     assert all("paved_fill" not in obj.model_path.casefold() for obj in added)
     assert all("paved_miter" not in obj.model_path.casefold() for obj in added)
     assert all("paved_wedge" not in obj.model_path.casefold() for obj in added)
