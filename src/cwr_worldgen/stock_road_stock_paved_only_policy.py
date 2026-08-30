@@ -199,6 +199,12 @@ def _apply_stock_emitted_seam_covers(report, elevations, spec):
     )
 
 
+# Keep the composed fitter's historical hook identity. Several regression tests
+# and diagnostic breadcrumbs refer to this slot by name; only its implementation
+# changed from generated helper P3Ds to stock road pieces.
+_apply_stock_emitted_seam_covers.__name__ = "_apply_emitted_seam_covers"
+
+
 def _legacy_stock_cap_for_turning_t(
     current,
     source_node,
