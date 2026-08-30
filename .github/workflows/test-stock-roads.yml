@@ -50,6 +50,7 @@ jobs:
             tests/test_paved_wedge_cross_slope.py \
             tests/test_paved_wedge_completion.py \
             tests/test_paved_wedge_geometry_v2.py \
+            tests/test_stock_paved_asset_only.py \
             tests/test_stock_road_3d_connector_policy.py \
             tests/test_stock_road_connector_policy.py \
             tests/test_stock_road_curve_policy.py \
