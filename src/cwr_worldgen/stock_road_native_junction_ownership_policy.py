@@ -16,6 +16,13 @@ planning for all-paved T junctions. The transactional relaxation layer already
 bounds and obstacle-checks those edits, then accepts them only when the resulting
 node satisfies the ordinary strict native matcher.
 
+The old final paved-completion pass compared a successfully fitted native T back
+to the *unmodified* source headings after the connector-relaxation context had
+ended. That could demote a correct native T back to a generic ``sil6`` solely
+because the original OSM branch was a few degrees skewed. Once the inner fitter
+has selected a measured native junction, keep that selection and let its actual
+WRP connectors be authoritative.
+
 Generated gravel keeps its existing mixed-junction rules. No new P3D is created.
 """
 from __future__ import annotations
@@ -29,11 +36,11 @@ from . import stock_road_local_fit_policy as _local
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_paved_junction_completion_policy as _paved
 from . import stock_road_surface_overlap_policy as _surface
+from . import stock_road_visual_finish_policy as _finish
 
 
 _NATIVE_EXTENT_TOLERANCE_METRES = 1.0e-6
 _ORIGINAL_QUALITY_WINDOW = None
-_ORIGINAL_SURFACE_QUALITY_WINDOW = None
 _INSTALLED = False
 
 
@@ -128,26 +135,32 @@ def _native_ownership_quality_window(
 def install_stock_road_native_junction_ownership_policy() -> None:
     """Install connector-trim ownership after the paved completion layer."""
 
-    global _ORIGINAL_QUALITY_WINDOW, _ORIGINAL_SURFACE_QUALITY_WINDOW, _INSTALLED
+    global _ORIGINAL_QUALITY_WINDOW, _INSTALLED
     if _INSTALLED:
         return
     if not _paved._INSTALLED:
         raise RuntimeError("paved junction completion policy must install first")
     if _local._ORIGINAL_QUALITY_WINDOW is None:
         raise RuntimeError("stock road local fit policy must install first")
+    if _paved._ORIGINAL_REALIGN is None:
+        raise RuntimeError("paved junction realignment baseline was not captured")
 
     _ORIGINAL_QUALITY_WINDOW = _quality._quality_window
-    _ORIGINAL_SURFACE_QUALITY_WINDOW = _surface._quality_window
     _quality._quality_window = _native_ownership_quality_window
     _surface._quality_window = _native_ownership_quality_window
 
     # The paved-completion layer used to veto connector relaxation whenever the
-    # unmodified source T was visibly skewed. That forced exactly the generic
-    # straight-cap overlap this policy is meant to eliminate. Restore the
-    # measured connector target planner. The transaction layer still decides
-    # whether a proposed skew correction is safe and strictly valid.
+    # unmodified source T was visibly skewed. Restore the measured connector
+    # target planner. The transaction layer still decides whether a proposed skew
+    # correction is obstacle-safe and strictly valid.
     if _paved._ORIGINAL_NATIVE_T_TARGETS is None:
         raise RuntimeError("paved connector target planner was not captured")
     _connector._native_t_targets = _paved._ORIGINAL_NATIVE_T_TARGETS
+
+    # The inner fitter makes native selection while the relaxed connector-aligned
+    # source is active. Do not re-evaluate that fitted T later against stale raw
+    # OSM headings and replace it with a generic short slab. Keep only the visual
+    # finisher's ordinary legacy-cap orientation pass here.
+    _finish._realign_legacy_caps = _paved._ORIGINAL_REALIGN
 
     _INSTALLED = True
