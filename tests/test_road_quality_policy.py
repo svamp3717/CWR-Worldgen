@@ -64,9 +64,9 @@ def test_stock_overlay_allows_diagonal_approach_to_continue_under_cap() -> None:
     )
     exit_distance = _exit_distance(junction, diagonal)
     assert exit_distance > 4.2
-    # A stock straight cap is a surface overlay, not a hard trimming boundary.
-    # Running the approach to the node underneath it avoids a visible triangular
-    # hole at skew junctions; the cap's vertical bias determines visible priority.
+    # A stock straight cap is a surface underlay, not a hard trimming boundary.
+    # Running the approach to the node above it avoids a visible triangular hole
+    # at skew junctions while the source-aligned approach owns the visible edge.
     assert adjusted[0] == 0.0
 
 
@@ -176,7 +176,7 @@ def test_diagonal_t_junction_does_not_add_overlap_repair_pieces() -> None:
     # main-axis cap at their shared centre. Do not manufacture a generated fill
     # or append incident-aligned overlap slabs.
     assert cap.model_path.casefold() == r"o\road\sil6.p3d"
-    assert cap.y >= playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
+    assert cap.y < playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
 
     branch_obj = next(
         obj
