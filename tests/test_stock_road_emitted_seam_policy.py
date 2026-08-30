@@ -44,10 +44,6 @@ def _straight_from_start(object_id, start, heading, *, pitch=0.0):
 
 
 def test_final_pass_sees_pitch_projected_straight_gap():
-    # Build the objects from their *physical* WRP horizontal spans. The older
-    # intermediate hook could miss this class because it ran before the final
-    # pitched objects existed. An eight-degree miter now receives one
-    # angle-matched borderless helper on the road-axis bisector.
     first_pitch = 8.0
     first_length = 6.25 * math.cos(math.radians(first_pitch))
     first = _object(
@@ -103,7 +99,6 @@ def test_final_curve_gap_uses_miter_bisector():
 def test_existing_paved_underlay_prevents_duplicate_cover():
     first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
     second = _straight_from_start(2, (0.10, 0.0), 8.0)
-    # A low, same-family straight already spans the whole seam area.
     existing = _object(3, r"o\road\sil6.p3d", 0.05, 0.0, 4.0, y=-0.01)
     report = SimpleNamespace(
         objects=(first, second, existing),
@@ -113,7 +108,7 @@ def test_existing_paved_underlay_prevents_duplicate_cover():
     assert _emitted._emitted_seam_cover_plans(report) == ()
 
 
-def test_buried_existing_underlay_still_gets_narrow_terrain_clear_wedge():
+def test_buried_existing_underlay_gets_stock_only_final_fallback():
     first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
     second = _straight_from_start(2, (0.0, 0.0), 12.0)
     existing = _object(3, r"o\road\sil6.p3d", 0.0, 0.0, 6.0, y=0.0)
@@ -137,13 +132,10 @@ def test_buried_existing_underlay_still_gets_narrow_terrain_clear_wedge():
     fixed = _emitted._apply_emitted_seam_covers(report, [0.0] * 4, spec)
 
     assert len(fixed.objects) == 4
-    assert fixed.objects[-1].model_path.casefold().startswith(
-        r"wg_test\i\paved_wedge_q"
-    )
-    assert not any(
-        "paved_miter" in obj.model_path.casefold()
-        for obj in fixed.objects[3:]
-    )
+    helper = fixed.objects[-1]
+    assert helper.model_path.casefold() == r"o\road\sil6.p3d"
+    assert "paved_" not in helper.model_path.casefold()
+    assert fixed.short_piece_objects == 1
 
 
 def test_aligned_physical_gap_gets_underlay_even_without_tangent_error():
@@ -184,7 +176,7 @@ def test_coincident_straight_miter_uses_one_bisecting_underlay():
     assert plans[0].outer_miter_apex is not None
 
 
-def test_paved_seam_plan_emits_borderless_world_local_fill():
+def test_paved_seam_plan_emits_stock_short_piece_only():
     first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
     second = _straight_from_start(2, (0.0, 0.0), 12.0)
     report = _p.RoadFitReport(
@@ -206,19 +198,14 @@ def test_paved_seam_plan_emits_borderless_world_local_fill():
 
     fixed = _emitted._apply_emitted_seam_covers(report, [0.0] * 4, spec)
 
-    assert len(fixed.objects) == 4
-    helper = fixed.objects[-2]
-    assert helper.model_path.casefold() == r"wg_test\i\paved_miter_q048.p3d"
-    assert math.dist((helper.x, helper.z), (0.0, 0.0)) < 1.0e-9
-    wedge = fixed.objects[-1]
-    assert wedge.model_path.casefold() == r"wg_test\i\paved_wedge_q048.p3d"
-    assert math.isclose(wedge.y, 0.03, abs_tol=1.0e-9)
-    assert fixed.short_piece_objects == 2
+    assert len(fixed.objects) == 3
+    helper = fixed.objects[-1]
+    assert helper.model_path.casefold() == r"o\road\sil6.p3d"
+    assert "paved_" not in helper.model_path.casefold()
+    assert fixed.short_piece_objects == 1
 
 
 def test_lundby34_compiled_grass_wedges_receive_final_underlays():
-    """Regress representative straight, mixed, and curve seams from Lundby34."""
-
     cases = (
         (
             (
