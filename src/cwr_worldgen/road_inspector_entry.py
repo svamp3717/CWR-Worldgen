@@ -17,6 +17,7 @@ from . import road_inspector_surface_height as _surface_height
 from . import road_inspector_overlap_filter as _overlap_filter
 from . import road_inspector_grass_wedge as _grass_wedge
 from . import road_inspector_paved_wedge_audit as _paved_wedge_audit
+from . import road_inspector_embedded_paved_geometry as _embedded_paved_geometry
 
 
 # Keep every correction confined to the inspector process. Importing the normal
@@ -34,10 +35,15 @@ _surface_coverage.install()
 _surface_height.install()
 _grass_wedge.install()
 _overlap_filter.install()
-# Finally scan paved physical endpoints directly so shallow visible outside
-# triangles are reported even when the ordinary seam thresholds emitted no base
-# issue. Dirt/gravel is deliberately outside this audit.
+# Scan paved physical endpoints directly so shallow visible outside triangles
+# are reported even when the ordinary seam thresholds emitted no base issue.
 _paved_wedge_audit.install()
+# Outermost of all inspector layers: generated helper filenames are not geometry
+# version identifiers. Read the actual embedded paved-wedge Visual LOD from the
+# inspected PBO so an older/narrower helper cannot suppress a grass wedge merely
+# because today's source code would generate a wider model with the same name.
+# Dirt/gravel is deliberately outside this layer.
+_embedded_paved_geometry.install()
 
 RoadIssue = _core.RoadIssue
 InspectionResult = _core.InspectionResult
