@@ -21,12 +21,14 @@ to the *unmodified* source headings after the connector-relaxation context had
 ended. That could demote a correct native T back to a generic ``sil6`` solely
 because the original OSM branch was a few degrees skewed. Once the inner fitter
 has selected a measured native junction, keep that selection and let its actual
-WRP connectors be authoritative.
+WRP connectors be authoritative. Generic all-paved fallback caps are still kept
+low, preserving their existing non-z-fighting behaviour.
 
 Generated gravel keeps its existing mixed-junction rules. No new P3D is created.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import math
 
 from . import gravel_junction_policy as _gravel_junction
@@ -132,6 +134,65 @@ def _native_ownership_quality_window(
     return tuple(result)
 
 
+def _native_owner_realign(report, dataset, projection, elevations, spec):
+    """Keep fitted native caps; retain the low generic paved fallback."""
+
+    if _paved._ORIGINAL_REALIGN is None:
+        raise RuntimeError("paved junction realignment baseline was not captured")
+
+    report = _paved._ORIGINAL_REALIGN(report, dataset, projection, elevations, spec)
+    cap_count = min(
+        int(getattr(report, "junction_cap_objects", 0)), len(report.objects)
+    )
+    if cap_count <= 0:
+        return report
+
+    incident_map = _finish._junction_incident_map(dataset, projection, spec)
+    if not incident_map:
+        return report
+
+    objects = list(report.objects)
+    changed = False
+    for index in range(cap_count):
+        current = objects[index]
+
+        # A purpose-built native model was selected while the connector-aligned
+        # candidate source was active. It already owns the centre. Do not compare
+        # it again to stale raw source headings and turn it back into a rectangle.
+        if _paved._native_signature(str(current.model_path)) is not None:
+            continue
+
+        family = _paved._cap_family(current)
+        if family is None:
+            continue
+        logical = _paved._logical_center(current)
+        if logical is None:
+            continue
+        junction = _paved._matching_junction(incident_map, logical)
+        if junction is None:
+            continue
+        node, incidents = junction
+        if not _paved._all_paved_incidents(incidents):
+            continue
+
+        # Unsupported/skew-too-far all-paved nodes still use one generic stock
+        # short cap. Keep it slightly below the approaches, exactly as the prior
+        # paved completion policy did, so it is fill rather than a raised slab.
+        replacement = _paved._low_stock_cap(
+            current,
+            node,
+            incidents,
+            family,
+            elevations,
+            spec,
+        )
+        if replacement != current:
+            objects[index] = replacement
+            changed = True
+
+    return replace(report, objects=tuple(objects)) if changed else report
+
+
 def install_stock_road_native_junction_ownership_policy() -> None:
     """Install connector-trim ownership after the paved completion layer."""
 
@@ -157,10 +218,8 @@ def install_stock_road_native_junction_ownership_policy() -> None:
         raise RuntimeError("paved connector target planner was not captured")
     _connector._native_t_targets = _paved._ORIGINAL_NATIVE_T_TARGETS
 
-    # The inner fitter makes native selection while the relaxed connector-aligned
-    # source is active. Do not re-evaluate that fitted T later against stale raw
-    # OSM headings and replace it with a generic short slab. Keep only the visual
-    # finisher's ordinary legacy-cap orientation pass here.
-    _finish._realign_legacy_caps = _paved._ORIGINAL_REALIGN
+    # Preserve a native model selected inside the relaxed fit, while still
+    # lowering genuinely unsupported generic all-paved caps.
+    _finish._realign_legacy_caps = _native_owner_realign
 
     _INSTALLED = True
