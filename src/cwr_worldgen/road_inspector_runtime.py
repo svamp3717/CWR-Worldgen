@@ -88,6 +88,22 @@ def _road_object_from_record(values):
     pitch = math.degrees(math.asin(pitch_sine))
     origin = (x, z)
 
+    if _core._PAVED_FILL.fullmatch(normalized) is not None:
+        return _core.RoadObject(
+            object_id,
+            model_path,
+            x,
+            y,
+            z,
+            heading,
+            pitch,
+            "sil",
+            "paved_fill",
+            float(_geometry.STOCK_HALF_WIDTHS_METRES["sil"]) * 2.0,
+            origin,
+            (),
+        )
+
     straight = _geometry.stock_straight_match(normalized)
     if straight is not None:
         family = straight.group("family").casefold()

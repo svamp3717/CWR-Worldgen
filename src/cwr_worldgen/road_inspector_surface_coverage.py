@@ -70,6 +70,9 @@ def _gap_samples(first, second):
 
 
 def _straight_contains(road, point: tuple[float, float]) -> bool:
+    if road.kind == "paved_fill":
+        radius = float(_core._geometry.STOCK_HALF_WIDTHS_METRES["sil"])
+        return math.dist(road.logical_center, point) <= radius + _SURFACE_MARGIN_METRES
     if road.kind != "straight" or len(road.endpoints) != 2:
         return False
     start = road.endpoints[0].point
@@ -118,7 +121,7 @@ def _covered_by_other_paved_surface(issue, roads) -> bool:
         if (
             int(road.object_id) not in issue.object_ids
             and road.family == first_road.family
-            and road.kind == "straight"
+            and road.kind in {"straight", "paved_fill"}
             and minimum_y <= float(road.y) <= maximum_y
         )
     )

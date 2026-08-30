@@ -26,6 +26,7 @@ from . import generator as _generator
 from . import playability as _p
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_visual_finish_policy as _finish
+from .procedural_infrastructure import paved_fill_model_path
 
 MAXIMUM_EMITTED_STRAIGHT_GAP_METRES = 0.20
 MAXIMUM_EMITTED_CURVE_GAP_METRES = 1.50
@@ -324,10 +325,15 @@ def _apply_emitted_seam_covers(report, elevations, spec):
             float(plan.centre[0]) + direction[0] * half,
             float(plan.centre[1]) + direction[1] * half,
         )
+        model_path = plan.model_path
+        if str(model_path).replace("/", "\\").casefold() == r"o\road\sil6.p3d":
+            model_path = paved_fill_model_path(
+                str(getattr(spec, "name", "cwr_worldgen"))
+            )
         objects.append(
             _p._road_object_on_slope(
                 next_id,
-                plan.model_path,
+                model_path,
                 start,
                 end,
                 elevations,

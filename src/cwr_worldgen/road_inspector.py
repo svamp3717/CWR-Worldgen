@@ -38,6 +38,10 @@ _X_JUNCTION = re.compile(
     r"^(?:.*[\\/])kr_new_silxsil\.p3d$",
     re.IGNORECASE,
 )
+_PAVED_FILL = re.compile(
+    r"^(?:.*[\\/])paved_fill\.p3d$",
+    re.IGNORECASE,
+)
 _PAVED_FAMILIES = {"sil", "asf", "kos"}
 _STOCK_FAMILIES = _PAVED_FAMILIES | {"ces"}
 
@@ -172,6 +176,22 @@ def _road_object_from_record(values) -> RoadObject | None:
     pitch_sine = max(-1.0, min(1.0, float(values[7])))
     pitch = math.degrees(math.asin(pitch_sine))
     origin = (x, z)
+
+    if _PAVED_FILL.fullmatch(normalized) is not None:
+        return RoadObject(
+            object_id,
+            model_path,
+            x,
+            y,
+            z,
+            heading,
+            pitch,
+            "sil",
+            "paved_fill",
+            float(_geometry.STOCK_HALF_WIDTHS_METRES["sil"]) * 2.0,
+            origin,
+            (),
+        )
 
     straight = _geometry.stock_straight_match(normalized)
     if straight is not None:
@@ -709,7 +729,7 @@ def _source_intersection_issues(
             road
             for road in roads
             if (
-                road.kind in {"junction_t", "junction_x"}
+                road.kind in {"junction_t", "junction_x", "paved_fill"}
                 or (road.kind == "straight" and road.nominal_length_metres <= 6.26)
             )
             and math.dist(road.logical_center, node) <= match_tolerance
@@ -797,6 +817,32 @@ def _source_intersection_issues(
                             "maximum_connector_heading_error_degrees": round(maximum_connector_error, 5),
                             "maximum_approach_heading_error_degrees": round(maximum_approach_error, 5),
                             "estimated_edge_offset_metres": round(edge_estimate, 5),
+                        },
+                    )
+                )
+            continue
+
+        if cap.kind == "paved_fill":
+            # A borderless disk deliberately has no rigid connector headings.
+            # It can own the centre of a turning all-paved node while the
+            # fitted approaches retain their real source tangents.
+            if maximum_approach_error >= 3.0:
+                score = min(100.0, 35.0 + maximum_approach_error * 5.0)
+                issues.append(
+                    RoadIssue(
+                        "",
+                        _severity(score),
+                        score,
+                        "intersection_approach_mismatch",
+                        node[0],
+                        node[1],
+                        tuple(sorted({cap.object_id, *(ep.object_id for ep in nearby_endpoints)})),
+                        tuple(sorted({cap.model_path, *(ep.model_path for ep in nearby_endpoints)})),
+                        f"One or more emitted approaches miss the normalized intersection tangent by up to {maximum_approach_error:.2f}°.",
+                        "Refit the final approach pieces to the logical node, using a native curve before the intersection when the source road is already turning.",
+                        {
+                            "source_degree": len(source.headings_degrees),
+                            "maximum_approach_heading_error_degrees": round(maximum_approach_error, 5),
                         },
                     )
                 )
@@ -996,6 +1042,9 @@ def _road_payload(road: RoadObject) -> dict[str, object]:
         "z": round(road.z, 4),
         "center": [round(road.logical_center[0], 4), round(road.logical_center[1], 4)],
         "segments": (
+            []
+            if not road.endpoints
+            else
             [
                 [round(road.logical_center[0], 4), round(road.logical_center[1], 4), round(endpoint.point[0], 4), round(endpoint.point[1], 4)]
                 for endpoint in road.endpoints

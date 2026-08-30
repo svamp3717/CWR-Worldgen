@@ -147,6 +147,30 @@ def test_same_family_underlay_cover_suppresses_raw_paved_miter():
     )
 
 
+def test_borderless_paved_fill_suppresses_raw_paved_miter():
+    seam = (0.0, 0.0)
+    first = _straight(1, seam=seam, heading=340.0, seam_endpoint=1)
+    second = _straight(2, seam=seam, heading=308.0, seam_endpoint=0)
+    fill = _core.RoadObject(
+        3,
+        r"wg_test\i\paved_fill.p3d",
+        seam[0],
+        -0.01,
+        seam[1],
+        144.0,
+        0.0,
+        "sil",
+        "paved_fill",
+        9.1,
+        seam,
+        (),
+    )
+
+    assert _coverage._covered_by_other_paved_surface(
+        _issue(), (first, second, fill)
+    )
+
+
 def test_nearby_but_wrongly_oriented_road_does_not_hide_open_edges():
     seam = (0.0, 0.0)
     first = _straight(1, seam=seam, heading=340.0, seam_endpoint=1)

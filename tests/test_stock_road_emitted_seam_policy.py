@@ -147,6 +147,35 @@ def test_coincident_straight_miter_uses_one_bisecting_underlay():
     assert math.dist(plans[0].centre, (0.0, 0.0)) < 1.0e-9
 
 
+def test_paved_seam_plan_emits_borderless_world_local_fill():
+    first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
+    second = _straight_from_start(2, (0.0, 0.0), 12.0)
+    report = _p.RoadFitReport(
+        objects=(first, second),
+        chain_count=1,
+        connection_count=1,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+    )
+    spec = SimpleNamespace(
+        name="wg_test",
+        cells=2,
+        cell_size=25.0,
+        max_road_objects=100,
+        advisory_object_limits=False,
+    )
+
+    fixed = _emitted._apply_emitted_seam_covers(report, [0.0] * 4, spec)
+
+    assert len(fixed.objects) == 3
+    helper = fixed.objects[-1]
+    assert helper.model_path.casefold() == r"wg_test\i\paved_fill.p3d"
+    assert math.dist((helper.x, helper.z), (0.0, 0.0)) < 1.0e-9
+    assert fixed.short_piece_objects == 1
+
+
 def test_lundby34_compiled_grass_wedges_receive_final_underlays():
     """Regress representative straight, mixed, and curve seams from Lundby34."""
 

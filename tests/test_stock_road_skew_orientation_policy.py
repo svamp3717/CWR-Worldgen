@@ -177,10 +177,10 @@ def test_production_fit_uses_low_fallback_for_lundby_turning_main_geometry() -> 
     report = _p.fit_road_objects(dataset, projection, [0.0] * (40 * 40), spec)
     assert report.junction_cap_objects >= 1
     cap = report.objects[0]
-    assert cap.model_path.casefold() == r"o\road\sil6.p3d"
+    assert cap.model_path.casefold() == rf"{spec.name}\i\paved_fill.p3d"
 
-    # The fallback cap remains at the actual source node while the approach
-    # pieces own the visible turning road surface.
+    # The borderless fallback fill remains at the actual source node while the
+    # approach pieces own every visible road edge.
     assert math.dist((cap.x, cap.z), node) < 0.05
     assert all(
         obj.model_path.casefold() != r"o\road\kr_new_sil_sil_t.p3d"
@@ -230,7 +230,7 @@ def test_production_fit_keeps_small_main_axis_fallback_for_45_degree_t() -> None
     report = _p.fit_road_objects(dataset, projection, [0.0] * (40 * 40), spec)
     assert report.junction_cap_objects >= 1
     cap = report.objects[0]
-    assert cap.model_path.casefold() == r"o\road\sil6.p3d"
+    assert cap.model_path.casefold() == rf"{spec.name}\i\paved_fill.p3d"
 
     incident_map = _finish._junction_incident_map(dataset, projection, spec)
     source_node, incidents = next(iter(incident_map.values()))

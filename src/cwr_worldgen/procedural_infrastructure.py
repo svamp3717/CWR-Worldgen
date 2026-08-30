@@ -44,6 +44,7 @@ GENERATED_GRAVEL_TEXTURE_REPEAT_METRES = 3.0
 GENERATED_GRAVEL_EDGE_WIDTH_METRES = 0.18
 GENERATED_GRAVEL_EDGE_JITTER_METRES = 0.06
 GENERATED_GRAVEL_EDGE_SECTION_METRES = 0.65
+GENERATED_PAVED_FILL_RADIUS_METRES = 4.55
 GENERATED_BRIDGE_MAXIMUM_DEPTH_METRES = 0.8
 GENERATED_BRIDGE_RAIL_OVERHANG_METRES = 0.16
 GENERATED_BRIDGE_ROADWAY_HEIGHT_METRES = 0.20
@@ -96,6 +97,33 @@ def create_gravel_junction_texture_image(size: int = 512) -> Image.Image:
         raise ValueError("gravel junction texture size must be at least 32 pixels")
     source = Image.open(_GRAVEL_REFERENCE_TEXTURE).convert("RGB")
     return source.resize((size, size), Image.Resampling.LANCZOS)
+
+
+def create_paved_fill_texture_image(size: int = 256) -> Image.Image:
+    """Build plain asphalt for borderless stock-road seam and node fills.
+
+    Stock ``sil6`` pieces include their own lateral border artwork.  Using a
+    complete second road piece as an underlay therefore exposes another set of
+    borders wherever two visible pieces turn.  The fill texture deliberately
+    contains only fine asphalt aggregate: the surrounding stock pieces retain
+    ownership of every visible road edge.
+    """
+
+    size = int(size)
+    if size < 32:
+        raise ValueError("paved fill texture size must be at least 32 pixels")
+    image = Image.new("RGB", (size, size), (58, 58, 56))
+    pixels = image.load()
+    for y in range(size):
+        for x in range(size):
+            fine = ((x * 37 + y * 19 + (x ^ y) * 11) % 13) - 6
+            broad = (((x // 8) * 17 + (y // 8) * 29) % 9) - 4
+            variation = int(round(fine * 0.55 + broad * 0.45))
+            pixels[x, y] = tuple(
+                max(0, min(255, channel + variation))
+                for channel in (58, 58, 56)
+            )
+    return image
 
 def _eden_gravel_surface_rules() -> dict[str, float]:
     rules: dict[str, float] = {}
@@ -161,6 +189,7 @@ _TEXTURE_FILE_STEMS = {
     "bridge": "b",
     "gravel": "g",
     "gravel_junction": "gj",
+    "paved_fill": "pf",
     "power_pole": "up",
     "power_tower": "ut",
     "water_tower": "uw",
@@ -180,6 +209,7 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         "rock": (118, 116, 107),
         "gravel": (126, 119, 103),
         "gravel_junction": (126, 119, 103),
+        "paved_fill": (58, 58, 56),
         "power_pole": (116, 102, 78),
         "power_tower": (118, 120, 119),
         "water_tower": (142, 148, 151),
@@ -215,6 +245,8 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         return create_gravel_road_texture_image(size)
     elif kind == "gravel_junction":
         return create_gravel_junction_texture_image(size)
+    elif kind == "paved_fill":
+        return create_paved_fill_texture_image(size)
     else:
         for y in range(size):
             for x in range(size):
@@ -606,7 +638,58 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
     return visual, map_geometry, roadway, land
 
 
+def _paved_fill_lods(texture: str) -> tuple[_Lod, ...]:
+    """Build a borderless circular paved surface at a stock-road connector.
+
+    A radius equal to the measured ``sil`` half-width is tangent to both road
+    edges at a miter.  The disk fills the outside triangle without protruding as
+    a second rotated rectangular road and is also a safe central surface for an
+    all-paved turning intersection.
+    """
+
+    radius = GENERATED_PAVED_FILL_RADIUS_METRES
+    sections = 32
+    points = [(0.0, 0.0, 0.0)]
+    for index in range(sections):
+        angle = math.tau * index / sections
+        points.append((math.sin(angle) * radius, 0.0, math.cos(angle) * radius))
+
+    visual_faces = []
+    roadway_faces = []
+    for index in range(sections):
+        first = 1 + index
+        second = 1 + ((index + 1) % sections)
+        first_point = points[first]
+        second_point = points[second]
+        visual_faces.append(_Face(
+            texture,
+            (
+                (0, 0, 0.5, 0.5),
+                (first, 0, 0.5 + first_point[0] / (2.0 * radius), 0.5 + first_point[2] / (2.0 * radius)),
+                (second, 0, 0.5 + second_point[0] / (2.0 * radius), 0.5 + second_point[2] / (2.0 * radius)),
+            ),
+        ))
+        roadway_faces.append(_Face("", ((0, 0, 0.5, 0.5), (first, 0, 0.0, 0.0), (second, 0, 1.0, 0.0))))
+
+    visual = _Lod(
+        tuple(points), ((0.0, 1.0, 0.0),), tuple(visual_faces), _VISUAL_LOD,
+        properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
+    )
+    map_geometry = _Lod(
+        ((-radius, 0.0, -radius), (radius, 0.0, -radius),
+         (radius, 0.0, radius), (-radius, 0.0, radius)),
+        (), (), _GEOMETRY_LOD, properties=(("map", "road"),),
+    )
+    roadway = _Lod(
+        tuple(points), ((0.0, 1.0, 0.0),), tuple(roadway_faces), _ROADWAY_LOD,
+    )
+    land = _Lod(tuple(points[1:]), (), (), _LAND_CONTACT_LOD)
+    return visual, map_geometry, roadway, land
+
+
 def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
+    if key.subtype.casefold() == "paved_fill":
+        return _paved_fill_lods(texture)
     if key.subtype.casefold() in {"gravel_j3", "gravel_j4"}:
         return _gravel_junction_lods(key, texture)
     width = key.width_m
@@ -753,6 +836,15 @@ def gravel_junction_model_path(world_name: str, degree: int) -> str:
     return rf"{world_name}\i\gravel_j{degree}.p3d"
 
 
+def paved_fill_model_path(world_name: str) -> str:
+    return rf"{world_name}\i\paved_fill.p3d"
+
+
+def is_generated_paved_fill_model(model_path: str) -> bool:
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
+    return filename.casefold() == "paved_fill.p3d"
+
+
 def is_generated_gravel_junction_model(model_path: str) -> bool:
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
     return re.fullmatch(r"gravel_j[34]\.p3d", filename, re.IGNORECASE) is not None
@@ -813,6 +905,8 @@ def _write_infrastructure_asset_task(task: _InfrastructureAssetTask) -> tuple[di
 def _infrastructure_texture_kind(key: InfrastructureModelKey) -> str:
     """Return the generated texture family used by one infrastructure model."""
     if key.kind == "road":
+        if key.subtype.casefold() == "paved_fill":
+            return "paved_fill"
         # Junction polygons tile their UV coordinates in two dimensions. They
         # must not use the alpha-edged ribbon texture, otherwise each texture
         # wrap reveals a thin strip of grass through the middle of the junction.
@@ -824,6 +918,7 @@ class ProceduralInfrastructureLibrary:
     _PATTERN = re.compile(r"^(bar|br|rock)_([a-z0-9_]+)_w(\d+)_l(\d+)\.p3d$", re.IGNORECASE)
     _GRAVEL_PATTERN = re.compile(r"^gravel(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.IGNORECASE)
     _GRAVEL_JUNCTION_PATTERN = re.compile(r"^gravel_j([34])\.p3d$", re.IGNORECASE)
+    _PAVED_FILL_PATTERN = re.compile(r"^paved_fill\.p3d$", re.IGNORECASE)
     _UTILITY_PATTERN = re.compile(r"^util_(power_pole|power_tower|water_tower)\.p3d$", re.IGNORECASE)
 
     def __init__(self, world_name: str, *, road_segment_length: float = 24.5, cache_dir: Path | None = None, cache_enabled: bool = True, cache_refresh: bool = False) -> None:
@@ -889,6 +984,12 @@ class ProceduralInfrastructureLibrary:
         if not self.is_generated_model(model_path):
             return
         filename = model_path.rsplit("\\", 1)[-1]
+        if self._PAVED_FILL_PATTERN.fullmatch(filename):
+            diameter_dm = int(round(GENERATED_PAVED_FILL_RADIUS_METRES * 20.0))
+            self._usage[InfrastructureModelKey(
+                "road", "paved_fill", diameter_dm, diameter_dm,
+            )] += count
+            return
         junction_match = self._GRAVEL_JUNCTION_PATTERN.fullmatch(filename)
         if junction_match:
             degree = int(junction_match.group(1))
@@ -963,6 +1064,14 @@ class ProceduralInfrastructureLibrary:
                 )
                 producer = lambda target: write_rgb_dxt1_paa(
                     target, create_gravel_junction_texture_image(512)
+                )
+            elif kind == "paved_fill":
+                asset_key = cache_key(
+                    "procedural-infrastructure-texture-v17-borderless-paved-fill",
+                    {"kind": kind, "size": 256, "recipe": "plain-asphalt-no-border-v1"},
+                )
+                producer = lambda target: write_rgb_dxt1_paa(
+                    target, create_paved_fill_texture_image(256)
                 )
             else:
                 texture_size = 256 if kind == "bridge" else 128

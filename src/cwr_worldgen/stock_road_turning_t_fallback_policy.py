@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Keep strongly turning paved T nodes on the low fallback-cap path.
+"""Keep paved T nodes on a borderless central-fill path when needed.
 
 A Resistance T junction is rigid: its two main connectors are exactly opposite.
 The balanced turning-T chooser can split a modest source-road bend across that
@@ -13,8 +13,9 @@ There are two native-T entry paths in the layered fitter. The late skew chooser
 can promote a legacy cap, but the earlier stock-junction policy may already have
 replaced the cap before the late chooser runs. Merely tightening the chooser is
 therefore insufficient. This policy also audits the final cap object after skew
-placement and demotes an already-native same-family T when the measured source
-through road bends beyond the accepted limit.
+placement, replaces legacy paved straight caps with borderless fill, and demotes
+an already-native same-family T when the measured source through road bends
+beyond the accepted limit.
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ from . import stock_road_junction_policy as _junction
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_skew_orientation_policy as _skew
 from . import stock_road_visual_finish_policy as _finish
+from .procedural_infrastructure import paved_fill_model_path
 
 MAXIMUM_BALANCED_NATIVE_MAIN_BEND_DEGREES = 15.0
 MAXIMUM_NATIVE_NODE_RECOVERY_DISTANCE_METRES = 2.5
@@ -69,9 +71,14 @@ def _legacy_cap_for_turning_t(current, source_node, incidents, family, elevation
         float(source_node[0]) + direction[0] * half,
         float(source_node[1]) + direction[1] * half,
     )
+    model_path = (
+        paved_fill_model_path(str(getattr(spec, "name", "cwr_worldgen")))
+        if family == "sil"
+        else rf"o\road\{family}6.p3d"
+    )
     fixed = _p._road_object_on_slope(
         int(current.object_id),
-        rf"o\road\{family}6.p3d",
+        model_path,
         start,
         end,
         elevations,
@@ -104,10 +111,23 @@ def _demote_over_bent_native_ts(report, dataset, projection, elevations, spec):
     changed = False
     for index in range(cap_count):
         current = objects[index]
-        family = _skew._same_family_for_native_t(str(current.model_path))
+        normalized_model = str(current.model_path).replace("/", "\\").casefold()
+        family = _skew._same_family_for_native_t(normalized_model)
+        legacy_straight = _geometry.stock_straight_match(normalized_model)
+        legacy_family = None
+        if legacy_straight is not None and int(legacy_straight.group("length")) == 6:
+            candidate_family = legacy_straight.group("family").casefold()
+            if candidate_family == "sil":
+                legacy_family = candidate_family
+        if family is None:
+            family = legacy_family
         if family is None:
             continue
-        logical = _skew._logical_intersection(current)
+        logical = (
+            (float(current.x), float(current.z))
+            if legacy_family is not None
+            else _skew._logical_intersection(current)
+        )
         if logical is None:
             continue
         junction = _nearest_source_junction(incident_map, logical)
@@ -118,6 +138,17 @@ def _demote_over_bent_native_ts(report, dataset, projection, elevations, spec):
             len(incidents) != 3
             or any(incident.family != family for incident in incidents)
         ):
+            continue
+        if legacy_family is not None:
+            objects[index] = _legacy_cap_for_turning_t(
+                current,
+                source_node,
+                incidents,
+                family,
+                elevations,
+                spec,
+            )
+            changed = True
             continue
         pair = _junction._dominant_pair(incidents)
         if pair is None:

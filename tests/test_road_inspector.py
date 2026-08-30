@@ -78,6 +78,32 @@ def test_detects_visible_straight_miter_edge_discontinuity(tmp_path: Path) -> No
     assert "connector-locked" in issue.candidate_fix
 
 
+def test_borderless_paved_fill_covers_straight_miter(tmp_path: Path) -> None:
+    wrp = tmp_path / "filled-miter.wrp"
+    seam = (0.0, 6.25)
+    first = WorldObject(1, r"o\road\sil6.p3d", 0.0, 0.035, 3.125, 0.0)
+    second = _straight_from_begin(2, seam, 6.0)
+    fill = WorldObject(
+        3,
+        r"wg_test\i\paved_fill.p3d",
+        seam[0],
+        0.025,
+        seam[1],
+        3.0,
+    )
+    _write_world(wrp, (first, second, fill))
+
+    result = inspect_road_geometry(wrp)
+
+    assert result.road_object_count == 3
+    assert not [
+        issue
+        for issue in result.issues
+        if issue.category in {"straight_miter", "grass_wedge"}
+        and set(issue.object_ids) == {1, 2}
+    ]
+
+
 def test_tangent_continuous_straights_do_not_raise_seam_issue(tmp_path: Path) -> None:
     wrp = tmp_path / "straight.wrp"
     first = WorldObject(1, r"o\road\sil6.p3d", 0.0, 0.035, 3.125, 0.0)
@@ -151,6 +177,67 @@ def test_normalized_roads_flag_visible_straight_cap_on_turning_intersection(tmp_
     assert issue.metrics["through_turn_degrees"] > 9.0
     assert issue.metrics["cap_below_approach_margin_metres"] < 0.0
     assert issue.metrics["maximum_approach_heading_error_degrees"] < 0.5
+
+
+def test_normalized_turning_intersection_accepts_borderless_paved_fill(
+    tmp_path: Path,
+) -> None:
+    wrp = tmp_path / "filled-junction.wrp"
+    node = (100.0, 100.0)
+    fill = WorldObject(
+        1,
+        r"wg_test\i\paved_fill.p3d",
+        node[0],
+        0.031,
+        node[1],
+        0.0,
+    )
+    north = _straight_to_end(2, node, 0.0)
+    southwest = _straight_to_end(3, node, 190.0)
+    east = _straight_to_end(4, node, 90.0)
+    _write_world(wrp, (fill, north, southwest, east))
+
+    roads = tmp_path / "filled-roads.geojson"
+    roads.write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {"road_id": "main"},
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [
+                                [98.2635, 90.1519],
+                                [100.0, 100.0],
+                                [100.0, 120.0],
+                            ],
+                        },
+                    },
+                    {
+                        "type": "Feature",
+                        "properties": {"road_id": "branch"},
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [[100.0, 100.0], [120.0, 100.0]],
+                        },
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = inspect_road_geometry(wrp, roads_geojson=roads)
+
+    assert result.source_junction_count == 1
+    assert not [
+        issue
+        for issue in result.issues
+        if issue.category
+        in {"turning_intersection_cap", "intersection_connector_orientation"}
+    ]
 
 
 def test_normalized_wgs84_roads_are_projected_into_wrp_metres(tmp_path: Path) -> None:

@@ -172,9 +172,9 @@ def test_diagonal_t_junction_does_not_add_overlap_repair_pieces() -> None:
     node = (500.0, 500.0)
     cap = report.objects[0]
     # A 45-degree side arm is too skewed for the rigid 90-degree stock T mesh.
-    # Keep the best fitted short cap and approaches, but do not lower the cap or
-    # append extra incident-aligned road slabs to camouflage the mismatch.
-    assert cap.model_path.casefold() == r"o\road\sil6.p3d"
+    # Keep the fitted approaches as the visible edges and use only a borderless
+    # paved fill at their shared centre; do not append incident-aligned slabs.
+    assert cap.model_path.casefold() == rf"{spec.name}\i\paved_fill.p3d"
     assert cap.y >= playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
 
     branch_obj = next(
