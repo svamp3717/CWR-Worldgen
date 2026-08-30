@@ -115,6 +115,23 @@ def test_paved_miter_is_reclassified_with_explicit_wedge_metrics() -> None:
     assert "Do not hide" in classified.candidate_fix
 
 
+def test_paved_connector_gap_is_promoted_to_grass_wedge() -> None:
+    incoming = _endpoint(1, endpoint_index=1, tangent=0.0, outward=0.0)
+    outgoing = _endpoint(2, endpoint_index=0, tangent=20.0, outward=200.0)
+    first_road = _road(1, _endpoint(1, endpoint_index=0, tangent=0.0, outward=180.0, point=(100.0, 193.75)), incoming)
+    second_road = _road(2, outgoing, _endpoint(2, endpoint_index=1, tangent=20.0, outward=20.0, point=(102.1376, 205.8731)))
+
+    classified = _grass._classify_grass_wedge(
+        _issue(category="connector_gap"),
+        (first_road, second_road),
+        (),
+        0.75,
+    )
+
+    assert classified.category == "grass_wedge"
+    assert classified.metrics["grass_wedge_detector"] == "forward_edge_ray_miter_triangle"
+
+
 def test_dirt_miter_is_not_promoted_to_grass_wedge() -> None:
     incoming = _endpoint(1, family="ces", endpoint_index=1, tangent=0.0, outward=0.0)
     outgoing = _endpoint(2, family="ces", endpoint_index=0, tangent=20.0, outward=200.0)
