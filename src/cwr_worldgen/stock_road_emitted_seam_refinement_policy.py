@@ -50,6 +50,10 @@ def _paved_cap_endpoints(report):
         length = float(_geometry.STOCK_STRAIGHT_LENGTHS_METRES[6])
         axis = _p._model_axis(obj, length)
         for endpoint_index, point in enumerate(axis):
+            outward_heading = (
+                float(obj.heading_degrees)
+                + (180.0 if endpoint_index == 0 else 0.0)
+            ) % 360.0
             result.append(
                 _finish._SeamEndpoint(
                     point=(float(point[0]), float(point[1])),
@@ -58,6 +62,7 @@ def _paved_cap_endpoints(report):
                     family=family,
                     tangent_axis_degrees=float(obj.heading_degrees) % 180.0,
                     is_curve=False,
+                    outward_heading_degrees=outward_heading,
                 )
             )
     return tuple(result)
@@ -107,12 +112,19 @@ def _overlapping_pair(report, first, second) -> bool:
     )
 
 
-def _plan(model_path: str, centre, heading: float, turn_degrees: float):
+def _plan(
+    model_path: str,
+    centre,
+    heading: float,
+    turn_degrees: float,
+    outer_miter_apex,
+):
     return _finish._SeamCoverPlan(
         model_path=model_path,
         centre=(float(centre[0]), float(centre[1])),
         tangent_axis_degrees=float(heading) % 180.0,
         turn_degrees=float(turn_degrees),
+        outer_miter_apex=outer_miter_apex,
     )
 
 
@@ -170,6 +182,7 @@ def _refined_emitted_seam_cover_plans(report):
                 centre,
                 _emitted._plan_heading(first, second),
                 tangent_error,
+                _emitted._outer_miter_apex(first, second),
             )
         )
     return tuple(plans)

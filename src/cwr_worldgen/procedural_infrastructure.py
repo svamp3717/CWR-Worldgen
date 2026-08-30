@@ -46,6 +46,8 @@ GENERATED_GRAVEL_EDGE_JITTER_METRES = 0.06
 GENERATED_GRAVEL_EDGE_SECTION_METRES = 0.65
 GENERATED_PAVED_FILL_RADIUS_METRES = 4.55
 GENERATED_PAVED_MITER_SAFETY_METRES = 0.003
+GENERATED_PAVED_WEDGE_BASE_OVERLAP_METRES = 0.020
+GENERATED_PAVED_WEDGE_APEX_OVERLAP_METRES = 0.020
 GENERATED_PAVED_MITER_STEP_DEGREES = 0.25
 GENERATED_PAVED_MITER_MAXIMUM_DEGREES = 35.0
 GENERATED_BRIDGE_MAXIMUM_DEPTH_METRES = 0.8
@@ -752,12 +754,89 @@ def _paved_miter_lods(
     return _paved_surface_lods(texture, tuple(perimeter))
 
 
+def paved_wedge_local_points(
+    turn_degrees: float,
+) -> tuple[tuple[float, float, float], ...]:
+    """Return the narrow, one-sided triangle covering one outside road miter."""
+
+    turn = max(
+        0.0,
+        min(float(turn_degrees), GENERATED_PAVED_MITER_MAXIMUM_DEGREES),
+    )
+    half_angle = math.radians(turn * 0.5)
+    radius = GENERATED_PAVED_FILL_RADIUS_METRES
+    base_distance = (
+        radius * math.cos(half_angle)
+        - GENERATED_PAVED_WEDGE_BASE_OVERLAP_METRES
+    )
+    base_half_width = (
+        radius * math.sin(half_angle)
+        + GENERATED_PAVED_WEDGE_BASE_OVERLAP_METRES
+    )
+    apex_distance = (
+        radius + GENERATED_PAVED_WEDGE_APEX_OVERLAP_METRES
+    ) / max(
+        1.0e-9,
+        math.cos(half_angle),
+    )
+    depth = apex_distance - base_distance
+    return (
+        (0.0, 0.0, depth),
+        (base_half_width, 0.0, 0.0),
+        (-base_half_width, 0.0, 0.0),
+    )
+
+
+def _paved_wedge_lods(
+    texture: str,
+    turn_degrees: float,
+) -> tuple[_Lod, ...]:
+    """Build only the outside miter triangle, with no duplicate road borders."""
+
+    points = paved_wedge_local_points(turn_degrees)
+    extent = max(max(abs(point[0]), abs(point[2])) for point in points)
+    uv = tuple(
+        (
+            index,
+            0,
+            0.5 + point[0] / (2.0 * extent),
+            0.5 + point[2] / (2.0 * extent),
+        )
+        for index, point in enumerate(points)
+    )
+    visual = _Lod(
+        points,
+        ((0.0, 1.0, 0.0),),
+        (_Face(texture, uv),),
+        _VISUAL_LOD,
+        properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
+    )
+    map_geometry = _Lod(
+        points,
+        (),
+        (),
+        _GEOMETRY_LOD,
+        properties=(("map", "road"),),
+    )
+    roadway = _Lod(
+        points,
+        ((0.0, 1.0, 0.0),),
+        (_Face("", tuple((index, 0, 0.0, 0.0) for index in range(3))),),
+        _ROADWAY_LOD,
+    )
+    land = _Lod(points, (), (), _LAND_CONTACT_LOD)
+    return visual, map_geometry, roadway, land
+
+
 def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
     if key.subtype.casefold() == "paved_fill":
         return _paved_fill_lods(texture)
     miter_angle = paved_miter_angle_degrees(key.subtype + ".p3d")
     if miter_angle is not None:
         return _paved_miter_lods(texture, miter_angle)
+    wedge_angle = paved_wedge_angle_degrees(key.subtype + ".p3d")
+    if wedge_angle is not None:
+        return _paved_wedge_lods(texture, wedge_angle)
     if key.subtype.casefold() in {"gravel_j3", "gravel_j4"}:
         return _gravel_junction_lods(key, texture)
     width = key.width_m
@@ -912,6 +991,10 @@ _PAVED_MITER_FILENAME_RE = re.compile(
     r"^paved_miter_q(?P<quarter>\d{3})\.p3d$",
     re.IGNORECASE,
 )
+_PAVED_WEDGE_FILENAME_RE = re.compile(
+    r"^paved_wedge_q(?P<quarter>\d{3})\.p3d$",
+    re.IGNORECASE,
+)
 
 
 def paved_miter_angle_degrees(model_path: str) -> float | None:
@@ -931,6 +1014,25 @@ def paved_miter_model_path(world_name: str, turn_degrees: float) -> str:
         turn / GENERATED_PAVED_MITER_STEP_DEGREES - 1.0e-9
     ))
     return rf"{world_name}\i\paved_miter_q{quarter:03d}.p3d"
+
+
+def paved_wedge_angle_degrees(model_path: str) -> float | None:
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
+    match = _PAVED_WEDGE_FILENAME_RE.fullmatch(filename)
+    if match is None:
+        return None
+    return int(match.group("quarter")) * GENERATED_PAVED_MITER_STEP_DEGREES
+
+
+def paved_wedge_model_path(world_name: str, turn_degrees: float) -> str:
+    turn = max(
+        0.0,
+        min(float(turn_degrees), GENERATED_PAVED_MITER_MAXIMUM_DEGREES),
+    )
+    quarter = int(math.ceil(
+        turn / GENERATED_PAVED_MITER_STEP_DEGREES - 1.0e-9
+    ))
+    return rf"{world_name}\i\paved_wedge_q{quarter:03d}.p3d"
 
 
 def is_generated_paved_fill_model(model_path: str) -> bool:
@@ -1001,6 +1103,7 @@ def _infrastructure_texture_kind(key: InfrastructureModelKey) -> str:
         if (
             key.subtype.casefold() == "paved_fill"
             or paved_miter_angle_degrees(key.subtype + ".p3d") is not None
+            or paved_wedge_angle_degrees(key.subtype + ".p3d") is not None
         ):
             return "paved_fill"
         # Junction polygons tile their UV coordinates in two dimensions. They
@@ -1016,6 +1119,7 @@ class ProceduralInfrastructureLibrary:
     _GRAVEL_JUNCTION_PATTERN = re.compile(r"^gravel_j([34])\.p3d$", re.IGNORECASE)
     _PAVED_FILL_PATTERN = re.compile(r"^paved_fill\.p3d$", re.IGNORECASE)
     _PAVED_MITER_PATTERN = _PAVED_MITER_FILENAME_RE
+    _PAVED_WEDGE_PATTERN = _PAVED_WEDGE_FILENAME_RE
     _UTILITY_PATTERN = re.compile(r"^util_(power_pole|power_tower|water_tower)\.p3d$", re.IGNORECASE)
 
     def __init__(self, world_name: str, *, road_segment_length: float = 24.5, cache_dir: Path | None = None, cache_enabled: bool = True, cache_refresh: bool = False) -> None:
@@ -1088,6 +1192,12 @@ class ProceduralInfrastructureLibrary:
             )] += count
             return
         if self._PAVED_MITER_PATTERN.fullmatch(filename):
+            diameter_dm = int(round(GENERATED_PAVED_FILL_RADIUS_METRES * 20.0))
+            self._usage[InfrastructureModelKey(
+                "road", filename[:-4].casefold(), diameter_dm, diameter_dm,
+            )] += count
+            return
+        if self._PAVED_WEDGE_PATTERN.fullmatch(filename):
             diameter_dm = int(round(GENERATED_PAVED_FILL_RADIUS_METRES * 20.0))
             self._usage[InfrastructureModelKey(
                 "road", filename[:-4].casefold(), diameter_dm, diameter_dm,
@@ -1238,7 +1348,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v16-angle-matched-paved-miters"
+                "procedural-infrastructure-model-v17-terrain-clear-wedge-overlays"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"

@@ -113,6 +113,39 @@ def test_existing_paved_underlay_prevents_duplicate_cover():
     assert _emitted._emitted_seam_cover_plans(report) == ()
 
 
+def test_buried_existing_underlay_still_gets_narrow_terrain_clear_wedge():
+    first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
+    second = _straight_from_start(2, (0.0, 0.0), 12.0)
+    existing = _object(3, r"o\road\sil6.p3d", 0.0, 0.0, 6.0, y=0.0)
+    report = _p.RoadFitReport(
+        objects=(first, second, existing),
+        chain_count=1,
+        connection_count=1,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+    )
+    spec = SimpleNamespace(
+        name="wg_test",
+        cells=2,
+        cell_size=25.0,
+        max_road_objects=100,
+        advisory_object_limits=False,
+    )
+
+    fixed = _emitted._apply_emitted_seam_covers(report, [0.0] * 4, spec)
+
+    assert len(fixed.objects) == 4
+    assert fixed.objects[-1].model_path.casefold().startswith(
+        r"wg_test\i\paved_wedge_q"
+    )
+    assert not any(
+        "paved_miter" in obj.model_path.casefold()
+        for obj in fixed.objects[3:]
+    )
+
+
 def test_aligned_physical_gap_gets_underlay_even_without_tangent_error():
     first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
     second = _straight_from_start(2, (0.0, 0.18), 0.0)
@@ -148,6 +181,7 @@ def test_coincident_straight_miter_uses_one_bisecting_underlay():
     assert math.isclose(plans[0].tangent_axis_degrees, 6.0, abs_tol=1.0e-9)
     assert math.isclose(plans[0].turn_degrees, 12.0, abs_tol=1.0e-9)
     assert math.dist(plans[0].centre, (0.0, 0.0)) < 1.0e-9
+    assert plans[0].outer_miter_apex is not None
 
 
 def test_paved_seam_plan_emits_borderless_world_local_fill():
@@ -172,11 +206,14 @@ def test_paved_seam_plan_emits_borderless_world_local_fill():
 
     fixed = _emitted._apply_emitted_seam_covers(report, [0.0] * 4, spec)
 
-    assert len(fixed.objects) == 3
-    helper = fixed.objects[-1]
+    assert len(fixed.objects) == 4
+    helper = fixed.objects[-2]
     assert helper.model_path.casefold() == r"wg_test\i\paved_miter_q048.p3d"
     assert math.dist((helper.x, helper.z), (0.0, 0.0)) < 1.0e-9
-    assert fixed.short_piece_objects == 1
+    wedge = fixed.objects[-1]
+    assert wedge.model_path.casefold() == r"wg_test\i\paved_wedge_q048.p3d"
+    assert math.isclose(wedge.y, 0.03, abs_tol=1.0e-9)
+    assert fixed.short_piece_objects == 2
 
 
 def test_lundby34_compiled_grass_wedges_receive_final_underlays():

@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from types import SimpleNamespace
 
 from cwr_worldgen import road_inspector as _core
 from cwr_worldgen import road_inspector_overlap_filter as _overlap
 from cwr_worldgen import road_inspector_surface_coverage as _coverage
+from cwr_worldgen import road_inspector_grass_wedge as _wedge
 from cwr_worldgen import stock_road_model_geometry as _geometry
+from cwr_worldgen.procedural_infrastructure import (
+    GENERATED_PAVED_FILL_RADIUS_METRES,
+    GENERATED_PAVED_WEDGE_BASE_OVERLAP_METRES,
+    paved_wedge_local_points,
+)
+from cwr_worldgen.pbo import pack_directory
+from cwr_worldgen.wrp import write_rvw4
 
 
 def _straight(
@@ -192,6 +201,97 @@ def test_angle_matched_paved_miter_suppresses_raw_paved_miter():
 
     assert _coverage._covered_by_other_paved_surface(
         _issue(), (first, second, miter)
+    )
+
+
+def test_buried_miter_needs_terrain_clear_outer_wedge():
+    seam = (0.0, 0.0)
+    first = _straight(1, seam=seam, heading=340.0, seam_endpoint=1)
+    second = _straight(2, seam=seam, heading=308.0, seam_endpoint=0)
+    miter = _core.RoadObject(
+        3,
+        r"wg_test\i\paved_miter_q128.p3d",
+        0.0,
+        0.025,
+        0.0,
+        144.0,
+        0.0,
+        "sil",
+        "paved_miter",
+        9.5,
+        seam,
+        (),
+    )
+    terrain = ((0.0, 0.0, 0.0, 0.0), 2, 25.0)
+    issue = _issue()
+    assert not _coverage._covered_by_other_paved_surface(
+        issue, (first, second, miter), terrain
+    )
+
+    geometry = _wedge._grass_wedge_geometry(first.endpoints[1], second.endpoints[0])
+    assert geometry is not None
+    apex = geometry[3]
+    radial = math.hypot(apex[0], apex[1])
+    ux, uz = apex[0] / radial, apex[1] / radial
+    turn = 32.0
+    base_distance = (
+        GENERATED_PAVED_FILL_RADIUS_METRES * math.cos(math.radians(turn * 0.5))
+        - GENERATED_PAVED_WEDGE_BASE_OVERLAP_METRES
+    )
+    origin = (ux * base_distance, uz * base_distance)
+    wedge_points = paved_wedge_local_points(turn)
+    wedge = _core.RoadObject(
+        4,
+        r"wg_test\i\paved_wedge_q128.p3d",
+        origin[0],
+        0.031,
+        origin[1],
+        math.degrees(math.atan2(ux, uz)) % 360.0,
+        0.0,
+        "sil",
+        "paved_wedge",
+        wedge_points[0][2],
+        origin,
+        (),
+    )
+    assert _coverage._covered_by_other_paved_surface(
+        issue, (first, second, miter, wedge), terrain
+    )
+
+
+def test_pbo_terrain_context_reads_landgrid_and_quantized_heights(
+    tmp_path: Path,
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.cpp").write_text(
+        "class CfgWorlds { class wg_test { landGrid = 10; }; };\n",
+        encoding="ascii",
+    )
+    write_rvw4(
+        source / "wg_test.wrp",
+        2,
+        2,
+        (0.0, 1.0, 2.0, 3.0),
+        (0, 0, 0, 0),
+        (r"wg_test\data\ground.pac",),
+        (),
+        height_scale=0.05,
+    )
+    pbo = tmp_path / "wg_test.pbo"
+    pack_directory(source, pbo)
+
+    terrain = _coverage._terrain_context(pbo)
+
+    assert terrain is not None
+    elevations, cells, cell_size = terrain
+    assert elevations == (0.0, 1.0, 2.0, 3.0)
+    assert cells == 2
+    assert cell_size == 10.0
+    assert math.isclose(
+        _coverage._terrain_height(terrain, (5.0, 5.0)),
+        1.5,
+        abs_tol=1.0e-9,
     )
 
 

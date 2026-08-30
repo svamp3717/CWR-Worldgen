@@ -41,6 +41,7 @@ class _SeamEndpoint:
     family: str
     tangent_axis_degrees: float
     is_curve: bool
+    outward_heading_degrees: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +50,7 @@ class _SeamCoverPlan:
     centre: tuple[float, float]
     tangent_axis_degrees: float
     turn_degrees: float = 0.0
+    outer_miter_apex: tuple[float, float] | None = None
 
 
 def _axis_heading_difference(first: float, second: float) -> float:
@@ -265,18 +267,38 @@ def _seam_endpoints(report) -> tuple[_SeamEndpoint, ...]:
         axis = _p._model_axis(obj, float(length))
         for endpoint_index, point in enumerate(axis):
             point = (float(point[0]), float(point[1]))
+            tangent = (
+                _curve_endpoint_tangent_axis(obj, point)
+                if is_curve
+                else float(obj.heading_degrees) % 180.0
+            )
+            other = axis[1 - endpoint_index]
+            outward_vector = (
+                float(point[0]) - float(other[0]),
+                float(point[1]) - float(other[1]),
+            )
+            tangent_unit = (
+                math.sin(math.radians(tangent)),
+                math.cos(math.radians(tangent)),
+            )
+            outward_heading = (
+                tangent
+                if (
+                    outward_vector[0] * tangent_unit[0]
+                    + outward_vector[1] * tangent_unit[1]
+                )
+                >= 0.0
+                else tangent + 180.0
+            )
             endpoints.append(
                 _SeamEndpoint(
                     point=point,
                     object_id=int(obj.object_id),
                     endpoint_index=endpoint_index,
                     family=family,
-                    tangent_axis_degrees=(
-                        _curve_endpoint_tangent_axis(obj, point)
-                        if is_curve
-                        else float(obj.heading_degrees) % 180.0
-                    ),
+                    tangent_axis_degrees=tangent,
                     is_curve=is_curve,
+                    outward_heading_degrees=outward_heading % 360.0,
                 )
             )
     return tuple(endpoints)

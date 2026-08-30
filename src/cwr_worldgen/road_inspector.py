@@ -28,6 +28,8 @@ from .procedural_infrastructure import (
     GENERATED_PAVED_FILL_RADIUS_METRES,
     GENERATED_PAVED_MITER_SAFETY_METRES,
     paved_miter_angle_degrees,
+    paved_wedge_angle_degrees,
+    paved_wedge_local_points,
 )
 
 
@@ -49,6 +51,10 @@ _PAVED_FILL = re.compile(
 )
 _PAVED_MITER = re.compile(
     r"^(?:.*[\\/])paved_miter_q\d{3}\.p3d$",
+    re.IGNORECASE,
+)
+_PAVED_WEDGE = re.compile(
+    r"^(?:.*[\\/])paved_wedge_q\d{3}\.p3d$",
     re.IGNORECASE,
 )
 _PAVED_FAMILIES = {"sil", "asf", "kos"}
@@ -184,6 +190,35 @@ def _paved_miter_contains(
     return abs(local_z) <= base_half_height * fraction + margin
 
 
+def _paved_wedge_contains(
+    road: RoadObject,
+    point: tuple[float, float],
+    *,
+    margin: float = 0.0,
+) -> bool:
+    turn = paved_wedge_angle_degrees(road.model_path)
+    if turn is None:
+        return False
+    dx = float(point[0]) - float(road.logical_center[0])
+    dz = float(point[1]) - float(road.logical_center[1])
+    heading = math.radians(float(road.heading_degrees))
+    local_x = dx * math.cos(heading) - dz * math.sin(heading)
+    cosine_pitch = math.cos(math.radians(float(road.pitch_degrees)))
+    if abs(cosine_pitch) <= 1.0e-9:
+        return False
+    local_z = (
+        dx * math.sin(heading) + dz * math.cos(heading)
+    ) / cosine_pitch
+    points = paved_wedge_local_points(turn)
+    depth = float(points[0][2])
+    base_half_width = abs(float(points[1][0]))
+    margin = max(0.0, float(margin))
+    if local_z < -margin or local_z > depth + margin:
+        return False
+    fraction = max(0.0, min(1.0, 1.0 - local_z / max(1.0e-9, depth)))
+    return abs(local_x) <= base_half_width * fraction + margin
+
+
 def _endpoint(
     *,
     object_id: int,
@@ -260,6 +295,27 @@ def _road_object_from_record(values) -> RoadObject | None:
             "sil",
             "paved_miter",
             apex * 2.0,
+            origin,
+            (),
+        )
+
+    if _PAVED_WEDGE.fullmatch(normalized) is not None:
+        turn = paved_wedge_angle_degrees(normalized)
+        if turn is None:
+            return None
+        points = paved_wedge_local_points(turn)
+        depth = float(points[0][2])
+        return RoadObject(
+            object_id,
+            model_path,
+            x,
+            y,
+            z,
+            heading,
+            pitch,
+            "sil",
+            "paved_wedge",
+            depth,
             origin,
             (),
         )

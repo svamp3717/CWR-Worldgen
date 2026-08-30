@@ -17,6 +17,9 @@ from cwr_worldgen.procedural_infrastructure import (
     paved_fill_model_path,
     paved_miter_angle_degrees,
     paved_miter_model_path,
+    paved_wedge_angle_degrees,
+    paved_wedge_local_points,
+    paved_wedge_model_path,
 )
 
 
@@ -65,6 +68,26 @@ def test_paved_miter_reaches_quantized_outer_edge_apex(tmp_path: Path) -> None:
     assert assets.texture_files == ("i/pf.paa",)
 
 
+def test_paved_wedge_is_a_narrow_borderless_outer_triangle(tmp_path: Path) -> None:
+    model_path = paved_wedge_model_path("cwr_paved_wedge", 12.01)
+    assert model_path.endswith(r"\paved_wedge_q049.p3d")
+    turn = paved_wedge_angle_degrees(model_path)
+    assert turn == 12.25
+    points = paved_wedge_local_points(turn)
+    assert len(points) == 3
+    assert points[0][2] > 0.0
+    assert points[1][2] == points[2][2] == 0.0
+    assert math.isclose(points[1][0], -points[2][0], abs_tol=1.0e-12)
+
+    library = ProceduralInfrastructureLibrary("cwr_paved_wedge")
+    library.register_model(model_path)
+    assets = library.write_assets(tmp_path, tmp_path / "infrastructure.json")
+    assert assets.model_files == ("i/paved_wedge_q049.p3d",)
+    assert assets.texture_files == ("i/pf.paa",)
+    summary = inspect_mlod(tmp_path / "i" / "paved_wedge_q049.p3d")
+    assert r"cwr_paved_wedge\i\pf.paa" in summary.texture_paths
+
+
 def test_paved_fill_runtime_assets_are_verified_inside_world_pbo(
     tmp_path: Path,
 ) -> None:
@@ -75,6 +98,7 @@ def test_paved_fill_runtime_assets_are_verified_inside_world_pbo(
     library = ProceduralInfrastructureLibrary("cwr_paved_bundle")
     library.register_model(paved_fill_model_path("cwr_paved_bundle"))
     library.register_model(paved_miter_model_path("cwr_paved_bundle", 6.0))
+    library.register_model(paved_wedge_model_path("cwr_paved_bundle", 6.0))
     generation = library.write_assets(
         source,
         tmp_path / "infrastructure-asset-catalogue.json",
@@ -91,5 +115,6 @@ def test_paved_fill_runtime_assets_are_verified_inside_world_pbo(
     assert layout["generated_road_models"] == [
         r"i\paved_fill.p3d",
         r"i\paved_miter_q024.p3d",
+        r"i\paved_wedge_q024.p3d",
     ]
     assert layout["generated_road_textures"] == [r"i\pf.paa"]

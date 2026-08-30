@@ -128,6 +128,27 @@ def _road_object_from_record(values):
             (),
         )
 
+    if _core._PAVED_WEDGE.fullmatch(normalized) is not None:
+        turn = _core.paved_wedge_angle_degrees(normalized)
+        if turn is None:
+            return None
+        points = _core.paved_wedge_local_points(turn)
+        depth = float(points[0][2])
+        return _core.RoadObject(
+            object_id,
+            model_path,
+            x,
+            y,
+            z,
+            heading,
+            pitch,
+            "sil",
+            "paved_wedge",
+            depth,
+            origin,
+            (),
+        )
+
     straight = _geometry.stock_straight_match(normalized)
     if straight is not None:
         family = straight.group("family").casefold()
