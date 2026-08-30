@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from cwr_worldgen import road_inspector as _core
 from cwr_worldgen import road_inspector_grass_wedge as _grass
 from cwr_worldgen import road_inspector_paved_wedge_audit as _audit
-from cwr_worldgen import stock_road_emitted_seam_policy as _emitted
 from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen import stock_road_paved_wedge_policy as _paved
 
@@ -97,9 +96,10 @@ def _road(object_id, family, first, second):
     )
 
 
-def test_direct_inspector_audit_adds_asphalt_wedge_and_ignores_dirt():
+def _wedge_pair(family="asf"):
     incoming = _endpoint(
         1,
+        family=family,
         endpoint_index=1,
         tangent=0.0,
         outward=0.0,
@@ -107,6 +107,7 @@ def test_direct_inspector_audit_adds_asphalt_wedge_and_ignores_dirt():
     )
     outgoing = _endpoint(
         2,
+        family=family,
         endpoint_index=0,
         tangent=20.0,
         outward=200.0,
@@ -114,9 +115,10 @@ def test_direct_inspector_audit_adds_asphalt_wedge_and_ignores_dirt():
     )
     first = _road(
         1,
-        "asf",
+        family,
         _endpoint(
             1,
+            family=family,
             endpoint_index=0,
             tangent=0.0,
             outward=180.0,
@@ -126,16 +128,22 @@ def test_direct_inspector_audit_adds_asphalt_wedge_and_ignores_dirt():
     )
     second = _road(
         2,
-        "asf",
+        family,
         outgoing,
         _endpoint(
             2,
+            family=family,
             endpoint_index=1,
             tangent=20.0,
             outward=20.0,
             point=(102.1376, 205.8731),
         ),
     )
+    return first, second
+
+
+def test_direct_inspector_audit_adds_asphalt_wedge_and_ignores_dirt():
+    first, second = _wedge_pair("asf")
     result = _core.InspectionResult(
         input_path="synthetic.wrp",
         wrp_entry="synthetic.wrp",
@@ -152,13 +160,5 @@ def test_direct_inspector_audit_adds_asphalt_wedge_and_ignores_dirt():
     assert audited.issues[0].category == "grass_wedge"
     assert audited.issues[0].models[0].casefold().endswith(r"asf6.p3d")
 
-    dirt_first = _core.RoadObject(
-        **{**first.__dict__, "family": "ces", "model_path": r"o\road\ces6.p3d"}
-    ) if hasattr(first, "__dict__") else None
-    # Slotted RoadObject instances have no __dict__; the paved-only candidate
-    # filter itself is the contract we care about for dirt.
-    assert all(
-        endpoint.family in {"sil", "asf", "kos"}
-        for pair in _audit._candidate_pairs((first, second))
-        for endpoint in pair
-    )
+    dirt_first, dirt_second = _wedge_pair("ces")
+    assert _audit._candidate_pairs((dirt_first, dirt_second)) == ()
