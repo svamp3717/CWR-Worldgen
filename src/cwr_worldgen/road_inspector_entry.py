@@ -19,6 +19,7 @@ from . import road_inspector_grass_wedge as _grass_wedge
 from . import road_inspector_paved_wedge_audit as _paved_wedge_audit
 from . import road_inspector_embedded_paved_geometry as _embedded_paved_geometry
 from . import road_inspector_wrptool_catalogue as _wrptool_catalogue
+from . import road_inspector_native_junction_overlap as _native_junction_overlap
 
 
 # Keep every correction confined to the inspector process. Importing the normal
@@ -48,6 +49,10 @@ _embedded_paved_geometry.install()
 # recommends the exact WrpTool-listed T/X P3D when a generic or wrong stock cap
 # survives at a source junction, and it never guesses unmeasured connector data.
 _wrptool_catalogue.install()
+# A correct native T/X must also be the only road surface crossing its logical
+# centre. Report any ordinary stock road that still penetrates the measured
+# connector footprint, which is the stacked-road failure visible in game.
+_native_junction_overlap.install()
 
 RoadIssue = _core.RoadIssue
 InspectionResult = _core.InspectionResult
