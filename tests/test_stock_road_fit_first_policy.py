@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from cwr_worldgen import stock_road_emitted_seam_policy as _emitted
 from cwr_worldgen import stock_road_fit_first_policy as _fit_first
+from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_intersection_edge_policy as _intersection_edge
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
 
@@ -34,8 +35,9 @@ def test_previous_overlap_hooks_remain_recorded_for_regression_analysis() -> Non
     assert _fit_first._ORIGINAL_INTERSECTION_EDGE_APPLY.__name__ == (
         "_seal_legacy_paved_intersections"
     )
-    assert _fit_first._ORIGINAL_EMITTED_SEAM_APPLY.__name__ == (
-        "_apply_emitted_seam_covers"
+    assert (
+        _fit_first._ORIGINAL_EMITTED_SEAM_APPLY
+        is _candidate._apply_wedge_candidates
     )
 
 
