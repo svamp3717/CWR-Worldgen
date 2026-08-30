@@ -18,9 +18,8 @@ is the potential exposed terrain wedge. Road Inspector reports it as
 ``grass_wedge`` with area, depth, opening, and miter coordinates.
 
 The layer is read-only. It does not add cover pieces or change generated road
-geometry. Existing surface/overlap filters run before this classifier, but a
-surviving paved seam is always evaluated geometrically here so a real exposed
-asphalt wedge cannot disappear merely because the base seam category changed.
+geometry. Existing surface/terrain coverage checks run before this classifier so
+only genuinely exposed paved seams are promoted.
 """
 from __future__ import annotations
 
@@ -32,11 +31,7 @@ from . import road_inspector as _core
 
 
 _PAVED_FAMILIES = frozenset({"sil", "asf", "kos"})
-# Keep the explicit legacy categories, but do not depend on them exclusively:
-# runtime/source-context layers may refine a paved seam's category before this
-# final classifier runs. Eligibility is therefore determined from the two road
-# objects and their nearest endpoints as well.
-_SEAM_CATEGORIES = frozenset({"straight_miter", "curve_transition"})
+_SEAM_CATEGORIES = frozenset({"straight_miter", "curve_transition", "connector_gap"})
 MINIMUM_GRASS_WEDGE_AREA_SQUARE_METRES = 0.001
 MINIMUM_GRASS_WEDGE_DEPTH_METRES = 0.005
 MINIMUM_GRASS_WEDGE_TURN_DEGREES = 0.75
@@ -201,6 +196,8 @@ def _near_source_junction(point, source_junctions, match_tolerance: float) -> bo
 
 
 def _classify_grass_wedge(issue, roads, source_junctions, match_tolerance: float):
+    if issue.category not in _SEAM_CATEGORIES:
+        return issue
     matched = _nearest_issue_endpoints(issue, roads)
     if matched is None:
         return issue
@@ -246,9 +243,10 @@ def _classify_grass_wedge(issue, roads, source_junctions, match_tolerance: float
             f"opening, {depth:.3f} m maximum wedge depth."
         ),
         candidate_fix=(
-            "Cover the exposed outside paved turn with the bounded borderless "
-            "paved wedge overlay, or refit the turn with connector-locked native "
-            "stock curves whose physical road edges remain continuous."
+            "Refit the turn with a connector-locked native stock curve or curve "
+            "chain whose physical road edges remain continuous, or cover only "
+            "the exposed outside triangle with the bounded borderless paved "
+            "wedge overlay. Do not hide the wedge with overlapping road pieces."
         ),
         metrics={
             **issue.metrics,
