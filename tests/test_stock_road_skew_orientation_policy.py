@@ -70,7 +70,7 @@ def test_lundby_turning_main_t_rejects_rigid_native_surface() -> None:
     # Real incident headings at Lundby's all-asphalt T near 3223.50/3181.50.
     # Lundby23 proves that balancing this 20.66-degree through bend over the
     # rigid T still leaves its measured connectors roughly 1-2 m from the actual
-    # approach pieces. Keep the visible approaches and low fallback fill instead.
+    # approach pieces. Keep the visible approaches and low stock fallback instead.
     incidents = (
         _incident(93.732),
         _incident(340.710),
@@ -177,10 +177,10 @@ def test_production_fit_uses_low_fallback_for_lundby_turning_main_geometry() -> 
     report = _p.fit_road_objects(dataset, projection, [0.0] * (40 * 40), spec)
     assert report.junction_cap_objects >= 1
     cap = report.objects[0]
-    assert cap.model_path.casefold() == rf"{spec.name}\i\paved_fill.p3d"
+    assert cap.model_path.casefold() == r"o\road\sil6.p3d"
 
-    # The borderless fallback fill remains at the actual source node while the
-    # approach pieces own every visible road edge.
+    # The stock six-metre fallback remains at the actual source node while the
+    # approach pieces own the fitted directions. No generated paved_fill is used.
     assert math.dist((cap.x, cap.z), node) < 0.05
     assert all(
         obj.model_path.casefold() != r"o\road\kr_new_sil_sil_t.p3d"
@@ -230,7 +230,7 @@ def test_production_fit_keeps_small_main_axis_fallback_for_45_degree_t() -> None
     report = _p.fit_road_objects(dataset, projection, [0.0] * (40 * 40), spec)
     assert report.junction_cap_objects >= 1
     cap = report.objects[0]
-    assert cap.model_path.casefold() == rf"{spec.name}\i\paved_fill.p3d"
+    assert cap.model_path.casefold() == r"o\road\sil6.p3d"
 
     incident_map = _finish._junction_incident_map(dataset, projection, spec)
     source_node, incidents = next(iter(incident_map.values()))
