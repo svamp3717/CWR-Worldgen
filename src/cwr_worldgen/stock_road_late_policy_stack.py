@@ -9,6 +9,7 @@ ever participating in a normal world build.
 """
 from __future__ import annotations
 
+from . import stock_road_wrptool_catalogue_policy as _wrptool_catalogue
 from . import stock_road_curve_regularization_policy as _curve_regularization
 from . import stock_road_sharp_turn_policy as _sharp_turn
 from . import stock_road_sharp_exact_policy as _sharp_exact
@@ -43,6 +44,11 @@ def install_stock_road_late_policy_stack() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+
+    # WrpTool's Resistance road inventory is the catalogue humans actually use
+    # when assembling WRPs by hand. Install that exact T/X set before any late
+    # junction policy asks the base fitter which native model exists.
+    _wrptool_catalogue.install_stock_road_wrptool_catalogue_policy()
 
     # Preserve and regularize coherent source curvature before exact-pose bend
     # promotion. These passes are paved-only where they alter stock piece use.
