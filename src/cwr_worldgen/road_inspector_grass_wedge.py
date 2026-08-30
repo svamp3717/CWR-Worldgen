@@ -2,22 +2,25 @@
 """Classify actual exposed paved-turn wedges in Road Inspector.
 
 The base inspector already measures centre, tangent, and road-edge discontinuity
-at stock-road seams.  A heading discontinuity is only a proxy for the visible
+at stock-road seams. A heading discontinuity is only a proxy for the visible
 failure users care about, though: on a faceted paved turn the two *outer* road
 edges can terminate at different points and leave a triangular patch of terrain
 between them.
 
-This layer turns that proxy into an explicit geometric diagnostic.  For an
-ordinary same-family paved seam, extend both physical outer edge rays beyond
-their emitted connectors.  When the rays meet in front of both road pieces, the
-triangle between the two connector-edge points and that miter intersection is
-the potential exposed terrain wedge.  Road Inspector reports it as
+This layer turns that proxy into an explicit geometric diagnostic for paved
+stock-road families only (``sil``, ``asf``, and ``kos``). Gravel/dirt families
+are deliberately outside this detector.
+
+For an ordinary same-family paved seam, extend both physical outer edge rays
+beyond their emitted connectors. When the rays meet in front of both road pieces,
+the triangle between the two connector-edge points and that miter intersection
+is the potential exposed terrain wedge. Road Inspector reports it as
 ``grass_wedge`` with area, depth, opening, and miter coordinates.
 
-The layer is read-only.  It does not add cover pieces or change generated road
-geometry.  Existing surface/overlap filters run before this classifier, so seams
-already proven covered by another paved surface are not promoted to grass-wedge
-findings.
+The layer is read-only. It does not add cover pieces or change generated road
+geometry. Existing surface/overlap filters run before this classifier, but a
+surviving paved seam is always evaluated geometrically here so a real exposed
+asphalt wedge cannot disappear merely because the base seam category changed.
 """
 from __future__ import annotations
 
@@ -29,6 +32,10 @@ from . import road_inspector as _core
 
 
 _PAVED_FAMILIES = frozenset({"sil", "asf", "kos"})
+# Keep the explicit legacy categories, but do not depend on them exclusively:
+# runtime/source-context layers may refine a paved seam's category before this
+# final classifier runs. Eligibility is therefore determined from the two road
+# objects and their nearest endpoints as well.
 _SEAM_CATEGORIES = frozenset({"straight_miter", "curve_transition"})
 MINIMUM_GRASS_WEDGE_AREA_SQUARE_METRES = 0.001
 MINIMUM_GRASS_WEDGE_DEPTH_METRES = 0.005
@@ -194,12 +201,17 @@ def _near_source_junction(point, source_junctions, match_tolerance: float) -> bo
 
 
 def _classify_grass_wedge(issue, roads, source_junctions, match_tolerance: float):
-    if issue.category not in _SEAM_CATEGORIES:
-        return issue
     matched = _nearest_issue_endpoints(issue, roads)
     if matched is None:
         return issue
     _first_road, _second_road, first, second = matched
+
+    # The base inspector normally labels these straight_miter/curve_transition.
+    # If a later read-only layer has refined the label, still evaluate the paved
+    # two-object seam. Conversely, categories that are explicitly about source
+    # intersections remain excluded below by the junction proximity check.
+    if issue.category not in _SEAM_CATEGORIES and len(issue.object_ids) != 2:
+        return issue
 
     issue_point = (float(issue.x), float(issue.z))
     if _near_source_junction(issue_point, source_junctions, match_tolerance):
@@ -241,9 +253,9 @@ def _classify_grass_wedge(issue, roads, source_junctions, match_tolerance: float
             f"opening, {depth:.3f} m maximum wedge depth."
         ),
         candidate_fix=(
-            "Refit the turn with a connector-locked native stock curve or curve "
-            "chain whose physical road edges remain continuous. Do not hide the "
-            "wedge with overlapping road pieces."
+            "Cover the exposed outside paved turn with the bounded borderless "
+            "paved wedge overlay, or refit the turn with connector-locked native "
+            "stock curves whose physical road edges remain continuous."
         ),
         metrics={
             **issue.metrics,
@@ -296,7 +308,7 @@ def inspect_road_geometry(
 
 
 def install() -> None:
-    """Install the final read-only grass-wedge classifier."""
+    """Install the final read-only paved grass-wedge classifier."""
 
     global _ORIGINAL_INSPECT, _INSTALLED
     if _INSTALLED:
