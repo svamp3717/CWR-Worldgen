@@ -1,19 +1,23 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Keep late exact paved fits connected to covered junction endpoints.
+"""Keep late exact paved fits on the effective junction endpoint window.
 
 The base stock-road fitter reserves a short approach trim around each junction.
-The local-fit policy later expands paved approaches back underneath the cap so
-the road surface reaches the logical node. Several late exact-curve policies can
-return their recovered stock actions directly, however, and historically made
-that decision from the original trimmed window. A successful curve promotion
-could therefore reintroduce a one-to-three metre approach gap beside a junction.
+The local-fit policy may expand paved approaches back underneath a generic cap,
+while purpose-built native T/X junctions now keep that measured connector trim.
+Several late exact-curve policies can return their recovered stock actions
+directly, however, and historically made that decision from the caller's raw
+window before the final junction policy had a chance to adjust it.
 
-Lundby32 exposed that failure at RI-00016: two paved approach runs beside the
-same cap stopped close to the old trim distance even though the earlier fitter
-had already requested node coverage. Keep the exact result when it reaches the
-expanded endpoint. If it does not, retry the same complete policy stack with the
-effective local-fit window and prefer the result that actually reaches the
-covered junction endpoint. No helper or overlapping road object is added.
+Lundby32 exposed the expansion side of that failure: a successful exact fit could
+stop at an obsolete trimmed endpoint even though a generic cap required node
+coverage. Native-junction ownership exposes the opposite case: an exact straight
+fit can continue all the way to the logical node even though a purpose-built T/X
+owns the centre and its approaches must stop at the measured connector.
+
+Treat the current quality window as authoritative in both directions. Retry the
+same complete exact policy stack when it expands a covered endpoint, and also
+when it trims a native-junction endpoint inward. No helper or overlapping road
+object is added.
 """
 from __future__ import annotations
 
@@ -114,6 +118,22 @@ def _junction_endpoint_chain(
         maximum_end_distance,
     )
     effective_start, effective_preferred, effective_minimum, effective_maximum = effective
+
+    trim_start = effective_start > raw_start + _WINDOW_EPSILON_METRES
+    trim_end = effective_preferred < raw_preferred - _WINDOW_EPSILON_METRES
+    if trim_start or trim_end:
+        # A native T/X owns the centre up to its measured connectors. Exact
+        # wrappers underneath this policy are allowed to optimize the selected
+        # stock sequence, not to ignore that final physical ownership window.
+        return _ORIGINAL_CHAIN(
+            measure,
+            pieces,
+            start_distance=effective_start,
+            preferred_end_distance=effective_preferred,
+            minimum_end_distance=effective_minimum,
+            maximum_end_distance=effective_maximum,
+        )
+
     recover_start = effective_start < raw_start - _WINDOW_EPSILON_METRES
     recover_end = effective_preferred > raw_preferred + _WINDOW_EPSILON_METRES
     if not recover_start and not recover_end:
@@ -160,7 +180,7 @@ def _junction_endpoint_chain(
 
 
 def install_stock_road_junction_endpoint_policy() -> None:
-    """Install endpoint recovery outside every late exact stock-chain wrapper."""
+    """Install endpoint-window enforcement outside every late exact wrapper."""
 
     global _ORIGINAL_CHAIN, _INSTALLED
     if _INSTALLED:
