@@ -65,12 +65,11 @@ def _native_t_targets(incidents, native) -> tuple[float, ...] | None:
     rotation = float(native.heading_degrees) % 360.0
     target_zero = rotation
     target_180 = (rotation + 180.0) % 360.0
-    # stock_road_junction_policy fits native T assets with their branch on the
-    # model-local +90 degree connector. Keep the relaxation pass on that same
-    # signed connector. Using +270 here mirrors the branch through the node and
-    # folds the first branch piece across the junction, creating the large
-    # in-game overlap that is especially obvious on skewed sil/ces T nodes.
-    target_branch = (rotation + 90.0) % 360.0
+    # Resistance T Memory LODs put the branch on model-local -X, i.e. 270
+    # degrees. The measured-junction policy installs the same mapping later in
+    # startup; keeping the base helper identical avoids a signed 180-degree
+    # disagreement when this module is exercised independently.
+    target_branch = (rotation + 270.0) % 360.0
 
     actual_first = _heading(incidents[first].direction)
     actual_second = _heading(incidents[second].direction)
