@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_connector_policy as _connector
 from cwr_worldgen import stock_road_junction_policy as _junction
+from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen import stock_road_paved_junction_completion_policy as _paved
 from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
 from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
@@ -46,7 +47,24 @@ def _spec(bbox):
     )
 
 
-def test_visibly_skewed_paved_t_does_not_relax_source_arms_to_rigid_connectors() -> None:
+def _stock_endpoints(obj):
+    straight = _geometry.stock_straight_match(str(obj.model_path))
+    if straight is not None:
+        length = float(
+            _geometry.STOCK_STRAIGHT_LENGTHS_METRES[int(straight.group("length"))]
+        )
+        return _p._model_axis(obj, length)
+    curve = _geometry.stock_curve_connectors(str(obj.model_path))
+    if curve is None:
+        return ()
+    origin = (float(obj.x), float(obj.z))
+    return (
+        _geometry.transform_local(curve.begin, origin, float(obj.heading_degrees)),
+        _geometry.transform_local(curve.end, origin, float(obj.heading_degrees)),
+    )
+
+
+def test_visibly_skewed_paved_t_plans_native_connector_targets() -> None:
     incidents = (
         _incident(0.0),
         _incident(180.0),
@@ -56,7 +74,10 @@ def test_visibly_skewed_paved_t_does_not_relax_source_arms_to_rigid_connectors()
 
     assert native is not None
     assert native.maximum_heading_error_degrees > _paved.MAXIMUM_VISIBLE_NATIVE_CONNECTOR_ERROR_DEGREES
-    assert _connector._native_t_targets(incidents, native) is None
+    # The final ownership policy restores the measured connector planner. The
+    # transaction layer still has to prove the moved arms obstacle-safe and make
+    # the resulting junction satisfy the strict native matcher before committing.
+    assert _connector._native_t_targets(incidents, native) is not None
 
 
 def test_nearly_exact_paved_t_can_still_use_native_connector_targets() -> None:
@@ -82,7 +103,7 @@ def test_dirt_or_gravel_incident_is_outside_paved_completion_policy() -> None:
     assert not _paved._all_paved_incidents(incidents)
 
 
-def test_skewed_paved_t_finishes_with_low_stock_cap_and_no_native_t() -> None:
+def test_skewed_paved_t_uses_one_native_t_and_stops_approaches_at_connectors() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     node = (500.0, 500.0)
@@ -98,7 +119,7 @@ def test_skewed_paved_t_finishes_with_low_stock_cap_and_no_native_t() -> None:
     )
     branch = _feature(projection, "way/branch", (node, branch_end))
     dataset = OsmDataset(
-        source_generator="paved-skew-t",
+        source_generator="paved-skew-t-native-owner",
         element_count=2,
         coastlines=(),
         water=(),
@@ -117,18 +138,27 @@ def test_skewed_paved_t_finishes_with_low_stock_cap_and_no_native_t() -> None:
 
     assert report.junction_cap_objects >= 1
     cap = report.objects[0]
-    assert cap.model_path.casefold() == r"o\road\sil6.p3d"
-    assert math.dist((cap.x, cap.z), node) < 0.05
-    assert math.isclose(
-        cap.y,
-        _p._STOCK_ROAD_VERTICAL_OFFSET_METRES
-        + _paved.PAVED_JUNCTION_UNDERLAY_BIAS_METRES,
-        abs_tol=1.0e-6,
-    )
+    assert cap.model_path.casefold() == r"o\road\kr_new_sil_sil_t.p3d"
+
+    # No generic stock short slab may compete for the logical centre once the
+    # purpose-built T owns it. Normal approach pieces should be centred several
+    # metres outside the node instead.
     assert all(
-        obj.model_path.casefold() != r"o\road\kr_new_sil_sil_t.p3d"
-        for obj in report.objects
+        not (
+            _geometry.stock_straight_match(str(obj.model_path)) is not None
+            and math.dist((float(obj.x), float(obj.z)), node) < 1.0
+        )
+        for obj in report.objects[report.junction_cap_objects :]
     )
+
+    approach_endpoints = [
+        endpoint
+        for obj in report.objects[report.junction_cap_objects :]
+        for endpoint in _stock_endpoints(obj)
+    ]
+    assert approach_endpoints
+    nearest = min(math.dist(node, endpoint) for endpoint in approach_endpoints)
+    assert 5.5 <= nearest <= 7.0
 
 
 def test_exact_paved_t_keeps_native_stock_junction() -> None:
@@ -162,6 +192,13 @@ def test_exact_paved_t_keeps_native_stock_junction() -> None:
 
     assert report.junction_cap_objects >= 1
     assert report.objects[0].model_path.casefold() == r"o\road\kr_new_sil_sil_t.p3d"
+    assert all(
+        not (
+            _geometry.stock_straight_match(str(obj.model_path)) is not None
+            and math.dist((float(obj.x), float(obj.z)), node) < 1.0
+        )
+        for obj in report.objects[report.junction_cap_objects :]
+    )
 
 
 def test_skewed_paved_x_exceeds_visible_native_connector_limit() -> None:
