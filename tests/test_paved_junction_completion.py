@@ -151,14 +151,21 @@ def test_skewed_paved_t_uses_one_native_t_and_stops_approaches_at_connectors() -
         for obj in report.objects[report.junction_cap_objects :]
     )
 
-    approach_endpoints = [
-        endpoint
+    approach_geometry = sorted(
+        (
+            math.dist(node, endpoint),
+            str(obj.model_path),
+            int(obj.object_id),
+            round(float(obj.x), 4),
+            round(float(obj.z), 4),
+            tuple(round(float(value), 4) for value in endpoint),
+        )
         for obj in report.objects[report.junction_cap_objects :]
         for endpoint in _stock_endpoints(obj)
-    ]
-    assert approach_endpoints
-    nearest = min(math.dist(node, endpoint) for endpoint in approach_endpoints)
-    assert 5.5 <= nearest <= 7.0
+    )
+    assert approach_geometry
+    nearest = approach_geometry[0][0]
+    assert 5.5 <= nearest <= 7.0, approach_geometry[:12]
 
 
 def test_exact_paved_t_keeps_native_stock_junction() -> None:
