@@ -206,13 +206,6 @@ def _classify_grass_wedge(issue, roads, source_junctions, match_tolerance: float
         return issue
     _first_road, _second_road, first, second = matched
 
-    # The base inspector normally labels these straight_miter/curve_transition.
-    # If a later read-only layer has refined the label, still evaluate the paved
-    # two-object seam. Conversely, categories that are explicitly about source
-    # intersections remain excluded below by the junction proximity check.
-    if issue.category not in _SEAM_CATEGORIES and len(issue.object_ids) != 2:
-        return issue
-
     issue_point = (float(issue.x), float(issue.z))
     if _near_source_junction(issue_point, source_junctions, match_tolerance):
         return issue
