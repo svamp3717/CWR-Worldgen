@@ -18,6 +18,7 @@ from . import road_inspector_overlap_filter as _overlap_filter
 from . import road_inspector_grass_wedge as _grass_wedge
 from . import road_inspector_paved_wedge_audit as _paved_wedge_audit
 from . import road_inspector_embedded_paved_geometry as _embedded_paved_geometry
+from . import road_inspector_wrptool_catalogue as _wrptool_catalogue
 
 
 # Keep every correction confined to the inspector process. Importing the normal
@@ -43,6 +44,10 @@ _paved_wedge_audit.install()
 # deciding whether such an old object really covers a wedge. Fresh worlds no
 # longer serialize these helpers at all.
 _embedded_paved_geometry.install()
+# Finish with the same Resistance road catalogue used by generation. This layer
+# recommends the exact WrpTool-listed T/X P3D when a generic or wrong stock cap
+# survives at a source junction, and it never guesses unmeasured connector data.
+_wrptool_catalogue.install()
 
 RoadIssue = _core.RoadIssue
 InspectionResult = _core.InspectionResult
