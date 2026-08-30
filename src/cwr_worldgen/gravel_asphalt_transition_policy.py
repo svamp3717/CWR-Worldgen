@@ -193,16 +193,16 @@ def _is_layered_stock_junction(junction) -> bool:
     )
 
 
-def _pieces_are_generated_gravel_branch(pieces) -> bool:
-    return bool(pieces) and all(
-        _p.is_generated_gravel_road_model(piece.model_path) for piece in pieces
-    )
-
-
-def _pieces_are_stock_ces_branch(pieces) -> bool:
-    return bool(pieces) and all(
-        _junction._family(piece.model_path) == "ces" for piece in pieces
-    )
+def _pieces_are_unpaved_branch(pieces) -> bool:
+    if not pieces:
+        return False
+    for piece in pieces:
+        if _p.is_generated_gravel_road_model(piece.model_path):
+            continue
+        if _junction._family(piece.model_path) == "ces":
+            continue
+        return False
+    return True
 
 
 def _quality_window(
@@ -225,24 +225,16 @@ def _quality_window(
         maximum_end,
         context,
     )
-
-    # Stock ces now has a real Resistance mixed-T centre. Its first road piece
-    # must stop at the measured 6.25 m connector, with only the normal quality
-    # overlap. Letting ces continue all the way to the logical node was needed
-    # only for the old paved-straight overlay fallback; underneath a native T it
-    # leaves a second strip visible through the intersection, exactly the broad
-    # overlap seen in Lundby44. Keep generated-gravel behaviour unchanged.
-    if _pieces_are_stock_ces_branch(pieces):
-        return start_distance, preferred_end, minimum_end, maximum_end
-    if not _pieces_are_generated_gravel_branch(pieces):
+    if not _pieces_are_unpaved_branch(pieces):
         return start_distance, preferred_end, minimum_end, maximum_end
 
     start_junction = context.junctions.get(_p._road_node_key(measure.points[0]))
     end_junction = context.junctions.get(_p._road_node_key(measure.points[-1]))
     shortest = min(float(piece.length_metres) for piece in pieces)
 
-    # Generated gravel still uses the paved-main overlay fallback, so it must
-    # physically reach the node underneath that surface to avoid a central gap.
+    # The branch continues underneath either the central overlay or native T.
+    # The raised native mesh owns the visible centre, while its relaxed approach
+    # is already collinear with the measured connector before reaching the node.
     if _is_layered_stock_junction(start_junction):
         start_distance = 0.0
     if _is_layered_stock_junction(end_junction):
