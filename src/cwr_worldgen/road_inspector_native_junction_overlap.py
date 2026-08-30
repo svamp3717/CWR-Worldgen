@@ -26,6 +26,24 @@ _ORIGINAL_SOURCE_INTERSECTION_ISSUES = None
 _INSTALLED = False
 
 
+def _point_segment_distance(point, start, end) -> float:
+    dx = float(end[0]) - float(start[0])
+    dz = float(end[1]) - float(start[1])
+    denominator = dx * dx + dz * dz
+    if denominator <= 1.0e-12:
+        return math.dist(point, start)
+    fraction = (
+        (float(point[0]) - float(start[0])) * dx
+        + (float(point[1]) - float(start[1])) * dz
+    ) / denominator
+    fraction = max(0.0, min(1.0, fraction))
+    nearest = (
+        float(start[0]) + dx * fraction,
+        float(start[1]) + dz * fraction,
+    )
+    return math.dist(point, nearest)
+
+
 def _native_cap(roads, node):
     candidates = [
         road
@@ -45,10 +63,7 @@ def _axis_intrudes_native_center(road, node) -> bool:
         return False
     first = road.endpoints[0].point
     second = road.endpoints[1].point
-    if (
-        _core._point_segment_distance(node, first, second)
-        > INTRUDING_AXIS_DISTANCE_METRES
-    ):
+    if _point_segment_distance(node, first, second) > INTRUDING_AXIS_DISTANCE_METRES:
         return False
 
     # A correct approach ends around the native connector radius and never puts
