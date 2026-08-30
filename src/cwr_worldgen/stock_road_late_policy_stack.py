@@ -31,6 +31,7 @@ from . import stock_road_emitted_seam_policy as _emitted_seam
 from . import stock_road_paved_wedge_policy as _paved_wedge
 from . import stock_road_emitted_seam_refinement_policy as _emitted_seam_refinement
 from . import stock_road_stock_paved_only_policy as _stock_paved_only
+from . import stock_road_inspector_candidate_policy as _inspector_candidates
 from . import stock_road_paved_junction_completion_policy as _paved_junctions
 from . import stock_road_fit_first_policy as _fit_first
 from . import stock_road_native_junction_ownership_policy as _native_junction_ownership
@@ -90,12 +91,18 @@ def install_stock_road_late_policy_stack() -> None:
     _curve_seam_fallback.install_stock_road_curve_seam_fallback_policy()
     _intersection_edge.install_stock_road_intersection_edge_policy()
     _emitted_seam.install_stock_road_emitted_seam_policy()
-    # Keep the physical endpoint reconstruction from the paved-wedge work. It is
-    # still useful for measuring the real WRP seams, but production must no
-    # longer serialize any world-local paved helper P3Ds.
+    # Keep the physical endpoint reconstruction and exact borderless wedge mesh.
+    # The later Inspector-candidate policy decides when that wedge is serialized.
     _paved_wedge.install_stock_road_paved_wedge_policy()
     _emitted_seam_refinement.install_stock_road_emitted_seam_refinement_policy()
     _stock_paved_only.install_stock_road_stock_paved_only_policy()
+
+    # Apply the concrete repairs described by Road Inspector while every late
+    # hook is still composable: measured -X T connector orientation, logical
+    # centre compensation, mixed native-centre trimming, and borderless paved
+    # terrain wedges. Generated gravel remains outside this policy.
+    _inspector_candidates.install_stock_road_inspector_candidate_policy()
+
     # Native paved T/X meshes are visually trustworthy only while every measured
     # connector is essentially exact. Otherwise keep source-aligned approaches
     # visible over one low stock-family central cap. Dirt/gravel stays untouched.
