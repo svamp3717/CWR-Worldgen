@@ -27,6 +27,7 @@ from . import stock_road_straight_seam_policy as _straight_seam
 from . import stock_road_curve_seam_fallback_policy as _curve_seam_fallback
 from . import stock_road_intersection_edge_policy as _intersection_edge
 from . import stock_road_emitted_seam_policy as _emitted_seam
+from . import stock_road_paved_wedge_policy as _paved_wedge
 from . import stock_road_emitted_seam_refinement_policy as _emitted_seam_refinement
 from . import stock_road_fit_first_policy as _fit_first
 
@@ -80,6 +81,9 @@ def install_stock_road_late_policy_stack() -> None:
     _curve_seam_fallback.install_stock_road_curve_seam_fallback_policy()
     _intersection_edge.install_stock_road_intersection_edge_policy()
     _emitted_seam.install_stock_road_emitted_seam_policy()
+    # Complete the final terrain-clear outside-wedge audit for all paved stock
+    # families (sil/asf/kos). Dirt/gravel remains deliberately untouched.
+    _paved_wedge.install_stock_road_paved_wedge_policy()
     _emitted_seam_refinement.install_stock_road_emitted_seam_refinement_policy()
 
     # Production builds keep fitting first. Disable the older intermediate seam
