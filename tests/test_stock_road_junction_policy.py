@@ -67,6 +67,27 @@ def test_mixed_highway_dirt_t_uses_surface_correct_native_model():
     assert native.cap_family == "sil"
 
 
+def test_nearly_aligned_mixed_highway_dirt_t_keeps_native_transition():
+    native = _native_junction_for_incidents(
+        (_incident(0.0, "sil"), _incident(180.0, "sil"), _incident(268.0, "ces"))
+    )
+
+    assert native is not None
+    assert native.model_path == r"o\road\kr_new_sil_ces_t.p3d"
+    assert native.maximum_heading_error_degrees <= 1.5
+
+
+def test_visibly_skewed_mixed_highway_dirt_t_uses_stock_main_overlay():
+    native = _native_junction_for_incidents(
+        (_incident(0.0, "sil"), _incident(180.0, "sil"), _incident(266.0, "ces"))
+    )
+
+    assert native is not None
+    assert native.model_path == r"o\road\sil6.p3d"
+    assert native.cap_family == "sil"
+    assert native.maximum_heading_error_degrees < 1.0e-9
+
+
 def test_small_skew_is_shared_between_measured_connectors_inside_road_surface():
     native = _native_junction_for_incidents(
         (
