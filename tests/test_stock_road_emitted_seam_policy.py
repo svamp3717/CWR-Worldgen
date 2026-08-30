@@ -108,7 +108,7 @@ def test_existing_paved_underlay_prevents_duplicate_cover():
     assert _emitted._emitted_seam_cover_plans(report) == ()
 
 
-def test_buried_existing_underlay_gets_stock_only_final_fallback():
+def test_buried_existing_underlay_gets_borderless_final_wedge():
     first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
     second = _straight_from_start(2, (0.0, 0.0), 12.0)
     existing = _object(3, r"o\road\sil6.p3d", 0.0, 0.0, 6.0, y=0.0)
@@ -133,8 +133,7 @@ def test_buried_existing_underlay_gets_stock_only_final_fallback():
 
     assert len(fixed.objects) == 4
     helper = fixed.objects[-1]
-    assert helper.model_path.casefold() == r"o\road\sil6.p3d"
-    assert "paved_" not in helper.model_path.casefold()
+    assert "\\paved_wedge_q" in helper.model_path.replace("/", "\\").casefold()
     assert fixed.short_piece_objects == 1
 
 
@@ -176,7 +175,7 @@ def test_coincident_straight_miter_uses_one_bisecting_underlay():
     assert plans[0].outer_miter_apex is not None
 
 
-def test_paved_seam_plan_emits_stock_short_piece_only():
+def test_paved_seam_plan_keeps_stock_underlay_and_adds_borderless_wedge():
     first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
     second = _straight_from_start(2, (0.0, 0.0), 12.0)
     report = _p.RoadFitReport(
@@ -198,11 +197,12 @@ def test_paved_seam_plan_emits_stock_short_piece_only():
 
     fixed = _emitted._apply_emitted_seam_covers(report, [0.0] * 4, spec)
 
-    assert len(fixed.objects) == 3
-    helper = fixed.objects[-1]
-    assert helper.model_path.casefold() == r"o\road\sil6.p3d"
-    assert "paved_" not in helper.model_path.casefold()
-    assert fixed.short_piece_objects == 1
+    assert len(fixed.objects) == 4
+    stock_helper = fixed.objects[-2]
+    wedge = fixed.objects[-1]
+    assert stock_helper.model_path.casefold() == r"o\road\sil6.p3d"
+    assert "\\paved_wedge_q" in wedge.model_path.replace("/", "\\").casefold()
+    assert fixed.short_piece_objects == 2
 
 
 def test_lundby34_compiled_grass_wedges_receive_final_underlays():
