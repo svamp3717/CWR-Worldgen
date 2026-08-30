@@ -2,12 +2,15 @@
 """Use only stock CWA road P3Ds for late paved-road fallbacks.
 
 The earlier paved seam work introduced world-local ``paved_fill``,
-``paved_miter`` and ``paved_wedge`` models.  They made the final WRP harder to
+``paved_miter`` and ``paved_wedge`` models. They made the final WRP harder to
 reason about and, more importantly, could disagree with what CWA actually showed
-at a turn.  Keep the measured/curve fitting work, but make the final fallback
+at a turn. Keep the measured/curve fitting work, but make the final fallback
 strictly stock-only: sil/asf/kos six-metre pieces are shifted slightly toward
 the outside miter and kept below the visible carriageway.
 
+A measured native T/X already owns its intersection centre. Never append another
+stock seam helper on top of that same centre. The helper pass may still operate
+at ordinary two-piece seams and outside a native junction's connector footprint.
 Dirt/gravel is deliberately untouched.
 """
 from __future__ import annotations
@@ -28,6 +31,11 @@ STOCK_PAVED_OUTSIDE_OVERLAP_METRES = 0.080
 MAXIMUM_STOCK_PAVED_HELPER_SHIFT_METRES = 0.75
 MAXIMUM_STOCK_PAVED_HELPER_LIFT_METRES = 0.035
 MINIMUM_STOCK_PAVED_TERRAIN_CLEARANCE_METRES = 0.005
+# A real approach short piece is centred roughly 3.1 m from a node. This guard
+# is intentionally much smaller and catches only the redundant co-centred seam
+# slab that made Lundby44's native-cap candidate look like several roads stacked
+# into one intersection.
+NATIVE_JUNCTION_HELPER_EXCLUSION_METRES = 0.75
 
 _ORIGINAL_TURNING_T_CAP = None
 _INSTALLED = False
@@ -105,7 +113,7 @@ def _stock_helper_for_plan(plan, object_id, elevations, spec):
     )
 
     # A full stock strip must not be raised aggressively because its painted
-    # borders would then win over the real approaches.  Permit only a tiny lift
+    # borders would then win over the real approaches. Permit only a tiny lift
     # when the outside miter would otherwise remain under terrain; larger
     # cross-slope failures are intentionally left for Road Inspector to report.
     apex = getattr(plan, "outer_miter_apex", None)
@@ -152,14 +160,54 @@ def _plan_key(plan):
     )
 
 
+def _native_junction_centres(report) -> tuple[tuple[float, float], ...]:
+    """Return logical centres of native stock T/X caps in the fitted report."""
+
+    cap_count = min(
+        int(getattr(report, "junction_cap_objects", 0)),
+        len(report.objects),
+    )
+    centres = []
+    for cap in report.objects[:cap_count]:
+        local = _geometry.native_junction_intersection_offset(str(cap.model_path))
+        if local is None:
+            continue
+        centres.append(
+            _geometry.transform_local(
+                local,
+                (float(cap.x), float(cap.z)),
+                float(cap.heading_degrees),
+            )
+        )
+    return tuple(centres)
+
+
+def _plan_hits_native_junction(
+    plan,
+    centres: tuple[tuple[float, float], ...],
+) -> bool:
+    if not centres:
+        return False
+    points = [(float(plan.centre[0]), float(plan.centre[1]))]
+    apex = getattr(plan, "outer_miter_apex", None)
+    if apex is not None:
+        points.append((float(apex[0]), float(apex[1])))
+    return any(
+        math.dist(point, centre) <= NATIVE_JUNCTION_HELPER_EXCLUSION_METRES
+        for point in points
+        for centre in centres
+    )
+
+
 def _apply_stock_emitted_seam_covers(report, elevations, spec):
-    """Replace generated paved miter/wedge objects with stock short pieces."""
+    """Replace generated paved seam helpers with stock short pieces."""
 
     plans = tuple(_emitted._emitted_seam_cover_plans(report))
     wedge_plans = tuple(_emitted._terrain_wedge_cover_plans(report, elevations, spec))
     if not plans and not wedge_plans:
         return report
 
+    native_centres = _native_junction_centres(report)
     objects = list(report.objects)
     next_id = max((int(obj.object_id) for obj in objects), default=0) + 1
     seen = set()
@@ -169,6 +217,8 @@ def _apply_stock_emitted_seam_covers(report, elevations, spec):
         if key in seen:
             continue
         seen.add(key)
+        if _plan_hits_native_junction(plan, native_centres):
+            continue
         helper = _stock_helper_for_plan(plan, next_id, elevations, spec)
         if helper is None:
             continue
