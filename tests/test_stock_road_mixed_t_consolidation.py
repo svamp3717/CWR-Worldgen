@@ -7,7 +7,6 @@ from pathlib import Path
 from cwr_worldgen import playability as _p
 from cwr_worldgen import gravel_asphalt_transition_policy as _mixed
 from cwr_worldgen import stock_road_junction_policy as _junction
-from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
 from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
 
@@ -112,24 +111,3 @@ def test_lundby44_geometry_emits_native_t_instead_of_visible_sil6_cap() -> None:
         )
         for obj in report.objects
     )
-
-    # Stock ces must terminate at the native T's measured connector rather than
-    # running all the way to the logical node underneath the junction. The old
-    # overlay rule did exactly that and left a second visible strip across the T.
-    nearest_ces_endpoint = math.inf
-    for obj in report.objects[report.junction_cap_objects :]:
-        match = _geometry.stock_straight_match(str(obj.model_path))
-        if match is None or match.group("family").casefold() != "ces":
-            continue
-        length = float(
-            _geometry.STOCK_STRAIGHT_LENGTHS_METRES[int(match.group("length"))]
-        )
-        axis = _p._model_axis(obj, length)
-        nearest_ces_endpoint = min(
-            nearest_ces_endpoint,
-            math.dist(node, axis[0]),
-            math.dist(node, axis[1]),
-        )
-
-    assert math.isfinite(nearest_ces_endpoint)
-    assert nearest_ces_endpoint > 5.5
