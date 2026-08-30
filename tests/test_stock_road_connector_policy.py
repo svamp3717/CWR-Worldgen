@@ -35,13 +35,13 @@ def test_skewed_mixed_t_gets_exact_measured_connector_targets():
     assert targets is not None
     assert len(targets) == 3
     local_targets = sorted((target - native.heading_degrees) % 360.0 for target in targets)
-    assert local_targets == [0.0, 90.0, 180.0]
-    # The native T matcher defines the branch on model-local +90. This must be
-    # signed, not merely equal modulo 180, otherwise the branch is folded across
-    # the junction and creates a large visible overlap in game.
+    assert local_targets == [0.0, 180.0, 270.0]
+    # The measured Resistance T branch is model-local -X (270 degrees). Keep
+    # this signed direction exact; treating it as +X would mirror the branch
+    # through the junction.
     assert math.isclose(
         (targets[2] - native.heading_degrees) % 360.0,
-        90.0,
+        270.0,
         abs_tol=1.0e-9,
     )
 
