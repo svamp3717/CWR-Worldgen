@@ -515,11 +515,12 @@ def _terrain_wedge_cover_plans(report, elevations=None, spec=None):
         if geometry is None:
             continue
         _area, apex, centroid = geometry
+        coverage_samples = _gap_samples(first, second) + (apex, centroid)
         if _terrain_wedge_already_visible(
             report,
             first,
             second,
-            (apex, centroid),
+            coverage_samples,
             elevations,
             spec,
         ):
@@ -571,18 +572,6 @@ def _terrain_clear_wedge_overlay(
     apex = getattr(plan, "outer_miter_apex", None)
     if apex is None or float(getattr(plan, "turn_degrees", 0.0)) < 0.75:
         return None
-    terrain_at_apex = _p._sample_elevation(
-        elevations,
-        spec.cells,
-        spec.cell_size,
-        float(apex[0]),
-        float(apex[1]),
-    )
-    if not force and (
-        _surface_height_at(low_miter, apex) - terrain_at_apex
-        >= MINIMUM_VISIBLE_WEDGE_CLEARANCE_METRES
-    ):
-        return None
 
     world_name = str(getattr(spec, "name", "cwr_worldgen"))
     model_path = paved_wedge_model_path(world_name, float(plan.turn_degrees))
@@ -619,10 +608,28 @@ def _terrain_clear_wedge_overlay(
     cosine_pitch = math.cos(pitch_radians)
     sine_pitch = math.sin(pitch_radians)
 
-    required_origin_y = -math.inf
+    world_samples = []
     for local_x, _local_y, local_z in _triangle_samples(local_points):
         world_x = origin[0] + local_x * cosine_heading + local_z * sine_heading * cosine_pitch
         world_z = origin[1] - local_x * sine_heading + local_z * cosine_heading * cosine_pitch
+        world_samples.append((world_x, world_z, local_z))
+
+    # The apex alone is not enough on a cross-slope: it can clear terrain while
+    # one base corner or edge midpoint is still buried and exposes a grass sliver.
+    # Suppress the overlay only when the existing miter clears the entire narrow
+    # triangle that the generated wedge would occupy.
+    if not force and all(
+        _surface_height_at(low_miter, (world_x, world_z))
+        - _p._sample_elevation(
+            elevations, spec.cells, spec.cell_size, world_x, world_z
+        )
+        >= MINIMUM_VISIBLE_WEDGE_CLEARANCE_METRES
+        for world_x, world_z, _local_z in world_samples
+    ):
+        return None
+
+    required_origin_y = -math.inf
+    for world_x, world_z, local_z in world_samples:
         terrain = _p._sample_elevation(
             elevations, spec.cells, spec.cell_size, world_x, world_z
         )
