@@ -89,16 +89,19 @@ def test_pitched_stock_straight_axis_uses_horizontal_connector_projection():
     )
 
 
-def test_3d_connector_semantics_do_not_leak_into_unknown_custom_roads():
+def test_3d_connector_semantics_are_limited_to_dirt_gravel_and_known_rigid_cases():
     custom = (
         _p._RoadPiece(r"custom\road25.p3d", 25.0, 25),
         _p._RoadPiece(r"custom\road12.p3d", 12.5, 12),
     )
-    stock = (_p._RoadPiece(r"o\road\sil25.p3d", 25.0, 25),)
+    paved = (_p._RoadPiece(r"o\road\sil25.p3d", 25.0, 25),)
+    dirt = (_p._RoadPiece(r"o\road\ces25.p3d", 25.0, 25),)
     gravel = (_p._RoadPiece(r"synthetic\i\gravel6.p3d", 6.0, 6),)
 
     assert not _uses_measured_rigid_connectors(custom)
-    assert _uses_measured_rigid_connectors(stock)
+    # Reference WrpTool placement keeps paved stock pieces planar in X/Z.
+    assert not _uses_measured_rigid_connectors(paved)
+    assert _uses_measured_rigid_connectors(dirt)
     assert _uses_measured_rigid_connectors(gravel)
 
 
