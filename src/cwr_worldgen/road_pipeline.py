@@ -25,6 +25,7 @@ _INSTALLED = False
 _TRACE_ENV = "CWR_WORLDGEN_ROAD_PIPELINE_TRACE"
 _PACKAGE = __package__ or "cwr_worldgen"
 _MAXIMUM_PAVED_SEAM_TANGENT_ERROR_DEGREES = 8.0
+_MAXIMUM_EXACT_S_BEND_RUN_METRES = 1200.0
 
 # The base stack historically used import -> install -> import -> install.
 # Preserve that exact timing because several policy modules bind the current
@@ -54,8 +55,8 @@ _BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
 
 # The old stock_road_late_policy_stack imported this entire family first and
 # installed it second. Keep that semantic while deleting the orchestration
-# module itself. Four cancelled overlap layers are intentionally absent:
-# straight_seam, curve_seam_fallback, intersection_edge and fit_first.
+# module itself. Cancelled overlap layers and one-assignment compatibility
+# modules are intentionally absent.
 _LATE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("wrptool_catalogue", "stock_road_wrptool_catalogue_policy", "install_stock_road_wrptool_catalogue_policy"),
     ("curve_regularization", "stock_road_curve_regularization_policy", "install_stock_road_curve_regularization_policy"),
@@ -64,7 +65,6 @@ _LATE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("s_bend", "stock_road_s_bend_policy", "install_stock_road_s_bend_policy"),
     ("micro_bend", "stock_road_micro_bend_policy", "install_stock_road_micro_bend_policy"),
     ("s_bend_exact", "stock_road_s_bend_exact_policy", "install_stock_road_s_bend_exact_policy"),
-    ("long_s_bend", "stock_road_long_s_bend_policy", "install_stock_road_long_s_bend_policy"),
     ("single_vertex_bend", "stock_road_single_vertex_bend_policy", "install_stock_road_single_vertex_bend_policy"),
     ("curve_usage", "stock_road_curve_usage_policy", "install_stock_road_curve_usage_policy"),
     ("junction_endpoint", "stock_road_junction_endpoint_policy", "install_stock_road_junction_endpoint_policy"),
@@ -123,12 +123,17 @@ def _install_late_stages() -> None:
     }
     for stage, module_name, installer_name in _LATE_STAGE_SPECS:
         _invoke(stage, modules[module_name], installer_name)
-        if stage == "final_continuity":
+        if stage == "s_bend_exact":
+            # A retired compatibility policy existed only to raise this exact
+            # covered-run search cap from 360 m to 1200 m.
+            modules["stock_road_s_bend_exact_policy"].MAXIMUM_EXACT_S_BEND_RUN_METRES = (
+                _MAXIMUM_EXACT_S_BEND_RUN_METRES
+            )
+        elif stage == "final_continuity":
             # The retired curve-seam fallback used to leave this 8-degree
             # geometry bound behind even though fit-first later disabled its
             # visual object-appending hook. The final physical emitted-seam
-            # planner still consumes the bound, so preserve the value directly
-            # without keeping an entire policy module alive for one assignment.
+            # planner still consumes the bound, so preserve the value directly.
             modules[
                 "stock_road_visual_finish_policy"
             ].MAXIMUM_CURVE_SEAM_TANGENT_ERROR_DEGREES = (
