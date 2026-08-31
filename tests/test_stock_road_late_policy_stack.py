@@ -26,6 +26,7 @@ from cwr_worldgen import stock_road_inspector_candidate_enforcement_policy as _e
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_reference_wrp_policy as _reference
 from cwr_worldgen import stock_road_kodiak_reference_policy as _kodiak
+from cwr_worldgen import stock_road_stock_assets_only_policy as _stock_only
 from cwr_worldgen import stock_road_late_policy_stack as _stack
 
 
@@ -50,13 +51,14 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
         _emitted_seam,
         _emitted_refinement,
         _fit_first,
-        _completion,
         _reference,
         _kodiak,
+        _stock_only,
     )
 
     assert _stack._INSTALLED
     assert all(policy._INSTALLED for policy in policies)
+    assert not _completion._INSTALLED
     assert _enforcement._SELECTOR_INSTALLED
     assert _enforcement._FINAL_INSTALLED
     assert _sharp_turn._sharp_turn_spans is _single_vertex_bend._single_vertex_sharp_turn_spans
@@ -64,9 +66,9 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
 
 
 def test_final_wrappers_are_not_left_disconnected() -> None:
-    # Kodiak is the final paved-road wrapper. The earlier WrpTool reference still
-    # owns planar/zero-pitch placement immediately inside it; final candidate
-    # enforcement still owns junction selection below that.
+    # Kodiak remains the outer playability wrapper. The final stock-only guard is
+    # attached to generator serialization rather than disturbing this road-policy
+    # composition.
     assert _p.fit_road_objects is _kodiak._fit
     assert _kodiak._ORIGINAL_FIT is _reference._fit
     assert _reference._ORIGINAL_FIT is _enforcement._fit
@@ -76,9 +78,9 @@ def test_final_wrappers_are_not_left_disconnected() -> None:
         _emitted_seam._emitted_seam_cover_plans
         is _emitted_refinement._refined_emitted_seam_cover_plans
     )
-    assert _completion._ORIGINAL_APPLY is _candidate._apply_wedge_candidates
-    assert _emitted_seam._apply_emitted_seam_covers is _completion._apply_candidate_completion
-    assert _fit_first._ORIGINAL_EMITTED_SEAM_APPLY is _completion._apply_candidate_completion
+    assert not _completion._INSTALLED
+    assert _emitted_seam._apply_emitted_seam_covers is _candidate._apply_wedge_candidates
+    assert _fit_first._ORIGINAL_EMITTED_SEAM_APPLY is _candidate._apply_wedge_candidates
 
     # Keep the older seam planners wired for regression analysis, but the final
     # production visual hook must preserve the fitted objects rather than append
