@@ -20,125 +20,25 @@ from ._version import __version__
 from .network import install_network_compatibility as _install_network_compatibility
 
 _install_network_compatibility()
-from .generator import BuildResult, build_milestone1, build_milestone2, build_milestone3, build_milestone4
+
+from .generator import (
+    BuildResult,
+    build_milestone1,
+    build_milestone2,
+    build_milestone3,
+    build_milestone4,
+)
 from .model import HeightmapSpec, OsmSpec, PlayabilitySpec, WorldSpec
+
+# Non-road stock utility behaviour remains independent. Road fitting itself has
+# exactly one production composition point below.
 from .stock_utility_policy import install_stock_utility_policy as _install_stock_utility_policy
 
 _install_stock_utility_policy()
-from .road_quality_policy import install_road_quality_policy as _install_road_quality_policy
 
-_install_road_quality_policy()
-from .stock_road_curve_policy import install_stock_road_curve_policy as _install_stock_road_curve_policy
+from .road_pipeline import install_road_pipeline as _install_road_pipeline
 
-_install_stock_road_curve_policy()
-from .stock_road_geometry_policy import install_stock_road_geometry_policy as _install_stock_road_geometry_policy
-
-_install_stock_road_geometry_policy()
-from .stock_road_transform_policy import install_stock_road_transform_policy as _install_stock_road_transform_policy
-
-_install_stock_road_transform_policy()
-# Fit rigid stock connectors in 3D after their measured planar geometry is known.
-from .stock_road_3d_connector_policy import (
-    install_stock_road_3d_connector_policy as _install_stock_road_3d_connector_policy,
-)
-
-_install_stock_road_3d_connector_policy()
-from .gravel_junction_policy import install_gravel_junction_policy as _install_gravel_junction_policy
-
-_install_gravel_junction_policy()
-from .gravel_gap_policy import install_gravel_gap_policy as _install_gravel_gap_policy
-
-_install_gravel_gap_policy()
-from .gravel_family_policy import install_gravel_family_policy as _install_gravel_family_policy
-
-_install_gravel_family_policy()
-from .stock_road_junction_policy import install_stock_road_junction_policy as _install_stock_road_junction_policy
-
-_install_stock_road_junction_policy()
-from .stock_road_measured_junction_policy import (
-    install_stock_road_measured_junction_policy as _install_stock_road_measured_junction_policy,
-)
-
-_install_stock_road_measured_junction_policy()
-from .stock_road_skew_policy import install_stock_road_skew_policy as _install_stock_road_skew_policy
-
-_install_stock_road_skew_policy()
-# Generated gravel borrows stock dirt connector geometry, but not its brown surface.
-from .gravel_asphalt_transition_policy import (
-    install_gravel_asphalt_transition_policy as _install_gravel_asphalt_transition_policy,
-)
-
-_install_gravel_asphalt_transition_policy()
-from .stock_road_connector_policy import install_stock_road_connector_policy as _install_stock_road_connector_policy
-
-_install_stock_road_connector_policy()
-# Measure the final fitted branch/cap geometry and bridge only connector gaps
-# that still remain in the actual road-object report.
-from .stock_road_surface_overlap_policy import (
-    install_stock_road_surface_overlap_policy as _install_stock_road_surface_overlap_policy,
-)
-
-_install_stock_road_surface_overlap_policy()
-# In open space, spend a small amount of source-line fidelity to prefer longer
-# stock pieces. Source-backed obstacles veto every local shortcut, and the final
-# seam pass avoids adding repair slabs when a larger road already covers a node.
-from .stock_road_relaxation_policy import (
-    install_stock_road_relaxation_policy as _install_stock_road_relaxation_policy,
-)
-
-_install_stock_road_relaxation_policy()
-# Extend the same relaxation obstacle index to mapped fences, walls, hedges,
-# retaining walls and tree rows before any later local/junction fitting policy
-# plans geometry changes.
-from .stock_road_obstacle_policy import (
-    install_stock_road_obstacle_policy as _install_stock_road_obstacle_policy,
-)
-
-_install_stock_road_obstacle_policy()
-# Use the same obstacle-aware freedom at shallow bends and skewed paved T nodes,
-# and keep fallback junction approaches underneath their cap instead of adding
-# lateral six-metre repair slabs across the carriageway.
-from .stock_road_local_fit_policy import (
-    install_stock_road_local_fit_policy as _install_stock_road_local_fit_policy,
-)
-
-_install_stock_road_local_fit_policy()
-# A relaxed junction is only a proposal until every moved arm clears the source
-# obstacle corridor and the resulting geometry passes the ordinary strict native
-# matcher. Never let planning tolerance leak into final junction placement.
-from .stock_road_relaxation_transaction_policy import (
-    install_stock_road_relaxation_transaction_policy as _install_stock_road_relaxation_transaction_policy,
-)
-
-_install_stock_road_relaxation_transaction_policy()
-# Condition stock-road source geometry before rigid pieces are chosen: merge
-# unambiguous same-type OSM fragments, remove sub-metre noise inside the existing
-# obstacle-safe corridor, and retain real junction/surface/sharp-corner anchors.
-from .stock_road_path_conditioning_policy import (
-    install_stock_road_path_conditioning_policy as _install_stock_road_path_conditioning_policy,
-)
-
-_install_stock_road_path_conditioning_policy()
-# A smooth ten-degree source arc can sit less than half a metre from its chord.
-# Preserve coherent one-direction curvature through both simplification stages so
-# the native CWA curve selector actually gets a chance to use curved P3Ds.
-from .stock_road_curve_preservation_policy import (
-    install_stock_road_curve_preservation_policy as _install_stock_road_curve_preservation_policy,
-)
-
-_install_stock_road_curve_preservation_policy()
-# Late Lundby-specific continuity policies were historically present in source
-# and regression tests but never reached normal package startup. Install them as
-# one ordered stack so production builds actually use the paved bend, seam and
-# intersection fixes they were written to provide.
-from .stock_road_late_policy_stack import (
-    install_stock_road_late_policy_stack as _install_stock_road_late_policy_stack,
-)
-
-_install_stock_road_late_policy_stack()
-from .raceway_policy import install_raceway_policy as _install_raceway_policy
-
-_install_raceway_policy()
+_install_road_pipeline()
 
 # Public Overpass servers sometimes all return transient 5xx/timeout errors at
 # once. Install the bounded retry wrapper before milestone modules import the
@@ -156,12 +56,15 @@ from .milestone9_advisory_policy import (
 )
 
 _install_milestone9_advisory_policy()
+
 from .grid_default_policy import install_default_grid_policy as _install_default_grid_policy
 
 _install_default_grid_policy()
+
 from .network import install_overture_release_resolution as _install_overture_release_resolution
 
 _install_overture_release_resolution()
+
 from .procedural_buildings import (
     BuildingGenerationResult,
     BuildingVariantKey,
