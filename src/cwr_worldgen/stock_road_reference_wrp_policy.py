@@ -228,8 +228,11 @@ def _fit(
         starting_id=starting_id,
         progress_callback=progress_callback,
     )
-    if not bool(getattr(spec, "stock_road_piece_fitting", False)):
-        return report
+    # A report containing a native stock T/X has already gone through stock-road
+    # fitting, even for lightweight/internal specs that do not expose the public
+    # ``stock_road_piece_fitting`` flag. Run this harmless ownership cleanup on
+    # the report itself rather than silently skipping it because a config field is
+    # absent. The old guard did exactly that in the junction regression.
     return _drop_native_node_to_connector_stubs(
         report, dataset, projection, spec
     )
