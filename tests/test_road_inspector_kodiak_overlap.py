@@ -74,24 +74,21 @@ def test_kodiak_overlap_scan_range_is_installed() -> None:
     )
 
 
-def test_intended_overlapping_straights_count_as_real_surface_cover() -> None:
+def test_longitudinal_overlap_prevents_a_shallow_exposed_wedge() -> None:
     first = _straight(1, (0.0, 0.0), 0.0)
     # Start the next stock road 0.45 m before the first connector and turn only
-    # one degree. This is the characteristic Kodiak longitudinal overlap, not a
-    # cross-axis repair slab.
+    # one degree. The real road surfaces already overlap far enough that the
+    # forward-edge wedge construction has no exposed triangle to report.
     second = _straight(2, (0.0, 5.80), 1.0)
     first_endpoint = first.endpoints[1]
     second_endpoint = second.endpoints[0]
-    geometry = _grass._grass_wedge_geometry(first_endpoint, second_endpoint)
-    assert geometry is not None
 
-    assert _kodiak._strictly_covered_by_other_paved_surface(
-        first_endpoint,
-        second_endpoint,
-        geometry,
-        (first, second),
-        None,
+    assert math.isclose(
+        math.dist(first_endpoint.point, second_endpoint.point),
+        0.45,
+        abs_tol=1.0e-9,
     )
+    assert _grass._grass_wedge_geometry(first_endpoint, second_endpoint) is None
 
 
 def test_stock_curve_ribbon_is_accepted_as_physical_cover() -> None:
