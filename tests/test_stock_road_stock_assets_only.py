@@ -90,6 +90,54 @@ def test_eleven_degree_mixed_t_can_be_planned_but_not_forced_unmodified() -> Non
     assert native.model_path.casefold() == r"o\road\kr_new_sil_ces_t.p3d"
 
 
+def test_family_first_planner_does_not_reject_t_from_raw_heading_error() -> None:
+    incidents = (
+        _junction._Incident(_direction(0.0), "sil", r"o\road\sil25.p3d"),
+        _junction._Incident(_direction(150.0), "sil", r"o\road\sil25.p3d"),
+        _junction._Incident(_direction(270.0), "ces", r"o\road\ces25.p3d"),
+    )
+
+    # This is intentionally far outside the old 1.25/15-degree source-heading
+    # gates. Planning still chooses the family-compatible stock T; the connector
+    # relaxation transaction, not this raw angle, decides whether it can actually
+    # be reached within its lateral and obstacle bounds.
+    with _planning_junction():
+        native = _stock_only._stock_native_t_dispatch(incidents)
+    assert native is not None
+    assert native.model_path.casefold() == r"o\road\kr_new_sil_ces_t.p3d"
+    assert native.maximum_heading_error_degrees > 5.0
+
+
+def test_tangent_stock_straights_receive_real_longitudinal_overlap() -> None:
+    measure = _p._PolylineMeasure.create(((0.0, 0.0), (0.0, 60.0)))
+    piece = _p._RoadPiece(r"o\road\sil25.p3d", 25.0, 25)
+    baseline = (
+        (piece, (0.0, 0.0), (0.0, 25.0)),
+        (piece, (0.0, 25.0), (0.0, 50.0)),
+    )
+
+    fitted = _stock_only._overlapped_stock_chain(
+        measure,
+        (piece,),
+        baseline,
+        start_distance=0.0,
+        preferred_end_distance=50.0,
+        minimum_end_distance=49.5,
+        maximum_end_distance=60.0,
+    )
+
+    assert fitted != baseline
+    assert len(fitted) == 2
+    assert math.isclose(math.dist(fitted[0][1], fitted[0][2]), 25.0, abs_tol=1.0e-9)
+    assert math.isclose(math.dist(fitted[1][1], fitted[1][2]), 25.0, abs_tol=1.0e-9)
+    assert math.isclose(
+        math.dist(fitted[0][2], fitted[1][1]),
+        _stock_only.ORDINARY_PAVED_OVERLAP_METRES,
+        abs_tol=1.0e-9,
+    )
+    assert math.isclose(fitted[-1][2][1], 49.55, abs_tol=1.0e-9)
+
+
 def test_reference_curve_corridor_is_installed() -> None:
     assert math.isclose(
         _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES,
