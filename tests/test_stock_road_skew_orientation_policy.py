@@ -7,7 +7,6 @@ from pathlib import Path
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_junction_policy as _junction
 from cwr_worldgen import stock_road_skew_orientation_policy as _skew
-from cwr_worldgen import stock_road_turning_t_fallback_policy as _turning_fallback
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
 from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
 from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
@@ -67,10 +66,6 @@ def test_near_orthogonal_t_keeps_measured_branch_side_and_small_slide() -> None:
 
 
 def test_lundby_turning_main_t_rejects_rigid_native_surface() -> None:
-    # Real incident headings at Lundby's all-asphalt T near 3223.50/3181.50.
-    # Lundby23 proves that balancing this 20.66-degree through bend over the
-    # rigid T still leaves its measured connectors roughly 1-2 m from the actual
-    # approach pieces. Keep the visible approaches and low stock fallback instead.
     incidents = (
         _incident(93.732),
         _incident(340.710),
@@ -81,7 +76,7 @@ def test_lundby_turning_main_t_rejects_rigid_native_surface() -> None:
     assert pair is not None
     main_bend = _skew._turning_main_bend_degrees(incidents, pair)
     assert 20.65 <= main_bend <= 20.67
-    assert main_bend > _turning_fallback.MAXIMUM_BALANCED_NATIVE_MAIN_BEND_DEGREES
+    assert main_bend > _skew.MAXIMUM_BALANCED_NATIVE_MAIN_BEND_DEGREES
     assert _skew._same_family_paved_skew_t(incidents, "sil") is None
 
 
@@ -179,8 +174,6 @@ def test_production_fit_uses_low_fallback_for_lundby_turning_main_geometry() -> 
     cap = report.objects[0]
     assert cap.model_path.casefold() == r"o\road\sil6.p3d"
 
-    # The stock six-metre fallback remains at the actual source node while the
-    # approach pieces own the fitted directions. No generated paved_fill is used.
     assert math.dist((cap.x, cap.z), node) < 0.05
     assert all(
         obj.model_path.casefold() != r"o\road\kr_new_sil_sil_t.p3d"
@@ -240,7 +233,6 @@ def test_production_fit_keeps_small_main_axis_fallback_for_45_degree_t() -> None
     main_heading = _junction._heading(incidents[pair[0]].direction)
     assert _finish._axis_heading_difference(cap.heading_degrees, main_heading) < 0.05
 
-    # Most importantly, the visible 90-degree T slab never enters the report.
     assert all(
         obj.model_path.casefold() != r"o\road\kr_new_sil_sil_t.p3d"
         for obj in report.objects
