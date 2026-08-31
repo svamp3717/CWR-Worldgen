@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_emitted_seam_policy as _emitted
-from cwr_worldgen import stock_road_emitted_seam_refinement_policy as _refinement
 from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
 
@@ -146,7 +145,7 @@ def test_aligned_physical_gap_gets_underlay_even_without_tangent_error():
     second = _straight_from_start(2, (0.0, 0.18), 0.0)
     report = SimpleNamespace(objects=(first, second), junction_cap_objects=0)
 
-    plans = _refinement._refined_emitted_seam_cover_plans(report)
+    plans = _emitted._emitted_seam_cover_plans(report)
 
     assert len(plans) == 1
     assert math.isclose(plans[0].tangent_axis_degrees, 0.0, abs_tol=1.0e-9)
@@ -158,7 +157,7 @@ def test_large_straight_miter_uses_one_angle_matched_underlay():
     second = _straight_from_start(2, (0.12, 0.0), 12.0)
     report = SimpleNamespace(objects=(first, second), junction_cap_objects=0)
 
-    plans = _refinement._refined_emitted_seam_cover_plans(report)
+    plans = _emitted._emitted_seam_cover_plans(report)
 
     assert len(plans) == 1
     assert math.isclose(plans[0].tangent_axis_degrees, 6.0, abs_tol=1.0e-9)
@@ -170,7 +169,7 @@ def test_coincident_straight_miter_uses_one_bisecting_underlay():
     second = _straight_from_start(2, (0.0, 0.0), 12.0)
     report = SimpleNamespace(objects=(first, second), junction_cap_objects=0)
 
-    plans = _refinement._refined_emitted_seam_cover_plans(report)
+    plans = _emitted._emitted_seam_cover_plans(report)
 
     assert len(plans) == 1
     assert math.isclose(plans[0].tangent_axis_degrees, 6.0, abs_tol=1.0e-9)
@@ -295,7 +294,7 @@ def test_unambiguous_legacy_paved_cap_endpoint_can_be_sealed():
     approach = _straight_from_start(2, (0.0, 0.15), 0.0)
     report = SimpleNamespace(objects=(cap, approach), junction_cap_objects=1)
 
-    plans = _refinement._refined_emitted_seam_cover_plans(report)
+    plans = _emitted._emitted_seam_cover_plans(report)
 
     assert len(plans) == 1
     assert math.dist(plans[0].centre, (0.0, 0.075)) < 1.0e-9
@@ -306,4 +305,4 @@ def test_near_coincident_overlapping_pieces_are_not_treated_as_seam():
     overlapping = _object(2, r"o\road\sil6.p3d", 0.18, 0.02, 0.4)
     report = SimpleNamespace(objects=(cap, overlapping), junction_cap_objects=1)
 
-    assert _refinement._refined_emitted_seam_cover_plans(report) == ()
+    assert _emitted._emitted_seam_cover_plans(report) == ()
