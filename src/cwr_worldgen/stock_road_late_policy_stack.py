@@ -38,6 +38,7 @@ from . import stock_road_paved_junction_completion_policy as _paved_junctions
 from . import stock_road_fit_first_policy as _fit_first
 from . import stock_road_native_junction_ownership_policy as _native_junction_ownership
 from . import stock_road_reference_wrp_policy as _reference_wrp
+from . import stock_road_kodiak_reference_policy as _kodiak_reference
 
 
 _INSTALLED = False
@@ -139,5 +140,12 @@ def install_stock_road_late_policy_stack() -> None:
     # full planar paved connector lengths. Stock ces/generated gravel keep their
     # existing 3D terrain-following behavior.
     _reference_wrp.install_stock_road_reference_wrp_policy()
+
+    # Kodiak confirms the same planar convention and adds two stronger habits:
+    # long native curve chains are normal paved construction, and correct paved
+    # approaches penetrate a native T/X by about half a metre rather than ending
+    # short or continuing to the logical node beneath it. Keep that paved-only
+    # refinement outermost.
+    _kodiak_reference.install_stock_road_kodiak_reference_policy()
 
     _INSTALLED = True
