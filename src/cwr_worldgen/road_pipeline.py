@@ -62,7 +62,7 @@ _LATE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("visual_finish", "stock_road_visual_finish_policy", "install_stock_road_visual_finish_policy"),
     ("final_continuity", "stock_road_final_continuity_policy", "install_stock_road_final_continuity_policy"),
     ("skew_orientation", "stock_road_skew_orientation_policy", "install_stock_road_skew_orientation_policy"),
-    ("turning_t_fallback", "stock_road_turning_t_fallback_policy", "install_stock_road_turning_t_fallback_policy"),
+    ("turning_t_fallback", "stock_road_skew_orientation_policy", "install_stock_road_turning_t_fallback_policy"),
     ("emitted_seam", "stock_road_emitted_seam_policy", "install_stock_road_emitted_seam_policy"),
     ("paved_wedge_geometry", "stock_road_paved_wedge_policy", "install_stock_road_paved_wedge_policy"),
     ("stock_paved_only", "stock_road_stock_paved_only_policy", "install_stock_road_stock_paved_only_policy"),
