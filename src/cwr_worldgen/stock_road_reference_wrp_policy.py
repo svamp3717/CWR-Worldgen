@@ -14,9 +14,12 @@ Apply those lessons conservatively to paved Resistance families only:
   shrinking by ``cos(pitch)``;
 * final paved stock road/junction objects are emitted with zero pitch while
   retaining the terrain-derived centre Y, matching the reference WRP's stepped
-  horizontal-piece placement style; and
+  horizontal-piece placement style;
 * coherent paved bends are allowed to promote to a native ten-degree curve with
-  fewer prerequisite short facets than the old emergency-only curve policy.
+  fewer prerequisite short facets than the old emergency-only curve policy; and
+* a native T/X owns the road centre all the way to its measured 6.25 m connector,
+  so a late ordinary paved stub from the logical node to that connector is
+  removed before serialization.
 
 This deliberately does not alter stock ``ces`` or generated gravel. Those road
 families retain the existing terrain-following 3D connector policy until they are
@@ -25,13 +28,17 @@ studied separately.
 from __future__ import annotations
 
 from dataclasses import replace
+import math
 import re
 
+from . import generator as _generator
 from . import playability as _p
 from . import stock_road_3d_connector_policy as _three_d
 from . import stock_road_curve_usage_policy as _curve_usage
 from . import stock_road_inspector_candidate_policy as _candidate
 from . import stock_road_model_geometry as _geometry
+from . import stock_road_paved_junction_completion_policy as _paved
+from . import stock_road_visual_finish_policy as _finish
 
 
 _PAVED_FAMILIES = frozenset({"sil", "asf", "kos"})
@@ -54,8 +61,12 @@ REFERENCE_MINIMUM_PROMOTED_CURVES = 1
 REFERENCE_MAXIMUM_EXTRA_CURVE_PIECES = 3
 REFERENCE_INSPECTOR_CURVE_MINIMUM_TURN_DEGREES = 3.0
 
+REFERENCE_NATIVE_NODE_TOLERANCE_METRES = 0.15
+REFERENCE_NATIVE_CONNECTOR_MARGIN_METRES = 0.35
+
 _ORIGINAL_ROAD_OBJECT_ON_SLOPE = None
 _ORIGINAL_USES_MEASURED_RIGID_CONNECTORS = None
+_ORIGINAL_FIT = None
 _INSTALLED = False
 
 
@@ -123,11 +134,113 @@ def _road_object_on_slope(*args, **kwargs):
     return replace(obj, pitch_degrees=0.0)
 
 
+def _source_node_for_native_cap(cap, incident_map):
+    logical = _paved._logical_center(cap)
+    if logical is None:
+        return None
+    if incident_map:
+        matched = _paved._matching_junction(incident_map, logical)
+        if matched is not None:
+            return tuple(matched[0])
+    return tuple(logical)
+
+
+def _drop_native_node_to_connector_stubs(report, dataset, projection, spec):
+    """Remove a paved straight that exists only inside a native T/X footprint.
+
+    The reference WRP's ordinary approaches terminate at the native connector;
+    they do not continue from that connector to the logical intersection node.
+    Some older composed policies can still leave exactly that 6.25 m centre stub
+    after native selection. Use the source junction node as the final authority
+    so the cleanup remains correct even if an asymmetric T's P3D origin is not at
+    the logical road crossing.
+    """
+
+    cap_count = min(
+        int(getattr(report, "junction_cap_objects", 0)), len(report.objects)
+    )
+    if cap_count <= 0:
+        return report
+
+    incident_map = _finish._junction_incident_map(dataset, projection, spec)
+    native_nodes = []
+    for cap in report.objects[:cap_count]:
+        if _paved._native_signature(str(cap.model_path)) is None:
+            continue
+        node = _source_node_for_native_cap(cap, incident_map)
+        if node is not None:
+            native_nodes.append(node)
+    if not native_nodes:
+        return report
+
+    radius = float(_geometry.STOCK_JUNCTION_CONNECTOR_RADIUS_METRES)
+    connector_limit = radius + REFERENCE_NATIVE_CONNECTOR_MARGIN_METRES
+    remove_ids: set[int] = set()
+    for obj in report.objects[cap_count:]:
+        match = _geometry.stock_straight_match(str(obj.model_path))
+        if match is None:
+            continue
+        family = match.group("family").casefold()
+        if family not in _PAVED_FAMILIES:
+            continue
+        length = float(
+            _geometry.STOCK_STRAIGHT_LENGTHS_METRES[int(match.group("length"))]
+        )
+        axis = _p._model_axis(obj, length)
+        for node in native_nodes:
+            distances = tuple(math.dist(node, endpoint) for endpoint in axis)
+            # The characteristic stale object has one endpoint at the logical
+            # node and the other at, or just inside, the native 6.25 m connector.
+            # Longer connector-to-outside approaches never satisfy this gate.
+            if (
+                min(distances) <= REFERENCE_NATIVE_NODE_TOLERANCE_METRES
+                and max(distances) <= connector_limit
+            ):
+                remove_ids.add(int(obj.object_id))
+                break
+
+    if not remove_ids:
+        return report
+    return replace(
+        report,
+        objects=tuple(
+            obj for obj in report.objects if int(obj.object_id) not in remove_ids
+        ),
+    )
+
+
+def _fit(
+    dataset,
+    projection,
+    elevations,
+    spec,
+    *,
+    starting_id: int = 1,
+    progress_callback=None,
+):
+    if _ORIGINAL_FIT is None:
+        raise RuntimeError("reference WRP road policy is not installed")
+    report = _ORIGINAL_FIT(
+        dataset,
+        projection,
+        elevations,
+        spec,
+        starting_id=starting_id,
+        progress_callback=progress_callback,
+    )
+    if not bool(getattr(spec, "stock_road_piece_fitting", False)):
+        return report
+    return _drop_native_node_to_connector_stubs(
+        report, dataset, projection, spec
+    )
+
+
 def install_stock_road_reference_wrp_policy() -> None:
     """Install the paved-only placement rules learned from the reference WRP."""
 
     global _ORIGINAL_ROAD_OBJECT_ON_SLOPE
     global _ORIGINAL_USES_MEASURED_RIGID_CONNECTORS
+    global _ORIGINAL_FIT
     global _INSTALLED
     if _INSTALLED:
         return
@@ -143,6 +256,7 @@ def install_stock_road_reference_wrp_policy() -> None:
     _ORIGINAL_USES_MEASURED_RIGID_CONNECTORS = (
         _three_d._uses_measured_rigid_connectors
     )
+    _ORIGINAL_FIT = _p.fit_road_objects
 
     # ``_three_d._stock_piece_chain`` resolves this helper dynamically even
     # though later curve wrappers sit outside it, so the paved chain reverts to
@@ -165,5 +279,11 @@ def install_stock_road_reference_wrp_policy() -> None:
     _candidate.INSPECTOR_CURVE_MAXIMUM_EXTRA_PIECES = (
         REFERENCE_MAXIMUM_EXTRA_CURVE_PIECES
     )
+
+    # Keep this outermost within the road stack. It does not invent geometry; it
+    # only drops a redundant node-to-connector paved stub after every older
+    # junction wrapper has had its chance to run.
+    _p.fit_road_objects = _fit
+    _generator.fit_road_objects = _fit
 
     _INSTALLED = True
