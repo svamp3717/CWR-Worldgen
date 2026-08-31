@@ -1,88 +1,93 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Single, explicit installation order for world-generation road policies.
 
-Historically the road fitter was patched from ``cwr_worldgen.__init__``,
-``stock_road_late_policy_stack`` and ``raceway_policy``. That made the effective
-runtime fitter difficult to inspect because installation order was spread across
-multiple modules and some installers re-installed or later cancelled earlier
-stages.
+The historical road stack relied on import-time capture of mutable fitter
+functions. That means import order is part of the behaviour, not merely the
+installer call order. Keep that behaviour explicit here:
 
-This module is the one production authority for road-policy activation.
-Individual policy modules still contain their algorithms, but they no longer
-choose when they become active.
+* base policies are imported and installed one at a time, matching the old
+  package startup sequence;
+* late policies are preloaded as a group and then installed in declared order,
+  matching the old late-stack module; and
+* raceway classification runs last and does not compose road fitters.
 
 Set ``CWR_WORLDGEN_ROAD_PIPELINE_TRACE=1`` to print each installed stage during
-package startup. This is intentionally opt-in so normal CLI/GUI output stays
-unchanged.
+package startup.
 """
 from __future__ import annotations
 
+from importlib import import_module
 import os
 import sys
-from collections.abc import Callable
+from types import ModuleType
 
 _INSTALLED = False
 _TRACE_ENV = "CWR_WORLDGEN_ROAD_PIPELINE_TRACE"
+_PACKAGE = __package__ or "cwr_worldgen"
 
+# The base stack historically used import -> install -> import -> install.
+# Preserve that exact timing because several policy modules bind the current
+# fitter or helper implementation when the module itself is imported.
+_BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("road_quality", "road_quality_policy", "install_road_quality_policy"),
+    ("stock_curve_base", "stock_road_curve_policy", "install_stock_road_curve_policy"),
+    ("stock_geometry", "stock_road_geometry_policy", "install_stock_road_geometry_policy"),
+    ("stock_transform", "stock_road_transform_policy", "install_stock_road_transform_policy"),
+    ("stock_3d_connector", "stock_road_3d_connector_policy", "install_stock_road_3d_connector_policy"),
+    ("gravel_junction", "gravel_junction_policy", "install_gravel_junction_policy"),
+    ("gravel_gap", "gravel_gap_policy", "install_gravel_gap_policy"),
+    ("gravel_family", "gravel_family_policy", "install_gravel_family_policy"),
+    ("stock_junction", "stock_road_junction_policy", "install_stock_road_junction_policy"),
+    ("stock_measured_junction", "stock_road_measured_junction_policy", "install_stock_road_measured_junction_policy"),
+    ("stock_skew", "stock_road_skew_policy", "install_stock_road_skew_policy"),
+    ("gravel_asphalt_transition", "gravel_asphalt_transition_policy", "install_gravel_asphalt_transition_policy"),
+    ("stock_connector", "stock_road_connector_policy", "install_stock_road_connector_policy"),
+    ("stock_surface_overlap", "stock_road_surface_overlap_policy", "install_stock_road_surface_overlap_policy"),
+    ("stock_relaxation", "stock_road_relaxation_policy", "install_stock_road_relaxation_policy"),
+    ("stock_obstacles", "stock_road_obstacle_policy", "install_stock_road_obstacle_policy"),
+    ("stock_local_fit", "stock_road_local_fit_policy", "install_stock_road_local_fit_policy"),
+    ("stock_relaxation_transaction", "stock_road_relaxation_transaction_policy", "install_stock_road_relaxation_transaction_policy"),
+    ("stock_path_conditioning", "stock_road_path_conditioning_policy", "install_stock_road_path_conditioning_policy"),
+    ("stock_curve_preservation", "stock_road_curve_preservation_policy", "install_stock_road_curve_preservation_policy"),
+)
 
-# Ordered stage names are public on purpose. A debugger or regression test can
-# inspect the exact production composition without reverse-engineering monkey
-# patches from several import sites.
+# The old stock_road_late_policy_stack imported this entire family first and
+# installed it second. Keep that semantic while deleting the orchestration
+# module itself. Four cancelled overlap layers are intentionally absent:
+# straight_seam, curve_seam_fallback, intersection_edge and fit_first.
+_LATE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("wrptool_catalogue", "stock_road_wrptool_catalogue_policy", "install_stock_road_wrptool_catalogue_policy"),
+    ("curve_regularization", "stock_road_curve_regularization_policy", "install_stock_road_curve_regularization_policy"),
+    ("sharp_turn", "stock_road_sharp_turn_policy", "install_stock_road_sharp_turn_policy"),
+    ("sharp_exact", "stock_road_sharp_exact_policy", "install_stock_road_sharp_exact_policy"),
+    ("s_bend", "stock_road_s_bend_policy", "install_stock_road_s_bend_policy"),
+    ("micro_bend", "stock_road_micro_bend_policy", "install_stock_road_micro_bend_policy"),
+    ("s_bend_exact", "stock_road_s_bend_exact_policy", "install_stock_road_s_bend_exact_policy"),
+    ("long_s_bend", "stock_road_long_s_bend_policy", "install_stock_road_long_s_bend_policy"),
+    ("single_vertex_bend", "stock_road_single_vertex_bend_policy", "install_stock_road_single_vertex_bend_policy"),
+    ("curve_usage", "stock_road_curve_usage_policy", "install_stock_road_curve_usage_policy"),
+    ("junction_endpoint", "stock_road_junction_endpoint_policy", "install_stock_road_junction_endpoint_policy"),
+    ("visual_finish", "stock_road_visual_finish_policy", "install_stock_road_visual_finish_policy"),
+    ("final_continuity", "stock_road_final_continuity_policy", "install_stock_road_final_continuity_policy"),
+    ("skew_orientation", "stock_road_skew_orientation_policy", "install_stock_road_skew_orientation_policy"),
+    ("turning_t_fallback", "stock_road_turning_t_fallback_policy", "install_stock_road_turning_t_fallback_policy"),
+    ("emitted_seam", "stock_road_emitted_seam_policy", "install_stock_road_emitted_seam_policy"),
+    ("paved_wedge_geometry", "stock_road_paved_wedge_policy", "install_stock_road_paved_wedge_policy"),
+    ("emitted_seam_refinement", "stock_road_emitted_seam_refinement_policy", "install_stock_road_emitted_seam_refinement_policy"),
+    ("stock_paved_only", "stock_road_stock_paved_only_policy", "install_stock_road_stock_paved_only_policy"),
+    ("inspector_candidates", "stock_road_inspector_candidate_policy", "install_stock_road_inspector_candidate_policy"),
+    ("candidate_enforcement", "stock_road_inspector_candidate_enforcement_policy", "install_stock_road_inspector_candidate_selector_policy"),
+    ("paved_junction_completion", "stock_road_paved_junction_completion_policy", "install_stock_road_paved_junction_completion_policy"),
+    ("native_junction_ownership", "stock_road_native_junction_ownership_policy", "install_stock_road_native_junction_ownership_policy"),
+    ("candidate_final_enforcement", "stock_road_inspector_candidate_enforcement_policy", "install_stock_road_inspector_candidate_final_policy"),
+    ("reference_wrp", "stock_road_reference_wrp_policy", "install_stock_road_reference_wrp_policy"),
+    ("kodiak_reference", "stock_road_kodiak_reference_policy", "install_stock_road_kodiak_reference_policy"),
+    ("stock_assets_only", "stock_road_stock_assets_only_policy", "install_stock_road_stock_assets_only_policy"),
+)
+
 ROAD_PIPELINE_STAGES: tuple[str, ...] = (
-    # Baseline stock-road fitting.
-    "road_quality",
-    "stock_curve_base",
-    "stock_geometry",
-    "stock_transform",
-    "stock_3d_connector",
-    # Gravel and mixed-surface integration.
-    "gravel_junction",
-    "gravel_gap",
-    "gravel_family",
-    "stock_junction",
-    "stock_measured_junction",
-    "stock_skew",
-    "gravel_asphalt_transition",
-    "stock_connector",
-    "stock_surface_overlap",
-    # Source conditioning / obstacle-safe fitting.
-    "stock_relaxation",
-    "stock_obstacles",
-    "stock_local_fit",
-    "stock_relaxation_transaction",
-    "stock_path_conditioning",
-    "stock_curve_preservation",
-    # Native curve and bend selection.
-    "wrptool_catalogue",
-    "curve_regularization",
-    "sharp_turn",
-    "sharp_exact",
-    "s_bend",
-    "micro_bend",
-    "s_bend_exact",
-    "long_s_bend",
-    "single_vertex_bend",
-    "curve_usage",
-    "junction_endpoint",
-    # Final continuity / physical emitted geometry.
-    "visual_finish",
-    "final_continuity",
-    "skew_orientation",
-    "turning_t_fallback",
-    "emitted_seam",
-    "paved_wedge_geometry",
-    "emitted_seam_refinement",
-    "stock_paved_only",
-    "inspector_candidates",
-    "candidate_enforcement",
-    "paved_junction_completion",
-    "native_junction_ownership",
-    "candidate_final_enforcement",
-    "reference_wrp",
-    "kodiak_reference",
-    "stock_assets_only",
-    # OSM classification belongs last so it cannot secretly compose fitter
-    # wrappers. It only broadens supported paved source classes/assets.
+    *(stage for stage, _module, _installer in _BASE_STAGE_SPECS),
+    *(stage for stage, _module, _installer in _LATE_STAGE_SPECS),
     "raceway_classification",
 )
 
@@ -93,131 +98,42 @@ def _trace(stage: str) -> None:
         print(f"[cwr-road-pipeline] installed {stage}", file=sys.stderr)
 
 
-def _run(stage: str, installer: Callable[[], None]) -> None:
-    installer()
+def _load(module_name: str) -> ModuleType:
+    return import_module(f".{module_name}", _PACKAGE)
+
+
+def _invoke(stage: str, module: ModuleType, installer_name: str) -> None:
+    getattr(module, installer_name)()
     _trace(stage)
 
 
+def _install_base_stages() -> None:
+    for stage, module_name, installer_name in _BASE_STAGE_SPECS:
+        module = _load(module_name)
+        _invoke(stage, module, installer_name)
+
+
+def _install_late_stages() -> None:
+    # Import every late module before installing any late module. This mirrors
+    # the historical late-stack module and preserves import-time helper capture.
+    modules = {
+        module_name: _load(module_name)
+        for _stage, module_name, _installer_name in _LATE_STAGE_SPECS
+    }
+    for stage, module_name, installer_name in _LATE_STAGE_SPECS:
+        _invoke(stage, modules[module_name], installer_name)
+
+
 def install_road_pipeline() -> None:
-    """Install the complete production road fitter exactly once.
-
-    This keeps the prior effective final behaviour while removing policy layers
-    whose output was immediately cancelled later in startup. In particular:
-
-    * final-continuity already disables visual curve-seam underlays;
-    * straight-seam and curve-seam fallback re-enabled those underlays only for
-      ``fit_first`` to disable them again; and
-    * intersection-edge wrapped the final fitter only for ``fit_first`` to turn
-      its application hook into a pass-through.
-
-    Those four cancelled layers are intentionally absent here.
-    """
+    """Install the production road fitter exactly once."""
 
     global _INSTALLED
     if _INSTALLED:
         return
 
-    from .road_quality_policy import install_road_quality_policy
-    from .stock_road_curve_policy import install_stock_road_curve_policy
-    from .stock_road_geometry_policy import install_stock_road_geometry_policy
-    from .stock_road_transform_policy import install_stock_road_transform_policy
-    from .stock_road_3d_connector_policy import install_stock_road_3d_connector_policy
-    from .gravel_junction_policy import install_gravel_junction_policy
-    from .gravel_gap_policy import install_gravel_gap_policy
-    from .gravel_family_policy import install_gravel_family_policy
-    from .stock_road_junction_policy import install_stock_road_junction_policy
-    from .stock_road_measured_junction_policy import install_stock_road_measured_junction_policy
-    from .stock_road_skew_policy import install_stock_road_skew_policy
-    from .gravel_asphalt_transition_policy import install_gravel_asphalt_transition_policy
-    from .stock_road_connector_policy import install_stock_road_connector_policy
-    from .stock_road_surface_overlap_policy import install_stock_road_surface_overlap_policy
-    from .stock_road_relaxation_policy import install_stock_road_relaxation_policy
-    from .stock_road_obstacle_policy import install_stock_road_obstacle_policy
-    from .stock_road_local_fit_policy import install_stock_road_local_fit_policy
-    from .stock_road_relaxation_transaction_policy import install_stock_road_relaxation_transaction_policy
-    from .stock_road_path_conditioning_policy import install_stock_road_path_conditioning_policy
-    from .stock_road_curve_preservation_policy import install_stock_road_curve_preservation_policy
+    _install_base_stages()
+    _install_late_stages()
 
-    _run("road_quality", install_road_quality_policy)
-    _run("stock_curve_base", install_stock_road_curve_policy)
-    _run("stock_geometry", install_stock_road_geometry_policy)
-    _run("stock_transform", install_stock_road_transform_policy)
-    _run("stock_3d_connector", install_stock_road_3d_connector_policy)
-    _run("gravel_junction", install_gravel_junction_policy)
-    _run("gravel_gap", install_gravel_gap_policy)
-    _run("gravel_family", install_gravel_family_policy)
-    _run("stock_junction", install_stock_road_junction_policy)
-    _run("stock_measured_junction", install_stock_road_measured_junction_policy)
-    _run("stock_skew", install_stock_road_skew_policy)
-    _run("gravel_asphalt_transition", install_gravel_asphalt_transition_policy)
-    _run("stock_connector", install_stock_road_connector_policy)
-    _run("stock_surface_overlap", install_stock_road_surface_overlap_policy)
-    _run("stock_relaxation", install_stock_road_relaxation_policy)
-    _run("stock_obstacles", install_stock_road_obstacle_policy)
-    _run("stock_local_fit", install_stock_road_local_fit_policy)
-    _run("stock_relaxation_transaction", install_stock_road_relaxation_transaction_policy)
-    _run("stock_path_conditioning", install_stock_road_path_conditioning_policy)
-    _run("stock_curve_preservation", install_stock_road_curve_preservation_policy)
-
-    from .stock_road_wrptool_catalogue_policy import install_stock_road_wrptool_catalogue_policy
-    from .stock_road_curve_regularization_policy import install_stock_road_curve_regularization_policy
-    from .stock_road_sharp_turn_policy import install_stock_road_sharp_turn_policy
-    from .stock_road_sharp_exact_policy import install_stock_road_sharp_exact_policy
-    from .stock_road_s_bend_policy import install_stock_road_s_bend_policy
-    from .stock_road_micro_bend_policy import install_stock_road_micro_bend_policy
-    from .stock_road_s_bend_exact_policy import install_stock_road_s_bend_exact_policy
-    from .stock_road_long_s_bend_policy import install_stock_road_long_s_bend_policy
-    from .stock_road_single_vertex_bend_policy import install_stock_road_single_vertex_bend_policy
-    from .stock_road_curve_usage_policy import install_stock_road_curve_usage_policy
-    from .stock_road_junction_endpoint_policy import install_stock_road_junction_endpoint_policy
-    from .stock_road_visual_finish_policy import install_stock_road_visual_finish_policy
-    from .stock_road_final_continuity_policy import install_stock_road_final_continuity_policy
-    from .stock_road_skew_orientation_policy import install_stock_road_skew_orientation_policy
-    from .stock_road_turning_t_fallback_policy import install_stock_road_turning_t_fallback_policy
-    from .stock_road_emitted_seam_policy import install_stock_road_emitted_seam_policy
-    from .stock_road_paved_wedge_policy import install_stock_road_paved_wedge_policy
-    from .stock_road_emitted_seam_refinement_policy import install_stock_road_emitted_seam_refinement_policy
-    from .stock_road_stock_paved_only_policy import install_stock_road_stock_paved_only_policy
-    from .stock_road_inspector_candidate_policy import install_stock_road_inspector_candidate_policy
-    from .stock_road_inspector_candidate_enforcement_policy import (
-        install_stock_road_inspector_candidate_final_policy,
-        install_stock_road_inspector_candidate_selector_policy,
-    )
-    from .stock_road_paved_junction_completion_policy import install_stock_road_paved_junction_completion_policy
-    from .stock_road_native_junction_ownership_policy import install_stock_road_native_junction_ownership_policy
-    from .stock_road_reference_wrp_policy import install_stock_road_reference_wrp_policy
-    from .stock_road_kodiak_reference_policy import install_stock_road_kodiak_reference_policy
-    from .stock_road_stock_assets_only_policy import install_stock_road_stock_assets_only_policy
-
-    _run("wrptool_catalogue", install_stock_road_wrptool_catalogue_policy)
-    _run("curve_regularization", install_stock_road_curve_regularization_policy)
-    _run("sharp_turn", install_stock_road_sharp_turn_policy)
-    _run("sharp_exact", install_stock_road_sharp_exact_policy)
-    _run("s_bend", install_stock_road_s_bend_policy)
-    _run("micro_bend", install_stock_road_micro_bend_policy)
-    _run("s_bend_exact", install_stock_road_s_bend_exact_policy)
-    _run("long_s_bend", install_stock_road_long_s_bend_policy)
-    _run("single_vertex_bend", install_stock_road_single_vertex_bend_policy)
-    _run("curve_usage", install_stock_road_curve_usage_policy)
-    _run("junction_endpoint", install_stock_road_junction_endpoint_policy)
-    _run("visual_finish", install_stock_road_visual_finish_policy)
-    _run("final_continuity", install_stock_road_final_continuity_policy)
-    _run("skew_orientation", install_stock_road_skew_orientation_policy)
-    _run("turning_t_fallback", install_stock_road_turning_t_fallback_policy)
-    _run("emitted_seam", install_stock_road_emitted_seam_policy)
-    _run("paved_wedge_geometry", install_stock_road_paved_wedge_policy)
-    _run("emitted_seam_refinement", install_stock_road_emitted_seam_refinement_policy)
-    _run("stock_paved_only", install_stock_road_stock_paved_only_policy)
-    _run("inspector_candidates", install_stock_road_inspector_candidate_policy)
-    _run("candidate_enforcement", install_stock_road_inspector_candidate_selector_policy)
-    _run("paved_junction_completion", install_stock_road_paved_junction_completion_policy)
-    _run("native_junction_ownership", install_stock_road_native_junction_ownership_policy)
-    _run("candidate_final_enforcement", install_stock_road_inspector_candidate_final_policy)
-    _run("reference_wrp", install_stock_road_reference_wrp_policy)
-    _run("kodiak_reference", install_stock_road_kodiak_reference_policy)
-    _run("stock_assets_only", install_stock_road_stock_assets_only_policy)
-
-    from .raceway_policy import install_raceway_policy
-
-    _run("raceway_classification", install_raceway_policy)
+    raceway = _load("raceway_policy")
+    _invoke("raceway_classification", raceway, "install_raceway_policy")
     _INSTALLED = True
