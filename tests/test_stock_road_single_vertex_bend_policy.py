@@ -4,9 +4,9 @@ from __future__ import annotations
 import math
 
 from cwr_worldgen import playability as _p
+from cwr_worldgen.road_pipeline import ROAD_PIPELINE_STAGES
 from cwr_worldgen import stock_road_model_geometry as _model_geometry
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
-from cwr_worldgen import stock_road_single_vertex_bend_policy as _single
 
 
 def _isolated_corner(turn_degrees: float):
@@ -95,22 +95,22 @@ def test_isolated_thirty_two_degree_corner_changes_production_fit_to_native_curv
 def test_small_heading_noise_is_not_promoted_to_stock_curve_span() -> None:
     points = _isolated_corner(5.0)
 
-    assert _single._isolated_single_vertex_spans(points) == ()
+    assert _sharp._isolated_single_vertex_spans(points) == ()
 
 
 def test_boundary_corner_is_left_to_endpoint_or_junction_fitting() -> None:
     points = _isolated_corner(12.0)[1:]
 
-    assert _single._isolated_single_vertex_spans(points) == ()
+    assert _sharp._isolated_single_vertex_spans(points) == ()
 
 
 def test_existing_sustained_span_wins_over_single_vertex_augmentation() -> None:
     points = _isolated_corner(12.0)
     existing = ((0, 3, 1),)
 
-    assert _single._isolated_single_vertex_spans(points, existing) == ()
+    assert _sharp._isolated_single_vertex_spans(points, existing) == ()
 
 
-def test_single_vertex_policy_is_active_on_package_import() -> None:
-    assert _single._INSTALLED
-    assert _sharp._sharp_turn_spans is _single._single_vertex_sharp_turn_spans
+def test_single_vertex_behavior_is_owned_by_sharp_turn_stage() -> None:
+    assert _sharp._INSTALLED
+    assert "single_vertex_bend" not in ROAD_PIPELINE_STAGES
