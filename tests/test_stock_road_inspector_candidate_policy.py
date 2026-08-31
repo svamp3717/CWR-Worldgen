@@ -9,11 +9,10 @@ from cwr_worldgen import stock_road_curve_usage_policy as _curve_usage
 from cwr_worldgen import stock_road_emitted_seam_policy as _emitted
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_junction_policy as _junction
-from cwr_worldgen import stock_road_micro_bend_policy as _micro
+from cwr_worldgen import stock_road_junction_endpoint_policy as _junction_endpoint
 from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen import stock_road_native_junction_ownership_policy as _ownership
 from cwr_worldgen import stock_road_paved_junction_completion_policy as _paved
-from cwr_worldgen import stock_road_single_vertex_bend_policy as _single
 from cwr_worldgen import stock_road_surface_overlap_policy as _surface
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
 
@@ -108,7 +107,9 @@ def test_mixed_paved_ces_t_uses_same_strict_candidate_path() -> None:
 
     assert _candidate._eligible_paved_or_mixed_incidents(mixed)
     assert not _candidate._eligible_paved_or_mixed_incidents(dirt_only)
-    assert _paved._all_paved_incidents is _candidate._eligible_paved_or_mixed_incidents
+    # The existing all-paved completion policy keeps its original scope. Mixed
+    # paved/ces handling belongs only to the final Inspector candidate layer.
+    assert not _paved._all_paved_incidents(mixed)
 
 
 def test_measured_native_origin_keeps_logical_center_on_source_node() -> None:
@@ -299,20 +300,10 @@ def test_wedge_candidate_emits_no_generated_or_full_turn_strip(monkeypatch) -> N
     assert fixed.short_piece_objects == 0
 
 
-def test_candidate_curve_search_is_broader_but_still_paved_only() -> None:
-    assert math.isclose(
-        _micro.MINIMUM_MICRO_BEND_TOTAL_TURN_DEGREES,
-        _candidate.INSPECTOR_CURVE_MINIMUM_TURN_DEGREES,
-    )
-    assert math.isclose(
-        _single.MINIMUM_SINGLE_VERTEX_TURN_DEGREES,
-        _candidate.INSPECTOR_CURVE_MINIMUM_TURN_DEGREES,
-    )
-    assert math.isclose(
-        _curve_usage._MINIMUM_TOTAL_TURN_DEGREES,
-        _candidate.INSPECTOR_CURVE_MINIMUM_TURN_DEGREES,
-    )
-    assert _curve_usage._MINIMUM_PROMOTED_CURVES == 1
+def test_candidate_curve_search_stays_inside_final_endpoint_guard() -> None:
+    assert _p._stock_piece_chain is _junction_endpoint._junction_endpoint_chain
+    assert _junction_endpoint._ORIGINAL_CHAIN is _candidate._candidate_exact_curve_chain
+    assert _candidate._ORIGINAL_PIECE_CHAIN is _curve_usage._curve_promotion_chain
 
 
 def test_candidate_policy_is_wired_into_production_hooks() -> None:
@@ -321,4 +312,5 @@ def test_candidate_policy_is_wired_into_production_hooks() -> None:
     assert _junction._native_junction_object is _candidate._measured_native_junction_object
     assert _ownership._trim_one_native_center is _candidate._trim_one_native_center
     assert _emitted._apply_emitted_seam_covers is _candidate._apply_wedge_candidates
-    assert _p._stock_piece_chain is _candidate._candidate_exact_curve_chain
+    assert _junction_endpoint._ORIGINAL_CHAIN is _candidate._candidate_exact_curve_chain
+    assert _p._stock_piece_chain is _junction_endpoint._junction_endpoint_chain
