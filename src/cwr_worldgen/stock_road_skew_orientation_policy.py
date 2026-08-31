@@ -9,10 +9,10 @@ cannot rotate the visible asphalt tongue to match that line.
 
 A second residual case occurs when the through road itself turns at the
 intersection. A balanced native T can split a modest bend over all three rigid
-connectors, but larger bends are safer on the low central-fill path so the fitted
-approaches remain authoritative. Both decisions are one late junction-output
-responsibility, but their installers remain separately timed to preserve the
-historical pipeline order.
+connectors, but larger bends are safer on the low stock-family central-fill path
+so the fitted approaches remain authoritative. Both decisions are one late
+junction-output responsibility, but their installers remain separately timed to
+preserve the historical pipeline order.
 """
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ from . import stock_road_final_continuity_policy as _final
 from . import stock_road_junction_policy as _junction
 from . import stock_road_model_geometry as _model_geometry
 from . import stock_road_visual_finish_policy as _finish
-from .procedural_infrastructure import paved_fill_model_path
 
 MAXIMUM_NATIVE_T_BRANCH_ERROR_DEGREES = 20.0
 MINIMUM_TURNING_T_MAIN_BEND_DEGREES = 2.0
@@ -302,6 +301,10 @@ def _nearest_source_junction(incident_map, point: tuple[float, float]):
 
 
 def _legacy_cap_for_turning_t(current, source_node, incidents, family, elevations, spec):
+    """Demote a turning T with the stock family short piece."""
+
+    if family not in {"sil", "asf", "kos"}:
+        return current
     pair = _junction._dominant_pair(incidents)
     if pair is None:
         return current
@@ -318,14 +321,9 @@ def _legacy_cap_for_turning_t(current, source_node, incidents, family, elevation
         float(source_node[0]) + direction[0] * half,
         float(source_node[1]) + direction[1] * half,
     )
-    model_path = (
-        paved_fill_model_path(str(getattr(spec, "name", "cwr_worldgen")))
-        if family == "sil"
-        else rf"o\road\{family}6.p3d"
-    )
     fixed = _p._road_object_on_slope(
         int(current.object_id),
-        model_path,
+        rf"o\road\{family}6.p3d",
         start,
         end,
         elevations,
