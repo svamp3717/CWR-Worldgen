@@ -9,12 +9,13 @@ apply the Inspector tolerance to stock paved/native choices, and run one final
 candidate ownership pass over the exact report that will be serialized to WRP.
 
 A strict final selector and a useful connector-relaxation planner are not the
-same thing. During the transaction's planning phase a near-straight paved T may
-provisionally use the wider historical heading budget so the approach points can
-be moved onto the measured Memory-LOD connectors. The transaction then re-runs
-the strict selector against that edited geometry before committing anything.
-A T whose through road is itself turning never receives that planning exception;
-Road Inspector's turning-cap candidate keeps those approaches authoritative.
+same thing. During the local-fit transaction's planning phase a near-straight
+paved T may provisionally use the wider historical heading budget so the approach
+points can be moved onto the measured Memory-LOD connectors. The transaction
+then re-runs the strict selector against that edited geometry before committing
+anything. A T whose through road is itself turning never receives that planning
+exception; Road Inspector's turning-cap candidate keeps those approaches
+authoritative.
 """
 from __future__ import annotations
 
@@ -30,7 +31,6 @@ from . import stock_road_local_fit_policy as _local
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_native_junction_ownership_policy as _ownership
 from . import stock_road_paved_junction_completion_policy as _paved
-from . import stock_road_relaxation_transaction_policy as _transaction
 
 
 MAXIMUM_NATIVE_THROUGH_TURN_DEGREES = 1.25
@@ -100,7 +100,7 @@ def _candidate_native_t_dispatch(incidents):
     if _through_turn_degrees(incidents) > MAXIMUM_NATIVE_THROUGH_TURN_DEGREES:
         return None
 
-    if _transaction._PLANNING_RELAXED_JUNCTION.get():
+    if _local._PLANNING_RELAXED_JUNCTION.get():
         limit = _planning_tolerance_degrees(incidents)
         if limit is not None:
             return _measured_native_t_with_limit(incidents, limit)
@@ -144,15 +144,7 @@ def install_stock_road_inspector_candidate_selector_policy() -> None:
 
 
 def _drop_fully_owned_native_straights(report):
-    """Remove any ordinary stock straight wholly inside a native T/X footprint.
-
-    This final guard is intentionally simpler than the span-rebuilding ownership
-    pass. It handles the case Road Inspector still found in production: a short
-    ordinary approach can be added or retained after the earlier trim, with both
-    of its physical endpoints at or inside the native 6.25 m connector radius.
-    Such an object contributes no road outside the junction mesh, so deleting it
-    cannot create an exterior gap and prevents duplicate borders at the centre.
-    """
+    """Remove any ordinary stock straight wholly inside a native T/X footprint."""
 
     cap_count = min(
         int(getattr(report, "junction_cap_objects", 0)), len(report.objects)
