@@ -61,6 +61,7 @@ jobs:
             tests/test_stock_road_curve_seam_fallback_policy.py \
             tests/test_stock_road_curve_usage_policy.py \
             tests/test_stock_road_reference_wrp_policy.py \
+            tests/test_stock_road_kodiak_reference_policy.py \
             tests/test_stock_road_emitted_seam_policy.py \
             tests/test_stock_road_final_continuity_policy.py \
             tests/test_stock_road_fit_first_policy.py \
