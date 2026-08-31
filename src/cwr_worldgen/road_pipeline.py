@@ -65,7 +65,7 @@ _LATE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("micro_bend", "stock_road_micro_bend_policy", "install_stock_road_micro_bend_policy"),
     ("s_bend_exact", "stock_road_s_bend_exact_policy", "install_stock_road_s_bend_exact_policy"),
     ("curve_usage", "stock_road_curve_usage_policy", "install_stock_road_curve_usage_policy"),
-    ("junction_endpoint", "stock_road_junction_endpoint_policy", "install_stock_road_junction_endpoint_policy"),
+    ("junction_endpoint", "stock_road_junction_policy", "install_stock_road_junction_endpoint_policy"),
     ("visual_finish", "stock_road_visual_finish_policy", "install_stock_road_visual_finish_policy"),
     ("final_continuity", "stock_road_final_continuity_policy", "install_stock_road_final_continuity_policy"),
     ("skew_orientation", "stock_road_skew_orientation_policy", "install_stock_road_skew_orientation_policy"),
