@@ -27,7 +27,6 @@ from . import playability as _p
 from . import stock_road_inspector_candidate_policy as _candidate
 from . import stock_road_junction_policy as _junction
 from . import stock_road_local_fit_policy as _local
-from . import stock_road_measured_junction_policy as _measured
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_native_junction_ownership_policy as _ownership
 from . import stock_road_paved_junction_completion_policy as _paved
@@ -87,7 +86,7 @@ def _measured_native_t_with_limit(incidents, limit_degrees: float):
     previous = _junction.MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES
     try:
         _junction.MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = float(limit_degrees)
-        return _measured._native_t_junction(incidents)
+        return _junction._measured_native_t_junction(incidents)
     finally:
         _junction.MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = previous
 
