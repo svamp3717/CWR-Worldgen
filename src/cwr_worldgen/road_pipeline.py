@@ -28,9 +28,6 @@ _PACKAGE = __package__ or "cwr_worldgen"
 _MAXIMUM_PAVED_SEAM_TANGENT_ERROR_DEGREES = 8.0
 _MAXIMUM_EXACT_S_BEND_RUN_METRES = 1200.0
 
-# The base stack historically used import -> install -> import -> install.
-# Preserve that exact timing because several policy modules bind the current
-# fitter or helper implementation when the module itself is imported.
 _BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("road_quality", "road_quality_policy", "install_road_quality_policy"),
     ("stock_curve_base", "stock_road_curve_policy", "install_stock_road_curve_policy"),
@@ -41,7 +38,7 @@ _BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("gravel_gap", "gravel_gap_policy", "install_gravel_gap_policy"),
     ("gravel_family", "gravel_family_policy", "install_gravel_family_policy"),
     ("stock_junction", "stock_road_junction_policy", "install_stock_road_junction_policy"),
-    ("stock_measured_junction", "stock_road_measured_junction_policy", "install_stock_road_measured_junction_policy"),
+    ("stock_measured_junction", "stock_road_junction_policy", "install_stock_road_measured_junction_policy"),
     ("stock_skew", "stock_road_junction_policy", "install_stock_road_skew_policy"),
     ("gravel_asphalt_transition", "gravel_asphalt_transition_policy", "install_gravel_asphalt_transition_policy"),
     ("stock_connector", "stock_road_connector_policy", "install_stock_road_connector_policy"),
@@ -53,10 +50,6 @@ _BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("stock_curve_preservation", "stock_road_curve_preservation_policy", "install_stock_road_curve_preservation_policy"),
 )
 
-# The old stock_road_late_policy_stack imported this entire family first and
-# installed it second. Keep that semantic while deleting the orchestration
-# module itself. Cancelled overlap layers and folded compatibility wrappers are
-# intentionally absent.
 _LATE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("curve_regularization", "stock_road_curve_regularization_policy", "install_stock_road_curve_regularization_policy"),
     ("sharp_turn", "stock_road_sharp_turn_policy", "install_stock_road_sharp_turn_policy"),
@@ -112,8 +105,6 @@ def _install_base_stages() -> None:
 
 
 def _install_late_stages() -> None:
-    # Import every late module before installing any late module. This mirrors
-    # the historical late-stack module and preserves import-time helper capture.
     modules = {
         module_name: _load(module_name)
         for _stage, module_name, _installer_name in _LATE_STAGE_SPECS
@@ -121,16 +112,10 @@ def _install_late_stages() -> None:
     for stage, module_name, installer_name in _LATE_STAGE_SPECS:
         _invoke(stage, modules[module_name], installer_name)
         if stage == "s_bend_exact":
-            # A retired compatibility policy existed only to raise this exact
-            # covered-run search cap from 360 m to 1200 m.
             modules["stock_road_s_bend_exact_policy"].MAXIMUM_EXACT_S_BEND_RUN_METRES = (
                 _MAXIMUM_EXACT_S_BEND_RUN_METRES
             )
         elif stage == "final_continuity":
-            # The retired curve-seam fallback used to leave this 8-degree
-            # geometry bound behind even though fit-first later disabled its
-            # visual object-appending hook. The final physical emitted-seam
-            # planner still consumes the bound, so preserve the value directly.
             modules[
                 "stock_road_visual_finish_policy"
             ].MAXIMUM_CURVE_SEAM_TANGENT_ERROR_DEGREES = (
@@ -139,8 +124,6 @@ def _install_late_stages() -> None:
 
 
 def _install_raceway_classification() -> None:
-    """Treat OSM motor raceways as ordinary supported paved vehicle roads."""
-
     asset_mapping = _load("asset_mapping")
     generator = _load("generator")
     normalization = _load("normalization")
@@ -174,21 +157,16 @@ def _install_raceway_classification() -> None:
 
     wrapped._cwr_raceway_classification = True  # type: ignore[attr-defined]
     asset_mapping.default_osm_asset_mapping = wrapped
-    # generator.py imports the mapping function directly.
     generator.default_osm_asset_mapping = wrapped
 
 
 def _synchronise_public_fitter() -> None:
-    """Expose the same final fitter through playability and generator."""
-
     generator = _load("generator")
     playability = _load("playability")
     playability.fit_road_objects = generator.fit_road_objects
 
 
 def install_road_pipeline() -> None:
-    """Install the production road fitter exactly once."""
-
     global _INSTALLED
     if _INSTALLED:
         return
