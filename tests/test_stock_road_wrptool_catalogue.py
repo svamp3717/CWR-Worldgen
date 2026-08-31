@@ -7,7 +7,6 @@ import math
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen import stock_road_junction_policy as _junction
 from cwr_worldgen import stock_road_wrp_catalogue as _catalogue
-from cwr_worldgen import stock_road_wrptool_catalogue_policy as _policy
 
 
 _EXPECTED_T = {
@@ -42,6 +41,12 @@ def test_wrptool_catalogue_contains_every_resistance_t_and_crossroad() -> None:
         "sil": r"o\road\kr_new_silxsil.p3d"
     }
     assert r"o\road\kr_new_kos.p3d" in _catalogue.WRPTOOL_SPECIAL_ROAD_MODELS
+
+
+def test_junction_owner_uses_wrptool_catalogue_directly() -> None:
+    assert _junction._T_JUNCTION_MODELS == _catalogue.WRPTOOL_T_JUNCTION_MODELS
+    assert _junction._X_JUNCTION_MODELS == _catalogue.WRPTOOL_X_JUNCTION_MODELS
+    assert _junction._ALL_NATIVE_JUNCTION_MODELS == _catalogue.WRPTOOL_NATIVE_JUNCTION_MODELS
 
 
 def test_generator_can_select_every_wrptool_t_combination() -> None:
@@ -97,7 +102,7 @@ def test_wrptool_native_model_wins_even_if_legacy_cap_family_differs(monkeypatch
         ),
     )
 
-    result = _policy._replace_stock_junction_caps(
+    result = _junction._replace_stock_junction_caps(
         report,
         dataset=object(),
         projection=object(),
