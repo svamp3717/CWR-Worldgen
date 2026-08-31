@@ -136,6 +136,14 @@ def _install_late_stages() -> None:
             )
 
 
+def _synchronise_public_fitter() -> None:
+    """Expose the same final fitter through playability and generator."""
+
+    generator = _load("generator")
+    playability = _load("playability")
+    playability.fit_road_objects = generator.fit_road_objects
+
+
 def install_road_pipeline() -> None:
     """Install the production road fitter exactly once."""
 
@@ -145,6 +153,7 @@ def install_road_pipeline() -> None:
 
     _install_base_stages()
     _install_late_stages()
+    _synchronise_public_fitter()
 
     raceway = _load("raceway_policy")
     _invoke("raceway_classification", raceway, "install_raceway_policy")
