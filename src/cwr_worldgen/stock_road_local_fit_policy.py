@@ -1,28 +1,30 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Prefer continuous stock-road surfaces over literal small source-line kinks.
+"""Own bounded local road fitting and its all-or-nothing junction transaction.
 
 The measured stock-road policies make connector geometry exact, but two visual
-failure modes can still remain in game:
+failure modes can still remain in game: shallow dog-legs can open grass seams
+between short straight slabs, and skewed paved T approaches can miss a useful
+native junction even though a tiny source-line adjustment would connect cleanly.
 
-* a shallow dog-leg can be represented by several 6.25 m straight slabs whose
-  centreline endpoints touch exactly while their rectangular surface edges open
-  a triangular grass seam; and
-* a skewed paved T can fall back to a straight six-metre cap, after which the
-  post-fit seam repair may try to bridge a mostly lateral connector mismatch by
-  placing another short road slab across the carriageway.
+Use the existing bounded source-line deviation before resorting to repair
+objects. Open-road micro-bends may simplify inside the 0.75 m corridor and paved
+T approaches may plan against a wider measured-junction matcher. Those junction
+edits are then committed as one transaction: every changed arm must pass the
+source-backed obstacle corridor together and the resulting node must satisfy the
+ordinary strict junction matcher. If any part fails, the complete node keeps its
+original geometry.
 
-Use the small source-line deviation budget before resorting to repair objects.
-Open-road micro-bends may be simplified inside the existing 0.75 m corridor,
-and same-family paved T approaches may relax onto a measured native junction.
-Every junction relaxation is vetoed when the moved approach would overlap a
-source-backed building, utility object, or mapped individual tree. Legacy caps
-remain a safe fallback: their approaches continue underneath the cap and the cap
-is raised slightly so its surface wins without z-fighting.
+The local-fit and transaction installers remain separately timed in the pipeline
+because later planning must capture the already-installed local-fit hooks. They
+now share one owner so the permissive planner and the contract that contains it
+cannot drift into separate policy files.
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import replace
 import math
+from typing import Mapping
 
 from . import gravel_junction_policy as _gravel_junction
 from . import playability as _p
@@ -38,11 +40,16 @@ MAXIMUM_PAVED_T_HEADING_ERROR_DEGREES = 14.0
 LEGACY_CAP_VERTICAL_BIAS_METRES = 0.006
 MINIMUM_REPAIR_ALIGNMENT_COSINE = math.cos(math.radians(35.0))
 
+_PLANNING_RELAXED_JUNCTION: ContextVar[bool] = ContextVar(
+    "cwr_planning_relaxed_stock_junction", default=False
+)
+
 _ORIGINAL_MIXED_T_ELIGIBLE = None
 _ORIGINAL_COLLECT_RELAXATIONS = None
 _ORIGINAL_QUALITY_WINDOW = None
 _ORIGINAL_LOWER_LEGACY_CAP = None
 _INSTALLED = False
+_TRANSACTION_INSTALLED = False
 
 
 def _same_family_paved_t(incidents) -> bool:
@@ -166,14 +173,7 @@ def _lower_legacy_stock_cap(old, elevations, spec):
 
 
 def _connector_cover_plans(report):
-    """Use repair underlays only for real longitudinal native-connector gaps.
-
-    A normal straight cap already owns the road surface between its two ends, so
-    adding another six-metre slab beneath one of those ends is redundant and can
-    create the conspicuous cross-road clipping seen in game. Native T/X meshes
-    may still need an underlay, but only when the uncovered gap points along the
-    connector rather than mostly sideways across the road.
-    """
+    """Use repair underlays only for real longitudinal native-connector gaps."""
 
     cap_count = min(int(getattr(report, "junction_cap_objects", 0)), len(report.objects))
     if cap_count <= 0:
@@ -189,9 +189,6 @@ def _connector_cover_plans(report):
     used_endpoints: set[tuple[int, int]] = set()
     plans = []
     for cap in caps:
-        # Legacy/mixed straight caps cover their own connector-to-centre span.
-        # Their approaches are now fitted underneath to the node, so no extra
-        # repair slab belongs here.
         if _geometry.stock_straight_match(cap.model_path) is not None:
             continue
         for connector in _surface._native_cap_connectors(cap):
@@ -240,6 +237,109 @@ def _connector_cover_plans(report):
     return tuple(plans)
 
 
+def _strict_native_junction_for_incidents(incidents):
+    """Return the non-relaxed measured junction choice used for final placement."""
+
+    strict = _junction._ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS
+    if strict is None:
+        raise RuntimeError("stock road skew stage is not installed")
+    return strict(incidents)
+
+
+def _transaction_native_junction_for_incidents(incidents):
+    """Use the wider matcher only while connector-aligned edits are being planned."""
+
+    if _PLANNING_RELAXED_JUNCTION.get():
+        return _native_junction_for_incidents(incidents)
+    return _strict_native_junction_for_incidents(incidents)
+
+
+def _group_relaxations(projected, relaxations):
+    grouped: dict[
+        tuple[int, int],
+        dict[tuple[int, int, int], tuple[float, float]],
+    ] = {}
+    for key, point in relaxations.items():
+        feature_index, node_index, _neighbour_index = key
+        node = tuple(projected[feature_index][node_index])
+        grouped.setdefault(_p._road_node_key(node), {})[key] = point
+    return grouped
+
+
+def _group_is_obstacle_safe(projected, plans, obstacles) -> bool:
+    """Require every changed arm at one junction to survive the same safety pass."""
+
+    for key, point in plans.items():
+        feature_index, node_index, neighbour_index = key
+        node = tuple(projected[feature_index][node_index])
+        neighbour = tuple(projected[feature_index][neighbour_index])
+        if not _relax._shortcut_clear(obstacles, node, point):
+            return False
+        if not _relax._shortcut_clear(obstacles, point, neighbour):
+            return False
+    return True
+
+
+def _flatten(groups: Mapping[tuple[int, int], Mapping]) -> dict:
+    result = {}
+    for plans in groups.values():
+        result.update(plans)
+    return result
+
+
+def _strict_match_keys(dataset, projection, projected, spec) -> set[tuple[int, int]]:
+    token = _connector._RELAXED_PROJECTED_ROADS.set(projected)
+    try:
+        return set(_junction._junction_incidents(dataset, projection, spec))
+    finally:
+        _connector._RELAXED_PROJECTED_ROADS.reset(token)
+
+
+def _collect_transaction_relaxations(dataset, projection, projected, spec):
+    """Plan permissively, then commit only complete obstacle-safe strict matches."""
+
+    if _ORIGINAL_COLLECT_RELAXATIONS is None:
+        raise RuntimeError("stock road local-fit transaction is not installed")
+
+    planning_token = _PLANNING_RELAXED_JUNCTION.set(True)
+    try:
+        planned = _ORIGINAL_COLLECT_RELAXATIONS(
+            dataset, projection, projected, spec
+        )
+    finally:
+        _PLANNING_RELAXED_JUNCTION.reset(planning_token)
+
+    if not planned:
+        return planned
+
+    context = _relax._CONTEXT.get()
+    if context is None:
+        return {}
+
+    groups = _group_relaxations(projected, planned)
+    groups = {
+        key: plans
+        for key, plans in groups.items()
+        if _group_is_obstacle_safe(projected, plans, context.obstacles)
+    }
+    if not groups:
+        return {}
+
+    for _ in range(4):
+        candidate = _connector._apply_relaxations(projected, _flatten(groups))
+        strict_keys = _strict_match_keys(dataset, projection, candidate, spec)
+        retained = {
+            key: plans for key, plans in groups.items() if key in strict_keys
+        }
+        if retained.keys() == groups.keys():
+            break
+        groups = retained
+        if not groups:
+            return {}
+
+    return _flatten(groups)
+
+
 def install_stock_road_local_fit_policy() -> None:
     global _ORIGINAL_MIXED_T_ELIGIBLE, _ORIGINAL_COLLECT_RELAXATIONS
     global _ORIGINAL_QUALITY_WINDOW, _ORIGINAL_LOWER_LEGACY_CAP, _INSTALLED
@@ -251,10 +351,6 @@ def install_stock_road_local_fit_policy() -> None:
     _ORIGINAL_QUALITY_WINDOW = _quality._quality_window
     _ORIGINAL_LOWER_LEGACY_CAP = _junction._lower_legacy_stock_cap
 
-    # A shallow 10-14 degree dog-leg can still remain within the already-bounded
-    # 0.75 m source corridor. The geometric deviation and obstacle checks remain
-    # authoritative, so increasing the heading gate does not flatten real bends
-    # that wander farther away from their source line.
     _relax.MAXIMUM_RELAXED_HEADING_CHANGE_DEGREES = (
         MAXIMUM_OPEN_ROAD_HEADING_RELAXATION_DEGREES
     )
@@ -270,3 +366,19 @@ def install_stock_road_local_fit_policy() -> None:
     _surface._connector_cover_plans = _connector_cover_plans
     _relax._connector_cover_plans = _connector_cover_plans
     _INSTALLED = True
+
+
+def install_stock_road_relaxation_transaction_policy() -> None:
+    """Install the all-or-nothing junction transaction at its historical stage."""
+
+    global _TRANSACTION_INSTALLED
+    if _TRANSACTION_INSTALLED:
+        return
+    if not _INSTALLED or _ORIGINAL_COLLECT_RELAXATIONS is None:
+        raise RuntimeError("stock road local fit policy must be installed first")
+
+    _junction._native_junction_for_incidents = (
+        _transaction_native_junction_for_incidents
+    )
+    _connector._collect_relaxations = _collect_transaction_relaxations
+    _TRANSACTION_INSTALLED = True
