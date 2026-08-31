@@ -23,6 +23,7 @@ def test_cancelled_or_folded_layers_are_not_in_production_pipeline():
         "single_vertex_bend",
         "wrptool_catalogue",
         "stock_obstacles",
+        "emitted_seam_refinement",
     }
     assert retired.isdisjoint(ROAD_PIPELINE_STAGES)
     assert ROAD_PIPELINE_STAGES.index("visual_finish") < ROAD_PIPELINE_STAGES.index(
