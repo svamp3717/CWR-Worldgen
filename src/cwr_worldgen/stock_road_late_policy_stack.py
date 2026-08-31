@@ -32,13 +32,13 @@ from . import stock_road_paved_wedge_policy as _paved_wedge
 from . import stock_road_emitted_seam_refinement_policy as _emitted_seam_refinement
 from . import stock_road_stock_paved_only_policy as _stock_paved_only
 from . import stock_road_inspector_candidate_policy as _inspector_candidates
-from . import stock_road_inspector_candidate_completion_policy as _candidate_completion
 from . import stock_road_inspector_candidate_enforcement_policy as _candidate_enforcement
 from . import stock_road_paved_junction_completion_policy as _paved_junctions
 from . import stock_road_fit_first_policy as _fit_first
 from . import stock_road_native_junction_ownership_policy as _native_junction_ownership
 from . import stock_road_reference_wrp_policy as _reference_wrp
 from . import stock_road_kodiak_reference_policy as _kodiak_reference
+from . import stock_road_stock_assets_only_policy as _stock_assets_only
 
 
 _INSTALLED = False
@@ -95,32 +95,27 @@ def install_stock_road_late_policy_stack() -> None:
     _curve_seam_fallback.install_stock_road_curve_seam_fallback_policy()
     _intersection_edge.install_stock_road_intersection_edge_policy()
     _emitted_seam.install_stock_road_emitted_seam_policy()
-    # Keep the physical endpoint reconstruction and corrected narrow wedge mesh.
-    # The Inspector candidate layer below prevents full miter/road-strip turn
-    # repairs while permitting only the bounded borderless outside triangle.
+    # Preserve the physical endpoint reconstruction used by Inspector and older
+    # compatibility tests. Production output below is nevertheless stock-only.
     _paved_wedge.install_stock_road_paved_wedge_policy()
     _emitted_seam_refinement.install_stock_road_emitted_seam_refinement_policy()
     _stock_paved_only.install_stock_road_stock_paved_only_policy()
 
-    # Translate Inspector candidate text into concrete paved/mixed-junction
-    # policies: strict measured native connectors, final exact stock curve-chain
-    # search, native-centre trimming, and low stock fill/tongues. Standalone ces
-    # and generated-gravel bends are deliberately not refitted here.
+    # Translate Inspector candidates into stock paved/mixed-junction geometry:
+    # measured connectors, final exact stock curve-chain search, native-centre
+    # trimming and stock low-fill/tongue fallbacks. The former generated wedge
+    # completion pass is intentionally NOT installed. No generated paved road
+    # helper is permitted in a production WRP.
     _inspector_candidates.install_stock_road_inspector_candidate_policy()
-    # If exact stock fitting still leaves an outside paved triangle, apply the
-    # Inspector's explicit second choice: one borderless wedge only. No generated
-    # miter/fill disk and no complete six-metre road strip is serialized.
-    _candidate_completion.install_stock_road_inspector_candidate_completion_policy()
     _candidate_enforcement.install_stock_road_inspector_candidate_selector_policy()
 
     # Native paved T/X meshes are visually trustworthy only while every measured
-    # connector is essentially exact. Otherwise keep source-aligned approaches
-    # visible over one low stock-family central cap. Dirt/gravel stays untouched.
+    # connector is essentially exact after local approach regularisation.
     _paved_junctions.install_stock_road_paved_junction_completion_policy()
 
     # Production builds keep fitting first. Disable the older intermediate seam
-    # and junction overlap helpers. Unresolved visible turns receive only the
-    # bounded wedge triangle installed above, never another full road surface.
+    # and junction overlap helpers. Any residual turn must be represented by
+    # stock road geometry and reported if that geometry cannot cover it.
     _fit_first.install_stock_road_fit_first_policy()
 
     # Once a purpose-built native T/X is selected, it owns the entire visible
@@ -128,24 +123,22 @@ def install_stock_road_late_policy_stack() -> None:
     # fallback layer has been composed.
     _native_junction_ownership.install_stock_road_native_junction_ownership_policy()
 
-    # One last pass owns the exact RoadFitReport that will be serialized. This is
-    # what prevents an older wrapper from re-promoting a skewed rigid junction
-    # after the candidate decision has already been made.
+    # One last candidate pass owns the exact RoadFitReport that will be
+    # serialized, preventing an older wrapper from re-promoting a bad cap.
     _candidate_enforcement.install_stock_road_inspector_candidate_final_policy()
 
-    # A hand-authored WrpTool reference world showed the stock-road convention we
-    # had been fighting instead of following: paved P3Ds stay horizontal in WRP
-    # space and native ten-degree curves are ordinary construction pieces. Apply
-    # that lesson last so every road object created by the composed fitter uses
-    # full planar paved connector lengths. Stock ces/generated gravel keep their
-    # existing 3D terrain-following behavior.
+    # Reference WRPs show that stock paved P3Ds stay horizontal in WRP space and
+    # native ten-degree curves are ordinary construction pieces.
     _reference_wrp.install_stock_road_reference_wrp_policy()
 
-    # Kodiak confirms the same planar convention and adds two stronger habits:
-    # long native curve chains are normal paved construction, and correct paved
-    # approaches penetrate a native T/X by about half a metre rather than ending
-    # short or continuing to the logical node beneath it. Keep that paved-only
-    # refinement outermost.
+    # Kodiak adds longer native curve chains and bounded penetration of correct
+    # paved approaches into stock T/X meshes.
     _kodiak_reference.install_stock_road_kodiak_reference_policy()
+
+    # Final authority: service/track/gravel roads use stock ces, no generated
+    # paved or dirt/gravel road P3D may survive, skew T junctions may be locally
+    # regularised inside the obstacle transaction, and the native curve beam gets
+    # a road-width-bounded source corridor.
+    _stock_assets_only.install_stock_road_stock_assets_only_policy()
 
     _INSTALLED = True
