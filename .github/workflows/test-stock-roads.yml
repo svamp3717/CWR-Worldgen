@@ -46,6 +46,7 @@ jobs:
             tests/test_road_inspector_grass_wedge.py \
             tests/test_road_inspector_kodiak_overlap.py \
             tests/test_road_inspector_embedded_paved_geometry.py \
+            tests/test_road_inspector_final_paved_recheck.py \
             tests/test_road_inspector_surface_height.py \
             tests/test_road_inspector_report_ui.py \
             tests/test_road_quality_policy.py \
@@ -55,6 +56,7 @@ jobs:
             tests/test_paved_wedge_completion.py \
             tests/test_paved_wedge_geometry_v2.py \
             tests/test_stock_paved_asset_only.py \
+            tests/test_stock_road_stock_assets_only.py \
             tests/test_stock_road_3d_connector_policy.py \
             tests/test_stock_road_connector_policy.py \
             tests/test_stock_road_curve_policy.py \
