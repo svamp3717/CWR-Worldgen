@@ -37,6 +37,7 @@ from . import stock_road_inspector_candidate_enforcement_policy as _candidate_en
 from . import stock_road_paved_junction_completion_policy as _paved_junctions
 from . import stock_road_fit_first_policy as _fit_first
 from . import stock_road_native_junction_ownership_policy as _native_junction_ownership
+from . import stock_road_reference_wrp_policy as _reference_wrp
 
 
 _INSTALLED = False
@@ -130,5 +131,13 @@ def install_stock_road_late_policy_stack() -> None:
     # what prevents an older wrapper from re-promoting a skewed rigid junction
     # after the candidate decision has already been made.
     _candidate_enforcement.install_stock_road_inspector_candidate_final_policy()
+
+    # A hand-authored WrpTool reference world showed the stock-road convention we
+    # had been fighting instead of following: paved P3Ds stay horizontal in WRP
+    # space and native ten-degree curves are ordinary construction pieces. Apply
+    # that lesson last so every road object created by the composed fitter uses
+    # full planar paved connector lengths. Stock ces/generated gravel keep their
+    # existing 3D terrain-following behavior.
+    _reference_wrp.install_stock_road_reference_wrp_policy()
 
     _INSTALLED = True
