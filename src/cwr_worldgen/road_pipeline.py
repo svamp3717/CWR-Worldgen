@@ -9,13 +9,14 @@ installer call order. Keep that behaviour explicit here:
   package startup sequence;
 * late policies are preloaded as a group and then installed in declared order,
   matching the old late-stack module; and
-* raceway classification runs last and does not compose road fitters.
+* non-fitting source classification is applied once at the end.
 
 Set ``CWR_WORLDGEN_ROAD_PIPELINE_TRACE=1`` to print each installed stage during
 package startup.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from importlib import import_module
 import os
 import sys
@@ -141,6 +142,46 @@ def _install_late_stages() -> None:
             )
 
 
+def _install_raceway_classification() -> None:
+    """Treat OSM motor raceways as ordinary supported paved vehicle roads."""
+
+    asset_mapping = _load("asset_mapping")
+    generator = _load("generator")
+    normalization = _load("normalization")
+    osm = _load("osm")
+
+    osm._MAJOR_HIGHWAYS.add("raceway")
+    normalization._MAJOR_HIGHWAYS.add("raceway")
+
+    original_mapping = asset_mapping.default_osm_asset_mapping
+    if getattr(original_mapping, "_cwr_raceway_classification", False):
+        return
+
+    def wrapped(spec, milestone_number: int, *, global_textures=()):
+        mapping = original_mapping(
+            spec,
+            milestone_number,
+            global_textures=global_textures,
+        )
+        rules = []
+        for rule in mapping.rules:
+            if rule.rule_id != "road-paved":
+                rules.append(rule)
+                continue
+            match = []
+            for key, values in rule.match:
+                if key == "highway" and "raceway" not in values:
+                    values = (*values, "raceway")
+                match.append((key, values))
+            rules.append(replace(rule, match=tuple(match)))
+        return replace(mapping, rules=tuple(rules))
+
+    wrapped._cwr_raceway_classification = True  # type: ignore[attr-defined]
+    asset_mapping.default_osm_asset_mapping = wrapped
+    # generator.py imports the mapping function directly.
+    generator.default_osm_asset_mapping = wrapped
+
+
 def _synchronise_public_fitter() -> None:
     """Expose the same final fitter through playability and generator."""
 
@@ -159,7 +200,6 @@ def install_road_pipeline() -> None:
     _install_base_stages()
     _install_late_stages()
     _synchronise_public_fitter()
-
-    raceway = _load("raceway_policy")
-    _invoke("raceway_classification", raceway, "install_raceway_policy")
+    _install_raceway_classification()
+    _trace("raceway_classification")
     _INSTALLED = True
