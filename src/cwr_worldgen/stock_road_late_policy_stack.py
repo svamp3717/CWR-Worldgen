@@ -32,6 +32,7 @@ from . import stock_road_paved_wedge_policy as _paved_wedge
 from . import stock_road_emitted_seam_refinement_policy as _emitted_seam_refinement
 from . import stock_road_stock_paved_only_policy as _stock_paved_only
 from . import stock_road_inspector_candidate_policy as _inspector_candidates
+from . import stock_road_inspector_candidate_completion_policy as _candidate_completion
 from . import stock_road_inspector_candidate_enforcement_policy as _candidate_enforcement
 from . import stock_road_paved_junction_completion_policy as _paved_junctions
 from . import stock_road_fit_first_policy as _fit_first
@@ -92,10 +93,9 @@ def install_stock_road_late_policy_stack() -> None:
     _curve_seam_fallback.install_stock_road_curve_seam_fallback_policy()
     _intersection_edge.install_stock_road_intersection_edge_policy()
     _emitted_seam.install_stock_road_emitted_seam_policy()
-    # Keep physical endpoint reconstruction from the old wedge work because the
-    # Inspector and exact curve search need it. Production candidate enforcement
-    # below prevents generated paved wedge/miter/fill helpers from being used as
-    # the visible repair strategy.
+    # Keep the physical endpoint reconstruction and corrected narrow wedge mesh.
+    # The Inspector candidate layer below prevents full miter/road-strip turn
+    # repairs while permitting only the bounded borderless outside triangle.
     _paved_wedge.install_stock_road_paved_wedge_policy()
     _emitted_seam_refinement.install_stock_road_emitted_seam_refinement_policy()
     _stock_paved_only.install_stock_road_stock_paved_only_policy()
@@ -105,6 +105,10 @@ def install_stock_road_late_policy_stack() -> None:
     # search, native-centre trimming, and low stock fill/tongues. Standalone ces
     # and generated-gravel bends are deliberately not refitted here.
     _inspector_candidates.install_stock_road_inspector_candidate_policy()
+    # If exact stock fitting still leaves an outside paved triangle, apply the
+    # Inspector's explicit second choice: one borderless wedge only. No generated
+    # miter/fill disk and no complete six-metre road strip is serialized.
+    _candidate_completion.install_stock_road_inspector_candidate_completion_policy()
     _candidate_enforcement.install_stock_road_inspector_candidate_selector_policy()
 
     # Native paved T/X meshes are visually trustworthy only while every measured
@@ -113,8 +117,8 @@ def install_stock_road_late_policy_stack() -> None:
     _paved_junctions.install_stock_road_paved_junction_completion_policy()
 
     # Production builds keep fitting first. Disable the older intermediate seam
-    # and junction overlap helpers. Unresolved visible turns remain reportable
-    # instead of being hidden under another full road strip.
+    # and junction overlap helpers. Unresolved visible turns receive only the
+    # bounded wedge triangle installed above, never another full road surface.
     _fit_first.install_stock_road_fit_first_policy()
 
     # Once a purpose-built native T/X is selected, it owns the entire visible
