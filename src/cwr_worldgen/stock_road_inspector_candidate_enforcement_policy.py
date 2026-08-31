@@ -18,6 +18,9 @@ Road Inspector's turning-cap candidate keeps those approaches authoritative.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+import math
+
 from . import generator as _generator
 from . import gravel_asphalt_transition_policy as _mixed
 from . import playability as _p
@@ -25,15 +28,14 @@ from . import stock_road_inspector_candidate_policy as _candidate
 from . import stock_road_junction_policy as _junction
 from . import stock_road_local_fit_policy as _local
 from . import stock_road_measured_junction_policy as _measured
+from . import stock_road_model_geometry as _geometry
 from . import stock_road_native_junction_ownership_policy as _ownership
+from . import stock_road_paved_junction_completion_policy as _paved
 from . import stock_road_relaxation_transaction_policy as _transaction
 
 
-# A rigid T has a straight 0/180 main axis. If the source through road already
-# turns more than this at the node, bending both approaches onto that axis merely
-# moves the visible defect away from the centre. The current Inspector report
-# starts flagging this failure just above this bound.
 MAXIMUM_NATIVE_THROUGH_TURN_DEGREES = 1.25
+_FINAL_NATIVE_FOOTPRINT_MARGIN_METRES = 0.20
 
 _ORIGINAL_NATIVE_X = None
 _ORIGINAL_FINAL_FIT = None
@@ -96,8 +98,6 @@ def _candidate_native_t_dispatch(incidents):
     if _contains_generated_gravel(incidents):
         return _mixed._native_t_junction(incidents)
 
-    # A genuine bend through the intersection follows the Inspector's low-fill
-    # candidate rather than forcing a straight rigid main axis.
     if _through_turn_degrees(incidents) > MAXIMUM_NATIVE_THROUGH_TURN_DEGREES:
         return None
 
@@ -106,8 +106,6 @@ def _candidate_native_t_dispatch(incidents):
         if limit is not None:
             return _measured_native_t_with_limit(incidents, limit)
 
-    # Outside the planning ContextVar, only geometry already within the visible
-    # 0.90-degree connector tolerance can select a native stock T.
     return _candidate._measured_native_t_junction(incidents)
 
 
@@ -146,6 +144,53 @@ def install_stock_road_inspector_candidate_selector_policy() -> None:
     _SELECTOR_INSTALLED = True
 
 
+def _drop_fully_owned_native_straights(report):
+    """Remove any ordinary stock straight wholly inside a native T/X footprint.
+
+    This final guard is intentionally simpler than the span-rebuilding ownership
+    pass. It handles the case Road Inspector still found in production: a short
+    ordinary approach can be added or retained after the earlier trim, with both
+    of its physical endpoints at or inside the native 6.25 m connector radius.
+    Such an object contributes no road outside the junction mesh, so deleting it
+    cannot create an exterior gap and prevents duplicate borders at the centre.
+    """
+
+    cap_count = min(
+        int(getattr(report, "junction_cap_objects", 0)), len(report.objects)
+    )
+    if cap_count <= 0:
+        return report
+
+    radius = float(_geometry.STOCK_JUNCTION_CONNECTOR_RADIUS_METRES)
+    limit = radius + _FINAL_NATIVE_FOOTPRINT_MARGIN_METRES
+    remove_ids: set[int] = set()
+    for cap in report.objects[:cap_count]:
+        if _paved._native_signature(str(cap.model_path)) is None:
+            continue
+        center = _paved._logical_center(cap)
+        if center is None:
+            continue
+        for obj in report.objects[cap_count:]:
+            match = _geometry.stock_straight_match(str(obj.model_path))
+            if match is None:
+                continue
+            family = match.group("family").casefold()
+            if family not in _candidate._NATIVE_OWNED_STOCK_FAMILIES:
+                continue
+            axis = _ownership._physical_straight_axis(obj)
+            if axis is None:
+                continue
+            if all(math.dist(center, endpoint) <= limit for endpoint in axis):
+                remove_ids.add(int(obj.object_id))
+
+    if not remove_ids:
+        return report
+    objects = tuple(
+        obj for obj in report.objects if int(obj.object_id) not in remove_ids
+    )
+    return replace(report, objects=objects)
+
+
 def _fit(
     dataset,
     projection,
@@ -168,17 +213,14 @@ def _fit(
     if not bool(getattr(spec, "stock_road_piece_fitting", False)):
         return report
 
-    # This is intentionally the last road-fit mutation. If an older wrapper has
-    # reintroduced a skewed native cap or a centre-crossing approach, apply the
-    # same native-or-low-fill and connector-ownership decision the Inspector
-    # reports against the final WRP geometry.
-    return _candidate._native_owner_realign(
+    fixed = _candidate._native_owner_realign(
         report,
         dataset,
         projection,
         elevations,
         spec,
     )
+    return _drop_fully_owned_native_straights(fixed)
 
 
 def install_stock_road_inspector_candidate_final_policy() -> None:
