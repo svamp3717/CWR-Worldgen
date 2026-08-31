@@ -25,6 +25,7 @@ from cwr_worldgen import stock_road_inspector_candidate_completion_policy as _co
 from cwr_worldgen import stock_road_inspector_candidate_enforcement_policy as _enforcement
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_reference_wrp_policy as _reference
+from cwr_worldgen import stock_road_kodiak_reference_policy as _kodiak
 from cwr_worldgen import stock_road_late_policy_stack as _stack
 
 
@@ -51,6 +52,7 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
         _fit_first,
         _completion,
         _reference,
+        _kodiak,
     )
 
     assert _stack._INSTALLED
@@ -62,10 +64,11 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
 
 
 def test_final_wrappers_are_not_left_disconnected() -> None:
-    # The reference-WRP guard is now the outer paved-road wrapper. Immediately
-    # inside it, final candidate enforcement still owns junction selection and
-    # the emitted layer still measures the exact WorldObjects that will be saved.
-    assert _p.fit_road_objects is _reference._fit
+    # Kodiak is the final paved-road wrapper. The earlier WrpTool reference still
+    # owns planar/zero-pitch placement immediately inside it; final candidate
+    # enforcement still owns junction selection below that.
+    assert _p.fit_road_objects is _kodiak._fit
+    assert _kodiak._ORIGINAL_FIT is _reference._fit
     assert _reference._ORIGINAL_FIT is _enforcement._fit
     assert _enforcement._ORIGINAL_FINAL_FIT is _emitted_seam._fit
     assert _emitted_seam._ORIGINAL_FIT is _intersection_edge._fit
