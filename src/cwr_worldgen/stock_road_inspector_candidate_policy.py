@@ -28,13 +28,12 @@ from . import playability as _p
 from . import stock_road_curve_usage_policy as _curve_usage
 from . import stock_road_emitted_seam_policy as _emitted
 from . import stock_road_junction_policy as _junction
-from . import stock_road_micro_bend_policy as _micro
+from . import stock_road_junction_endpoint_policy as _junction_endpoint
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_native_junction_ownership_policy as _ownership
 from . import stock_road_paved_junction_completion_policy as _paved
 from . import stock_road_sharp_exact_policy as _exact
 from . import stock_road_sharp_turn_policy as _sharp
-from . import stock_road_single_vertex_bend_policy as _single
 from . import stock_road_stock_paved_only_policy as _stock_only
 from . import stock_road_surface_overlap_policy as _surface
 from . import stock_road_visual_finish_policy as _finish
@@ -698,23 +697,16 @@ def install_stock_road_inspector_candidate_policy() -> None:
         raise RuntimeError("stock paved-only policy must install first")
 
     # Candidate: exact stock curve/curve-chain before any visual overlap fallback.
-    _micro.MINIMUM_MICRO_BEND_TOTAL_TURN_DEGREES = (
-        INSPECTOR_CURVE_MINIMUM_TURN_DEGREES
-    )
-    _single.MINIMUM_SINGLE_VERTEX_TURN_DEGREES = (
-        INSPECTOR_CURVE_MINIMUM_TURN_DEGREES
-    )
-    _curve_usage._MINIMUM_TOTAL_TURN_DEGREES = (
-        INSPECTOR_CURVE_MINIMUM_TURN_DEGREES
-    )
-    _curve_usage._MINIMUM_PROMOTED_CURVES = 1
-    _curve_usage._MINIMUM_BASELINE_SHORT_STRAIGHTS = 2
-    _ORIGINAL_PIECE_CHAIN = _p._stock_piece_chain
-    _p._stock_piece_chain = _candidate_exact_curve_chain
+    # Keep junction-endpoint enforcement outermost; insert this final exact search
+    # immediately inside it so native connector ownership still has last refusal.
+    if _junction_endpoint._ORIGINAL_CHAIN is None:
+        raise RuntimeError("junction endpoint policy must install first")
+    _ORIGINAL_PIECE_CHAIN = _junction_endpoint._ORIGINAL_CHAIN
+    _junction_endpoint._ORIGINAL_CHAIN = _candidate_exact_curve_chain
 
     # Candidate: use a measured native model only inside its visible connector
-    # tolerance. Mixed paved/ces T junctions follow the same rule as all-paved.
-    _paved._all_paved_incidents = _eligible_paved_or_mixed_incidents
+    # tolerance. Mixed paved/ces T junctions are handled by the final candidate
+    # realigner without changing the all-paved completion module's public scope.
     _junction._native_t_junction = _measured_native_t_junction
     _junction._native_junction_object = _measured_native_junction_object
 
