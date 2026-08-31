@@ -59,7 +59,6 @@ _BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
 # module itself. Cancelled overlap layers and one-assignment compatibility
 # modules are intentionally absent.
 _LATE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
-    ("wrptool_catalogue", "stock_road_wrptool_catalogue_policy", "install_stock_road_wrptool_catalogue_policy"),
     ("curve_regularization", "stock_road_curve_regularization_policy", "install_stock_road_curve_regularization_policy"),
     ("sharp_turn", "stock_road_sharp_turn_policy", "install_stock_road_sharp_turn_policy"),
     ("sharp_exact", "stock_road_sharp_exact_policy", "install_stock_road_sharp_exact_policy"),
