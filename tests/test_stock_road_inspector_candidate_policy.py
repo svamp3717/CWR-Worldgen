@@ -7,12 +7,15 @@ from types import SimpleNamespace
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_curve_usage_policy as _curve_usage
 from cwr_worldgen import stock_road_emitted_seam_policy as _emitted
+from cwr_worldgen import stock_road_inspector_candidate_completion_policy as _completion
+from cwr_worldgen import stock_road_inspector_candidate_enforcement_policy as _enforcement
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_junction_policy as _junction
 from cwr_worldgen import stock_road_junction_endpoint_policy as _junction_endpoint
 from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen import stock_road_native_junction_ownership_policy as _ownership
 from cwr_worldgen import stock_road_paved_junction_completion_policy as _paved
+from cwr_worldgen import stock_road_relaxation_transaction_policy as _transaction
 from cwr_worldgen import stock_road_surface_overlap_policy as _surface
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
 
@@ -254,7 +257,7 @@ def test_fallback_junction_adds_only_low_uncovered_paved_tongue(monkeypatch) -> 
     assert fixed.short_piece_objects == report.short_piece_objects + 1
 
 
-def test_wedge_candidate_emits_no_generated_or_full_turn_strip(monkeypatch) -> None:
+def test_candidate_turn_pass_still_refuses_full_surface_overlay(monkeypatch) -> None:
     plan = _finish._SeamCoverPlan(
         model_path=r"o\road\sil6.p3d",
         centre=(30.0, 30.0),
@@ -300,6 +303,97 @@ def test_wedge_candidate_emits_no_generated_or_full_turn_strip(monkeypatch) -> N
     assert fixed.short_piece_objects == 0
 
 
+def test_completion_adds_only_borderless_wedge_triangle(monkeypatch) -> None:
+    plan = _finish._SeamCoverPlan(
+        model_path=r"o\road\sil6.p3d",
+        centre=(30.0, 30.0),
+        tangent_axis_degrees=0.0,
+        turn_degrees=10.0,
+        outer_miter_apex=(30.5, 30.0),
+    )
+    report = _p.RoadFitReport(
+        objects=(),
+        chain_count=0,
+        connection_count=0,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+    )
+    monkeypatch.setattr(
+        _completion,
+        "_ORIGINAL_APPLY",
+        lambda current, elevations, spec: current,
+    )
+    monkeypatch.setattr(
+        _emitted,
+        "_terrain_wedge_cover_plans",
+        lambda current, elevations=None, spec=None: (plan,),
+    )
+    monkeypatch.setattr(
+        _emitted,
+        "_terrain_clear_wedge_overlay",
+        lambda plan, reference, object_id, elevations, spec, force=False: _p.WorldObject(
+            int(object_id),
+            r"candidate\i\paved_wedge_q040.p3d",
+            float(plan.centre[0]),
+            0.05,
+            float(plan.centre[1]),
+            float(plan.tangent_axis_degrees),
+        ),
+    )
+
+    fixed = _completion._apply_candidate_completion(
+        report,
+        _flat_elevations(),
+        _flat_spec(name="candidate_wedge"),
+    )
+
+    assert len(fixed.objects) == 1
+    filename = fixed.objects[0].model_path.replace("/", "\\").rsplit("\\", 1)[-1]
+    assert filename.casefold().startswith("paved_wedge_q")
+    assert all("paved_miter" not in str(obj.model_path).casefold() for obj in fixed.objects)
+    assert all("paved_fill" not in str(obj.model_path).casefold() for obj in fixed.objects)
+    assert fixed.short_piece_objects == 1
+
+
+def test_planning_selector_can_propose_near_straight_skew_t() -> None:
+    incidents = (
+        _incident(0.0, "sil"),
+        _incident(180.0, "sil"),
+        _incident(288.0, "sil"),
+    )
+    assert _enforcement._candidate_native_t_dispatch(incidents) is None
+
+    token = _transaction._PLANNING_RELAXED_JUNCTION.set(True)
+    try:
+        planned = _enforcement._candidate_native_t_dispatch(incidents)
+    finally:
+        _transaction._PLANNING_RELAXED_JUNCTION.reset(token)
+
+    assert planned is not None
+    assert planned.model_path.casefold().endswith(r"kr_new_sil_sil_t.p3d")
+
+
+def test_planning_selector_does_not_straighten_turning_through_road() -> None:
+    incidents = (
+        _incident(0.0, "sil"),
+        _incident(160.0, "sil"),
+        _incident(270.0, "sil"),
+    )
+
+    token = _transaction._PLANNING_RELAXED_JUNCTION.set(True)
+    try:
+        planned = _enforcement._candidate_native_t_dispatch(incidents)
+    finally:
+        _transaction._PLANNING_RELAXED_JUNCTION.reset(token)
+
+    assert _enforcement._through_turn_degrees(incidents) > (
+        _enforcement.MAXIMUM_NATIVE_THROUGH_TURN_DEGREES
+    )
+    assert planned is None
+
+
 def test_candidate_curve_search_stays_inside_final_endpoint_guard() -> None:
     assert _p._stock_piece_chain is _junction_endpoint._junction_endpoint_chain
     assert _junction_endpoint._ORIGINAL_CHAIN is _candidate._candidate_exact_curve_chain
@@ -308,9 +402,12 @@ def test_candidate_curve_search_stays_inside_final_endpoint_guard() -> None:
 
 def test_candidate_policy_is_wired_into_production_hooks() -> None:
     assert _candidate._INSTALLED
-    assert _junction._native_t_junction is _candidate._measured_native_t_junction
+    assert _completion._INSTALLED
+    assert _enforcement._SELECTOR_INSTALLED
+    assert _junction._native_t_junction is _enforcement._candidate_native_t_dispatch
     assert _junction._native_junction_object is _candidate._measured_native_junction_object
     assert _ownership._trim_one_native_center is _candidate._trim_one_native_center
-    assert _emitted._apply_emitted_seam_covers is _candidate._apply_wedge_candidates
+    assert _completion._ORIGINAL_APPLY is _candidate._apply_wedge_candidates
+    assert _emitted._apply_emitted_seam_covers is _completion._apply_candidate_completion
     assert _junction_endpoint._ORIGINAL_CHAIN is _candidate._candidate_exact_curve_chain
     assert _p._stock_piece_chain is _junction_endpoint._junction_endpoint_chain
