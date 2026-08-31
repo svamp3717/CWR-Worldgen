@@ -24,6 +24,7 @@ from types import ModuleType
 _INSTALLED = False
 _TRACE_ENV = "CWR_WORLDGEN_ROAD_PIPELINE_TRACE"
 _PACKAGE = __package__ or "cwr_worldgen"
+_MAXIMUM_PAVED_SEAM_TANGENT_ERROR_DEGREES = 8.0
 
 # The base stack historically used import -> install -> import -> install.
 # Preserve that exact timing because several policy modules bind the current
@@ -122,6 +123,17 @@ def _install_late_stages() -> None:
     }
     for stage, module_name, installer_name in _LATE_STAGE_SPECS:
         _invoke(stage, modules[module_name], installer_name)
+        if stage == "final_continuity":
+            # The retired curve-seam fallback used to leave this 8-degree
+            # geometry bound behind even though fit-first later disabled its
+            # visual object-appending hook. The final physical emitted-seam
+            # planner still consumes the bound, so preserve the value directly
+            # without keeping an entire policy module alive for one assignment.
+            modules[
+                "stock_road_visual_finish_policy"
+            ].MAXIMUM_CURVE_SEAM_TANGENT_ERROR_DEGREES = (
+                _MAXIMUM_PAVED_SEAM_TANGENT_ERROR_DEGREES
+            )
 
 
 def install_road_pipeline() -> None:
