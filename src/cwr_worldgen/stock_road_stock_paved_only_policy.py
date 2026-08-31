@@ -1,17 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Use only stock CWA road P3Ds for late paved-road fallbacks.
+"""Use only stock CWA road P3Ds for late paved-road seam fallbacks.
 
 The earlier paved seam work introduced world-local ``paved_fill``,
 ``paved_miter`` and ``paved_wedge`` models. They made the final WRP harder to
 reason about and, more importantly, could disagree with what CWA actually showed
-at a turn. Keep the measured/curve fitting work, but make the final fallback
+at a turn. Keep the measured/curve fitting work, but make final seam fallback
 strictly stock-only: sil/asf/kos six-metre pieces are shifted slightly toward
 the outside miter and kept below the visible carriageway.
 
-A measured native T/X already owns its intersection centre. Never append another
-stock seam helper on top of that same centre. The helper pass may still operate
-at ordinary two-piece seams and outside a native junction's connector footprint.
-Dirt/gravel is deliberately untouched.
+Turning-T fallback is already stock-only in its own owner; this stage now has one
+job only: replace emitted paved seam/wedge helpers with stock short pieces. Dirt
+and gravel are deliberately untouched.
 """
 from __future__ import annotations
 
@@ -20,9 +19,7 @@ import math
 
 from . import playability as _p
 from . import stock_road_emitted_seam_policy as _emitted
-from . import stock_road_junction_policy as _junction
 from . import stock_road_model_geometry as _geometry
-from . import stock_road_skew_orientation_policy as _skew
 
 
 _PAVED_FAMILIES = frozenset({"sil", "asf", "kos"})
@@ -33,7 +30,6 @@ MAXIMUM_STOCK_PAVED_HELPER_LIFT_METRES = 0.035
 MINIMUM_STOCK_PAVED_TERRAIN_CLEARANCE_METRES = 0.005
 NATIVE_JUNCTION_HELPER_EXCLUSION_METRES = 0.75
 
-_ORIGINAL_TURNING_T_CAP = None
 _INSTALLED = False
 
 
@@ -244,65 +240,14 @@ def _apply_stock_emitted_seam_covers(report, elevations, spec):
 _apply_stock_emitted_seam_covers.__name__ = "_apply_emitted_seam_covers"
 
 
-def _legacy_stock_cap_for_turning_t(
-    current,
-    source_node,
-    incidents,
-    family,
-    elevations,
-    spec,
-):
-    """Demote a turning T with the stock family short piece, never paved_fill."""
-
-    if family not in _PAVED_FAMILIES:
-        return current
-    pair = _junction._dominant_pair(incidents)
-    if pair is None:
-        return current
-    heading = _junction._heading(incidents[pair[0]].direction)
-    length = float(_geometry.STOCK_STRAIGHT_LENGTHS_METRES[6])
-    half = length * 0.5
-    direction = (
-        math.sin(math.radians(heading)),
-        math.cos(math.radians(heading)),
-    )
-    start = (
-        float(source_node[0]) - direction[0] * half,
-        float(source_node[1]) - direction[1] * half,
-    )
-    end = (
-        float(source_node[0]) + direction[0] * half,
-        float(source_node[1]) + direction[1] * half,
-    )
-    fixed = _p._road_object_on_slope(
-        int(current.object_id),
-        _stock_short_model(family),
-        start,
-        end,
-        elevations,
-        spec,
-        vertical_offset=_p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
-    )
-    return replace(
-        fixed,
-        x=float(source_node[0]),
-        z=float(source_node[1]),
-        heading_degrees=heading % 360.0,
-    )
-
-
 def install_stock_road_stock_paved_only_policy() -> None:
-    """Make every late paved fallback use only stock sil/asf/kos P3Ds."""
+    """Make every late paved seam fallback use only stock sil/asf/kos P3Ds."""
 
-    global _ORIGINAL_TURNING_T_CAP, _INSTALLED
+    global _INSTALLED
     if _INSTALLED:
         return
     if not _emitted._INSTALLED:
         raise RuntimeError("stock road emitted-seam policy must install first")
-    if not _skew._TURNING_FALLBACK_INSTALLED:
-        raise RuntimeError("turning-T fallback stage must install first")
 
-    _ORIGINAL_TURNING_T_CAP = _skew._legacy_cap_for_turning_t
     _emitted._apply_emitted_seam_covers = _apply_stock_emitted_seam_covers
-    _skew._legacy_cap_for_turning_t = _legacy_stock_cap_for_turning_t
     _INSTALLED = True
