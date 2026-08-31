@@ -14,6 +14,11 @@ grading, object budgeting and road-quality auditing stay untouched. Only the
 central cap changes shape/orientation, so the maximum deviation from the source
 road is bounded to the small connector mismatch inside the already-cleared road
 corridor.
+
+This module also owns the bounded mixed-surface skew extension. Generated gravel
+may borrow stock ``ces`` connector semantics while matching one paved-main T, but
+that relaxation remains a separately installed pipeline stage so historical
+installation order is preserved.
 """
 from __future__ import annotations
 
@@ -36,12 +41,17 @@ _STOCK_CAP_MODEL = re.compile(
     r"^(?:.*[\\/])(?P<family>sil|ces|asf|kos)6\.p3d$",
     re.IGNORECASE,
 )
+_GENERATED_GRAVEL_FILENAME = re.compile(
+    r"^gravel(?:25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$",
+    re.IGNORECASE,
+)
 
 # A native junction may rotate a few degrees away from each OSM arm to split the
 # error between all connectors. At the default 2.94 m connector radius, 7.5 deg
 # means <0.39 m lateral displacement, well inside a normal six-metre road.
 MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = 7.5
 NATIVE_JUNCTION_VERTICAL_BIAS_METRES = 0.006
+MAXIMUM_RELAXED_JUNCTION_HEADING_ERROR_DEGREES = 18.0
 
 # Keep one source of truth for the purpose-built Resistance T/X inventory.
 _T_JUNCTION_MODELS = dict(_catalogue.WRPTOOL_T_JUNCTION_MODELS)
@@ -51,6 +61,9 @@ _ALL_NATIVE_JUNCTION_MODELS = tuple(_catalogue.WRPTOOL_NATIVE_JUNCTION_MODELS)
 _ORIGINAL_FIT = None
 _ORIGINAL_VARIANT_PATHS = None
 _INSTALLED = False
+_ORIGINAL_SKEW_FAMILY = None
+_ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS = None
+_SKEW_INSTALLED = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -373,6 +386,62 @@ def _fit(
     )
 
 
+def _is_generated_gravel_model(model_path: str) -> bool:
+    filename = str(model_path).replace("/", "\\").rsplit("\\", 1)[-1]
+    return _GENERATED_GRAVEL_FILENAME.fullmatch(filename) is not None
+
+
+def _family_with_generated_gravel(model_path: str) -> str | None:
+    if _ORIGINAL_SKEW_FAMILY is None:
+        raise RuntimeError("stock road skew stage is not installed")
+    family = _ORIGINAL_SKEW_FAMILY(model_path)
+    if family is not None:
+        return family
+    if _is_generated_gravel_model(model_path):
+        return "ces"
+    return None
+
+
+def _eligible_relaxed_mixed_t(incidents) -> bool:
+    if len(incidents) != 3:
+        return False
+    gravel = [
+        incident
+        for incident in incidents
+        if _is_generated_gravel_model(incident.model_path)
+    ]
+    if len(gravel) != 1:
+        return False
+    stock_families = [
+        incident.family
+        for incident in incidents
+        if not _is_generated_gravel_model(incident.model_path)
+    ]
+    return (
+        len(stock_families) == 2
+        and stock_families[0] == stock_families[1]
+        and stock_families[0] in {"sil", "asf", "kos"}
+    )
+
+
+def _native_junction_with_bounded_mixed_skew(incidents):
+    if _ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS is None:
+        raise RuntimeError("stock road skew stage is not installed")
+
+    native = _ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS(incidents)
+    if native is not None or not _eligible_relaxed_mixed_t(incidents):
+        return native
+
+    original_limit = MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES
+    try:
+        globals()["MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES"] = (
+            MAXIMUM_RELAXED_JUNCTION_HEADING_ERROR_DEGREES
+        )
+        return _ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS(incidents)
+    finally:
+        globals()["MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES"] = original_limit
+
+
 def install_stock_road_junction_policy() -> None:
     global _ORIGINAL_FIT, _ORIGINAL_VARIANT_PATHS, _INSTALLED
     if _INSTALLED:
@@ -384,3 +453,17 @@ def install_stock_road_junction_policy() -> None:
     _p.road_model_variant_paths = _road_model_variant_paths
     _generator.road_model_variant_paths = _road_model_variant_paths
     _INSTALLED = True
+
+
+def install_stock_road_skew_policy() -> None:
+    """Enable bounded generated-gravel skew matching at the historical stage."""
+
+    global _ORIGINAL_SKEW_FAMILY, _ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS
+    global _SKEW_INSTALLED, _family, _native_junction_for_incidents
+    if _SKEW_INSTALLED:
+        return
+    _ORIGINAL_SKEW_FAMILY = _family
+    _ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS = _native_junction_for_incidents
+    _family = _family_with_generated_gravel
+    _native_junction_for_incidents = _native_junction_with_bounded_mixed_skew
+    _SKEW_INSTALLED = True
