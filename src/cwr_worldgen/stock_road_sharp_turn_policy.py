@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Replace faceted sharp paved bends with connector-locked stock curve chains.
+"""Replace faceted paved bends with connector-locked stock curve chains.
 
 A difficult real-world bend can be too irregular for the single-radius curve
 regularizer while still being perfectly representable by a short sequence of
@@ -7,13 +7,12 @@ stock straights and ten-degree curves. Falling all the way back to rotated
 ``sil6``/``sil12`` rectangles makes every heading change a visible mitre: the
 road surface clips and the painted borders no longer meet.
 
-This policy is intentionally narrow. It only considers stock paved families
-(sil/asf/kos), only sustained same-direction bends, and only spans where the
-existing fitter has not already placed a useful native-curve sequence. A small
-beam search propagates the actual connector pose from piece to piece, so every
-accepted internal seam has one common position and tangent. Candidates must
-stay within a sub-metre corridor around the already-conditioned centreline.
-Dirt, gravel, junction selection and terrain are untouched.
+This policy handles both sustained same-direction bends and isolated paved
+corners surrounded by quiet source geometry. A small beam search propagates the
+actual connector pose from piece to piece, so every accepted internal seam has
+one common position and tangent. Candidates must stay inside the existing
+bounded source corridor. Dirt, gravel, junction selection and terrain are
+untouched.
 """
 from __future__ import annotations
 
@@ -29,6 +28,9 @@ _MINIMUM_SIGNIFICANT_TURN_DEGREES = 0.70
 _MAXIMUM_LOCAL_SUSTAINED_TURN_DEGREES = 18.0
 _MINIMUM_SUSTAINED_TOTAL_TURN_DEGREES = 18.0
 _MAXIMUM_QUIET_DISTANCE_METRES = 35.0
+_MINIMUM_SINGLE_VERTEX_TURN_DEGREES = 7.5
+_MAXIMUM_SINGLE_VERTEX_TURN_DEGREES = 35.0
+_MAXIMUM_ADJACENT_SIGNIFICANT_TURN_DEGREES = 0.70
 _MAXIMUM_LOCKED_CORRIDOR_METRES = 0.60
 _MAXIMUM_LOCKED_END_ERROR_METRES = 1.25
 _MAXIMUM_LOCKED_BOUNDARY_TANGENT_ERROR_DEGREES = 3.0
@@ -85,7 +87,7 @@ def _signed_turn(previous, point, following) -> float:
     )
 
 
-def _sharp_turn_spans(points):
+def _sustained_sharp_turn_spans(points):
     """Return sustained same-direction bend spans, splitting long quiet gaps."""
 
     cleaned = tuple(points)
@@ -153,6 +155,65 @@ def _sharp_turn_spans(points):
 
     finish()
     return tuple(spans)
+
+
+def _isolated_single_vertex_spans(points, existing=()):
+    """Return curve-beam spans for isolated paved corners not already covered."""
+
+    cleaned = tuple(points)
+    if len(cleaned) < 5:
+        return ()
+
+    covered = tuple((int(start), int(end)) for start, end, _sign in existing)
+    turns = [0.0] * len(cleaned)
+    for index in range(1, len(cleaned) - 1):
+        turns[index] = _signed_turn(
+            cleaned[index - 1], cleaned[index], cleaned[index + 1]
+        )
+
+    result = []
+    # Two quiet boundary segments let _locked_measure derive stable entry and
+    # exit tangents around the three-point corner span. Corners near a run edge
+    # remain the responsibility of endpoint/junction fitting.
+    for index in range(2, len(cleaned) - 2):
+        turn = float(turns[index])
+        magnitude = abs(turn)
+        if not (
+            _MINIMUM_SINGLE_VERTEX_TURN_DEGREES
+            <= magnitude
+            <= _MAXIMUM_SINGLE_VERTEX_TURN_DEGREES
+        ):
+            continue
+        if any(start <= index <= end + 1 for start, end in covered):
+            continue
+        if (
+            abs(float(turns[index - 1]))
+            >= _MAXIMUM_ADJACENT_SIGNIFICANT_TURN_DEGREES
+            or abs(float(turns[index + 1]))
+            >= _MAXIMUM_ADJACENT_SIGNIFICANT_TURN_DEGREES
+        ):
+            continue
+
+        start = index - 1
+        end = index + 1
+        length = sum(
+            math.dist(a, b)
+            for a, b in zip(cleaned[start:end], cleaned[start + 1 : end + 1])
+        )
+        if length <= 1.0 or length > _MAXIMUM_SPAN_METRES:
+            continue
+        result.append((start, end, 1 if turn > 0.0 else -1))
+    return tuple(result)
+
+
+def _sharp_turn_spans(points):
+    """Return all paved bend spans owned by the connector-locked curve beam."""
+
+    existing = _sustained_sharp_turn_spans(points)
+    additions = _isolated_single_vertex_spans(points, existing)
+    if not additions:
+        return existing
+    return tuple(sorted((*existing, *additions), key=lambda item: (item[0], item[1])))
 
 
 def _paved_family(pieces) -> tuple[str, str] | None:
