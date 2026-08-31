@@ -108,7 +108,7 @@ def test_existing_paved_underlay_prevents_duplicate_cover():
     assert _emitted._emitted_seam_cover_plans(report) == ()
 
 
-def test_buried_turn_is_not_hidden_by_generated_final_wedge():
+def test_buried_turn_gets_only_borderless_final_wedge():
     first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
     second = _straight_from_start(2, (0.0, 0.0), 12.0)
     existing = _object(3, r"o\road\sil6.p3d", 0.0, 0.0, 6.0, y=0.0)
@@ -131,9 +131,12 @@ def test_buried_turn_is_not_hidden_by_generated_final_wedge():
 
     fixed = _emitted._apply_emitted_seam_covers(report, [0.0] * 4, spec)
 
-    assert len(fixed.objects) == 3
-    assert all("paved_" not in str(obj.model_path).casefold() for obj in fixed.objects)
-    assert fixed.short_piece_objects == 0
+    assert len(fixed.objects) == 4
+    helper = fixed.objects[-1]
+    assert "\\paved_wedge_q" in helper.model_path.replace("/", "\\").casefold()
+    assert "paved_miter" not in helper.model_path.casefold()
+    assert "paved_fill" not in helper.model_path.casefold()
+    assert fixed.short_piece_objects == 1
 
 
 def test_aligned_physical_gap_gets_underlay_even_without_tangent_error():
@@ -174,7 +177,7 @@ def test_coincident_straight_miter_uses_one_bisecting_underlay():
     assert plans[0].outer_miter_apex is not None
 
 
-def test_paved_turn_seam_is_left_for_exact_curve_refit_not_overlap_helper():
+def test_paved_turn_seam_uses_wedge_not_overlap_helper():
     first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
     second = _straight_from_start(2, (0.0, 0.0), 12.0)
     report = _p.RoadFitReport(
@@ -196,9 +199,12 @@ def test_paved_turn_seam_is_left_for_exact_curve_refit_not_overlap_helper():
 
     fixed = _emitted._apply_emitted_seam_covers(report, [0.0] * 4, spec)
 
-    assert len(fixed.objects) == 2
-    assert all("paved_" not in str(obj.model_path).casefold() for obj in fixed.objects)
-    assert fixed.short_piece_objects == 0
+    assert len(fixed.objects) == 3
+    helper = fixed.objects[-1]
+    assert "\\paved_wedge_q" in helper.model_path.replace("/", "\\").casefold()
+    assert all("paved_miter" not in str(obj.model_path).casefold() for obj in fixed.objects)
+    assert all("paved_fill" not in str(obj.model_path).casefold() for obj in fixed.objects)
+    assert fixed.short_piece_objects == 1
 
 
 def test_lundby34_compiled_grass_wedges_still_generate_diagnostic_plans():
