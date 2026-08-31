@@ -5,11 +5,13 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 import math
 
+from cwr_worldgen import generator as _generator
 from cwr_worldgen import playability as _p
 from cwr_worldgen import road_quality_policy as _quality
 from cwr_worldgen import stock_road_curve_usage_policy as _curve_usage
 from cwr_worldgen import stock_road_kodiak_reference_policy as _kodiak
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
+from cwr_worldgen import stock_road_stock_assets_only_policy as _stock_only
 
 
 @dataclass(frozen=True)
@@ -22,9 +24,16 @@ def _piece(model_path: str, length: float, nominal: int):
     return _p._RoadPiece(model_path, length, nominal)
 
 
-def test_kodiak_policy_is_outermost_and_curve_first() -> None:
+def test_kodiak_policy_remains_in_final_curve_first_chain() -> None:
     assert _kodiak._INSTALLED
-    assert _p.fit_road_objects is _kodiak._fit
+    assert _stock_only._INSTALLED
+
+    # There is one public fitter now. The serialization guard is the outer
+    # boundary and delegates directly to Kodiak's fitted-road implementation.
+    assert _p.fit_road_objects is _generator.fit_road_objects
+    assert _generator.fit_road_objects is _stock_only._fit
+    assert _stock_only._ORIGINAL_FIT is _kodiak._fit
+
     assert _quality._quality_window is _kodiak._quality_window
     assert _curve_usage._MINIMUM_BASELINE_SHORT_STRAIGHTS == 0
     assert math.isclose(
