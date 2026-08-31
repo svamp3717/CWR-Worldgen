@@ -21,6 +21,7 @@ from . import road_inspector_kodiak_overlap as _kodiak_overlap
 from . import road_inspector_embedded_paved_geometry as _embedded_paved_geometry
 from . import road_inspector_wrptool_catalogue as _wrptool_catalogue
 from . import road_inspector_native_junction_overlap as _native_junction_overlap
+from . import road_inspector_final_paved_recheck as _final_paved_recheck
 
 
 # Keep every correction confined to the inspector process. Importing the normal
@@ -45,10 +46,9 @@ _paved_wedge_audit.install()
 # about half a metre. Inspect that wider range and count the two real stock road
 # surfaces as cover when they physically hide the outside triangle.
 _kodiak_overlap.install()
-# Existing PBOs may still contain the retired generated paved helpers. Their
-# filename is not a geometry version, so use the actual embedded Visual LOD when
-# deciding whether such an old object really covers a wedge. Fresh worlds no
-# longer serialize these helpers at all.
+# Existing PBOs may still contain retired generated paved helpers. Their filename
+# is not a geometry version, so use the actual embedded Visual LOD when deciding
+# whether such an old object really covers a wedge. Fresh worlds are stock-only.
 _embedded_paved_geometry.install()
 # Finish with the same Resistance road catalogue used by generation. This layer
 # recommends the exact WrpTool-listed T/X P3D when a generic or wrong stock cap
@@ -58,6 +58,11 @@ _wrptool_catalogue.install()
 # centre. Report any ordinary stock road that still penetrates the measured
 # connector footprint, which is the stacked-road failure visible in game.
 _native_junction_overlap.install()
+# Revisit grass-wedge labels only after every physical-surface layer has run.
+# This removes the old false-positive path where an early label prevented the
+# strict audit from recognising actual stock overlap or an embedded historical
+# helper that already covered the entire outside triangle.
+_final_paved_recheck.install()
 
 RoadIssue = _core.RoadIssue
 InspectionResult = _core.InspectionResult
