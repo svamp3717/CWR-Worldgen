@@ -31,7 +31,6 @@ from . import stock_road_connector_policy as _connector
 from . import stock_road_junction_policy as _junction
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_relaxation_policy as _relax
-from . import stock_road_skew_policy as _skew
 from . import stock_road_surface_overlap_policy as _surface
 
 MAXIMUM_OPEN_ROAD_HEADING_RELAXATION_DEGREES = 14.0
@@ -49,7 +48,7 @@ _INSTALLED = False
 def _same_family_paved_t(incidents) -> bool:
     if len(incidents) != 3:
         return False
-    if any(_skew._is_generated_gravel_model(incident.model_path) for incident in incidents):
+    if any(_junction._is_generated_gravel_model(incident.model_path) for incident in incidents):
         return False
     families = tuple(incident.family for incident in incidents)
     return (
@@ -68,16 +67,16 @@ def _eligible_relaxed_t(incidents) -> bool:
 def _native_junction_for_incidents(incidents):
     """Permit measured native T geometry when local relaxation can absorb it."""
 
-    original = _skew._ORIGINAL_NATIVE_JUNCTION_FOR_INCIDENTS
+    original = _junction._ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS
     if original is None:
-        raise RuntimeError("stock road skew policy is not installed")
+        raise RuntimeError("stock road skew stage is not installed")
 
     native = original(incidents)
     if native is not None:
         return native
 
     if _ORIGINAL_MIXED_T_ELIGIBLE is not None and _ORIGINAL_MIXED_T_ELIGIBLE(incidents):
-        limit = _skew.MAXIMUM_RELAXED_JUNCTION_HEADING_ERROR_DEGREES
+        limit = _junction.MAXIMUM_RELAXED_JUNCTION_HEADING_ERROR_DEGREES
     elif _same_family_paved_t(incidents):
         limit = MAXIMUM_PAVED_T_HEADING_ERROR_DEGREES
     else:
@@ -247,7 +246,7 @@ def install_stock_road_local_fit_policy() -> None:
     if _INSTALLED:
         return
 
-    _ORIGINAL_MIXED_T_ELIGIBLE = _skew._eligible_relaxed_mixed_t
+    _ORIGINAL_MIXED_T_ELIGIBLE = _junction._eligible_relaxed_mixed_t
     _ORIGINAL_COLLECT_RELAXATIONS = _connector._collect_relaxations
     _ORIGINAL_QUALITY_WINDOW = _quality._quality_window
     _ORIGINAL_LOWER_LEGACY_CAP = _junction._lower_legacy_stock_cap
@@ -260,7 +259,7 @@ def install_stock_road_local_fit_policy() -> None:
         MAXIMUM_OPEN_ROAD_HEADING_RELAXATION_DEGREES
     )
 
-    _skew._eligible_relaxed_mixed_t = _eligible_relaxed_t
+    _junction._eligible_relaxed_mixed_t = _eligible_relaxed_t
     _junction._native_junction_for_incidents = _native_junction_for_incidents
     _connector._collect_relaxations = _collect_relaxations
 
