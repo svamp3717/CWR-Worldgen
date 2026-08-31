@@ -21,6 +21,9 @@ from cwr_worldgen import stock_road_intersection_edge_policy as _intersection_ed
 from cwr_worldgen import stock_road_emitted_seam_policy as _emitted_seam
 from cwr_worldgen import stock_road_emitted_seam_refinement_policy as _emitted_refinement
 from cwr_worldgen import stock_road_fit_first_policy as _fit_first
+from cwr_worldgen import stock_road_inspector_candidate_completion_policy as _completion
+from cwr_worldgen import stock_road_inspector_candidate_enforcement_policy as _enforcement
+from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_late_policy_stack as _stack
 
 
@@ -45,28 +48,31 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
         _emitted_seam,
         _emitted_refinement,
         _fit_first,
+        _completion,
     )
 
     assert _stack._INSTALLED
     assert all(policy._INSTALLED for policy in policies)
+    assert _enforcement._SELECTOR_INSTALLED
+    assert _enforcement._FINAL_INSTALLED
     assert _sharp_turn._sharp_turn_spans is _single_vertex_bend._single_vertex_sharp_turn_spans
     assert _p._stock_piece_chain is _junction_endpoint._junction_endpoint_chain
 
 
 def test_final_wrappers_are_not_left_disconnected() -> None:
-    # The emitted-geometry wrapper remains outermost so it still measures the
-    # exact final pitched WorldObjects. Its bounded paved-only application hook
-    # remains active so residual grass wedges are sealed after fitting.
-    assert _p.fit_road_objects is _emitted_seam._fit
+    # The final candidate wrapper owns the report that will be serialized, while
+    # the emitted-geometry wrapper immediately inside it still measures exact
+    # pitch-projected WorldObjects and invokes the bounded paved wedge completion.
+    assert _p.fit_road_objects is _enforcement._fit
+    assert _enforcement._ORIGINAL_FINAL_FIT is _emitted_seam._fit
     assert _emitted_seam._ORIGINAL_FIT is _intersection_edge._fit
     assert (
         _emitted_seam._emitted_seam_cover_plans
         is _emitted_refinement._refined_emitted_seam_cover_plans
     )
-    assert (
-        _emitted_seam._apply_emitted_seam_covers
-        is _fit_first._ORIGINAL_EMITTED_SEAM_APPLY
-    )
+    assert _completion._ORIGINAL_APPLY is _candidate._apply_wedge_candidates
+    assert _emitted_seam._apply_emitted_seam_covers is _completion._apply_candidate_completion
+    assert _fit_first._ORIGINAL_EMITTED_SEAM_APPLY is _completion._apply_candidate_completion
 
     # Keep the older seam planners wired for regression analysis, but the final
     # production visual hook must preserve the fitted objects rather than append
