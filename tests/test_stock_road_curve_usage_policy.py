@@ -5,6 +5,7 @@ import math
 
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_curve_usage_policy as _usage
+from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_junction_endpoint_policy as _junction_endpoint
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 
@@ -75,6 +76,7 @@ def test_exact_native_curve_sequence_has_zero_internal_tangent_error():
     assert _usage._maximum_internal_tangent_error(fitted, 1) <= 1.0e-9
 
 
-def test_curve_usage_policy_remains_inside_final_endpoint_wrapper():
-    assert _junction_endpoint._ORIGINAL_CHAIN is _usage._curve_promotion_chain
+def test_curve_usage_and_inspector_search_remain_inside_endpoint_wrapper():
+    assert _candidate._ORIGINAL_PIECE_CHAIN is _usage._curve_promotion_chain
+    assert _junction_endpoint._ORIGINAL_CHAIN is _candidate._candidate_exact_curve_chain
     assert _p._stock_piece_chain is _junction_endpoint._junction_endpoint_chain
