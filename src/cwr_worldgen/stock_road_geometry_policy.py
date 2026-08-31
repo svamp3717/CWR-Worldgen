@@ -1,11 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Authoritative physical geometry for OFP/CWA stock road pieces.
+"""Authoritative physical geometry and transforms for CWA stock road pieces.
 
 Stock P3Ds are not scaled when they are placed in a WRP. Their fitted connector
 spacing therefore has to come from the actual model geometry, not from the
 configurable long-piece spacing used by custom roads. Ordinary bends are rounded
 with bounded constant-radius fillets so the native ten-degree curves can be used
 without pulling the road far away from the source centerline.
+
+The same owner also installs the later model-space transform stage. Stock curve
+ODOLs are not centred on their connector chord, so their final WRP pose must be
+solved from the real Memory-LOD begin/end connectors. The transform installer is
+kept separate from the geometry installer so the historical pipeline timing and
+captured fitter state remain unchanged.
 """
 from __future__ import annotations
 
@@ -36,13 +42,17 @@ _ORIGINAL_ROUNDED_ROAD_RUN = _p._rounded_road_run
 _ORIGINAL_QUALITY_PIECE_LENGTH = _quality._piece_length
 _INSTALLED = False
 
+# Captured only when the separately timed transform stage is installed. Keeping
+# these as None during geometry-module import preserves the old import/install
+# semantics even though both stages now live in one source file.
+_ORIGINAL_TRANSFORM_ROAD_OBJECT_ON_SLOPE = None
+_ORIGINAL_TRANSFORM_MODEL_AXIS = None
+_REVERSED_FINAL_KEYS: set[tuple[int, str, float, float, float]] = set()
+_TRANSFORM_INSTALLED = False
+
 
 def stock_curve_geometry(radius_nominal: int, scale: float = 1.0) -> tuple[float, float, float]:
-    """Return the measured connector chord, turn angle and sagitta of a stock curve.
-
-    ``scale`` is retained for compatibility with older callers but deliberately
-    ignored. WRP transforms do not scale P3Ds.
-    """
+    """Return measured connector chord, turn angle and sagitta of a stock curve."""
 
     if radius_nominal <= 0:
         raise ValueError("stock road curve radius must be positive")
@@ -284,6 +294,62 @@ def _circular_road_run(
     return tuple(rounded)
 
 
+def _transform_road_object_on_slope(*args, **kwargs):
+    if _ORIGINAL_TRANSFORM_ROAD_OBJECT_ON_SLOPE is None:
+        raise RuntimeError("stock road transform stage is not installed")
+    model_path = str(args[1] if len(args) > 1 else kwargs.get("model_path", ""))
+    geometry = _model_geometry.stock_curve_connectors(model_path)
+    obj = _ORIGINAL_TRANSFORM_ROAD_OBJECT_ON_SLOPE(*args, **kwargs)
+    if geometry is None:
+        return obj
+
+    start = tuple(args[2] if len(args) > 2 else kwargs["start"])
+    end = tuple(args[3] if len(args) > 3 else kwargs["end"])
+    reverse = _curve._curve_object_key(obj) in _curve._REVERSED_CURVE_KEYS
+    local_begin = geometry.end if reverse else geometry.begin
+    local_end = geometry.begin if reverse else geometry.end
+
+    local_length = math.dist(local_begin, local_end)
+    world_horizontal_length = math.dist(start, end)
+    if not math.isclose(
+        local_length,
+        world_horizontal_length,
+        rel_tol=0.0,
+        abs_tol=1.0e-3,
+    ):
+        if reverse:
+            _REVERSED_FINAL_KEYS.add(_curve._curve_object_key(obj))
+        return obj
+
+    origin, heading = _model_geometry.solve_planar_connector_transform(
+        start, end, local_begin, local_end
+    )
+    fixed = replace(
+        obj,
+        x=origin[0],
+        z=origin[1],
+        heading_degrees=heading,
+    )
+    if reverse:
+        _REVERSED_FINAL_KEYS.add(_curve._curve_object_key(fixed))
+    return fixed
+
+
+def _transform_model_axis(obj, length: float):
+    if _ORIGINAL_TRANSFORM_MODEL_AXIS is None:
+        raise RuntimeError("stock road transform stage is not installed")
+    geometry = _model_geometry.stock_curve_connectors(obj.model_path)
+    if geometry is None:
+        return _ORIGINAL_TRANSFORM_MODEL_AXIS(obj, length)
+
+    origin = (float(obj.x), float(obj.z))
+    begin = _model_geometry.transform_local(geometry.begin, origin, obj.heading_degrees)
+    end = _model_geometry.transform_local(geometry.end, origin, obj.heading_degrees)
+    if _curve._curve_object_key(obj) in _REVERSED_FINAL_KEYS:
+        return end, begin
+    return begin, end
+
+
 def install_stock_road_geometry_policy() -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -295,3 +361,17 @@ def install_stock_road_geometry_policy() -> None:
     _p._rounded_road_run = _circular_road_run
     _p._stock_piece_chain = _seam_safe_stock_curve_chain
     _INSTALLED = True
+
+
+def install_stock_road_transform_policy() -> None:
+    """Install the model-space connector transform at its historical stage."""
+
+    global _ORIGINAL_TRANSFORM_ROAD_OBJECT_ON_SLOPE, _ORIGINAL_TRANSFORM_MODEL_AXIS
+    global _TRANSFORM_INSTALLED
+    if _TRANSFORM_INSTALLED:
+        return
+    _ORIGINAL_TRANSFORM_ROAD_OBJECT_ON_SLOPE = _p._road_object_on_slope
+    _ORIGINAL_TRANSFORM_MODEL_AXIS = _p._model_axis
+    _p._road_object_on_slope = _transform_road_object_on_slope
+    _p._model_axis = _transform_model_axis
+    _TRANSFORM_INSTALLED = True
