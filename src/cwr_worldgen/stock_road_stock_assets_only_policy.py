@@ -25,11 +25,10 @@ import math
 
 from . import generator as _generator
 from . import playability as _p
+from . import stock_road_curve_usage_policy as _curve_usage
 from . import stock_road_inspector_candidate_enforcement_policy as _enforcement
 from . import stock_road_inspector_candidate_policy as _candidate
-from . import stock_road_junction_endpoint_policy as _endpoint
 from . import stock_road_junction_policy as _junction
-from . import stock_road_kodiak_reference_policy as _kodiak
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_relaxation_transaction_policy as _transaction
 from . import stock_road_sharp_turn_policy as _sharp
@@ -298,7 +297,7 @@ def _fit(
     starting_id: int = 1,
     progress_callback=None,
 ):
-    """Run the inner fitter and reject generated paved/dirt survivors."""
+    """Run the complete road fitter and reject generated paved/dirt survivors."""
 
     if _ORIGINAL_FIT is None:
         raise RuntimeError("stock paved/dirt final guard is not installed")
@@ -328,26 +327,23 @@ def install_stock_road_stock_assets_only_policy() -> None:
     global _ORIGINAL_NATIVE_T, _ORIGINAL_CHAIN, _ORIGINAL_FIT, _INSTALLED
     if _INSTALLED:
         return
-    if not _enforcement._FINAL_INSTALLED:
-        raise RuntimeError("Inspector candidate final policy must install first")
-    if not _endpoint._INSTALLED or not _kodiak._INSTALLED:
-        raise RuntimeError("endpoint and Kodiak road policies must install first")
+    if not _enforcement._FINAL_INSTALLED or not _curve_usage._INSTALLED:
+        raise RuntimeError("candidate enforcement and curve usage must install first")
 
     _ORIGINAL_NATIVE_T = _enforcement._junction._native_t_junction
 
-    # Keep junction-endpoint enforcement as the public outer chain wrapper. Put
-    # the ordinary overlap stage immediately inside it so effective T/X endpoint
-    # windows still get the final word. This preserves the established wrapper
-    # contract while changing the actual straight-chain construction.
-    _ORIGINAL_CHAIN = _endpoint._ORIGINAL_CHAIN
-    _endpoint._ORIGINAL_CHAIN = _stock_overlap_chain
+    # Keep the established public curve/candidate/endpoint wrapper chain intact.
+    # Install ordinary paved overlap at the baseline point reached only when the
+    # new curve-first solver declines a run. Exact curve results therefore remain
+    # connector-locked, while healthy straight-only fallbacks get Kodiak overlap.
+    _ORIGINAL_CHAIN = _curve_usage._ORIGINAL_CHAIN
+    _curve_usage._ORIGINAL_CHAIN = _stock_overlap_chain
 
-    # Likewise keep Kodiak's final ownership cleanup outermost. The guard runs
-    # immediately inside it, after all older generation layers but before Kodiak
-    # removes redundant stock node stubs. Kodiak never adds road models, so no
-    # generated paved/dirt P3D can appear after this check.
-    _ORIGINAL_FIT = _kodiak._ORIGINAL_FIT
-    _kodiak._ORIGINAL_FIT = _fit
+    # The generator's module-global call is the serialization path. Wrap that
+    # call without disturbing the tested playability/Kodiak composition used by
+    # all the road policies themselves.
+    _ORIGINAL_FIT = _p.fit_road_objects
+    _generator.fit_road_objects = _fit
 
     # During planning, choose the family-compatible WrpTool T first. The normal
     # connector relaxation transaction decides whether its measured arms can be
@@ -358,8 +354,4 @@ def install_stock_road_stock_assets_only_policy() -> None:
     # corridor. The curve-first policy additionally checks the obstacle index.
     _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES = STOCK_CURVE_SOURCE_CORRIDOR_METRES
 
-    # Leave the established public outer wrappers in place.
-    _p._stock_piece_chain = _endpoint._junction_endpoint_chain
-    _p.fit_road_objects = _kodiak._fit
-    _generator.fit_road_objects = _kodiak._fit
     _INSTALLED = True
