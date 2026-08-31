@@ -5,11 +5,9 @@ import math
 from types import SimpleNamespace
 
 from cwr_worldgen import playability as _p
-from cwr_worldgen import stock_road_curve_seam_fallback_policy as _curve_seam_fallback
-from cwr_worldgen import stock_road_fit_first_policy as _fit_first
+from cwr_worldgen import stock_road_final_continuity_policy as _continuity
 from cwr_worldgen import stock_road_junction_policy as _junction
 from cwr_worldgen import stock_road_model_geometry as _geometry
-from cwr_worldgen import stock_road_straight_seam_policy as _straight
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
 
 
@@ -29,7 +27,10 @@ def test_skew_t_legacy_cap_uses_continuous_main_axis():
 
 def test_native_curve_tangents_meet_at_the_rendered_edge(monkeypatch):
     first_start = (0.0, 0.0)
-    first_end = (math.sin(math.radians(5.0)) * 10.0, math.cos(math.radians(5.0)) * 10.0)
+    first_end = (
+        math.sin(math.radians(5.0)) * 10.0,
+        math.cos(math.radians(5.0)) * 10.0,
+    )
     second_start = first_end
     second_end = (
         second_start[0] + math.sin(math.radians(15.0)) * 10.0,
@@ -50,8 +51,12 @@ def test_native_curve_tangents_meet_at_the_rendered_edge(monkeypatch):
         lambda _points, point: headings[tuple(point)],
     )
 
-    first_tangents = _finish._piece_tangents(measure, piece, first_start, first_end)
-    second_tangents = _finish._piece_tangents(measure, piece, second_start, second_end)
+    first_tangents = _finish._piece_tangents(
+        measure, piece, first_start, first_end
+    )
+    second_tangents = _finish._piece_tangents(
+        measure, piece, second_start, second_end
+    )
 
     assert math.isclose(first_tangents[0], 0.0, abs_tol=1.0e-9)
     assert math.isclose(first_tangents[1], 10.0, abs_tol=1.0e-9)
@@ -72,14 +77,15 @@ def _object(object_id, model_path, x, z, heading):
     )
 
 
-def test_curve_straight_tangent_mismatch_gets_low_seam_cover():
+def _curve_straight_report(straight_heading: float):
     model = r"o\road\sil10 100.p3d"
     curve_geometry = _geometry.stock_curve_connectors(model)
     assert curve_geometry is not None
     curve = _object(1, model, 0.0, 0.0, 0.0)
-    seam = _geometry.transform_local(curve_geometry.end, (0.0, 0.0), 0.0)
+    seam = _geometry.transform_local(
+        curve_geometry.end, (0.0, 0.0), 0.0
+    )
 
-    straight_heading = 11.5
     half = _geometry.STOCK_STRAIGHT_LENGTHS_METRES[6] * 0.5
     angle = math.radians(straight_heading)
     direction = (math.sin(angle), math.cos(angle))
@@ -90,17 +96,35 @@ def test_curve_straight_tangent_mismatch_gets_low_seam_cover():
         seam[1] + direction[1] * half,
         straight_heading,
     )
-    report = SimpleNamespace(objects=(curve, straight), junction_cap_objects=0)
+    return SimpleNamespace(
+        objects=(curve, straight),
+        junction_cap_objects=0,
+    ), seam
+
+
+def test_curve_straight_tangent_mismatch_is_detected():
+    report, seam = _curve_straight_report(11.5)
 
     plans = _finish._curve_seam_cover_plans(report)
 
     assert len(plans) == 1
     assert plans[0].model_path.casefold() == r"o\road\sil6.p3d"
     assert math.dist(plans[0].centre, seam) < 1.0e-9
-    assert math.isclose(plans[0].tangent_axis_degrees, 10.75, abs_tol=1.0e-9)
+    assert math.isclose(
+        plans[0].tangent_axis_degrees, 10.75, abs_tol=1.0e-9
+    )
 
 
-def test_continuous_native_curve_run_does_not_get_seam_cover():
+def test_final_physical_seam_budget_keeps_lundby_sized_turns():
+    # The retired curve-seam wrapper existed partly to widen this bound to 8
+    # degrees. Keep that effective production value without keeping the wrapper.
+    assert _finish.MAXIMUM_CURVE_SEAM_TANGENT_ERROR_DEGREES == 8.0
+
+    report, _seam = _curve_straight_report(16.0)
+    assert len(_finish._curve_seam_cover_plans(report)) == 1
+
+
+def test_continuous_native_curve_run_does_not_get_seam_plan():
     model = r"o\road\sil10 100.p3d"
     geometry = _geometry.stock_curve_connectors(model)
     assert geometry is not None
@@ -109,58 +133,26 @@ def test_continuous_native_curve_run_does_not_get_seam_cover():
 
     second_heading = 10.0
     begin_offset = _geometry.rotate_local(geometry.begin, second_heading)
-    second_origin = (seam[0] - begin_offset[0], seam[1] - begin_offset[1])
-    second = _object(2, model, second_origin[0], second_origin[1], second_heading)
-    report = SimpleNamespace(objects=(first, second), junction_cap_objects=0)
-
-    plans = _finish._curve_seam_cover_plans(report)
-
-    assert plans == ()
-
-
-def _straight_miter_report(family: str, heading: float):
-    half = _geometry.STOCK_STRAIGHT_LENGTHS_METRES[6] * 0.5
-    first = _object(1, rf"o\road\{family}6.p3d", 0.0, -half, 0.0)
-    angle = math.radians(heading)
-    direction = (math.sin(angle), math.cos(angle))
-    second = _object(
-        2,
-        rf"o\road\{family}6.p3d",
-        direction[0] * half,
-        direction[1] * half,
-        heading,
+    second_origin = (
+        seam[0] - begin_offset[0],
+        seam[1] - begin_offset[1],
     )
-    return SimpleNamespace(objects=(first, second), junction_cap_objects=0)
+    second = _object(
+        2, model, second_origin[0], second_origin[1], second_heading
+    )
+    report = SimpleNamespace(
+        objects=(first, second),
+        junction_cap_objects=0,
+    )
+
+    assert _finish._curve_seam_cover_plans(report) == ()
 
 
-def test_paved_straight_facet_miter_gets_low_seam_cover():
-    plans = _straight._straight_seam_cover_plans(_straight_miter_report("sil", 8.0))
-
-    assert len(plans) == 1
-    assert plans[0].model_path.casefold() == r"o\road\sil6.p3d"
-    assert math.dist(plans[0].centre, (0.0, 0.0)) < 1.0e-9
-    assert math.isclose(plans[0].tangent_axis_degrees, 4.0, abs_tol=1.0e-9)
-
-
-def test_tiny_straight_heading_noise_does_not_add_underlay():
-    plans = _straight._straight_seam_cover_plans(_straight_miter_report("sil", 0.5))
-
-    assert plans == ()
-
-
-def test_narrow_ces_road_does_not_get_paved_miter_underlay():
-    plans = _straight._straight_seam_cover_plans(_straight_miter_report("ces", 8.0))
-
-    assert plans == ()
-
-
-def test_fit_first_policy_is_the_final_visual_hook():
+def test_final_continuity_owns_intermediate_visual_seam_policy():
+    # Intermediate road-underlay wrappers are gone. Curve selection/continuity
+    # owns the visible geometry; the later emitted-seam audit owns final WRP
+    # connector gaps.
     assert (
         _finish._apply_curve_seam_covers
-        is _fit_first._preserve_fitted_visual_seam
+        is _continuity._disable_curve_seam_underlays
     )
-    assert (
-        _fit_first._ORIGINAL_VISUAL_SEAM_APPLY
-        is _curve_seam_fallback._apply_paved_curve_seam_fallback
-    )
-    assert _curve_seam_fallback._ORIGINAL_FINISH is _straight._apply_straight_seam_covers
