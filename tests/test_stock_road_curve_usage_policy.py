@@ -6,7 +6,7 @@ import math
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_curve_usage_policy as _usage
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
-from cwr_worldgen import stock_road_junction_endpoint_policy as _junction_endpoint
+from cwr_worldgen import stock_road_junction_policy as _junction
 from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen import stock_road_sharp_exact_policy as _exact
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
@@ -140,5 +140,5 @@ def test_curve_first_success_does_not_call_straight_baseline(monkeypatch):
 
 def test_curve_usage_and_inspector_search_remain_inside_endpoint_wrapper():
     assert _candidate._ORIGINAL_PIECE_CHAIN is _usage._curve_promotion_chain
-    assert _junction_endpoint._ORIGINAL_CHAIN is _candidate._candidate_exact_curve_chain
-    assert _p._stock_piece_chain is _junction_endpoint._junction_endpoint_chain
+    assert _junction._ORIGINAL_ENDPOINT_CHAIN is _candidate._candidate_exact_curve_chain
+    assert _p._stock_piece_chain is _junction._junction_endpoint_chain
