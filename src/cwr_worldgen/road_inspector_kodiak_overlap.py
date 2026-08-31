@@ -2,12 +2,12 @@
 """Teach Road Inspector the bounded stock-road overlap seen in ``kodiak2.wrp``.
 
 Kodiak's paved road pieces are usually tangent-aligned but their physical
-connectors commonly overlap by roughly half a metre.  That is different from a
+connectors commonly overlap by roughly half a metre. That is different from a
 repair slab placed across a turn: the two intended stock pieces themselves own
-the seam.  The direct grass-wedge audit must therefore inspect those wider
+the seam. The direct grass-wedge audit must therefore inspect those wider
 endpoint separations and count the involved stock road surfaces as valid cover.
 
-This module is read-only and paved-only.  It does not alter generated geometry.
+This module is read-only and paved-only. It does not alter generated geometry.
 """
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ def _strictly_covered_by_other_paved_surface(
         )
         if all(road is not None for road in involved):
             # Kodiak-style overlap is healthy only if the intended pair itself
-            # physically covers every sample.  This does not forgive a mere
+            # physically covers every sample. This does not forgive a mere
             # connector-distance discrepancy or an unrelated overlapping slab.
             if all(
                 any(_visible_at_sample(road, sample, terrain) for road in involved)
@@ -145,8 +145,8 @@ def _classify_grass_wedge(issue, roads, source_junctions, match_tolerance: float
             "If the intended stock pieces are already tangent-aligned, a bounded "
             "longitudinal overlap of those same pieces (Kodiak-style, roughly "
             "0.45 m) is valid when their real surfaces cover the outside seam. "
-            "Do not add a cross-axis road slab; use the borderless wedge only "
-            "when stock geometry still leaves terrain exposed."
+            "Do not hide the wedge with a cross-axis road slab; use the borderless "
+            "wedge only when stock geometry still leaves terrain exposed."
         ),
     )
 
