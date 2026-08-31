@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from cwr_worldgen import stock_road_emitted_seam_policy as _emitted
 from cwr_worldgen import stock_road_fit_first_policy as _fit_first
+from cwr_worldgen import stock_road_inspector_candidate_completion_policy as _completion
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_intersection_edge_policy as _intersection_edge
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
@@ -37,8 +38,9 @@ def test_previous_overlap_hooks_remain_recorded_for_regression_analysis() -> Non
     )
     assert (
         _fit_first._ORIGINAL_EMITTED_SEAM_APPLY
-        is _candidate._apply_wedge_candidates
+        is _completion._apply_candidate_completion
     )
+    assert _completion._ORIGINAL_APPLY is _candidate._apply_wedge_candidates
 
 
 def test_visual_seam_guard_does_not_append_road_objects() -> None:
