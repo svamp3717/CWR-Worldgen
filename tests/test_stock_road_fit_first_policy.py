@@ -36,11 +36,13 @@ def test_previous_overlap_hooks_remain_recorded_for_regression_analysis() -> Non
     assert _fit_first._ORIGINAL_INTERSECTION_EDGE_APPLY.__name__ == (
         "_seal_legacy_paved_intersections"
     )
+    # Generated paved completion is deliberately retired from production. The
+    # last recorded seam hook is the candidate diagnostic/planning pass itself.
     assert (
         _fit_first._ORIGINAL_EMITTED_SEAM_APPLY
-        is _completion._apply_candidate_completion
+        is _candidate._apply_wedge_candidates
     )
-    assert _completion._ORIGINAL_APPLY is _candidate._apply_wedge_candidates
+    assert not _completion._INSTALLED
 
 
 def test_visual_seam_guard_does_not_append_road_objects() -> None:
