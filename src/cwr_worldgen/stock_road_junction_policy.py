@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Use native OFP/CWA junction P3Ds instead of straight road slabs at intersections.
+"""Own native stock-road junction selection, placement and endpoint contracts.
 
 The stock piece fitter historically represents every non-gravel T/X junction with
 one six-metre straight road model centred on the node. That works as a road-link
@@ -15,10 +15,11 @@ central cap changes shape/orientation, so the maximum deviation from the source
 road is bounded to the small connector mismatch inside the already-cleared road
 corridor.
 
-This module also owns the bounded mixed-surface skew extension. Generated gravel
-may borrow stock ``ces`` connector semantics while matching one paved-main T, but
-that relaxation remains a separately installed pipeline stage so historical
-installation order is preserved.
+This module also owns two staged junction refinements while preserving their
+historical installation positions: bounded mixed-surface skew matching and the
+late endpoint-window contract used by exact stock-piece fitters. Keeping those
+rules here removes separate policy files without changing when they become
+active in the production pipeline.
 """
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ from typing import Sequence
 
 from . import generator as _generator
 from . import playability as _p
+from . import road_quality_policy as _quality
 from . import stock_road_wrp_catalogue as _catalogue
 
 
@@ -52,6 +54,8 @@ _GENERATED_GRAVEL_FILENAME = re.compile(
 MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = 7.5
 NATIVE_JUNCTION_VERTICAL_BIAS_METRES = 0.006
 MAXIMUM_RELAXED_JUNCTION_HEADING_ERROR_DEGREES = 18.0
+MINIMUM_ENDPOINT_RECOVERY_IMPROVEMENT_METRES = 0.05
+_WINDOW_EPSILON_METRES = 1.0e-6
 
 # Keep one source of truth for the purpose-built Resistance T/X inventory.
 _T_JUNCTION_MODELS = dict(_catalogue.WRPTOOL_T_JUNCTION_MODELS)
@@ -64,6 +68,8 @@ _INSTALLED = False
 _ORIGINAL_SKEW_FAMILY = None
 _ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS = None
 _SKEW_INSTALLED = False
+_ORIGINAL_ENDPOINT_CHAIN = None
+_ENDPOINT_INSTALLED = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,12 +116,8 @@ def _rotation_score(
 
 
 def _best_rotation(pairs: Sequence[tuple[float, float]]) -> tuple[float, float]:
-    """Return minimax rotation and its maximum connector heading error.
+    """Return minimax rotation and its maximum connector heading error."""
 
-    The optimum of a finite set of angular absolute-error constraints occurs at
-    one constraint offset or midway between two offsets. Evaluating those
-    candidates is deterministic and avoids a coarse angular grid.
-    """
     offsets = tuple((actual - local) % 360.0 for local, actual in pairs)
     candidates = set(offsets)
     for first, second in itertools.combinations(offsets, 2):
@@ -274,9 +276,6 @@ def _native_junction_object(old, native: _NativeJunction, elevations, spec):
     direction = (math.sin(angle), math.cos(angle))
     start = (old.x - direction[0] * half, old.z - direction[1] * half)
     end = (old.x + direction[0] * half, old.z + direction[1] * half)
-    # Stock chain pieces use 0.035 m. Six extra millimetres is enough to make
-    # the junction surface win the z-buffer without reproducing the conspicuous
-    # 25 mm raised rectangle used by the legacy straight cap.
     return _p._road_object_on_slope(
         old.object_id,
         native.model_path,
@@ -329,12 +328,7 @@ def _replace_stock_junction_caps(report, dataset, projection, elevations, spec):
             point, native = match
             asset = _catalogue.native_junction_asset(str(native.model_path))
             if asset is not None and math.dist((old.x, old.z), point) <= 0.20:
-                # Incident road families own the surface combination. The legacy
-                # six-metre cap is only a temporary fitting hub and must not veto
-                # a valid WrpTool-listed native junction because its family differs.
-                objects[index] = _native_junction_object(
-                    old, native, elevations, spec
-                )
+                objects[index] = _native_junction_object(old, native, elevations, spec)
                 changed = True
                 continue
 
@@ -381,9 +375,7 @@ def _fit(
     )
     if not bool(getattr(spec, "stock_road_piece_fitting", False)):
         return report
-    return _replace_stock_junction_caps(
-        report, dataset, projection, elevations, spec
-    )
+    return _replace_stock_junction_caps(report, dataset, projection, elevations, spec)
 
 
 def _is_generated_gravel_model(model_path: str) -> bool:
@@ -425,6 +417,7 @@ def _eligible_relaxed_mixed_t(incidents) -> bool:
 
 
 def _native_junction_with_bounded_mixed_skew(incidents):
+    global MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES
     if _ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS is None:
         raise RuntimeError("stock road skew stage is not installed")
 
@@ -434,12 +427,158 @@ def _native_junction_with_bounded_mixed_skew(incidents):
 
     original_limit = MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES
     try:
-        globals()["MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES"] = (
+        MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = (
             MAXIMUM_RELAXED_JUNCTION_HEADING_ERROR_DEGREES
         )
         return _ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS(incidents)
     finally:
-        globals()["MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES"] = original_limit
+        MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = original_limit
+
+
+def _effective_window(
+    measure,
+    pieces,
+    start_distance: float,
+    preferred_end_distance: float,
+    minimum_end_distance: float,
+    maximum_end_distance: float,
+):
+    context = _quality._CONTEXT.get()
+    if context is None:
+        return (
+            float(start_distance),
+            float(preferred_end_distance),
+            float(minimum_end_distance),
+            float(maximum_end_distance),
+        )
+    return tuple(
+        float(value)
+        for value in _quality._quality_window(
+            measure,
+            pieces,
+            start_distance,
+            preferred_end_distance,
+            minimum_end_distance,
+            maximum_end_distance,
+            context,
+        )
+    )
+
+
+def _covered_endpoint_errors(
+    measure,
+    fitted,
+    *,
+    recover_start: bool,
+    recover_end: bool,
+    effective_start: float,
+    effective_end: float,
+) -> tuple[float, ...]:
+    if not fitted:
+        return (math.inf,) if recover_start or recover_end else ()
+
+    errors = []
+    if recover_start:
+        desired = measure.point(effective_start)[:2]
+        errors.append(math.dist(tuple(fitted[0][1]), desired))
+    if recover_end:
+        desired = measure.point(effective_end)[:2]
+        errors.append(math.dist(tuple(fitted[-1][2]), desired))
+    return tuple(errors)
+
+
+def _junction_endpoint_chain(
+    measure,
+    pieces,
+    *,
+    start_distance,
+    preferred_end_distance,
+    minimum_end_distance,
+    maximum_end_distance,
+):
+    if _ORIGINAL_ENDPOINT_CHAIN is None:
+        raise RuntimeError("stock road junction-endpoint stage is not installed")
+
+    raw_start = float(start_distance)
+    raw_preferred = float(preferred_end_distance)
+    baseline = _ORIGINAL_ENDPOINT_CHAIN(
+        measure,
+        pieces,
+        start_distance=start_distance,
+        preferred_end_distance=preferred_end_distance,
+        minimum_end_distance=minimum_end_distance,
+        maximum_end_distance=maximum_end_distance,
+    )
+
+    effective_start, effective_preferred, effective_minimum, effective_maximum = (
+        _effective_window(
+            measure,
+            pieces,
+            start_distance,
+            preferred_end_distance,
+            minimum_end_distance,
+            maximum_end_distance,
+        )
+    )
+
+    trim_start = effective_start > raw_start + _WINDOW_EPSILON_METRES
+    trim_end = effective_preferred < raw_preferred - _WINDOW_EPSILON_METRES
+    if trim_start or trim_end:
+        return _ORIGINAL_ENDPOINT_CHAIN(
+            measure,
+            pieces,
+            start_distance=effective_start,
+            preferred_end_distance=effective_preferred,
+            minimum_end_distance=effective_minimum,
+            maximum_end_distance=effective_maximum,
+        )
+
+    recover_start = effective_start < raw_start - _WINDOW_EPSILON_METRES
+    recover_end = effective_preferred > raw_preferred + _WINDOW_EPSILON_METRES
+    if not recover_start and not recover_end:
+        return baseline
+
+    baseline_errors = _covered_endpoint_errors(
+        measure,
+        baseline,
+        recover_start=recover_start,
+        recover_end=recover_end,
+        effective_start=effective_start,
+        effective_end=effective_preferred,
+    )
+    if (
+        baseline_errors
+        and max(baseline_errors) <= MINIMUM_ENDPOINT_RECOVERY_IMPROVEMENT_METRES
+    ):
+        return baseline
+
+    recovered = _ORIGINAL_ENDPOINT_CHAIN(
+        measure,
+        pieces,
+        start_distance=effective_start,
+        preferred_end_distance=effective_preferred,
+        minimum_end_distance=effective_minimum,
+        maximum_end_distance=effective_maximum,
+    )
+    if not recovered:
+        return baseline
+
+    recovered_errors = _covered_endpoint_errors(
+        measure,
+        recovered,
+        recover_start=recover_start,
+        recover_end=recover_end,
+        effective_start=effective_start,
+        effective_end=effective_preferred,
+    )
+    if not recovered_errors:
+        return baseline
+
+    baseline_max = max(baseline_errors) if baseline_errors else math.inf
+    recovered_max = max(recovered_errors)
+    if recovered_max + MINIMUM_ENDPOINT_RECOVERY_IMPROVEMENT_METRES < baseline_max:
+        return recovered
+    return baseline
 
 
 def install_stock_road_junction_policy() -> None:
@@ -467,3 +606,14 @@ def install_stock_road_skew_policy() -> None:
     _family = _family_with_generated_gravel
     _native_junction_for_incidents = _native_junction_with_bounded_mixed_skew
     _SKEW_INSTALLED = True
+
+
+def install_stock_road_junction_endpoint_policy() -> None:
+    """Install endpoint-window enforcement outside every late exact wrapper."""
+
+    global _ORIGINAL_ENDPOINT_CHAIN, _ENDPOINT_INSTALLED
+    if _ENDPOINT_INSTALLED:
+        return
+    _ORIGINAL_ENDPOINT_CHAIN = _p._stock_piece_chain
+    _p._stock_piece_chain = _junction_endpoint_chain
+    _ENDPOINT_INSTALLED = True
