@@ -23,7 +23,6 @@ from . import playability as _p
 from . import road_quality_policy as _quality
 from . import stock_road_junction_policy as _junction
 from . import stock_road_measured_junction_policy as _measured
-from . import stock_road_skew_policy as _skew
 from . import stock_road_model_geometry as _model_geometry
 from .stock_road_model_geometry import STOCK_JUNCTION_CONNECTOR_RADIUS_METRES
 
@@ -254,9 +253,9 @@ def install_gravel_asphalt_transition_policy() -> None:
         return
     _ORIGINAL_NATIVE_T = _measured._native_t_junction
     _ORIGINAL_QUALITY_WINDOW = _quality._quality_window
-    _ORIGINAL_RELAXATION_ELIGIBILITY = _skew._eligible_relaxed_mixed_t
+    _ORIGINAL_RELAXATION_ELIGIBILITY = _junction._eligible_relaxed_mixed_t
     _measured._native_t_junction = _native_t_junction
     _junction._native_t_junction = _native_t_junction
     _quality._quality_window = _quality_window
-    _skew._eligible_relaxed_mixed_t = _relaxation_eligible
+    _junction._eligible_relaxed_mixed_t = _relaxation_eligible
     _INSTALLED = True
