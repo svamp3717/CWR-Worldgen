@@ -22,7 +22,6 @@ from . import road_quality_policy as _quality
 from . import stock_road_curve_policy as _curve
 from . import stock_road_geometry_policy as _geometry
 from . import stock_road_model_geometry as _model_geometry
-from . import stock_road_transform_policy as _transform
 
 _ORIGINAL_CHAIN = None
 _ORIGINAL_ROAD_OBJECT_ON_SLOPE = None
@@ -229,7 +228,7 @@ def _road_object_on_slope(*args, **kwargs):
     spec = args[5] if len(args) > 5 else kwargs["spec"]
     vertical_offset = float(kwargs.get("vertical_offset", 0.0))
 
-    reverse = _curve._curve_object_key(obj) in _transform._REVERSED_FINAL_KEYS
+    reverse = _curve._curve_object_key(obj) in _geometry._REVERSED_FINAL_KEYS
     local_begin = geometry.end if reverse else geometry.begin
     local_end = geometry.begin if reverse else geometry.end
     start_height = _p._sample_elevation(
@@ -256,7 +255,7 @@ def _road_object_on_slope(*args, **kwargs):
         pitch_degrees=pitch,
     )
     if reverse:
-        _transform._REVERSED_FINAL_KEYS.add(_curve._curve_object_key(fixed))
+        _geometry._REVERSED_FINAL_KEYS.add(_curve._curve_object_key(fixed))
     return fixed
 
 
@@ -275,16 +274,12 @@ def _model_axis(obj, length: float):
         )
         begin_xz = (begin[0], begin[2])
         end_xz = (end[0], end[2])
-        if _curve._curve_object_key(obj) in _transform._REVERSED_FINAL_KEYS:
+        if _curve._curve_object_key(obj) in _geometry._REVERSED_FINAL_KEYS:
             return end_xz, begin_xz
         return begin_xz, end_xz
 
     stock_length = _model_geometry.stock_straight_length(obj.model_path)
     if stock_length is not None:
-        # A pitched rigid straight still has ``stock_length`` in model space,
-        # but only L*cos(pitch) of that connector axis exists in world X/Z.
-        # Audits and seam coverage must use the physical horizontal projection,
-        # otherwise they report an overlap equal to the missing cosine term.
         horizontal = stock_length * abs(math.cos(math.radians(float(obj.pitch_degrees))))
         return _ORIGINAL_MODEL_AXIS(obj, horizontal)
 
