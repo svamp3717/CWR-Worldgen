@@ -10,7 +10,6 @@ from cwr_worldgen import stock_road_emitted_seam_policy as _emitted
 from cwr_worldgen import stock_road_inspector_candidate_enforcement_policy as _enforcement
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_junction_policy as _junction
-from cwr_worldgen import stock_road_junction_endpoint_policy as _junction_endpoint
 from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen import stock_road_native_junction_ownership_policy as _ownership
 from cwr_worldgen import stock_road_paved_junction_completion_policy as _paved
@@ -336,8 +335,8 @@ def test_planning_selector_does_not_straighten_turning_through_road() -> None:
 
 
 def test_candidate_curve_search_stays_inside_final_endpoint_guard() -> None:
-    assert _p._stock_piece_chain is _junction_endpoint._junction_endpoint_chain
-    assert _junction_endpoint._ORIGINAL_CHAIN is _candidate._candidate_exact_curve_chain
+    assert _p._stock_piece_chain is _junction._junction_endpoint_chain
+    assert _junction._ORIGINAL_ENDPOINT_CHAIN is _candidate._candidate_exact_curve_chain
     assert _candidate._ORIGINAL_PIECE_CHAIN is _curve_usage._curve_promotion_chain
 
 
@@ -347,5 +346,5 @@ def test_candidate_policy_is_wired_into_production_hooks() -> None:
     assert _junction._native_junction_object is _candidate._measured_native_junction_object
     assert _ownership._trim_one_native_center is _candidate._trim_one_native_center
     assert _emitted._apply_emitted_seam_covers is _candidate._apply_wedge_candidates
-    assert _junction_endpoint._ORIGINAL_CHAIN is _candidate._candidate_exact_curve_chain
-    assert _p._stock_piece_chain is _junction_endpoint._junction_endpoint_chain
+    assert _junction._ORIGINAL_ENDPOINT_CHAIN is _candidate._candidate_exact_curve_chain
+    assert _p._stock_piece_chain is _junction._junction_endpoint_chain
