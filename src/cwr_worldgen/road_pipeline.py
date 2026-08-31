@@ -2,16 +2,17 @@
 """Single, explicit installation order for world-generation road policies.
 
 Historically the road fitter was patched from ``cwr_worldgen.__init__``,
-``stock_road_late_policy_stack`` and ``raceway_policy``.  That made the effective
+``stock_road_late_policy_stack`` and ``raceway_policy``. That made the effective
 runtime fitter difficult to inspect because installation order was spread across
-multiple modules and some installers re-installed earlier stages.
+multiple modules and some installers re-installed or later cancelled earlier
+stages.
 
-This module is now the one production authority for road-policy activation.
+This module is the one production authority for road-policy activation.
 Individual policy modules still contain their algorithms, but they no longer
 choose when they become active.
 
 Set ``CWR_WORLDGEN_ROAD_PIPELINE_TRACE=1`` to print each installed stage during
-package startup.  This is intentionally opt-in so normal CLI/GUI output stays
+package startup. This is intentionally opt-in so normal CLI/GUI output stays
 unchanged.
 """
 from __future__ import annotations
@@ -24,7 +25,7 @@ _INSTALLED = False
 _TRACE_ENV = "CWR_WORLDGEN_ROAD_PIPELINE_TRACE"
 
 
-# Ordered stage names are public on purpose.  A debugger or regression test can
+# Ordered stage names are public on purpose. A debugger or regression test can
 # inspect the exact production composition without reverse-engineering monkey
 # patches from several import sites.
 ROAD_PIPELINE_STAGES: tuple[str, ...] = (
@@ -68,9 +69,6 @@ ROAD_PIPELINE_STAGES: tuple[str, ...] = (
     "final_continuity",
     "skew_orientation",
     "turning_t_fallback",
-    "straight_seam",
-    "curve_seam_fallback",
-    "intersection_edge",
     "emitted_seam",
     "paved_wedge_geometry",
     "emitted_seam_refinement",
@@ -78,14 +76,13 @@ ROAD_PIPELINE_STAGES: tuple[str, ...] = (
     "inspector_candidates",
     "candidate_enforcement",
     "paved_junction_completion",
-    "fit_first",
     "native_junction_ownership",
     "candidate_final_enforcement",
     "reference_wrp",
     "kodiak_reference",
     "stock_assets_only",
     # OSM classification belongs last so it cannot secretly compose fitter
-    # wrappers.  It only broadens supported paved source classes/assets.
+    # wrappers. It only broadens supported paved source classes/assets.
     "raceway_classification",
 )
 
@@ -104,10 +101,16 @@ def _run(stage: str, installer: Callable[[], None]) -> None:
 def install_road_pipeline() -> None:
     """Install the complete production road fitter exactly once.
 
-    The ordering below intentionally mirrors the previous effective package
-    startup order.  The refactor changes ownership and observability, not road
-    geometry, so it is suitable as a first step before deleting redundant
-    policy implementations.
+    This keeps the prior effective final behaviour while removing policy layers
+    whose output was immediately cancelled later in startup. In particular:
+
+    * final-continuity already disables visual curve-seam underlays;
+    * straight-seam and curve-seam fallback re-enabled those underlays only for
+      ``fit_first`` to disable them again; and
+    * intersection-edge wrapped the final fitter only for ``fit_first`` to turn
+      its application hook into a pass-through.
+
+    Those four cancelled layers are intentionally absent here.
     """
 
     global _INSTALLED
@@ -156,7 +159,6 @@ def install_road_pipeline() -> None:
     _run("stock_path_conditioning", install_stock_road_path_conditioning_policy)
     _run("stock_curve_preservation", install_stock_road_curve_preservation_policy)
 
-    # Former stock_road_late_policy_stack.py, kept here in the same order.
     from .stock_road_wrptool_catalogue_policy import install_stock_road_wrptool_catalogue_policy
     from .stock_road_curve_regularization_policy import install_stock_road_curve_regularization_policy
     from .stock_road_sharp_turn_policy import install_stock_road_sharp_turn_policy
@@ -172,9 +174,6 @@ def install_road_pipeline() -> None:
     from .stock_road_final_continuity_policy import install_stock_road_final_continuity_policy
     from .stock_road_skew_orientation_policy import install_stock_road_skew_orientation_policy
     from .stock_road_turning_t_fallback_policy import install_stock_road_turning_t_fallback_policy
-    from .stock_road_straight_seam_policy import install_stock_road_straight_seam_policy
-    from .stock_road_curve_seam_fallback_policy import install_stock_road_curve_seam_fallback_policy
-    from .stock_road_intersection_edge_policy import install_stock_road_intersection_edge_policy
     from .stock_road_emitted_seam_policy import install_stock_road_emitted_seam_policy
     from .stock_road_paved_wedge_policy import install_stock_road_paved_wedge_policy
     from .stock_road_emitted_seam_refinement_policy import install_stock_road_emitted_seam_refinement_policy
@@ -185,7 +184,6 @@ def install_road_pipeline() -> None:
         install_stock_road_inspector_candidate_selector_policy,
     )
     from .stock_road_paved_junction_completion_policy import install_stock_road_paved_junction_completion_policy
-    from .stock_road_fit_first_policy import install_stock_road_fit_first_policy
     from .stock_road_native_junction_ownership_policy import install_stock_road_native_junction_ownership_policy
     from .stock_road_reference_wrp_policy import install_stock_road_reference_wrp_policy
     from .stock_road_kodiak_reference_policy import install_stock_road_kodiak_reference_policy
@@ -206,9 +204,6 @@ def install_road_pipeline() -> None:
     _run("final_continuity", install_stock_road_final_continuity_policy)
     _run("skew_orientation", install_stock_road_skew_orientation_policy)
     _run("turning_t_fallback", install_stock_road_turning_t_fallback_policy)
-    _run("straight_seam", install_stock_road_straight_seam_policy)
-    _run("curve_seam_fallback", install_stock_road_curve_seam_fallback_policy)
-    _run("intersection_edge", install_stock_road_intersection_edge_policy)
     _run("emitted_seam", install_stock_road_emitted_seam_policy)
     _run("paved_wedge_geometry", install_stock_road_paved_wedge_policy)
     _run("emitted_seam_refinement", install_stock_road_emitted_seam_refinement_policy)
@@ -216,7 +211,6 @@ def install_road_pipeline() -> None:
     _run("inspector_candidates", install_stock_road_inspector_candidate_policy)
     _run("candidate_enforcement", install_stock_road_inspector_candidate_selector_policy)
     _run("paved_junction_completion", install_stock_road_paved_junction_completion_policy)
-    _run("fit_first", install_stock_road_fit_first_policy)
     _run("native_junction_ownership", install_stock_road_native_junction_ownership_policy)
     _run("candidate_final_enforcement", install_stock_road_inspector_candidate_final_policy)
     _run("reference_wrp", install_stock_road_reference_wrp_policy)
