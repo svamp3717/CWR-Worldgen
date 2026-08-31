@@ -8,7 +8,6 @@ from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_3d_connector_policy as _three_d
 from cwr_worldgen import stock_road_curve_usage_policy as _curve_usage
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
-from cwr_worldgen import stock_road_kodiak_reference_policy as _kodiak
 from cwr_worldgen import stock_road_reference_wrp_policy as _reference
 
 
@@ -18,6 +17,7 @@ def _piece(model_path: str):
 
 def test_reference_wrp_policy_is_active_in_production_stack() -> None:
     assert _reference._INSTALLED
+    assert _reference._KODIAK_INSTALLED
     assert _p._road_object_on_slope is _reference._road_object_on_slope
     assert (
         _three_d._uses_measured_rigid_connectors
@@ -35,11 +35,7 @@ def test_paved_stock_chains_use_full_planar_connector_lengths() -> None:
         _piece(r"o\road\ces6.p3d"),
     )
 
-    # The reference WRP keeps paved stock P3Ds horizontal, so fitting must not
-    # shorten their X/Z chord by the old pitch cosine before placement.
     assert not _reference._uses_measured_rigid_connectors(paved)
-    # Keep the scope promised by the paved-road work: stock dirt still uses the
-    # existing terrain-following 3D connector semantics.
     assert _reference._uses_measured_rigid_connectors(dirt)
 
 
@@ -112,19 +108,19 @@ def test_stock_dirt_object_keeps_terrain_pitch(monkeypatch) -> None:
     assert math.isclose(fixed.pitch_degrees, 8.0, abs_tol=1.0e-12)
 
 
-def test_reference_curve_preference_is_extended_by_kodiak_policy() -> None:
-    # The first WRP reference lowered the emergency threshold to two short
-    # facets. Kodiak is the later/outer reference and allows an exact curve
-    # search before any short-facet prerequisite at all.
+def test_reference_curve_preference_is_extended_by_kodiak_stage() -> None:
     assert _reference.REFERENCE_MINIMUM_BASELINE_SHORT_STRAIGHTS == 2
     assert _curve_usage._MINIMUM_BASELINE_SHORT_STRAIGHTS == 0
     assert math.isclose(
         _curve_usage._MINIMUM_TOTAL_TURN_DEGREES,
-        _kodiak.KODIAK_MINIMUM_CURVE_PROMOTION_TURN_DEGREES,
+        _reference.KODIAK_MINIMUM_CURVE_PROMOTION_TURN_DEGREES,
         abs_tol=1.0e-12,
     )
     assert _curve_usage._MINIMUM_PROMOTED_CURVES == 1
-    assert _curve_usage._MAXIMUM_EXTRA_PIECES == _kodiak.KODIAK_MAXIMUM_EXTRA_CURVE_PIECES
+    assert (
+        _curve_usage._MAXIMUM_EXTRA_PIECES
+        == _reference.KODIAK_MAXIMUM_EXTRA_CURVE_PIECES
+    )
     assert math.isclose(
         _candidate.INSPECTOR_CURVE_MINIMUM_TURN_DEGREES,
         _reference.REFERENCE_INSPECTOR_CURVE_MINIMUM_TURN_DEGREES,
