@@ -11,6 +11,8 @@ on:
       - "src/cwr_worldgen/raceway_policy.py"
       - "tests/test_*road*.py"
       - "tests/test_gravel_*.py"
+      - "tests/test_paved_*.py"
+      - "tests/test_raceway_policy.py"
       - ".github/workflows/test-stock-roads.yml"
 
 permissions:
@@ -33,64 +35,7 @@ jobs:
       - name: Run focused road tests
         run: |
           python -m pytest -q \
-            tests/test_gui_road_inspector_autorun.py \
-            tests/test_road_inspector.py \
-            tests/test_road_inspector_postbuild.py \
-            tests/test_road_inspector_source_context.py \
-            tests/test_road_inspector_edge_view.py \
-            tests/test_road_inspector_intersection_context.py \
-            tests/test_road_inspector_wrptool_catalogue.py \
-            tests/test_road_inspector_native_junction_overlap.py \
-            tests/test_road_inspector_surface_coverage.py \
-            tests/test_road_inspector_overlap_filter.py \
-            tests/test_road_inspector_grass_wedge.py \
-            tests/test_road_inspector_kodiak_overlap.py \
-            tests/test_road_inspector_embedded_paved_geometry.py \
-            tests/test_road_inspector_final_paved_recheck.py \
-            tests/test_road_inspector_surface_height.py \
-            tests/test_road_inspector_report_ui.py \
-            tests/test_road_quality_policy.py \
-            tests/test_gravel_junction_policy.py \
-            tests/test_paved_junction_completion.py \
-            tests/test_paved_wedge_cross_slope.py \
-            tests/test_paved_wedge_completion.py \
-            tests/test_paved_wedge_geometry_v2.py \
-            tests/test_stock_paved_asset_only.py \
-            tests/test_stock_road_stock_assets_only.py \
-            tests/test_stock_road_3d_connector_policy.py \
-            tests/test_stock_road_connector_policy.py \
-            tests/test_stock_road_curve_policy.py \
-            tests/test_stock_road_curve_preservation_policy.py \
-            tests/test_stock_road_curve_seam_fallback_policy.py \
-            tests/test_stock_road_curve_usage_policy.py \
-            tests/test_stock_road_reference_wrp_policy.py \
-            tests/test_stock_road_kodiak_reference_policy.py \
-            tests/test_stock_road_emitted_seam_policy.py \
-            tests/test_stock_road_final_continuity_policy.py \
-            tests/test_stock_road_fit_first_policy.py \
-            tests/test_stock_road_geometry_policy.py \
-            tests/test_stock_road_inspector_candidate_policy.py \
-            tests/test_stock_road_intersection_edge_policy.py \
-            tests/test_stock_road_junction_endpoint_policy.py \
-            tests/test_stock_road_junction_policy.py \
-            tests/test_stock_road_mixed_t_consolidation.py \
-            tests/test_stock_road_wrptool_catalogue.py \
-            tests/test_stock_road_native_junction_ownership.py \
-            tests/test_stock_road_late_policy_stack.py \
-            tests/test_stock_road_local_fit_policy.py \
-            tests/test_stock_road_long_s_bend_policy.py \
-            tests/test_stock_road_micro_bend_policy.py \
-            tests/test_stock_road_model_geometry.py \
-            tests/test_stock_road_obstacle_policy.py \
-            tests/test_stock_road_path_conditioning_policy.py \
-            tests/test_stock_road_relaxation_policy.py \
-            tests/test_stock_road_relaxation_transaction_policy.py \
-            tests/test_stock_road_sharp_turn_policy.py \
-            tests/test_stock_road_single_vertex_bend_policy.py \
-            tests/test_stock_road_s_bend_policy.py \
-            tests/test_stock_road_skew_orientation_policy.py \
-            tests/test_stock_road_straight_seam_gap_policy.py \
-            tests/test_stock_road_skew_policy.py \
-            tests/test_stock_road_surface_overlap_policy.py \
-            tests/test_stock_road_transform_policy.py \
-            tests/test_stock_road_visual_finish_policy.py
+            tests/test_*road*.py \
+            tests/test_gravel_*.py \
+            tests/test_paved_*.py \
+            tests/test_raceway_policy.py
