@@ -8,11 +8,10 @@ increases visible joins and encourages later seam-repair objects to overlap one
 another.
 
 This policy keeps real junction endpoints fixed but may simplify very small bends
-inside a bounded 0.75 m corridor. The shortcut is rejected near source-backed
-buildings, utility structures, and mapped individual trees. Later roadside props
-are generated after road fitting and already avoid the source road corridor, so
-keeping the relaxed centreline inside that corridor also keeps those placements
-stable.
+inside a bounded 0.75 m corridor. A shortcut is rejected near source-backed
+buildings, utility structures, individual trees, fences, walls, hedges,
+retaining walls and tree rows. Linear roadside features are indexed segment by
+segment so one bent fence does not create a giant rectangular exclusion zone.
 
 The same policy makes junction seam repair aware of complete road axes. If a
 larger approach piece already passes underneath a junction connector, do not add
@@ -40,6 +39,13 @@ ROAD_RELAXATION_OBJECT_MARGIN_METRES = 0.55
 _OBSTACLE_BUCKET_METRES = 32.0
 _AXIS_BUCKET_METRES = 32.0
 _AXIS_ALIGNMENT_COSINE = math.cos(math.radians(35.0))
+_BARRIER_HALF_WIDTH_METRES = {
+    "hedge": 1.25,
+    "wall": 0.60,
+    "retaining_wall": 0.75,
+    "fence": 0.45,
+}
+_TREE_ROW_HALF_WIDTH_METRES = 1.75
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +103,46 @@ def _point_bbox(point: tuple[float, float], radius: float) -> tuple[float, float
     return x - radius, z - radius, x + radius, z + radius
 
 
+def _line_radius(feature, default: float) -> float:
+    kind = str(getattr(feature, "tags", {}).get("barrier", "")).strip().casefold()
+    return _BARRIER_HALF_WIDTH_METRES.get(kind, default)
+
+
+def _line_obstacles(features, projection, *, default_radius: float):
+    """Represent mapped roadside lines as segment-sized obstacle boxes."""
+
+    result = []
+    for feature in features:
+        points = tuple(projection.to_world(point) for point in feature.points)
+        if len(points) < 2:
+            continue
+        radius = max(0.0, _line_radius(feature, default_radius))
+        for start, end in zip(points, points[1:]):
+            if math.dist(start, end) <= 1.0e-6:
+                continue
+            result.append(
+                _Obstacle(
+                    min(start[0], end[0]) - radius,
+                    min(start[1], end[1]) - radius,
+                    max(start[0], end[0]) + radius,
+                    max(start[1], end[1]) + radius,
+                )
+            )
+    return result
+
+
+def _reindex(obstacles) -> _ObstacleIndex:
+    bucket_lists: dict[tuple[int, int], list[int]] = {}
+    for index, obstacle in enumerate(obstacles):
+        for bx in _bucket_range(obstacle.min_x, obstacle.max_x, _OBSTACLE_BUCKET_METRES):
+            for bz in _bucket_range(obstacle.min_z, obstacle.max_z, _OBSTACLE_BUCKET_METRES):
+                bucket_lists.setdefault((bx, bz), []).append(index)
+    return _ObstacleIndex(
+        tuple(obstacles),
+        {key: tuple(values) for key, values in bucket_lists.items()},
+    )
+
+
 def _build_obstacle_index(dataset, projection) -> _ObstacleIndex:
     obstacles: list[_Obstacle] = []
 
@@ -136,13 +182,23 @@ def _build_obstacle_index(dataset, projection) -> _ObstacleIndex:
         point = projection.to_world(feature.point)
         _add_bbox(obstacles, *_point_bbox(point, 1.25))
 
-    bucket_lists: dict[tuple[int, int], list[int]] = {}
-    for index, obstacle in enumerate(obstacles):
-        for bx in _bucket_range(obstacle.min_x, obstacle.max_x, _OBSTACLE_BUCKET_METRES):
-            for bz in _bucket_range(obstacle.min_z, obstacle.max_z, _OBSTACLE_BUCKET_METRES):
-                bucket_lists.setdefault((bx, bz), []).append(index)
-    buckets = {key: tuple(values) for key, values in bucket_lists.items()}
-    return _ObstacleIndex(tuple(obstacles), buckets)
+    obstacles.extend(
+        _line_obstacles(
+            getattr(dataset, "barriers", ()),
+            projection,
+            default_radius=0.50,
+        )
+    )
+    # Tree rows become repeated stock tree objects. Give their source centreline
+    # a modest crown/trunk envelope before _shortcut_clear adds road-width margin.
+    obstacles.extend(
+        _line_obstacles(
+            getattr(dataset, "tree_rows", ()),
+            projection,
+            default_radius=_TREE_ROW_HALF_WIDTH_METRES,
+        )
+    )
+    return _reindex(obstacles)
 
 
 def _segment_intersects_box(
