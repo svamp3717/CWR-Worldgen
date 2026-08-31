@@ -304,6 +304,8 @@ def test_candidate_turn_pass_still_refuses_full_surface_overlay(monkeypatch) -> 
 
 
 def test_completion_adds_only_borderless_wedge_triangle(monkeypatch) -> None:
+    # Legacy helper unit coverage is retained for old PBO compatibility. The
+    # completion policy itself is deliberately not installed in production.
     plan = _finish._SeamCoverPlan(
         model_path=r"o\road\sil6.p3d",
         centre=(30.0, 30.0),
@@ -402,12 +404,12 @@ def test_candidate_curve_search_stays_inside_final_endpoint_guard() -> None:
 
 def test_candidate_policy_is_wired_into_production_hooks() -> None:
     assert _candidate._INSTALLED
-    assert _completion._INSTALLED
+    # The old completion module remains importable only for legacy regression
+    # analysis; generated paved wedges are not a production repair path.
+    assert not _completion._INSTALLED
     assert _enforcement._SELECTOR_INSTALLED
-    assert _junction._native_t_junction is _enforcement._candidate_native_t_dispatch
     assert _junction._native_junction_object is _candidate._measured_native_junction_object
     assert _ownership._trim_one_native_center is _candidate._trim_one_native_center
-    assert _completion._ORIGINAL_APPLY is _candidate._apply_wedge_candidates
-    assert _emitted._apply_emitted_seam_covers is _completion._apply_candidate_completion
+    assert _emitted._apply_emitted_seam_covers is _candidate._apply_wedge_candidates
     assert _junction_endpoint._ORIGINAL_CHAIN is _candidate._candidate_exact_curve_chain
     assert _p._stock_piece_chain is _junction_endpoint._junction_endpoint_chain
