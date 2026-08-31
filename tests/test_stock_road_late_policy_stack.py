@@ -24,6 +24,7 @@ from cwr_worldgen import stock_road_fit_first_policy as _fit_first
 from cwr_worldgen import stock_road_inspector_candidate_completion_policy as _completion
 from cwr_worldgen import stock_road_inspector_candidate_enforcement_policy as _enforcement
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
+from cwr_worldgen import stock_road_reference_wrp_policy as _reference
 from cwr_worldgen import stock_road_late_policy_stack as _stack
 
 
@@ -49,6 +50,7 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
         _emitted_refinement,
         _fit_first,
         _completion,
+        _reference,
     )
 
     assert _stack._INSTALLED
@@ -60,10 +62,11 @@ def test_late_stock_road_policies_are_active_on_package_import() -> None:
 
 
 def test_final_wrappers_are_not_left_disconnected() -> None:
-    # The final candidate wrapper owns the report that will be serialized, while
-    # the emitted-geometry wrapper immediately inside it still measures exact
-    # pitch-projected WorldObjects and invokes the bounded paved wedge completion.
-    assert _p.fit_road_objects is _enforcement._fit
+    # The reference-WRP guard is now the outer paved-road wrapper. Immediately
+    # inside it, final candidate enforcement still owns junction selection and
+    # the emitted layer still measures the exact WorldObjects that will be saved.
+    assert _p.fit_road_objects is _reference._fit
+    assert _reference._ORIGINAL_FIT is _enforcement._fit
     assert _enforcement._ORIGINAL_FINAL_FIT is _emitted_seam._fit
     assert _emitted_seam._ORIGINAL_FIT is _intersection_edge._fit
     assert (
