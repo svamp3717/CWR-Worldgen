@@ -42,7 +42,7 @@ _BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("gravel_family", "gravel_family_policy", "install_gravel_family_policy"),
     ("stock_junction", "stock_road_junction_policy", "install_stock_road_junction_policy"),
     ("stock_measured_junction", "stock_road_measured_junction_policy", "install_stock_road_measured_junction_policy"),
-    ("stock_skew", "stock_road_skew_policy", "install_stock_road_skew_policy"),
+    ("stock_skew", "stock_road_junction_policy", "install_stock_road_skew_policy"),
     ("gravel_asphalt_transition", "gravel_asphalt_transition_policy", "install_gravel_asphalt_transition_policy"),
     ("stock_connector", "stock_road_connector_policy", "install_stock_road_connector_policy"),
     ("stock_surface_overlap", "stock_road_surface_overlap_policy", "install_stock_road_surface_overlap_policy"),
