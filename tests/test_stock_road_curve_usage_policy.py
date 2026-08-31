@@ -7,6 +7,8 @@ from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_curve_usage_policy as _usage
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_junction_endpoint_policy as _junction_endpoint
+from cwr_worldgen import stock_road_model_geometry as _geometry
+from cwr_worldgen import stock_road_sharp_exact_policy as _exact
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 
 
@@ -74,6 +76,66 @@ def test_exact_native_curve_sequence_has_zero_internal_tangent_error():
     )
 
     assert _usage._maximum_internal_tangent_error(fitted, 1) <= 1.0e-9
+
+
+def test_curve_first_success_does_not_call_straight_baseline(monkeypatch):
+    measure = _p._PolylineMeasure.create(
+        ((0.0, 0.0), (0.0, 10.0), (1.75, 20.0), (5.1, 29.4), (9.8, 38.2))
+    )
+    pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
+    geometry = _geometry.stock_curve_connectors(r"o\road\sil10 100.p3d")
+    assert geometry is not None
+    curve_piece = _p._RoadPiece(
+        r"o\road\sil10 100.p3d",
+        geometry.chord_length_metres,
+        10,
+    )
+    exact = ((curve_piece, measure.points[0], measure.points[-1]),)
+    preferred = measure.total - 0.5
+
+    def baseline_should_not_run(*args, **kwargs):
+        raise AssertionError("faceted baseline ran before successful native curve fit")
+
+    monkeypatch.setattr(_usage, "_ORIGINAL_CHAIN", baseline_should_not_run)
+    monkeypatch.setattr(_usage, "_dominant_bend", lambda points: (1, 20.0))
+    monkeypatch.setattr(
+        _exact,
+        "_measure_slice",
+        lambda current, start, end: (current.points, 0.0, 20.0),
+    )
+    monkeypatch.setattr(
+        _exact,
+        "_quantised_stock_exit_heading",
+        lambda entry, source_exit, sign: 20.0,
+    )
+    monkeypatch.setattr(
+        _sharp,
+        "_beam_stock_path",
+        lambda source, sign, entry, exit, available: (
+            measure.points[0],
+            measure.points[-1],
+        ),
+    )
+    monkeypatch.setattr(_usage, "_path_is_obstacle_safe", lambda path: True)
+    monkeypatch.setattr(_exact, "_recover_exact_actions", lambda path, available, sign: exact)
+    monkeypatch.setattr(_exact, "_curve_count", lambda fitted: 1)
+    monkeypatch.setattr(_usage, "_maximum_internal_tangent_error", lambda fitted, sign: 0.0)
+    monkeypatch.setattr(
+        _sharp,
+        "_nearest_forward",
+        lambda current, point, minimum, maximum: (0.0, preferred),
+    )
+
+    fitted = _usage._curve_promotion_chain(
+        measure,
+        pieces,
+        start_distance=0.0,
+        preferred_end_distance=preferred,
+        minimum_end_distance=preferred - 1.0,
+        maximum_end_distance=measure.total,
+    )
+
+    assert fitted == exact
 
 
 def test_curve_usage_and_inspector_search_remain_inside_endpoint_wrapper():
