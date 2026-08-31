@@ -17,6 +17,7 @@ from . import road_inspector_surface_height as _surface_height
 from . import road_inspector_overlap_filter as _overlap_filter
 from . import road_inspector_grass_wedge as _grass_wedge
 from . import road_inspector_paved_wedge_audit as _paved_wedge_audit
+from . import road_inspector_kodiak_overlap as _kodiak_overlap
 from . import road_inspector_embedded_paved_geometry as _embedded_paved_geometry
 from . import road_inspector_wrptool_catalogue as _wrptool_catalogue
 from . import road_inspector_native_junction_overlap as _native_junction_overlap
@@ -40,6 +41,10 @@ _overlap_filter.install()
 # Scan paved physical endpoints directly so shallow visible outside triangles
 # are reported even when the ordinary seam thresholds emitted no base issue.
 _paved_wedge_audit.install()
+# Kodiak demonstrates that the intended stock pieces may legitimately overlap by
+# about half a metre. Inspect that wider range and count the two real stock road
+# surfaces as cover when they physically hide the outside triangle.
+_kodiak_overlap.install()
 # Existing PBOs may still contain the retired generated paved helpers. Their
 # filename is not a geometry version, so use the actual embedded Visual LOD when
 # deciding whether such an old object really covers a wedge. Fresh worlds no
