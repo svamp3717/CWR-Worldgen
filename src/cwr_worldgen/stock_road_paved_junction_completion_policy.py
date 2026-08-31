@@ -250,6 +250,13 @@ def install_stock_road_paved_junction_completion_policy() -> None:
     if not _finish._INSTALLED:
         raise RuntimeError("stock road visual-finish policy must install first")
 
+    # Make the same visible-error bound authoritative during *selection*, not
+    # merely during the later cap audit. The measured dispatcher resolves T/X
+    # selectors dynamically, so skewed rigid junctions never get to steer the
+    # approach fitter before being demoted again.
+    _junction.MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = (
+        MAXIMUM_VISIBLE_NATIVE_CONNECTOR_ERROR_DEGREES
+    )
     _ORIGINAL_NATIVE_T_TARGETS = _connector._native_t_targets
     _ORIGINAL_REALIGN = _finish._realign_legacy_caps
     _connector._native_t_targets = _native_t_targets
