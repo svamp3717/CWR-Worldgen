@@ -8,6 +8,7 @@ ships purpose-built junction models for the common paved/asphalt/cobble families
 use them when the incident geometry is close enough to their fixed 90-degree
 connector template.
 
+The WrpTool catalogue is authoritative for which stock junction assets exist.
 The replacement is deliberately post-fit. Existing branch trimming, terrain
 grading, object budgeting and road-quality auditing stay untouched. Only the
 central cap changes shape/orientation, so the maximum deviation from the source
@@ -24,6 +25,7 @@ from typing import Sequence
 
 from . import generator as _generator
 from . import playability as _p
+from . import stock_road_wrp_catalogue as _catalogue
 
 
 _STOCK_ROAD_FAMILY = re.compile(
@@ -41,25 +43,10 @@ _STOCK_CAP_MODEL = re.compile(
 MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = 7.5
 NATIVE_JUNCTION_VERTICAL_BIAS_METRES = 0.006
 
-# Purpose-built Resistance road junctions listed in O.pbo. There is no
-# ces/ces T or dirt X sibling, so those deliberately retain the legacy fallback.
-_T_JUNCTION_MODELS = {
-    ("sil", "sil"): r"o\road\kr_new_sil_sil_t.p3d",
-    ("sil", "asf"): r"o\road\kr_new_sil_asf_t.p3d",
-    ("sil", "ces"): r"o\road\kr_new_sil_ces_t.p3d",
-    ("sil", "kos"): r"o\road\kr_new_sil_kos_t.p3d",
-    ("asf", "asf"): r"o\road\kr_new_asf_asf_t.p3d",
-    ("asf", "ces"): r"o\road\kr_new_asf_ces_t.p3d",
-    ("asf", "sil"): r"o\road\kr_new_asf_sil_t.p3d",
-    ("kos", "kos"): r"o\road\kr_new_kos_kos_t.p3d",
-    ("kos", "sil"): r"o\road\kr_new_kos_sil_t.p3d",
-}
-_X_JUNCTION_MODELS = {
-    "sil": r"o\road\kr_new_silxsil.p3d",
-}
-_ALL_NATIVE_JUNCTION_MODELS = tuple(
-    dict.fromkeys((*_T_JUNCTION_MODELS.values(), *_X_JUNCTION_MODELS.values()))
-)
+# Keep one source of truth for the purpose-built Resistance T/X inventory.
+_T_JUNCTION_MODELS = dict(_catalogue.WRPTOOL_T_JUNCTION_MODELS)
+_X_JUNCTION_MODELS = dict(_catalogue.WRPTOOL_X_JUNCTION_MODELS)
+_ALL_NATIVE_JUNCTION_MODELS = tuple(_catalogue.WRPTOOL_NATIVE_JUNCTION_MODELS)
 
 _ORIGINAL_FIT = None
 _ORIGINAL_VARIANT_PATHS = None
@@ -321,22 +308,17 @@ def _replace_stock_junction_caps(report, dataset, projection, elevations, spec):
     changed = False
     for index in range(min(count, len(objects))):
         old = objects[index]
-        cap_match = _STOCK_CAP_MODEL.fullmatch(old.model_path.replace("/", "\\"))
-        if cap_match is None:
+        if _STOCK_CAP_MODEL.fullmatch(old.model_path.replace("/", "\\")) is None:
             continue
-        cap_family = cap_match.group("family").casefold()
         key = _p._road_node_key((old.x, old.z))
         match = junctions.get(key)
         if match is not None:
             point, native = match
-            # The core cap origin is exactly the OSM node. Also require the
-            # surface family selected by the core fitter to agree with the
-            # native model's main surface so mixed intersections cannot be
-            # silently recoloured by this post-fit replacement.
-            if (
-                math.dist((old.x, old.z), point) <= 0.20
-                and cap_family == native.cap_family
-            ):
+            asset = _catalogue.native_junction_asset(str(native.model_path))
+            if asset is not None and math.dist((old.x, old.z), point) <= 0.20:
+                # Incident road families own the surface combination. The legacy
+                # six-metre cap is only a temporary fitting hub and must not veto
+                # a valid WrpTool-listed native junction because its family differs.
                 objects[index] = _native_junction_object(
                     old, native, elevations, spec
                 )
