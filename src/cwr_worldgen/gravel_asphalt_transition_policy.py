@@ -7,12 +7,6 @@ texture, so it keeps the paved-main overlay fallback. Stock ``ces`` does have
 purpose-built Resistance T meshes. Prefer that single native T whenever its
 three rigid connectors can be reached by the existing bounded connector-relaxation
 pass without leaving the stock ``ces`` carriageway.
-
-This avoids the visually noisy fallback where a low six-metre paved cap and
-several independently headed approach pieces all remain visible at the same
-node. The native mesh owns the centre, while the first few metres of each road
-are locally steered onto its measured Memory-LOD connectors. Dirt/gravel logic
-outside this mixed stock-T case is deliberately unchanged.
 """
 from __future__ import annotations
 
@@ -22,16 +16,10 @@ from . import gravel_junction_policy as _gravel_junction
 from . import playability as _p
 from . import road_quality_policy as _quality
 from . import stock_road_junction_policy as _junction
-from . import stock_road_measured_junction_policy as _measured
 from . import stock_road_model_geometry as _model_geometry
 from .stock_road_model_geometry import STOCK_JUNCTION_CONNECTOR_RADIUS_METRES
 
 MAXIMUM_LAYERED_MAIN_HEADING_ERROR_DEGREES = 30.0
-# Stock ces has a 1.75 m half-width. At the measured 6.25 m T-connector radius,
-# 15 degrees needs about 1.62 m of lateral correction. That leaves a small edge
-# margin while still admitting Lundby44's 14.65-degree mixed T near
-# 3206.25/3176.25. The connector policy then makes the actual emitted approaches
-# match the native P3D exactly instead of leaving several slabs visible.
 MAXIMUM_STOCK_CES_NATIVE_HEADING_ERROR_DEGREES = 15.0
 _UNPAVED_END_TOLERANCE_METRES = 0.25
 
@@ -50,8 +38,6 @@ def _is_unpaved_incident(incident) -> bool:
 
 
 def _layered_mixed_t_components(incidents):
-    """Return paved-main indices and the one unpaved branch for a mixed T."""
-
     if len(incidents) != 3:
         return None
     unpaved = [
@@ -91,8 +77,6 @@ def _layered_main_rotation(incidents, first: int, second: int):
 
 
 def _bounded_stock_ces_native_t(incidents):
-    """Return the real mixed T when connector relaxation can absorb its skew."""
-
     if _ORIGINAL_NATIVE_T is None:
         raise RuntimeError("mixed unpaved/paved transition policy is not installed")
     previous = _junction.MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES
@@ -124,20 +108,13 @@ def _native_t_junction(incidents):
         return original
 
     family, first, second, _unpaved, generated_gravel = layered
-
     if not generated_gravel:
-        # Stock ces has a matching Resistance mixed-T asset. First use an exact
-        # ordinary match; otherwise allow the bounded connector-relaxation pass
-        # to steer the last few metres onto the single native T.
         if original is not None:
             return original
         bounded = _bounded_stock_ces_native_t(incidents)
         if bounded is not None:
             return bounded
 
-    # Generated gravel has no matching stock texture, and stock ces beyond the
-    # safe relaxation envelope also cannot use a rigid native T. Preserve the
-    # paved main-road overlay fallback for those cases.
     maximum_error, rotation = _layered_main_rotation(incidents, first, second)
     if maximum_error > MAXIMUM_LAYERED_MAIN_HEADING_ERROR_DEGREES:
         return original
@@ -151,8 +128,6 @@ def _native_t_junction(incidents):
 
 
 def _relaxation_eligible(incidents) -> bool:
-    """Snap approaches only when the selected centre object is a real T mesh."""
-
     if _ORIGINAL_RELAXATION_ELIGIBILITY is None:
         raise RuntimeError("mixed unpaved/paved transition policy is not installed")
 
@@ -163,13 +138,8 @@ def _relaxation_eligible(incidents) -> bool:
         if native is not None and _model_geometry.stock_straight_match(
             str(native.model_path)
         ) is None:
-            # Generated gravel's historical eligibility and the new bounded
-            # stock-ces case both use the same obstacle-checked connector pass.
-            return (not generated_gravel) or _ORIGINAL_RELAXATION_ELIGIBILITY(
-                incidents
-            )
+            return (not generated_gravel) or _ORIGINAL_RELAXATION_ELIGIBILITY(incidents)
         return False
-
     return _ORIGINAL_RELAXATION_ELIGIBILITY(incidents)
 
 
@@ -230,10 +200,6 @@ def _quality_window(
     start_junction = context.junctions.get(_p._road_node_key(measure.points[0]))
     end_junction = context.junctions.get(_p._road_node_key(measure.points[-1]))
     shortest = min(float(piece.length_metres) for piece in pieces)
-
-    # The branch continues underneath either the central overlay or native T.
-    # The raised native mesh owns the visible centre, while its relaxed approach
-    # is already collinear with the measured connector before reaching the node.
     if _is_layered_stock_junction(start_junction):
         start_distance = 0.0
     if _is_layered_stock_junction(end_junction):
@@ -251,10 +217,9 @@ def install_gravel_asphalt_transition_policy() -> None:
     global _ORIGINAL_RELAXATION_ELIGIBILITY, _INSTALLED
     if _INSTALLED:
         return
-    _ORIGINAL_NATIVE_T = _measured._native_t_junction
+    _ORIGINAL_NATIVE_T = _junction._native_t_junction
     _ORIGINAL_QUALITY_WINDOW = _quality._quality_window
     _ORIGINAL_RELAXATION_ELIGIBILITY = _junction._eligible_relaxed_mixed_t
-    _measured._native_t_junction = _native_t_junction
     _junction._native_t_junction = _native_t_junction
     _quality._quality_window = _quality_window
     _junction._eligible_relaxed_mixed_t = _relaxation_eligible
