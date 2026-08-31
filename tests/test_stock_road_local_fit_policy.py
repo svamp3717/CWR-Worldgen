@@ -15,6 +15,9 @@ from cwr_worldgen.stock_road_relaxation_policy import (
     _ObstacleIndex,
     _simplify_open_run,
 )
+from cwr_worldgen.stock_road_relaxation_transaction_policy import (
+    _PLANNING_RELAXED_JUNCTION,
+)
 
 
 def _direction(heading_degrees: float) -> tuple[float, float]:
@@ -48,16 +51,22 @@ def test_large_visual_bend_is_not_flattened_even_below_heading_gate():
     assert simplified == points
 
 
-def test_same_family_paved_skew_t_can_use_native_junction():
-    # Deliberately synthetic skew, not copied from a generated world.
+def test_same_family_paved_skew_t_is_provisional_only_during_transaction():
     incidents = (
-        _Incident(_direction(95.0), "sil", r"o\road\sil25.p3d"),
-        _Incident(_direction(255.0), "sil", r"o\road\sil25.p3d"),
-        _Incident(_direction(342.0), "sil", r"o\road\sil25.p3d"),
+        _Incident(_direction(0.0), "sil", r"o\road\sil25.p3d"),
+        _Incident(_direction(180.0), "sil", r"o\road\sil25.p3d"),
+        _Incident(_direction(282.0), "sil", r"o\road\sil25.p3d"),
     )
 
     assert _same_family_paved_t(incidents)
-    native = _native_junction_for_incidents(incidents)
+    assert _native_junction_for_incidents(incidents) is None
+
+    token = _PLANNING_RELAXED_JUNCTION.set(True)
+    try:
+        native = _native_junction_for_incidents(incidents)
+    finally:
+        _PLANNING_RELAXED_JUNCTION.reset(token)
+
     assert native is not None
     assert native.model_path.casefold().endswith(r"kr_new_sil_sil_t.p3d")
 
