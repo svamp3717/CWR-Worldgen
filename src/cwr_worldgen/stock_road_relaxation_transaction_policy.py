@@ -5,13 +5,13 @@ The local-fit policy deliberately allows a small amount of source-line freedom
 so shallow paved dog-legs and skewed T nodes can use cleaner stock geometry.
 Planning that geometry is necessarily more permissive than final placement: a
 native T may be considered while deciding where its approaches would need to
-move.  That wider matcher must not leak into the final cap-selection pass.
+move. That wider matcher must not leak into the final cap-selection pass.
 
-This policy makes that distinction explicit.  Relaxed matching is enabled only
-inside the approach-planning call.  Planned edits are grouped by junction node,
+This policy makes that distinction explicit. Relaxed matching is enabled only
+inside the approach-planning call. Planned edits are grouped by junction node,
 all changed arms must pass the source-backed obstacle corridor together, and the
-resulting geometry must then satisfy the ordinary strict junction matcher.  If
-any part fails, the whole node keeps its original geometry.  Humans call this a
+resulting geometry must then satisfy the ordinary strict junction matcher. If
+any part fails, the whole node keeps its original geometry. Humans call this a
 transaction; road meshes call it finally not being asked to improvise.
 """
 from __future__ import annotations
@@ -24,7 +24,6 @@ from . import stock_road_connector_policy as _connector
 from . import stock_road_junction_policy as _junction
 from . import stock_road_local_fit_policy as _local
 from . import stock_road_relaxation_policy as _relax
-from . import stock_road_skew_policy as _skew
 
 _PLANNING_RELAXED_JUNCTION: ContextVar[bool] = ContextVar(
     "cwr_planning_relaxed_stock_junction", default=False
@@ -37,14 +36,14 @@ _INSTALLED = False
 def _strict_native_junction_for_incidents(incidents):
     """Return the non-relaxed measured junction choice used for final placement."""
 
-    # stock_road_skew_policy captured this function before it installed its
-    # temporary relaxed matcher.  The function still sees the later measured
+    # The junction-owned skew stage captured this function before it installed
+    # its temporary relaxed matcher. The function still sees the later measured
     # geometry and gravel/asphalt surface policy, but it obeys the normal native
-    # heading tolerance.  In particular it does not inherit the local-fit
+    # heading tolerance. In particular it does not inherit the local-fit
     # policy's same-family paved relaxation eligibility.
-    strict = _skew._ORIGINAL_NATIVE_JUNCTION_FOR_INCIDENTS
+    strict = _junction._ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS
     if strict is None:
-        raise RuntimeError("stock road skew policy is not installed")
+        raise RuntimeError("stock road skew stage is not installed")
     return strict(incidents)
 
 
@@ -103,7 +102,7 @@ def _collect_relaxations(dataset, projection, projected, spec):
     if _ORIGINAL_COLLECT_RELAXATIONS is None:
         raise RuntimeError("stock road relaxation transaction policy is not installed")
 
-    # First plan with the wider matcher.  Nothing from this block is committed
+    # First plan with the wider matcher. Nothing from this block is committed
     # yet, and the ContextVar prevents the permissive matcher from leaking into
     # the later junction-cap replacement pass.
     planning_token = _PLANNING_RELAXED_JUNCTION.set(True)
@@ -133,9 +132,9 @@ def _collect_relaxations(dataset, projection, projected, spec):
         return {}
 
     # A planner can legitimately be unable to move one short arm far enough to
-    # reach the candidate connector.  Validate the geometry after all surviving
+    # reach the candidate connector. Validate the geometry after all surviving
     # edits are applied and discard a whole node unless the ordinary strict
-    # matcher now accepts it.  Iterate because two very close junctions can
+    # matcher now accepts it. Iterate because two very close junctions can
     # share one road feature; removing one edit may change the local segment
     # seen by its neighbour.
     for _ in range(4):
@@ -158,7 +157,7 @@ def install_stock_road_relaxation_transaction_policy() -> None:
     if _INSTALLED:
         return
 
-    # Bypass the local-fit wrapper's per-arm filtering.  This policy performs
+    # Bypass the local-fit wrapper's per-arm filtering. This policy performs
     # the same obstacle checks as one all-or-nothing junction transaction and
     # then validates the resulting node against the strict matcher.
     _ORIGINAL_COLLECT_RELAXATIONS = _local._ORIGINAL_COLLECT_RELAXATIONS
