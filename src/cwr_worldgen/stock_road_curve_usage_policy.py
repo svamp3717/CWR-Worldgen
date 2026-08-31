@@ -1,19 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Promote more paved bends from short facets to exact stock curve chains.
+"""Fit paved bends with connector-locked stock curves before faceted straights.
 
-The sharp-turn policies intentionally started with a very narrow production
-case.  Real worlds still contain many junction-to-junction and feature-end runs
-where a coherent 15-70 degree bend is rendered mostly from ``sil6``/``sil12``
-rectangles even though a connector-locked sequence of stock ten-degree curves
-fits the conditioned centreline.  Those rectangular mitres are the source of
-triangular grass wedges on the outside of a turn.
+The old policy first asked the ordinary greedy stock fitter to build a paved
+road, then tried to promote a bad short-straight result into curves. That made
+``sil6`` facets the architecture and native curves the repair. Reference WRPs do
+the opposite: they choose stock-compatible curvature first and only fall back to
+facets when no safe stock curve chain can represent the source.
 
-This late road-only policy gives those runs a second chance.  It never moves
-terrain or roadside objects, never applies to dirt/gravel, and never loosens the
-physical curve connectors.  It simply accepts the existing sharp-turn beam's
-exact stock-piece sequence on a broader class of paved runs when that sequence
-uses more native curves, stays in the same 0.60 m source corridor, and keeps
-internal tangents continuous.
+For ``sil/asf/kos`` this wrapper therefore attempts the exact stock-curve beam
+*before* calling the inherited straight-oriented fitter. The candidate may
+smooth hard OSM vertices inside the bounded stock-road corridor, but every
+sample is also checked against the source-backed obstacle index when that context
+is active. Dirt and generated gravel are untouched.
 """
 from __future__ import annotations
 
@@ -21,20 +19,23 @@ import math
 
 from . import playability as _p
 from . import stock_road_model_geometry as _geometry
+from . import stock_road_relaxation_policy as _relax
 from . import stock_road_sharp_exact_policy as _exact
 from . import stock_road_sharp_turn_policy as _sharp
 
 _MAXIMUM_PROMOTION_RUN_METRES = 180.0
-_MINIMUM_BASELINE_SHORT_STRAIGHTS = 3
+# Retained for compatibility with older tests/importers; primary fitting no
+# longer requires a bad baseline before it is willing to use curves.
+_MINIMUM_BASELINE_SHORT_STRAIGHTS = 0
 _MINIMUM_TOTAL_TURN_DEGREES = 15.0
 _MAXIMUM_TOTAL_TURN_DEGREES = 70.0
-_MINIMUM_PROMOTED_CURVES = 2
-_MAXIMUM_EXTRA_PIECES = 2
+_MINIMUM_PROMOTED_CURVES = 1
+_MAXIMUM_EXTRA_PIECES = 5
 _MINIMUM_ENDPOINT_COVER_METRES = 0.40
 _MAXIMUM_UNCOVERED_EXIT_ERROR_DEGREES = 1.50
 _END_PROGRESS_TOLERANCE_METRES = 0.20
 _MINIMUM_SIGNIFICANT_VERTEX_TURN_DEGREES = 0.45
-_MAXIMUM_LOCAL_VERTEX_TURN_DEGREES = 24.0
+_MAXIMUM_LOCAL_VERTEX_TURN_DEGREES = 35.0
 _MAXIMUM_REVERSE_NOISE_DEGREES = 1.50
 
 _ORIGINAL_CHAIN = None
@@ -67,7 +68,7 @@ def _dominant_bend(points) -> tuple[int, float] | None:
     magnitude = abs(total)
     if (
         sign == 0
-        or count < 2
+        or count < 1
         or magnitude < _MINIMUM_TOTAL_TURN_DEGREES
         or magnitude > _MAXIMUM_TOTAL_TURN_DEGREES
     ):
@@ -95,6 +96,37 @@ def _maximum_internal_tangent_error(fitted, turn_sign: int) -> float:
     return maximum
 
 
+def _fallback_chain(
+    measure,
+    pieces,
+    *,
+    start_distance,
+    preferred_end_distance,
+    minimum_end_distance,
+    maximum_end_distance,
+):
+    return _ORIGINAL_CHAIN(
+        measure,
+        pieces,
+        start_distance=start_distance,
+        preferred_end_distance=preferred_end_distance,
+        minimum_end_distance=minimum_end_distance,
+        maximum_end_distance=maximum_end_distance,
+    )
+
+
+def _path_is_obstacle_safe(path) -> bool:
+    """Check the smoothed stock alignment against source-backed obstacles."""
+
+    context = _relax._CONTEXT.get()
+    if context is None:
+        return True
+    return all(
+        _relax._shortcut_clear(context.obstacles, first, second)
+        for first, second in zip(path, path[1:])
+    )
+
+
 def _curve_promotion_chain(
     measure,
     pieces,
@@ -104,51 +136,51 @@ def _curve_promotion_chain(
     minimum_end_distance,
     maximum_end_distance,
 ):
+    """Return an exact native-curve chain first, then fall back to old fitting."""
+
     if _ORIGINAL_CHAIN is None:
         raise RuntimeError("stock road curve-usage policy is not installed")
 
-    baseline = _ORIGINAL_CHAIN(
-        measure,
-        pieces,
+    fallback_args = dict(
         start_distance=start_distance,
         preferred_end_distance=preferred_end_distance,
         minimum_end_distance=minimum_end_distance,
         maximum_end_distance=maximum_end_distance,
     )
     if _sharp._paved_family(pieces) is None:
-        return baseline
+        return _fallback_chain(measure, pieces, **fallback_args)
     if measure.total > _MAXIMUM_PROMOTION_RUN_METRES:
-        return baseline
-    if _exact._baseline_short_straights(baseline) < _MINIMUM_BASELINE_SHORT_STRAIGHTS:
-        return baseline
+        return _fallback_chain(measure, pieces, **fallback_args)
 
     bend = _dominant_bend(measure.points)
     if bend is None:
-        return baseline
+        return _fallback_chain(measure, pieces, **fallback_args)
     turn_sign, _total_turn = bend
 
     start = max(0.0, min(float(measure.total), float(start_distance)))
     end = max(start, min(float(measure.total), float(preferred_end_distance)))
     if end <= start + 1.0:
-        return baseline
+        return _fallback_chain(measure, pieces, **fallback_args)
 
-    source_points, entry_heading, source_exit_heading = _exact._measure_slice(measure, start, end)
+    source_points, entry_heading, source_exit_heading = _exact._measure_slice(
+        measure, start, end
+    )
     stock_exit_heading = _exact._quantised_stock_exit_heading(
         entry_heading,
         source_exit_heading,
         turn_sign,
     )
 
-    # A junction cap can hide the small quantisation error at a run boundary.
-    # Without such cover, accept only an almost exact source tangent so this
-    # policy cannot trade an interior grass wedge for a new exposed end seam.
+    # At an exposed feature end, do not trade an interior miter for a visibly
+    # rotated final connector. Junction cover may absorb the normal ten-degree
+    # stock quantisation at trimmed boundaries.
     end_cover = float(measure.total) - float(preferred_end_distance)
     if (
         end_cover < _MINIMUM_ENDPOINT_COVER_METRES
         and _p._heading_difference(stock_exit_heading, source_exit_heading)
         > _MAXIMUM_UNCOVERED_EXIT_ERROR_DEGREES
     ):
-        return baseline
+        return _fallback_chain(measure, pieces, **fallback_args)
 
     locked_path = _sharp._beam_stock_path(
         source_points,
@@ -157,24 +189,18 @@ def _curve_promotion_chain(
         stock_exit_heading,
         pieces,
     )
-    if locked_path is None:
-        return baseline
+    if locked_path is None or not _path_is_obstacle_safe(locked_path):
+        return _fallback_chain(measure, pieces, **fallback_args)
+
     exact = _exact._recover_exact_actions(locked_path, pieces, turn_sign)
-    if exact is None:
-        return baseline
+    if exact is None or _exact._curve_count(exact) < _MINIMUM_PROMOTED_CURVES:
+        return _fallback_chain(measure, pieces, **fallback_args)
 
-    exact_curves = _exact._curve_count(exact)
-    baseline_curves = _exact._curve_count(baseline)
-    if exact_curves < _MINIMUM_PROMOTED_CURVES or exact_curves <= baseline_curves:
-        return baseline
-    if len(exact) > len(baseline) + _MAXIMUM_EXTRA_PIECES:
-        return baseline
-
-    # The entire point of this promotion is to remove rectangular mitres.  Do
-    # not accept a recovered sequence unless the physical curve/straight
-    # tangents agree at every exposed internal connector.
+    # Connector continuity, not comparison with an already-bad baseline, is the
+    # acceptance criterion. This is the architectural inversion the reference
+    # WRPs pointed to.
     if _maximum_internal_tangent_error(exact, turn_sign) > 1.0e-4:
-        return baseline
+        return _fallback_chain(measure, pieces, **fallback_args)
 
     end_projection = _sharp._nearest_forward(
         measure,
@@ -183,20 +209,20 @@ def _curve_promotion_chain(
         float(maximum_end_distance),
     )
     if end_projection is None:
-        return baseline
+        return _fallback_chain(measure, pieces, **fallback_args)
     if end_projection[0] > _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES + 1.0e-9:
-        return baseline
+        return _fallback_chain(measure, pieces, **fallback_args)
     if end_projection[1] < float(minimum_end_distance) - _END_PROGRESS_TOLERANCE_METRES:
-        return baseline
+        return _fallback_chain(measure, pieces, **fallback_args)
 
     start_point = measure.point(start)[:2]
     if math.dist(locked_path[0], start_point) > 1.0e-6:
-        return baseline
+        return _fallback_chain(measure, pieces, **fallback_args)
     return exact
 
 
 def install_stock_road_curve_usage_policy() -> None:
-    """Install broader exact curve promotion after the narrow sharp-turn pass."""
+    """Install exact curve-first paved fitting after the narrow bend policies."""
 
     global _ORIGINAL_CHAIN, _INSTALLED
     if _INSTALLED:
