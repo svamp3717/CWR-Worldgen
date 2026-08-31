@@ -22,7 +22,6 @@ import math
 from . import generator as _generator
 from . import playability as _p
 from . import stock_road_junction_policy as _junction
-from . import stock_road_skew_policy as _skew
 
 MAXIMUM_APPROACH_LATERAL_RELAXATION_METRES = 2.0
 APPROACH_CONNECTOR_MARGIN_METRES = 0.20
@@ -164,7 +163,7 @@ def _collect_relaxations(dataset, projection, projected, spec):
             _junction._Incident(value[0], _junction._family(value[2]), value[2])
             for value in unique
         )
-        if not _skew._eligible_relaxed_mixed_t(incidents):
+        if not _junction._eligible_relaxed_mixed_t(incidents):
             continue
         native = _junction._native_junction_for_incidents(incidents)
         if native is None:
