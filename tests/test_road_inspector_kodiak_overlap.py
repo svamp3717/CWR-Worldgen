@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import math
 
+# Import the stable entry first so the read-only Inspector layer stack is
+# installed exactly as it is for the CLI/GUI, including the Kodiak overlap pass.
+from cwr_worldgen import road_inspector_entry as _entry  # noqa: F401
 from cwr_worldgen import road_inspector as _core
 from cwr_worldgen import road_inspector_grass_wedge as _grass
 from cwr_worldgen import road_inspector_kodiak_overlap as _kodiak
