@@ -28,7 +28,6 @@ from . import playability as _p
 from . import stock_road_curve_usage_policy as _curve_usage
 from . import stock_road_emitted_seam_policy as _emitted
 from . import stock_road_junction_policy as _junction
-from . import stock_road_junction_endpoint_policy as _junction_endpoint
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_native_junction_ownership_policy as _ownership
 from . import stock_road_paved_junction_completion_policy as _paved
@@ -218,8 +217,6 @@ def _trim_one_native_center(objects, cap, *, cap_count, elevations, spec, next_i
                 connectors, family, center, outer
             )
             if connector is None:
-                # A mixed T has only one ces branch connector. A stale ces
-                # through-piece on the other side is inside the wrong arm.
                 continue
             matched_any = True
             built = _ownership._build_stock_span(
@@ -330,7 +327,6 @@ def _candidate_exact_curve_chain(
         turn_sign,
     )
 
-    # If the end is exposed, preserve the existing tight exit-heading gate.
     end_cover = float(measure.total) - float(preferred_end_distance)
     if (
         end_cover < 0.40
@@ -365,9 +361,6 @@ def _candidate_exact_curve_chain(
     exact_curves = _exact._curve_count(exact)
     baseline_short = _exact._baseline_short_straights(baseline)
 
-    # This is the key difference from the older promotion layer: an exact chain
-    # may replace a baseline with the same curve count when the old curve/straight
-    # transition itself is the Inspector finding.
     if (
         exact_curves <= baseline_curves
         and baseline_tangent <= INSPECTOR_CURVE_TRANSITION_ERROR_DEGREES
@@ -677,9 +670,6 @@ def _apply_wedge_candidates(report, elevations, spec):
     _emitted._terrain_wedge_cover_plans = lambda *_args, **_kwargs: ()
     _emitted._emitted_seam_cover_plans = non_turn_seams
     try:
-        # The exact curve-chain wrapper has already had first refusal. Keep only
-        # non-turn stock seam fallbacks here. A remaining turn stays reportable
-        # instead of being buried under a second painted road or a generated P3D.
         return _ORIGINAL_STOCK_APPLY(report, elevations, spec)
     finally:
         _emitted._terrain_wedge_cover_plans = original_wedge_planner
@@ -699,25 +689,18 @@ def install_stock_road_inspector_candidate_policy() -> None:
     # Candidate: exact stock curve/curve-chain before any visual overlap fallback.
     # Keep junction-endpoint enforcement outermost; insert this final exact search
     # immediately inside it so native connector ownership still has last refusal.
-    if _junction_endpoint._ORIGINAL_CHAIN is None:
-        raise RuntimeError("junction endpoint policy must install first")
-    _ORIGINAL_PIECE_CHAIN = _junction_endpoint._ORIGINAL_CHAIN
-    _junction_endpoint._ORIGINAL_CHAIN = _candidate_exact_curve_chain
+    if _junction._ORIGINAL_ENDPOINT_CHAIN is None:
+        raise RuntimeError("junction endpoint stage must install first")
+    _ORIGINAL_PIECE_CHAIN = _junction._ORIGINAL_ENDPOINT_CHAIN
+    _junction._ORIGINAL_ENDPOINT_CHAIN = _candidate_exact_curve_chain
 
-    # Candidate: use a measured native model only inside its visible connector
-    # tolerance. Mixed paved/ces T junctions are handled by the final candidate
-    # realigner without changing the all-paved completion module's public scope.
     _junction._native_t_junction = _measured_native_t_junction
     _junction._native_junction_object = _measured_native_junction_object
 
-    # Candidate: one native centre owns all ordinary approach geometry, including
-    # its stock ces branch.
     _ownership._trim_one_native_center = _trim_one_native_center
     _ORIGINAL_OWNER_REALIGN = _ownership._native_owner_realign
     _ownership._native_owner_realign = _native_owner_realign
 
-    # Candidate: do not reintroduce a full road strip or generated paved wedge
-    # after exact curve fitting.
     _ORIGINAL_STOCK_APPLY = _stock_only._apply_stock_emitted_seam_covers
     _emitted._apply_emitted_seam_covers = _apply_wedge_candidates
 
