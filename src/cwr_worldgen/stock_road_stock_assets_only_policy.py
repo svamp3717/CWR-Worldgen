@@ -42,6 +42,7 @@ STOCK_CURVE_SOURCE_CORRIDOR_METRES = 1.25
 ORDINARY_PAVED_OVERLAP_METRES = 0.45
 ORDINARY_PAVED_OVERLAP_TANGENT_TOLERANCE_DEGREES = 0.75
 ORDINARY_PAVED_OVERLAP_ENDPOINT_TOLERANCE_METRES = 0.15
+ORDINARY_PAVED_OVERLAP_MAXIMUM_END_SHORTFALL_METRES = 0.55
 
 _ORIGINAL_NATIVE_T = None
 _ORIGINAL_CHAIN = None
@@ -159,6 +160,26 @@ def _tangent_compatible_straight_chain(fitted) -> bool:
     return True
 
 
+def _valid_overlapped_straight_chain(fitted) -> bool:
+    if len(fitted) < 2 or any(not _stock_paved_straight(item[0]) for item in fitted):
+        return False
+    seam_limit = (
+        ORDINARY_PAVED_OVERLAP_METRES
+        + ORDINARY_PAVED_OVERLAP_ENDPOINT_TOLERANCE_METRES
+    )
+    for previous, current in zip(fitted, fitted[1:]):
+        if _p._heading_difference(
+            _heading(previous[1], previous[2]),
+            _heading(current[1], current[2]),
+        ) > ORDINARY_PAVED_OVERLAP_TANGENT_TOLERANCE_DEGREES + 1.0e-9:
+            return False
+        # In an overlapped chain the next stock model deliberately starts about
+        # 0.45 m before the previous one ends along the same tangent.
+        if math.dist(previous[2], current[1]) > seam_limit + 1.0e-9:
+            return False
+    return True
+
+
 def _overlapped_stock_chain(
     measure,
     pieces,
@@ -169,61 +190,29 @@ def _overlapped_stock_chain(
     minimum_end_distance,
     maximum_end_distance,
 ):
-    """Re-space a healthy paved straight chain with bounded axial overlap.
+    """Re-space healthy stock straights with real 0.45 m axial overlap.
 
-    The guide chord for each stock slab is 0.45 m shorter than the actual P3D.
-    The model is not scaled, so its physical ends extend about 0.225 m beyond
-    each guide end and neighbouring slabs overlap longitudinally. The fitter may
-    add another normal stock piece when needed, so the chain still reaches its
-    required endpoint instead of accumulating an uncovered length deficit.
+    Each P3D keeps its measured full connector length. Only the next piece's
+    source progress is backed up by 0.45 m, so the actual model footprints overlap
+    by that amount. This avoids the earlier mistake of shortening every guide
+    chord, which both over-compressed the run and could provoke a six-metre extra
+    piece at the far end. If the discrete stock sequence would finish more than
+    0.55 m short of its required endpoint, keep the original exact-butt chain.
     """
 
     if not _tangent_compatible_straight_chain(fitted):
         return fitted
-
-    ordered = tuple(sorted(
-        pieces,
-        key=lambda piece: (-float(piece.length_metres), str(piece.model_path).casefold()),
-    ))
-    if not ordered or any(not _stock_paved_straight(piece) for piece in ordered):
+    sequence = tuple(item[0] for item in fitted)
+    if any(not _stock_paved_straight(piece) for piece in sequence):
         return fitted
-
-    original_sequence = [item[0] for item in fitted]
-    shortest_effective = max(
-        0.50,
-        min(float(piece.length_metres) for piece in ordered) - ORDINARY_PAVED_OVERLAP_METRES,
-    )
-    maximum_objects = max(
-        len(original_sequence) + 2,
-        int(math.ceil((float(maximum_end_distance) - float(start_distance)) / shortest_effective)) + 2,
-    )
 
     current = float(start_distance)
     rebuilt = []
-    for index in range(maximum_objects):
-        # The physical last model extends half the overlap beyond its guide end.
-        if (
-            current + ORDINARY_PAVED_OVERLAP_METRES * 0.5
-            >= float(preferred_end_distance) - 0.05
-            and current + ORDINARY_PAVED_OVERLAP_METRES * 0.5
-            >= float(minimum_end_distance) - 0.05
-        ):
-            break
-
-        remaining = max(0.0, float(preferred_end_distance) - current)
-        if index < len(original_sequence):
-            piece = original_sequence[index]
-        else:
-            preferred = _p._road_piece_sequence(remaining, ordered)
-            piece = preferred[0] if preferred else ordered[-1]
-
-        effective = max(
-            0.50,
-            float(piece.length_metres) - ORDINARY_PAVED_OVERLAP_METRES,
-        )
+    final_progress = current
+    for index, piece in enumerate(sequence):
         endpoint = measure.chord_endpoint(
             current,
-            effective,
+            float(piece.length_metres),
             float(maximum_end_distance),
         )
         if endpoint is None:
@@ -231,16 +220,21 @@ def _overlapped_stock_chain(
         end_distance, end_x, end_z, _chord_heading = endpoint
         start_x, start_z, _start_heading = measure.point(current)
         rebuilt.append((piece, (start_x, start_z), (end_x, end_z)))
-        if end_distance <= current + 1.0e-7:
-            return fitted
-        current = float(end_distance)
+        final_progress = float(end_distance)
+        if index + 1 < len(sequence):
+            next_progress = final_progress - ORDINARY_PAVED_OVERLAP_METRES
+            if next_progress <= current + 0.05:
+                return fitted
+            current = next_progress
 
-    if (
-        current + ORDINARY_PAVED_OVERLAP_METRES * 0.5
-        < float(minimum_end_distance) - 0.05
+    if final_progress < (
+        float(minimum_end_distance)
+        - ORDINARY_PAVED_OVERLAP_MAXIMUM_END_SHORTFALL_METRES
     ):
         return fitted
-    if not _tangent_compatible_straight_chain(tuple(rebuilt)):
+    if final_progress > float(maximum_end_distance) + 1.0e-6:
+        return fitted
+    if not _valid_overlapped_straight_chain(tuple(rebuilt)):
         return fitted
     return tuple(rebuilt)
 
