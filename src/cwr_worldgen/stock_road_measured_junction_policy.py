@@ -62,8 +62,11 @@ def _native_t_junction(incidents):
 
 
 def _native_junction_for_incidents(incidents):
+    # Resolve the T selector dynamically. Late policies deliberately tighten the
+    # allowed connector error after this measured-geometry layer is installed;
+    # calling the module-local implementation here would silently bypass them.
     if len(incidents) == 3:
-        return _native_t_junction(incidents)
+        return _junction._native_t_junction(incidents)
     if len(incidents) == 4:
         return _junction._native_x_junction(incidents)
     return None
