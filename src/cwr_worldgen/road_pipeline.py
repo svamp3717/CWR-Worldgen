@@ -35,7 +35,7 @@ _BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("road_quality", "road_quality_policy", "install_road_quality_policy"),
     ("stock_curve_base", "stock_road_curve_policy", "install_stock_road_curve_policy"),
     ("stock_geometry", "stock_road_geometry_policy", "install_stock_road_geometry_policy"),
-    ("stock_transform", "stock_road_transform_policy", "install_stock_road_transform_policy"),
+    ("stock_transform", "stock_road_geometry_policy", "install_stock_road_transform_policy"),
     ("stock_3d_connector", "stock_road_3d_connector_policy", "install_stock_road_3d_connector_policy"),
     ("gravel_junction", "gravel_junction_policy", "install_gravel_junction_policy"),
     ("gravel_gap", "gravel_gap_policy", "install_gravel_gap_policy"),
