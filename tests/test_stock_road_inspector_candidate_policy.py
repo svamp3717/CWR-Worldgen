@@ -10,10 +10,10 @@ from cwr_worldgen import stock_road_emitted_seam_policy as _emitted
 from cwr_worldgen import stock_road_inspector_candidate_enforcement_policy as _enforcement
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_junction_policy as _junction
+from cwr_worldgen import stock_road_local_fit_policy as _local_fit
 from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen import stock_road_native_junction_ownership_policy as _ownership
 from cwr_worldgen import stock_road_paved_junction_completion_policy as _paved
-from cwr_worldgen import stock_road_relaxation_transaction_policy as _transaction
 from cwr_worldgen import stock_road_surface_overlap_policy as _surface
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
 
@@ -305,11 +305,11 @@ def test_planning_selector_can_propose_near_straight_skew_t() -> None:
     )
     assert _enforcement._candidate_native_t_dispatch(incidents) is None
 
-    token = _transaction._PLANNING_RELAXED_JUNCTION.set(True)
+    token = _local_fit._PLANNING_RELAXED_JUNCTION.set(True)
     try:
         planned = _enforcement._candidate_native_t_dispatch(incidents)
     finally:
-        _transaction._PLANNING_RELAXED_JUNCTION.reset(token)
+        _local_fit._PLANNING_RELAXED_JUNCTION.reset(token)
 
     assert planned is not None
     assert planned.model_path.casefold().endswith(r"kr_new_sil_sil_t.p3d")
@@ -322,11 +322,11 @@ def test_planning_selector_does_not_straighten_turning_through_road() -> None:
         _incident(270.0, "sil"),
     )
 
-    token = _transaction._PLANNING_RELAXED_JUNCTION.set(True)
+    token = _local_fit._PLANNING_RELAXED_JUNCTION.set(True)
     try:
         planned = _enforcement._candidate_native_t_dispatch(incidents)
     finally:
-        _transaction._PLANNING_RELAXED_JUNCTION.reset(token)
+        _local_fit._PLANNING_RELAXED_JUNCTION.reset(token)
 
     assert _enforcement._through_turn_degrees(incidents) > (
         _enforcement.MAXIMUM_NATIVE_THROUGH_TURN_DEGREES
