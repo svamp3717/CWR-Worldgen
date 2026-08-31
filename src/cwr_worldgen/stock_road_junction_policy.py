@@ -2,24 +2,16 @@
 """Own native stock-road junction selection, placement and endpoint contracts.
 
 The stock piece fitter historically represents every non-gravel T/X junction with
-one six-metre straight road model centred on the node. That works as a road-link
-hub, but visually lays a rectangular slab across angled branches. Resistance
-ships purpose-built junction models for the common paved/asphalt/cobble families;
-use them when the incident geometry is close enough to their fixed 90-degree
-connector template.
+one six-metre straight road model centred on the node. Resistance ships
+purpose-built junction models for the common paved/asphalt/cobble families; use
+them when the incident geometry is close enough to their fixed connector
+template.
 
-The WrpTool catalogue is authoritative for which stock junction assets exist.
-The replacement is deliberately post-fit. Existing branch trimming, terrain
-grading, object budgeting and road-quality auditing stay untouched. Only the
-central cap changes shape/orientation, so the maximum deviation from the source
-road is bounded to the small connector mismatch inside the already-cleared road
-corridor.
-
-This module also owns two staged junction refinements while preserving their
-historical installation positions: bounded mixed-surface skew matching and the
-late endpoint-window contract used by exact stock-piece fitters. Keeping those
-rules here removes separate policy files without changing when they become
-active in the production pipeline.
+This module owns the staged junction refinements that used to be spread across
+several policy files: base native selection, measured Memory-LOD placement,
+bounded mixed-surface skew matching, and the late endpoint-window contract. Each
+installer still runs at its historical pipeline position, so ownership is
+simplified without changing mutation timing.
 """
 from __future__ import annotations
 
@@ -32,6 +24,7 @@ from typing import Sequence
 from . import generator as _generator
 from . import playability as _p
 from . import road_quality_policy as _quality
+from . import stock_road_model_geometry as _model_geometry
 from . import stock_road_wrp_catalogue as _catalogue
 
 
@@ -48,16 +41,13 @@ _GENERATED_GRAVEL_FILENAME = re.compile(
     re.IGNORECASE,
 )
 
-# A native junction may rotate a few degrees away from each OSM arm to split the
-# error between all connectors. At the default 2.94 m connector radius, 7.5 deg
-# means <0.39 m lateral displacement, well inside a normal six-metre road.
 MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = 7.5
 NATIVE_JUNCTION_VERTICAL_BIAS_METRES = 0.006
 MAXIMUM_RELAXED_JUNCTION_HEADING_ERROR_DEGREES = 18.0
+MAXIMUM_RELAXED_APPROACH_METRES = 2.0
 MINIMUM_ENDPOINT_RECOVERY_IMPROVEMENT_METRES = 0.05
 _WINDOW_EPSILON_METRES = 1.0e-6
 
-# Keep one source of truth for the purpose-built Resistance T/X inventory.
 _T_JUNCTION_MODELS = dict(_catalogue.WRPTOOL_T_JUNCTION_MODELS)
 _X_JUNCTION_MODELS = dict(_catalogue.WRPTOOL_X_JUNCTION_MODELS)
 _ALL_NATIVE_JUNCTION_MODELS = tuple(_catalogue.WRPTOOL_NATIVE_JUNCTION_MODELS)
@@ -65,9 +55,15 @@ _ALL_NATIVE_JUNCTION_MODELS = tuple(_catalogue.WRPTOOL_NATIVE_JUNCTION_MODELS)
 _ORIGINAL_FIT = None
 _ORIGINAL_VARIANT_PATHS = None
 _INSTALLED = False
+
+_ORIGINAL_MEASURED_QUALITY_JUNCTION_GEOMETRY = None
+_MEASURED_CONNECTOR = None
+_MEASURED_INSTALLED = False
+
 _ORIGINAL_SKEW_FAMILY = None
 _ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS = None
 _SKEW_INSTALLED = False
+
 _ORIGINAL_ENDPOINT_CHAIN = None
 _ENDPOINT_INSTALLED = False
 
@@ -116,8 +112,6 @@ def _rotation_score(
 
 
 def _best_rotation(pairs: Sequence[tuple[float, float]]) -> tuple[float, float]:
-    """Return minimax rotation and its maximum connector heading error."""
-
     offsets = tuple((actual - local) % 360.0 for local, actual in pairs)
     candidates = set(offsets)
     for first, second in itertools.combinations(offsets, 2):
@@ -172,12 +166,9 @@ def _native_t_junction(incidents: Sequence[_Incident]) -> _NativeJunction | None
     branch_heading = _heading(incidents[branch].direction)
     fits = []
     for actual_zero, actual_180 in ((main_a, main_b), (main_b, main_a)):
-        pairs = (
-            (0.0, actual_zero),
-            (180.0, actual_180),
-            (90.0, branch_heading),
+        rotation, maximum_error = _best_rotation(
+            ((0.0, actual_zero), (180.0, actual_180), (90.0, branch_heading))
         )
-        rotation, maximum_error = _best_rotation(pairs)
         fits.append((maximum_error, rotation))
     maximum_error, rotation = min(fits)
     if maximum_error > MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES:
@@ -201,8 +192,7 @@ def _native_x_junction(incidents: Sequence[_Incident]) -> _NativeJunction | None
     local = (0.0, 90.0, 180.0, 270.0)
     best = None
     for assignment in itertools.permutations(actual):
-        pairs = tuple(zip(local, assignment))
-        rotation, maximum_error = _best_rotation(pairs)
+        rotation, maximum_error = _best_rotation(tuple(zip(local, assignment)))
         candidate = (maximum_error, rotation)
         if best is None or candidate < best:
             best = candidate
@@ -291,7 +281,6 @@ def _native_junction_object(old, native: _NativeJunction, elevations, spec):
 
 
 def _lower_legacy_stock_cap(old, elevations, spec):
-    """Put unsupported straight caps on the same plane as their branch roads."""
     if _STOCK_CAP_MODEL.fullmatch(old.model_path.replace("/", "\\")) is None:
         return old
     half = _connector_half_extent(spec)
@@ -378,6 +367,156 @@ def _fit(
     return _replace_stock_junction_caps(report, dataset, projection, elevations, spec)
 
 
+# Measured Memory-LOD stage -------------------------------------------------
+
+def _measured_native_t_junction(incidents):
+    if len(incidents) != 3:
+        return None
+    pair = _dominant_pair(incidents)
+    if pair is None:
+        return None
+    first, second = pair
+    branch = next(index for index in range(3) if index not in pair)
+    main_family = incidents[first].family
+    if main_family is None or incidents[second].family != main_family:
+        return None
+    branch_family = incidents[branch].family
+    if branch_family is None:
+        return None
+    model = _T_JUNCTION_MODELS.get((main_family, branch_family))
+    if model is None:
+        return None
+
+    main_a = _heading(incidents[first].direction)
+    main_b = _heading(incidents[second].direction)
+    branch_heading = _heading(incidents[branch].direction)
+    fits = []
+    for actual_zero, actual_180 in ((main_a, main_b), (main_b, main_a)):
+        rotation, maximum_error = _best_rotation(
+            ((0.0, actual_zero), (180.0, actual_180), (270.0, branch_heading))
+        )
+        fits.append((maximum_error, rotation))
+    maximum_error, rotation = min(fits)
+    if maximum_error > MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES:
+        return None
+    return _NativeJunction(model, rotation, maximum_error, main_family)
+
+
+def _measured_native_junction_for_incidents(incidents):
+    if len(incidents) == 3:
+        return _native_t_junction(incidents)
+    if len(incidents) == 4:
+        return _native_x_junction(incidents)
+    return None
+
+
+def _measured_connector_half_extent(_spec) -> float:
+    return _model_geometry.STOCK_JUNCTION_CONNECTOR_RADIUS_METRES
+
+
+def _measured_native_junction_object(old, native, elevations, spec):
+    half = _model_geometry.STOCK_JUNCTION_CONNECTOR_RADIUS_METRES
+    angle = math.radians(native.heading_degrees)
+    direction = (math.sin(angle), math.cos(angle))
+    node = (float(old.x), float(old.z))
+    start = (node[0] - direction[0] * half, node[1] - direction[1] * half)
+    end = (node[0] + direction[0] * half, node[1] + direction[1] * half)
+    placed = _p._road_object_on_slope(
+        old.object_id,
+        native.model_path,
+        start,
+        end,
+        elevations,
+        spec,
+        vertical_offset=(
+            _p._STOCK_ROAD_VERTICAL_OFFSET_METRES + NATIVE_JUNCTION_VERTICAL_BIAS_METRES
+        ),
+    )
+
+    intersection_local = _model_geometry.native_junction_intersection_offset(native.model_path)
+    if intersection_local is None:
+        return placed
+    intersection_world_offset = _model_geometry.rotate_local(
+        intersection_local, native.heading_degrees
+    )
+    return replace(
+        placed,
+        x=node[0] - intersection_world_offset[0],
+        z=node[1] - intersection_world_offset[1],
+        heading_degrees=native.heading_degrees,
+    )
+
+
+def _measured_lower_legacy_stock_cap(old, elevations, spec):
+    if _STOCK_CAP_MODEL.fullmatch(old.model_path.replace("/", "\\")) is None:
+        return old
+    half = _model_geometry.STOCK_STRAIGHT_LENGTHS_METRES[6] * 0.5
+    angle = math.radians(old.heading_degrees)
+    direction = (math.sin(angle), math.cos(angle))
+    start = (old.x - direction[0] * half, old.z - direction[1] * half)
+    end = (old.x + direction[0] * half, old.z + direction[1] * half)
+    return _p._road_object_on_slope(
+        old.object_id,
+        old.model_path,
+        start,
+        end,
+        elevations,
+        spec,
+        vertical_offset=_p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
+    )
+
+
+def _measured_quality_junction_geometry(dataset, projection, spec):
+    if _ORIGINAL_MEASURED_QUALITY_JUNCTION_GEOMETRY is None:
+        raise RuntimeError("measured stock junction stage is not installed")
+    result = dict(_ORIGINAL_MEASURED_QUALITY_JUNCTION_GEOMETRY(dataset, projection, spec))
+    native = _junction_incidents(dataset, projection, spec)
+    extent = _model_geometry.STOCK_JUNCTION_CONNECTOR_RADIUS_METRES
+    for key in native:
+        current = result.get(key)
+        if current is None:
+            continue
+        result[key] = replace(current, half_length=extent, half_width=extent)
+    return result
+
+
+def _measured_native_t_targets(incidents, native):
+    connector = _MEASURED_CONNECTOR
+    if connector is None:
+        raise RuntimeError("measured stock junction stage is not installed")
+    if len(incidents) != 3:
+        return None
+    pair = _dominant_pair(incidents)
+    if pair is None:
+        return None
+    first, second = pair
+    branch = next(index for index in range(3) if index not in pair)
+    rotation = float(native.heading_degrees) % 360.0
+    target_zero = rotation
+    target_180 = (rotation + 180.0) % 360.0
+    target_branch = (rotation + 270.0) % 360.0
+
+    actual_first = connector._heading(incidents[first].direction)
+    actual_second = connector._heading(incidents[second].direction)
+    direct = (
+        connector._angular_distance(actual_first, target_zero)
+        + connector._angular_distance(actual_second, target_180)
+    )
+    swapped = (
+        connector._angular_distance(actual_first, target_180)
+        + connector._angular_distance(actual_second, target_zero)
+    )
+    targets = [0.0, 0.0, 0.0]
+    if direct <= swapped:
+        targets[first], targets[second] = target_zero, target_180
+    else:
+        targets[first], targets[second] = target_180, target_zero
+    targets[branch] = target_branch
+    return tuple(targets)
+
+
+# Mixed skew stage ---------------------------------------------------------
+
 def _is_generated_gravel_model(model_path: str) -> bool:
     filename = str(model_path).replace("/", "\\").rsplit("\\", 1)[-1]
     return _GENERATED_GRAVEL_FILENAME.fullmatch(filename) is not None
@@ -397,11 +536,7 @@ def _family_with_generated_gravel(model_path: str) -> str | None:
 def _eligible_relaxed_mixed_t(incidents) -> bool:
     if len(incidents) != 3:
         return False
-    gravel = [
-        incident
-        for incident in incidents
-        if _is_generated_gravel_model(incident.model_path)
-    ]
+    gravel = [incident for incident in incidents if _is_generated_gravel_model(incident.model_path)]
     if len(gravel) != 1:
         return False
     stock_families = [
@@ -427,13 +562,13 @@ def _native_junction_with_bounded_mixed_skew(incidents):
 
     original_limit = MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES
     try:
-        MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = (
-            MAXIMUM_RELAXED_JUNCTION_HEADING_ERROR_DEGREES
-        )
+        MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = MAXIMUM_RELAXED_JUNCTION_HEADING_ERROR_DEGREES
         return _ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS(incidents)
     finally:
         MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = original_limit
 
+
+# Late endpoint stage ------------------------------------------------------
 
 def _effective_window(
     measure,
@@ -476,14 +611,11 @@ def _covered_endpoint_errors(
 ) -> tuple[float, ...]:
     if not fitted:
         return (math.inf,) if recover_start or recover_end else ()
-
     errors = []
     if recover_start:
-        desired = measure.point(effective_start)[:2]
-        errors.append(math.dist(tuple(fitted[0][1]), desired))
+        errors.append(math.dist(tuple(fitted[0][1]), measure.point(effective_start)[:2]))
     if recover_end:
-        desired = measure.point(effective_end)[:2]
-        errors.append(math.dist(tuple(fitted[-1][2]), desired))
+        errors.append(math.dist(tuple(fitted[-1][2]), measure.point(effective_end)[:2]))
     return tuple(errors)
 
 
@@ -509,16 +641,13 @@ def _junction_endpoint_chain(
         minimum_end_distance=minimum_end_distance,
         maximum_end_distance=maximum_end_distance,
     )
-
-    effective_start, effective_preferred, effective_minimum, effective_maximum = (
-        _effective_window(
-            measure,
-            pieces,
-            start_distance,
-            preferred_end_distance,
-            minimum_end_distance,
-            maximum_end_distance,
-        )
+    effective_start, effective_preferred, effective_minimum, effective_maximum = _effective_window(
+        measure,
+        pieces,
+        start_distance,
+        preferred_end_distance,
+        minimum_end_distance,
+        maximum_end_distance,
     )
 
     trim_start = effective_start > raw_start + _WINDOW_EPSILON_METRES
@@ -546,10 +675,7 @@ def _junction_endpoint_chain(
         effective_start=effective_start,
         effective_end=effective_preferred,
     )
-    if (
-        baseline_errors
-        and max(baseline_errors) <= MINIMUM_ENDPOINT_RECOVERY_IMPROVEMENT_METRES
-    ):
+    if baseline_errors and max(baseline_errors) <= MINIMUM_ENDPOINT_RECOVERY_IMPROVEMENT_METRES:
         return baseline
 
     recovered = _ORIGINAL_ENDPOINT_CHAIN(
@@ -562,7 +688,6 @@ def _junction_endpoint_chain(
     )
     if not recovered:
         return baseline
-
     recovered_errors = _covered_endpoint_errors(
         measure,
         recovered,
@@ -581,6 +706,8 @@ def _junction_endpoint_chain(
     return baseline
 
 
+# Staged installers --------------------------------------------------------
+
 def install_stock_road_junction_policy() -> None:
     global _ORIGINAL_FIT, _ORIGINAL_VARIANT_PATHS, _INSTALLED
     if _INSTALLED:
@@ -594,9 +721,35 @@ def install_stock_road_junction_policy() -> None:
     _INSTALLED = True
 
 
-def install_stock_road_skew_policy() -> None:
-    """Enable bounded generated-gravel skew matching at the historical stage."""
+def install_stock_road_measured_junction_policy() -> None:
+    """Install measured Memory-LOD junction geometry at its historical stage."""
 
+    global _ORIGINAL_MEASURED_QUALITY_JUNCTION_GEOMETRY, _MEASURED_CONNECTOR
+    global _MEASURED_INSTALLED
+    global _native_t_junction, _native_junction_for_incidents
+    global _connector_half_extent, _native_junction_object, _lower_legacy_stock_cap
+    if _MEASURED_INSTALLED:
+        return
+
+    # The old measured-junction module imported the connector module at this
+    # stage. Delay the import until now so folding files does not move that side
+    # effect earlier in startup.
+    from . import stock_road_connector_policy as connector
+
+    _MEASURED_CONNECTOR = connector
+    _ORIGINAL_MEASURED_QUALITY_JUNCTION_GEOMETRY = _quality._junction_geometry
+    _native_t_junction = _measured_native_t_junction
+    _native_junction_for_incidents = _measured_native_junction_for_incidents
+    _connector_half_extent = _measured_connector_half_extent
+    _native_junction_object = _measured_native_junction_object
+    _lower_legacy_stock_cap = _measured_lower_legacy_stock_cap
+    _quality._junction_geometry = _measured_quality_junction_geometry
+    connector._native_t_targets = _measured_native_t_targets
+    connector.MAXIMUM_APPROACH_LATERAL_RELAXATION_METRES = MAXIMUM_RELAXED_APPROACH_METRES
+    _MEASURED_INSTALLED = True
+
+
+def install_stock_road_skew_policy() -> None:
     global _ORIGINAL_SKEW_FAMILY, _ORIGINAL_SKEW_NATIVE_JUNCTION_FOR_INCIDENTS
     global _SKEW_INSTALLED, _family, _native_junction_for_incidents
     if _SKEW_INSTALLED:
@@ -609,8 +762,6 @@ def install_stock_road_skew_policy() -> None:
 
 
 def install_stock_road_junction_endpoint_policy() -> None:
-    """Install endpoint-window enforcement outside every late exact wrapper."""
-
     global _ORIGINAL_ENDPOINT_CHAIN, _ENDPOINT_INSTALLED
     if _ENDPOINT_INSTALLED:
         return
