@@ -72,7 +72,6 @@ _LATE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("turning_t_fallback", "stock_road_turning_t_fallback_policy", "install_stock_road_turning_t_fallback_policy"),
     ("emitted_seam", "stock_road_emitted_seam_policy", "install_stock_road_emitted_seam_policy"),
     ("paved_wedge_geometry", "stock_road_paved_wedge_policy", "install_stock_road_paved_wedge_policy"),
-    ("emitted_seam_refinement", "stock_road_emitted_seam_refinement_policy", "install_stock_road_emitted_seam_refinement_policy"),
     ("stock_paved_only", "stock_road_stock_paved_only_policy", "install_stock_road_stock_paved_only_policy"),
     ("inspector_candidates", "stock_road_inspector_candidate_policy", "install_stock_road_inspector_candidate_policy"),
     ("candidate_enforcement", "stock_road_inspector_candidate_enforcement_policy", "install_stock_road_inspector_candidate_selector_policy"),
