@@ -4,11 +4,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from cwr_worldgen.osm import OsmLineFeature
-from cwr_worldgen.stock_road_obstacle_policy import (
+from cwr_worldgen.stock_road_relaxation_policy import (
     _build_obstacle_index,
     _line_obstacles,
+    _shortcut_clear,
 )
-from cwr_worldgen.stock_road_relaxation_policy import _shortcut_clear
 
 
 class _IdentityProjection:
