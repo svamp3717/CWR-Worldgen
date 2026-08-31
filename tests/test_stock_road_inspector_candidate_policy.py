@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_curve_usage_policy as _curve_usage
 from cwr_worldgen import stock_road_emitted_seam_policy as _emitted
-from cwr_worldgen import stock_road_inspector_candidate_completion_policy as _completion
 from cwr_worldgen import stock_road_inspector_candidate_enforcement_policy as _enforcement
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_junction_policy as _junction
@@ -110,8 +109,6 @@ def test_mixed_paved_ces_t_uses_same_strict_candidate_path() -> None:
 
     assert _candidate._eligible_paved_or_mixed_incidents(mixed)
     assert not _candidate._eligible_paved_or_mixed_incidents(dirt_only)
-    # The existing all-paved completion policy keeps its original scope. Mixed
-    # paved/ces handling belongs only to the final Inspector candidate layer.
     assert not _paved._all_paved_incidents(mixed)
 
 
@@ -212,8 +209,6 @@ def test_fallback_junction_adds_only_low_uncovered_paved_tongue(monkeypatch) -> 
         node[1],
         0.0,
     )
-    # This approach starts one stock-short length away from the node, so the
-    # candidate should bridge exactly that uncovered incident axis.
     approach = _p._road_object_on_slope(
         2,
         r"o\road\sil6.p3d",
@@ -303,62 +298,6 @@ def test_candidate_turn_pass_still_refuses_full_surface_overlay(monkeypatch) -> 
     assert fixed.short_piece_objects == 0
 
 
-def test_completion_adds_only_borderless_wedge_triangle(monkeypatch) -> None:
-    # Legacy helper unit coverage is retained for old PBO compatibility. The
-    # completion policy itself is deliberately not installed in production.
-    plan = _finish._SeamCoverPlan(
-        model_path=r"o\road\sil6.p3d",
-        centre=(30.0, 30.0),
-        tangent_axis_degrees=0.0,
-        turn_degrees=10.0,
-        outer_miter_apex=(30.5, 30.0),
-    )
-    report = _p.RoadFitReport(
-        objects=(),
-        chain_count=0,
-        connection_count=0,
-        failed_connections=0,
-        maximum_connection_gap=0.0,
-        maximum_chain_gap=0.0,
-        truncated=False,
-    )
-    monkeypatch.setattr(
-        _completion,
-        "_ORIGINAL_APPLY",
-        lambda current, elevations, spec: current,
-    )
-    monkeypatch.setattr(
-        _emitted,
-        "_terrain_wedge_cover_plans",
-        lambda current, elevations=None, spec=None: (plan,),
-    )
-    monkeypatch.setattr(
-        _emitted,
-        "_terrain_clear_wedge_overlay",
-        lambda plan, reference, object_id, elevations, spec, force=False: _p.WorldObject(
-            int(object_id),
-            r"candidate\i\paved_wedge_q040.p3d",
-            float(plan.centre[0]),
-            0.05,
-            float(plan.centre[1]),
-            float(plan.tangent_axis_degrees),
-        ),
-    )
-
-    fixed = _completion._apply_candidate_completion(
-        report,
-        _flat_elevations(),
-        _flat_spec(name="candidate_wedge"),
-    )
-
-    assert len(fixed.objects) == 1
-    filename = fixed.objects[0].model_path.replace("/", "\\").rsplit("\\", 1)[-1]
-    assert filename.casefold().startswith("paved_wedge_q")
-    assert all("paved_miter" not in str(obj.model_path).casefold() for obj in fixed.objects)
-    assert all("paved_fill" not in str(obj.model_path).casefold() for obj in fixed.objects)
-    assert fixed.short_piece_objects == 1
-
-
 def test_planning_selector_can_propose_near_straight_skew_t() -> None:
     incidents = (
         _incident(0.0, "sil"),
@@ -404,9 +343,6 @@ def test_candidate_curve_search_stays_inside_final_endpoint_guard() -> None:
 
 def test_candidate_policy_is_wired_into_production_hooks() -> None:
     assert _candidate._INSTALLED
-    # The old completion module remains importable only for legacy regression
-    # analysis; generated paved wedges are not a production repair path.
-    assert not _completion._INSTALLED
     assert _enforcement._SELECTOR_INSTALLED
     assert _junction._native_junction_object is _candidate._measured_native_junction_object
     assert _ownership._trim_one_native_center is _candidate._trim_one_native_center
