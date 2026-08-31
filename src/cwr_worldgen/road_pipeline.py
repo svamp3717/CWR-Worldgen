@@ -56,8 +56,8 @@ _BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
 
 # The old stock_road_late_policy_stack imported this entire family first and
 # installed it second. Keep that semantic while deleting the orchestration
-# module itself. Cancelled overlap layers and one-assignment compatibility
-# modules are intentionally absent.
+# module itself. Cancelled overlap layers and folded compatibility wrappers are
+# intentionally absent.
 _LATE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("curve_regularization", "stock_road_curve_regularization_policy", "install_stock_road_curve_regularization_policy"),
     ("sharp_turn", "stock_road_sharp_turn_policy", "install_stock_road_sharp_turn_policy"),
@@ -65,7 +65,6 @@ _LATE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("s_bend", "stock_road_s_bend_policy", "install_stock_road_s_bend_policy"),
     ("micro_bend", "stock_road_micro_bend_policy", "install_stock_road_micro_bend_policy"),
     ("s_bend_exact", "stock_road_s_bend_exact_policy", "install_stock_road_s_bend_exact_policy"),
-    ("single_vertex_bend", "stock_road_single_vertex_bend_policy", "install_stock_road_single_vertex_bend_policy"),
     ("curve_usage", "stock_road_curve_usage_policy", "install_stock_road_curve_usage_policy"),
     ("junction_endpoint", "stock_road_junction_endpoint_policy", "install_stock_road_junction_endpoint_policy"),
     ("visual_finish", "stock_road_visual_finish_policy", "install_stock_road_visual_finish_policy"),
