@@ -32,6 +32,7 @@ from . import stock_road_paved_wedge_policy as _paved_wedge
 from . import stock_road_emitted_seam_refinement_policy as _emitted_seam_refinement
 from . import stock_road_stock_paved_only_policy as _stock_paved_only
 from . import stock_road_inspector_candidate_policy as _inspector_candidates
+from . import stock_road_inspector_candidate_enforcement_policy as _candidate_enforcement
 from . import stock_road_paved_junction_completion_policy as _paved_junctions
 from . import stock_road_fit_first_policy as _fit_first
 from . import stock_road_native_junction_ownership_policy as _native_junction_ownership
@@ -91,17 +92,20 @@ def install_stock_road_late_policy_stack() -> None:
     _curve_seam_fallback.install_stock_road_curve_seam_fallback_policy()
     _intersection_edge.install_stock_road_intersection_edge_policy()
     _emitted_seam.install_stock_road_emitted_seam_policy()
-    # Keep the physical endpoint reconstruction and exact borderless wedge mesh.
-    # The later Inspector-candidate policy decides when that wedge is serialized.
+    # Keep physical endpoint reconstruction from the old wedge work because the
+    # Inspector and exact curve search need it. Production candidate enforcement
+    # below prevents generated paved wedge/miter/fill helpers from being used as
+    # the visible repair strategy.
     _paved_wedge.install_stock_road_paved_wedge_policy()
     _emitted_seam_refinement.install_stock_road_emitted_seam_refinement_policy()
     _stock_paved_only.install_stock_road_stock_paved_only_policy()
 
-    # Apply the concrete repairs described by Road Inspector while every late
-    # hook is still composable: measured -X T connector orientation, logical
-    # centre compensation, mixed native-centre trimming, and borderless paved
-    # terrain wedges. Generated gravel remains outside this policy.
+    # Translate Inspector candidate text into concrete paved/mixed-junction
+    # policies: strict measured native connectors, final exact stock curve-chain
+    # search, native-centre trimming, and low stock fill/tongues. Standalone ces
+    # and generated-gravel bends are deliberately not refitted here.
     _inspector_candidates.install_stock_road_inspector_candidate_policy()
+    _candidate_enforcement.install_stock_road_inspector_candidate_selector_policy()
 
     # Native paved T/X meshes are visually trustworthy only while every measured
     # connector is essentially exact. Otherwise keep source-aligned approaches
@@ -109,14 +113,18 @@ def install_stock_road_late_policy_stack() -> None:
     _paved_junctions.install_stock_road_paved_junction_completion_policy()
 
     # Production builds keep fitting first. Disable the older intermediate seam
-    # and junction overlap helpers, but leave the final pitch-aware emitted-seam
-    # audit active so unambiguous residual paved wedges are not serialized open.
+    # and junction overlap helpers. Unresolved visible turns remain reportable
+    # instead of being hidden under another full road strip.
     _fit_first.install_stock_road_fit_first_policy()
 
     # Once a purpose-built native T/X is selected, it owns the entire visible
     # intersection centre. Restore the measured connector trim after every older
-    # fallback layer has been composed, and re-enable the transaction-checked
-    # connector alignment for skewed all-paved T junctions.
+    # fallback layer has been composed.
     _native_junction_ownership.install_stock_road_native_junction_ownership_policy()
+
+    # One last pass owns the exact RoadFitReport that will be serialized. This is
+    # what prevents an older wrapper from re-promoting a skewed rigid junction
+    # after the candidate decision has already been made.
+    _candidate_enforcement.install_stock_road_inspector_candidate_final_policy()
 
     _INSTALLED = True
