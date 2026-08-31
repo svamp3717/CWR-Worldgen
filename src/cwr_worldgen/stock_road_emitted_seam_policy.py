@@ -2,20 +2,16 @@
 """Close paved seams after every other stock-road wrapper has finished.
 
 Several road policies legitimately replace or append objects after the older
-visual-finish seam hook runs.  A seam that is perfect in the intermediate report
+visual-finish seam hook runs. A seam that is perfect in an intermediate report
 can also open in the actual WRP because a pitched rigid P3D has only
-``length*cos(pitch)`` of horizontal connector span.  The final Road Inspector
-therefore used to find asphalt gaps that no generator-side seam pass had ever
-seen.
+``length*cos(pitch)`` of horizontal connector span. The final Road Inspector
+therefore used to find asphalt gaps that no generator-side seam pass had seen.
 
-This policy is deliberately the outermost stock-road fit wrapper.  It inspects
-the final ``WorldObject`` geometry through ``_p._model_axis`` (which already uses
-measured 3D stock connectors), ignores gaps already covered by another
-same-family paved surface, and adds low angle-matched borderless miter fills.
-Straight mitres use the same 0.20 m physical connector radius as Road Inspector.
-Residual curve seams may bridge up to 1.50 m when the mutually-nearest pair has
-a modest tangent error; the fill follows the straight-side tangent when one is
-available, avoiding a diagonal patch across the carriageway.
+This module owns the final emitted paved-seam planner. It inspects final
+``WorldObject`` geometry through ``_p._model_axis``, includes legacy paved cap
+endpoints, ignores near-coincident overlapping pieces and surfaces already
+covered by another same-family road, and plans the narrow final seam repair.
+There is intentionally no later refinement module replacing this planner.
 """
 from __future__ import annotations
 
@@ -41,6 +37,10 @@ MAXIMUM_EMITTED_CURVE_GAP_METRES = 1.50
 MINIMUM_EMITTED_TANGENT_ERROR_DEGREES = 0.75
 MAXIMUM_EMITTED_STRAIGHT_TANGENT_ERROR_DEGREES = 35.0
 MAXIMUM_EMITTED_CURVE_TANGENT_ERROR_DEGREES = 12.0
+MINIMUM_PHYSICAL_OPEN_GAP_METRES = 0.04
+OVERLAPPING_CENTRE_DISTANCE_METRES = 0.50
+OVERLAPPING_TANGENT_ERROR_DEGREES = 2.0
+OVERLAPPING_VERTICAL_DISTANCE_METRES = 0.15
 EMITTED_SEAM_UNDERLAY_BIAS_METRES = -0.010
 MINIMUM_VISIBLE_WEDGE_CLEARANCE_METRES = 0.030
 MAXIMUM_OUTER_MITER_CENTER_GAP_METRES = 0.35
@@ -326,12 +326,102 @@ def _plan_heading(first, second) -> float:
     )
 
 
-def _emitted_seam_cover_plans(report):
-    endpoints = tuple(
+def _paved_cap_endpoints(report):
+    """Expose paved six-metre legacy caps to the final physical seam audit."""
+
+    cap_count = min(
+        int(getattr(report, "junction_cap_objects", 0)),
+        len(report.objects),
+    )
+    result = []
+    for obj in report.objects[:cap_count]:
+        match = _geometry.stock_straight_match(str(obj.model_path))
+        if match is None or int(match.group("length")) != 6:
+            continue
+        family = match.group("family").casefold()
+        if family not in _PAVED_FAMILIES:
+            continue
+        length = float(_geometry.STOCK_STRAIGHT_LENGTHS_METRES[6])
+        axis = _p._model_axis(obj, length)
+        for endpoint_index, point in enumerate(axis):
+            outward_heading = (
+                float(obj.heading_degrees)
+                + (180.0 if endpoint_index == 0 else 0.0)
+            ) % 360.0
+            result.append(
+                _finish._SeamEndpoint(
+                    point=(float(point[0]), float(point[1])),
+                    object_id=int(obj.object_id),
+                    endpoint_index=endpoint_index,
+                    family=family,
+                    tangent_axis_degrees=float(obj.heading_degrees) % 180.0,
+                    is_curve=False,
+                    outward_heading_degrees=outward_heading,
+                )
+            )
+    return tuple(result)
+
+
+def _emitted_endpoints(report):
+    chain = tuple(
         endpoint
         for endpoint in _finish._seam_endpoints(report)
         if endpoint.family in _PAVED_FAMILIES
     )
+    return chain + _paved_cap_endpoints(report)
+
+
+def _axis_error(first: float, second: float) -> float:
+    return _finish._axis_heading_difference(first, second)
+
+
+def _overlapping_pair(report, first, second) -> bool:
+    """Ignore near-coincident same-family straights that are deliberate overlap."""
+
+    road_by_id = {int(obj.object_id): obj for obj in report.objects}
+    first_obj = road_by_id.get(int(first.object_id))
+    second_obj = road_by_id.get(int(second.object_id))
+    if first_obj is None or second_obj is None:
+        return False
+    first_match = _geometry.stock_straight_match(str(first_obj.model_path))
+    second_match = _geometry.stock_straight_match(str(second_obj.model_path))
+    if first_match is None or second_match is None:
+        return False
+    if first_match.group("family").casefold() != second_match.group("family").casefold():
+        return False
+    if (
+        math.dist(
+            (float(first_obj.x), float(first_obj.z)),
+            (float(second_obj.x), float(second_obj.z)),
+        )
+        > OVERLAPPING_CENTRE_DISTANCE_METRES
+    ):
+        return False
+    if (
+        _axis_error(first_obj.heading_degrees, second_obj.heading_degrees)
+        > OVERLAPPING_TANGENT_ERROR_DEGREES
+    ):
+        return False
+    return (
+        abs(float(first_obj.y) - float(second_obj.y))
+        <= OVERLAPPING_VERTICAL_DISTANCE_METRES
+    )
+
+
+def _seam_plan(model_path, centre, heading, turn_degrees, outer_miter_apex):
+    return _finish._SeamCoverPlan(
+        model_path=model_path,
+        centre=(float(centre[0]), float(centre[1])),
+        tangent_axis_degrees=float(heading) % 180.0,
+        turn_degrees=float(turn_degrees),
+        outer_miter_apex=outer_miter_apex,
+    )
+
+
+def _emitted_seam_cover_plans(report):
+    """Plan the final physical paved seam repair from emitted object geometry."""
+
+    endpoints = _emitted_endpoints(report)
     if not endpoints:
         return ()
 
@@ -341,17 +431,18 @@ def _emitted_seam_cover_plans(report):
             continue
         if not _pair_is_unambiguous(endpoints, first, second, distance):
             continue
-        tangent_error = _finish._axis_heading_difference(
+        if _overlapping_pair(report, first, second):
+            continue
+
+        tangent_error = _axis_error(
             first.tangent_axis_degrees,
             second.tangent_axis_degrees,
         )
-        if tangent_error < MINIMUM_EMITTED_TANGENT_ERROR_DEGREES:
-            continue
-
         curve_seam = bool(first.is_curve or second.is_curve)
         if curve_seam:
             if (
-                distance > MAXIMUM_EMITTED_CURVE_GAP_METRES + 1.0e-9
+                tangent_error < MINIMUM_EMITTED_TANGENT_ERROR_DEGREES
+                or distance > MAXIMUM_EMITTED_CURVE_GAP_METRES + 1.0e-9
                 or tangent_error > MAXIMUM_EMITTED_CURVE_TANGENT_ERROR_DEGREES
             ):
                 continue
@@ -361,19 +452,28 @@ def _emitted_seam_cover_plans(report):
                 or tangent_error > MAXIMUM_EMITTED_STRAIGHT_TANGENT_ERROR_DEGREES
             ):
                 continue
+            # Exact/near-exact seams need no helper, but a real horizontal hole
+            # does even when both road tangents are essentially identical.
+            if (
+                distance < MINIMUM_PHYSICAL_OPEN_GAP_METRES
+                and tangent_error < MINIMUM_EMITTED_TANGENT_ERROR_DEGREES
+            ):
+                continue
 
         if _covered_by_existing_surface(report, first, second):
             continue
+
+        centre = (
+            (float(first.point[0]) + float(second.point[0])) * 0.5,
+            (float(first.point[1]) + float(second.point[1])) * 0.5,
+        )
         plans.append(
-            _finish._SeamCoverPlan(
-                model_path=rf"o\road\{first.family}6.p3d",
-                centre=(
-                    (float(first.point[0]) + float(second.point[0])) * 0.5,
-                    (float(first.point[1]) + float(second.point[1])) * 0.5,
-                ),
-                tangent_axis_degrees=_plan_heading(first, second),
-                turn_degrees=tangent_error,
-                outer_miter_apex=_outer_miter_apex(first, second),
+            _seam_plan(
+                rf"o\road\{first.family}6.p3d",
+                centre,
+                _plan_heading(first, second),
+                tangent_error,
+                _outer_miter_apex(first, second),
             )
         )
     return tuple(plans)
@@ -455,8 +555,6 @@ def _terrain_wedge_already_visible(
             and _surface_contains(obj, samples[0])
         )
     )
-    # Re-evaluate containment per sample; the first-sample clause above merely
-    # keeps the candidate tuple small without accepting a centre-only overlap.
     return all(
         any(
             _surface_contains(obj, sample)
@@ -474,13 +572,7 @@ def _terrain_wedge_already_visible(
 
 
 def _terrain_wedge_cover_plans(report, elevations=None, spec=None):
-    """Plan the actual outside triangles even when an older helper covers X/Z.
-
-    Earlier seam passes can add a full straight underlay. Its footprint may
-    cover every inspector sample while its rigid plane is still buried by a
-    cross-slope at the outside miter. The final terrain-clear triangle therefore
-    audits the physical road endpoints independently of existing helper pieces.
-    """
+    """Plan actual outside triangles even when an older helper covers X/Z."""
 
     endpoints = tuple(
         endpoint
@@ -596,10 +688,6 @@ def _terrain_clear_wedge_overlay(
         float(plan.centre[1]) + uz * base_distance,
     )
     heading = math.degrees(math.atan2(ux, uz)) % 360.0
-    # Keep the tiny triangle horizontal. Pitching an origin-offset wedge would
-    # contract its footprint in X/Z and could pull its tip back from the exact
-    # road-edge miter. Raising this borderless, wedge-only polygon to the local
-    # terrain maximum cannot paint across the road like a full helper disk.
     pitch = 0.0
     heading_radians = math.radians(heading)
     pitch_radians = math.radians(pitch)
@@ -614,10 +702,6 @@ def _terrain_clear_wedge_overlay(
         world_z = origin[1] - local_x * sine_heading + local_z * cosine_heading * cosine_pitch
         world_samples.append((world_x, world_z, local_z))
 
-    # The apex alone is not enough on a cross-slope: it can clear terrain while
-    # one base corner or edge midpoint is still buried and exposes a grass sliver.
-    # Suppress the overlay only when the existing miter clears the entire narrow
-    # triangle that the generated wedge would occupy.
     if not force and all(
         _surface_height_at(low_miter, (world_x, world_z))
         - _p._sample_elevation(
