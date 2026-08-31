@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+from dataclasses import dataclass
 from types import SimpleNamespace
 import math
 
@@ -9,6 +10,12 @@ from cwr_worldgen import road_quality_policy as _quality
 from cwr_worldgen import stock_road_curve_usage_policy as _curve_usage
 from cwr_worldgen import stock_road_kodiak_reference_policy as _kodiak
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
+
+
+@dataclass(frozen=True)
+class _Report:
+    objects: tuple
+    junction_cap_objects: int
 
 
 def _piece(model_path: str, length: float, nominal: int):
@@ -143,7 +150,7 @@ def test_native_node_to_connector_sil6_is_removed(monkeypatch) -> None:
         0.0,
         0.0,
     )
-    report = SimpleNamespace(
+    report = _Report(
         objects=(cap, stale, outside),
         junction_cap_objects=1,
     )
