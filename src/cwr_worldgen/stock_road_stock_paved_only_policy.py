@@ -22,7 +22,7 @@ from . import playability as _p
 from . import stock_road_emitted_seam_policy as _emitted
 from . import stock_road_junction_policy as _junction
 from . import stock_road_model_geometry as _geometry
-from . import stock_road_turning_t_fallback_policy as _turning_t
+from . import stock_road_skew_orientation_policy as _skew
 
 
 _PAVED_FAMILIES = frozenset({"sil", "asf", "kos"})
@@ -31,10 +31,6 @@ STOCK_PAVED_OUTSIDE_OVERLAP_METRES = 0.080
 MAXIMUM_STOCK_PAVED_HELPER_SHIFT_METRES = 0.75
 MAXIMUM_STOCK_PAVED_HELPER_LIFT_METRES = 0.035
 MINIMUM_STOCK_PAVED_TERRAIN_CLEARANCE_METRES = 0.005
-# A real approach short piece is centred roughly 3.1 m from a node. This guard
-# is intentionally much smaller and catches only the redundant co-centred seam
-# slab that made Lundby44's native-cap candidate look like several roads stacked
-# into one intersection.
 NATIVE_JUNCTION_HELPER_EXCLUSION_METRES = 0.75
 
 _ORIGINAL_TURNING_T_CAP = None
@@ -112,10 +108,6 @@ def _stock_helper_for_plan(plan, object_id, elevations, spec):
         ),
     )
 
-    # A full stock strip must not be raised aggressively because its painted
-    # borders would then win over the real approaches. Permit only a tiny lift
-    # when the outside miter would otherwise remain under terrain; larger
-    # cross-slope failures are intentionally left for Road Inspector to report.
     apex = getattr(plan, "outer_miter_apex", None)
     if apex is not None and elevations is not None and spec is not None:
         terrain = _p._sample_elevation(
@@ -249,9 +241,6 @@ def _apply_stock_emitted_seam_covers(report, elevations, spec):
     )
 
 
-# Keep the composed fitter's historical hook identity. Several regression tests
-# and diagnostic breadcrumbs refer to this slot by name; only its implementation
-# changed from generated helper P3Ds to stock road pieces.
 _apply_stock_emitted_seam_covers.__name__ = "_apply_emitted_seam_covers"
 
 
@@ -310,10 +299,10 @@ def install_stock_road_stock_paved_only_policy() -> None:
         return
     if not _emitted._INSTALLED:
         raise RuntimeError("stock road emitted-seam policy must install first")
-    if not _turning_t._INSTALLED:
-        raise RuntimeError("turning-T fallback policy must install first")
+    if not _skew._TURNING_FALLBACK_INSTALLED:
+        raise RuntimeError("turning-T fallback stage must install first")
 
-    _ORIGINAL_TURNING_T_CAP = _turning_t._legacy_cap_for_turning_t
+    _ORIGINAL_TURNING_T_CAP = _skew._legacy_cap_for_turning_t
     _emitted._apply_emitted_seam_covers = _apply_stock_emitted_seam_covers
-    _turning_t._legacy_cap_for_turning_t = _legacy_stock_cap_for_turning_t
+    _skew._legacy_cap_for_turning_t = _legacy_stock_cap_for_turning_t
     _INSTALLED = True
