@@ -47,10 +47,9 @@ def test_planar_wrapper_defers_slope_shortened_curve_chord():
     geometry = stock_curve_connectors(model)
     assert geometry is not None
 
-    # A pitched rigid curve has a shorter horizontal projection than its full
-    # Memory-LOD connector distance. This is the handoff case between the older
-    # planar origin correction and the outer 3D connector solver. The planar
-    # wrapper must not reject the shortened chord before the 3D solver can run.
+    # The inner transform wrapper still accepts the old terrain-shortened chord
+    # so stock dirt/gravel-compatible 3D callers are not broken. The later
+    # reference-WRP policy chooses full planar paved chords in production.
     start = (0.0, 0.0)
     horizontal = geometry.chord_length_metres - 0.060356
     end = (0.0, horizontal)
@@ -70,21 +69,19 @@ def test_planar_wrapper_defers_slope_shortened_curve_chord():
     assert math.isclose(math.dist(start, end), horizontal, abs_tol=1.0e-9)
 
 
-def test_installed_curve_transform_keeps_sloped_connectors_closed_in_plan():
+def test_installed_paved_curve_keeps_full_planar_connectors_on_sloped_terrain():
     model = r"O\Road\sil10 50.p3d"
     geometry = stock_curve_connectors(model)
     assert geometry is not None
 
-    # Construct a terrain plane with a 4% grade along +Z. The horizontal chord
-    # is shortened so the rigid P3D's full 3D connector distance remains equal
-    # to its measured Memory-LOD chord.
+    # The reference WRP keeps stock paved road matrices yaw-only even where Y
+    # changes from piece to piece. Production now fits the full Memory-LOD chord
+    # in X/Z and leaves the P3D horizontal instead of shortening it by cos(pitch).
     cells = 128
     cell_size = 1.0
     elevations = tuple(z * 0.04 for z in range(cells) for _x in range(cells))
     start = (20.0, 20.0)
-    grade = 0.04
-    horizontal = geometry.chord_length_metres / math.sqrt(1.0 + grade * grade)
-    end = (20.0, 20.0 + horizontal)
+    end = (20.0, 20.0 + geometry.chord_length_metres)
     spec = SimpleNamespace(cells=cells, cell_size=cell_size)
 
     obj = _p._road_object_on_slope(
@@ -98,6 +95,6 @@ def test_installed_curve_transform_keeps_sloped_connectors_closed_in_plan():
     )
     begin, finish = _p._model_axis(obj, geometry.chord_length_metres)
 
-    assert math.dist(begin, start) < 2.0e-3
-    assert math.dist(finish, end) < 2.0e-3
-    assert abs(obj.pitch_degrees) > 0.0
+    assert math.dist(begin, start) < 1.0e-6
+    assert math.dist(finish, end) < 1.0e-6
+    assert math.isclose(obj.pitch_degrees, 0.0, abs_tol=1.0e-12)
