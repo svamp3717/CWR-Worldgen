@@ -31,7 +31,6 @@ _INSTALLED = False
 _TRACE_ENV = "CWR_WORLDGEN_ROAD_PIPELINE_TRACE"
 _PACKAGE = __package__ or "cwr_worldgen"
 _MAXIMUM_PAVED_SEAM_TANGENT_ERROR_DEGREES = 8.0
-_MAXIMUM_EXACT_S_BEND_RUN_METRES = 1200.0
 _DEFERRED_LATE_IMPORTS = ("stock_road_stock_assets_only_policy",)
 
 InstallerSpec = str | tuple[str, ...]
@@ -166,11 +165,7 @@ def _install_late_stages() -> None:
     modules = _preload_late_modules()
     for stage, module_name, installer_spec in _LATE_STAGE_SPECS:
         _invoke(stage, modules[module_name], installer_spec)
-        if stage == "s_bend_exact":
-            modules["stock_road_s_bend_policy"].MAXIMUM_EXACT_S_BEND_RUN_METRES = (
-                _MAXIMUM_EXACT_S_BEND_RUN_METRES
-            )
-        elif stage == "final_continuity":
+        if stage == "final_continuity":
             modules[
                 "stock_road_visual_finish_policy"
             ].MAXIMUM_CURVE_SEAM_TANGENT_ERROR_DEGREES = (
