@@ -135,12 +135,7 @@ def test_aligned_straight_through_cap_is_not_needlessly_rebuilt(monkeypatch):
     assert result is report
 
 
-def test_final_continuity_owns_intermediate_visual_seam_policy():
-    # The old intermediate seam planner is retired. Keep the hook only so the
-    # explicit production composition remains stable while emitted-seam owns
-    # actual final WRP connector gaps.
-    assert (
-        _finish._apply_curve_seam_covers
-        is _continuity._disable_curve_seam_underlays
-    )
-    assert _finish.MAXIMUM_CURVE_SEAM_TANGENT_ERROR_DEGREES == 8.0
+def test_retired_intermediate_visual_seam_hook_is_a_noop():
+    report = SimpleNamespace(objects=(), junction_cap_objects=0)
+
+    assert _finish._apply_curve_seam_covers(report, (), SimpleNamespace()) is report
