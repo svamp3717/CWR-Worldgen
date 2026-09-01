@@ -79,35 +79,15 @@ def _micro_beam_stock_path(
 def _dominant_micro_bend(points):
     """Return one coherent gentle bend sign and accumulated source turn."""
 
-    sign = 0
-    count = 0
-    total = 0.0
-    for previous, point, following in zip(points, points[1:], points[2:]):
-        turn = float(_sharp._signed_turn(previous, point, following))
-        magnitude = abs(turn)
-        if magnitude < MINIMUM_MICRO_VERTEX_TURN_DEGREES:
-            continue
-        if magnitude > MAXIMUM_MICRO_VERTEX_TURN_DEGREES:
-            return None
-        current_sign = 1 if turn > 0.0 else -1
-        if sign and current_sign != sign:
-            if magnitude <= MAXIMUM_MICRO_REVERSE_NOISE_DEGREES:
-                continue
-            return None
-        if not sign:
-            sign = current_sign
-        total += turn
-        count += 1
-
-    magnitude = abs(total)
-    if (
-        sign == 0
-        or count < 2
-        or magnitude < MINIMUM_MICRO_BEND_TOTAL_TURN_DEGREES
-        or magnitude > MAXIMUM_MICRO_BEND_TOTAL_TURN_DEGREES
-    ):
-        return None
-    return sign, magnitude
+    return _sharp._coherent_bend(
+        points,
+        minimum_vertex_turn_degrees=MINIMUM_MICRO_VERTEX_TURN_DEGREES,
+        maximum_vertex_turn_degrees=MAXIMUM_MICRO_VERTEX_TURN_DEGREES,
+        maximum_reverse_noise_degrees=MAXIMUM_MICRO_REVERSE_NOISE_DEGREES,
+        minimum_total_turn_degrees=MINIMUM_MICRO_BEND_TOTAL_TURN_DEGREES,
+        maximum_total_turn_degrees=MAXIMUM_MICRO_BEND_TOTAL_TURN_DEGREES,
+        minimum_significant_vertices=2,
+    )
 
 
 def _micro_exact_chain(
