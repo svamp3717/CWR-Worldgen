@@ -11,8 +11,7 @@ that through pair itself turns at the node, keep the fitted approaches as the
 visible surface and sink the rigid straight cap into a low central-fill role.
 
 The seam endpoint records below are shared geometry consumed by the later
-emitted-seam and paved-wedge owners. The old intermediate curve-underlay planner
-is retired; its hook remains a no-op only to preserve composition compatibility.
+emitted-seam and paved-wedge owners.
 """
 from __future__ import annotations
 
@@ -28,9 +27,6 @@ from . import stock_road_model_geometry as _model_geometry
 LEGACY_CAP_AXIS_TOLERANCE_DEGREES = 0.50
 MINIMUM_TURNING_LEGACY_CAP_TURN_DEGREES = 1.0
 TURNING_LEGACY_CAP_VERTICAL_BIAS_METRES = -0.006
-# Compatibility value still set by final continuity. Intermediate curve seam
-# underlays themselves are retired; emitted-seam owns actual final WRP gaps.
-MAXIMUM_CURVE_SEAM_TANGENT_ERROR_DEGREES = 3.25
 
 _ORIGINAL_FIT = None
 _INSTALLED = False
@@ -321,12 +317,6 @@ def _seam_endpoints(report) -> tuple[_SeamEndpoint, ...]:
     return tuple(endpoints)
 
 
-def _apply_curve_seam_covers(report, elevations, spec):
-    """Compatibility no-op for the retired intermediate curve-underlay stage."""
-
-    return report
-
-
 def _fit(
     dataset,
     projection,
@@ -348,8 +338,7 @@ def _fit(
     )
     if not bool(getattr(spec, "stock_road_piece_fitting", False)):
         return report
-    report = _realign_legacy_caps(report, dataset, projection, elevations, spec)
-    return _apply_curve_seam_covers(report, elevations, spec)
+    return _realign_legacy_caps(report, dataset, projection, elevations, spec)
 
 
 def install_stock_road_visual_finish_policy() -> None:
