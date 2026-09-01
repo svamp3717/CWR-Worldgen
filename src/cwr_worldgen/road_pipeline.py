@@ -40,7 +40,7 @@ _BASE_STAGE_SPECS: tuple[StageSpec, ...] = (
     ("stock_curve_base", "stock_road_curve_policy", "install_stock_road_curve_policy"),
     ("stock_geometry", "stock_road_geometry_policy", "install_stock_road_geometry_policy"),
     ("stock_3d_connector", "stock_road_3d_connector_policy", "install_stock_road_3d_connector_policy"),
-    ("gravel_junction", "gravel_junction_policy", "install_gravel_junction_policy"),
+    ("gravel_junction", "gravel_family_policy", "install_gravel_junction_policy"),
     ("gravel_gap", "gravel_gap_policy", "install_gravel_gap_policy"),
     ("gravel_family", "gravel_family_policy", "install_gravel_family_policy"),
     (
