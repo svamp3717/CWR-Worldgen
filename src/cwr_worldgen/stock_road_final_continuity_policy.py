@@ -35,6 +35,7 @@ from . import stock_road_visual_finish_policy as _finish
 
 MAXIMUM_FINAL_CURVE_TURN_ERROR_DEGREES = 1.75
 MAXIMUM_NATIVE_RADIUS_ERROR_RATIO = 0.12
+MAXIMUM_PAVED_SEAM_TANGENT_ERROR_DEGREES = 8.0
 SKEW_T_CONNECTOR_EDGE_MARGIN_METRES = 0.05
 MAXIMUM_SKEW_T_MAIN_AXIS_ERROR_DEGREES = 7.5
 
@@ -527,4 +528,7 @@ def install_stock_road_final_continuity_policy() -> None:
 
     _finish._apply_curve_seam_covers = _disable_curve_seam_underlays
     _finish._realign_legacy_caps = _replace_physically_covered_skew_t_caps
+    _finish.MAXIMUM_CURVE_SEAM_TANGENT_ERROR_DEGREES = (
+        MAXIMUM_PAVED_SEAM_TANGENT_ERROR_DEGREES
+    )
     _INSTALLED = True
