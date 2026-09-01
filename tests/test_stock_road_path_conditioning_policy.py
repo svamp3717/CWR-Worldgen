@@ -1,8 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+import math
+
+from cwr_worldgen import stock_road_geometry_policy as _geometry
+from cwr_worldgen import stock_road_path_conditioning_policy as _path
+from cwr_worldgen import stock_road_relaxation_policy as _relax
 from cwr_worldgen.playability import _unique_incidents
 from cwr_worldgen.stock_road_path_conditioning_policy import (
+    _candidate_is_sustained_curve,
     _condition_paths_with_count,
     _merge_compatible_paths,
     _protected_node_keys,
@@ -13,6 +19,21 @@ from cwr_worldgen.stock_road_relaxation_policy import _Obstacle, _ObstacleIndex
 
 def _empty_obstacles() -> _ObstacleIndex:
     return _ObstacleIndex((), {})
+
+
+def _stock_like_arc(radius: float = 100.0):
+    # Five samples over ten degrees. The complete arc is only about 0.38 m away
+    # from its endpoint chord, so a plain sub-metre simplifier would erase it.
+    result = []
+    for degrees in (0.0, 2.5, 5.0, 7.5, 10.0):
+        angle = math.radians(degrees)
+        result.append(
+            (
+                radius * (1.0 - math.cos(angle)),
+                radius * math.sin(angle),
+            )
+        )
+    return tuple(result)
 
 
 def test_unambiguous_same_type_fragments_merge_into_one_run():
@@ -58,9 +79,6 @@ def test_main_road_can_merge_through_different_surface_branch():
 
 
 def test_merged_through_road_keeps_both_incident_directions_at_t_node():
-    # After two source ways are merged, both main-road segments inherit the
-    # owner's OSM key. Junction discovery must still count them separately: the
-    # incident deduper is geometric, so opposite directions cannot collapse.
     values = (
         ((1.0, 0.0), False, r"o\road\sil25.p3d", "owner/000000", "owner"),
         ((-1.0, 0.0), False, r"o\road\sil25.p3d", "owner/000001", "owner"),
@@ -123,3 +141,41 @@ def test_obstacle_corridor_vetoes_source_shortcut():
     simplified = _simplify_path(points, set(), obstacles)
 
     assert simplified == points
+
+
+def test_stock_radius_ten_degree_arc_is_recognised_as_sustained_curvature():
+    points = _stock_like_arc()
+
+    assert _candidate_is_sustained_curve(points, 0, len(points) - 1)
+
+
+def test_pre_fit_conditioner_does_not_flatten_stock_like_arc():
+    points = _stock_like_arc()
+
+    simplified = _path._simplify_path(points, set(), _empty_obstacles())
+
+    assert simplified == points
+
+
+def test_post_rounding_relaxation_does_not_flatten_stock_like_arc():
+    points = _stock_like_arc()
+
+    simplified = _relax._simplify_open_run(points, _empty_obstacles())
+
+    assert simplified == points
+
+
+def test_micro_bend_cleanup_keeps_consecutive_same_direction_curve_samples():
+    points = _stock_like_arc()
+
+    assert _geometry._simplify_micro_bends(points) == points
+
+
+def test_nearly_straight_dogleg_is_still_allowed_to_simplify():
+    points = ((0.0, 0.0), (0.30, 12.0), (0.0, 25.0))
+
+    assert not _candidate_is_sustained_curve(points, 0, len(points) - 1)
+    assert _path._simplify_path(points, set(), _empty_obstacles()) == (
+        points[0],
+        points[-1],
+    )
