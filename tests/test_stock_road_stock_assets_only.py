@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from cwr_worldgen import asset_mapping as _asset_mapping
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_junction_policy as _junction
-from cwr_worldgen import stock_road_relaxation_transaction_policy as _transaction
+from cwr_worldgen import stock_road_local_fit_policy as _local
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 from cwr_worldgen import stock_road_stock_assets_only_policy as _stock_only
 from cwr_worldgen.procedural_infrastructure import is_generated_gravel_road_model
@@ -34,11 +34,11 @@ def _direction(heading: float) -> tuple[float, float]:
 
 @contextmanager
 def _planning_junction():
-    token = _transaction._PLANNING_RELAXED_JUNCTION.set(True)
+    token = _local._PLANNING_RELAXED_JUNCTION.set(True)
     try:
         yield
     finally:
-        _transaction._PLANNING_RELAXED_JUNCTION.reset(token)
+        _local._PLANNING_RELAXED_JUNCTION.reset(token)
 
 
 def test_gravel_still_uses_generated_family_when_enabled() -> None:
@@ -77,13 +77,8 @@ def test_eleven_degree_mixed_t_can_be_planned_but_not_forced_unmodified() -> Non
         _junction._Incident(_direction(270.0), "ces", r"o\road\ces25.p3d"),
     )
 
-    # Raw source geometry is visibly too skewed for the final strict connector
-    # matcher, so a native T is not simply stamped over the original roads.
     assert _stock_only._stock_native_t_dispatch(incidents) is None
 
-    # The obstacle-checked transaction may provisionally consider the real stock
-    # T and insert connector-aligned local approach points. The transaction later
-    # re-runs the strict matcher on that edited geometry before committing it.
     with _planning_junction():
         native = _stock_only._stock_native_t_dispatch(incidents)
     assert native is not None
@@ -97,10 +92,6 @@ def test_family_first_planner_does_not_reject_t_from_raw_heading_error() -> None
         _junction._Incident(_direction(270.0), "ces", r"o\road\ces25.p3d"),
     )
 
-    # This is intentionally far outside the old 1.25/15-degree source-heading
-    # gates. Planning still chooses the family-compatible stock T; the connector
-    # relaxation transaction, not this raw angle, decides whether it can actually
-    # be reached within its lateral and obstacle bounds.
     with _planning_junction():
         native = _stock_only._stock_native_t_dispatch(incidents)
     assert native is not None
