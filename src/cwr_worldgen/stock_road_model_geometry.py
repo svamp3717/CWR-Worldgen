@@ -8,6 +8,7 @@ not scale a P3D, so fitting must use these physical dimensions exactly.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import math
 import re
 
@@ -49,14 +50,17 @@ class StockCurveConnectors:
     local_chord_heading_degrees: float
 
 
+@lru_cache(maxsize=128)
 def stock_straight_match(model_path: str) -> re.Match[str] | None:
     return _STRAIGHT.fullmatch(str(model_path).replace("/", "\\"))
 
 
+@lru_cache(maxsize=128)
 def stock_curve_match(model_path: str) -> re.Match[str] | None:
     return _CURVE.fullmatch(str(model_path).replace("/", "\\"))
 
 
+@lru_cache(maxsize=128)
 def stock_straight_length(model_path: str) -> float | None:
     match = stock_straight_match(model_path)
     if match is None:
@@ -64,6 +68,7 @@ def stock_straight_length(model_path: str) -> float | None:
     return STOCK_STRAIGHT_LENGTHS_METRES[int(match.group("length"))]
 
 
+@lru_cache(maxsize=128)
 def stock_curve_connectors(model_path: str) -> StockCurveConnectors | None:
     """Return the actual Memory-LOD centerline connectors for a stock curve.
 
@@ -164,6 +169,7 @@ def solve_planar_connector_transform(
     return origin, heading
 
 
+@lru_cache(maxsize=64)
 def native_junction_intersection_offset(model_path: str) -> tuple[float, float] | None:
     """Return model-local position of the logical road-intersection center."""
 
