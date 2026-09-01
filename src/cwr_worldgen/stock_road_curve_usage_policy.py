@@ -1,17 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Fit paved bends with connector-locked stock curves before faceted straights.
+"""Fit stock bends with connector-locked curves before faceted straights.
 
-The old policy first asked the ordinary greedy stock fitter to build a paved
-road, then tried to promote a bad short-straight result into curves. That made
-``sil6`` facets the architecture and native curves the repair. Reference WRPs do
+The old policy first asked the ordinary greedy stock fitter to build a road,
+then tried to promote a bad short-straight result into curves. That made short
+straight facets the architecture and native curves the repair. Reference WRPs do
 the opposite: they choose stock-compatible curvature first and only fall back to
 facets when no safe stock curve chain can represent the source.
 
-For ``sil/asf/kos`` this wrapper therefore attempts the exact stock-curve beam
-*before* calling the inherited straight-oriented fitter. The candidate may
-smooth hard OSM vertices inside the bounded stock-road corridor, but every
-sample is also checked against the source-backed obstacle index when that context
-is active. Dirt and generated gravel are untouched.
+For the verified Resistance ``sil/asf/kos/ces`` families this wrapper therefore
+attempts the exact stock-curve beam *before* calling the inherited
+straight-oriented fitter. The candidate may smooth hard OSM vertices inside the
+bounded stock-road corridor, but every sample is also checked against the
+source-backed obstacle index when that context is active. Generated gravel and
+custom road families remain untouched.
 """
 from __future__ import annotations
 
@@ -38,7 +39,7 @@ _INSTALLED = False
 
 
 def _dominant_bend(points) -> tuple[int, float] | None:
-    """Return one coherent bend sign and accumulated turn for a paved run."""
+    """Return one coherent bend sign and accumulated turn for a stock run."""
 
     sign = 0
     count = 0
@@ -142,7 +143,7 @@ def _curve_promotion_chain(
         minimum_end_distance=minimum_end_distance,
         maximum_end_distance=maximum_end_distance,
     )
-    if _sharp._paved_family(pieces) is None:
+    if _sharp._curveable_family(pieces) is None:
         return _fallback_chain(measure, pieces, **fallback_args)
     if measure.total > _MAXIMUM_PROMOTION_RUN_METRES:
         return _fallback_chain(measure, pieces, **fallback_args)
@@ -217,7 +218,7 @@ def _curve_promotion_chain(
 
 
 def install_stock_road_curve_usage_policy() -> None:
-    """Install exact curve-first paved fitting after the narrow bend policies."""
+    """Install exact curve-first stock fitting after the narrow bend policies."""
 
     global _ORIGINAL_CHAIN, _INSTALLED
     if _INSTALLED:
