@@ -29,7 +29,6 @@ from . import playability as _p
 from . import stock_road_curve_policy as _curve
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_s_bend_policy as _s_bend
-from . import stock_road_sharp_exact_policy as _exact
 from . import stock_road_sharp_turn_policy as _sharp
 
 MAXIMUM_EXACT_S_BEND_RUN_METRES = 360.0
@@ -268,7 +267,7 @@ def _exact_s_bend_chain(
         return baseline
     if float(measure.total) > MAXIMUM_EXACT_S_BEND_RUN_METRES:
         return baseline
-    if _exact._baseline_short_straights(baseline) < MINIMUM_EXACT_S_BEND_SHORT_STRAIGHTS:
+    if _sharp._baseline_short_straights(baseline) < MINIMUM_EXACT_S_BEND_SHORT_STRAIGHTS:
         return baseline
     if not _has_direction_reversal(measure.points):
         return baseline
@@ -286,7 +285,7 @@ def _exact_s_bend_chain(
     if end <= start + 1.0:
         return baseline
 
-    source_points, entry_heading, source_exit_heading = _exact._measure_slice(
+    source_points, entry_heading, source_exit_heading = _sharp._measure_slice(
         measure, start, end
     )
     stock_exit_heading = _quantised_exit_heading(entry_heading, source_exit_heading)
