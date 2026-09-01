@@ -22,6 +22,7 @@ from . import stock_road_inspector_candidate_policy as _candidate
 from . import stock_road_junction_policy as _junction
 from . import stock_road_local_fit_policy as _local
 from . import stock_road_model_geometry as _geometry
+from . import stock_road_reference_wrp_policy as _reference
 from . import stock_road_sharp_turn_policy as _sharp
 from .procedural_infrastructure import (
     paved_miter_angle_degrees,
@@ -488,6 +489,12 @@ def _fit(
         starting_id=starting_id,
         progress_callback=progress_callback,
     )
+    report = _reference._drop_native_node_stubs(
+        report,
+        dataset,
+        projection,
+        spec,
+    )
     forbidden = tuple(
         obj for obj in report.objects if _generated_road_model(str(obj.model_path))
     )
@@ -510,6 +517,8 @@ def install_stock_road_stock_assets_only_policy() -> None:
         raise RuntimeError("stock paved helper policy must install first")
     if not _candidate._FINAL_INSTALLED or not _curve_usage._INSTALLED:
         raise RuntimeError("candidate enforcement and curve usage must install first")
+    if not _reference._KODIAK_INSTALLED:
+        raise RuntimeError("Kodiak reference road stage must install first")
 
     _ORIGINAL_NATIVE_T = _junction._native_t_junction
     _ORIGINAL_CHAIN = _curve_usage._ORIGINAL_CHAIN
