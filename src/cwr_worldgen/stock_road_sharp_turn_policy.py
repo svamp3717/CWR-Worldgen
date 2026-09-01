@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Replace faceted paved bends with connector-locked stock curve chains.
+"""Own connector-locked stock fitting for difficult paved bends.
 
 A difficult real-world bend can be too irregular for the single-radius curve
 regularizer while still being perfectly representable by a short sequence of
@@ -7,12 +7,13 @@ stock straights and ten-degree curves. Falling all the way back to rotated
 ``sil6``/``sil12`` rectangles makes every heading change a visible mitre: the
 road surface clips and the painted borders no longer meet.
 
-This policy handles both sustained same-direction bends and isolated paved
+This owner handles both sustained same-direction bends and isolated paved
 corners surrounded by quiet source geometry. A small beam search propagates the
 actual connector pose from piece to piece, so every accepted internal seam has
-one common position and tangent. Candidates must stay inside the existing
-bounded source corridor. Dirt, gravel, junction selection and terrain are
-untouched.
+one common position and tangent. A second, separately installed exact phase
+retains those beam actions directly for short junction-covered runs instead of
+feeding them back through the greedy fitter. Dirt, gravel, junction selection
+and terrain are untouched.
 """
 from __future__ import annotations
 
@@ -39,13 +40,24 @@ _BEAM_WIDTH = 256
 _MAXIMUM_SPAN_METRES = 180.0
 _CURVE_SAMPLE_COUNT = 4
 
+_MAXIMUM_EXACT_RUN_METRES = 110.0
+_MINIMUM_ENDPOINT_TRIM_METRES = 0.40
+_MINIMUM_BASELINE_SHORT_STRAIGHTS = 6
+_MINIMUM_TOTAL_TURN_DEGREES = 20.0
+_MAXIMUM_TOTAL_TURN_DEGREES = 50.0
+_MINIMUM_EXACT_CURVES = 3
+_END_PROGRESS_TOLERANCE_METRES = 0.20
+_ACTION_LENGTH_TOLERANCE_METRES = 1.0e-4
+
 _STOCK_PAVED_STRAIGHT = re.compile(
     r"^(?P<prefix>.*[\\/])(?P<family>sil|asf|kos)(?P<length>25|12|6)\.p3d$",
     re.IGNORECASE,
 )
 
 _ORIGINAL_CHAIN = None
+_ORIGINAL_EXACT_CHAIN = None
 _INSTALLED = False
+_EXACT_INSTALLED = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,14 +512,7 @@ def _has_coherent_native_curve_run(
     *,
     minimum_count: int = 2,
 ) -> bool:
-    """True only for adjacent same-radius native curves inside one bend span.
-
-    Isolated curve pieces separated by short straights are exactly the visual
-    failure this policy exists to repair. Counting all native curves in a span
-    therefore gives the wrong answer. A bend is already satisfactory only when
-    the baseline contains a connector-neighbouring run of the same stock curve
-    radius, with no straight facet between those curve pieces.
-    """
+    """True only for adjacent same-radius native curves inside one bend span."""
 
     run_key = None
     run_count = 0
@@ -638,6 +643,176 @@ def _sharp_turn_chain(
     return fitted if locked_curves > baseline_curves else baseline
 
 
+def _measure_slice(measure, start_distance: float, end_distance: float):
+    start_x, start_z, start_heading = measure.point(start_distance)
+    end_x, end_z, end_heading = measure.point(end_distance)
+    points = [(start_x, start_z)]
+    for distance, point in zip(measure.cumulative, measure.points):
+        if start_distance + 1.0e-7 < distance < end_distance - 1.0e-7:
+            points.append(point)
+    if math.dist(points[-1], (end_x, end_z)) > 0.05:
+        points.append((end_x, end_z))
+    return tuple(points), start_heading, end_heading
+
+
+def _recover_exact_actions(path, pieces, turn_sign: int):
+    """Recover one stock action from each beam sampling group."""
+
+    family = _paved_family(pieces)
+    samples_per_action = _CURVE_SAMPLE_COUNT
+    if (
+        family is None
+        or len(path) < 2
+        or (len(path) - 1) % samples_per_action != 0
+    ):
+        return None
+    actions = _actions(pieces, *family, turn_sign)
+    if not actions:
+        return None
+
+    recovered = []
+    action_count = (len(path) - 1) // samples_per_action
+    for index in range(action_count):
+        start = path[index * samples_per_action]
+        end = path[(index + 1) * samples_per_action]
+        chord = math.dist(start, end)
+        action = min(
+            actions,
+            key=lambda candidate: abs(float(candidate.piece.length_metres) - chord),
+        )
+        if abs(float(action.piece.length_metres) - chord) > _ACTION_LENGTH_TOLERANCE_METRES:
+            return None
+        recovered.append((action.piece, start, end))
+    return tuple(recovered)
+
+
+def _baseline_short_straights(fitted) -> int:
+    return sum(
+        1
+        for piece, _start, _end in fitted
+        if piece.nominal_length in {6, 12}
+        and _model_geometry.stock_curve_match(str(piece.model_path)) is None
+    )
+
+
+def _curve_count(fitted) -> int:
+    return sum(
+        _model_geometry.stock_curve_match(str(piece.model_path)) is not None
+        for piece, _start, _end in fitted
+    )
+
+
+def _quantised_stock_exit_heading(
+    entry_heading: float,
+    source_exit_heading: float,
+    turn_sign: int,
+) -> float:
+    """Return the nearest heading reachable by whole 10-degree stock curves."""
+
+    total_turn = _p._heading_difference(entry_heading, source_exit_heading)
+    curve_steps = max(1, int(round(total_turn / 10.0)))
+    return (float(entry_heading) + float(turn_sign) * curve_steps * 10.0) % 360.0
+
+
+def _exact_sharp_turn_chain(
+    measure,
+    pieces,
+    *,
+    start_distance,
+    preferred_end_distance,
+    minimum_end_distance,
+    maximum_end_distance,
+):
+    if _ORIGINAL_EXACT_CHAIN is None:
+        raise RuntimeError("stock road exact sharp-turn policy is not installed")
+
+    baseline = _ORIGINAL_EXACT_CHAIN(
+        measure,
+        pieces,
+        start_distance=start_distance,
+        preferred_end_distance=preferred_end_distance,
+        minimum_end_distance=minimum_end_distance,
+        maximum_end_distance=maximum_end_distance,
+    )
+    if _paved_family(pieces) is None:
+        return baseline
+    if measure.total > _MAXIMUM_EXACT_RUN_METRES:
+        return baseline
+
+    start_trim = float(start_distance)
+    end_trim = float(measure.total) - float(preferred_end_distance)
+    if (
+        start_trim < _MINIMUM_ENDPOINT_TRIM_METRES
+        or end_trim < _MINIMUM_ENDPOINT_TRIM_METRES
+    ):
+        return baseline
+    if _baseline_short_straights(baseline) < _MINIMUM_BASELINE_SHORT_STRAIGHTS:
+        return baseline
+
+    for start_index, end_index, turn_sign in _sharp_turn_spans(measure.points):
+        if start_index != 0 or end_index + 1 != len(measure.points) - 1:
+            continue
+
+        start = max(float(start_distance), float(measure.cumulative[start_index]))
+        end = min(
+            float(preferred_end_distance),
+            float(measure.cumulative[end_index + 1]),
+        )
+        if end <= start + 1.0:
+            continue
+
+        source_points, entry_heading, source_exit_heading = _measure_slice(
+            measure, start, end
+        )
+        total_turn = _p._heading_difference(entry_heading, source_exit_heading)
+        if not (_MINIMUM_TOTAL_TURN_DEGREES <= total_turn <= _MAXIMUM_TOTAL_TURN_DEGREES):
+            continue
+
+        stock_exit_heading = _quantised_stock_exit_heading(
+            entry_heading,
+            source_exit_heading,
+            turn_sign,
+        )
+        locked_path = _beam_stock_path(
+            source_points,
+            turn_sign,
+            entry_heading,
+            stock_exit_heading,
+            pieces,
+        )
+        if locked_path is None:
+            continue
+        exact = _recover_exact_actions(locked_path, pieces, turn_sign)
+        if exact is None or _curve_count(exact) < _MINIMUM_EXACT_CURVES:
+            continue
+        if _curve_count(exact) <= _curve_count(baseline):
+            continue
+        if len(exact) > len(baseline):
+            continue
+
+        end_projection = _nearest_forward(
+            measure,
+            locked_path[-1],
+            start,
+            float(maximum_end_distance),
+        )
+        if end_projection is None:
+            continue
+        if end_projection[0] > _MAXIMUM_LOCKED_CORRIDOR_METRES + 1.0e-9:
+            continue
+        if (
+            end_projection[1]
+            < float(minimum_end_distance) - _END_PROGRESS_TOLERANCE_METRES
+        ):
+            continue
+        start_point = measure.point(start)[:2]
+        if math.dist(locked_path[0], start_point) > 1.0e-6:
+            continue
+        return exact
+
+    return baseline
+
+
 def install_stock_road_sharp_turn_policy() -> None:
     global _ORIGINAL_CHAIN, _INSTALLED
     if _INSTALLED:
@@ -645,3 +820,14 @@ def install_stock_road_sharp_turn_policy() -> None:
     _ORIGINAL_CHAIN = _p._stock_piece_chain
     _p._stock_piece_chain = _sharp_turn_chain
     _INSTALLED = True
+
+
+def install_stock_road_sharp_exact_policy() -> None:
+    global _ORIGINAL_EXACT_CHAIN, _EXACT_INSTALLED
+    if _EXACT_INSTALLED:
+        return
+    if not _INSTALLED:
+        raise RuntimeError("stock road sharp-turn policy must install first")
+    _ORIGINAL_EXACT_CHAIN = _p._stock_piece_chain
+    _p._stock_piece_chain = _exact_sharp_turn_chain
+    _EXACT_INSTALLED = True
