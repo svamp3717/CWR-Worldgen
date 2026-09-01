@@ -9,6 +9,7 @@ from cwr_worldgen import asset_mapping as _asset_mapping
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_junction_policy as _junction
 from cwr_worldgen import stock_road_local_fit_policy as _local
+from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 from cwr_worldgen import stock_road_stock_assets_only_policy as _stock_only
 from cwr_worldgen.procedural_infrastructure import is_generated_gravel_road_model
@@ -32,6 +33,38 @@ def _direction(heading: float) -> tuple[float, float]:
     return math.sin(angle), math.cos(angle)
 
 
+def _object(object_id, model, x, z, heading, *, y=0.0, pitch=0.0):
+    return SimpleNamespace(
+        object_id=int(object_id),
+        model_path=model,
+        x=float(x),
+        y=float(y),
+        z=float(z),
+        heading_degrees=float(heading),
+        pitch_degrees=float(pitch),
+    )
+
+
+def _straight_from_start(object_id, family, start, heading):
+    length = float(_geometry.STOCK_STRAIGHT_LENGTHS_METRES[6])
+    half = length * 0.5
+    direction = (
+        math.sin(math.radians(float(heading))),
+        math.cos(math.radians(float(heading))),
+    )
+    centre = (
+        float(start[0]) + direction[0] * half,
+        float(start[1]) + direction[1] * half,
+    )
+    return _object(
+        object_id,
+        rf"o\road\{family}6.p3d",
+        centre[0],
+        centre[1],
+        heading,
+    )
+
+
 @contextmanager
 def _planning_junction():
     token = _local._PLANNING_RELAXED_JUNCTION.set(True)
@@ -39,6 +72,46 @@ def _planning_junction():
         yield
     finally:
         _local._PLANNING_RELAXED_JUNCTION.reset(token)
+
+
+def test_stock_paved_helper_stage_and_final_guard_share_one_owner() -> None:
+    assert _stock_only._PAVED_HELPERS_INSTALLED
+    assert _stock_only._INSTALLED
+
+
+def test_final_paved_turn_fallback_serializes_stock_assets_only():
+    first = _object(1, r"o\road\sil6.p3d", 0.0, -3.125, 0.0)
+    second = _straight_from_start(2, "sil", (0.0, 0.0), 12.0)
+    report = _p.RoadFitReport(
+        objects=(first, second),
+        chain_count=1,
+        connection_count=1,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+    )
+    spec = SimpleNamespace(
+        name="wg_stock_only",
+        cells=2,
+        cell_size=25.0,
+        max_road_objects=100,
+        advisory_object_limits=False,
+    )
+
+    fixed = _stock_only._apply_stock_emitted_seam_covers(
+        report,
+        [0.0] * 4,
+        spec,
+    )
+
+    assert len(fixed.objects) > len(report.objects)
+    added = fixed.objects[len(report.objects):]
+    assert all(obj.model_path.casefold().startswith("o\\road\\") for obj in added)
+    assert all("paved_fill" not in obj.model_path.casefold() for obj in added)
+    assert all("paved_miter" not in obj.model_path.casefold() for obj in added)
+    assert all("paved_wedge" not in obj.model_path.casefold() for obj in added)
+    assert all(obj.model_path.casefold() == r"o\road\sil6.p3d" for obj in added)
 
 
 def test_gravel_still_uses_generated_family_when_enabled() -> None:
