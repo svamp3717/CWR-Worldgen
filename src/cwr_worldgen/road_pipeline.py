@@ -71,8 +71,14 @@ _BASE_STAGE_SPECS: tuple[StageSpec, ...] = (
 
 _LATE_STAGE_SPECS: tuple[StageSpec, ...] = (
     ("curve_regularization", "stock_road_curve_regularization_policy", "install_stock_road_curve_regularization_policy"),
-    ("sharp_turn", "stock_road_sharp_turn_policy", "install_stock_road_sharp_turn_policy"),
-    ("sharp_exact", "stock_road_sharp_turn_policy", "install_stock_road_sharp_exact_policy"),
+    (
+        "sharp_turn",
+        "stock_road_sharp_turn_policy",
+        (
+            "install_stock_road_sharp_turn_policy",
+            "install_stock_road_sharp_exact_policy",
+        ),
+    ),
     ("s_bend", "stock_road_s_bend_policy", "install_stock_road_s_bend_policy"),
     ("micro_bend", "stock_road_micro_bend_policy", "install_stock_road_micro_bend_policy"),
     ("s_bend_exact", "stock_road_s_bend_exact_policy", "install_stock_road_s_bend_exact_policy"),
