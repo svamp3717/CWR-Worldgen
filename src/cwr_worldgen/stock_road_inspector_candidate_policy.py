@@ -22,7 +22,7 @@ from . import stock_road_emitted_seam_policy as _emitted
 from . import stock_road_junction_policy as _junction
 from . import stock_road_local_fit_policy as _local
 from . import stock_road_model_geometry as _geometry
-from . import stock_road_native_junction_ownership_policy as _ownership
+from . import stock_road_paved_junction_completion_policy as _ownership
 from . import stock_road_paved_junction_completion_policy as _paved
 from . import stock_road_sharp_turn_policy as _sharp
 from . import stock_road_surface_overlap_policy as _surface
@@ -823,7 +823,7 @@ def install_stock_road_inspector_candidate_final_policy() -> None:
         return
     if not _SELECTOR_INSTALLED:
         raise RuntimeError("Inspector candidate selector policy must install first")
-    if not _ownership._INSTALLED:
+    if not _ownership._NATIVE_OWNERSHIP_INSTALLED:
         raise RuntimeError("native junction ownership policy must install first")
 
     _ORIGINAL_FINAL_FIT = _p.fit_road_objects
