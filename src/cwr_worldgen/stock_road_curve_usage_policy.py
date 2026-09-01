@@ -15,6 +15,7 @@ gravel and custom road families remain outside this owner.
 """
 from __future__ import annotations
 
+from functools import lru_cache
 import math
 
 from . import playability as _p
@@ -45,6 +46,7 @@ _END_PROGRESS_TOLERANCE_METRES = 0.20
 _MINIMUM_SIGNIFICANT_VERTEX_TURN_DEGREES = 0.45
 _MAXIMUM_LOCAL_VERTEX_TURN_DEGREES = 35.0
 _MAXIMUM_REVERSE_NOISE_DEGREES = 1.50
+_BEAM_CACHE_SIZE = 512
 
 _ORIGINAL_BEAM = None
 _ORIGINAL_MICRO_CHAIN = None
@@ -53,14 +55,15 @@ _ORIGINAL_CHAIN = None
 _INSTALLED = False
 
 
-def _micro_beam_stock_path(
-    source_points,
+@lru_cache(maxsize=_BEAM_CACHE_SIZE)
+def _cached_micro_beam_stock_path(
+    source_points: tuple[tuple[float, float], ...],
     turn_sign: int,
     entry_heading: float,
     exit_heading: float,
-    pieces,
+    pieces: tuple,
 ):
-    """Try the strict shared beam first, then allow one native curve section."""
+    """Memoize the pure stock beam shared by several late curve policies."""
 
     if _ORIGINAL_BEAM is None:
         raise RuntimeError("stock road micro-bend policy is not installed")
@@ -84,6 +87,24 @@ def _micro_beam_stock_path(
         maximum_boundary_tangent_error_degrees=(
             MAXIMUM_MICRO_BEND_BOUNDARY_TANGENT_ERROR_DEGREES
         ),
+    )
+
+
+def _micro_beam_stock_path(
+    source_points,
+    turn_sign: int,
+    entry_heading: float,
+    exit_heading: float,
+    pieces,
+):
+    """Try the strict shared beam first, then allow one native curve section."""
+
+    return _cached_micro_beam_stock_path(
+        tuple(source_points),
+        int(turn_sign),
+        float(entry_heading),
+        float(exit_heading),
+        tuple(pieces),
     )
 
 
@@ -210,6 +231,7 @@ def install_stock_road_micro_bend_policy() -> None:
         return
 
     _ORIGINAL_BEAM = _sharp._beam_stock_path
+    _cached_micro_beam_stock_path.cache_clear()
     _sharp._beam_stock_path = _micro_beam_stock_path
 
     _ORIGINAL_MICRO_CHAIN = _p._stock_piece_chain
