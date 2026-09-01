@@ -44,7 +44,7 @@ def test_reference_stages_are_active_in_production_stack() -> None:
 
     assert _p.fit_road_objects is _generator.fit_road_objects
     assert _generator.fit_road_objects is _stock_only._fit
-    assert _stock_only._ORIGINAL_FIT is _reference._fit
+    assert _stock_only._ORIGINAL_FIT is _candidate._fit
 
 
 def test_paved_stock_chains_use_full_planar_connector_lengths() -> None:
