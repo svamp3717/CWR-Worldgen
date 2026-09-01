@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Own connector-locked stock curve usage after the sharp-turn search.
+"""Own connector-locked stock curve usage and shared search acceleration.
 
 Two installation moments share one curve-selection responsibility:
 
@@ -8,10 +8,11 @@ Two installation moments share one curve-selection responsibility:
 * the later curve-usage phase tries a connector-locked stock curve chain before
   the inherited straight-oriented fitter for broader coherent bends.
 
-Both phases use the same verified ``sil/asf/kos/ces`` stock assets, the same
-0.60 m source corridor, and the same sharp-turn geometry helpers. They remain
-separate installers because the exact S-bend phase runs between them. Generated
-gravel and custom road families remain outside this owner.
+The early phase also installs output-equivalent accelerators used by the whole
+stock-curve stack: cached polyline segment geometry, bounded source scans,
+precomputed stock-action samples, and memoized stock/S-bend beams. Search
+thresholds, beam width and scoring remain owned by their original algorithms.
+Generated gravel and custom road families remain outside this owner.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ import math
 from . import playability as _p
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_relaxation_policy as _relax
+from . import stock_road_s_bend_policy as _s_bend
 from . import stock_road_sharp_turn_policy as _sharp
 
 MINIMUM_MICRO_BEND_TOTAL_TURN_DEGREES = 7.5
@@ -47,13 +49,15 @@ _END_PROGRESS_TOLERANCE_METRES = 0.20
 _MINIMUM_SIGNIFICANT_VERTEX_TURN_DEGREES = 0.45
 _MAXIMUM_LOCAL_VERTEX_TURN_DEGREES = 35.0
 _MAXIMUM_REVERSE_NOISE_DEGREES = 1.50
-_BEAM_CACHE_SIZE = 512
+_STOCK_BEAM_CACHE_SIZE = 512
+_S_BEND_BEAM_CACHE_SIZE = 256
 _SEGMENT_TABLE_CACHE_SIZE = 1024
 _ACTION_GEOMETRY_CACHE_SIZE = 64
 _STRICT_MINIMUM_CURVES = 2
 _STOCK_CURVE_TURN_DEGREES = 10.0
 
 _ORIGINAL_BEAM = None
+_ORIGINAL_S_BEND_BEAM = _s_bend._beam_s_bend_path
 _ORIGINAL_ADVANCE = _sharp._advance
 _ORIGINAL_NEAREST_FORWARD = _sharp._nearest_forward
 _ORIGINAL_POINT = _p._PolylineMeasure.point
@@ -93,17 +97,7 @@ def _segment_table(measure) -> tuple[tuple[float, ...], ...]:
         denominator = dx * dx + dz * dz
         heading = math.degrees(math.atan2(dx, dz)) % 360.0
         result.append(
-            (
-                segment_start,
-                segment_end,
-                ax,
-                az,
-                dx,
-                dz,
-                length,
-                denominator,
-                heading,
-            )
+            (segment_start, segment_end, ax, az, dx, dz, length, denominator, heading)
         )
     return tuple(result)
 
@@ -320,8 +314,8 @@ def _strict_beam_can_reach_boundary(entry_heading: float, exit_heading: float) -
     )
 
 
-@lru_cache(maxsize=_BEAM_CACHE_SIZE)
-def _cached_micro_beam_stock_path(
+@lru_cache(maxsize=_STOCK_BEAM_CACHE_SIZE)
+def _cached_stock_beam_path(
     source_points: tuple[tuple[float, float], ...],
     turn_sign: int,
     entry_heading: float,
@@ -331,7 +325,7 @@ def _cached_micro_beam_stock_path(
     """Memoize the stock beam and skip a strict pass that cannot satisfy its boundary."""
 
     if _ORIGINAL_BEAM is None:
-        raise RuntimeError("stock road micro-bend policy is not installed")
+        raise RuntimeError("stock road curve search is not installed")
 
     if _strict_beam_can_reach_boundary(entry_heading, exit_heading):
         result = _ORIGINAL_BEAM(source_points, turn_sign, entry_heading, exit_heading, pieces)
@@ -349,16 +343,68 @@ def _cached_micro_beam_stock_path(
     )
 
 
-def _micro_beam_stock_path(source_points, turn_sign: int, entry_heading: float, exit_heading: float, pieces):
+def _shared_stock_beam_path(source_points, turn_sign: int, entry_heading: float, exit_heading: float, pieces):
     """Use the strict stock beam when feasible, otherwise allow one curve section."""
 
-    return _cached_micro_beam_stock_path(
+    return _cached_stock_beam_path(
         tuple((float(point[0]), float(point[1])) for point in source_points),
         int(turn_sign),
         float(entry_heading),
         float(exit_heading),
         _canonical_pieces(pieces),
     )
+
+
+@lru_cache(maxsize=_S_BEND_BEAM_CACHE_SIZE)
+def _cached_s_bend_beam_path(
+    source_points: tuple[tuple[float, float], ...],
+    entry_heading: float,
+    exit_heading: float,
+    pieces: tuple[_p._RoadPiece, ...],
+    maximum_span_metres: float,
+):
+    """Memoize the pure bidirectional S-bend beam across planning passes."""
+
+    return _ORIGINAL_S_BEND_BEAM(
+        source_points,
+        entry_heading,
+        exit_heading,
+        pieces,
+        maximum_span_metres=maximum_span_metres,
+    )
+
+
+def _shared_s_bend_beam_path(
+    source_points,
+    entry_heading: float,
+    exit_heading: float,
+    pieces,
+    *,
+    maximum_span_metres: float = _s_bend._MAXIMUM_S_BEND_SPAN_METRES,
+):
+    return _cached_s_bend_beam_path(
+        tuple((float(point[0]), float(point[1])) for point in source_points),
+        float(entry_heading),
+        float(exit_heading),
+        _canonical_pieces(pieces),
+        float(maximum_span_metres),
+    )
+
+
+def _install_curve_search_accelerators() -> None:
+    """Install output-equivalent hot-path helpers used by all stock curve policies."""
+
+    _cached_stock_beam_path.cache_clear()
+    _cached_s_bend_beam_path.cache_clear()
+    _segment_table.cache_clear()
+    _local_action_samples.cache_clear()
+    _p._PolylineMeasure.point = _fast_measure_point
+    _sharp._advance = _fast_advance
+    _sharp._nearest_forward = _fast_nearest_forward
+    _p._PolylineMeasure.chord_endpoint = _fast_chord_endpoint
+    _p._PolylineMeasure.maximum_chord_deviation = _fast_maximum_chord_deviation
+    _sharp._beam_stock_path = _shared_stock_beam_path
+    _s_bend._beam_s_bend_path = _shared_s_bend_beam_path
 
 
 def _dominant_micro_bend(points):
@@ -424,7 +470,7 @@ def _micro_exact_chain(
 
     source_points, entry_heading, source_exit_heading = _sharp._measure_slice(measure, start, end)
     stock_exit_heading = _sharp._quantised_stock_exit_heading(entry_heading, source_exit_heading, turn_sign)
-    locked_path = _micro_beam_stock_path(
+    locked_path = _shared_stock_beam_path(
         source_points,
         turn_sign,
         entry_heading,
@@ -463,23 +509,14 @@ def _micro_exact_chain(
 
 
 def install_stock_road_micro_bend_policy() -> None:
-    """Install one-curve recovery and shared stock-curve search accelerators."""
+    """Install shared acceleration and one-curve recovery before exact S-bends."""
 
     global _ORIGINAL_BEAM, _ORIGINAL_MICRO_CHAIN, _MICRO_INSTALLED
     if _MICRO_INSTALLED:
         return
 
     _ORIGINAL_BEAM = _sharp._beam_stock_path
-    _cached_micro_beam_stock_path.cache_clear()
-    _segment_table.cache_clear()
-    _local_action_samples.cache_clear()
-    _p._PolylineMeasure.point = _fast_measure_point
-    _sharp._advance = _fast_advance
-    _sharp._nearest_forward = _fast_nearest_forward
-    _p._PolylineMeasure.chord_endpoint = _fast_chord_endpoint
-    _p._PolylineMeasure.maximum_chord_deviation = _fast_maximum_chord_deviation
-    _sharp._beam_stock_path = _micro_beam_stock_path
-
+    _install_curve_search_accelerators()
     _ORIGINAL_MICRO_CHAIN = _p._stock_piece_chain
     _p._stock_piece_chain = _micro_exact_chain
     _MICRO_INSTALLED = True
@@ -608,7 +645,6 @@ def _curve_promotion_chain(
     exact = _sharp._recover_exact_actions(locked_path, pieces, turn_sign)
     if exact is None or _sharp._curve_count(exact) < _MINIMUM_PROMOTED_CURVES:
         return _fallback_chain(measure, pieces, **fallback_args)
-
     if _maximum_internal_tangent_error(exact, turn_sign) > 1.0e-4:
         return _fallback_chain(measure, pieces, **fallback_args)
 
