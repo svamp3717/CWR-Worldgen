@@ -49,10 +49,12 @@ _MAXIMUM_LOCAL_VERTEX_TURN_DEGREES = 35.0
 _MAXIMUM_REVERSE_NOISE_DEGREES = 1.50
 _BEAM_CACHE_SIZE = 512
 _SEGMENT_TABLE_CACHE_SIZE = 1024
+_ACTION_GEOMETRY_CACHE_SIZE = 64
 _STRICT_MINIMUM_CURVES = 2
 _STOCK_CURVE_TURN_DEGREES = 10.0
 
 _ORIGINAL_BEAM = None
+_ORIGINAL_ADVANCE = _sharp._advance
 _ORIGINAL_NEAREST_FORWARD = _sharp._nearest_forward
 _ORIGINAL_POINT = _p._PolylineMeasure.point
 _ORIGINAL_CHORD_ENDPOINT = _p._PolylineMeasure.chord_endpoint
@@ -106,17 +108,74 @@ def _segment_table(measure) -> tuple[tuple[float, ...], ...]:
     return tuple(result)
 
 
+@lru_cache(maxsize=_ACTION_GEOMETRY_CACHE_SIZE)
+def _local_action_samples(
+    length_metres: float,
+    turn_sign: int,
+    radius_metres: float | None,
+) -> tuple[tuple[float, float], ...]:
+    """Return one stock action's sample points in an entry-heading-zero frame."""
+
+    sign = int(turn_sign)
+    if sign == 0:
+        return tuple(
+            (0.0, float(length_metres) * sample / _sharp._CURVE_SAMPLE_COUNT)
+            for sample in range(1, _sharp._CURVE_SAMPLE_COUNT + 1)
+        )
+
+    radius = float(radius_metres)
+    centre_x = radius * sign
+    vector_x = -centre_x
+    turn = _STOCK_CURVE_TURN_DEGREES * sign
+    samples = []
+    for sample in range(1, _sharp._CURVE_SAMPLE_COUNT + 1):
+        angle = -math.radians(turn * (sample / _sharp._CURVE_SAMPLE_COUNT))
+        samples.append(
+            (
+                centre_x + math.cos(angle) * vector_x,
+                math.sin(angle) * vector_x,
+            )
+        )
+    return tuple(samples)
+
+
+def _fast_advance(state, action):
+    """Advance one beam state using precomputed local action geometry."""
+
+    local_samples = _local_action_samples(
+        float(action.piece.length_metres),
+        int(action.turn_sign),
+        None if action.radius_metres is None else float(action.radius_metres),
+    )
+    angle = math.radians(float(state.heading_degrees))
+    cosine = math.cos(angle)
+    sine = math.sin(angle)
+    samples = tuple(
+        (
+            float(state.x) + cosine * local_x + sine * local_z,
+            float(state.z) - sine * local_x + cosine * local_z,
+        )
+        for local_x, local_z in local_samples
+    )
+    end_heading = (
+        float(state.heading_degrees)
+        if int(action.turn_sign) == 0
+        else (
+            float(state.heading_degrees)
+            + _STOCK_CURVE_TURN_DEGREES * int(action.turn_sign)
+        )
+        % 360.0
+    )
+    return samples[-1], end_heading, samples
+
+
 def _fast_measure_point(measure, distance: float) -> tuple[float, float, float]:
     """Interpolate on cached segment geometry without recomputing its heading."""
 
     segments = _segment_table(measure)
     if distance < 0.0:
         _start, _end, ax, az, dx, dz, length, _denominator, heading = segments[0]
-        return (
-            ax + dx / length * distance,
-            az + dz / length * distance,
-            heading,
-        )
+        return ax + dx / length * distance, az + dz / length * distance, heading
     if distance > measure.total:
         _start, _end, ax, az, dx, dz, length, _denominator, heading = segments[-1]
         excess = distance - float(measure.total)
@@ -141,10 +200,7 @@ def _fast_nearest_forward(measure, point, minimum_distance: float, maximum_dista
     minimum = max(0.0, min(float(measure.total), float(minimum_distance)))
     maximum = max(minimum, min(float(measure.total), float(maximum_distance)))
     first = max(0, bisect.bisect_right(measure.cumulative, minimum) - 2)
-    last = min(
-        len(measure.points) - 2,
-        bisect.bisect_right(measure.cumulative, maximum),
-    )
+    last = min(len(measure.points) - 2, bisect.bisect_right(measure.cumulative, maximum))
     px, pz = float(point[0]), float(point[1])
     best_distance_squared = math.inf
     best_along = math.inf
@@ -189,12 +245,7 @@ def _fast_nearest_forward(measure, point, minimum_distance: float, maximum_dista
     return math.sqrt(best_distance_squared), best_along
 
 
-def _fast_chord_endpoint(
-    measure,
-    start_distance: float,
-    chord_length: float,
-    maximum_distance: float,
-):
+def _fast_chord_endpoint(measure, start_distance: float, chord_length: float, maximum_distance: float):
     """Find the original chord endpoint without scanning unrelated breakpoints."""
 
     if chord_length <= 0.0 or maximum_distance <= start_distance + 1.0e-9:
@@ -283,13 +334,7 @@ def _cached_micro_beam_stock_path(
         raise RuntimeError("stock road micro-bend policy is not installed")
 
     if _strict_beam_can_reach_boundary(entry_heading, exit_heading):
-        result = _ORIGINAL_BEAM(
-            source_points,
-            turn_sign,
-            entry_heading,
-            exit_heading,
-            pieces,
-        )
+        result = _ORIGINAL_BEAM(source_points, turn_sign, entry_heading, exit_heading, pieces)
         if result is not None:
             return result
 
@@ -300,19 +345,11 @@ def _cached_micro_beam_stock_path(
         exit_heading,
         pieces,
         minimum_curve_count=1,
-        maximum_boundary_tangent_error_degrees=(
-            MAXIMUM_MICRO_BEND_BOUNDARY_TANGENT_ERROR_DEGREES
-        ),
+        maximum_boundary_tangent_error_degrees=MAXIMUM_MICRO_BEND_BOUNDARY_TANGENT_ERROR_DEGREES,
     )
 
 
-def _micro_beam_stock_path(
-    source_points,
-    turn_sign: int,
-    entry_heading: float,
-    exit_heading: float,
-    pieces,
-):
+def _micro_beam_stock_path(source_points, turn_sign: int, entry_heading: float, exit_heading: float, pieces):
     """Use the strict stock beam when feasible, otherwise allow one curve section."""
 
     return _cached_micro_beam_stock_path(
@@ -385,14 +422,8 @@ def _micro_exact_chain(
     if end <= start + 1.0:
         return baseline
 
-    source_points, entry_heading, source_exit_heading = _sharp._measure_slice(
-        measure, start, end
-    )
-    stock_exit_heading = _sharp._quantised_stock_exit_heading(
-        entry_heading,
-        source_exit_heading,
-        turn_sign,
-    )
+    source_points, entry_heading, source_exit_heading = _sharp._measure_slice(measure, start, end)
+    stock_exit_heading = _sharp._quantised_stock_exit_heading(entry_heading, source_exit_heading, turn_sign)
     locked_path = _micro_beam_stock_path(
         source_points,
         turn_sign,
@@ -413,20 +444,12 @@ def _micro_exact_chain(
     if len(exact) > len(baseline) + MAXIMUM_MICRO_EXACT_EXTRA_PIECES:
         return baseline
 
-    end_projection = _sharp._nearest_forward(
-        measure,
-        locked_path[-1],
-        start,
-        float(maximum_end_distance),
-    )
+    end_projection = _sharp._nearest_forward(measure, locked_path[-1], start, float(maximum_end_distance))
     if end_projection is None:
         return baseline
     if end_projection[0] > _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES + 1.0e-9:
         return baseline
-    if (
-        end_projection[1]
-        < float(minimum_end_distance) - MICRO_EXACT_END_PROGRESS_TOLERANCE_METRES
-    ):
+    if end_projection[1] < float(minimum_end_distance) - MICRO_EXACT_END_PROGRESS_TOLERANCE_METRES:
         return baseline
 
     start_point = measure.point(start)[:2]
@@ -440,7 +463,7 @@ def _micro_exact_chain(
 
 
 def install_stock_road_micro_bend_policy() -> None:
-    """Install one-curve recovery before the exact S-bend phase."""
+    """Install one-curve recovery and shared stock-curve search accelerators."""
 
     global _ORIGINAL_BEAM, _ORIGINAL_MICRO_CHAIN, _MICRO_INSTALLED
     if _MICRO_INSTALLED:
@@ -449,7 +472,9 @@ def install_stock_road_micro_bend_policy() -> None:
     _ORIGINAL_BEAM = _sharp._beam_stock_path
     _cached_micro_beam_stock_path.cache_clear()
     _segment_table.cache_clear()
+    _local_action_samples.cache_clear()
     _p._PolylineMeasure.point = _fast_measure_point
+    _sharp._advance = _fast_advance
     _sharp._nearest_forward = _fast_nearest_forward
     _p._PolylineMeasure.chord_endpoint = _fast_chord_endpoint
     _p._PolylineMeasure.maximum_chord_deviation = _fast_maximum_chord_deviation
@@ -559,14 +584,8 @@ def _curve_promotion_chain(
     if end <= start + 1.0:
         return _fallback_chain(measure, pieces, **fallback_args)
 
-    source_points, entry_heading, source_exit_heading = _sharp._measure_slice(
-        measure, start, end
-    )
-    stock_exit_heading = _sharp._quantised_stock_exit_heading(
-        entry_heading,
-        source_exit_heading,
-        turn_sign,
-    )
+    source_points, entry_heading, source_exit_heading = _sharp._measure_slice(measure, start, end)
+    stock_exit_heading = _sharp._quantised_stock_exit_heading(entry_heading, source_exit_heading, turn_sign)
 
     end_cover = float(measure.total) - float(preferred_end_distance)
     if (
@@ -593,12 +612,7 @@ def _curve_promotion_chain(
     if _maximum_internal_tangent_error(exact, turn_sign) > 1.0e-4:
         return _fallback_chain(measure, pieces, **fallback_args)
 
-    end_projection = _sharp._nearest_forward(
-        measure,
-        locked_path[-1],
-        start,
-        float(maximum_end_distance),
-    )
+    end_projection = _sharp._nearest_forward(measure, locked_path[-1], start, float(maximum_end_distance))
     if end_projection is None:
         return _fallback_chain(measure, pieces, **fallback_args)
     if end_projection[0] > _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES + 1.0e-9:
