@@ -5,7 +5,6 @@ import math
 
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_model_geometry as _geometry
-from cwr_worldgen import stock_road_s_bend_exact_policy as _s_exact
 from cwr_worldgen import stock_road_s_bend_policy as _s_bend
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 
@@ -103,25 +102,25 @@ def test_lundby20_production_s_bend_retains_exact_stock_actions_and_handedness()
     source_points, entry_heading, source_exit_heading = _sharp._measure_slice(
         measure, start, preferred
     )
-    stock_exit_heading = _s_exact._quantised_exit_heading(
+    stock_exit_heading = _s_bend._quantised_exit_heading(
         entry_heading, source_exit_heading
     )
-    locked_path = _s_exact._long_exact_s_bend_path(
+    locked_path = _s_bend._long_exact_s_bend_path(
         source_points, entry_heading, stock_exit_heading, pieces
     )
     assert locked_path is not None
-    exact_steps = _s_exact._recover_exact_steps(locked_path, pieces)
+    exact_steps = _s_bend._recover_exact_steps(locked_path, pieces)
     assert exact_steps is not None
     exact_actions = tuple((piece, a, b) for piece, a, b, _sign in exact_steps)
-    assert _curve_count(exact_actions) >= _s_exact.MINIMUM_EXACT_S_BEND_CURVES
-    assert _s_exact._maximum_step_tangent_error(exact_steps) <= 1.0e-3
+    assert _curve_count(exact_actions) >= _s_bend.MINIMUM_EXACT_S_BEND_CURVES
+    assert _s_bend._maximum_step_tangent_error(exact_steps) <= 1.0e-3
     assert any(sign < 0 for _piece, _a, _b, sign in exact_steps)
     assert any(sign > 0 for _piece, _a, _b, sign in exact_steps)
 
-    baseline = _fit_with_production_junction_cover(_s_exact._ORIGINAL_CHAIN, measure, pieces)
+    baseline = _fit_with_production_junction_cover(_s_bend._ORIGINAL_CHAIN, measure, pieces)
     fitted = _fit_with_production_junction_cover(_p._stock_piece_chain, measure, pieces)
 
-    assert _s_exact._INSTALLED
+    assert _s_bend._EXACT_INSTALLED
     assert fitted != baseline
     assert _curve_count(fitted) >= _curve_count(baseline)
     for previous, current in zip(fitted, fitted[1:]):
@@ -131,7 +130,7 @@ def test_lundby20_production_s_bend_retains_exact_stock_actions_and_handedness()
     registered = [
         (piece, a, b, sign)
         for piece, a, b, sign in exact_steps
-        if sign and _s_exact._curve_key(piece.model_path, a, b) in _s_exact._EXACT_CURVE_REVERSE
+        if sign and _s_bend._curve_key(piece.model_path, a, b) in _s_bend._EXACT_CURVE_REVERSE
     ]
     assert registered
     piece, a, b, sign = next(
@@ -139,8 +138,8 @@ def test_lundby20_production_s_bend_retains_exact_stock_actions_and_handedness()
     )
     placed = _p._curved_gravel_model_for_run(piece.model_path, measure.points, a, b)
     assert placed == piece.model_path
-    assert _s_exact._curve._CURVE_REVERSE.get() is True
-    _s_exact._curve._CURVE_REVERSE.set(False)
+    assert _s_bend._curve._CURVE_REVERSE.get() is True
+    _s_bend._curve._CURVE_REVERSE.set(False)
 
 
 def test_s_bend_policy_does_not_apply_to_ces_roads():
