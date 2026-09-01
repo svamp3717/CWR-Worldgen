@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from cwr_worldgen.asset_mapping import default_osm_asset_mapping
 from cwr_worldgen.normalization import _MAJOR_HIGHWAYS as NORMALIZED_MAJOR_HIGHWAYS
 from cwr_worldgen.osm import road_is_dirt, road_is_supported, road_model_for_tags
+from cwr_worldgen import road_pipeline as _pipeline
 from cwr_worldgen.road_pipeline import ROAD_PIPELINE_STAGES
 from cwr_worldgen import stock_road_s_bend_policy as _s_bend
 
@@ -11,6 +12,16 @@ from cwr_worldgen import stock_road_s_bend_policy as _s_bend
 def test_road_pipeline_has_one_unique_declared_order():
     assert len(ROAD_PIPELINE_STAGES) == len(set(ROAD_PIPELINE_STAGES))
     assert ROAD_PIPELINE_STAGES[-1] == "raceway_classification"
+
+
+def test_gravel_runtime_phases_share_one_owner():
+    owners = {
+        stage: module
+        for stage, module, _installer in _pipeline._BASE_STAGE_SPECS
+    }
+    assert owners["gravel_junction"] == "gravel_family_policy"
+    assert owners["gravel_gap"] == "gravel_family_policy"
+    assert owners["gravel_family"] == "gravel_family_policy"
 
 
 def test_cancelled_or_folded_layers_are_not_in_production_pipeline():
