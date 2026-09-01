@@ -9,8 +9,9 @@ though projecting those pitched P3Ds to the logical node put the cap below them.
 
 Keep this correction inspector-only. Re-evaluate ``turning_intersection_cap``
 findings at their source node using the same yaw/pitch transform as RVW4. A cap
-that is safely below every nearby approach and whose approach headings already
-match is not a visible problem and is removed from the report.
+that is safely below every nearby approach is no longer a turning-cap defect. If
+its approaches still miss the source tangents, report that separately as an
+``intersection_approach_mismatch`` instead of letting one category hide the other.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from . import road_inspector as _core
 
 _MINIMUM_HIDDEN_CAP_MARGIN_METRES = 0.002
 _MAXIMUM_MATCHED_APPROACH_ERROR_DEGREES = 2.0
+_MINIMUM_APPROACH_MISMATCH_DEGREES = 3.0
 _APPROACH_ENDPOINT_RADIUS_METRES = 0.90
 _CAP_CENTER_RADIUS_METRES = 0.90
 
@@ -52,6 +54,27 @@ def _near_node_endpoint(road, node: tuple[float, float]) -> bool:
     return any(
         math.dist(endpoint.point, node) <= _APPROACH_ENDPOINT_RADIUS_METRES
         for endpoint in road.endpoints
+    )
+
+
+def _approach_mismatch(issue, *, maximum_approach_error: float, metrics):
+    score = min(100.0, 35.0 + maximum_approach_error * 5.0)
+    return replace(
+        issue,
+        severity=_core._severity(score),
+        score=score,
+        category="intersection_approach_mismatch",
+        message=(
+            "The legacy intersection cap is safely below the visible approaches, "
+            "but one or more emitted approaches miss the normalized intersection "
+            f"tangent by up to {maximum_approach_error:.2f}°."
+        ),
+        candidate_fix=(
+            "Refit the final stock piece on each incident road to the logical node, "
+            "using a native curve before the intersection when the source road is "
+            "already turning. Keep the existing low cap only as central fill."
+        ),
+        metrics=metrics,
     )
 
 
@@ -97,11 +120,20 @@ def _correct_turning_cap_issue(issue, roads_by_id):
     )
     through_turn = float(metrics.get("through_turn_degrees", 0.0))
 
-    if (
+    cap_is_hidden = (
         through_turn >= 1.0
         and visible_margin >= _MINIMUM_HIDDEN_CAP_MARGIN_METRES
-        and maximum_approach_error < _MAXIMUM_MATCHED_APPROACH_ERROR_DEGREES
-    ):
+    )
+    if cap_is_hidden:
+        if maximum_approach_error >= _MINIMUM_APPROACH_MISMATCH_DEGREES:
+            return _approach_mismatch(
+                issue,
+                maximum_approach_error=maximum_approach_error,
+                metrics=metrics,
+            )
+        # The cap is physically hidden and the residual approach error is below
+        # the Inspector's ordinary three-degree mismatch threshold. There is no
+        # remaining source-intersection defect to report here.
         return None
 
     edge_estimate = float(metrics.get("estimated_edge_offset_metres", 0.0))
