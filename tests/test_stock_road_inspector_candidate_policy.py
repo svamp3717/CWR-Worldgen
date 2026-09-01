@@ -296,6 +296,118 @@ def test_candidate_turn_pass_still_refuses_full_surface_overlay(monkeypatch) -> 
     assert fixed.short_piece_objects == 0
 
 
+def test_near_straight_stock_ces_t_uses_relaxed_candidate_contract() -> None:
+    incidents = (
+        _incident(0.0, "sil"),
+        _incident(177.8, "sil"),
+        _incident(270.0, "ces"),
+    )
+
+    assert _candidate._through_turn_degrees(incidents) > (
+        _candidate.MAXIMUM_NATIVE_THROUGH_TURN_DEGREES
+    )
+    assert _candidate._through_turn_degrees(incidents) <= (
+        _candidate.MAXIMUM_STOCK_CES_NATIVE_THROUGH_TURN_DEGREES
+    )
+    assert _candidate._measured_native_t_junction(incidents) is None
+
+    native = _candidate._candidate_native_t_dispatch(incidents)
+
+    assert native is not None
+    assert native.model_path.casefold().endswith(r"kr_new_sil_ces_t.p3d")
+    assert native.maximum_heading_error_degrees > (
+        _candidate.INSPECTOR_NATIVE_CONNECTOR_TOLERANCE_DEGREES
+    )
+    assert native.maximum_heading_error_degrees < (
+        _candidate._native_connector_tolerance_degrees(incidents)
+    )
+    assert math.isclose(
+        _candidate._native_connector_tolerance_degrees(incidents),
+        15.0,
+        abs_tol=1.0e-9,
+    )
+
+
+def test_all_paved_t_keeps_strict_through_turn_and_connector_limits() -> None:
+    incidents = (
+        _incident(0.0, "sil"),
+        _incident(177.8, "sil"),
+        _incident(270.0, "sil"),
+    )
+
+    assert _candidate._through_turn_degrees(incidents) > (
+        _candidate.MAXIMUM_NATIVE_THROUGH_TURN_DEGREES
+    )
+    assert _candidate._candidate_native_t_dispatch(incidents) is None
+    assert math.isclose(
+        _candidate._native_connector_tolerance_degrees(incidents),
+        _candidate.INSPECTOR_NATIVE_CONNECTOR_TOLERANCE_DEGREES,
+        abs_tol=1.0e-9,
+    )
+
+
+def test_final_owner_promotes_near_straight_stock_ces_cap(monkeypatch) -> None:
+    node = (30.0, 30.0)
+    incidents = (
+        _incident(0.0, "sil"),
+        _incident(177.8, "sil"),
+        _incident(270.0, "ces"),
+    )
+    cap = _p.WorldObject(
+        1,
+        r"o\road\sil6.p3d",
+        node[0],
+        _p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
+        node[1],
+        0.0,
+    )
+    report = _p.RoadFitReport(
+        objects=(cap,),
+        chain_count=0,
+        connection_count=0,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+        junction_cap_objects=1,
+    )
+
+    monkeypatch.setattr(
+        _candidate,
+        "_ORIGINAL_OWNER_REALIGN",
+        lambda report, dataset, projection, elevations, spec: report,
+    )
+    monkeypatch.setattr(
+        _finish,
+        "_junction_incident_map",
+        lambda dataset, projection, spec: {
+            _p._road_node_key(node): (node, incidents)
+        },
+    )
+    monkeypatch.setattr(
+        _ownership,
+        "_trim_native_center_intruders",
+        lambda report, elevations, spec: report,
+    )
+    monkeypatch.setattr(
+        _candidate,
+        "_add_low_fallback_tongues",
+        lambda report, dataset, projection, elevations, spec: report,
+    )
+
+    fixed = _candidate._native_owner_realign(
+        report,
+        object(),
+        object(),
+        _flat_elevations(),
+        _flat_spec(name="near_straight_mixed_t"),
+    )
+
+    assert fixed.objects[0].model_path.casefold().endswith(
+        r"kr_new_sil_ces_t.p3d"
+    )
+
+
 def test_planning_selector_can_propose_near_straight_skew_t() -> None:
     incidents = (
         _incident(0.0, "sil"),
