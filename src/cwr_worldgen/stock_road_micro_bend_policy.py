@@ -2,21 +2,21 @@
 """Use native stock curves for gentle paved bends that still facet into straights.
 
 The first sharp-turn beam deliberately required at least two native ten-degree
-curves.  That leaves a common real-world case untreated: a gentle 8-15 degree
-bend spread across several ``sil6``/``sil12`` pieces.  Each individual miter is
+curves. That leaves a common real-world case untreated: a gentle 8-15 degree
+bend spread across several ``sil6``/``sil12`` pieces. Each individual miter is
 small, but the outside road edge still opens enough for terrain to show through.
 
-Keep the existing sharp-turn search as first refusal.  If it cannot finish, run
+Keep the existing sharp-turn search as first refusal. If it cannot finish, run
 the same connector-locked search with a one-curve minimum and a slightly wider
-boundary-tangent allowance.  The source corridor remains the same 0.60 m and
+boundary-tangent allowance. The source corridor remains the same 0.60 m and
 all internal stock connectors remain exact.
 
 A second detail matters in production: returning only the beam's sampled
 centreline lets the ordinary greedy fitter turn that native curve straight back
-into short rectangular facets.  For short junction-to-junction paved runs with
+into short rectangular facets. For short junction-to-junction paved runs with
 a coherent 7.5-15 degree bend, retain the beam's recovered stock-piece actions
-directly.  Boundary quantisation remains under the existing endpoint covers;
-interior seams stay connector- and tangent-locked.  No overlap/underlay road
+directly. Boundary quantisation remains under the existing endpoint covers;
+interior seams stay connector- and tangent-locked. No overlap/underlay road
 objects are introduced by this policy.
 """
 from __future__ import annotations
@@ -25,12 +25,10 @@ import math
 
 from . import playability as _p
 from . import stock_road_sharp_turn_policy as _sharp
-from . import stock_road_visual_finish_policy as _finish
 
 MINIMUM_MICRO_BEND_TOTAL_TURN_DEGREES = 7.5
 MAXIMUM_MICRO_BEND_TOTAL_TURN_DEGREES = 15.0
 MAXIMUM_MICRO_BEND_BOUNDARY_TANGENT_ERROR_DEGREES = 4.5
-MICRO_BEND_SEAM_COVER_VERTICAL_BIAS_METRES = -0.003
 
 MAXIMUM_MICRO_EXACT_RUN_METRES = 120.0
 MINIMUM_MICRO_EXACT_ENDPOINT_COVER_METRES = 0.40
@@ -387,7 +385,7 @@ def install_stock_road_micro_bend_policy() -> None:
         return
 
     # A stock curve turns ten degrees, so a source bend just below that angle is
-    # an important case rather than noise.  The 0.60 m corridor remains the
+    # an important case rather than noise. The 0.60 m corridor remains the
     # geometric safety gate before any replacement can be accepted.
     _sharp._MINIMUM_SUSTAINED_TOTAL_TURN_DEGREES = (
         MINIMUM_MICRO_BEND_TOTAL_TURN_DEGREES
@@ -396,15 +394,8 @@ def install_stock_road_micro_bend_policy() -> None:
     _sharp._beam_stock_path = _micro_beam_stock_path
 
     # Preserve exact one-curve actions after the earlier sharp/exact/S-bend
-    # wrappers have had first refusal.  Later curve-usage policies can still
+    # wrappers have had first refusal. Later curve-usage policies can still
     # promote larger bends around this result.
     _ORIGINAL_CHAIN = _p._stock_piece_chain
     _p._stock_piece_chain = _micro_exact_chain
-
-    # Kept for compatibility with the historical visual-finish layer.  The
-    # final fit-first policy disables production overlap helpers, so this bias no
-    # longer causes extra paved road objects to be emitted.
-    _finish.CURVE_SEAM_COVER_VERTICAL_BIAS_METRES = (
-        MICRO_BEND_SEAM_COVER_VERTICAL_BIAS_METRES
-    )
     _INSTALLED = True
