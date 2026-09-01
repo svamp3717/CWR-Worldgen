@@ -377,7 +377,16 @@ def _advance(state: _State, action: _Action):
     return samples[-1], (state.heading_degrees + turn) % 360.0, tuple(samples)
 
 
-def _beam_stock_path(source_points, turn_sign: int, entry_heading: float, exit_heading: float, pieces):
+def _beam_stock_path(
+    source_points,
+    turn_sign: int,
+    entry_heading: float,
+    exit_heading: float,
+    pieces,
+    *,
+    minimum_curve_count: int = 2,
+    maximum_boundary_tangent_error_degrees: float = _MAXIMUM_LOCKED_BOUNDARY_TANGENT_ERROR_DEGREES,
+):
     """Fit one exact-pose stock sequence through a difficult bend."""
 
     measure = _p._PolylineMeasure.create(source_points)
@@ -465,8 +474,8 @@ def _beam_stock_path(source_points, turn_sign: int, entry_heading: float, exit_h
                 if (
                     remaining <= _MAXIMUM_LOCKED_END_ERROR_METRES
                     and end_error <= _MAXIMUM_LOCKED_END_ERROR_METRES
-                    and boundary_error <= _MAXIMUM_LOCKED_BOUNDARY_TANGENT_ERROR_DEGREES
-                    and candidate.curve_count >= 2
+                    and boundary_error <= maximum_boundary_tangent_error_degrees
+                    and candidate.curve_count >= int(minimum_curve_count)
                 ):
                     final_score = (
                         score
