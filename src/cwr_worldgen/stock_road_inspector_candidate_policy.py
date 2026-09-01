@@ -237,35 +237,14 @@ def _trim_one_native_center(objects, cap, *, cap_count, elevations, spec, next_i
 
 
 def _coherent_candidate_bend(points) -> tuple[int, float] | None:
-    sign = 0
-    total = 0.0
-    count = 0
-    for previous, point, following in zip(points, points[1:], points[2:]):
-        turn = float(_sharp._signed_turn(previous, point, following))
-        magnitude = abs(turn)
-        if magnitude < 0.35:
-            continue
-        if magnitude > 35.0:
-            return None
-        current_sign = 1 if turn > 0.0 else -1
-        if sign and current_sign != sign:
-            if magnitude <= 1.50:
-                continue
-            return None
-        if not sign:
-            sign = current_sign
-        total += turn
-        count += 1
-
-    magnitude = abs(total)
-    if (
-        sign == 0
-        or count < 1
-        or magnitude < INSPECTOR_CURVE_MINIMUM_TURN_DEGREES
-        or magnitude > INSPECTOR_CURVE_MAXIMUM_TURN_DEGREES
-    ):
-        return None
-    return sign, magnitude
+    return _sharp._coherent_bend(
+        points,
+        minimum_vertex_turn_degrees=0.35,
+        maximum_vertex_turn_degrees=35.0,
+        maximum_reverse_noise_degrees=1.50,
+        minimum_total_turn_degrees=INSPECTOR_CURVE_MINIMUM_TURN_DEGREES,
+        maximum_total_turn_degrees=INSPECTOR_CURVE_MAXIMUM_TURN_DEGREES,
+    )
 
 
 def _candidate_exact_curve_chain(
