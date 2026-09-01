@@ -1,7 +1,7 @@
 from pathlib import Path
 import math
 
-import cwr_worldgen.gravel_junction_policy as gravel_policy
+import cwr_worldgen.gravel_family_policy as gravel_policy
 import cwr_worldgen.playability as playability
 import cwr_worldgen.road_quality_policy as road_quality
 from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
