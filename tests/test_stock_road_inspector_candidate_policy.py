@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_curve_usage_policy as _curve_usage
 from cwr_worldgen import stock_road_emitted_seam_policy as _emitted
-from cwr_worldgen import stock_road_inspector_candidate_enforcement_policy as _enforcement
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_junction_policy as _junction
 from cwr_worldgen import stock_road_local_fit_policy as _local_fit
@@ -303,11 +302,11 @@ def test_planning_selector_can_propose_near_straight_skew_t() -> None:
         _incident(180.0, "sil"),
         _incident(288.0, "sil"),
     )
-    assert _enforcement._candidate_native_t_dispatch(incidents) is None
+    assert _candidate._candidate_native_t_dispatch(incidents) is None
 
     token = _local_fit._PLANNING_RELAXED_JUNCTION.set(True)
     try:
-        planned = _enforcement._candidate_native_t_dispatch(incidents)
+        planned = _candidate._candidate_native_t_dispatch(incidents)
     finally:
         _local_fit._PLANNING_RELAXED_JUNCTION.reset(token)
 
@@ -324,12 +323,12 @@ def test_planning_selector_does_not_straighten_turning_through_road() -> None:
 
     token = _local_fit._PLANNING_RELAXED_JUNCTION.set(True)
     try:
-        planned = _enforcement._candidate_native_t_dispatch(incidents)
+        planned = _candidate._candidate_native_t_dispatch(incidents)
     finally:
         _local_fit._PLANNING_RELAXED_JUNCTION.reset(token)
 
-    assert _enforcement._through_turn_degrees(incidents) > (
-        _enforcement.MAXIMUM_NATIVE_THROUGH_TURN_DEGREES
+    assert _candidate._through_turn_degrees(incidents) > (
+        _candidate.MAXIMUM_NATIVE_THROUGH_TURN_DEGREES
     )
     assert planned is None
 
@@ -342,7 +341,8 @@ def test_candidate_curve_search_stays_inside_final_endpoint_guard() -> None:
 
 def test_candidate_policy_is_wired_into_production_hooks() -> None:
     assert _candidate._INSTALLED
-    assert _enforcement._SELECTOR_INSTALLED
+    assert _candidate._SELECTOR_INSTALLED
+    assert _candidate._FINAL_INSTALLED
     assert _junction._native_junction_object is _candidate._measured_native_junction_object
     assert _ownership._trim_one_native_center is _candidate._trim_one_native_center
     assert _emitted._apply_emitted_seam_covers is _candidate._apply_wedge_candidates
