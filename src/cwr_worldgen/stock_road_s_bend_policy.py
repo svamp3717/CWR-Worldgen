@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-import threading
 
 from . import playability as _p
 from . import stock_road_curve_policy as _curve
@@ -53,7 +52,6 @@ _ORIGINAL_CURVED_MODEL_FOR_RUN = None
 _ORIGINAL_FIT_STOCK_ROADS = None
 _INSTALLED = False
 _EXACT_INSTALLED = False
-_BEAM_LIMIT_LOCK = threading.Lock()
 _EXACT_CURVE_REVERSE: dict[
     tuple[str, float, float, float, float], bool
 ] = {}
@@ -90,9 +88,16 @@ def _s_bend_actions(pieces):
     return tuple(result)
 
 
-def _beam_s_bend_path(source_points, entry_heading: float, exit_heading: float, pieces):
+def _beam_s_bend_path(
+    source_points,
+    entry_heading: float,
+    exit_heading: float,
+    pieces,
+    *,
+    maximum_span_metres: float = _MAXIMUM_S_BEND_SPAN_METRES,
+):
     measure = _p._PolylineMeasure.create(source_points)
-    if measure.total <= 1.0 or measure.total > _MAXIMUM_S_BEND_SPAN_METRES:
+    if measure.total <= 1.0 or measure.total > float(maximum_span_metres):
         return None
     actions = _s_bend_actions(pieces)
     if not actions:
@@ -436,13 +441,6 @@ def _recover_exact_steps(path, pieces):
     return tuple(recovered)
 
 
-def _recover_exact_actions(path, pieces):
-    steps = _recover_exact_steps(path, pieces)
-    if steps is None:
-        return None
-    return tuple((piece, start, end) for piece, start, end, _sign in steps)
-
-
 def _curve_count(fitted) -> int:
     return sum(
         _geometry.stock_curve_match(str(piece.model_path)) is not None
@@ -496,24 +494,18 @@ def _quantised_exit_heading(entry_heading: float, source_exit_heading: float) ->
 
 
 def _long_exact_s_bend_path(source_points, entry_heading, exit_heading, pieces):
-    """Run the S-bend beam with a larger cap only for the covered exact pass."""
+    """Run the same S-bend beam with the larger covered-run span allowance."""
 
-    global _MAXIMUM_S_BEND_SPAN_METRES
-    with _BEAM_LIMIT_LOCK:
-        previous_limit = float(_MAXIMUM_S_BEND_SPAN_METRES)
-        _MAXIMUM_S_BEND_SPAN_METRES = max(
-            previous_limit,
+    return _beam_s_bend_path(
+        source_points,
+        entry_heading,
+        exit_heading,
+        pieces,
+        maximum_span_metres=max(
+            _MAXIMUM_S_BEND_SPAN_METRES,
             MAXIMUM_EXACT_S_BEND_RUN_METRES,
-        )
-        try:
-            return _beam_s_bend_path(
-                source_points,
-                entry_heading,
-                exit_heading,
-                pieces,
-            )
-        finally:
-            _MAXIMUM_S_BEND_SPAN_METRES = previous_limit
+        ),
+    )
 
 
 def _curved_model_for_run(model_path, run, start, end):
