@@ -1,23 +1,23 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Final continuity rules for stock curves and strongly skewed paved T nodes.
 
-Stock curve P3Ds have fixed ten-degree connector geometry.  A sampled source arc
+Stock curve P3Ds have fixed ten-degree connector geometry. A sampled source arc
 therefore has two distinct quantities that matter: its true tangent change and
-its radius.  Earlier selection used nearest segment headings and a permissive
+its radius. Earlier selection used nearest segment headings and a permissive
 sagitta tolerance, which let a smooth 100 m arc become a mixture of 75 m, 50 m
-and straight pieces.  Those pieces meet at their centre connectors but their
+and straight pieces. Those pieces meet at their centre connectors but their
 painted borders do not form one continuous curve.
 
 Reconstruct vertex tangents from adjacent source chords and score a native curve
-against the radius implied by those tangents.  A coherent 100 m source arc now
+against the radius implied by those tangents. A coherent 100 m source arc now
 stays on the 100 m stock family; a curve whose radius cannot be represented
 closely falls back to ordinary short straights rather than mixing incompatible
-native radii.  Curve seam underlays are disabled because a wrong curve choice
-must be fixed at selection time instead of hidden under another road slab.
+native radii. Final physical seam repair is owned later by the emitted-seam
+stage, so this policy does not mutate the retired intermediate visual seam hook.
 
 For a fallback same-family paved T, keep the dominant through-road axis exact and
 use the native T mesh only when its branch connector centre still lies inside the
-actual branch road width.  The ordinary fitted approaches already continue under
+actual branch road width. The ordinary fitted approaches already continue under
 the cap, so this overlap closes a 45-degree skew connector without inventing a
 lateral repair piece.
 """
@@ -35,7 +35,6 @@ from . import stock_road_visual_finish_policy as _finish
 
 MAXIMUM_FINAL_CURVE_TURN_ERROR_DEGREES = 1.75
 MAXIMUM_NATIVE_RADIUS_ERROR_RATIO = 0.12
-MAXIMUM_PAVED_SEAM_TANGENT_ERROR_DEGREES = 8.0
 SKEW_T_CONNECTOR_EDGE_MARGIN_METRES = 0.05
 MAXIMUM_SKEW_T_MAIN_AXIS_ERROR_DEGREES = 7.5
 
@@ -505,12 +504,6 @@ def _replace_physically_covered_skew_t_caps(report, dataset, projection, elevati
     return replace(report, objects=tuple(objects))
 
 
-def _disable_curve_seam_underlays(report, elevations, spec):
-    """Curve borders are fixed by coherent piece selection, not repair slabs."""
-
-    return report
-
-
 def install_stock_road_final_continuity_policy() -> None:
     global _ORIGINAL_REALIGN_LEGACY_CAPS, _INSTALLED
     if _INSTALLED:
@@ -526,9 +519,5 @@ def install_stock_road_final_continuity_policy() -> None:
         MAXIMUM_FINAL_CURVE_TURN_ERROR_DEGREES
     )
 
-    _finish._apply_curve_seam_covers = _disable_curve_seam_underlays
     _finish._realign_legacy_caps = _replace_physically_covered_skew_t_caps
-    _finish.MAXIMUM_CURVE_SEAM_TANGENT_ERROR_DEGREES = (
-        MAXIMUM_PAVED_SEAM_TANGENT_ERROR_DEGREES
-    )
     _INSTALLED = True
