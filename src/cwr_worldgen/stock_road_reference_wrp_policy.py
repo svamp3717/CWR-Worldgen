@@ -7,12 +7,11 @@ normal turn primitives, and paved approaches overlap purpose-built junction
 meshes slightly instead of stopping short or leaving a stale node-to-connector
 stub underneath the junction.
 
-Keep the two historical installation stages because timing still matters. The
-first reference stage establishes paved transform and curve-promotion semantics.
-The later Kodiak stage widens the exact-curve window and applies the measured
-paved junction overlap. Native-node stub cleanup is exposed here but executed by
-the final stock-output owner, avoiding another fitter wrapper around the same
-report.
+The reference behavior installs as one stage. Kodiak's curve and junction-overlap
+refinements are applied immediately with the baseline reference hooks because no
+runtime policy captures state between them. Native-node stub cleanup is exposed
+here but executed by the final stock-output owner, avoiding another fitter wrapper
+around the same report.
 
 Stock ``ces`` and generated gravel retain their terrain-following 3D connector
 policy and are deliberately excluded from the paved reference refinements.
@@ -44,8 +43,6 @@ _NATIVE_X = re.compile(
     re.IGNORECASE,
 )
 
-REFERENCE_MINIMUM_BASELINE_SHORT_STRAIGHTS = 2
-REFERENCE_MINIMUM_TOTAL_TURN_DEGREES = 8.0
 REFERENCE_MINIMUM_PROMOTED_CURVES = 1
 REFERENCE_MAXIMUM_EXTRA_CURVE_PIECES = 3
 REFERENCE_INSPECTOR_CURVE_MINIMUM_TURN_DEGREES = 3.0
@@ -150,7 +147,7 @@ def _quality_window(
     """Let paved approaches penetrate stock junction footprints by 0.55 m."""
 
     if _ORIGINAL_QUALITY_WINDOW is None:
-        raise RuntimeError("Kodiak reference stage is not installed")
+        raise RuntimeError("reference WRP road policy is not installed")
     current = list(
         _ORIGINAL_QUALITY_WINDOW(
             measure,
@@ -290,11 +287,12 @@ def _drop_native_node_stubs(report, dataset, projection, spec):
 
 
 def install_stock_road_reference_wrp_policy() -> None:
-    """Install the baseline paved placement rules learned from the reference WRP."""
+    """Install the complete reference-WRP paved-road policy."""
 
     global _ORIGINAL_ROAD_OBJECT_ON_SLOPE
     global _ORIGINAL_USES_MEASURED_RIGID_CONNECTORS
-    global _INSTALLED
+    global _ORIGINAL_QUALITY_WINDOW
+    global _INSTALLED, _KODIAK_INSTALLED
     if _INSTALLED:
         return
 
@@ -309,36 +307,11 @@ def install_stock_road_reference_wrp_policy() -> None:
     _ORIGINAL_USES_MEASURED_RIGID_CONNECTORS = (
         _three_d._uses_measured_rigid_connectors
     )
+    _ORIGINAL_QUALITY_WINDOW = _quality._quality_window
 
     _three_d._uses_measured_rigid_connectors = _uses_measured_rigid_connectors
     _p._road_object_on_slope = _road_object_on_slope
-
-    _curve_usage._MINIMUM_BASELINE_SHORT_STRAIGHTS = (
-        REFERENCE_MINIMUM_BASELINE_SHORT_STRAIGHTS
-    )
-    _curve_usage._MINIMUM_TOTAL_TURN_DEGREES = REFERENCE_MINIMUM_TOTAL_TURN_DEGREES
-    _curve_usage._MINIMUM_PROMOTED_CURVES = REFERENCE_MINIMUM_PROMOTED_CURVES
-    _curve_usage._MAXIMUM_EXTRA_PIECES = REFERENCE_MAXIMUM_EXTRA_CURVE_PIECES
-    _candidate.INSPECTOR_CURVE_MINIMUM_TURN_DEGREES = (
-        REFERENCE_INSPECTOR_CURVE_MINIMUM_TURN_DEGREES
-    )
-    _candidate.INSPECTOR_CURVE_MAXIMUM_EXTRA_PIECES = (
-        REFERENCE_MAXIMUM_EXTRA_CURVE_PIECES
-    )
-
-    _INSTALLED = True
-
-
-def install_stock_road_kodiak_reference_policy() -> None:
-    """Install the later Kodiak curve and junction-overlap refinements."""
-
-    global _ORIGINAL_QUALITY_WINDOW, _KODIAK_INSTALLED
-    if _KODIAK_INSTALLED:
-        return
-    if not _INSTALLED:
-        raise RuntimeError("reference WRP paved-road stage must install first")
-
-    _ORIGINAL_QUALITY_WINDOW = _quality._quality_window
+    _quality._quality_window = _quality_window
 
     _curve_usage._MINIMUM_BASELINE_SHORT_STRAIGHTS = 0
     _curve_usage._MINIMUM_TOTAL_TURN_DEGREES = (
@@ -350,8 +323,15 @@ def install_stock_road_kodiak_reference_policy() -> None:
     _curve_usage._MAXIMUM_PROMOTION_RUN_METRES = (
         KODIAK_MAXIMUM_CURVE_PROMOTION_RUN_METRES
     )
+    _curve_usage._MINIMUM_PROMOTED_CURVES = REFERENCE_MINIMUM_PROMOTED_CURVES
     _curve_usage._MAXIMUM_EXTRA_PIECES = KODIAK_MAXIMUM_EXTRA_CURVE_PIECES
+    _candidate.INSPECTOR_CURVE_MINIMUM_TURN_DEGREES = (
+        REFERENCE_INSPECTOR_CURVE_MINIMUM_TURN_DEGREES
+    )
+    _candidate.INSPECTOR_CURVE_MAXIMUM_EXTRA_PIECES = (
+        REFERENCE_MAXIMUM_EXTRA_CURVE_PIECES
+    )
     _sharp._MAXIMUM_SPAN_METRES = KODIAK_MAXIMUM_CURVE_PROMOTION_RUN_METRES
 
-    _quality._quality_window = _quality_window
+    _INSTALLED = True
     _KODIAK_INSTALLED = True
