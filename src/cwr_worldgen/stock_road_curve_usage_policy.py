@@ -209,9 +209,6 @@ def install_stock_road_micro_bend_policy() -> None:
     if _MICRO_INSTALLED:
         return
 
-    _sharp._MINIMUM_SUSTAINED_TOTAL_TURN_DEGREES = (
-        MINIMUM_MICRO_BEND_TOTAL_TURN_DEGREES
-    )
     _ORIGINAL_BEAM = _sharp._beam_stock_path
     _sharp._beam_stock_path = _micro_beam_stock_path
 
