@@ -584,7 +584,11 @@ def _native_owner_realign(report, dataset, projection, elevations, spec):
         if family not in _PAVED_FAMILIES:
             continue
 
-        native = _junction._native_junction_for_incidents(incidents)
+        native = (
+            _candidate_native_t_dispatch(incidents)
+            if _stock_ces_mixed_t(incidents)
+            else _junction._native_junction_for_incidents(incidents)
+        )
         if (
             native is not None
             and native.cap_family == family
@@ -691,7 +695,11 @@ def _stock_ces_mixed_t(incidents) -> bool:
 
 
 def _native_connector_tolerance_degrees(incidents) -> float:
-    if _stock_ces_mixed_t(incidents):
+    if (
+        _stock_ces_mixed_t(incidents)
+        and _through_turn_degrees(incidents)
+        <= MAXIMUM_STOCK_CES_NATIVE_THROUGH_TURN_DEGREES + 1.0e-9
+    ):
         return float(_mixed.MAXIMUM_STOCK_CES_NATIVE_HEADING_ERROR_DEGREES)
     return INSPECTOR_NATIVE_CONNECTOR_TOLERANCE_DEGREES
 
