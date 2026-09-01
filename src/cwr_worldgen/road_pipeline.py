@@ -98,8 +98,14 @@ _LATE_STAGE_SPECS: tuple[StageSpec, ...] = (
             "install_stock_road_inspector_candidate_selector_policy",
         ),
     ),
-    ("paved_junction_completion", "stock_road_paved_junction_completion_policy", "install_stock_road_paved_junction_completion_policy"),
-    ("native_junction_ownership", "stock_road_native_junction_ownership_policy", "install_stock_road_native_junction_ownership_policy"),
+    (
+        "paved_junction_completion",
+        "stock_road_paved_junction_completion_policy",
+        (
+            "install_stock_road_paved_junction_completion_policy",
+            "install_stock_road_native_junction_ownership_policy",
+        ),
+    ),
     ("candidate_final_enforcement", "stock_road_inspector_candidate_policy", "install_stock_road_inspector_candidate_final_policy"),
     ("reference_wrp", "stock_road_reference_wrp_policy", "install_stock_road_reference_wrp_policy"),
     ("stock_assets_only", "stock_road_stock_assets_only_policy", "install_stock_road_stock_assets_only_policy"),
