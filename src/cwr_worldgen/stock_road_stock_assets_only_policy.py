@@ -1,31 +1,23 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Keep paved and dirt roads stock-only while allowing procedural gravel.
+"""Own stock-only paved/dirt road output while allowing procedural gravel.
 
-Paved production roads use stock ``sil/asf/kos`` pieces and measured Resistance
-junctions. Dirt roads use stock ``ces``. Generated gravel remains a supported,
-separate family when requested.
+Two installation moments are intentionally retained. The early stock-helper
+stage replaces generated paved seam/wedge fallbacks with stock short road P3Ds.
+The final stage applies the reference-WRP construction rules and rejects any
+generated paved or dirt road model that survives to serialization.
 
-This final policy also completes the reference-WRP construction strategy:
-
-* native paved curves are allowed to smooth hard OSM vertices inside a bounded,
-  obstacle-checked road corridor;
-* tangent-compatible ordinary paved straight neighbours use a small Kodiak-style
-  longitudinal overlap instead of exact butt joints;
-* a T junction is chosen from the WrpTool stock family catalogue before approach
-  headings are regularised, and only the resulting obstacle-safe geometry has to
-  pass the strict final connector matcher; and
-* a generic ``*6`` cap is therefore a fallback only when the stock T cannot be
-  made representable inside those safety bounds.
-
-Generated paved and generated dirt road P3Ds remain forbidden at serialization.
+Keeping both responsibilities here makes the stock-output contract visible in
+one place without changing when either hook becomes active.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import math
 
 from . import generator as _generator
 from . import playability as _p
 from . import stock_road_curve_usage_policy as _curve_usage
+from . import stock_road_emitted_seam_policy as _emitted
 from . import stock_road_inspector_candidate_enforcement_policy as _enforcement
 from . import stock_road_inspector_candidate_policy as _candidate
 from . import stock_road_junction_policy as _junction
@@ -38,6 +30,14 @@ from .procedural_infrastructure import (
 )
 
 
+_PAVED_FAMILIES = frozenset({"sil", "asf", "kos"})
+STOCK_PAVED_HELPER_BIAS_METRES = -0.006
+STOCK_PAVED_OUTSIDE_OVERLAP_METRES = 0.080
+MAXIMUM_STOCK_PAVED_HELPER_SHIFT_METRES = 0.75
+MAXIMUM_STOCK_PAVED_HELPER_LIFT_METRES = 0.035
+MINIMUM_STOCK_PAVED_TERRAIN_CLEARANCE_METRES = 0.005
+NATIVE_JUNCTION_HELPER_EXCLUSION_METRES = 0.75
+
 STOCK_CURVE_SOURCE_CORRIDOR_METRES = 1.25
 ORDINARY_PAVED_OVERLAP_METRES = 0.45
 ORDINARY_PAVED_OVERLAP_TANGENT_TOLERANCE_DEGREES = 0.75
@@ -47,6 +47,7 @@ ORDINARY_PAVED_OVERLAP_MAXIMUM_END_SHORTFALL_METRES = 0.55
 _ORIGINAL_NATIVE_T = None
 _ORIGINAL_CHAIN = None
 _ORIGINAL_FIT = None
+_PAVED_HELPERS_INSTALLED = False
 _INSTALLED = False
 
 
@@ -54,24 +55,233 @@ def _normalised_path(model_path: str) -> str:
     return str(model_path).replace("/", "\\").casefold()
 
 
-def _generated_dirt_model(model_path: str) -> bool:
-    """Reject any future world-local dirt P3D without confusing gravel with dirt."""
+def _stock_family(model_path: str) -> str | None:
+    match = _geometry.stock_straight_match(str(model_path))
+    if match is None:
+        return None
+    family = match.group("family").casefold()
+    return family if family in _PAVED_FAMILIES else None
 
+
+def _stock_short_model(family: str) -> str:
+    return rf"o\road\{family}6.p3d"
+
+
+def _shifted_helper_centre(plan, family: str) -> tuple[float, float]:
+    centre = (float(plan.centre[0]), float(plan.centre[1]))
+    apex = getattr(plan, "outer_miter_apex", None)
+    if apex is None:
+        return centre
+
+    dx = float(apex[0]) - centre[0]
+    dz = float(apex[1]) - centre[1]
+    distance = math.hypot(dx, dz)
+    if distance <= 1.0e-9:
+        return centre
+
+    half_width = float(_geometry.STOCK_HALF_WIDTHS_METRES[family])
+    shift = max(
+        0.0,
+        distance - half_width + STOCK_PAVED_OUTSIDE_OVERLAP_METRES,
+    )
+    shift = min(shift, MAXIMUM_STOCK_PAVED_HELPER_SHIFT_METRES)
+    if shift <= 1.0e-9:
+        return centre
+    return (
+        centre[0] + dx / distance * shift,
+        centre[1] + dz / distance * shift,
+    )
+
+
+def _stock_helper_for_plan(plan, object_id, elevations, spec):
+    family = _stock_family(str(plan.model_path))
+    if family is None:
+        return None
+
+    centre = _shifted_helper_centre(plan, family)
+    heading = float(plan.tangent_axis_degrees) % 360.0
+    direction = (
+        math.sin(math.radians(heading)),
+        math.cos(math.radians(heading)),
+    )
+    half = float(_geometry.STOCK_STRAIGHT_LENGTHS_METRES[6]) * 0.5
+    start = (
+        centre[0] - direction[0] * half,
+        centre[1] - direction[1] * half,
+    )
+    end = (
+        centre[0] + direction[0] * half,
+        centre[1] + direction[1] * half,
+    )
+    helper = _p._road_object_on_slope(
+        int(object_id),
+        _stock_short_model(family),
+        start,
+        end,
+        elevations,
+        spec,
+        vertical_offset=(
+            _p._STOCK_ROAD_VERTICAL_OFFSET_METRES
+            + STOCK_PAVED_HELPER_BIAS_METRES
+        ),
+    )
+
+    apex = getattr(plan, "outer_miter_apex", None)
+    if apex is not None and elevations is not None and spec is not None:
+        terrain = _p._sample_elevation(
+            elevations,
+            spec.cells,
+            spec.cell_size,
+            float(apex[0]),
+            float(apex[1]),
+        )
+        surface = _emitted._surface_height_at(
+            helper,
+            (float(apex[0]), float(apex[1])),
+        )
+        lift = max(
+            0.0,
+            terrain + MINIMUM_STOCK_PAVED_TERRAIN_CLEARANCE_METRES - surface,
+        )
+        if lift > 0.0:
+            helper = replace(
+                helper,
+                y=float(helper.y)
+                + min(lift, MAXIMUM_STOCK_PAVED_HELPER_LIFT_METRES),
+            )
+    return helper
+
+
+def _plan_key(plan):
+    apex = getattr(plan, "outer_miter_apex", None)
+    if apex is not None:
+        return (
+            "apex",
+            round(float(apex[0]), 3),
+            round(float(apex[1]), 3),
+            str(plan.model_path).casefold(),
+        )
+    return (
+        "centre",
+        round(float(plan.centre[0]), 3),
+        round(float(plan.centre[1]), 3),
+        round(float(plan.tangent_axis_degrees) % 180.0, 3),
+        str(plan.model_path).casefold(),
+    )
+
+
+def _native_junction_centres(report) -> tuple[tuple[float, float], ...]:
+    cap_count = min(
+        int(getattr(report, "junction_cap_objects", 0)),
+        len(report.objects),
+    )
+    centres = []
+    for cap in report.objects[:cap_count]:
+        local = _geometry.native_junction_intersection_offset(str(cap.model_path))
+        if local is None:
+            continue
+        centres.append(
+            _geometry.transform_local(
+                local,
+                (float(cap.x), float(cap.z)),
+                float(cap.heading_degrees),
+            )
+        )
+    return tuple(centres)
+
+
+def _plan_hits_native_junction(
+    plan,
+    centres: tuple[tuple[float, float], ...],
+) -> bool:
+    if not centres:
+        return False
+    points = [(float(plan.centre[0]), float(plan.centre[1]))]
+    apex = getattr(plan, "outer_miter_apex", None)
+    if apex is not None:
+        points.append((float(apex[0]), float(apex[1])))
+    return any(
+        math.dist(point, centre) <= NATIVE_JUNCTION_HELPER_EXCLUSION_METRES
+        for point in points
+        for centre in centres
+    )
+
+
+def _apply_stock_emitted_seam_covers(report, elevations, spec):
+    """Replace generated paved seam helpers with stock short pieces."""
+
+    plans = tuple(_emitted._emitted_seam_cover_plans(report))
+    wedge_plans = tuple(
+        _emitted._terrain_wedge_cover_plans(report, elevations, spec)
+    )
+    if not plans and not wedge_plans:
+        return report
+
+    native_centres = _native_junction_centres(report)
+    objects = list(report.objects)
+    next_id = max((int(obj.object_id) for obj in objects), default=0) + 1
+    seen = set()
+    added = 0
+    for plan in (*plans, *wedge_plans):
+        key = _plan_key(plan)
+        if key in seen:
+            continue
+        seen.add(key)
+        if _plan_hits_native_junction(plan, native_centres):
+            continue
+        helper = _stock_helper_for_plan(plan, next_id, elevations, spec)
+        if helper is None:
+            continue
+        objects.append(helper)
+        next_id += 1
+        added += 1
+
+    if added == 0:
+        return report
+
+    required = len(objects)
+    if (
+        required > int(spec.max_road_objects)
+        and not bool(getattr(spec, "advisory_object_limits", False))
+    ):
+        raise ValueError(
+            "road object budget is too small after stock-only paved seam "
+            f"coverage: requires {required:,} objects, "
+            f"limit is {int(spec.max_road_objects):,}"
+        )
+
+    return replace(
+        report,
+        objects=tuple(objects),
+        short_piece_objects=(
+            int(getattr(report, "short_piece_objects", 0)) + added
+        ),
+    )
+
+
+_apply_stock_emitted_seam_covers.__name__ = "_apply_emitted_seam_covers"
+
+
+def install_stock_road_stock_paved_only_policy() -> None:
+    """Make late paved seam fallbacks use only stock sil/asf/kos P3Ds."""
+
+    global _PAVED_HELPERS_INSTALLED
+    if _PAVED_HELPERS_INSTALLED:
+        return
+    if not _emitted._INSTALLED:
+        raise RuntimeError("stock road emitted-seam policy must install first")
+
+    _emitted._apply_emitted_seam_covers = _apply_stock_emitted_seam_covers
+    _PAVED_HELPERS_INSTALLED = True
+
+
+def _generated_dirt_model(model_path: str) -> bool:
     path = _normalised_path(model_path)
     filename = path.rsplit("\\", 1)[-1]
     return "\\i\\" in path and filename.startswith("dirt") and filename.endswith(".p3d")
 
 
 def _family_first_native_t(incidents):
-    """Choose the stock T from road families before judging source headings.
-
-    Heading error is intentionally not an acceptance gate here. This function is
-    used only while the all-or-nothing relaxation transaction is planning. The
-    connector policy then inserts measured connector-aligned approach points,
-    applies its two-metre lateral bound and obstacle checks, and the transaction
-    finally reruns the strict 0.90-degree matcher on the edited geometry.
-    """
-
     if len(incidents) != 3:
         return None
     pair = _junction._dominant_pair(incidents)
@@ -112,8 +322,6 @@ def _family_first_native_t(incidents):
 
 
 def _stock_native_t_dispatch(incidents):
-    """Select stock T first while planning, then enforce the strict final fit."""
-
     if _ORIGINAL_NATIVE_T is None:
         raise RuntimeError("stock paved/dirt policy is not installed")
 
@@ -128,7 +336,7 @@ def _stock_native_t_dispatch(incidents):
 
 def _stock_paved_straight(piece) -> bool:
     match = _geometry.stock_straight_match(str(piece.model_path))
-    return match is not None and match.group("family").casefold() in {"sil", "asf", "kos"}
+    return match is not None and match.group("family").casefold() in _PAVED_FAMILIES
 
 
 def _heading(start, end) -> float:
@@ -138,8 +346,6 @@ def _heading(start, end) -> float:
 
 
 def _tangent_compatible_straight_chain(fitted) -> bool:
-    """Only overlap a chain whose existing ordinary seams are already healthy."""
-
     if len(fitted) < 2 or any(not _stock_paved_straight(item[0]) for item in fitted):
         return False
     for previous, current in zip(fitted, fitted[1:]):
@@ -184,8 +390,6 @@ def _overlapped_stock_chain(
     minimum_end_distance,
     maximum_end_distance,
 ):
-    """Re-space healthy stock straights with real 0.45 m axial overlap."""
-
     if not _tangent_compatible_straight_chain(fitted):
         return fitted
     sequence = tuple(item[0] for item in fitted)
@@ -256,8 +460,6 @@ def _stock_overlap_chain(
 
 
 def _generated_road_model(model_path: str) -> bool:
-    """Return True only for generated paved/dirt road models forbidden in output."""
-
     path = _normalised_path(model_path)
     filename = path.rsplit("\\", 1)[-1]
     return (
@@ -277,8 +479,6 @@ def _fit(
     starting_id: int = 1,
     progress_callback=None,
 ):
-    """Run the complete road fitter and reject generated paved/dirt survivors."""
-
     if _ORIGINAL_FIT is None:
         raise RuntimeError("stock paved/dirt final guard is not installed")
     report = _ORIGINAL_FIT(
@@ -307,11 +507,12 @@ def install_stock_road_stock_assets_only_policy() -> None:
     global _ORIGINAL_NATIVE_T, _ORIGINAL_CHAIN, _ORIGINAL_FIT, _INSTALLED
     if _INSTALLED:
         return
+    if not _PAVED_HELPERS_INSTALLED:
+        raise RuntimeError("stock paved helper policy must install first")
     if not _enforcement._FINAL_INSTALLED or not _curve_usage._INSTALLED:
         raise RuntimeError("candidate enforcement and curve usage must install first")
 
     _ORIGINAL_NATIVE_T = _enforcement._junction._native_t_junction
-
     _ORIGINAL_CHAIN = _curve_usage._ORIGINAL_CHAIN
     _curve_usage._ORIGINAL_CHAIN = _stock_overlap_chain
 
@@ -319,7 +520,6 @@ def install_stock_road_stock_assets_only_policy() -> None:
     _generator.fit_road_objects = _fit
 
     _enforcement._junction._native_t_junction = _stock_native_t_dispatch
-
     _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES = STOCK_CURVE_SOURCE_CORRIDOR_METRES
 
     _INSTALLED = True
