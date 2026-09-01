@@ -327,7 +327,10 @@ def _legacy_cap_for_turning_t(current, source_node, incidents, family, elevation
         end,
         elevations,
         spec,
-        vertical_offset=_p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
+        vertical_offset=(
+            _p._STOCK_ROAD_VERTICAL_OFFSET_METRES
+            + _finish.TURNING_LEGACY_CAP_VERTICAL_BIAS_METRES
+        ),
     )
     return replace(
         fixed,
