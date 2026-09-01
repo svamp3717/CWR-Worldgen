@@ -18,7 +18,6 @@ from . import generator as _generator
 from . import playability as _p
 from . import stock_road_curve_usage_policy as _curve_usage
 from . import stock_road_emitted_seam_policy as _emitted
-from . import stock_road_inspector_candidate_enforcement_policy as _enforcement
 from . import stock_road_inspector_candidate_policy as _candidate
 from . import stock_road_junction_policy as _junction
 from . import stock_road_local_fit_policy as _local
@@ -325,7 +324,7 @@ def _stock_native_t_dispatch(incidents):
     if _ORIGINAL_NATIVE_T is None:
         raise RuntimeError("stock paved/dirt policy is not installed")
 
-    if _enforcement._contains_generated_gravel(incidents):
+    if _candidate._contains_generated_gravel(incidents):
         return _ORIGINAL_NATIVE_T(incidents)
 
     if _local._PLANNING_RELAXED_JUNCTION.get():
@@ -509,17 +508,17 @@ def install_stock_road_stock_assets_only_policy() -> None:
         return
     if not _PAVED_HELPERS_INSTALLED:
         raise RuntimeError("stock paved helper policy must install first")
-    if not _enforcement._FINAL_INSTALLED or not _curve_usage._INSTALLED:
+    if not _candidate._FINAL_INSTALLED or not _curve_usage._INSTALLED:
         raise RuntimeError("candidate enforcement and curve usage must install first")
 
-    _ORIGINAL_NATIVE_T = _enforcement._junction._native_t_junction
+    _ORIGINAL_NATIVE_T = _junction._native_t_junction
     _ORIGINAL_CHAIN = _curve_usage._ORIGINAL_CHAIN
     _curve_usage._ORIGINAL_CHAIN = _stock_overlap_chain
 
     _ORIGINAL_FIT = _p.fit_road_objects
     _generator.fit_road_objects = _fit
 
-    _enforcement._junction._native_t_junction = _stock_native_t_dispatch
+    _junction._native_t_junction = _stock_native_t_dispatch
     _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES = STOCK_CURVE_SOURCE_CORRIDOR_METRES
 
     _INSTALLED = True
