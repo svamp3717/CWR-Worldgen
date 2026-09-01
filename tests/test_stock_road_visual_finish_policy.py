@@ -133,9 +133,3 @@ def test_aligned_straight_through_cap_is_not_needlessly_rebuilt(monkeypatch):
 
     assert captured == []
     assert result is report
-
-
-def test_retired_intermediate_visual_seam_hook_is_a_noop():
-    report = SimpleNamespace(objects=(), junction_cap_objects=0)
-
-    assert _finish._apply_curve_seam_covers(report, (), SimpleNamespace()) is report
