@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Use native stock curves for gentle bends that still facet into straights.
 
-The first sharp-turn beam deliberately required at least two native ten-degree
+The first sharp-turn beam deliberately requires at least two native ten-degree
 curves. That leaves a common real-world case untreated: a gentle 8-15 degree
 bend spread across several short stock pieces. Each individual miter is small,
 but the outside road edge still opens enough for terrain to show through.
@@ -11,13 +11,9 @@ the same connector-locked search with a one-curve minimum and a slightly wider
 boundary-tangent allowance. The source corridor remains the same 0.60 m and
 all internal stock connectors remain exact.
 
-A second detail matters in production: returning only the beam's sampled
-centreline lets the ordinary greedy fitter turn that native curve straight back
-into short rectangular facets. For short junction-to-junction stock runs with
-a coherent 7.5-15 degree bend, retain the beam's recovered stock-piece actions
-directly. Boundary quantisation remains under the existing endpoint covers;
-interior seams stay connector- and tangent-locked. No overlap/underlay road
-objects are introduced by this policy. Generated gravel remains outside this
+For short junction-to-junction stock runs with a coherent 7.5-15 degree bend,
+retain the recovered stock-piece actions directly rather than feeding the sampled
+centreline back through the greedy fitter. Generated gravel remains outside this
 stock-asset path.
 """
 from __future__ import annotations
@@ -46,173 +42,6 @@ _ORIGINAL_CHAIN = None
 _INSTALLED = False
 
 
-def _one_curve_beam_stock_path(
-    source_points,
-    turn_sign: int,
-    entry_heading: float,
-    exit_heading: float,
-    pieces,
-):
-    """Repeat the stock beam while allowing a single native curve section."""
-
-    measure = _p._PolylineMeasure.create(source_points)
-    if measure.total <= 1.0:
-        return None
-    family = _sharp._curveable_family(pieces)
-    if family is None:
-        return None
-    prefix, family_name = family
-    actions = _sharp._actions(pieces, prefix, family_name, turn_sign)
-    if not actions:
-        return None
-
-    start = source_points[0]
-    beam = (
-        _sharp._State(
-            0.0,
-            float(start[0]),
-            float(start[1]),
-            float(entry_heading),
-            0.0,
-            (),
-            0,
-        ),
-    )
-    best = None
-    shortest = min(float(action.piece.length_metres) for action in actions)
-    maximum_steps = max(3, int(math.ceil(measure.total / shortest)) + 5)
-
-    for _step_index in range(maximum_steps):
-        candidates = []
-        for state in beam:
-            for action in actions:
-                end, end_heading, samples = _sharp._advance(state, action)
-                progress = state.progress
-                maximum_deviation = 0.0
-                lookahead = max(12.0, float(action.piece.length_metres) * 2.0 + 8.0)
-                valid = True
-                for sample in samples:
-                    nearest = _sharp._nearest_forward(
-                        measure,
-                        sample,
-                        progress,
-                        min(measure.total, state.progress + lookahead),
-                    )
-                    if (
-                        nearest is None
-                        or nearest[0] > _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES
-                    ):
-                        valid = False
-                        break
-                    maximum_deviation = max(maximum_deviation, nearest[0])
-                    progress = max(progress, nearest[1])
-                if not valid or progress <= state.progress + 0.40:
-                    continue
-
-                source_heading = measure.point(progress)[2]
-                tangent_error = _p._heading_difference(end_heading, source_heading)
-                if tangent_error > _sharp._MAXIMUM_CANDIDATE_TANGENT_ERROR_DEGREES:
-                    continue
-                source_turn = _p._heading_difference(
-                    state.heading_degrees, source_heading
-                )
-                action_turn = 10.0 if action.turn_sign else 0.0
-                turn_mismatch = abs(source_turn - action_turn)
-                endpoint_nearest = _sharp._nearest_forward(
-                    measure,
-                    end,
-                    state.progress,
-                    min(measure.total, state.progress + lookahead),
-                )
-                endpoint_error = (
-                    endpoint_nearest[0] if endpoint_nearest is not None else math.inf
-                )
-                if endpoint_error > _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES:
-                    continue
-
-                score = (
-                    state.score
-                    + maximum_deviation * maximum_deviation * 7.0
-                    + endpoint_error * endpoint_error * 3.0
-                    + (tangent_error / 5.0) ** 2
-                    + (turn_mismatch / 5.0) ** 2
-                    + 0.03
-                )
-                step = _sharp._Step(
-                    action.piece,
-                    (state.x, state.z),
-                    end,
-                    samples,
-                )
-                candidate = _sharp._State(
-                    score,
-                    end[0],
-                    end[1],
-                    end_heading,
-                    progress,
-                    (*state.steps, step),
-                    state.curve_count + int(action.turn_sign != 0),
-                )
-
-                remaining = measure.total - progress
-                end_error = math.dist(end, source_points[-1])
-                boundary_error = _p._heading_difference(end_heading, exit_heading)
-                if (
-                    remaining <= _sharp._MAXIMUM_LOCKED_END_ERROR_METRES
-                    and end_error <= _sharp._MAXIMUM_LOCKED_END_ERROR_METRES
-                    and boundary_error
-                    <= MAXIMUM_MICRO_BEND_BOUNDARY_TANGENT_ERROR_DEGREES
-                    and candidate.curve_count >= 1
-                ):
-                    final_score = (
-                        score
-                        + end_error * end_error * 3.0
-                        + (boundary_error / 3.0) ** 2
-                    )
-                    if best is None or final_score < best[0]:
-                        best = (final_score, candidate)
-
-                if progress < measure.total - 0.05:
-                    candidates.append(candidate)
-
-        if best is not None:
-            break
-        if not candidates:
-            break
-
-        candidates.sort(
-            key=lambda item: (
-                item.score + (measure.total - item.progress) * 0.01,
-                item.score,
-                -item.progress,
-            )
-        )
-        beam_list = []
-        seen = {}
-        for candidate in candidates:
-            key = (
-                int(candidate.progress / 2.5),
-                int(round(candidate.heading_degrees / 2.5)) % 144,
-            )
-            if seen.get(key, 0) >= 2:
-                continue
-            seen[key] = seen.get(key, 0) + 1
-            beam_list.append(candidate)
-            if len(beam_list) >= _sharp._BEAM_WIDTH:
-                break
-        beam = tuple(beam_list)
-
-    if best is None:
-        return None
-    state = best[1]
-    result = [source_points[0]]
-    for step in state.steps:
-        for point in step.samples:
-            if math.dist(result[-1], point) > 0.05:
-                result.append(point)
-    return tuple(result)
-
-
 def _micro_beam_stock_path(
     source_points,
     turn_sign: int,
@@ -220,6 +49,8 @@ def _micro_beam_stock_path(
     exit_heading: float,
     pieces,
 ):
+    """Try the strict shared beam first, then allow one native curve section."""
+
     if _ORIGINAL_BEAM is None:
         raise RuntimeError("stock road micro-bend policy is not installed")
 
@@ -232,12 +63,16 @@ def _micro_beam_stock_path(
     )
     if result is not None:
         return result
-    return _one_curve_beam_stock_path(
+    return _ORIGINAL_BEAM(
         source_points,
         turn_sign,
         entry_heading,
         exit_heading,
         pieces,
+        minimum_curve_count=1,
+        maximum_boundary_tangent_error_degrees=(
+            MAXIMUM_MICRO_BEND_BOUNDARY_TANGENT_ERROR_DEGREES
+        ),
     )
 
 
@@ -330,7 +165,7 @@ def _micro_exact_chain(
         source_exit_heading,
         turn_sign,
     )
-    locked_path = _one_curve_beam_stock_path(
+    locked_path = _micro_beam_stock_path(
         source_points,
         turn_sign,
         entry_heading,
