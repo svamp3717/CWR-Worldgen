@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from types import SimpleNamespace
 
-from cwr_worldgen import stock_road_micro_bend_policy as _micro
+from cwr_worldgen import stock_road_curve_usage_policy as _micro
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 
 
@@ -49,8 +49,6 @@ def test_micro_bend_beam_accepts_one_native_curve():
     source = _ten_degree_radius_100_arc()
     pieces = _pieces()
 
-    # The original sharp-turn beam deliberately requires two curves and cannot
-    # finish this one-section bend. The late micro-bend wrapper should.
     assert _micro._ORIGINAL_BEAM is not None
     assert _micro._ORIGINAL_BEAM(source, 1, 0.0, 10.0, pieces) is None
 
