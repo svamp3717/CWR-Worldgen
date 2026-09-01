@@ -173,6 +173,12 @@ def test_production_fit_uses_low_fallback_for_lundby_turning_main_geometry() -> 
     assert report.junction_cap_objects >= 1
     cap = report.objects[0]
     assert cap.model_path.casefold() == r"o\road\sil6.p3d"
+    assert math.isclose(
+        cap.y,
+        _p._STOCK_ROAD_VERTICAL_OFFSET_METRES
+        + _finish.TURNING_LEGACY_CAP_VERTICAL_BIAS_METRES,
+        abs_tol=1.0e-6,
+    )
 
     assert math.dist((cap.x, cap.z), node) < 0.05
     assert all(
