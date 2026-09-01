@@ -24,6 +24,15 @@ def test_gravel_runtime_phases_share_one_owner():
     assert owners["gravel_family"] == "gravel_family_policy"
 
 
+def test_micro_and_curve_usage_phases_share_one_owner():
+    owners = {
+        stage: module
+        for stage, module, _installer in _pipeline._LATE_STAGE_SPECS
+    }
+    assert owners["micro_bend"] == "stock_road_curve_usage_policy"
+    assert owners["curve_usage"] == "stock_road_curve_usage_policy"
+
+
 def test_cancelled_or_folded_layers_are_not_in_production_pipeline():
     retired = {
         "straight_seam",
