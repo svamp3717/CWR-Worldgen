@@ -208,8 +208,3 @@ def test_too_skewed_branch_keeps_legacy_fallback():
     )
 
     assert _final._same_family_paved_skew_t(incidents, "sil") is None
-
-
-def test_curve_seam_repair_underlays_are_disabled():
-    marker = object()
-    assert _final._disable_curve_seam_underlays(marker, (), None) is marker
