@@ -107,6 +107,14 @@ def _point_segment_distance(
     return math.dist(point, projected)
 
 
+def _segment_axis_heading(segment: _SourceSegment) -> float:
+    """Return one undirected source-segment axis in world heading degrees."""
+
+    dx = float(segment.end[0]) - float(segment.start[0])
+    dz = float(segment.end[1]) - float(segment.start[1])
+    return math.degrees(math.atan2(dx, dz)) % 180.0
+
+
 def _candidate_segments(index: _SourceIndex, point: tuple[float, float]) -> tuple[_SourceSegment, ...]:
     bx, bz = _bucket(point[0]), _bucket(point[1])
     indices = set()
@@ -132,6 +140,7 @@ def _metrics_from_candidates(issue, candidates: tuple[_SourceSegment, ...]):
     road_ids = sorted({segment.road_id for segment in nearby if segment.road_id})
     highways = sorted({segment.highway for segment in nearby if segment.highway})
     surfaces = sorted({segment.surface for segment in nearby if segment.surface})
+    source_axes = sorted({round(_segment_axis_heading(segment), 3) for segment in nearby})
     metrics: dict[str, float | str] = {
         "nearest_source_distance_metres": round(nearest_distance, 5),
     }
@@ -147,6 +156,10 @@ def _metrics_from_candidates(issue, candidates: tuple[_SourceSegment, ...]):
         metrics["source_surfaces"] = ";".join(surfaces)
     elif nearest.surface:
         metrics["source_surfaces"] = nearest.surface
+    if source_axes:
+        metrics["source_segment_axes_degrees"] = ";".join(
+            f"{heading:.3f}" for heading in source_axes
+        )
     return metrics
 
 
