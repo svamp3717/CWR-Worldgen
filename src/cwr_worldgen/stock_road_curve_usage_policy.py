@@ -54,6 +54,7 @@ _STOCK_CURVE_TURN_DEGREES = 10.0
 
 _ORIGINAL_BEAM = None
 _ORIGINAL_NEAREST_FORWARD = _sharp._nearest_forward
+_ORIGINAL_POINT = _p._PolylineMeasure.point
 _ORIGINAL_CHORD_ENDPOINT = _p._PolylineMeasure.chord_endpoint
 _ORIGINAL_MAXIMUM_CHORD_DEVIATION = _p._PolylineMeasure.maximum_chord_deviation
 _ORIGINAL_MICRO_CHAIN = None
@@ -77,7 +78,7 @@ def _canonical_pieces(pieces) -> tuple[_p._RoadPiece, ...]:
 
 @lru_cache(maxsize=_SEGMENT_TABLE_CACHE_SIZE)
 def _segment_table(measure) -> tuple[tuple[float, ...], ...]:
-    """Precompute immutable source-segment geometry reused by every beam state."""
+    """Precompute immutable source-segment geometry reused by every fitter stage."""
 
     result = []
     for index, (start, end) in enumerate(zip(measure.points, measure.points[1:])):
@@ -88,6 +89,7 @@ def _segment_table(measure) -> tuple[tuple[float, ...], ...]:
         dz = float(end[1]) - az
         length = max(1.0e-9, segment_end - segment_start)
         denominator = dx * dx + dz * dz
+        heading = math.degrees(math.atan2(dx, dz)) % 360.0
         result.append(
             (
                 segment_start,
@@ -98,9 +100,39 @@ def _segment_table(measure) -> tuple[tuple[float, ...], ...]:
                 dz,
                 length,
                 denominator,
+                heading,
             )
         )
     return tuple(result)
+
+
+def _fast_measure_point(measure, distance: float) -> tuple[float, float, float]:
+    """Interpolate on cached segment geometry without recomputing its heading."""
+
+    segments = _segment_table(measure)
+    if distance < 0.0:
+        _start, _end, ax, az, dx, dz, length, _denominator, heading = segments[0]
+        return (
+            ax + dx / length * distance,
+            az + dz / length * distance,
+            heading,
+        )
+    if distance > measure.total:
+        _start, _end, ax, az, dx, dz, length, _denominator, heading = segments[-1]
+        excess = distance - float(measure.total)
+        return (
+            ax + dx + dx / length * excess,
+            az + dz + dz / length * excess,
+            heading,
+        )
+
+    segment = min(
+        len(segments) - 1,
+        max(0, bisect.bisect_right(measure.cumulative, distance) - 1),
+    )
+    segment_start, _segment_end, ax, az, dx, dz, length, _denominator, heading = segments[segment]
+    fraction = (distance - segment_start) / length
+    return ax + dx * fraction, az + dz * fraction, heading
 
 
 def _fast_nearest_forward(measure, point, minimum_distance: float, maximum_distance: float):
@@ -129,6 +161,7 @@ def _fast_nearest_forward(measure, point, minimum_distance: float, maximum_dista
             dz,
             length,
             denominator,
+            _heading,
         ) = segments[index]
         low = max(minimum, segment_start)
         high = min(maximum, segment_end)
@@ -145,10 +178,7 @@ def _fast_nearest_forward(measure, point, minimum_distance: float, maximum_dista
         if (
             not found
             or distance_squared < best_distance_squared
-            or (
-                distance_squared == best_distance_squared
-                and along < best_along
-            )
+            or (distance_squared == best_distance_squared and along < best_along)
         ):
             found = True
             best_distance_squared = distance_squared
@@ -419,6 +449,7 @@ def install_stock_road_micro_bend_policy() -> None:
     _ORIGINAL_BEAM = _sharp._beam_stock_path
     _cached_micro_beam_stock_path.cache_clear()
     _segment_table.cache_clear()
+    _p._PolylineMeasure.point = _fast_measure_point
     _sharp._nearest_forward = _fast_nearest_forward
     _p._PolylineMeasure.chord_endpoint = _fast_chord_endpoint
     _p._PolylineMeasure.maximum_chord_deviation = _fast_maximum_chord_deviation
