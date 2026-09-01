@@ -1,18 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Fit stock bends with connector-locked curves before faceted straights.
+"""Own connector-locked stock curve usage after the sharp-turn search.
 
-The old policy first asked the ordinary greedy stock fitter to build a road,
-then tried to promote a bad short-straight result into curves. That made short
-straight facets the architecture and native curves the repair. Reference WRPs do
-the opposite: they choose stock-compatible curvature first and only fall back to
-facets when no safe stock curve chain can represent the source.
+Two installation moments share one curve-selection responsibility:
 
-For the verified Resistance ``sil/asf/kos/ces`` families this wrapper therefore
-attempts the exact stock-curve beam *before* calling the inherited
-straight-oriented fitter. The candidate may smooth hard OSM vertices inside the
-bounded stock-road corridor, but every sample is also checked against the
-source-backed obstacle index when that context is active. Generated gravel and
-custom road families remain untouched.
+* the micro-bend phase lets the shared beam retain one native ten-degree curve
+  for gentle 7.5-15 degree bends that the stricter sharp-turn search rejects;
+* the later curve-usage phase tries a connector-locked stock curve chain before
+  the inherited straight-oriented fitter for broader coherent bends.
+
+Both phases use the same verified ``sil/asf/kos/ces`` stock assets, the same
+0.60 m source corridor, and the same sharp-turn geometry helpers. They remain
+separate installers because the exact S-bend phase runs between them. Generated
+gravel and custom road families remain outside this owner.
 """
 from __future__ import annotations
 
@@ -22,6 +21,19 @@ from . import playability as _p
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_relaxation_policy as _relax
 from . import stock_road_sharp_turn_policy as _sharp
+
+MINIMUM_MICRO_BEND_TOTAL_TURN_DEGREES = 7.5
+MAXIMUM_MICRO_BEND_TOTAL_TURN_DEGREES = 15.0
+MAXIMUM_MICRO_BEND_BOUNDARY_TANGENT_ERROR_DEGREES = 4.5
+MAXIMUM_MICRO_EXACT_RUN_METRES = 120.0
+MINIMUM_MICRO_EXACT_ENDPOINT_COVER_METRES = 0.40
+MINIMUM_MICRO_EXACT_SHORT_STRAIGHTS = 2
+MINIMUM_MICRO_EXACT_CURVES = 1
+MAXIMUM_MICRO_EXACT_EXTRA_PIECES = 2
+MAXIMUM_MICRO_VERTEX_TURN_DEGREES = 18.0
+MINIMUM_MICRO_VERTEX_TURN_DEGREES = 0.45
+MAXIMUM_MICRO_REVERSE_NOISE_DEGREES = 1.0
+MICRO_EXACT_END_PROGRESS_TOLERANCE_METRES = 0.20
 
 _MAXIMUM_PROMOTION_RUN_METRES = 180.0
 _MINIMUM_TOTAL_TURN_DEGREES = 15.0
@@ -34,8 +46,178 @@ _MINIMUM_SIGNIFICANT_VERTEX_TURN_DEGREES = 0.45
 _MAXIMUM_LOCAL_VERTEX_TURN_DEGREES = 35.0
 _MAXIMUM_REVERSE_NOISE_DEGREES = 1.50
 
+_ORIGINAL_BEAM = None
+_ORIGINAL_MICRO_CHAIN = None
+_MICRO_INSTALLED = False
 _ORIGINAL_CHAIN = None
 _INSTALLED = False
+
+
+def _micro_beam_stock_path(
+    source_points,
+    turn_sign: int,
+    entry_heading: float,
+    exit_heading: float,
+    pieces,
+):
+    """Try the strict shared beam first, then allow one native curve section."""
+
+    if _ORIGINAL_BEAM is None:
+        raise RuntimeError("stock road micro-bend policy is not installed")
+
+    result = _ORIGINAL_BEAM(
+        source_points,
+        turn_sign,
+        entry_heading,
+        exit_heading,
+        pieces,
+    )
+    if result is not None:
+        return result
+    return _ORIGINAL_BEAM(
+        source_points,
+        turn_sign,
+        entry_heading,
+        exit_heading,
+        pieces,
+        minimum_curve_count=1,
+        maximum_boundary_tangent_error_degrees=(
+            MAXIMUM_MICRO_BEND_BOUNDARY_TANGENT_ERROR_DEGREES
+        ),
+    )
+
+
+def _dominant_micro_bend(points):
+    """Return one coherent gentle bend sign and accumulated source turn."""
+
+    return _sharp._coherent_bend(
+        points,
+        minimum_vertex_turn_degrees=MINIMUM_MICRO_VERTEX_TURN_DEGREES,
+        maximum_vertex_turn_degrees=MAXIMUM_MICRO_VERTEX_TURN_DEGREES,
+        maximum_reverse_noise_degrees=MAXIMUM_MICRO_REVERSE_NOISE_DEGREES,
+        minimum_total_turn_degrees=MINIMUM_MICRO_BEND_TOTAL_TURN_DEGREES,
+        maximum_total_turn_degrees=MAXIMUM_MICRO_BEND_TOTAL_TURN_DEGREES,
+        minimum_significant_vertices=2,
+    )
+
+
+def _micro_exact_chain(
+    measure,
+    pieces,
+    *,
+    start_distance,
+    preferred_end_distance,
+    minimum_end_distance,
+    maximum_end_distance,
+):
+    """Retain a one-curve beam result instead of greedily re-faceting it."""
+
+    if _ORIGINAL_MICRO_CHAIN is None:
+        raise RuntimeError("stock road micro-bend exact policy is not installed")
+
+    baseline = _ORIGINAL_MICRO_CHAIN(
+        measure,
+        pieces,
+        start_distance=start_distance,
+        preferred_end_distance=preferred_end_distance,
+        minimum_end_distance=minimum_end_distance,
+        maximum_end_distance=maximum_end_distance,
+    )
+    if _sharp._curveable_family(pieces) is None:
+        return baseline
+    if measure.total > MAXIMUM_MICRO_EXACT_RUN_METRES:
+        return baseline
+    if _sharp._baseline_short_straights(baseline) < MINIMUM_MICRO_EXACT_SHORT_STRAIGHTS:
+        return baseline
+
+    bend = _dominant_micro_bend(measure.points)
+    if bend is None:
+        return baseline
+    turn_sign, _total_turn = bend
+
+    start_cover = float(start_distance)
+    end_cover = float(measure.total) - float(preferred_end_distance)
+    if (
+        start_cover < MINIMUM_MICRO_EXACT_ENDPOINT_COVER_METRES
+        or end_cover < MINIMUM_MICRO_EXACT_ENDPOINT_COVER_METRES
+    ):
+        return baseline
+
+    start = max(0.0, min(float(measure.total), float(start_distance)))
+    end = max(start, min(float(measure.total), float(preferred_end_distance)))
+    if end <= start + 1.0:
+        return baseline
+
+    source_points, entry_heading, source_exit_heading = _sharp._measure_slice(
+        measure, start, end
+    )
+    stock_exit_heading = _sharp._quantised_stock_exit_heading(
+        entry_heading,
+        source_exit_heading,
+        turn_sign,
+    )
+    locked_path = _micro_beam_stock_path(
+        source_points,
+        turn_sign,
+        entry_heading,
+        stock_exit_heading,
+        pieces,
+    )
+    if locked_path is None:
+        return baseline
+
+    exact = _sharp._recover_exact_actions(locked_path, pieces, turn_sign)
+    if exact is None:
+        return baseline
+    exact_curves = _sharp._curve_count(exact)
+    baseline_curves = _sharp._curve_count(baseline)
+    if exact_curves < MINIMUM_MICRO_EXACT_CURVES or exact_curves <= baseline_curves:
+        return baseline
+    if len(exact) > len(baseline) + MAXIMUM_MICRO_EXACT_EXTRA_PIECES:
+        return baseline
+
+    end_projection = _sharp._nearest_forward(
+        measure,
+        locked_path[-1],
+        start,
+        float(maximum_end_distance),
+    )
+    if end_projection is None:
+        return baseline
+    if end_projection[0] > _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES + 1.0e-9:
+        return baseline
+    if (
+        end_projection[1]
+        < float(minimum_end_distance) - MICRO_EXACT_END_PROGRESS_TOLERANCE_METRES
+    ):
+        return baseline
+
+    start_point = measure.point(start)[:2]
+    if math.dist(locked_path[0], start_point) > 1.0e-6:
+        return baseline
+
+    for previous, current in zip(exact, exact[1:]):
+        if math.dist(previous[2], current[1]) > 1.0e-4:
+            return baseline
+    return exact
+
+
+def install_stock_road_micro_bend_policy() -> None:
+    """Install one-curve recovery before the exact S-bend phase."""
+
+    global _ORIGINAL_BEAM, _ORIGINAL_MICRO_CHAIN, _MICRO_INSTALLED
+    if _MICRO_INSTALLED:
+        return
+
+    _sharp._MINIMUM_SUSTAINED_TOTAL_TURN_DEGREES = (
+        MINIMUM_MICRO_BEND_TOTAL_TURN_DEGREES
+    )
+    _ORIGINAL_BEAM = _sharp._beam_stock_path
+    _sharp._beam_stock_path = _micro_beam_stock_path
+
+    _ORIGINAL_MICRO_CHAIN = _p._stock_piece_chain
+    _p._stock_piece_chain = _micro_exact_chain
+    _MICRO_INSTALLED = True
 
 
 def _dominant_bend(points) -> tuple[int, float] | None:
@@ -146,9 +328,6 @@ def _curve_promotion_chain(
         turn_sign,
     )
 
-    # At an exposed feature end, do not trade an interior miter for a visibly
-    # rotated final connector. Junction cover may absorb the normal ten-degree
-    # stock quantisation at trimmed boundaries.
     end_cover = float(measure.total) - float(preferred_end_distance)
     if (
         end_cover < _MINIMUM_ENDPOINT_COVER_METRES
@@ -171,9 +350,6 @@ def _curve_promotion_chain(
     if exact is None or _sharp._curve_count(exact) < _MINIMUM_PROMOTED_CURVES:
         return _fallback_chain(measure, pieces, **fallback_args)
 
-    # Connector continuity, not comparison with an already-bad baseline, is the
-    # acceptance criterion. This is the architectural inversion the reference
-    # WRPs pointed to.
     if _maximum_internal_tangent_error(exact, turn_sign) > 1.0e-4:
         return _fallback_chain(measure, pieces, **fallback_args)
 
@@ -197,11 +373,13 @@ def _curve_promotion_chain(
 
 
 def install_stock_road_curve_usage_policy() -> None:
-    """Install exact curve-first stock fitting after the narrow bend policies."""
+    """Install broader curve-first fitting after the exact S-bend phase."""
 
     global _ORIGINAL_CHAIN, _INSTALLED
     if _INSTALLED:
         return
+    if not _MICRO_INSTALLED:
+        raise RuntimeError("stock road micro-bend policy must install first")
     _ORIGINAL_CHAIN = _p._stock_piece_chain
     _p._stock_piece_chain = _curve_promotion_chain
     _INSTALLED = True
