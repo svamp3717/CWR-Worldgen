@@ -7,7 +7,6 @@ from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_model_geometry as _geometry
 from cwr_worldgen import stock_road_s_bend_exact_policy as _s_exact
 from cwr_worldgen import stock_road_s_bend_policy as _s_bend
-from cwr_worldgen import stock_road_sharp_exact_policy as _exact
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 
 
@@ -101,7 +100,7 @@ def test_lundby20_production_s_bend_retains_exact_stock_actions_and_handedness()
     pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
     start, preferred, _minimum, _maximum = _production_window(measure)
 
-    source_points, entry_heading, source_exit_heading = _exact._measure_slice(
+    source_points, entry_heading, source_exit_heading = _sharp._measure_slice(
         measure, start, preferred
     )
     stock_exit_heading = _s_exact._quantised_exit_heading(
