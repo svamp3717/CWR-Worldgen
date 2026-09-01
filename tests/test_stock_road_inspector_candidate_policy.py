@@ -11,7 +11,7 @@ from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_junction_policy as _junction
 from cwr_worldgen import stock_road_local_fit_policy as _local_fit
 from cwr_worldgen import stock_road_model_geometry as _geometry
-from cwr_worldgen import stock_road_native_junction_ownership_policy as _ownership
+from cwr_worldgen import stock_road_paved_junction_completion_policy as _ownership
 from cwr_worldgen import stock_road_paved_junction_completion_policy as _paved
 from cwr_worldgen import stock_road_surface_overlap_policy as _surface
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
