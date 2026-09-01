@@ -15,6 +15,7 @@ gravel and custom road families remain outside this owner.
 """
 from __future__ import annotations
 
+import bisect
 from functools import lru_cache
 import math
 
@@ -47,10 +48,12 @@ _MINIMUM_SIGNIFICANT_VERTEX_TURN_DEGREES = 0.45
 _MAXIMUM_LOCAL_VERTEX_TURN_DEGREES = 35.0
 _MAXIMUM_REVERSE_NOISE_DEGREES = 1.50
 _BEAM_CACHE_SIZE = 512
+_SEGMENT_TABLE_CACHE_SIZE = 1024
 _STRICT_MINIMUM_CURVES = 2
 _STOCK_CURVE_TURN_DEGREES = 10.0
 
 _ORIGINAL_BEAM = None
+_ORIGINAL_NEAREST_FORWARD = _sharp._nearest_forward
 _ORIGINAL_MICRO_CHAIN = None
 _MICRO_INSTALLED = False
 _ORIGINAL_CHAIN = None
@@ -68,6 +71,89 @@ def _canonical_pieces(pieces) -> tuple[_p._RoadPiece, ...]:
         )
         for piece in pieces
     )
+
+
+@lru_cache(maxsize=_SEGMENT_TABLE_CACHE_SIZE)
+def _segment_table(measure) -> tuple[tuple[float, ...], ...]:
+    """Precompute immutable source-segment geometry reused by every beam state."""
+
+    result = []
+    for index, (start, end) in enumerate(zip(measure.points, measure.points[1:])):
+        segment_start = float(measure.cumulative[index])
+        segment_end = float(measure.cumulative[index + 1])
+        ax, az = float(start[0]), float(start[1])
+        dx = float(end[0]) - ax
+        dz = float(end[1]) - az
+        length = max(1.0e-9, segment_end - segment_start)
+        denominator = dx * dx + dz * dz
+        result.append(
+            (
+                segment_start,
+                segment_end,
+                ax,
+                az,
+                dx,
+                dz,
+                length,
+                denominator,
+            )
+        )
+    return tuple(result)
+
+
+def _fast_nearest_forward(measure, point, minimum_distance: float, maximum_distance: float):
+    """Equivalent bounded projection using cached segments and one final square root."""
+
+    minimum = max(0.0, min(float(measure.total), float(minimum_distance)))
+    maximum = max(minimum, min(float(measure.total), float(maximum_distance)))
+    first = max(0, bisect.bisect_right(measure.cumulative, minimum) - 2)
+    last = min(
+        len(measure.points) - 2,
+        bisect.bisect_right(measure.cumulative, maximum),
+    )
+    px, pz = float(point[0]), float(point[1])
+    best_distance_squared = math.inf
+    best_along = math.inf
+    found = False
+
+    for index in range(first, last + 1):
+        (
+            segment_start,
+            segment_end,
+            ax,
+            az,
+            dx,
+            dz,
+            length,
+            denominator,
+        ) = _segment_table(measure)[index]
+        low = max(minimum, segment_start)
+        high = min(maximum, segment_end)
+        if high < low - 1.0e-9 or denominator <= 1.0e-12:
+            continue
+        low_t = max(0.0, min(1.0, (low - segment_start) / length))
+        high_t = max(low_t, min(1.0, (high - segment_start) / length))
+        t = ((px - ax) * dx + (pz - az) * dz) / denominator
+        t = max(low_t, min(high_t, t))
+        offset_x = px - (ax + dx * t)
+        offset_z = pz - (az + dz * t)
+        distance_squared = offset_x * offset_x + offset_z * offset_z
+        along = segment_start + length * t
+        if (
+            not found
+            or distance_squared < best_distance_squared
+            or (
+                distance_squared == best_distance_squared
+                and along < best_along
+            )
+        ):
+            found = True
+            best_distance_squared = distance_squared
+            best_along = along
+
+    if not found:
+        return None
+    return math.sqrt(best_distance_squared), best_along
 
 
 def _strict_beam_can_reach_boundary(entry_heading: float, exit_heading: float) -> bool:
@@ -260,6 +346,8 @@ def install_stock_road_micro_bend_policy() -> None:
 
     _ORIGINAL_BEAM = _sharp._beam_stock_path
     _cached_micro_beam_stock_path.cache_clear()
+    _segment_table.cache_clear()
+    _sharp._nearest_forward = _fast_nearest_forward
     _sharp._beam_stock_path = _micro_beam_stock_path
 
     _ORIGINAL_MICRO_CHAIN = _p._stock_piece_chain
