@@ -33,6 +33,7 @@ from . import generator as _generator
 from . import playability as _p
 from . import stock_road_connector_policy as _connector
 from . import stock_road_geometry_policy as _geometry
+from . import stock_road_model_geometry as _model_geometry
 from . import stock_road_relaxation_policy as _relax
 
 MAXIMUM_PRE_FIT_DEVIATION_METRES = 0.50
@@ -80,7 +81,7 @@ def _compatibility_key(feature, spec):
     # Only the verified stock straight families participate. Generated gravel has
     # its own flexible curve family, and custom models must not silently inherit
     # assumptions measured from the CWA O\Road assets.
-    stock = _geometry.stock_straight_match(str(model))
+    stock = _model_geometry.stock_straight_match(str(model))
     if stock is None:
         return None
     width = float(_p.road_width_metres(feature.tags))
