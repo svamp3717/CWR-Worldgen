@@ -6,7 +6,7 @@ import math
 from cwr_worldgen import stock_road_geometry_policy as _geometry
 from cwr_worldgen import stock_road_path_conditioning_policy as _path
 from cwr_worldgen import stock_road_relaxation_policy as _relax
-from cwr_worldgen.stock_road_curve_preservation_policy import (
+from cwr_worldgen.stock_road_path_conditioning_policy import (
     _candidate_is_sustained_curve,
 )
 
