@@ -54,6 +54,8 @@ _STOCK_CURVE_TURN_DEGREES = 10.0
 
 _ORIGINAL_BEAM = None
 _ORIGINAL_NEAREST_FORWARD = _sharp._nearest_forward
+_ORIGINAL_CHORD_ENDPOINT = _p._PolylineMeasure.chord_endpoint
+_ORIGINAL_MAXIMUM_CHORD_DEVIATION = _p._PolylineMeasure.maximum_chord_deviation
 _ORIGINAL_MICRO_CHAIN = None
 _MICRO_INSTALLED = False
 _ORIGINAL_CHAIN = None
@@ -115,6 +117,7 @@ def _fast_nearest_forward(measure, point, minimum_distance: float, maximum_dista
     best_distance_squared = math.inf
     best_along = math.inf
     found = False
+    segments = _segment_table(measure)
 
     for index in range(first, last + 1):
         (
@@ -126,7 +129,7 @@ def _fast_nearest_forward(measure, point, minimum_distance: float, maximum_dista
             dz,
             length,
             denominator,
-        ) = _segment_table(measure)[index]
+        ) = segments[index]
         low = max(minimum, segment_start)
         high = min(maximum, segment_end)
         if high < low - 1.0e-9 or denominator <= 1.0e-12:
@@ -154,6 +157,75 @@ def _fast_nearest_forward(measure, point, minimum_distance: float, maximum_dista
     if not found:
         return None
     return math.sqrt(best_distance_squared), best_along
+
+
+def _fast_chord_endpoint(
+    measure,
+    start_distance: float,
+    chord_length: float,
+    maximum_distance: float,
+):
+    """Find the original chord endpoint without scanning unrelated breakpoints."""
+
+    if chord_length <= 0.0 or maximum_distance <= start_distance + 1.0e-9:
+        return None
+    origin_x, origin_z, _ = measure.point(start_distance)
+    first = bisect.bisect_right(measure.cumulative, start_distance + 1.0e-9)
+    last = bisect.bisect_left(measure.cumulative, maximum_distance - 1.0e-9)
+    breakpoints = [start_distance]
+    breakpoints.extend(measure.cumulative[first:last])
+    breakpoints.append(maximum_distance)
+    radius_squared = chord_length * chord_length
+
+    for distance0, distance1 in zip(breakpoints, breakpoints[1:]):
+        ax, az, _ = measure.point(distance0)
+        bx, bz, _ = measure.point(distance1)
+        vx, vz = bx - ax, bz - az
+        denominator = vx * vx + vz * vz
+        if denominator <= 1.0e-12:
+            continue
+        ox, oz = ax - origin_x, az - origin_z
+        linear = 2.0 * (ox * vx + oz * vz)
+        constant = ox * ox + oz * oz - radius_squared
+        discriminant = linear * linear - 4.0 * denominator * constant
+        if discriminant < -1.0e-8:
+            continue
+        root = math.sqrt(max(0.0, discriminant))
+        fractions = sorted(
+            (
+                (-linear - root) / (2.0 * denominator),
+                (-linear + root) / (2.0 * denominator),
+            )
+        )
+        for fraction in fractions:
+            if fraction < -1.0e-8 or fraction > 1.0 + 1.0e-8:
+                continue
+            fraction = max(0.0, min(1.0, fraction))
+            distance = distance0 + (distance1 - distance0) * fraction
+            if distance <= start_distance + 1.0e-7:
+                continue
+            x = ax + vx * fraction
+            z = az + vz * fraction
+            heading = math.degrees(math.atan2(x - origin_x, z - origin_z)) % 360.0
+            return distance, x, z, heading
+    return None
+
+
+def _fast_maximum_chord_deviation(
+    measure,
+    start_distance: float,
+    end_distance: float,
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> float:
+    """Test only source breakpoints that lie inside the candidate chord span."""
+
+    first = bisect.bisect_right(measure.cumulative, start_distance + 1.0e-7)
+    last = bisect.bisect_left(measure.cumulative, end_distance - 1.0e-7)
+    maximum = 0.0
+    for point in measure.points[first:last]:
+        maximum = max(maximum, _p._point_segment_distance(point, start, end))
+    return maximum
 
 
 def _strict_beam_can_reach_boundary(entry_heading: float, exit_heading: float) -> bool:
@@ -348,6 +420,8 @@ def install_stock_road_micro_bend_policy() -> None:
     _cached_micro_beam_stock_path.cache_clear()
     _segment_table.cache_clear()
     _sharp._nearest_forward = _fast_nearest_forward
+    _p._PolylineMeasure.chord_endpoint = _fast_chord_endpoint
+    _p._PolylineMeasure.maximum_chord_deviation = _fast_maximum_chord_deviation
     _sharp._beam_stock_path = _micro_beam_stock_path
 
     _ORIGINAL_MICRO_CHAIN = _p._stock_piece_chain
