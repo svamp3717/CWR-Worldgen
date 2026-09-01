@@ -9,30 +9,41 @@ itself. That makes pre-fitting conditioning even more valuable:
 * compatible OSM way fragments are merged into one continuous path where their
   endpoints have one unambiguous same-type continuation;
 * sub-metre source noise may be simplified before curve selection rather than
-  being serialized as several rotated 6.25 m straight pieces; and
-* real junctions, surface transitions and sharp corners remain explicit anchors.
+  being serialized as several rotated 6.25 m straight pieces;
+* real junctions, surface transitions and sharp corners remain explicit anchors;
+  and
+* repeated same-direction curvature is preserved so later stock-curve selection
+  still sees the source arc instead of an over-simplified endpoint chord.
 
 The simplifier never moves an endpoint and only replaces an existing sub-path by
 its chord. The chord must remain within a 0.50 m source corridor and pass the
 same source-backed obstacle check used by the later road-relaxation policy.
+Curve preservation extends that contract across the relaxation and geometry
+micro-bend passes as well, keeping centerline conditioning in one owner.
 """
 from __future__ import annotations
 
 from contextvars import ContextVar
 from dataclasses import replace
+from functools import lru_cache
 import math
 from typing import Sequence
 
 from . import generator as _generator
 from . import playability as _p
 from . import stock_road_connector_policy as _connector
-from . import stock_road_model_geometry as _geometry
+from . import stock_road_geometry_policy as _geometry
 from . import stock_road_relaxation_policy as _relax
 
 MAXIMUM_PRE_FIT_DEVIATION_METRES = 0.50
 MAXIMUM_PRE_FIT_CHORD_METRES = 100.0
 MAXIMUM_PRE_FIT_LOOKAHEAD_POINTS = 48
 SHARP_CORNER_ANCHOR_DEGREES = 45.0
+
+MINIMUM_CURVE_SIGNAL_TANGENT_CHANGE_DEGREES = 4.0
+MINIMUM_CURVE_SIGNAL_DEVIATION_METRES = 0.12
+MINIMUM_LOCAL_SUSTAINED_TURN_DEGREES = 0.75
+CURVE_SIDE_EPSILON_METRES = 0.03
 
 _SPEC: ContextVar[object | None] = ContextVar(
     "cwr_stock_road_path_conditioning_spec", default=None
@@ -42,7 +53,11 @@ _SUPPRESSED_BY_CONDITIONING: ContextVar[int] = ContextVar(
 )
 _ORIGINAL_FIT = None
 _ORIGINAL_PROJECTED_ROADS = None
+_ORIGINAL_RELAXABLE = None
+_ORIGINAL_PATH_SHORTCUT_SAFE = None
+_ORIGINAL_SIMPLIFY_MICRO_BENDS = None
 _INSTALLED = False
+_CURVE_PRESERVATION_INSTALLED = False
 
 
 def _normalised_special(tags) -> tuple[str, str, str, str]:
@@ -224,6 +239,171 @@ def _shortcut_is_safe(points, first, last, protected, obstacles) -> bool:
     return _relax._shortcut_clear(obstacles, start, end)
 
 
+def _heading(start, end) -> float:
+    return math.degrees(math.atan2(end[0] - start[0], end[1] - start[1])) % 360.0
+
+
+def _signed_turn(previous, point, following) -> float:
+    return _p._signed_heading_delta(
+        _heading(previous, point),
+        _heading(point, following),
+    )
+
+
+def _signed_chord_offset(point, start, end) -> float:
+    dx, dz = end[0] - start[0], end[1] - start[1]
+    length = math.hypot(dx, dz)
+    if length <= 1.0e-9:
+        return 0.0
+    return (dx * (point[1] - start[1]) - dz * (point[0] - start[0])) / length
+
+
+def _candidate_is_sustained_curve(points, first: int, last: int) -> bool:
+    """Return whether a shortcut would erase coherent repeated curvature."""
+
+    if last <= first + 2:
+        # One interior vertex is a dog-leg/corner, not a sustained curve run.
+        return False
+    start, end = points[first], points[last]
+    if math.dist(start, end) <= 0.10:
+        return False
+
+    entry = _heading(points[first], points[first + 1])
+    exit_heading = _heading(points[last - 1], points[last])
+    tangent_change = _p._heading_difference(entry, exit_heading)
+    if tangent_change < MINIMUM_CURVE_SIGNAL_TANGENT_CHANGE_DEGREES:
+        return False
+
+    positive = False
+    negative = False
+    maximum_offset = 0.0
+    for index in range(first + 1, last):
+        offset = _signed_chord_offset(points[index], start, end)
+        maximum_offset = max(maximum_offset, abs(offset))
+        if offset > CURVE_SIDE_EPSILON_METRES:
+            positive = True
+        elif offset < -CURVE_SIDE_EPSILON_METRES:
+            negative = True
+        if positive and negative:
+            return False
+    if maximum_offset < MINIMUM_CURVE_SIGNAL_DEVIATION_METRES:
+        return False
+
+    turn_sign = 0
+    significant_turns = 0
+    for index in range(first + 1, last):
+        turn = _signed_turn(points[index - 1], points[index], points[index + 1])
+        if abs(turn) < MINIMUM_LOCAL_SUSTAINED_TURN_DEGREES:
+            continue
+        sign = 1 if turn > 0.0 else -1
+        if turn_sign and sign != turn_sign:
+            return False
+        turn_sign = sign
+        significant_turns += 1
+    return significant_turns >= 2
+
+
+@lru_cache(maxsize=2048)
+def _curve_anchor_points_cached(
+    cleaned: tuple[tuple[float, float], ...],
+) -> frozenset[tuple[float, float]]:
+    """Return repeated-curvature samples once per immutable source polyline."""
+
+    if len(cleaned) < 4:
+        return frozenset()
+    turns = [0.0] * len(cleaned)
+    for index in range(1, len(cleaned) - 1):
+        turns[index] = _signed_turn(cleaned[index - 1], cleaned[index], cleaned[index + 1])
+
+    protected: set[tuple[float, float]] = set()
+    for index in range(1, len(cleaned) - 1):
+        current = turns[index]
+        if abs(current) < MINIMUM_LOCAL_SUSTAINED_TURN_DEGREES:
+            continue
+        sign = 1 if current > 0.0 else -1
+        neighbours = []
+        if index > 1:
+            neighbours.append(turns[index - 1])
+        if index + 1 < len(cleaned) - 1:
+            neighbours.append(turns[index + 1])
+        if any(
+            abs(value) >= MINIMUM_LOCAL_SUSTAINED_TURN_DEGREES
+            and (1 if value > 0.0 else -1) == sign
+            for value in neighbours
+        ):
+            protected.add(cleaned[index])
+    return frozenset(protected)
+
+
+def _curve_anchor_points(points) -> frozenset[tuple[float, float]]:
+    """Protect samples participating in consecutive same-direction turns."""
+
+    cleaned = tuple(_p._clean_road_points(points))
+    return _curve_anchor_points_cached(cleaned)
+
+
+def _candidate_contains_curve_anchor(points, first: int, last: int) -> bool:
+    if last <= first + 1:
+        return False
+    anchors = _curve_anchor_points(points)
+    return any(points[index] in anchors for index in range(first + 1, last))
+
+
+def _curve_preserving_candidate_is_relaxable(points, first: int, last: int, obstacles) -> bool:
+    if _ORIGINAL_RELAXABLE is None:
+        raise RuntimeError("stock road curve preservation is not installed")
+    if (
+        _candidate_is_sustained_curve(points, first, last)
+        or _candidate_contains_curve_anchor(points, first, last)
+    ):
+        return False
+    return _ORIGINAL_RELAXABLE(points, first, last, obstacles)
+
+
+def _curve_preserving_shortcut_is_safe(points, first, last, protected, obstacles) -> bool:
+    if _ORIGINAL_PATH_SHORTCUT_SAFE is None:
+        raise RuntimeError("stock road curve preservation is not installed")
+    if (
+        _candidate_is_sustained_curve(points, first, last)
+        or _candidate_contains_curve_anchor(points, first, last)
+    ):
+        return False
+    return _ORIGINAL_PATH_SHORTCUT_SAFE(points, first, last, protected, obstacles)
+
+
+def _curve_preserving_simplify_micro_bends(points):
+    """Run the existing micro-bend cleanup without collapsing smooth curve runs."""
+
+    if _ORIGINAL_SIMPLIFY_MICRO_BENDS is None:
+        raise RuntimeError("stock road curve preservation is not installed")
+    protected = _curve_anchor_points(points)
+    if not protected:
+        return _ORIGINAL_SIMPLIFY_MICRO_BENDS(points)
+
+    result = list(_p._clean_road_points(points))
+    changed = True
+    while changed and len(result) >= 3:
+        changed = False
+        simplified = [result[0]]
+        for index in range(1, len(result) - 1):
+            previous, point, following = result[index - 1], result[index], result[index + 1]
+            if point in protected:
+                simplified.append(point)
+                continue
+            turn = _p._turn_degrees(previous, point, following)
+            deviation = _geometry._point_segment_distance(point, previous, following)
+            if (
+                turn <= _geometry._MAXIMUM_MICRO_BEND_DEGREES
+                and deviation <= _geometry._MAXIMUM_MICRO_BEND_DEVIATION_METRES
+            ):
+                changed = True
+                continue
+            simplified.append(point)
+        simplified.append(result[-1])
+        result = simplified
+    return tuple(result)
+
+
 def _simplify_path(points_raw, protected, obstacles):
     """Greedily replace harmless source noise by the longest safe chord."""
 
@@ -338,3 +518,24 @@ def install_stock_road_path_conditioning_policy() -> None:
     _p.fit_road_objects = _fit
     _generator.fit_road_objects = _fit
     _INSTALLED = True
+
+
+def install_stock_road_curve_preservation_policy() -> None:
+    """Install sustained-curve guards as the second half of path conditioning."""
+
+    global _ORIGINAL_RELAXABLE, _ORIGINAL_PATH_SHORTCUT_SAFE
+    global _ORIGINAL_SIMPLIFY_MICRO_BENDS, _CURVE_PRESERVATION_INSTALLED
+    global _shortcut_is_safe
+    if _CURVE_PRESERVATION_INSTALLED:
+        return
+    if not _INSTALLED or not _relax._INSTALLED or not _geometry._INSTALLED:
+        raise RuntimeError("stock road conditioning dependencies must install first")
+
+    _ORIGINAL_RELAXABLE = _relax._candidate_is_relaxable
+    _ORIGINAL_PATH_SHORTCUT_SAFE = _shortcut_is_safe
+    _ORIGINAL_SIMPLIFY_MICRO_BENDS = _geometry._simplify_micro_bends
+
+    _relax._candidate_is_relaxable = _curve_preserving_candidate_is_relaxable
+    _shortcut_is_safe = _curve_preserving_shortcut_is_safe
+    _geometry._simplify_micro_bends = _curve_preserving_simplify_micro_bends
+    _CURVE_PRESERVATION_INSTALLED = True
