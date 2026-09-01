@@ -5,7 +5,7 @@ from cwr_worldgen.asset_mapping import default_osm_asset_mapping
 from cwr_worldgen.normalization import _MAJOR_HIGHWAYS as NORMALIZED_MAJOR_HIGHWAYS
 from cwr_worldgen.osm import road_is_dirt, road_is_supported, road_model_for_tags
 from cwr_worldgen.road_pipeline import ROAD_PIPELINE_STAGES
-from cwr_worldgen import stock_road_s_bend_exact_policy as _s_exact
+from cwr_worldgen import stock_road_s_bend_policy as _s_bend
 
 
 def test_road_pipeline_has_one_unique_declared_order():
@@ -43,7 +43,7 @@ def test_cancelled_or_folded_layers_are_not_in_production_pipeline():
 
 
 def test_folded_long_s_bend_limit_is_preserved():
-    assert _s_exact.MAXIMUM_EXACT_S_BEND_RUN_METRES >= 1200.0
+    assert _s_bend.MAXIMUM_EXACT_S_BEND_RUN_METRES >= 1200.0
 
 
 def _raceway_spec():
