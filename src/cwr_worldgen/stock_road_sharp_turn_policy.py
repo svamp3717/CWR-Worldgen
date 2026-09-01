@@ -104,6 +104,49 @@ def _signed_turn(previous, point, following) -> float:
     )
 
 
+def _coherent_bend(
+    points,
+    *,
+    minimum_vertex_turn_degrees: float,
+    maximum_vertex_turn_degrees: float,
+    maximum_reverse_noise_degrees: float,
+    minimum_total_turn_degrees: float,
+    maximum_total_turn_degrees: float,
+    minimum_significant_vertices: int = 1,
+) -> tuple[int, float] | None:
+    """Return one coherent bend sign using caller-owned acceptance thresholds."""
+
+    sign = 0
+    count = 0
+    total = 0.0
+    for previous, point, following in zip(points, points[1:], points[2:]):
+        turn = float(_signed_turn(previous, point, following))
+        magnitude = abs(turn)
+        if magnitude < float(minimum_vertex_turn_degrees):
+            continue
+        if magnitude > float(maximum_vertex_turn_degrees):
+            return None
+        current_sign = 1 if turn > 0.0 else -1
+        if sign and current_sign != sign:
+            if magnitude <= float(maximum_reverse_noise_degrees):
+                continue
+            return None
+        if not sign:
+            sign = current_sign
+        total += turn
+        count += 1
+
+    magnitude = abs(total)
+    if (
+        sign == 0
+        or count < int(minimum_significant_vertices)
+        or magnitude < float(minimum_total_turn_degrees)
+        or magnitude > float(maximum_total_turn_degrees)
+    ):
+        return None
+    return sign, magnitude
+
+
 def _sustained_sharp_turn_spans(points):
     """Return sustained same-direction bend spans, splitting long quiet gaps."""
 
