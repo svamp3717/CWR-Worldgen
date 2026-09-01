@@ -36,6 +36,7 @@ INSPECTOR_CURVE_MAXIMUM_TURN_DEGREES = 70.0
 INSPECTOR_CURVE_TRANSITION_ERROR_DEGREES = 0.75
 INSPECTOR_CURVE_MAXIMUM_EXTRA_PIECES = 2
 MAXIMUM_NATIVE_THROUGH_TURN_DEGREES = 1.25
+MAXIMUM_STOCK_CES_NATIVE_THROUGH_TURN_DEGREES = 3.0
 _FINAL_NATIVE_FOOTPRINT_MARGIN_METRES = 0.20
 
 JUNCTION_TONGUE_MINIMUM_GAP_METRES = 0.35
@@ -518,7 +519,7 @@ def _add_low_fallback_tongues(report, dataset, projection, elevations, spec):
     required = len(report.objects) + len(additions)
     if (
         required > int(spec.max_road_objects)
-        and not bool(getattr(spec, "advisory_object_limits", False))
+        and not bool(getattr(spec, "advisory_object_limits", False)
     ):
         raise ValueError(
             "road object budget is too small after Inspector junction tongues: "
@@ -560,12 +561,13 @@ def _native_owner_realign(report, dataset, projection, elevations, spec):
         node, incidents = junction
         if not _eligible_paved_or_mixed_incidents(incidents):
             continue
+        connector_tolerance = _native_connector_tolerance_degrees(incidents)
 
         signature = _paved._native_signature(str(current.model_path))
         if signature is not None:
             family, local_headings = signature
             error = _paved._connector_error_degrees(current, incidents, local_headings)
-            if error <= INSPECTOR_NATIVE_CONNECTOR_TOLERANCE_DEGREES + 1.0e-9:
+            if error <= connector_tolerance + 1.0e-9:
                 continue
             replacement = _paved._low_stock_cap(
                 current, node, incidents, family, elevations, spec
@@ -587,7 +589,7 @@ def _native_owner_realign(report, dataset, projection, elevations, spec):
             native is not None
             and native.cap_family == family
             and float(native.maximum_heading_error_degrees)
-            <= INSPECTOR_NATIVE_CONNECTOR_TOLERANCE_DEGREES + 1.0e-9
+            <= connector_tolerance + 1.0e-9
         ):
             aligned_cap = replace(current, x=float(node[0]), z=float(node[1]))
             objects[index] = _measured_native_junction_object(
@@ -688,6 +690,12 @@ def _stock_ces_mixed_t(incidents) -> bool:
     return not generated_gravel
 
 
+def _native_connector_tolerance_degrees(incidents) -> float:
+    if _stock_ces_mixed_t(incidents):
+        return float(_mixed.MAXIMUM_STOCK_CES_NATIVE_HEADING_ERROR_DEGREES)
+    return INSPECTOR_NATIVE_CONNECTOR_TOLERANCE_DEGREES
+
+
 def _planning_tolerance_degrees(incidents) -> float | None:
     if _local._same_family_paved_t(incidents):
         return float(_local.MAXIMUM_PAVED_T_HEADING_ERROR_DEGREES)
@@ -708,8 +716,21 @@ def _measured_native_t_with_limit(incidents, limit_degrees: float):
 def _candidate_native_t_dispatch(incidents):
     if _contains_generated_gravel(incidents):
         return _mixed._native_t_junction(incidents)
-    if _through_turn_degrees(incidents) > MAXIMUM_NATIVE_THROUGH_TURN_DEGREES:
+
+    stock_ces_mixed = _stock_ces_mixed_t(incidents)
+    through_turn_limit = (
+        MAXIMUM_STOCK_CES_NATIVE_THROUGH_TURN_DEGREES
+        if stock_ces_mixed
+        else MAXIMUM_NATIVE_THROUGH_TURN_DEGREES
+    )
+    if _through_turn_degrees(incidents) > through_turn_limit:
         return None
+
+    if stock_ces_mixed:
+        return _measured_native_t_with_limit(
+            incidents,
+            _mixed.MAXIMUM_STOCK_CES_NATIVE_HEADING_ERROR_DEGREES,
+        )
     if _local._PLANNING_RELAXED_JUNCTION.get():
         limit = _planning_tolerance_degrees(incidents)
         if limit is not None:
