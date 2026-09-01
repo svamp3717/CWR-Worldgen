@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_curve_usage_policy as _usage
+from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 
 
 def _pieces():
@@ -68,6 +69,27 @@ def _measure():
     return _p._PolylineMeasure.create(
         ((0.0, 0.0), (0.0, 12.0), (4.0, 24.0), (12.0, 31.0), (18.0, 42.0))
     )
+
+
+def test_fast_advance_matches_original_stock_action_geometry():
+    actions = (
+        _sharp._Action(_p._RoadPiece(r"o\road\sil12.p3d", 12.5, 12), 0, None),
+        _sharp._Action(_p._RoadPiece(r"o\road\sil10 100.p3d", 17.4311485495, 10), 1, 100.0),
+        _sharp._Action(_p._RoadPiece(r"o\road\sil10 50.p3d", 8.7155742748, 10), -1, 50.0),
+    )
+    _usage._local_action_samples.cache_clear()
+    for heading in (0.0, 37.0, 123.5, 270.0):
+        state = _sharp._State(0.0, 14.0, -8.0, heading, 0.0, (), 0)
+        for action in actions:
+            expected_end, expected_heading, expected_samples = _usage._ORIGINAL_ADVANCE(state, action)
+            actual_end, actual_heading, actual_samples = _usage._fast_advance(state, action)
+            assert math.isclose(actual_heading, expected_heading, rel_tol=0.0, abs_tol=1.0e-12)
+            for observed, wanted in zip(actual_end, expected_end):
+                assert math.isclose(observed, wanted, rel_tol=0.0, abs_tol=1.0e-10)
+            assert len(actual_samples) == len(expected_samples)
+            for observed_point, wanted_point in zip(actual_samples, expected_samples):
+                for observed, wanted in zip(observed_point, wanted_point):
+                    assert math.isclose(observed, wanted, rel_tol=0.0, abs_tol=1.0e-10)
 
 
 def test_fast_measure_point_matches_original_interpolation_and_extrapolation():
