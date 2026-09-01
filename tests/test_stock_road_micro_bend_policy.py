@@ -5,7 +5,6 @@ import math
 from types import SimpleNamespace
 
 from cwr_worldgen import stock_road_micro_bend_policy as _micro
-from cwr_worldgen import stock_road_sharp_exact_policy as _exact
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 from cwr_worldgen import stock_road_visual_finish_policy as _finish
 
@@ -58,9 +57,9 @@ def test_micro_bend_beam_accepts_one_native_curve():
 
     locked = _sharp._beam_stock_path(source, 1, 0.0, 10.0, pieces)
     assert locked is not None
-    exact = _exact._recover_exact_actions(locked, pieces, 1)
+    exact = _sharp._recover_exact_actions(locked, pieces, 1)
     assert exact is not None
-    assert _exact._curve_count(exact) == 1
+    assert _sharp._curve_count(exact) == 1
     assert exact[0][0].model_path.casefold() == r"o\road\sil10 100.p3d"
 
 
