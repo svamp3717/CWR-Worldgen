@@ -193,7 +193,7 @@ def test_lundby_locked_path_stays_inside_narrow_source_corridor():
     assert maximum <= _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES + 1.0e-9
 
 
-def test_sharp_turn_policy_does_not_apply_to_ces_family():
+def test_sharp_turn_policy_uses_stock_ces_curve_assets_without_reclassifying_paved():
     points = _lundby_sharp_turn_points()
     measure = _p._PolylineMeasure.create(_p._rounded_road_run(points))
     pieces = _p.road_model_variants(r"o\road\ces25.p3d", 25.0)
@@ -201,4 +201,11 @@ def test_sharp_turn_policy_does_not_apply_to_ces_family():
     baseline = _fit(_sharp._ORIGINAL_CHAIN, measure, pieces)
     fitted = _fit(_p._stock_piece_chain, measure, pieces)
 
-    assert fitted == baseline
+    assert _sharp._paved_family(pieces) is None
+    family = _sharp._curveable_family(pieces)
+    assert family is not None
+    assert family[1] == "ces"
+    assert _curve_count(fitted) >= 2, [piece.model_path for piece, _a, _b in fitted]
+    assert _curve_count(fitted) > _curve_count(baseline)
+    for previous, current in zip(fitted, fitted[1:]):
+        assert math.dist(previous[2], current[1]) <= 1.0e-4
