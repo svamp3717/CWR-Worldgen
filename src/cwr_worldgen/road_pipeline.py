@@ -90,8 +90,14 @@ _LATE_STAGE_SPECS: tuple[StageSpec, ...] = (
     ("emitted_seam", "stock_road_emitted_seam_policy", "install_stock_road_emitted_seam_policy"),
     ("paved_wedge_geometry", "stock_road_paved_wedge_policy", "install_stock_road_paved_wedge_policy"),
     ("stock_paved_only", "stock_road_stock_assets_only_policy", "install_stock_road_stock_paved_only_policy"),
-    ("inspector_candidates", "stock_road_inspector_candidate_policy", "install_stock_road_inspector_candidate_policy"),
-    ("candidate_enforcement", "stock_road_inspector_candidate_policy", "install_stock_road_inspector_candidate_selector_policy"),
+    (
+        "inspector_candidates",
+        "stock_road_inspector_candidate_policy",
+        (
+            "install_stock_road_inspector_candidate_policy",
+            "install_stock_road_inspector_candidate_selector_policy",
+        ),
+    ),
     ("paved_junction_completion", "stock_road_paved_junction_completion_policy", "install_stock_road_paved_junction_completion_policy"),
     ("native_junction_ownership", "stock_road_native_junction_ownership_policy", "install_stock_road_native_junction_ownership_policy"),
     ("candidate_final_enforcement", "stock_road_inspector_candidate_policy", "install_stock_road_inspector_candidate_final_policy"),
