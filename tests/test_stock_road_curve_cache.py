@@ -64,10 +64,14 @@ def test_reachable_twenty_degree_target_still_tries_strict_beam_first(monkeypatc
     assert calls == [{}]
 
 
-def test_fast_nearest_forward_matches_original_bounded_projection():
-    measure = _p._PolylineMeasure.create(
+def _measure():
+    return _p._PolylineMeasure.create(
         ((0.0, 0.0), (0.0, 12.0), (4.0, 24.0), (12.0, 31.0), (18.0, 42.0))
     )
+
+
+def test_fast_nearest_forward_matches_original_bounded_projection():
+    measure = _measure()
     cases = (
         ((1.0, 4.0), 0.0, measure.total),
         ((3.0, 18.0), 5.0, 28.0),
@@ -83,3 +87,43 @@ def test_fast_nearest_forward_matches_original_bounded_projection():
         assert expected is not None and actual is not None
         assert math.isclose(actual[0], expected[0], rel_tol=0.0, abs_tol=1.0e-12)
         assert math.isclose(actual[1], expected[1], rel_tol=0.0, abs_tol=1.0e-12)
+
+
+def test_fast_chord_endpoint_matches_original_without_full_vertex_scan():
+    measure = _measure()
+    cases = (
+        (0.0, 6.25, measure.total),
+        (3.0, 12.5, 30.0),
+        (11.0, 6.25, 25.0),
+        (20.0, 12.5, measure.total),
+    )
+
+    for start, chord, maximum in cases:
+        expected = _usage._ORIGINAL_CHORD_ENDPOINT(measure, start, chord, maximum)
+        actual = _usage._fast_chord_endpoint(measure, start, chord, maximum)
+        assert (expected is None) == (actual is None)
+        if expected is None:
+            continue
+        assert actual is not None
+        for observed, wanted in zip(actual, expected):
+            assert math.isclose(observed, wanted, rel_tol=0.0, abs_tol=1.0e-12)
+
+
+def test_fast_maximum_chord_deviation_matches_original_span_filtering():
+    measure = _measure()
+    cases = (
+        (0.0, 20.0),
+        (5.0, 30.0),
+        (12.0, measure.total),
+    )
+
+    for start_distance, end_distance in cases:
+        start = measure.point(start_distance)[:2]
+        end = measure.point(end_distance)[:2]
+        expected = _usage._ORIGINAL_MAXIMUM_CHORD_DEVIATION(
+            measure, start_distance, end_distance, start, end
+        )
+        actual = _usage._fast_maximum_chord_deviation(
+            measure, start_distance, end_distance, start, end
+        )
+        assert math.isclose(actual, expected, rel_tol=0.0, abs_tol=1.0e-12)
