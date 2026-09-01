@@ -6,11 +6,11 @@ keeps the legacy six-metre straight cap, and the core fitter may orient that
 symmetric cap along the side arm. In game that produces a conspicuous rectangular
 road slab across the main carriageway even though the logical road graph is valid.
 
-Align every legacy stock cap with the most nearly continuous incident pair. For
-ordinary bends, keep native curves intact and cover only real two-piece seams
-whose rendered tangent axes differ enough to expose a narrow grass wedge. The
-cover is an ordinary same-family six-metre straight placed slightly below both
-road pieces, so it cannot replace the visible curve or create a new raised slab.
+Align every legacy stock cap with the most nearly continuous incident pair. When
+that through pair itself turns at the node, keep the fitted approaches as the
+visible surface and sink the rigid straight cap into a low central-fill role.
+For ordinary bends, keep native curves intact and cover only real two-piece seams
+whose rendered tangent axes differ enough to expose a narrow grass wedge.
 """
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ from . import stock_road_local_fit_policy as _local_fit
 from . import stock_road_model_geometry as _model_geometry
 
 LEGACY_CAP_AXIS_TOLERANCE_DEGREES = 0.50
+MINIMUM_TURNING_LEGACY_CAP_TURN_DEGREES = 1.0
+TURNING_LEGACY_CAP_VERTICAL_BIAS_METRES = -0.010
 MINIMUM_CURVE_SEAM_TANGENT_ERROR_DEGREES = 0.20
 MAXIMUM_CURVE_SEAM_TANGENT_ERROR_DEGREES = 3.25
 CURVE_SEAM_ENDPOINT_TOLERANCE_METRES = 0.03
@@ -115,6 +117,19 @@ def _junction_incident_map(dataset, projection, spec):
     return result
 
 
+def _dominant_through_geometry(incidents) -> tuple[float, float] | None:
+    """Return the dominant through heading and its deviation from straight."""
+
+    pair = _junction._dominant_pair(incidents)
+    if pair is None:
+        return None
+    first, second = pair
+    first_heading = _junction._heading(incidents[first].direction)
+    second_heading = _junction._heading(incidents[second].direction)
+    separation = _junction._angular_distance(first_heading, second_heading)
+    return first_heading, abs(180.0 - separation)
+
+
 def _dominant_cap_heading(incidents, family: str) -> float | None:
     """Return the continuous same-family axis a legacy cap should follow."""
 
@@ -153,13 +168,30 @@ def _realign_legacy_caps(report, dataset, projection, elevations, spec):
         node, incidents = junction
         if math.dist((float(old.x), float(old.z)), node) > 0.25:
             continue
+
+        through = _dominant_through_geometry(incidents)
+        if through is None:
+            continue
+        through_heading, through_turn = through
+        turning_through = (
+            through_turn >= MINIMUM_TURNING_LEGACY_CAP_TURN_DEGREES
+        )
+
         heading = _dominant_cap_heading(incidents, family)
         if heading is None:
-            continue
-        if (
+            if not turning_through:
+                continue
+            # A mixed-surface turning node can still use its legacy cap as low
+            # central fill. Once sunk, following the dominant through direction
+            # gives that fill the most useful coverage without making it the
+            # visible surface of either incident family.
+            heading = through_heading
+
+        axis_aligned = (
             _axis_heading_difference(float(old.heading_degrees), heading)
             <= LEGACY_CAP_AXIS_TOLERANCE_DEGREES
-        ):
+        )
+        if axis_aligned and not turning_through:
             continue
 
         half = _model_geometry.STOCK_STRAIGHT_LENGTHS_METRES[6] * 0.5
@@ -173,6 +205,11 @@ def _realign_legacy_caps(report, dataset, projection, elevations, spec):
             node[0] + direction[0] * half,
             node[1] + direction[1] * half,
         )
+        vertical_bias = (
+            TURNING_LEGACY_CAP_VERTICAL_BIAS_METRES
+            if turning_through
+            else _local_fit.LEGACY_CAP_VERTICAL_BIAS_METRES
+        )
         fixed = _p._road_object_on_slope(
             int(old.object_id),
             old.model_path,
@@ -181,8 +218,7 @@ def _realign_legacy_caps(report, dataset, projection, elevations, spec):
             elevations,
             spec,
             vertical_offset=(
-                _p._STOCK_ROAD_VERTICAL_OFFSET_METRES
-                + _local_fit.LEGACY_CAP_VERTICAL_BIAS_METRES
+                _p._STOCK_ROAD_VERTICAL_OFFSET_METRES + vertical_bias
             ),
         )
         objects[index] = replace(
