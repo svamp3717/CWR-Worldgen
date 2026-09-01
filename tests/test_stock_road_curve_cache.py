@@ -70,6 +70,15 @@ def _measure():
     )
 
 
+def test_fast_measure_point_matches_original_interpolation_and_extrapolation():
+    measure = _measure()
+    for distance in (-4.0, 0.0, 4.5, 12.0, 17.5, 29.0, measure.total, measure.total + 6.0):
+        expected = _usage._ORIGINAL_POINT(measure, distance)
+        actual = _usage._fast_measure_point(measure, distance)
+        for observed, wanted in zip(actual, expected):
+            assert math.isclose(observed, wanted, rel_tol=0.0, abs_tol=1.0e-12)
+
+
 def test_fast_nearest_forward_matches_original_bounded_projection():
     measure = _measure()
     cases = (
