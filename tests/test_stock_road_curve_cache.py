@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import math
 from types import SimpleNamespace
 
+from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_curve_usage_policy as _usage
 
 
@@ -60,3 +62,24 @@ def test_reachable_twenty_degree_target_still_tries_strict_beam_first(monkeypatc
 
     assert result == expected
     assert calls == [{}]
+
+
+def test_fast_nearest_forward_matches_original_bounded_projection():
+    measure = _p._PolylineMeasure.create(
+        ((0.0, 0.0), (0.0, 12.0), (4.0, 24.0), (12.0, 31.0), (18.0, 42.0))
+    )
+    cases = (
+        ((1.0, 4.0), 0.0, measure.total),
+        ((3.0, 18.0), 5.0, 28.0),
+        ((10.0, 27.0), 15.0, 35.0),
+        ((19.0, 44.0), 30.0, measure.total),
+        ((-2.0, -1.0), 0.0, 8.0),
+    )
+
+    _usage._segment_table.cache_clear()
+    for point, minimum, maximum in cases:
+        expected = _usage._ORIGINAL_NEAREST_FORWARD(measure, point, minimum, maximum)
+        actual = _usage._fast_nearest_forward(measure, point, minimum, maximum)
+        assert expected is not None and actual is not None
+        assert math.isclose(actual[0], expected[0], rel_tol=0.0, abs_tol=1.0e-12)
+        assert math.isclose(actual[1], expected[1], rel_tol=0.0, abs_tol=1.0e-12)
