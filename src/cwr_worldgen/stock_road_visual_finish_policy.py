@@ -63,6 +63,18 @@ def _axis_heading_difference(first: float, second: float) -> float:
     return min(difference, abs(180.0 - difference))
 
 
+def _average_axis_heading(first: float, second: float) -> float:
+    """Average two undirected headings without a 0/180-degree discontinuity."""
+
+    first_radians = math.radians(float(first) * 2.0)
+    second_radians = math.radians(float(second) * 2.0)
+    sine = math.sin(first_radians) + math.sin(second_radians)
+    cosine = math.cos(first_radians) + math.cos(second_radians)
+    if abs(sine) <= 1.0e-12 and abs(cosine) <= 1.0e-12:
+        return float(first) % 180.0
+    return (math.degrees(math.atan2(sine, cosine)) * 0.5) % 180.0
+
+
 def _junction_incident_map(dataset, projection, spec):
     raw = {}
     positions = {}
