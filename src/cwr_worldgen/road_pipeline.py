@@ -58,9 +58,14 @@ _BASE_STAGE_SPECS: tuple[StageSpec, ...] = (
     ("stock_connector", "stock_road_connector_policy", "install_stock_road_connector_policy"),
     ("stock_surface_overlap", "stock_road_surface_overlap_policy", "install_stock_road_surface_overlap_policy"),
     ("stock_relaxation", "stock_road_relaxation_policy", "install_stock_road_relaxation_policy"),
-    ("stock_local_fit", "stock_road_local_fit_policy", "install_stock_road_local_fit_policy"),
-    ("stock_path_conditioning", "stock_road_path_conditioning_policy", "install_stock_road_path_conditioning_policy"),
-    ("stock_curve_preservation", "stock_road_curve_preservation_policy", "install_stock_road_curve_preservation_policy"),
+    (
+        "stock_path_conditioning",
+        "stock_road_path_conditioning_policy",
+        (
+            "install_stock_road_path_conditioning_policy",
+            "install_stock_road_curve_preservation_policy",
+        ),
+    ),
 )
 
 _LATE_STAGE_SPECS: tuple[StageSpec, ...] = (
