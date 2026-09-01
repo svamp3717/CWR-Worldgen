@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Final visual safeguards for stock-road junction caps.
+"""Final visual safeguards and shared stock-road seam geometry.
 
 CWA renders the whole road strip, not just its centreline. An unsupported skew T
 keeps the legacy six-metre straight cap, and the core fitter may orient that
@@ -9,14 +9,14 @@ road slab across the main carriageway even though the logical road graph is vali
 Align every legacy stock cap with the most nearly continuous incident pair. When
 that through pair itself turns at the node, keep the fitted approaches as the
 visible surface and sink the rigid straight cap into a low central-fill role.
-Curve continuity is owned later by ``stock_road_final_continuity_policy`` and
-physical final-WRP seam repair by ``stock_road_emitted_seam_policy``. The old
-intermediate curve-underlay planner was disabled in production and is therefore
-retained only as a no-op hook for composition compatibility.
+
+The seam endpoint records below are shared geometry consumed by the later
+emitted-seam and paved-wedge owners. The old intermediate curve-underlay planner
+is retired; its hook remains a no-op only to preserve composition compatibility.
 """
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import math
 
 from . import generator as _generator
@@ -34,6 +34,26 @@ MAXIMUM_CURVE_SEAM_TANGENT_ERROR_DEGREES = 3.25
 
 _ORIGINAL_FIT = None
 _INSTALLED = False
+
+
+@dataclass(frozen=True, slots=True)
+class _SeamEndpoint:
+    point: tuple[float, float]
+    object_id: int
+    endpoint_index: int
+    family: str
+    tangent_axis_degrees: float
+    is_curve: bool
+    outward_heading_degrees: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class _SeamCoverPlan:
+    model_path: str
+    centre: tuple[float, float]
+    tangent_axis_degrees: float
+    turn_degrees: float = 0.0
+    outer_miter_apex: tuple[float, float] | None = None
 
 
 def _axis_heading_difference(first: float, second: float) -> float:
@@ -199,6 +219,94 @@ def _realign_legacy_caps(report, dataset, projection, elevations, spec):
         changed = True
 
     return replace(report, objects=tuple(objects)) if changed else report
+
+
+def _stock_piece_geometry(model_path: str):
+    straight = _model_geometry.stock_straight_match(model_path)
+    if straight is not None:
+        return (
+            straight.group("family").casefold(),
+            _model_geometry.STOCK_STRAIGHT_LENGTHS_METRES[int(straight.group("length"))],
+            False,
+        )
+    curve = _model_geometry.stock_curve_connectors(model_path)
+    if curve is not None:
+        return curve.family, curve.chord_length_metres, True
+    return None
+
+
+def _curve_endpoint_tangent_axis(obj, point: tuple[float, float]) -> float:
+    """Return the rendered curve tangent axis at one physical connector."""
+
+    geometry = _model_geometry.stock_curve_connectors(obj.model_path)
+    if geometry is None:
+        return float(obj.heading_degrees) % 180.0
+
+    origin = (float(obj.x), float(obj.z))
+    begin = _model_geometry.transform_local(
+        geometry.begin, origin, float(obj.heading_degrees)
+    )
+    end = _model_geometry.transform_local(
+        geometry.end, origin, float(obj.heading_degrees)
+    )
+    local_turn = (
+        0.0
+        if math.dist(point, begin) <= math.dist(point, end)
+        else _model_geometry.STOCK_CURVE_ANGLE_DEGREES
+    )
+    return (float(obj.heading_degrees) + local_turn) % 180.0
+
+
+def _seam_endpoints(report) -> tuple[_SeamEndpoint, ...]:
+    """Return stock-piece endpoints for later final seam/wedge owners."""
+
+    cap_count = min(
+        int(getattr(report, "junction_cap_objects", 0)), len(report.objects)
+    )
+    endpoints = []
+    for obj in report.objects[cap_count:]:
+        geometry = _stock_piece_geometry(str(obj.model_path))
+        if geometry is None:
+            continue
+        family, length, is_curve = geometry
+        axis = _p._model_axis(obj, float(length))
+        for endpoint_index, point in enumerate(axis):
+            point = (float(point[0]), float(point[1]))
+            tangent = (
+                _curve_endpoint_tangent_axis(obj, point)
+                if is_curve
+                else float(obj.heading_degrees) % 180.0
+            )
+            other = axis[1 - endpoint_index]
+            outward_vector = (
+                float(point[0]) - float(other[0]),
+                float(point[1]) - float(other[1]),
+            )
+            tangent_unit = (
+                math.sin(math.radians(tangent)),
+                math.cos(math.radians(tangent)),
+            )
+            outward_heading = (
+                tangent
+                if (
+                    outward_vector[0] * tangent_unit[0]
+                    + outward_vector[1] * tangent_unit[1]
+                )
+                >= 0.0
+                else tangent + 180.0
+            )
+            endpoints.append(
+                _SeamEndpoint(
+                    point=point,
+                    object_id=int(obj.object_id),
+                    endpoint_index=endpoint_index,
+                    family=family,
+                    tangent_axis_degrees=tangent,
+                    is_curve=is_curve,
+                    outward_heading_degrees=outward_heading % 360.0,
+                )
+            )
+    return tuple(endpoints)
 
 
 def _apply_curve_seam_covers(report, elevations, spec):
