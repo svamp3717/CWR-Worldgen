@@ -33,7 +33,6 @@ from . import stock_road_native_junction_ownership_policy as _ownership
 from . import stock_road_paved_junction_completion_policy as _paved
 from . import stock_road_sharp_exact_policy as _exact
 from . import stock_road_sharp_turn_policy as _sharp
-from . import stock_road_stock_paved_only_policy as _stock_only
 from . import stock_road_surface_overlap_policy as _surface
 from . import stock_road_visual_finish_policy as _finish
 
@@ -683,8 +682,6 @@ def install_stock_road_inspector_candidate_policy() -> None:
     global _ORIGINAL_PIECE_CHAIN, _INSTALLED
     if _INSTALLED:
         return
-    if not _stock_only._INSTALLED:
-        raise RuntimeError("stock paved-only policy must install first")
 
     # Candidate: exact stock curve/curve-chain before any visual overlap fallback.
     # Keep junction-endpoint enforcement outermost; insert this final exact search
@@ -701,7 +698,10 @@ def install_stock_road_inspector_candidate_policy() -> None:
     _ORIGINAL_OWNER_REALIGN = _ownership._native_owner_realign
     _ownership._native_owner_realign = _native_owner_realign
 
-    _ORIGINAL_STOCK_APPLY = _stock_only._apply_stock_emitted_seam_covers
+    # The preceding stock-paved output stage owns this hook. Capture the active
+    # hook directly instead of importing its owner, which keeps candidate
+    # selection independent from final serialization policy.
+    _ORIGINAL_STOCK_APPLY = _emitted._apply_emitted_seam_covers
     _emitted._apply_emitted_seam_covers = _apply_wedge_candidates
 
     _INSTALLED = True
