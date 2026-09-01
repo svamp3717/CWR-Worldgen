@@ -8,7 +8,6 @@ from cwr_worldgen import stock_road_curve_usage_policy as _usage
 from cwr_worldgen import stock_road_inspector_candidate_policy as _candidate
 from cwr_worldgen import stock_road_junction_policy as _junction
 from cwr_worldgen import stock_road_model_geometry as _geometry
-from cwr_worldgen import stock_road_sharp_exact_policy as _exact
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 
 
@@ -99,12 +98,12 @@ def test_curve_first_success_does_not_call_straight_baseline(monkeypatch):
     monkeypatch.setattr(_usage, "_ORIGINAL_CHAIN", baseline_should_not_run)
     monkeypatch.setattr(_usage, "_dominant_bend", lambda points: (1, 20.0))
     monkeypatch.setattr(
-        _exact,
+        _sharp,
         "_measure_slice",
         lambda current, start, end: (current.points, 0.0, 20.0),
     )
     monkeypatch.setattr(
-        _exact,
+        _sharp,
         "_quantised_stock_exit_heading",
         lambda entry, source_exit, sign: 20.0,
     )
@@ -117,8 +116,8 @@ def test_curve_first_success_does_not_call_straight_baseline(monkeypatch):
         ),
     )
     monkeypatch.setattr(_usage, "_path_is_obstacle_safe", lambda path: True)
-    monkeypatch.setattr(_exact, "_recover_exact_actions", lambda path, available, sign: exact)
-    monkeypatch.setattr(_exact, "_curve_count", lambda fitted: 1)
+    monkeypatch.setattr(_sharp, "_recover_exact_actions", lambda path, available, sign: exact)
+    monkeypatch.setattr(_sharp, "_curve_count", lambda fitted: 1)
     monkeypatch.setattr(_usage, "_maximum_internal_tangent_error", lambda fitted, sign: 0.0)
     monkeypatch.setattr(
         _sharp,
