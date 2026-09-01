@@ -9,10 +9,10 @@ stub underneath the junction.
 
 Keep the two historical installation stages because timing still matters. The
 first reference stage establishes paved transform and curve-promotion semantics.
-The later Kodiak stage widens the exact-curve window, applies the measured paved
-junction overlap, and owns the one remaining reference-based fitter cleanup.
-Keeping both installers in this owner removes another file boundary without
-changing their position in the production pipeline.
+The later Kodiak stage widens the exact-curve window and applies the measured
+paved junction overlap. Native-node stub cleanup is exposed here but executed by
+the final stock-output owner, avoiding another fitter wrapper around the same
+report.
 
 Stock ``ces`` and generated gravel retain their terrain-following 3D connector
 policy and are deliberately excluded from the paved reference refinements.
@@ -23,7 +23,6 @@ from dataclasses import replace
 import math
 import re
 
-from . import generator as _generator
 from . import playability as _p
 from . import road_quality_policy as _quality
 from . import stock_road_3d_connector_policy as _three_d
@@ -63,7 +62,6 @@ KODIAK_NATIVE_CONNECTOR_MARGIN_METRES = 0.75
 _ORIGINAL_ROAD_OBJECT_ON_SLOPE = None
 _ORIGINAL_USES_MEASURED_RIGID_CONNECTORS = None
 _ORIGINAL_QUALITY_WINDOW = None
-_ORIGINAL_FIT = None
 _INSTALLED = False
 _KODIAK_INSTALLED = False
 
@@ -291,28 +289,6 @@ def _drop_native_node_stubs(report, dataset, projection, spec):
     )
 
 
-def _fit(
-    dataset,
-    projection,
-    elevations,
-    spec,
-    *,
-    starting_id: int = 1,
-    progress_callback=None,
-):
-    if _ORIGINAL_FIT is None:
-        raise RuntimeError("Kodiak reference stage is not installed")
-    report = _ORIGINAL_FIT(
-        dataset,
-        projection,
-        elevations,
-        spec,
-        starting_id=starting_id,
-        progress_callback=progress_callback,
-    )
-    return _drop_native_node_stubs(report, dataset, projection, spec)
-
-
 def install_stock_road_reference_wrp_policy() -> None:
     """Install the baseline paved placement rules learned from the reference WRP."""
 
@@ -354,16 +330,15 @@ def install_stock_road_reference_wrp_policy() -> None:
 
 
 def install_stock_road_kodiak_reference_policy() -> None:
-    """Install the later Kodiak curve, junction-overlap and cleanup refinements."""
+    """Install the later Kodiak curve and junction-overlap refinements."""
 
-    global _ORIGINAL_QUALITY_WINDOW, _ORIGINAL_FIT, _KODIAK_INSTALLED
+    global _ORIGINAL_QUALITY_WINDOW, _KODIAK_INSTALLED
     if _KODIAK_INSTALLED:
         return
     if not _INSTALLED:
         raise RuntimeError("reference WRP paved-road stage must install first")
 
     _ORIGINAL_QUALITY_WINDOW = _quality._quality_window
-    _ORIGINAL_FIT = _p.fit_road_objects
 
     _curve_usage._MINIMUM_BASELINE_SHORT_STRAIGHTS = 0
     _curve_usage._MINIMUM_TOTAL_TURN_DEGREES = (
@@ -379,7 +354,4 @@ def install_stock_road_kodiak_reference_policy() -> None:
     _sharp._MAXIMUM_SPAN_METRES = KODIAK_MAXIMUM_CURVE_PROMOTION_RUN_METRES
 
     _quality._quality_window = _quality_window
-
-    _p.fit_road_objects = _fit
-    _generator.fit_road_objects = _fit
     _KODIAK_INSTALLED = True
