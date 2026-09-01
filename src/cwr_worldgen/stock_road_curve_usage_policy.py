@@ -23,13 +23,9 @@ from . import stock_road_relaxation_policy as _relax
 from . import stock_road_sharp_turn_policy as _sharp
 
 _MAXIMUM_PROMOTION_RUN_METRES = 180.0
-# Retained for compatibility with older tests/importers; primary fitting no
-# longer requires a bad baseline before it is willing to use curves.
-_MINIMUM_BASELINE_SHORT_STRAIGHTS = 0
 _MINIMUM_TOTAL_TURN_DEGREES = 15.0
 _MAXIMUM_TOTAL_TURN_DEGREES = 70.0
 _MINIMUM_PROMOTED_CURVES = 1
-_MAXIMUM_EXTRA_PIECES = 5
 _MINIMUM_ENDPOINT_COVER_METRES = 0.40
 _MAXIMUM_UNCOVERED_EXIT_ERROR_DEGREES = 1.50
 _END_PROGRESS_TOLERANCE_METRES = 0.20
