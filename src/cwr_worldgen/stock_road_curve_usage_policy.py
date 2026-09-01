@@ -55,13 +55,26 @@ _ORIGINAL_CHAIN = None
 _INSTALLED = False
 
 
+def _canonical_pieces(pieces) -> tuple[_p._RoadPiece, ...]:
+    """Return hashable beam inputs using only geometry-relevant piece fields."""
+
+    return tuple(
+        _p._RoadPiece(
+            str(piece.model_path),
+            float(piece.length_metres),
+            int(piece.nominal_length),
+        )
+        for piece in pieces
+    )
+
+
 @lru_cache(maxsize=_BEAM_CACHE_SIZE)
 def _cached_micro_beam_stock_path(
     source_points: tuple[tuple[float, float], ...],
     turn_sign: int,
     entry_heading: float,
     exit_heading: float,
-    pieces: tuple,
+    pieces: tuple[_p._RoadPiece, ...],
 ):
     """Memoize the pure stock beam shared by several late curve policies."""
 
@@ -100,11 +113,11 @@ def _micro_beam_stock_path(
     """Try the strict shared beam first, then allow one native curve section."""
 
     return _cached_micro_beam_stock_path(
-        tuple(source_points),
+        tuple((float(point[0]), float(point[1])) for point in source_points),
         int(turn_sign),
         float(entry_heading),
         float(exit_heading),
-        tuple(pieces),
+        _canonical_pieces(pieces),
     )
 
 
