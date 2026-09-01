@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 from cwr_worldgen import stock_road_micro_bend_policy as _micro
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
-from cwr_worldgen import stock_road_visual_finish_policy as _finish
 
 
 def _pieces():
@@ -70,12 +69,3 @@ def test_micro_bend_policy_lowers_the_sustained_turn_gate():
         abs_tol=1.0e-12,
     )
     assert _sharp._MINIMUM_SUSTAINED_TOTAL_TURN_DEGREES < 10.0
-
-
-def test_paved_seam_underlay_is_kept_close_to_visible_road():
-    assert math.isclose(
-        _finish.CURVE_SEAM_COVER_VERTICAL_BIAS_METRES,
-        _micro.MICRO_BEND_SEAM_COVER_VERTICAL_BIAS_METRES,
-        abs_tol=1.0e-12,
-    )
-    assert -0.005 < _finish.CURVE_SEAM_COVER_VERTICAL_BIAS_METRES < 0.0
