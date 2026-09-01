@@ -81,7 +81,7 @@ _LATE_STAGE_SPECS: tuple[StageSpec, ...] = (
     ),
     ("s_bend", "stock_road_s_bend_policy", "install_stock_road_s_bend_policy"),
     ("micro_bend", "stock_road_micro_bend_policy", "install_stock_road_micro_bend_policy"),
-    ("s_bend_exact", "stock_road_s_bend_exact_policy", "install_stock_road_s_bend_exact_policy"),
+    ("s_bend_exact", "stock_road_s_bend_policy", "install_stock_road_s_bend_exact_policy"),
     ("curve_usage", "stock_road_curve_usage_policy", "install_stock_road_curve_usage_policy"),
     ("junction_endpoint", "stock_road_junction_policy", "install_stock_road_junction_endpoint_policy"),
     ("visual_finish", "stock_road_visual_finish_policy", "install_stock_road_visual_finish_policy"),
@@ -155,7 +155,7 @@ def _install_late_stages() -> None:
     for stage, module_name, installer_spec in _LATE_STAGE_SPECS:
         _invoke(stage, modules[module_name], installer_spec)
         if stage == "s_bend_exact":
-            modules["stock_road_s_bend_exact_policy"].MAXIMUM_EXACT_S_BEND_RUN_METRES = (
+            modules["stock_road_s_bend_policy"].MAXIMUM_EXACT_S_BEND_RUN_METRES = (
                 _MAXIMUM_EXACT_S_BEND_RUN_METRES
             )
         elif stage == "final_continuity":
