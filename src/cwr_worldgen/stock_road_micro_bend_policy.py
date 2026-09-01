@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Use native stock curves for gentle paved bends that still facet into straights.
+"""Use native stock curves for gentle bends that still facet into straights.
 
 The first sharp-turn beam deliberately required at least two native ten-degree
 curves. That leaves a common real-world case untreated: a gentle 8-15 degree
-bend spread across several ``sil6``/``sil12`` pieces. Each individual miter is
-small, but the outside road edge still opens enough for terrain to show through.
+bend spread across several short stock pieces. Each individual miter is small,
+but the outside road edge still opens enough for terrain to show through.
 
 Keep the existing sharp-turn search as first refusal. If it cannot finish, run
 the same connector-locked search with a one-curve minimum and a slightly wider
@@ -13,11 +13,12 @@ all internal stock connectors remain exact.
 
 A second detail matters in production: returning only the beam's sampled
 centreline lets the ordinary greedy fitter turn that native curve straight back
-into short rectangular facets. For short junction-to-junction paved runs with
+into short rectangular facets. For short junction-to-junction stock runs with
 a coherent 7.5-15 degree bend, retain the beam's recovered stock-piece actions
 directly. Boundary quantisation remains under the existing endpoint covers;
 interior seams stay connector- and tangent-locked. No overlap/underlay road
-objects are introduced by this policy.
+objects are introduced by this policy. Generated gravel remains outside this
+stock-asset path.
 """
 from __future__ import annotations
 
@@ -57,7 +58,7 @@ def _one_curve_beam_stock_path(
     measure = _p._PolylineMeasure.create(source_points)
     if measure.total <= 1.0:
         return None
-    family = _sharp._paved_family(pieces)
+    family = _sharp._curveable_family(pieces)
     if family is None:
         return None
     prefix, family_name = family
@@ -296,7 +297,7 @@ def _micro_exact_chain(
         minimum_end_distance=minimum_end_distance,
         maximum_end_distance=maximum_end_distance,
     )
-    if _sharp._paved_family(pieces) is None:
+    if _sharp._curveable_family(pieces) is None:
         return baseline
     if measure.total > MAXIMUM_MICRO_EXACT_RUN_METRES:
         return baseline
@@ -378,7 +379,7 @@ def _micro_exact_chain(
 
 
 def install_stock_road_micro_bend_policy() -> None:
-    """Allow and preserve one-curve paved bend repairs."""
+    """Allow and preserve one-curve stock bend repairs."""
 
     global _ORIGINAL_BEAM, _ORIGINAL_CHAIN, _INSTALLED
     if _INSTALLED:
