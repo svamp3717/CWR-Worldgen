@@ -27,6 +27,7 @@ _TRACE_ENV = "CWR_WORLDGEN_ROAD_PIPELINE_TRACE"
 _PACKAGE = __package__ or "cwr_worldgen"
 _MAXIMUM_PAVED_SEAM_TANGENT_ERROR_DEGREES = 8.0
 _MAXIMUM_EXACT_S_BEND_RUN_METRES = 1200.0
+_DEFERRED_LATE_IMPORTS = ("stock_road_stock_assets_only_policy",)
 
 _BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("road_quality", "road_quality_policy", "install_road_quality_policy"),
@@ -64,7 +65,7 @@ _LATE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("turning_t_fallback", "stock_road_skew_orientation_policy", "install_stock_road_turning_t_fallback_policy"),
     ("emitted_seam", "stock_road_emitted_seam_policy", "install_stock_road_emitted_seam_policy"),
     ("paved_wedge_geometry", "stock_road_paved_wedge_policy", "install_stock_road_paved_wedge_policy"),
-    ("stock_paved_only", "stock_road_stock_paved_only_policy", "install_stock_road_stock_paved_only_policy"),
+    ("stock_paved_only", "stock_road_stock_assets_only_policy", "install_stock_road_stock_paved_only_policy"),
     ("inspector_candidates", "stock_road_inspector_candidate_policy", "install_stock_road_inspector_candidate_policy"),
     ("candidate_enforcement", "stock_road_inspector_candidate_enforcement_policy", "install_stock_road_inspector_candidate_selector_policy"),
     ("paved_junction_completion", "stock_road_paved_junction_completion_policy", "install_stock_road_paved_junction_completion_policy"),
@@ -103,11 +104,27 @@ def _install_base_stages() -> None:
         _invoke(stage, module, installer_name)
 
 
-def _install_late_stages() -> None:
+def _preload_late_modules() -> dict[str, ModuleType]:
+    """Load shared late owners at their historical latest import position."""
+
+    ordered = []
+    for _stage, module_name, _installer_name in _LATE_STAGE_SPECS:
+        if module_name not in ordered:
+            ordered.append(module_name)
+
     modules = {
         module_name: _load(module_name)
-        for _stage, module_name, _installer_name in _LATE_STAGE_SPECS
+        for module_name in ordered
+        if module_name not in _DEFERRED_LATE_IMPORTS
     }
+    for module_name in _DEFERRED_LATE_IMPORTS:
+        if module_name in ordered:
+            modules[module_name] = _load(module_name)
+    return modules
+
+
+def _install_late_stages() -> None:
+    modules = _preload_late_modules()
     for stage, module_name, installer_name in _LATE_STAGE_SPECS:
         _invoke(stage, modules[module_name], installer_name)
         if stage == "s_bend_exact":
