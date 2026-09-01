@@ -11,6 +11,11 @@ installer call order. Keep that behaviour explicit here:
   matching the old late-stack module; and
 * non-fitting source classification is applied once at the end.
 
+A stage may invoke several installers from one owner when those installers were
+historically consecutive and no other module observed the intermediate state.
+This keeps internal implementation seams without advertising them as separate
+runtime policy layers.
+
 Set ``CWR_WORLDGEN_ROAD_PIPELINE_TRACE=1`` to print each installed stage during
 package startup.
 """
@@ -29,7 +34,10 @@ _MAXIMUM_PAVED_SEAM_TANGENT_ERROR_DEGREES = 8.0
 _MAXIMUM_EXACT_S_BEND_RUN_METRES = 1200.0
 _DEFERRED_LATE_IMPORTS = ("stock_road_stock_assets_only_policy",)
 
-_BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
+InstallerSpec = str | tuple[str, ...]
+StageSpec = tuple[str, str, InstallerSpec]
+
+_BASE_STAGE_SPECS: tuple[StageSpec, ...] = (
     ("road_quality", "road_quality_policy", "install_road_quality_policy"),
     ("stock_curve_base", "stock_road_curve_policy", "install_stock_road_curve_policy"),
     ("stock_geometry", "stock_road_geometry_policy", "install_stock_road_geometry_policy"),
@@ -37,9 +45,15 @@ _BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("gravel_junction", "gravel_junction_policy", "install_gravel_junction_policy"),
     ("gravel_gap", "gravel_gap_policy", "install_gravel_gap_policy"),
     ("gravel_family", "gravel_family_policy", "install_gravel_family_policy"),
-    ("stock_junction", "stock_road_junction_policy", "install_stock_road_junction_policy"),
-    ("stock_measured_junction", "stock_road_junction_policy", "install_stock_road_measured_junction_policy"),
-    ("stock_skew", "stock_road_junction_policy", "install_stock_road_skew_policy"),
+    (
+        "stock_junction",
+        "stock_road_junction_policy",
+        (
+            "install_stock_road_junction_policy",
+            "install_stock_road_measured_junction_policy",
+            "install_stock_road_skew_policy",
+        ),
+    ),
     ("gravel_asphalt_transition", "gravel_asphalt_transition_policy", "install_gravel_asphalt_transition_policy"),
     ("stock_connector", "stock_road_connector_policy", "install_stock_road_connector_policy"),
     ("stock_surface_overlap", "stock_road_surface_overlap_policy", "install_stock_road_surface_overlap_policy"),
@@ -49,7 +63,7 @@ _BASE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("stock_curve_preservation", "stock_road_curve_preservation_policy", "install_stock_road_curve_preservation_policy"),
 )
 
-_LATE_STAGE_SPECS: tuple[tuple[str, str, str], ...] = (
+_LATE_STAGE_SPECS: tuple[StageSpec, ...] = (
     ("curve_regularization", "stock_road_curve_regularization_policy", "install_stock_road_curve_regularization_policy"),
     ("sharp_turn", "stock_road_sharp_turn_policy", "install_stock_road_sharp_turn_policy"),
     ("sharp_exact", "stock_road_sharp_exact_policy", "install_stock_road_sharp_exact_policy"),
@@ -90,22 +104,26 @@ def _load(module_name: str) -> ModuleType:
     return import_module(f".{module_name}", _PACKAGE)
 
 
-def _invoke(stage: str, module: ModuleType, installer_name: str) -> None:
-    getattr(module, installer_name)()
+def _invoke(stage: str, module: ModuleType, installer_spec: InstallerSpec) -> None:
+    installer_names = (
+        (installer_spec,) if isinstance(installer_spec, str) else installer_spec
+    )
+    for installer_name in installer_names:
+        getattr(module, installer_name)()
     _trace(stage)
 
 
 def _install_base_stages() -> None:
-    for stage, module_name, installer_name in _BASE_STAGE_SPECS:
+    for stage, module_name, installer_spec in _BASE_STAGE_SPECS:
         module = _load(module_name)
-        _invoke(stage, module, installer_name)
+        _invoke(stage, module, installer_spec)
 
 
 def _preload_late_modules() -> dict[str, ModuleType]:
     """Load shared late owners at their historical latest import position."""
 
     ordered = []
-    for _stage, module_name, _installer_name in _LATE_STAGE_SPECS:
+    for _stage, module_name, _installer_spec in _LATE_STAGE_SPECS:
         if module_name not in ordered:
             ordered.append(module_name)
 
@@ -122,8 +140,8 @@ def _preload_late_modules() -> dict[str, ModuleType]:
 
 def _install_late_stages() -> None:
     modules = _preload_late_modules()
-    for stage, module_name, installer_name in _LATE_STAGE_SPECS:
-        _invoke(stage, modules[module_name], installer_name)
+    for stage, module_name, installer_spec in _LATE_STAGE_SPECS:
+        _invoke(stage, modules[module_name], installer_spec)
         if stage == "s_bend_exact":
             modules["stock_road_s_bend_exact_policy"].MAXIMUM_EXACT_S_BEND_RUN_METRES = (
                 _MAXIMUM_EXACT_S_BEND_RUN_METRES
