@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_curve_usage_policy as _usage
+from cwr_worldgen import stock_road_s_bend_policy as _s_bend
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 
 
@@ -27,12 +28,12 @@ def test_repeated_stock_beam_search_uses_cached_result(monkeypatch):
     source = ((0.0, 0.0), (0.0, 10.0))
 
     monkeypatch.setattr(_usage, "_ORIGINAL_BEAM", beam)
-    _usage._cached_micro_beam_stock_path.cache_clear()
+    _usage._cached_stock_beam_path.cache_clear()
     try:
-        first = _usage._micro_beam_stock_path(source, 1, 0.0, 10.0, _pieces())
-        second = _usage._micro_beam_stock_path(source, 1, 0.0, 10.0, _pieces())
+        first = _usage._shared_stock_beam_path(source, 1, 0.0, 10.0, _pieces())
+        second = _usage._shared_stock_beam_path(source, 1, 0.0, 10.0, _pieces())
     finally:
-        _usage._cached_micro_beam_stock_path.cache_clear()
+        _usage._cached_stock_beam_path.cache_clear()
 
     assert first == expected
     assert second == expected
@@ -49,9 +50,9 @@ def test_reachable_twenty_degree_target_still_tries_strict_beam_first(monkeypatc
         return expected
 
     monkeypatch.setattr(_usage, "_ORIGINAL_BEAM", beam)
-    _usage._cached_micro_beam_stock_path.cache_clear()
+    _usage._cached_stock_beam_path.cache_clear()
     try:
-        result = _usage._micro_beam_stock_path(
+        result = _usage._shared_stock_beam_path(
             ((0.0, 0.0), (0.0, 20.0)),
             1,
             0.0,
@@ -59,10 +60,49 @@ def test_reachable_twenty_degree_target_still_tries_strict_beam_first(monkeypatc
             _pieces(),
         )
     finally:
-        _usage._cached_micro_beam_stock_path.cache_clear()
+        _usage._cached_stock_beam_path.cache_clear()
 
     assert result == expected
     assert calls == [{}]
+
+
+def test_repeated_s_bend_beam_search_uses_cached_result(monkeypatch):
+    calls = []
+    expected = ((0.0, 0.0), (1.0, 10.0), (0.0, 20.0))
+
+    def beam(source, entry, exit, pieces, *, maximum_span_metres):
+        calls.append(float(maximum_span_metres))
+        assert all(hasattr(piece, "model_path") for piece in pieces)
+        return expected
+
+    monkeypatch.setattr(_usage, "_ORIGINAL_S_BEND_BEAM", beam)
+    _usage._cached_s_bend_beam_path.cache_clear()
+    try:
+        first = _usage._shared_s_bend_beam_path(
+            expected, 0.0, 0.0, _pieces(), maximum_span_metres=230.0
+        )
+        second = _usage._shared_s_bend_beam_path(
+            expected, 0.0, 0.0, _pieces(), maximum_span_metres=230.0
+        )
+    finally:
+        _usage._cached_s_bend_beam_path.cache_clear()
+
+    assert first == expected
+    assert second == expected
+    assert calls == [230.0]
+
+
+def test_shared_accelerators_are_installed_once_for_curve_stack():
+    assert _sharp._beam_stock_path is _usage._shared_stock_beam_path
+    assert _s_bend._beam_s_bend_path is _usage._shared_s_bend_beam_path
+    assert _sharp._advance is _usage._fast_advance
+    assert _sharp._nearest_forward is _usage._fast_nearest_forward
+    assert _p._PolylineMeasure.point is _usage._fast_measure_point
+    assert _p._PolylineMeasure.chord_endpoint is _usage._fast_chord_endpoint
+    assert (
+        _p._PolylineMeasure.maximum_chord_deviation
+        is _usage._fast_maximum_chord_deviation
+    )
 
 
 def _measure():
