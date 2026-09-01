@@ -41,35 +41,14 @@ _INSTALLED = False
 def _dominant_bend(points) -> tuple[int, float] | None:
     """Return one coherent bend sign and accumulated turn for a stock run."""
 
-    sign = 0
-    count = 0
-    total = 0.0
-    for previous, point, following in zip(points, points[1:], points[2:]):
-        turn = _sharp._signed_turn(previous, point, following)
-        magnitude = abs(turn)
-        if magnitude < _MINIMUM_SIGNIFICANT_VERTEX_TURN_DEGREES:
-            continue
-        if magnitude > _MAXIMUM_LOCAL_VERTEX_TURN_DEGREES:
-            return None
-        current_sign = 1 if turn > 0.0 else -1
-        if sign and current_sign != sign:
-            if magnitude <= _MAXIMUM_REVERSE_NOISE_DEGREES:
-                continue
-            return None
-        if not sign:
-            sign = current_sign
-        total += turn
-        count += 1
-
-    magnitude = abs(total)
-    if (
-        sign == 0
-        or count < 1
-        or magnitude < _MINIMUM_TOTAL_TURN_DEGREES
-        or magnitude > _MAXIMUM_TOTAL_TURN_DEGREES
-    ):
-        return None
-    return sign, magnitude
+    return _sharp._coherent_bend(
+        points,
+        minimum_vertex_turn_degrees=_MINIMUM_SIGNIFICANT_VERTEX_TURN_DEGREES,
+        maximum_vertex_turn_degrees=_MAXIMUM_LOCAL_VERTEX_TURN_DEGREES,
+        maximum_reverse_noise_degrees=_MAXIMUM_REVERSE_NOISE_DEGREES,
+        minimum_total_turn_degrees=_MINIMUM_TOTAL_TURN_DEGREES,
+        maximum_total_turn_degrees=_MAXIMUM_TOTAL_TURN_DEGREES,
+    )
 
 
 def _piece_tangents(item, turn_sign: int) -> tuple[float, float]:
