@@ -25,7 +25,6 @@ import math
 
 from . import playability as _p
 from . import stock_road_sharp_turn_policy as _sharp
-from . import stock_road_sharp_exact_policy as _exact
 from . import stock_road_visual_finish_policy as _finish
 
 MINIMUM_MICRO_BEND_TOTAL_TURN_DEGREES = 7.5
@@ -303,7 +302,7 @@ def _micro_exact_chain(
         return baseline
     if measure.total > MAXIMUM_MICRO_EXACT_RUN_METRES:
         return baseline
-    if _exact._baseline_short_straights(baseline) < MINIMUM_MICRO_EXACT_SHORT_STRAIGHTS:
+    if _sharp._baseline_short_straights(baseline) < MINIMUM_MICRO_EXACT_SHORT_STRAIGHTS:
         return baseline
 
     bend = _dominant_micro_bend(measure.points)
@@ -324,10 +323,10 @@ def _micro_exact_chain(
     if end <= start + 1.0:
         return baseline
 
-    source_points, entry_heading, source_exit_heading = _exact._measure_slice(
+    source_points, entry_heading, source_exit_heading = _sharp._measure_slice(
         measure, start, end
     )
-    stock_exit_heading = _exact._quantised_stock_exit_heading(
+    stock_exit_heading = _sharp._quantised_stock_exit_heading(
         entry_heading,
         source_exit_heading,
         turn_sign,
@@ -342,11 +341,11 @@ def _micro_exact_chain(
     if locked_path is None:
         return baseline
 
-    exact = _exact._recover_exact_actions(locked_path, pieces, turn_sign)
+    exact = _sharp._recover_exact_actions(locked_path, pieces, turn_sign)
     if exact is None:
         return baseline
-    exact_curves = _exact._curve_count(exact)
-    baseline_curves = _exact._curve_count(baseline)
+    exact_curves = _sharp._curve_count(exact)
+    baseline_curves = _sharp._curve_count(baseline)
     if exact_curves < MINIMUM_MICRO_EXACT_CURVES or exact_curves <= baseline_curves:
         return baseline
     if len(exact) > len(baseline) + MAXIMUM_MICRO_EXACT_EXTRA_PIECES:
