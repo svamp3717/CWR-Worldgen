@@ -14,7 +14,7 @@ from dataclasses import replace
 import math
 from typing import Mapping
 
-from . import gravel_junction_policy as _gravel_junction
+from . import gravel_family_policy as _gravel_junction
 from . import playability as _p
 from . import road_quality_policy as _quality
 from . import stock_road_connector_policy as _connector
