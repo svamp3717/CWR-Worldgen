@@ -64,3 +64,4 @@ def test_wgs84_source_segments_are_reported_in_world_metres(tmp_path: Path) -> N
     assert metrics["source_road_ids"] == "road-000280"
     assert metrics["source_highways"] == "tertiary"
     assert metrics["source_surfaces"] == "asphalt"
+    assert metrics["source_segment_axes_degrees"] == "90.000"
