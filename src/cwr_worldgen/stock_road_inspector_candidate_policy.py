@@ -1,20 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Apply Road Inspector's paved and mixed-junction repair candidates.
+"""Own Road Inspector's paved/mixed candidate selection and final enforcement.
 
-The candidate text in Road Inspector is treated as executable policy here rather
-than as a vague suggestion:
-
-* native T/X meshes are accepted only when their measured connector directions
-  are within the Inspector's visible tolerance;
-* otherwise the fitted approaches remain authoritative and the junction is
-  reduced to a low stock-family centre fill, with low stock tongues only where a
-  real approach stops short of the logical node;
-* purpose-built native junctions own their complete measured connector footprint,
-  including the stock ``ces`` branch of a mixed paved/ces T;
-* paved bends get one final connector-locked stock-curve search that may replace
-  an equally curved but tangent-mismatched baseline chain;
-* turn wedges are not hidden with full overlapping road strips, and this policy
-  does not emit generated paved helper P3Ds.
+The candidate text in Road Inspector is executable policy here rather than a
+vague suggestion. This module chooses measured native junctions and exact stock
+curves, owns fallback surface repair, installs the strict T/X selector, and runs
+one final ownership pass over the exact report that will be serialized to WRP.
 
 Standalone stock ``ces``/generated-gravel bends remain outside this policy.
 ``ces`` is touched only at a mixed junction whose main road is paved.
@@ -24,10 +14,13 @@ from __future__ import annotations
 from dataclasses import replace
 import math
 
+from . import generator as _generator
+from . import gravel_asphalt_transition_policy as _mixed
 from . import playability as _p
 from . import stock_road_curve_usage_policy as _curve_usage
 from . import stock_road_emitted_seam_policy as _emitted
 from . import stock_road_junction_policy as _junction
+from . import stock_road_local_fit_policy as _local
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_native_junction_ownership_policy as _ownership
 from . import stock_road_paved_junction_completion_policy as _paved
@@ -43,6 +36,8 @@ INSPECTOR_CURVE_MINIMUM_TURN_DEGREES = 4.50
 INSPECTOR_CURVE_MAXIMUM_TURN_DEGREES = 70.0
 INSPECTOR_CURVE_TRANSITION_ERROR_DEGREES = 0.75
 INSPECTOR_CURVE_MAXIMUM_EXTRA_PIECES = 2
+MAXIMUM_NATIVE_THROUGH_TURN_DEGREES = 1.25
+_FINAL_NATIVE_FOOTPRINT_MARGIN_METRES = 0.20
 
 JUNCTION_TONGUE_MINIMUM_GAP_METRES = 0.35
 JUNCTION_TONGUE_MAXIMUM_ENDPOINT_DISTANCE_METRES = 7.25
@@ -55,7 +50,11 @@ _PAVED_FAMILIES = frozenset({"sil", "asf", "kos"})
 _ORIGINAL_STOCK_APPLY = None
 _ORIGINAL_OWNER_REALIGN = None
 _ORIGINAL_PIECE_CHAIN = None
+_ORIGINAL_NATIVE_X = None
+_ORIGINAL_FINAL_FIT = None
 _INSTALLED = False
+_SELECTOR_INSTALLED = False
+_FINAL_INSTALLED = False
 
 
 def _normalised(vector: tuple[float, float]) -> tuple[float, float]:
@@ -66,8 +65,6 @@ def _normalised(vector: tuple[float, float]) -> tuple[float, float]:
 
 
 def _eligible_paved_or_mixed_incidents(incidents) -> bool:
-    """Return True for all-paved T/X or a paved-main T with a stock ces branch."""
-
     if len(incidents) not in {3, 4}:
         return False
     if all(incident.family in _PAVED_FAMILIES for incident in incidents):
@@ -89,8 +86,6 @@ def _eligible_paved_or_mixed_incidents(incidents) -> bool:
 
 
 def _measured_native_t_junction(incidents):
-    """Fit a T from measured connectors and reject visible connector rotation."""
-
     if len(incidents) != 3:
         return None
     pair = _junction._dominant_pair(incidents)
@@ -113,12 +108,13 @@ def _measured_native_t_junction(incidents):
     branch_heading = _junction._heading(incidents[branch].direction)
     fits = []
     for actual_zero, actual_180 in ((main_a, main_b), (main_b, main_a)):
-        pairs = (
-            (0.0, actual_zero),
-            (180.0, actual_180),
-            (MEASURED_T_BRANCH_LOCAL_HEADING_DEGREES, branch_heading),
+        rotation, maximum_error = _junction._best_rotation(
+            (
+                (0.0, actual_zero),
+                (180.0, actual_180),
+                (MEASURED_T_BRANCH_LOCAL_HEADING_DEGREES, branch_heading),
+            )
         )
-        rotation, maximum_error = _junction._best_rotation(pairs)
         fits.append((maximum_error, rotation))
     maximum_error, rotation = min(fits)
     if maximum_error > INSPECTOR_NATIVE_CONNECTOR_TOLERANCE_DEGREES + 1.0e-9:
@@ -127,8 +123,6 @@ def _measured_native_t_junction(incidents):
 
 
 def _measured_native_junction_object(old, native, elevations, spec):
-    """Put the measured logical intersection, rather than the P3D origin, on node."""
-
     node = (float(old.x), float(old.z))
     radius = float(_geometry.STOCK_JUNCTION_CONNECTOR_RADIUS_METRES)
     angle = math.radians(float(native.heading_degrees))
@@ -167,8 +161,6 @@ def _measured_native_junction_object(old, native, elevations, spec):
 
 
 def _trim_one_native_center(objects, cap, *, cap_count, elevations, spec, next_id):
-    """Terminate stock approaches at the connector that actually owns their arm."""
-
     center = _paved._logical_center(cap)
     if center is None:
         return objects, next_id, False
@@ -212,9 +204,7 @@ def _trim_one_native_center(objects, cap, *, cap_count, elevations, spec, next_i
         matched_any = False
         failed_matched_span = False
         for outer in outside:
-            connector = _ownership._matching_connector(
-                connectors, family, center, outer
-            )
+            connector = _ownership._matching_connector(connectors, family, center, outer)
             if connector is None:
                 continue
             matched_any = True
@@ -247,8 +237,6 @@ def _trim_one_native_center(objects, cap, *, cap_count, elevations, spec, next_i
 
 
 def _coherent_candidate_bend(points) -> tuple[int, float] | None:
-    """Return a safe paved bend sign for the final Inspector curve search."""
-
     sign = 0
     total = 0.0
     count = 0
@@ -289,8 +277,6 @@ def _candidate_exact_curve_chain(
     minimum_end_distance,
     maximum_end_distance,
 ):
-    """Final paved-only exact-chain attempt for Inspector miter/transition candidates."""
-
     if _ORIGINAL_PIECE_CHAIN is None:
         raise RuntimeError("Road Inspector candidate curve policy is not installed")
 
@@ -464,8 +450,6 @@ def _low_incident_tongue(object_id, node, incident, elevations, spec):
 
 
 def _add_low_fallback_tongues(report, dataset, projection, elevations, spec):
-    """Bridge only uncovered paved fallback arms, below the visible approaches."""
-
     cap_count = min(
         int(getattr(report, "junction_cap_objects", 0)), len(report.objects)
     )
@@ -522,9 +506,7 @@ def _add_low_fallback_tongues(report, dataset, projection, elevations, spec):
             )
             if key in seen:
                 continue
-            tongue = _low_incident_tongue(
-                next_id, node, incident, elevations, spec
-            )
+            tongue = _low_incident_tongue(next_id, node, incident, elevations, spec)
             if tongue is None:
                 continue
             additions.append(tongue)
@@ -553,13 +535,9 @@ def _add_low_fallback_tongues(report, dataset, projection, elevations, spec):
 
 
 def _native_owner_realign(report, dataset, projection, elevations, spec):
-    """Apply the Inspector's native-or-low-fill decision at final WRP geometry."""
-
     if _ORIGINAL_OWNER_REALIGN is None:
         raise RuntimeError("Road Inspector candidate policy is not installed")
-    report = _ORIGINAL_OWNER_REALIGN(
-        report, dataset, projection, elevations, spec
-    )
+    report = _ORIGINAL_OWNER_REALIGN(report, dataset, projection, elevations, spec)
 
     cap_count = min(
         int(getattr(report, "junction_cap_objects", 0)), len(report.objects)
@@ -587,18 +565,11 @@ def _native_owner_realign(report, dataset, projection, elevations, spec):
         signature = _paved._native_signature(str(current.model_path))
         if signature is not None:
             family, local_headings = signature
-            error = _paved._connector_error_degrees(
-                current, incidents, local_headings
-            )
+            error = _paved._connector_error_degrees(current, incidents, local_headings)
             if error <= INSPECTOR_NATIVE_CONNECTOR_TOLERANCE_DEGREES + 1.0e-9:
                 continue
             replacement = _paved._low_stock_cap(
-                current,
-                node,
-                incidents,
-                family,
-                elevations,
-                spec,
+                current, node, incidents, family, elevations, spec
             )
             if replacement != current:
                 objects[index] = replacement
@@ -627,12 +598,7 @@ def _native_owner_realign(report, dataset, projection, elevations, spec):
             continue
 
         replacement = _paved._low_stock_cap(
-            current,
-            node,
-            incidents,
-            family,
-            elevations,
-            spec,
+            current, node, incidents, family, elevations, spec
         )
         if replacement != current:
             objects[index] = replacement
@@ -641,14 +607,10 @@ def _native_owner_realign(report, dataset, projection, elevations, spec):
     if changed:
         report = replace(report, objects=tuple(objects))
     report = _ownership._trim_native_center_intruders(report, elevations, spec)
-    return _add_low_fallback_tongues(
-        report, dataset, projection, elevations, spec
-    )
+    return _add_low_fallback_tongues(report, dataset, projection, elevations, spec)
 
 
 def _apply_wedge_candidates(report, elevations, spec):
-    """Do not hide Inspector turn wedges with generated or full-strip overlays."""
-
     if _ORIGINAL_STOCK_APPLY is None:
         raise RuntimeError("Road Inspector candidate policy is not installed")
 
@@ -676,16 +638,11 @@ def _apply_wedge_candidates(report, elevations, spec):
 
 
 def install_stock_road_inspector_candidate_policy() -> None:
-    """Install the paved/mixed repairs described by Road Inspector candidates."""
-
     global _ORIGINAL_STOCK_APPLY, _ORIGINAL_OWNER_REALIGN
     global _ORIGINAL_PIECE_CHAIN, _INSTALLED
     if _INSTALLED:
         return
 
-    # Candidate: exact stock curve/curve-chain before any visual overlap fallback.
-    # Keep junction-endpoint enforcement outermost; insert this final exact search
-    # immediately inside it so native connector ownership still has last refusal.
     if _junction._ORIGINAL_ENDPOINT_CHAIN is None:
         raise RuntimeError("junction endpoint stage must install first")
     _ORIGINAL_PIECE_CHAIN = _junction._ORIGINAL_ENDPOINT_CHAIN
@@ -698,10 +655,179 @@ def install_stock_road_inspector_candidate_policy() -> None:
     _ORIGINAL_OWNER_REALIGN = _ownership._native_owner_realign
     _ownership._native_owner_realign = _native_owner_realign
 
-    # The preceding stock-paved output stage owns this hook. Capture the active
-    # hook directly instead of importing its owner, which keeps candidate
-    # selection independent from final serialization policy.
     _ORIGINAL_STOCK_APPLY = _emitted._apply_emitted_seam_covers
     _emitted._apply_emitted_seam_covers = _apply_wedge_candidates
 
     _INSTALLED = True
+
+
+def _contains_generated_gravel(incidents) -> bool:
+    return any(
+        _p.is_generated_gravel_road_model(str(incident.model_path))
+        for incident in incidents
+    )
+
+
+def _through_turn_degrees(incidents) -> float:
+    if len(incidents) != 3:
+        return 180.0
+    pair = _junction._dominant_pair(incidents)
+    if pair is None:
+        return 180.0
+    first, second = pair
+    first_heading = _junction._heading(incidents[first].direction)
+    second_heading = _junction._heading(incidents[second].direction)
+    separation = _junction._angular_distance(first_heading, second_heading)
+    return abs(180.0 - separation)
+
+
+def _stock_ces_mixed_t(incidents) -> bool:
+    layered = _mixed._layered_mixed_t_components(incidents)
+    if layered is None:
+        return False
+    _family, _first, _second, _unpaved, generated_gravel = layered
+    return not generated_gravel
+
+
+def _planning_tolerance_degrees(incidents) -> float | None:
+    if _local._same_family_paved_t(incidents):
+        return float(_local.MAXIMUM_PAVED_T_HEADING_ERROR_DEGREES)
+    if _stock_ces_mixed_t(incidents):
+        return float(_mixed.MAXIMUM_STOCK_CES_NATIVE_HEADING_ERROR_DEGREES)
+    return None
+
+
+def _measured_native_t_with_limit(incidents, limit_degrees: float):
+    previous = _junction.MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES
+    try:
+        _junction.MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = float(limit_degrees)
+        return _junction._measured_native_t_junction(incidents)
+    finally:
+        _junction.MAXIMUM_NATIVE_JUNCTION_HEADING_ERROR_DEGREES = previous
+
+
+def _candidate_native_t_dispatch(incidents):
+    if _contains_generated_gravel(incidents):
+        return _mixed._native_t_junction(incidents)
+    if _through_turn_degrees(incidents) > MAXIMUM_NATIVE_THROUGH_TURN_DEGREES:
+        return None
+    if _local._PLANNING_RELAXED_JUNCTION.get():
+        limit = _planning_tolerance_degrees(incidents)
+        if limit is not None:
+            return _measured_native_t_with_limit(incidents, limit)
+    return _measured_native_t_junction(incidents)
+
+
+def _candidate_native_x_dispatch(incidents):
+    if _ORIGINAL_NATIVE_X is None:
+        raise RuntimeError("Inspector candidate X selector is not installed")
+    native = _ORIGINAL_NATIVE_X(incidents)
+    if native is None:
+        return None
+    if not all(
+        getattr(incident, "family", None) in _PAVED_FAMILIES
+        for incident in incidents
+    ):
+        return native
+    if float(native.maximum_heading_error_degrees) > (
+        INSPECTOR_NATIVE_CONNECTOR_TOLERANCE_DEGREES + 1.0e-9
+    ):
+        return None
+    return native
+
+
+def install_stock_road_inspector_candidate_selector_policy() -> None:
+    global _ORIGINAL_NATIVE_X, _SELECTOR_INSTALLED
+    if _SELECTOR_INSTALLED:
+        return
+    if not _INSTALLED:
+        raise RuntimeError("Inspector candidate policy must install first")
+
+    _ORIGINAL_NATIVE_X = _junction._native_x_junction
+    _junction._native_t_junction = _candidate_native_t_dispatch
+    _junction._native_x_junction = _candidate_native_x_dispatch
+    _SELECTOR_INSTALLED = True
+
+
+def _drop_fully_owned_native_straights(report):
+    cap_count = min(
+        int(getattr(report, "junction_cap_objects", 0)), len(report.objects)
+    )
+    if cap_count <= 0:
+        return report
+
+    radius = float(_geometry.STOCK_JUNCTION_CONNECTOR_RADIUS_METRES)
+    limit = radius + _FINAL_NATIVE_FOOTPRINT_MARGIN_METRES
+    remove_ids: set[int] = set()
+    for cap in report.objects[:cap_count]:
+        if _paved._native_signature(str(cap.model_path)) is None:
+            continue
+        center = _paved._logical_center(cap)
+        if center is None:
+            continue
+        for obj in report.objects[cap_count:]:
+            match = _geometry.stock_straight_match(str(obj.model_path))
+            if match is None:
+                continue
+            family = match.group("family").casefold()
+            if family not in _NATIVE_OWNED_STOCK_FAMILIES:
+                continue
+            axis = _ownership._physical_straight_axis(obj)
+            if axis is None:
+                continue
+            if all(math.dist(center, endpoint) <= limit for endpoint in axis):
+                remove_ids.add(int(obj.object_id))
+
+    if not remove_ids:
+        return report
+    objects = tuple(
+        obj for obj in report.objects if int(obj.object_id) not in remove_ids
+    )
+    return replace(report, objects=objects)
+
+
+def _fit(
+    dataset,
+    projection,
+    elevations,
+    spec,
+    *,
+    starting_id: int = 1,
+    progress_callback=None,
+):
+    if _ORIGINAL_FINAL_FIT is None:
+        raise RuntimeError("Inspector candidate final enforcement is not installed")
+    report = _ORIGINAL_FINAL_FIT(
+        dataset,
+        projection,
+        elevations,
+        spec,
+        starting_id=starting_id,
+        progress_callback=progress_callback,
+    )
+    if not bool(getattr(spec, "stock_road_piece_fitting", False)):
+        return report
+
+    fixed = _native_owner_realign(
+        report,
+        dataset,
+        projection,
+        elevations,
+        spec,
+    )
+    return _drop_fully_owned_native_straights(fixed)
+
+
+def install_stock_road_inspector_candidate_final_policy() -> None:
+    global _ORIGINAL_FINAL_FIT, _FINAL_INSTALLED
+    if _FINAL_INSTALLED:
+        return
+    if not _SELECTOR_INSTALLED:
+        raise RuntimeError("Inspector candidate selector policy must install first")
+    if not _ownership._INSTALLED:
+        raise RuntimeError("native junction ownership policy must install first")
+
+    _ORIGINAL_FINAL_FIT = _p.fit_road_objects
+    _p.fit_road_objects = _fit
+    _generator.fit_road_objects = _fit
+    _FINAL_INSTALLED = True
