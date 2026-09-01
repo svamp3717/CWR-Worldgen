@@ -7,11 +7,10 @@ configurable long-piece spacing used by custom roads. Ordinary bends are rounded
 with bounded constant-radius fillets so the native ten-degree curves can be used
 without pulling the road far away from the source centerline.
 
-The same owner also installs the later model-space transform stage. Stock curve
-ODOLs are not centred on their connector chord, so their final WRP pose must be
-solved from the real Memory-LOD begin/end connectors. The transform installer is
-kept separate from the geometry installer so the historical pipeline timing and
-captured fitter state remain unchanged.
+The same owner installs model-space transforms in the same lifecycle stage.
+Stock curve ODOLs are not centred on their connector chord, so their final WRP
+pose is solved from the real Memory-LOD begin/end connectors immediately after
+the exact stock geometry hooks are installed.
 """
 from __future__ import annotations
 
@@ -40,14 +39,10 @@ _STRAIGHT_FALLBACK_CHAIN = _curve._ORIGINAL_CHAIN
 _ORIGINAL_VARIANTS = _p.road_model_variants
 _ORIGINAL_ROUNDED_ROAD_RUN = _p._rounded_road_run
 _ORIGINAL_QUALITY_PIECE_LENGTH = _quality._piece_length
-_INSTALLED = False
-
-# Captured only when the separately timed transform stage is installed. Keeping
-# these as None during geometry-module import preserves the old import/install
-# semantics even though both stages now live in one source file.
 _ORIGINAL_TRANSFORM_ROAD_OBJECT_ON_SLOPE = None
 _ORIGINAL_TRANSFORM_MODEL_AXIS = None
 _REVERSED_FINAL_KEYS: set[tuple[int, str, float, float, float]] = set()
+_INSTALLED = False
 _TRANSFORM_INSTALLED = False
 
 
@@ -296,7 +291,7 @@ def _circular_road_run(
 
 def _transform_road_object_on_slope(*args, **kwargs):
     if _ORIGINAL_TRANSFORM_ROAD_OBJECT_ON_SLOPE is None:
-        raise RuntimeError("stock road transform stage is not installed")
+        raise RuntimeError("stock road geometry policy is not installed")
     model_path = str(args[1] if len(args) > 1 else kwargs.get("model_path", ""))
     geometry = _model_geometry.stock_curve_connectors(model_path)
     obj = _ORIGINAL_TRANSFORM_ROAD_OBJECT_ON_SLOPE(*args, **kwargs)
@@ -337,7 +332,7 @@ def _transform_road_object_on_slope(*args, **kwargs):
 
 def _transform_model_axis(obj, length: float):
     if _ORIGINAL_TRANSFORM_MODEL_AXIS is None:
-        raise RuntimeError("stock road transform stage is not installed")
+        raise RuntimeError("stock road geometry policy is not installed")
     geometry = _model_geometry.stock_curve_connectors(obj.model_path)
     if geometry is None:
         return _ORIGINAL_TRANSFORM_MODEL_AXIS(obj, length)
@@ -351,27 +346,24 @@ def _transform_model_axis(obj, length: float):
 
 
 def install_stock_road_geometry_policy() -> None:
-    global _INSTALLED
+    """Install exact stock geometry and model-space transforms together."""
+
+    global _ORIGINAL_TRANSFORM_ROAD_OBJECT_ON_SLOPE, _ORIGINAL_TRANSFORM_MODEL_AXIS
+    global _INSTALLED, _TRANSFORM_INSTALLED
     if _INSTALLED:
         return
+
     _curve._curve_geometry = stock_curve_geometry
     _curve._piece_length = _exact_piece_length
     _p.road_model_variants = _exact_stock_variants
     _quality._piece_length = _exact_piece_length
     _p._rounded_road_run = _circular_road_run
     _p._stock_piece_chain = _seam_safe_stock_curve_chain
-    _INSTALLED = True
 
-
-def install_stock_road_transform_policy() -> None:
-    """Install the model-space connector transform at its historical stage."""
-
-    global _ORIGINAL_TRANSFORM_ROAD_OBJECT_ON_SLOPE, _ORIGINAL_TRANSFORM_MODEL_AXIS
-    global _TRANSFORM_INSTALLED
-    if _TRANSFORM_INSTALLED:
-        return
     _ORIGINAL_TRANSFORM_ROAD_OBJECT_ON_SLOPE = _p._road_object_on_slope
     _ORIGINAL_TRANSFORM_MODEL_AXIS = _p._model_axis
     _p._road_object_on_slope = _transform_road_object_on_slope
     _p._model_axis = _transform_model_axis
+
+    _INSTALLED = True
     _TRANSFORM_INSTALLED = True
