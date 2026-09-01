@@ -20,7 +20,6 @@ import math
 from . import playability as _p
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_relaxation_policy as _relax
-from . import stock_road_sharp_exact_policy as _exact
 from . import stock_road_sharp_turn_policy as _sharp
 
 _MAXIMUM_PROMOTION_RUN_METRES = 180.0
@@ -162,10 +161,10 @@ def _curve_promotion_chain(
     if end <= start + 1.0:
         return _fallback_chain(measure, pieces, **fallback_args)
 
-    source_points, entry_heading, source_exit_heading = _exact._measure_slice(
+    source_points, entry_heading, source_exit_heading = _sharp._measure_slice(
         measure, start, end
     )
-    stock_exit_heading = _exact._quantised_stock_exit_heading(
+    stock_exit_heading = _sharp._quantised_stock_exit_heading(
         entry_heading,
         source_exit_heading,
         turn_sign,
@@ -192,8 +191,8 @@ def _curve_promotion_chain(
     if locked_path is None or not _path_is_obstacle_safe(locked_path):
         return _fallback_chain(measure, pieces, **fallback_args)
 
-    exact = _exact._recover_exact_actions(locked_path, pieces, turn_sign)
-    if exact is None or _exact._curve_count(exact) < _MINIMUM_PROMOTED_CURVES:
+    exact = _sharp._recover_exact_actions(locked_path, pieces, turn_sign)
+    if exact is None or _sharp._curve_count(exact) < _MINIMUM_PROMOTED_CURVES:
         return _fallback_chain(measure, pieces, **fallback_args)
 
     # Connector continuity, not comparison with an already-bad baseline, is the
