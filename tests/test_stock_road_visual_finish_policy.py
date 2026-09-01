@@ -100,7 +100,9 @@ def test_turning_legacy_cap_is_lowered_even_when_axis_already_matches(monkeypatc
     captured = []
     _install_cap_realign_test_doubles(monkeypatch, incidents, captured)
 
-    result = _finish._realign_legacy_caps(
+    realign = _continuity._ORIGINAL_REALIGN_LEGACY_CAPS
+    assert realign is not None
+    result = realign(
         _legacy_cap_report(90.0), None, None, (), SimpleNamespace()
     )
 
@@ -126,9 +128,9 @@ def test_aligned_straight_through_cap_is_not_needlessly_rebuilt(monkeypatch):
     _install_cap_realign_test_doubles(monkeypatch, incidents, captured)
     report = _legacy_cap_report(90.0)
 
-    result = _finish._realign_legacy_caps(
-        report, None, None, (), SimpleNamespace()
-    )
+    realign = _continuity._ORIGINAL_REALIGN_LEGACY_CAPS
+    assert realign is not None
+    result = realign(report, None, None, (), SimpleNamespace())
 
     assert captured == []
     assert result is report
