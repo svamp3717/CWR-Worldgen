@@ -1,19 +1,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Own connector-locked stock fitting for difficult paved bends.
+"""Own connector-locked stock fitting for difficult road bends.
 
 A difficult real-world bend can be too irregular for the single-radius curve
 regularizer while still being perfectly representable by a short sequence of
-stock straights and ten-degree curves. Falling all the way back to rotated
-``sil6``/``sil12`` rectangles makes every heading change a visible mitre: the
-road surface clips and the painted borders no longer meet.
+stock straights and ten-degree curves. Falling all the way back to rotated short
+rectangles makes every heading change a visible mitre: the road surface clips
+and the borders no longer meet.
 
-This owner handles both sustained same-direction bends and isolated paved
+This owner handles both sustained same-direction bends and isolated stock-road
 corners surrounded by quiet source geometry. A small beam search propagates the
 actual connector pose from piece to piece, so every accepted internal seam has
 one common position and tangent. A second, separately installed exact phase
 retains those beam actions directly for short junction-covered runs instead of
-feeding them back through the greedy fitter. Dirt, gravel, junction selection
-and terrain are untouched.
+feeding them back through the greedy fitter. Resistance ``ces`` uses the same
+verified ten-degree stock-curve geometry as the paved families; generated gravel,
+junction selection and terrain remain untouched.
 """
 from __future__ import annotations
 
@@ -51,6 +52,10 @@ _ACTION_LENGTH_TOLERANCE_METRES = 1.0e-4
 
 _STOCK_PAVED_STRAIGHT = re.compile(
     r"^(?P<prefix>.*[\\/])(?P<family>sil|asf|kos)(?P<length>25|12|6)\.p3d$",
+    re.IGNORECASE,
+)
+_STOCK_CURVEABLE_STRAIGHT = re.compile(
+    r"^(?P<prefix>.*[\\/])(?P<family>sil|asf|kos|ces)(?P<length>25|12|6)\.p3d$",
     re.IGNORECASE,
 )
 
@@ -170,7 +175,7 @@ def _sustained_sharp_turn_spans(points):
 
 
 def _isolated_single_vertex_spans(points, existing=()):
-    """Return curve-beam spans for isolated paved corners not already covered."""
+    """Return curve-beam spans for isolated stock corners not already covered."""
 
     cleaned = tuple(points)
     if len(cleaned) < 5:
@@ -219,7 +224,7 @@ def _isolated_single_vertex_spans(points, existing=()):
 
 
 def _sharp_turn_spans(points):
-    """Return all paved bend spans owned by the connector-locked curve beam."""
+    """Return all stock bend spans owned by the connector-locked curve beam."""
 
     existing = _sustained_sharp_turn_spans(points)
     additions = _isolated_single_vertex_spans(points, existing)
@@ -228,12 +233,12 @@ def _sharp_turn_spans(points):
     return tuple(sorted((*existing, *additions), key=lambda item: (item[0], item[1])))
 
 
-def _paved_family(pieces) -> tuple[str, str] | None:
+def _family_for_pattern(pieces, pattern) -> tuple[str, str] | None:
     family = None
     prefix = None
     found = False
     for piece in pieces:
-        match = _STOCK_PAVED_STRAIGHT.fullmatch(str(piece.model_path).replace("/", "\\"))
+        match = pattern.fullmatch(str(piece.model_path).replace("/", "\\"))
         if match is None:
             continue
         current_family = match.group("family").casefold()
@@ -249,11 +254,25 @@ def _paved_family(pieces) -> tuple[str, str] | None:
     return prefix, family
 
 
+def _paved_family(pieces) -> tuple[str, str] | None:
+    """Return only paved stock families for callers that intentionally exclude ces."""
+
+    return _family_for_pattern(pieces, _STOCK_PAVED_STRAIGHT)
+
+
+def _curveable_family(pieces) -> tuple[str, str] | None:
+    """Return any stock family with verified Resistance ten-degree curve assets."""
+
+    return _family_for_pattern(pieces, _STOCK_CURVEABLE_STRAIGHT)
+
+
 def _actions(pieces, prefix: str, family: str, turn_sign: int) -> tuple[_Action, ...]:
     result: list[_Action] = []
     straights = []
     for piece in pieces:
-        match = _STOCK_PAVED_STRAIGHT.fullmatch(str(piece.model_path).replace("/", "\\"))
+        match = _STOCK_CURVEABLE_STRAIGHT.fullmatch(
+            str(piece.model_path).replace("/", "\\")
+        )
         if match is None or match.group("family").casefold() != family:
             continue
         straights.append(piece)
@@ -359,12 +378,12 @@ def _advance(state: _State, action: _Action):
 
 
 def _beam_stock_path(source_points, turn_sign: int, entry_heading: float, exit_heading: float, pieces):
-    """Fit one exact-pose stock sequence through a difficult paved bend."""
+    """Fit one exact-pose stock sequence through a difficult bend."""
 
     measure = _p._PolylineMeasure.create(source_points)
     if measure.total <= 1.0:
         return None
-    family = _paved_family(pieces)
+    family = _curveable_family(pieces)
     if family is None:
         return None
     prefix, family_name = family
@@ -607,7 +626,7 @@ def _sharp_turn_chain(
         minimum_end_distance=minimum_end_distance,
         maximum_end_distance=maximum_end_distance,
     )
-    if _paved_family(pieces) is None:
+    if _curveable_family(pieces) is None:
         return baseline
 
     locked = _locked_measure(measure, pieces, baseline)
@@ -658,7 +677,7 @@ def _measure_slice(measure, start_distance: float, end_distance: float):
 def _recover_exact_actions(path, pieces, turn_sign: int):
     """Recover one stock action from each beam sampling group."""
 
-    family = _paved_family(pieces)
+    family = _curveable_family(pieces)
     samples_per_action = _CURVE_SAMPLE_COUNT
     if (
         family is None
@@ -734,7 +753,7 @@ def _exact_sharp_turn_chain(
         minimum_end_distance=minimum_end_distance,
         maximum_end_distance=maximum_end_distance,
     )
-    if _paved_family(pieces) is None:
+    if _curveable_family(pieces) is None:
         return baseline
     if measure.total > _MAXIMUM_EXACT_RUN_METRES:
         return baseline
