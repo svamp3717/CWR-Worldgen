@@ -23,7 +23,7 @@ import math
 import re
 
 from . import generator as _generator
-from . import gravel_junction_policy as _gravel_junction
+from . import gravel_family_policy as _gravel_junction
 from . import playability as _p
 from . import road_quality_policy as _quality
 from . import stock_road_model_geometry as _geometry
