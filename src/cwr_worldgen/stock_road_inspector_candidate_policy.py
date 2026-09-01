@@ -519,7 +519,7 @@ def _add_low_fallback_tongues(report, dataset, projection, elevations, spec):
     required = len(report.objects) + len(additions)
     if (
         required > int(spec.max_road_objects)
-        and not bool(getattr(spec, "advisory_object_limits", False)
+        and not bool(getattr(spec, "advisory_object_limits", False))
     ):
         raise ValueError(
             "road object budget is too small after Inspector junction tongues: "
