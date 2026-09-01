@@ -29,8 +29,8 @@ from . import stock_road_curve_usage_policy as _curve_usage
 from . import stock_road_inspector_candidate_enforcement_policy as _enforcement
 from . import stock_road_inspector_candidate_policy as _candidate
 from . import stock_road_junction_policy as _junction
+from . import stock_road_local_fit_policy as _local
 from . import stock_road_model_geometry as _geometry
-from . import stock_road_relaxation_transaction_policy as _transaction
 from . import stock_road_sharp_turn_policy as _sharp
 from .procedural_infrastructure import (
     paved_miter_angle_degrees,
@@ -117,16 +117,12 @@ def _stock_native_t_dispatch(incidents):
     if _ORIGINAL_NATIVE_T is None:
         raise RuntimeError("stock paved/dirt policy is not installed")
 
-    # Generated gravel keeps its existing junction path. The stock-first planner
-    # below is only for stock paved and stock-ces combinations.
     if _enforcement._contains_generated_gravel(incidents):
         return _ORIGINAL_NATIVE_T(incidents)
 
-    if _transaction._PLANNING_RELAXED_JUNCTION.get():
+    if _local._PLANNING_RELAXED_JUNCTION.get():
         return _family_first_native_t(incidents)
 
-    # Final placement judges the geometry that actually survived the obstacle
-    # transaction. Raw OSM headings are no longer the reason a valid T disappears.
     return _candidate._measured_native_t_junction(incidents)
 
 
@@ -173,8 +169,6 @@ def _valid_overlapped_straight_chain(fitted) -> bool:
             _heading(current[1], current[2]),
         ) > ORDINARY_PAVED_OVERLAP_TANGENT_TOLERANCE_DEGREES + 1.0e-9:
             return False
-        # In an overlapped chain the next stock model deliberately starts about
-        # 0.45 m before the previous one ends along the same tangent.
         if math.dist(previous[2], current[1]) > seam_limit + 1.0e-9:
             return False
     return True
@@ -190,15 +184,7 @@ def _overlapped_stock_chain(
     minimum_end_distance,
     maximum_end_distance,
 ):
-    """Re-space healthy stock straights with real 0.45 m axial overlap.
-
-    Each P3D keeps its measured full connector length. Only the next piece's
-    source progress is backed up by 0.45 m, so the actual model footprints overlap
-    by that amount. This avoids the earlier mistake of shortening every guide
-    chord, which both over-compressed the run and could provoke a six-metre extra
-    piece at the far end. If the discrete stock sequence would finish more than
-    0.55 m short of its required endpoint, keep the original exact-butt chain.
-    """
+    """Re-space healthy stock straights with real 0.45 m axial overlap."""
 
     if not _tangent_compatible_straight_chain(fitted):
         return fitted
@@ -326,26 +312,14 @@ def install_stock_road_stock_assets_only_policy() -> None:
 
     _ORIGINAL_NATIVE_T = _enforcement._junction._native_t_junction
 
-    # Keep the established public curve/candidate/endpoint wrapper chain intact.
-    # Install ordinary paved overlap at the baseline point reached only when the
-    # new curve-first solver declines a run. Exact curve results therefore remain
-    # connector-locked, while healthy straight-only fallbacks get Kodiak overlap.
     _ORIGINAL_CHAIN = _curve_usage._ORIGINAL_CHAIN
     _curve_usage._ORIGINAL_CHAIN = _stock_overlap_chain
 
-    # The generator's module-global call is the serialization path. Wrap that
-    # call without disturbing the tested playability/Kodiak composition used by
-    # all the road policies themselves.
     _ORIGINAL_FIT = _p.fit_road_objects
     _generator.fit_road_objects = _fit
 
-    # During planning, choose the family-compatible WrpTool T first. The normal
-    # connector relaxation transaction decides whether its measured arms can be
-    # reached safely; final selection remains strict.
     _enforcement._junction._native_t_junction = _stock_native_t_dispatch
 
-    # Exact paved curves may smooth the source inside a road-width-bounded
-    # corridor. The curve-first policy additionally checks the obstacle index.
     _sharp._MAXIMUM_LOCKED_CORRIDOR_METRES = STOCK_CURVE_SOURCE_CORRIDOR_METRES
 
     _INSTALLED = True
