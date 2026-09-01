@@ -47,6 +47,8 @@ _MINIMUM_SIGNIFICANT_VERTEX_TURN_DEGREES = 0.45
 _MAXIMUM_LOCAL_VERTEX_TURN_DEGREES = 35.0
 _MAXIMUM_REVERSE_NOISE_DEGREES = 1.50
 _BEAM_CACHE_SIZE = 512
+_STRICT_MINIMUM_CURVES = 2
+_STOCK_CURVE_TURN_DEGREES = 10.0
 
 _ORIGINAL_BEAM = None
 _ORIGINAL_MICRO_CHAIN = None
@@ -68,6 +70,17 @@ def _canonical_pieces(pieces) -> tuple[_p._RoadPiece, ...]:
     )
 
 
+def _strict_beam_can_reach_boundary(entry_heading: float, exit_heading: float) -> bool:
+    """Return whether two same-direction stock curves can reach the requested exit."""
+
+    target_turn = _p._heading_difference(float(entry_heading), float(exit_heading))
+    minimum_strict_turn = _STRICT_MINIMUM_CURVES * _STOCK_CURVE_TURN_DEGREES
+    return (
+        target_turn + _sharp._MAXIMUM_LOCKED_BOUNDARY_TANGENT_ERROR_DEGREES
+        >= minimum_strict_turn - 1.0e-9
+    )
+
+
 @lru_cache(maxsize=_BEAM_CACHE_SIZE)
 def _cached_micro_beam_stock_path(
     source_points: tuple[tuple[float, float], ...],
@@ -76,20 +89,22 @@ def _cached_micro_beam_stock_path(
     exit_heading: float,
     pieces: tuple[_p._RoadPiece, ...],
 ):
-    """Memoize the pure stock beam shared by several late curve policies."""
+    """Memoize the stock beam and skip a strict pass that cannot satisfy its boundary."""
 
     if _ORIGINAL_BEAM is None:
         raise RuntimeError("stock road micro-bend policy is not installed")
 
-    result = _ORIGINAL_BEAM(
-        source_points,
-        turn_sign,
-        entry_heading,
-        exit_heading,
-        pieces,
-    )
-    if result is not None:
-        return result
+    if _strict_beam_can_reach_boundary(entry_heading, exit_heading):
+        result = _ORIGINAL_BEAM(
+            source_points,
+            turn_sign,
+            entry_heading,
+            exit_heading,
+            pieces,
+        )
+        if result is not None:
+            return result
+
     return _ORIGINAL_BEAM(
         source_points,
         turn_sign,
@@ -110,7 +125,7 @@ def _micro_beam_stock_path(
     exit_heading: float,
     pieces,
 ):
-    """Try the strict shared beam first, then allow one native curve section."""
+    """Use the strict stock beam when feasible, otherwise allow one curve section."""
 
     return _cached_micro_beam_stock_path(
         tuple((float(point[0]), float(point[1])) for point in source_points),
