@@ -78,7 +78,7 @@ _LATE_STAGE_SPECS: tuple[StageSpec, ...] = (
         ),
     ),
     ("s_bend", "stock_road_s_bend_policy", "install_stock_road_s_bend_policy"),
-    ("micro_bend", "stock_road_micro_bend_policy", "install_stock_road_micro_bend_policy"),
+    ("micro_bend", "stock_road_curve_usage_policy", "install_stock_road_micro_bend_policy"),
     ("s_bend_exact", "stock_road_s_bend_policy", "install_stock_road_s_bend_exact_policy"),
     ("curve_usage", "stock_road_curve_usage_policy", "install_stock_road_curve_usage_policy"),
     ("junction_endpoint", "stock_road_junction_policy", "install_stock_road_junction_endpoint_policy"),
