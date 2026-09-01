@@ -24,7 +24,6 @@ from . import stock_road_local_fit_policy as _local
 from . import stock_road_model_geometry as _geometry
 from . import stock_road_native_junction_ownership_policy as _ownership
 from . import stock_road_paved_junction_completion_policy as _paved
-from . import stock_road_sharp_exact_policy as _exact
 from . import stock_road_sharp_turn_policy as _sharp
 from . import stock_road_surface_overlap_policy as _surface
 from . import stock_road_visual_finish_policy as _finish
@@ -303,10 +302,10 @@ def _candidate_exact_curve_chain(
     if end <= start + 1.0:
         return baseline
 
-    source_points, entry_heading, source_exit_heading = _exact._measure_slice(
+    source_points, entry_heading, source_exit_heading = _sharp._measure_slice(
         measure, start, end
     )
-    stock_exit_heading = _exact._quantised_stock_exit_heading(
+    stock_exit_heading = _sharp._quantised_stock_exit_heading(
         entry_heading,
         source_exit_heading,
         turn_sign,
@@ -328,8 +327,8 @@ def _candidate_exact_curve_chain(
     )
     if locked_path is None:
         return baseline
-    exact = _exact._recover_exact_actions(locked_path, pieces, turn_sign)
-    if exact is None or _exact._curve_count(exact) < 1:
+    exact = _sharp._recover_exact_actions(locked_path, pieces, turn_sign)
+    if exact is None or _sharp._curve_count(exact) < 1:
         return baseline
     if len(exact) > len(baseline) + INSPECTOR_CURVE_MAXIMUM_EXTRA_PIECES:
         return baseline
@@ -342,9 +341,9 @@ def _candidate_exact_curve_chain(
         if baseline
         else math.inf
     )
-    baseline_curves = _exact._curve_count(baseline)
-    exact_curves = _exact._curve_count(exact)
-    baseline_short = _exact._baseline_short_straights(baseline)
+    baseline_curves = _sharp._curve_count(baseline)
+    exact_curves = _sharp._curve_count(exact)
+    baseline_short = _sharp._baseline_short_straights(baseline)
 
     if (
         exact_curves <= baseline_curves
