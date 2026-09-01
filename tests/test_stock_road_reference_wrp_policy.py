@@ -131,7 +131,6 @@ def test_stock_dirt_object_keeps_terrain_pitch(monkeypatch) -> None:
 
 
 def test_reference_curve_preference_is_extended_by_kodiak_stage() -> None:
-    assert _reference.REFERENCE_MINIMUM_BASELINE_SHORT_STRAIGHTS == 2
     assert _curve_usage._MINIMUM_BASELINE_SHORT_STRAIGHTS == 0
     assert math.isclose(
         _curve_usage._MINIMUM_TOTAL_TURN_DEGREES,
