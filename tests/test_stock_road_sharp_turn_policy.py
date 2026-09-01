@@ -5,7 +5,6 @@ import math
 
 from cwr_worldgen import playability as _p
 from cwr_worldgen import stock_road_model_geometry as _model_geometry
-from cwr_worldgen import stock_road_sharp_exact_policy as _exact
 from cwr_worldgen import stock_road_sharp_turn_policy as _sharp
 
 
@@ -143,7 +142,9 @@ def test_lundby_production_split_has_no_exposed_tangent_miters():
     measure = _p._PolylineMeasure.create(_p._rounded_road_run(points))
     pieces = _p.road_model_variants(r"o\road\sil25.p3d", 25.0)
 
-    baseline = _fit_with_production_junction_cover(_exact._ORIGINAL_CHAIN, measure, pieces)
+    baseline = _fit_with_production_junction_cover(
+        _sharp._ORIGINAL_EXACT_CHAIN, measure, pieces
+    )
     fitted = _fit_with_production_junction_cover(_p._stock_piece_chain, measure, pieces)
 
     assert _curve_count(fitted) >= 3, [piece.model_path for piece, _a, _b in fitted]
