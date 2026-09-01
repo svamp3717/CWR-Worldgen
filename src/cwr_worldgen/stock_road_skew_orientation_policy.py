@@ -10,9 +10,8 @@ cannot rotate the visible asphalt tongue to match that line.
 A second residual case occurs when the through road itself turns at the
 intersection. A balanced native T can split a modest bend over all three rigid
 connectors, but larger bends are safer on the low stock-family central-fill path
-so the fitted approaches remain authoritative. Both decisions are one late
-junction-output responsibility, but their installers remain separately timed to
-preserve the historical pipeline order.
+so the fitted approaches remain authoritative. Both decisions install together
+as one late junction-output stage.
 """
 from __future__ import annotations
 
@@ -340,7 +339,7 @@ def _legacy_cap_for_turning_t(current, source_node, incidents, family, elevation
 
 def _demote_over_bent_native_ts(report, dataset, projection, elevations, spec):
     if _ORIGINAL_TURNING_REALIGN is None:
-        raise RuntimeError("turning-T fallback stage is not installed")
+        raise RuntimeError("skew orientation policy is not installed")
     report = _ORIGINAL_TURNING_REALIGN(report, dataset, projection, elevations, spec)
 
     cap_count = min(
@@ -416,32 +415,25 @@ def _demote_over_bent_native_ts(report, dataset, projection, elevations, spec):
 
 
 def install_stock_road_skew_orientation_policy() -> None:
-    """Patch the final skew chooser and its visual placement after continuity."""
+    """Install final skew selection, placement and over-bent T fallback."""
 
-    global _ORIGINAL_FINAL_REALIGN, _INSTALLED
+    global _ORIGINAL_FINAL_REALIGN, _ORIGINAL_TURNING_REALIGN
+    global _INSTALLED, _TURNING_FALLBACK_INSTALLED
+    global MAXIMUM_TURNING_T_MAIN_BEND_DEGREES
     if _INSTALLED:
         return
+
     _final._same_family_paved_skew_t = _same_family_paved_skew_t
     _ORIGINAL_FINAL_REALIGN = _finish._realign_legacy_caps
     if _ORIGINAL_FINAL_REALIGN is None:
         raise RuntimeError("final stock-road continuity policy must install first")
     _finish._realign_legacy_caps = _realign_and_shift_skew_t_caps
-    _INSTALLED = True
-
-
-def install_stock_road_turning_t_fallback_policy() -> None:
-    """Demote over-bent T meshes at the historical post-skew stage."""
-
-    global _ORIGINAL_TURNING_REALIGN, _TURNING_FALLBACK_INSTALLED
-    global MAXIMUM_TURNING_T_MAIN_BEND_DEGREES
-    if _TURNING_FALLBACK_INSTALLED:
-        return
-    if not _INSTALLED:
-        raise RuntimeError("stock road skew-orientation policy must install first")
 
     MAXIMUM_TURNING_T_MAIN_BEND_DEGREES = (
         MAXIMUM_BALANCED_NATIVE_MAIN_BEND_DEGREES
     )
     _ORIGINAL_TURNING_REALIGN = _finish._realign_legacy_caps
     _finish._realign_legacy_caps = _demote_over_bent_native_ts
+
+    _INSTALLED = True
     _TURNING_FALLBACK_INSTALLED = True
