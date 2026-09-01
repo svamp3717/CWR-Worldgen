@@ -22,9 +22,14 @@ def _straight(
         begin[1] + direction[1] * length,
     )
     center = ((begin[0] + end[0]) * 0.5, (begin[1] + end[1]) * 0.5)
+    model_path = (
+        r"o\road\sil6.p3d"
+        if length <= 6.26
+        else r"o\road\sil12.p3d"
+    )
     first = _core.RoadEndpoint(
         object_id,
-        r"o\road\sil6.p3d",
+        model_path,
         "sil",
         "straight",
         0,
@@ -35,7 +40,7 @@ def _straight(
     )
     second = _core.RoadEndpoint(
         object_id,
-        r"o\road\sil6.p3d",
+        model_path,
         "sil",
         "straight",
         1,
@@ -46,7 +51,7 @@ def _straight(
     )
     return _core.RoadObject(
         object_id,
-        r"o\road\sil6.p3d",
+        model_path,
         center[0],
         center_y,
         center[1],
@@ -60,17 +65,32 @@ def _straight(
     )
 
 
-def _cap(object_id: int, node: tuple[float, float]) -> _core.RoadObject:
+def _cap(
+    object_id: int,
+    node: tuple[float, float],
+    *,
+    heading: float = 0.0,
+) -> _core.RoadObject:
     half = 6.25 * 0.5
+    angle = math.radians(heading)
+    direction = (math.sin(angle), math.cos(angle))
+    first_point = (
+        node[0] - direction[0] * half,
+        node[1] - direction[1] * half,
+    )
+    second_point = (
+        node[0] + direction[0] * half,
+        node[1] + direction[1] * half,
+    )
     first = _core.RoadEndpoint(
         object_id,
         r"o\road\sil6.p3d",
         "sil",
         "straight",
         0,
-        (node[0], node[1] - half),
-        0.0,
-        180.0,
+        first_point,
+        heading % 180.0,
+        (heading + 180.0) % 360.0,
         4.55,
     )
     second = _core.RoadEndpoint(
@@ -79,9 +99,9 @@ def _cap(object_id: int, node: tuple[float, float]) -> _core.RoadObject:
         "sil",
         "straight",
         1,
-        (node[0], node[1] + half),
-        0.0,
-        0.0,
+        second_point,
+        heading % 180.0,
+        heading % 360.0,
         4.55,
     )
     return _core.RoadObject(
@@ -90,7 +110,7 @@ def _cap(object_id: int, node: tuple[float, float]) -> _core.RoadObject:
         node[0],
         0.031,
         node[1],
-        0.0,
+        heading,
         0.0,
         "sil",
         "straight",
@@ -136,6 +156,55 @@ def test_inset_matching_does_not_snap_a_piece_that_points_across_the_node() -> N
         # The endpoint happens to be east of the node but the piece points
         # north. Proximity alone must not invent a correct eastern approach.
         _straight(4, begin=(103.0, 100.0), heading=0.0),
+    )
+    source = (_core.SourceJunction(node, (0.0, 90.0, 180.0)),)
+
+    issues = _core._source_intersection_issues(
+        roads,
+        source,
+        match_tolerance=0.75,
+    )
+
+    mismatch = next(
+        issue for issue in issues if issue.category == "intersection_approach_mismatch"
+    )
+    assert mismatch.metrics["maximum_approach_heading_error_degrees"] > 80.0
+
+
+def test_straight_crossing_low_cap_counts_as_real_intersection_axis() -> None:
+    node = (100.0, 100.0)
+    roads = (
+        _cap(1, node),
+        _straight(2, begin=(100.0, 103.0), heading=0.0),
+        _straight(3, begin=(100.0, 97.0), heading=180.0),
+        # Both connectors are more than six metres from the junction, but the
+        # stock straight itself physically crosses the source node east/west.
+        _straight(4, begin=(93.75, 100.0), heading=90.0, length=12.5),
+    )
+    source = (_core.SourceJunction(node, (0.0, 90.0, 180.0)),)
+
+    issues = _core._source_intersection_issues(
+        roads,
+        source,
+        match_tolerance=0.75,
+    )
+
+    assert not [
+        issue
+        for issue in issues
+        if issue.category
+        in {"intersection_missing_cap", "intersection_approach_mismatch"}
+    ]
+
+
+def test_selected_cap_cannot_masquerade_as_crossing_approach() -> None:
+    node = (100.0, 100.0)
+    roads = (
+        # Point the central cap along the otherwise missing east/west arm. If
+        # cap exclusion breaks, its own axis would falsely make this T complete.
+        _cap(1, node, heading=90.0),
+        _straight(2, begin=(100.0, 103.0), heading=0.0),
+        _straight(3, begin=(100.0, 97.0), heading=180.0),
     )
     source = (_core.SourceJunction(node, (0.0, 90.0, 180.0)),)
 
