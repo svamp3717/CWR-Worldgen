@@ -2,10 +2,14 @@ from pathlib import Path
 
 from cwr_worldgen.gui_entry import (
     CONSOLE_LOG_FILENAME,
+    ROAD_INSPECTOR_CLI_MARKER,
+    _run_road_inspector_postbuild,
     console_log_paths,
     generated_mod_folder,
+    generated_world_pbo,
     managed_replacement,
     mirror_console_log_fragment,
+    road_inspector_postbuild_command,
 )
 
 
@@ -127,3 +131,68 @@ def test_generated_mod_folder_prefers_worldgen_when_multiple_exist(tmp_path: Pat
     (worldgen / "Anims").mkdir()
 
     assert generated_mod_folder(tmp_path) == worldgen.resolve()
+
+
+def test_generated_world_pbo_uses_exact_world_name(tmp_path: Path) -> None:
+    runtime = tmp_path / "CWR-Worldgen"
+    addons = runtime / "Addons"
+    addons.mkdir(parents=True)
+    (runtime / "Anims").mkdir()
+    expected = addons / "wg_demo.pbo"
+    expected.write_bytes(b"pbo")
+    (addons / "other.pbo").write_bytes(b"other")
+
+    assert generated_world_pbo(tmp_path, "wg_demo") == expected.resolve()
+
+
+def test_source_gui_postbuild_command_reenters_gui_entry(tmp_path: Path) -> None:
+    command = road_inspector_postbuild_command(
+        tmp_path / "build",
+        "wg_demo",
+        frozen=False,
+        executable="python-test",
+    )
+
+    assert command == [
+        "python-test",
+        "-m",
+        "cwr_worldgen.gui_entry",
+        ROAD_INSPECTOR_CLI_MARKER,
+        "--build-dir",
+        str(tmp_path / "build"),
+        "--world-name",
+        "wg_demo",
+    ]
+
+
+def test_frozen_gui_postbuild_command_reenters_executable(tmp_path: Path) -> None:
+    command = road_inspector_postbuild_command(
+        tmp_path / "build",
+        "wg_demo",
+        frozen=True,
+        executable="CWR-Worldgen.exe",
+    )
+
+    assert command == [
+        "CWR-Worldgen.exe",
+        ROAD_INSPECTOR_CLI_MARKER,
+        "--build-dir",
+        str(tmp_path / "build"),
+        "--world-name",
+        "wg_demo",
+    ]
+
+
+def test_missing_postbuild_pbo_is_nonfatal(tmp_path: Path) -> None:
+    assert _run_road_inspector_postbuild([
+        "--build-dir", str(tmp_path), "--world-name", "wg_missing"
+    ]) == 0
+    assert (tmp_path / "road-inspector" / "error.txt").is_file()
+
+
+def test_gui_entry_contains_inspector_checkbox_and_pipeline_hook() -> None:
+    source = (Path(__file__).resolve().parents[1] / "src" / "cwr_worldgen" / "gui_entry.py").read_text(encoding="utf-8")
+    assert "Run Road Inspector after a successful build" in source
+    assert '"run_road_inspector_after_build"' in source
+    assert '"Running Road Inspector"' in source
+    assert "road_inspector_postbuild_command(" in source
