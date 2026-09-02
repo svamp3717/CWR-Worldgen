@@ -43,27 +43,27 @@ def _wrp_bytes(objects: tuple[tuple[int, str, float, float, float, float, float]
     return bytes(data)
 
 
+def _write_wrp(tmp_path: Path, name: str, objects) -> Path:
+    wrp = tmp_path / name
+    wrp.write_bytes(_wrp_bytes(tuple(objects)))
+    return wrp
+
+
 def test_clean_straights_have_no_findings(tmp_path: Path) -> None:
-    wrp = tmp_path / "clean.wrp"
-    wrp.write_bytes(
-        _wrp_bytes((
-            (1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
-            (2, r"o\road\sil25.p3d", 0.0, 0.0, 25.0, 0.0, 0.0),
-        ))
-    )
+    wrp = _write_wrp(tmp_path, "clean.wrp", (
+        (1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
+        (2, r"o\road\sil25.p3d", 0.0, 0.0, 25.0, 0.0, 0.0),
+    ))
     result = inspect_road_geometry(wrp)
     assert result.road_object_count == 2
     assert result.issues == ()
 
 
 def test_misaligned_straights_are_reported(tmp_path: Path) -> None:
-    wrp = tmp_path / "bad.wrp"
-    wrp.write_bytes(
-        _wrp_bytes((
-            (1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
-            (2, r"o\road\sil25.p3d", 0.0, 0.0, 25.0, 5.0, 0.0),
-        ))
-    )
+    wrp = _write_wrp(tmp_path, "bad.wrp", (
+        (1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
+        (2, r"o\road\sil25.p3d", 0.0, 0.0, 25.0, 5.0, 0.0),
+    ))
     result = inspect_road_geometry(wrp)
     assert len(result.issues) == 1
     assert result.issues[0].category in {"connector_gap", "straight_miter"}
@@ -72,14 +72,54 @@ def test_misaligned_straights_are_reported(tmp_path: Path) -> None:
 def test_pitch_uses_rvw4_horizontal_projection(tmp_path: Path) -> None:
     pitch = 10.0
     spacing = 25.0 * math.cos(math.radians(pitch))
-    wrp = tmp_path / "graded.wrp"
-    wrp.write_bytes(
-        _wrp_bytes((
-            (1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, pitch),
-            (2, r"o\road\sil25.p3d", 0.0, 0.0, spacing, 0.0, pitch),
-        ))
-    )
+    wrp = _write_wrp(tmp_path, "graded.wrp", (
+        (1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, pitch),
+        (2, r"o\road\sil25.p3d", 0.0, 0.0, spacing, 0.0, pitch),
+    ))
     assert inspect_road_geometry(wrp).issues == ()
+
+
+def test_complete_t_junction_has_no_junction_findings(tmp_path: Path) -> None:
+    wrp = _write_wrp(tmp_path, "junction-ok.wrp", (
+        (1, r"o\road\kr_new_sil_sil_t.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
+        (2, r"o\road\sil25.p3d", 0.85, 0.0, 18.75, 0.0, 0.0),
+        (3, r"o\road\sil25.p3d", 0.85, 0.0, -18.75, 0.0, 0.0),
+        (4, r"o\road\sil25.p3d", -17.90, 0.0, 0.0, 90.0, 0.0),
+    ))
+    result = inspect_road_geometry(wrp)
+    assert not [issue for issue in result.issues if issue.category in {"bad_junction", "junction_connector_mismatch"}]
+
+
+def test_t_junction_missing_arm_is_reported(tmp_path: Path) -> None:
+    wrp = _write_wrp(tmp_path, "junction-missing.wrp", (
+        (1, r"o\road\kr_new_sil_sil_t.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
+        (2, r"o\road\sil25.p3d", 0.85, 0.0, 18.75, 0.0, 0.0),
+        (3, r"o\road\sil25.p3d", 0.85, 0.0, -18.75, 0.0, 0.0),
+    ))
+    issue = next(issue for issue in inspect_road_geometry(wrp).issues if issue.category == "bad_junction")
+    assert issue.metrics["missing_connectors"] == 1.0
+
+
+def test_t_junction_extra_arm_is_reported(tmp_path: Path) -> None:
+    wrp = _write_wrp(tmp_path, "junction-extra.wrp", (
+        (1, r"o\road\kr_new_sil_sil_t.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
+        (2, r"o\road\sil25.p3d", 0.85, 0.0, 18.75, 0.0, 0.0),
+        (3, r"o\road\sil25.p3d", 0.85, 0.0, -18.75, 0.0, 0.0),
+        (4, r"o\road\sil25.p3d", -17.90, 0.0, 0.0, 90.0, 0.0),
+        (5, r"o\road\sil25.p3d", 12.50, 0.0, 0.0, 90.0, 0.0),
+    ))
+    issue = next(issue for issue in inspect_road_geometry(wrp).issues if issue.category == "bad_junction")
+    assert issue.metrics["extra_approaches"] >= 1.0
+
+
+def test_three_way_intersection_without_junction_is_reported(tmp_path: Path) -> None:
+    wrp = _write_wrp(tmp_path, "intersection.wrp", (
+        (1, r"o\road\sil25.p3d", 0.0, 0.0, 12.5, 0.0, 0.0),
+        (2, r"o\road\sil25.p3d", 0.0, 0.0, -12.5, 0.0, 0.0),
+        (3, r"o\road\sil25.p3d", -12.5, 0.0, 0.0, 90.0, 0.0),
+    ))
+    result = inspect_road_geometry(wrp)
+    assert any(issue.category == "intersection_without_junction" for issue in result.issues)
 
 
 def test_pbo_input_and_reports_are_read_only(tmp_path: Path) -> None:
