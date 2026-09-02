@@ -1,0 +1,61 @@
+name: Sync OSM House Modeler styles v3
+
+on:
+  push:
+    branches:
+      - upgrade/osm-house-modeler-buildings
+
+permissions:
+  contents: write
+
+jobs:
+  sync-styles:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out integration branch
+        uses: actions/checkout@v6
+        with:
+          ref: upgrade/osm-house-modeler-buildings
+          fetch-depth: 0
+
+      - name: Check out pinned OSM House Modeler source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch main https://github.com/svamp3717/osm-house-modeler.git /tmp/osm-house-modeler
+          test "$(git -C /tmp/osm-house-modeler rev-parse HEAD)" = "74c8049466875dc94409493bc77bfcad56e38a8d"
+
+      - name: Sync exact modeler catalogues
+        run: python tools/sync_osm_house_modeler_styles.py /tmp/osm-house-modeler
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+
+      - name: Run building and style regression tests
+        run: |
+          pytest -q \
+            tests/test_house_style_catalogue.py \
+            tests/test_osm_house_modeler_upgrade.py \
+            tests/test_building_shape_extensions.py \
+            tests/test_milestone8.py
+
+      - name: Commit exact upstream catalogues and integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm --ignore-unmatch .github/workflows/sync-osm-house-modeler-styles-v3.yml
+          git add -A
+          git commit -m "Replace building styles with modeler country catalogue"
+          git push origin HEAD:upgrade/osm-house-modeler-buildings
