@@ -28,7 +28,9 @@ jobs:
           test "$(git -C /tmp/osm-house-modeler rev-parse HEAD)" = "74c8049466875dc94409493bc77bfcad56e38a8d"
 
       - name: Sync exact modeler catalogues
-        run: python tools/sync_osm_house_modeler_styles.py /tmp/osm-house-modeler
+        run: |
+          python tools/sync_osm_house_modeler_styles.py /tmp/osm-house-modeler
+          python tools/patch_modeler_roof_aliases.py
 
       - name: Set up Python
         uses: actions/setup-python@v6
