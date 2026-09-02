@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Read-only post-build inspector for stock CWA road geometry."""
+"""Read-only post-build inspector for CWA road geometry."""
 from __future__ import annotations
 
 from collections import Counter
@@ -14,13 +14,19 @@ _HEADER = struct.Struct("<4sii")
 _OBJECT = struct.Struct("<12fi76s")
 _TEXTURE_BYTES = 512 * 32
 _LENGTHS = {25: 25.0, 12: 12.5, 6: 6.25}
-_WIDTHS = {"sil": 4.55, "kos": 4.55, "asf": 3.50, "ces": 1.75}
+_WIDTHS = {"sil": 4.55, "kos": 4.55, "asf": 3.50, "ces": 1.75, "gravel": 2.30}
 _CURVE_ANGLE = 10.0
 _JUNCTION_RADIUS = 6.25
+_GRAVEL_JUNCTION_RADIUS = 4.0
 _STRAIGHT = re.compile(r"^(?:.*[\\/])(?P<family>sil|ces|asf|kos)(?P<length>25|12|6)\.p3d$", re.I)
 _CURVE = re.compile(r"^(?:.*[\\/])(?P<family>sil|ces|asf|kos)10 (?P<radius>25|50|75|100)\.p3d$", re.I)
 _T = re.compile(r"^(?:.*[\\/])kr_new_(?P<main>sil|asf|kos)_(?P<branch>sil|ces|asf|kos)_t\.p3d$", re.I)
 _X = re.compile(r"^(?:.*[\\/])kr_new_silxsil\.p3d$", re.I)
+_GRAVEL = re.compile(r"^(?:.*[\\/])gravel(?P<length>25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.I)
+_GRAVEL_JUNCTION = re.compile(
+    r"^(?:.*[\\/])gravel_j(?P<degree>[34])(?:_(?P<variant>t(?:30|45|60|75)[lr]|t90|y120|x(?:30|45|60|75|90)))?\.p3d$",
+    re.I,
+)
 
 DEFAULT_ENDPOINT_TOLERANCE_METRES = 0.20
 DEFAULT_NEARBY_GAP_METRES = 1.50
@@ -53,6 +59,14 @@ class RoadObject:
     family: str
     kind: str
     endpoints: tuple[RoadEndpoint, ...]
+
+    @property
+    def road_type(self) -> str:
+        if self.family == "gravel":
+            return "gravel"
+        if self.family == "ces":
+            return "dirt"
+        return "paved"
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +141,23 @@ def _endpoint(road_id: int, model: str, family: str, kind: str, index: int,
     return RoadEndpoint(road_id, model, family, kind, index, point, tangent % 180.0, outward % 360.0, _WIDTHS[family])
 
 
+def _gravel_junction_headings(degree: int, variant: str | None) -> tuple[float, ...]:
+    value = (variant or ("t90" if degree == 3 else "x90")).casefold()
+    if value == "y120":
+        return (0.0, 120.0, 240.0)
+    match = re.fullmatch(r"t(30|45|60|75)([lr])", value)
+    if match:
+        turn = float(match.group(1)) * (1.0 if match.group(2) == "r" else -1.0)
+        return (0.0, 180.0, turn)
+    if value == "t90":
+        return (0.0, 180.0, 90.0)
+    match = re.fullmatch(r"x(30|45|60|75|90)", value)
+    if match:
+        turn = float(match.group(1))
+        return (0.0, 180.0, turn, turn + 180.0)
+    return ()
+
+
 def _road(values) -> RoadObject | None:
     raw = values[13].split(b"\0", 1)[0]
     if not raw:
@@ -187,10 +218,8 @@ def _road(values) -> RoadObject | None:
 
     if _X.fullmatch(path):
         definitions = (
-            ((0.0, _JUNCTION_RADIUS), 0.0),
-            ((0.0, -_JUNCTION_RADIUS), 180.0),
-            ((_JUNCTION_RADIUS, 0.0), 90.0),
-            ((-_JUNCTION_RADIUS, 0.0), 270.0),
+            ((0.0, _JUNCTION_RADIUS), 0.0), ((0.0, -_JUNCTION_RADIUS), 180.0),
+            ((_JUNCTION_RADIUS, 0.0), 90.0), ((-_JUNCTION_RADIUS, 0.0), 270.0),
         )
         endpoints = tuple(
             _endpoint(object_id, model, "sil", "junction", i, _world_point(local, origin, yaw, pitch),
@@ -198,6 +227,30 @@ def _road(values) -> RoadObject | None:
             for i, (local, direction) in enumerate(definitions)
         )
         return RoadObject(object_id, model, x, y, z, yaw, pitch, "sil", "junction_x", endpoints)
+
+    match = _GRAVEL.fullmatch(path)
+    if match:
+        length = float(match.group("length"))
+        tangent = _world_heading(0.0, yaw, pitch)
+        begin = _world_point((0.0, -length * 0.5), origin, yaw, pitch)
+        end = _world_point((0.0, length * 0.5), origin, yaw, pitch)
+        endpoints = (
+            _endpoint(object_id, model, "gravel", "gravel", 0, begin, tangent, _world_heading(180.0, yaw, pitch)),
+            _endpoint(object_id, model, "gravel", "gravel", 1, end, tangent, tangent),
+        )
+        return RoadObject(object_id, model, x, y, z, yaw, pitch, "gravel", "gravel", endpoints)
+
+    match = _GRAVEL_JUNCTION.fullmatch(path)
+    if match:
+        headings = _gravel_junction_headings(int(match.group("degree")), match.group("variant"))
+        endpoints = tuple(
+            _endpoint(object_id, model, "gravel", "junction", i,
+                      _world_point((math.sin(math.radians(direction)) * _GRAVEL_JUNCTION_RADIUS,
+                                    math.cos(math.radians(direction)) * _GRAVEL_JUNCTION_RADIUS), origin, yaw, pitch),
+                      _world_heading(direction, yaw, pitch), _world_heading(direction, yaw, pitch))
+            for i, direction in enumerate(headings)
+        )
+        return RoadObject(object_id, model, x, y, z, yaw, pitch, "gravel", "junction_gravel", endpoints)
     return None
 
 
@@ -319,10 +372,8 @@ def _issue(first: RoadEndpoint, second: RoadEndpoint, edge_limit: float, tangent
     score = min(100.0, min(45.0, center * 70.0) + min(35.0, edge * 50.0) + min(30.0, tangent * 4.0) + (20.0 if family else 0.0))
     return RoadIssue(
         "", _severity(score), score, category,
-        (first.point[0] + second.point[0]) * 0.5,
-        (first.point[1] + second.point[1]) * 0.5,
-        tuple(sorted((first.object_id, second.object_id))),
-        (first.model_path, second.model_path),
+        (first.point[0] + second.point[0]) * 0.5, (first.point[1] + second.point[1]) * 0.5,
+        tuple(sorted((first.object_id, second.object_id))), (first.model_path, second.model_path),
         f"{first.model_path} -> {second.model_path}: center gap {center:.3f} m, tangent mismatch {tangent:.2f}°, edge discontinuity {edge:.3f} m.",
         {"center_gap_metres": round(center, 5), "tangent_error_degrees": round(tangent, 5), "edge_gap_metres": round(edge, 5)},
     )
@@ -356,6 +407,58 @@ def _intersection_issue(endpoints: Sequence[RoadEndpoint]) -> RoadIssue | None:
     )
 
 
+def _segment_intersection(a: tuple[float, float], b: tuple[float, float],
+                          c: tuple[float, float], d: tuple[float, float]) -> tuple[float, float, float, float] | None:
+    den = (a[0] - b[0]) * (c[1] - d[1]) - (a[1] - b[1]) * (c[0] - d[0])
+    if abs(den) <= 1.0e-9:
+        return None
+    t = ((a[0] - c[0]) * (c[1] - d[1]) - (a[1] - c[1]) * (c[0] - d[0])) / den
+    u = -((a[0] - b[0]) * (a[1] - c[1]) - (a[1] - b[1]) * (a[0] - c[0])) / den
+    if not (0.0 <= t <= 1.0 and 0.0 <= u <= 1.0):
+        return None
+    return a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), t, u
+
+
+def _paved_crossing_issues(roads: Sequence[RoadObject]) -> list[RoadIssue]:
+    paved = tuple(road for road in roads if road.kind == "straight" and road.family in {"sil", "asf", "kos"})
+    buckets: dict[tuple[int, int], list[int]] = {}
+    for index, road in enumerate(paved):
+        first, last = road.endpoints[0].point, road.endpoints[-1].point
+        for bx in range(math.floor(min(first[0], last[0]) / 25.0), math.floor(max(first[0], last[0]) / 25.0) + 1):
+            for bz in range(math.floor(min(first[1], last[1]) / 25.0), math.floor(max(first[1], last[1]) / 25.0) + 1):
+                buckets.setdefault((bx, bz), []).append(index)
+    issues: list[RoadIssue] = []
+    seen: set[tuple[int, int]] = set()
+    junctions = tuple((road.x, road.z) for road in roads if road.kind in {"junction_t", "junction_x"})
+    for indices in buckets.values():
+        for i, first_index in enumerate(indices):
+            for second_index in indices[i + 1:]:
+                pair = tuple(sorted((first_index, second_index)))
+                if pair in seen:
+                    continue
+                seen.add(pair)
+                first, second = paved[pair[0]], paved[pair[1]]
+                hit = _segment_intersection(first.endpoints[0].point, first.endpoints[-1].point,
+                                            second.endpoints[0].point, second.endpoints[-1].point)
+                if hit is None:
+                    continue
+                x, z, first_t, second_t = hit
+                crossing_angle = _axis_angle(first.endpoints[0].tangent, second.endpoints[0].tangent)
+                if crossing_angle < 20.0 or not (0.08 < first_t < 0.92 or 0.08 < second_t < 0.92):
+                    continue
+                if any(math.dist((x, z), center) <= _JUNCTION_RADIUS + 1.0 for center in junctions):
+                    continue
+                category = "paved_crossing_without_junction" if 0.08 < first_t < 0.92 and 0.08 < second_t < 0.92 else "paved_t_without_junction"
+                score = 90.0 if category.startswith("paved_crossing") else 80.0
+                issues.append(RoadIssue(
+                    "", _severity(score), score, category, x, z,
+                    tuple(sorted((first.object_id, second.object_id))), tuple(sorted((first.model_path, second.model_path))),
+                    f"Paved road pieces intersect at {crossing_angle:.1f}° without a junction connector at the crossing.",
+                    {"crossing_angle_degrees": round(crossing_angle, 5), "first_position": round(first_t, 5), "second_position": round(second_t, 5)},
+                ))
+    return issues
+
+
 def _heading_to(start: tuple[float, float], end: tuple[float, float]) -> float:
     return math.degrees(math.atan2(end[0] - start[0], end[1] - start[1])) % 360.0
 
@@ -369,7 +472,6 @@ def _junction_issues(roads: Sequence[RoadObject], maximum_gap: float) -> list[Ro
         models = {junction.model_path}
         missing = duplicates = 0
         worst_gap = 0.0
-
         for connector in junction.endpoints:
             candidates = []
             for endpoint in approaches:
@@ -401,7 +503,6 @@ def _junction_issues(roads: Sequence[RoadObject], maximum_gap: float) -> list[Ro
                 extras.append(endpoint)
                 object_ids.add(endpoint.object_id)
                 models.add(endpoint.model_path)
-
         if not missing and not duplicates and not extras:
             continue
         expected = len(junction.endpoints)
@@ -410,16 +511,10 @@ def _junction_issues(roads: Sequence[RoadObject], maximum_gap: float) -> list[Ro
         issues.append(RoadIssue(
             "", _severity(score), score, "bad_junction", junction.x, junction.z,
             tuple(sorted(object_ids)), tuple(sorted(models)),
-            f"{junction.kind.replace('_', ' ')} has {connected}/{expected} connected stock connectors"
-            f"; {missing} missing, {duplicates} multiply connected, {len(extras)} extra approach(es) near the junction centre.",
-            {
-                "expected_connectors": float(expected),
-                "connected_connectors": float(connected),
-                "missing_connectors": float(missing),
-                "duplicate_connections": float(duplicates),
-                "extra_approaches": float(len(extras)),
-                "worst_connector_gap_metres": round(worst_gap, 5),
-            },
+            f"{junction.kind.replace('_', ' ')} has {connected}/{expected} connected stock connectors; {missing} missing, {duplicates} multiply connected, {len(extras)} extra approach(es) near the junction centre.",
+            {"expected_connectors": float(expected), "connected_connectors": float(connected),
+             "missing_connectors": float(missing), "duplicate_connections": float(duplicates),
+             "extra_approaches": float(len(extras)), "worst_connector_gap_metres": round(worst_gap, 5)},
         ))
     return issues
 
@@ -474,7 +569,8 @@ def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAU
                           minimum_tangent_error: float = DEFAULT_MINIMUM_TANGENT_ERROR_DEGREES) -> InspectionResult:
     data, wrp_entry = _wrp(Path(input_path))
     roads = _roads(data)
-    endpoints = tuple(endpoint for road in roads for endpoint in road.endpoints)
+    checked_roads = tuple(road for road in roads if road.family != "gravel")
+    endpoints = tuple(endpoint for road in checked_roads for endpoint in road.endpoints)
     issues: list[RoadIssue] = []
     paired: set[tuple[int, int]] = set()
     for cluster in _clusters(endpoints, endpoint_tolerance):
@@ -491,17 +587,16 @@ def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAU
         if issue:
             issues.append(issue)
     issues.extend(_nearby(endpoints, paired, endpoint_tolerance, nearby_gap, minimum_edge_gap, minimum_tangent_error))
-    issues.extend(_junction_issues(roads, nearby_gap))
+    issues.extend(_junction_issues(checked_roads, nearby_gap))
+    issues.extend(_paved_crossing_issues(checked_roads))
     return InspectionResult(str(Path(input_path)), wrp_entry, roads, _number(issues))
 
 
 def _summary(result: InspectionResult) -> dict[str, object]:
     return {
-        "input": result.input_path,
-        "wrp_entry": result.wrp_entry,
-        "road_objects": result.road_object_count,
-        "issue_count": len(result.issues),
-        "severity_counts": dict(Counter(i.severity for i in result.issues)),
+        "input": result.input_path, "wrp_entry": result.wrp_entry, "road_objects": result.road_object_count,
+        "road_type_counts": dict(Counter(road.road_type for road in result.road_objects)),
+        "issue_count": len(result.issues), "severity_counts": dict(Counter(i.severity for i in result.issues)),
         "category_counts": dict(Counter(i.category for i in result.issues)),
     }
 
@@ -509,13 +604,9 @@ def _summary(result: InspectionResult) -> dict[str, object]:
 def write_inspection_report(result: InspectionResult, output_dir: Path) -> dict[str, Path]:
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
-    paths = {
-        "issues_json": output / "issues.json",
-        "issues_csv": output / "issues.csv",
-        "summary_json": output / "summary.json",
-        "coordinate_csv": output / "ingame-coordinates.csv",
-        "html": output / "report.html",
-    }
+    paths = {"issues_json": output / "issues.json", "issues_csv": output / "issues.csv",
+             "summary_json": output / "summary.json", "coordinate_csv": output / "ingame-coordinates.csv",
+             "html": output / "report.html"}
     paths["issues_json"].write_text(json.dumps([asdict(i) for i in result.issues], indent=2) + "\n", encoding="utf-8")
     paths["summary_json"].write_text(json.dumps(_summary(result), indent=2) + "\n", encoding="utf-8")
     with paths["issues_csv"].open("w", newline="", encoding="utf-8") as stream:
@@ -545,11 +636,9 @@ def write_inspection_report(result: InspectionResult, output_dir: Path) -> dict[
     paths["html"].write_text(
         f'<!doctype html><meta charset="utf-8"><title>Road Inspector</title><style>body{{font:14px system-ui;margin:24px}}'
         f'table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #aaa;padding:6px;text-align:left}}</style>'
-        f'<h1>Road Inspector</h1><p>Read-only RVW4 stock-road audit. {result.road_object_count} road objects, '
+        f'<h1>Road Inspector</h1><p>Read-only RVW4 road audit. {result.road_object_count} road objects, '
         f'{len(result.issues)} issues.</p><table><tr><th>ID</th><th>Severity</th><th>Score</th><th>Category</th>'
-        f'<th>X/Z</th><th>Details</th></tr>{rows}</table>',
-        encoding="utf-8",
-    )
+        f'<th>X/Z</th><th>Details</th></tr>{rows}</table>', encoding="utf-8")
     return paths
 
 
@@ -561,7 +650,7 @@ def _positive(value: str) -> float:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="cwr-road-inspector", description="Read-only inspection of stock-road seams in a CWA RVW4 WRP/PBO.")
+    parser = argparse.ArgumentParser(prog="cwr-road-inspector", description="Read-only inspection of road seams and junctions in a CWA RVW4 WRP/PBO.")
     parser.add_argument("input", type=Path)
     parser.add_argument("--output", type=Path, default=Path("road-inspector"))
     parser.add_argument("--endpoint-tolerance", type=_positive, default=DEFAULT_ENDPOINT_TOLERANCE_METRES)
@@ -569,13 +658,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--minimum-edge-gap", type=_positive, default=DEFAULT_MINIMUM_EDGE_GAP_METRES)
     parser.add_argument("--minimum-tangent-error", type=_positive, default=DEFAULT_MINIMUM_TANGENT_ERROR_DEGREES)
     args = parser.parse_args(argv)
-    result = inspect_road_geometry(
-        args.input,
-        endpoint_tolerance=args.endpoint_tolerance,
-        nearby_gap=args.nearby_gap,
-        minimum_edge_gap=args.minimum_edge_gap,
-        minimum_tangent_error=args.minimum_tangent_error,
-    )
+    result = inspect_road_geometry(args.input, endpoint_tolerance=args.endpoint_tolerance, nearby_gap=args.nearby_gap,
+                                   minimum_edge_gap=args.minimum_edge_gap, minimum_tangent_error=args.minimum_tangent_error)
     report = write_inspection_report(result, args.output)
     counts = Counter(issue.severity for issue in result.issues)
     print(f"Road Inspector: {result.road_object_count:,} road objects, {len(result.issues):,} issues ({counts.get('critical', 0)} critical, {counts.get('high', 0)} high).")
