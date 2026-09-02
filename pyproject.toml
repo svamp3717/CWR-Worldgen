@@ -38,4 +38,4 @@ version = {attr = "cwr_worldgen._version.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"cwr_worldgen" = ["data/eden_gravel/*.paa", "data/eden_gravel/*.txt", "data/gravel_reference.png", "house_styles/*.json"]
+"cwr_worldgen" = ["data/road_types.json", "data/eden_gravel/*.paa", "data/eden_gravel/*.txt", "data/gravel_reference.png", "house_styles/*.json"]
