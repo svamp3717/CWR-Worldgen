@@ -2,6 +2,7 @@ from pathlib import Path
 
 from cwr_worldgen.gui_entry import (
     CONSOLE_LOG_FILENAME,
+    ROAD_INSPECTOR_CHILD_CODE,
     ROAD_INSPECTOR_CLI_MARKER,
     _run_road_inspector_postbuild,
     console_log_paths,
@@ -145,7 +146,7 @@ def test_generated_world_pbo_uses_exact_world_name(tmp_path: Path) -> None:
     assert generated_world_pbo(tmp_path, "wg_demo") == expected.resolve()
 
 
-def test_source_gui_postbuild_command_reenters_gui_entry(tmp_path: Path) -> None:
+def test_source_gui_postbuild_command_avoids_runpy_reentry(tmp_path: Path) -> None:
     command = road_inspector_postbuild_command(
         tmp_path / "build",
         "wg_demo",
@@ -155,14 +156,14 @@ def test_source_gui_postbuild_command_reenters_gui_entry(tmp_path: Path) -> None
 
     assert command == [
         "python-test",
-        "-m",
-        "cwr_worldgen.gui_entry",
-        ROAD_INSPECTOR_CLI_MARKER,
+        "-c",
+        ROAD_INSPECTOR_CHILD_CODE,
         "--build-dir",
         str(tmp_path / "build"),
         "--world-name",
         "wg_demo",
     ]
+    assert "-m" not in command
 
 
 def test_frozen_gui_postbuild_command_reenters_executable(tmp_path: Path) -> None:
@@ -190,9 +191,11 @@ def test_missing_postbuild_pbo_is_nonfatal(tmp_path: Path) -> None:
     assert (tmp_path / "road-inspector" / "error.txt").is_file()
 
 
-def test_gui_entry_contains_inspector_checkbox_and_pipeline_hook() -> None:
+def test_gui_entry_contains_inspector_checkbox_pipeline_and_map() -> None:
     source = (Path(__file__).resolve().parents[1] / "src" / "cwr_worldgen" / "gui_entry.py").read_text(encoding="utf-8")
     assert "Run Road Inspector after a successful build" in source
     assert '"run_road_inspector_after_build"' in source
     assert '"Running Road Inspector"' in source
     assert "road_inspector_postbuild_command(" in source
+    assert '<svg id="map"></svg>' in source
+    assert "medium +" in source
