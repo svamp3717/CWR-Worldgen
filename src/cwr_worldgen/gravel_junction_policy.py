@@ -116,6 +116,12 @@ def _quality_window(measure, pieces, start_distance, preferred_end, minimum_end,
     return start_distance, preferred_end, minimum_end, maximum_end
 
 
+def _ordinary_gravel_cap_model_path(world_name: str, degree: int) -> str:
+    if degree not in {3, 4}:
+        raise ValueError("gravel junction degree must be 3 or 4")
+    return _RQ._p.gravel_road_model_path(world_name, 6)
+
+
 def _install_stale_paved_cap_cleanup() -> None:
     # The paved policy replaces the selected cap by position. Any other base
     # sil/asf/kos cap inside that junction's clear area is stale and must go.
@@ -179,5 +185,9 @@ def install_gravel_junction_policy() -> None:
     rq._junction_geometry = _junction_geometry
     rq._exit_distance = _exit_distance
     rq._quality_window = _quality_window
+    # This branch allows stock junction P3Ds only for paved roads. Keep the
+    # base gravel cap topology, but render it as an ordinary gravel6 road
+    # piece instead of a generated gravel_j3/gravel_j4 intersection model.
+    rq._p.gravel_junction_model_path = _ordinary_gravel_cap_model_path
     _install_stale_paved_cap_cleanup()
     _INSTALLED = True
