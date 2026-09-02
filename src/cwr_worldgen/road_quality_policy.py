@@ -171,13 +171,40 @@ def _terrain_bulge(context: _Context, start, end, nominal: int) -> float:
 
 
 def _tail_error(measure, pieces, current, preferred_end, maximum_end, depth: int) -> float:
+    """Estimate the best short tail without recursively fitting hypothetical geometry.
+
+    The tail score is only a lookahead heuristic. Actual road pieces still pass
+    through ``chord_endpoint`` and the normal fidelity checks when they are
+    selected on a later fitting iteration. Running those full geometric searches
+    recursively here multiplied the expensive chord work for every candidate and
+    made dense stock-road planning dramatically slower than 0.9.257.
+
+    For the bounded lookahead, fixed model lengths are enough to tell whether a
+    combination such as 12+12+6 can finish close to the requested endpoint.
+    Deduplicating equal accumulated distances also keeps the work bounded by the
+    small set of reachable tail lengths rather than the number of piece orders.
+    """
+
+    _ = measure  # Kept in the signature for callers and tests; geometry is intentionally not sampled here.
     best = abs(preferred_end - current)
     if depth <= 0 or current >= preferred_end - 0.05:
         return best
-    for piece in pieces:
-        endpoint = measure.chord_endpoint(current, piece.length_metres, maximum_end)
-        if endpoint is not None and endpoint[0] > current + 1e-7:
-            best = min(best, _tail_error(measure, pieces, endpoint[0], preferred_end, maximum_end, depth - 1))
+
+    frontier = {current}
+    for _step in range(depth):
+        following: set[float] = set()
+        for distance in frontier:
+            for piece in pieces:
+                candidate = distance + piece.length_metres
+                if candidate > maximum_end + 1e-7:
+                    continue
+                best = min(best, abs(preferred_end - candidate))
+                if best <= 1e-7:
+                    return 0.0
+                following.add(candidate)
+        if not following:
+            break
+        frontier = following
     return best
 
 
