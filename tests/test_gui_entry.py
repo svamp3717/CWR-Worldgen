@@ -12,6 +12,12 @@ from cwr_worldgen.gui_entry import (
     mirror_console_log_fragment,
     road_inspector_postbuild_command,
 )
+from cwr_worldgen.postbuild_cleanup import (
+    CLEANUP_BUILD_AFTER_BUILD,
+    CLEANUP_ONLY_MARKER,
+    cleanup_build_outputs,
+    postbuild_cleanup_command,
+)
 
 
 def test_frozen_worker_dispatch_happens_before_gui_import() -> None:
@@ -140,6 +146,60 @@ def test_frozen_gui_postbuild_command_reenters_executable(tmp_path: Path) -> Non
 def test_missing_postbuild_pbo_is_nonfatal(tmp_path: Path) -> None:
     assert _run_road_inspector_postbuild(["--build-dir", str(tmp_path), "--world-name", "wg_missing"]) == 0
     assert (tmp_path / "road-inspector" / "error.txt").is_file()
+
+
+def test_cleanup_removes_only_source_and_normalized(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    normalized = tmp_path / "normalized"
+    runtime = tmp_path / "CWR-Worldgen"
+    inspector = tmp_path / "road-inspector"
+    source.mkdir()
+    normalized.mkdir()
+    runtime.mkdir()
+    inspector.mkdir()
+    (source / "world.wrp").write_text("temporary", encoding="utf-8")
+    (normalized / "roads.geojson").write_text("temporary", encoding="utf-8")
+    final_pbo = tmp_path / "wg_demo.pbo"
+    final_pbo.write_bytes(b"pbo")
+    log = tmp_path / CONSOLE_LOG_FILENAME
+    log.write_text("log", encoding="utf-8")
+
+    removed = cleanup_build_outputs(tmp_path)
+
+    assert removed == (source, normalized)
+    assert not source.exists()
+    assert not normalized.exists()
+    assert runtime.is_dir()
+    assert inspector.is_dir()
+    assert final_pbo.read_bytes() == b"pbo"
+    assert log.read_text(encoding="utf-8") == "log"
+
+
+def test_source_cleanup_command_reuses_quiet_child_launcher(tmp_path: Path) -> None:
+    command = postbuild_cleanup_command(tmp_path / "build", frozen=False, executable="python-test")
+    assert command == [
+        "python-test", "-c", ROAD_INSPECTOR_CHILD_CODE,
+        CLEANUP_ONLY_MARKER, "--build-dir", str(tmp_path / "build"),
+    ]
+
+
+def test_frozen_cleanup_command_reenters_existing_marker(tmp_path: Path) -> None:
+    command = postbuild_cleanup_command(tmp_path / "build", frozen=True, executable="CWR-Worldgen.exe")
+    assert command == [
+        "CWR-Worldgen.exe", ROAD_INSPECTOR_CLI_MARKER,
+        CLEANUP_ONLY_MARKER, "--build-dir", str(tmp_path / "build"),
+    ]
+
+
+def test_cleanup_checkbox_is_default_on_and_above_inspector() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "cwr_worldgen" / "postbuild_cleanup.py"
+    ).read_text(encoding="utf-8")
+    assert f'values[CLEANUP_BUILD_AFTER_BUILD] = True' in source
+    assert "Delete temporary build files after a successful build" in source
+    assert 'cleanup.pack(anchor="w", before=inspector)' in source
+    assert 'CLEANUP_DIR_NAMES = ("source", "normalized")' in source
 
 
 def test_gui_entry_contains_inspector_checkbox_pipeline_map_and_road_type_filter() -> None:
