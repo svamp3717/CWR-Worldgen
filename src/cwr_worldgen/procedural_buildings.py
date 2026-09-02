@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover - exercised only on older Shapely 2.0
 
 from .cache import cache_key, restore_or_create_file
 from .building_semantics import detect_region, is_actual_church
+from .osm_house_modeler_styles import choose_country, load_country_profiles
 from .house_style_catalogue import (
     HOUSE_STYLE_PRESET_AUTO,
     default_roof_style,
@@ -7818,6 +7819,7 @@ class ProceduralBuildingLibrary:
         self._usage: Counter[BuildingVariantKey] = Counter()
         self._prepared = False
         self.region_identifier: str | None = None
+        self.country_style_identifier: str | None = None
         self.detected_house_style_identifier: str | None = None
         self.house_style_identifier: str | None = None
         self._urban_polygons: tuple[Polygon, ...] = ()
@@ -7833,13 +7835,37 @@ class ProceduralBuildingLibrary:
     def _prepare_geographic_context(self, dataset: Any, projection: Any) -> None:
         tag_sources = [feature.tags for feature in getattr(dataset, "places", ())]
         tag_sources.extend(feature.tags for feature in getattr(dataset, "building_polygons", ()))
-        profile = detect_region(
-            (projection.south, projection.west, projection.north, projection.east),
-            tag_sources,
+        bbox = (projection.south, projection.west, projection.north, projection.east)
+        profile = detect_region(bbox, tag_sources)
+        latitude = (projection.south + projection.north) * 0.5
+        longitude = (projection.west + projection.east) * 0.5
+        country_tags: dict[str, str] = {}
+        country_keys = (
+            "addr:country", "country", "country_code", "is_in:country_code",
+            "ISO3166-1:alpha2", "ISO3166-1:alpha3",
         )
-        self.region_identifier = profile.identifier if profile is not None else None
+        for tags in tag_sources:
+            for name in country_keys:
+                value = tags.get(name)
+                if value and name not in country_tags:
+                    country_tags[name] = str(value)
+        country_profiles = load_country_profiles()
+        country_profile = (
+            choose_country(country_profiles, longitude, latitude, country_tags)
+            if country_profiles else None
+        )
+        self.country_style_identifier = (
+            country_profile.identifier if country_profile is not None else None
+        )
+        self.region_identifier = (
+            country_profile.parent_region_identifier
+            if country_profile is not None
+            else profile.identifier if profile is not None else None
+        )
         self.detected_house_style_identifier = (
-            profile.house_style_identifier if profile is not None else None
+            country_profile.identifier
+            if country_profile is not None
+            else profile.house_style_identifier if profile is not None else None
         )
         override_profile = house_style_preset_profile(self.house_style_preset)
         self.house_style_identifier = (

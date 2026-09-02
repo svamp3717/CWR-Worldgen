@@ -1,0 +1,2898 @@
+{
+  "schema_version": 1,
+  "identifier": "ph_philippines",
+  "display_name": "Philippines",
+  "iso_alpha2": "PH",
+  "iso_alpha3": "PHL",
+  "iso_numeric": "608",
+  "parent_region_identifier": "east_asia",
+  "parent_region_name": "East Asia",
+  "detail_revision": "2026-08-country-exterior-details-v1",
+  "detail_level": "country-expanded-curated",
+  "data_provenance": {
+    "architectural_basis": "curated national tuning over detailed CWR region",
+    "geography_basis": "bundled low-resolution country geometry from generation-time countryinfo/Natural-Earth-derived data when available; manual envelope fallback for selected small territories",
+    "runtime_network_required": false,
+    "editor_note": "Country data is a procedural default, not a statement that all buildings in the country share one style. Explicit OSM tags override these defaults."
+  },
+  "country_overview": "Concrete/block, timber and metal construction with corrugated roofs, awnings and ventilation-oriented windows are widespread.",
+  "geographic_metadata": {
+    "world_region": "Asia",
+    "subregion": "South-Eastern Asia",
+    "reference_lat_lon": [
+      13,
+      122
+    ],
+    "capital": "Manila",
+    "neighbours_iso3": []
+  },
+  "match": {
+    "country_aliases": [
+      "PH",
+      "PHL",
+      "Philippines",
+      "Republic of the Philippines",
+      "Repúblika ng Pilipinas",
+      "Pilipinas"
+    ],
+    "envelopes_lon_lat": [
+      [
+        117.174275,
+        5.581003,
+        126.537424,
+        18.505227
+      ]
+    ],
+    "geometry": {
+      "type": "MultiPolygon",
+      "coordinates": [
+        [
+          [
+            [
+              126.376814,
+              8.414706
+            ],
+            [
+              126.478513,
+              7.750354
+            ],
+            [
+              126.537424,
+              7.189381
+            ],
+            [
+              126.196773,
+              6.274294
+            ],
+            [
+              125.831421,
+              7.293715
+            ],
+            [
+              125.363852,
+              6.786485
+            ],
+            [
+              125.683161,
+              6.049657
+            ],
+            [
+              125.396512,
+              5.581003
+            ],
+            [
+              124.219788,
+              6.161355
+            ],
+            [
+              123.93872,
+              6.885136
+            ],
+            [
+              124.243662,
+              7.36061
+            ],
+            [
+              123.610212,
+              7.833527
+            ],
+            [
+              123.296071,
+              7.418876
+            ],
+            [
+              122.825506,
+              7.457375
+            ],
+            [
+              122.085499,
+              6.899424
+            ],
+            [
+              121.919928,
+              7.192119
+            ],
+            [
+              122.312359,
+              8.034962
+            ],
+            [
+              122.942398,
+              8.316237
+            ],
+            [
+              123.487688,
+              8.69301
+            ],
+            [
+              123.841154,
+              8.240324
+            ],
+            [
+              124.60147,
+              8.514158
+            ],
+            [
+              124.764612,
+              8.960409
+            ],
+            [
+              125.471391,
+              8.986997
+            ],
+            [
+              125.412118,
+              9.760335
+            ],
+            [
+              126.222714,
+              9.286074
+            ],
+            [
+              126.306637,
+              8.782487
+            ],
+            [
+              126.376814,
+              8.414706
+            ]
+          ]
+        ],
+        [
+          [
+            [
+              123.982438,
+              10.278779
+            ],
+            [
+              123.623183,
+              9.950091
+            ],
+            [
+              123.309921,
+              9.318269
+            ],
+            [
+              122.995883,
+              9.022189
+            ],
+            [
+              122.380055,
+              9.713361
+            ],
+            [
+              122.586089,
+              9.981045
+            ],
+            [
+              122.837081,
+              10.261157
+            ],
+            [
+              122.947411,
+              10.881868
+            ],
+            [
+              123.49885,
+              10.940624
+            ],
+            [
+              123.337774,
+              10.267384
+            ],
+            [
+              124.077936,
+              11.232726
+            ],
+            [
+              123.982438,
+              10.278779
+            ]
+          ]
+        ],
+        [
+          [
+            [
+              118.504581,
+              9.316383
+            ],
+            [
+              117.174275,
+              8.3675
+            ],
+            [
+              117.664477,
+              9.066889
+            ],
+            [
+              118.386914,
+              9.6845
+            ],
+            [
+              118.987342,
+              10.376292
+            ],
+            [
+              119.511496,
+              11.369668
+            ],
+            [
+              119.689677,
+              10.554291
+            ],
+            [
+              119.029458,
+              10.003653
+            ],
+            [
+              118.504581,
+              9.316383
+            ]
+          ]
+        ],
+        [
+          [
+            [
+              121.883548,
+              11.891755
+            ],
+            [
+              122.483821,
+              11.582187
+            ],
+            [
+              123.120217,
+              11.58366
+            ],
+            [
+              123.100838,
+              11.165934
+            ],
+            [
+              122.637714,
+              10.741308
+            ],
+            [
+              122.00261,
+              10.441017
+            ],
+            [
+              121.967367,
+              10.905691
+            ],
+            [
+              122.03837,
+              11.415841
+            ],
+            [
+              121.883548,
+              11.891755
+            ]
+          ]
+        ],
+        [
+          [
+            [
+              125.502552,
+              12.162695
+            ],
+            [
+              125.783465,
+              11.046122
+            ],
+            [
+              125.011884,
+              11.311455
+            ],
+            [
+              125.032761,
+              10.975816
+            ],
+            [
+              125.277449,
+              10.358722
+            ],
+            [
+              124.801819,
+              10.134679
+            ],
+            [
+              124.760168,
+              10.837995
+            ],
+            [
+              124.459101,
+              10.88993
+            ],
+            [
+              124.302522,
+              11.495371
+            ],
+            [
+              124.891013,
+              11.415583
+            ],
+            [
+              124.87799,
+              11.79419
+            ],
+            [
+              124.266762,
+              12.557761
+            ],
+            [
+              125.227116,
+              12.535721
+            ],
+            [
+              125.502552,
+              12.162695
+            ]
+          ]
+        ],
+        [
+          [
+            [
+              121.527394,
+              13.06959
+            ],
+            [
+              121.26219,
+              12.20556
+            ],
+            [
+              120.833896,
+              12.704496
+            ],
+            [
+              120.323436,
+              13.466413
+            ],
+            [
+              121.180128,
+              13.429697
+            ],
+            [
+              121.527394,
+              13.06959
+            ]
+          ]
+        ],
+        [
+          [
+            [
+              121.321308,
+              18.504065
+            ],
+            [
+              121.937601,
+              18.218552
+            ],
+            [
+              122.246006,
+              18.47895
+            ],
+            [
+              122.336957,
+              18.224883
+            ],
+            [
+              122.174279,
+              17.810283
+            ],
+            [
+              122.515654,
+              17.093505
+            ],
+            [
+              122.252311,
+              16.262444
+            ],
+            [
+              121.662786,
+              15.931018
+            ],
+            [
+              121.50507,
+              15.124814
+            ],
+            [
+              121.728829,
+              14.328376
+            ],
+            [
+              122.258925,
+              14.218202
+            ],
+            [
+              122.701276,
+              14.336541
+            ],
+            [
+              123.950295,
+              13.782131
+            ],
+            [
+              123.855107,
+              13.237771
+            ],
+            [
+              124.181289,
+              12.997527
+            ],
+            [
+              124.077419,
+              12.536677
+            ],
+            [
+              123.298035,
+              13.027526
+            ],
+            [
+              122.928652,
+              13.55292
+            ],
+            [
+              122.671355,
+              13.185836
+            ],
+            [
+              122.03465,
+              13.784482
+            ],
+            [
+              121.126385,
+              13.636687
+            ],
+            [
+              120.628637,
+              13.857656
+            ],
+            [
+              120.679384,
+              14.271016
+            ],
+            [
+              120.991819,
+              14.525393
+            ],
+            [
+              120.693336,
+              14.756671
+            ],
+            [
+              120.564145,
+              14.396279
+            ],
+            [
+              120.070429,
+              14.970869
+            ],
+            [
+              119.920929,
+              15.406347
+            ],
+            [
+              119.883773,
+              16.363704
+            ],
+            [
+              120.286488,
+              16.034629
+            ],
+            [
+              120.390047,
+              17.599081
+            ],
+            [
+              120.715867,
+              18.505227
+            ],
+            [
+              121.321308,
+              18.504065
+            ]
+          ]
+        ]
+      ]
+    }
+  },
+  "contexts": {
+    "rural": {
+      "description": "Masonry, concrete, and timber traditions with varied roof profiles. Rendered/concrete or brick walls, tiled/hipped rural roofs, flat urban roofs, aluminium windows and sliding or hinged doors.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "industrial",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [
+          {
+            "field": "building:material",
+            "values": [
+              "brick",
+              "bricks"
+            ],
+            "style": "western_brick"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "stone",
+              "limestone",
+              "sandstone",
+              "granite",
+              "slate"
+            ],
+            "style": "regional_stone"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "plaster",
+              "stucco",
+              "render",
+              "masonry"
+            ],
+            "style": "regional_stucco"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "wood",
+              "timber"
+            ],
+            "style": "regional_wood"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "concrete",
+              "cement_block",
+              "precast_concrete",
+              "prefabricated"
+            ],
+            "style": "regional_concrete"
+          }
+        ],
+        "family_distributions": {
+          "residential": [
+            {
+              "lt": 55,
+              "style": "regional_stucco"
+            },
+            {
+              "lt": 82,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 100,
+              "style": "regional_wood"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 58,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 82,
+              "style": "regional_stucco"
+            },
+            {
+              "lt": 100,
+              "style": "regional_wood"
+            }
+          ],
+          "urban": [
+            {
+              "lt": 48,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 78,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 100,
+              "style": "regional_stucco"
+            }
+          ],
+          "agricultural": [
+            {
+              "lt": 62,
+              "style": "regional_stucco"
+            },
+            {
+              "lt": 100,
+              "style": "regional_wood"
+            }
+          ],
+          "outbuilding": [
+            {
+              "lt": 70,
+              "style": "regional_stucco"
+            },
+            {
+              "lt": 100,
+              "style": "regional_concrete"
+            }
+          ],
+          "*": [
+            {
+              "lt": 55,
+              "style": "regional_stucco"
+            },
+            {
+              "lt": 82,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 100,
+              "style": "regional_wood"
+            }
+          ],
+          "industrial": [
+            {
+              "lt": 72,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 100,
+              "style": "regional_stucco"
+            }
+          ]
+        },
+        "default_style": "regional_stucco"
+      },
+      "roof_defaults": {
+        "*": "hipped",
+        "residential": "hipped",
+        "townhouse": "hipped",
+        "urban": "hipped",
+        "agricultural": "gabled",
+        "outbuilding": "gabled",
+        "industrial": "gabled",
+        "school": "hipped",
+        "shop": "hipped"
+      },
+      "architectural_details": {
+        "scope_note": "Procedural regional defaults only. Explicit OSM tags such as building:material, roof:shape, roof:material, height, building:levels, entrance and mapped openings should override these heuristics.",
+        "climate_response": "Humid continental, monsoon, subtropical and cold regions; modern construction varies from tiled low-rise to dense concrete urban stock.",
+        "architectural_character": "Rendered/concrete or brick walls, tiled/hipped rural roofs, flat urban roofs, aluminium windows and sliding or hinged doors.",
+        "materials": {
+          "common_wall_materials": [
+            "concrete block",
+            "stucco/render",
+            "timber"
+          ],
+          "common_roof_materials": [
+            "corrugated metal",
+            "concrete tile"
+          ],
+          "typical_colour_palette": [
+            "white",
+            "grey",
+            "cream",
+            "earth brown",
+            "dark tile",
+            "muted red",
+            "natural timber"
+          ],
+          "trim_guidance": "tile/stone surrounds, restrained painted trim and projecting sun/rain hoods"
+        },
+        "geometry_defaults": {
+          "storey_height_m": {
+            "residential": 3.0,
+            "townhouse": 3.0,
+            "urban": 3.0,
+            "school": 3.3,
+            "shop": 3.3,
+            "industrial": 4.5,
+            "agricultural": 4.0,
+            "outbuilding": 3.0
+          },
+          "wall_thickness_m": {
+            "lightweight": 0.16,
+            "masonry": 0.28,
+            "heavy_or_insulated": 0.38
+          },
+          "foundation": {
+            "types": [
+              "reinforced concrete strip footing",
+              "slab-on-grade",
+              "raised masonry/concrete plinth",
+              "pier/post for selected timber vernacular buildings"
+            ],
+            "default_visible_plinth_m": 0.25,
+            "default_below_grade_depth_m": 1.0,
+            "uneven_terrain_strategy": "extend foundation skirt below local building datum; never stretch facade walls down to terrain"
+          },
+          "roof": {
+            "shape_distribution": [
+              {
+                "shape": "hipped",
+                "weight": 30
+              },
+              {
+                "shape": "gabled",
+                "weight": 26
+              },
+              {
+                "shape": "flat",
+                "weight": 28
+              },
+              {
+                "shape": "shed",
+                "weight": 10
+              },
+              {
+                "shape": "pyramidal",
+                "weight": 6
+              }
+            ],
+            "pitch_degrees": {
+              "min": 10,
+              "max": 35,
+              "preferred": 22.5
+            },
+            "eave_overhang_m": {
+              "min": 0.25,
+              "max": 0.8
+            },
+            "materials": [
+              "corrugated metal",
+              "concrete tile"
+            ],
+            "details": [
+              "gutters/downpipes where rainfall/snow makes them plausible",
+              "ridge/eave trim matched to roof material",
+              "chimneys primarily on residential stock where climate/style supports them"
+            ]
+          }
+        },
+        "windows": {
+          "type_distribution": [
+            {
+              "type": "sliding",
+              "weight": 33
+            },
+            {
+              "type": "jalousie",
+              "weight": 33
+            },
+            {
+              "type": "casement",
+              "weight": 34
+            }
+          ],
+          "frame_materials": [
+            "aluminium",
+            "uPVC",
+            "painted timber"
+          ],
+          "glazing": "single to double glazing; insulated glazing increases in colder/high-rise contexts",
+          "shutters_and_screens": [
+            "rolling shutter",
+            "storm shutter in exposed regions",
+            "none"
+          ],
+          "trim": "tile/stone surrounds, restrained painted trim and projecting sun/rain hoods",
+          "default_dimensions_m": {
+            "width": 1.15,
+            "height": 1.25,
+            "sill_height": 0.9,
+            "minimum_edge_margin": 0.55,
+            "target_bay_spacing": 3.0
+          },
+          "placement": {
+            "ground_floor": "keep sill above foundation/plinth; avoid door clearance zones",
+            "upper_floors": "align vertically when facade style is regular; omit on utility families unless explicitly mapped",
+            "gable_walls": "allow smaller centred opening only when enough wall area exists",
+            "corners": "keep at least the configured edge margin from each corner"
+          },
+          "special_sets": {
+            "utility_small": {
+              "types": [
+                "fixed_small",
+                "small_casement",
+                "louvered_vent"
+              ],
+              "width_m": [
+                0.55,
+                0.9
+              ],
+              "height_m": [
+                0.45,
+                0.8
+              ]
+            },
+            "industrial": {
+              "types": [
+                "clerestory_fixed",
+                "strip_window",
+                "industrial_casement"
+              ],
+              "width_m": [
+                1.2,
+                2.4
+              ],
+              "height_m": [
+                0.6,
+                1.2
+              ]
+            },
+            "large_regular": {
+              "types": [
+                "large_casement",
+                "fixed_plus_operable"
+              ],
+              "width_m": [
+                1.4,
+                2.2
+              ],
+              "height_m": [
+                1.4,
+                1.9
+              ]
+            },
+            "storefront": {
+              "types": [
+                "storefront_fixed",
+                "large_fixed",
+                "shopfront_mullioned"
+              ],
+              "width_m": [
+                1.8,
+                3.6
+              ],
+              "height_m": [
+                1.8,
+                2.6
+              ]
+            }
+          },
+          "procedural_placement": {
+            "style_distribution": [
+              {
+                "style": "regular_aligned",
+                "weight": 42
+              },
+              {
+                "style": "paired_groups",
+                "weight": 27
+              },
+              {
+                "style": "symmetric_bays",
+                "weight": 20
+              },
+              {
+                "style": "staggered_floors",
+                "weight": 11
+              }
+            ],
+            "horizontal_jitter_fraction": 0.07,
+            "vertical_jitter_m": 0.04,
+            "omit_bay_probability": 0.04,
+            "floor_phase_shift_fraction": 0.1,
+            "front_density_multiplier": 1.14,
+            "side_density_multiplier": 0.94,
+            "rear_density_multiplier": 0.84,
+            "minimum_windows_per_primary_facade": 1,
+            "maximum_windows_per_wall": 8,
+            "paired_group_gap_fraction": 0.34,
+            "family_overrides": {
+              "townhouse": {
+                "style_distribution": [
+                  {
+                    "style": "regular_aligned",
+                    "weight": 55
+                  },
+                  {
+                    "style": "symmetric_bays",
+                    "weight": 35
+                  },
+                  {
+                    "style": "staggered_floors",
+                    "weight": 10
+                  }
+                ],
+                "omit_bay_probability": 0.02,
+                "front_density_multiplier": 1.18,
+                "maximum_windows_per_wall": 14
+              },
+              "urban": {
+                "style_distribution": [
+                  {
+                    "style": "regular_aligned",
+                    "weight": 52
+                  },
+                  {
+                    "style": "staggered_floors",
+                    "weight": 22
+                  },
+                  {
+                    "style": "symmetric_bays",
+                    "weight": 18
+                  },
+                  {
+                    "style": "paired_groups",
+                    "weight": 8
+                  }
+                ],
+                "omit_bay_probability": 0.025,
+                "horizontal_jitter_fraction": 0.035,
+                "maximum_windows_per_wall": 16
+              },
+              "school": {
+                "style_distribution": [
+                  {
+                    "style": "regular_aligned",
+                    "weight": 72
+                  },
+                  {
+                    "style": "paired_groups",
+                    "weight": 18
+                  },
+                  {
+                    "style": "symmetric_bays",
+                    "weight": 10
+                  }
+                ],
+                "omit_bay_probability": 0.01,
+                "horizontal_jitter_fraction": 0.025,
+                "front_density_multiplier": 1.1,
+                "maximum_windows_per_wall": 18
+              },
+              "shop": {
+                "style_distribution": [
+                  {
+                    "style": "storefront_rhythm",
+                    "weight": 72
+                  },
+                  {
+                    "style": "regular_aligned",
+                    "weight": 18
+                  },
+                  {
+                    "style": "symmetric_bays",
+                    "weight": 10
+                  }
+                ],
+                "front_density_multiplier": 1.48,
+                "side_density_multiplier": 0.62,
+                "rear_density_multiplier": 0.38,
+                "omit_bay_probability": 0.04
+              },
+              "industrial": {
+                "style_distribution": [
+                  {
+                    "style": "clerestory_band",
+                    "weight": 70
+                  },
+                  {
+                    "style": "regular_aligned",
+                    "weight": 20
+                  },
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 10
+                  }
+                ],
+                "front_density_multiplier": 0.82,
+                "side_density_multiplier": 0.88,
+                "rear_density_multiplier": 0.7,
+                "omit_bay_probability": 0.1,
+                "maximum_windows_per_wall": 8
+              },
+              "agricultural": {
+                "style_distribution": [
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 62
+                  },
+                  {
+                    "style": "irregular_cottage",
+                    "weight": 23
+                  },
+                  {
+                    "style": "regular_aligned",
+                    "weight": 15
+                  }
+                ],
+                "front_density_multiplier": 0.72,
+                "side_density_multiplier": 0.62,
+                "rear_density_multiplier": 0.48,
+                "omit_bay_probability": 0.28,
+                "maximum_windows_per_wall": 3
+              },
+              "outbuilding": {
+                "style_distribution": [
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 78
+                  },
+                  {
+                    "style": "irregular_cottage",
+                    "weight": 17
+                  },
+                  {
+                    "style": "regular_aligned",
+                    "weight": 5
+                  }
+                ],
+                "front_density_multiplier": 0.7,
+                "side_density_multiplier": 0.52,
+                "rear_density_multiplier": 0.38,
+                "omit_bay_probability": 0.38,
+                "maximum_windows_per_wall": 2
+              }
+            },
+            "building_class_overrides": {
+              "cabin": {
+                "style_distribution": [
+                  {
+                    "style": "irregular_cottage",
+                    "weight": 48
+                  },
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 27
+                  },
+                  {
+                    "style": "symmetric_bays",
+                    "weight": 15
+                  },
+                  {
+                    "style": "regular_aligned",
+                    "weight": 10
+                  }
+                ],
+                "horizontal_jitter_fraction": 0.12,
+                "vertical_jitter_m": 0.07,
+                "omit_bay_probability": 0.12,
+                "front_density_multiplier": 1.12,
+                "side_density_multiplier": 0.78,
+                "rear_density_multiplier": 0.58,
+                "maximum_windows_per_wall": 4
+              },
+              "shed": {
+                "window_probability": 0.0,
+                "density_multiplier": 0.0,
+                "minimum_windows_per_primary_facade": 0,
+                "maximum_windows_per_wall": 0,
+                "omit_bay_probability": 1.0,
+                "style_distribution": [
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 100
+                  }
+                ]
+              },
+              "garage": {
+                "window_probability": 0.0,
+                "density_multiplier": 0.0,
+                "minimum_windows_per_primary_facade": 0,
+                "maximum_windows_per_wall": 0,
+                "omit_bay_probability": 1.0,
+                "style_distribution": [
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 100
+                  }
+                ]
+              },
+              "barn": {
+                "window_probability": 0.0,
+                "density_multiplier": 0.0,
+                "minimum_windows_per_primary_facade": 0,
+                "maximum_windows_per_wall": 0,
+                "omit_bay_probability": 1.0,
+                "style_distribution": [
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 100
+                  }
+                ]
+              },
+              "warehouse": {
+                "window_probability": 0.2,
+                "density_multiplier": 0.3,
+                "minimum_windows_per_primary_facade": 0,
+                "maximum_windows_per_wall": 2,
+                "omit_bay_probability": 0.68,
+                "front_density_multiplier": 0.55,
+                "side_density_multiplier": 0.42,
+                "rear_density_multiplier": 0.3,
+                "style_distribution": [
+                  {
+                    "style": "clerestory_band",
+                    "weight": 60
+                  },
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 40
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "doors": {
+          "type_distribution": [
+            {
+              "type": "metal_entry",
+              "weight": 50
+            },
+            {
+              "type": "timber_panel",
+              "weight": 50
+            }
+          ],
+          "materials": [
+            "timber",
+            "painted/galvanised steel",
+            "aluminium/composite",
+            "aluminium"
+          ],
+          "primary_entry_dimensions_m": {
+            "width": 0.95,
+            "height": 2.1
+          },
+          "service_entry_dimensions_m": {
+            "width": 0.9,
+            "height": 2.05
+          },
+          "garage": {
+            "type": "sectional_or_roll_up",
+            "width_m": [
+              2.4,
+              3.2
+            ],
+            "height_m": [
+              2.1,
+              2.5
+            ],
+            "use_when": "outbuilding classified as garage or OSM explicitly tags garage/garages"
+          },
+          "barn": {
+            "type": "sliding_or_double_leaf",
+            "width_m": [
+              2.8,
+              4.8
+            ],
+            "height_m": [
+              2.8,
+              4.5
+            ],
+            "use_when": "agricultural/barn family"
+          },
+          "warehouse": {
+            "type": "roll_up_or_sliding_metal",
+            "width_m": [
+              3.2,
+              5.5
+            ],
+            "height_m": [
+              3.2,
+              5.0
+            ],
+            "use_when": "industrial/warehouse/hangar family"
+          },
+          "shop": {
+            "type": "commercial_glazed_or_local_shop_entry",
+            "width_m": [
+              0.9,
+              1.8
+            ],
+            "height_m": [
+              2.1,
+              2.5
+            ]
+          },
+          "school": {
+            "type": "paired_or_glazed_institutional",
+            "width_m": [
+              1.6,
+              2.2
+            ],
+            "height_m": [
+              2.1,
+              2.5
+            ]
+          },
+          "placement": {
+            "preferred_facade": "long accessible exterior wall unless mapped entrance identifies a facade",
+            "corner_clearance_m": 0.7,
+            "keep_clear_of_windows_m": 0.35,
+            "foundation_transition": "pedestrian threshold/step for ordinary doors; broad ramp for vehicle-scale garage/barn/warehouse openings"
+          }
+        },
+        "building_family_profiles": {
+          "residential": {
+            "window_density": "medium",
+            "window_rule": "regular room-scaled bays; avoid corners; 1-3 openings per usable wall depending on length",
+            "door_rule": "one primary pedestrian entry; secondary/service door optional on long footprints",
+            "preferred_window_set": "context_default",
+            "preferred_door_set": "context_default"
+          },
+          "townhouse": {
+            "window_density": "high",
+            "window_rule": "vertically align openings by storey where practical",
+            "door_rule": "narrow pedestrian entrance, usually one per street-facing unit",
+            "preferred_window_set": "context_default",
+            "preferred_door_set": "context_default"
+          },
+          "urban": {
+            "window_density": "high",
+            "window_rule": "repeat bays by storey; ground floor may use larger commercial/opening proportions",
+            "door_rule": "primary street entrance plus optional service entrance",
+            "preferred_window_set": "urban",
+            "preferred_door_set": "urban"
+          },
+          "agricultural": {
+            "window_density": "low",
+            "window_rule": "barns are windowless; agricultural entrances and ventilation details carry the facade",
+            "door_rule": "sliding_or_double_leaf",
+            "preferred_window_set": "utility_small",
+            "preferred_door_set": "barn"
+          },
+          "outbuilding": {
+            "window_density": "very-low",
+            "window_rule": "sheds and garages are windowless; utility doors define the facade",
+            "door_rule": "shed uses pedestrian utility door; garage uses vehicle-scale door when footprint can fit a car",
+            "preferred_window_set": "utility_small",
+            "preferred_door_set": "shed_or_garage"
+          },
+          "industrial": {
+            "window_density": "low-medium",
+            "window_rule": "warehouses are usually windowless; uncommon glazing is sparse clerestory/fixed utility glazing rather than domestic bays",
+            "door_rule": "roll_up_or_sliding_metal",
+            "preferred_window_set": "industrial",
+            "preferred_door_set": "warehouse"
+          },
+          "school": {
+            "window_density": "high",
+            "window_rule": "larger repeated classroom windows with consistent sill and head heights",
+            "door_rule": "paired or glazed institutional entrance, plus service/egress doors",
+            "preferred_window_set": "large_regular",
+            "preferred_door_set": "institutional"
+          },
+          "shop": {
+            "window_density": "high_on_front",
+            "window_rule": "street facade favours large fixed/storefront glazing; side/rear walls use ordinary or service windows",
+            "door_rule": "glazed commercial door or local shop entry; roller shutter may accompany storefront",
+            "preferred_window_set": "storefront",
+            "preferred_door_set": "commercial"
+          }
+        },
+        "building_class_profiles": {
+          "cabin": {
+            "family": "residential",
+            "default_levels": 1,
+            "automatic_max_levels": 1,
+            "storey_height_m": 3.0,
+            "window_placement_profile": "cabin",
+            "description": "Small residential cabin/cottage. Defaults to one storey unless explicit OSM height/building:levels says otherwise."
+          },
+          "cottage": {
+            "family": "residential",
+            "default_levels": 2,
+            "automatic_max_levels": 2,
+            "window_placement_profile": "cabin",
+            "description": "Small cottage/house. Two levels are allowed automatically, with the regional roof-storey probability deciding whether the upper level is integrated into the roof."
+          },
+          "apartments": {
+            "family": "urban",
+            "default_levels": 3,
+            "automatic_max_levels": 5,
+            "description": "Apartment building. Regional roof-storey probability may integrate only the top level into a compatible gabled roof."
+          }
+        },
+        "roof_storeys": {
+          "description": "Optional top storey integrated inside a steep gabled roof. Regular upper facade windows are removed; daylight is provided only through windows in gable-end side walls. Dormers and roof-slope windows are intentionally excluded by this profile.",
+          "eligible_roof_shapes": [
+            "gabled"
+          ],
+          "minimum_total_levels": 2,
+          "force_compatible_roof_when_selected": true,
+          "probability_by_building_class": {
+            "cottage": 0.08,
+            "cabin": 0.08,
+            "residential": 0.05,
+            "apartments": 0.06,
+            "townhouse": 0.061,
+            "commercial": 0.022,
+            "hotel": 0.024,
+            "office": 0.01
+          },
+          "probability_by_family": {
+            "residential": 0.05,
+            "townhouse": 0.061,
+            "urban": 0.048,
+            "school": 0.0,
+            "shop": 0.0,
+            "agricultural": 0.0,
+            "outbuilding": 0.0,
+            "industrial": 0.0
+          },
+          "window_policy": {
+            "gable_ends_only": true,
+            "minimum_roof_height_m": 2.35,
+            "sill_above_eave_m": 0.42,
+            "top_clearance_m": 0.34,
+            "side_clearance_m": 0.3,
+            "window_width_scale": 0.82,
+            "window_height_scale": 0.78,
+            "windows_per_gable_distribution": [
+              {
+                "count": 1,
+                "weight": 58
+              },
+              {
+                "count": 2,
+                "weight": 42
+              }
+            ],
+            "description": "Place one or two room-sized windows only in vertical gable triangles. Never repeat the normal upper-floor bay pattern on eave walls."
+          }
+        },
+        "country_specific_note": "Concrete/block, timber and metal construction with corrugated roofs, awnings and ventilation-oriented windows are widespread.",
+        "exterior_details": {
+          "feature_budget": {
+            "minimum": 0,
+            "maximum": 5
+          },
+          "stairs": {
+            "enabled": true,
+            "probability_by_building_class": {
+              "residential": 0.58,
+              "house": 0.62,
+              "cottage": 0.78,
+              "cabin": 0.82,
+              "apartments": 0.48,
+              "commercial": 0.25,
+              "office": 0.2,
+              "hotel": 0.38,
+              "townhouse": 0.5,
+              "shop": 0.2,
+              "school": 0.35,
+              "shed": 0.22,
+              "garage": 0.18,
+              "barn": 0.15,
+              "warehouse": 0.06,
+              "industrial": 0.05,
+              "hangar": 0.02
+            },
+            "styles": [
+              {
+                "type": "stone_entry_steps",
+                "weight": 30
+              },
+              {
+                "type": "concrete_steps",
+                "weight": 50
+              },
+              {
+                "type": "timber_steps",
+                "weight": 20
+              }
+            ],
+            "materials": [
+              {
+                "material": "stone",
+                "weight": 30
+              },
+              {
+                "material": "concrete",
+                "weight": 50
+              },
+              {
+                "material": "timber",
+                "weight": 20
+              }
+            ],
+            "width_m": [
+              1.25,
+              2.15
+            ],
+            "step_rise_m": [
+              0.13,
+              0.18
+            ],
+            "step_depth_m": [
+              0.27,
+              0.36
+            ],
+            "max_steps": 4,
+            "rules": {
+              "requires_entrance": true,
+              "use_foundation_depth": true,
+              "vehicle_scale_utility_doors": "avoid domestic stairs"
+            }
+          },
+          "porches": {
+            "enabled": true,
+            "probability_by_building_class": {
+              "residential": 0.42,
+              "house": 0.48,
+              "cottage": 0.68,
+              "cabin": 0.72,
+              "apartments": 0.06,
+              "commercial": 0.12,
+              "office": 0.05,
+              "hotel": 0.2,
+              "townhouse": 0.14,
+              "shop": 0.14,
+              "school": 0.08,
+              "shed": 0.12,
+              "garage": 0.05,
+              "barn": 0.06,
+              "warehouse": 0.01,
+              "industrial": 0.01,
+              "hangar": 0.0
+            },
+            "styles": [
+              {
+                "type": "light_entry_canopy",
+                "weight": 42
+              },
+              {
+                "type": "timber_entry_porch",
+                "weight": 22
+              },
+              {
+                "type": "concrete_canopy",
+                "weight": 36
+              }
+            ],
+            "materials": [
+              {
+                "material": "painted/galvanised steel",
+                "weight": 38
+              },
+              {
+                "material": "timber",
+                "weight": 22
+              },
+              {
+                "material": "concrete",
+                "weight": 40
+              }
+            ],
+            "width_m": [
+              1.8,
+              3.8
+            ],
+            "depth_m": [
+              0.8,
+              1.8
+            ],
+            "height_m": [
+              2.25,
+              2.7
+            ],
+            "rules": {
+              "requires_entrance": true,
+              "avoid_utility_vehicle_doors": true,
+              "canopy_overhang_m": [
+                0.08,
+                0.25
+              ]
+            }
+          },
+          "chimneys": {
+            "enabled": true,
+            "probability_by_building_class": {
+              "residential": 0.18,
+              "house": 0.25,
+              "cottage": 0.42,
+              "cabin": 0.48,
+              "apartments": 0.0,
+              "commercial": 0.0,
+              "office": 0.0,
+              "hotel": 0.0,
+              "townhouse": 0.03,
+              "shop": 0.0,
+              "school": 0.0,
+              "shed": 0.0,
+              "garage": 0.0,
+              "barn": 0.0,
+              "warehouse": 0.0,
+              "industrial": 0.0,
+              "hangar": 0.0
+            },
+            "styles": [
+              {
+                "type": "metal_flue",
+                "weight": 70
+              },
+              {
+                "type": "rendered_masonry_stack",
+                "weight": 20
+              },
+              {
+                "type": "brick_rectangular",
+                "weight": 10
+              }
+            ],
+            "materials": [
+              {
+                "material": "painted/galvanised steel",
+                "weight": 70
+              },
+              {
+                "material": "stucco",
+                "weight": 20
+              },
+              {
+                "material": "brick",
+                "weight": 10
+              }
+            ],
+            "width_m": [
+              0.38,
+              0.68
+            ],
+            "depth_m": [
+              0.34,
+              0.58
+            ],
+            "height_m": [
+              0.75,
+              1.55
+            ],
+            "count_distribution": [
+              {
+                "count": 1,
+                "weight": 86
+              },
+              {
+                "count": 2,
+                "weight": 14
+              }
+            ],
+            "rules": {
+              "prefer_near_ridge": true,
+              "avoid_dome_onion": true,
+              "minimum_roof_rise_m": 0.4
+            }
+          },
+          "balconies": {
+            "enabled": true,
+            "probability_by_building_class": {
+              "residential": 0.08,
+              "house": 0.11,
+              "cottage": 0.06,
+              "cabin": 0.0,
+              "apartments": 0.69,
+              "commercial": 0.41,
+              "office": 0.16,
+              "hotel": 0.66,
+              "townhouse": 0.24,
+              "shop": 0.08,
+              "school": 0.0,
+              "shed": 0.0,
+              "garage": 0.0,
+              "barn": 0.0,
+              "warehouse": 0.0,
+              "industrial": 0.0,
+              "hangar": 0.0
+            },
+            "styles": [
+              {
+                "type": "painted_metal_railing",
+                "weight": 48
+              },
+              {
+                "type": "concrete_balcony",
+                "weight": 38
+              },
+              {
+                "type": "timber_railing_balcony",
+                "weight": 14
+              }
+            ],
+            "materials": [
+              {
+                "material": "painted/galvanised steel",
+                "weight": 48
+              },
+              {
+                "material": "concrete",
+                "weight": 38
+              },
+              {
+                "material": "timber",
+                "weight": 14
+              }
+            ],
+            "width_m": [
+              1.8,
+              4.2
+            ],
+            "depth_m": [
+              0.75,
+              1.45
+            ],
+            "railing_height_m": [
+              0.88,
+              1.08
+            ],
+            "post_spacing_m": [
+              1.0,
+              1.7
+            ],
+            "count_distribution": [
+              {
+                "count": 1,
+                "weight": 82
+              },
+              {
+                "count": 2,
+                "weight": 18
+              }
+            ],
+            "rules": {
+              "minimum_regular_wall_levels": 2,
+              "prefer_primary_facade": true,
+              "do_not_place_on_attic_only_level": true
+            }
+          },
+          "rainwater": {
+            "enabled": true,
+            "probability_by_building_class": {
+              "residential": 0.82,
+              "house": 0.86,
+              "cottage": 0.88,
+              "cabin": 0.82,
+              "apartments": 0.92,
+              "commercial": 0.88,
+              "office": 0.88,
+              "hotel": 0.92,
+              "townhouse": 0.9,
+              "shop": 0.85,
+              "school": 0.9,
+              "shed": 0.55,
+              "garage": 0.68,
+              "barn": 0.65,
+              "warehouse": 0.75,
+              "industrial": 0.75,
+              "hangar": 0.68
+            },
+            "material": "painted/galvanised steel",
+            "gutter_width_m": [
+              0.08,
+              0.13
+            ],
+            "downspout_width_m": [
+              0.065,
+              0.1
+            ],
+            "downspouts": 2,
+            "rules": {
+              "gabled_roof": "eave_edges_only",
+              "flat_roof": "perimeter_allowed",
+              "dome_onion": "omit"
+            }
+          }
+        }
+      }
+    },
+    "town_city": {
+      "description": "Masonry, concrete, and timber traditions with varied roof profiles. Rendered/concrete or brick walls, tiled/hipped rural roofs, flat urban roofs, aluminium windows and sliding or hinged doors.",
+      "selection": {
+        "supported_families": [
+          "residential",
+          "townhouse",
+          "urban",
+          "agricultural",
+          "outbuilding",
+          "industrial",
+          "school",
+          "shop"
+        ],
+        "tag_rules": [
+          {
+            "field": "building:material",
+            "values": [
+              "brick",
+              "bricks"
+            ],
+            "style": "western_brick"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "stone",
+              "limestone",
+              "sandstone",
+              "granite",
+              "slate"
+            ],
+            "style": "regional_stone"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "plaster",
+              "stucco",
+              "render",
+              "masonry"
+            ],
+            "style": "regional_stucco"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "wood",
+              "timber"
+            ],
+            "style": "regional_wood"
+          },
+          {
+            "field": "building:material",
+            "values": [
+              "concrete",
+              "cement_block",
+              "precast_concrete",
+              "prefabricated"
+            ],
+            "style": "regional_concrete"
+          }
+        ],
+        "family_distributions": {
+          "residential": [
+            {
+              "lt": 55,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 82,
+              "style": "regional_stucco"
+            },
+            {
+              "lt": 100,
+              "style": "regional_wood"
+            }
+          ],
+          "townhouse": [
+            {
+              "lt": 58,
+              "style": "regional_stucco"
+            },
+            {
+              "lt": 82,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 100,
+              "style": "regional_wood"
+            }
+          ],
+          "urban": [
+            {
+              "lt": 48,
+              "style": "regional_stucco"
+            },
+            {
+              "lt": 78,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 100,
+              "style": "regional_concrete"
+            }
+          ],
+          "agricultural": [
+            {
+              "lt": 62,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 100,
+              "style": "regional_wood"
+            }
+          ],
+          "outbuilding": [
+            {
+              "lt": 70,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 100,
+              "style": "regional_concrete"
+            }
+          ],
+          "*": [
+            {
+              "lt": 55,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 82,
+              "style": "regional_stucco"
+            },
+            {
+              "lt": 100,
+              "style": "regional_wood"
+            }
+          ],
+          "industrial": [
+            {
+              "lt": 72,
+              "style": "regional_concrete"
+            },
+            {
+              "lt": 100,
+              "style": "regional_concrete"
+            }
+          ]
+        },
+        "default_style": "regional_concrete"
+      },
+      "roof_defaults": {
+        "*": "flat",
+        "residential": "flat",
+        "townhouse": "flat",
+        "urban": "flat",
+        "agricultural": "gabled",
+        "outbuilding": "shed",
+        "industrial": "flat",
+        "school": "flat",
+        "shop": "flat"
+      },
+      "architectural_details": {
+        "scope_note": "Procedural regional defaults only. Explicit OSM tags such as building:material, roof:shape, roof:material, height, building:levels, entrance and mapped openings should override these heuristics.",
+        "climate_response": "Humid continental, monsoon, subtropical and cold regions; modern construction varies from tiled low-rise to dense concrete urban stock.",
+        "architectural_character": "Rendered/concrete or brick walls, tiled/hipped rural roofs, flat urban roofs, aluminium windows and sliding or hinged doors.",
+        "materials": {
+          "common_wall_materials": [
+            "concrete block",
+            "stucco/render",
+            "timber"
+          ],
+          "common_roof_materials": [
+            "corrugated metal",
+            "concrete tile"
+          ],
+          "typical_colour_palette": [
+            "white",
+            "grey",
+            "cream",
+            "earth brown",
+            "dark tile",
+            "muted red",
+            "natural timber"
+          ],
+          "trim_guidance": "tile/stone surrounds, restrained painted trim and projecting sun/rain hoods"
+        },
+        "geometry_defaults": {
+          "storey_height_m": {
+            "residential": 3.0,
+            "townhouse": 3.0,
+            "urban": 3.2,
+            "school": 3.3,
+            "shop": 3.3,
+            "industrial": 4.5,
+            "agricultural": 4.0,
+            "outbuilding": 3.0
+          },
+          "wall_thickness_m": {
+            "lightweight": 0.16,
+            "masonry": 0.28,
+            "heavy_or_insulated": 0.38
+          },
+          "foundation": {
+            "types": [
+              "reinforced concrete strip footing",
+              "slab-on-grade",
+              "raised masonry/concrete plinth",
+              "pier/post for selected timber vernacular buildings"
+            ],
+            "default_visible_plinth_m": 0.18,
+            "default_below_grade_depth_m": 1.0,
+            "uneven_terrain_strategy": "extend foundation skirt below local building datum; never stretch facade walls down to terrain"
+          },
+          "roof": {
+            "shape_distribution": [
+              {
+                "shape": "hipped",
+                "weight": 30
+              },
+              {
+                "shape": "gabled",
+                "weight": 26
+              },
+              {
+                "shape": "flat",
+                "weight": 28
+              },
+              {
+                "shape": "shed",
+                "weight": 10
+              },
+              {
+                "shape": "pyramidal",
+                "weight": 6
+              }
+            ],
+            "pitch_degrees": {
+              "min": 10,
+              "max": 35,
+              "preferred": 22.5
+            },
+            "eave_overhang_m": {
+              "min": 0.25,
+              "max": 0.8
+            },
+            "materials": [
+              "corrugated metal",
+              "concrete tile"
+            ],
+            "details": [
+              "gutters/downpipes where rainfall/snow makes them plausible",
+              "ridge/eave trim matched to roof material",
+              "chimneys primarily on residential stock where climate/style supports them"
+            ]
+          }
+        },
+        "windows": {
+          "type_distribution": [
+            {
+              "type": "sliding",
+              "weight": 33
+            },
+            {
+              "type": "jalousie",
+              "weight": 33
+            },
+            {
+              "type": "casement",
+              "weight": 34
+            }
+          ],
+          "frame_materials": [
+            "aluminium",
+            "uPVC",
+            "painted timber"
+          ],
+          "glazing": "single to double glazing; insulated glazing increases in colder/high-rise contexts",
+          "shutters_and_screens": [
+            "rolling shutter",
+            "storm shutter in exposed regions",
+            "none"
+          ],
+          "trim": "tile/stone surrounds, restrained painted trim and projecting sun/rain hoods",
+          "default_dimensions_m": {
+            "width": 1.25,
+            "height": 1.4,
+            "sill_height": 0.85,
+            "minimum_edge_margin": 0.55,
+            "target_bay_spacing": 2.8
+          },
+          "placement": {
+            "ground_floor": "keep sill above foundation/plinth; avoid door clearance zones",
+            "upper_floors": "align vertically when facade style is regular; omit on utility families unless explicitly mapped",
+            "gable_walls": "allow smaller centred opening only when enough wall area exists",
+            "corners": "keep at least the configured edge margin from each corner"
+          },
+          "special_sets": {
+            "utility_small": {
+              "types": [
+                "fixed_small",
+                "small_casement",
+                "louvered_vent"
+              ],
+              "width_m": [
+                0.55,
+                0.9
+              ],
+              "height_m": [
+                0.45,
+                0.8
+              ]
+            },
+            "industrial": {
+              "types": [
+                "clerestory_fixed",
+                "strip_window",
+                "industrial_casement"
+              ],
+              "width_m": [
+                1.2,
+                2.4
+              ],
+              "height_m": [
+                0.6,
+                1.2
+              ]
+            },
+            "large_regular": {
+              "types": [
+                "large_casement",
+                "fixed_plus_operable"
+              ],
+              "width_m": [
+                1.4,
+                2.2
+              ],
+              "height_m": [
+                1.4,
+                1.9
+              ]
+            },
+            "storefront": {
+              "types": [
+                "storefront_fixed",
+                "large_fixed",
+                "shopfront_mullioned"
+              ],
+              "width_m": [
+                1.8,
+                3.6
+              ],
+              "height_m": [
+                1.8,
+                2.6
+              ]
+            }
+          },
+          "procedural_placement": {
+            "style_distribution": [
+              {
+                "style": "regular_aligned",
+                "weight": 47
+              },
+              {
+                "style": "paired_groups",
+                "weight": 23
+              },
+              {
+                "style": "symmetric_bays",
+                "weight": 23
+              },
+              {
+                "style": "staggered_floors",
+                "weight": 7
+              }
+            ],
+            "horizontal_jitter_fraction": 0.05,
+            "vertical_jitter_m": 0.026,
+            "omit_bay_probability": 0.022,
+            "floor_phase_shift_fraction": 0.07,
+            "front_density_multiplier": 1.197,
+            "side_density_multiplier": 0.94,
+            "rear_density_multiplier": 0.84,
+            "minimum_windows_per_primary_facade": 1,
+            "maximum_windows_per_wall": 12,
+            "paired_group_gap_fraction": 0.34,
+            "family_overrides": {
+              "townhouse": {
+                "style_distribution": [
+                  {
+                    "style": "regular_aligned",
+                    "weight": 55
+                  },
+                  {
+                    "style": "symmetric_bays",
+                    "weight": 35
+                  },
+                  {
+                    "style": "staggered_floors",
+                    "weight": 10
+                  }
+                ],
+                "omit_bay_probability": 0.02,
+                "front_density_multiplier": 1.18,
+                "maximum_windows_per_wall": 14
+              },
+              "urban": {
+                "style_distribution": [
+                  {
+                    "style": "regular_aligned",
+                    "weight": 52
+                  },
+                  {
+                    "style": "staggered_floors",
+                    "weight": 22
+                  },
+                  {
+                    "style": "symmetric_bays",
+                    "weight": 18
+                  },
+                  {
+                    "style": "paired_groups",
+                    "weight": 8
+                  }
+                ],
+                "omit_bay_probability": 0.025,
+                "horizontal_jitter_fraction": 0.035,
+                "maximum_windows_per_wall": 16
+              },
+              "school": {
+                "style_distribution": [
+                  {
+                    "style": "regular_aligned",
+                    "weight": 72
+                  },
+                  {
+                    "style": "paired_groups",
+                    "weight": 18
+                  },
+                  {
+                    "style": "symmetric_bays",
+                    "weight": 10
+                  }
+                ],
+                "omit_bay_probability": 0.01,
+                "horizontal_jitter_fraction": 0.025,
+                "front_density_multiplier": 1.1,
+                "maximum_windows_per_wall": 18
+              },
+              "shop": {
+                "style_distribution": [
+                  {
+                    "style": "storefront_rhythm",
+                    "weight": 72
+                  },
+                  {
+                    "style": "regular_aligned",
+                    "weight": 18
+                  },
+                  {
+                    "style": "symmetric_bays",
+                    "weight": 10
+                  }
+                ],
+                "front_density_multiplier": 1.48,
+                "side_density_multiplier": 0.62,
+                "rear_density_multiplier": 0.38,
+                "omit_bay_probability": 0.04
+              },
+              "industrial": {
+                "style_distribution": [
+                  {
+                    "style": "clerestory_band",
+                    "weight": 70
+                  },
+                  {
+                    "style": "regular_aligned",
+                    "weight": 20
+                  },
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 10
+                  }
+                ],
+                "front_density_multiplier": 0.82,
+                "side_density_multiplier": 0.88,
+                "rear_density_multiplier": 0.7,
+                "omit_bay_probability": 0.1,
+                "maximum_windows_per_wall": 8
+              },
+              "agricultural": {
+                "style_distribution": [
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 62
+                  },
+                  {
+                    "style": "irregular_cottage",
+                    "weight": 23
+                  },
+                  {
+                    "style": "regular_aligned",
+                    "weight": 15
+                  }
+                ],
+                "front_density_multiplier": 0.72,
+                "side_density_multiplier": 0.62,
+                "rear_density_multiplier": 0.48,
+                "omit_bay_probability": 0.28,
+                "maximum_windows_per_wall": 3
+              },
+              "outbuilding": {
+                "style_distribution": [
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 78
+                  },
+                  {
+                    "style": "irregular_cottage",
+                    "weight": 17
+                  },
+                  {
+                    "style": "regular_aligned",
+                    "weight": 5
+                  }
+                ],
+                "front_density_multiplier": 0.7,
+                "side_density_multiplier": 0.52,
+                "rear_density_multiplier": 0.38,
+                "omit_bay_probability": 0.38,
+                "maximum_windows_per_wall": 2
+              }
+            },
+            "building_class_overrides": {
+              "cabin": {
+                "style_distribution": [
+                  {
+                    "style": "irregular_cottage",
+                    "weight": 48
+                  },
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 27
+                  },
+                  {
+                    "style": "symmetric_bays",
+                    "weight": 15
+                  },
+                  {
+                    "style": "regular_aligned",
+                    "weight": 10
+                  }
+                ],
+                "horizontal_jitter_fraction": 0.12,
+                "vertical_jitter_m": 0.07,
+                "omit_bay_probability": 0.12,
+                "front_density_multiplier": 1.12,
+                "side_density_multiplier": 0.78,
+                "rear_density_multiplier": 0.58,
+                "maximum_windows_per_wall": 4
+              },
+              "shed": {
+                "window_probability": 0.0,
+                "density_multiplier": 0.0,
+                "minimum_windows_per_primary_facade": 0,
+                "maximum_windows_per_wall": 0,
+                "omit_bay_probability": 1.0,
+                "style_distribution": [
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 100
+                  }
+                ]
+              },
+              "garage": {
+                "window_probability": 0.0,
+                "density_multiplier": 0.0,
+                "minimum_windows_per_primary_facade": 0,
+                "maximum_windows_per_wall": 0,
+                "omit_bay_probability": 1.0,
+                "style_distribution": [
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 100
+                  }
+                ]
+              },
+              "barn": {
+                "window_probability": 0.0,
+                "density_multiplier": 0.0,
+                "minimum_windows_per_primary_facade": 0,
+                "maximum_windows_per_wall": 0,
+                "omit_bay_probability": 1.0,
+                "style_distribution": [
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 100
+                  }
+                ]
+              },
+              "warehouse": {
+                "window_probability": 0.2,
+                "density_multiplier": 0.3,
+                "minimum_windows_per_primary_facade": 0,
+                "maximum_windows_per_wall": 2,
+                "omit_bay_probability": 0.68,
+                "front_density_multiplier": 0.55,
+                "side_density_multiplier": 0.42,
+                "rear_density_multiplier": 0.3,
+                "style_distribution": [
+                  {
+                    "style": "clerestory_band",
+                    "weight": 60
+                  },
+                  {
+                    "style": "sparse_asymmetric",
+                    "weight": 40
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "doors": {
+          "type_distribution": [
+            {
+              "type": "metal_entry",
+              "weight": 50
+            },
+            {
+              "type": "timber_panel",
+              "weight": 50
+            }
+          ],
+          "materials": [
+            "timber",
+            "painted/galvanised steel",
+            "aluminium/composite",
+            "aluminium"
+          ],
+          "primary_entry_dimensions_m": {
+            "width": 0.95,
+            "height": 2.1
+          },
+          "service_entry_dimensions_m": {
+            "width": 0.9,
+            "height": 2.05
+          },
+          "garage": {
+            "type": "sectional_or_roll_up",
+            "width_m": [
+              2.4,
+              3.2
+            ],
+            "height_m": [
+              2.1,
+              2.5
+            ],
+            "use_when": "outbuilding classified as garage or OSM explicitly tags garage/garages"
+          },
+          "barn": {
+            "type": "sliding_or_double_leaf",
+            "width_m": [
+              2.8,
+              4.8
+            ],
+            "height_m": [
+              2.8,
+              4.5
+            ],
+            "use_when": "agricultural/barn family"
+          },
+          "warehouse": {
+            "type": "roll_up_or_sliding_metal",
+            "width_m": [
+              3.2,
+              5.5
+            ],
+            "height_m": [
+              3.2,
+              5.0
+            ],
+            "use_when": "industrial/warehouse/hangar family"
+          },
+          "shop": {
+            "type": "commercial_glazed_or_local_shop_entry",
+            "width_m": [
+              0.9,
+              1.8
+            ],
+            "height_m": [
+              2.1,
+              2.5
+            ]
+          },
+          "school": {
+            "type": "paired_or_glazed_institutional",
+            "width_m": [
+              1.6,
+              2.2
+            ],
+            "height_m": [
+              2.1,
+              2.5
+            ]
+          },
+          "placement": {
+            "preferred_facade": "long accessible exterior wall unless mapped entrance identifies a facade",
+            "corner_clearance_m": 0.7,
+            "keep_clear_of_windows_m": 0.35,
+            "foundation_transition": "pedestrian threshold/step for ordinary doors; broad ramp for vehicle-scale garage/barn/warehouse openings"
+          }
+        },
+        "building_family_profiles": {
+          "residential": {
+            "window_density": "medium-high",
+            "window_rule": "regular room-scaled bays; avoid corners; 1-3 openings per usable wall depending on length",
+            "door_rule": "one primary pedestrian entry; secondary/service door optional on long footprints",
+            "preferred_window_set": "context_default",
+            "preferred_door_set": "context_default"
+          },
+          "townhouse": {
+            "window_density": "high",
+            "window_rule": "vertically align openings by storey where practical",
+            "door_rule": "narrow pedestrian entrance, usually one per street-facing unit",
+            "preferred_window_set": "context_default",
+            "preferred_door_set": "context_default"
+          },
+          "urban": {
+            "window_density": "high",
+            "window_rule": "repeat bays by storey; ground floor may use larger commercial/opening proportions",
+            "door_rule": "primary street entrance plus optional service entrance",
+            "preferred_window_set": "urban",
+            "preferred_door_set": "urban"
+          },
+          "agricultural": {
+            "window_density": "low",
+            "window_rule": "barns are windowless; agricultural entrances and ventilation details carry the facade",
+            "door_rule": "sliding_or_double_leaf",
+            "preferred_window_set": "utility_small",
+            "preferred_door_set": "barn"
+          },
+          "outbuilding": {
+            "window_density": "very-low",
+            "window_rule": "sheds and garages are windowless; utility doors define the facade",
+            "door_rule": "shed uses pedestrian utility door; garage uses vehicle-scale door when footprint can fit a car",
+            "preferred_window_set": "utility_small",
+            "preferred_door_set": "shed_or_garage"
+          },
+          "industrial": {
+            "window_density": "low-medium",
+            "window_rule": "warehouses are usually windowless; uncommon glazing is sparse clerestory/fixed utility glazing rather than domestic bays",
+            "door_rule": "roll_up_or_sliding_metal",
+            "preferred_window_set": "industrial",
+            "preferred_door_set": "warehouse"
+          },
+          "school": {
+            "window_density": "high",
+            "window_rule": "larger repeated classroom windows with consistent sill and head heights",
+            "door_rule": "paired or glazed institutional entrance, plus service/egress doors",
+            "preferred_window_set": "large_regular",
+            "preferred_door_set": "institutional"
+          },
+          "shop": {
+            "window_density": "high_on_front",
+            "window_rule": "street facade favours large fixed/storefront glazing; side/rear walls use ordinary or service windows",
+            "door_rule": "glazed commercial door or local shop entry; roller shutter may accompany storefront",
+            "preferred_window_set": "storefront",
+            "preferred_door_set": "commercial"
+          }
+        },
+        "building_class_profiles": {
+          "cabin": {
+            "family": "residential",
+            "default_levels": 1,
+            "automatic_max_levels": 1,
+            "storey_height_m": 3.0,
+            "window_placement_profile": "cabin",
+            "description": "Small residential cabin/cottage. Defaults to one storey unless explicit OSM height/building:levels says otherwise."
+          },
+          "cottage": {
+            "family": "residential",
+            "default_levels": 2,
+            "automatic_max_levels": 2,
+            "window_placement_profile": "cabin",
+            "description": "Small cottage/house. Two levels are allowed automatically, with the regional roof-storey probability deciding whether the upper level is integrated into the roof."
+          },
+          "apartments": {
+            "family": "urban",
+            "default_levels": 3,
+            "automatic_max_levels": 5,
+            "description": "Apartment building. Regional roof-storey probability may integrate only the top level into a compatible gabled roof."
+          }
+        },
+        "roof_storeys": {
+          "description": "Optional top storey integrated inside a steep gabled roof. Regular upper facade windows are removed; daylight is provided only through windows in gable-end side walls. Dormers and roof-slope windows are intentionally excluded by this profile.",
+          "eligible_roof_shapes": [
+            "gabled"
+          ],
+          "minimum_total_levels": 2,
+          "force_compatible_roof_when_selected": true,
+          "probability_by_building_class": {
+            "cottage": 0.062,
+            "cabin": 0.058,
+            "residential": 0.045,
+            "apartments": 0.1,
+            "townhouse": 0.08,
+            "commercial": 0.036,
+            "hotel": 0.04,
+            "office": 0.016
+          },
+          "probability_by_family": {
+            "residential": 0.045,
+            "townhouse": 0.08,
+            "urban": 0.08,
+            "school": 0.0,
+            "shop": 0.0,
+            "agricultural": 0.0,
+            "outbuilding": 0.0,
+            "industrial": 0.0
+          },
+          "window_policy": {
+            "gable_ends_only": true,
+            "minimum_roof_height_m": 2.35,
+            "sill_above_eave_m": 0.42,
+            "top_clearance_m": 0.34,
+            "side_clearance_m": 0.3,
+            "window_width_scale": 0.82,
+            "window_height_scale": 0.78,
+            "windows_per_gable_distribution": [
+              {
+                "count": 1,
+                "weight": 58
+              },
+              {
+                "count": 2,
+                "weight": 42
+              }
+            ],
+            "description": "Place one or two room-sized windows only in vertical gable triangles. Never repeat the normal upper-floor bay pattern on eave walls."
+          }
+        },
+        "country_specific_note": "Concrete/block, timber and metal construction with corrugated roofs, awnings and ventilation-oriented windows are widespread.",
+        "exterior_details": {
+          "feature_budget": {
+            "minimum": 0,
+            "maximum": 5
+          },
+          "stairs": {
+            "enabled": true,
+            "probability_by_building_class": {
+              "residential": 0.58,
+              "house": 0.62,
+              "cottage": 0.78,
+              "cabin": 0.82,
+              "apartments": 0.48,
+              "commercial": 0.25,
+              "office": 0.2,
+              "hotel": 0.38,
+              "townhouse": 0.5,
+              "shop": 0.2,
+              "school": 0.35,
+              "shed": 0.22,
+              "garage": 0.18,
+              "barn": 0.15,
+              "warehouse": 0.06,
+              "industrial": 0.05,
+              "hangar": 0.02
+            },
+            "styles": [
+              {
+                "type": "stone_entry_steps",
+                "weight": 30
+              },
+              {
+                "type": "concrete_steps",
+                "weight": 50
+              },
+              {
+                "type": "timber_steps",
+                "weight": 20
+              }
+            ],
+            "materials": [
+              {
+                "material": "stone",
+                "weight": 30
+              },
+              {
+                "material": "concrete",
+                "weight": 50
+              },
+              {
+                "material": "timber",
+                "weight": 20
+              }
+            ],
+            "width_m": [
+              1.25,
+              2.15
+            ],
+            "step_rise_m": [
+              0.13,
+              0.18
+            ],
+            "step_depth_m": [
+              0.27,
+              0.36
+            ],
+            "max_steps": 4,
+            "rules": {
+              "requires_entrance": true,
+              "use_foundation_depth": true,
+              "vehicle_scale_utility_doors": "avoid domestic stairs"
+            }
+          },
+          "porches": {
+            "enabled": true,
+            "probability_by_building_class": {
+              "residential": 0.26,
+              "house": 0.32,
+              "cottage": 0.52,
+              "cabin": 0.56,
+              "apartments": 0.0,
+              "commercial": 0.06,
+              "office": 0.0,
+              "hotel": 0.14,
+              "townhouse": 0.08,
+              "shop": 0.08,
+              "school": 0.02,
+              "shed": 0.06,
+              "garage": 0.0,
+              "barn": 0.0,
+              "warehouse": 0.0,
+              "industrial": 0.0,
+              "hangar": 0.0
+            },
+            "styles": [
+              {
+                "type": "light_entry_canopy",
+                "weight": 42
+              },
+              {
+                "type": "timber_entry_porch",
+                "weight": 22
+              },
+              {
+                "type": "concrete_canopy",
+                "weight": 36
+              }
+            ],
+            "materials": [
+              {
+                "material": "painted/galvanised steel",
+                "weight": 38
+              },
+              {
+                "material": "timber",
+                "weight": 22
+              },
+              {
+                "material": "concrete",
+                "weight": 40
+              }
+            ],
+            "width_m": [
+              1.8,
+              3.8
+            ],
+            "depth_m": [
+              0.8,
+              1.8
+            ],
+            "height_m": [
+              2.25,
+              2.7
+            ],
+            "rules": {
+              "requires_entrance": true,
+              "avoid_utility_vehicle_doors": true,
+              "canopy_overhang_m": [
+                0.08,
+                0.25
+              ]
+            }
+          },
+          "chimneys": {
+            "enabled": true,
+            "probability_by_building_class": {
+              "residential": 0.18,
+              "house": 0.25,
+              "cottage": 0.42,
+              "cabin": 0.48,
+              "apartments": 0.0,
+              "commercial": 0.0,
+              "office": 0.0,
+              "hotel": 0.0,
+              "townhouse": 0.03,
+              "shop": 0.0,
+              "school": 0.0,
+              "shed": 0.0,
+              "garage": 0.0,
+              "barn": 0.0,
+              "warehouse": 0.0,
+              "industrial": 0.0,
+              "hangar": 0.0
+            },
+            "styles": [
+              {
+                "type": "metal_flue",
+                "weight": 70
+              },
+              {
+                "type": "rendered_masonry_stack",
+                "weight": 20
+              },
+              {
+                "type": "brick_rectangular",
+                "weight": 10
+              }
+            ],
+            "materials": [
+              {
+                "material": "painted/galvanised steel",
+                "weight": 70
+              },
+              {
+                "material": "stucco",
+                "weight": 20
+              },
+              {
+                "material": "brick",
+                "weight": 10
+              }
+            ],
+            "width_m": [
+              0.38,
+              0.68
+            ],
+            "depth_m": [
+              0.34,
+              0.58
+            ],
+            "height_m": [
+              0.75,
+              1.55
+            ],
+            "count_distribution": [
+              {
+                "count": 1,
+                "weight": 86
+              },
+              {
+                "count": 2,
+                "weight": 14
+              }
+            ],
+            "rules": {
+              "prefer_near_ridge": true,
+              "avoid_dome_onion": true,
+              "minimum_roof_rise_m": 0.4
+            }
+          },
+          "balconies": {
+            "enabled": true,
+            "probability_by_building_class": {
+              "residential": 0.18,
+              "house": 0.21,
+              "cottage": 0.16,
+              "cabin": 0.1,
+              "apartments": 0.88,
+              "commercial": 0.6,
+              "office": 0.26,
+              "hotel": 0.85,
+              "townhouse": 0.43,
+              "shop": 0.18,
+              "school": 0.09,
+              "shed": 0.06,
+              "garage": 0.06,
+              "barn": 0.06,
+              "warehouse": 0.08,
+              "industrial": 0.08,
+              "hangar": 0.06
+            },
+            "styles": [
+              {
+                "type": "painted_metal_railing",
+                "weight": 48
+              },
+              {
+                "type": "concrete_balcony",
+                "weight": 38
+              },
+              {
+                "type": "timber_railing_balcony",
+                "weight": 14
+              }
+            ],
+            "materials": [
+              {
+                "material": "painted/galvanised steel",
+                "weight": 48
+              },
+              {
+                "material": "concrete",
+                "weight": 38
+              },
+              {
+                "material": "timber",
+                "weight": 14
+              }
+            ],
+            "width_m": [
+              1.8,
+              4.2
+            ],
+            "depth_m": [
+              0.75,
+              1.45
+            ],
+            "railing_height_m": [
+              0.88,
+              1.08
+            ],
+            "post_spacing_m": [
+              1.0,
+              1.7
+            ],
+            "count_distribution": [
+              {
+                "count": 1,
+                "weight": 54
+              },
+              {
+                "count": 2,
+                "weight": 34
+              },
+              {
+                "count": 3,
+                "weight": 12
+              }
+            ],
+            "rules": {
+              "minimum_regular_wall_levels": 2,
+              "prefer_primary_facade": true,
+              "do_not_place_on_attic_only_level": true
+            }
+          },
+          "rainwater": {
+            "enabled": true,
+            "probability_by_building_class": {
+              "residential": 0.82,
+              "house": 0.86,
+              "cottage": 0.88,
+              "cabin": 0.82,
+              "apartments": 0.92,
+              "commercial": 0.88,
+              "office": 0.88,
+              "hotel": 0.92,
+              "townhouse": 0.9,
+              "shop": 0.85,
+              "school": 0.9,
+              "shed": 0.55,
+              "garage": 0.68,
+              "barn": 0.65,
+              "warehouse": 0.75,
+              "industrial": 0.75,
+              "hangar": 0.68
+            },
+            "material": "painted/galvanised steel",
+            "gutter_width_m": [
+              0.08,
+              0.13
+            ],
+            "downspout_width_m": [
+              0.065,
+              0.1
+            ],
+            "downspouts": 2,
+            "rules": {
+              "gabled_roof": "eave_edges_only",
+              "flat_roof": "perimeter_allowed",
+              "dome_onion": "omit"
+            }
+          }
+        }
+      }
+    }
+  }
+}

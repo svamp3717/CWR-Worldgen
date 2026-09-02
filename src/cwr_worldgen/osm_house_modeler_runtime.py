@@ -36,7 +36,7 @@ def _visual_lod(*args, **kwargs):
     roof_texture = args[2]
     roof_pitch = float(_argument(args, kwargs, "roof_pitch_degrees", 3, 35.0))
     foundation_texture = (
-        _argument(args, kwargs, "foundation_texture", 5, None) or wall_texture
+        _argument(args, kwargs, "foundation_texture", 5, None) or roof_texture
     )
     foundation_depth = float(
         _argument(args, kwargs, "foundation_depth", 6, 0.0) or 0.0
@@ -73,7 +73,7 @@ def _polygon_visual_lod(*args, **kwargs):
     wall_texture = args[1]
     roof_texture = args[2]
     roof_pitch = float(kwargs.get("roof_pitch_degrees", 35.0) or 35.0)
-    foundation_texture = kwargs.get("foundation_texture") or wall_texture
+    foundation_texture = kwargs.get("foundation_texture") or roof_texture
     foundation_depth = float(kwargs.get("foundation_depth", 0.0) or 0.0)
     return _upgrade._append_details(
         lod,

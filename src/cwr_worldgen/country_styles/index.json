@@ -1,0 +1,1998 @@
+{
+  "schema_version": 1,
+  "profile_count": 249,
+  "profiles": [
+    {
+      "iso_alpha2": "AD",
+      "iso_alpha3": "AND",
+      "display_name": "Andorra",
+      "file": "AD_Andorra.json",
+      "parent_region_identifier": "mediterranean_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "AE",
+      "iso_alpha3": "ARE",
+      "display_name": "United Arab Emirates",
+      "file": "AE_United_Arab_Emirates.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "AF",
+      "iso_alpha3": "AFG",
+      "display_name": "Afghanistan",
+      "file": "AF_Afghanistan.json",
+      "parent_region_identifier": "south_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "AG",
+      "iso_alpha3": "ATG",
+      "display_name": "Antigua and Barbuda",
+      "file": "AG_Antigua_and_Barbuda.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "AI",
+      "iso_alpha3": "AIA",
+      "display_name": "Anguilla",
+      "file": "AI_Anguilla.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "AL",
+      "iso_alpha3": "ALB",
+      "display_name": "Albania",
+      "file": "AL_Albania.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "AM",
+      "iso_alpha3": "ARM",
+      "display_name": "Armenia",
+      "file": "AM_Armenia.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "AO",
+      "iso_alpha3": "AGO",
+      "display_name": "Angola",
+      "file": "AO_Angola.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "AQ",
+      "iso_alpha3": "ATA",
+      "display_name": "Antarctica",
+      "file": "AQ_Antarctica.json",
+      "parent_region_identifier": "arctic_polar",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "AR",
+      "iso_alpha3": "ARG",
+      "display_name": "Argentina",
+      "file": "AR_Argentina.json",
+      "parent_region_identifier": "southern_cone",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "AS",
+      "iso_alpha3": "ASM",
+      "display_name": "American Samoa",
+      "file": "AS_American_Samoa.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "AT",
+      "iso_alpha3": "AUT",
+      "display_name": "Austria",
+      "file": "AT_Austria.json",
+      "parent_region_identifier": "western_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "AU",
+      "iso_alpha3": "AUS",
+      "display_name": "Australia",
+      "file": "AU_Australia.json",
+      "parent_region_identifier": "australia_new_zealand",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "AW",
+      "iso_alpha3": "ABW",
+      "display_name": "Aruba",
+      "file": "AW_Aruba.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "AX",
+      "iso_alpha3": "ALA",
+      "display_name": "Åland Islands",
+      "file": "AX_land_Islands.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "AZ",
+      "iso_alpha3": "AZE",
+      "display_name": "Azerbaijan",
+      "file": "AZ_Azerbaijan.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BA",
+      "iso_alpha3": "BIH",
+      "display_name": "Bosnia and Herzegovina",
+      "file": "BA_Bosnia_and_Herzegovina.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BB",
+      "iso_alpha3": "BRB",
+      "display_name": "Barbados",
+      "file": "BB_Barbados.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BD",
+      "iso_alpha3": "BGD",
+      "display_name": "Bangladesh",
+      "file": "BD_Bangladesh.json",
+      "parent_region_identifier": "south_asia",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "BE",
+      "iso_alpha3": "BEL",
+      "display_name": "Belgium",
+      "file": "BE_Belgium.json",
+      "parent_region_identifier": "western_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "BF",
+      "iso_alpha3": "BFA",
+      "display_name": "Burkina Faso",
+      "file": "BF_Burkina_Faso.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BG",
+      "iso_alpha3": "BGR",
+      "display_name": "Bulgaria",
+      "file": "BG_Bulgaria.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BH",
+      "iso_alpha3": "BHR",
+      "display_name": "Bahrain",
+      "file": "BH_Bahrain.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BI",
+      "iso_alpha3": "BDI",
+      "display_name": "Burundi",
+      "file": "BI_Burundi.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BJ",
+      "iso_alpha3": "BEN",
+      "display_name": "Benin",
+      "file": "BJ_Benin.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BL",
+      "iso_alpha3": "BLM",
+      "display_name": "Saint Barthélemy",
+      "file": "BL_Saint_Barth_lemy.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BM",
+      "iso_alpha3": "BMU",
+      "display_name": "Bermuda",
+      "file": "BM_Bermuda.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BN",
+      "iso_alpha3": "BRN",
+      "display_name": "Brunei Darussalam",
+      "file": "BN_Brunei_Darussalam.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BO",
+      "iso_alpha3": "BOL",
+      "display_name": "Bolivia, Plurinational State of",
+      "file": "BO_Bolivia_Plurinational_State_of.json",
+      "parent_region_identifier": "andes",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BQ",
+      "iso_alpha3": "BES",
+      "display_name": "Bonaire, Sint Eustatius and Saba",
+      "file": "BQ_Bonaire_Sint_Eustatius_and_Saba.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BR",
+      "iso_alpha3": "BRA",
+      "display_name": "Brazil",
+      "file": "BR_Brazil.json",
+      "parent_region_identifier": "brazil_amazon_basin",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "BS",
+      "iso_alpha3": "BHS",
+      "display_name": "Bahamas",
+      "file": "BS_Bahamas.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BT",
+      "iso_alpha3": "BTN",
+      "display_name": "Bhutan",
+      "file": "BT_Bhutan.json",
+      "parent_region_identifier": "south_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BV",
+      "iso_alpha3": "BVT",
+      "display_name": "Bouvet Island",
+      "file": "BV_Bouvet_Island.json",
+      "parent_region_identifier": "arctic_polar",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BW",
+      "iso_alpha3": "BWA",
+      "display_name": "Botswana",
+      "file": "BW_Botswana.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BY",
+      "iso_alpha3": "BLR",
+      "display_name": "Belarus",
+      "file": "BY_Belarus.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "BZ",
+      "iso_alpha3": "BLZ",
+      "display_name": "Belize",
+      "file": "BZ_Belize.json",
+      "parent_region_identifier": "mexico_central_america",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CA",
+      "iso_alpha3": "CAN",
+      "display_name": "Canada",
+      "file": "CA_Canada.json",
+      "parent_region_identifier": "canada_alaska",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "CC",
+      "iso_alpha3": "CCK",
+      "display_name": "Cocos (Keeling) Islands",
+      "file": "CC_Cocos_Keeling_Islands.json",
+      "parent_region_identifier": "australia_new_zealand",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CD",
+      "iso_alpha3": "COD",
+      "display_name": "Congo, The Democratic Republic of the",
+      "file": "CD_Congo_The_Democratic_Republic_of_the.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CF",
+      "iso_alpha3": "CAF",
+      "display_name": "Central African Republic",
+      "file": "CF_Central_African_Republic.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CG",
+      "iso_alpha3": "COG",
+      "display_name": "Congo",
+      "file": "CG_Congo.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CH",
+      "iso_alpha3": "CHE",
+      "display_name": "Switzerland",
+      "file": "CH_Switzerland.json",
+      "parent_region_identifier": "western_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "CI",
+      "iso_alpha3": "CIV",
+      "display_name": "Côte d'Ivoire",
+      "file": "CI_C_te_d_Ivoire.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CK",
+      "iso_alpha3": "COK",
+      "display_name": "Cook Islands",
+      "file": "CK_Cook_Islands.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CL",
+      "iso_alpha3": "CHL",
+      "display_name": "Chile",
+      "file": "CL_Chile.json",
+      "parent_region_identifier": "southern_cone",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "CM",
+      "iso_alpha3": "CMR",
+      "display_name": "Cameroon",
+      "file": "CM_Cameroon.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CN",
+      "iso_alpha3": "CHN",
+      "display_name": "China",
+      "file": "CN_China.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "CO",
+      "iso_alpha3": "COL",
+      "display_name": "Colombia",
+      "file": "CO_Colombia.json",
+      "parent_region_identifier": "andes",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CR",
+      "iso_alpha3": "CRI",
+      "display_name": "Costa Rica",
+      "file": "CR_Costa_Rica.json",
+      "parent_region_identifier": "mexico_central_america",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CU",
+      "iso_alpha3": "CUB",
+      "display_name": "Cuba",
+      "file": "CU_Cuba.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CV",
+      "iso_alpha3": "CPV",
+      "display_name": "Cabo Verde",
+      "file": "CV_Cabo_Verde.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CW",
+      "iso_alpha3": "CUW",
+      "display_name": "Curaçao",
+      "file": "CW_Cura_ao.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CX",
+      "iso_alpha3": "CXR",
+      "display_name": "Christmas Island",
+      "file": "CX_Christmas_Island.json",
+      "parent_region_identifier": "australia_new_zealand",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CY",
+      "iso_alpha3": "CYP",
+      "display_name": "Cyprus",
+      "file": "CY_Cyprus.json",
+      "parent_region_identifier": "mediterranean_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "CZ",
+      "iso_alpha3": "CZE",
+      "display_name": "Czechia",
+      "file": "CZ_Czechia.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "DE",
+      "iso_alpha3": "DEU",
+      "display_name": "Germany",
+      "file": "DE_Germany.json",
+      "parent_region_identifier": "western_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "DJ",
+      "iso_alpha3": "DJI",
+      "display_name": "Djibouti",
+      "file": "DJ_Djibouti.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "DK",
+      "iso_alpha3": "DNK",
+      "display_name": "Denmark",
+      "file": "DK_Denmark.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "DM",
+      "iso_alpha3": "DMA",
+      "display_name": "Dominica",
+      "file": "DM_Dominica.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "DO",
+      "iso_alpha3": "DOM",
+      "display_name": "Dominican Republic",
+      "file": "DO_Dominican_Republic.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "DZ",
+      "iso_alpha3": "DZA",
+      "display_name": "Algeria",
+      "file": "DZ_Algeria.json",
+      "parent_region_identifier": "north_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "EC",
+      "iso_alpha3": "ECU",
+      "display_name": "Ecuador",
+      "file": "EC_Ecuador.json",
+      "parent_region_identifier": "andes",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "EE",
+      "iso_alpha3": "EST",
+      "display_name": "Estonia",
+      "file": "EE_Estonia.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "EG",
+      "iso_alpha3": "EGY",
+      "display_name": "Egypt",
+      "file": "EG_Egypt.json",
+      "parent_region_identifier": "north_africa",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "EH",
+      "iso_alpha3": "ESH",
+      "display_name": "Western Sahara",
+      "file": "EH_Western_Sahara.json",
+      "parent_region_identifier": "north_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "ER",
+      "iso_alpha3": "ERI",
+      "display_name": "Eritrea",
+      "file": "ER_Eritrea.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "ES",
+      "iso_alpha3": "ESP",
+      "display_name": "Spain",
+      "file": "ES_Spain.json",
+      "parent_region_identifier": "mediterranean_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "ET",
+      "iso_alpha3": "ETH",
+      "display_name": "Ethiopia",
+      "file": "ET_Ethiopia.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "FI",
+      "iso_alpha3": "FIN",
+      "display_name": "Finland",
+      "file": "FI_Finland.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "FJ",
+      "iso_alpha3": "FJI",
+      "display_name": "Fiji",
+      "file": "FJ_Fiji.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "FK",
+      "iso_alpha3": "FLK",
+      "display_name": "Falkland Islands (Malvinas)",
+      "file": "FK_Falkland_Islands_Malvinas.json",
+      "parent_region_identifier": "southern_cone",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "FM",
+      "iso_alpha3": "FSM",
+      "display_name": "Micronesia, Federated States of",
+      "file": "FM_Micronesia_Federated_States_of.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "FO",
+      "iso_alpha3": "FRO",
+      "display_name": "Faroe Islands",
+      "file": "FO_Faroe_Islands.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "FR",
+      "iso_alpha3": "FRA",
+      "display_name": "France",
+      "file": "FR_France.json",
+      "parent_region_identifier": "western_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "GA",
+      "iso_alpha3": "GAB",
+      "display_name": "Gabon",
+      "file": "GA_Gabon.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GB",
+      "iso_alpha3": "GBR",
+      "display_name": "United Kingdom",
+      "file": "GB_United_Kingdom.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "GD",
+      "iso_alpha3": "GRD",
+      "display_name": "Grenada",
+      "file": "GD_Grenada.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GE",
+      "iso_alpha3": "GEO",
+      "display_name": "Georgia",
+      "file": "GE_Georgia.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GF",
+      "iso_alpha3": "GUF",
+      "display_name": "French Guiana",
+      "file": "GF_French_Guiana.json",
+      "parent_region_identifier": "brazil_amazon_basin",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GG",
+      "iso_alpha3": "GGY",
+      "display_name": "Guernsey",
+      "file": "GG_Guernsey.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GH",
+      "iso_alpha3": "GHA",
+      "display_name": "Ghana",
+      "file": "GH_Ghana.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GI",
+      "iso_alpha3": "GIB",
+      "display_name": "Gibraltar",
+      "file": "GI_Gibraltar.json",
+      "parent_region_identifier": "mediterranean_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GL",
+      "iso_alpha3": "GRL",
+      "display_name": "Greenland",
+      "file": "GL_Greenland.json",
+      "parent_region_identifier": "arctic_polar",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GM",
+      "iso_alpha3": "GMB",
+      "display_name": "Gambia",
+      "file": "GM_Gambia.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GN",
+      "iso_alpha3": "GIN",
+      "display_name": "Guinea",
+      "file": "GN_Guinea.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GP",
+      "iso_alpha3": "GLP",
+      "display_name": "Guadeloupe",
+      "file": "GP_Guadeloupe.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GQ",
+      "iso_alpha3": "GNQ",
+      "display_name": "Equatorial Guinea",
+      "file": "GQ_Equatorial_Guinea.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GR",
+      "iso_alpha3": "GRC",
+      "display_name": "Greece",
+      "file": "GR_Greece.json",
+      "parent_region_identifier": "mediterranean_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "GS",
+      "iso_alpha3": "SGS",
+      "display_name": "South Georgia and the South Sandwich Islands",
+      "file": "GS_South_Georgia_and_the_South_Sandwich_Islands.json",
+      "parent_region_identifier": "arctic_polar",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GT",
+      "iso_alpha3": "GTM",
+      "display_name": "Guatemala",
+      "file": "GT_Guatemala.json",
+      "parent_region_identifier": "mexico_central_america",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GU",
+      "iso_alpha3": "GUM",
+      "display_name": "Guam",
+      "file": "GU_Guam.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GW",
+      "iso_alpha3": "GNB",
+      "display_name": "Guinea-Bissau",
+      "file": "GW_Guinea_Bissau.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "GY",
+      "iso_alpha3": "GUY",
+      "display_name": "Guyana",
+      "file": "GY_Guyana.json",
+      "parent_region_identifier": "brazil_amazon_basin",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "HK",
+      "iso_alpha3": "HKG",
+      "display_name": "Hong Kong",
+      "file": "HK_Hong_Kong.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "HM",
+      "iso_alpha3": "HMD",
+      "display_name": "Heard Island and McDonald Islands",
+      "file": "HM_Heard_Island_and_McDonald_Islands.json",
+      "parent_region_identifier": "arctic_polar",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "HN",
+      "iso_alpha3": "HND",
+      "display_name": "Honduras",
+      "file": "HN_Honduras.json",
+      "parent_region_identifier": "mexico_central_america",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "HR",
+      "iso_alpha3": "HRV",
+      "display_name": "Croatia",
+      "file": "HR_Croatia.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "HT",
+      "iso_alpha3": "HTI",
+      "display_name": "Haiti",
+      "file": "HT_Haiti.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "HU",
+      "iso_alpha3": "HUN",
+      "display_name": "Hungary",
+      "file": "HU_Hungary.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "ID",
+      "iso_alpha3": "IDN",
+      "display_name": "Indonesia",
+      "file": "ID_Indonesia.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "IE",
+      "iso_alpha3": "IRL",
+      "display_name": "Ireland",
+      "file": "IE_Ireland.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "IL",
+      "iso_alpha3": "ISR",
+      "display_name": "Israel",
+      "file": "IL_Israel.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "IM",
+      "iso_alpha3": "IMN",
+      "display_name": "Isle of Man",
+      "file": "IM_Isle_of_Man.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "IN",
+      "iso_alpha3": "IND",
+      "display_name": "India",
+      "file": "IN_India.json",
+      "parent_region_identifier": "south_asia",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "IO",
+      "iso_alpha3": "IOT",
+      "display_name": "British Indian Ocean Territory",
+      "file": "IO_British_Indian_Ocean_Territory.json",
+      "parent_region_identifier": "south_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "IQ",
+      "iso_alpha3": "IRQ",
+      "display_name": "Iraq",
+      "file": "IQ_Iraq.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "IR",
+      "iso_alpha3": "IRN",
+      "display_name": "Iran, Islamic Republic of",
+      "file": "IR_Iran_Islamic_Republic_of.json",
+      "parent_region_identifier": "south_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "IS",
+      "iso_alpha3": "ISL",
+      "display_name": "Iceland",
+      "file": "IS_Iceland.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "IT",
+      "iso_alpha3": "ITA",
+      "display_name": "Italy",
+      "file": "IT_Italy.json",
+      "parent_region_identifier": "mediterranean_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "JE",
+      "iso_alpha3": "JEY",
+      "display_name": "Jersey",
+      "file": "JE_Jersey.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "JM",
+      "iso_alpha3": "JAM",
+      "display_name": "Jamaica",
+      "file": "JM_Jamaica.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "JO",
+      "iso_alpha3": "JOR",
+      "display_name": "Jordan",
+      "file": "JO_Jordan.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "JP",
+      "iso_alpha3": "JPN",
+      "display_name": "Japan",
+      "file": "JP_Japan.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "KE",
+      "iso_alpha3": "KEN",
+      "display_name": "Kenya",
+      "file": "KE_Kenya.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "KG",
+      "iso_alpha3": "KGZ",
+      "display_name": "Kyrgyzstan",
+      "file": "KG_Kyrgyzstan.json",
+      "parent_region_identifier": "central_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "KH",
+      "iso_alpha3": "KHM",
+      "display_name": "Cambodia",
+      "file": "KH_Cambodia.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "KI",
+      "iso_alpha3": "KIR",
+      "display_name": "Kiribati",
+      "file": "KI_Kiribati.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "KM",
+      "iso_alpha3": "COM",
+      "display_name": "Comoros",
+      "file": "KM_Comoros.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "KN",
+      "iso_alpha3": "KNA",
+      "display_name": "Saint Kitts and Nevis",
+      "file": "KN_Saint_Kitts_and_Nevis.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "KP",
+      "iso_alpha3": "PRK",
+      "display_name": "Korea, Democratic People's Republic of",
+      "file": "KP_Korea_Democratic_People_s_Republic_of.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "KR",
+      "iso_alpha3": "KOR",
+      "display_name": "Korea, Republic of",
+      "file": "KR_Korea_Republic_of.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "KW",
+      "iso_alpha3": "KWT",
+      "display_name": "Kuwait",
+      "file": "KW_Kuwait.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "KY",
+      "iso_alpha3": "CYM",
+      "display_name": "Cayman Islands",
+      "file": "KY_Cayman_Islands.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "KZ",
+      "iso_alpha3": "KAZ",
+      "display_name": "Kazakhstan",
+      "file": "KZ_Kazakhstan.json",
+      "parent_region_identifier": "central_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "LA",
+      "iso_alpha3": "LAO",
+      "display_name": "Lao People's Democratic Republic",
+      "file": "LA_Lao_People_s_Democratic_Republic.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "LB",
+      "iso_alpha3": "LBN",
+      "display_name": "Lebanon",
+      "file": "LB_Lebanon.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "LC",
+      "iso_alpha3": "LCA",
+      "display_name": "Saint Lucia",
+      "file": "LC_Saint_Lucia.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "LI",
+      "iso_alpha3": "LIE",
+      "display_name": "Liechtenstein",
+      "file": "LI_Liechtenstein.json",
+      "parent_region_identifier": "western_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "LK",
+      "iso_alpha3": "LKA",
+      "display_name": "Sri Lanka",
+      "file": "LK_Sri_Lanka.json",
+      "parent_region_identifier": "south_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "LR",
+      "iso_alpha3": "LBR",
+      "display_name": "Liberia",
+      "file": "LR_Liberia.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "LS",
+      "iso_alpha3": "LSO",
+      "display_name": "Lesotho",
+      "file": "LS_Lesotho.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "LT",
+      "iso_alpha3": "LTU",
+      "display_name": "Lithuania",
+      "file": "LT_Lithuania.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "LU",
+      "iso_alpha3": "LUX",
+      "display_name": "Luxembourg",
+      "file": "LU_Luxembourg.json",
+      "parent_region_identifier": "western_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "LV",
+      "iso_alpha3": "LVA",
+      "display_name": "Latvia",
+      "file": "LV_Latvia.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "LY",
+      "iso_alpha3": "LBY",
+      "display_name": "Libya",
+      "file": "LY_Libya.json",
+      "parent_region_identifier": "north_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MA",
+      "iso_alpha3": "MAR",
+      "display_name": "Morocco",
+      "file": "MA_Morocco.json",
+      "parent_region_identifier": "north_africa",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "MC",
+      "iso_alpha3": "MCO",
+      "display_name": "Monaco",
+      "file": "MC_Monaco.json",
+      "parent_region_identifier": "western_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MD",
+      "iso_alpha3": "MDA",
+      "display_name": "Moldova, Republic of",
+      "file": "MD_Moldova_Republic_of.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "ME",
+      "iso_alpha3": "MNE",
+      "display_name": "Montenegro",
+      "file": "ME_Montenegro.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MF",
+      "iso_alpha3": "MAF",
+      "display_name": "Saint Martin (French part)",
+      "file": "MF_Saint_Martin_French_part.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MG",
+      "iso_alpha3": "MDG",
+      "display_name": "Madagascar",
+      "file": "MG_Madagascar.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MH",
+      "iso_alpha3": "MHL",
+      "display_name": "Marshall Islands",
+      "file": "MH_Marshall_Islands.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MK",
+      "iso_alpha3": "MKD",
+      "display_name": "North Macedonia",
+      "file": "MK_North_Macedonia.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "ML",
+      "iso_alpha3": "MLI",
+      "display_name": "Mali",
+      "file": "ML_Mali.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MM",
+      "iso_alpha3": "MMR",
+      "display_name": "Myanmar",
+      "file": "MM_Myanmar.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MN",
+      "iso_alpha3": "MNG",
+      "display_name": "Mongolia",
+      "file": "MN_Mongolia.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MO",
+      "iso_alpha3": "MAC",
+      "display_name": "Macao",
+      "file": "MO_Macao.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MP",
+      "iso_alpha3": "MNP",
+      "display_name": "Northern Mariana Islands",
+      "file": "MP_Northern_Mariana_Islands.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MQ",
+      "iso_alpha3": "MTQ",
+      "display_name": "Martinique",
+      "file": "MQ_Martinique.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MR",
+      "iso_alpha3": "MRT",
+      "display_name": "Mauritania",
+      "file": "MR_Mauritania.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MS",
+      "iso_alpha3": "MSR",
+      "display_name": "Montserrat",
+      "file": "MS_Montserrat.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MT",
+      "iso_alpha3": "MLT",
+      "display_name": "Malta",
+      "file": "MT_Malta.json",
+      "parent_region_identifier": "mediterranean_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MU",
+      "iso_alpha3": "MUS",
+      "display_name": "Mauritius",
+      "file": "MU_Mauritius.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MV",
+      "iso_alpha3": "MDV",
+      "display_name": "Maldives",
+      "file": "MV_Maldives.json",
+      "parent_region_identifier": "south_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MW",
+      "iso_alpha3": "MWI",
+      "display_name": "Malawi",
+      "file": "MW_Malawi.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MX",
+      "iso_alpha3": "MEX",
+      "display_name": "Mexico",
+      "file": "MX_Mexico.json",
+      "parent_region_identifier": "mexico_central_america",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "MY",
+      "iso_alpha3": "MYS",
+      "display_name": "Malaysia",
+      "file": "MY_Malaysia.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "MZ",
+      "iso_alpha3": "MOZ",
+      "display_name": "Mozambique",
+      "file": "MZ_Mozambique.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "NA",
+      "iso_alpha3": "NAM",
+      "display_name": "Namibia",
+      "file": "NA_Namibia.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "NC",
+      "iso_alpha3": "NCL",
+      "display_name": "New Caledonia",
+      "file": "NC_New_Caledonia.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "NE",
+      "iso_alpha3": "NER",
+      "display_name": "Niger",
+      "file": "NE_Niger.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "NF",
+      "iso_alpha3": "NFK",
+      "display_name": "Norfolk Island",
+      "file": "NF_Norfolk_Island.json",
+      "parent_region_identifier": "australia_new_zealand",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "NG",
+      "iso_alpha3": "NGA",
+      "display_name": "Nigeria",
+      "file": "NG_Nigeria.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "NI",
+      "iso_alpha3": "NIC",
+      "display_name": "Nicaragua",
+      "file": "NI_Nicaragua.json",
+      "parent_region_identifier": "mexico_central_america",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "NL",
+      "iso_alpha3": "NLD",
+      "display_name": "Netherlands",
+      "file": "NL_Netherlands.json",
+      "parent_region_identifier": "western_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "NO",
+      "iso_alpha3": "NOR",
+      "display_name": "Norway",
+      "file": "NO_Norway.json",
+      "parent_region_identifier": "northern_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "NP",
+      "iso_alpha3": "NPL",
+      "display_name": "Nepal",
+      "file": "NP_Nepal.json",
+      "parent_region_identifier": "south_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "NR",
+      "iso_alpha3": "NRU",
+      "display_name": "Nauru",
+      "file": "NR_Nauru.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "NU",
+      "iso_alpha3": "NIU",
+      "display_name": "Niue",
+      "file": "NU_Niue.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "NZ",
+      "iso_alpha3": "NZL",
+      "display_name": "New Zealand",
+      "file": "NZ_New_Zealand.json",
+      "parent_region_identifier": "australia_new_zealand",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "OM",
+      "iso_alpha3": "OMN",
+      "display_name": "Oman",
+      "file": "OM_Oman.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "PA",
+      "iso_alpha3": "PAN",
+      "display_name": "Panama",
+      "file": "PA_Panama.json",
+      "parent_region_identifier": "mexico_central_america",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "PE",
+      "iso_alpha3": "PER",
+      "display_name": "Peru",
+      "file": "PE_Peru.json",
+      "parent_region_identifier": "andes",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "PF",
+      "iso_alpha3": "PYF",
+      "display_name": "French Polynesia",
+      "file": "PF_French_Polynesia.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "PG",
+      "iso_alpha3": "PNG",
+      "display_name": "Papua New Guinea",
+      "file": "PG_Papua_New_Guinea.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "PH",
+      "iso_alpha3": "PHL",
+      "display_name": "Philippines",
+      "file": "PH_Philippines.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "PK",
+      "iso_alpha3": "PAK",
+      "display_name": "Pakistan",
+      "file": "PK_Pakistan.json",
+      "parent_region_identifier": "south_asia",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "PL",
+      "iso_alpha3": "POL",
+      "display_name": "Poland",
+      "file": "PL_Poland.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "PM",
+      "iso_alpha3": "SPM",
+      "display_name": "Saint Pierre and Miquelon",
+      "file": "PM_Saint_Pierre_and_Miquelon.json",
+      "parent_region_identifier": "canada_alaska",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "PN",
+      "iso_alpha3": "PCN",
+      "display_name": "Pitcairn",
+      "file": "PN_Pitcairn.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "PR",
+      "iso_alpha3": "PRI",
+      "display_name": "Puerto Rico",
+      "file": "PR_Puerto_Rico.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "PS",
+      "iso_alpha3": "PSE",
+      "display_name": "Palestine, State of",
+      "file": "PS_Palestine_State_of.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "PT",
+      "iso_alpha3": "PRT",
+      "display_name": "Portugal",
+      "file": "PT_Portugal.json",
+      "parent_region_identifier": "mediterranean_europe",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "PW",
+      "iso_alpha3": "PLW",
+      "display_name": "Palau",
+      "file": "PW_Palau.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "PY",
+      "iso_alpha3": "PRY",
+      "display_name": "Paraguay",
+      "file": "PY_Paraguay.json",
+      "parent_region_identifier": "southern_cone",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "QA",
+      "iso_alpha3": "QAT",
+      "display_name": "Qatar",
+      "file": "QA_Qatar.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "RE",
+      "iso_alpha3": "REU",
+      "display_name": "Réunion",
+      "file": "RE_R_union.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "RO",
+      "iso_alpha3": "ROU",
+      "display_name": "Romania",
+      "file": "RO_Romania.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "RS",
+      "iso_alpha3": "SRB",
+      "display_name": "Serbia",
+      "file": "RS_Serbia.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "RU",
+      "iso_alpha3": "RUS",
+      "display_name": "Russian Federation",
+      "file": "RU_Russian_Federation.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "RW",
+      "iso_alpha3": "RWA",
+      "display_name": "Rwanda",
+      "file": "RW_Rwanda.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SA",
+      "iso_alpha3": "SAU",
+      "display_name": "Saudi Arabia",
+      "file": "SA_Saudi_Arabia.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "SB",
+      "iso_alpha3": "SLB",
+      "display_name": "Solomon Islands",
+      "file": "SB_Solomon_Islands.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SC",
+      "iso_alpha3": "SYC",
+      "display_name": "Seychelles",
+      "file": "SC_Seychelles.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SD",
+      "iso_alpha3": "SDN",
+      "display_name": "Sudan",
+      "file": "SD_Sudan.json",
+      "parent_region_identifier": "north_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SE",
+      "iso_alpha3": "SWE",
+      "display_name": "Sweden",
+      "file": "SE_Sweden.json",
+      "parent_region_identifier": "sweden",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "SG",
+      "iso_alpha3": "SGP",
+      "display_name": "Singapore",
+      "file": "SG_Singapore.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SH",
+      "iso_alpha3": "SHN",
+      "display_name": "Saint Helena, Ascension and Tristan da Cunha",
+      "file": "SH_Saint_Helena_Ascension_and_Tristan_da_Cunha.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SI",
+      "iso_alpha3": "SVN",
+      "display_name": "Slovenia",
+      "file": "SI_Slovenia.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SJ",
+      "iso_alpha3": "SJM",
+      "display_name": "Svalbard and Jan Mayen",
+      "file": "SJ_Svalbard_and_Jan_Mayen.json",
+      "parent_region_identifier": "arctic_polar",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SK",
+      "iso_alpha3": "SVK",
+      "display_name": "Slovakia",
+      "file": "SK_Slovakia.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SL",
+      "iso_alpha3": "SLE",
+      "display_name": "Sierra Leone",
+      "file": "SL_Sierra_Leone.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SM",
+      "iso_alpha3": "SMR",
+      "display_name": "San Marino",
+      "file": "SM_San_Marino.json",
+      "parent_region_identifier": "mediterranean_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SN",
+      "iso_alpha3": "SEN",
+      "display_name": "Senegal",
+      "file": "SN_Senegal.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SO",
+      "iso_alpha3": "SOM",
+      "display_name": "Somalia",
+      "file": "SO_Somalia.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SR",
+      "iso_alpha3": "SUR",
+      "display_name": "Suriname",
+      "file": "SR_Suriname.json",
+      "parent_region_identifier": "brazil_amazon_basin",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SS",
+      "iso_alpha3": "SSD",
+      "display_name": "South Sudan",
+      "file": "SS_South_Sudan.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "ST",
+      "iso_alpha3": "STP",
+      "display_name": "Sao Tome and Principe",
+      "file": "ST_Sao_Tome_and_Principe.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SV",
+      "iso_alpha3": "SLV",
+      "display_name": "El Salvador",
+      "file": "SV_El_Salvador.json",
+      "parent_region_identifier": "mexico_central_america",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SX",
+      "iso_alpha3": "SXM",
+      "display_name": "Sint Maarten (Dutch part)",
+      "file": "SX_Sint_Maarten_Dutch_part.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SY",
+      "iso_alpha3": "SYR",
+      "display_name": "Syrian Arab Republic",
+      "file": "SY_Syrian_Arab_Republic.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "SZ",
+      "iso_alpha3": "SWZ",
+      "display_name": "Eswatini",
+      "file": "SZ_Eswatini.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TC",
+      "iso_alpha3": "TCA",
+      "display_name": "Turks and Caicos Islands",
+      "file": "TC_Turks_and_Caicos_Islands.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TD",
+      "iso_alpha3": "TCD",
+      "display_name": "Chad",
+      "file": "TD_Chad.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TF",
+      "iso_alpha3": "ATF",
+      "display_name": "French Southern Territories",
+      "file": "TF_French_Southern_Territories.json",
+      "parent_region_identifier": "arctic_polar",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TG",
+      "iso_alpha3": "TGO",
+      "display_name": "Togo",
+      "file": "TG_Togo.json",
+      "parent_region_identifier": "west_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TH",
+      "iso_alpha3": "THA",
+      "display_name": "Thailand",
+      "file": "TH_Thailand.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "TJ",
+      "iso_alpha3": "TJK",
+      "display_name": "Tajikistan",
+      "file": "TJ_Tajikistan.json",
+      "parent_region_identifier": "central_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TK",
+      "iso_alpha3": "TKL",
+      "display_name": "Tokelau",
+      "file": "TK_Tokelau.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TL",
+      "iso_alpha3": "TLS",
+      "display_name": "Timor-Leste",
+      "file": "TL_Timor_Leste.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TM",
+      "iso_alpha3": "TKM",
+      "display_name": "Turkmenistan",
+      "file": "TM_Turkmenistan.json",
+      "parent_region_identifier": "central_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TN",
+      "iso_alpha3": "TUN",
+      "display_name": "Tunisia",
+      "file": "TN_Tunisia.json",
+      "parent_region_identifier": "north_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TO",
+      "iso_alpha3": "TON",
+      "display_name": "Tonga",
+      "file": "TO_Tonga.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TR",
+      "iso_alpha3": "TUR",
+      "display_name": "Türkiye",
+      "file": "TR_T_rkiye.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "TT",
+      "iso_alpha3": "TTO",
+      "display_name": "Trinidad and Tobago",
+      "file": "TT_Trinidad_and_Tobago.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TV",
+      "iso_alpha3": "TUV",
+      "display_name": "Tuvalu",
+      "file": "TV_Tuvalu.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TW",
+      "iso_alpha3": "TWN",
+      "display_name": "Taiwan, Province of China",
+      "file": "TW_Taiwan_Province_of_China.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "TZ",
+      "iso_alpha3": "TZA",
+      "display_name": "Tanzania, United Republic of",
+      "file": "TZ_Tanzania_United_Republic_of.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "UA",
+      "iso_alpha3": "UKR",
+      "display_name": "Ukraine",
+      "file": "UA_Ukraine.json",
+      "parent_region_identifier": "eastern_europe_balkans",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "UG",
+      "iso_alpha3": "UGA",
+      "display_name": "Uganda",
+      "file": "UG_Uganda.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "UM",
+      "iso_alpha3": "UMI",
+      "display_name": "United States Minor Outlying Islands",
+      "file": "UM_United_States_Minor_Outlying_Islands.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "US",
+      "iso_alpha3": "USA",
+      "display_name": "United States",
+      "file": "US_United_States.json",
+      "parent_region_identifier": "united_states",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "UY",
+      "iso_alpha3": "URY",
+      "display_name": "Uruguay",
+      "file": "UY_Uruguay.json",
+      "parent_region_identifier": "southern_cone",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "UZ",
+      "iso_alpha3": "UZB",
+      "display_name": "Uzbekistan",
+      "file": "UZ_Uzbekistan.json",
+      "parent_region_identifier": "central_asia",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "VA",
+      "iso_alpha3": "VAT",
+      "display_name": "Holy See (Vatican City State)",
+      "file": "VA_Holy_See_Vatican_City_State.json",
+      "parent_region_identifier": "mediterranean_europe",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "VC",
+      "iso_alpha3": "VCT",
+      "display_name": "Saint Vincent and the Grenadines",
+      "file": "VC_Saint_Vincent_and_the_Grenadines.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "VE",
+      "iso_alpha3": "VEN",
+      "display_name": "Venezuela, Bolivarian Republic of",
+      "file": "VE_Venezuela_Bolivarian_Republic_of.json",
+      "parent_region_identifier": "andes",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "VG",
+      "iso_alpha3": "VGB",
+      "display_name": "Virgin Islands, British",
+      "file": "VG_Virgin_Islands_British.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "VI",
+      "iso_alpha3": "VIR",
+      "display_name": "Virgin Islands, U.S.",
+      "file": "VI_Virgin_Islands_U_S.json",
+      "parent_region_identifier": "caribbean",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "VN",
+      "iso_alpha3": "VNM",
+      "display_name": "Viet Nam",
+      "file": "VN_Viet_Nam.json",
+      "parent_region_identifier": "east_asia",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "VU",
+      "iso_alpha3": "VUT",
+      "display_name": "Vanuatu",
+      "file": "VU_Vanuatu.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "WF",
+      "iso_alpha3": "WLF",
+      "display_name": "Wallis and Futuna",
+      "file": "WF_Wallis_and_Futuna.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "WS",
+      "iso_alpha3": "WSM",
+      "display_name": "Samoa",
+      "file": "WS_Samoa.json",
+      "parent_region_identifier": "pacific_islands",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "YE",
+      "iso_alpha3": "YEM",
+      "display_name": "Yemen",
+      "file": "YE_Yemen.json",
+      "parent_region_identifier": "middle_east",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "YT",
+      "iso_alpha3": "MYT",
+      "display_name": "Mayotte",
+      "file": "YT_Mayotte.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "ZA",
+      "iso_alpha3": "ZAF",
+      "display_name": "South Africa",
+      "file": "ZA_South_Africa.json",
+      "parent_region_identifier": "central_southern_africa",
+      "detail_level": "country-expanded-curated"
+    },
+    {
+      "iso_alpha2": "ZM",
+      "iso_alpha3": "ZMB",
+      "display_name": "Zambia",
+      "file": "ZM_Zambia.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    },
+    {
+      "iso_alpha2": "ZW",
+      "iso_alpha3": "ZWE",
+      "display_name": "Zimbabwe",
+      "file": "ZW_Zimbabwe.json",
+      "parent_region_identifier": "east_africa",
+      "detail_level": "country-expanded-regional-baseline"
+    }
+  ]
+}

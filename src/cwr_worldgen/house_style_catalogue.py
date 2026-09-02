@@ -147,7 +147,31 @@ def _normalise_selection(value: Any, *, filename: str) -> dict[str, Any]:
 def _normalise_roof_defaults(value: Any, *, filename: str) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ValueError(f"{filename}: roof_defaults must be an object")
-    clean_roofs = {str(key): str(item) for key, item in value.items()}
+    # osm-house-modeler has a slightly richer roof vocabulary than CWR's legacy
+    # P3D renderer. Preserve the upstream data verbatim and translate only at the
+    # compatibility boundary, using the same aliases as the modeler's own style
+    # engine: shed/skillion roofs use CWR's gabled implementation and mansards use
+    # its hipped implementation until native shapes are added to the renderer.
+    aliases = {
+        "gable": "gabled",
+        "gabled": "gabled",
+        "saltbox": "gabled",
+        "skillion": "gabled",
+        "shed": "gabled",
+        "hip": "hipped",
+        "hipped": "hipped",
+        "half_hipped": "hipped",
+        "mansard": "hipped",
+        "pyramid": "pyramidal",
+        "pyramidal": "pyramidal",
+        "flat": "flat",
+        "dome": "dome",
+        "onion": "onion",
+    }
+    clean_roofs = {
+        str(key): aliases.get(str(item).casefold().replace("-", "_"), str(item))
+        for key, item in value.items()
+    }
     unsupported = sorted(set(clean_roofs.values()) - _ALLOWED_ROOF_STYLES)
     if unsupported:
         raise ValueError(
@@ -336,12 +360,42 @@ def _context_key(settlement_context: str | None) -> str:
     return "town_city" if str(settlement_context or "").casefold() in _TOWN_CITY_CONTEXTS else "rural"
 
 
+def get_country_style_context(
+    country_identifier: str | None, settlement_context: str = "rural"
+) -> HouseStyleContext | None:
+    """Resolve one modeler country profile into CWR's compatibility context."""
+
+    if not country_identifier:
+        return None
+    from .osm_house_modeler_styles import find_country_profile, load_country_profiles
+
+    profiles = load_country_profiles()
+    if not profiles:
+        return None
+    try:
+        profile = find_country_profile(profiles, country_identifier)
+    except ValueError:
+        return None
+    context_name = _context_key(settlement_context)
+    raw = profile.contexts.get(context_name) or profile.contexts.get("rural")
+    if not isinstance(raw, Mapping):
+        return None
+    try:
+        return _normalise_context(
+            raw,
+            filename=f"country_styles/{profile.iso_alpha2}_{profile.display_name}",
+            context_name=context_name,
+        )
+    except ValueError:
+        return None
+
+
 def get_house_style_context(
     region_identifier: str | None, settlement_context: str = "rural"
 ) -> HouseStyleContext | None:
     profile = get_region_profile(region_identifier)
     if profile is None:
-        return None
+        return get_country_style_context(region_identifier, settlement_context)
     contexts = profile.contexts or {}
     return contexts.get(_context_key(settlement_context)) or contexts.get("rural")
 

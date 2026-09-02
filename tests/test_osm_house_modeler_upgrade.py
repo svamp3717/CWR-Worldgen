@@ -91,7 +91,7 @@ def test_enterable_upgrade_keeps_collision_sensitive_details_safe() -> None:
     key = _house(interiors=True)
     plan = detail_plan_for_key(key, foundation_depth=0.5)
     assert not plan.stairs
-    assert plan.balcony_count == 0
+    # Enterable variants may carry visual-only balconies without a balcony door.
     # This deterministic Swedish key receives safe secondary architecture, so
     # the enterable visual path is genuinely exercised instead of only testing
     # the two safety exclusions above.
@@ -169,3 +169,19 @@ def test_polygon_native_exterior_receives_modeler_details() -> None:
     assert len(upgraded.points) > len(baseline.points)
     assert len(upgraded.faces) > len(baseline.faces)
     assert upgraded.resolution == baseline.resolution == 1.0
+
+
+def test_enterable_balconies_are_allowed_without_balcony_doors() -> None:
+    found = None
+    for variant in range(256):
+        key = pb.BuildingVariantKey(
+            "residential", "gabled", 10.0, 14.0, 6.0,
+            foundation_depth_m=0.5, regional_style="sweden_red",
+            texture_variant=variant, interiors=True,
+        )
+        plan = detail_plan_for_key(key, foundation_depth=0.5)
+        if plan.balcony_count:
+            found = plan
+            break
+    assert found is not None
+    assert found.balcony_count >= 1

@@ -158,13 +158,12 @@ def detail_plan_for_key(
     ):
         chimney_count = 2
 
-    # A balcony without a corresponding collision/opening treatment is a lie in
-    # an enterable P3D. Keep balconies on exterior-only variants until a balcony
-    # door is also represented in Geometry/Memory/animation LODs.
+    # Balconies are intentionally visual secondary architecture on both closed
+    # and enterable variants. Enterable buildings do not need a dedicated balcony
+    # door; the balcony may simply be an inaccessible exterior feature.
     balcony_count = 0
     if (
-        not key.interiors
-        and key.family in {"residential", "townhouse", "urban"}
+        key.family in {"residential", "townhouse", "urban"}
         and key.height_m >= 5.5
         and key.width_m >= 5.5
         and _chance(key, "balcony", balcony_p)
@@ -423,7 +422,11 @@ def _append_details(
     points = list(lod.points)
     normals = list(lod.normals)
     faces = list(lod.faces)
-    detail_texture = foundation_texture or wall_texture
+    # Secondary architecture must never borrow a painted window atlas.
+    # Polygon-native facade tests and, more importantly, actual models rely
+    # on those atlas UVs being reserved for wall bands. Foundation material
+    # is preferred; roof material is the safe fallback when no plinth exists.
+    detail_texture = foundation_texture or roof_texture or wall_texture
     eave_y = _roof_base_y(key, roof_pitch_degrees)
 
     if plan.stairs:
@@ -483,7 +486,7 @@ def _append_details(
             depth=depth,
             y0=0.015,
             y1=0.085,
-            texture=wall_texture,
+            texture=detail_texture,
         )
         canopy_y = min(max(2.25, eave_y - 0.55), 2.65)
         _add_box(
@@ -520,7 +523,7 @@ def _append_details(
                 depth=0.10,
                 y0=0.08,
                 y1=canopy_y,
-                texture=wall_texture,
+                texture=detail_texture,
             )
 
     if plan.balcony_count:
@@ -711,13 +714,26 @@ def _append_details(
                 texture=roof_texture,
             )
 
+    added_points = len(points) - len(lod.points)
+    added_faces = len(faces) - len(lod.faces)
+    selections = tuple(
+        _pb._NamedSelection(
+            selection.name,
+            selection.point_weights + bytes(added_points),
+            selection.face_flags + bytes(added_faces),
+        )
+        for selection in lod.selections
+    )
+    mass_per_point = lod.mass_per_point
+    if mass_per_point and added_points:
+        mass_per_point = mass_per_point + (0.0,) * added_points
     return _pb._Lod(
         tuple(points),
         tuple(normals),
         tuple(faces),
         lod.resolution,
-        lod.mass_per_point,
-        lod.selections,
+        mass_per_point,
+        selections,
         lod.properties,
     )
 

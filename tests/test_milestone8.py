@@ -80,7 +80,7 @@ class ProceduralBuildingTests(unittest.TestCase):
         inferred = library.key_for({"building": "yes"}, 6.0, 8.0)
         small_house = library.key_for({"building": "house"}, 6.0, 8.0)
 
-        self.assertEqual((tiny.family, tiny.height_m, tiny.regional_style), ("outbuilding", 3.0, "sweden_red"))
+        self.assertEqual((tiny.family, tiny.height_m, tiny.regional_style), ("outbuilding", 3.0, "swedish_wood"))
         self.assertEqual(tiny.outbuilding_kind, "garage")
         self.assertEqual((large_shed.family, large_shed.outbuilding_kind), ("outbuilding", "shed"))
         self.assertEqual((inferred.family, inferred.outbuilding_kind), ("outbuilding", "garage"))
