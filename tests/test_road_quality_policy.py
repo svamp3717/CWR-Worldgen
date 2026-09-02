@@ -12,6 +12,7 @@ from cwr_worldgen.road_quality_policy import (
     _Context,
     _exit_distance,
     _quality_window,
+    _tail_error,
 )
 
 
@@ -91,6 +92,24 @@ def test_chain_lookahead_avoids_awkward_final_overshoot() -> None:
         _CONTEXT.reset(token)
     assert [piece.nominal_length for piece, _start, _end in fitted] == [12, 12, 6]
     assert fitted[-1][2] == (0.0, 30.0)
+
+
+def test_tail_lookahead_does_not_fit_hypothetical_geometry() -> None:
+    class GeometryForbidden:
+        def chord_endpoint(self, *_args, **_kwargs):
+            raise AssertionError("tail lookahead must not run geometric chord fitting")
+
+    pieces = (
+        playability._RoadPiece(r"o\road\sil25.p3d", 25.0, 25),
+        playability._RoadPiece(r"o\road\sil12.p3d", 12.0, 12),
+        playability._RoadPiece(r"o\road\sil6.p3d", 6.0, 6),
+    )
+    measure = GeometryForbidden()
+
+    # From 12 m, the depth-two tail can plan 12 + 6 and finish exactly at 30 m.
+    assert _tail_error(measure, pieces, 12.0, 30.0, 30.0, 2) == 0.0
+    # From 25 m, no stock sibling fits inside the five-metre remainder.
+    assert _tail_error(measure, pieces, 25.0, 30.0, 30.0, 2) == 5.0
 
 
 def test_terrain_profile_prefers_shorter_rigid_pieces_over_midspan_clipping() -> None:
