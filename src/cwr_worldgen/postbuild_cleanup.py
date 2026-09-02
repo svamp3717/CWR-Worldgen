@@ -69,6 +69,13 @@ def postbuild_cleanup_command(
     return command
 
 
+def _widget_text(widget: Any) -> str:
+    try:
+        return str(widget.cget("text"))
+    except Exception:
+        return ""
+
+
 def install_postbuild_cleanup() -> None:
     """Add a default-on cleanup checkbox and a final cleanup pipeline job."""
     global _INSTALLED
@@ -112,7 +119,7 @@ def install_postbuild_cleanup() -> None:
                 checks = next(
                     (
                         child for child in body.winfo_children()
-                        if str(child.cget("text")) == "Post-build checks"
+                        if _widget_text(child) == "Post-build checks"
                     ),
                     None,
                 )
@@ -121,7 +128,7 @@ def install_postbuild_cleanup() -> None:
                 inspector = next(
                     (
                         child for child in checks.winfo_children()
-                        if str(child.cget("text")) == "Run Road Inspector after a successful build"
+                        if _widget_text(child) == "Run Road Inspector after a successful build"
                     ),
                     None,
                 )
