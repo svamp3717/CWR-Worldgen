@@ -159,6 +159,9 @@ _install_milestone9_advisory_policy()
 from .grid_default_policy import install_default_grid_policy as _install_default_grid_policy
 
 _install_default_grid_policy()
+from .postbuild_cleanup import install_postbuild_cleanup as _install_postbuild_cleanup
+
+_install_postbuild_cleanup()
 from .network import install_overture_release_resolution as _install_overture_release_resolution
 
 _install_overture_release_resolution()
