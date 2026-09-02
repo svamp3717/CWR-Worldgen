@@ -48,6 +48,7 @@ def _apply_paved_junctions_without_premerge_slabs(report, plans, elevations, spe
 
     applications = []
     used_caps = set()
+    protected_cap_ids = set()
     for key in sorted(plans):
         plan = plans[key]
         cap_index = _paved_junction_policy._cap_index(report, plan, used_caps)
@@ -57,17 +58,21 @@ def _apply_paved_junctions_without_premerge_slabs(report, plans, elevations, spe
         if choices is None:
             continue
         used_caps.add(cap_index)
+        protected_cap_ids.add(report.objects[cap_index].object_id)
         applications.append((plan, choices))
     if not applications:
         return applied
 
-    protected_ids = {
+    protected_ids = protected_cap_ids | {
         target.object_id
         for _plan, choices in applications
         for _score, target, _choice in choices
     }
     remove_ids = set()
-    for obj in report.objects[report.junction_cap_objects:]:
+    # Scan caps as well as ordinary chain pieces. A mixed/nearby base junction
+    # can leave a plain sil6 cap inside the paved approach corridor; Lundby68's
+    # object 94 is exactly that case. The actual T/X caps are protected above.
+    for obj in report.objects:
         if obj.object_id in protected_ids:
             continue
         axis = _paved_junction_policy._object_axis(obj, spec)
