@@ -110,7 +110,6 @@ def mirror_console_log_fragment(
                 stream.write(payload)
             initialized.add(key)
         except OSError:
-            # A diagnostic mirror must never be allowed to break the build itself.
             continue
 
 
@@ -160,14 +159,12 @@ def generated_world_pbo(build_dir: str | Path, world_name: str) -> Path | None:
 def _write_road_inspector_map_report(result: Any, path: Path) -> None:
     """Write the compact interactive map used by GUI post-build inspection."""
     roads = []
+    road_types = {road.object_id: road.road_type for road in result.road_objects}
     for road in result.road_objects:
         if not road.endpoints:
             continue
         if road.kind.startswith("junction_"):
-            segments = [
-                [road.x, road.z, endpoint.point[0], endpoint.point[1]]
-                for endpoint in road.endpoints
-            ]
+            segments = [[road.x, road.z, endpoint.point[0], endpoint.point[1]] for endpoint in road.endpoints]
         else:
             first, last = road.endpoints[0], road.endpoints[-1]
             segments = [[first.point[0], first.point[1], last.point[0], last.point[1]]]
@@ -175,6 +172,7 @@ def _write_road_inspector_map_report(result: Any, path: Path) -> None:
             "id": road.object_id,
             "kind": road.kind,
             "family": road.family,
+            "type": road.road_type,
             "segments": segments,
         })
     issues = [
@@ -186,14 +184,12 @@ def _write_road_inspector_map_report(result: Any, path: Path) -> None:
             "x": issue.x,
             "z": issue.z,
             "objects": list(issue.object_ids),
+            "types": sorted({road_types[value] for value in issue.object_ids if value in road_types}),
             "message": issue.message,
         }
         for issue in result.issues
     ]
-    summary = {
-        "roads": result.road_object_count,
-        "issues": len(result.issues),
-    }
+    summary = {"roads": result.road_object_count, "issues": len(result.issues)}
 
     def embedded_json(value: object) -> str:
         return json.dumps(value, separators=(",", ":")).replace("</", "<\\/")
@@ -222,10 +218,12 @@ select,button{{background:#222;color:#eee;border:1px solid #555;border-radius:5p
 #mapinfo{{position:absolute;top:10px;left:10px;padding:8px 10px;border-radius:6px;background:#111d;border:1px solid #555;font-family:ui-monospace,Consolas,monospace;pointer-events:none}}
 @media(max-width:900px){{body{{grid-template-columns:1fr;grid-template-rows:55vh 45vh}}#panel{{border-right:0;border-bottom:1px solid #444}}}}
 </style></head><body>
-<section id="panel"><h1>{title}</h1><div class="muted">Read-only audit of the actual emitted RVW4 stock-road geometry.</div>
+<section id="panel"><h1>{title}</h1><div class="muted">Read-only audit of emitted RVW4 roads. Gravel is mapped but not seam-scored.</div>
 <div class="stats" id="stats"></div><div class="controls">
 <select id="severity"><option value="30" selected>medium +</option><option value="55">high +</option><option value="80">critical only</option><option value="0">all findings</option></select>
-<select id="category"><option value="">all categories</option></select><button id="reset">Reset map</button></div><div id="issues"></div></section>
+<select id="category"><option value="">all categories</option></select>
+<select id="roadtype"><option value="">all road types</option><option value="paved">paved</option><option value="gravel">gravel</option><option value="dirt">dirt</option></select>
+<button id="reset">Reset map</button></div><div id="issues"></div></section>
 <section id="mapwrap"><svg id="map"></svg><div id="mapinfo">Click a finding to zoom to ±35 m</div></section>
 <script>
 const summary={embedded_json(summary)},issues={embedded_json(issues)},roads={embedded_json(roads)};
@@ -237,10 +235,11 @@ if(!Number.isFinite(minx)){{minx=0;maxx=1;minz=0;maxz=1}}
 function view(x0,z0,x1,z1){{svg.setAttribute('viewBox',`${{x0}} ${{-z1}} ${{Math.max(1,x1-x0)}} ${{Math.max(1,z1-z0)}}`)}}
 function resetView(){{view(minx-10,minz-10,maxx+10,maxz+10)}}resetView();
 const roadEls=new Map(),markerEls=new Map();
-for(const r of roads)for(const s of r.segments){{const line=document.createElementNS(ns,'line');line.setAttribute('x1',s[0]);line.setAttribute('y1',-s[1]);line.setAttribute('x2',s[2]);line.setAttribute('y2',-s[3]);line.classList.add('road');if(r.kind==='curve')line.classList.add('curve');if(r.kind.startsWith('junction_'))line.classList.add('junction');svg.appendChild(line);if(!roadEls.has(r.id))roadEls.set(r.id,[]);roadEls.get(r.id).push(line)}}
+for(const r of roads)for(const s of r.segments){{const line=document.createElementNS(ns,'line');line.setAttribute('x1',s[0]);line.setAttribute('y1',-s[1]);line.setAttribute('x2',s[2]);line.setAttribute('y2',-s[3]);line.classList.add('road');line.dataset.roadType=r.type;if(r.kind==='curve')line.classList.add('curve');if(r.kind.startsWith('junction_'))line.classList.add('junction');svg.appendChild(line);if(!roadEls.has(r.id))roadEls.set(r.id,[]);roadEls.get(r.id).push(line)}}
 for(const i of issues){{const c=document.createElementNS(ns,'circle');c.setAttribute('cx',i.x);c.setAttribute('cy',-i.z);c.setAttribute('r',2.2);c.classList.add('marker',i.severity);c.onclick=()=>selectIssue(i);svg.appendChild(c);markerEls.set(i.id,c)}}
 function esc(s){{return String(s).replace(/[&<>\"]/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}}[c]))}}
-function visible(i){{const score=Number(document.getElementById('severity').value),cat=document.getElementById('category').value;return i.score>=score&&(!cat||i.category===cat)}}
+function selectedType(){{return document.getElementById('roadtype').value}}
+function visible(i){{const score=Number(document.getElementById('severity').value),cat=document.getElementById('category').value,type=selectedType();return i.score>=score&&(!cat||i.category===cat)&&(!type||i.types.includes(type))}}
 function consoleCommand(i){{return `player setPos [${{i.x.toFixed(3)}}, ${{i.z.toFixed(3)}}, 0]`}}
 async function copyText(text){{
   if(navigator.clipboard&&window.isSecureContext){{try{{await navigator.clipboard.writeText(text);return true}}catch(_error){{}}}}
@@ -248,9 +247,9 @@ async function copyText(text){{
   let copied=false;try{{copied=document.execCommand('copy')}}catch(_error){{}}area.remove();return copied;
 }}
 function selectIssue(i){{document.querySelectorAll('.road.selected').forEach(e=>e.classList.remove('selected'));for(const id of i.objects)for(const e of roadEls.get(id)||[])e.classList.add('selected');view(i.x-35,i.z-35,i.x+35,i.z+35);document.getElementById('mapinfo').textContent=`${{i.id}}  ${{i.x.toFixed(2)}}, ${{i.z.toFixed(2)}}  ${{i.category}}`;document.querySelectorAll('.issue.active').forEach(e=>e.classList.remove('active'));const row=document.querySelector(`[data-row="${{i.id}}"]`);if(row){{row.classList.add('active');row.scrollIntoView({{block:'nearest'}})}}}}
-function render(){{list.innerHTML='';let shown=0;for(const i of issues){{const show=visible(i),marker=markerEls.get(i.id);if(marker)marker.style.display=show?'':'none';if(!show)continue;shown++;const d=document.createElement('div'),command=consoleCommand(i);d.className=`issue ${{i.severity}}`;d.dataset.row=i.id;d.innerHTML=`<div class="issuehead"><span>${{esc(i.id)}} · ${{esc(i.severity.toUpperCase())}}</span><span>${{i.score.toFixed(1)}}</span></div><div class="category">${{esc(i.category)}}</div><div class="coords">${{i.x.toFixed(2)}}, ${{i.z.toFixed(2)}} · objects ${{esc(i.objects.join(', '))}}</div><div>${{esc(i.message)}}</div><div class="coords">${{esc(command)}}</div><div class="issueactions"><button type="button" class="copycoords">Copy coords</button></div>`;d.onclick=()=>selectIssue(i);const copy=d.querySelector('.copycoords');copy.onclick=async event=>{{event.stopPropagation();const copied=await copyText(command);copy.textContent=copied?'Copied':'Copy failed';window.setTimeout(()=>{{copy.textContent='Copy coords'}},1200)}};list.appendChild(d)}}document.getElementById('stats').innerHTML=`<span class="stat">${{summary.roads}} road objects</span><span class="stat">${{summary.issues}} findings</span><span class="stat">${{shown}} shown</span>`}}
-const cats=[...new Set(issues.map(i=>i.category))].sort(),catSel=document.getElementById('category');for(const c of cats){{const o=document.createElement('option');o.textContent=c;o.value=c;catSel.appendChild(o)}}
-document.getElementById('severity').onchange=render;catSel.onchange=render;document.getElementById('reset').onclick=()=>{{resetView();document.querySelectorAll('.road.selected').forEach(e=>e.classList.remove('selected'));document.getElementById('mapinfo').textContent='Click a finding to zoom to ±35 m'}};render();
+function render(){{const type=selectedType();document.querySelectorAll('.road').forEach(e=>e.style.display=!type||e.dataset.roadType===type?'':'none');list.innerHTML='';let shown=0;for(const i of issues){{const show=visible(i),marker=markerEls.get(i.id);if(marker)marker.style.display=show?'':'none';if(!show)continue;shown++;const d=document.createElement('div'),command=consoleCommand(i);d.className=`issue ${{i.severity}}`;d.dataset.row=i.id;d.innerHTML=`<div class="issuehead"><span>${{esc(i.id)}} · ${{esc(i.severity.toUpperCase())}}</span><span>${{i.score.toFixed(1)}}</span></div><div class="category">${{esc(i.category)}}</div><div class="coords">${{esc(i.types.join('/'))}} · ${{i.x.toFixed(2)}}, ${{i.z.toFixed(2)}} · objects ${{esc(i.objects.join(', '))}}</div><div>${{esc(i.message)}}</div><div class="coords">${{esc(command)}}</div><div class="issueactions"><button type="button" class="copycoords">Copy coords</button></div>`;d.onclick=()=>selectIssue(i);const copy=d.querySelector('.copycoords');copy.onclick=async event=>{{event.stopPropagation();const copied=await copyText(command);copy.textContent=copied?'Copied':'Copy failed';window.setTimeout(()=>{{copy.textContent='Copy coords'}},1200)}};list.appendChild(d)}}document.getElementById('stats').innerHTML=`<span class="stat">${{summary.roads}} road objects</span><span class="stat">${{summary.issues}} findings</span><span class="stat">${{shown}} shown</span>`}}
+const cats=[...new Set(issues.map(i=>i.category))].sort(),catSel=document.getElementById('category'),roadTypeSel=document.getElementById('roadtype');for(const c of cats){{const o=document.createElement('option');o.textContent=c;o.value=c;catSel.appendChild(o)}}
+document.getElementById('severity').onchange=render;catSel.onchange=render;roadTypeSel.onchange=render;document.getElementById('reset').onclick=()=>{{resetView();document.querySelectorAll('.road.selected').forEach(e=>e.classList.remove('selected'));document.getElementById('mapinfo').textContent='Click a finding to zoom to ±35 m'}};render();
 </script></body></html>"""
     path.write_text(document, encoding="utf-8")
 
@@ -666,8 +665,6 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
                 if str(self.vars["source_mode"].get()) == "new"
                 else None
             )
-            # Keep this reference useful even if a future GUI revision changes
-            # how the suggestion button derives its values.
             _ = generated
 
     gui.WorldgenGui = SyncedWorldgenGui
