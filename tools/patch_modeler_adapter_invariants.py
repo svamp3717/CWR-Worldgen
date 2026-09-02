@@ -46,6 +46,18 @@ def main() -> int:
         '''    added_points = len(points) - len(lod.points)\n    added_faces = len(faces) - len(lod.faces)\n    selections = tuple(\n        _pb._NamedSelection(\n            selection.name,\n            selection.point_weights + bytes(added_points),\n            selection.face_flags + bytes(added_faces),\n        )\n        for selection in lod.selections\n    )\n    mass_per_point = lod.mass_per_point\n    if mass_per_point and added_points:\n        mass_per_point = mass_per_point + (0.0,) * added_points\n    return _pb._Lod(\n        tuple(points),\n        tuple(normals),\n        tuple(faces),\n        lod.resolution,\n        mass_per_point,\n        selections,\n        lod.properties,\n    )\n''',
     )
 
+    runtime = root / "src" / "cwr_worldgen" / "osm_house_modeler_runtime.py"
+    replace_once(
+        runtime,
+        '''    foundation_texture = (\n        _argument(args, kwargs, "foundation_texture", 5, None) or wall_texture\n    )\n''',
+        '''    foundation_texture = (\n        _argument(args, kwargs, "foundation_texture", 5, None) or roof_texture\n    )\n''',
+    )
+    replace_once(
+        runtime,
+        '    foundation_texture = kwargs.get("foundation_texture") or wall_texture\n',
+        '    foundation_texture = kwargs.get("foundation_texture") or roof_texture\n',
+    )
+
     milestone = root / "tests" / "test_milestone8.py"
     replace_once(
         milestone,
