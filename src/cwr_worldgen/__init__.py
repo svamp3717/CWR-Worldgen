@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """OFP/CWA world generation utilities."""
 
+from dataclasses import replace as _dataclass_replace
 import os as _os
 import sys as _sys
 import warnings as _warnings
@@ -28,9 +29,99 @@ _install_stock_utility_policy()
 from .road_quality_policy import install_road_quality_policy as _install_road_quality_policy
 
 _install_road_quality_policy()
+from . import paved_junction_policy as _paved_junction_policy
 from .paved_junction_policy import install_paved_junction_policy as _install_paved_junction_policy
 
 _install_paved_junction_policy()
+
+# Keep the selected merge endpoint, but remove any older paved slab that survives
+# between the fixed 30 m clear zone and that endpoint. This is intentionally a
+# thin wrapper so the previous junction implementation remains one-commit
+# rollbackable while Lundby testing settles the final cleanup rule.
+_original_paved_junction_apply = _paved_junction_policy._apply_plans
+
+
+def _apply_paved_junctions_without_premerge_slabs(report, plans, elevations, spec):
+    applied = _original_paved_junction_apply(report, plans, elevations, spec)
+    if applied is report or not plans:
+        return applied
+
+    applications = []
+    used_caps = set()
+    for key in sorted(plans):
+        plan = plans[key]
+        cap_index = _paved_junction_policy._cap_index(report, plan, used_caps)
+        if cap_index is None:
+            continue
+        choices = _paved_junction_policy._plan_application(report, plan, spec)
+        if choices is None:
+            continue
+        used_caps.add(cap_index)
+        applications.append((plan, choices))
+    if not applications:
+        return applied
+
+    protected_ids = {
+        target.object_id
+        for _plan, choices in applications
+        for _score, target, _choice in choices
+    }
+    remove_ids = set()
+    for obj in report.objects[report.junction_cap_objects:]:
+        if obj.object_id in protected_ids:
+            continue
+        axis = _paved_junction_policy._object_axis(obj, spec)
+        if axis is None:
+            continue
+        midpoint = (
+            (axis[0][0] + axis[1][0]) * 0.5,
+            (axis[0][1] + axis[1][1]) * 0.5,
+        )
+        for plan, choices in applications:
+            for arm, (_score, target, _choice) in zip(plan.arms, choices):
+                sx, sz = arm.source_direction
+                target_along = (
+                    (target.point[0] - plan.point[0]) * sx
+                    + (target.point[1] - plan.point[1]) * sz
+                )
+                if target_along <= _paved_junction_policy._CLEAR_RADIUS + 0.20:
+                    continue
+                samples = (axis[0], midpoint, axis[1])
+                along = tuple(
+                    (point[0] - plan.point[0]) * sx
+                    + (point[1] - plan.point[1]) * sz
+                    for point in samples
+                )
+                if (
+                    max(along) <= _paved_junction_policy._CLEAR_RADIUS - 0.20
+                    or min(along) >= target_along - 0.20
+                ):
+                    continue
+                lateral = min(
+                    abs(
+                        (point[0] - plan.point[0]) * sz
+                        - (point[1] - plan.point[1]) * sx
+                    )
+                    for point in samples
+                )
+                if lateral <= 6.0:
+                    remove_ids.add(obj.object_id)
+                    break
+            if obj.object_id in remove_ids:
+                break
+
+    if not remove_ids:
+        return applied
+    return _dataclass_replace(
+        applied,
+        objects=tuple(
+            obj for obj in applied.objects if obj.object_id not in remove_ids
+        ),
+    )
+
+
+_paved_junction_policy._apply_plans = _apply_paved_junctions_without_premerge_slabs
+
 from .gravel_junction_policy import install_gravel_junction_policy as _install_gravel_junction_policy
 
 _install_gravel_junction_policy()
