@@ -199,3 +199,5 @@ def test_gui_entry_contains_inspector_checkbox_pipeline_and_map() -> None:
     assert "road_inspector_postbuild_command(" in source
     assert '<svg id="map"></svg>' in source
     assert "medium +" in source
+    assert "Copy coords" in source
+    assert "document.execCommand('copy')" in source
