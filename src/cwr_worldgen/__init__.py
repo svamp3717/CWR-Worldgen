@@ -28,6 +28,9 @@ _install_stock_utility_policy()
 from .road_quality_policy import install_road_quality_policy as _install_road_quality_policy
 
 _install_road_quality_policy()
+from .paved_junction_policy import install_paved_junction_policy as _install_paved_junction_policy
+
+_install_paved_junction_policy()
 from .gravel_junction_policy import install_gravel_junction_policy as _install_gravel_junction_policy
 
 _install_gravel_junction_policy()

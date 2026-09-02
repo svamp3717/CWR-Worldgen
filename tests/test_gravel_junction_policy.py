@@ -28,14 +28,6 @@ def _gravel_feature(projection, osm_key: str, points):
     )
 
 
-def _point_from_heading(origin, heading_degrees, distance):
-    angle = math.radians(heading_degrees)
-    return (
-        origin[0] + math.sin(angle) * distance,
-        origin[1] + math.cos(angle) * distance,
-    )
-
-
 def _heading_direction(heading):
     angle = math.radians(heading)
     return (math.sin(angle), math.cos(angle))
@@ -49,6 +41,8 @@ def test_policy_is_layered_on_top_of_general_road_quality_policy() -> None:
 
 
 def test_fixed_gravel_junction_catalogue_has_fifteen_reusable_shapes() -> None:
+    # The generated family still exists for compatibility/reference, but the
+    # paved-junction branch no longer emits these hubs into worlds.
     assert len(GRAVEL_JUNCTION_VARIANTS) == 15
     for variant in GRAVEL_JUNCTION_VARIANTS:
         headings = gravel_junction_template_headings(variant)
@@ -64,7 +58,7 @@ def test_fixed_gravel_junction_catalogue_has_fifteen_reusable_shapes() -> None:
         assert max(math.hypot(x, z) for x, _y, z in visual.points) > 3.5
 
 
-def test_uploaded_lundby_junction_selects_reusable_60_degree_t_model() -> None:
+def test_uploaded_lundby_gravel_node_is_not_promoted_to_junction() -> None:
     bbox = (59.4012347, 16.8211928, 59.4587912, 16.9343614)
     projection = BboxProjection.create(bbox, 6400.0)
     centre = (3943.500087480133, 2295.750436527429)
@@ -85,27 +79,15 @@ def test_uploaded_lundby_junction_selects_reusable_60_degree_t_model() -> None:
         cells=128, cell_size=50.0, max_road_objects=10000,
         strict_assets=False, procedural_gravel_roads=True,
     )
-    junction = road_quality._junction_geometry(dataset, projection, spec)[
-        playability._road_node_key(centre)
-    ]
-    variant, _axis = gravel_junction_variant_for_directions(junction.directions)
-    assert variant in {"t60l", "t60r"}
-    assert math.isclose(junction.half_width, GENERATED_GRAVEL_HALF_WIDTH_METRES, abs_tol=1e-9)
-    assert math.isclose(junction.half_length, GRAVEL_JUNCTION_ARM_EXTENT_METRES, abs_tol=1e-9)
-    for direction in junction.directions:
-        assert road_quality._exit_distance(junction, direction) >= 3.9
+    key = playability._road_node_key(centre)
+    assert key not in road_quality._junction_geometry(dataset, projection, spec)
+
     report = playability.fit_road_objects(
         dataset, projection, [0.0] * (spec.cells * spec.cells), spec
     )
-    assert report.junction_cap_objects == 1
-    cap = report.objects[0]
-    assert cap.model_path.casefold().endswith(rf"\gravel_j3_{variant}.p3d")
-    assert report.failed_connections == 0
-    assert report.maximum_connection_gap <= spec.road_connection_tolerance
     assert not any(
-        obj.model_path.casefold().endswith(r"\gravel3.p3d")
-        and obj.y > -0.020
-        and math.dist((obj.x, obj.z), centre) < 5.0
+        "gravel_j" in obj.model_path.casefold()
+        or "kr_new_" in obj.model_path.casefold()
         for obj in report.objects
     )
 
@@ -147,8 +129,10 @@ def test_skew_three_way_family_rotation_minimizes_all_arm_errors() -> None:
         (axis_heading + value) % 360.0
         for value in gravel_junction_template_headings(variant)
     )
+
     def angular_error(left, right):
         return abs((left - right + 180.0) % 360.0 - 180.0)
+
     best_maximum = min(
         max(angular_error(model, actual) for model, actual in zip(model_headings, ordering))
         for ordering in __import__("itertools").permutations(headings)
@@ -158,6 +142,7 @@ def test_skew_three_way_family_rotation_minimizes_all_arm_errors() -> None:
 
 def test_orthogonal_family_hubs_use_full_length_family_models() -> None:
     from cwr_worldgen.gravel_family_policy import gravel_junction_model_path
+
     assert gravel_junction_model_path("synthetic", 3, "t90").endswith(r"\gravel_j3.p3d")
     assert gravel_junction_model_path("synthetic", 4, "x90").endswith(r"\gravel_j4.p3d")
     for degree, variant in ((3, "t90"), (4, "x90")):

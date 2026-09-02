@@ -1,0 +1,26 @@
+{
+  "families": [
+    {"name": "asfaltka", "kind": "paved", "root": "data3d\\asfaltka", "junction_family": "asf"},
+    {"name": "cesta", "kind": "dirt", "root": "data3d\\cesta", "junction_family": "ces"},
+    {"name": "silnice", "kind": "paved", "root": "data3d\\silnice", "junction_family": "sil"},
+    {"name": "asf", "kind": "paved", "root": "o\\road\\asf", "junction_family": "asf"},
+    {"name": "ces", "kind": "dirt", "root": "o\\road\\ces", "junction_family": "ces"},
+    {"name": "kos", "kind": "paved", "root": "o\\road\\kos", "junction_family": "kos"},
+    {"name": "sil", "kind": "paved", "root": "o\\road\\sil", "junction_family": "sil"},
+    {"name": "gravel", "kind": "gravel", "generated": true, "junction_family": "ces"}
+  ],
+  "stock_straight_lengths": [25, 12, 6],
+  "stock_curve_radii": [25, 50, 75, 100],
+  "stock_t_junctions": [
+    "o\\road\\kr_new_asf_asf_t.p3d",
+    "o\\road\\kr_new_asf_ces_t.p3d",
+    "o\\road\\kr_new_asf_sil_t.p3d",
+    "o\\road\\kr_new_kos_kos_t.p3d",
+    "o\\road\\kr_new_kos_sil_t.p3d",
+    "o\\road\\kr_new_sil_asf_t.p3d",
+    "o\\road\\kr_new_sil_ces_t.p3d",
+    "o\\road\\kr_new_sil_kos_t.p3d",
+    "o\\road\\kr_new_sil_sil_t.p3d"
+  ],
+  "stock_x_junctions": ["o\\road\\kr_new_silxsil.p3d"]
+}
