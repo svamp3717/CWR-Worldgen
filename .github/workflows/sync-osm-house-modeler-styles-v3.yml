@@ -31,6 +31,7 @@ jobs:
         run: |
           python tools/sync_osm_house_modeler_styles.py /tmp/osm-house-modeler
           python tools/patch_modeler_roof_aliases.py
+          python tools/patch_modeler_adapter_invariants.py
 
       - name: Set up Python
         uses: actions/setup-python@v6
