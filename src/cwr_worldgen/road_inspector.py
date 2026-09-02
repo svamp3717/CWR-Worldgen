@@ -159,7 +159,8 @@ def _road(values) -> RoadObject | None:
     if match:
         family = match.group("family").casefold()
         begin_local, end_local = _curve_points(family, float(match.group("radius")))
-        begin, end = (_world_point(begin_local, origin, yaw, pitch), _world_point(end_local, origin, yaw, pitch))
+        begin = _world_point(begin_local, origin, yaw, pitch)
+        end = _world_point(end_local, origin, yaw, pitch)
         begin_heading = _world_heading(0.0, yaw, pitch)
         end_heading = _world_heading(_CURVE_ANGLE, yaw, pitch)
         endpoints = (
@@ -172,19 +173,30 @@ def _road(values) -> RoadObject | None:
     if match:
         main, branch = match.group("main").casefold(), match.group("branch").casefold()
         cx = (_JUNCTION_RADIUS - _WIDTHS[main]) * 0.5
-        definitions = (((cx, _JUNCTION_RADIUS), main, 0.0), ((cx, -_JUNCTION_RADIUS), main, 180.0),
-                       ((cx - _JUNCTION_RADIUS, 0.0), branch, 270.0))
-        endpoints = tuple(_endpoint(object_id, model, family, "junction", i, _world_point(local, origin, yaw, pitch),
-                                    _world_heading(direction, yaw, pitch), _world_heading(direction, yaw, pitch))
-                          for i, (local, family, direction) in enumerate(definitions))
+        definitions = (
+            ((cx, _JUNCTION_RADIUS), main, 0.0),
+            ((cx, -_JUNCTION_RADIUS), main, 180.0),
+            ((cx - _JUNCTION_RADIUS, 0.0), branch, 270.0),
+        )
+        endpoints = tuple(
+            _endpoint(object_id, model, family, "junction", i, _world_point(local, origin, yaw, pitch),
+                      _world_heading(direction, yaw, pitch), _world_heading(direction, yaw, pitch))
+            for i, (local, family, direction) in enumerate(definitions)
+        )
         return RoadObject(object_id, model, x, y, z, yaw, pitch, main, "junction_t", endpoints)
 
     if _X.fullmatch(path):
-        definitions = (((0.0, _JUNCTION_RADIUS), 0.0), ((0.0, -_JUNCTION_RADIUS), 180.0),
-                       ((_JUNCTION_RADIUS, 0.0), 90.0), ((-_JUNCTION_RADIUS, 0.0), 270.0))
-        endpoints = tuple(_endpoint(object_id, model, "sil", "junction", i, _world_point(local, origin, yaw, pitch),
-                                    _world_heading(direction, yaw, pitch), _world_heading(direction, yaw, pitch))
-                          for i, (local, direction) in enumerate(definitions))
+        definitions = (
+            ((0.0, _JUNCTION_RADIUS), 0.0),
+            ((0.0, -_JUNCTION_RADIUS), 180.0),
+            ((_JUNCTION_RADIUS, 0.0), 90.0),
+            ((-_JUNCTION_RADIUS, 0.0), 270.0),
+        )
+        endpoints = tuple(
+            _endpoint(object_id, model, "sil", "junction", i, _world_point(local, origin, yaw, pitch),
+                      _world_heading(direction, yaw, pitch), _world_heading(direction, yaw, pitch))
+            for i, (local, direction) in enumerate(definitions)
+        )
         return RoadObject(object_id, model, x, y, z, yaw, pitch, "sil", "junction_x", endpoints)
     return None
 
@@ -240,15 +252,18 @@ def _clusters(endpoints: Sequence[RoadEndpoint], tolerance: float) -> tuple[tupl
     for i, endpoint in enumerate(endpoints):
         buckets.setdefault(_bucket(endpoint.point, tolerance), []).append(i)
     parent = list(range(len(endpoints)))
+
     def find(i: int) -> int:
         while parent[i] != i:
             parent[i] = parent[parent[i]]
             i = parent[i]
         return i
+
     def merge(a: int, b: int) -> None:
         a, b = find(a), find(b)
         if a != b:
             parent[b] = a
+
     for i, endpoint in enumerate(endpoints):
         bx, bz = _bucket(endpoint.point, tolerance)
         for dx in (-1, 0, 1):
@@ -269,6 +284,7 @@ def _edge_gap(first: RoadEndpoint, second: RoadEndpoint) -> float:
         x, z = endpoint.point
         w = endpoint.half_width
         return ((x + nx * w, z + nz * w), (x - nx * w, z - nz * w))
+
     a, b = edges(first), edges(second)
     direct = max(math.dist(a[0], b[0]), math.dist(a[1], b[1]))
     crossed = max(math.dist(a[0], b[1]), math.dist(a[1], b[0]))
@@ -279,7 +295,8 @@ def _severity(score: float) -> str:
     return "critical" if score >= 80 else "high" if score >= 55 else "medium" if score >= 30 else "low"
 
 
-def _issue(first: RoadEndpoint, second: RoadEndpoint, edge_limit: float, tangent_limit: float, force_gap: bool = False) -> RoadIssue | None:
+def _issue(first: RoadEndpoint, second: RoadEndpoint, edge_limit: float, tangent_limit: float,
+           force_gap: bool = False) -> RoadIssue | None:
     center = math.dist(first.point, second.point)
     tangent = _axis_angle(first.tangent, second.tangent)
     edge = _edge_gap(first, second)
@@ -287,10 +304,10 @@ def _issue(first: RoadEndpoint, second: RoadEndpoint, edge_limit: float, tangent
     junction = (first.kind == "junction") != (second.kind == "junction")
     if not force_gap and center < 0.05 and edge < edge_limit and tangent < tangent_limit and not family:
         return None
-    if force_gap:
-        category = "connector_gap"
-    elif junction:
+    if junction:
         category = "junction_connector_mismatch"
+    elif force_gap:
+        category = "connector_gap"
     elif family:
         category = "surface_family_mismatch"
     elif first.kind == "curve" or second.kind == "curve":
@@ -300,11 +317,111 @@ def _issue(first: RoadEndpoint, second: RoadEndpoint, edge_limit: float, tangent
     else:
         category = "connector_gap"
     score = min(100.0, min(45.0, center * 70.0) + min(35.0, edge * 50.0) + min(30.0, tangent * 4.0) + (20.0 if family else 0.0))
-    return RoadIssue("", _severity(score), score, category, (first.point[0] + second.point[0]) * 0.5,
-                     (first.point[1] + second.point[1]) * 0.5, tuple(sorted((first.object_id, second.object_id))),
-                     (first.model_path, second.model_path),
-                     f"{first.model_path} -> {second.model_path}: center gap {center:.3f} m, tangent mismatch {tangent:.2f}°, edge discontinuity {edge:.3f} m.",
-                     {"center_gap_metres": round(center, 5), "tangent_error_degrees": round(tangent, 5), "edge_gap_metres": round(edge, 5)})
+    return RoadIssue(
+        "", _severity(score), score, category,
+        (first.point[0] + second.point[0]) * 0.5,
+        (first.point[1] + second.point[1]) * 0.5,
+        tuple(sorted((first.object_id, second.object_id))),
+        (first.model_path, second.model_path),
+        f"{first.model_path} -> {second.model_path}: center gap {center:.3f} m, tangent mismatch {tangent:.2f}°, edge discontinuity {edge:.3f} m.",
+        {"center_gap_metres": round(center, 5), "tangent_error_degrees": round(tangent, 5), "edge_gap_metres": round(edge, 5)},
+    )
+
+
+def _direction_count(endpoints: Sequence[RoadEndpoint], tolerance: float = 20.0) -> int:
+    directions: list[float] = []
+    for endpoint in endpoints:
+        if all(_angle(endpoint.outward, direction) > tolerance for direction in directions):
+            directions.append(endpoint.outward)
+    return len(directions)
+
+
+def _intersection_issue(endpoints: Sequence[RoadEndpoint]) -> RoadIssue | None:
+    unique = {(endpoint.object_id, endpoint.index): endpoint for endpoint in endpoints}
+    values = tuple(unique.values())
+    if len({endpoint.object_id for endpoint in values}) < 3 or any(endpoint.kind == "junction" for endpoint in values):
+        return None
+    directions = _direction_count(values)
+    if directions < 3:
+        return None
+    x = sum(endpoint.point[0] for endpoint in values) / len(values)
+    z = sum(endpoint.point[1] for endpoint in values) / len(values)
+    score = 85.0 if directions >= 4 else 70.0
+    return RoadIssue(
+        "", _severity(score), score, "intersection_without_junction", x, z,
+        tuple(sorted({endpoint.object_id for endpoint in values})),
+        tuple(sorted({endpoint.model_path for endpoint in values})),
+        f"{directions}-way road intersection has {len(values)} coincident approach endpoints but no stock junction connector.",
+        {"approach_endpoints": float(len(values)), "distinct_directions": float(directions)},
+    )
+
+
+def _heading_to(start: tuple[float, float], end: tuple[float, float]) -> float:
+    return math.degrees(math.atan2(end[0] - start[0], end[1] - start[1])) % 360.0
+
+
+def _junction_issues(roads: Sequence[RoadObject], maximum_gap: float) -> list[RoadIssue]:
+    approaches = tuple(endpoint for road in roads if not road.kind.startswith("junction_") for endpoint in road.endpoints)
+    issues: list[RoadIssue] = []
+    for junction in (road for road in roads if road.kind.startswith("junction_")):
+        connector_candidates: set[tuple[int, int]] = set()
+        object_ids = {junction.object_id}
+        models = {junction.model_path}
+        missing = duplicates = 0
+        worst_gap = 0.0
+
+        for connector in junction.endpoints:
+            candidates = []
+            for endpoint in approaches:
+                distance = math.dist(connector.point, endpoint.point)
+                facing = abs(180.0 - _angle(connector.outward, endpoint.outward))
+                if distance <= maximum_gap and facing <= 25.0:
+                    candidates.append((distance, endpoint))
+            candidates.sort(key=lambda item: item[0])
+            for _distance, endpoint in candidates:
+                connector_candidates.add((endpoint.object_id, endpoint.index))
+                object_ids.add(endpoint.object_id)
+                models.add(endpoint.model_path)
+            if not candidates:
+                missing += 1
+                continue
+            worst_gap = max(worst_gap, candidates[0][0])
+            duplicates += max(0, len(candidates) - 1)
+
+        center = junction.x, junction.z
+        extras = []
+        for endpoint in approaches:
+            key = endpoint.object_id, endpoint.index
+            if key in connector_candidates:
+                continue
+            center_distance = math.dist(endpoint.point, center)
+            if center_distance > _JUNCTION_RADIUS + maximum_gap:
+                continue
+            if center_distance <= 0.05 or _angle(endpoint.outward, _heading_to(endpoint.point, center)) <= 25.0:
+                extras.append(endpoint)
+                object_ids.add(endpoint.object_id)
+                models.add(endpoint.model_path)
+
+        if not missing and not duplicates and not extras:
+            continue
+        expected = len(junction.endpoints)
+        connected = expected - missing
+        score = min(100.0, 55.0 + missing * 20.0 + duplicates * 10.0 + len(extras) * 15.0)
+        issues.append(RoadIssue(
+            "", _severity(score), score, "bad_junction", junction.x, junction.z,
+            tuple(sorted(object_ids)), tuple(sorted(models)),
+            f"{junction.kind.replace('_', ' ')} has {connected}/{expected} connected stock connectors"
+            f"; {missing} missing, {duplicates} multiply connected, {len(extras)} extra approach(es) near the junction centre.",
+            {
+                "expected_connectors": float(expected),
+                "connected_connectors": float(connected),
+                "missing_connectors": float(missing),
+                "duplicate_connections": float(duplicates),
+                "extra_approaches": float(len(extras)),
+                "worst_connector_gap_metres": round(worst_gap, 5),
+            },
+        ))
+    return issues
 
 
 def _nearby(endpoints: Sequence[RoadEndpoint], paired: set[tuple[int, int]], minimum: float, maximum: float,
@@ -344,8 +461,10 @@ def _number(issues: Iterable[RoadIssue]) -> tuple[RoadIssue, ...]:
         if key in seen:
             continue
         seen.add(key)
-        result.append(RoadIssue(f"RI-{len(result)+1:05d}", issue.severity, round(issue.score, 2), issue.category,
-                                round(issue.x, 4), round(issue.z, 4), issue.object_ids, issue.models, issue.message, issue.metrics))
+        result.append(RoadIssue(
+            f"RI-{len(result)+1:05d}", issue.severity, round(issue.score, 2), issue.category,
+            round(issue.x, 4), round(issue.z, 4), issue.object_ids, issue.models, issue.message, issue.metrics,
+        ))
     return tuple(result)
 
 
@@ -356,51 +475,81 @@ def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAU
     data, wrp_entry = _wrp(Path(input_path))
     roads = _roads(data)
     endpoints = tuple(endpoint for road in roads for endpoint in road.endpoints)
-    issues, paired = [], set()
+    issues: list[RoadIssue] = []
+    paired: set[tuple[int, int]] = set()
     for cluster in _clusters(endpoints, endpoint_tolerance):
         unique = {(endpoint.object_id, endpoint.index): endpoint for endpoint in cluster}
-        if len(unique) != 2:
+        if len(unique) == 2:
+            first, second = tuple(unique.values())
+            paired.update(unique)
+            issue = _issue(first, second, minimum_edge_gap, minimum_tangent_error)
+            if issue:
+                issues.append(issue)
             continue
-        first, second = tuple(unique.values())
         paired.update(unique)
-        issue = _issue(first, second, minimum_edge_gap, minimum_tangent_error)
+        issue = _intersection_issue(tuple(unique.values()))
         if issue:
             issues.append(issue)
     issues.extend(_nearby(endpoints, paired, endpoint_tolerance, nearby_gap, minimum_edge_gap, minimum_tangent_error))
+    issues.extend(_junction_issues(roads, nearby_gap))
     return InspectionResult(str(Path(input_path)), wrp_entry, roads, _number(issues))
 
 
 def _summary(result: InspectionResult) -> dict[str, object]:
-    return {"input": result.input_path, "wrp_entry": result.wrp_entry, "road_objects": result.road_object_count,
-            "issue_count": len(result.issues), "severity_counts": dict(Counter(i.severity for i in result.issues)),
-            "category_counts": dict(Counter(i.category for i in result.issues))}
+    return {
+        "input": result.input_path,
+        "wrp_entry": result.wrp_entry,
+        "road_objects": result.road_object_count,
+        "issue_count": len(result.issues),
+        "severity_counts": dict(Counter(i.severity for i in result.issues)),
+        "category_counts": dict(Counter(i.category for i in result.issues)),
+    }
 
 
 def write_inspection_report(result: InspectionResult, output_dir: Path) -> dict[str, Path]:
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
-    paths = {"issues_json": output / "issues.json", "issues_csv": output / "issues.csv",
-             "summary_json": output / "summary.json", "coordinate_csv": output / "ingame-coordinates.csv",
-             "html": output / "report.html"}
+    paths = {
+        "issues_json": output / "issues.json",
+        "issues_csv": output / "issues.csv",
+        "summary_json": output / "summary.json",
+        "coordinate_csv": output / "ingame-coordinates.csv",
+        "html": output / "report.html",
+    }
     paths["issues_json"].write_text(json.dumps([asdict(i) for i in result.issues], indent=2) + "\n", encoding="utf-8")
     paths["summary_json"].write_text(json.dumps(_summary(result), indent=2) + "\n", encoding="utf-8")
     with paths["issues_csv"].open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.writer(stream); writer.writerow(("issue_id", "severity", "score", "category", "x", "z", "object_ids", "models", "message"))
-        for i in result.issues:
-            writer.writerow((i.issue_id, i.severity, i.score, i.category, i.x, i.z, ";".join(map(str, i.object_ids)), ";".join(i.models), i.message))
+        writer = csv.writer(stream)
+        writer.writerow(("issue_id", "severity", "score", "category", "x", "z", "object_ids", "models", "message"))
+        for issue in result.issues:
+            writer.writerow((issue.issue_id, issue.severity, issue.score, issue.category, issue.x, issue.z,
+                             ";".join(map(str, issue.object_ids)), ";".join(issue.models), issue.message))
     related: dict[int, list[str]] = {}
     for issue in result.issues:
         for object_id in issue.object_ids:
             related.setdefault(object_id, []).append(issue.issue_id)
     with paths["coordinate_csv"].open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.writer(stream); writer.writerow(("kind", "id", "x", "z", "model", "issues", "teleport"))
-        for i in result.issues:
-            writer.writerow(("issue", i.issue_id, i.x, i.z, "", i.issue_id, f"player setPos [{i.x:.3f}, {i.z:.3f}, 0]"))
+        writer = csv.writer(stream)
+        writer.writerow(("kind", "id", "x", "z", "model", "issues", "teleport"))
+        for issue in result.issues:
+            writer.writerow(("issue", issue.issue_id, issue.x, issue.z, "", issue.issue_id,
+                             f"player setPos [{issue.x:.3f}, {issue.z:.3f}, 0]"))
         for road in result.road_objects:
-            writer.writerow(("road", road.object_id, road.x, road.z, road.model_path, ";".join(related.get(road.object_id, ())), f"player setPos [{road.x:.3f}, {road.z:.3f}, 0]"))
-    rows = "".join(f"<tr><td>{html.escape(i.issue_id)}</td><td>{html.escape(i.severity)}</td><td>{i.score:.1f}</td><td>{html.escape(i.category)}</td><td>{i.x:.2f}, {i.z:.2f}</td><td>{html.escape(i.message)}</td></tr>" for i in result.issues)
-    rows = rows or '<tr><td colspan="6">No road issues found.</td></tr>'
-    paths["html"].write_text(f'<!doctype html><meta charset="utf-8"><title>Road Inspector</title><style>body{{font:14px system-ui;margin:24px}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #aaa;padding:6px;text-align:left}}</style><h1>Road Inspector</h1><p>Read-only RVW4 stock-road audit. {result.road_object_count} road objects, {len(result.issues)} issues.</p><table><tr><th>ID</th><th>Severity</th><th>Score</th><th>Category</th><th>X/Z</th><th>Details</th></tr>{rows}</table>', encoding="utf-8")
+            writer.writerow(("road", road.object_id, road.x, road.z, road.model_path,
+                             ";".join(related.get(road.object_id, ())), f"player setPos [{road.x:.3f}, {road.z:.3f}, 0]"))
+    rows = "".join(
+        f"<tr><td>{html.escape(i.issue_id)}</td><td>{html.escape(i.severity)}</td><td>{i.score:.1f}</td>"
+        f"<td>{html.escape(i.category)}</td><td>{i.x:.2f}, {i.z:.2f}</td><td>{html.escape(i.message)}</td></tr>"
+        for i in result.issues
+    ) or '<tr><td colspan="6">No road issues found.</td></tr>'
+    paths["html"].write_text(
+        f'<!doctype html><meta charset="utf-8"><title>Road Inspector</title><style>body{{font:14px system-ui;margin:24px}}'
+        f'table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #aaa;padding:6px;text-align:left}}</style>'
+        f'<h1>Road Inspector</h1><p>Read-only RVW4 stock-road audit. {result.road_object_count} road objects, '
+        f'{len(result.issues)} issues.</p><table><tr><th>ID</th><th>Severity</th><th>Score</th><th>Category</th>'
+        f'<th>X/Z</th><th>Details</th></tr>{rows}</table>',
+        encoding="utf-8",
+    )
     return paths
 
 
@@ -420,11 +569,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--minimum-edge-gap", type=_positive, default=DEFAULT_MINIMUM_EDGE_GAP_METRES)
     parser.add_argument("--minimum-tangent-error", type=_positive, default=DEFAULT_MINIMUM_TANGENT_ERROR_DEGREES)
     args = parser.parse_args(argv)
-    result = inspect_road_geometry(args.input, endpoint_tolerance=args.endpoint_tolerance, nearby_gap=args.nearby_gap,
-                                   minimum_edge_gap=args.minimum_edge_gap, minimum_tangent_error=args.minimum_tangent_error)
+    result = inspect_road_geometry(
+        args.input,
+        endpoint_tolerance=args.endpoint_tolerance,
+        nearby_gap=args.nearby_gap,
+        minimum_edge_gap=args.minimum_edge_gap,
+        minimum_tangent_error=args.minimum_tangent_error,
+    )
     report = write_inspection_report(result, args.output)
     counts = Counter(issue.severity for issue in result.issues)
-    print(f"Road Inspector: {result.road_object_count:,} road objects, {len(result.issues):,} issues ({counts.get('critical',0)} critical, {counts.get('high',0)} high).")
+    print(f"Road Inspector: {result.road_object_count:,} road objects, {len(result.issues):,} issues ({counts.get('critical', 0)} critical, {counts.get('high', 0)} high).")
     print(f"HTML report: {report['html']}")
     return 0
 
