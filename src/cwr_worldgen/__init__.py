@@ -172,7 +172,7 @@ from .procedural_buildings import (
     inspect_mlod,
     write_building_mlod,
 )
-from .osm_house_modeler_upgrade import (
+from .osm_house_modeler_runtime import (
     install_osm_house_modeler_upgrade as _install_osm_house_modeler_upgrade,
 )
 
