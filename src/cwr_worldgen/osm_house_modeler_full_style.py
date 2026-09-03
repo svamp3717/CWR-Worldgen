@@ -2,7 +2,7 @@
 """Translate OSM House Modeler's detailed StyleChoice into CWR-safe values.
 
 The upstream modeler remains the authority for regional/country classification and
-architectural policy.  CWR remains the authority for P3D/MLOD geometry, collision,
+architectural policy. CWR remains the authority for P3D/MLOD geometry, collision,
 Roadway/Memory/Paths LODs and its enterable-building implementation.
 """
 from __future__ import annotations
@@ -41,14 +41,37 @@ def modeler_context(settlement_context: str) -> str:
     return "town_city" if value in {"city", "town", "town_city", "urban"} else "rural"
 
 
+_STYLE_SEED_TAGS = frozenset({
+    "building", "amenity", "shop", "man_made", "historic",
+    "building:material", "building:colour", "building:color",
+    "building:levels", "height", "roof:levels", "roof:shape",
+    "roof:material", "roof:colour", "roof:color", "roof:height",
+})
+
+
 def stable_way_id(
     tags: Mapping[str, str], latitude: float, longitude: float, width_m: float, length_m: float,
 ) -> int:
+    """Return a repeatable modeler seed without destroying CWR variant reuse.
+
+    The standalone application has a real OSM way id available, so each way can
+    legitimately sample a different style. CWR's building library often sees only
+    semantic tags and dimensions, and its hard variant cap depends on repeated
+    architectural requests collapsing to the same immutable key. Seeding from
+    coordinates or labels such as ``name`` made identical houses unique and could
+    spend every variant slot on cosmetic randomness. Country is still resolved from
+    the real building coordinate; only the random style sample uses this compact
+    architectural signature.
+    """
+    del latitude, longitude
+    architectural_tags = {
+        str(key): str(value)
+        for key, value in tags.items()
+        if str(key).casefold() in _STYLE_SEED_TAGS
+    }
     payload = json.dumps(
         {
-            "tags": dict(sorted((str(k), str(v)) for k, v in tags.items())),
-            "lat": round(float(latitude), 7),
-            "lon": round(float(longitude), 7),
+            "tags": dict(sorted(architectural_tags.items())),
             "width": round(float(width_m), 2),
             "length": round(float(length_m), 2),
         },
