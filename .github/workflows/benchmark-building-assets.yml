@@ -1,0 +1,120 @@
+name: Benchmark procedural building assets
+
+on:
+  push:
+    branches:
+      - upgrade/osm-house-modeler-buildings
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: upgrade/osm-house-modeler-buildings
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install benchmark environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[sources]"
+      - name: Benchmark texture bridge and building assets
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          from pathlib import Path
+          import tempfile
+          import time
+
+          from cwr_worldgen.osm_house_modeler_texture_bridge import (
+              modeler_front_texture_image,
+              modeler_interior_wall_texture_image,
+              modeler_open_wall_texture_image,
+              modeler_wall_texture_image,
+          )
+          from cwr_worldgen.procedural_buildings import BuildingVariantKey, ProceduralBuildingLibrary
+
+          metadata = {
+              "texture_renderer_revision": 2,
+              "window": {
+                  "width_m": 1.2,
+                  "height_m": 1.35,
+                  "sill_height_m": 0.85,
+                  "target_bay_spacing_m": 3.6,
+                  "density_multiplier": 1.0,
+                  "type": "paired casement",
+                  "frame_material": "painted timber",
+              },
+              "door": {
+                  "width_m": 0.95,
+                  "height_m": 2.05,
+                  "type": "glazed panel",
+                  "material": "natural timber",
+              },
+          }
+          encoded = base64.urlsafe_b64encode(
+              json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()
+          ).decode().rstrip("=")
+          tokens = [
+              f"western_brick|brick~{encoded}|red brick",
+              f"western_stucco|plaster~{encoded}|cream",
+              f"swedish_wood|painted timber~{encoded}|falun red",
+              f"regional_stone|stone~{encoded}|stone",
+              f"regional_concrete|concrete~{encoded}|grey",
+              f"regional_wood|timber~{encoded}|natural timber",
+          ]
+
+          started = time.perf_counter()
+          for token in tokens:
+              for variant in range(10):
+                  modeler_wall_texture_image("residential", 128, token, variant)
+                  modeler_open_wall_texture_image("residential", 128, token, variant)
+                  modeler_interior_wall_texture_image("residential", 128, token, variant)
+                  modeler_front_texture_image("residential", 128, token, variant, "")
+          texture_seconds = time.perf_counter() - started
+          print(f"BENCH texture_bridge_seconds={texture_seconds:.3f}")
+
+          library = ProceduralBuildingLibrary(
+              world_name="benchworld",
+              maximum_variants=512,
+              texture_variants=10,
+              cache_enabled=False,
+          )
+          for index in range(180):
+              token = tokens[index % len(tokens)]
+              variant = index % 10
+              key = BuildingVariantKey(
+                  family="residential",
+                  roof_style="gabled",
+                  width_m=6.0 + (index % 15) * 0.5,
+                  length_m=8.0 + ((index // 15) % 12) * 0.5,
+                  height_m=5.8 + (index % 3) * 0.4,
+                  foundation_depth_m=0.5,
+                  regional_style=token.split("|", 1)[0],
+                  texture_variant=variant,
+                  interiors=(index % 4 == 0),
+                  second_storey=(index % 4 == 0),
+                  wall_material=token.split("|", 2)[1].split("~", 1)[0],
+                  roof_material="clay/concrete tile",
+                  colour_palette=("red brick",),
+                  texture_style_token=token,
+              )
+              library._usage[key] += 1
+
+          with tempfile.TemporaryDirectory() as temporary:
+              root = Path(temporary)
+              started = time.perf_counter()
+              result = library.write_assets(root, root / "catalogue.json")
+              asset_seconds = time.perf_counter() - started
+          print(f"BENCH write_assets_seconds={asset_seconds:.3f}")
+          print(f"BENCH generated_variants={result.generated_variants}")
+          print(f"BENCH texture_files={len(result.texture_files)}")
+          PY
