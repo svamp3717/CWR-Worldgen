@@ -1,75 +1,58 @@
-name: Build Linux App
+name: Populate Country Utility Materials
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - upgrade/osm-house-modeler-buildings
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build-linux:
-    name: Build Linux executable
+  populate-country-utility-materials:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
-      - name: Check out repository
+      - name: Check out upgrade branch
         uses: actions/checkout@v6
+        with:
+          ref: upgrade/osm-house-modeler-buildings
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.14"
+          python-version: "3.13"
           cache: pip
 
-      - name: Install GUI runtime libraries
+      - name: Populate all country profiles
         run: |
-          sudo apt-get update
-          sudo apt-get install -y tk
+          python tools/populate_country_utility_materials.py
+          test "$(git diff --name-only -- src/cwr_worldgen/country_styles '*.json' | wc -l)" -eq 249
 
-      - name: Install project and build dependencies
+      - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[sources]" pyinstaller
+          python -m pip install ".[sources]" pytest
 
-      - name: Create GUI entry point
+      - name: Verify country data and building integration
         run: |
-          cat > build_gui.py <<'PY'
-          from cwr_worldgen.gui_entry import main
+          pytest -q \
+            tests/test_country_utility_materials.py \
+            tests/test_house_style_catalogue.py \
+            tests/test_modeler_opening_dimensions.py \
+            tests/test_interior_performance_policy.py \
+            tests/test_osm_house_modeler_upgrade.py \
+            tests/test_building_shape_extensions.py \
+            tests/test_milestone8.py
 
-          if __name__ == "__main__":
-              raise SystemExit(main())
-          PY
-
-      - name: Build Linux executable
+      - name: Commit migrated catalogues and restore normal workflow
         run: |
-          python -m PyInstaller \
-            --noconfirm \
-            --clean \
-            --onefile \
-            --name "CWR-Worldgen" \
-            --collect-all cwr_worldgen \
-            --collect-all dem_stitcher \
-            --collect-all rasterio \
-            --collect-all pyarrow \
-            --collect-all duckdb \
-            build_gui.py
-
-      - name: Verify executable was created
-        run: |
-          test -f "dist/CWR-Worldgen"
-          chmod +x "dist/CWR-Worldgen"
-          ls -lh "dist/CWR-Worldgen"
-          file "dist/CWR-Worldgen"
-
-      - name: Package Linux executable
-        run: |
-          tar -czf "CWR-Worldgen-Linux-x64.tar.gz" -C dist "CWR-Worldgen"
-          ls -lh "CWR-Worldgen-Linux-x64.tar.gz"
-
-      - name: Upload Linux build
-        uses: actions/upload-artifact@v7
-        with:
-          name: CWR-Worldgen-Linux-x64
-          path: CWR-Worldgen-Linux-x64.tar.gz
-          if-no-files-found: error
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout origin/main -- .github/workflows/build-linux.yml
+          git add src/cwr_worldgen/country_styles .github/workflows/build-linux.yml
+          git commit -m "Add utility material pools to all country styles"
+          git push origin HEAD:upgrade/osm-house-modeler-buildings
