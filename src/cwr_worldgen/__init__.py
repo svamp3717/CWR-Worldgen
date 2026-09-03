@@ -177,6 +177,11 @@ from .osm_house_modeler_runtime import (
 )
 
 _install_osm_house_modeler_upgrade()
+from .foundation_visual_policy import (
+    install_foundation_visual_policy as _install_foundation_visual_policy,
+)
+
+_install_foundation_visual_policy()
 from .normalization import (
     NormalizationSpec,
     NormalizedBundle,
