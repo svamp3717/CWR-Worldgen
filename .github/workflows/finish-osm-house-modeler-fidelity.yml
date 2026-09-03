@@ -27,6 +27,7 @@ jobs:
           python tools/fix_fidelity_polygon_roof_storey.py
           python tools/fix_fidelity_eave_legacy_texture.py
           python tools/finish_osm_house_modeler_fidelity.py
+          python tools/fix_fidelity_legacy_feature_textures.py
 
       - name: Set up Python
         uses: actions/setup-python@v6
