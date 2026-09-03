@@ -20,6 +20,11 @@ text = text.replace(
     '        self.assertTrue(all(key.regional_style for key in keys))\n        self.assertIn("swedish_wood", allowed)\n',
     1,
 )
+text = text.replace(
+    '        self.assertTrue({key.regional_style for key in apartments} <= advertised("se_sweden", "town_city"))\n',
+    '        self.assertTrue(all(key.regional_style for key in apartments))\n        self.assertTrue(all(key.country_style_identifier == "se_sweden" for key in apartments))\n',
+    1,
+)
 # The eastern-Europe test is the next occurrence after Sweden. The detailed
 # modeler may source a facade from a class profile in addition to the compact
 # selection table, so validate the actual modeler result instead of pretending
