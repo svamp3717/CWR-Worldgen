@@ -197,6 +197,19 @@ def _normalise_context(value: Any, *, filename: str, context_name: str) -> House
     )
 
 
+_LEGACY_IDENTIFIER_BY_STYLE_IDENTIFIER = {
+    "mediterranean_europe": "western_europe",
+    "eastern_europe_balkans": "eastern_europe",
+    "north_africa": "africa",
+    "west_africa": "africa",
+    "east_africa": "africa",
+    "central_southern_africa": "africa",
+}
+_LEGACY_DEFAULT_STYLE_IDENTIFIERS = frozenset({
+    "western_europe", "eastern_europe_balkans", "west_africa",
+})
+
+
 def _load_profiles() -> tuple[RegionProfile, ...]:
     if not _HOUSE_STYLES_DIR.is_dir():
         raise RuntimeError(f"house-style data directory is missing: {_HOUSE_STYLES_DIR}")
@@ -229,7 +242,10 @@ def _load_profiles() -> tuple[RegionProfile, ...]:
         aliases = match.get("country_aliases", [])
         if not isinstance(aliases, list):
             raise RuntimeError(f"{path.name}: country_aliases must be a list")
-        legacy_identifier = str(document.get("legacy_identifier", "")).strip()
+        legacy_identifier = str(
+            document.get("legacy_identifier")
+            or _LEGACY_IDENTIFIER_BY_STYLE_IDENTIFIER.get(style_identifier.casefold(), "")
+        ).strip()
         public_identifier = legacy_identifier or style_identifier
 
         try:
@@ -277,7 +293,10 @@ def _load_profiles() -> tuple[RegionProfile, ...]:
             selection=rural.selection,
             roof_defaults=rural.roof_defaults,
             contexts=contexts,
-            legacy_default=bool(document.get("legacy_default", False)),
+            legacy_default=bool(
+                document.get("legacy_default", False)
+                or style_identifier.casefold() in _LEGACY_DEFAULT_STYLE_IDENTIFIERS
+            ),
         ))
 
     if len(profiles) != 24 or numbers != set(range(1, 25)):
@@ -287,6 +306,19 @@ def _load_profiles() -> tuple[RegionProfile, ...]:
 
 REGION_PROFILES: tuple[RegionProfile, ...] = _load_profiles()
 HOUSE_STYLE_PRESET_AUTO = "auto"
+
+
+_LEGACY_IDENTIFIER_BY_STYLE_IDENTIFIER = {
+    "mediterranean_europe": "western_europe",
+    "eastern_europe_balkans": "eastern_europe",
+    "north_africa": "africa",
+    "west_africa": "africa",
+    "east_africa": "africa",
+    "central_southern_africa": "africa",
+}
+_LEGACY_DEFAULT_STYLE_IDENTIFIERS = frozenset({
+    "western_europe", "eastern_europe_balkans", "west_africa",
+})
 HOUSE_STYLE_PRESET_IDENTIFIERS: tuple[str, ...] = tuple(
     profile.house_style_identifier for profile in REGION_PROFILES
 )

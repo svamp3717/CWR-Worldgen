@@ -241,6 +241,41 @@ class BuildingVariantKey:
     # context. These small one-storey homes need a guaranteed entrance facade;
     # generic narrow-wall anti-window heuristics must not erase the only door.
     isolated_dwelling: bool = False
+    # Detailed OSM House Modeler style signature. These values are deliberately
+    # immutable/hashable because they affect geometry, textures and P3D cache identity.
+    building_class: str = ""
+    country_style_identifier: str = ""
+    wall_material: str = ""
+    roof_material: str = ""
+    foundation_type: str = ""
+    storey_height_m: float = 3.0
+    wall_thickness_m: float = 0.22
+    style_foundation_depth_m: float = 0.5
+    visible_plinth_m: float = 0.0
+    roof_pitch_degrees: float = 0.0
+    eave_overhang_m: float = 0.0
+    colour_palette: tuple[str, ...] = ()
+    window_width_m: float = 0.0
+    window_height_m: float = 0.0
+    window_sill_height_m: float = 0.0
+    window_edge_margin_m: float = 0.0
+    window_bay_spacing_m: float = 0.0
+    window_density_multiplier: float = 1.0
+    window_type: str = ""
+    window_placement_style: str = ""
+    window_frame_material: str = ""
+    door_width_m: float = 0.0
+    door_height_m: float = 0.0
+    door_corner_clearance_m: float = 0.0
+    door_window_clearance_m: float = 0.0
+    door_type: str = ""
+    door_material: str = ""
+    roof_storey: bool = False
+    roof_storey_probability: float = 0.0
+    roof_storey_windows_per_gable: int = 0
+    roof_storey_spec_json: str = ""
+    exterior_detail_spec_json: str = ""
+    texture_style_token: str = ""
 
     def canonical(self) -> str:
         return json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
@@ -8683,20 +8718,28 @@ class ProceduralBuildingLibrary:
 
     @staticmethod
     def _regional_style_index(regional_style: str) -> int:
-        return {
+        # Keep the historical slots stable, while detailed country/material tokens and
+        # new modeler facade ids receive deterministic slots in a larger 64-style bank.
+        # The three-character base36 filename budget comfortably covers this expansion.
+        known = {
             "default": 0, "sweden_red": 1, "sweden_yellow": 2,
             "eastern_plaster": 3, "eastern_brick": 4,
             "eastern_whitewash": 5, "eastern_panel": 6,
-            # A world has one detected region, so Western Europe safely reuses
-            # the four regional atlas slots without expanding the two-character
-            # OFP texture-name budget.
             "western_stucco": 3, "western_brick": 4,
             "western_stone": 5, "western_half_timber": 6,
             "africa_earth": 7, "africa_whitewash": 8,
             "africa_block": 9, "africa_colour": 10,
             "middle_east_sandstone": 11, "middle_east_whitewash": 12,
             "middle_east_adobe": 13, "middle_east_concrete": 14,
-        }.get(regional_style, 15)
+        }
+        base_style = str(regional_style or "default").split("|", 1)[0]
+        if regional_style in known:
+            return known[regional_style]
+        if base_style in known and "|" not in str(regional_style):
+            return known[base_style]
+        # unknown modeler styles receive deterministic slots 16..63.
+        digest = sha256(str(regional_style).encode("utf-8")).digest()
+        return 16 + int.from_bytes(digest[:2], "big") % 48
 
     @staticmethod
     def _base36_code(value: int) -> str:
@@ -8724,7 +8767,7 @@ class ProceduralBuildingLibrary:
     ) -> str:
         family_index = self._family_texture_index(family)
         style_index = self._regional_style_index(regional_style)
-        value = (family_index * 16 + style_index) * self.texture_variants
+        value = (family_index * 64 + style_index) * self.texture_variants
         value += _normalise_texture_variant(texture_variant, self.texture_variants)
         return self._base36_code(value)
 
@@ -8779,11 +8822,36 @@ class ProceduralBuildingLibrary:
         return rf"{self.world_name}\d\{prefix}{code}.paa"
 
     def _roof_texture(self, roof_style: str, texture_variant: int = 0) -> str:
+        token = str(roof_style or "gabled")
+        base_roof = token.split("|", 1)[0]
         roof_index = {
             "flat": 0, "gabled": 1, "hipped": 2,
             "pyramidal": 3, "dome": 4, "onion": 5,
-        }[roof_style]
-        value = roof_index * self.texture_variants
+        }[base_roof]
+        material_text = token.casefold()
+        if "|" not in token:
+            material_slot = 0
+        elif "tile" in material_text or "clay" in material_text or "terracotta" in material_text:
+            material_slot = 1
+        elif "metal" in material_text or "steel" in material_text or "zinc" in material_text:
+            material_slot = 2
+        elif "slate" in material_text:
+            material_slot = 3
+        elif "thatch" in material_text or "reed" in material_text:
+            material_slot = 4
+        elif "concrete" in material_text or "cement" in material_text:
+            material_slot = 5
+        elif "bitumen" in material_text or "asphalt" in material_text:
+            material_slot = 6
+        elif "wood" in material_text or "timber" in material_text or "shingle" in material_text:
+            material_slot = 7
+        elif "stone" in material_text:
+            material_slot = 8
+        else:
+            material_slot = 16 + int.from_bytes(sha256(token.encode("utf-8")).digest()[:2], "big") % 48
+        # 64 slots per roof form still fit the historic three-character base36
+        # filename budget even with a maximum 20-character world name.
+        value = (roof_index * 64 + material_slot) * self.texture_variants
         value += _normalise_texture_variant(texture_variant, self.texture_variants)
         return rf"{self.world_name}\d\r{self._base36_code(value)}.paa"
 
@@ -8799,22 +8867,22 @@ class ProceduralBuildingLibrary:
         # even when the selected model set referenced only one or two. That made
         # interior-heavy PBOs unnecessarily large and slower to enumerate/load.
         used_palette_variants = sorted({
-            (key.family, key.regional_style, key.texture_variant)
+            (key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
             for key in selected
         })
         used_open_palette_variants = sorted({
-            (key.family, key.regional_style, key.texture_variant) for key in selected
+            (key.family, (key.texture_style_token or key.regional_style), key.texture_variant) for key in selected
             if key.interiors
             or key.family == "church"
             or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
             or key.family in _PAINTED_WINDOW_FAMILIES
         })
         used_interior_palette_variants = sorted({
-            (key.family, key.regional_style, key.texture_variant)
+            (key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
             for key in selected if key.interiors
         })
         used_front_palette_variants = sorted({
-            (key.family, key.regional_style, key.texture_variant, key.outbuilding_kind)
+            (key.family, (key.texture_style_token or key.regional_style), key.texture_variant, key.outbuilding_kind)
             for key in selected
         })
         uses_white_window_trim = any(
@@ -8828,15 +8896,15 @@ class ProceduralBuildingLibrary:
             if not key.interiors and not key.footprint_vertices:
                 continue
             path = self._door_texture(
-                key.family, key.regional_style, key.texture_variant,
+                key.family, (key.texture_style_token or key.regional_style), key.texture_variant,
                 key.outbuilding_kind,
             )
             used_door_variants.setdefault(
                 path,
-                (key.family, key.regional_style, key.texture_variant, key.outbuilding_kind),
+                (key.family, (key.texture_style_token or key.regional_style), key.texture_variant, key.outbuilding_kind),
             )
         used_roof_variants = sorted({
-            (key.roof_style, key.texture_variant) for key in selected
+            (f"{key.roof_style}|{key.roof_material}|{','.join(key.colour_palette[:4])}", key.texture_variant) for key in selected
         })
         if any(key.foundation_depth_m > 0.0 for key in selected):
             texture_path = self._foundation_texture()
@@ -9081,18 +9149,18 @@ class ProceduralBuildingLibrary:
                 {
                     "world_name": self.world_name,
                     "variant": asdict(key),
-                    "roof_pitch_degrees": self.roof_pitch_degrees,
+                    "roof_pitch_degrees": (key.roof_pitch_degrees or self.roof_pitch_degrees),
                     "foundation_depth": key.foundation_depth_m,
                     "church_plinth_height": self.church_plinth_height,
                 },
             )
             cached = self.cache_dir / "procedural-assets" / f"{asset_key}.p3d" if self.cache_dir else None
             wall_texture = (
-                self._wall_texture(key.family, key.regional_style, key.texture_variant)
+                self._wall_texture(key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
                 if key.interiors and key.family in UTILITY_INTERIOR_FAMILIES
-                else self._open_wall_texture(key.family, key.regional_style, key.texture_variant)
+                else self._open_wall_texture(key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
                 if key.interiors
-                else self._wall_texture(key.family, key.regional_style, key.texture_variant)
+                else self._wall_texture(key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
             )
             model_tasks.append(_BuildingAssetTask(
                 key=key,
@@ -9105,10 +9173,10 @@ class ProceduralBuildingLibrary:
                 usage_count=self._usage[key],
                 wall_texture=wall_texture,
                 front_texture=self._front_texture(
-                    key.family, key.regional_style, key.texture_variant, key.outbuilding_kind
+                    key.family, (key.texture_style_token or key.regional_style), key.texture_variant, key.outbuilding_kind
                 ),
-                roof_texture=self._roof_texture(key.roof_style, key.texture_variant),
-                roof_pitch_degrees=self.roof_pitch_degrees,
+                roof_texture=self._roof_texture(f"{key.roof_style}|{key.roof_material}|{','.join(key.colour_palette[:4])}", key.texture_variant),
+                roof_pitch_degrees=(key.roof_pitch_degrees or self.roof_pitch_degrees),
                 foundation_texture=(
                     self._foundation_texture()
                     if key.foundation_depth_m > 0.0 or key.family == "church" else None
@@ -9116,7 +9184,7 @@ class ProceduralBuildingLibrary:
                 foundation_depth=key.foundation_depth_m,
                 church_plinth_height=self.church_plinth_height,
                 interior_texture=(
-                    self._interior_wall_texture(key.family, key.regional_style, key.texture_variant)
+                    self._interior_wall_texture(key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
                     if key.interiors else None
                 ),
                 window_trim_texture=(
@@ -9127,7 +9195,7 @@ class ProceduralBuildingLibrary:
                     else None
                 ),
                 plain_wall_texture=(
-                    self._open_wall_texture(key.family, key.regional_style, key.texture_variant)
+                    self._open_wall_texture(key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
                     if (
                         key.interiors
                         or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
@@ -9137,11 +9205,11 @@ class ProceduralBuildingLibrary:
                 ),
                 door_texture=(
                     self._door_texture(
-                        key.family, key.regional_style, key.texture_variant, key.outbuilding_kind
+                        key.family, (key.texture_style_token or key.regional_style), key.texture_variant, key.outbuilding_kind
                     ) if key.interiors or key.footprint_vertices else None
                 ),
                 distance_wall_texture=(
-                    self._wall_texture(key.family, key.regional_style, key.texture_variant)
+                    self._wall_texture(key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
                     if key.interiors else None
                 ),
             ))
@@ -9180,7 +9248,7 @@ class ProceduralBuildingLibrary:
                 "texture_size_px": self.texture_size,
                 "high_quality_textures": self.high_quality_textures,
                 "texture_variant_selection": "deterministic-building-tags-and-position",
-                "roof_pitch_degrees": self.roof_pitch_degrees,
+                "roof_pitch_degrees": (key.roof_pitch_degrees or self.roof_pitch_degrees),
                 "minimum_foundation_depth_m": self.foundation_depth,
                 "maximum_foundation_depth_m": self.maximum_foundation_depth,
                 "enterable_foundation_limit_m": self.maximum_foundation_depth,

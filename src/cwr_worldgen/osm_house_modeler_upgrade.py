@@ -20,6 +20,7 @@ import threading
 from typing import Callable
 
 from . import procedural_buildings as _pb
+from .osm_house_modeler_full_style import detail_spec_from_key
 
 OSM_HOUSE_MODELER_SOURCE_VERSION = "0.13.6"
 OSM_HOUSE_MODELER_SOURCE_URL = "https://github.com/svamp3717/osm-house-modeler"
@@ -411,6 +412,7 @@ def _append_details(
     foundation_depth: float,
 ) -> _pb._Lod:
     plan = detail_plan_for_key(key, foundation_depth=foundation_depth)
+    detail_spec = detail_spec_from_key(key)
     if (
         not plan.enabled
         or frame is None
@@ -430,15 +432,16 @@ def _append_details(
     eave_y = _roof_base_y(key, roof_pitch_degrees)
 
     if plan.stairs:
+        stair_spec = detail_spec.get("stairs") or {}
         door_half, _door_height, _pivot = _pb._door_dimensions(key)
-        rise = 0.16
+        rise = max(0.08, float(stair_spec.get("step_rise_m", 0.16) or 0.16))
         count = max(
             1,
-            min(5, int(math.ceil(max(0.18, foundation_depth) / rise))),
+            min(max(1, int(stair_spec.get("max_steps", 5) or 5)), int(math.ceil(max(0.18, foundation_depth) / rise))),
         )
-        tread = 0.30
+        tread = max(0.16, float(stair_spec.get("step_depth_m", 0.30) or 0.30))
         width = min(
-            max(door_half * 2.0 + 0.45, 1.35),
+            max(float(stair_spec.get("width_m", 0.0) or 0.0), door_half * 2.0 + 0.45, 1.35),
             max(1.35, frontage - 0.35),
         )
         for index in range(count):
@@ -464,11 +467,12 @@ def _append_details(
             )
 
     if plan.porch:
+        porch_spec = detail_spec.get("porches") or {}
         width = min(
-            max(2.2, frontage * 0.26),
+            max(float(porch_spec.get("width_m", 0.0) or 0.0), 2.2, frontage * 0.26),
             max(2.2, frontage - 0.45),
         )
-        depth = 1.10
+        depth = max(0.45, float(porch_spec.get("depth_m", 1.10) or 1.10))
         centre = (
             anchor[0] + outward[0] * depth * 0.5,
             anchor[1] + outward[1] * depth * 0.5,
@@ -527,6 +531,7 @@ def _append_details(
             )
 
     if plan.balcony_count:
+        balcony_spec = detail_spec.get("balconies") or {}
         floor_height = min(
             3.1,
             max(2.55, eave_y / max(2, int(round(eave_y / 3.0)))),
@@ -536,10 +541,10 @@ def _append_details(
             if y > eave_y - 0.55:
                 break
             width = min(
-                max(2.4, frontage * 0.28),
+                max(float(balcony_spec.get("width_m", 0.0) or 0.0), 2.4, frontage * 0.28),
                 max(2.4, frontage - 0.55),
             )
-            depth = 1.0
+            depth = max(0.45, float(balcony_spec.get("depth_m", 1.0) or 1.0))
             centre = (
                 anchor[0] + outward[0] * depth * 0.5,
                 anchor[1] + outward[1] * depth * 0.5,
@@ -557,7 +562,7 @@ def _append_details(
                 y1=y,
                 texture=foundation_texture or wall_texture,
             )
-            rail_y0, rail_y1 = y, y + 0.95
+            rail_y0, rail_y1 = y, y + max(0.55, float(balcony_spec.get("railing_height_m", 0.95) or 0.95))
             front = (
                 anchor[0] + outward[0] * (depth - 0.04),
                 anchor[1] + outward[1] * (depth - 0.04),
@@ -575,7 +580,8 @@ def _append_details(
                 y1=rail_y1,
                 texture=roof_texture,
             )
-            posts = max(3, int(math.ceil(width / 1.2)) + 1)
+            post_spacing = max(0.45, float(balcony_spec.get("post_spacing_m", 1.2) or 1.2))
+            posts = max(3, int(math.ceil(width / post_spacing)) + 1)
             for index in range(posts):
                 offset = -width * 0.5 + width * index / (posts - 1)
                 post = (
@@ -597,6 +603,10 @@ def _append_details(
                 )
 
     if plan.chimney_count:
+        chimney_spec = detail_spec.get("chimneys") or {}
+        chimney_width = max(0.20, float(chimney_spec.get("width_m", 0.48) or 0.48))
+        chimney_depth = max(0.20, float(chimney_spec.get("depth_m", 0.40) or 0.40))
+        chimney_height = max(0.35, float(chimney_spec.get("height_m", 1.15) or 1.15))
         for index in range(plan.chimney_count):
             offset = (
                 index - (plan.chimney_count - 1) * 0.5
@@ -620,10 +630,10 @@ def _append_details(
                 center=centre,
                 axis_width=(1.0, 0.0),
                 axis_depth=(0.0, 1.0),
-                width=0.48,
-                depth=0.40,
+                width=chimney_width,
+                depth=chimney_depth,
                 y0=base_y,
-                y1=base_y + 1.15,
+                y1=base_y + chimney_height,
                 texture=detail_texture,
             )
             _add_box(
@@ -633,15 +643,17 @@ def _append_details(
                 center=centre,
                 axis_width=(1.0, 0.0),
                 axis_depth=(0.0, 1.0),
-                width=0.55,
-                depth=0.47,
-                y0=base_y + 1.15,
-                y1=base_y + 1.23,
+                width=chimney_width + 0.07,
+                depth=chimney_depth + 0.07,
+                y0=base_y + chimney_height,
+                y1=base_y + chimney_height + 0.08,
                 texture=detail_texture,
             )
 
     if plan.gutters:
-        gutter = 0.085
+        rainwater_spec = detail_spec.get("rainwater") or {}
+        gutter = max(0.04, float(rainwater_spec.get("gutter_width_m", 0.085) or 0.085))
+        downspout_width = max(0.035, float(rainwater_spec.get("downspout_width_m", 0.075) or 0.075))
         # Rectangular variants get exact eave gutters. Polygon-native variants
         # get a frontage gutter plus corner downspouts, preserving arbitrary
         # footprint safety without guessing the complete eave topology.
@@ -707,8 +719,8 @@ def _append_details(
                 center=position,
                 axis_width=tangent,
                 axis_depth=outward,
-                width=0.075,
-                depth=0.075,
+                width=downspout_width,
+                depth=downspout_width,
                 y0=-0.04,
                 y1=eave_y,
                 texture=roof_texture,

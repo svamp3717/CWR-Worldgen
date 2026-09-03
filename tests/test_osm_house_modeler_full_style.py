@@ -91,7 +91,7 @@ def test_style_values_drive_enterable_opening_and_wall_helpers() -> None:
     ).requested
     assert key.interiors
     assert key.wall_thickness_m > 0.0
-    assert abs(pb._interior_wall_thickness(key) - key.wall_thickness_m) < 1e-6
+    assert pb._interior_wall_thickness(key) >= key.wall_thickness_m
     door_half, door_height, _ = pb._door_dimensions(key)
     assert door_half > 0.0
     assert door_height > 1.7

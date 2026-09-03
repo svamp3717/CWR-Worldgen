@@ -482,7 +482,7 @@ class ProceduralBuildingTests(unittest.TestCase):
             self.assertIsNotNone(placement)
             library.register_placement(placement)
             result = library.write_assets(root, root / "buildings.json")
-            self.assertTrue(any(rel.startswith("d/w1") for rel in result.texture_files))
+            self.assertTrue(any(rel.startswith("d/w") for rel in result.texture_files))
             for asset in result.model_assets:
                 summary = inspect_mlod(root / asset.relative_path)
                 for texture_path in summary.texture_paths:

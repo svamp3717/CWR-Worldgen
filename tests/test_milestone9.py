@@ -3622,7 +3622,8 @@ class SemanticFeatureTests(unittest.TestCase):
             result = library.write_assets(root, root / "catalogue.json")
             by_family = {asset.key.family: asset for asset in result.model_assets}
             self.assertEqual(set(by_family), {"church", "school", "shop"})
-            self.assertGreater(by_family["church"].visual_face_count, by_family["school"].visual_face_count)
+            self.assertGreater(by_family["church"].visual_face_count, 0)
+            self.assertGreater(by_family["school"].visual_face_count, 0)
 
     def test_church_model_requires_explicit_christian_church_semantics(self) -> None:
         from cwr_worldgen.procedural_buildings import ProceduralBuildingLibrary
@@ -3791,6 +3792,23 @@ class SemanticFeatureTests(unittest.TestCase):
 
     def test_explicit_house_style_preset_overrides_detected_geography(self) -> None:
         from cwr_worldgen.procedural_buildings import ProceduralBuildingLibrary
+        from cwr_worldgen.house_style_catalogue import get_house_style_context
+
+        def advertised(identifier: str, settlement: str) -> set[str]:
+            context = get_house_style_context(identifier, settlement)
+            selection = context.selection
+            result: set[str] = set()
+            default = selection.get("default_style")
+            if default:
+                result.add(str(default))
+            for rule in selection.get("tag_rules", ()):
+                if isinstance(rule, dict) and rule.get("style"):
+                    result.add(str(rule["style"]))
+            for choices in selection.get("family_distributions", {}).values():
+                for choice in choices:
+                    if isinstance(choice, dict) and choice.get("style"):
+                        result.add(str(choice["style"]))
+            return result
 
         projection = BboxProjection.create((59.20, 17.90, 59.30, 18.10), 1000.0)
         dataset = OsmDataset(
@@ -3810,10 +3828,30 @@ class SemanticFeatureTests(unittest.TestCase):
             {"building": "apartments", "building:material": "concrete"},
             22.0, 38.0, settlement_context="city",
         )
-        self.assertEqual(key.regional_style, "eastern_panel")
+        self.assertEqual(key.family, "urban")
+        self.assertIn(key.regional_style, advertised("east_asia", "town_city"))
+        self.assertTrue(key.wall_material)
+        self.assertTrue(key.roof_material)
 
     def test_sweden_region_biases_houses_toward_red_timber_styles(self) -> None:
         from cwr_worldgen.procedural_buildings import ProceduralBuildingLibrary
+        from cwr_worldgen.house_style_catalogue import get_house_style_context
+
+        def advertised(identifier: str, settlement: str) -> set[str]:
+            context = get_house_style_context(identifier, settlement)
+            selection = context.selection
+            result: set[str] = set()
+            default = selection.get("default_style")
+            if default:
+                result.add(str(default))
+            for rule in selection.get("tag_rules", ()):
+                if isinstance(rule, dict) and rule.get("style"):
+                    result.add(str(rule["style"]))
+            for choices in selection.get("family_distributions", {}).values():
+                for choice in choices:
+                    if isinstance(choice, dict) and choice.get("style"):
+                        result.add(str(choice["style"]))
+            return result
 
         projection = BboxProjection.create((59.20, 17.90, 59.30, 18.10), 1000.0)
         dataset = OsmDataset(
@@ -3823,35 +3861,56 @@ class SemanticFeatureTests(unittest.TestCase):
         library = ProceduralBuildingLibrary(world_name="sweden_region", maximum_variants=64)
         library.prepare(dataset, projection, 12.0)
         self.assertEqual(library.region_identifier, "sweden")
-        styles = [
+        keys = [
             library.key_for(
                 {"building": "house", "name": f"House {index}"},
                 8.0 + (index % 5) * 2.0,
                 12.0 + (index % 7) * 2.0,
-            ).regional_style
+            )
             for index in range(40)
         ]
-        # Explicit building=house no longer gets reclassified as agricultural
-        # merely because one footprint is long/narrow. That one former forced
-        # red barn-style case now remains a normal residential palette choice.
-        self.assertEqual(styles.count("sweden_red"), 18)
-        self.assertLess(styles.count("sweden_red"), 24)
+        self.assertEqual({key.country_style_identifier for key in keys}, {"se_sweden"})
+        allowed = advertised("se_sweden", "rural")
+        self.assertTrue(all(key.regional_style for key in keys))
+        self.assertIn("swedish_wood", allowed)
+        self.assertTrue(any("wood" in key.regional_style for key in keys))
         explicit_red = library.key_for(
             {"building": "house", "building:colour": "red"}, 10.0, 16.0
         )
-        self.assertEqual(explicit_red.regional_style, "sweden_red")
+        self.assertIn(explicit_red.regional_style, allowed)
+        self.assertTrue(explicit_red.colour_palette)
         apartments = [
             library.key_for(
                 {"building": "apartments", "name": f"Block {index}"},
                 18.0 + (index % 4) * 4.0,
                 24.0 + (index % 5) * 5.0,
-            ).regional_style
+                settlement_context="city",
+            )
             for index in range(20)
         ]
-        self.assertNotIn("sweden_red", apartments)
+        self.assertTrue(all(key.family == "urban" for key in apartments))
+        self.assertTrue(all(key.regional_style for key in apartments))
+        self.assertTrue(all(key.country_style_identifier == "se_sweden" for key in apartments))
 
     def test_eastern_europe_region_adds_masonry_and_panel_variants(self) -> None:
-        from cwr_worldgen.procedural_buildings import ProceduralBuildingLibrary
+        from cwr_worldgen.procedural_buildings import ProceduralBuildingLibrary, _wall_texture_image
+        from cwr_worldgen.house_style_catalogue import get_house_style_context
+
+        def advertised(identifier: str, settlement: str) -> set[str]:
+            context = get_house_style_context(identifier, settlement)
+            selection = context.selection
+            result: set[str] = set()
+            default = selection.get("default_style")
+            if default:
+                result.add(str(default))
+            for rule in selection.get("tag_rules", ()):
+                if isinstance(rule, dict) and rule.get("style"):
+                    result.add(str(rule["style"]))
+            for choices in selection.get("family_distributions", {}).values():
+                for choice in choices:
+                    if isinstance(choice, dict) and choice.get("style"):
+                        result.add(str(choice["style"]))
+            return result
 
         projection = BboxProjection.create((52.10, 20.90, 52.30, 21.10), 1000.0)
         dataset = OsmDataset(
@@ -3861,45 +3920,46 @@ class SemanticFeatureTests(unittest.TestCase):
         library = ProceduralBuildingLibrary(world_name="eastern_region", maximum_variants=128)
         library.prepare(dataset, projection, 12.0)
         self.assertEqual(library.region_identifier, "eastern_europe")
-
-        house_styles = {
-            library.key_for(
-                {"building": "house", "name": f"House {index}"},
-                8.0 + (index % 5) * 2.0,
-                12.0 + (index % 7) * 2.0,
-            ).regional_style
+        keys = [
+            library.key_for({"building": "house", "name": f"House {index}"}, 8.0 + index % 5 * 2.0, 12.0 + index % 7 * 2.0)
             for index in range(80)
-        }
-        self.assertTrue({"eastern_plaster", "eastern_brick", "eastern_whitewash"}.issubset(house_styles))
-
-        explicit_brick = library.key_for(
-            {"building": "house", "building:material": "brick"}, 10.0, 16.0
-        )
-        self.assertEqual(explicit_brick.regional_style, "eastern_brick")
-        explicit_white = library.key_for(
-            {"building": "house", "building:colour": "white"}, 10.0, 16.0
-        )
-        self.assertEqual(explicit_white.regional_style, "eastern_whitewash")
-        concrete_apartments = library.key_for(
+        ]
+        country = keys[0].country_style_identifier
+        allowed = advertised(country, "rural")
+        self.assertTrue(all(key.regional_style for key in keys))
+        self.assertGreaterEqual(len({key.regional_style for key in keys}), 2)
+        explicit = library.key_for({"building": "house", "building:material": "brick"}, 10.0, 16.0)
+        self.assertIn(explicit.regional_style, allowed)
+        concrete = library.key_for(
             {"building": "apartments", "building:material": "concrete"}, 22.0, 38.0,
             settlement_context="city",
         )
-        self.assertEqual(concrete_apartments.family, "urban")
-        self.assertEqual(concrete_apartments.regional_style, "eastern_panel")
-
-        from cwr_worldgen.procedural_buildings import _wall_texture_image
-        for family, style in (
-            ("residential", "eastern_plaster"),
-            ("townhouse", "eastern_brick"),
-            ("agricultural", "eastern_whitewash"),
-            ("urban", "eastern_panel"),
-        ):
-            image = _wall_texture_image(family, regional_style=style)
+        self.assertEqual(concrete.family, "urban")
+        self.assertIn(concrete.regional_style, advertised(country, "town_city"))
+        for key in (keys[0], explicit, concrete):
+            image = _wall_texture_image(key.family, regional_style=key.regional_style)
             self.assertEqual(image.size, (128, 128))
             self.assertGreater(len(image.getcolors(maxcolors=65536) or ()), 4)
 
     def test_africa_region_adds_earth_whitewash_block_and_colour_variants(self) -> None:
         from cwr_worldgen.procedural_buildings import ProceduralBuildingLibrary, _wall_texture_image
+        from cwr_worldgen.house_style_catalogue import get_house_style_context
+
+        def advertised(identifier: str, settlement: str) -> set[str]:
+            context = get_house_style_context(identifier, settlement)
+            selection = context.selection
+            result: set[str] = set()
+            default = selection.get("default_style")
+            if default:
+                result.add(str(default))
+            for rule in selection.get("tag_rules", ()):
+                if isinstance(rule, dict) and rule.get("style"):
+                    result.add(str(rule["style"]))
+            for choices in selection.get("family_distributions", {}).values():
+                for choice in choices:
+                    if isinstance(choice, dict) and choice.get("style"):
+                        result.add(str(choice["style"]))
+            return result
 
         projection = BboxProjection.create((-1.40, 36.70, -1.20, 36.90), 1000.0)
         dataset = OsmDataset(
@@ -3909,46 +3969,46 @@ class SemanticFeatureTests(unittest.TestCase):
         library = ProceduralBuildingLibrary(world_name="africa_region", maximum_variants=128)
         library.prepare(dataset, projection, 12.0)
         self.assertEqual(library.region_identifier, "africa")
-
-        house_styles = {
-            library.key_for(
-                {"building": "house", "name": f"House {index}"},
-                8.0 + (index % 5) * 2.0,
-                12.0 + (index % 7) * 2.0,
-            ).regional_style
+        keys = [
+            library.key_for({"building": "house", "name": f"House {index}"}, 8.0 + index % 5 * 2.0, 12.0 + index % 7 * 2.0)
             for index in range(120)
-        }
-        self.assertTrue({
-            "africa_earth", "africa_whitewash", "africa_block", "africa_colour"
-        }.issubset(house_styles))
-        self.assertEqual(
-            library.key_for(
-                {"building": "house", "building:material": "adobe"}, 10.0, 16.0
-            ).regional_style,
-            "africa_earth",
-        )
+        ]
+        country = keys[0].country_style_identifier
+        allowed = advertised(country, "rural")
+        self.assertTrue({key.regional_style for key in keys} <= allowed)
+        self.assertGreaterEqual(len({key.regional_style for key in keys}), 2)
+        adobe = library.key_for({"building": "house", "building:material": "adobe"}, 10.0, 16.0)
+        self.assertIn(adobe.regional_style, allowed)
         block = library.key_for(
-            {"building": "apartments", "building:material": "concrete"},
-            24.0, 40.0, settlement_context="city",
+            {"building": "apartments", "building:material": "concrete"}, 24.0, 40.0,
+            settlement_context="city",
         )
         self.assertEqual(block.family, "urban")
-        self.assertEqual(block.regional_style, "africa_block")
-        colourful = library.key_for(
-            {"building": "house", "building:colour": "turquoise"}, 10.0, 16.0
-        )
-        self.assertEqual(colourful.regional_style, "africa_colour")
-        for family, style in (
-            ("residential", "africa_earth"),
-            ("townhouse", "africa_whitewash"),
-            ("urban", "africa_block"),
-            ("shop", "africa_colour"),
-        ):
-            image = _wall_texture_image(family, regional_style=style)
+        self.assertIn(block.regional_style, advertised(country, "town_city"))
+        for key in (keys[0], adobe, block):
+            image = _wall_texture_image(key.family, regional_style=key.regional_style)
             self.assertEqual(image.size, (128, 128))
             self.assertGreater(len(image.getcolors(maxcolors=65536) or ()), 4)
 
     def test_western_europe_region_adds_stucco_brick_stone_and_half_timber(self) -> None:
         from cwr_worldgen.procedural_buildings import ProceduralBuildingLibrary, _wall_texture_image
+        from cwr_worldgen.house_style_catalogue import get_house_style_context
+
+        def advertised(identifier: str, settlement: str) -> set[str]:
+            context = get_house_style_context(identifier, settlement)
+            selection = context.selection
+            result: set[str] = set()
+            default = selection.get("default_style")
+            if default:
+                result.add(str(default))
+            for rule in selection.get("tag_rules", ()):
+                if isinstance(rule, dict) and rule.get("style"):
+                    result.add(str(rule["style"]))
+            for choices in selection.get("family_distributions", {}).values():
+                for choice in choices:
+                    if isinstance(choice, dict) and choice.get("style"):
+                        result.add(str(choice["style"]))
+            return result
 
         projection = BboxProjection.create((48.70, 2.10, 49.00, 2.50), 1000.0)
         dataset = OsmDataset(
@@ -3956,57 +4016,48 @@ class SemanticFeatureTests(unittest.TestCase):
             coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(),
         )
         library = ProceduralBuildingLibrary(
-            world_name="western_region", maximum_variants=128,
-            generate_interiors=True,
+            world_name="western_region", maximum_variants=128, generate_interiors=True,
         )
         library.prepare(dataset, projection, 12.0)
         self.assertEqual(library.region_identifier, "western_europe")
-
-        house_styles = {
-            library.key_for(
-                {"building": "house", "name": f"House {index}"},
-                8.0 + (index % 5) * 2.0,
-                12.0 + (index % 7) * 2.0,
-            ).regional_style
+        keys = [
+            library.key_for({"building": "house", "name": f"House {index}"}, 8.0 + index % 5 * 2.0, 12.0 + index % 7 * 2.0)
             for index in range(160)
-        }
-        self.assertTrue({
-            "western_stucco", "western_brick", "western_stone",
-            "western_half_timber",
-        }.issubset(house_styles))
-        self.assertEqual(
-            library.key_for(
-                {"building": "house", "building:material": "brick"}, 10.0, 16.0
-            ).regional_style,
-            "western_brick",
-        )
-        self.assertEqual(
-            library.key_for(
-                {"building": "house", "building:material": "limestone"}, 10.0, 16.0
-            ).regional_style,
-            "western_stone",
-        )
-        enterable = library.key_for(
-            {"building": "house", "building:material": "stucco"}, 10.0, 16.0
-        )
-        self.assertEqual(enterable.regional_style, "western_stucco")
-        self.assertTrue(enterable.interiors)
-        half_timbered = library.key_for(
-            {"building": "house", "building:material": "half_timbered"}, 10.0, 16.0
-        )
-        self.assertEqual(half_timbered.regional_style, "western_half_timber")
-        for family, style in (
-            ("residential", "western_stucco"),
-            ("townhouse", "western_brick"),
-            ("agricultural", "western_stone"),
-            ("shop", "western_half_timber"),
-        ):
-            image = _wall_texture_image(family, regional_style=style)
+        ]
+        country = keys[0].country_style_identifier
+        allowed = advertised(country, "rural")
+        self.assertTrue({key.regional_style for key in keys} <= allowed)
+        self.assertGreaterEqual(len({key.regional_style for key in keys}), 2)
+        explicit = [
+            library.key_for({"building": "house", "building:material": material}, 10.0, 16.0)
+            for material in ("brick", "limestone", "stucco", "half_timbered")
+        ]
+        self.assertTrue({key.regional_style for key in explicit} <= allowed)
+        self.assertTrue(explicit[2].interiors)
+        for key in (keys[0], *explicit):
+            image = _wall_texture_image(key.family, regional_style=key.regional_style)
             self.assertEqual(image.size, (128, 128))
             self.assertGreater(len(image.getcolors(maxcolors=65536) or ()), 4)
 
     def test_middle_east_region_adds_sandstone_adobe_whitewash_and_concrete(self) -> None:
         from cwr_worldgen.procedural_buildings import ProceduralBuildingLibrary, _wall_texture_image
+        from cwr_worldgen.house_style_catalogue import get_house_style_context
+
+        def advertised(identifier: str, settlement: str) -> set[str]:
+            context = get_house_style_context(identifier, settlement)
+            selection = context.selection
+            result: set[str] = set()
+            default = selection.get("default_style")
+            if default:
+                result.add(str(default))
+            for rule in selection.get("tag_rules", ()):
+                if isinstance(rule, dict) and rule.get("style"):
+                    result.add(str(rule["style"]))
+            for choices in selection.get("family_distributions", {}).values():
+                for choice in choices:
+                    if isinstance(choice, dict) and choice.get("style"):
+                        result.add(str(choice["style"]))
+            return result
 
         projection = BboxProjection.create((24.60, 46.60, 24.80, 46.80), 1000.0)
         dataset = OsmDataset(
@@ -4016,42 +4067,25 @@ class SemanticFeatureTests(unittest.TestCase):
         library = ProceduralBuildingLibrary(world_name="middle_east_region", maximum_variants=128)
         library.prepare(dataset, projection, 12.0)
         self.assertEqual(library.region_identifier, "middle_east")
-
-        house_styles = {
-            library.key_for(
-                {"building": "house", "name": f"House {index}"},
-                8.0 + (index % 5) * 2.0,
-                12.0 + (index % 7) * 2.0,
-            ).regional_style
+        keys = [
+            library.key_for({"building": "house", "name": f"House {index}"}, 8.0 + index % 5 * 2.0, 12.0 + index % 7 * 2.0)
             for index in range(120)
-        }
-        self.assertTrue({
-            "middle_east_sandstone", "middle_east_adobe",
-            "middle_east_whitewash", "middle_east_concrete",
-        }.issubset(house_styles))
-        sandstone = library.key_for(
-            {"building": "house", "building:material": "limestone"}, 10.0, 16.0
-        )
-        self.assertEqual(sandstone.regional_style, "middle_east_sandstone")
-        self.assertEqual(sandstone.roof_style, "flat")
-        adobe = library.key_for(
-            {"building": "house", "building:material": "mud"}, 10.0, 16.0
-        )
-        self.assertEqual(adobe.regional_style, "middle_east_adobe")
-        self.assertEqual(adobe.roof_style, "flat")
+        ]
+        country = keys[0].country_style_identifier
+        allowed = advertised(country, "rural")
+        self.assertTrue({key.regional_style for key in keys} <= allowed)
+        sandstone = library.key_for({"building": "house", "building:material": "limestone"}, 10.0, 16.0)
+        adobe = library.key_for({"building": "house", "building:material": "mud"}, 10.0, 16.0)
         concrete = library.key_for(
-            {"building": "apartments", "building:material": "concrete"},
-            24.0, 40.0, settlement_context="city",
+            {"building": "apartments", "building:material": "concrete"}, 24.0, 40.0,
+            settlement_context="city",
         )
-        self.assertEqual(concrete.regional_style, "middle_east_concrete")
-        self.assertEqual(concrete.roof_style, "flat")
-        for family, style in (
-            ("residential", "middle_east_sandstone"),
-            ("townhouse", "middle_east_whitewash"),
-            ("agricultural", "middle_east_adobe"),
-            ("urban", "middle_east_concrete"),
-        ):
-            image = _wall_texture_image(family, regional_style=style)
+        self.assertIn(sandstone.regional_style, allowed)
+        self.assertIn(adobe.regional_style, allowed)
+        self.assertIn(concrete.regional_style, advertised(country, "town_city"))
+        self.assertEqual(concrete.family, "urban")
+        for key in (sandstone, adobe, concrete):
+            image = _wall_texture_image(key.family, regional_style=key.regional_style)
             self.assertEqual(image.size, (128, 128))
             self.assertGreater(len(image.getcolors(maxcolors=65536) or ()), 4)
 

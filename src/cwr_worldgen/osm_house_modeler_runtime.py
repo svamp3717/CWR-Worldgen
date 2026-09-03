@@ -147,7 +147,28 @@ def _style_location(library, x: float | None, z: float | None):
 
 def _prepare_geographic_context(self, dataset, projection):
     self._modeler_projection = projection
-    return _ORIGINAL_PREPARE_GEO(self, dataset, projection)
+    result = _ORIGINAL_PREPARE_GEO(self, dataset, projection)
+    # Keep CWR's long-standing public region identifiers stable. The exact modeler
+    # country/region ids remain available separately and still drive StyleChoice.
+    legacy = {
+        "mediterranean_europe": "western_europe",
+        "eastern_europe_balkans": "eastern_europe",
+        "north_africa": "africa",
+        "west_africa": "africa",
+        "east_africa": "africa",
+        "central_southern_africa": "africa",
+    }
+    precise_region = str(self.region_identifier or "")
+    self.region_identifier = legacy.get(precise_region, precise_region) or None
+    self.detected_house_style_identifier = self.region_identifier
+    override_profile = house_style_preset_profile(self.house_style_preset)
+    if override_profile is not None:
+        self.house_style_identifier = override_profile.house_style_identifier
+    elif self.country_style_identifier:
+        self.house_style_identifier = self.country_style_identifier
+    elif precise_region:
+        self.house_style_identifier = precise_region
+    return result
 
 
 def _regional_preset(library) -> str:
@@ -185,9 +206,27 @@ def _style_key_for(
             (float(projection.west) + float(projection.east)) * 0.5,
         )
     latitude, longitude = location
+    # CWR has several OFP-specific semantic rules that are more expressive than
+    # the standalone modeler's dimension fallback (isolated dwellings, town context,
+    # social facilities, shops). Feed that resolved semantic intent to the modeler
+    # while preserving the original tags for explicit material/roof/opening rules.
+    style_tags = dict(tags)
+    building_value = str(style_tags.get("building", "") or "").casefold()
+    if base.family == "shop":
+        style_tags["building"] = "shop"
+    elif base.family == "townhouse" and building_value in {"", "yes", "building"}:
+        style_tags["building"] = "townhouse"
+    elif base.family == "urban" and building_value in {"", "yes", "building", "warehouse"}:
+        style_tags["building"] = "apartments"
+    elif base.family == "residential" and building_value in {"", "yes", "building"}:
+        style_tags["building"] = "cabin" if base.isolated_dwelling else "house"
+    elif base.family == "agricultural" and building_value in {"", "yes", "building"}:
+        style_tags["building"] = "barn"
+    elif base.family == "outbuilding" and building_value in {"", "yes", "building"}:
+        style_tags["building"] = base.outbuilding_kind or "shed"
     try:
         choice = resolve_style(
-            tags=tags,
+            tags=style_tags,
             latitude=latitude,
             longitude=longitude,
             width_m=width_m,
@@ -202,7 +241,8 @@ def _style_key_for(
         return base
 
     fields = key_fields(choice)
-    family = base.family if base.family == "church" else str(choice.family or base.family)
+    # CWR family is authoritative for engine semantics and variant reservation.
+    family = base.family
     roof_style = base.roof_style if family == "church" else str(choice.roof_style or base.roof_style)
     fallback_height = _pb._height(tags, family, max(2.4, float(choice.storey_height_m or self.default_level_height)))
     target_height = base.height_m if family == "church" else requested_height(tags, choice, fallback_height)
@@ -212,7 +252,7 @@ def _style_key_for(
         self.minimum_height,
         self.maximum_height,
     )
-    levels = base.facade_storeys if family == "church" else requested_levels(tags, choice)
+    levels = base.facade_storeys if family == "church" else (1 if base.isolated_dwelling else requested_levels(style_tags, choice))
     roof_storey = bool(fields["roof_storey"] and roof_style == "gabled" and levels >= 2 and family in {"residential", "townhouse", "urban"})
     facade_storeys = max(1, levels - 1) if roof_storey else max(1, levels)
 
@@ -258,7 +298,7 @@ def _style_key_for(
         regional_style=str(choice.facade_style or base.regional_style),
         interiors=interiors,
         second_storey=second_storey,
-        outbuilding_kind=(str(choice.outbuilding_kind or base.outbuilding_kind) if family == "outbuilding" else ""),
+        outbuilding_kind=(str(base.outbuilding_kind or choice.outbuilding_kind) if family == "outbuilding" else ""),
         facade_storeys=facade_storeys,
         **fields,
     )
@@ -347,10 +387,11 @@ def _door_dimensions(key):
 
 
 def _interior_wall_thickness(key):
+    # Never make CWR's collision-safe shell thinner than its proven clearance.
+    # Country styles may request a thicker wall and that is still honoured.
+    baseline = float(_ORIGINAL_INTERIOR_WALL_THICKNESS(key))
     styled = float(getattr(key, "wall_thickness_m", 0.0) or 0.0)
-    if styled > 0.0:
-        return max(0.10, min(0.60, styled))
-    return _ORIGINAL_INTERIOR_WALL_THICKNESS(key)
+    return max(baseline, max(0.10, min(0.60, styled))) if styled > 0.0 else baseline
 
 
 def _interior_window_openings(*args, **kwargs):
