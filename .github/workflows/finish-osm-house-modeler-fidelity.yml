@@ -21,7 +21,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply final fidelity patch
-        run: python tools/finish_osm_house_modeler_fidelity.py
+        run: |
+          python tools/fix_fidelity_patch_plinth.py
+          python tools/finish_osm_house_modeler_fidelity.py
 
       - name: Set up Python
         uses: actions/setup-python@v6
