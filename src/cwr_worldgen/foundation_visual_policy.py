@@ -131,8 +131,17 @@ def install_foundation_visual_policy() -> None:
     install_opening_dimension_policy()
     install_opening_texture_policy()
 
-    # Performance wrappers must be last: they memoize the *final* opening
-    # functions and compact only the generated distance LOD, never the detail LOD.
+    # Performance wrappers must be last among geometry policies: they memoize the
+    # final opening functions and compact only the generated distance LOD, never
+    # the detail LOD.
     from .interior_performance_policy import install_interior_performance_policy
 
     install_interior_performance_policy()
+
+    # Utility material selection is deliberately data-only: all barn/shed/garage/
+    # warehouse/hangar/industrial pools live in the selected country JSON. The
+    # runtime merely consumes those explicit distributions and supplies matching
+    # utility material renderers.
+    from .country_utility_material_policy import install_country_utility_material_policy
+
+    install_country_utility_material_policy()
