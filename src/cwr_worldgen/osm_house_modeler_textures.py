@@ -314,6 +314,10 @@ def make_textures(
     window = _render_window(window_spec, rng, size, no_glass=no_glass)
     window_frame = _render_window_frame(window_spec, rng, size)
     door = _render_door(door_spec, family, outbuilding_kind, rng, size, no_glass=no_glass)
+    # Secondary architecture uses three deliberately reusable material atlases.
+    # This keeps OBJ/MTL material counts sane while allowing
+    # chimneys, stoops, porches, balconies and rainwater hardware to read as
+    # actual geometry rather than flat facade decals.
     detail_masonry = _render_foundation(rng, size, (139, 136, 128))
     detail_wood = _render_wall("wood", (139, 96, 61), rng, size)
     detail_metal = _render_roof("metal", (100, 108, 112), rng, size)
