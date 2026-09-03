@@ -24,6 +24,7 @@ jobs:
         run: |
           python tools/fix_fidelity_material_paths.py
           python tools/fix_fidelity_patch_plinth.py
+          python tools/fix_fidelity_polygon_roof_storey.py
           python tools/finish_osm_house_modeler_fidelity.py
 
       - name: Set up Python
