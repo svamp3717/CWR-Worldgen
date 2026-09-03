@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 
 
 def replace_once(path: Path, old: str, new: str) -> None:
@@ -25,6 +27,17 @@ def sync_catalogues(repo_root: Path, source_root: Path) -> None:
     shutil.copy2(
         source_root / "src" / "osm_house_modeler" / "styles.py",
         package / "osm_house_modeler_styles.py",
+    )
+
+    # The upstream country catalogue is the baseline. CWR deliberately extends
+    # every country/context with explicit class-specific material distributions
+    # for barns, sheds, garages, warehouses, hangars and industrial buildings.
+    # Reapply that data migration immediately after every upstream refresh so a
+    # sync cannot silently erase the local country extensions.
+    subprocess.run(
+        [sys.executable, str(repo_root / "tools" / "populate_country_utility_materials.py")],
+        cwd=repo_root,
+        check=True,
     )
 
     replace_once(
@@ -83,7 +96,7 @@ def sync_catalogues(repo_root: Path, source_root: Path) -> None:
     notice_text = notice.read_text(encoding="utf-8")
     notice_text = notice_text.replace(
         "It ports the architectural-detail behavior needed by the\nworld generator: entrance stairs for exterior-only models, porches/canopies,\nbalconies on non-enterable variants, chimneys, gutters and downspouts. Enterable\nvariants keep CWR's collision-aware openings, floors, stairs and animated doors.\n",
-        "It ports the architectural-detail behavior needed by the\nworld generator: entrance stairs for exterior-only models, porches/canopies,\nbalconies (including visual-only balconies on enterable variants), chimneys,\ngutters and downspouts. Enterable variants keep CWR's collision-aware openings,\nfloors, stairs and animated entrance doors; no dedicated balcony door is required.\n\nThe 24 regional house-style profiles, all 249 country profiles, and the upstream\ncountry/region style-selection engine are vendored verbatim from osm-house-modeler\ncommit `74c8049466875dc94409493bc77bfcad56e38a8d`.\n",
+        "It ports the architectural-detail behavior needed by the\nworld generator: entrance stairs for exterior-only models, porches/canopies,\nbalconies (including visual-only balconies on enterable variants), chimneys,\ngutters and downspouts. Enterable variants keep CWR's collision-aware openings,\nfloors, stairs and animated entrance doors; no dedicated balcony door is required.\n\nThe 24 regional house-style profiles and the base set of 249 country profiles\noriginate from osm-house-modeler commit\n`74c8049466875dc94409493bc77bfcad56e38a8d`. CWR extends every country/context\nwith explicit barn, shed, garage, warehouse, hangar and industrial wall/roof\nmaterial pools under revision `2026-09-country-utility-materials-v1`. The\nupstream country/region style-selection engine remains pinned to that source\ncommit.\n",
     )
     notice.write_text(notice_text, encoding="utf-8")
 
