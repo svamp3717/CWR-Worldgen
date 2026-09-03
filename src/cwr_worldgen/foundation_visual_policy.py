@@ -121,3 +121,10 @@ def install_foundation_visual_policy() -> None:
     buildings._polygon_native_visual_lod = projected_polygon_visual
     buildings.cache_key = revised_building_cache_key
     _INSTALLED = True
+
+    # Install after the runtime style adapter and foundation wrapper so opening
+    # sizes see the final modeler key fields and can advance the P3D cache from
+    # v50 without discarding the already-correct texture cache.
+    from .opening_dimension_policy import install_opening_dimension_policy
+
+    install_opening_dimension_policy()
