@@ -17,6 +17,8 @@ from cwr_worldgen.osm_house_modeler_texture_bridge import (
     _wall_material_image,
     cwa_exposure_compensate,
     modeler_front_texture_image,
+    modeler_interior_wall_texture_image,
+    modeler_open_wall_texture_image,
     modeler_roof_texture_image,
     modeler_wall_texture_image,
 )
@@ -93,6 +95,7 @@ def test_modeler_material_is_rendered_at_native_256_before_downsampling() -> Non
     native.putdata(native_pixels)
     expected = native.resize((128, 128), Image.Resampling.LANCZOS)
 
+    _wall_material_image.cache_clear()
     actual = _wall_material_image(token, 3, 128)
     assert actual.tobytes() == expected.tobytes()
 
@@ -103,6 +106,39 @@ def test_modeler_material_is_rendered_at_native_256_before_downsampling() -> Non
     wrong = Image.new("RGB", (128, 128))
     wrong.putdata(upstream_textures._render_wall(kind, base, wrong_rng, 128))
     assert actual.tobytes() != wrong.tobytes()
+
+
+def test_wall_material_native_render_is_reused_across_facade_outputs(monkeypatch) -> None:
+    token = _token("western_brick", "brick", "red brick")
+    calls = 0
+    original = upstream_textures._render_wall
+
+    def counted(kind, base, rng, size):
+        nonlocal calls
+        calls += 1
+        return original(kind, base, rng, size)
+
+    monkeypatch.setattr(upstream_textures, "_render_wall", counted)
+    _wall_material_image.cache_clear()
+
+    modeler_wall_texture_image("residential", 128, token, 4)
+    modeler_open_wall_texture_image("residential", 128, token, 4)
+    modeler_interior_wall_texture_image("residential", 128, token, 4)
+    modeler_front_texture_image("residential", 128, token, 4, "")
+
+    assert calls == 1
+    info = _wall_material_image.cache_info()
+    assert info.misses == 1
+    assert info.hits >= 3
+
+
+def test_cached_material_is_not_mutated_by_front_composition() -> None:
+    token = _token("western_stucco", "plaster", "cream")
+    _wall_material_image.cache_clear()
+    before = modeler_open_wall_texture_image("residential", 128, token, 7).tobytes()
+    modeler_front_texture_image("residential", 128, token, 7, "")
+    after = modeler_open_wall_texture_image("residential", 128, token, 7).tobytes()
+    assert before == after
 
 
 def test_modeler_front_composites_real_window_and_door_materials() -> None:
