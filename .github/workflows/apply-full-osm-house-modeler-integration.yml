@@ -24,6 +24,9 @@ jobs:
         run: |
           python tools/apply_full_osm_house_modeler_integration.py
           python tools/fix_full_modeler_compat.py
+          python tools/fix_full_modeler_runtime.py
+          python tools/fix_full_modeler_source.py
+          python tools/update_full_modeler_tests.py
 
       - name: Set up Python
         uses: actions/setup-python@v6
