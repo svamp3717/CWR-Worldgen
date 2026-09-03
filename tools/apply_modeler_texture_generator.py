@@ -1,3 +1,4 @@
+# Branch-local texture migration helper.
 from __future__ import annotations
 
 from pathlib import Path
