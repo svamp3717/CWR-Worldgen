@@ -27,6 +27,7 @@ jobs:
           python tools/fix_full_modeler_runtime.py
           python tools/fix_full_modeler_source.py
           python tools/update_full_modeler_tests.py
+          python tools/fix_full_modeler_remaining_tests.py
 
       - name: Set up Python
         uses: actions/setup-python@v6
