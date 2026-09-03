@@ -1,10 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Render CWA PAA source images from OSM House Modeler's texture generator.
 
-The upstream modeler emits PNG materials for its OBJ pipeline.  CWR needs the
+The upstream modeler emits PNG materials for its OBJ pipeline. CWR needs the
 same material logic in compact PAA atlases that fit its existing MLOD building
-pipeline.  This module is the conversion layer: upstream owns material/palette
+pipeline. This module is the conversion layer: upstream owns material/palette
 selection and pixels, CWR owns facade-atlas layout and PAA packaging.
+
+The upstream texture renderer is authored on a fixed 256x256 canvas. Several of
+its material and opening renderers deliberately use pixel-space dimensions for
+courses, boards, seams, frames and hardware. Calling those renderers directly
+at CWR's smaller 128px asset size changes the physical scale of the artwork and
+can even move fixed details outside the image. Always render upstream at its
+native authoring size first, then resample the finished tile for CWR.
 """
 from __future__ import annotations
 
@@ -17,9 +24,8 @@ from PIL import Image
 from .osm_house_modeler_full_style import split_texture_token, texture_metadata_from_token
 from . import osm_house_modeler_textures as _upstream
 
-# CWA/OFP's fixed-function lighting makes diffuse textures read substantially
-# brighter than the standalone modeler's neutral viewer.  Compensate once at
-# export rather than corrupting every country palette independently.
+UPSTREAM_TEXTURE_CANONICAL_SIZE = 256
+
 CWA_EXTERIOR_EXPOSURE = 0.78
 CWA_INTERIOR_EXPOSURE = 0.58
 
@@ -45,6 +51,16 @@ def _pixels_image(pixels: list[tuple[int, int, int]], size: int) -> Image.Image:
     return image
 
 
+def _canonical_image(pixels: list[tuple[int, int, int]], requested_size: int) -> Image.Image:
+    """Convert one native 256px upstream render to the requested CWR size."""
+    native = UPSTREAM_TEXTURE_CANONICAL_SIZE
+    image = _pixels_image(pixels, native)
+    target = max(1, int(requested_size))
+    if target == native:
+        return image
+    return image.resize((target, target), Image.Resampling.LANCZOS)
+
+
 def _style_inputs(token: str) -> tuple[str, str, tuple[str, ...], dict[str, Any]]:
     facade, material, palette = split_texture_token(token)
     return facade, material, palette, texture_metadata_from_token(token)
@@ -54,33 +70,33 @@ def _wall_material_image(token: str, texture_variant: int, size: int) -> Image.I
     facade, material, palette, _metadata = _style_inputs(token)
     kind, base = _upstream._choose_wall_base(facade, facade, material, palette)
     rng = random.Random(_seed(f"wall:{token}:{texture_variant}"))
-    return _pixels_image(_upstream._render_wall(kind, base, rng, size), size)
+    native = UPSTREAM_TEXTURE_CANONICAL_SIZE
+    return _canonical_image(_upstream._render_wall(kind, base, rng, native), size)
+
+
+def _window_spec(metadata: Mapping[str, Any]) -> dict[str, str]:
+    window = metadata.get("window") or {}
+    if not isinstance(window, Mapping):
+        window = {}
+    return {
+        "type": str(window.get("type", "casement") or "casement"),
+        "frame_material": str(window.get("frame_material", "painted timber") or "painted timber"),
+        "trim": str(window.get("trim", "white") or "white"),
+    }
 
 
 def _window_image(metadata: Mapping[str, Any], token: str, texture_variant: int, size: int) -> Image.Image:
-    window = metadata.get("window") or {}
-    if not isinstance(window, Mapping):
-        window = {}
-    spec = {
-        "type": str(window.get("type", "casement") or "casement"),
-        "frame_material": str(window.get("frame_material", "painted timber") or "painted timber"),
-        "trim": str(window.get("trim", "white") or "white"),
-    }
+    spec = _window_spec(metadata)
     rng = random.Random(_seed(f"window:{token}:{texture_variant}"))
-    return _pixels_image(_upstream._render_window(spec, rng, size), size)
+    native = UPSTREAM_TEXTURE_CANONICAL_SIZE
+    return _canonical_image(_upstream._render_window(spec, rng, native), size)
 
 
 def _window_frame_image(metadata: Mapping[str, Any], token: str, texture_variant: int, size: int) -> Image.Image:
-    window = metadata.get("window") or {}
-    if not isinstance(window, Mapping):
-        window = {}
-    spec = {
-        "type": str(window.get("type", "casement") or "casement"),
-        "frame_material": str(window.get("frame_material", "painted timber") or "painted timber"),
-        "trim": str(window.get("trim", "white") or "white"),
-    }
+    spec = _window_spec(metadata)
     rng = random.Random(_seed(f"window-frame:{token}:{texture_variant}"))
-    return _pixels_image(_upstream._render_window_frame(spec, rng, size), size)
+    native = UPSTREAM_TEXTURE_CANONICAL_SIZE
+    return _canonical_image(_upstream._render_window_frame(spec, rng, native), size)
 
 
 def _door_image(
@@ -96,8 +112,9 @@ def _door_image(
         "materials": [material],
     }
     rng = random.Random(_seed(f"door:{token}:{texture_variant}:{family}:{outbuilding_kind}"))
-    return _pixels_image(
-        _upstream._render_door(spec, family, outbuilding_kind, rng, size), size
+    native = UPSTREAM_TEXTURE_CANONICAL_SIZE
+    return _canonical_image(
+        _upstream._render_door(spec, family, outbuilding_kind, rng, native), size
     )
 
 
@@ -112,7 +129,7 @@ def _paste_scaled(base: Image.Image, source: Image.Image, box: tuple[int, int, i
     x0, y0, x1, y1 = box
     if x1 <= x0 or y1 <= y0:
         return
-    base.paste(source.resize((x1 - x0, y1 - y0), Image.Resampling.BILINEAR), (x0, y0))
+    base.paste(source.resize((x1 - x0, y1 - y0), Image.Resampling.LANCZOS), (x0, y0))
 
 
 def _with_openings(
@@ -123,7 +140,7 @@ def _with_openings(
     front: bool,
     outbuilding_kind: str = "",
 ) -> Image.Image:
-    """Compose the modeler's real window/door textures into CWR's closed atlas."""
+    """Compose modeler window/door materials into CWR's closed 4m x 3m bay."""
     image = base.convert("RGB").copy()
     size = image.width
     metadata = texture_metadata_from_token(token)
@@ -178,9 +195,7 @@ def modeler_wall_texture_image(
     family: str, size: int = 128, regional_style: str = "default", texture_variant: int = 0,
 ) -> Image.Image:
     base = _wall_material_image(regional_style, texture_variant, int(size))
-    composed = _with_openings(
-        base, regional_style, texture_variant, family=family, front=False
-    )
+    composed = _with_openings(base, regional_style, texture_variant, family=family, front=False)
     return cwa_exposure_compensate(composed)
 
 
@@ -188,9 +203,7 @@ def modeler_open_wall_texture_image(
     family: str, size: int = 128, regional_style: str = "default", texture_variant: int = 0,
 ) -> Image.Image:
     del family
-    return cwa_exposure_compensate(
-        _wall_material_image(regional_style, texture_variant, int(size))
-    )
+    return cwa_exposure_compensate(_wall_material_image(regional_style, texture_variant, int(size)))
 
 
 def modeler_interior_wall_texture_image(
@@ -249,34 +262,37 @@ def modeler_roof_texture_image(
     if palette:
         base = _upstream._colour_from_name(palette[0], default=base)
     rng = random.Random(_seed(f"roof:{roof_style}:{texture_variant}"))
+    native = UPSTREAM_TEXTURE_CANONICAL_SIZE
     return cwa_exposure_compensate(
-        _pixels_image(_upstream._render_roof(kind, base, rng, int(size)), int(size))
+        _canonical_image(_upstream._render_roof(kind, base, rng, native), size)
     )
 
 
 def modeler_foundation_texture_image(size: int = 128, foundation_type: str = "concrete foundation") -> Image.Image:
     base = _upstream._colour_from_name(foundation_type, default=(131, 130, 126))
     rng = random.Random(_seed(f"foundation:{foundation_type}"))
+    native = UPSTREAM_TEXTURE_CANONICAL_SIZE
     return cwa_exposure_compensate(
-        _pixels_image(_upstream._render_foundation(rng, int(size), base), int(size))
+        _canonical_image(_upstream._render_foundation(rng, native, base), size)
     )
 
 
 def modeler_detail_texture_image(kind: str, size: int = 128) -> Image.Image:
     kind = str(kind or "masonry").casefold()
     rng = random.Random(_seed(f"detail:{kind}"))
-    size = int(size)
+    target = max(1, int(size))
+    native = UPSTREAM_TEXTURE_CANONICAL_SIZE
     if kind == "wood":
-        pixels = _upstream._render_wall("wood", (139, 96, 61), rng, size)
+        pixels = _upstream._render_wall("wood", (139, 96, 61), rng, native)
     elif kind == "metal":
-        pixels = _upstream._render_roof("metal", (100, 108, 112), rng, size)
+        pixels = _upstream._render_roof("metal", (100, 108, 112), rng, native)
     elif kind == "glass":
         pixels = _upstream._render_window(
             {"type": "fixed", "frame_material": "aluminium-clad timber", "trim": "grey"},
-            rng, size,
+            rng, native,
         )
     elif kind == "balcony":
-        pixels = _upstream._render_roof("metal", (92, 99, 102), rng, size)
+        pixels = _upstream._render_roof("metal", (92, 99, 102), rng, native)
     else:
-        pixels = _upstream._render_foundation(rng, size, (139, 136, 128))
-    return cwa_exposure_compensate(_pixels_image(pixels, size))
+        pixels = _upstream._render_foundation(rng, native, (139, 136, 128))
+    return cwa_exposure_compensate(_canonical_image(pixels, target))
