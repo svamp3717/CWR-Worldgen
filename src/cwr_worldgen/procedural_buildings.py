@@ -8891,6 +8891,16 @@ class ProceduralBuildingLibrary:
 
     def write_assets(self, source_dir: Path, catalogue_path: Path) -> BuildingGenerationResult:
         selected = sorted(self._usage)
+        from .osm_house_modeler_texture_bridge import (
+            modeler_door_texture_image,
+            modeler_foundation_texture_image,
+            modeler_front_texture_image,
+            modeler_interior_wall_texture_image,
+            modeler_open_wall_texture_image,
+            modeler_roof_texture_image,
+            modeler_wall_texture_image,
+            modeler_window_frame_texture_image,
+        )
         model_assets: list[GeneratedBuildingAsset] = []
         texture_files: list[str] = []
         if selected:
@@ -8944,11 +8954,11 @@ class ProceduralBuildingLibrary:
             texture_path = self._foundation_texture()
             relative = texture_path.split("\\", 1)[1].replace("\\", "/")
             file_path = source_dir / relative
-            key = cache_key("procedural-building-foundation-v4-selectable-quality", {"texture": "stone", "texture_size": self.texture_size})
+            key = cache_key("procedural-building-foundation-modeler-v1-cwa78", {"texture": "stone", "texture_size": self.texture_size})
             cached = self.cache_dir / "procedural-assets" / f"{key}.paa" if self.cache_dir else None
             hit = restore_or_create_file(
                 cache_path=cached, destination=file_path,
-                producer=lambda target: write_rgb_dxt1_paa(target, _foundation_texture_image(self.texture_size)),
+                producer=lambda target: write_rgb_dxt1_paa(target, modeler_foundation_texture_image(self.texture_size)),
                 enabled=self.cache_enabled, refresh=self.cache_refresh,
             )
             self.cache_hits += int(hit); self.cache_misses += int(not hit)
@@ -8958,7 +8968,7 @@ class ProceduralBuildingLibrary:
             relative = texture_path.split("\\", 1)[1].replace("\\", "/")
             file_path = source_dir / relative
             key = cache_key(
-                "procedural-building-white-window-trim-v4-selectable-quality",
+                "procedural-building-window-frame-modeler-v1-cwa84",
                 {"material": "weathered-white-painted-wood", "texture_size": self.texture_size},
             )
             cached = self.cache_dir / "procedural-assets" / f"{key}.paa" if self.cache_dir else None
@@ -8966,7 +8976,7 @@ class ProceduralBuildingLibrary:
                 cache_path=cached,
                 destination=file_path,
                 producer=lambda target: write_rgb_dxt1_paa(
-                    target, _white_trim_texture_image(self.texture_size)
+                    target, modeler_window_frame_texture_image(self.texture_size)
                 ),
                 enabled=self.cache_enabled,
                 refresh=self.cache_refresh,
@@ -8980,7 +8990,7 @@ class ProceduralBuildingLibrary:
             relative = texture_path.split("\\", 1)[1].replace("\\", "/")
             file_path = source_dir / relative
             cache_id = cache_key(
-                "procedural-building-door-v3-clean-utility-aperture-selectable-quality",
+                "procedural-building-door-modeler-v1-cwa84",
                 {
                     "family": family,
                     "regional_style": regional_style,
@@ -8995,7 +9005,7 @@ class ProceduralBuildingLibrary:
                 destination=file_path,
                 producer=lambda target, family=family, regional_style=regional_style, texture_variant=texture_variant, outbuilding_kind=outbuilding_kind: write_rgb_dxt1_paa(
                     target,
-                    _door_texture_image(
+                    modeler_door_texture_image(
                         self.texture_size,
                         family=family,
                         regional_style=regional_style,
@@ -9017,7 +9027,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-wall-v12-window-sill-selectable-quality",
+                    "procedural-building-wall-modeler-v1-cwa78",
                     {
                         "family": family,
                         "regional_style": regional_style,
@@ -9031,7 +9041,7 @@ class ProceduralBuildingLibrary:
                     destination=file_path,
                     producer=lambda target, family=family, regional_style=regional_style, texture_variant=texture_variant: write_rgb_dxt1_paa(
                         target,
-                        _wall_texture_image(
+                        modeler_wall_texture_image(
                             family,
                             size=self.texture_size,
                             regional_style=regional_style,
@@ -9051,7 +9061,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-open-wall-v4-utility-cladding-match-selectable-quality",
+                    "procedural-building-open-wall-modeler-v1-cwa78",
                     {
                         "family": family,
                         "regional_style": regional_style,
@@ -9065,7 +9075,7 @@ class ProceduralBuildingLibrary:
                     destination=file_path,
                     producer=lambda target, family=family, regional_style=regional_style, texture_variant=texture_variant: write_rgb_dxt1_paa(
                         target,
-                        _open_wall_texture_image(
+                        modeler_open_wall_texture_image(
                             family,
                             size=self.texture_size,
                             regional_style=regional_style,
@@ -9086,7 +9096,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-interior-wall-v3-selectable-quality",
+                    "procedural-building-interior-wall-modeler-v1-cwa58",
                     {
                         "family": family,
                         "regional_style": regional_style,
@@ -9100,7 +9110,7 @@ class ProceduralBuildingLibrary:
                     destination=file_path,
                     producer=lambda target, family=family, regional_style=regional_style, texture_variant=texture_variant: write_rgb_dxt1_paa(
                         target,
-                        _interior_wall_texture_image(
+                        modeler_interior_wall_texture_image(
                             family,
                             size=self.texture_size,
                             regional_style=regional_style,
@@ -9121,7 +9131,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-front-v13-window-sill-selectable-quality",
+                    "procedural-building-front-modeler-v1-cwa78",
                     {
                         "family": family,
                         "regional_style": regional_style,
@@ -9135,7 +9145,7 @@ class ProceduralBuildingLibrary:
                     cache_path=cached, destination=file_path,
                     producer=lambda target, family=family, regional_style=regional_style, texture_variant=texture_variant, outbuilding_kind=outbuilding_kind: write_rgb_dxt1_paa(
                         target,
-                        _front_texture_image(
+                        modeler_front_texture_image(
                             family,
                             size=self.texture_size,
                             regional_style=regional_style,
@@ -9153,7 +9163,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-roof-v5-selectable-quality",
+                    "procedural-building-roof-modeler-v1-cwa78",
                     {"roof": roof, "texture_variant": texture_variant, "texture_size": self.texture_size},
                 )
                 cached = self.cache_dir / "procedural-assets" / f"{key}.paa" if self.cache_dir else None
@@ -9161,7 +9171,7 @@ class ProceduralBuildingLibrary:
                     cache_path=cached,
                     destination=file_path,
                     producer=lambda target, roof=roof, texture_variant=texture_variant: write_rgb_dxt1_paa(
-                        target, _roof_texture_image(
+                        target, modeler_roof_texture_image(
                             roof, size=self.texture_size,
                             texture_variant=texture_variant
                         )
@@ -9282,7 +9292,7 @@ class ProceduralBuildingLibrary:
                 "texture_size_px": self.texture_size,
                 "high_quality_textures": self.high_quality_textures,
                 "texture_variant_selection": "deterministic-building-tags-and-position",
-                "roof_pitch_degrees": (key.roof_pitch_degrees or self.roof_pitch_degrees),
+                "roof_pitch_degrees": self.roof_pitch_degrees,
                 "minimum_foundation_depth_m": self.foundation_depth,
                 "maximum_foundation_depth_m": self.maximum_foundation_depth,
                 "enterable_foundation_limit_m": self.maximum_foundation_depth,

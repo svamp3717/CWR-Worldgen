@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw
 
 from . import procedural_buildings as _pb
 from .paa import write_rgb_dxt1_paa
+from .osm_house_modeler_texture_bridge import modeler_detail_texture_image
 
 
 DETAIL_MATERIAL_CODES: Mapping[str, str] = {
@@ -136,7 +137,7 @@ def emit_detail_material_textures(library: object, source_dir: Path) -> tuple[st
     relative: list[str] = []
     for kind, code in DETAIL_MATERIAL_CODES.items():
         path = directory / f"{code}.paa"
-        write_rgb_dxt1_paa(path, _DETAIL_IMAGE_FACTORIES[kind](size))
+        write_rgb_dxt1_paa(path, modeler_detail_texture_image(kind, size))
         relative.append(f"d/{code}.paa")
     return tuple(relative)
 
