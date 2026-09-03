@@ -1,0 +1,103 @@
+name: Final OSM House Modeler texture verification
+
+on:
+  push:
+    branches:
+      - upgrade/osm-house-modeler-buildings
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out integration branch
+        uses: actions/checkout@v6
+        with:
+          ref: upgrade/osm-house-modeler-buildings
+          fetch-depth: 0
+
+      - name: Copy exact pinned upstream texture generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/svamp3717/osm-house-modeler.git /tmp/osm-house-modeler
+          git -C /tmp/osm-house-modeler checkout --quiet 74c8049466875dc94409493bc77bfcad56e38a8d
+          cp /tmp/osm-house-modeler/src/osm_house_modeler/textures.py src/cwr_worldgen/osm_house_modeler_textures.py
+          upstream_blob=$(git -C /tmp/osm-house-modeler hash-object src/osm_house_modeler/textures.py)
+          branch_blob=$(git hash-object src/cwr_worldgen/osm_house_modeler_textures.py)
+          echo "upstream_texture_blob=$upstream_blob"
+          echo "branch_texture_blob=$branch_blob"
+          test "$upstream_blob" = "$branch_blob"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install branch test environment
+        shell: bash
+        run: |
+          python -m venv .verify-venv
+          .verify-venv/bin/python -m pip install --upgrade pip
+          .verify-venv/bin/python -m pip install -e ".[sources]" pytest
+
+      - name: Run complete branch suite
+        shell: bash
+        run: |
+          set +e
+          .verify-venv/bin/python -m pytest -q > /tmp/branch-pytest.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/branch-pytest.log
+          grep '^FAILED ' /tmp/branch-pytest.log | sed -E 's/^FAILED ([^ ]+).*/\1/' | sort -u > /tmp/branch-failures.txt || true
+          echo "$status" > /tmp/branch-status.txt
+
+      - name: Prepare current main worktree
+        shell: bash
+        run: git worktree add --detach /tmp/cwr-main origin/main
+
+      - name: Run complete current-main suite
+        shell: bash
+        run: |
+          set +e
+          (
+            cd /tmp/cwr-main
+            PYTHONPATH=/tmp/cwr-main/src "$GITHUB_WORKSPACE/.verify-venv/bin/python" -m pytest -q
+          ) > /tmp/main-pytest.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/main-pytest.log
+          grep '^FAILED ' /tmp/main-pytest.log | sed -E 's/^FAILED ([^ ]+).*/\1/' | sort -u > /tmp/main-failures.txt || true
+          echo "$status" > /tmp/main-status.txt
+
+      - name: Compare failure sets
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Branch failures:"
+          cat /tmp/branch-failures.txt
+          echo "Main failures:"
+          cat /tmp/main-failures.txt
+          comm -23 /tmp/branch-failures.txt /tmp/main-failures.txt > /tmp/branch-only.txt
+          if [[ -s /tmp/branch-only.txt ]]; then
+            echo "Branch-only regressions:"
+            cat /tmp/branch-only.txt
+            exit 1
+          fi
+          echo "No branch-only test failures."
+
+      - name: Commit exact upstream texture copy and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/final-modeler-texture-verification.yml
+          git add src/cwr_worldgen/osm_house_modeler_textures.py
+          git commit -m "Finalize OSM House Modeler texture integration"
+          git push origin HEAD:upgrade/osm-house-modeler-buildings
