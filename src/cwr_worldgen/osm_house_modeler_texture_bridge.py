@@ -12,9 +12,17 @@ courses, boards, seams, frames and hardware. Calling those renderers directly
 at CWR's smaller 128px asset size changes the physical scale of the artwork and
 can even move fixed details outside the image. Always render upstream at its
 native authoring size first, then resample the finished tile for CWR.
+
+A single generated building style can reference the same wall material as a
+closed wall, open wall, interior wall and entrance facade. Native 256px modeler
+renders are comparatively expensive pure-Python pixel loops, so this bridge
+keeps a bounded process-local cache of those immutable source images. Callers
+only read or copy cached images; the cache therefore changes performance, not
+pixels or PAA identity.
 """
 from __future__ import annotations
 
+from functools import lru_cache
 from hashlib import sha256
 import random
 from typing import Any, Mapping
@@ -25,6 +33,10 @@ from .osm_house_modeler_full_style import split_texture_token, texture_metadata_
 from . import osm_house_modeler_textures as _upstream
 
 UPSTREAM_TEXTURE_CANONICAL_SIZE = 256
+# A normal world uses far fewer than this many distinct style/variant material
+# combinations. At 128px the full cache is only about 12 MiB of RGB data; HQ
+# 256px builds remain bounded to about 48 MiB rather than growing with the map.
+_MODEL_RENDER_CACHE_SIZE = 256
 
 CWA_EXTERIOR_EXPOSURE = 0.78
 CWA_INTERIOR_EXPOSURE = 0.58
@@ -38,11 +50,17 @@ def _clamp_channel(value: int) -> int:
     return max(0, min(255, int(value)))
 
 
+@lru_cache(maxsize=8)
+def _exposure_lut(factor: float) -> tuple[int, ...]:
+    """Return one reusable three-channel Pillow point table."""
+    values = tuple(_clamp_channel(round(value * factor)) for value in range(256))
+    return values * 3
+
+
 def cwa_exposure_compensate(image: Image.Image, factor: float = CWA_EXTERIOR_EXPOSURE) -> Image.Image:
     """Reduce diffuse brightness before CWA's legacy lighting is applied."""
     factor = max(0.35, min(1.0, float(factor)))
-    table = [_clamp_channel(round(value * factor)) for value in range(256)]
-    return image.convert("RGB").point(table * 3)
+    return image.convert("RGB").point(_exposure_lut(factor))
 
 
 def _pixels_image(pixels: list[tuple[int, int, int]], size: int) -> Image.Image:
@@ -66,12 +84,14 @@ def _style_inputs(token: str) -> tuple[str, str, tuple[str, ...], dict[str, Any]
     return facade, material, palette, texture_metadata_from_token(token)
 
 
+@lru_cache(maxsize=_MODEL_RENDER_CACHE_SIZE)
 def _wall_material_image(token: str, texture_variant: int, size: int) -> Image.Image:
+    """Return one immutable cached modeler wall-material tile."""
     facade, material, palette, _metadata = _style_inputs(token)
     kind, base = _upstream._choose_wall_base(facade, facade, material, palette)
     rng = random.Random(_seed(f"wall:{token}:{texture_variant}"))
     native = UPSTREAM_TEXTURE_CANONICAL_SIZE
-    return _canonical_image(_upstream._render_wall(kind, base, rng, native), size)
+    return _canonical_image(_upstream._render_wall(kind, base, rng, native), int(size))
 
 
 def _window_spec(metadata: Mapping[str, Any]) -> dict[str, str]:
@@ -85,24 +105,45 @@ def _window_spec(metadata: Mapping[str, Any]) -> dict[str, str]:
     }
 
 
-def _window_image(metadata: Mapping[str, Any], token: str, texture_variant: int, size: int) -> Image.Image:
+@lru_cache(maxsize=_MODEL_RENDER_CACHE_SIZE)
+def _window_image_cached(token: str, texture_variant: int, size: int) -> Image.Image:
+    metadata = texture_metadata_from_token(token)
     spec = _window_spec(metadata)
     rng = random.Random(_seed(f"window:{token}:{texture_variant}"))
     native = UPSTREAM_TEXTURE_CANONICAL_SIZE
-    return _canonical_image(_upstream._render_window(spec, rng, native), size)
+    return _canonical_image(_upstream._render_window(spec, rng, native), int(size))
 
 
-def _window_frame_image(metadata: Mapping[str, Any], token: str, texture_variant: int, size: int) -> Image.Image:
+def _window_image(metadata: Mapping[str, Any], token: str, texture_variant: int, size: int) -> Image.Image:
+    # Metadata is already encoded in token. Keeping this compatibility wrapper
+    # avoids making the cache key depend on an unhashable Mapping.
+    del metadata
+    return _window_image_cached(token, int(texture_variant), int(size))
+
+
+@lru_cache(maxsize=32)
+def _window_frame_image_cached(token: str, texture_variant: int, size: int) -> Image.Image:
+    metadata = texture_metadata_from_token(token)
     spec = _window_spec(metadata)
     rng = random.Random(_seed(f"window-frame:{token}:{texture_variant}"))
     native = UPSTREAM_TEXTURE_CANONICAL_SIZE
-    return _canonical_image(_upstream._render_window_frame(spec, rng, native), size)
+    return _canonical_image(_upstream._render_window_frame(spec, rng, native), int(size))
 
 
-def _door_image(
-    metadata: Mapping[str, Any], token: str, texture_variant: int, size: int,
-    *, family: str, outbuilding_kind: str = "",
+def _window_frame_image(metadata: Mapping[str, Any], token: str, texture_variant: int, size: int) -> Image.Image:
+    del metadata
+    return _window_frame_image_cached(token, int(texture_variant), int(size))
+
+
+@lru_cache(maxsize=_MODEL_RENDER_CACHE_SIZE)
+def _door_image_cached(
+    token: str,
+    texture_variant: int,
+    size: int,
+    family: str,
+    outbuilding_kind: str,
 ) -> Image.Image:
+    metadata = texture_metadata_from_token(token)
     door = metadata.get("door") or {}
     if not isinstance(door, Mapping):
         door = {}
@@ -114,7 +155,17 @@ def _door_image(
     rng = random.Random(_seed(f"door:{token}:{texture_variant}:{family}:{outbuilding_kind}"))
     native = UPSTREAM_TEXTURE_CANONICAL_SIZE
     return _canonical_image(
-        _upstream._render_door(spec, family, outbuilding_kind, rng, native), size
+        _upstream._render_door(spec, family, outbuilding_kind, rng, native), int(size)
+    )
+
+
+def _door_image(
+    metadata: Mapping[str, Any], token: str, texture_variant: int, size: int,
+    *, family: str, outbuilding_kind: str = "",
+) -> Image.Image:
+    del metadata
+    return _door_image_cached(
+        token, int(texture_variant), int(size), str(family), str(outbuilding_kind)
     )
 
 
