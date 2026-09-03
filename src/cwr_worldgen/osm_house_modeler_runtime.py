@@ -24,8 +24,10 @@ from .osm_house_modeler_full_style import (
     resolve_style,
     split_texture_token,
     tint_texture,
+    texture_metadata_from_token,
     visual_style_alias,
 )
+from .osm_house_modeler_fidelity import render_modeler_facade_texture
 
 _STYLE_STATE = threading.local()
 _ORIGINAL_KEY_FOR = None
@@ -469,7 +471,28 @@ def _styled_image_wrapper(name: str, position: int, *, strength: float):
             token = positional[position]
         token = str(token or "default")
         facade, material, palette = split_texture_token(token)
+        metadata = texture_metadata_from_token(token)
         alias = visual_style_alias(facade, material)
+        family = str(kwargs.get("family") or (positional[0] if positional else "residential"))
+        size = int(kwargs.get("size") or (positional[1] if len(positional) > 1 else 128) or 128)
+        texture_variant = int(kwargs.get("texture_variant") if "texture_variant" in kwargs else (positional[3] if len(positional) > 3 else 0))
+
+        if (
+            metadata
+            and name in {"_wall_texture_image", "_front_texture_image"}
+            and family in {"residential", "townhouse", "urban", "school"}
+        ):
+            plain = _ORIGINAL_TEXTURE_FUNCTIONS.get("_open_wall_texture_image")
+            if plain is not None:
+                base = plain(family, size, alias, texture_variant)
+                base = tint_texture(base, palette, strength=strength)
+                return render_modeler_facade_texture(
+                    base,
+                    metadata,
+                    family=family,
+                    front=name == "_front_texture_image",
+                )
+
         if "regional_style" in kwargs:
             kwargs = dict(kwargs)
             kwargs["regional_style"] = alias
@@ -478,7 +501,6 @@ def _styled_image_wrapper(name: str, position: int, *, strength: float):
         image = original(*positional, **kwargs)
         return tint_texture(image, palette, strength=strength)
     return wrapped
-
 
 def _roof_image_wrapper(*args, **kwargs):
     original = _ORIGINAL_TEXTURE_FUNCTIONS["_roof_texture_image"]

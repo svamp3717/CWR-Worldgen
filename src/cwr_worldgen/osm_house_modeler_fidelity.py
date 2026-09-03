@@ -19,11 +19,11 @@ from .paa import write_rgb_dxt1_paa
 
 
 DETAIL_MATERIAL_CODES: Mapping[str, str] = {
-    "masonry": "ma",
-    "wood": "wo",
-    "metal": "me",
-    "balcony": "ba",
-    "glass": "gl",
+    "masonry": "qma",
+    "wood": "qwo",
+    "metal": "qme",
+    "balcony": "qba",
+    "glass": "qgl",
 }
 
 
@@ -31,9 +31,12 @@ def detail_texture_path(reference_texture: str, kind: str) -> str:
     """Return a short CWA-safe texture path beside the normal building textures."""
     code = DETAIL_MATERIAL_CODES.get(str(kind).casefold(), DETAIL_MATERIAL_CODES["masonry"])
     reference = str(reference_texture or "")
-    prefix = reference.split("\\", 1)[0] if "\\" in reference else reference
-    if not prefix:
-        prefix = "cwr"
+    # Unit-level/legacy callers often pass a bare ``wall.paa`` instead of a
+    # world-relative CWA path. Keep those calls byte-compatible and reserve the
+    # dedicated material set for real generated addon paths.
+    if "\\" not in reference:
+        return reference
+    prefix = reference.split("\\", 1)[0]
     return rf"{prefix}\d\{code}.paa"
 
 

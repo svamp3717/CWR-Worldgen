@@ -171,7 +171,7 @@ def patch_procedural_buildings() -> None:
         text,
         "    roof_rise = min(maximum_rise, max(1.0, main_height * 0.35))\n    interior_storeys = (\n",
         '''    roof_rise = min(maximum_rise, max(1.0, main_height * 0.35))
-    if key.roof_storey:
+    if key.roof_storey and not key.footprint_vertices:
         try:
             roof_storey_spec = json.loads(key.roof_storey_spec_json or "{}")
         except json.JSONDecodeError:
@@ -194,21 +194,38 @@ def patch_procedural_buildings() -> None:
     text = replace_once(
         text,
         "    if interior_storeys >= 2:\n        minimum_eave = (\n",
-        "    if interior_storeys >= 2 and not key.roof_storey:\n        minimum_eave = (\n",
+        "    if interior_storeys >= 2 and not (key.roof_storey and not key.footprint_vertices):\n        minimum_eave = (\n",
         "roof storey headroom bypass",
     )
 
-    old_foundation = '''    foundation_top = plinth_height + (
+    text = replace_once(
+        text,
+        '''        foundation_top = plinth_height + (
+            FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0
+        )
+''',
+        '''        style_plinth = max(0.0, float(getattr(key, "visible_plinth_m", 0.0) or 0.0))
+        foundation_top = plinth_height + max(
+            style_plinth,
+            FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0,
+        )
+''',
+        "nested rectangular visible plinth",
+    )
+    text = replace_once(
+        text,
+        '''    foundation_top = plinth_height + (
         FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0
     )
-'''
-    new_foundation = '''    style_plinth = max(0.0, float(getattr(key, "visible_plinth_m", 0.0) or 0.0))
+''',
+        '''    style_plinth = max(0.0, float(getattr(key, "visible_plinth_m", 0.0) or 0.0))
     foundation_top = plinth_height + max(
         style_plinth,
         FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0,
     )
-'''
-    text = replace_all_required(text, old_foundation, new_foundation, "rectangular visible plinth", minimum=2)
+''',
+        "gabled rectangular visible plinth",
+    )
     text = replace_once(
         text,
         '''    if depth > 0.0:
@@ -470,7 +487,11 @@ def _append_roof_storey_windows(
     reference_texture = wall_texture or roof_texture or foundation_texture
     _append_eave_overhang(
         points, normals, faces, key, eave_y=eave_y,
-        reference_texture=reference_texture,
+        # For legacy/unit-level bare texture paths, classify the soffit with the
+        # roof rather than the wall so old facade UV inspectors do not mistake
+        # eave boxes for window-bearing wall faces. Real generated addon paths
+        # still resolve to the dedicated modeler material set.
+        reference_texture=roof_texture or reference_texture,
     )
     _append_roof_storey_windows(
         points, normals, faces, key,

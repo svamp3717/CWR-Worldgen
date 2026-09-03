@@ -7,6 +7,7 @@ Roadway/Memory/Paths LODs and its enterable-building implementation.
 """
 from __future__ import annotations
 
+import base64
 from functools import lru_cache
 from hashlib import sha256
 import json
@@ -176,7 +177,7 @@ def key_fields(choice: StyleChoice) -> dict[str, object]:
         "door_corner_clearance_m": round(max(0.0, _number(door.get("corner_clearance_m"), 0.0)), 3),
         "door_window_clearance_m": round(max(0.0, _number(door.get("keep_clear_of_windows_m"), 0.0)), 3),
         "door_type": _text(door, "type"),
-        "door_material": _text(door, "material"),
+        "door_material": (_text(door, "material") or next((str(v) for v in door.get("materials", ()) if str(v).strip()), "")),
         "roof_storey": bool(choice.roof_storey),
         "roof_storey_probability": round(max(0.0, min(1.0, float(choice.roof_storey_probability or 0.0))), 4),
         "roof_storey_windows_per_gable": max(0, int(_number(roof_storey.get("windows_per_gable"), 0))),
@@ -186,9 +187,39 @@ def key_fields(choice: StyleChoice) -> dict[str, object]:
     }
 
 
+def _texture_metadata(choice: StyleChoice) -> dict[str, Any]:
+    window = dict(choice.window_spec or {})
+    door = dict(choice.door_spec or {})
+    door_material = str(door.get("material") or next(
+        (value for value in door.get("materials", ()) if str(value).strip()), ""
+    ))
+    return {
+        "window": {
+            "width_m": _number(window.get("width_m"), 0.0),
+            "height_m": _number(window.get("height_m"), 0.0),
+            "sill_height_m": _number(window.get("sill_height_m"), 0.0),
+            "target_bay_spacing_m": _number(window.get("target_bay_spacing_m"), 0.0),
+            "density_multiplier": _number(window.get("density_multiplier"), 1.0),
+            "type": _text(window, "type"),
+            "placement_style": _text(window, "placement_style"),
+            "frame_material": _text(window, "frame_material"),
+        },
+        "door": {
+            "width_m": _number(door.get("primary_width_m"), 0.0),
+            "height_m": _number(door.get("primary_height_m"), 0.0),
+            "type": _text(door, "type"),
+            "material": door_material,
+        },
+    }
+
+
 def texture_style_token(choice: StyleChoice) -> str:
     palette = ",".join(str(value).strip() for value in choice.colour_palette[:6])
-    return "|".join((str(choice.facade_style or "default"), str(choice.wall_material or ""), palette))
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(_texture_metadata(choice), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    material = f"{str(choice.wall_material or '')}~{encoded}"
+    return "|".join((str(choice.facade_style or "default"), material, palette))
 
 
 def roof_texture_token(roof_style: str, roof_material: str, palette: tuple[str, ...] = ()) -> str:
@@ -198,10 +229,26 @@ def roof_texture_token(roof_style: str, roof_material: str, palette: tuple[str, 
 def split_texture_token(value: str) -> tuple[str, str, tuple[str, ...]]:
     parts = str(value or "default").split("|", 2)
     facade = parts[0] or "default"
-    material = parts[1] if len(parts) > 1 else ""
+    material_blob = parts[1] if len(parts) > 1 else ""
+    material = material_blob.split("~", 1)[0]
     palette = tuple(v for v in (parts[2].split(",") if len(parts) > 2 else ()) if v)
     return facade, material, palette
 
+
+def texture_metadata_from_token(value: str) -> dict[str, Any]:
+    parts = str(value or "").split("|", 2)
+    if len(parts) < 2 or "~" not in parts[1]:
+        return {}
+    encoded = parts[1].split("~", 1)[1]
+    if not encoded:
+        return {}
+    try:
+        encoded += "=" * (-len(encoded) % 4)
+        decoded = base64.urlsafe_b64decode(encoded.encode("ascii")).decode("utf-8")
+        value = json.loads(decoded)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return dict(value) if isinstance(value, Mapping) else {}
 
 def visual_style_alias(style: str, material: str = "") -> str:
     value = f"{style} {material}".casefold().replace("-", "_")

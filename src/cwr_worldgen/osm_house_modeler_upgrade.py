@@ -15,12 +15,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+import json
 import math
 import threading
 from typing import Callable
 
 from . import procedural_buildings as _pb
 from .osm_house_modeler_full_style import detail_spec_from_key
+from .osm_house_modeler_fidelity import detail_texture_path, material_texture_path
 
 OSM_HOUSE_MODELER_SOURCE_VERSION = "0.13.6"
 OSM_HOUSE_MODELER_SOURCE_URL = "https://github.com/svamp3717/osm-house-modeler"
@@ -395,6 +397,149 @@ def _roof_base_y(
         return max(2.4, _pb._main_building_height(key) - 1.2)
 
 
+def _outer_eave_frames(key: _pb.BuildingVariantKey):
+    if not key.footprint_vertices:
+        hw, hl = key.width_m * 0.5, key.length_m * 0.5
+        return (
+            ((0.0, -hl), (1.0, 0.0), (0.0, -1.0), key.width_m),
+            ((hw, 0.0), (0.0, 1.0), (1.0, 0.0), key.length_m),
+            ((0.0, hl), (-1.0, 0.0), (0.0, 1.0), key.width_m),
+            ((-hw, 0.0), (0.0, -1.0), (-1.0, 0.0), key.length_m),
+        )
+    ring = tuple(key.footprint_vertices)
+    result = []
+    for index, a in enumerate(ring):
+        b = ring[(index + 1) % len(ring)]
+        vx, vz = b[0] - a[0], b[1] - a[1]
+        span = math.hypot(vx, vz)
+        if span <= 1.0e-6:
+            continue
+        tangent = (vx / span, vz / span)
+        outward = (tangent[1], -tangent[0])
+        result.append((((a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5), tangent, outward, span))
+    return tuple(result)
+
+
+def _append_eave_overhang(
+    points, normals, faces, key, *, eave_y: float, reference_texture: str
+) -> None:
+    overhang = max(0.0, min(1.5, float(getattr(key, "eave_overhang_m", 0.0) or 0.0)))
+    if overhang <= 0.03 or key.roof_style in {"flat", "dome", "onion"}:
+        return
+    material = material_texture_path(reference_texture, key.roof_material, "wood")
+    for anchor, tangent, outward, span in _outer_eave_frames(key):
+        centre = (
+            anchor[0] + outward[0] * overhang * 0.5,
+            anchor[1] + outward[1] * overhang * 0.5,
+        )
+        _add_box(
+            points, normals, faces,
+            center=centre, axis_width=tangent, axis_depth=outward,
+            width=span + overhang * 2.0, depth=overhang,
+            y0=eave_y - 0.07, y1=eave_y + 0.02, texture=material,
+        )
+        fascia = (
+            anchor[0] + outward[0] * max(0.0, overhang - 0.025),
+            anchor[1] + outward[1] * max(0.0, overhang - 0.025),
+        )
+        _add_box(
+            points, normals, faces,
+            center=fascia, axis_width=tangent, axis_depth=outward,
+            width=span + overhang * 2.0, depth=0.05,
+            y0=eave_y - 0.13, y1=eave_y + 0.02, texture=material,
+        )
+
+
+def _roof_storey_spec(key: _pb.BuildingVariantKey) -> dict:
+    try:
+        value = json.loads(str(key.roof_storey_spec_json or "{}"))
+    except json.JSONDecodeError:
+        return {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _add_gable_window(
+    points, normals, faces, *, centre_x: float, z: float, y0: float, width: float,
+    height: float, glass_texture: str, trim_texture: str, front: bool,
+) -> None:
+    half = width * 0.5
+    y1 = y0 + height
+    normal_sign = -1.0 if front else 1.0
+    z_face = z + normal_sign * 0.018
+    if front:
+        coordinates = (
+            (centre_x - half, y0, z_face),
+            (centre_x - half, y1, z_face),
+            (centre_x + half, y1, z_face),
+            (centre_x + half, y0, z_face),
+        )
+    else:
+        coordinates = (
+            (centre_x + half, y0, z_face),
+            (centre_x + half, y1, z_face),
+            (centre_x - half, y1, z_face),
+            (centre_x - half, y0, z_face),
+        )
+    _add_quad(points, normals, faces, coordinates, glass_texture, u_scale=1.0, v_scale=1.0)
+    frame = 0.065
+    for cx, cy, fw, fh in (
+        (centre_x - half - frame * 0.5, y0 + height * 0.5, frame, height + frame * 2.0),
+        (centre_x + half + frame * 0.5, y0 + height * 0.5, frame, height + frame * 2.0),
+        (centre_x, y0 - frame * 0.5, width + frame * 2.0, frame),
+        (centre_x, y1 + frame * 0.5, width + frame * 2.0, frame),
+    ):
+        _add_box(
+            points, normals, faces,
+            center=(cx, z_face + normal_sign * 0.018),
+            axis_width=(1.0, 0.0), axis_depth=(0.0, normal_sign),
+            width=fw, depth=0.035, y0=cy - fh * 0.5, y1=cy + fh * 0.5,
+            texture=trim_texture,
+        )
+
+
+def _append_roof_storey_windows(
+    points, normals, faces, key, *, roof_pitch_degrees: float, reference_texture: str
+) -> None:
+    if not key.roof_storey or key.roof_style != "gabled" or key.footprint_vertices:
+        return
+    spec = _roof_storey_spec(key)
+    eave_y, roof_rise, _ = _pb._gabled_profile(key, roof_pitch_degrees)
+    minimum_roof = max(0.0, float(spec.get("minimum_roof_height_m", 0.0) or 0.0))
+    if roof_rise + 1.0e-6 < minimum_roof:
+        return
+    sill_above = max(0.20, float(spec.get("sill_above_eave_m", 0.42) or 0.42))
+    top_clearance = max(0.18, float(spec.get("top_clearance_m", 0.34) or 0.34))
+    side_clearance = max(0.15, float(spec.get("side_clearance_m", 0.30) or 0.30))
+    width = max(0.45, float(key.window_width_m or 1.0) * float(spec.get("window_width_scale", 0.82) or 0.82))
+    height = max(0.50, float(key.window_height_m or 1.1) * float(spec.get("window_height_scale", 0.78) or 0.78))
+    y0 = eave_y + sill_above
+    height = min(height, max(0.45, eave_y + roof_rise - top_clearance - y0))
+    if height < 0.45:
+        return
+    y1 = y0 + height
+    # The gable narrows linearly towards the ridge. Require the whole window,
+    # including trim, to fit at its top edge rather than clipping the roof slope.
+    half_width = key.width_m * 0.5
+    available_half = half_width * max(0.0, 1.0 - (y1 - eave_y) / max(0.01, roof_rise))
+    usable_half = max(0.0, available_half - side_clearance)
+    count = max(1, min(2, int(key.roof_storey_windows_per_gable or spec.get("windows_per_gable", 1) or 1)))
+    if count == 2 and usable_half * 2.0 < width * 2.3:
+        count = 1
+    if usable_half * 2.0 < width + 0.12:
+        return
+    centres = (0.0,) if count == 1 else (-min(usable_half * 0.52, width * 0.65), min(usable_half * 0.52, width * 0.65))
+    glass = detail_texture_path(reference_texture, "glass")
+    trim = material_texture_path(reference_texture, key.window_frame_material, "wood")
+    half_length = key.length_m * 0.5
+    for front, z in ((True, -half_length), (False, half_length)):
+        for centre_x in centres:
+            _add_gable_window(
+                points, normals, faces, centre_x=centre_x, z=z, y0=y0,
+                width=width, height=height, glass_texture=glass,
+                trim_texture=trim, front=front,
+            )
+
+
 def _append_details(
     lod: _pb._Lod,
     key: _pb.BuildingVariantKey,
@@ -413,8 +558,12 @@ def _append_details(
 ) -> _pb._Lod:
     plan = detail_plan_for_key(key, foundation_depth=foundation_depth)
     detail_spec = detail_spec_from_key(key)
+    core_style_geometry = (
+        (float(getattr(key, "eave_overhang_m", 0.0) or 0.0) > 0.03 and key.roof_style not in {"flat", "dome", "onion"})
+        or (key.roof_storey and key.roof_style == "gabled" and not key.footprint_vertices)
+    )
     if (
-        not plan.enabled
+        (not plan.enabled and not core_style_geometry)
         or frame is None
         or abs(lod.resolution - 1.0) > 1.0e-6
     ):
@@ -430,10 +579,36 @@ def _append_details(
     # is preferred; roof material is the safe fallback when no plinth exists.
     detail_texture = foundation_texture or roof_texture or wall_texture
     eave_y = _roof_base_y(key, roof_pitch_degrees)
+    reference_texture = wall_texture or roof_texture or foundation_texture
+    generated_material_paths = "\\" in str(reference_texture or "")
+
+    def feature_material(material, kind: str, legacy_texture: str) -> str:
+        if generated_material_paths:
+            return material_texture_path(reference_texture, material, kind)
+        return legacy_texture
+
+    def feature_detail(kind: str, legacy_texture: str) -> str:
+        if generated_material_paths:
+            return detail_texture_path(reference_texture, kind)
+        return legacy_texture
+    _append_eave_overhang(
+        points, normals, faces, key, eave_y=eave_y,
+        # For legacy/unit-level bare texture paths, classify the soffit with the
+        # roof rather than the wall so old facade UV inspectors do not mistake
+        # eave boxes for window-bearing wall faces. Real generated addon paths
+        # still resolve to the dedicated modeler material set.
+        reference_texture=roof_texture or reference_texture,
+    )
+    _append_roof_storey_windows(
+        points, normals, faces, key,
+        roof_pitch_degrees=roof_pitch_degrees,
+        reference_texture=reference_texture,
+    )
 
     if plan.stairs:
         stair_spec = detail_spec.get("stairs") or {}
         door_half, _door_height, _pivot = _pb._door_dimensions(key)
+        stair_texture = feature_material(stair_spec.get("material"), "masonry", foundation_texture or roof_texture or detail_texture)
         rise = max(0.08, float(stair_spec.get("step_rise_m", 0.16) or 0.16))
         count = max(
             1,
@@ -463,11 +638,17 @@ def _append_details(
                 depth=tread * 0.98,
                 y0=-max(0.08, foundation_depth),
                 y1=-max(0.0, foundation_depth - height),
-                texture=detail_texture,
+                texture=stair_texture,
             )
 
     if plan.porch:
         porch_spec = detail_spec.get("porches") or {}
+        porch_texture = feature_material(porch_spec.get("material"), "wood", foundation_texture or roof_texture or detail_texture)
+        porch_canopy_texture = (
+            material_texture_path(reference_texture, porch_spec.get("material"), "metal")
+            if "metal" in str(porch_spec.get("material", "")).casefold() or "steel" in str(porch_spec.get("material", "")).casefold()
+            else roof_texture
+        )
         width = min(
             max(float(porch_spec.get("width_m", 0.0) or 0.0), 2.2, frontage * 0.26),
             max(2.2, frontage - 0.45),
@@ -490,7 +671,7 @@ def _append_details(
             depth=depth,
             y0=0.015,
             y1=0.085,
-            texture=detail_texture,
+            texture=porch_texture,
         )
         canopy_y = min(max(2.25, eave_y - 0.55), 2.65)
         _add_box(
@@ -504,7 +685,7 @@ def _append_details(
             depth=depth + 0.12,
             y0=canopy_y,
             y1=canopy_y + 0.11,
-            texture=roof_texture,
+            texture=porch_canopy_texture,
         )
         post_offset = max(0.25, width * 0.5 - 0.12)
         front = (
@@ -527,11 +708,12 @@ def _append_details(
                 depth=0.10,
                 y0=0.08,
                 y1=canopy_y,
-                texture=detail_texture,
+                texture=porch_texture,
             )
 
     if plan.balcony_count:
         balcony_spec = detail_spec.get("balconies") or {}
+        balcony_texture = feature_detail("balcony", roof_texture or foundation_texture or detail_texture)
         floor_height = min(
             3.1,
             max(2.55, eave_y / max(2, int(round(eave_y / 3.0)))),
@@ -560,7 +742,7 @@ def _append_details(
                 depth=depth,
                 y0=y - 0.11,
                 y1=y,
-                texture=foundation_texture or wall_texture,
+                texture=balcony_texture,
             )
             rail_y0, rail_y1 = y, y + max(0.55, float(balcony_spec.get("railing_height_m", 0.95) or 0.95))
             front = (
@@ -578,7 +760,7 @@ def _append_details(
                 depth=0.055,
                 y0=rail_y1 - 0.08,
                 y1=rail_y1,
-                texture=roof_texture,
+                texture=balcony_texture,
             )
             post_spacing = max(0.45, float(balcony_spec.get("post_spacing_m", 1.2) or 1.2))
             posts = max(3, int(math.ceil(width / post_spacing)) + 1)
@@ -599,11 +781,12 @@ def _append_details(
                     depth=0.05,
                     y0=rail_y0,
                     y1=rail_y1,
-                    texture=roof_texture,
+                    texture=balcony_texture,
                 )
 
     if plan.chimney_count:
         chimney_spec = detail_spec.get("chimneys") or {}
+        chimney_texture = feature_material(chimney_spec.get("material"), "masonry", foundation_texture or roof_texture or detail_texture)
         chimney_width = max(0.20, float(chimney_spec.get("width_m", 0.48) or 0.48))
         chimney_depth = max(0.20, float(chimney_spec.get("depth_m", 0.40) or 0.40))
         chimney_height = max(0.35, float(chimney_spec.get("height_m", 1.15) or 1.15))
@@ -634,7 +817,7 @@ def _append_details(
                 depth=chimney_depth,
                 y0=base_y,
                 y1=base_y + chimney_height,
-                texture=detail_texture,
+                texture=chimney_texture,
             )
             _add_box(
                 points,
@@ -647,11 +830,12 @@ def _append_details(
                 depth=chimney_depth + 0.07,
                 y0=base_y + chimney_height,
                 y1=base_y + chimney_height + 0.08,
-                texture=detail_texture,
+                texture=chimney_texture,
             )
 
     if plan.gutters:
         rainwater_spec = detail_spec.get("rainwater") or {}
+        rainwater_texture = feature_material(rainwater_spec.get("material"), "metal", roof_texture or foundation_texture or detail_texture)
         gutter = max(0.04, float(rainwater_spec.get("gutter_width_m", 0.085) or 0.085))
         downspout_width = max(0.035, float(rainwater_spec.get("downspout_width_m", 0.075) or 0.075))
         # Rectangular variants get exact eave gutters. Polygon-native variants
@@ -675,7 +859,7 @@ def _append_details(
                     depth=gutter,
                     y0=eave_y - gutter * 0.45,
                     y1=eave_y + gutter * 0.45,
-                    texture=roof_texture,
+                    texture=rainwater_texture,
                 )
             down_positions = (
                 (-half_width - 0.04, -half_length - 0.04),
@@ -697,7 +881,7 @@ def _append_details(
                 depth=gutter,
                 y0=eave_y - gutter * 0.45,
                 y1=eave_y + gutter * 0.45,
-                texture=roof_texture,
+                texture=rainwater_texture,
             )
             half = frontage * 0.5
             down_positions = tuple(
@@ -723,7 +907,7 @@ def _append_details(
                 depth=downspout_width,
                 y0=-0.04,
                 y1=eave_y,
-                texture=roof_texture,
+                texture=rainwater_texture,
             )
 
     added_points = len(points) - len(lod.points)

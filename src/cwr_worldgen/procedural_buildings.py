@@ -3275,6 +3275,22 @@ def _gabled_profile(
     main_height = _main_building_height(key)
     maximum_rise = half_width * math.tan(math.radians(roof_pitch_degrees))
     roof_rise = min(maximum_rise, max(1.0, main_height * 0.35))
+    if key.roof_storey and not key.footprint_vertices:
+        try:
+            roof_storey_spec = json.loads(key.roof_storey_spec_json or "{}")
+        except json.JSONDecodeError:
+            roof_storey_spec = {}
+        if not isinstance(roof_storey_spec, dict):
+            roof_storey_spec = {}
+        minimum_roof_height = max(
+            1.2,
+            float(roof_storey_spec.get("minimum_roof_height_m", 2.2) or 2.2),
+        )
+        usable_roof_height = max(0.8, main_height - INTERIOR_SECOND_STOREY_FLOOR_Y_M)
+        roof_rise = min(
+            maximum_rise,
+            max(roof_rise, min(minimum_roof_height, usable_roof_height)),
+        )
     interior_storeys = (
         _interior_storey_count(key)
         if interior_storeys_override is None
@@ -3289,7 +3305,7 @@ def _gabled_profile(
             roof_rise,
             max(0.55, main_height - minimum_visible_eave),
         )
-    if interior_storeys >= 2:
+    if interior_storeys >= 2 and not (key.roof_storey and not key.footprint_vertices):
         minimum_eave = (
             INTERIOR_SECOND_STOREY_FLOOR_Y_M
             + INTERIOR_SECOND_STOREY_MINIMUM_HEADROOM_M
@@ -4401,6 +4417,14 @@ def _interior_roadway_lod(
         _ROADWAY_LOD,
     )
 
+def _uses_light_window_trim(key: BuildingVariantKey) -> bool:
+    frame = str(getattr(key, "window_frame_material", "") or "").casefold()
+    return (
+        key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+        or any(token in frame for token in ("painted", "white", "upvc", "timber"))
+    )
+
+
 def _main_building_height(key: BuildingVariantKey) -> float:
     """Return the wall/roof height used by the main building mass.
 
@@ -5216,7 +5240,7 @@ def _visual_lod(
             )
             if (
                 window_trim_texture
-                and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+                and _uses_light_window_trim(key)
             ):
                 points, faces = _add_white_window_trim(
                     key,
@@ -5233,7 +5257,7 @@ def _visual_lod(
                 texture=(
                     window_trim_texture
                     if window_trim_texture
-                    and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+                    and _uses_light_window_trim(key)
                     else interior_texture
                 ),
             )
@@ -5253,8 +5277,10 @@ def _visual_lod(
         plinth_height = max(0.0, float(church_plinth_height)) if key.family == "church" else 0.0
         if plinth_height > 0.0:
             points = tuple((x, y + plinth_height, z) for x, y, z in points)
-        foundation_top = plinth_height + (
-            FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0
+        style_plinth = max(0.0, float(getattr(key, "visible_plinth_m", 0.0) or 0.0))
+        foundation_top = plinth_height + max(
+            style_plinth,
+            FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0,
         )
         points, faces = _add_foundation_skirt(
             points, faces, half_width=half_width, half_length=half_length,
@@ -5599,7 +5625,7 @@ def _visual_lod(
         )
         if (
             window_trim_texture
-            and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+            and _uses_light_window_trim(key)
         ):
             points, faces = _add_white_window_trim(
                 key,
@@ -5616,7 +5642,7 @@ def _visual_lod(
             texture=(
                 window_trim_texture
                 if window_trim_texture
-                and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+                and _uses_light_window_trim(key)
                 else interior_texture
             ),
         )
@@ -5703,8 +5729,10 @@ def _visual_lod(
     plinth_height = max(0.0, float(church_plinth_height)) if key.family == "church" else 0.0
     if plinth_height > 0.0:
         points = tuple((x, y + plinth_height, z) for x, y, z in points)
-    foundation_top = plinth_height + (
-        FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0
+    style_plinth = max(0.0, float(getattr(key, "visible_plinth_m", 0.0) or 0.0))
+    foundation_top = plinth_height + max(
+        style_plinth,
+        FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0,
     )
     points, faces = _add_foundation_skirt(
         points, faces, half_width=half_width, half_length=half_length,
@@ -6566,7 +6594,10 @@ def _polygon_native_visual_lod(
 
     depth = max(0.0, float(foundation_depth))
     if depth > 0.0:
-        foundation_top = FOUNDATION_VISIBLE_REVEAL_M
+        foundation_top = max(
+            FOUNDATION_VISIBLE_REVEAL_M,
+            max(0.0, float(getattr(key, "visible_plinth_m", 0.0) or 0.0)),
+        )
         for ring_index, ring in enumerate(rings):
             for edge_index in range(len(ring)):
                 add_edge_wall(
@@ -8862,6 +8893,9 @@ class ProceduralBuildingLibrary:
         selected = sorted(self._usage)
         model_assets: list[GeneratedBuildingAsset] = []
         texture_files: list[str] = []
+        if selected:
+            from .osm_house_modeler_fidelity import emit_detail_material_textures
+            texture_files.extend(emit_detail_material_textures(self, source_dir))
         # Emit only texture variants actually referenced by generated P3Ds.
         # Previous releases wrote all ten palette variants for every used style
         # even when the selected model set referenced only one or two. That made
@@ -8888,7 +8922,7 @@ class ProceduralBuildingLibrary:
         uses_white_window_trim = any(
             key.interiors
             and key.family not in UTILITY_INTERIOR_FAMILIES
-            and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+            and _uses_light_window_trim(key)
             for key in selected
         )
         used_door_variants: dict[str, tuple[str, str, int, str]] = {}
@@ -9191,7 +9225,7 @@ class ProceduralBuildingLibrary:
                     self._white_window_trim_texture()
                     if key.interiors
                     and key.family not in UTILITY_INTERIOR_FAMILIES
-                    and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+                    and _uses_light_window_trim(key)
                     else None
                 ),
                 plain_wall_texture=(
