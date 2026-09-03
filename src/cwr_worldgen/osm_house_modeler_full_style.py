@@ -194,6 +194,10 @@ def _texture_metadata(choice: StyleChoice) -> dict[str, Any]:
         (value for value in door.get("materials", ()) if str(value).strip()), ""
     ))
     return {
+        # Part of the encoded texture token, hence part of both texture and P3D
+        # cache identity. Bump whenever the bridge changes pixel-coordinate
+        # semantics so an old PAA cannot be restored into a newly fixed build.
+        "texture_renderer_revision": 2,
         "window": {
             "width_m": _number(window.get("width_m"), 0.0),
             "height_m": _number(window.get("height_m"), 0.0),
@@ -249,6 +253,7 @@ def texture_metadata_from_token(value: str) -> dict[str, Any]:
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
         return {}
     return dict(value) if isinstance(value, Mapping) else {}
+
 
 def visual_style_alias(style: str, material: str = "") -> str:
     value = f"{style} {material}".casefold().replace("-", "_")
