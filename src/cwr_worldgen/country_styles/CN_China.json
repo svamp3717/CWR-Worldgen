@@ -7,7 +7,7 @@
   "iso_numeric": "156",
   "parent_region_identifier": "east_asia",
   "parent_region_name": "East Asia",
-  "detail_revision": "2026-08-country-exterior-details-v1",
+  "detail_revision": "2026-09-country-utility-materials-v1",
   "detail_level": "country-expanded-curated",
   "data_provenance": {
     "architectural_basis": "curated national tuning over detailed CWR region",
@@ -1225,7 +1225,177 @@
             "muted red",
             "natural timber"
           ],
-          "trim_guidance": "tile/stone surrounds, restrained painted trim and projecting sun/rain hoods"
+          "trim_guidance": "tile/stone surrounds, restrained painted trim and projecting sun/rain hoods",
+          "building_class_overrides": {
+            "barn": {
+              "wall_materials": [
+                {
+                  "material": "utility painted timber board cladding",
+                  "weight": 60
+                },
+                {
+                  "material": "utility structural brick",
+                  "weight": 28
+                },
+                {
+                  "material": "utility precast concrete panels",
+                  "weight": 8
+                },
+                {
+                  "material": "utility rendered masonry wall",
+                  "weight": 5
+                }
+              ],
+              "roof_materials": [
+                {
+                  "material": "utility clay/concrete tile roof",
+                  "weight": 24
+                },
+                {
+                  "material": "utility membrane/bituminous roof",
+                  "weight": 6
+                }
+              ],
+              "selection_note": "Class-specific utility material pool. Explicit OSM building:material/roof:material tags override this default."
+            },
+            "shed": {
+              "wall_materials": [
+                {
+                  "material": "utility precast concrete panels",
+                  "weight": 28
+                },
+                {
+                  "material": "utility structural brick",
+                  "weight": 12
+                },
+                {
+                  "material": "utility rendered masonry wall",
+                  "weight": 8
+                }
+              ],
+              "roof_materials": [
+                {
+                  "material": "utility membrane/bituminous roof",
+                  "weight": 24
+                },
+                {
+                  "material": "utility clay/concrete tile roof",
+                  "weight": 15
+                }
+              ],
+              "selection_note": "Class-specific utility material pool. Explicit OSM building:material/roof:material tags override this default."
+            },
+            "garage": {
+              "wall_materials": [
+                {
+                  "material": "utility precast concrete panels",
+                  "weight": 60
+                },
+                {
+                  "material": "utility structural brick",
+                  "weight": 28
+                },
+                {
+                  "material": "utility rendered masonry wall",
+                  "weight": 18
+                }
+              ],
+              "roof_materials": [
+                {
+                  "material": "utility membrane/bituminous roof",
+                  "weight": 40
+                },
+                {
+                  "material": "utility clay/concrete tile roof",
+                  "weight": 15
+                }
+              ],
+              "selection_note": "Class-specific utility material pool. Explicit OSM building:material/roof:material tags override this default."
+            },
+            "warehouse": {
+              "wall_materials": [
+                {
+                  "material": "utility precast concrete panels",
+                  "weight": 42
+                },
+                {
+                  "material": "utility structural brick",
+                  "weight": 28
+                },
+                {
+                  "material": "utility rendered masonry wall",
+                  "weight": 18
+                }
+              ],
+              "roof_materials": [
+                {
+                  "material": "utility membrane/bituminous roof",
+                  "weight": 40
+                },
+                {
+                  "material": "utility clay/concrete tile roof",
+                  "weight": 10
+                }
+              ],
+              "selection_note": "Class-specific utility material pool. Explicit OSM building:material/roof:material tags override this default."
+            },
+            "hangar": {
+              "wall_materials": [
+                {
+                  "material": "utility precast concrete panels",
+                  "weight": 42
+                },
+                {
+                  "material": "utility structural brick",
+                  "weight": 18
+                },
+                {
+                  "material": "utility rendered masonry wall",
+                  "weight": 12
+                }
+              ],
+              "roof_materials": [
+                {
+                  "material": "utility membrane/bituminous roof",
+                  "weight": 40
+                },
+                {
+                  "material": "utility clay/concrete tile roof",
+                  "weight": 10
+                }
+              ],
+              "selection_note": "Class-specific utility material pool. Explicit OSM building:material/roof:material tags override this default."
+            },
+            "industrial": {
+              "wall_materials": [
+                {
+                  "material": "utility precast concrete panels",
+                  "weight": 60
+                },
+                {
+                  "material": "utility structural brick",
+                  "weight": 28
+                },
+                {
+                  "material": "utility rendered masonry wall",
+                  "weight": 18
+                }
+              ],
+              "roof_materials": [
+                {
+                  "material": "utility membrane/bituminous roof",
+                  "weight": 40
+                },
+                {
+                  "material": "utility clay/concrete tile roof",
+                  "weight": 10
+                }
+              ],
+              "selection_note": "Class-specific utility material pool. Explicit OSM building:material/roof:material tags override this default."
+            }
+          },
+          "utility_materials_revision": "2026-09-country-utility-materials-v1",
+          "utility_materials_provenance": "Explicit country/context class pools derived from this profile's curated material/facade vocabulary; parent-region materials are used only when the country context omits them."
         },
         "geometry_defaults": {
           "storey_height_m": {
@@ -2413,7 +2583,177 @@
             "muted red",
             "natural timber"
           ],
-          "trim_guidance": "tile/stone surrounds, restrained painted trim and projecting sun/rain hoods"
+          "trim_guidance": "tile/stone surrounds, restrained painted trim and projecting sun/rain hoods",
+          "building_class_overrides": {
+            "barn": {
+              "wall_materials": [
+                {
+                  "material": "utility painted timber board cladding",
+                  "weight": 60
+                },
+                {
+                  "material": "utility structural brick",
+                  "weight": 28
+                },
+                {
+                  "material": "utility precast concrete panels",
+                  "weight": 8
+                },
+                {
+                  "material": "utility rendered masonry wall",
+                  "weight": 5
+                }
+              ],
+              "roof_materials": [
+                {
+                  "material": "utility clay/concrete tile roof",
+                  "weight": 24
+                },
+                {
+                  "material": "utility membrane/bituminous roof",
+                  "weight": 6
+                }
+              ],
+              "selection_note": "Class-specific utility material pool. Explicit OSM building:material/roof:material tags override this default."
+            },
+            "shed": {
+              "wall_materials": [
+                {
+                  "material": "utility precast concrete panels",
+                  "weight": 28
+                },
+                {
+                  "material": "utility structural brick",
+                  "weight": 12
+                },
+                {
+                  "material": "utility rendered masonry wall",
+                  "weight": 8
+                }
+              ],
+              "roof_materials": [
+                {
+                  "material": "utility membrane/bituminous roof",
+                  "weight": 24
+                },
+                {
+                  "material": "utility clay/concrete tile roof",
+                  "weight": 15
+                }
+              ],
+              "selection_note": "Class-specific utility material pool. Explicit OSM building:material/roof:material tags override this default."
+            },
+            "garage": {
+              "wall_materials": [
+                {
+                  "material": "utility precast concrete panels",
+                  "weight": 60
+                },
+                {
+                  "material": "utility structural brick",
+                  "weight": 28
+                },
+                {
+                  "material": "utility rendered masonry wall",
+                  "weight": 18
+                }
+              ],
+              "roof_materials": [
+                {
+                  "material": "utility membrane/bituminous roof",
+                  "weight": 40
+                },
+                {
+                  "material": "utility clay/concrete tile roof",
+                  "weight": 15
+                }
+              ],
+              "selection_note": "Class-specific utility material pool. Explicit OSM building:material/roof:material tags override this default."
+            },
+            "warehouse": {
+              "wall_materials": [
+                {
+                  "material": "utility precast concrete panels",
+                  "weight": 42
+                },
+                {
+                  "material": "utility structural brick",
+                  "weight": 28
+                },
+                {
+                  "material": "utility rendered masonry wall",
+                  "weight": 18
+                }
+              ],
+              "roof_materials": [
+                {
+                  "material": "utility membrane/bituminous roof",
+                  "weight": 40
+                },
+                {
+                  "material": "utility clay/concrete tile roof",
+                  "weight": 10
+                }
+              ],
+              "selection_note": "Class-specific utility material pool. Explicit OSM building:material/roof:material tags override this default."
+            },
+            "hangar": {
+              "wall_materials": [
+                {
+                  "material": "utility precast concrete panels",
+                  "weight": 42
+                },
+                {
+                  "material": "utility structural brick",
+                  "weight": 18
+                },
+                {
+                  "material": "utility rendered masonry wall",
+                  "weight": 12
+                }
+              ],
+              "roof_materials": [
+                {
+                  "material": "utility membrane/bituminous roof",
+                  "weight": 40
+                },
+                {
+                  "material": "utility clay/concrete tile roof",
+                  "weight": 10
+                }
+              ],
+              "selection_note": "Class-specific utility material pool. Explicit OSM building:material/roof:material tags override this default."
+            },
+            "industrial": {
+              "wall_materials": [
+                {
+                  "material": "utility precast concrete panels",
+                  "weight": 60
+                },
+                {
+                  "material": "utility structural brick",
+                  "weight": 28
+                },
+                {
+                  "material": "utility rendered masonry wall",
+                  "weight": 18
+                }
+              ],
+              "roof_materials": [
+                {
+                  "material": "utility membrane/bituminous roof",
+                  "weight": 40
+                },
+                {
+                  "material": "utility clay/concrete tile roof",
+                  "weight": 10
+                }
+              ],
+              "selection_note": "Class-specific utility material pool. Explicit OSM building:material/roof:material tags override this default."
+            }
+          },
+          "utility_materials_revision": "2026-09-country-utility-materials-v1",
+          "utility_materials_provenance": "Explicit country/context class pools derived from this profile's curated material/facade vocabulary; parent-region materials are used only when the country context omits them."
         },
         "geometry_defaults": {
           "storey_height_m": {
