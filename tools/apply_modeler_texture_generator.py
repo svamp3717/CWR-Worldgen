@@ -25,8 +25,6 @@ def patch_buildings() -> None:
     import_anchor = "        selected = sorted(self._usage)\n        model_assets: list[GeneratedBuildingAsset] = []\n"
     import_block = "        selected = sorted(self._usage)\n        from .osm_house_modeler_texture_bridge import (\n            modeler_door_texture_image,\n            modeler_foundation_texture_image,\n            modeler_front_texture_image,\n            modeler_interior_wall_texture_image,\n            modeler_open_wall_texture_image,\n            modeler_roof_texture_image,\n            modeler_wall_texture_image,\n        )\n        model_assets: list[GeneratedBuildingAsset] = []\n"
     body = replace_once(body, import_anchor, import_block, "texture bridge imports")
-    # Replace the two names that contain ``_wall_texture_image`` first so the
-    # final base-wall replacement cannot accidentally match inside them.
     replacements = (
         (
             "_open_wall_texture_image(\n                            family,",
@@ -37,8 +35,8 @@ def patch_buildings() -> None:
             "modeler_interior_wall_texture_image(\n                            family,",
         ),
         (
-            "_wall_texture_image(\n                            family,",
-            "modeler_wall_texture_image(\n                            family,",
+            "                        _wall_texture_image(\n                            family,",
+            "                        modeler_wall_texture_image(\n                            family,",
         ),
         (
             "_foundation_texture_image(self.texture_size)",
