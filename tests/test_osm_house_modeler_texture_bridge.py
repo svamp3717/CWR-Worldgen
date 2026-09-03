@@ -3,12 +3,18 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+import random
 import tempfile
 
-from PIL import ImageStat
+from PIL import Image, ImageStat
 
+from cwr_worldgen import osm_house_modeler_textures as upstream_textures
+from cwr_worldgen.osm_house_modeler_full_style import split_texture_token
 from cwr_worldgen.osm_house_modeler_texture_bridge import (
     CWA_EXTERIOR_EXPOSURE,
+    UPSTREAM_TEXTURE_CANONICAL_SIZE,
+    _seed,
+    _wall_material_image,
     cwa_exposure_compensate,
     modeler_front_texture_image,
     modeler_roof_texture_image,
@@ -26,6 +32,7 @@ def _token(
     door_material: str = "timber",
 ) -> str:
     metadata = {
+        "texture_renderer_revision": 2,
         "window": {
             "width_m": 1.2,
             "height_m": 1.35,
@@ -55,8 +62,6 @@ def _mean_luma(image) -> float:
 
 
 def test_cwa_exposure_compensation_reduces_diffuse_brightness() -> None:
-    from PIL import Image
-
     source = Image.new("RGB", (8, 8), (220, 200, 180))
     adjusted = cwa_exposure_compensate(source)
     assert CWA_EXTERIOR_EXPOSURE < 1.0
@@ -71,6 +76,33 @@ def test_modeler_wall_uses_material_palette_and_stays_below_washed_out_range() -
     assert 80.0 < _mean_luma(image) < 165.0
     extrema = ImageStat.Stat(image).extrema
     assert any(high - low > 30 for low, high in extrema)
+
+
+def test_modeler_material_is_rendered_at_native_256_before_downsampling() -> None:
+    token = _token("western_brick", "brick", "red brick")
+    facade, material, palette = split_texture_token(token)
+    kind, base = upstream_textures._choose_wall_base(facade, facade, material, palette)
+
+    native_rng = random.Random(_seed(f"wall:{token}:3"))
+    native_pixels = upstream_textures._render_wall(
+        kind, base, native_rng, UPSTREAM_TEXTURE_CANONICAL_SIZE
+    )
+    native = Image.new(
+        "RGB", (UPSTREAM_TEXTURE_CANONICAL_SIZE, UPSTREAM_TEXTURE_CANONICAL_SIZE)
+    )
+    native.putdata(native_pixels)
+    expected = native.resize((128, 128), Image.Resampling.LANCZOS)
+
+    actual = _wall_material_image(token, 3, 128)
+    assert actual.tobytes() == expected.tobytes()
+
+    # This is the bug visible in the CWA screenshot: asking the upstream private
+    # renderer to draw directly at 128 changes all of its fixed pixel-space brick
+    # dimensions. The bridge must never regress to that output again.
+    wrong_rng = random.Random(_seed(f"wall:{token}:3"))
+    wrong = Image.new("RGB", (128, 128))
+    wrong.putdata(upstream_textures._render_wall(kind, base, wrong_rng, 128))
+    assert actual.tobytes() != wrong.tobytes()
 
 
 def test_modeler_front_composites_real_window_and_door_materials() -> None:
