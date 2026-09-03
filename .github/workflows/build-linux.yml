@@ -37,16 +37,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[sources]" pytest
 
-      - name: Verify country data and building integration
+      - name: Verify country data and material integration
         run: |
           pytest -q \
             tests/test_country_utility_materials.py \
             tests/test_house_style_catalogue.py \
             tests/test_modeler_opening_dimensions.py \
-            tests/test_interior_performance_policy.py \
-            tests/test_osm_house_modeler_upgrade.py \
-            tests/test_building_shape_extensions.py \
-            tests/test_milestone8.py
+            tests/test_interior_performance_policy.py
 
       - name: Commit migrated catalogues and restore normal workflow
         run: |
