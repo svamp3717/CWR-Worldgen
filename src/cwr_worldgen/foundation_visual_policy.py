@@ -130,3 +130,9 @@ def install_foundation_visual_policy() -> None:
 
     install_opening_dimension_policy()
     install_opening_texture_policy()
+
+    # Performance wrappers must be last: they memoize the *final* opening
+    # functions and compact only the generated distance LOD, never the detail LOD.
+    from .interior_performance_policy import install_interior_performance_policy
+
+    install_interior_performance_policy()
