@@ -126,5 +126,7 @@ def install_foundation_visual_policy() -> None:
     # sizes see the final modeler key fields and can advance the P3D cache from
     # v50 without discarding the already-correct texture cache.
     from .opening_dimension_policy import install_opening_dimension_policy
+    from .opening_texture_policy import install_opening_texture_policy
 
     install_opening_dimension_policy()
+    install_opening_texture_policy()
