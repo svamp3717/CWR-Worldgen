@@ -94,6 +94,36 @@ def _weighted_pick(values: object, seed: str, fallback: str) -> str:
     return choices[-1][0]
 
 
+def _weighted_colour(values: object, seed: str, fallback: str) -> str:
+    """Pick a weighted facade colour from explicit country data."""
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)):
+        return str(fallback or "")
+    choices: list[tuple[str, float]] = []
+    for entry in values:
+        if isinstance(entry, Mapping):
+            colour = str(entry.get("colour", entry.get("color", "")) or "").strip()
+            try:
+                weight = max(0.0, float(entry.get("weight", 1.0)))
+            except (TypeError, ValueError):
+                weight = 1.0
+        else:
+            colour = str(entry or "").strip()
+            weight = 1.0
+        if colour and weight > 0.0:
+            choices.append((colour, weight))
+    if not choices:
+        return str(fallback or "")
+    total = sum(weight for _colour, weight in choices)
+    unit = int.from_bytes(sha256(seed.encode("utf-8")).digest()[:8], "big") / 2**64
+    target = unit * total
+    running = 0.0
+    for colour, weight in choices:
+        running += weight
+        if target < running:
+            return colour
+    return choices[-1][0]
+
+
 def apply_country_utility_materials(
     choice,
     tags: Mapping[str, str],
@@ -102,33 +132,59 @@ def apply_country_utility_materials(
     width_m: float,
     length_m: float,
 ):
-    """Apply only material pools explicitly stored in the selected profile."""
-    override_name = _override_name(choice, tags)
-    if not override_name:
-        return choice
+    """Apply material and facade-colour pools explicitly stored in the profile."""
     materials, geometry = _context_details(choice)
+    override_name = _override_name(choice, tags)
     overrides = materials.get("building_class_overrides") or {}
-    if not isinstance(overrides, Mapping):
-        return choice
-    block = overrides.get(override_name) or {}
-    if not isinstance(block, Mapping):
-        return choice
+    block = {}
+    if override_name and isinstance(overrides, Mapping):
+        candidate = overrides.get(override_name) or {}
+        if isinstance(candidate, Mapping):
+            block = candidate
 
     signature = ":".join((
         str(seed),
         str(getattr(choice, "country_profile_identifier", "") or getattr(choice, "region_identifier", "")),
         str(getattr(choice, "context", "")),
-        override_name,
+        str(getattr(choice, "building_class", "")),
+        str(getattr(choice, "family", "")),
         str(getattr(choice, "facade_style", "")),
         f"{float(width_m):.2f}",
         f"{float(length_m):.2f}",
     ))
+
     wall = str(getattr(choice, "wall_material", "") or "")
     roof = str(getattr(choice, "roof_material", "") or "")
     if not str(tags.get("building:material", "") or "").strip():
-        wall = _weighted_pick(block.get("wall_materials"), signature + ":wall", wall)
-    if not str(tags.get("roof:material", "") or "").strip():
+        if block:
+            wall = _weighted_pick(block.get("wall_materials"), signature + ":wall", wall)
+        else:
+            wall = _weighted_pick(
+                materials.get("common_wall_material_distribution"),
+                signature + ":wall",
+                wall,
+            )
+    if block and not str(tags.get("roof:material", "") or "").strip():
         roof = _weighted_pick(block.get("roof_materials"), signature + ":roof", roof)
+
+    palette = tuple(str(value) for value in getattr(choice, "colour_palette", ()) if str(value).strip())
+    explicit_colour = str(
+        tags.get("building:colour")
+        or tags.get("building:color")
+        or ""
+    ).strip()
+    primary_colour = explicit_colour
+    if not primary_colour:
+        primary_colour = _weighted_colour(
+            materials.get("facade_colour_distribution"),
+            signature + ":facade-colour",
+            palette[0] if palette else "",
+        )
+    if primary_colour:
+        primary_key = primary_colour.casefold()
+        palette = (primary_colour,) + tuple(
+            value for value in palette if value.casefold() != primary_key
+        )
 
     thickness = float(getattr(choice, "wall_thickness_m", 0.22) or 0.22)
     if wall != getattr(choice, "wall_material", ""):
@@ -136,7 +192,13 @@ def apply_country_utility_materials(
             thickness = float(_styles._wall_thickness_m(geometry, wall))
         except (AttributeError, TypeError, ValueError):
             pass
-    return replace(choice, wall_material=wall, roof_material=roof, wall_thickness_m=thickness)
+    return replace(
+        choice,
+        wall_material=wall,
+        roof_material=roof,
+        wall_thickness_m=thickness,
+        colour_palette=palette,
+    )
 
 
 def _utility_kind(text: str) -> str:

@@ -174,7 +174,12 @@ def test_country_selected_feature_materials_reach_generated_mlod() -> None:
         z=z,
     )
     spec = upgrade.detail_spec_from_key(placement.requested)
+    # Source country metadata may still describe/force a porch, but CWR no
+    # longer emits porch geometry because it does not read well in-game.
     assert spec["porches"]["enabled"]
+    assert not upgrade.detail_plan_for_key(
+        placement.requested, foundation_depth=placement.requested.foundation_depth_m
+    ).porch
     assert spec["chimneys"]["enabled"]
     assert spec["balconies"]["enabled"]
     library.register_placement(placement)

@@ -143,12 +143,10 @@ def detail_plan_for_key(
         and foundation_depth >= 0.18
         and key.width_m >= 2.8
     )
-    porch = (
-        pedestrian
-        and key.family in {"residential", "townhouse"}
-        and key.width_m >= 4.8
-        and _chance(key, "porch", porch_p)
-    )
+    # Porches/canopies do not read well in CWA's low-resolution visual LOD.
+    # Keep their country metadata available for provenance, but never generate
+    # porch geometry.
+    porch = False
     chimney_count = int(
         key.family in {"residential", "townhouse"}
         and key.roof_style not in {"flat", "dome", "onion"}

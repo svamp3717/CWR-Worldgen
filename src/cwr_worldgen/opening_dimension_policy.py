@@ -339,7 +339,7 @@ def _styled_visual_lod(*args, **kwargs):
 def _enrich_texture_metadata(original):
     def enriched(choice):
         metadata = dict(original(choice))
-        metadata["texture_renderer_revision"] = 3
+        metadata["texture_renderer_revision"] = 4
         source_window = dict(choice.window_spec or {})
         source_door = dict(choice.door_spec or {})
         window = dict(metadata.get("window") or {})

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from cwr_worldgen import parallel_assets
 from cwr_worldgen import procedural_buildings as pb
 from cwr_worldgen.building_asset_budget_policy import (
@@ -150,3 +151,32 @@ def test_modeler_texture_cache_misses_can_be_prewarmed(tmp_path) -> None:
     total_after, misses_after = _texture_cache_tasks(library, pb)
     assert total_after == total
     assert len(misses_after) == total - 1
+
+
+def test_final_budget_never_changes_building_class_or_primary_material_group() -> None:
+    library = pb.ProceduralBuildingLibrary(
+        world_name="FinalBudgetAppearance",
+        maximum_variants=1,
+    )
+    house_key = replace(
+        _variant(),
+        building_class="residential",
+        colour_palette=("cream", "falun red"),
+    )
+    cabin_key = replace(
+        _variant(overhang=0.33),
+        building_class="cabin",
+        wall_material="painted vertical timber cladding",
+        roof_material="standing-seam metal",
+        colour_palette=("ochre yellow", "falun red"),
+        texture_style_token="swedish_wood|painted vertical timber cladding~|ochre yellow,falun red",
+    )
+    first = library.register_placement(_placement(house_key))
+    second = library.register_placement(_placement(cabin_key))
+
+    assert first.selected.building_class == "residential"
+    assert second.selected.building_class == "cabin"
+    assert second.selected.wall_material == "painted vertical timber cladding"
+    assert second.selected.colour_palette[0] == "ochre yellow"
+    # Fidelity groups may exceed a tiny synthetic numerical cap rather than\n    # silently changing architecture/material identity.
+    assert len(library._usage) == 2

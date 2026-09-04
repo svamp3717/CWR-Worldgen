@@ -395,6 +395,32 @@ def _safe_final_reuse(library, requested, candidates: Iterable[Any]):
         return None
     pool = same_mode
 
+    # Performance reuse must not rewrite the architectural identity selected by
+    # the country/style system. In the Lundby80 diagnostic PBO the old broad
+    # family-compatible reuse mapped many ordinary residences to cabin assets and
+    # collapsed a balanced timber/stucco/brick request mix into mostly brick.
+    # Preserve class and the primary visible material/colour/roof group, then
+    # continue using the mature physical-fit chooser inside that group.
+    def appearance_group(key):
+        palette = tuple(getattr(key, "colour_palette", ()) or ())
+        primary_colour = str(palette[0]) if palette else ""
+        return (
+            str(getattr(key, "family", "")),
+            str(getattr(key, "building_class", "")),
+            str(getattr(key, "outbuilding_kind", "")),
+            str(getattr(key, "wall_material", "")),
+            primary_colour,
+            str(getattr(key, "roof_material", "")),
+            str(getattr(key, "roof_style", "")),
+            int(getattr(key, "facade_storeys", 1) or 1),
+        )
+
+    requested_group = appearance_group(requested)
+    same_appearance = [candidate for candidate in pool if appearance_group(candidate) == requested_group]
+    if not same_appearance:
+        return None
+    pool = same_appearance
+
     compatible = set(library._compatible_families(requested.family))
     compatible_pool = [candidate for candidate in pool if candidate.family in compatible]
     if not compatible_pool:

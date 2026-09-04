@@ -308,11 +308,11 @@ def modeler_roof_texture_image(
     parts = str(roof_style or "gabled").split("|", 2)
     shape = parts[0] or "gabled"
     material = parts[1] if len(parts) > 1 else ""
-    palette = tuple(v for v in (parts[2].split(",") if len(parts) > 2 else ()) if v)
     kind, base = _upstream._choose_roof_base(shape, material)
-    if palette:
-        base = _upstream._colour_from_name(palette[0], default=base)
-    rng = random.Random(_seed(f"roof:{roof_style}:{texture_variant}"))
+    # Wall/facade colours are not roof colours. Keep roof material authoritative
+    # and seed only from roof semantics so changing a facade colour cannot even
+    # perturb the roof noise pattern.
+    rng = random.Random(_seed(f"roof:{shape}|{material}:{texture_variant}"))
     native = UPSTREAM_TEXTURE_CANONICAL_SIZE
     return cwa_exposure_compensate(
         _canonical_image(_upstream._render_roof(kind, base, rng, native), size)

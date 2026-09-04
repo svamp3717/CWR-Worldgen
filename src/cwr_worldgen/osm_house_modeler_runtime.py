@@ -455,7 +455,10 @@ def _detail_plan_for_key(key, *, foundation_depth=0.0):
         or (key.family == "outbuilding" and _pb._outbuilding_is_garage(key))
     )
     stairs = enabled("stairs") and pedestrian and not key.interiors and foundation_depth >= 0.18
-    porch = enabled("porches") and pedestrian and key.family in {"residential", "townhouse"}
+    # Country profiles may describe porches, but CWR intentionally suppresses
+    # their visual geometry because the current implementation does not read well
+    # in-game.
+    porch = False
     chimneys = count("chimneys") if enabled("chimneys") and key.family in {"residential", "townhouse"} else 0
     balconies = count("balconies") if enabled("balconies") and key.family in {"residential", "townhouse", "urban"} else 0
     gutters = enabled("rainwater") and key.roof_style not in {"flat", "dome", "onion"}

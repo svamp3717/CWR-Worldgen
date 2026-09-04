@@ -82,7 +82,10 @@ def test_residential_choice_is_not_given_utility_materials() -> None:
         width_m=10.0,
         length_m=8.0,
     )
-    assert selected == choice
+    assert selected.building_class == choice.building_class
+    assert not selected.wall_material.startswith("utility ")
+    assert not selected.roof_material.startswith("utility ")
+    assert set(selected.colour_palette) == set(choice.colour_palette)
 
 
 def test_explicit_osm_material_tags_override_country_utility_defaults() -> None:
