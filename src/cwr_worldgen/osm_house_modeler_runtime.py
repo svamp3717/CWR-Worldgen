@@ -147,8 +147,46 @@ def _style_location(library, x: float | None, z: float | None):
         _STYLE_STATE.location = previous
 
 
+def _tag_signature(tags: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
+    """Return a stable hashable signature for one mapped building tag set."""
+    return tuple(sorted((str(key), str(value)) for key, value in tags.items()))
+
+
+def _polygon_request_signature(tags, points, holes=()):
+    return (
+        _tag_signature(tags),
+        tuple((float(x), float(z)) for x, z in points),
+        tuple(tuple((float(x), float(z)) for x, z in ring) for ring in holes),
+    )
+
+
+def _point_request_signature(tags, footprint, x, z):
+    return (
+        _tag_signature(tags),
+        round(float(footprint), 9),
+        round(float(x), 9) if x is not None else None,
+        round(float(z), 9) if z is not None else None,
+    )
+
+
+@contextmanager
+def _prepared_style_request(value):
+    """Expose one already-resolved prepare-time style key to placement."""
+    previous = getattr(_STYLE_STATE, "prepared_request", None)
+    _STYLE_STATE.prepared_request = value
+    try:
+        yield
+    finally:
+        _STYLE_STATE.prepared_request = previous
+
+
 def _prepare_geographic_context(self, dataset, projection):
     self._modeler_projection = projection
+    # ``prepare()`` already resolves the full modeler style for every mapped
+    # footprint. Keep those exact requests so the later placement pass can reuse
+    # them instead of repeating country/material/window/door selection.
+    self._modeler_prepared_polygon_keys = {}
+    self._modeler_prepared_point_keys = {}
     result = _ORIGINAL_PREPARE_GEO(self, dataset, projection)
     # Keep CWR's long-standing public region identifiers stable. The exact modeler
     # country/region ids remain available separately and still drive StyleChoice.
@@ -190,6 +228,18 @@ def _style_key_for(
     foundation_depth_m: float | None = None,
     settlement_context: str = "rural",
 ):
+    prepared = getattr(_STYLE_STATE, "prepared_request", None)
+    if prepared is not None and foundation_depth_m is None:
+        prepared_key, prepared_width, prepared_length, prepared_context = prepared
+        requested_dimensions = sorted((float(width_m), float(length_m)))
+        prepared_dimensions = sorted((float(prepared_width), float(prepared_length)))
+        if (
+            str(settlement_context) == str(prepared_context)
+            and math.isclose(requested_dimensions[0], prepared_dimensions[0], rel_tol=0.0, abs_tol=1.0e-7)
+            and math.isclose(requested_dimensions[1], prepared_dimensions[1], rel_tol=0.0, abs_tol=1.0e-7)
+        ):
+            return prepared_key
+
     base = _ORIGINAL_KEY_FOR(
         self,
         tags,
@@ -307,6 +357,8 @@ def _style_key_for(
 
 
 def _iter_dataset_keys(self, dataset, projection, point_footprint):
+    polygon_cache = self._modeler_prepared_polygon_keys
+    point_cache = self._modeler_prepared_point_keys
     for feature in dataset.building_polygons:
         for polygon in feature.polygons:
             projected = [projection.to_world(point) for point in polygon.outer[:-1]]
@@ -324,38 +376,53 @@ def _iter_dataset_keys(self, dataset, projection, point_footprint):
                 polygon_geometry, footprint = _pb._polygon_with_footprint(projected, projected_holes)
                 centre = polygon_geometry.centroid
                 centre_x, centre_z = float(centre.x), float(centre.y)
+            context = self._settlement_context(centre_x, centre_z)
             with _style_location(self, centre_x, centre_z):
                 key = self.key_for(
                     feature.tags,
                     footprint.width_m,
                     footprint.length_m,
-                    settlement_context=self._settlement_context(centre_x, centre_z),
+                    settlement_context=context,
                 )
+            polygon_cache[_polygon_request_signature(
+                feature.tags, projected, projected_holes
+            )] = (key, footprint.width_m, footprint.length_m, context)
             yield key
     for feature in dataset.building_points:
         x, z = projection.to_world(feature.point)
+        context = self._settlement_context(x, z)
         with _style_location(self, x, z):
             key = self.key_for(
                 feature.tags,
                 point_footprint,
                 point_footprint,
-                settlement_context=self._settlement_context(x, z),
+                settlement_context=context,
             )
+        point_cache[_point_request_signature(
+            feature.tags, point_footprint, x, z
+        )] = (key, point_footprint, point_footprint, context)
         yield key
 
 
 def _plan_polygon(self, tags, points: Sequence[tuple[float, float]], **kwargs):
+    holes = kwargs.get("holes", ()) or ()
+    prepared = getattr(self, "_modeler_prepared_polygon_keys", {}).get(
+        _polygon_request_signature(tags, points, holes)
+    )
     if points:
         centre_x = sum(float(point[0]) for point in points) / len(points)
         centre_z = sum(float(point[1]) for point in points) / len(points)
     else:
         centre_x = centre_z = None
-    with _style_location(self, centre_x, centre_z):
+    with _style_location(self, centre_x, centre_z), _prepared_style_request(prepared):
         return _ORIGINAL_PLAN_POLYGON(self, tags, points, **kwargs)
 
 
 def _plan_point(self, tags, footprint, heading_degrees, *, x=None, z=None, **kwargs):
-    with _style_location(self, x, z):
+    prepared = getattr(self, "_modeler_prepared_point_keys", {}).get(
+        _point_request_signature(tags, footprint, x, z)
+    )
+    with _style_location(self, x, z), _prepared_style_request(prepared):
         return _ORIGINAL_PLAN_POINT(
             self,
             tags,

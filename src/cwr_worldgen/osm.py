@@ -7404,20 +7404,31 @@ def plan_building_placements(
     progress(0, "Counting mapped building candidates")
     candidate_total = sum(len(feature.polygons) for feature in dataset.building_polygons) + len(dataset.building_points)
 
+    # Classify each feature once. The old lazy implementation rescanned both
+    # building collections for every one of the five priority bands, repeating
+    # semantic tag work five times before actual placement even started.
+    polygon_features_by_priority: list[list[OsmPolygonFeature]] = [[] for _ in range(5)]
+    point_features_by_priority: list[list[OsmPointFeature]] = [[] for _ in range(5)]
+    for feature in dataset.building_polygons:
+        priority = _building_placement_priority(feature.tags)
+        if 0 <= priority < 5:
+            polygon_features_by_priority[priority].append(feature)
+    for feature in dataset.building_points:
+        priority = _building_placement_priority(feature.tags)
+        if 0 <= priority < 5:
+            point_features_by_priority[priority].append(feature)
+
     def candidates_for_priority(priority: int):
-        # Both source feature collections are already sorted by OSM key. Merge
-        # them lazily inside each of the five priority bands instead of allocating
-        # and globally sorting a six-tuple for every building geometry.
+        # Input feature groups are already sorted by OSM key, so bucketing above
+        # preserves the previous deterministic ordering inside each band.
         polygons = (
             (feature.osm_key, polygon_index, "polygon", feature, polygon)
-            for feature in dataset.building_polygons
-            if _building_placement_priority(feature.tags) == priority
+            for feature in polygon_features_by_priority[priority]
             for polygon_index, polygon in enumerate(feature.polygons)
         )
         points = (
             (feature.osm_key, 0, "point", feature, feature.point)
-            for feature in dataset.building_points
-            if _building_placement_priority(feature.tags) == priority
+            for feature in point_features_by_priority[priority]
         )
         yield from heapq.merge(
             polygons, points, key=lambda item: (item[0], item[1], item[2])
@@ -7443,6 +7454,14 @@ def plan_building_placements(
     building_warning_threshold = max(0, int(spec.max_buildings))
     building_limit = _advisory_object_limit(building_warning_threshold, enabled=advisory_limits)
     progress_interval = max(1, candidate_total // 40)
+    polygon_planner = (
+        getattr(building_asset_library, "plan_polygon", None)
+        if building_asset_library is not None else None
+    )
+    point_planner = (
+        getattr(building_asset_library, "plan_point", None)
+        if building_asset_library is not None else None
+    )
     for candidate_number, (_priority, osm_key, geometry_index, geometry_kind, feature, geometry) in enumerate(candidates, start=1):
         if candidate_number == 1 or candidate_number == candidate_total or candidate_number % progress_interval == 0:
             progress(
@@ -7488,15 +7507,14 @@ def plan_building_placements(
                     dataset, projection, parent_projected,
                     entrance_index=building_entrance_index,
                 )
-                planner = getattr(building_asset_library, "plan_polygon", None)
                 procedural_placement = (
-                    planner(
+                    polygon_planner(
                         feature.tags, projected, holes=projected_holes,
                         road_point=road_point,
                         entrance_point=entrance_point,
                         allow_native_polygon=True,
                     )
-                    if planner is not None
+                    if polygon_planner is not None
                     else building_asset_library.place_polygon(
                         feature.tags, projected, road_point=(entrance_point or road_point)
                     )
@@ -7520,13 +7538,12 @@ def plan_building_placements(
                 )
             else:
                 road_point = nearest_road_point(dataset, projection, x, z)
-                planner = getattr(building_asset_library, "plan_point", None)
                 procedural_placement = (
-                    planner(
+                    point_planner(
                         feature.tags, spec.point_building_footprint, heading,
                         x=x, z=z, road_point=road_point,
                     )
-                    if planner is not None
+                    if point_planner is not None
                     else building_asset_library.place_point(
                         feature.tags, spec.point_building_footprint, heading
                     )
