@@ -8,6 +8,7 @@ on:
       - 'src/cwr_worldgen/building_progress_policy.py'
       - 'src/cwr_worldgen/foundation_visual_policy.py'
       - 'tests/test_building_progress_policy.py'
+      - 'tests/test_parallel_assets.py'
       - '.github/workflows/verify-building-progress.yml'
   workflow_dispatch:
 
