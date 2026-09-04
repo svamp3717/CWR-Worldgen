@@ -1,0 +1,85 @@
+name: Apply Sweden Barn and House Visual Fix
+
+on:
+  push:
+    branches:
+      - upgrade/osm-house-modeler-buildings
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: upgrade/osm-house-modeler-buildings
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Apply visual corrections
+        run: python tools/apply_sweden_barn_house_visuals.py
+      - name: Install package and tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[sources]" pytest
+      - name: Verify Sweden barn and house corrections
+        run: |
+          pytest -q \
+            tests/test_modeler_opening_dimensions.py \
+            tests/test_osm_house_modeler_texture_bridge.py \
+            tests/test_global_country_visual_balance.py \
+            tests/test_country_utility_materials.py \
+            tests/test_building_asset_budget_policy.py
+      - name: Sample Sweden output distributions
+        run: |
+          python - <<'PY'
+          from collections import Counter
+          from cwr_worldgen.country_utility_material_policy import apply_country_utility_materials
+          from cwr_worldgen.osm_house_modeler_styles import StyleChoice
+
+          barn = StyleChoice(
+              region_identifier='northern_europe', region_name='Northern Europe',
+              facade_style='swedish_wood', roof_style='gabled', context='rural',
+              family='agricultural', building_class='barn',
+              country_code='SE', country_name='Sweden', country_profile_identifier='se_sweden',
+              wall_material='utility painted timber board cladding',
+              roof_material='utility sheet metal roof',
+              colour_palette=('falun red','ochre yellow','white','cream','grey','dark green','natural timber'),
+          )
+          colours = Counter()
+          walls = Counter()
+          for i in range(1000):
+              choice = apply_country_utility_materials(
+                  barn, {}, seed='sweden-pbo-regression',
+                  width_m=6.0 + i * 0.013, length_m=18.0 + (i % 53) * 0.09,
+              )
+              colours[choice.colour_palette[0]] += 1
+              walls[choice.wall_material] += 1
+          print('barn colours', colours)
+          print('barn walls', walls)
+          assert colours['falun red'] >= 620
+          assert walls['utility structural brick'] <= 90
+          PY
+      - name: Commit verified visual corrections
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/cwr_worldgen/country_utility_material_policy.py \
+            src/cwr_worldgen/opening_dimension_policy.py \
+            src/cwr_worldgen/osm_house_modeler_texture_bridge.py \
+            src/cwr_worldgen/country_styles/SE_Sweden.json \
+            tools/populate_country_visual_balance.py \
+            tests/test_modeler_opening_dimensions.py \
+            tests/test_osm_house_modeler_texture_bridge.py \
+            tests/test_global_country_visual_balance.py
+          if git diff --cached --quiet; then
+            echo "No visual corrections to commit"
+          else
+            git commit -m "Improve Swedish barns and house materials"
+            git push origin HEAD:upgrade/osm-house-modeler-buildings
+          fi
