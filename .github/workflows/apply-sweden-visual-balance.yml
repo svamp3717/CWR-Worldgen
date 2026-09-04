@@ -6,6 +6,7 @@ on:
       - upgrade/osm-house-modeler-buildings
     paths:
       - 'tools/apply_sweden_visual_balance.py'
+      - 'tools/fix_sweden_visual_balance_tests.py'
       - '.github/workflows/apply-sweden-visual-balance.yml'
   workflow_dispatch:
 
@@ -25,7 +26,9 @@ jobs:
           python-version: '3.13'
           cache: pip
       - name: Apply visual tuning
-        run: python tools/apply_sweden_visual_balance.py
+        run: |
+          python tools/apply_sweden_visual_balance.py
+          python tools/fix_sweden_visual_balance_tests.py
       - name: Install package and tests
         run: |
           python -m pip install --upgrade pip
