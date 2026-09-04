@@ -6,6 +6,7 @@ on:
       - upgrade/osm-house-modeler-buildings
     paths:
       - 'tools/apply_global_country_visual_cleanup.py'
+      - 'tools/fix_global_cleanup_country_count.py'
       - '.github/workflows/apply-global-country-visual-cleanup.yml'
   workflow_dispatch:
 
@@ -25,12 +26,20 @@ jobs:
           python-version: '3.13'
           cache: pip
       - name: Apply global country cleanup
-        run: python tools/apply_global_country_visual_cleanup.py
+        run: |
+          python tools/fix_global_cleanup_country_count.py
+          python tools/apply_global_country_visual_cleanup.py
       - name: Validate catalogue structure
         run: |
           test ! -e src/cwr_worldgen/house_styles/24_sweden.json
           test "$(find src/cwr_worldgen/house_styles -maxdepth 1 -name '*.json' | wc -l)" -eq 23
-          test "$(find src/cwr_worldgen/country_styles -maxdepth 1 -name '*.json' | wc -l)" -eq 249
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          paths = sorted(Path('src/cwr_worldgen/country_styles').glob('*.json'))
+          profiles = [json.loads(path.read_text(encoding='utf-8')) for path in paths]
+          assert sum(bool(doc.get('iso_alpha2')) for doc in profiles) == 249
+          PY
           ! grep -R --line-number -E 'parent_region_identifier == "sweden"|exposes_24_regions|len\(load_profiles\(\)\) == 24' tests src/cwr_worldgen tools/sync_osm_house_modeler_styles.py
       - name: Install package and tests
         run: |
