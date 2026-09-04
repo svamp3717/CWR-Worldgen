@@ -1,0 +1,58 @@
+name: Apply Sweden Colour And Porch Cleanup
+
+on:
+  push:
+    branches:
+      - upgrade/osm-house-modeler-buildings
+    paths:
+      - tools/apply_sweden_colour_and_porch_cleanup.py
+      - .github/workflows/apply-sweden-colour-and-porch-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: upgrade/osm-house-modeler-buildings
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Apply Sweden colour and porch cleanup
+        run: python tools/apply_sweden_colour_and_porch_cleanup.py
+      - name: Install package and tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[sources]" pytest
+      - name: Check generated diff
+        run: git diff --check
+      - name: Verify Sweden colour and porch behavior
+        run: |
+          pytest -q \
+            tests/test_sweden_colour_and_porch_cleanup.py \
+            tests/test_global_country_visual_balance.py \
+            tests/test_country_utility_materials.py \
+            tests/test_modeler_opening_dimensions.py \
+            tests/test_building_shape_extensions.py \
+            tests/test_building_asset_budget_policy.py
+      - name: Commit verified cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/cwr_worldgen/country_styles/SE_Sweden.json \
+            src/cwr_worldgen/osm_house_modeler_upgrade.py \
+            src/cwr_worldgen/opening_dimension_policy.py \
+            tools/populate_country_visual_balance.py \
+            tests/test_sweden_colour_and_porch_cleanup.py
+          if git diff --cached --quiet; then
+            echo "No Sweden colour/porch changes to commit"
+          else
+            git commit -m "Rebalance Swedish colours and remove porch geometry"
+            git push origin HEAD:upgrade/osm-house-modeler-buildings
+          fi
