@@ -145,6 +145,13 @@ def install_foundation_visual_policy() -> None:
 
     install_building_asset_budget_policy()
 
+    # The asset budget knows which modeler textures/P3Ds are expensive. Install
+    # streaming completion reporting after it so worker processes can publish
+    # completed/total counters without changing any other procedural asset stage.
+    from .building_progress_policy import install_building_progress_policy
+
+    install_building_progress_policy()
+
     # Utility material selection is deliberately data-only: all barn/shed/garage/
     # warehouse/hangar/industrial pools live in the selected country JSON. The
     # runtime merely consumes those explicit distributions and supplies matching
