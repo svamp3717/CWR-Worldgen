@@ -478,9 +478,17 @@ def install_building_asset_budget_policy() -> None:
             kwargs["maximum_polygon_variants"] = _polygon_variant_budget(
                 int(kwargs.get("maximum_variants", _DEFAULT_STANDARD_VARIANTS))
             )
-        kwargs["texture_variants"] = _texture_variant_budget(
-            int(kwargs.get("texture_variants", buildings.DEFAULT_BUILDING_TEXTURE_VARIANTS))
-        )
+        # Normal world generation leaves texture_variants unspecified and gets
+        # the modeler-optimized single cosmetic variant. Explicit library callers
+        # retain the public constructor override; the environment variable remains
+        # the highest-priority runtime tuning knob.
+        if (
+            "texture_variants" not in kwargs
+            or os.environ.get(_ENV_TEXTURE_VARIANTS, "").strip()
+        ):
+            kwargs["texture_variants"] = _texture_variant_budget(
+                int(kwargs.get("texture_variants", buildings.DEFAULT_BUILDING_TEXTURE_VARIANTS))
+            )
         result = original_init(self, *args, **kwargs)
         self._cwr_final_standard_variant_budget = _final_variant_budget(self.maximum_variants)
         return result
