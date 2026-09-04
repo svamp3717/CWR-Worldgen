@@ -5,10 +5,10 @@ helper = ROOT / "tools" / "apply_global_country_visual_cleanup.py"
 text = helper.read_text(encoding="utf-8")
 
 replacements = {
-    '                assert _values(wall_distribution, "material") == {value.casefold() for value in walls}\\n':
-    '                assert _values(wall_distribution, "material") <= {value.casefold() for value in walls}\\n',
-    '                assert _values(colour_distribution, "colour") == {value.casefold() for value in colours}\\n':
-    '                assert _values(colour_distribution, "colour") <= {value.casefold() for value in colours}\\n',
+    'assert _values(wall_distribution, "material") == {value.casefold() for value in walls}':
+    'assert _values(wall_distribution, "material") <= {value.casefold() for value in walls}',
+    'assert _values(colour_distribution, "colour") == {value.casefold() for value in colours}':
+    'assert _values(colour_distribution, "colour") <= {value.casefold() for value in colours}',
 }
 for old, new in replacements.items():
     if text.count(old) != 1:
