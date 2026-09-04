@@ -116,3 +116,53 @@ def test_sweden_is_country_style_only_and_uses_northern_europe_parent() -> None:
     )
     assert choice.country_profile_identifier == "se_sweden"
     assert choice.region_identifier == "northern_europe"
+
+
+def test_sweden_barns_are_red_dominant_and_stucco_avoids_timber_red_bias() -> None:
+    profile = next(p for p in load_country_profiles() if p.identifier == "se_sweden")
+    rural = profile.contexts["rural"]
+    materials = rural["architectural_details"]["materials"]
+    barn_colours = materials["building_class_overrides"]["barn"]["facade_colour_distribution"]
+    weights = {str(entry["colour"]): float(entry["weight"]) for entry in barn_colours}
+    assert weights["falun red"] >= 65
+    assert weights["falun red"] == max(weights.values())
+
+    barn_base = StyleChoice(
+        region_identifier="northern_europe", region_name="Northern Europe",
+        facade_style="swedish_wood", roof_style="gabled", context="rural",
+        family="agricultural", building_class="barn",
+        country_code="SE", country_name="Sweden",
+        country_profile_identifier="se_sweden",
+        wall_material="utility painted timber board cladding",
+        roof_material="utility sheet metal roof",
+        colour_palette=("falun red", "ochre yellow", "white", "cream", "grey", "dark green", "natural timber"),
+    )
+    sampled = []
+    for index in range(300):
+        tuned = apply_country_utility_materials(
+            barn_base, {}, seed="sweden-red-barns",
+            width_m=6.0 + index * 0.031, length_m=18.0 + (index % 41) * 0.17,
+        )
+        sampled.append(tuned.colour_palette[0])
+    assert sampled.count("falun red") / len(sampled) >= 0.58
+
+    stucco_base = StyleChoice(
+        region_identifier="northern_europe", region_name="Northern Europe",
+        facade_style="western_stucco", roof_style="gabled", context="rural",
+        family="residential", building_class="residential",
+        country_code="SE", country_name="Sweden",
+        country_profile_identifier="se_sweden",
+        wall_material="stucco/render", roof_material="clay/concrete tile",
+        colour_palette=("falun red", "ochre yellow", "white", "cream", "grey", "dark green", "natural timber"),
+    )
+    stucco_colours = []
+    for index in range(240):
+        tuned = apply_country_utility_materials(
+            stucco_base, {"building:material": "stucco"},
+            seed="sweden-stucco-colours",
+            width_m=8.0 + index * 0.021, length_m=10.0 + (index % 37) * 0.11,
+        )
+        stucco_colours.append(tuned.colour_palette[0])
+    neutral = sum(colour in {"cream", "white", "grey"} for colour in stucco_colours)
+    assert neutral / len(stucco_colours) >= 0.78
+    assert stucco_colours.count("falun red") / len(stucco_colours) <= 0.06

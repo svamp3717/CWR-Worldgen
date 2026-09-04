@@ -14,6 +14,8 @@ _ORIGINAL_DOOR_DIMENSIONS = None
 _ORIGINAL_INTERIOR_WINDOW_OPENINGS = None
 _ORIGINAL_POLYGON_EDGE_OPENINGS = None
 _ORIGINAL_VISUAL_LOD = None
+_BARN_UTILITY_DOOR_MAX_WIDTH_M = 3.20
+_BARN_UTILITY_DOOR_MAX_HEIGHT_M = 3.30
 
 
 def _number(value: object, default: float = 0.0) -> float:
@@ -205,8 +207,12 @@ def _styled_polygon_edge_openings(
 
 def _front_door_uv(key) -> tuple[float, float, float, float]:
     door = _door_metadata(key)
+    role = str(door.get("utility_role", "") or "").casefold()
     width = _number(door.get("width_m"), 0.95) or 0.95
     height = _number(door.get("height_m"), 2.05) or 2.05
+    if role:
+        width = _number(door.get("utility_width_m"), width) or width
+        height = _number(door.get("utility_height_m"), height) or height
     u_span = max(0.14, min(0.34, width / 4.0))
     v_span = max(0.48, min(0.84, height / 3.0))
     return ((1.0 - u_span) * 0.5, (1.0 + u_span) * 0.5, 1.0 - v_span, 1.0)
@@ -346,9 +352,17 @@ def _enrich_texture_metadata(original):
         window["edge_margin_m"] = _number(source_window.get("edge_margin_m"), 0.0)
         metadata["window"] = window
         door = dict(metadata.get("door") or {})
-        door["utility_width_m"] = _number(source_door.get("utility_width_m"), 0.0)
-        door["utility_height_m"] = _number(source_door.get("utility_height_m"), 0.0)
-        door["utility_role"] = str(source_door.get("utility_role", "") or "")
+        utility_width = _number(source_door.get("utility_width_m"), 0.0)
+        utility_height = _number(source_door.get("utility_height_m"), 0.0)
+        utility_role = str(source_door.get("utility_role", "") or "").casefold()
+        if utility_role == "barn":
+            if utility_width > 0.0:
+                utility_width = min(utility_width, _BARN_UTILITY_DOOR_MAX_WIDTH_M)
+            if utility_height > 0.0:
+                utility_height = min(utility_height, _BARN_UTILITY_DOOR_MAX_HEIGHT_M)
+        door["utility_width_m"] = utility_width
+        door["utility_height_m"] = utility_height
+        door["utility_role"] = utility_role
         door["corner_clearance_m"] = _number(source_door.get("corner_clearance_m"), 0.0)
         door["keep_clear_of_windows_m"] = _number(source_door.get("keep_clear_of_windows_m"), 0.0)
         metadata["door"] = door

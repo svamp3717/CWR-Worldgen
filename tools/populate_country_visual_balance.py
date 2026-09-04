@@ -29,6 +29,106 @@ def _distribution(values: object, field: str) -> list[dict[str, object]]:
     return [{field: value, "weight": 100} for value in _dedupe(values)]
 
 
+def _weighted(field: str, values: list[tuple[str, int]]) -> list[dict[str, object]]:
+    return [{field: value, "weight": weight} for value, weight in values]
+
+
+def _tune_sweden(document: dict) -> None:
+    document["parent_region_identifier"] = "northern_europe"
+    document["parent_region_name"] = "Northern Europe"
+    document["detail_revision"] = "2026-09-sweden-barn-house-visuals-v3"
+    provenance = document.setdefault("data_provenance", {})
+    provenance["architectural_basis"] = (
+        "curated national tuning over the Northern Europe regional baseline; "
+        "Sweden itself is defined only in country_styles"
+    )
+
+    for context_name, context in (document.get("contexts") or {}).items():
+        selection = context.get("selection") or {}
+        families = selection.get("family_distributions") or {}
+        rural = str(context_name).casefold() == "rural"
+        families["residential"] = (
+            [{"lt": 70, "style": "swedish_wood"}, {"lt": 95, "style": "western_stucco"}, {"lt": 100, "style": "western_brick"}]
+            if rural else
+            [{"lt": 48, "style": "swedish_wood"}, {"lt": 90, "style": "western_stucco"}, {"lt": 100, "style": "western_brick"}]
+        )
+        families["agricultural"] = (
+            [{"lt": 84, "style": "swedish_wood"}, {"lt": 100, "style": "western_brick"}]
+            if rural else
+            [{"lt": 72, "style": "swedish_wood"}, {"lt": 100, "style": "western_brick"}]
+        )
+        selection["family_distributions"] = families
+        context["selection"] = selection
+
+        details = context.get("architectural_details") or {}
+        materials = details.get("materials") or {}
+        materials["common_wall_material_distribution"] = _weighted(
+            "material",
+            [
+                ("painted vertical timber cladding", 68 if rural else 45),
+                ("stucco/render", 24 if rural else 45),
+                ("brick", 8 if rural else 10),
+            ],
+        )
+        materials["wall_material_colour_distributions"] = {
+            "painted vertical timber cladding": _weighted(
+                "colour",
+                [
+                    ("falun red", 38 if rural else 22),
+                    ("ochre yellow", 24 if rural else 22),
+                    ("white", 12 if rural else 18),
+                    ("cream", 8 if rural else 12),
+                    ("grey", 6 if rural else 12),
+                    ("dark green", 5),
+                    ("natural timber", 7 if rural else 9),
+                ],
+            ),
+            "stucco/render": _weighted(
+                "colour",
+                [
+                    ("cream", 38 if rural else 35),
+                    ("white", 32 if rural else 35),
+                    ("grey", 20 if rural else 22),
+                    ("ochre yellow", 8 if rural else 6),
+                    ("falun red", 2),
+                ],
+            ),
+        }
+
+        overrides = materials.get("building_class_overrides") or {}
+        barn = overrides.get("barn") or {}
+        barn["facade_colour_distribution"] = _weighted(
+            "colour",
+            [
+                ("falun red", 72 if rural else 62),
+                ("ochre yellow", 10 if rural else 12),
+                ("natural timber", 8 if rural else 8),
+                ("dark green", 4 if rural else 5),
+                ("grey", 3 if rural else 5),
+                ("white", 2 if rural else 5),
+                ("cream", 1 if rural else 3),
+            ],
+        )
+        overrides["barn"] = barn
+        shed = overrides.get("shed") or {}
+        shed["facade_colour_distribution"] = _weighted(
+            "colour",
+            [
+                ("falun red", 48 if rural else 34),
+                ("ochre yellow", 16),
+                ("natural timber", 14),
+                ("grey", 8 if rural else 12),
+                ("dark green", 6),
+                ("white", 5 if rural else 10),
+                ("cream", 3 if rural else 8),
+            ],
+        )
+        overrides["shed"] = shed
+        materials["building_class_overrides"] = overrides
+        details["materials"] = materials
+        context["architectural_details"] = details
+
+
 def populate(repo_root: Path) -> tuple[int, int]:
     package = repo_root / "src" / "cwr_worldgen"
     country_dir = package / "country_styles"
@@ -43,13 +143,7 @@ def populate(repo_root: Path) -> tuple[int, int]:
     context_count = 0
     for path, document in documents:
         if document.get("identifier") == "se_sweden":
-            document["parent_region_identifier"] = "northern_europe"
-            document["parent_region_name"] = "Northern Europe"
-            provenance = document.setdefault("data_provenance", {})
-            provenance["architectural_basis"] = (
-                "curated national tuning over the Northern Europe regional baseline; "
-                "Sweden itself is defined only in country_styles"
-            )
+            _tune_sweden(document)
 
         contexts = document.get("contexts") or {}
         if not isinstance(contexts, dict):

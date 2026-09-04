@@ -9,7 +9,9 @@ import pytest
 from cwr_worldgen import procedural_buildings as pb
 
 
-def _token(*, utility_width: float = 0.0, utility_height: float = 0.0) -> str:
+def _token(
+    *, utility_width: float = 0.0, utility_height: float = 0.0, utility_role: str = ""
+) -> str:
     metadata = {
         "texture_renderer_revision": 3,
         "window": {
@@ -27,6 +29,7 @@ def _token(*, utility_width: float = 0.0, utility_height: float = 0.0) -> str:
             "height_m": 2.10,
             "utility_width_m": utility_width,
             "utility_height_m": utility_height,
+            "utility_role": utility_role,
             "corner_clearance_m": 0.70,
             "keep_clear_of_windows_m": 0.40,
             "type": "panel",
@@ -92,6 +95,27 @@ def test_utility_door_uses_modeler_utility_dimensions_not_old_family_heuristic()
     half_width, height, _pivot = pb._door_dimensions(key)
     assert half_width * 2.0 == pytest.approx(3.20, abs=1.0e-6)
     assert height == pytest.approx(3.40, abs=1.0e-6)
+
+
+def test_barn_utility_door_is_capped_below_hangar_scale() -> None:
+    key = pb.BuildingVariantKey(
+        family="agricultural",
+        building_class="barn",
+        roof_style="gabled",
+        width_m=6.0,
+        length_m=36.0,
+        height_m=6.0,
+        regional_style="swedish_wood",
+        door_width_m=0.95,
+        door_height_m=2.10,
+        door_corner_clearance_m=0.70,
+        texture_style_token=_token(
+            utility_width=3.20, utility_height=3.30, utility_role="barn"
+        ),
+    )
+    half_width, height, _pivot = pb._door_dimensions(key)
+    assert half_width * 2.0 == pytest.approx(3.20, abs=1.0e-6)
+    assert height == pytest.approx(3.30, abs=1.0e-6)
 
 
 def test_enterable_windows_use_modeler_width_height_sill_and_edge_margin() -> None:

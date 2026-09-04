@@ -94,12 +94,19 @@ def modeler_wall_material_identity(token: str, texture_variant: int = 0) -> str:
     material render whenever their visible wall material is actually identical.
     """
     facade, material, palette = split_texture_token(token)
+    material_text = str(material or "").casefold()
+    vertical_timber_revision = int(
+        not material_text.startswith("utility ")
+        and "vertical" in material_text
+        and any(token in material_text for token in ("timber", "wood"))
+    )
     return json.dumps(
         {
             "facade": facade,
             "material": material,
             "palette": list(palette),
             "variant": int(texture_variant),
+            "vertical_timber_renderer_revision": vertical_timber_revision,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -267,9 +274,16 @@ def _door_cache_identity(metadata: Mapping[str, Any], *, layout: bool) -> dict[s
         "material": str(door.get("material", "timber") or "timber"),
     }
     if layout:
+        role = str(door.get("utility_role", "") or "").casefold()
+        width = _number(door.get("width_m"), 0.0)
+        height = _number(door.get("height_m"), 0.0)
+        if role:
+            width = _number(door.get("utility_width_m"), width) or width
+            height = _number(door.get("utility_height_m"), height) or height
         result.update({
-            "width_m": round(_number(door.get("width_m"), 0.0), 4),
-            "height_m": round(_number(door.get("height_m"), 0.0), 4),
+            "width_m": round(width, 4),
+            "height_m": round(height, 4),
+            "utility_role": role,
         })
     return result
 
@@ -353,6 +367,10 @@ def _with_openings(
 
     door_w_m = max(0.0, _number(door.get("width_m"), 0.0))
     door_h_m = max(0.0, _number(door.get("height_m"), 0.0))
+    utility_role = str(door.get("utility_role", "") or "").casefold()
+    if utility_role:
+        door_w_m = max(0.0, _number(door.get("utility_width_m"), door_w_m))
+        door_h_m = max(0.0, _number(door.get("utility_height_m"), door_h_m))
     door_w = int(round(size * max(0.14, min(0.34, (door_w_m or 0.95) / 4.0))))
     door_h = int(round(size * max(0.48, min(0.84, (door_h_m or 2.05) / 3.0))))
     door_x0 = (size - door_w) // 2

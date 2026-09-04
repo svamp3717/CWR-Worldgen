@@ -124,6 +124,41 @@ def _weighted_colour(values: object, seed: str, fallback: str) -> str:
     return choices[-1][0]
 
 
+def _material_colour_distribution(source: object, wall_material: str):
+    if not isinstance(source, Mapping):
+        return None
+    folded = str(wall_material or "").casefold().strip()
+    for key, values in source.items():
+        if str(key).casefold().strip() == folded:
+            return values
+    return None
+
+
+def _facade_colour_distribution(
+    materials: Mapping[str, Any],
+    block: Mapping[str, Any],
+    wall_material: str,
+):
+    # Building-class colour pools win first (a Swedish barn should be red far
+    # more often than an ordinary rendered house), then a material-specific
+    # pool, then the country's ordinary facade distribution.
+    if block:
+        values = block.get("facade_colour_distribution")
+        if values:
+            return values
+        values = _material_colour_distribution(
+            block.get("wall_material_colour_distributions"), wall_material
+        )
+        if values:
+            return values
+    values = _material_colour_distribution(
+        materials.get("wall_material_colour_distributions"), wall_material
+    )
+    if values:
+        return values
+    return materials.get("facade_colour_distribution")
+
+
 def apply_country_utility_materials(
     choice,
     tags: Mapping[str, str],
@@ -176,7 +211,7 @@ def apply_country_utility_materials(
     primary_colour = explicit_colour
     if not primary_colour:
         primary_colour = _weighted_colour(
-            materials.get("facade_colour_distribution"),
+            _facade_colour_distribution(materials, block, wall),
             signature + ":facade-colour",
             palette[0] if palette else "",
         )
@@ -223,6 +258,17 @@ def _utility_kind(text: str) -> str:
 
 
 def _utility_wall_base(region: str, facade: str, wall_material: str, palette: tuple[str, ...]):
+    material_text = str(wall_material or "").casefold()
+    if (
+        not material_text.startswith("utility ")
+        and "vertical" in material_text
+        and any(token in material_text for token in ("timber", "wood"))
+    ):
+        base = (
+            _textures._colour_from_name(palette[0], default=(148, 104, 70))
+            if palette else (148, 104, 70)
+        )
+        return "cwr_vertical_timber", base
     utility_kind = _utility_kind(wall_material)
     if not utility_kind:
         return _ORIGINAL_CHOOSE_WALL_BASE(region, facade, wall_material, palette)
@@ -244,6 +290,34 @@ def _utility_wall_base(region: str, facade: str, wall_material: str, palette: tu
 
 
 def _utility_render_wall(kind: str, base, rng: random.Random, size: int):
+    if str(kind) == "cwr_vertical_timber":
+        # Swedish painted timber is vertical board-on-board/clapboard-like
+        # cladding, not the generic modeler's broad horizontal wood courses.
+        # Keep it chunky enough for CWA while adding subtle board-to-board
+        # variation and sparse weathering instead of a flat colour slab.
+        pixels = []
+        board_width = max(16, int(round(size * 0.085)))
+        for y in range(size):
+            for x in range(size):
+                board = x // board_width
+                phase = x % board_width
+                board_shift = ((board * 17) % 9) - 4
+                colour = [
+                    _textures._clamp(channel + board_shift + rng.randint(-4, 4))
+                    for channel in base
+                ]
+                if phase < 2:
+                    colour = [_textures._clamp(int(c * 0.57)) for c in colour]
+                elif phase < 4:
+                    colour = [_textures._clamp(int(c * 1.06)) for c in colour]
+                # Sparse vertical grain and a very occasional butt joint keep
+                # the material readable without turning it into stripy noise.
+                if (y + board * 23) % 79 == 0 and phase > 4:
+                    colour = [_textures._clamp(int(c * 0.91)) for c in colour]
+                if y % max(96, int(size * 0.62)) < 2:
+                    colour = [_textures._clamp(int(c * 0.88)) for c in colour]
+                pixels.append(tuple(colour))
+        return pixels
     if not str(kind).startswith("utility_"):
         return _ORIGINAL_RENDER_WALL(kind, base, rng, size)
     raw = str(kind)[8:]

@@ -253,3 +253,16 @@ def test_roof_cache_identity_ignores_facade_palette_that_renderer_ignores() -> N
     assert modeler_roof_texture_image("gabled|standing-seam metal|cream", 128, 2).tobytes() == (
         modeler_roof_texture_image("gabled|standing-seam metal|falun red", 128, 2).tobytes()
     )
+
+
+def test_painted_vertical_timber_cladding_uses_vertical_board_renderer() -> None:
+    token = _token("swedish_wood", "painted vertical timber cladding", "ochre yellow")
+    facade, material, palette = split_texture_token(token)
+    kind, base = upstream_textures._choose_wall_base(facade, facade, material, palette)
+    assert kind == "cwr_vertical_timber"
+    pixels = upstream_textures._render_wall(kind, base, random.Random(1234), 256)
+    # A seam column is intentionally much darker than a board interior. This
+    # catches a regression back to the old broad horizontal wood courses.
+    seam = sum(sum(pixels[y * 256]) for y in range(256)) / (256 * 3)
+    interior = sum(sum(pixels[y * 256 + 10]) for y in range(256)) / (256 * 3)
+    assert seam < interior * 0.78
