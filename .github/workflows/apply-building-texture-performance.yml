@@ -1,0 +1,123 @@
+name: Apply Building Texture Performance Optimization
+
+on:
+  push:
+    branches:
+      - upgrade/osm-house-modeler-buildings
+    paths:
+      - 'tools/apply_building_texture_performance.py'
+      - '.github/workflows/apply-building-texture-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: upgrade/osm-house-modeler-buildings
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Apply optimization
+        run: python tools/apply_building_texture_performance.py
+      - name: Install package and tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[sources]" pytest
+      - name: Verify texture performance and fidelity
+        run: |
+          pytest -q \
+            tests/test_osm_house_modeler_texture_bridge.py \
+            tests/test_building_asset_budget_policy.py \
+            tests/test_building_progress_policy.py \
+            tests/test_paa_performance_cache.py \
+            tests/test_modeler_opening_dimensions.py \
+            tests/test_country_utility_materials.py \
+            tests/test_global_country_visual_balance.py
+      - name: Measure synthetic texture fanout
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          from dataclasses import replace
+          from tempfile import TemporaryDirectory
+          from pathlib import Path
+          from cwr_worldgen import procedural_buildings as pb
+          from cwr_worldgen.building_asset_budget_policy import _texture_cache_tasks
+
+          def token(door_width):
+              metadata = {
+                  'texture_renderer_revision': 5,
+                  'window': {
+                      'width_m': 1.2, 'height_m': 1.35, 'sill_height_m': 0.85,
+                      'target_bay_spacing_m': 3.6, 'density_multiplier': 1.0,
+                      'type': 'paired casement', 'frame_material': 'painted timber',
+                  },
+                  'door': {
+                      'width_m': door_width, 'height_m': 2.05,
+                      'type': 'panel', 'material': 'timber',
+                  },
+              }
+              encoded = base64.urlsafe_b64encode(
+                  json.dumps(metadata, sort_keys=True, separators=(',', ':')).encode()
+              ).decode().rstrip('=')
+              return f'western_stucco|stucco~{encoded}|cream'
+
+          with TemporaryDirectory() as temporary:
+              lib = pb.ProceduralBuildingLibrary(
+                  world_name='TextureFanout', cache_dir=Path(temporary), cache_enabled=True
+              )
+              base = pb.BuildingVariantKey(
+                  family='residential', roof_style='gabled', width_m=10.0,
+                  length_m=8.0, height_m=6.0, regional_style='western_stucco',
+                  texture_style_token=token(0.9), wall_material='stucco',
+                  roof_material='tile', colour_palette=('cream',),
+                  window_width_m=1.2, window_height_m=1.35,
+                  window_sill_height_m=0.85, door_width_m=0.9, door_height_m=2.05,
+              )
+              for index in range(64):
+                  key = replace(
+                      base,
+                      eave_overhang_m=0.10 + index * 0.001,
+                      texture_style_token=token(0.80 + index * 0.01),
+                  )
+                  lib._usage[key] = 1
+              total, misses = _texture_cache_tasks(lib, pb)
+              kinds = {}
+              for task in misses:
+                  kinds[task.kind] = kinds.get(task.kind, 0) + 1
+              print('canonical texture refs:', total, kinds)
+              # Without pixel-equivalence keying this pattern is roughly 64 wall +
+              # 64 open-wall + 64 front + 64 roof cache entries. Only fronts are
+              # genuinely different because only their rendered door width changes.
+              assert kinds.get('wall') == 1
+              assert kinds.get('open_wall') == 1
+              assert kinds.get('roof') == 1
+              assert kinds.get('front') == 64
+              assert total <= 68
+          PY
+      - name: Commit verified optimization
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/cwr_worldgen/osm_house_modeler_texture_bridge.py \
+            src/cwr_worldgen/building_asset_budget_policy.py \
+            src/cwr_worldgen/building_progress_policy.py \
+            src/cwr_worldgen/paa.py \
+            tests/test_osm_house_modeler_texture_bridge.py \
+            tests/test_building_asset_budget_policy.py \
+            tests/test_building_progress_policy.py \
+            tests/test_paa_performance_cache.py
+          if git diff --cached --quiet; then
+            echo "No optimization changes to commit"
+          else
+            git commit -m "Optimize procedural building texture generation"
+            git push origin HEAD:upgrade/osm-house-modeler-buildings
+          fi
