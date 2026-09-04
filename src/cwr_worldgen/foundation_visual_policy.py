@@ -138,6 +138,13 @@ def install_foundation_visual_policy() -> None:
 
     install_interior_performance_policy()
 
+    # Bound exact polygon P3Ds after the final geometry/performance wrappers are
+    # installed. This keeps complex footprint fidelity without letting a hidden
+    # 2048-model side budget dominate the asset-generation stage.
+    from .building_asset_budget_policy import install_building_asset_budget_policy
+
+    install_building_asset_budget_policy()
+
     # Utility material selection is deliberately data-only: all barn/shed/garage/
     # warehouse/hangar/industrial pools live in the selected country JSON. The
     # runtime merely consumes those explicit distributions and supplies matching
