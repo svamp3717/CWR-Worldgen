@@ -16,6 +16,8 @@ from cwr_worldgen.osm_house_modeler_texture_bridge import (
     _door_image_cached,
     _seed,
     _wall_material_image,
+    modeler_texture_cache_identity,
+    modeler_wall_material_identity,
     cwa_exposure_compensate,
     modeler_door_texture_image,
     modeler_front_texture_image,
@@ -34,6 +36,7 @@ def _token(
     *,
     window_material: str = "painted timber",
     door_material: str = "timber",
+    door_width_m: float = 0.95,
 ) -> str:
     metadata = {
         "texture_renderer_revision": 2,
@@ -48,7 +51,7 @@ def _token(
             "frame_material": window_material,
         },
         "door": {
-            "width_m": 0.95,
+            "width_m": door_width_m,
             "height_m": 2.05,
             "type": "glazed panel",
             "material": door_material,
@@ -87,7 +90,18 @@ def test_modeler_material_is_rendered_at_native_256_before_downsampling() -> Non
     facade, material, palette = split_texture_token(token)
     kind, base = upstream_textures._choose_wall_base(facade, facade, material, palette)
 
-    native_rng = random.Random(_seed(f"wall:{token}:3"))
+    identity = modeler_wall_material_identity(token, 3)
+    identity_payload = json.loads(identity)
+    seed_basis = json.dumps(
+        {
+            "facade": identity_payload["facade"],
+            "material": identity_payload["material"],
+            "palette": identity_payload["palette"],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    native_rng = random.Random(_seed(f"wall:{seed_basis}:3"))
     native_pixels = upstream_textures._render_wall(
         kind, base, native_rng, UPSTREAM_TEXTURE_CANONICAL_SIZE
     )
@@ -104,7 +118,7 @@ def test_modeler_material_is_rendered_at_native_256_before_downsampling() -> Non
     # This is the bug visible in the CWA screenshot: asking the upstream private
     # renderer to draw directly at 128 changes all of its fixed pixel-space brick
     # dimensions. The bridge must never regress to that output again.
-    wrong_rng = random.Random(_seed(f"wall:{token}:3"))
+    wrong_rng = random.Random(_seed(f"wall:{seed_basis}:3"))
     wrong = Image.new("RGB", (128, 128))
     wrong.putdata(upstream_textures._render_wall(kind, base, wrong_rng, 128))
     assert actual.tobytes() != wrong.tobytes()
@@ -197,3 +211,45 @@ def test_modeler_doors_force_solid_no_glass(monkeypatch) -> None:
         texture_variant=11,
     )
     assert seen == [True]
+
+
+def test_irrelevant_door_metadata_does_not_multiply_wall_cache_identity() -> None:
+    narrow = _token("western_stucco", "plaster", "cream", door_width_m=0.90)
+    wide = _token("western_stucco", "plaster", "cream", door_width_m=1.40)
+
+    assert modeler_texture_cache_identity(
+        "open_wall", style_token=narrow, texture_variant=0, size=128
+    ) == modeler_texture_cache_identity(
+        "open_wall", style_token=wide, texture_variant=0, size=128
+    )
+    assert modeler_texture_cache_identity(
+        "wall", style_token=narrow, texture_variant=0, size=128
+    ) == modeler_texture_cache_identity(
+        "wall", style_token=wide, texture_variant=0, size=128
+    )
+    assert modeler_open_wall_texture_image("residential", 128, narrow, 0).tobytes() == (
+        modeler_open_wall_texture_image("residential", 128, wide, 0).tobytes()
+    )
+
+    # Front pixels really do use door width, so that identity must remain distinct.
+    assert modeler_texture_cache_identity(
+        "front", style_token=narrow, texture_variant=0, family="residential", size=128
+    ) != modeler_texture_cache_identity(
+        "front", style_token=wide, texture_variant=0, family="residential", size=128
+    )
+    assert modeler_front_texture_image("residential", 128, narrow, 0, "").tobytes() != (
+        modeler_front_texture_image("residential", 128, wide, 0, "").tobytes()
+    )
+
+
+def test_roof_cache_identity_ignores_facade_palette_that_renderer_ignores() -> None:
+    cream = modeler_texture_cache_identity(
+        "roof", roof_token="gabled|standing-seam metal|cream", texture_variant=2, size=128
+    )
+    red = modeler_texture_cache_identity(
+        "roof", roof_token="gabled|standing-seam metal|falun red", texture_variant=2, size=128
+    )
+    assert cream == red
+    assert modeler_roof_texture_image("gabled|standing-seam metal|cream", 128, 2).tobytes() == (
+        modeler_roof_texture_image("gabled|standing-seam metal|falun red", 128, 2).tobytes()
+    )

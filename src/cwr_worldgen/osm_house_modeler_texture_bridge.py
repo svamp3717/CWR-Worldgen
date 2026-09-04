@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from hashlib import sha256
+import json
 import random
 from typing import Any, Mapping
 
@@ -84,14 +85,59 @@ def _style_inputs(token: str) -> tuple[str, str, tuple[str, ...], dict[str, Any]
     return facade, material, palette, texture_metadata_from_token(token)
 
 
+def modeler_wall_material_identity(token: str, texture_variant: int = 0) -> str:
+    """Return the pixel identity of the base wall material only.
+
+    Door/window geometry lives in the encoded style token but cannot affect the
+    bare wall material. Keeping it out of this identity lets sibling facade
+    textures and architecturally different buildings reuse one native 256px
+    material render whenever their visible wall material is actually identical.
+    """
+    facade, material, palette = split_texture_token(token)
+    return json.dumps(
+        {
+            "facade": facade,
+            "material": material,
+            "palette": list(palette),
+            "variant": int(texture_variant),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 @lru_cache(maxsize=_MODEL_RENDER_CACHE_SIZE)
-def _wall_material_image(token: str, texture_variant: int, size: int) -> Image.Image:
-    """Return one immutable cached modeler wall-material tile."""
-    facade, material, palette, _metadata = _style_inputs(token)
+def _wall_material_image_canonical(
+    facade: str,
+    material: str,
+    palette: tuple[str, ...],
+    texture_variant: int,
+    size: int,
+) -> Image.Image:
+    """Return one immutable cached native modeler wall-material tile."""
     kind, base = _upstream._choose_wall_base(facade, facade, material, palette)
-    rng = random.Random(_seed(f"wall:{token}:{texture_variant}"))
+    identity = json.dumps(
+        {"facade": facade, "material": material, "palette": list(palette)},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    rng = random.Random(_seed(f"wall:{identity}:{int(texture_variant)}"))
     native = UPSTREAM_TEXTURE_CANONICAL_SIZE
-    return _canonical_image(_upstream._render_wall(kind, base, rng, native), int(size))
+    return _canonical_image(
+        _upstream._render_wall(kind, base, rng, native), int(size)
+    )
+
+
+def _wall_material_image(token: str, texture_variant: int, size: int) -> Image.Image:
+    facade, material, palette, _metadata = _style_inputs(token)
+    return _wall_material_image_canonical(
+        facade, material, palette, int(texture_variant), int(size)
+    )
+
+
+# Preserve the small internal cache-inspection API used by regression tests.
+_wall_material_image.cache_clear = _wall_material_image_canonical.cache_clear  # type: ignore[attr-defined]
+_wall_material_image.cache_info = _wall_material_image_canonical.cache_info  # type: ignore[attr-defined]
 
 
 def _window_spec(metadata: Mapping[str, Any]) -> dict[str, str]:
@@ -109,7 +155,8 @@ def _window_spec(metadata: Mapping[str, Any]) -> dict[str, str]:
 def _window_image_cached(token: str, texture_variant: int, size: int) -> Image.Image:
     metadata = texture_metadata_from_token(token)
     spec = _window_spec(metadata)
-    rng = random.Random(_seed(f"window:{token}:{texture_variant}"))
+    window_identity = json.dumps(spec, sort_keys=True, separators=(",", ":"))
+    rng = random.Random(_seed(f"window:{window_identity}:{texture_variant}"))
     native = UPSTREAM_TEXTURE_CANONICAL_SIZE
     return _canonical_image(_upstream._render_window(spec, rng, native), int(size))
 
@@ -125,7 +172,8 @@ def _window_image(metadata: Mapping[str, Any], token: str, texture_variant: int,
 def _window_frame_image_cached(token: str, texture_variant: int, size: int) -> Image.Image:
     metadata = texture_metadata_from_token(token)
     spec = _window_spec(metadata)
-    rng = random.Random(_seed(f"window-frame:{token}:{texture_variant}"))
+    window_identity = json.dumps(spec, sort_keys=True, separators=(",", ":"))
+    rng = random.Random(_seed(f"window-frame:{window_identity}:{texture_variant}"))
     native = UPSTREAM_TEXTURE_CANONICAL_SIZE
     return _canonical_image(_upstream._render_window_frame(spec, rng, native), int(size))
 
@@ -152,7 +200,17 @@ def _door_image_cached(
         "type": str(door.get("type", "panel") or "panel"),
         "materials": [material],
     }
-    rng = random.Random(_seed(f"door:{token}:{texture_variant}:{family}:{outbuilding_kind}"))
+    door_identity = json.dumps(
+        {
+            "type": spec["type"],
+            "material": material,
+            "family": str(family),
+            "outbuilding_kind": str(outbuilding_kind),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    rng = random.Random(_seed(f"door:{door_identity}:{texture_variant}"))
     native = UPSTREAM_TEXTURE_CANONICAL_SIZE
     return _canonical_image(
         _upstream._render_door(
@@ -177,6 +235,94 @@ def _number(value: object, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _window_cache_identity(metadata: Mapping[str, Any], *, layout: bool) -> dict[str, Any]:
+    window = metadata.get("window") or {}
+    if not isinstance(window, Mapping):
+        window = {}
+    visual = _window_spec(metadata)
+    result: dict[str, Any] = {
+        "type": visual["type"],
+        "frame_material": visual["frame_material"],
+        "trim": visual["trim"],
+    }
+    if layout:
+        result.update({
+            "width_m": round(_number(window.get("width_m"), 0.0), 4),
+            "height_m": round(_number(window.get("height_m"), 0.0), 4),
+            "sill_height_m": round(_number(window.get("sill_height_m"), 0.85), 4),
+            "target_bay_spacing_m": round(_number(window.get("target_bay_spacing_m"), 4.0), 4),
+            "density_multiplier": round(_number(window.get("density_multiplier"), 1.0), 4),
+        })
+    return result
+
+
+def _door_cache_identity(metadata: Mapping[str, Any], *, layout: bool) -> dict[str, Any]:
+    door = metadata.get("door") or {}
+    if not isinstance(door, Mapping):
+        door = {}
+    result: dict[str, Any] = {
+        "type": str(door.get("type", "panel") or "panel"),
+        "material": str(door.get("material", "timber") or "timber"),
+    }
+    if layout:
+        result.update({
+            "width_m": round(_number(door.get("width_m"), 0.0), 4),
+            "height_m": round(_number(door.get("height_m"), 0.0), 4),
+        })
+    return result
+
+
+def modeler_texture_cache_identity(
+    kind: str,
+    *,
+    style_token: str = "default",
+    texture_variant: int = 0,
+    family: str = "",
+    outbuilding_kind: str = "",
+    roof_token: str = "",
+    size: int = 128,
+) -> str:
+    """Return the smallest deterministic identity that fully determines pixels."""
+    name = str(kind or "").casefold()
+    variant = int(texture_variant)
+    payload: dict[str, Any] = {
+        "kind": name,
+        "size": int(size),
+        "variant": variant,
+    }
+    if name == "roof":
+        parts = str(roof_token or "gabled").split("|", 2)
+        payload.update({
+            "shape": parts[0] or "gabled",
+            "material": parts[1] if len(parts) > 1 else "",
+        })
+    elif name == "foundation":
+        payload["foundation_type"] = "concrete foundation"
+    else:
+        metadata = texture_metadata_from_token(style_token)
+        payload["renderer_revision"] = int(
+            round(_number(metadata.get("texture_renderer_revision"), 0.0))
+        )
+        if name in {"wall", "open_wall", "interior_wall", "front"}:
+            payload["wall_material"] = modeler_wall_material_identity(
+                style_token, variant
+            )
+        if name == "wall":
+            payload["window"] = _window_cache_identity(metadata, layout=True)
+        elif name == "front":
+            payload["window"] = _window_cache_identity(metadata, layout=True)
+            payload["door"] = _door_cache_identity(metadata, layout=True)
+            payload["family"] = str(family)
+            payload["outbuilding_kind"] = str(outbuilding_kind)
+        elif name == "door":
+            payload["door"] = _door_cache_identity(metadata, layout=False)
+            payload["family"] = str(family)
+            payload["outbuilding_kind"] = str(outbuilding_kind)
+        elif name == "window_frame":
+            payload["window"] = _window_cache_identity(metadata, layout=False)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 def _paste_scaled(base: Image.Image, source: Image.Image, box: tuple[int, int, int, int]) -> None:

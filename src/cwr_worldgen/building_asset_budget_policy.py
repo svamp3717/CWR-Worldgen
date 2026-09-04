@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import os
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 _DEFAULT_STANDARD_VARIANTS = 128
 _DEFAULT_POLYGON_DIVISOR = 2
@@ -37,6 +37,17 @@ _DEFAULT_POLYGON_CEILING = 96
 _DEFAULT_BUILDING_PARALLEL_MINIMUM = 16
 _DEFAULT_MODELER_TEXTURE_VARIANTS = 1
 _TEXTURE_PARALLEL_MINIMUM = 4
+_TEXTURE_CACHE_IDENTITY_REVISION = "pixel-equivalent-v1"
+_TEXTURE_NAMESPACE_KINDS = {
+    "procedural-building-wall-modeler-v1-cwa78": "wall",
+    "procedural-building-open-wall-modeler-v1-cwa78": "open_wall",
+    "procedural-building-interior-wall-modeler-v1-cwa58": "interior_wall",
+    "procedural-building-front-modeler-v1-cwa78": "front",
+    "procedural-building-door-modeler-v1-cwa84": "door",
+    "procedural-building-roof-modeler-v1-cwa78": "roof",
+    "procedural-building-foundation-modeler-v1-cwa78": "foundation",
+    "procedural-building-window-frame-modeler-v1-cwa84": "window_frame",
+}
 _ENV_POLYGON_VARIANTS = "CWR_WORLDGEN_POLYGON_BUILDING_VARIANTS"
 _ENV_FINAL_VARIANTS = "CWR_WORLDGEN_FINAL_BUILDING_VARIANTS"
 _ENV_TEXTURE_VARIANTS = "CWR_WORLDGEN_BUILDING_TEXTURE_VARIANTS"
@@ -103,6 +114,30 @@ class _TextureCacheTask:
     roof_token: str = ""
     cache_enabled: bool = True
     cache_refresh: bool = False
+
+
+def _canonical_texture_cache_request(namespace: str, payload: Any) -> tuple[str, Any]:
+    """Collapse only texture cache keys that render byte-equivalent pixels."""
+    kind = _TEXTURE_NAMESPACE_KINDS.get(str(namespace))
+    if kind is None or not isinstance(payload, Mapping):
+        return namespace, payload
+
+    from .osm_house_modeler_texture_bridge import modeler_texture_cache_identity
+
+    size = int(payload.get("texture_size", 128) or 128)
+    identity = modeler_texture_cache_identity(
+        kind,
+        style_token=str(payload.get("regional_style", "default") or "default"),
+        texture_variant=int(payload.get("texture_variant", 0) or 0),
+        family=str(payload.get("family", "") or ""),
+        outbuilding_kind=str(payload.get("outbuilding_kind", "") or ""),
+        roof_token=str(payload.get("roof", "") or ""),
+        size=size,
+    )
+    return (
+        f"{namespace}-{_TEXTURE_CACHE_IDENTITY_REVISION}",
+        {"identity": identity, "texture_size": size},
+    )
 
 
 def _write_modeler_texture_cache_task(task: _TextureCacheTask) -> str:
@@ -498,6 +533,13 @@ def install_building_asset_budget_policy() -> None:
     original_init = buildings.ProceduralBuildingLibrary.__init__
     original_register = buildings.ProceduralBuildingLibrary.register_placement
     original_write_assets = buildings.ProceduralBuildingLibrary.write_assets
+    original_cache_key = buildings.cache_key
+
+    def canonical_texture_cache_key(namespace: str, payload):
+        revised_namespace, revised_payload = _canonical_texture_cache_request(
+            namespace, payload
+        )
+        return original_cache_key(revised_namespace, revised_payload)
 
     def budgeted_init(self, *args, **kwargs):
         if "maximum_polygon_variants" not in kwargs:
@@ -597,6 +639,7 @@ def install_building_asset_budget_policy() -> None:
 
         return original_write_assets(self, source_dir, catalogue_path)
 
+    buildings.cache_key = canonical_texture_cache_key
     buildings.ProceduralBuildingLibrary.__init__ = budgeted_init
     buildings.ProceduralBuildingLibrary.register_placement = register_with_final_budget
     buildings.ProceduralBuildingLibrary.write_assets = write_assets_with_budget_progress

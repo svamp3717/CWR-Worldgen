@@ -4,9 +4,13 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 from cwr_worldgen import parallel_assets
-from cwr_worldgen.building_progress_policy import process_asset_tasks_with_progress
+from cwr_worldgen.building_progress_policy import (
+    _partition_indexed_tasks,
+    process_asset_tasks_with_progress,
+)
 
 
 def _subprocess_env() -> dict[str, str]:
@@ -125,3 +129,27 @@ def test_building_p3d_route_emits_human_readable_counter(monkeypatch) -> None:
         74,
         "Generating procedural building P3Ds (2/2, 100%)",
     )
+
+
+def test_texture_worker_partition_keeps_sibling_style_outputs_together() -> None:
+    def texture_worker(value):
+        return value
+
+    texture_worker.__module__ = "cwr_worldgen.building_asset_budget_policy"
+    texture_worker.__name__ = "_write_modeler_texture_cache_task"
+    tasks = [
+        SimpleNamespace(style_token="style-a", texture_variant=0, kind="wall", roof_token=""),
+        SimpleNamespace(style_token="style-b", texture_variant=0, kind="wall", roof_token=""),
+        SimpleNamespace(style_token="style-a", texture_variant=0, kind="open_wall", roof_token=""),
+        SimpleNamespace(style_token="style-b", texture_variant=0, kind="front", roof_token=""),
+        SimpleNamespace(style_token="style-a", texture_variant=0, kind="front", roof_token=""),
+    ]
+    chunks = _partition_indexed_tasks(
+        texture_worker, list(enumerate(tasks)), 2
+    )
+    locations = {}
+    for chunk_index, chunk in enumerate(chunks):
+        for _source_index, task in chunk:
+            locations.setdefault(task.style_token, set()).add(chunk_index)
+    assert locations["style-a"] == {next(iter(locations["style-a"]))}
+    assert locations["style-b"] == {next(iter(locations["style-b"]))}

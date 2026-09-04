@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 import io
 import struct
@@ -126,6 +127,7 @@ def _decode_rgb565(value: int) -> tuple[int, int, int]:
     return (red * 255 // 31, green * 255 // 63, blue * 255 // 31)
 
 
+@lru_cache(maxsize=65_536)
 def _compress_dxt1_rgb_bytes(raw: bytes) -> bytes:
     """Compress one 4x4 RGB block with a fast deterministic endpoint fit.
 

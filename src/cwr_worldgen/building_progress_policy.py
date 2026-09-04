@@ -43,6 +43,53 @@ def _worker_identity(worker: Callable[..., object]) -> tuple[str, str]:
     )
 
 
+def _texture_task_affinity(task: object) -> tuple[object, ...]:
+    """Keep sibling texture outputs together without creating giant material shards."""
+    token = str(getattr(task, "style_token", "") or "")
+    variant = int(getattr(task, "texture_variant", 0) or 0)
+    if token:
+        # Full style token is intentional here: one building style's wall/open/
+        # front/door outputs share the same native source renders. Using only the
+        # wall material could put a dominant national material on one worker and
+        # destroy load balance.
+        return ("style", token, variant)
+    roof = str(getattr(task, "roof_token", "") or "")
+    if roof:
+        parts = roof.split("|", 2)
+        return ("roof", parts[0] if parts else "", parts[1] if len(parts) > 1 else "", variant)
+    return ("kind", str(getattr(task, "kind", "") or ""), variant)
+
+
+def _partition_indexed_tasks(
+    worker: Callable[..., object],
+    indexed_tasks: list[tuple[int, T]],
+    worker_count: int,
+) -> list[list[tuple[int, T]]]:
+    if _worker_identity(worker) != _TEXTURE_WORKER:
+        return [
+            indexed_tasks[worker_index::worker_count]
+            for worker_index in range(worker_count)
+        ]
+
+    groups: dict[tuple[object, ...], list[tuple[int, T]]] = {}
+    for item in indexed_tasks:
+        groups.setdefault(_texture_task_affinity(item[1]), []).append(item)
+
+    chunks: list[list[tuple[int, T]]] = [[] for _ in range(worker_count)]
+    loads = [0] * worker_count
+    # Largest sibling groups first, then deterministic source order. This is a
+    # small greedy bin-pack that preserves cache affinity without sacrificing all
+    # load balance when one style happens to need more output kinds than another.
+    ordered_groups = sorted(
+        groups.values(), key=lambda group: (-len(group), group[0][0])
+    )
+    for group in ordered_groups:
+        target = min(range(worker_count), key=lambda index: (loads[index], index))
+        chunks[target].extend(group)
+        loads[target] += len(group)
+    return chunks
+
+
 def _progress_worker_chunk(
     worker: Callable[[T], R],
     indexed_tasks: list[tuple[int, T]],
@@ -86,10 +133,7 @@ def _process_map_with_progress(
 
     worker_count = min(max(1, int(workers)), len(tasks))
     indexed_tasks = list(enumerate(tasks))
-    chunks: list[list[tuple[int, T]]] = [
-        indexed_tasks[worker_index::worker_count]
-        for worker_index in range(worker_count)
-    ]
+    chunks = _partition_indexed_tasks(worker, indexed_tasks, worker_count)
 
     context = mp.get_context("spawn")
     processes: list[mp.Process] = []

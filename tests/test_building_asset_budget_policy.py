@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import base64
+import json
 from cwr_worldgen import parallel_assets
 from cwr_worldgen import procedural_buildings as pb
 from cwr_worldgen.building_asset_budget_policy import (
@@ -31,6 +33,31 @@ def _variant(*, overhang: float = 0.2, interiors: bool = False) -> pb.BuildingVa
         door_width_m=0.95,
         door_height_m=2.1,
     )
+
+
+def _encoded_token(*, door_width_m: float) -> str:
+    metadata = {
+        "texture_renderer_revision": 5,
+        "window": {
+            "width_m": 1.2,
+            "height_m": 1.35,
+            "sill_height_m": 0.85,
+            "target_bay_spacing_m": 3.6,
+            "density_multiplier": 1.0,
+            "type": "paired casement",
+            "frame_material": "painted timber",
+        },
+        "door": {
+            "width_m": door_width_m,
+            "height_m": 2.05,
+            "type": "panel",
+            "material": "timber",
+        },
+    }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    return f"western_stucco|stucco~{encoded}|cream"
 
 
 def _placement(key: pb.BuildingVariantKey) -> pb.BuildingPlacement:
@@ -180,3 +207,25 @@ def test_final_budget_never_changes_building_class_or_primary_material_group() -
     assert second.selected.colour_palette[0] == "ochre yellow"
     # Fidelity groups may exceed a tiny synthetic numerical cap rather than\n    # silently changing architecture/material identity.
     assert len(library._usage) == 2
+
+
+def test_texture_cache_collapses_only_pixel_equivalent_outputs(tmp_path) -> None:
+    library = pb.ProceduralBuildingLibrary(
+        world_name="PixelEquivalentCache",
+        cache_dir=tmp_path,
+        cache_enabled=True,
+    )
+    narrow = replace(_variant(), texture_style_token=_encoded_token(door_width_m=0.90))
+    wide = replace(_variant(overhang=0.21), texture_style_token=_encoded_token(door_width_m=1.40))
+    library._usage[narrow] = 1
+    library._usage[wide] = 1
+
+    _total, misses = _texture_cache_tasks(library, pb)
+    kinds = [task.kind for task in misses]
+    # Door width is invisible to wall/open-wall pixels, so those cache entries
+    # collapse. The front layout uses door width and must remain two entries.
+    assert kinds.count("wall") == 1
+    assert kinds.count("open_wall") == 1
+    assert kinds.count("front") == 2
+    # Roof rendering ignores facade palette/opening metadata.
+    assert kinds.count("roof") == 1
