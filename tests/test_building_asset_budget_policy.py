@@ -98,6 +98,21 @@ def test_final_rectangular_p3d_budget_is_enforced_after_registration() -> None:
     assert sum(library._usage.values()) == 3
 
 
+def test_386_registration_fanout_is_bounded_to_128_final_rectangular_p3ds() -> None:
+    library = pb.ProceduralBuildingLibrary(
+        world_name="ReleaseSizedBudget",
+        maximum_variants=128,
+    )
+    for index in range(386):
+        library.register_placement(
+            _placement(_variant(overhang=0.100 + index * 0.001))
+        )
+
+    standard = [key for key in library._usage if not key.footprint_vertices]
+    assert len(standard) == 128
+    assert sum(library._usage.values()) == 386
+
+
 def test_final_budget_never_reuses_exterior_for_first_interior() -> None:
     library = pb.ProceduralBuildingLibrary(
         world_name="FinalBudgetModes",
