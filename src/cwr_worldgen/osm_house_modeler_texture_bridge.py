@@ -155,7 +155,10 @@ def _door_image_cached(
     rng = random.Random(_seed(f"door:{token}:{texture_variant}:{family}:{outbuilding_kind}"))
     native = UPSTREAM_TEXTURE_CANONICAL_SIZE
     return _canonical_image(
-        _upstream._render_door(spec, family, outbuilding_kind, rng, native), int(size)
+        _upstream._render_door(
+            spec, family, outbuilding_kind, rng, native, no_glass=True
+        ),
+        int(size),
     )
 
 

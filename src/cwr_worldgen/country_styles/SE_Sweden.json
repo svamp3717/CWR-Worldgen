@@ -5,12 +5,12 @@
   "iso_alpha2": "SE",
   "iso_alpha3": "SWE",
   "iso_numeric": "752",
-  "parent_region_identifier": "sweden",
-  "parent_region_name": "Sweden",
+  "parent_region_identifier": "northern_europe",
+  "parent_region_name": "Northern Europe",
   "detail_revision": "2026-09-sweden-visual-balance-v2",
   "detail_level": "country-expanded-curated",
   "data_provenance": {
-    "architectural_basis": "curated national tuning over detailed CWR region",
+    "architectural_basis": "curated national tuning over the Northern Europe regional baseline; Sweden itself is defined only in country_styles",
     "geography_basis": "bundled low-resolution country geometry from generation-time countryinfo/Natural-Earth-derived data when available; manual envelope fallback for selected small territories",
     "runtime_network_required": false,
     "editor_note": "Country data is a procedural default, not a statement that all buildings in the country share one style. Explicit OSM tags override these defaults."
@@ -819,7 +819,9 @@
             }
           ],
           "visual_balance_revision": "2026-09-sweden-red-brick-balance-v2",
-          "facade_colour_provenance": "Weighted facade colours are stored explicitly so Falun red is a common Swedish cue rather than the automatic first colour on every building."
+          "facade_colour_provenance": "Weighted facade colours are stored explicitly so Falun red is a common Swedish cue rather than the automatic first colour on every building.",
+          "global_visual_balance_revision": "2026-09-global-country-visual-balance-v1",
+          "global_visual_balance_provenance": "Explicit ordinary-wall and facade-colour distributions derived from this country/context's curated lists. Hand-tuned distributions take precedence; otherwise listed options use an equal-weight baseline. Explicit OSM building:material/building:colour tags remain authoritative."
         },
         "geometry_defaults": {
           "storey_height_m": {
@@ -2295,7 +2297,9 @@
             }
           ],
           "visual_balance_revision": "2026-09-sweden-red-brick-balance-v2",
-          "facade_colour_provenance": "Weighted facade colours are stored explicitly so Falun red is a common Swedish cue rather than the automatic first colour on every building."
+          "facade_colour_provenance": "Weighted facade colours are stored explicitly so Falun red is a common Swedish cue rather than the automatic first colour on every building.",
+          "global_visual_balance_revision": "2026-09-global-country-visual-balance-v1",
+          "global_visual_balance_provenance": "Explicit ordinary-wall and facade-colour distributions derived from this country/context's curated lists. Hand-tuned distributions take precedence; otherwise listed options use an equal-weight baseline. Explicit OSM building:material/building:colour tags remain authoritative."
         },
         "geometry_defaults": {
           "storey_height_m": {

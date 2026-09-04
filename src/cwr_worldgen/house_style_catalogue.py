@@ -34,7 +34,7 @@ class RegionProfile:
 
     ``identifier`` intentionally preserves the older broad identifiers where a
     profile declares ``legacy_identifier``. New code should use
-    ``house_style_identifier`` when it needs the precise 24-region catalogue.
+    ``house_style_identifier`` when it needs the bundled regional catalogue.
 
     ``description``, ``selection`` and ``roof_defaults`` remain aliases for the
     rural context so older callers keep working while new code can select the
@@ -299,8 +299,10 @@ def _load_profiles() -> tuple[RegionProfile, ...]:
             ),
         ))
 
-    if len(profiles) != 24 or numbers != set(range(1, 25)):
-        raise RuntimeError("house-style catalogue must contain exactly map regions 1 through 24")
+    # Sweden is represented exclusively by country_styles/SE_Sweden.json and
+    # inherits the Northern Europe baseline, so the regional catalogue ends at 23.
+    if len(profiles) != 23 or numbers != set(range(1, 24)):
+        raise RuntimeError("house-style catalogue must contain exactly map regions 1 through 23")
     return tuple(sorted(profiles, key=lambda item: item.map_region_number))
 
 

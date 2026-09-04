@@ -447,7 +447,61 @@
             }
           },
           "utility_materials_revision": "2026-09-country-utility-materials-v1",
-          "utility_materials_provenance": "Explicit country/context class pools derived from this profile's curated material/facade vocabulary; parent-region materials are used only when the country context omits them."
+          "utility_materials_provenance": "Explicit country/context class pools derived from this profile's curated material/facade vocabulary; parent-region materials are used only when the country context omits them.",
+          "common_wall_material_distribution": [
+            {
+              "material": "painted timber boards",
+              "weight": 100
+            },
+            {
+              "material": "fibre-cement panels",
+              "weight": 100
+            },
+            {
+              "material": "stucco/render",
+              "weight": 100
+            },
+            {
+              "material": "concrete block",
+              "weight": 100
+            },
+            {
+              "material": "woven/lightweight vernacular panels",
+              "weight": 100
+            }
+          ],
+          "facade_colour_distribution": [
+            {
+              "colour": "white",
+              "weight": 100
+            },
+            {
+              "colour": "pale blue",
+              "weight": 100
+            },
+            {
+              "colour": "turquoise",
+              "weight": 100
+            },
+            {
+              "colour": "green",
+              "weight": 100
+            },
+            {
+              "colour": "cream",
+              "weight": 100
+            },
+            {
+              "colour": "natural timber",
+              "weight": 100
+            },
+            {
+              "colour": "bright accent colours",
+              "weight": 100
+            }
+          ],
+          "global_visual_balance_revision": "2026-09-global-country-visual-balance-v1",
+          "global_visual_balance_provenance": "Explicit ordinary-wall and facade-colour distributions derived from this country/context's curated lists. Hand-tuned distributions take precedence; otherwise listed options use an equal-weight baseline. Explicit OSM building:material/building:colour tags remain authoritative."
         },
         "geometry_defaults": {
           "storey_height_m": {
@@ -1872,7 +1926,61 @@
             }
           },
           "utility_materials_revision": "2026-09-country-utility-materials-v1",
-          "utility_materials_provenance": "Explicit country/context class pools derived from this profile's curated material/facade vocabulary; parent-region materials are used only when the country context omits them."
+          "utility_materials_provenance": "Explicit country/context class pools derived from this profile's curated material/facade vocabulary; parent-region materials are used only when the country context omits them.",
+          "common_wall_material_distribution": [
+            {
+              "material": "painted timber boards",
+              "weight": 100
+            },
+            {
+              "material": "fibre-cement panels",
+              "weight": 100
+            },
+            {
+              "material": "stucco/render",
+              "weight": 100
+            },
+            {
+              "material": "concrete block",
+              "weight": 100
+            },
+            {
+              "material": "woven/lightweight vernacular panels",
+              "weight": 100
+            }
+          ],
+          "facade_colour_distribution": [
+            {
+              "colour": "white",
+              "weight": 100
+            },
+            {
+              "colour": "pale blue",
+              "weight": 100
+            },
+            {
+              "colour": "turquoise",
+              "weight": 100
+            },
+            {
+              "colour": "green",
+              "weight": 100
+            },
+            {
+              "colour": "cream",
+              "weight": 100
+            },
+            {
+              "colour": "natural timber",
+              "weight": 100
+            },
+            {
+              "colour": "bright accent colours",
+              "weight": 100
+            }
+          ],
+          "global_visual_balance_revision": "2026-09-global-country-visual-balance-v1",
+          "global_visual_balance_provenance": "Explicit ordinary-wall and facade-colour distributions derived from this country/context's curated lists. Hand-tuned distributions take precedence; otherwise listed options use an equal-weight baseline. Explicit OSM building:material/building:colour tags remain authoritative."
         },
         "geometry_defaults": {
           "storey_height_m": {

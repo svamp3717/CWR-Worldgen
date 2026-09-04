@@ -13,9 +13,11 @@ from cwr_worldgen.osm_house_modeler_full_style import split_texture_token
 from cwr_worldgen.osm_house_modeler_texture_bridge import (
     CWA_EXTERIOR_EXPOSURE,
     UPSTREAM_TEXTURE_CANONICAL_SIZE,
+    _door_image_cached,
     _seed,
     _wall_material_image,
     cwa_exposure_compensate,
+    modeler_door_texture_image,
     modeler_front_texture_image,
     modeler_interior_wall_texture_image,
     modeler_open_wall_texture_image,
@@ -172,3 +174,26 @@ def test_empty_building_catalogue_does_not_depend_on_last_variant_key() -> None:
         assert result.placements == 0
         assert result.generated_variants == 0
         assert (root / "catalogue.json").is_file()
+
+
+
+def test_modeler_doors_force_solid_no_glass(monkeypatch) -> None:
+    token = _token("swedish_wood", "painted timber", "cream", door_material="timber")
+    seen: list[bool] = []
+    original = upstream_textures._render_door
+
+    def captured(spec, family, outbuilding_kind, rng, size, *, no_glass=False):
+        seen.append(bool(no_glass))
+        return original(
+            spec, family, outbuilding_kind, rng, size, no_glass=no_glass
+        )
+
+    monkeypatch.setattr(upstream_textures, "_render_door", captured)
+    _door_image_cached.cache_clear()
+    modeler_door_texture_image(
+        128,
+        family="residential",
+        regional_style=token,
+        texture_variant=11,
+    )
+    assert seen == [True]

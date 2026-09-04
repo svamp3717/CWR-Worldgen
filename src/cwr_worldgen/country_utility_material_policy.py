@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Consume explicit per-country utility material pools and render their finishes.
+"""Consume explicit per-country material, colour and utility-building pools.
 
-Selection in this module is intentionally data-driven. It does not invent a barn
-or warehouse material at runtime: the selected country/context JSON must contain
-``architectural_details.materials.building_class_overrides``. Explicit OSM
-``building:material`` and ``roof:material`` tags remain authoritative.
+Selection in this module is intentionally data-driven. Ordinary walls/facade
+colours and utility classes come from the selected country/context JSON. Explicit
+OSM ``building:material``, ``building:colour`` and ``roof:material`` tags remain
+authoritative.
 """
 from __future__ import annotations
 

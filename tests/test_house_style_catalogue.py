@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from cwr_worldgen.house_style_catalogue import (
@@ -19,14 +18,12 @@ from cwr_worldgen.osm_house_modeler_styles import (
 )
 
 
-def test_modeler_region_catalogue_replaces_old_compact_files() -> None:
-    assert [profile.map_region_number for profile in REGION_PROFILES] == list(range(1, 25))
-    assert len(load_profiles()) == 24
+def test_modeler_region_catalogue_excludes_sweden_country_duplicate() -> None:
+    assert [profile.map_region_number for profile in REGION_PROFILES] == list(range(1, 24))
+    assert len(load_profiles()) == 23
     sweden_file = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "house_styles" / "24_sweden.json"
-    document = json.loads(sweden_file.read_text(encoding="utf-8"))
-    assert document.get("detail_revision")
-    assert "architectural_details" in document["contexts"]["rural"]
-    assert "exterior_details" in document["contexts"]["rural"]["architectural_details"]
+    assert not sweden_file.exists()
+    assert all(profile.identifier != "sweden" for profile in load_profiles())
 
 
 def test_country_catalogue_contains_all_modeler_profiles() -> None:
@@ -35,7 +32,7 @@ def test_country_catalogue_contains_all_modeler_profiles() -> None:
     sweden = choose_country(countries, 15.0, 62.0, {})
     assert sweden is not None
     assert sweden.iso_alpha2 == "SE"
-    assert sweden.parent_region_identifier == "sweden"
+    assert sweden.parent_region_identifier == "northern_europe"
     assert sweden.detail_level == "country-expanded-curated"
     context = get_house_style_context(sweden.identifier, "rural")
     assert context is not None
@@ -60,12 +57,13 @@ def test_country_context_drives_existing_cwr_style_selector() -> None:
     assert "swedish_wood" in styles
 
 
-def test_house_style_preset_catalogue_still_exposes_24_regions() -> None:
+def test_house_style_preset_catalogue_exposes_23_regions_without_sweden_duplicate() -> None:
     assert HOUSE_STYLE_PRESET_AUTO == "auto"
     assert HOUSE_STYLE_PRESET_IDENTIFIERS == tuple(
         profile.house_style_identifier for profile in REGION_PROFILES
     )
-    assert len(HOUSE_STYLE_PRESET_IDENTIFIERS) == 24
+    assert len(HOUSE_STYLE_PRESET_IDENTIFIERS) == 23
+    assert "sweden" not in HOUSE_STYLE_PRESET_IDENTIFIERS
     assert normalise_house_style_preset("AUTO") == "auto"
     assert normalise_house_style_preset("east_asia") == "east_asia"
     assert house_style_preset_profile("auto") is None
