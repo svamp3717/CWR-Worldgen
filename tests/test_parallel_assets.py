@@ -36,7 +36,7 @@ def test_modeler_buildings_use_lower_parallel_cutoff_without_affecting_other_wor
     worker.__module__ = "cwr_worldgen.procedural_buildings"
     worker.__name__ = "_write_building_asset_task"
     assert _parallel_minimum_for_worker(worker, 768) == _BUILDING_PARALLEL_MINIMUM
-    assert _parallel_minimum_for_worker(worker, 32) == 32
+    assert _parallel_minimum_for_worker(worker, 32) == min(32, _BUILDING_PARALLEL_MINIMUM)
 
     worker.__module__ = "cwr_worldgen.procedural_forests"
     worker.__name__ = "_write_forest_asset_task"
