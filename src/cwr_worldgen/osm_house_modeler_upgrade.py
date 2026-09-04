@@ -639,75 +639,8 @@ def _append_details(
                 texture=stair_texture,
             )
 
-    if plan.porch:
-        porch_spec = detail_spec.get("porches") or {}
-        porch_texture = feature_material(porch_spec.get("material"), "wood", foundation_texture or roof_texture or detail_texture)
-        porch_canopy_texture = (
-            material_texture_path(reference_texture, porch_spec.get("material"), "metal")
-            if "metal" in str(porch_spec.get("material", "")).casefold() or "steel" in str(porch_spec.get("material", "")).casefold()
-            else roof_texture
-        )
-        width = min(
-            max(float(porch_spec.get("width_m", 0.0) or 0.0), 2.2, frontage * 0.26),
-            max(2.2, frontage - 0.45),
-        )
-        depth = max(0.45, float(porch_spec.get("depth_m", 1.10) or 1.10))
-        centre = (
-            anchor[0] + outward[0] * depth * 0.5,
-            anchor[1] + outward[1] * depth * 0.5,
-        )
-        # Keep the deck wafer-thin on enterable models so CWR's collision-aware
-        # Roadway entrance stairs remain authoritative.
-        _add_box(
-            points,
-            normals,
-            faces,
-            center=centre,
-            axis_width=tangent,
-            axis_depth=outward,
-            width=width,
-            depth=depth,
-            y0=0.015,
-            y1=0.085,
-            texture=porch_texture,
-        )
-        canopy_y = min(max(2.25, eave_y - 0.55), 2.65)
-        _add_box(
-            points,
-            normals,
-            faces,
-            center=centre,
-            axis_width=tangent,
-            axis_depth=outward,
-            width=width + 0.12,
-            depth=depth + 0.12,
-            y0=canopy_y,
-            y1=canopy_y + 0.11,
-            texture=porch_canopy_texture,
-        )
-        post_offset = max(0.25, width * 0.5 - 0.12)
-        front = (
-            anchor[0] + outward[0] * (depth - 0.08),
-            anchor[1] + outward[1] * (depth - 0.08),
-        )
-        for sign in (-1.0, 1.0):
-            post = (
-                front[0] + tangent[0] * sign * post_offset,
-                front[1] + tangent[1] * sign * post_offset,
-            )
-            _add_box(
-                points,
-                normals,
-                faces,
-                center=post,
-                axis_width=tangent,
-                axis_depth=outward,
-                width=0.10,
-                depth=0.10,
-                y0=0.08,
-                y1=canopy_y,
-                texture=porch_texture,
-            )
+    # Porch geometry is intentionally absent in CWA. Country metadata may
+    # still describe porches, but no deck/floor, canopy or posts are emitted.
 
     if plan.balcony_count:
         balcony_spec = detail_spec.get("balconies") or {}

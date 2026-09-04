@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 _BUILDING_MODEL_CACHE_V49 = "procedural-building-model-v49-robust-polygon-roof-triangulation"
 _BUILDING_MODEL_CACHE_V50 = "procedural-building-model-v50-foundation-skin-offset"
 _BUILDING_MODEL_CACHE_V51 = "procedural-building-model-v51-modeler-opening-dimensions"
+_BUILDING_MODEL_CACHE_V52 = "procedural-building-model-v52-no-porch-geometry"
 _INSTALLED = False
 _ORIGINAL_DOOR_DIMENSIONS = None
 _ORIGINAL_INTERIOR_WINDOW_OPENINGS = None
@@ -393,8 +394,8 @@ def install_opening_dimension_policy() -> None:
     original_cache_key = buildings.cache_key
 
     def revised_building_cache_key(namespace: str, payload):
-        if namespace in {_BUILDING_MODEL_CACHE_V49, _BUILDING_MODEL_CACHE_V50}:
-            namespace = _BUILDING_MODEL_CACHE_V51
+        if namespace in {_BUILDING_MODEL_CACHE_V49, _BUILDING_MODEL_CACHE_V50, _BUILDING_MODEL_CACHE_V51}:
+            namespace = _BUILDING_MODEL_CACHE_V52
         return original_cache_key(namespace, payload)
 
     buildings._door_dimensions = _styled_door_dimensions

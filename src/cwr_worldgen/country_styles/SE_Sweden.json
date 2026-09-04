@@ -7,7 +7,7 @@
   "iso_numeric": "752",
   "parent_region_identifier": "northern_europe",
   "parent_region_name": "Northern Europe",
-  "detail_revision": "2026-09-sweden-barn-house-visuals-v3",
+  "detail_revision": "2026-09-sweden-colour-balance-v4",
   "detail_level": "country-expanded-curated",
   "data_provenance": {
     "architectural_basis": "curated national tuning over the Northern Europe regional baseline; Sweden itself is defined only in country_styles",
@@ -416,11 +416,11 @@
         "family_distributions": {
           "residential": [
             {
-              "lt": 70,
+              "lt": 78,
               "style": "swedish_wood"
             },
             {
-              "lt": 95,
+              "lt": 96,
               "style": "western_stucco"
             },
             {
@@ -578,23 +578,23 @@
               "facade_colour_distribution": [
                 {
                   "colour": "falun red",
-                  "weight": 72
+                  "weight": 78
                 },
                 {
                   "colour": "ochre yellow",
-                  "weight": 10
-                },
-                {
-                  "colour": "natural timber",
                   "weight": 8
                 },
                 {
+                  "colour": "natural timber",
+                  "weight": 7
+                },
+                {
                   "colour": "dark green",
-                  "weight": 4
+                  "weight": 3
                 },
                 {
                   "colour": "grey",
-                  "weight": 3
+                  "weight": 1
                 },
                 {
                   "colour": "white",
@@ -647,31 +647,31 @@
               "facade_colour_distribution": [
                 {
                   "colour": "falun red",
-                  "weight": 48
+                  "weight": 58
                 },
                 {
                   "colour": "ochre yellow",
-                  "weight": 16
+                  "weight": 18
                 },
                 {
                   "colour": "natural timber",
-                  "weight": 14
+                  "weight": 12
                 },
                 {
                   "colour": "grey",
-                  "weight": 8
+                  "weight": 3
                 },
                 {
                   "colour": "dark green",
-                  "weight": 6
+                  "weight": 4
                 },
                 {
                   "colour": "white",
-                  "weight": 5
+                  "weight": 3
                 },
                 {
                   "colour": "cream",
-                  "weight": 3
+                  "weight": 2
                 }
               ]
             },
@@ -837,45 +837,49 @@
           "common_wall_material_distribution": [
             {
               "material": "painted vertical timber cladding",
-              "weight": 68
+              "weight": 74
             },
             {
               "material": "stucco/render",
-              "weight": 24
+              "weight": 22
             },
             {
               "material": "brick",
-              "weight": 8
+              "weight": 4
             }
           ],
           "facade_colour_distribution": [
             {
               "colour": "falun red",
-              "weight": 24
+              "weight": 38
             },
             {
               "colour": "ochre yellow",
-              "weight": 24
-            },
-            {
-              "colour": "cream",
-              "weight": 16
+              "weight": 28
             },
             {
               "colour": "white",
               "weight": 12
             },
             {
-              "colour": "grey",
-              "weight": 10
+              "colour": "cream",
+              "weight": 8
             },
             {
               "colour": "natural timber",
-              "weight": 10
+              "weight": 5
             },
             {
               "colour": "dark green",
               "weight": 4
+            },
+            {
+              "colour": "grey",
+              "weight": 3
+            },
+            {
+              "colour": "black",
+              "weight": 2
             }
           ],
           "visual_balance_revision": "2026-09-sweden-red-brick-balance-v2",
@@ -886,49 +890,49 @@
             "painted vertical timber cladding": [
               {
                 "colour": "falun red",
-                "weight": 38
+                "weight": 48
               },
               {
                 "colour": "ochre yellow",
-                "weight": 24
+                "weight": 30
               },
               {
                 "colour": "white",
-                "weight": 12
-              },
-              {
-                "colour": "cream",
                 "weight": 8
               },
               {
-                "colour": "grey",
-                "weight": 6
-              },
-              {
-                "colour": "dark green",
+                "colour": "cream",
                 "weight": 5
               },
               {
+                "colour": "grey",
+                "weight": 2
+              },
+              {
+                "colour": "dark green",
+                "weight": 3
+              },
+              {
                 "colour": "natural timber",
-                "weight": 7
+                "weight": 4
               }
             ],
             "stucco/render": [
               {
                 "colour": "cream",
-                "weight": 38
+                "weight": 42
               },
               {
                 "colour": "white",
-                "weight": 32
+                "weight": 35
               },
               {
                 "colour": "grey",
-                "weight": 20
+                "weight": 8
               },
               {
                 "colour": "ochre yellow",
-                "weight": 8
+                "weight": 13
               },
               {
                 "colour": "falun red",
@@ -2008,11 +2012,11 @@
         "family_distributions": {
           "residential": [
             {
-              "lt": 48,
+              "lt": 58,
               "style": "swedish_wood"
             },
             {
-              "lt": 90,
+              "lt": 92,
               "style": "western_stucco"
             },
             {
@@ -2170,11 +2174,11 @@
               "facade_colour_distribution": [
                 {
                   "colour": "falun red",
-                  "weight": 62
+                  "weight": 68
                 },
                 {
                   "colour": "ochre yellow",
-                  "weight": 12
+                  "weight": 10
                 },
                 {
                   "colour": "natural timber",
@@ -2182,11 +2186,11 @@
                 },
                 {
                   "colour": "dark green",
-                  "weight": 5
+                  "weight": 4
                 },
                 {
                   "colour": "grey",
-                  "weight": 5
+                  "weight": 2
                 },
                 {
                   "colour": "white",
@@ -2239,31 +2243,31 @@
               "facade_colour_distribution": [
                 {
                   "colour": "falun red",
-                  "weight": 34
+                  "weight": 44
                 },
                 {
                   "colour": "ochre yellow",
-                  "weight": 16
+                  "weight": 18
                 },
                 {
                   "colour": "natural timber",
-                  "weight": 14
-                },
-                {
-                  "colour": "grey",
                   "weight": 12
                 },
                 {
-                  "colour": "dark green",
+                  "colour": "grey",
                   "weight": 6
                 },
                 {
+                  "colour": "dark green",
+                  "weight": 5
+                },
+                {
                   "colour": "white",
-                  "weight": 10
+                  "weight": 9
                 },
                 {
                   "colour": "cream",
-                  "weight": 8
+                  "weight": 6
                 }
               ]
             },
@@ -2429,37 +2433,33 @@
           "common_wall_material_distribution": [
             {
               "material": "painted vertical timber cladding",
-              "weight": 45
+              "weight": 52
             },
             {
               "material": "stucco/render",
-              "weight": 45
+              "weight": 40
             },
             {
               "material": "brick",
-              "weight": 10
+              "weight": 8
             }
           ],
           "facade_colour_distribution": [
             {
               "colour": "falun red",
-              "weight": 12
+              "weight": 24
             },
             {
               "colour": "ochre yellow",
-              "weight": 16
-            },
-            {
-              "colour": "cream",
-              "weight": 22
+              "weight": 24
             },
             {
               "colour": "white",
-              "weight": 22
+              "weight": 20
             },
             {
-              "colour": "grey",
-              "weight": 20
+              "colour": "cream",
+              "weight": 14
             },
             {
               "colour": "natural timber",
@@ -2467,6 +2467,14 @@
             },
             {
               "colour": "dark green",
+              "weight": 4
+            },
+            {
+              "colour": "grey",
+              "weight": 6
+            },
+            {
+              "colour": "black",
               "weight": 3
             }
           ],
@@ -2478,31 +2486,31 @@
             "painted vertical timber cladding": [
               {
                 "colour": "falun red",
-                "weight": 22
+                "weight": 30
               },
               {
                 "colour": "ochre yellow",
-                "weight": 22
+                "weight": 28
               },
               {
                 "colour": "white",
-                "weight": 18
+                "weight": 16
               },
               {
                 "colour": "cream",
-                "weight": 12
+                "weight": 10
               },
               {
                 "colour": "grey",
-                "weight": 12
-              },
-              {
-                "colour": "dark green",
                 "weight": 5
               },
               {
+                "colour": "dark green",
+                "weight": 4
+              },
+              {
                 "colour": "natural timber",
-                "weight": 9
+                "weight": 7
               }
             ],
             "stucco/render": [
@@ -2512,15 +2520,15 @@
               },
               {
                 "colour": "white",
-                "weight": 35
+                "weight": 36
               },
               {
                 "colour": "grey",
-                "weight": 22
+                "weight": 10
               },
               {
                 "colour": "ochre yellow",
-                "weight": 6
+                "weight": 17
               },
               {
                 "colour": "falun red",

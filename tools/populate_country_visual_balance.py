@@ -36,7 +36,7 @@ def _weighted(field: str, values: list[tuple[str, int]]) -> list[dict[str, objec
 def _tune_sweden(document: dict) -> None:
     document["parent_region_identifier"] = "northern_europe"
     document["parent_region_name"] = "Northern Europe"
-    document["detail_revision"] = "2026-09-sweden-barn-house-visuals-v3"
+    document["detail_revision"] = "2026-09-sweden-colour-balance-v4"
     provenance = document.setdefault("data_provenance", {})
     provenance["architectural_basis"] = (
         "curated national tuning over the Northern Europe regional baseline; "
@@ -48,9 +48,9 @@ def _tune_sweden(document: dict) -> None:
         families = selection.get("family_distributions") or {}
         rural = str(context_name).casefold() == "rural"
         families["residential"] = (
-            [{"lt": 70, "style": "swedish_wood"}, {"lt": 95, "style": "western_stucco"}, {"lt": 100, "style": "western_brick"}]
+            [{"lt": 78, "style": "swedish_wood"}, {"lt": 96, "style": "western_stucco"}, {"lt": 100, "style": "western_brick"}]
             if rural else
-            [{"lt": 48, "style": "swedish_wood"}, {"lt": 90, "style": "western_stucco"}, {"lt": 100, "style": "western_brick"}]
+            [{"lt": 58, "style": "swedish_wood"}, {"lt": 92, "style": "western_stucco"}, {"lt": 100, "style": "western_brick"}]
         )
         families["agricultural"] = (
             [{"lt": 84, "style": "swedish_wood"}, {"lt": 100, "style": "western_brick"}]
@@ -65,46 +65,60 @@ def _tune_sweden(document: dict) -> None:
         materials["common_wall_material_distribution"] = _weighted(
             "material",
             [
-                ("painted vertical timber cladding", 68 if rural else 45),
-                ("stucco/render", 24 if rural else 45),
-                ("brick", 8 if rural else 10),
+                ("painted vertical timber cladding", 74 if rural else 52),
+                ("stucco/render", 22 if rural else 40),
+                ("brick", 4 if rural else 8),
             ],
         )
         materials["wall_material_colour_distributions"] = {
             "painted vertical timber cladding": _weighted(
                 "colour",
                 [
-                    ("falun red", 38 if rural else 22),
-                    ("ochre yellow", 24 if rural else 22),
-                    ("white", 12 if rural else 18),
-                    ("cream", 8 if rural else 12),
-                    ("grey", 6 if rural else 12),
-                    ("dark green", 5),
-                    ("natural timber", 7 if rural else 9),
+                    ("falun red", 48 if rural else 30),
+                    ("ochre yellow", 30 if rural else 28),
+                    ("white", 8 if rural else 16),
+                    ("cream", 5 if rural else 10),
+                    ("grey", 2 if rural else 5),
+                    ("dark green", 3 if rural else 4),
+                    ("natural timber", 4 if rural else 7),
                 ],
             ),
             "stucco/render": _weighted(
                 "colour",
                 [
-                    ("cream", 38 if rural else 35),
-                    ("white", 32 if rural else 35),
-                    ("grey", 20 if rural else 22),
-                    ("ochre yellow", 8 if rural else 6),
+                    ("cream", 42 if rural else 35),
+                    ("white", 35 if rural else 36),
+                    ("grey", 8 if rural else 10),
+                    ("ochre yellow", 13 if rural else 17),
                     ("falun red", 2),
                 ],
             ),
         }
+
+        materials["facade_colour_distribution"] = _weighted(
+            "colour",
+            [
+                ("falun red", 38 if rural else 24),
+                ("ochre yellow", 28 if rural else 24),
+                ("white", 12 if rural else 20),
+                ("cream", 8 if rural else 14),
+                ("natural timber", 5),
+                ("dark green", 4),
+                ("grey", 3 if rural else 6),
+                ("black", 2 if rural else 3),
+            ],
+        )
 
         overrides = materials.get("building_class_overrides") or {}
         barn = overrides.get("barn") or {}
         barn["facade_colour_distribution"] = _weighted(
             "colour",
             [
-                ("falun red", 72 if rural else 62),
-                ("ochre yellow", 10 if rural else 12),
-                ("natural timber", 8 if rural else 8),
-                ("dark green", 4 if rural else 5),
-                ("grey", 3 if rural else 5),
+                ("falun red", 78 if rural else 68),
+                ("ochre yellow", 8 if rural else 10),
+                ("natural timber", 7 if rural else 8),
+                ("dark green", 3 if rural else 4),
+                ("grey", 1 if rural else 2),
                 ("white", 2 if rural else 5),
                 ("cream", 1 if rural else 3),
             ],
@@ -114,13 +128,13 @@ def _tune_sweden(document: dict) -> None:
         shed["facade_colour_distribution"] = _weighted(
             "colour",
             [
-                ("falun red", 48 if rural else 34),
-                ("ochre yellow", 16),
-                ("natural timber", 14),
-                ("grey", 8 if rural else 12),
-                ("dark green", 6),
-                ("white", 5 if rural else 10),
-                ("cream", 3 if rural else 8),
+                ("falun red", 58 if rural else 44),
+                ("ochre yellow", 18),
+                ("natural timber", 12),
+                ("grey", 3 if rural else 6),
+                ("dark green", 4 if rural else 5),
+                ("white", 3 if rural else 9),
+                ("cream", 2 if rural else 6),
             ],
         )
         overrides["shed"] = shed
