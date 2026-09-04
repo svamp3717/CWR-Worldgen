@@ -147,17 +147,15 @@ def detail_plan_for_key(
     # Keep their country metadata available for provenance, but never generate
     # porch geometry.
     porch = False
+    # CWA procedural buildings use at most one chimney. Multiple stacks look
+    # exaggerated at the game's visual scale and are not worth multiplying
+    # secondary roof geometry. Country/style data may still control whether a
+    # chimney exists, but never the count above one.
     chimney_count = int(
         key.family in {"residential", "townhouse"}
         and key.roof_style not in {"flat", "dome", "onion"}
         and _chance(key, "chimney", chimney_p)
     )
-    if (
-        chimney_count
-        and key.width_m >= 12.0
-        and _chance(key, "chimney-second", 0.18)
-    ):
-        chimney_count = 2
 
     # Balconies are intentionally visual secondary architecture on both closed
     # and enterable variants. Enterable buildings do not need a dedicated balcony
@@ -715,15 +713,19 @@ def _append_details(
                     texture=balcony_texture,
                 )
 
-    if plan.chimney_count:
+    # Treat one chimney as a hard geometry invariant as well as a style-policy
+    # rule. This protects generated P3Ds even if a future caller constructs an
+    # ArchitecturalDetailPlan with an out-of-range chimney_count.
+    chimney_count = min(1, max(0, int(plan.chimney_count)))
+    if chimney_count:
         chimney_spec = detail_spec.get("chimneys") or {}
         chimney_texture = feature_material(chimney_spec.get("material"), "masonry", foundation_texture or roof_texture or detail_texture)
         chimney_width = max(0.20, float(chimney_spec.get("width_m", 0.48) or 0.48))
         chimney_depth = max(0.20, float(chimney_spec.get("depth_m", 0.40) or 0.40))
         chimney_height = max(0.35, float(chimney_spec.get("height_m", 1.15) or 1.15))
-        for index in range(plan.chimney_count):
+        for index in range(chimney_count):
             offset = (
-                index - (plan.chimney_count - 1) * 0.5
+                index - (chimney_count - 1) * 0.5
             ) * min(2.4, key.length_m * 0.22)
             centre = (offset, 0.0)
             if key.footprint_vertices:
