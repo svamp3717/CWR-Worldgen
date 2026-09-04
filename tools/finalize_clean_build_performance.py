@@ -64,7 +64,7 @@ test = replace_once(
 ''',
     '''            self.assertEqual(result.generated_variants, 1)
             self.assertEqual(result.reused_placements, 2)
-            self.assertAlmostEqual(result.reuse_ratio, 2.0 / 3.0)
+            self.assertEqual(result.reuse_ratio, 0.666667)
             self.assertEqual(len(result.model_assets), 1)
 ''',
     "final P3D variant cap result",
