@@ -1,0 +1,38 @@
+name: Verify Building Progress
+
+on:
+  push:
+    branches:
+      - upgrade/osm-house-modeler-buildings
+    paths:
+      - 'src/cwr_worldgen/building_progress_policy.py'
+      - 'src/cwr_worldgen/foundation_visual_policy.py'
+      - 'tests/test_building_progress_policy.py'
+      - '.github/workflows/verify-building-progress.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: upgrade/osm-house-modeler-buildings
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install package and tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[sources]" pytest
+      - name: Run streaming progress regression suite
+        run: |
+          pytest -q \
+            tests/test_building_progress_policy.py \
+            tests/test_parallel_assets.py \
+            tests/test_building_asset_budget_policy.py \
+            tests/test_osm_house_modeler_texture_bridge.py
