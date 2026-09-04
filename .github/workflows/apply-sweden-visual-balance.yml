@@ -37,8 +37,9 @@ jobs:
             tests/test_building_asset_budget_policy.py \
             tests/test_osm_house_modeler_geometry_fidelity.py \
             tests/test_osm_house_modeler_texture_bridge.py \
-            tests/test_opening_dimension_policy.py \
-            tests/test_interior_performance_policy.py
+            tests/test_country_utility_materials.py \
+            tests/test_foundation_visual_policy.py \
+            tests/test_building_progress_policy.py
       - name: Commit verified changes
         run: |
           git config user.name "github-actions[bot]"
