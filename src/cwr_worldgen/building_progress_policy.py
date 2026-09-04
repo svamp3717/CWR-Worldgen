@@ -3,7 +3,7 @@
 
 The generic asset pool historically returned one whole worker chunk at a time.
 For modeler-backed buildings that can mean minutes with no visible movement even
-though child processes are steadily completing textures or P3Ds.  This policy
+though child processes are steadily completing textures or P3Ds. This policy
 keeps the existing spawned-process lifecycle and deterministic ordering, but
 lets the two expensive building phases send one result at a time so the parent
 can emit useful counters.
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 from multiprocessing.connection import Connection, wait as wait_connections
-from pathlib import Path
+import os
 import traceback
 from typing import Callable, Iterable, TypeVar, cast
 
@@ -212,7 +212,7 @@ def process_asset_tasks_with_progress(
 
     workers = _parallel.asset_worker_count(len(miss_indices))
     explicit_workers = bool(
-        __import__("os").environ.get("CWR_WORLDGEN_ASSET_WORKERS", "").strip()
+        os.environ.get("CWR_WORLDGEN_ASSET_WORKERS", "").strip()
     )
     threshold = (
         2
