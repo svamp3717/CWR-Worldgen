@@ -199,3 +199,13 @@ def install_building_prepare_progress_policy() -> None:
     from .final_road_dedup_policy import install_final_road_dedup_policy
 
     install_final_road_dedup_policy()
+
+    # Building placement was planned before the final road chain existed. Record
+    # that post-dedupe road report and apply a bounded final-footprint correction
+    # only when non-road objects are emitted. This must wrap the dedupe fitter,
+    # never the other way around.
+    from .final_building_road_clearance_policy import (
+        install_final_building_road_clearance_policy,
+    )
+
+    install_final_building_road_clearance_policy()
