@@ -40,37 +40,41 @@ def building_country_options() -> tuple[tuple[str, str], ...]:
 
 
 def _install_catalogue_transport() -> tuple[str, ...]:
-    """Reuse the legacy preset transport field while making its explicit values countries."""
+    """Let the existing transport field carry countries without changing region APIs."""
     from . import house_style_catalogue as catalogue
     from . import procedural_buildings as buildings
     from . import osm_house_modeler_runtime as runtime
+    from . import cli
 
     old_region_identifiers = tuple(catalogue.HOUSE_STYLE_PRESET_IDENTIFIERS)
-    options = building_country_options()
-    identifiers = tuple(identifier for identifier, _label in options)
+    country_identifiers = tuple(identifier for identifier, _label in building_country_options())
+    original_normalise = buildings.normalise_house_style_preset
+    original_profile = runtime.house_style_preset_profile
 
-    def normalise(value: str | None) -> str:
+    def normalise_transport(value: str | None) -> str:
         try:
             return normalise_building_country(value)
-        except ValueError as exc:
-            choices = ", ".join(identifiers)
-            raise ValueError(
-                f"unknown building country {value!r}; expected auto or one of: {choices}"
-            ) from exc
+        except ValueError:
+            # Preserve programmatic compatibility for callers that still carry an
+            # old region id, but the GUI/CLI no longer offer those values.
+            return original_normalise(value)
 
     def profile_for_transport(value: str | None):
-        # Region forcing is intentionally gone. The detailed modeler resolver
-        # receives the selected country through the marker below instead.
-        normalise(value)
-        return None
+        try:
+            country = _country_profile(value)
+        except ValueError:
+            return original_profile(value)
+        if country is not None:
+            return None
+        return original_profile(value)
 
-    catalogue.HOUSE_STYLE_PRESET_IDENTIFIERS = identifiers
-    catalogue.HOUSE_STYLE_PRESET_OPTIONS = options
-    catalogue.normalise_house_style_preset = normalise
-    catalogue.house_style_preset_profile = profile_for_transport
+    # cli.py has already been imported during package initialization, but parser
+    # construction happens later in cli.main(). Replace only its choice tuple so
+    # the public command line now accepts countries rather than broad regions.
+    cli.HOUSE_STYLE_PRESET_IDENTIFIERS = country_identifiers
 
     # These modules imported the helpers by name before this policy is installed.
-    buildings.normalise_house_style_preset = normalise
+    buildings.normalise_house_style_preset = normalise_transport
     buildings.house_style_preset_profile = profile_for_transport
     runtime.house_style_preset_profile = profile_for_transport
     return old_region_identifiers
@@ -82,11 +86,14 @@ def _install_runtime_country_override() -> None:
 
     original_resolve_style = runtime.resolve_style
     original_prepare = buildings.ProceduralBuildingLibrary._prepare_geographic_context
+    original_regional_preset = runtime._regional_preset
 
     def regional_preset(library) -> str:
-        requested = normalise_building_country(
-            getattr(library, "house_style_preset", BUILDING_COUNTRY_AUTO)
-        )
+        raw = getattr(library, "house_style_preset", BUILDING_COUNTRY_AUTO)
+        try:
+            requested = normalise_building_country(raw)
+        except ValueError:
+            return original_regional_preset(library)
         if requested == BUILDING_COUNTRY_AUTO:
             return BUILDING_COUNTRY_AUTO
         return _COUNTRY_MARKER_PREFIX + requested
@@ -110,7 +117,10 @@ def _install_runtime_country_override() -> None:
 
     def prepare_geographic_context(self, dataset, projection):
         result = original_prepare(self, dataset, projection)
-        profile = _country_profile(getattr(self, "house_style_preset", BUILDING_COUNTRY_AUTO))
+        try:
+            profile = _country_profile(getattr(self, "house_style_preset", BUILDING_COUNTRY_AUTO))
+        except ValueError:
+            profile = None
         if profile is not None:
             # Keep the detected region separately for compatibility, but report
             # the explicit country as the style actually driving generated assets.
