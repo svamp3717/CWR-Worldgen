@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "description": "Global semantic appearance defaults for places of worship. Country profiles may still determine surrounding architecture, but ordinary residential facade palettes must not leak into worship buildings. Explicit OSM material, colour and roof tags remain authoritative.",
+  "classes": {
+    "church": {
+      "facade_style": "worship",
+      "wall_materials": [
+        {"material": "rendered masonry", "weight": 34},
+        {"material": "stone masonry", "weight": 28},
+        {"material": "brick masonry", "weight": 18},
+        {"material": "painted timber", "weight": 12},
+        {"material": "concrete", "weight": 8}
+      ],
+      "roof_materials": [
+        {"material": "slate", "weight": 34},
+        {"material": "standing-seam metal", "weight": 32},
+        {"material": "clay/concrete tile", "weight": 24},
+        {"material": "corrugated metal", "weight": 10}
+      ],
+      "facade_colours": [
+        {"colour": "white", "weight": 34},
+        {"colour": "cream", "weight": 20},
+        {"colour": "grey", "weight": 14},
+        {"colour": "stone", "weight": 14},
+        {"colour": "ochre yellow", "weight": 8},
+        {"colour": "brick", "weight": 7},
+        {"colour": "natural timber", "weight": 3}
+      ],
+      "roof_styles": [
+        {"style": "gabled", "weight": 65},
+        {"style": "hipped", "weight": 25},
+        {"style": "flat", "weight": 10}
+      ],
+      "window_density_multiplier": 0.55
+    },
+    "orthodox_church": {
+      "facade_style": "worship",
+      "wall_materials": [
+        {"material": "rendered masonry", "weight": 48},
+        {"material": "stone masonry", "weight": 22},
+        {"material": "brick masonry", "weight": 12},
+        {"material": "concrete", "weight": 10},
+        {"material": "painted timber", "weight": 8}
+      ],
+      "roof_materials": [
+        {"material": "standing-seam metal", "weight": 46},
+        {"material": "slate", "weight": 24},
+        {"material": "clay/concrete tile", "weight": 20},
+        {"material": "corrugated metal", "weight": 10}
+      ],
+      "facade_colours": [
+        {"colour": "white", "weight": 50},
+        {"colour": "cream", "weight": 18},
+        {"colour": "grey", "weight": 12},
+        {"colour": "stone", "weight": 10},
+        {"colour": "ochre yellow", "weight": 6},
+        {"colour": "natural timber", "weight": 4}
+      ],
+      "roof_styles": [
+        {"style": "onion", "weight": 50},
+        {"style": "dome", "weight": 30},
+        {"style": "gabled", "weight": 15},
+        {"style": "hipped", "weight": 5}
+      ],
+      "window_density_multiplier": 0.45
+    },
+    "mosque": {
+      "facade_style": "worship",
+      "wall_materials": [
+        {"material": "rendered masonry", "weight": 46},
+        {"material": "concrete", "weight": 26},
+        {"material": "stone masonry", "weight": 16},
+        {"material": "brick masonry", "weight": 9},
+        {"material": "painted timber", "weight": 3}
+      ],
+      "roof_materials": [
+        {"material": "standing-seam metal", "weight": 34},
+        {"material": "clay/concrete tile", "weight": 28},
+        {"material": "slate", "weight": 20},
+        {"material": "corrugated metal", "weight": 18}
+      ],
+      "facade_colours": [
+        {"colour": "white", "weight": 44},
+        {"colour": "cream", "weight": 25},
+        {"colour": "stone", "weight": 12},
+        {"colour": "grey", "weight": 10},
+        {"colour": "stucco", "weight": 9}
+      ],
+      "roof_styles": [
+        {"style": "dome", "weight": 55},
+        {"style": "flat", "weight": 30},
+        {"style": "hipped", "weight": 15}
+      ],
+      "window_density_multiplier": 0.65
+    },
+    "synagogue": {
+      "facade_style": "worship",
+      "wall_materials": [
+        {"material": "stone masonry", "weight": 30},
+        {"material": "rendered masonry", "weight": 30},
+        {"material": "brick masonry", "weight": 22},
+        {"material": "concrete", "weight": 12},
+        {"material": "painted timber", "weight": 6}
+      ],
+      "roof_materials": [
+        {"material": "slate", "weight": 34},
+        {"material": "standing-seam metal", "weight": 28},
+        {"material": "clay/concrete tile", "weight": 28},
+        {"material": "corrugated metal", "weight": 10}
+      ],
+      "facade_colours": [
+        {"colour": "stone", "weight": 28},
+        {"colour": "cream", "weight": 24},
+        {"colour": "white", "weight": 22},
+        {"colour": "grey", "weight": 14},
+        {"colour": "brick", "weight": 8},
+        {"colour": "stucco", "weight": 4}
+      ],
+      "roof_styles": [
+        {"style": "gabled", "weight": 45},
+        {"style": "hipped", "weight": 25},
+        {"style": "dome", "weight": 20},
+        {"style": "flat", "weight": 10}
+      ],
+      "window_density_multiplier": 0.75
+    },
+    "temple": {
+      "facade_style": "worship",
+      "wall_materials": [
+        {"material": "stone masonry", "weight": 30},
+        {"material": "rendered masonry", "weight": 26},
+        {"material": "brick masonry", "weight": 18},
+        {"material": "concrete", "weight": 16},
+        {"material": "natural timber", "weight": 10}
+      ],
+      "roof_materials": [
+        {"material": "clay/concrete tile", "weight": 38},
+        {"material": "standing-seam metal", "weight": 24},
+        {"material": "slate", "weight": 20},
+        {"material": "corrugated metal", "weight": 18}
+      ],
+      "facade_colours": [
+        {"colour": "stone", "weight": 28},
+        {"colour": "cream", "weight": 18},
+        {"colour": "white", "weight": 15},
+        {"colour": "ochre yellow", "weight": 12},
+        {"colour": "brick", "weight": 10},
+        {"colour": "natural timber", "weight": 10},
+        {"colour": "grey", "weight": 7}
+      ],
+      "roof_styles": [
+        {"style": "hipped", "weight": 35},
+        {"style": "pyramidal", "weight": 30},
+        {"style": "gabled", "weight": 20},
+        {"style": "dome", "weight": 15}
+      ],
+      "window_density_multiplier": 0.55
+    },
+    "shrine": {
+      "facade_style": "worship",
+      "wall_materials": [
+        {"material": "natural timber", "weight": 35},
+        {"material": "stone masonry", "weight": 25},
+        {"material": "rendered masonry", "weight": 20},
+        {"material": "brick masonry", "weight": 10},
+        {"material": "concrete", "weight": 10}
+      ],
+      "roof_materials": [
+        {"material": "clay/concrete tile", "weight": 38},
+        {"material": "slate", "weight": 24},
+        {"material": "standing-seam metal", "weight": 22},
+        {"material": "corrugated metal", "weight": 16}
+      ],
+      "facade_colours": [
+        {"colour": "natural timber", "weight": 35},
+        {"colour": "stone", "weight": 25},
+        {"colour": "white", "weight": 15},
+        {"colour": "cream", "weight": 10},
+        {"colour": "brick", "weight": 8},
+        {"colour": "grey", "weight": 7}
+      ],
+      "roof_styles": [
+        {"style": "gabled", "weight": 55},
+        {"style": "pyramidal", "weight": 25},
+        {"style": "hipped", "weight": 20}
+      ],
+      "window_density_multiplier": 0.35
+    },
+    "place_of_worship": {
+      "facade_style": "worship",
+      "wall_materials": [
+        {"material": "rendered masonry", "weight": 35},
+        {"material": "stone masonry", "weight": 25},
+        {"material": "brick masonry", "weight": 15},
+        {"material": "concrete", "weight": 15},
+        {"material": "natural timber", "weight": 10}
+      ],
+      "roof_materials": [
+        {"material": "slate", "weight": 28},
+        {"material": "standing-seam metal", "weight": 28},
+        {"material": "clay/concrete tile", "weight": 28},
+        {"material": "corrugated metal", "weight": 16}
+      ],
+      "facade_colours": [
+        {"colour": "white", "weight": 28},
+        {"colour": "cream", "weight": 22},
+        {"colour": "stone", "weight": 20},
+        {"colour": "grey", "weight": 12},
+        {"colour": "stucco", "weight": 10},
+        {"colour": "brick", "weight": 8}
+      ],
+      "roof_styles": [
+        {"style": "gabled", "weight": 40},
+        {"style": "hipped", "weight": 35},
+        {"style": "flat", "weight": 25}
+      ],
+      "window_density_multiplier": 0.65
+    }
+  }
+}

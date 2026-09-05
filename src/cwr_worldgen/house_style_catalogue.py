@@ -34,7 +34,7 @@ class RegionProfile:
 
     ``identifier`` intentionally preserves the older broad identifiers where a
     profile declares ``legacy_identifier``. New code should use
-    ``house_style_identifier`` when it needs the precise 24-region catalogue.
+    ``house_style_identifier`` when it needs the bundled regional catalogue.
 
     ``description``, ``selection`` and ``roof_defaults`` remain aliases for the
     rural context so older callers keep working while new code can select the
@@ -147,7 +147,31 @@ def _normalise_selection(value: Any, *, filename: str) -> dict[str, Any]:
 def _normalise_roof_defaults(value: Any, *, filename: str) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ValueError(f"{filename}: roof_defaults must be an object")
-    clean_roofs = {str(key): str(item) for key, item in value.items()}
+    # osm-house-modeler has a slightly richer roof vocabulary than CWR's legacy
+    # P3D renderer. Preserve the upstream data verbatim and translate only at the
+    # compatibility boundary, using the same aliases as the modeler's own style
+    # engine: shed/skillion roofs use CWR's gabled implementation and mansards use
+    # its hipped implementation until native shapes are added to the renderer.
+    aliases = {
+        "gable": "gabled",
+        "gabled": "gabled",
+        "saltbox": "gabled",
+        "skillion": "gabled",
+        "shed": "gabled",
+        "hip": "hipped",
+        "hipped": "hipped",
+        "half_hipped": "hipped",
+        "mansard": "hipped",
+        "pyramid": "pyramidal",
+        "pyramidal": "pyramidal",
+        "flat": "flat",
+        "dome": "dome",
+        "onion": "onion",
+    }
+    clean_roofs = {
+        str(key): aliases.get(str(item).casefold().replace("-", "_"), str(item))
+        for key, item in value.items()
+    }
     unsupported = sorted(set(clean_roofs.values()) - _ALLOWED_ROOF_STYLES)
     if unsupported:
         raise ValueError(
@@ -171,6 +195,19 @@ def _normalise_context(value: Any, *, filename: str, context_name: str) -> House
             value.get("roof_defaults", {}), filename=f"{filename}: contexts.{context_name}"
         ),
     )
+
+
+_LEGACY_IDENTIFIER_BY_STYLE_IDENTIFIER = {
+    "mediterranean_europe": "western_europe",
+    "eastern_europe_balkans": "eastern_europe",
+    "north_africa": "africa",
+    "west_africa": "africa",
+    "east_africa": "africa",
+    "central_southern_africa": "africa",
+}
+_LEGACY_DEFAULT_STYLE_IDENTIFIERS = frozenset({
+    "western_europe", "eastern_europe_balkans", "west_africa",
+})
 
 
 def _load_profiles() -> tuple[RegionProfile, ...]:
@@ -205,7 +242,10 @@ def _load_profiles() -> tuple[RegionProfile, ...]:
         aliases = match.get("country_aliases", [])
         if not isinstance(aliases, list):
             raise RuntimeError(f"{path.name}: country_aliases must be a list")
-        legacy_identifier = str(document.get("legacy_identifier", "")).strip()
+        legacy_identifier = str(
+            document.get("legacy_identifier")
+            or _LEGACY_IDENTIFIER_BY_STYLE_IDENTIFIER.get(style_identifier.casefold(), "")
+        ).strip()
         public_identifier = legacy_identifier or style_identifier
 
         try:
@@ -253,16 +293,34 @@ def _load_profiles() -> tuple[RegionProfile, ...]:
             selection=rural.selection,
             roof_defaults=rural.roof_defaults,
             contexts=contexts,
-            legacy_default=bool(document.get("legacy_default", False)),
+            legacy_default=bool(
+                document.get("legacy_default", False)
+                or style_identifier.casefold() in _LEGACY_DEFAULT_STYLE_IDENTIFIERS
+            ),
         ))
 
-    if len(profiles) != 24 or numbers != set(range(1, 25)):
-        raise RuntimeError("house-style catalogue must contain exactly map regions 1 through 24")
+    # Sweden is represented exclusively by country_styles/SE_Sweden.json and
+    # inherits the Northern Europe baseline, so the regional catalogue ends at 23.
+    if len(profiles) != 23 or numbers != set(range(1, 24)):
+        raise RuntimeError("house-style catalogue must contain exactly map regions 1 through 23")
     return tuple(sorted(profiles, key=lambda item: item.map_region_number))
 
 
 REGION_PROFILES: tuple[RegionProfile, ...] = _load_profiles()
 HOUSE_STYLE_PRESET_AUTO = "auto"
+
+
+_LEGACY_IDENTIFIER_BY_STYLE_IDENTIFIER = {
+    "mediterranean_europe": "western_europe",
+    "eastern_europe_balkans": "eastern_europe",
+    "north_africa": "africa",
+    "west_africa": "africa",
+    "east_africa": "africa",
+    "central_southern_africa": "africa",
+}
+_LEGACY_DEFAULT_STYLE_IDENTIFIERS = frozenset({
+    "western_europe", "eastern_europe_balkans", "west_africa",
+})
 HOUSE_STYLE_PRESET_IDENTIFIERS: tuple[str, ...] = tuple(
     profile.house_style_identifier for profile in REGION_PROFILES
 )
@@ -336,12 +394,42 @@ def _context_key(settlement_context: str | None) -> str:
     return "town_city" if str(settlement_context or "").casefold() in _TOWN_CITY_CONTEXTS else "rural"
 
 
+def get_country_style_context(
+    country_identifier: str | None, settlement_context: str = "rural"
+) -> HouseStyleContext | None:
+    """Resolve one modeler country profile into CWR's compatibility context."""
+
+    if not country_identifier:
+        return None
+    from .osm_house_modeler_styles import find_country_profile, load_country_profiles
+
+    profiles = load_country_profiles()
+    if not profiles:
+        return None
+    try:
+        profile = find_country_profile(profiles, country_identifier)
+    except ValueError:
+        return None
+    context_name = _context_key(settlement_context)
+    raw = profile.contexts.get(context_name) or profile.contexts.get("rural")
+    if not isinstance(raw, Mapping):
+        return None
+    try:
+        return _normalise_context(
+            raw,
+            filename=f"country_styles/{profile.iso_alpha2}_{profile.display_name}",
+            context_name=context_name,
+        )
+    except ValueError:
+        return None
+
+
 def get_house_style_context(
     region_identifier: str | None, settlement_context: str = "rural"
 ) -> HouseStyleContext | None:
     profile = get_region_profile(region_identifier)
     if profile is None:
-        return None
+        return get_country_style_context(region_identifier, settlement_context)
     contexts = profile.contexts or {}
     return contexts.get(_context_key(settlement_context)) or contexts.get("rural")
 

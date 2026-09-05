@@ -13,6 +13,15 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 _DEFAULT_PARALLEL_MINIMUM = 768
+# Detailed modeler-backed P3Ds are substantially more expensive than the older
+# compact building assets for which the 768-task cutoff was chosen. Keep the
+# generic threshold conservative for forests/infrastructure/site assets, but let
+# a medium fresh batch of building models use the existing bounded worker pool.
+_BUILDING_PARALLEL_MINIMUM = 64
+_BUILDING_ASSET_WORKER = (
+    "cwr_worldgen.procedural_buildings",
+    "_write_building_asset_task",
+)
 _WORKER_POLL_SECONDS = 0.20
 _WORKER_EXIT_GRACE_SECONDS = 5.0
 _WORKER_TERMINATE_GRACE_SECONDS = 2.0
@@ -43,6 +52,18 @@ def asset_worker_count(task_count: int) -> int:
     return min(task_count, requested)
 
 
+def _parallel_minimum_for_worker(worker: Callable[..., object], requested: int) -> int:
+    """Return a worker-specific threshold without changing other asset stages."""
+    threshold = max(2, int(requested))
+    identity = (
+        str(getattr(worker, "__module__", "")),
+        str(getattr(worker, "__name__", "")),
+    )
+    if identity == _BUILDING_ASSET_WORKER:
+        return min(threshold, _BUILDING_PARALLEL_MINIMUM)
+    return threshold
+
+
 def _cache_hit_without_refresh(task: object) -> bool:
     enabled = bool(getattr(task, "cache_enabled", False))
     refresh = bool(getattr(task, "cache_refresh", False))
@@ -60,14 +81,14 @@ def _asset_worker_chunk(
     This deliberately avoids multiprocessing Queue/Pool/ProcessPoolExecutor.
     Those abstractions allocate synchronization semaphores and an executor
     management thread, which can leave Python's resource_tracker waiting during
-    GUI/frozen shutdown.  Plain processes plus one-way pipes need neither.
+    GUI/frozen shutdown. Plain processes plus one-way pipes need neither.
     """
     try:
         payload = [(index, worker(task)) for index, task in indexed_tasks]
         sender.send(("ok", payload))
     except BaseException as exc:  # pragma: no cover - exercised through parent fallback
         # Do not try to pickle the original exception: third-party exceptions
-        # are not guaranteed to be picklable.  The parent reruns serially after
+        # are not guaranteed to be picklable. The parent reruns serially after
         # cleanup, which exposes the real exception in the normal process.
         try:
             sender.send((
@@ -115,6 +136,7 @@ def _finish_processes(
         except (OSError, ValueError):
             pass
 
+
 def _abort_processes(processes: Iterable[mp.Process]) -> None:
     """Best-effort synchronous cleanup for every started worker."""
     process_list = list(processes)
@@ -123,7 +145,6 @@ def _abort_processes(processes: Iterable[mp.Process]) -> None:
             if process.is_alive():
                 process.terminate()
         except ValueError:
-            # Already closed/reaped by _finish_process().
             continue
     for process in process_list:
         try:
@@ -216,9 +237,6 @@ def _process_map(worker: Callable[[T], R], tasks: list[T], workers: int) -> list
                 for index, result in message[1]:
                     output[int(index)] = result
 
-                # Do not join here. All children share one bounded shutdown
-                # grace below, so four pathological exits cannot multiply it.
-
         # The result payloads have crossed their pipes and every output file was
         # already closed. Give all children one shared grace period for ordinary
         # library teardown, then synchronously terminate any stragglers.
@@ -249,8 +267,10 @@ def process_asset_tasks(
     Cache hits stay in the parent process; spawning workers just to copy and
     inspect already-cached files is slower. Only sufficiently large cache-miss
     batches use subprocesses, because small P3D batches are faster serially after
-    accounting for Python/Pillow/Shapely import cost. Set
-    ``CWR_WORLDGEN_ASSET_WORKERS`` to explicitly tune worker count.
+    accounting for Python/Pillow/Shapely import cost. Detailed building P3Ds have
+    a lower worker-specific cutoff; other asset families retain the conservative
+    generic threshold. Set ``CWR_WORLDGEN_ASSET_WORKERS`` to explicitly tune
+    worker count.
 
     Spawned workers use explicit one-way pipes rather than ProcessPoolExecutor.
     This avoids leaked multiprocessing semaphores and gives the parent a bounded
@@ -272,7 +292,11 @@ def process_asset_tasks(
 
     workers = asset_worker_count(len(miss_indices))
     explicit_workers = bool(os.environ.get("CWR_WORLDGEN_ASSET_WORKERS", "").strip())
-    threshold = 2 if explicit_workers else max(2, int(minimum_parallel_tasks))
+    threshold = (
+        2
+        if explicit_workers
+        else _parallel_minimum_for_worker(worker, minimum_parallel_tasks)
+    )
     miss_tasks = [task_list[index] for index in miss_indices]
 
     if workers > 1 and len(miss_tasks) >= threshold:

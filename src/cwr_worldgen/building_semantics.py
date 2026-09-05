@@ -7,25 +7,99 @@ from .house_style_catalogue import REGION_PROFILES, RegionProfile, point_in_prof
 
 
 _CHRISTIAN_BUILDING_VALUES = frozenset({"church", "chapel", "cathedral"})
-_NON_CHURCH_WORSHIP_BUILDINGS = frozenset({"mosque", "synagogue", "temple", "shrine"})
+_MOSQUE_BUILDING_VALUES = frozenset({"mosque"})
+_SYNAGOGUE_BUILDING_VALUES = frozenset({"synagogue"})
+_TEMPLE_BUILDING_VALUES = frozenset({"temple"})
+_SHRINE_BUILDING_VALUES = frozenset({"shrine"})
+_NON_CHURCH_WORSHIP_BUILDINGS = frozenset(
+    _MOSQUE_BUILDING_VALUES
+    | _SYNAGOGUE_BUILDING_VALUES
+    | _TEMPLE_BUILDING_VALUES
+    | _SHRINE_BUILDING_VALUES
+)
+_TEMPLE_RELIGIONS = frozenset({
+    "buddhist",
+    "hindu",
+    "jain",
+    "shinto",
+    "sikh",
+    "taoist",
+})
+_ORTHODOX_DENOMINATION_MARKERS = frozenset({
+    "coptic",
+    "armenian_apostolic",
+    "armenian apostolic",
+    "ethiopian_orthodox",
+    "eritrean_orthodox",
+    "syriac_orthodox",
+})
+
+
+def _fold_tag(tags: Mapping[str, str], name: str) -> str:
+    return str(tags.get(name, "") or "").casefold().strip()
+
+
+def _is_orthodox_christian(tags: Mapping[str, str]) -> bool:
+    denomination = _fold_tag(tags, "denomination").replace("-", "_")
+    religion = _fold_tag(tags, "religion").replace("-", "_")
+    if "orthodox" in denomination or "orthodox" in religion:
+        return True
+    return denomination in _ORTHODOX_DENOMINATION_MARKERS
+
+
+def worship_building_class(tags: Mapping[str, str]) -> str:
+    """Return a global worship-building semantic class or an empty string.
+
+    OSM uses ``amenity=place_of_worship`` across religions, while ``building=*``
+    may be either specific (``mosque``, ``synagogue``, ``church``) or generic.
+    Classify the religious building first so country/region house palettes cannot
+    accidentally style it as an ordinary dwelling. The result is architectural,
+    not a statement about the occupants or the surrounding population.
+    """
+
+    building = _fold_tag(tags, "building")
+    amenity = _fold_tag(tags, "amenity")
+    religion = _fold_tag(tags, "religion")
+
+    if building in _MOSQUE_BUILDING_VALUES:
+        return "mosque"
+    if building in _SYNAGOGUE_BUILDING_VALUES:
+        return "synagogue"
+    if building in _TEMPLE_BUILDING_VALUES:
+        return "temple"
+    if building in _SHRINE_BUILDING_VALUES:
+        return "shrine"
+
+    christian_building = building in _CHRISTIAN_BUILDING_VALUES
+    place_of_worship = amenity == "place_of_worship"
+    orthodox = _is_orthodox_christian(tags)
+    if christian_building or (place_of_worship and (religion == "christian" or orthodox)):
+        return "orthodox_church" if orthodox else "church"
+
+    if not place_of_worship:
+        return ""
+    if religion in {"muslim", "islam"}:
+        return "mosque"
+    if religion in {"jewish", "judaism"}:
+        return "synagogue"
+    if religion in _TEMPLE_RELIGIONS:
+        return "temple"
+    return "place_of_worship"
+
+
+def is_worship_building(tags: Mapping[str, str]) -> bool:
+    return bool(worship_building_class(tags))
 
 
 def is_actual_church(tags: Mapping[str, str]) -> bool:
-    """Return true only for explicitly Christian church buildings.
+    """Return true only for Christian church-family buildings.
 
-    A generic ``amenity=place_of_worship`` is not enough. OSM uses that tag for
-    mosques, synagogues, temples, meeting halls, and many other buildings that
-    should not receive a Christian tower-and-spire model.
+    Orthodox churches remain in CWR's dedicated church geometry family. Mosques,
+    synagogues, temples and generic worship halls deliberately do not receive the
+    Christian tower-and-spire model.
     """
 
-    building = str(tags.get("building", "")).casefold()
-    if building in _CHRISTIAN_BUILDING_VALUES:
-        return True
-    if building in _NON_CHURCH_WORSHIP_BUILDINGS:
-        return False
-    amenity = str(tags.get("amenity", "")).casefold()
-    religion = str(tags.get("religion", "")).casefold()
-    return amenity == "place_of_worship" and religion == "christian"
+    return worship_building_class(tags) in {"church", "orthodox_church"}
 
 
 def _best_profile(

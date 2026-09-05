@@ -172,6 +172,16 @@ from .procedural_buildings import (
     inspect_mlod,
     write_building_mlod,
 )
+from .osm_house_modeler_runtime import (
+    install_osm_house_modeler_upgrade as _install_osm_house_modeler_upgrade,
+)
+
+_install_osm_house_modeler_upgrade()
+from .foundation_visual_policy import (
+    install_foundation_visual_policy as _install_foundation_visual_policy,
+)
+
+_install_foundation_visual_policy()
 from .normalization import (
     NormalizationSpec,
     NormalizedBundle,

@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover - exercised only on older Shapely 2.0
 
 from .cache import cache_key, restore_or_create_file
 from .building_semantics import detect_region, is_actual_church
+from .osm_house_modeler_styles import choose_country, load_country_profiles
 from .house_style_catalogue import (
     HOUSE_STYLE_PRESET_AUTO,
     default_roof_style,
@@ -240,6 +241,41 @@ class BuildingVariantKey:
     # context. These small one-storey homes need a guaranteed entrance facade;
     # generic narrow-wall anti-window heuristics must not erase the only door.
     isolated_dwelling: bool = False
+    # Detailed OSM House Modeler style signature. These values are deliberately
+    # immutable/hashable because they affect geometry, textures and P3D cache identity.
+    building_class: str = ""
+    country_style_identifier: str = ""
+    wall_material: str = ""
+    roof_material: str = ""
+    foundation_type: str = ""
+    storey_height_m: float = 3.0
+    wall_thickness_m: float = 0.22
+    style_foundation_depth_m: float = 0.5
+    visible_plinth_m: float = 0.0
+    roof_pitch_degrees: float = 0.0
+    eave_overhang_m: float = 0.0
+    colour_palette: tuple[str, ...] = ()
+    window_width_m: float = 0.0
+    window_height_m: float = 0.0
+    window_sill_height_m: float = 0.0
+    window_edge_margin_m: float = 0.0
+    window_bay_spacing_m: float = 0.0
+    window_density_multiplier: float = 1.0
+    window_type: str = ""
+    window_placement_style: str = ""
+    window_frame_material: str = ""
+    door_width_m: float = 0.0
+    door_height_m: float = 0.0
+    door_corner_clearance_m: float = 0.0
+    door_window_clearance_m: float = 0.0
+    door_type: str = ""
+    door_material: str = ""
+    roof_storey: bool = False
+    roof_storey_probability: float = 0.0
+    roof_storey_windows_per_gable: int = 0
+    roof_storey_spec_json: str = ""
+    exterior_detail_spec_json: str = ""
+    texture_style_token: str = ""
 
     def canonical(self) -> str:
         return json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
@@ -3239,6 +3275,22 @@ def _gabled_profile(
     main_height = _main_building_height(key)
     maximum_rise = half_width * math.tan(math.radians(roof_pitch_degrees))
     roof_rise = min(maximum_rise, max(1.0, main_height * 0.35))
+    if key.roof_storey and not key.footprint_vertices:
+        try:
+            roof_storey_spec = json.loads(key.roof_storey_spec_json or "{}")
+        except json.JSONDecodeError:
+            roof_storey_spec = {}
+        if not isinstance(roof_storey_spec, dict):
+            roof_storey_spec = {}
+        minimum_roof_height = max(
+            1.2,
+            float(roof_storey_spec.get("minimum_roof_height_m", 2.2) or 2.2),
+        )
+        usable_roof_height = max(0.8, main_height - INTERIOR_SECOND_STOREY_FLOOR_Y_M)
+        roof_rise = min(
+            maximum_rise,
+            max(roof_rise, min(minimum_roof_height, usable_roof_height)),
+        )
     interior_storeys = (
         _interior_storey_count(key)
         if interior_storeys_override is None
@@ -3253,7 +3305,7 @@ def _gabled_profile(
             roof_rise,
             max(0.55, main_height - minimum_visible_eave),
         )
-    if interior_storeys >= 2:
+    if interior_storeys >= 2 and not (key.roof_storey and not key.footprint_vertices):
         minimum_eave = (
             INTERIOR_SECOND_STOREY_FLOOR_Y_M
             + INTERIOR_SECOND_STOREY_MINIMUM_HEADROOM_M
@@ -4365,6 +4417,14 @@ def _interior_roadway_lod(
         _ROADWAY_LOD,
     )
 
+def _uses_light_window_trim(key: BuildingVariantKey) -> bool:
+    frame = str(getattr(key, "window_frame_material", "") or "").casefold()
+    return (
+        key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+        or any(token in frame for token in ("painted", "white", "upvc", "timber"))
+    )
+
+
 def _main_building_height(key: BuildingVariantKey) -> float:
     """Return the wall/roof height used by the main building mass.
 
@@ -5180,7 +5240,7 @@ def _visual_lod(
             )
             if (
                 window_trim_texture
-                and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+                and _uses_light_window_trim(key)
             ):
                 points, faces = _add_white_window_trim(
                     key,
@@ -5197,7 +5257,7 @@ def _visual_lod(
                 texture=(
                     window_trim_texture
                     if window_trim_texture
-                    and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+                    and _uses_light_window_trim(key)
                     else interior_texture
                 ),
             )
@@ -5217,8 +5277,10 @@ def _visual_lod(
         plinth_height = max(0.0, float(church_plinth_height)) if key.family == "church" else 0.0
         if plinth_height > 0.0:
             points = tuple((x, y + plinth_height, z) for x, y, z in points)
-        foundation_top = plinth_height + (
-            FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0
+        style_plinth = max(0.0, float(getattr(key, "visible_plinth_m", 0.0) or 0.0))
+        foundation_top = plinth_height + max(
+            style_plinth,
+            FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0,
         )
         points, faces = _add_foundation_skirt(
             points, faces, half_width=half_width, half_length=half_length,
@@ -5563,7 +5625,7 @@ def _visual_lod(
         )
         if (
             window_trim_texture
-            and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+            and _uses_light_window_trim(key)
         ):
             points, faces = _add_white_window_trim(
                 key,
@@ -5580,7 +5642,7 @@ def _visual_lod(
             texture=(
                 window_trim_texture
                 if window_trim_texture
-                and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+                and _uses_light_window_trim(key)
                 else interior_texture
             ),
         )
@@ -5667,8 +5729,10 @@ def _visual_lod(
     plinth_height = max(0.0, float(church_plinth_height)) if key.family == "church" else 0.0
     if plinth_height > 0.0:
         points = tuple((x, y + plinth_height, z) for x, y, z in points)
-    foundation_top = plinth_height + (
-        FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0
+    style_plinth = max(0.0, float(getattr(key, "visible_plinth_m", 0.0) or 0.0))
+    foundation_top = plinth_height + max(
+        style_plinth,
+        FOUNDATION_VISIBLE_REVEAL_M if foundation_depth > 0.0 else 0.0,
     )
     points, faces = _add_foundation_skirt(
         points, faces, half_width=half_width, half_length=half_length,
@@ -6530,7 +6594,10 @@ def _polygon_native_visual_lod(
 
     depth = max(0.0, float(foundation_depth))
     if depth > 0.0:
-        foundation_top = FOUNDATION_VISIBLE_REVEAL_M
+        foundation_top = max(
+            FOUNDATION_VISIBLE_REVEAL_M,
+            max(0.0, float(getattr(key, "visible_plinth_m", 0.0) or 0.0)),
+        )
         for ring_index, ring in enumerate(rings):
             for edge_index in range(len(ring)):
                 add_edge_wall(
@@ -7818,6 +7885,7 @@ class ProceduralBuildingLibrary:
         self._usage: Counter[BuildingVariantKey] = Counter()
         self._prepared = False
         self.region_identifier: str | None = None
+        self.country_style_identifier: str | None = None
         self.detected_house_style_identifier: str | None = None
         self.house_style_identifier: str | None = None
         self._urban_polygons: tuple[Polygon, ...] = ()
@@ -7833,13 +7901,37 @@ class ProceduralBuildingLibrary:
     def _prepare_geographic_context(self, dataset: Any, projection: Any) -> None:
         tag_sources = [feature.tags for feature in getattr(dataset, "places", ())]
         tag_sources.extend(feature.tags for feature in getattr(dataset, "building_polygons", ()))
-        profile = detect_region(
-            (projection.south, projection.west, projection.north, projection.east),
-            tag_sources,
+        bbox = (projection.south, projection.west, projection.north, projection.east)
+        profile = detect_region(bbox, tag_sources)
+        latitude = (projection.south + projection.north) * 0.5
+        longitude = (projection.west + projection.east) * 0.5
+        country_tags: dict[str, str] = {}
+        country_keys = (
+            "addr:country", "country", "country_code", "is_in:country_code",
+            "ISO3166-1:alpha2", "ISO3166-1:alpha3",
         )
-        self.region_identifier = profile.identifier if profile is not None else None
+        for tags in tag_sources:
+            for name in country_keys:
+                value = tags.get(name)
+                if value and name not in country_tags:
+                    country_tags[name] = str(value)
+        country_profiles = load_country_profiles()
+        country_profile = (
+            choose_country(country_profiles, longitude, latitude, country_tags)
+            if country_profiles else None
+        )
+        self.country_style_identifier = (
+            country_profile.identifier if country_profile is not None else None
+        )
+        self.region_identifier = (
+            country_profile.parent_region_identifier
+            if country_profile is not None
+            else profile.identifier if profile is not None else None
+        )
         self.detected_house_style_identifier = (
-            profile.house_style_identifier if profile is not None else None
+            country_profile.identifier
+            if country_profile is not None
+            else profile.house_style_identifier if profile is not None else None
         )
         override_profile = house_style_preset_profile(self.house_style_preset)
         self.house_style_identifier = (
@@ -8657,20 +8749,28 @@ class ProceduralBuildingLibrary:
 
     @staticmethod
     def _regional_style_index(regional_style: str) -> int:
-        return {
+        # Keep the historical slots stable, while detailed country/material tokens and
+        # new modeler facade ids receive deterministic slots in a larger 64-style bank.
+        # The three-character base36 filename budget comfortably covers this expansion.
+        known = {
             "default": 0, "sweden_red": 1, "sweden_yellow": 2,
             "eastern_plaster": 3, "eastern_brick": 4,
             "eastern_whitewash": 5, "eastern_panel": 6,
-            # A world has one detected region, so Western Europe safely reuses
-            # the four regional atlas slots without expanding the two-character
-            # OFP texture-name budget.
             "western_stucco": 3, "western_brick": 4,
             "western_stone": 5, "western_half_timber": 6,
             "africa_earth": 7, "africa_whitewash": 8,
             "africa_block": 9, "africa_colour": 10,
             "middle_east_sandstone": 11, "middle_east_whitewash": 12,
             "middle_east_adobe": 13, "middle_east_concrete": 14,
-        }.get(regional_style, 15)
+        }
+        base_style = str(regional_style or "default").split("|", 1)[0]
+        if regional_style in known:
+            return known[regional_style]
+        if base_style in known and "|" not in str(regional_style):
+            return known[base_style]
+        # unknown modeler styles receive deterministic slots 16..63.
+        digest = sha256(str(regional_style).encode("utf-8")).digest()
+        return 16 + int.from_bytes(digest[:2], "big") % 48
 
     @staticmethod
     def _base36_code(value: int) -> str:
@@ -8698,7 +8798,7 @@ class ProceduralBuildingLibrary:
     ) -> str:
         family_index = self._family_texture_index(family)
         style_index = self._regional_style_index(regional_style)
-        value = (family_index * 16 + style_index) * self.texture_variants
+        value = (family_index * 64 + style_index) * self.texture_variants
         value += _normalise_texture_variant(texture_variant, self.texture_variants)
         return self._base36_code(value)
 
@@ -8753,11 +8853,36 @@ class ProceduralBuildingLibrary:
         return rf"{self.world_name}\d\{prefix}{code}.paa"
 
     def _roof_texture(self, roof_style: str, texture_variant: int = 0) -> str:
+        token = str(roof_style or "gabled")
+        base_roof = token.split("|", 1)[0]
         roof_index = {
             "flat": 0, "gabled": 1, "hipped": 2,
             "pyramidal": 3, "dome": 4, "onion": 5,
-        }[roof_style]
-        value = roof_index * self.texture_variants
+        }[base_roof]
+        material_text = token.casefold()
+        if "|" not in token:
+            material_slot = 0
+        elif "tile" in material_text or "clay" in material_text or "terracotta" in material_text:
+            material_slot = 1
+        elif "metal" in material_text or "steel" in material_text or "zinc" in material_text:
+            material_slot = 2
+        elif "slate" in material_text:
+            material_slot = 3
+        elif "thatch" in material_text or "reed" in material_text:
+            material_slot = 4
+        elif "concrete" in material_text or "cement" in material_text:
+            material_slot = 5
+        elif "bitumen" in material_text or "asphalt" in material_text:
+            material_slot = 6
+        elif "wood" in material_text or "timber" in material_text or "shingle" in material_text:
+            material_slot = 7
+        elif "stone" in material_text:
+            material_slot = 8
+        else:
+            material_slot = 16 + int.from_bytes(sha256(token.encode("utf-8")).digest()[:2], "big") % 48
+        # 64 slots per roof form still fit the historic three-character base36
+        # filename budget even with a maximum 20-character world name.
+        value = (roof_index * 64 + material_slot) * self.texture_variants
         value += _normalise_texture_variant(texture_variant, self.texture_variants)
         return rf"{self.world_name}\d\r{self._base36_code(value)}.paa"
 
@@ -8766,35 +8891,48 @@ class ProceduralBuildingLibrary:
 
     def write_assets(self, source_dir: Path, catalogue_path: Path) -> BuildingGenerationResult:
         selected = sorted(self._usage)
+        from .osm_house_modeler_texture_bridge import (
+            modeler_door_texture_image,
+            modeler_foundation_texture_image,
+            modeler_front_texture_image,
+            modeler_interior_wall_texture_image,
+            modeler_open_wall_texture_image,
+            modeler_roof_texture_image,
+            modeler_wall_texture_image,
+            modeler_window_frame_texture_image,
+        )
         model_assets: list[GeneratedBuildingAsset] = []
         texture_files: list[str] = []
+        if selected:
+            from .osm_house_modeler_fidelity import emit_detail_material_textures
+            texture_files.extend(emit_detail_material_textures(self, source_dir))
         # Emit only texture variants actually referenced by generated P3Ds.
         # Previous releases wrote all ten palette variants for every used style
         # even when the selected model set referenced only one or two. That made
         # interior-heavy PBOs unnecessarily large and slower to enumerate/load.
         used_palette_variants = sorted({
-            (key.family, key.regional_style, key.texture_variant)
+            (key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
             for key in selected
         })
         used_open_palette_variants = sorted({
-            (key.family, key.regional_style, key.texture_variant) for key in selected
+            (key.family, (key.texture_style_token or key.regional_style), key.texture_variant) for key in selected
             if key.interiors
             or key.family == "church"
             or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
             or key.family in _PAINTED_WINDOW_FAMILIES
         })
         used_interior_palette_variants = sorted({
-            (key.family, key.regional_style, key.texture_variant)
+            (key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
             for key in selected if key.interiors
         })
         used_front_palette_variants = sorted({
-            (key.family, key.regional_style, key.texture_variant, key.outbuilding_kind)
+            (key.family, (key.texture_style_token or key.regional_style), key.texture_variant, key.outbuilding_kind)
             for key in selected
         })
         uses_white_window_trim = any(
             key.interiors
             and key.family not in UTILITY_INTERIOR_FAMILIES
-            and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+            and _uses_light_window_trim(key)
             for key in selected
         )
         used_door_variants: dict[str, tuple[str, str, int, str]] = {}
@@ -8802,25 +8940,25 @@ class ProceduralBuildingLibrary:
             if not key.interiors and not key.footprint_vertices:
                 continue
             path = self._door_texture(
-                key.family, key.regional_style, key.texture_variant,
+                key.family, (key.texture_style_token or key.regional_style), key.texture_variant,
                 key.outbuilding_kind,
             )
             used_door_variants.setdefault(
                 path,
-                (key.family, key.regional_style, key.texture_variant, key.outbuilding_kind),
+                (key.family, (key.texture_style_token or key.regional_style), key.texture_variant, key.outbuilding_kind),
             )
         used_roof_variants = sorted({
-            (key.roof_style, key.texture_variant) for key in selected
+            (f"{key.roof_style}|{key.roof_material}|{','.join(key.colour_palette[:4])}", key.texture_variant) for key in selected
         })
         if any(key.foundation_depth_m > 0.0 for key in selected):
             texture_path = self._foundation_texture()
             relative = texture_path.split("\\", 1)[1].replace("\\", "/")
             file_path = source_dir / relative
-            key = cache_key("procedural-building-foundation-v4-selectable-quality", {"texture": "stone", "texture_size": self.texture_size})
+            key = cache_key("procedural-building-foundation-modeler-v1-cwa78", {"texture": "stone", "texture_size": self.texture_size})
             cached = self.cache_dir / "procedural-assets" / f"{key}.paa" if self.cache_dir else None
             hit = restore_or_create_file(
                 cache_path=cached, destination=file_path,
-                producer=lambda target: write_rgb_dxt1_paa(target, _foundation_texture_image(self.texture_size)),
+                producer=lambda target: write_rgb_dxt1_paa(target, modeler_foundation_texture_image(self.texture_size)),
                 enabled=self.cache_enabled, refresh=self.cache_refresh,
             )
             self.cache_hits += int(hit); self.cache_misses += int(not hit)
@@ -8830,7 +8968,7 @@ class ProceduralBuildingLibrary:
             relative = texture_path.split("\\", 1)[1].replace("\\", "/")
             file_path = source_dir / relative
             key = cache_key(
-                "procedural-building-white-window-trim-v4-selectable-quality",
+                "procedural-building-window-frame-modeler-v1-cwa84",
                 {"material": "weathered-white-painted-wood", "texture_size": self.texture_size},
             )
             cached = self.cache_dir / "procedural-assets" / f"{key}.paa" if self.cache_dir else None
@@ -8838,7 +8976,7 @@ class ProceduralBuildingLibrary:
                 cache_path=cached,
                 destination=file_path,
                 producer=lambda target: write_rgb_dxt1_paa(
-                    target, _white_trim_texture_image(self.texture_size)
+                    target, modeler_window_frame_texture_image(self.texture_size)
                 ),
                 enabled=self.cache_enabled,
                 refresh=self.cache_refresh,
@@ -8852,7 +8990,7 @@ class ProceduralBuildingLibrary:
             relative = texture_path.split("\\", 1)[1].replace("\\", "/")
             file_path = source_dir / relative
             cache_id = cache_key(
-                "procedural-building-door-v3-clean-utility-aperture-selectable-quality",
+                "procedural-building-door-modeler-v1-cwa84",
                 {
                     "family": family,
                     "regional_style": regional_style,
@@ -8867,7 +9005,7 @@ class ProceduralBuildingLibrary:
                 destination=file_path,
                 producer=lambda target, family=family, regional_style=regional_style, texture_variant=texture_variant, outbuilding_kind=outbuilding_kind: write_rgb_dxt1_paa(
                     target,
-                    _door_texture_image(
+                    modeler_door_texture_image(
                         self.texture_size,
                         family=family,
                         regional_style=regional_style,
@@ -8889,7 +9027,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-wall-v12-window-sill-selectable-quality",
+                    "procedural-building-wall-modeler-v1-cwa78",
                     {
                         "family": family,
                         "regional_style": regional_style,
@@ -8903,7 +9041,7 @@ class ProceduralBuildingLibrary:
                     destination=file_path,
                     producer=lambda target, family=family, regional_style=regional_style, texture_variant=texture_variant: write_rgb_dxt1_paa(
                         target,
-                        _wall_texture_image(
+                        modeler_wall_texture_image(
                             family,
                             size=self.texture_size,
                             regional_style=regional_style,
@@ -8923,7 +9061,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-open-wall-v4-utility-cladding-match-selectable-quality",
+                    "procedural-building-open-wall-modeler-v1-cwa78",
                     {
                         "family": family,
                         "regional_style": regional_style,
@@ -8937,7 +9075,7 @@ class ProceduralBuildingLibrary:
                     destination=file_path,
                     producer=lambda target, family=family, regional_style=regional_style, texture_variant=texture_variant: write_rgb_dxt1_paa(
                         target,
-                        _open_wall_texture_image(
+                        modeler_open_wall_texture_image(
                             family,
                             size=self.texture_size,
                             regional_style=regional_style,
@@ -8958,7 +9096,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-interior-wall-v3-selectable-quality",
+                    "procedural-building-interior-wall-modeler-v1-cwa58",
                     {
                         "family": family,
                         "regional_style": regional_style,
@@ -8972,7 +9110,7 @@ class ProceduralBuildingLibrary:
                     destination=file_path,
                     producer=lambda target, family=family, regional_style=regional_style, texture_variant=texture_variant: write_rgb_dxt1_paa(
                         target,
-                        _interior_wall_texture_image(
+                        modeler_interior_wall_texture_image(
                             family,
                             size=self.texture_size,
                             regional_style=regional_style,
@@ -8993,7 +9131,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-front-v13-window-sill-selectable-quality",
+                    "procedural-building-front-modeler-v1-cwa78",
                     {
                         "family": family,
                         "regional_style": regional_style,
@@ -9007,7 +9145,7 @@ class ProceduralBuildingLibrary:
                     cache_path=cached, destination=file_path,
                     producer=lambda target, family=family, regional_style=regional_style, texture_variant=texture_variant, outbuilding_kind=outbuilding_kind: write_rgb_dxt1_paa(
                         target,
-                        _front_texture_image(
+                        modeler_front_texture_image(
                             family,
                             size=self.texture_size,
                             regional_style=regional_style,
@@ -9025,7 +9163,7 @@ class ProceduralBuildingLibrary:
                 relative = texture_path.split("\\", 1)[1].replace("\\", "/")
                 file_path = source_dir / relative
                 key = cache_key(
-                    "procedural-building-roof-v5-selectable-quality",
+                    "procedural-building-roof-modeler-v1-cwa78",
                     {"roof": roof, "texture_variant": texture_variant, "texture_size": self.texture_size},
                 )
                 cached = self.cache_dir / "procedural-assets" / f"{key}.paa" if self.cache_dir else None
@@ -9033,7 +9171,7 @@ class ProceduralBuildingLibrary:
                     cache_path=cached,
                     destination=file_path,
                     producer=lambda target, roof=roof, texture_variant=texture_variant: write_rgb_dxt1_paa(
-                        target, _roof_texture_image(
+                        target, modeler_roof_texture_image(
                             roof, size=self.texture_size,
                             texture_variant=texture_variant
                         )
@@ -9055,18 +9193,18 @@ class ProceduralBuildingLibrary:
                 {
                     "world_name": self.world_name,
                     "variant": asdict(key),
-                    "roof_pitch_degrees": self.roof_pitch_degrees,
+                    "roof_pitch_degrees": (key.roof_pitch_degrees or self.roof_pitch_degrees),
                     "foundation_depth": key.foundation_depth_m,
                     "church_plinth_height": self.church_plinth_height,
                 },
             )
             cached = self.cache_dir / "procedural-assets" / f"{asset_key}.p3d" if self.cache_dir else None
             wall_texture = (
-                self._wall_texture(key.family, key.regional_style, key.texture_variant)
+                self._wall_texture(key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
                 if key.interiors and key.family in UTILITY_INTERIOR_FAMILIES
-                else self._open_wall_texture(key.family, key.regional_style, key.texture_variant)
+                else self._open_wall_texture(key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
                 if key.interiors
-                else self._wall_texture(key.family, key.regional_style, key.texture_variant)
+                else self._wall_texture(key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
             )
             model_tasks.append(_BuildingAssetTask(
                 key=key,
@@ -9079,10 +9217,10 @@ class ProceduralBuildingLibrary:
                 usage_count=self._usage[key],
                 wall_texture=wall_texture,
                 front_texture=self._front_texture(
-                    key.family, key.regional_style, key.texture_variant, key.outbuilding_kind
+                    key.family, (key.texture_style_token or key.regional_style), key.texture_variant, key.outbuilding_kind
                 ),
-                roof_texture=self._roof_texture(key.roof_style, key.texture_variant),
-                roof_pitch_degrees=self.roof_pitch_degrees,
+                roof_texture=self._roof_texture(f"{key.roof_style}|{key.roof_material}|{','.join(key.colour_palette[:4])}", key.texture_variant),
+                roof_pitch_degrees=(key.roof_pitch_degrees or self.roof_pitch_degrees),
                 foundation_texture=(
                     self._foundation_texture()
                     if key.foundation_depth_m > 0.0 or key.family == "church" else None
@@ -9090,18 +9228,18 @@ class ProceduralBuildingLibrary:
                 foundation_depth=key.foundation_depth_m,
                 church_plinth_height=self.church_plinth_height,
                 interior_texture=(
-                    self._interior_wall_texture(key.family, key.regional_style, key.texture_variant)
+                    self._interior_wall_texture(key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
                     if key.interiors else None
                 ),
                 window_trim_texture=(
                     self._white_window_trim_texture()
                     if key.interiors
                     and key.family not in UTILITY_INTERIOR_FAMILIES
-                    and key.regional_style in WHITE_WINDOW_TRIM_REGIONAL_STYLES
+                    and _uses_light_window_trim(key)
                     else None
                 ),
                 plain_wall_texture=(
-                    self._open_wall_texture(key.family, key.regional_style, key.texture_variant)
+                    self._open_wall_texture(key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
                     if (
                         key.interiors
                         or key.family in _GROUND_FLOOR_ONLY_FACADE_FAMILIES
@@ -9111,11 +9249,11 @@ class ProceduralBuildingLibrary:
                 ),
                 door_texture=(
                     self._door_texture(
-                        key.family, key.regional_style, key.texture_variant, key.outbuilding_kind
+                        key.family, (key.texture_style_token or key.regional_style), key.texture_variant, key.outbuilding_kind
                     ) if key.interiors or key.footprint_vertices else None
                 ),
                 distance_wall_texture=(
-                    self._wall_texture(key.family, key.regional_style, key.texture_variant)
+                    self._wall_texture(key.family, (key.texture_style_token or key.regional_style), key.texture_variant)
                     if key.interiors else None
                 ),
             ))

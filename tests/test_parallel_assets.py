@@ -5,7 +5,11 @@ from pathlib import Path
 import subprocess
 import sys
 
-from cwr_worldgen.parallel_assets import asset_worker_count
+from cwr_worldgen.parallel_assets import (
+    _BUILDING_PARALLEL_MINIMUM,
+    _parallel_minimum_for_worker,
+    asset_worker_count,
+)
 
 
 def _subprocess_env() -> dict[str, str]:
@@ -23,6 +27,20 @@ def test_asset_worker_count_honours_bounded_override(monkeypatch) -> None:
     assert asset_worker_count(100) == 16
     monkeypatch.setenv("CWR_WORLDGEN_ASSET_WORKERS", "nonsense")
     assert asset_worker_count(100) == 1
+
+
+def test_modeler_buildings_use_lower_parallel_cutoff_without_affecting_other_workers() -> None:
+    def worker(value):
+        return value
+
+    worker.__module__ = "cwr_worldgen.procedural_buildings"
+    worker.__name__ = "_write_building_asset_task"
+    assert _parallel_minimum_for_worker(worker, 768) == _BUILDING_PARALLEL_MINIMUM
+    assert _parallel_minimum_for_worker(worker, 32) == min(32, _BUILDING_PARALLEL_MINIMUM)
+
+    worker.__module__ = "cwr_worldgen.procedural_forests"
+    worker.__name__ = "_write_forest_asset_task"
+    assert _parallel_minimum_for_worker(worker, 768) == 768
 
 
 def test_spawned_asset_workers_exit_cleanly_without_resource_tracker_warning(tmp_path: Path) -> None:

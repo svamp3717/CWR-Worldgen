@@ -80,7 +80,7 @@ class ProceduralBuildingTests(unittest.TestCase):
         inferred = library.key_for({"building": "yes"}, 6.0, 8.0)
         small_house = library.key_for({"building": "house"}, 6.0, 8.0)
 
-        self.assertEqual((tiny.family, tiny.height_m, tiny.regional_style), ("outbuilding", 3.0, "sweden_red"))
+        self.assertEqual((tiny.family, tiny.height_m, tiny.regional_style), ("outbuilding", 3.0, "swedish_wood"))
         self.assertEqual(tiny.outbuilding_kind, "garage")
         self.assertEqual((large_shed.family, large_shed.outbuilding_kind), ("outbuilding", "shed"))
         self.assertEqual((inferred.family, inferred.outbuilding_kind), ("outbuilding", "garage"))
@@ -467,7 +467,7 @@ class ProceduralBuildingTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            library = ProceduralBuildingLibrary(world_name=world_name)
+            library = ProceduralBuildingLibrary(world_name=world_name, texture_variants=10)
             library.prepare(dataset, projection, 12.0)
             library.region_identifier = "sweden"
             placement = None
@@ -482,7 +482,7 @@ class ProceduralBuildingTests(unittest.TestCase):
             self.assertIsNotNone(placement)
             library.register_placement(placement)
             result = library.write_assets(root, root / "buildings.json")
-            self.assertTrue(any(rel.startswith("d/w1") for rel in result.texture_files))
+            self.assertTrue(any(rel.startswith("d/w") for rel in result.texture_files))
             for asset in result.model_assets:
                 summary = inspect_mlod(root / asset.relative_path)
                 for texture_path in summary.texture_paths:
@@ -1055,10 +1055,10 @@ class ProceduralBuildingTests(unittest.TestCase):
             root = Path(temp)
             result = library.write_assets(root, root / "catalogue.json")
             self.assertEqual(result.placements, 3)
-            self.assertEqual(result.generated_variants, 3)
-            self.assertEqual(result.reused_placements, 0)
-            self.assertEqual(result.reuse_ratio, 0.0)
-            self.assertEqual(len(result.model_assets), 3)
+            self.assertEqual(result.generated_variants, 1)
+            self.assertEqual(result.reused_placements, 2)
+            self.assertEqual(result.reuse_ratio, 0.666667)
+            self.assertEqual(len(result.model_assets), 1)
             geometry_signatures = {
                 (
                     asset.key.family, asset.key.roof_style, asset.key.width_m,
@@ -1068,7 +1068,7 @@ class ProceduralBuildingTests(unittest.TestCase):
                 for asset in result.model_assets
             }
             self.assertEqual(len(geometry_signatures), 1)
-            self.assertEqual(len({asset.key.texture_variant for asset in result.model_assets}), 3)
+            self.assertEqual({asset.key.texture_variant for asset in result.model_assets}, {0})
             for asset in result.model_assets:
                 model = root / asset.relative_path
                 self.assertTrue(model.is_file())
@@ -1077,15 +1077,15 @@ class ProceduralBuildingTests(unittest.TestCase):
             walls = [relative for relative in result.texture_files if relative.startswith("d/w")]
             fronts = [relative for relative in result.texture_files if relative.startswith("d/e")]
             roofs = [relative for relative in result.texture_files if relative.startswith("d/r")]
-            # Only texture variants referenced by generated P3Ds are emitted.
-            # This test produces three selected palettes, so writing all ten
-            # configured variants would only bloat the addon and load time.
-            self.assertEqual(len(walls), 3)
-            self.assertEqual(len(fronts), 3)
-            self.assertEqual(len(roofs), 3)
-            self.assertEqual(len({(root / relative).read_bytes() for relative in walls}), 3)
-            self.assertEqual(len({(root / relative).read_bytes() for relative in fronts}), 3)
-            self.assertEqual(len({(root / relative).read_bytes() for relative in roofs}), 3)
+            # OSM House Modeler country/material/opening choices now provide
+            # the visible variety. The normal generator therefore emits one
+            # cosmetic weather variant instead of multiplying every selected P3D.
+            self.assertEqual(len(walls), 1)
+            self.assertEqual(len(fronts), 1)
+            self.assertEqual(len(roofs), 1)
+            self.assertEqual(len({(root / relative).read_bytes() for relative in walls}), 1)
+            self.assertEqual(len({(root / relative).read_bytes() for relative in fronts}), 1)
+            self.assertEqual(len({(root / relative).read_bytes() for relative in roofs}), 1)
             wall = root / walls[0]
             roof = root / roofs[0]
             from cwr_worldgen.procedural_buildings import BUILDING_ASSET_TEXTURE_SIZE
@@ -1121,7 +1121,7 @@ class ProceduralBuildingTests(unittest.TestCase):
             self.assertEqual(inspect_paa(low_wall).width, 128)
             self.assertEqual(inspect_paa(high_wall).width, 256)
 
-    def test_building_positions_select_all_ten_texture_variants_deterministically(self) -> None:
+    def test_building_positions_use_single_modeler_texture_variant_deterministically(self) -> None:
         bbox = (0.0, 0.0, 0.01, 0.01)
         projection = BboxProjection.create(bbox, 1000.0)
         dataset = OsmDataset(
@@ -1147,7 +1147,7 @@ class ProceduralBuildingTests(unittest.TestCase):
             for index in range(200)
         ]
         self.assertEqual(variants_first, variants_second)
-        self.assertEqual(set(variants_first), set(range(10)))
+        self.assertEqual(set(variants_first), {0})
 
     def test_ofp_style_textures_are_low_palette_and_dark_glazed(self) -> None:
         from cwr_worldgen.procedural_buildings import (
