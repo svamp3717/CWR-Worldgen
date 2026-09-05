@@ -27,6 +27,12 @@ _NON_CHRISTIAN_WORSHIP = frozenset({
     "shrine",
     "place_of_worship",
 })
+_COLOUR_METADATA_TAGS = (
+    "building:colour",
+    "building:color",
+    "roof:colour",
+    "roof:color",
+)
 _INSTALLED = False
 _ORIGINAL_STYLE_CLASSIFIER = None
 _ORIGINAL_CWR_FAMILY = None
@@ -220,6 +226,14 @@ def apply_global_worship_style(
     )
 
 
+def _install_normalization_colour_metadata() -> None:
+    """Keep explicit OSM facade/roof colours through normalized bundles."""
+    from . import normalization
+
+    existing = tuple(getattr(normalization, "_BUILDING_METADATA_TAGS", ()))
+    normalization._BUILDING_METADATA_TAGS = tuple(dict.fromkeys((*existing, *_COLOUR_METADATA_TAGS)))
+
+
 def _install_style_classification() -> None:
     global _ORIGINAL_STYLE_CLASSIFIER
     from . import osm_house_modeler_styles as styles
@@ -355,6 +369,7 @@ def install_worship_building_policy() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+    _install_normalization_colour_metadata()
     _install_style_classification()
     _install_cwr_family_classification()
     _install_runtime_style_override()
