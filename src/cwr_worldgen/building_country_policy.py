@@ -144,6 +144,10 @@ def _replace_building_preset_labels(widget: Any) -> None:
     text = _widget_text(widget)
     if text:
         replaced = text.replace("Building preset", "Building country")
+        replaced = replaced.replace(
+            "Choose one of the 23 regional presets here to override procedural building façades and roof defaults for the entire world.",
+            "Choose a country here to use that country's procedural building architecture for the entire world.",
+        )
         if replaced != text:
             try:
                 widget.configure(text=replaced)
