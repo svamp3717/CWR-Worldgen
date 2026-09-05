@@ -142,6 +142,12 @@ def _fetch_latest_overture_release(release_pattern) -> str:
 def install_overture_release_resolution() -> None:
     """Make Overture use the live STAC latest release unless explicitly pinned."""
     from . import overture
+    from .overture_geometry_policy import install_overture_geometry_policy
+
+    # Overture's remote GEOMETRY becomes WKB/BLOB when the temporary Parquet
+    # extract is reopened. Install this before the worker can resolve/call the
+    # direct downloader so newer DuckDB versions do not bind ST_AsWKB(BLOB).
+    install_overture_geometry_policy()
 
     original = overture.selected_overture_release
     if bool(getattr(original, "_cwr_live_release", False)):
