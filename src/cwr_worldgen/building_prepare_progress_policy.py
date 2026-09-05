@@ -183,3 +183,12 @@ def install_building_prepare_progress_policy() -> None:
     from .road_audit_performance_policy import install_road_audit_performance_policy
 
     install_road_audit_performance_policy()
+
+    # The audit counter exposed a second post-fit hotspot: paved-junction target
+    # selection and cleanup. Install its indexed replacement after the progress
+    # ContextVar exists so all sub-phases can reuse the same GUI callback.
+    from .paved_junction_performance_policy import (
+        install_paved_junction_performance_policy,
+    )
+
+    install_paved_junction_performance_policy()
