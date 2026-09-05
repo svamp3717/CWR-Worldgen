@@ -60,3 +60,12 @@ def install_final_building_road_geometry_policy() -> None:
     from .road_building_priority_policy import install_road_building_priority_policy
 
     install_road_building_priority_policy()
+
+    # Step 4 is the final invariant. It sees the exact road set that survives
+    # Step 3 suppression and refuses to serialize any procedural building that
+    # still intersects a ground-level road surface.
+    from .final_road_building_audit_policy import (
+        install_final_road_building_audit_policy,
+    )
+
+    install_final_road_building_audit_policy()
