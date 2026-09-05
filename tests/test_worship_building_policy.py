@@ -2,6 +2,7 @@ from pathlib import Path
 
 from cwr_worldgen.building_semantics import is_actual_church, worship_building_class
 from cwr_worldgen.osm_house_modeler_styles import StyleChoice, classify_building
+from cwr_worldgen import normalization
 from cwr_worldgen import procedural_buildings as buildings
 from cwr_worldgen.worship_building_policy import (
     apply_global_worship_style,
@@ -85,6 +86,35 @@ def test_cwr_family_keeps_churches_but_not_other_worship() -> None:
     assert buildings._family({"building": "synagogue"}, 18.0, 26.0) == "school"
 
 
+def test_orthodox_church_can_use_onion_or_dome_roof_geometry() -> None:
+    install_worship_building_policy()
+    library = buildings.ProceduralBuildingLibrary(world_name="worship-roofs")
+    key = library.key_for(
+        {
+            "amenity": "place_of_worship",
+            "religion": "christian",
+            "denomination": "orthodox",
+        },
+        18.0,
+        28.0,
+    )
+    assert key.family == "church"
+    assert key.building_class == "orthodox_church"
+    assert key.roof_style in {"onion", "dome", "gabled", "hipped"}
+
+    explicit = library.key_for(
+        {
+            "amenity": "place_of_worship",
+            "religion": "christian",
+            "denomination": "orthodox",
+            "roof:shape": "flat",
+        },
+        18.0,
+        28.0,
+    )
+    assert explicit.roof_style == "flat"
+
+
 def test_church_global_style_replaces_residential_red_palette() -> None:
     styled = apply_global_worship_style(
         _choice(),
@@ -103,16 +133,21 @@ def test_church_global_style_replaces_residential_red_palette() -> None:
 
 def test_orthodox_mosque_and_synagogue_use_class_specific_global_rules() -> None:
     cases = (
-        ({"amenity": "place_of_worship", "religion": "christian", "denomination": "orthodox"}, "orthodox_church"),
-        ({"building": "mosque"}, "mosque"),
-        ({"building": "synagogue"}, "synagogue"),
+        (
+            {"amenity": "place_of_worship", "religion": "christian", "denomination": "orthodox"},
+            "orthodox_church",
+            {"onion", "dome", "gabled", "hipped"},
+        ),
+        ({"building": "mosque"}, "mosque", {"dome", "flat", "hipped"}),
+        ({"building": "synagogue"}, "synagogue", {"gabled", "hipped", "dome", "flat"}),
     )
-    for tags, expected in cases:
+    for tags, expected, roof_styles in cases:
         styled = apply_global_worship_style(
             _choice(), tags, width_m=22.0, length_m=34.0, seed="test-world"
         )
         assert styled.building_class == expected
         assert styled.facade_style == "worship"
+        assert styled.roof_style in roof_styles
         assert styled.colour_palette
         assert "falun red" not in {value.casefold() for value in styled.colour_palette}
 
@@ -141,6 +176,17 @@ def test_explicit_osm_worship_appearance_remains_authoritative() -> None:
     assert styled.roof_material == "slate"
     assert styled.roof_style == "hipped"
     assert styled.colour_palette == ("blue",)
+
+
+def test_normalization_preserves_explicit_building_and_roof_colours() -> None:
+    install_worship_building_policy()
+    metadata = set(normalization._BUILDING_METADATA_TAGS)
+    assert {
+        "building:colour",
+        "building:color",
+        "roof:colour",
+        "roof:color",
+    } <= metadata
 
 
 def test_global_rule_catalogue_contains_no_country_specific_sections() -> None:
