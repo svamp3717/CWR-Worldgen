@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import cwr_worldgen.cli as cli
-import cwr_worldgen.gui as gui
-import cwr_worldgen.gui_entry as gui_entry
 from cwr_worldgen import osm_house_modeler_runtime as runtime
 from cwr_worldgen.building_country_policy import (
-    BUILDING_COUNTRY_AUTO_LABEL,
+    _replace_building_preset_labels,
     building_country_options,
     normalise_building_country,
 )
@@ -44,17 +40,30 @@ def test_forced_country_overrides_map_location() -> None:
     assert choice.region_identifier == "northern_europe"
 
 
-def test_gui_replaces_region_dropdown_with_country_dropdown(tmp_path: Path) -> None:
-    gui_entry._configure_gui(gui, tmp_path)
+def test_country_selector_relabels_region_copy_without_tk_state() -> None:
+    class Widget:
+        def __init__(self, text: str = "", children=()):
+            self.text = text
+            self.children = list(children)
 
-    assert gui.HOUSE_STYLE_PRESET_LABELS[0] == BUILDING_COUNTRY_AUTO_LABEL
-    assert "SE — Sweden" in gui.HOUSE_STYLE_PRESET_LABELS
-    assert not any("East Asia" in label for label in gui.HOUSE_STYLE_PRESET_LABELS)
-    assert gui.gui_house_style_preset_identifier("SE — Sweden") == "se_sweden"
-    assert gui.gui_house_style_preset_identifier("east_asia") == "auto"
+        def cget(self, name: str):
+            assert name == "text"
+            return self.text
 
-    values = gui.default_gui_values()
-    values["house_style_preset"] = "SE — Sweden"
-    command = gui.build_milestone9_command(values, python="python")
-    index = command.index("--house-style-preset")
-    assert command[index + 1] == "se_sweden"
+        def configure(self, **kwargs):
+            self.text = str(kwargs["text"])
+
+        def winfo_children(self):
+            return list(self.children)
+
+    title = Widget("Building preset")
+    hint = Widget(
+        "Automatic uses the selected map area/country. Choose one of the 23 regional presets here to override procedural building façades and roof defaults for the entire world."
+    )
+    root = Widget(children=(title, hint))
+
+    _replace_building_preset_labels(root)
+
+    assert title.text == "Building country"
+    assert "regional presets" not in hint.text
+    assert "Choose a country" in hint.text
