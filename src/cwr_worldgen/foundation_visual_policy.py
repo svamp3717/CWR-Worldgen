@@ -203,3 +203,10 @@ def install_foundation_visual_policy() -> None:
     from .church_native_tower_cache_policy import install_church_native_tower_cache_policy
 
     install_church_native_tower_cache_policy()
+
+    # Desert ground is stock game artwork, not generated world-local PAA data.
+    # Install after the core surface modules are loaded so both Milestone 8 and 9
+    # paths share the same external texture table and skip DXT1 ground generation.
+    from .stock_desert_surface_policy import install_stock_desert_surface_policy
+
+    install_stock_desert_surface_policy()
