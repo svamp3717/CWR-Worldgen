@@ -169,7 +169,11 @@ def _append_roof_storey_windows(
     """Use the same light casing on roof-storey windows as normal windows."""
     previous = getattr(_GABLE_TRIM_STATE, "texture", None)
     trim_texture = None
-    if _pb._uses_light_window_trim(key):
+    if (
+        key.interiors
+        and key.family not in _pb.UTILITY_INTERIOR_FAMILIES
+        and _pb._uses_light_window_trim(key)
+    ):
         trim_texture = _shared_light_trim_path(reference_texture)
     _GABLE_TRIM_STATE.texture = trim_texture
     try:
