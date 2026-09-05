@@ -109,6 +109,16 @@ def test_orthodox_church_can_use_onion_or_dome_roof_geometry() -> None:
     assert key.family == "church"
     assert key.building_class == "orthodox_church"
     assert key.roof_style in {"onion", "dome", "gabled", "hipped"}
+    lod = buildings._visual_lod(
+        key,
+        r"test\worship_wall.paa",
+        r"test\worship_roof.paa",
+        35.0,
+    )
+    assert lod.faces
+    assert max(point[1] for point in lod.points) > key.height_m
+    if key.roof_style in {"onion", "dome"}:
+        assert len(lod.points) > 40
 
     explicit = library.key_for(
         {
