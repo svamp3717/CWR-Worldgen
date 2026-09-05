@@ -194,7 +194,8 @@ def _add_rectangular_window_glass(key, points, faces, *, wall_top, reference_tex
             (start + 0, normal, 0.0, 1.0), (start + 1, normal, 0.0, 0.0),
             (start + 2, normal, 1.0, 0.0), (start + 3, normal, 1.0, 1.0),
         ))
-        faces = faces + (face, buildings._reverse_face(face))
+        # _visual_lod double-sides the complete face set at return time.
+        faces = faces + (face,)
 
     for axis, plane, openings, normal in (
         ("x", -hl - 0.008, front, 0),
@@ -265,6 +266,8 @@ def _polygon_visual_lod(*args, **kwargs):
                     (base + 0, ni, 0.0, 1.0), (base + 1, ni, 0.0, 0.0),
                     (base + 2, ni, 1.0, 0.0), (base + 3, ni, 1.0, 1.0),
                 ))
+                # This wrapper runs after the base polygon LOD has already been
+                # doubled, so panes added here need their own reverse face.
                 faces.extend((face, buildings._reverse_face(face)))
                 added = True
     if not added:
