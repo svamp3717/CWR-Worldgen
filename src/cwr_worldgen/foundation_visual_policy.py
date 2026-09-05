@@ -160,8 +160,17 @@ def install_foundation_visual_policy() -> None:
 
     install_country_utility_material_policy()
 
-    # Keep this final: it wraps the country-adjusted resolver and final geometry
-    # stack without bypassing weighted country material/colour selection.
+    # Keep this final among style/geometry wrappers: it consumes the country-
+    # adjusted resolver and final geometry stack without bypassing weighted
+    # material/colour selection.
     from .osm_house_modeler_visual_policy import install_osm_house_modeler_visual_policy
 
     install_osm_house_modeler_visual_policy()
+
+    # The GUI no longer exposes broad regional architecture presets. Explicit
+    # building style selection is country-only, while Automatic still detects the
+    # country from the selected map area. Install after the visual resolver so a
+    # forced country flows through every existing material/colour/window fix.
+    from .building_country_policy import install_building_country_policy
+
+    install_building_country_policy()
