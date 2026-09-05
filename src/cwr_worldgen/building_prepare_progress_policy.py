@@ -209,3 +209,12 @@ def install_building_prepare_progress_policy() -> None:
     )
 
     install_final_building_road_clearance_policy()
+
+    # Generated gravel curves use a quadratic bowed ribbon. Install the exact
+    # centreline recipe after the clearance module exists so its road primitives
+    # match the mesh generator rather than a circular approximation.
+    from .final_building_road_geometry_policy import (
+        install_final_building_road_geometry_policy,
+    )
+
+    install_final_building_road_geometry_policy()
