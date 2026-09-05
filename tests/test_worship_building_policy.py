@@ -40,6 +40,10 @@ def test_global_worship_semantics_distinguish_religions() -> None:
         "religion": "christian",
         "denomination": "russian_orthodox",
     }) == "orthodox_church"
+    assert worship_building_class({
+        "amenity": "place_of_worship",
+        "religion": "orthodox",
+    }) == "orthodox_church"
     assert worship_building_class({"building": "mosque"}) == "mosque"
     assert worship_building_class({
         "amenity": "place_of_worship",
@@ -61,6 +65,10 @@ def test_only_christian_worship_uses_church_geometry_family() -> None:
         "amenity": "place_of_worship",
         "religion": "christian",
         "denomination": "greek_orthodox",
+    })
+    assert is_actual_church({
+        "amenity": "place_of_worship",
+        "religion": "orthodox",
     })
     assert not is_actual_church({"building": "mosque"})
     assert not is_actual_church({"building": "synagogue"})
