@@ -159,3 +159,9 @@ def install_foundation_visual_policy() -> None:
     from .country_utility_material_policy import install_country_utility_material_policy
 
     install_country_utility_material_policy()
+
+    # Keep this final: it wraps the country-adjusted resolver and final geometry
+    # stack without bypassing weighted country material/colour selection.
+    from .osm_house_modeler_visual_policy import install_osm_house_modeler_visual_policy
+
+    install_osm_house_modeler_visual_policy()
