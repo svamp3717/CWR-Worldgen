@@ -152,6 +152,13 @@ def install_foundation_visual_policy() -> None:
 
     install_building_progress_policy()
 
+    # Preparing variants is a separate serial phase before texture/P3D workers.
+    # Expose its style-resolution and capped-reuse counters as well so the GUI no
+    # longer appears frozen at the same percentage on building-heavy worlds.
+    from .building_prepare_progress_policy import install_building_prepare_progress_policy
+
+    install_building_prepare_progress_policy()
+
     # Utility material selection is deliberately data-only: all barn/shed/garage/
     # warehouse/hangar/industrial pools live in the selected country JSON. The
     # runtime merely consumes those explicit distributions and supplies matching
