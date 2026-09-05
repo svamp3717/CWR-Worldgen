@@ -118,13 +118,18 @@ def _window_frame_texture_image(
 ):
     """Make the shared trim atlas actually light instead of reddish timber."""
     style = str(regional_style or "default")
-    if style.strip().casefold() in {"", "default"}:
+    shared_light_trim = style.strip().casefold() in {"", "default"}
+    if shared_light_trim:
         style = _LIGHT_WINDOW_STYLE_TOKEN
-    return _ORIGINAL_WINDOW_FRAME_TEXTURE_IMAGE(
+    image = _ORIGINAL_WINDOW_FRAME_TEXTURE_IMAGE(
         size,
         style,
         texture_variant,
     )
+    # The upstream named "white" is intentionally a warm architectural ivory.
+    # For CWR's shared casing material keep that subtle grain, but remove the
+    # residual red/yellow cast so Swedish trim reads as actually white in-game.
+    return image.convert("L").convert("RGB") if shared_light_trim else image
 
 
 def _cache_key(namespace, *args, **kwargs):
