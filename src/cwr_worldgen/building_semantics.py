@@ -72,8 +72,9 @@ def worship_building_class(tags: Mapping[str, str]) -> str:
 
     christian_building = building in _CHRISTIAN_BUILDING_VALUES
     place_of_worship = amenity == "place_of_worship"
-    if christian_building or (place_of_worship and religion == "christian"):
-        return "orthodox_church" if _is_orthodox_christian(tags) else "church"
+    orthodox = _is_orthodox_christian(tags)
+    if christian_building or (place_of_worship and (religion == "christian" or orthodox)):
+        return "orthodox_church" if orthodox else "church"
 
     if not place_of_worship:
         return ""
@@ -83,8 +84,6 @@ def worship_building_class(tags: Mapping[str, str]) -> str:
         return "synagogue"
     if religion in _TEMPLE_RELIGIONS:
         return "temple"
-    if religion == "christian":
-        return "orthodox_church" if _is_orthodox_christian(tags) else "church"
     return "place_of_worship"
 
 
