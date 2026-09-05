@@ -88,6 +88,11 @@ class CfgVehicles
         }};
         class UserActions
         {{
+            // One action pair is enough for both sides of the doorway. The
+            // door1_action memory point is only ~0.55 m outside the wall and
+            // the 5 m interaction radius comfortably reaches the interior too.
+            // Defining a second pair at door1_action_inside made OFP/CWA show
+            // duplicate Open/Close menu entries whenever both radii overlapped.
             class OpenDoor1
             {{
                 displayName = "Open door";
@@ -101,24 +106,6 @@ class CfgVehicles
             {{
                 displayName = "Close door";
                 position = "door1_action";
-                radius = 5.0;
-                condition = "this animationPhase ""Door1"" >= 0.5";
-                statement = "this animate [""Door1"", 0]";
-                onlyForPlayer = 1;
-            }};
-            class OpenDoor1Inside
-            {{
-                displayName = "Open door";
-                position = "door1_action_inside";
-                radius = 5.0;
-                condition = "this animationPhase ""Door1"" < 0.5";
-                statement = "this animate [""Door1"", 1]";
-                onlyForPlayer = 1;
-            }};
-            class CloseDoor1Inside
-            {{
-                displayName = "Close door";
-                position = "door1_action_inside";
                 radius = 5.0;
                 condition = "this animationPhase ""Door1"" >= 0.5";
                 statement = "this animate [""Door1"", 0]";
