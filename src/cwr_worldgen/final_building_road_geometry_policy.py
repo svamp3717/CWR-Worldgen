@@ -53,3 +53,10 @@ def install_final_building_road_geometry_policy() -> None:
         return
     _clearance._gravel_curve_points = gravel_curve_centreline_points
     _INSTALLED = True
+
+    # Step 3 depends on the exact final-road primitive geometry above. Install
+    # right-of-way priority last so unresolved buildings may suppress only a
+    # tightly bounded set of low-priority dirt/gravel road pieces.
+    from .road_building_priority_policy import install_road_building_priority_policy
+
+    install_road_building_priority_policy()
