@@ -189,3 +189,10 @@ def install_foundation_visual_policy() -> None:
     from .worship_building_policy import install_worship_building_policy
 
     install_worship_building_policy()
+
+    # Irregular churches used to be the one semantic family barred from the
+    # polygon-native model path. Install after worship classification so churches
+    # retain their exact mapped outline without bypassing the final worship style.
+    from .church_native_polygon_policy import install_church_native_polygon_policy
+
+    install_church_native_polygon_policy()
