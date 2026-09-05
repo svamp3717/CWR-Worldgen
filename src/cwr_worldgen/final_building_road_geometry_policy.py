@@ -69,3 +69,11 @@ def install_final_building_road_geometry_policy() -> None:
     )
 
     install_final_road_building_audit_policy()
+
+    # The 0.75 m margin is a preferred relocation target, not part of the road
+    # mesh. Install the final semantics layer after Steps 3/4 so destructive
+    # rejection/suppression uses physical road overlap only while Step 2 keeps
+    # the nicer optional clearance search.
+    from .physical_road_overlap_policy import install_physical_road_overlap_policy
+
+    install_physical_road_overlap_policy()
