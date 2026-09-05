@@ -30,6 +30,7 @@ _NON_CHRISTIAN_WORSHIP = frozenset({
 _INSTALLED = False
 _ORIGINAL_STYLE_CLASSIFIER = None
 _ORIGINAL_CWR_FAMILY = None
+_ORIGINAL_CWR_KEY_FOR = None
 _ORIGINAL_RUNTIME_RESOLVE = None
 
 
@@ -101,6 +102,11 @@ def _explicit_colour(tags: Mapping[str, str]) -> str:
     return str(tags.get("building:colour") or tags.get("building:color") or "").strip()
 
 
+def _class_rules(building_class: str) -> Mapping[str, Any]:
+    rules = load_worship_style_rules()
+    return rules.get(building_class) or rules.get("place_of_worship") or {}
+
+
 def apply_global_worship_style(
     choice,
     tags: Mapping[str, str],
@@ -113,9 +119,7 @@ def apply_global_worship_style(
     building_class = worship_building_class(tags)
     if not building_class:
         return choice
-    rules = load_worship_style_rules().get(building_class)
-    if not rules:
-        rules = load_worship_style_rules().get("place_of_worship")
+    rules = _class_rules(building_class)
     if not rules:
         return replace(choice, building_class=building_class)
 
@@ -174,13 +178,14 @@ def apply_global_worship_style(
         # Texture renderers currently tint from the first colour, but keeping the
         # entire palette class-safe prevents a future renderer from reviving a
         # country house colour as a secondary church facade by accident.
-        allowed = []
+        allowed: list[str] = []
+        seen = {primary.casefold()}
         for entry in rules.get("facade_colours") or ():
             if isinstance(entry, Mapping):
                 value = str(entry.get("colour", "") or "").strip()
-                if value and value.casefold() != primary.casefold() and value.casefold() not in {
-                    item.casefold() for item in allowed
-                }:
+                folded = value.casefold()
+                if value and folded not in seen:
+                    seen.add(folded)
                     allowed.append(value)
         palette = (primary, *allowed[:5])
 
@@ -276,6 +281,53 @@ def _install_cwr_family_classification() -> None:
     buildings._family = family
 
 
+def _install_cwr_key_adjustment() -> None:
+    """Let Orthodox churches use the roof shape selected by their global rule."""
+    global _ORIGINAL_CWR_KEY_FOR
+    from . import procedural_buildings as buildings
+
+    _ORIGINAL_CWR_KEY_FOR = buildings.ProceduralBuildingLibrary.key_for
+
+    def key_for(
+        self,
+        tags: Mapping[str, str],
+        width_m: float,
+        length_m: float,
+        *,
+        foundation_depth_m: float | None = None,
+        settlement_context: str = "rural",
+    ):
+        key = _ORIGINAL_CWR_KEY_FOR(
+            self,
+            tags,
+            width_m,
+            length_m,
+            foundation_depth_m=foundation_depth_m,
+            settlement_context=settlement_context,
+        )
+        building_class = worship_building_class(tags)
+        if building_class != "orthodox_church" or str(tags.get("roof:shape", "") or "").strip():
+            return key
+        rules = _class_rules(building_class)
+        roof_style = _weighted_pick(
+            rules.get("roof_styles"),
+            ":".join((
+                str(getattr(self, "world_name", "cwr-worldgen") or "cwr-worldgen"),
+                building_class,
+                str(getattr(key, "country_style_identifier", "") or "global"),
+                f"{float(width_m):.2f}",
+                f"{float(length_m):.2f}",
+                str(tags.get("denomination", "") or ""),
+                "cwr-roof",
+            )),
+            value_key="style",
+            fallback=str(getattr(key, "roof_style", "gabled") or "gabled"),
+        )
+        return replace(key, roof_style=roof_style, building_class=building_class)
+
+    buildings.ProceduralBuildingLibrary.key_for = key_for
+
+
 def _install_runtime_style_override() -> None:
     global _ORIGINAL_RUNTIME_RESOLVE
     from . import osm_house_modeler_runtime as runtime
@@ -306,4 +358,5 @@ def install_worship_building_policy() -> None:
     _install_style_classification()
     _install_cwr_family_classification()
     _install_runtime_style_override()
+    _install_cwr_key_adjustment()
     _INSTALLED = True
