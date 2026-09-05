@@ -176,3 +176,10 @@ def install_building_prepare_progress_policy() -> None:
     buildings.ProceduralBuildingLibrary._reuse_candidates = progressive_reuse_candidates
     buildings.ProceduralBuildingLibrary.prepare = progressive_prepare
     _INSTALLED = True
+
+    # This module is installed late in package startup, after the paved/gravel/
+    # raceway road wrappers. That makes it a safe place to add the audit wrapper
+    # without bypassing any of those policies.
+    from .road_audit_performance_policy import install_road_audit_performance_policy
+
+    install_road_audit_performance_policy()
