@@ -1,36 +1,32 @@
 from __future__ import annotations
 
-from shapely.geometry import Point
+from types import SimpleNamespace
 
-from cwr_worldgen.cache import cache_key as raw_cache_key
 from cwr_worldgen import final_building_road_clearance_policy as clearance
+from cwr_worldgen import osm
 from cwr_worldgen import procedural_buildings as buildings
 from cwr_worldgen.church_native_polygon_policy import (
-    _BUILDING_MODEL_CACHE_V57,
-    _church_tower_base,
+    _mapped_church_support_polygon,
     install_church_native_polygon_policy,
-)
-from cwr_worldgen.church_native_tower_cache_policy import (
-    install_church_native_tower_cache_policy,
 )
 
 
 def _library() -> buildings.ProceduralBuildingLibrary:
     library = buildings.ProceduralBuildingLibrary(
-        world_name="test_church_native",
+        world_name="test_legacy_church",
         maximum_variants=16,
         maximum_polygon_variants=16,
     )
-    # plan_polygon's native path does not require capped rectangle preparation;
-    # it only needs the normal geographic/style defaults supplied by key_for.
+    # The legacy rectangle fallback calls _selected(), which normally becomes
+    # prepared during the real build's prepare() phase. Empty mapping means an
+    # isolated unit test may use its exact requested church key.
+    library._prepared = True
     return library
 
 
-def _irregular_church_placement():
+def _legacy_irregular_church_placement():
     install_church_native_polygon_policy()
     library = _library()
-    # Strongly non-rectangular church outline. The old church-only exclusion
-    # replaced this with a 40 x 100 m minimum-rotated rectangle.
     points = (
         (0.0, 0.0),
         (100.0, 0.0),
@@ -53,20 +49,21 @@ def _irregular_church_placement():
     )
 
 
-def test_irregular_church_uses_polygon_native_model() -> None:
-    placement = _irregular_church_placement()
+def test_irregular_church_uses_legacy_rectangular_renderer() -> None:
+    placement = _legacy_irregular_church_placement()
 
     assert placement.requested.family == "church"
     assert placement.selected.family == "church"
-    assert placement.selected.footprint_vertices
-    assert len(placement.selected.footprint_vertices) >= 6
-    assert placement.selected.roof_style in {"flat", "gabled", "hipped", "pyramidal"}
+    # This is the deliberate old church path. Exact OSM geometry is now used
+    # only for road/collision policy, not as a replacement church renderer.
+    assert placement.selected.footprint_vertices == ()
+    assert placement.selected.footprint_holes == ()
 
 
-def test_polygon_native_church_keeps_tower_and_spire_silhouette() -> None:
-    placement = _irregular_church_placement()
+def test_legacy_church_renderer_keeps_end_tower_and_spire() -> None:
+    placement = _legacy_irregular_church_placement()
     key = placement.selected
-    visual = buildings._polygon_native_visual_lod(
+    visual = buildings._visual_lod(
         key,
         r"testworld\d\church_wall.paa",
         r"testworld\d\church_roof.paa",
@@ -75,50 +72,66 @@ def test_polygon_native_church_keeps_tower_and_spire_silhouette() -> None:
     )
 
     maximum_y = max(point[1] for point in visual.points)
-    # The ordinary native shell stops at the nave roof. Christian church models
-    # must retain the familiar tower/spire that rises well above the nave.
+    # The mature rectangular renderer integrates its church tower at the front
+    # end of the nave and extends the spire substantially above the nave roof.
     assert maximum_y >= max(18.0, key.height_m + 8.0) + 4.5
     assert any(face.texture.endswith("church_roof.paa") for face in visual.faces)
     assert any(face.texture.endswith("church_plain.paa") for face in visual.faces)
 
 
-def test_native_church_tower_stays_inside_mapped_footprint() -> None:
-    placement = _irregular_church_placement()
-    key = placement.selected
-    shape = buildings._polygon_native_shape(key)
-    base = _church_tower_base(key)
+def test_mapped_church_road_support_uses_source_outline_and_follows_nudge() -> None:
+    plan = osm.BuildingPlacementPlan(
+        osm_key="way/123",
+        geometry_index=0,
+        geometry_kind="polygon",
+        x=6.0,
+        z=3.0,
+        heading_degrees=0.0,
+        model_path=r"testworld\g\church.p3d",
+        # Deliberately oversized fitted rectangle, similar to the cathedral bug.
+        support_polygon=((-4.0, -7.0), (16.0, -7.0), (16.0, 13.0), (-4.0, 13.0)),
+        building_family="church",
+    )
+    feature = SimpleNamespace(
+        osm_key="way/123",
+        tags={
+            "building": "church",
+            "amenity": "place_of_worship",
+            "religion": "christian",
+        },
+        polygons=(SimpleNamespace(
+            outer=((0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0), (0.0, 0.0)),
+        ),),
+    )
+    dataset = SimpleNamespace(building_polygons=(feature,))
+    projection = SimpleNamespace(to_world=lambda point: point)
 
-    assert base is not None
-    corners, _half, _depth = base
-    assert all(shape.buffer(0.021).covers(Point(x, z)) for x, z in corners)
+    support = _mapped_church_support_polygon(plan, dataset, projection)
+
+    # Source centroid is (5,2), while the current model origin is (6,3). The
+    # support therefore receives the same +1,+1 rigid translation as the model.
+    assert support == ((1.0, 1.0), (11.0, 1.0), (11.0, 5.0), (1.0, 5.0))
 
 
-def test_church_native_policy_bumps_nonroad_cache_revision() -> None:
+def test_nonchurch_does_not_receive_church_source_support_override() -> None:
+    plan = osm.BuildingPlacementPlan(
+        osm_key="way/124",
+        geometry_index=0,
+        geometry_kind="polygon",
+        x=5.0,
+        z=2.0,
+        heading_degrees=0.0,
+        model_path=r"testworld\g\house.p3d",
+        support_polygon=((0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)),
+        building_family="residential",
+    )
+    dataset = SimpleNamespace(building_polygons=())
+    projection = SimpleNamespace(to_world=lambda point: point)
+    assert _mapped_church_support_polygon(plan, dataset, projection) is None
+
+
+def test_legacy_church_policy_bumps_nonroad_cache_revision() -> None:
     install_church_native_polygon_policy()
-    assert clearance._CACHE_REVISION == "final-road-building-clearance-v5-church-native-towers"
-
-
-def test_church_tower_cache_promotes_legacy_model_namespace() -> None:
-    install_church_native_polygon_policy()
-    install_church_native_tower_cache_policy()
-    payload = {
-        "world_name": "test_church_native",
-        "variant": {"family": "church", "footprint_vertices": [[0.0, 0.0]]},
-    }
-    assert buildings.cache_key(
-        "procedural-building-model-v49-robust-polygon-roof-triangulation",
-        payload,
-    ) == raw_cache_key(_BUILDING_MODEL_CACHE_V57, payload)
-
-
-def test_church_tower_cache_does_not_force_nonchurch_models_to_v57() -> None:
-    install_church_native_polygon_policy()
-    install_church_native_tower_cache_policy()
-    payload = {
-        "world_name": "test_church_native",
-        "variant": {"family": "residential"},
-    }
-    assert buildings.cache_key(
-        "procedural-building-model-v49-robust-polygon-roof-triangulation",
-        payload,
-    ) != raw_cache_key(_BUILDING_MODEL_CACHE_V57, payload)
+    assert clearance._CACHE_REVISION == (
+        "final-road-building-clearance-v6-legacy-church-source-road-footprints"
+    )
