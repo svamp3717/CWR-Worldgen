@@ -7,7 +7,9 @@ from dataclasses import replace
 from cwr_worldgen import osm_house_modeler_runtime as runtime
 from cwr_worldgen import osm_house_modeler_texture_bridge as texture_bridge
 from cwr_worldgen import osm_house_modeler_upgrade as upgrade
+from cwr_worldgen import osm_house_modeler_visual_policy as visual_policy
 from cwr_worldgen import procedural_buildings as pb
+from cwr_worldgen.osm_house_modeler_styles import StyleChoice
 
 
 def _swedish_house(
@@ -58,6 +60,58 @@ def test_runtime_sweden_colour_policy_is_not_bypassed() -> None:
 
     assert len(colours) >= 4
     assert colours["falun red"] < 90
+    assert colours["falun red"] > colours["white"]
+
+
+def test_sweden_rural_white_timber_tuning_is_small_and_preserves_osm_colour(monkeypatch) -> None:
+    base = StyleChoice(
+        region_identifier="northern_europe",
+        region_name="Northern Europe",
+        facade_style="swedish_wood",
+        roof_style="gabled",
+        context="rural",
+        family="residential",
+        building_class="cottage",
+        country_code="SE",
+        country_name="Sweden",
+        country_profile_identifier="se_sweden",
+        wall_material="painted vertical timber cladding",
+        colour_palette=("white", "falun red", "ochre yellow"),
+        window_spec={"frame_material": "painted timber", "trim": "white"},
+    )
+    monkeypatch.setattr(
+        visual_policy,
+        "_ORIGINAL_RESOLVE_STYLE",
+        lambda *args, **kwargs: base,
+    )
+
+    colours = Counter()
+    for index in range(80):
+        tuned = visual_policy._resolved_style(
+            tags={"building": "cottage"},
+            latitude=57.5,
+            longitude=13.0,
+            width_m=7.0,
+            length_m=10.0,
+            settlement_context="rural",
+            seed=f"SwedenRedCottage:{index}",
+        )
+        colours[tuned.colour_palette[0]] += 1
+
+    # Deliberately a modest nudge, not another "everything is red" episode.
+    assert 20 <= colours["falun red"] <= 60
+    assert colours["white"] > 0
+
+    explicit = visual_policy._resolved_style(
+        tags={"building": "cottage", "building:colour": "white"},
+        latitude=57.5,
+        longitude=13.0,
+        width_m=7.0,
+        length_m=10.0,
+        settlement_context="rural",
+        seed="SwedenExplicitWhite",
+    )
+    assert explicit.colour_palette[0] == "white"
 
 
 def test_interior_variant_reuse_preserves_swedish_facade_colour_when_fit_is_valid() -> None:
@@ -96,20 +150,22 @@ def test_shared_window_trim_texture_is_light_and_neutral() -> None:
     assert max(mean) - min(mean) <= 2.0
 
 
-def test_rectangular_enterable_windows_have_glass_material() -> None:
+def test_rectangular_enterable_windows_remain_real_openings() -> None:
     key = _swedish_house(width_m=10.0, length_m=14.0)
     points, faces = pb._add_window_crosses(
         key,
         (),
         (),
         wall_top=6.0,
-        texture=r"sweden_glass_regression\d\t.paa",
+        texture=r"sweden_open_window_regression\d\t.paa",
     )
     assert points
-    assert r"sweden_glass_regression\d\qgl.paa" in {face.texture for face in faces}
+    textures = {face.texture for face in faces}
+    assert r"sweden_open_window_regression\d\t.paa" in textures
+    assert r"sweden_open_window_regression\d\qgl.paa" not in textures
 
 
-def test_roof_storey_windows_reuse_shared_light_trim_texture() -> None:
+def test_enterable_roof_storey_windows_have_trim_but_no_fake_glass() -> None:
     key = _swedish_house(width_m=10.0, length_m=14.0)
     points: list[tuple[float, float, float]] = []
     normals: list[tuple[float, float, float]] = []
@@ -125,4 +181,51 @@ def test_roof_storey_windows_reuse_shared_light_trim_texture() -> None:
     assert faces
     textures = {face.texture for face in faces}
     assert r"sweden_trim_regression\d\t.paa" in textures
-    assert r"sweden_trim_regression\d\qgl.paa" in textures
+    assert r"sweden_trim_regression\d\qgl.paa" not in textures
+
+
+def test_enterable_open_window_policy_applies_to_other_countries() -> None:
+    key = replace(
+        _swedish_house(width_m=10.0, length_m=14.0),
+        country_style_identifier="de_germany",
+        regional_style="western_stucco",
+        wall_material="stucco/render",
+        colour_palette=("cream",),
+        window_frame_material="uPVC",
+    )
+    points: list[tuple[float, float, float]] = []
+    normals: list[tuple[float, float, float]] = []
+    faces: list[pb._Face] = []
+    upgrade._append_roof_storey_windows(
+        points,
+        normals,
+        faces,
+        key,
+        roof_pitch_degrees=40.0,
+        reference_texture=r"germany_open_window_regression\d\roof.paa",
+    )
+    assert faces
+    assert r"germany_open_window_regression\d\qgl.paa" not in {
+        face.texture for face in faces
+    }
+
+
+def test_closed_roof_storey_windows_keep_decorative_glass() -> None:
+    key = replace(
+        _swedish_house(width_m=10.0, length_m=14.0),
+        interiors=False,
+    )
+    points: list[tuple[float, float, float]] = []
+    normals: list[tuple[float, float, float]] = []
+    faces: list[pb._Face] = []
+    upgrade._append_roof_storey_windows(
+        points,
+        normals,
+        faces,
+        key,
+        roof_pitch_degrees=40.0,
+        reference_texture=r"sweden_closed_window_regression\d\roof.paa",
+    )
+    assert r"sweden_closed_window_regression\d\qgl.paa" in {
+        face.texture for face in faces
+    }
