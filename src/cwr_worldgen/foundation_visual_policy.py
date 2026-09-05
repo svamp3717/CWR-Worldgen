@@ -181,3 +181,11 @@ def install_foundation_visual_policy() -> None:
     from .building_country_policy import install_building_country_policy
 
     install_building_country_policy()
+
+    # Worship semantics are global, not country-specific. Install this last so a
+    # church/mosque/synagogue can consume the selected country context first, then
+    # replace only residential-looking materials/colours with its class defaults.
+    # Explicit OSM building/roof material and colour tags still remain final.
+    from .worship_building_policy import install_worship_building_policy
+
+    install_worship_building_policy()
