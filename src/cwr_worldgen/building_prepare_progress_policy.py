@@ -192,3 +192,10 @@ def install_building_prepare_progress_policy() -> None:
     )
 
     install_paved_junction_performance_policy()
+
+    # Final straight-road deduplication must be outermost: only after the complete
+    # junction/gravel/raceway chain has produced its final object list do we know
+    # which slabs would actually overlap in the WRP.
+    from .final_road_dedup_policy import install_final_road_dedup_policy
+
+    install_final_road_dedup_policy()
