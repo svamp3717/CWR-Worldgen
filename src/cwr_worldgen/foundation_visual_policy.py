@@ -196,3 +196,10 @@ def install_foundation_visual_policy() -> None:
     from .church_native_polygon_policy import install_church_native_polygon_policy
 
     install_church_native_polygon_policy()
+
+    # The model-cache call site still enters the wrapper chain with the historical
+    # v49 namespace. Install one final church-only cache gate outside that chain so
+    # tower-aware native church P3Ds cannot reuse the old towerless asset bytes.
+    from .church_native_tower_cache_policy import install_church_native_tower_cache_policy
+
+    install_church_native_tower_cache_policy()
