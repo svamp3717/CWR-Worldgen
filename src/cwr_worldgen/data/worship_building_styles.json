@@ -57,9 +57,10 @@
         {"colour": "natural timber", "weight": 4}
       ],
       "roof_styles": [
-        {"style": "hipped", "weight": 45},
-        {"style": "gabled", "weight": 45},
-        {"style": "pyramidal", "weight": 10}
+        {"style": "onion", "weight": 50},
+        {"style": "dome", "weight": 30},
+        {"style": "gabled", "weight": 15},
+        {"style": "hipped", "weight": 5}
       ],
       "window_density_multiplier": 0.45
     },
@@ -86,9 +87,9 @@
         {"colour": "stucco", "weight": 9}
       ],
       "roof_styles": [
-        {"style": "flat", "weight": 55},
-        {"style": "hipped", "weight": 30},
-        {"style": "gabled", "weight": 15}
+        {"style": "dome", "weight": 55},
+        {"style": "flat", "weight": 30},
+        {"style": "hipped", "weight": 15}
       ],
       "window_density_multiplier": 0.65
     },
@@ -117,8 +118,9 @@
       ],
       "roof_styles": [
         {"style": "gabled", "weight": 45},
-        {"style": "hipped", "weight": 35},
-        {"style": "flat", "weight": 20}
+        {"style": "hipped", "weight": 25},
+        {"style": "dome", "weight": 20},
+        {"style": "flat", "weight": 10}
       ],
       "window_density_multiplier": 0.75
     },
@@ -147,9 +149,10 @@
         {"colour": "grey", "weight": 7}
       ],
       "roof_styles": [
-        {"style": "hipped", "weight": 40},
-        {"style": "gabled", "weight": 35},
-        {"style": "flat", "weight": 25}
+        {"style": "hipped", "weight": 35},
+        {"style": "pyramidal", "weight": 30},
+        {"style": "gabled", "weight": 20},
+        {"style": "dome", "weight": 15}
       ],
       "window_density_multiplier": 0.55
     },
@@ -178,8 +181,8 @@
       ],
       "roof_styles": [
         {"style": "gabled", "weight": 55},
-        {"style": "hipped", "weight": 30},
-        {"style": "pyramidal", "weight": 15}
+        {"style": "pyramidal", "weight": 25},
+        {"style": "hipped", "weight": 20}
       ],
       "window_density_multiplier": 0.35
     },
