@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from shapely.geometry import Point
+
 from cwr_worldgen.cache import cache_key as raw_cache_key
 from cwr_worldgen import final_building_road_clearance_policy as clearance
 from cwr_worldgen import procedural_buildings as buildings
 from cwr_worldgen.church_native_polygon_policy import (
     _BUILDING_MODEL_CACHE_V56,
     _BUILDING_MODEL_CACHE_V57,
+    _church_tower_base,
     install_church_native_polygon_policy,
 )
 
@@ -81,27 +84,11 @@ def test_native_church_tower_stays_inside_mapped_footprint() -> None:
     placement = _irregular_church_placement()
     key = placement.selected
     shape = buildings._polygon_native_shape(key)
-    visual = buildings._polygon_native_visual_lod(
-        key,
-        r"testworld\d\church_wall.paa",
-        r"testworld\d\church_roof.paa",
-        plain_wall_texture=r"testworld\d\church_plain.paa",
-    )
+    base = _church_tower_base(key)
 
-    # Tower base points are appended after the existing native shell. Every
-    # added ground-level point must remain on/in the exact mapped church shape.
-    original = buildings._polygon_native_visual_lod.__wrapped__(
-        key,
-        r"testworld\d\church_wall.paa",
-        r"testworld\d\church_roof.paa",
-        plain_wall_texture=r"testworld\d\church_plain.paa",
-    ) if hasattr(buildings._polygon_native_visual_lod, "__wrapped__") else None
-    if original is not None:
-        added = visual.points[len(original.points):]
-        ground = [(x, z) for x, y, z in added if abs(y) <= 1.0e-7]
-        assert ground
-        from shapely.geometry import Point
-        assert all(shape.buffer(0.021).covers(Point(x, z)) for x, z in ground)
+    assert base is not None
+    corners, _half, _depth = base
+    assert all(shape.buffer(0.021).covers(Point(x, z)) for x, z in corners)
 
 
 def test_church_native_policy_bumps_nonroad_cache_revision() -> None:
