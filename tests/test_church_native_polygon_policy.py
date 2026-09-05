@@ -6,10 +6,12 @@ from cwr_worldgen.cache import cache_key as raw_cache_key
 from cwr_worldgen import final_building_road_clearance_policy as clearance
 from cwr_worldgen import procedural_buildings as buildings
 from cwr_worldgen.church_native_polygon_policy import (
-    _BUILDING_MODEL_CACHE_V56,
     _BUILDING_MODEL_CACHE_V57,
     _church_tower_base,
     install_church_native_polygon_policy,
+)
+from cwr_worldgen.church_native_tower_cache_policy import (
+    install_church_native_tower_cache_policy,
 )
 
 
@@ -96,10 +98,27 @@ def test_church_native_policy_bumps_nonroad_cache_revision() -> None:
     assert clearance._CACHE_REVISION == "final-road-building-clearance-v5-church-native-towers"
 
 
-def test_church_native_policy_bumps_building_model_cache() -> None:
+def test_church_tower_cache_promotes_legacy_model_namespace() -> None:
     install_church_native_polygon_policy()
-    payload = {"family": "church", "native": True}
-    assert buildings.cache_key(_BUILDING_MODEL_CACHE_V56, payload) == raw_cache_key(
-        _BUILDING_MODEL_CACHE_V57,
+    install_church_native_tower_cache_policy()
+    payload = {
+        "world_name": "test_church_native",
+        "variant": {"family": "church", "footprint_vertices": [[0.0, 0.0]]},
+    }
+    assert buildings.cache_key(
+        "procedural-building-model-v49-robust-polygon-roof-triangulation",
         payload,
-    )
+    ) == raw_cache_key(_BUILDING_MODEL_CACHE_V57, payload)
+
+
+def test_church_tower_cache_does_not_force_nonchurch_models_to_v57() -> None:
+    install_church_native_polygon_policy()
+    install_church_native_tower_cache_policy()
+    payload = {
+        "world_name": "test_church_native",
+        "variant": {"family": "residential"},
+    }
+    assert buildings.cache_key(
+        "procedural-building-model-v49-robust-polygon-roof-triangulation",
+        payload,
+    ) != raw_cache_key(_BUILDING_MODEL_CACHE_V57, payload)
