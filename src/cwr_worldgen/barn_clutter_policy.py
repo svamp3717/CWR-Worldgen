@@ -19,13 +19,7 @@ def install_barn_clutter_policy() -> None:
         dict.fromkeys((*_osm.STOCK_SETTLEMENT_BARN_CLUTTER_MODELS, STOH_MODEL))
     )
     detail_models = tuple(
-        dict.fromkeys(
-            (
-                *_osm.STOCK_SETTLEMENT_GENERIC_DETAIL_MODELS,
-                *barn_models,
-                *_osm.STOCK_SETTLEMENT_FRUIT_TREE_MODELS,
-            )
-        )
+        dict.fromkeys((*_osm.STOCK_SETTLEMENT_DETAIL_MODELS, STOH_MODEL))
     )
 
     # OSM placement reads the barn-specific tuple directly. Generator keeps a
