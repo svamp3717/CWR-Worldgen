@@ -35,59 +35,40 @@ def _tinybjorsund_bridge() -> WorldObject:
     )
 
 
-def _module_length_dm(model_path: str) -> int:
-    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
-    return int(filename.rsplit("_l", 1)[1][:-4])
+def _axis_offset(obj: WorldObject, origin: WorldObject) -> float:
+    heading = math.radians(origin.heading_degrees)
+    dx = obj.x - origin.x
+    dz = obj.z - origin.z
+    return dx * math.sin(heading) + dz * math.cos(heading)
 
 
-def _axis_endpoint(obj: WorldObject, *, forward: bool) -> tuple[float, float]:
-    length = _module_length_dm(obj.model_path) / 10.0
-    sign = 1.0 if forward else -1.0
-    heading = math.radians(obj.heading_degrees)
-    return (
-        obj.x + math.sin(heading) * length * 0.5 * sign,
-        obj.z + math.cos(heading) * length * 0.5 * sign,
-    )
-
-
-def test_tinybjorsund_long_bridge_is_split_into_cwa_safe_modules() -> None:
+def test_tinybjorsund_bridge_uses_contiguous_stock_cwa_modules() -> None:
     original = _tinybjorsund_bridge()
     modules, next_id = bridge_render._split_bridge_object(
         original, _spec(), next_object_id=4000
     )
 
-    lengths = tuple(_module_length_dm(obj.model_path) for obj in modules)
     assert len(modules) == 11
-    assert sum(lengths) == 3213
-    assert max(lengths) <= 300
-    assert modules[0].model_path.endswith(r"\br_start_w084_l293.p3d")
-    assert modules[-1].model_path.endswith(r"\br_end_w084_l292.p3d")
-    assert all(
-        r"\br_middle_w084_" in obj.model_path
-        for obj in modules[1:-1]
-    )
     assert next_id == 4010
-
-    total_length = 321.3
-    heading = math.radians(original.heading_degrees)
-    expected_start = (
-        original.x - math.sin(heading) * total_length * 0.5,
-        original.z - math.cos(heading) * total_length * 0.5,
+    assert all(
+        obj.model_path.casefold() == bridge_render._STOCK_BRIDGE_MODEL.casefold()
+        for obj in modules
     )
-    expected_end = (
-        original.x + math.sin(heading) * total_length * 0.5,
-        original.z + math.cos(heading) * total_length * 0.5,
-    )
-    assert math.dist(_axis_endpoint(modules[0], forward=False), expected_start) < 1e-6
-    assert math.dist(_axis_endpoint(modules[-1], forward=True), expected_end) < 1e-6
-    for first, second in zip(modules, modules[1:]):
-        assert math.dist(
-            _axis_endpoint(first, forward=True),
-            _axis_endpoint(second, forward=False),
-        ) < 1e-6
+    assert all(abs(obj.y - original.y) < 1e-9 for obj in modules)
+    assert all(abs(obj.pitch_degrees - original.pitch_degrees) < 1e-9 for obj in modules)
+
+    offsets = tuple(_axis_offset(obj, original) for obj in modules)
+    expected_step = 321.3 / 11.0
+    for first, second in zip(offsets, offsets[1:]):
+        assert abs((second - first) - expected_step) < 1e-6
+        assert second - first <= bridge_render._STOCK_BRIDGE_LENGTH_METRES + 1e-9
+
+    half_stock = bridge_render._STOCK_BRIDGE_LENGTH_METRES * 0.5
+    assert offsets[0] - half_stock <= -321.3 * 0.5 + 1e-6
+    assert offsets[-1] + half_stock >= 321.3 * 0.5 - 1e-6
 
 
-def test_modularization_updates_bridge_count_and_asset_usage() -> None:
+def test_stock_bridge_rewrite_updates_count_and_removes_generated_asset_usage() -> None:
     bridge = _tinybjorsund_bridge()
     prop = WorldObject(3320, r"o\misc\lavicka_1.p3d", 10.0, 0.0, 10.0, 0.0)
     result = _Result(
@@ -104,15 +85,11 @@ def test_modularization_updates_bridge_count_and_asset_usage() -> None:
     usage = Counter(dict(rewritten.model_usage))
     assert bridge.model_path not in usage
     assert usage[prop.model_path] == 1
-    assert sum(
-        count for path, count in usage.items()
-        if "\\i\\br_" in path.casefold()
-    ) == 11
-    assert any("br_start_w084_l293.p3d" in path for path in usage)
-    assert any("br_end_w084_l292.p3d" in path for path in usage)
+    assert usage[bridge_render._STOCK_BRIDGE_MODEL] == 11
+    assert not any("\\i\\br_" in path.casefold() for path in usage)
 
 
-def test_cached_nonroad_result_is_modularized_without_cache_clear() -> None:
+def test_cached_nonroad_result_is_rewritten_without_cache_clear() -> None:
     bridge = _tinybjorsund_bridge()
     cached = _Result(
         objects=(bridge,),
@@ -136,9 +113,13 @@ def test_cached_nonroad_result_is_modularized_without_cache_clear() -> None:
     assert value[2:] == cached_tuple[2:]
     assert value[0].bridge_objects == 11
     assert len(value[0].objects) == 11
+    assert all(
+        obj.model_path.casefold() == bridge_render._STOCK_BRIDGE_MODEL.casefold()
+        for obj in value[0].objects
+    )
 
 
-def test_short_procedural_bridge_stays_single() -> None:
+def test_short_procedural_bridge_becomes_one_stock_module() -> None:
     short = WorldObject(
         1,
         r"world\i\br_single_w070_l250.p3d",
@@ -150,5 +131,30 @@ def test_short_procedural_bridge_stays_single() -> None:
     pieces, next_id = bridge_render._split_bridge_object(
         short, _spec(), next_object_id=2
     )
-    assert pieces == (short,)
+
+    assert len(pieces) == 1
+    assert pieces[0].object_id == short.object_id
+    assert pieces[0].model_path.casefold() == bridge_render._STOCK_BRIDGE_MODEL.casefold()
+    assert (pieces[0].x, pieces[0].y, pieces[0].z) == (short.x, short.y, short.z)
     assert next_id == 2
+
+
+def test_pitched_stock_modules_follow_the_solved_deck_line_not_terrain() -> None:
+    bridge = WorldObject(
+        10,
+        r"world\i\br_single_w084_l600.p3d",
+        200.0,
+        12.0,
+        300.0,
+        0.0,
+        5.0,
+    )
+    pieces, _next_id = bridge_render._split_bridge_object(
+        bridge, _spec(), next_object_id=20
+    )
+
+    assert len(pieces) == 2
+    expected_delta = math.tan(math.radians(5.0)) * 15.0
+    assert abs(pieces[0].y - (bridge.y - expected_delta)) < 1e-6
+    assert abs(pieces[1].y - (bridge.y + expected_delta)) < 1e-6
+    assert all(obj.pitch_degrees == 5.0 for obj in pieces)
