@@ -2,16 +2,16 @@
 """Use verified in-game terrain artwork for the Desert ground profile.
 
 Desert used to synthesize every Milestone 9 semantic ground tile as a world-local
-PAA.  Apart from making each new desert world spend minutes in Python DXT1
-compression, that duplicated artwork the game already ships.  This policy maps
+PAA. Apart from making each new desert world spend minutes in Python DXT1
+compression, that duplicated artwork the game already ships. This policy maps
 every Desert material to existing CWA/Resistance terrain textures and makes the
 core generator treat Desert as an external/stock texture profile.
 
 The generator's historical local-texture predicate is hard-coded around the two
-original stock profiles (Everon and Nogova).  ``_StockDesertProfile`` is a narrow
+original stock profiles (Everon and Nogova). ``_StockDesertProfile`` is a narrow
 compatibility bridge for that predicate: it serializes and displays as ``desert``
 but compares as the already-stock Everon profile when the old membership check is
-performed.  Ground-path helpers are replaced explicitly, so the WRP still receives
+performed. Ground-path helpers are replaced explicitly, so the WRP still receives
 the Desert-specific stock palette below rather than Everon's palette.
 """
 from __future__ import annotations
@@ -23,33 +23,39 @@ from . import surface_pass as _surface
 from . import terrain as _terrain
 
 
-# All paths below are existing game textures already used elsewhere by CWR
-# Worldgen's verified Everon/Nogova palettes.  Desert deliberately favours the
-# sandy Eden earth tile, Nogova beach sand, Resistance rock/farm tiles, and only
-# keeps green artwork where the semantic surface really represents vegetation.
+# Desert must remain visually desert even when OSM semantics classify land as a
+# forest, field, meadow, park or sports ground. Those semantic classes still
+# drive object placement and reports, but their WRP ground tile is sand rather
+# than a temperate grass/farmland texture. Roads, built surfaces and exposed rock
+# keep distinct stock artwork so the terrain remains readable without introducing
+# green islands. ``o\ps.paa`` is already the verified stock sand dependency used
+# by the mapped-beach slot and is deliberately reused for all natural ground.
+_DESERT_SAND_TEXTURE = r"o\ps.paa"
+_DESERT_EARTH_TEXTURE = r"Eden\bak\bah.pac"
+
 DESERT_STOCK_SURFACE_TEXTURES: Mapping[str, str] = {
-    "w": r"Eden\tn.paa",          # seabed / water-adjacent ground
-    "q": r"Eden\bak\bah.pac",    # wet shoreline
-    "s": r"o\ps.paa",            # dry shoreline sand
-    "g": r"Eden\bak\bah.pac",    # sparse desert ground
-    "h": r"Eden\bak\bah.pac",    # dry grass / bare earth
-    "r": r"o\l1.paa",            # rock
-    "k": r"o\lom2.paa",          # steep rock / scree
-    "f": r"Eden\zbh.paa",        # actual forest interior
-    "e": r"Eden\zbh.paa",        # forest edge
-    "a": r"o\pole1.paa",         # farmland light
-    "b": r"o\pole2.paa",         # farmland dark
-    "c": r"Eden\bak\bah.pac",    # field boundary / dry strip
+    "w": _DESERT_SAND_TEXTURE,      # seabed / water-adjacent ground
+    "q": _DESERT_EARTH_TEXTURE,     # wet shoreline / damp earth
+    "s": _DESERT_SAND_TEXTURE,      # dry shoreline sand
+    "g": _DESERT_SAND_TEXTURE,      # grass semantics, desert ground
+    "h": _DESERT_SAND_TEXTURE,      # dry grass / bare desert ground
+    "r": r"o\l1.paa",             # rock
+    "k": r"o\lom2.paa",           # steep rock / scree
+    "f": _DESERT_SAND_TEXTURE,      # forest interior beneath vegetation
+    "e": _DESERT_SAND_TEXTURE,      # forest edge beneath vegetation
+    "a": _DESERT_SAND_TEXTURE,      # farmland light, still desert soil
+    "b": _DESERT_SAND_TEXTURE,      # farmland dark, still desert soil
+    "c": _DESERT_SAND_TEXTURE,      # field boundary / dry strip
     "u": r"Eden\tn.paa",          # urban surface
     "i": r"Eden\tn.paa",          # industrial surface
     "p": r"Eden\tn.paa",          # paved road underlay
-    "o": r"Eden\bak\bah.pac",    # road shoulder
-    "d": r"Eden\bak\bah.pac",    # dirt road
-    "t": r"Eden\bak\bah.pac",    # dirt-road blend
-    "v": r"Eden\bak\bah.pac",    # gravel underlay
-    "j": r"Eden\zbh.paa",        # irrigated/green park
-    "y": r"Eden\zbh.paa",        # sports field
-    "x": r"o\ps.paa",            # mapped beach
+    "o": _DESERT_EARTH_TEXTURE,     # road shoulder
+    "d": _DESERT_EARTH_TEXTURE,     # dirt road
+    "t": _DESERT_EARTH_TEXTURE,     # dirt-road blend
+    "v": _DESERT_EARTH_TEXTURE,     # gravel underlay
+    "j": _DESERT_SAND_TEXTURE,      # park semantics, desert ground
+    "y": _DESERT_SAND_TEXTURE,      # sports field semantics, desert ground
+    "x": _DESERT_SAND_TEXTURE,      # mapped beach
 }
 
 _INSTALLED = False
@@ -155,7 +161,7 @@ def install_stock_desert_surface_policy() -> None:
     _surface.STOCK_SURFACE_TEXTURES = stock_profiles
 
     # Core Milestone 9 helpers need both the actual Desert paths and the old
-    # generated/local-texture predicate suppressed.  Keep the latter compatibility
+    # generated/local-texture predicate suppressed. Keep the latter compatibility
     # entirely inside this policy instead of teaching every caller about it.
     _generator._ground_texture_profile = _stock_desert_ground_texture_profile
     _generator._ground_texture_paths = _stock_desert_ground_texture_paths
