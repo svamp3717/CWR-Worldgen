@@ -208,6 +208,14 @@ def install_building_prepare_progress_policy() -> None:
 
     install_bridge_underlay_cleanup_policy()
 
+    # A single several-hundred-metre procedural bridge P3D can exceed legacy
+    # OFP/CWA Geometry/Roadway extents and disappear even though the WRP and PBO
+    # references are valid. Split those generated spans into <=30 m modules
+    # before the final non-road/building wrappers capture their generation hooks.
+    from .bridge_render_policy import install_bridge_render_policy
+
+    install_bridge_render_policy()
+
     # Building placement was planned before the final road chain existed. Record
     # that post-dedupe road report and apply a bounded final-footprint correction
     # only when non-road objects are emitted. This must wrap the dedupe fitter,
