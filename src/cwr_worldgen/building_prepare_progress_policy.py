@@ -200,6 +200,14 @@ def install_building_prepare_progress_policy() -> None:
 
     install_final_road_dedup_policy()
 
+    # Bridge P3Ds are emitted later by the non-road pass, but their mapped road
+    # ways have already been fitted here. Remove only the aligned ordinary-road
+    # underlay now, after dedupe and before building-road clearance records the
+    # final road footprint. This preserves junction topology and land approaches.
+    from .bridge_underlay_cleanup_policy import install_bridge_underlay_cleanup_policy
+
+    install_bridge_underlay_cleanup_policy()
+
     # Building placement was planned before the final road chain existed. Record
     # that post-dedupe road report and apply a bounded final-footprint correction
     # only when non-road objects are emitted. This must wrap the dedupe fitter,
