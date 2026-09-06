@@ -4,18 +4,22 @@
 The generated-P3D bridge route is unreliable in OFP/CWA, so this policy forces
 bridge generation through the stock Resistance/Nogova bridge planner.
 
-ODOL7 stores LOD vertices relative to the model's LOD center. Inspection of the
-original ``O\\Hous\\most_stred30.p3d`` and reconstruction to model-space shows:
+The stock asset is not a 30 m, origin-on-road model. Inspection of the original
+ODOL7 ``O\\Hous\\most_stred30.p3d`` shows:
 
-* the stock bridge spans about 50 m longitudinally;
-* the ODOL LOD center is +20.775841 m on Y;
-* the central Roadway surface is at model-space y=33.758728 m; and
-* the visible asphalt deck is at model-space y=33.745087 m.
+* the visual span is about 50 m long;
+* the drivable Roadway LOD runs from z=-25.095142 to z=+25.095142;
+* the central Roadway surface is at local y=12.982887 m; and
+* the visible deck surface is at local y=13.049332 m.
 
-WRP object Y is the model origin. Therefore the desired road/deck elevation must
-be converted back to model-origin Y using the reconstructed model-space deck
-height, not the raw center-relative ODOL vertex coordinate. The same correction
-is applied to cached non-road placements.
+WRP object Y is the model origin. Therefore anchoring object Y directly to the
+road raises the visible deck by about 13 m. Anchoring the Roadway LOD itself is
+still slightly high visually because the stock model deliberately renders its
+deck 0.066444 m above that collision surface. Use the measured visible deck
+surface for vertical alignment with the adjoining stock road pieces, while
+retaining the stock Roadway LOD unchanged inside the model.
+
+The same correction is applied to cached non-road placements.
 """
 from __future__ import annotations
 
@@ -35,19 +39,8 @@ _STOCK_MODEL = _osm.NOGOVA_BRIDGE_MODEL.casefold()
 # The file name is historical; the model itself spans approximately 50 m.
 _STOCK_MODULE_SPACING_METRES = 50.0
 _STOCK_ROADWAY_HALF_LENGTH_METRES = 25.095142364501953
-
-# ODOL7 point coordinates are center-relative. The original model's LOD center
-# must be added back before using any vertex as a model-space offset from the
-# WRP object origin. Values below were measured from the user's stock P3D.
-_STOCK_ODOL_LOD_CENTER_Y_METRES = 20.775840759277344
-_STOCK_ODOL_ROADWAY_RAW_Y_METRES = 12.982887268066406
-_STOCK_ODOL_VISIBLE_DECK_RAW_Y_METRES = 12.969245910644531
-_STOCK_ROADWAY_LOCAL_Y_METRES = (
-    _STOCK_ODOL_LOD_CENTER_Y_METRES + _STOCK_ODOL_ROADWAY_RAW_Y_METRES
-)
-_STOCK_VISIBLE_DECK_LOCAL_Y_METRES = (
-    _STOCK_ODOL_LOD_CENTER_Y_METRES + _STOCK_ODOL_VISIBLE_DECK_RAW_Y_METRES
-)
+_STOCK_ROADWAY_LOCAL_Y_METRES = 12.982887268066406
+_STOCK_VISIBLE_DECK_LOCAL_Y_METRES = 13.049331665039062
 
 _CHAIN_ENDPOINT_TOLERANCE_METRES = 6.0
 _CHAIN_HEADING_TOLERANCE_DEGREES = 40.0
@@ -207,7 +200,7 @@ def _dry_approach_height(
     elevations,
     spec,
 ) -> float | None:
-    """Find the nearest dry road-bank roadway height outside a bridge end."""
+    """Find the nearest dry road-bank visible road height outside a bridge end."""
 
     world_size = float(spec.world_size)
     distance = 0.0
@@ -239,11 +232,9 @@ def _model_origin_y_for_visible_deck(
 ) -> float:
     """Convert desired visible deck-centre Y to RVW4 model-origin Y.
 
-    The stock ODOL vertices are center-relative, so the visible asphalt's true
-    model-space Y is about 33.745 m above the WRP object origin. RVW4 pitch
-    rotates that local Y contribution by cos(pitch). The sampled central deck
-    face lies at local z approximately zero, so no longitudinal sine term is
-    needed at module centre.
+    RVW4 pitch rotates local Y by cos(pitch). The stock bridge's visible asphalt
+    surface lies at local z=0 on the same plane as its end vertices, so no
+    longitudinal sine term is needed at module centre.
     """
 
     pitch = math.radians(float(pitch_degrees))
@@ -306,9 +297,10 @@ def _anchor_stock_bridge_chains(result, raster, elevations, spec):
             )
             pitch = math.degrees(math.atan(local_grade))
 
-            # WRP stores the model origin. ODOL7 vertices are relative to the
-            # LOD center, so the visible asphalt is actually ~33.745 m above
-            # that origin after the +20.776 m LOD-center offset is restored.
+            # WRP stores the model origin. The visible bridge deck is ~13.049 m
+            # above it; the Roadway collision plane is another ~0.066 m lower.
+            # Align the rendered deck to the stock road surface, not the collision
+            # plane, so the abutments are visually flush at both banks.
             origin_y = _model_origin_y_for_visible_deck(
                 visible_deck_y, pitch
             )
