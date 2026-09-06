@@ -33,6 +33,24 @@ def test_desert_milestone9_texture_table_uses_only_stock_game_paths() -> None:
     assert all("test_desert\\" not in path.casefold() for path in paths)
 
 
+def test_desert_natural_land_semantics_all_use_stock_sand() -> None:
+    # OSM may still classify cells as grass, forest, farmland, parks or sports.
+    # In the Desert ground profile those semantics must not switch the WRP back
+    # to temperate green tiles. They retain their semantics while sharing sand.
+    sand = r"o\ps.paa"
+    natural_codes = {"w", "s", "g", "h", "f", "e", "a", "b", "c", "j", "y", "x"}
+    assert {DESERT_STOCK_SURFACE_TEXTURES[code] for code in natural_codes} == {sand}
+
+
+def test_desert_stock_palette_contains_no_temperate_grass_or_field_tiles() -> None:
+    forbidden = {
+        r"eden\zbh.paa",
+        r"o\pole1.paa",
+        r"o\pole2.paa",
+    }
+    assert not ({path.casefold() for path in DESERT_STOCK_SURFACE_TEXTURES.values()} & forbidden)
+
+
 def test_desert_external_dependencies_are_stock_and_deduplicated() -> None:
     install_stock_desert_surface_policy()
     paths = generator._external_ground_texture_paths(_spec())
@@ -81,6 +99,9 @@ def test_desert_profile_suppresses_legacy_generated_texture_predicate() -> None:
 def test_legacy_desert_ground_path_also_resolves_to_stock_texture() -> None:
     install_stock_desert_surface_policy()
     assert terrain.ground_texture_path("test_desert", "s", "desert") == r"o\ps.paa"
+    assert terrain.ground_texture_path("test_desert", "g", "desert") == r"o\ps.paa"
+    assert terrain.ground_texture_path("test_desert", "f", "desert") == r"o\ps.paa"
+    assert terrain.ground_texture_path("test_desert", "a", "desert") == r"o\ps.paa"
     assert terrain.ground_texture_path("test_desert", "d", "desert") == r"Eden\bak\bah.pac"
 
 
