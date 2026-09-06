@@ -23,19 +23,18 @@ from . import surface_pass as _surface
 from . import terrain as _terrain
 
 
-# Desert must remain visually desert even when OSM semantics classify land as a
-# forest, field, meadow, park, sports ground, settlement or road. Those semantic
-# classes still drive placement and reports, but their WRP ground tiles are sand
-# or dry earth rather than temperate grass/field/settlement artwork. Exposed rock
-# keeps distinct stock textures so the terrain remains readable without green
-# islands. ``o\ps.paa`` is the verified stock sand dependency; ``bah.pac`` is the
-# dry earth tile used for roads and built-up semantic underlays.
+# Desert semantics still distinguish forests, fields, settlements and roads for
+# object placement, terrain grading, reporting and overview generation. They do
+# not need different WRP ground artwork. Road P3Ds provide the visible road deck
+# and buildings provide the settlement geometry, so painting a second Eden earth
+# tile beneath those masks merely creates coloured halos around roads and houses.
+# Use one verified stock sand tile for every non-rock material and reserve only
+# the stock rock/scree tiles for exposed stone.
 _DESERT_SAND_TEXTURE = r"o\ps.paa"
-_DESERT_EARTH_TEXTURE = r"Eden\bak\bah.pac"
 
 DESERT_STOCK_SURFACE_TEXTURES: Mapping[str, str] = {
     "w": _DESERT_SAND_TEXTURE,      # seabed / water-adjacent ground
-    "q": _DESERT_EARTH_TEXTURE,     # wet shoreline / damp earth
+    "q": _DESERT_SAND_TEXTURE,      # wet shoreline semantics
     "s": _DESERT_SAND_TEXTURE,      # dry shoreline sand
     "g": _DESERT_SAND_TEXTURE,      # grass semantics, desert ground
     "h": _DESERT_SAND_TEXTURE,      # dry grass / bare desert ground
@@ -43,16 +42,16 @@ DESERT_STOCK_SURFACE_TEXTURES: Mapping[str, str] = {
     "k": r"o\lom2.paa",           # steep rock / scree
     "f": _DESERT_SAND_TEXTURE,      # forest interior beneath vegetation
     "e": _DESERT_SAND_TEXTURE,      # forest edge beneath vegetation
-    "a": _DESERT_SAND_TEXTURE,      # farmland light, still desert soil
-    "b": _DESERT_SAND_TEXTURE,      # farmland dark, still desert soil
+    "a": _DESERT_SAND_TEXTURE,      # farmland light
+    "b": _DESERT_SAND_TEXTURE,      # farmland dark
     "c": _DESERT_SAND_TEXTURE,      # field boundary / dry strip
-    "u": _DESERT_EARTH_TEXTURE,     # urban surface, no temperate Eden tile
-    "i": _DESERT_EARTH_TEXTURE,     # industrial surface
-    "p": _DESERT_EARTH_TEXTURE,     # paved-road underlay
-    "o": _DESERT_EARTH_TEXTURE,     # road shoulder
-    "d": _DESERT_EARTH_TEXTURE,     # dirt road
-    "t": _DESERT_EARTH_TEXTURE,     # dirt-road blend
-    "v": _DESERT_EARTH_TEXTURE,     # gravel underlay
+    "u": _DESERT_SAND_TEXTURE,      # urban surface beneath buildings
+    "i": _DESERT_SAND_TEXTURE,      # industrial surface beneath buildings
+    "p": _DESERT_SAND_TEXTURE,      # paved-road underlay beneath road P3Ds
+    "o": _DESERT_SAND_TEXTURE,      # road shoulder
+    "d": _DESERT_SAND_TEXTURE,      # dirt road underlay
+    "t": _DESERT_SAND_TEXTURE,      # dirt-road blend
+    "v": _DESERT_SAND_TEXTURE,      # gravel underlay
     "j": _DESERT_SAND_TEXTURE,      # park semantics, desert ground
     "y": _DESERT_SAND_TEXTURE,      # sports field semantics, desert ground
     "x": _DESERT_SAND_TEXTURE,      # mapped beach
@@ -122,7 +121,7 @@ def _stock_desert_ground_texture_paths(spec) -> tuple[str, ...]:
 def _stock_desert_external_ground_texture_paths(spec) -> tuple[str, ...]:
     if _is_desert(getattr(spec, "ground_texture_profile", "")):
         # Asset scanning only needs each physical dependency once even though the
-        # WRP semantic table intentionally reuses several stock textures.
+        # WRP semantic table intentionally reuses the sand texture many times.
         return tuple(dict.fromkeys(_stock_desert_ground_texture_paths(spec)))
     return _ORIGINAL_EXTERNAL_GROUND_TEXTURE_PATHS(spec)
 
