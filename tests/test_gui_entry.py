@@ -18,6 +18,7 @@ from cwr_worldgen.postbuild_cleanup import (
     cleanup_build_outputs,
     postbuild_cleanup_command,
 )
+from cwr_worldgen.build_cache_policy import BUILD_CACHE_DIRNAME
 
 
 def test_frozen_worker_dispatch_happens_before_gui_import() -> None:
@@ -148,17 +149,20 @@ def test_missing_postbuild_pbo_is_nonfatal(tmp_path: Path) -> None:
     assert (tmp_path / "road-inspector" / "error.txt").is_file()
 
 
-def test_cleanup_removes_only_source_and_normalized(tmp_path: Path) -> None:
+def test_cleanup_removes_source_normalized_and_build_cache(tmp_path: Path) -> None:
     source = tmp_path / "source"
     normalized = tmp_path / "normalized"
+    build_cache = tmp_path / BUILD_CACHE_DIRNAME
     runtime = tmp_path / "CWR-Worldgen"
     inspector = tmp_path / "road-inspector"
     source.mkdir()
     normalized.mkdir()
+    build_cache.mkdir()
     runtime.mkdir()
     inspector.mkdir()
     (source / "world.wrp").write_text("temporary", encoding="utf-8")
     (normalized / "roads.geojson").write_text("temporary", encoding="utf-8")
+    (build_cache / "terrain.pickle").write_bytes(b"cache")
     final_pbo = tmp_path / "wg_demo.pbo"
     final_pbo.write_bytes(b"pbo")
     log = tmp_path / CONSOLE_LOG_FILENAME
@@ -166,9 +170,10 @@ def test_cleanup_removes_only_source_and_normalized(tmp_path: Path) -> None:
 
     removed = cleanup_build_outputs(tmp_path)
 
-    assert removed == (source, normalized)
+    assert removed == (source, normalized, build_cache)
     assert not source.exists()
     assert not normalized.exists()
+    assert not build_cache.exists()
     assert runtime.is_dir()
     assert inspector.is_dir()
     assert final_pbo.read_bytes() == b"pbo"
@@ -199,7 +204,7 @@ def test_cleanup_checkbox_is_default_on_and_above_inspector() -> None:
     assert f'values[CLEANUP_BUILD_AFTER_BUILD] = True' in source
     assert "Delete temporary build files after a successful build" in source
     assert 'cleanup.pack(anchor="w", before=inspector)' in source
-    assert 'CLEANUP_DIR_NAMES = ("source", "normalized")' in source
+    assert 'CLEANUP_DIR_NAMES = ("source", "normalized", BUILD_CACHE_DIRNAME)' in source
 
 
 def test_gui_entry_contains_inspector_checkbox_pipeline_map_and_road_type_filter() -> None:
