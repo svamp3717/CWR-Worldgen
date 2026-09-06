@@ -2262,7 +2262,7 @@ class WorldgenGui(tk.Tk):
         elif preset in {"Everon classic", "Everon classic (recommended)"}:
             desired = ("everon", "everon", EVERON_SINGLE_TREE_MODEL)
         elif preset == "Desert ground textures":
-            desired = ("desert", "everon", EVERON_SINGLE_TREE_MODEL)
+            desired = ("desert", "malden", r"data3d\str_fikovnik.p3d")
         elif preset == "Generated ground textures":
             desired = ("generated", "everon", EVERON_SINGLE_TREE_MODEL)
         else:
@@ -3129,7 +3129,7 @@ class WorldgenGui(tk.Tk):
         ttk.Button(body, text="Inspect normalized bundle", command=self._inspect_normalized).pack(fill="x", pady=3)
         ttk.Separator(body).pack(fill="x", pady=12)
         ttk.Label(body, text="Optional build tools", font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        ttk.Button(body, text="Asset checker & OSM mapping…", command=self._open_asset_tools).pack(fill="x", pady=(8, 3))
+        ttk.Button(body, text="Asset checker & OSM mapping…", command=lambda: None).pack(fill="x", pady=(8, 3))
         ttk.Separator(body).pack(fill="x", pady=12)
         ttk.Label(body, text="Cleanup", font=("Segoe UI", 11, "bold")).pack(anchor="w")
         ttk.Button(body, text="Delete build output", command=self._clear_output).pack(fill="x", pady=(8, 3))
@@ -3243,7 +3243,7 @@ class WorldgenGui(tk.Tk):
                     self.vars["appearance_preset"].set("Malden classic")
                 elif ground == "everon" and forest == "everon":
                     self.vars["appearance_preset"].set("Everon classic")
-                elif ground == "desert" and forest == "everon":
+                elif ground == "desert" and forest == "malden":
                     self.vars["appearance_preset"].set("Desert ground textures")
                 elif ground == "generated" and forest == "everon":
                     self.vars["appearance_preset"].set("Generated ground textures")
