@@ -43,6 +43,17 @@ def _roadway_world_y(obj: WorldObject, local_z: float = 0.0) -> float:
     )
 
 
+def _visible_deck_world_y(obj: WorldObject, local_z: float = 0.0) -> float:
+    """Return stock bridge rendered road-surface world Y."""
+
+    pitch = math.radians(obj.pitch_degrees)
+    return (
+        obj.y
+        + bridge_render._STOCK_VISIBLE_DECK_LOCAL_Y_METRES * math.cos(pitch)
+        + local_z * math.sin(pitch)
+    )
+
+
 def test_stock_bridge_spec_preserves_user_spec_and_overrides_only_bridge_mode() -> None:
     original = _Spec()
     rewritten = bridge_render._stock_bridge_spec(original)
@@ -184,27 +195,36 @@ def test_stock_asset_geometry_matches_measured_original_p3d() -> None:
         bridge_render._STOCK_ROADWAY_LOCAL_Y_METRES
         - 12.982887268066406
     ) < 1e-12
+    assert abs(
+        bridge_render._STOCK_VISIBLE_DECK_LOCAL_Y_METRES
+        - 13.049331665039062
+    ) < 1e-12
+    assert abs(
+        bridge_render._STOCK_VISIBLE_DECK_LOCAL_Y_METRES
+        - bridge_render._STOCK_ROADWAY_LOCAL_Y_METRES
+        - 0.06644439697265625
+    ) < 1e-12
     assert (
         bridge_render._osm.NOGOVA_BRIDGE_MODULE_LENGTH_METRES
         == bridge_render._STOCK_MODULE_SPACING_METRES
     )
 
 
-def test_model_origin_is_lowered_by_stock_roadway_local_height() -> None:
-    desired_roadway_y = 7.035
-    origin_y = bridge_render._model_origin_y_for_roadway(
-        desired_roadway_y, 0.0
+def test_model_origin_is_lowered_by_stock_visible_deck_local_height() -> None:
+    desired_visible_deck_y = 7.035
+    origin_y = bridge_render._model_origin_y_for_visible_deck(
+        desired_visible_deck_y, 0.0
     )
     assert abs(
         origin_y
         - (
-            desired_roadway_y
-            - bridge_render._STOCK_ROADWAY_LOCAL_Y_METRES
+            desired_visible_deck_y
+            - bridge_render._STOCK_VISIBLE_DECK_LOCAL_Y_METRES
         )
     ) < 1e-12
 
 
-def test_stock_bridge_chain_roadway_is_anchored_to_both_bank_elevations() -> None:
+def test_stock_bridge_chain_visible_deck_is_anchored_to_both_bank_elevations() -> None:
     spec = _Spec(procedural_bridges=False, bridge_module_length=50.0)
     raster = _dry_raster(spec)
     modules = tuple(
@@ -249,19 +269,30 @@ def test_stock_bridge_chain_roadway_is_anchored_to_both_bank_elevations() -> Non
     )
     half = bridge_render._STOCK_ROADWAY_HALF_LENGTH_METRES
 
-    assert abs(_roadway_world_y(first, -half) - expected_start) < 1e-6
-    assert abs(_roadway_world_y(last, half) - expected_end) < 1e-6
+    assert abs(_visible_deck_world_y(first, -half) - expected_start) < 1e-6
+    assert abs(_visible_deck_world_y(last, half) - expected_end) < 1e-6
 
-    # The WRP origin itself must be roughly 13 m below the roadway, not placed
-    # directly on the bank as the broken implementation did.
+    # The Roadway collision plane is intentionally about 6.6 cm below the
+    # rendered asphalt surface inside the stock model.
+    expected_collision_delta = (
+        bridge_render._STOCK_VISIBLE_DECK_LOCAL_Y_METRES
+        - bridge_render._STOCK_ROADWAY_LOCAL_Y_METRES
+    )
+    assert abs(
+        _roadway_world_y(first, -half)
+        - (expected_start - expected_collision_delta)
+    ) < 1e-6
+
+    # The WRP origin itself must be roughly 13 m below the rendered deck, not
+    # directly on the bank as the original broken implementation did.
     assert first.y < expected_start - 12.0
     assert last.y < expected_end - 12.0
 
-    # Adjacent stock modules must present continuous Roadway endpoints.
+    # Adjacent stock modules must present continuous rendered deck endpoints.
     for left, right in zip(anchored.objects, anchored.objects[1:]):
-        left_end = _roadway_world_y(left, half)
-        right_start = _roadway_world_y(right, -half)
-        # The real roadway is ~50.190 m long while centres are spaced 50 m,
+        left_end = _visible_deck_world_y(left, half)
+        right_start = _visible_deck_world_y(right, -half)
+        # The real deck is ~50.190 m long while centres are spaced 50 m,
         # intentionally giving a small overlap instead of an open seam.
         assert abs(left_end - right_start) < 0.05
 
@@ -302,7 +333,7 @@ def test_middle_water_depth_does_not_drag_stock_bridge_modules_down() -> None:
     # terrain under middle modules is intentionally irrelevant to the deck line.
     assert len(sampled_z) == 2
     assert min(
-        _roadway_world_y(obj) for obj in anchored.objects
+        _visible_deck_world_y(obj) for obj in anchored.objects
     ) > 4.0
     assert max(obj.y for obj in anchored.objects) < 0.0
 
@@ -353,11 +384,11 @@ def test_cached_stock_bridge_result_is_reanchored_without_cache_clear() -> None:
 
     assert value[1:] == cached[1:]
     assert value[0] is not cached_result
-    expected_roadway_y = (
+    expected_visible_deck_y = (
         6.0 + bridge_render._osm.NOGOVA_BRIDGE_APPROACH_OFFSET_METRES
     )
     assert all(
-        abs(_roadway_world_y(obj) - expected_roadway_y) < 1e-6
+        abs(_visible_deck_world_y(obj) - expected_visible_deck_y) < 1e-6
         for obj in value[0].objects
     )
     assert all(obj.y < -6.0 for obj in value[0].objects)
