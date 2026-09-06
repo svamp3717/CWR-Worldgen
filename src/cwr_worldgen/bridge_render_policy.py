@@ -1,55 +1,78 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Route CWA bridges through the stock model with its real model-space geometry.
+"""Place stock CWA bridges only over water and join modules through shared 3-D seams.
 
-The generated-P3D bridge route is unreliable in OFP/CWA, so this policy forces
-bridge generation through the stock Resistance/Nogova bridge planner.
+Generated bridge P3Ds proved unreliable in OFP/CWA, so Worldgen forces bridge
+output through the stock Resistance/Nogova ``O\\Hous\\most_stred30.p3d`` model.
 
-The stock asset is not a 30 m, origin-on-road model. Inspection of the original
-ODOL7 ``O\\Hous\\most_stred30.p3d`` shows:
+The stock model's Roadway LOD is about 50.190 m long.  Bridge-tagged OSM ways can
+extend hundreds of metres beyond the actual water crossing, while the stock core
+planner historically spread a whole-number module count across that complete
+length.  That compressed neighbouring modules and exposed their end geometry as
+walls in the carriageway.
 
-* the visual span is about 50 m long;
-* the drivable Roadway LOD runs from z=-25.095142 to z=+25.095142;
-* the central Roadway surface is at local y=12.982887 m; and
-* the visible deck surface is at local y=13.049332 m.
+This policy therefore:
 
-WRP object Y is the model origin. Therefore anchoring object Y directly to the
-road raises the visible deck by about 13 m. Anchoring the Roadway LOD itself is
-still slightly high visually because the stock model deliberately renders its
-deck 0.066444 m above that collision surface. Use the measured visible deck
-surface for vertical alignment with the adjoining stock road pieces, while
-retaining the stock Roadway LOD unchanged inside the model.
+* clips stock bridge planning to the first/last actual in-game water on the way;
+* uses an exact whole number of measured stock Roadway lengths;
+* leaves the dry prefix/suffix to the ordinary road fitter;
+* reconstructs every module from shared visible-deck 3-D joint points; and
+* validates every internal seam before returning world objects.
 
-A final 0.7 m world-space downward tuning offset is applied uniformly to the
-entire bridge chain so both abutments sit lower relative to the adjoining road.
-The same correction is applied to cached non-road placements.
+A final 0.7 m world-space downward tuning offset is retained from in-game testing
+so the rendered stock bridge deck matches the adjoining stock road surface.
 """
 from __future__ import annotations
 
-from dataclasses import is_dataclass, replace
+from dataclasses import dataclass, is_dataclass, replace
 import math
+from typing import Sequence
 
 from . import generator as _generator
 from . import osm as _osm
 
 _ORIGINAL_GENERATE_WORLD_OBJECTS = None
 _ORIGINAL_LOAD_NONROAD_OBJECTS = None
+_ORIGINAL_EXTEND_BRIDGE_SPAN = None
 _INSTALLED = False
 
 _STOCK_MODEL = _osm.NOGOVA_BRIDGE_MODEL.casefold()
 
 # Measured from the original CWA/Resistance O\Hous\most_stred30.p3d ODOL7.
-# The file name is historical; the model itself spans approximately 50 m.
-_STOCK_MODULE_SPACING_METRES = 50.0
 _STOCK_ROADWAY_HALF_LENGTH_METRES = 25.095142364501953
+_STOCK_ROADWAY_LENGTH_METRES = _STOCK_ROADWAY_HALF_LENGTH_METRES * 2.0
+# The placement/cache identity uses the actual Roadway join length.  Neighbouring
+# modules therefore meet at one joint instead of being compressed across a span.
+_STOCK_MODULE_SPACING_METRES = _STOCK_ROADWAY_LENGTH_METRES
 _STOCK_ROADWAY_LOCAL_Y_METRES = 12.982887268066406
 _STOCK_VISIBLE_DECK_LOCAL_Y_METRES = 13.049331665039062
 _BRIDGE_WORLD_DOWNWARD_OFFSET_METRES = 0.7
 
+_WATER_SAMPLE_STEP_METRES = 2.0
+_WATER_BOUNDARY_REFINEMENT_STEPS = 12
 _CHAIN_ENDPOINT_TOLERANCE_METRES = 6.0
-_CHAIN_HEADING_TOLERANCE_DEGREES = 40.0
+_CHAIN_MINIMUM_CENTER_SPACING_METRES = _STOCK_MODULE_SPACING_METRES - 6.0
+_CHAIN_MAXIMUM_CENTER_SPACING_METRES = _STOCK_MODULE_SPACING_METRES + 1.0
+_CHAIN_HEADING_TOLERANCE_DEGREES = 15.0
 _APPROACH_SEARCH_METRES = 60.0
 _APPROACH_SEARCH_STEP_METRES = 2.0
 _MAXIMUM_ANCHORED_BRIDGE_PITCH_DEGREES = 12.0
+_MAXIMUM_SEAM_HORIZONTAL_ERROR_METRES = 0.10
+_MAXIMUM_SEAM_VERTICAL_ERROR_METRES = 0.02
+
+
+@dataclass(frozen=True, slots=True)
+class StockBridgeSpanPlan:
+    """Straight stock-model corridor covering only the actual wet crossing."""
+
+    points: tuple[tuple[float, float], tuple[float, float]]
+    module_count: int
+    wet_start: tuple[float, float]
+    wet_end: tuple[float, float]
+    wet_length: float
+
+    @property
+    def length(self) -> float:
+        return self.module_count * _STOCK_MODULE_SPACING_METRES
 
 
 class _StockBridgeSpecProxy:
@@ -67,7 +90,7 @@ class _StockBridgeSpecProxy:
 
 
 def _stock_bridge_spec(spec):
-    """Return a stock-bridge spec with cache identity tied to real module length."""
+    """Return a stock-bridge spec whose cache identity includes real join length."""
 
     procedural = bool(getattr(spec, "procedural_bridges", True))
     try:
@@ -95,15 +118,291 @@ def _is_stock_bridge(obj) -> bool:
     )
 
 
-def _axis_endpoints(obj) -> tuple[tuple[float, float], tuple[float, float]]:
-    """Return the actual Roadway-LOD ends, not the old nominal 30 m ends."""
+def _clean_points(
+    points: Sequence[tuple[float, float]],
+) -> tuple[tuple[float, float], ...]:
+    cleaned: list[tuple[float, float]] = []
+    for point in points:
+        value = (float(point[0]), float(point[1]))
+        if not cleaned or math.dist(value, cleaned[-1]) > 0.05:
+            cleaned.append(value)
+    return tuple(cleaned)
 
-    angle = math.radians(float(getattr(obj, "heading_degrees", 0.0)))
-    dx = math.sin(angle) * _STOCK_ROADWAY_HALF_LENGTH_METRES
-    dz = math.cos(angle) * _STOCK_ROADWAY_HALF_LENGTH_METRES
-    x = float(obj.x)
-    z = float(obj.z)
-    return ((x - dx, z - dz), (x + dx, z + dz))
+
+def _polyline_measure(
+    points: Sequence[tuple[float, float]],
+) -> tuple[tuple[tuple[float, float], ...], tuple[float, ...]]:
+    cleaned = _clean_points(points)
+    if len(cleaned) < 2:
+        return cleaned, (0.0,)
+    cumulative = [0.0]
+    for start, end in zip(cleaned, cleaned[1:]):
+        cumulative.append(cumulative[-1] + math.dist(start, end))
+    return cleaned, tuple(cumulative)
+
+
+def _point_at_measure(
+    points: Sequence[tuple[float, float]],
+    cumulative: Sequence[float],
+    distance: float,
+) -> tuple[float, float]:
+    if len(points) < 2:
+        return tuple(points[0]) if points else (0.0, 0.0)
+    target = max(0.0, min(float(cumulative[-1]), float(distance)))
+    for index in range(len(points) - 1):
+        start_distance = float(cumulative[index])
+        end_distance = float(cumulative[index + 1])
+        if target > end_distance and index + 2 < len(points):
+            continue
+        length = end_distance - start_distance
+        if length <= 1.0e-9:
+            return float(points[index + 1][0]), float(points[index + 1][1])
+        fraction = (target - start_distance) / length
+        start, end = points[index], points[index + 1]
+        return (
+            float(start[0]) + (float(end[0]) - float(start[0])) * fraction,
+            float(start[1]) + (float(end[1]) - float(start[1])) * fraction,
+        )
+    return float(points[-1][0]), float(points[-1][1])
+
+
+def _ground_at_measure(points, cumulative, distance, elevations, spec) -> float:
+    x, z = _point_at_measure(points, cumulative, distance)
+    return float(
+        _osm._sample_elevation(
+            elevations, spec.cells, spec.cell_size, x, z
+        )
+    )
+
+
+def _wet_at_measure(points, cumulative, distance, elevations, spec) -> bool:
+    epsilon = float(getattr(_osm, "BRIDGE_WATER_EPSILON_METRES", 0.05))
+    return _ground_at_measure(
+        points, cumulative, distance, elevations, spec
+    ) < float(spec.sea_level) - epsilon
+
+
+def _refine_wet_start(
+    points, cumulative, dry_distance, wet_distance, elevations, spec
+) -> float:
+    low = float(dry_distance)
+    high = float(wet_distance)
+    for _ in range(_WATER_BOUNDARY_REFINEMENT_STEPS):
+        middle = (low + high) * 0.5
+        if _wet_at_measure(points, cumulative, middle, elevations, spec):
+            high = middle
+        else:
+            low = middle
+    return high
+
+
+def _refine_wet_end(
+    points, cumulative, wet_distance, dry_distance, elevations, spec
+) -> float:
+    low = float(wet_distance)
+    high = float(dry_distance)
+    for _ in range(_WATER_BOUNDARY_REFINEMENT_STEPS):
+        middle = (low + high) * 0.5
+        if _wet_at_measure(points, cumulative, middle, elevations, spec):
+            low = middle
+        else:
+            high = middle
+    return low
+
+
+def stock_bridge_span_plan(
+    points: Sequence[tuple[float, float]],
+    elevations,
+    spec,
+) -> StockBridgeSpanPlan | None:
+    """Return the stock bridge footprint covering only actual below-sea terrain.
+
+    The OSM bridge way remains the candidate corridor, but its dry prefix/suffix
+    are not converted into bridge modules.  A straight stock chain is centred on
+    the wet interval and expanded only to the next whole measured Roadway length.
+    """
+
+    if elevations is None or spec is None:
+        return None
+    cleaned, cumulative = _polyline_measure(points)
+    if len(cleaned) < 2 or cumulative[-1] <= 0.1:
+        return None
+
+    total = float(cumulative[-1])
+    step = max(
+        0.5,
+        min(
+            _WATER_SAMPLE_STEP_METRES,
+            max(0.5, float(getattr(spec, "cell_size", 10.0)) * 0.20),
+        ),
+    )
+    sample_count = max(1, int(math.ceil(total / step)))
+    distances = [min(total, index * total / sample_count) for index in range(sample_count + 1)]
+    wet = [
+        _wet_at_measure(cleaned, cumulative, distance, elevations, spec)
+        for distance in distances
+    ]
+    wet_indices = [index for index, state in enumerate(wet) if state]
+    if not wet_indices:
+        return None
+
+    first = wet_indices[0]
+    last = wet_indices[-1]
+    wet_start_distance = distances[first]
+    wet_end_distance = distances[last]
+    if first > 0 and not wet[first - 1]:
+        wet_start_distance = _refine_wet_start(
+            cleaned,
+            cumulative,
+            distances[first - 1],
+            distances[first],
+            elevations,
+            spec,
+        )
+    if last + 1 < len(distances) and not wet[last + 1]:
+        wet_end_distance = _refine_wet_end(
+            cleaned,
+            cumulative,
+            distances[last],
+            distances[last + 1],
+            elevations,
+            spec,
+        )
+
+    wet_start = _point_at_measure(cleaned, cumulative, wet_start_distance)
+    wet_end = _point_at_measure(cleaned, cumulative, wet_end_distance)
+    dx = wet_end[0] - wet_start[0]
+    dz = wet_end[1] - wet_start[1]
+    wet_length = math.hypot(dx, dz)
+    if wet_length <= 0.10:
+        return None
+    unit_x, unit_z = dx / wet_length, dz / wet_length
+
+    # Use the smallest whole number of stock modules that covers the wet chord.
+    # Any unavoidable excess becomes a small land overhang instead of hundreds
+    # of metres of bridge-tagged dry OSM approach.
+    tolerance = max(1.0e-6, _STOCK_MODULE_SPACING_METRES * 1.0e-9)
+    module_count = max(
+        1,
+        int(
+            math.ceil(
+                (wet_length - tolerance) / _STOCK_MODULE_SPACING_METRES
+            )
+        ),
+    )
+    target_length = module_count * _STOCK_MODULE_SPACING_METRES
+    half_target = target_length * 0.5
+    centre = (
+        (wet_start[0] + wet_end[0]) * 0.5,
+        (wet_start[1] + wet_end[1]) * 0.5,
+    )
+
+    # If the mapped bridge way is longer than the necessary stock chain, keep the
+    # complete chain inside that source extent. This maximises ordinary road on
+    # both dry approaches without changing the wet coverage.
+    projections = [
+        (point[0] - centre[0]) * unit_x + (point[1] - centre[1]) * unit_z
+        for point in cleaned
+    ]
+    source_min = min(projections)
+    source_max = max(projections)
+    if source_max - source_min >= target_length:
+        minimum_shift = source_min + half_target
+        maximum_shift = source_max - half_target
+        shift = max(minimum_shift, min(0.0, maximum_shift))
+        centre = (
+            centre[0] + unit_x * shift,
+            centre[1] + unit_z * shift,
+        )
+
+    start = (
+        centre[0] - unit_x * half_target,
+        centre[1] - unit_z * half_target,
+    )
+    end = (
+        centre[0] + unit_x * half_target,
+        centre[1] + unit_z * half_target,
+    )
+    world_size = float(getattr(spec, "world_size", 0.0) or 0.0)
+    if world_size > 0.0 and not all(
+        0.0 <= value < world_size
+        for point in (start, end)
+        for value in point
+    ):
+        # Edge-of-world bridges are rare; retain the established core behaviour
+        # rather than silently distort a fixed-length stock module chain.
+        return None
+
+    return StockBridgeSpanPlan(
+        points=(start, end),
+        module_count=module_count,
+        wet_start=wet_start,
+        wet_end=wet_end,
+        wet_length=wet_length,
+    )
+
+
+def _extend_stock_bridge_to_wet_span(
+    points,
+    elevations,
+    spec,
+    module_length,
+    *,
+    feature=None,
+    dataset=None,
+    projection=None,
+    raster=None,
+):
+    """Replace plateau extension with a minimal wet-only stock bridge corridor."""
+
+    if bool(getattr(spec, "procedural_bridges", True)):
+        return _ORIGINAL_EXTEND_BRIDGE_SPAN(
+            points,
+            elevations,
+            spec,
+            module_length,
+            feature=feature,
+            dataset=dataset,
+            projection=projection,
+            raster=raster,
+        )
+    plan = stock_bridge_span_plan(points, elevations, spec)
+    if plan is not None:
+        return plan.points
+    return _ORIGINAL_EXTEND_BRIDGE_SPAN(
+        points,
+        elevations,
+        spec,
+        module_length,
+        feature=feature,
+        dataset=dataset,
+        projection=projection,
+        raster=raster,
+    )
+
+
+def _visible_deck_point(obj, local_z: float) -> tuple[float, float, float]:
+    """Transform a central visible-deck point from model to world coordinates."""
+
+    heading = math.radians(float(obj.heading_degrees))
+    pitch = math.radians(float(obj.pitch_degrees))
+    sh, ch = math.sin(heading), math.cos(heading)
+    sp, cp = math.sin(pitch), math.cos(pitch)
+    local_y = _STOCK_VISIBLE_DECK_LOCAL_Y_METRES
+    z = float(local_z)
+    return (
+        float(obj.x) - sh * sp * local_y + sh * cp * z,
+        float(obj.y) + cp * local_y + sp * z,
+        float(obj.z) - ch * sp * local_y + ch * cp * z,
+    )
+
+
+def _axis_endpoints(obj) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Return the actual visible-deck plan endpoints including object pitch."""
+
+    first = _visible_deck_point(obj, -_STOCK_ROADWAY_HALF_LENGTH_METRES)
+    second = _visible_deck_point(obj, _STOCK_ROADWAY_HALF_LENGTH_METRES)
+    return ((first[0], first[2]), (second[0], second[2]))
 
 
 def _axial_heading_difference(a: float, b: float) -> float:
@@ -127,14 +426,16 @@ def _bridge_components(objects) -> tuple[tuple[int, ...], ...]:
         left_endpoints = endpoints[left_index]
         for right_index in indices[position + 1 :]:
             right = objects[right_index]
+            left_centre = _visible_deck_point(left, 0.0)
+            right_centre = _visible_deck_point(right, 0.0)
             centre_distance = math.hypot(
-                float(left.x) - float(right.x),
-                float(left.z) - float(right.z),
+                left_centre[0] - right_centre[0],
+                left_centre[2] - right_centre[2],
             )
-            if (
-                centre_distance
-                > _STOCK_MODULE_SPACING_METRES
-                + _CHAIN_ENDPOINT_TOLERANCE_METRES
+            if not (
+                _CHAIN_MINIMUM_CENTER_SPACING_METRES
+                <= centre_distance
+                <= _CHAIN_MAXIMUM_CENTER_SPACING_METRES
             ):
                 continue
             if (
@@ -172,28 +473,65 @@ def _bridge_components(objects) -> tuple[tuple[int, ...], ...]:
     return tuple(components)
 
 
-def _outer_chain_endpoints(
-    objects, component: tuple[int, ...]
-) -> tuple[tuple[float, float], tuple[float, float]] | None:
-    """Return the two most distant Roadway-LOD endpoints for one chain."""
+def _ordered_component(
+    objects,
+    component: tuple[int, ...],
+) -> tuple[tuple[int, ...], tuple[float, float], tuple[float, float]] | None:
+    """Return chain indices in travel order, common axis and plan midpoint."""
 
-    candidates = [
-        point for index in component for point in _axis_endpoints(objects[index])
-    ]
-    if len(candidates) < 2:
+    if not component:
         return None
-    best: tuple[float, tuple[float, float], tuple[float, float]] | None = None
-    for i, first in enumerate(candidates):
-        for second in candidates[i + 1 :]:
+    if len(component) == 1:
+        obj = objects[component[0]]
+        heading = math.radians(float(obj.heading_degrees))
+        axis = (math.sin(heading), math.cos(heading))
+        deck_centre = _visible_deck_point(obj, 0.0)
+        return component, axis, (deck_centre[0], deck_centre[2])
+
+    centres = {
+        index: _visible_deck_point(objects[index], 0.0)
+        for index in component
+    }
+    best = None
+    for offset, first_index in enumerate(component):
+        first = centres[first_index]
+        for second_index in component[offset + 1 :]:
+            second = centres[second_index]
             distance_sq = (
                 (second[0] - first[0]) ** 2
-                + (second[1] - first[1]) ** 2
+                + (second[2] - first[2]) ** 2
             )
             if best is None or distance_sq > best[0]:
-                best = (distance_sq, first, second)
-    if best is None or best[0] <= 1.0e-6:
+                best = (distance_sq, first_index, second_index)
+    if best is None or best[0] <= 1.0e-9:
         return None
-    return best[1], best[2]
+
+    first = centres[best[1]]
+    second = centres[best[2]]
+    dx = second[0] - first[0]
+    dz = second[2] - first[2]
+    length = math.hypot(dx, dz)
+    axis = (dx / length, dz / length)
+    projections = {
+        index: centres[index][0] * axis[0] + centres[index][2] * axis[1]
+        for index in component
+    }
+    ordered = tuple(sorted(component, key=lambda index: projections[index]))
+
+    # Orient the common axis to agree with the first module's forward heading.
+    first_heading = math.radians(float(objects[ordered[0]].heading_degrees))
+    forward = (math.sin(first_heading), math.cos(first_heading))
+    if forward[0] * axis[0] + forward[1] * axis[1] < 0.0:
+        axis = (-axis[0], -axis[1])
+        ordered = tuple(reversed(ordered))
+
+    first_centre = centres[ordered[0]]
+    last_centre = centres[ordered[-1]]
+    midpoint = (
+        (first_centre[0] + last_centre[0]) * 0.5,
+        (first_centre[2] + last_centre[2]) * 0.5,
+    )
+    return ordered, axis, midpoint
 
 
 def _dry_approach_height(
@@ -203,7 +541,7 @@ def _dry_approach_height(
     elevations,
     spec,
 ) -> float | None:
-    """Find the nearest dry road-bank visible road height outside a bridge end."""
+    """Find nearest dry stock-road surface height outside one bridge end."""
 
     world_size = float(spec.world_size)
     distance = 0.0
@@ -211,12 +549,15 @@ def _dry_approach_height(
         x = endpoint[0] + outward[0] * distance
         z = endpoint[1] + outward[1] * distance
         if 0.0 <= x < world_size and 0.0 <= z < world_size:
-            if not _osm._mask_at(
-                raster.water, spec.cells, world_size, x, z
-            ):
-                ground = _osm._sample_elevation(
-                    elevations, spec.cells, spec.cell_size, x, z
-                )
+            # Final in-game water is determined by terrain below sea level.  The
+            # OSM water mask alone is not sufficient after terrain solving.
+            ground = _osm._sample_elevation(
+                elevations, spec.cells, spec.cell_size, x, z
+            )
+            epsilon = float(
+                getattr(_osm, "BRIDGE_WATER_EPSILON_METRES", 0.05)
+            )
+            if ground >= float(spec.sea_level) - epsilon:
                 deck = (
                     ground
                     + float(_osm.NOGOVA_BRIDGE_APPROACH_OFFSET_METRES)
@@ -230,15 +571,31 @@ def _dry_approach_height(
     return None
 
 
+def _model_origin_for_visible_deck_center(
+    deck_x: float,
+    deck_y: float,
+    deck_z: float,
+    heading_degrees: float,
+    pitch_degrees: float,
+) -> tuple[float, float, float]:
+    """Convert a desired visible-deck centre to the RVW4 model origin."""
+
+    heading = math.radians(float(heading_degrees))
+    pitch = math.radians(float(pitch_degrees))
+    sh, ch = math.sin(heading), math.cos(heading)
+    sp, cp = math.sin(pitch), math.cos(pitch)
+    local_y = _STOCK_VISIBLE_DECK_LOCAL_Y_METRES
+    return (
+        float(deck_x) + sh * sp * local_y,
+        float(deck_y) - cp * local_y,
+        float(deck_z) + ch * sp * local_y,
+    )
+
+
 def _model_origin_y_for_visible_deck(
     visible_deck_y: float, pitch_degrees: float
 ) -> float:
-    """Convert desired visible deck-centre Y to RVW4 model-origin Y.
-
-    RVW4 pitch rotates local Y by cos(pitch). The stock bridge's visible asphalt
-    surface lies at local z=0 on the same plane as its end vertices, so no
-    longitudinal sine term is needed at module centre.
-    """
+    """Compatibility helper retained for callers/tests that only need Y."""
 
     pitch = math.radians(float(pitch_degrees))
     return float(visible_deck_y) - (
@@ -246,8 +603,35 @@ def _model_origin_y_for_visible_deck(
     )
 
 
+def _component_seam_errors(
+    objects,
+    ordered: Sequence[int],
+) -> tuple[float, float]:
+    maximum_horizontal = 0.0
+    maximum_vertical = 0.0
+    for left_index, right_index in zip(ordered, ordered[1:]):
+        left_end = _visible_deck_point(
+            objects[left_index], _STOCK_ROADWAY_HALF_LENGTH_METRES
+        )
+        right_start = _visible_deck_point(
+            objects[right_index], -_STOCK_ROADWAY_HALF_LENGTH_METRES
+        )
+        maximum_horizontal = max(
+            maximum_horizontal,
+            math.hypot(
+                right_start[0] - left_end[0],
+                right_start[2] - left_end[2],
+            ),
+        )
+        maximum_vertical = max(
+            maximum_vertical,
+            abs(right_start[1] - left_end[1]),
+        )
+    return maximum_horizontal, maximum_vertical
+
+
 def _anchor_stock_bridge_chains(result, raster, elevations, spec):
-    """Fit each stock bridge visible deck continuously between its approaches."""
+    """Rebuild each stock chain from shared visible-deck 3-D joints."""
 
     if result is None or raster is None or elevations is None or spec is None:
         return result
@@ -257,64 +641,120 @@ def _anchor_stock_bridge_chains(result, raster, elevations, spec):
 
     changed = False
     for component in _bridge_components(objects):
-        outer = _outer_chain_endpoints(objects, component)
-        if outer is None:
+        ordered_state = _ordered_component(objects, component)
+        if ordered_state is None:
             continue
-        start, end = outer
-        span_dx = end[0] - start[0]
-        span_dz = end[1] - start[1]
-        span_length = math.hypot(span_dx, span_dz)
-        if span_length <= 1.0e-6:
-            continue
-        unit_x = span_dx / span_length
-        unit_z = span_dz / span_length
-
-        start_y = _dry_approach_height(
-            start, (-unit_x, -unit_z), raster, elevations, spec
-        )
-        end_y = _dry_approach_height(
-            end, (unit_x, unit_z), raster, elevations, spec
-        )
-        if start_y is None or end_y is None:
+        ordered, axis, midpoint = ordered_state
+        count = len(ordered)
+        if count <= 0:
             continue
 
-        grade = (end_y - start_y) / span_length
-        bridge_pitch = math.degrees(math.atan(grade))
-        if abs(bridge_pitch) > _MAXIMUM_ANCHORED_BRIDGE_PITCH_DEGREES:
-            continue
-
-        for index in component:
-            obj = objects[index]
-            centre_dx = float(obj.x) - start[0]
-            centre_dz = float(obj.z) - start[1]
-            along = centre_dx * unit_x + centre_dz * unit_z
-            visible_deck_y = (
-                start_y
-                + grade * along
-                - _BRIDGE_WORLD_DOWNWARD_OFFSET_METRES
+        # First estimate assumes a level chain.  Re-sample once after converting
+        # the bank height difference into the stock model's fixed 3-D length.
+        horizontal_step = _STOCK_MODULE_SPACING_METRES
+        start_height = end_height = None
+        for _ in range(2):
+            half_span = horizontal_step * count * 0.5
+            start = (
+                midpoint[0] - axis[0] * half_span,
+                midpoint[1] - axis[1] * half_span,
+            )
+            end = (
+                midpoint[0] + axis[0] * half_span,
+                midpoint[1] + axis[1] * half_span,
+            )
+            start_height = _dry_approach_height(
+                start, (-axis[0], -axis[1]), raster, elevations, spec
+            )
+            end_height = _dry_approach_height(
+                end, axis, raster, elevations, spec
+            )
+            if start_height is None or end_height is None:
+                break
+            per_module_rise = (end_height - start_height) / count
+            if abs(per_module_rise) >= _STOCK_MODULE_SPACING_METRES:
+                start_height = end_height = None
+                break
+            horizontal_step = math.sqrt(
+                max(
+                    0.0,
+                    _STOCK_MODULE_SPACING_METRES ** 2
+                    - per_module_rise ** 2,
+                )
             )
 
-            # Pitch is along the model's local forward axis. A module may point
-            # opposite the component direction or follow a modest plan-view bend.
-            heading = math.radians(float(obj.heading_degrees))
-            local_x = math.sin(heading)
-            local_z = math.cos(heading)
-            local_grade = grade * (
-                local_x * unit_x + local_z * unit_z
-            )
-            pitch = math.degrees(math.atan(local_grade))
+        if start_height is None or end_height is None:
+            continue
 
-            # WRP stores the model origin. The visible bridge deck is ~13.049 m
-            # above it; the Roadway collision plane is another ~0.066 m lower.
-            # Align the rendered deck to the stock road surface, then apply the
-            # explicit 0.7 m world-space tuning offset above.
-            origin_y = _model_origin_y_for_visible_deck(
-                visible_deck_y, pitch
+        start_deck_y = (
+            float(start_height) - _BRIDGE_WORLD_DOWNWARD_OFFSET_METRES
+        )
+        end_deck_y = (
+            float(end_height) - _BRIDGE_WORLD_DOWNWARD_OFFSET_METRES
+        )
+        per_module_rise = (end_deck_y - start_deck_y) / count
+        ratio = per_module_rise / _STOCK_MODULE_SPACING_METRES
+        if not -1.0 < ratio < 1.0:
+            continue
+        pitch = math.degrees(math.asin(ratio))
+        if abs(pitch) > _MAXIMUM_ANCHORED_BRIDGE_PITCH_DEGREES:
+            continue
+        horizontal_step = math.sqrt(
+            max(
+                0.0,
+                _STOCK_MODULE_SPACING_METRES ** 2
+                - per_module_rise ** 2,
+            )
+        )
+        heading = math.degrees(math.atan2(axis[0], axis[1])) % 360.0
+        half_span = horizontal_step * count * 0.5
+        first_joint_x = midpoint[0] - axis[0] * half_span
+        first_joint_z = midpoint[1] - axis[1] * half_span
+
+        for position, index in enumerate(ordered):
+            joint0 = (
+                first_joint_x + axis[0] * horizontal_step * position,
+                start_deck_y + per_module_rise * position,
+                first_joint_z + axis[1] * horizontal_step * position,
+            )
+            joint1 = (
+                first_joint_x + axis[0] * horizontal_step * (position + 1),
+                start_deck_y + per_module_rise * (position + 1),
+                first_joint_z + axis[1] * horizontal_step * (position + 1),
+            )
+            deck_centre = (
+                (joint0[0] + joint1[0]) * 0.5,
+                (joint0[1] + joint1[1]) * 0.5,
+                (joint0[2] + joint1[2]) * 0.5,
+            )
+            origin_x, origin_y, origin_z = _model_origin_for_visible_deck_center(
+                deck_centre[0],
+                deck_centre[1],
+                deck_centre[2],
+                heading,
+                pitch,
             )
             objects[index] = replace(
-                obj, y=origin_y, pitch_degrees=pitch
+                objects[index],
+                x=origin_x,
+                y=origin_y,
+                z=origin_z,
+                heading_degrees=heading,
+                pitch_degrees=pitch,
             )
             changed = True
+
+        horizontal_error, vertical_error = _component_seam_errors(objects, ordered)
+        if (
+            horizontal_error > _MAXIMUM_SEAM_HORIZONTAL_ERROR_METRES
+            or vertical_error > _MAXIMUM_SEAM_VERTICAL_ERROR_METRES
+        ):
+            ids = tuple(int(objects[index].object_id) for index in ordered)
+            raise RuntimeError(
+                "stock bridge seam validation failed for objects "
+                f"{ids}: horizontal={horizontal_error:.4f} m, "
+                f"vertical={vertical_error:.4f} m"
+            )
 
     if not changed:
         return result
@@ -330,7 +770,7 @@ def _generate_world_objects(
     *args,
     **kwargs,
 ):
-    """Use stock bridge planning, then anchor its visible deck to both banks."""
+    """Use stock wet-only bridge planning, then rebuild shared 3-D seams."""
 
     stock_spec = _stock_bridge_spec(spec)
     result = _ORIGINAL_GENERATE_WORLD_OBJECTS(
@@ -383,18 +823,24 @@ def _load_nonroad_objects(*args, **kwargs):
 
 
 def install_bridge_render_policy() -> None:
-    """Install before later non-road/building wrappers capture generation hooks."""
+    """Install stock wet-span planning before final non-road wrappers capture it."""
 
     global _ORIGINAL_GENERATE_WORLD_OBJECTS
     global _ORIGINAL_LOAD_NONROAD_OBJECTS
+    global _ORIGINAL_EXTEND_BRIDGE_SPAN
     global _INSTALLED
 
     if _INSTALLED:
         return
 
-    # The stock asset measures about 50 m longitudinally. The historical 30 m
-    # constant made the core planner emit heavily overlapping modules.
     _osm.NOGOVA_BRIDGE_MODULE_LENGTH_METRES = _STOCK_MODULE_SPACING_METRES
+
+    _ORIGINAL_EXTEND_BRIDGE_SPAN = (
+        _osm._extend_procedural_bridge_to_approach_plateaus
+    )
+    _osm._extend_procedural_bridge_to_approach_plateaus = (
+        _extend_stock_bridge_to_wet_span
+    )
 
     _ORIGINAL_GENERATE_WORLD_OBJECTS = _osm.generate_world_objects
     _ORIGINAL_LOAD_NONROAD_OBJECTS = _generator._load_nonroad_objects
