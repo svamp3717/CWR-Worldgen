@@ -48,23 +48,36 @@ _MAXIMUM_ANCHORED_BRIDGE_PITCH_DEGREES = 12.0
 class _StockBridgeSpecProxy:
     """Read-through spec view for non-dataclass compatibility callers/tests."""
 
-    __slots__ = ("_base", "procedural_bridges")
+    __slots__ = ("_base", "procedural_bridges", "bridge_module_length")
 
     def __init__(self, base) -> None:
         self._base = base
         self.procedural_bridges = False
+        self.bridge_module_length = _STOCK_MODULE_SPACING_METRES
 
     def __getattr__(self, name):
         return getattr(self._base, name)
 
 
 def _stock_bridge_spec(spec):
-    """Return an equivalent spec whose bridge implementation is stock CWA."""
+    """Return a stock-bridge spec with cache identity tied to real module length."""
 
-    if not bool(getattr(spec, "procedural_bridges", True)):
+    procedural = bool(getattr(spec, "procedural_bridges", True))
+    try:
+        module_length = float(getattr(spec, "bridge_module_length", 0.0))
+    except (TypeError, ValueError):
+        module_length = 0.0
+    if (
+        not procedural
+        and abs(module_length - _STOCK_MODULE_SPACING_METRES) <= 1.0e-9
+    ):
         return spec
     if is_dataclass(spec):
-        return replace(spec, procedural_bridges=False)
+        return replace(
+            spec,
+            procedural_bridges=False,
+            bridge_module_length=_STOCK_MODULE_SPACING_METRES,
+        )
     return _StockBridgeSpecProxy(spec)
 
 
