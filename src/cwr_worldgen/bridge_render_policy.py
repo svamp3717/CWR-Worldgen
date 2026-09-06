@@ -214,4 +214,10 @@ def install_bridge_render_policy() -> None:
     _osm.generate_world_objects = _generate_world_objects
     _generator.generate_world_objects = _generate_world_objects
     _generator._load_nonroad_objects = _load_nonroad_objects
+
+    # Bridge modules already carry absolute WRP deck transforms. Do not let a
+    # LandContact LOD independently conform each module to bank/seabed terrain.
+    from .bridge_grounding_policy import install_bridge_grounding_policy
+
+    install_bridge_grounding_policy()
     _INSTALLED = True
