@@ -19,6 +19,8 @@ deck 0.066444 m above that collision surface. Use the measured visible deck
 surface for vertical alignment with the adjoining stock road pieces, while
 retaining the stock Roadway LOD unchanged inside the model.
 
+A final one-metre world-space downward tuning offset is applied uniformly to the
+entire bridge chain so both abutments sit lower relative to the adjoining road.
 The same correction is applied to cached non-road placements.
 """
 from __future__ import annotations
@@ -41,6 +43,7 @@ _STOCK_MODULE_SPACING_METRES = 50.0
 _STOCK_ROADWAY_HALF_LENGTH_METRES = 25.095142364501953
 _STOCK_ROADWAY_LOCAL_Y_METRES = 12.982887268066406
 _STOCK_VISIBLE_DECK_LOCAL_Y_METRES = 13.049331665039062
+_BRIDGE_WORLD_DOWNWARD_OFFSET_METRES = 1.0
 
 _CHAIN_ENDPOINT_TOLERANCE_METRES = 6.0
 _CHAIN_HEADING_TOLERANCE_DEGREES = 40.0
@@ -285,7 +288,11 @@ def _anchor_stock_bridge_chains(result, raster, elevations, spec):
             centre_dx = float(obj.x) - start[0]
             centre_dz = float(obj.z) - start[1]
             along = centre_dx * unit_x + centre_dz * unit_z
-            visible_deck_y = start_y + grade * along
+            visible_deck_y = (
+                start_y
+                + grade * along
+                - _BRIDGE_WORLD_DOWNWARD_OFFSET_METRES
+            )
 
             # Pitch is along the model's local forward axis. A module may point
             # opposite the component direction or follow a modest plan-view bend.
@@ -299,8 +306,8 @@ def _anchor_stock_bridge_chains(result, raster, elevations, spec):
 
             # WRP stores the model origin. The visible bridge deck is ~13.049 m
             # above it; the Roadway collision plane is another ~0.066 m lower.
-            # Align the rendered deck to the stock road surface, not the collision
-            # plane, so the abutments are visually flush at both banks.
+            # Align the rendered deck to the stock road surface, then apply the
+            # explicit one-metre world-space tuning offset above.
             origin_y = _model_origin_y_for_visible_deck(
                 visible_deck_y, pitch
             )
