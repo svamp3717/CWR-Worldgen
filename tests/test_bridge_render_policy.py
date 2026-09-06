@@ -50,12 +50,12 @@ def test_stock_bridge_spec_preserves_user_spec_and_overrides_only_bridge_mode() 
     assert original.procedural_bridges is True
     assert rewritten is not original
     assert rewritten.procedural_bridges is False
-    assert rewritten.bridge_module_length == original.bridge_module_length
+    assert rewritten.bridge_module_length == bridge_render._STOCK_MODULE_SPACING_METRES
     assert rewritten.marker == original.marker
 
 
 def test_already_stock_bridge_spec_is_reused() -> None:
-    original = _Spec(procedural_bridges=False)
+    original = _Spec(procedural_bridges=False, bridge_module_length=50.0)
     assert bridge_render._stock_bridge_spec(original) is original
 
 
@@ -71,7 +71,7 @@ def test_non_dataclass_compatibility_proxy_reads_all_other_fields_from_base() ->
     rewritten = bridge_render._stock_bridge_spec(original)
 
     assert rewritten.procedural_bridges is False
-    assert rewritten.bridge_module_length == 24.0
+    assert rewritten.bridge_module_length == bridge_render._STOCK_MODULE_SPACING_METRES
     assert rewritten.cells == 256
     assert rewritten.sea_level == 0.0
     assert original.procedural_bridges is True
@@ -101,6 +101,7 @@ def test_direct_generation_calls_core_with_stock_bridge_mode() -> None:
 
     assert result is sentinel
     assert observed["spec"].procedural_bridges is False
+    assert observed["spec"].bridge_module_length == bridge_render._STOCK_MODULE_SPACING_METRES
     assert observed["spec"].marker == "kept"
     assert observed["kwargs"] == {
         "include_roads": False,
@@ -134,6 +135,7 @@ def test_nonroad_cache_receives_stock_bridge_spec_positionally() -> None:
 
     assert result is sentinel
     assert observed["spec"].procedural_bridges is False
+    assert observed["spec"].bridge_module_length == bridge_render._STOCK_MODULE_SPACING_METRES
     assert observed["spec"].marker == "kept"
     assert observed["kwargs"]["road_fingerprint"] == "roads"
     assert original.procedural_bridges is True
@@ -163,6 +165,7 @@ def test_nonroad_cache_receives_stock_bridge_spec_when_named() -> None:
 
     assert result is sentinel
     assert observed["spec"].procedural_bridges is False
+    assert observed["spec"].bridge_module_length == bridge_render._STOCK_MODULE_SPACING_METRES
     assert observed["spec"].marker == "kept"
     assert original.procedural_bridges is True
 
@@ -202,7 +205,7 @@ def test_model_origin_is_lowered_by_stock_roadway_local_height() -> None:
 
 
 def test_stock_bridge_chain_roadway_is_anchored_to_both_bank_elevations() -> None:
-    spec = _Spec(procedural_bridges=False)
+    spec = _Spec(procedural_bridges=False, bridge_module_length=50.0)
     raster = _dry_raster(spec)
     modules = tuple(
         WorldObject(
@@ -264,7 +267,7 @@ def test_stock_bridge_chain_roadway_is_anchored_to_both_bank_elevations() -> Non
 
 
 def test_middle_water_depth_does_not_drag_stock_bridge_modules_down() -> None:
-    spec = _Spec(procedural_bridges=False)
+    spec = _Spec(procedural_bridges=False, bridge_module_length=50.0)
     raster = _dry_raster(spec)
     modules = tuple(
         WorldObject(
