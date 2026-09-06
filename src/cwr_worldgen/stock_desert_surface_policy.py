@@ -24,12 +24,12 @@ from . import terrain as _terrain
 
 
 # Desert must remain visually desert even when OSM semantics classify land as a
-# forest, field, meadow, park or sports ground. Those semantic classes still
-# drive object placement and reports, but their WRP ground tile is sand rather
-# than a temperate grass/farmland texture. Roads, built surfaces and exposed rock
-# keep distinct stock artwork so the terrain remains readable without introducing
-# green islands. ``o\ps.paa`` is already the verified stock sand dependency used
-# by the mapped-beach slot and is deliberately reused for all natural ground.
+# forest, field, meadow, park, sports ground, settlement or road. Those semantic
+# classes still drive placement and reports, but their WRP ground tiles are sand
+# or dry earth rather than temperate grass/field/settlement artwork. Exposed rock
+# keeps distinct stock textures so the terrain remains readable without green
+# islands. ``o\ps.paa`` is the verified stock sand dependency; ``bah.pac`` is the
+# dry earth tile used for roads and built-up semantic underlays.
 _DESERT_SAND_TEXTURE = r"o\ps.paa"
 _DESERT_EARTH_TEXTURE = r"Eden\bak\bah.pac"
 
@@ -46,9 +46,9 @@ DESERT_STOCK_SURFACE_TEXTURES: Mapping[str, str] = {
     "a": _DESERT_SAND_TEXTURE,      # farmland light, still desert soil
     "b": _DESERT_SAND_TEXTURE,      # farmland dark, still desert soil
     "c": _DESERT_SAND_TEXTURE,      # field boundary / dry strip
-    "u": r"Eden\tn.paa",          # urban surface
-    "i": r"Eden\tn.paa",          # industrial surface
-    "p": r"Eden\tn.paa",          # paved road underlay
+    "u": _DESERT_EARTH_TEXTURE,     # urban surface, no temperate Eden tile
+    "i": _DESERT_EARTH_TEXTURE,     # industrial surface
+    "p": _DESERT_EARTH_TEXTURE,     # paved-road underlay
     "o": _DESERT_EARTH_TEXTURE,     # road shoulder
     "d": _DESERT_EARTH_TEXTURE,     # dirt road
     "t": _DESERT_EARTH_TEXTURE,     # dirt-road blend
