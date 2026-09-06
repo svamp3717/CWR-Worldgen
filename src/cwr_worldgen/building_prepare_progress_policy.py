@@ -192,3 +192,29 @@ def install_building_prepare_progress_policy() -> None:
     )
 
     install_paved_junction_performance_policy()
+
+    # Final straight-road deduplication must be outermost: only after the complete
+    # junction/gravel/raceway chain has produced its final object list do we know
+    # which slabs would actually overlap in the WRP.
+    from .final_road_dedup_policy import install_final_road_dedup_policy
+
+    install_final_road_dedup_policy()
+
+    # Building placement was planned before the final road chain existed. Record
+    # that post-dedupe road report and apply a bounded final-footprint correction
+    # only when non-road objects are emitted. This must wrap the dedupe fitter,
+    # never the other way around.
+    from .final_building_road_clearance_policy import (
+        install_final_building_road_clearance_policy,
+    )
+
+    install_final_building_road_clearance_policy()
+
+    # Generated gravel curves use a quadratic bowed ribbon. Install the exact
+    # centreline recipe after the clearance module exists so its road primitives
+    # match the mesh generator rather than a circular approximation.
+    from .final_building_road_geometry_policy import (
+        install_final_building_road_geometry_policy,
+    )
+
+    install_final_building_road_geometry_policy()

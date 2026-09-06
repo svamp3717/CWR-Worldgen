@@ -189,3 +189,24 @@ def install_foundation_visual_policy() -> None:
     from .worship_building_policy import install_worship_building_policy
 
     install_worship_building_policy()
+
+    # Irregular churches used to be the one semantic family barred from the
+    # polygon-native model path. Install after worship classification so churches
+    # retain their exact mapped outline without bypassing the final worship style.
+    from .church_native_polygon_policy import install_church_native_polygon_policy
+
+    install_church_native_polygon_policy()
+
+    # The model-cache call site still enters the wrapper chain with the historical
+    # v49 namespace. Install one final church-only cache gate outside that chain so
+    # tower-aware native church P3Ds cannot reuse the old towerless asset bytes.
+    from .church_native_tower_cache_policy import install_church_native_tower_cache_policy
+
+    install_church_native_tower_cache_policy()
+
+    # Desert ground is stock game artwork, not generated world-local PAA data.
+    # Install after the core surface modules are loaded so both Milestone 8 and 9
+    # paths share the same external texture table and skip DXT1 ground generation.
+    from .stock_desert_surface_policy import install_stock_desert_surface_policy
+
+    install_stock_desert_surface_policy()

@@ -8,10 +8,12 @@ import shutil
 import sys
 from typing import Any
 
+from .build_cache_policy import BUILD_CACHE_DIRNAME, install_build_cache_policy
+
 CLEANUP_BUILD_AFTER_BUILD = "cleanup_build_after_build"
 CLEANUP_ONLY_MARKER = "--cleanup-build-files"
 CLEANUP_DESCRIPTION = "Deleting temporary build files"
-CLEANUP_DIR_NAMES = ("source", "normalized")
+CLEANUP_DIR_NAMES = ("source", "normalized", BUILD_CACHE_DIRNAME)
 _INSTALLED = False
 
 
@@ -77,10 +79,15 @@ def _widget_text(widget: Any) -> str:
 
 
 def install_postbuild_cleanup() -> None:
-    """Add a default-on cleanup checkbox and a final cleanup pipeline job."""
+    """Add build-cache routing, a default-on cleanup checkbox and final cleanup job."""
     global _INSTALLED
     if _INSTALLED:
         return
+
+    # Milestone 9 is already imported when this installer runs. Route only its
+    # core build caches to BUILD/.cwr-worldgen-build-cache while keeping source,
+    # normalization and Overture caches in the source-local cache.
+    install_build_cache_policy()
 
     from . import gui_entry
 
