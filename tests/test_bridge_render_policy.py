@@ -32,6 +32,17 @@ def _dry_raster(spec: _Spec):
     return SimpleNamespace(water=(False,) * (spec.cells * spec.cells))
 
 
+def _roadway_world_y(obj: WorldObject, local_z: float = 0.0) -> float:
+    """Return central stock Roadway-face world Y for one local-z position."""
+
+    pitch = math.radians(obj.pitch_degrees)
+    return (
+        obj.y
+        + bridge_render._STOCK_ROADWAY_LOCAL_Y_METRES * math.cos(pitch)
+        + local_z * math.sin(pitch)
+    )
+
+
 def test_stock_bridge_spec_preserves_user_spec_and_overrides_only_bridge_mode() -> None:
     original = _Spec()
     rewritten = bridge_render._stock_bridge_spec(original)
@@ -91,7 +102,10 @@ def test_direct_generation_calls_core_with_stock_bridge_mode() -> None:
     assert result is sentinel
     assert observed["spec"].procedural_bridges is False
     assert observed["spec"].marker == "kept"
-    assert observed["kwargs"] == {"include_roads": False, "starting_object_id": 7}
+    assert observed["kwargs"] == {
+        "include_roads": False,
+        "starting_object_id": 7,
+    }
     assert original.procedural_bridges is True
 
 
@@ -105,7 +119,9 @@ def test_nonroad_cache_receives_stock_bridge_spec_positionally() -> None:
         observed["kwargs"] = kwargs
         return sentinel
 
-    with patch.object(bridge_render, "_ORIGINAL_LOAD_NONROAD_OBJECTS", loader):
+    with patch.object(
+        bridge_render, "_ORIGINAL_LOAD_NONROAD_OBJECTS", loader
+    ):
         result = bridge_render._load_nonroad_objects(
             "dataset",
             "projection",
@@ -132,7 +148,9 @@ def test_nonroad_cache_receives_stock_bridge_spec_when_named() -> None:
         observed.update(kwargs)
         return sentinel
 
-    with patch.object(bridge_render, "_ORIGINAL_LOAD_NONROAD_OBJECTS", loader):
+    with patch.object(
+        bridge_render, "_ORIGINAL_LOAD_NONROAD_OBJECTS", loader
+    ):
         result = bridge_render._load_nonroad_objects(
             dataset="dataset",
             projection="projection",
@@ -149,12 +167,41 @@ def test_nonroad_cache_receives_stock_bridge_spec_when_named() -> None:
     assert original.procedural_bridges is True
 
 
-def test_core_stock_branch_uses_verified_nogova_bridge_asset() -> None:
-    assert bridge_render._osm.NOGOVA_BRIDGE_MODEL.casefold() == r"o\hous\most_stred30.p3d".casefold()
-    assert bridge_render._osm.NOGOVA_BRIDGE_MODULE_LENGTH_METRES == 30.0
+def test_stock_asset_geometry_matches_measured_original_p3d() -> None:
+    assert (
+        bridge_render._osm.NOGOVA_BRIDGE_MODEL.casefold()
+        == r"o\hous\most_stred30.p3d".casefold()
+    )
+    assert bridge_render._STOCK_MODULE_SPACING_METRES == 50.0
+    assert abs(
+        bridge_render._STOCK_ROADWAY_HALF_LENGTH_METRES
+        - 25.095142364501953
+    ) < 1e-12
+    assert abs(
+        bridge_render._STOCK_ROADWAY_LOCAL_Y_METRES
+        - 12.982887268066406
+    ) < 1e-12
+    assert (
+        bridge_render._osm.NOGOVA_BRIDGE_MODULE_LENGTH_METRES
+        == bridge_render._STOCK_MODULE_SPACING_METRES
+    )
 
 
-def test_stock_bridge_chain_is_anchored_to_both_bank_elevations() -> None:
+def test_model_origin_is_lowered_by_stock_roadway_local_height() -> None:
+    desired_roadway_y = 7.035
+    origin_y = bridge_render._model_origin_y_for_roadway(
+        desired_roadway_y, 0.0
+    )
+    assert abs(
+        origin_y
+        - (
+            desired_roadway_y
+            - bridge_render._STOCK_ROADWAY_LOCAL_Y_METRES
+        )
+    ) < 1e-12
+
+
+def test_stock_bridge_chain_roadway_is_anchored_to_both_bank_elevations() -> None:
     spec = _Spec(procedural_bridges=False)
     raster = _dry_raster(spec)
     modules = tuple(
@@ -163,7 +210,7 @@ def test_stock_bridge_chain_is_anchored_to_both_bank_elevations() -> None:
             bridge_render._osm.NOGOVA_BRIDGE_MODEL,
             100.0,
             20.0,
-            15.0 + index * 30.0,
+            125.0 + index * 50.0,
             0.0,
             0.0,
         )
@@ -172,13 +219,15 @@ def test_stock_bridge_chain_is_anchored_to_both_bank_elevations() -> None:
     result = _Result(modules)
 
     def terrain(_elevations, _cells, _cell_size, _x, z):
-        if z <= 1.0:
+        if z <= 101.0:
             return 3.0
-        if z >= 119.0:
+        if z >= 299.0:
             return 7.0
         return -5.0
 
-    with patch.object(bridge_render._osm, "_sample_elevation", side_effect=terrain):
+    with patch.object(
+        bridge_render._osm, "_sample_elevation", side_effect=terrain
+    ):
         anchored = bridge_render._anchor_stock_bridge_chains(
             result,
             raster,
@@ -189,19 +238,29 @@ def test_stock_bridge_chain_is_anchored_to_both_bank_elevations() -> None:
     assert anchored is not result
     first = anchored.objects[0]
     last = anchored.objects[-1]
-    expected_start = 3.0 + bridge_render._osm.NOGOVA_BRIDGE_APPROACH_OFFSET_METRES
-    expected_end = 7.0 + bridge_render._osm.NOGOVA_BRIDGE_APPROACH_OFFSET_METRES
+    expected_start = (
+        3.0 + bridge_render._osm.NOGOVA_BRIDGE_APPROACH_OFFSET_METRES
+    )
+    expected_end = (
+        7.0 + bridge_render._osm.NOGOVA_BRIDGE_APPROACH_OFFSET_METRES
+    )
+    half = bridge_render._STOCK_ROADWAY_HALF_LENGTH_METRES
 
-    first_half_rise = math.tan(math.radians(first.pitch_degrees)) * 15.0
-    last_half_rise = math.tan(math.radians(last.pitch_degrees)) * 15.0
-    assert abs((first.y - first_half_rise) - expected_start) < 1e-6
-    assert abs((last.y + last_half_rise) - expected_end) < 1e-6
+    assert abs(_roadway_world_y(first, -half) - expected_start) < 1e-6
+    assert abs(_roadway_world_y(last, half) - expected_end) < 1e-6
 
-    # Adjacent 30 m modules must meet at exactly the same deck elevation.
+    # The WRP origin itself must be roughly 13 m below the roadway, not placed
+    # directly on the bank as the broken implementation did.
+    assert first.y < expected_start - 12.0
+    assert last.y < expected_end - 12.0
+
+    # Adjacent stock modules must present continuous Roadway endpoints.
     for left, right in zip(anchored.objects, anchored.objects[1:]):
-        left_end = left.y + math.tan(math.radians(left.pitch_degrees)) * 15.0
-        right_start = right.y - math.tan(math.radians(right.pitch_degrees)) * 15.0
-        assert abs(left_end - right_start) < 1e-6
+        left_end = _roadway_world_y(left, half)
+        right_start = _roadway_world_y(right, -half)
+        # The real roadway is ~50.190 m long while centres are spaced 50 m,
+        # intentionally giving a small overlap instead of an open seam.
+        assert abs(left_end - right_start) < 0.05
 
 
 def test_middle_water_depth_does_not_drag_stock_bridge_modules_down() -> None:
@@ -213,7 +272,7 @@ def test_middle_water_depth_does_not_drag_stock_bridge_modules_down() -> None:
             bridge_render._osm.NOGOVA_BRIDGE_MODEL,
             200.0,
             30.0,
-            15.0 + index * 30.0,
+            125.0 + index * 50.0,
             0.0,
             0.0,
         )
@@ -224,9 +283,11 @@ def test_middle_water_depth_does_not_drag_stock_bridge_modules_down() -> None:
 
     def terrain(_elevations, _cells, _cell_size, _x, z):
         sampled_z.append(z)
-        return 4.0 if z < 45.0 else 5.0
+        return 4.0 if z < 180.0 else 5.0
 
-    with patch.object(bridge_render._osm, "_sample_elevation", side_effect=terrain):
+    with patch.object(
+        bridge_render._osm, "_sample_elevation", side_effect=terrain
+    ):
         anchored = bridge_render._anchor_stock_bridge_chains(
             _Result(modules),
             raster,
@@ -237,21 +298,46 @@ def test_middle_water_depth_does_not_drag_stock_bridge_modules_down() -> None:
     # Only the two approaches are sampled for vertical anchoring. The seabed or
     # terrain under middle modules is intentionally irrelevant to the deck line.
     assert len(sampled_z) == 2
-    assert min(obj.y for obj in anchored.objects) > 4.0
+    assert min(
+        _roadway_world_y(obj) for obj in anchored.objects
+    ) > 4.0
+    assert max(obj.y for obj in anchored.objects) < 0.0
 
 
 def test_cached_stock_bridge_result_is_reanchored_without_cache_clear() -> None:
     spec = _Spec()
     raster = _dry_raster(spec)
-    cached_result = _Result((
-        WorldObject(1, bridge_render._osm.NOGOVA_BRIDGE_MODEL, 100.0, 50.0, 15.0, 0.0),
-        WorldObject(2, bridge_render._osm.NOGOVA_BRIDGE_MODEL, 100.0, 50.0, 45.0, 0.0),
-    ))
+    cached_result = _Result(
+        (
+            WorldObject(
+                1,
+                bridge_render._osm.NOGOVA_BRIDGE_MODEL,
+                100.0,
+                50.0,
+                125.0,
+                0.0,
+            ),
+            WorldObject(
+                2,
+                bridge_render._osm.NOGOVA_BRIDGE_MODEL,
+                100.0,
+                50.0,
+                175.0,
+                0.0,
+            ),
+        )
+    )
     cached = (cached_result, object(), True, "cache", "path")
 
     with (
-        patch.object(bridge_render, "_ORIGINAL_LOAD_NONROAD_OBJECTS", return_value=cached),
-        patch.object(bridge_render._osm, "_sample_elevation", return_value=6.0),
+        patch.object(
+            bridge_render,
+            "_ORIGINAL_LOAD_NONROAD_OBJECTS",
+            return_value=cached,
+        ),
+        patch.object(
+            bridge_render._osm, "_sample_elevation", return_value=6.0
+        ),
     ):
         value = bridge_render._load_nonroad_objects(
             "dataset",
@@ -264,4 +350,11 @@ def test_cached_stock_bridge_result_is_reanchored_without_cache_clear() -> None:
 
     assert value[1:] == cached[1:]
     assert value[0] is not cached_result
-    assert all(obj.y < 10.0 for obj in value[0].objects)
+    expected_roadway_y = (
+        6.0 + bridge_render._osm.NOGOVA_BRIDGE_APPROACH_OFFSET_METRES
+    )
+    assert all(
+        abs(_roadway_world_y(obj) - expected_roadway_y) < 1e-6
+        for obj in value[0].objects
+    )
+    assert all(obj.y < -6.0 for obj in value[0].objects)
