@@ -130,6 +130,11 @@ def _apply_paved_junctions_without_premerge_slabs(report, plans, elevations, spe
 
 _paved_junction_policy._apply_plans = _apply_paved_junctions_without_premerge_slabs
 
+from .paved_junction_fallback_policy import (
+    install_paved_junction_fallback_policy as _install_paved_junction_fallback_policy,
+)
+
+_install_paved_junction_fallback_policy()
 from .gravel_junction_policy import install_gravel_junction_policy as _install_gravel_junction_policy
 
 _install_gravel_junction_policy()
