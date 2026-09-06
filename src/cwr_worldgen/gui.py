@@ -1872,7 +1872,7 @@ class WorldgenGui(tk.Tk):
             messagebox.showerror(APP_TITLE, f"Could not import mapping:\n{exc}")
 
     def _export_osm_mapping(self) -> None:
-        path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=(("OSM asset mapping", "*.json"),))
+        path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=(("CWR GUI profile", "*.json"),))
         if not path:
             return
         try:
@@ -3129,7 +3129,7 @@ class WorldgenGui(tk.Tk):
         ttk.Button(body, text="Inspect normalized bundle", command=self._inspect_normalized).pack(fill="x", pady=3)
         ttk.Separator(body).pack(fill="x", pady=12)
         ttk.Label(body, text="Optional build tools", font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        ttk.Button(body, text="Asset checker & OSM mapping…", command=lambda: None).pack(fill="x", pady=(8, 3))
+        ttk.Button(body, text="Asset checker & OSM mapping…", command=self._open_asset_tools).pack(fill="x", pady=(8, 3))
         ttk.Separator(body).pack(fill="x", pady=12)
         ttk.Label(body, text="Cleanup", font=("Segoe UI", 11, "bold")).pack(anchor="w")
         ttk.Button(body, text="Delete build output", command=self._clear_output).pack(fill="x", pady=(8, 3))
