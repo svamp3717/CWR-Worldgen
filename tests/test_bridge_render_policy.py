@@ -204,7 +204,7 @@ def test_stock_asset_geometry_matches_measured_original_p3d() -> None:
         - bridge_render._STOCK_ROADWAY_LOCAL_Y_METRES
         - 0.06644439697265625
     ) < 1e-12
-    assert bridge_render._BRIDGE_WORLD_DOWNWARD_OFFSET_METRES == 0.8
+    assert bridge_render._BRIDGE_WORLD_DOWNWARD_OFFSET_METRES == 0.7
     assert (
         bridge_render._osm.NOGOVA_BRIDGE_MODULE_LENGTH_METRES
         == bridge_render._STOCK_MODULE_SPACING_METRES
