@@ -8,13 +8,16 @@ The stock asset is not a 30 m, origin-on-road model. Inspection of the original
 ODOL7 ``O\\Hous\\most_stred30.p3d`` shows:
 
 * the visual span is about 50 m long;
-* the drivable Roadway LOD runs from z=-25.095142 to z=+25.095142; and
-* the central Roadway surface is at local y=12.982887 m.
+* the drivable Roadway LOD runs from z=-25.095142 to z=+25.095142;
+* the central Roadway surface is at local y=12.982887 m; and
+* the visible deck surface is at local y=13.049332 m.
 
 WRP object Y is the model origin. Therefore anchoring object Y directly to the
-road raises the actual roadway by almost 13 m. Use the measured stock geometry
-for module spacing/endpoints and convert desired roadway elevation back to model
-origin Y after pitch is known.
+road raises the visible deck by about 13 m. Anchoring the Roadway LOD itself is
+still slightly high visually because the stock model deliberately renders its
+deck 0.066444 m above that collision surface. Use the measured visible deck
+surface for vertical alignment with the adjoining stock road pieces, while
+retaining the stock Roadway LOD unchanged inside the model.
 
 The same correction is applied to cached non-road placements.
 """
@@ -37,6 +40,7 @@ _STOCK_MODEL = _osm.NOGOVA_BRIDGE_MODEL.casefold()
 _STOCK_MODULE_SPACING_METRES = 50.0
 _STOCK_ROADWAY_HALF_LENGTH_METRES = 25.095142364501953
 _STOCK_ROADWAY_LOCAL_Y_METRES = 12.982887268066406
+_STOCK_VISIBLE_DECK_LOCAL_Y_METRES = 13.049331665039062
 
 _CHAIN_ENDPOINT_TOLERANCE_METRES = 6.0
 _CHAIN_HEADING_TOLERANCE_DEGREES = 40.0
@@ -196,7 +200,7 @@ def _dry_approach_height(
     elevations,
     spec,
 ) -> float | None:
-    """Find the nearest dry road-bank roadway height outside a bridge end."""
+    """Find the nearest dry road-bank visible road height outside a bridge end."""
 
     world_size = float(spec.world_size)
     distance = 0.0
@@ -223,23 +227,24 @@ def _dry_approach_height(
     return None
 
 
-def _model_origin_y_for_roadway(
-    roadway_y: float, pitch_degrees: float
+def _model_origin_y_for_visible_deck(
+    visible_deck_y: float, pitch_degrees: float
 ) -> float:
-    """Convert desired world roadway-center Y to RVW4 model-origin Y.
+    """Convert desired visible deck-centre Y to RVW4 model-origin Y.
 
-    RVW4 pitch rotates local Y by cos(pitch). The central drivable Roadway face
-    lies at local z=0, so no longitudinal sine term is needed at module centre.
+    RVW4 pitch rotates local Y by cos(pitch). The stock bridge's visible asphalt
+    surface lies at local z=0 on the same plane as its end vertices, so no
+    longitudinal sine term is needed at module centre.
     """
 
     pitch = math.radians(float(pitch_degrees))
-    return float(roadway_y) - (
-        _STOCK_ROADWAY_LOCAL_Y_METRES * math.cos(pitch)
+    return float(visible_deck_y) - (
+        _STOCK_VISIBLE_DECK_LOCAL_Y_METRES * math.cos(pitch)
     )
 
 
 def _anchor_stock_bridge_chains(result, raster, elevations, spec):
-    """Fit each stock bridge roadway continuously between its two approaches."""
+    """Fit each stock bridge visible deck continuously between its approaches."""
 
     if result is None or raster is None or elevations is None or spec is None:
         return result
@@ -280,7 +285,7 @@ def _anchor_stock_bridge_chains(result, raster, elevations, spec):
             centre_dx = float(obj.x) - start[0]
             centre_dz = float(obj.z) - start[1]
             along = centre_dx * unit_x + centre_dz * unit_z
-            roadway_y = start_y + grade * along
+            visible_deck_y = start_y + grade * along
 
             # Pitch is along the model's local forward axis. A module may point
             # opposite the component direction or follow a modest plan-view bend.
@@ -292,9 +297,13 @@ def _anchor_stock_bridge_chains(result, raster, elevations, spec):
             )
             pitch = math.degrees(math.atan(local_grade))
 
-            # This is the critical stock-model correction: WRP stores the model
-            # origin, while the drivable Roadway LOD is ~12.983 m above it.
-            origin_y = _model_origin_y_for_roadway(roadway_y, pitch)
+            # WRP stores the model origin. The visible bridge deck is ~13.049 m
+            # above it; the Roadway collision plane is another ~0.066 m lower.
+            # Align the rendered deck to the stock road surface, not the collision
+            # plane, so the abutments are visually flush at both banks.
+            origin_y = _model_origin_y_for_visible_deck(
+                visible_deck_y, pitch
+            )
             objects[index] = replace(
                 obj, y=origin_y, pitch_degrees=pitch
             )
@@ -314,7 +323,7 @@ def _generate_world_objects(
     *args,
     **kwargs,
 ):
-    """Use stock bridge planning, then anchor its Roadway LOD to both banks."""
+    """Use stock bridge planning, then anchor its visible deck to both banks."""
 
     stock_spec = _stock_bridge_spec(spec)
     result = _ORIGINAL_GENERATE_WORLD_OBJECTS(
