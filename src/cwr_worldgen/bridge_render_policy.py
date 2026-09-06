@@ -1,15 +1,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Keep procedural bridge P3Ds within OFP/CWA model-size limits.
+"""Render generated bridge plans with stock CWA bridge modules.
 
-The core bridge planner currently emits one ``br_single`` object for the complete
-extended bridge span. That is attractive on paper, but OFP/CWA has practical
-Geometry/Roadway size limits. Long real-world bridges can therefore exist in the
-WRP and PBO while rendering as nothing in game.
+The OSM bridge planner already solves the useful part of the problem: which road
+span is a bridge, where its centreline lies, and what absolute deck Y/pitch it
+needs. Earlier revisions represented that solution with world-local custom P3Ds.
+Long P3Ds exceeded legacy Roadway limits; splitting them exposed more terrain-
+object quirks around custom model classes and grounding.
 
-This policy preserves the planner's exact straight bridge axis, elevation and
-heading, but replaces oversized single-span bridge objects with contiguous
-start/middle/end modules no longer than 30 metres. It also post-processes cached
-non-road placement results so an old cached 300 m bridge cannot bypass the fix.
+For CWA output the conservative answer is to stop reimplementing a bridge model.
+Translate each generated ``br_single`` placement into a contiguous chain of the
+stock Resistance/Nogova 30 m bridge module. The WRP transform remains the one
+solved by the procedural planner, while model behavior comes from a known-good
+engine asset.
+
+Cached non-road placement results are rewritten too, so users do not need to
+clear their placement cache after upgrading this policy.
 """
 from __future__ import annotations
 
@@ -21,10 +26,8 @@ import re
 from . import generator as _generator
 from . import osm as _osm
 
-# Stock OFP/CWA bridge/road infrastructure is conventionally modular at about
-# 25-30 m. Keep generated Geometry and Roadway LODs in that same conservative
-# range instead of relying on one terrain object hundreds of metres long.
-_MAX_CWA_BRIDGE_MODULE_METRES = 30.0
+_STOCK_BRIDGE_MODEL = _osm.NOGOVA_BRIDGE_MODEL
+_STOCK_BRIDGE_LENGTH_METRES = float(_osm.NOGOVA_BRIDGE_MODULE_LENGTH_METRES)
 _BRIDGE_SINGLE = re.compile(
     r"^br_single_w(?P<width>\d+)_l(?P<length>\d+)\.p3d$",
     re.IGNORECASE,
@@ -35,73 +38,59 @@ _ORIGINAL_LOAD_NONROAD_OBJECTS = None
 _INSTALLED = False
 
 
-def _target_module_dm(spec) -> int:
+def _target_spacing_metres(spec) -> float:
+    """Return requested centre spacing, bounded by the fixed stock module length."""
+
     try:
         configured = float(getattr(spec, "bridge_module_length", 30.0))
     except (TypeError, ValueError):
-        configured = 30.0
+        configured = _STOCK_BRIDGE_LENGTH_METRES
     if not math.isfinite(configured):
-        configured = 30.0
-    metres = min(_MAX_CWA_BRIDGE_MODULE_METRES, max(3.0, configured))
-    return max(30, int(round(metres * 10.0)))
+        configured = _STOCK_BRIDGE_LENGTH_METRES
+    return min(_STOCK_BRIDGE_LENGTH_METRES, max(3.0, configured))
 
 
-def _module_lengths_dm(total_dm: int, target_dm: int) -> tuple[int, ...]:
-    """Partition one bridge length exactly into near-equal safe modules."""
+def _module_offsets(total_metres: float, target_spacing: float) -> tuple[float, ...]:
+    """Return evenly spaced stock-module centres covering the complete span.
 
-    total_dm = max(30, int(total_dm))
-    target_dm = max(30, int(target_dm))
-    if total_dm <= target_dm:
-        return (total_dm,)
-    count = max(2, int(math.ceil(total_dm / target_dm)))
-    base, remainder = divmod(total_dm, count)
-    # ``count`` comes from a >=3 m target, so real bridge spans cannot create a
-    # sub-3 m module here. Keep the guard for malformed/cached model names.
-    if base < 30:
-        return (total_dm,)
-    return tuple(base + (1 if index < remainder else 0) for index in range(count))
+    Stock bridge models are fixed at 30 m. Centre spacing is therefore no greater
+    than 30 m, giving either exact joins or a small deterministic overlap when a
+    bridge is not an exact multiple. The first/last modules may extend slightly
+    onto dry land, which is preferable to a seam over water and mirrors the
+    existing stock-bridge path in ``osm.py``.
+    """
+
+    total = max(3.0, float(total_metres))
+    spacing = min(_STOCK_BRIDGE_LENGTH_METRES, max(3.0, float(target_spacing)))
+    tolerance = max(1.0e-6, spacing * 1.0e-9)
+    count = max(1, int(math.ceil((total - tolerance) / spacing)))
+    covered_step = total / count
+    first = -total * 0.5 + covered_step * 0.5
+    return tuple(first + index * covered_step for index in range(count))
 
 
 def _split_bridge_object(obj, spec, *, next_object_id: int):
-    """Return CWA-sized replacements for one generated ``br_single`` object."""
+    """Replace one generated bridge P3D with stock CWA bridge modules."""
 
     path = str(getattr(obj, "model_path", "")).replace("/", "\\")
     if "\\" not in path:
         return (obj,), next_object_id
-    prefix, filename = path.rsplit("\\", 1)
+    _prefix, filename = path.rsplit("\\", 1)
     match = _BRIDGE_SINGLE.fullmatch(filename)
     if match is None:
         return (obj,), next_object_id
 
-    width_dm = int(match.group("width"))
-    total_dm = int(match.group("length"))
-    lengths_dm = _module_lengths_dm(total_dm, _target_module_dm(spec))
-    if len(lengths_dm) == 1:
-        return (obj,), next_object_id
-
-    total_m = total_dm / 10.0
+    total_metres = max(3.0, int(match.group("length")) / 10.0)
+    offsets = _module_offsets(total_metres, _target_spacing_metres(spec))
     heading_degrees = float(getattr(obj, "heading_degrees", 0.0))
     pitch_degrees = float(getattr(obj, "pitch_degrees", 0.0))
     heading = math.radians(heading_degrees)
     sin_heading = math.sin(heading)
     cos_heading = math.cos(heading)
-    vertical_per_metre = math.tan(math.radians(pitch_degrees))
+    vertical_per_horizontal_metre = math.tan(math.radians(pitch_degrees))
 
-    cursor = -total_m * 0.5
     pieces = []
-    last = len(lengths_dm) - 1
-    for index, length_dm in enumerate(lengths_dm):
-        length_m = length_dm / 10.0
-        offset = cursor + length_m * 0.5
-        if index == 0:
-            subtype = "start"
-        elif index == last:
-            subtype = "end"
-        else:
-            subtype = "middle"
-        model_path = (
-            f"{prefix}\\br_{subtype}_w{width_dm:03d}_l{length_dm:03d}.p3d"
-        )
+    for index, offset in enumerate(offsets):
         object_id = int(getattr(obj, "object_id", 0)) if index == 0 else next_object_id
         if index != 0:
             next_object_id += 1
@@ -109,18 +98,17 @@ def _split_bridge_object(obj, spec, *, next_object_id: int):
             replace(
                 obj,
                 object_id=object_id,
-                model_path=model_path,
+                model_path=_STOCK_BRIDGE_MODEL,
                 x=float(obj.x) + sin_heading * offset,
-                y=float(obj.y) + vertical_per_metre * offset,
+                y=float(obj.y) + vertical_per_horizontal_metre * offset,
                 z=float(obj.z) + cos_heading * offset,
             )
         )
-        cursor += length_m
     return tuple(pieces), next_object_id
 
 
 def _modularize_result(result, spec):
-    """Replace oversized generated bridge objects and keep result accounting exact."""
+    """Rewrite generated bridge objects and keep placement accounting exact."""
 
     if result is None or not bool(getattr(spec, "procedural_bridges", True)):
         return result
@@ -128,7 +116,9 @@ def _modularize_result(result, spec):
     if not objects:
         return result
 
-    next_object_id = max((int(getattr(obj, "object_id", 0)) for obj in objects), default=0) + 1
+    next_object_id = max(
+        (int(getattr(obj, "object_id", 0)) for obj in objects), default=0
+    ) + 1
     rewritten = []
     replacements: list[tuple[object, tuple[object, ...]]] = []
     for obj in objects:
@@ -136,7 +126,9 @@ def _modularize_result(result, spec):
             obj, spec, next_object_id=next_object_id
         )
         rewritten.extend(pieces)
-        if len(pieces) > 1:
+        # Even a short one-piece bridge is a replacement when its custom model
+        # becomes the stock CWA bridge model.
+        if len(pieces) != 1 or pieces[0] is not obj:
             replacements.append((obj, pieces))
 
     if not replacements:
@@ -161,9 +153,6 @@ def _modularize_result(result, spec):
             sorted(usage.items(), key=lambda item: item[0].casefold())
         )
     elif hasattr(result, "model_usage"):
-        # Compatibility for hand-built/direct API results that predate the
-        # emission-time aggregate. Asset generation still needs the new module
-        # paths, so build the aggregate once from the already-rewritten objects.
         usage = Counter(obj.model_path for obj in rewritten)
         updates["model_usage"] = tuple(
             sorted(usage.items(), key=lambda item: item[0].casefold())
@@ -188,7 +177,7 @@ def _generate_world_objects(
 
 
 def _load_nonroad_objects(*args, **kwargs):
-    """Modularize both fresh and cached non-road placement results."""
+    """Rewrite both fresh and cached non-road placement results."""
 
     value = _ORIGINAL_LOAD_NONROAD_OBJECTS(*args, **kwargs)
     spec = kwargs.get("spec")
@@ -196,10 +185,10 @@ def _load_nonroad_objects(*args, **kwargs):
         spec = args[4]
     if spec is None or not isinstance(value, tuple) or not value:
         return value
-    modularized = _modularize_result(value[0], spec)
-    if modularized is value[0]:
+    rewritten = _modularize_result(value[0], spec)
+    if rewritten is value[0]:
         return value
-    return (modularized, *value[1:])
+    return (rewritten, *value[1:])
 
 
 def install_bridge_render_policy() -> None:
@@ -214,10 +203,4 @@ def install_bridge_render_policy() -> None:
     _osm.generate_world_objects = _generate_world_objects
     _generator.generate_world_objects = _generate_world_objects
     _generator._load_nonroad_objects = _load_nonroad_objects
-
-    # Bridge modules already carry absolute WRP deck transforms. Do not let a
-    # LandContact LOD independently conform each module to bank/seabed terrain.
-    from .bridge_grounding_policy import install_bridge_grounding_policy
-
-    install_bridge_grounding_policy()
     _INSTALLED = True
