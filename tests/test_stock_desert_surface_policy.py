@@ -42,9 +42,18 @@ def test_desert_natural_land_semantics_all_use_stock_sand() -> None:
     assert {DESERT_STOCK_SURFACE_TEXTURES[code] for code in natural_codes} == {sand}
 
 
-def test_desert_stock_palette_contains_no_temperate_grass_or_field_tiles() -> None:
+def test_desert_built_and_road_semantics_use_dry_earth() -> None:
+    # Urban/industrial/paved masks are exactly where the editor screenshot showed
+    # the remaining green corridors. They must use dry earth, never Eden tn.paa.
+    earth = r"Eden\bak\bah.pac"
+    built_codes = {"u", "i", "p", "o", "d", "t", "v"}
+    assert {DESERT_STOCK_SURFACE_TEXTURES[code] for code in built_codes} == {earth}
+
+
+def test_desert_stock_palette_contains_no_temperate_green_or_field_tiles() -> None:
     forbidden = {
         r"eden\zbh.paa",
+        r"eden\tn.paa",
         r"o\pole1.paa",
         r"o\pole2.paa",
     }
@@ -102,6 +111,8 @@ def test_legacy_desert_ground_path_also_resolves_to_stock_texture() -> None:
     assert terrain.ground_texture_path("test_desert", "g", "desert") == r"o\ps.paa"
     assert terrain.ground_texture_path("test_desert", "f", "desert") == r"o\ps.paa"
     assert terrain.ground_texture_path("test_desert", "a", "desert") == r"o\ps.paa"
+    assert terrain.ground_texture_path("test_desert", "u", "desert") == r"Eden\bak\bah.pac"
+    assert terrain.ground_texture_path("test_desert", "p", "desert") == r"Eden\bak\bah.pac"
     assert terrain.ground_texture_path("test_desert", "d", "desert") == r"Eden\bak\bah.pac"
 
 
