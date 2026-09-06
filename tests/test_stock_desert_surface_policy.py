@@ -29,35 +29,40 @@ def test_desert_milestone9_texture_table_uses_only_stock_game_paths() -> None:
         DESERT_STOCK_SURFACE_TEXTURES[material.code]
         for material in surface_pass.MILESTONE9_MATERIALS
     )
-    assert all(path.casefold().startswith(("eden\\", "o\\")) for path in paths)
+    assert all(path.casefold().startswith("o\\") for path in paths)
     assert all("test_desert\\" not in path.casefold() for path in paths)
 
 
-def test_desert_natural_land_semantics_all_use_stock_sand() -> None:
-    # OSM may still classify cells as grass, forest, farmland, parks or sports.
-    # In the Desert ground profile those semantics must not switch the WRP back
-    # to temperate green tiles. They retain their semantics while sharing sand.
+def test_desert_every_nonrock_semantic_uses_stock_sand() -> None:
+    # The WRP may still classify cells as forest, field, settlement, paved road,
+    # dirt road, gravel, park, sports ground, shoreline, etc. Those distinctions
+    # drive placement and reports, but must not produce coloured halos in Desert.
     sand = r"o\ps.paa"
-    natural_codes = {"w", "s", "g", "h", "f", "e", "a", "b", "c", "j", "y", "x"}
-    assert {DESERT_STOCK_SURFACE_TEXTURES[code] for code in natural_codes} == {sand}
+    rock_codes = {"r", "k"}
+    nonrock_codes = set(DESERT_STOCK_SURFACE_TEXTURES) - rock_codes
+    assert nonrock_codes
+    assert {DESERT_STOCK_SURFACE_TEXTURES[code] for code in nonrock_codes} == {sand}
 
 
-def test_desert_built_and_road_semantics_use_dry_earth() -> None:
-    # Urban/industrial/paved masks are exactly where the editor screenshot showed
-    # the remaining green corridors. They must use dry earth, never Eden tn.paa.
-    earth = r"Eden\bak\bah.pac"
-    built_codes = {"u", "i", "p", "o", "d", "t", "v"}
-    assert {DESERT_STOCK_SURFACE_TEXTURES[code] for code in built_codes} == {earth}
+def test_desert_roads_and_buildings_have_sand_underlay() -> None:
+    sand = r"o\ps.paa"
+    # These are the exact semantic masks that previously formed green/earth halos
+    # around settlements and roads in the editor.
+    affected_codes = {"u", "i", "p", "o", "d", "t", "v"}
+    assert {DESERT_STOCK_SURFACE_TEXTURES[code] for code in affected_codes} == {sand}
 
 
-def test_desert_stock_palette_contains_no_temperate_green_or_field_tiles() -> None:
+def test_desert_stock_palette_contains_no_eden_or_temperate_field_tiles() -> None:
+    paths = {path.casefold() for path in DESERT_STOCK_SURFACE_TEXTURES.values()}
     forbidden = {
         r"eden\zbh.paa",
         r"eden\tn.paa",
+        r"eden\bak\bah.pac",
         r"o\pole1.paa",
         r"o\pole2.paa",
     }
-    assert not ({path.casefold() for path in DESERT_STOCK_SURFACE_TEXTURES.values()} & forbidden)
+    assert not (paths & forbidden)
+    assert all(not path.startswith("eden\\") for path in paths)
 
 
 def test_desert_external_dependencies_are_stock_and_deduplicated() -> None:
@@ -105,15 +110,10 @@ def test_desert_profile_suppresses_legacy_generated_texture_predicate() -> None:
     assert generated == ()
 
 
-def test_legacy_desert_ground_path_also_resolves_to_stock_texture() -> None:
+def test_legacy_desert_ground_path_also_resolves_to_stock_sand() -> None:
     install_stock_desert_surface_policy()
-    assert terrain.ground_texture_path("test_desert", "s", "desert") == r"o\ps.paa"
-    assert terrain.ground_texture_path("test_desert", "g", "desert") == r"o\ps.paa"
-    assert terrain.ground_texture_path("test_desert", "f", "desert") == r"o\ps.paa"
-    assert terrain.ground_texture_path("test_desert", "a", "desert") == r"o\ps.paa"
-    assert terrain.ground_texture_path("test_desert", "u", "desert") == r"Eden\bak\bah.pac"
-    assert terrain.ground_texture_path("test_desert", "p", "desert") == r"Eden\bak\bah.pac"
-    assert terrain.ground_texture_path("test_desert", "d", "desert") == r"Eden\bak\bah.pac"
+    for code in ("s", "g", "f", "a", "u", "p", "d"):
+        assert terrain.ground_texture_path("test_desert", code, "desert") == r"o\ps.paa"
 
 
 def test_non_desert_profile_keeps_normal_generator_identity() -> None:
