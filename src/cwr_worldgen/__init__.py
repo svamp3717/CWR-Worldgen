@@ -26,6 +26,9 @@ from .model import HeightmapSpec, OsmSpec, PlayabilitySpec, WorldSpec
 from .stock_utility_policy import install_stock_utility_policy as _install_stock_utility_policy
 
 _install_stock_utility_policy()
+from .barn_clutter_policy import install_barn_clutter_policy as _install_barn_clutter_policy
+
+_install_barn_clutter_policy()
 from .road_quality_policy import install_road_quality_policy as _install_road_quality_policy
 
 _install_road_quality_policy()
