@@ -204,7 +204,7 @@ def test_stock_asset_geometry_matches_measured_original_p3d() -> None:
         - bridge_render._STOCK_ROADWAY_LOCAL_Y_METRES
         - 0.06644439697265625
     ) < 1e-12
-    assert bridge_render._BRIDGE_WORLD_DOWNWARD_OFFSET_METRES == 1.0
+    assert bridge_render._BRIDGE_WORLD_DOWNWARD_OFFSET_METRES == 0.8
     assert (
         bridge_render._osm.NOGOVA_BRIDGE_MODULE_LENGTH_METRES
         == bridge_render._STOCK_MODULE_SPACING_METRES
@@ -225,7 +225,7 @@ def test_model_origin_is_lowered_by_stock_visible_deck_local_height() -> None:
     ) < 1e-12
 
 
-def test_stock_bridge_chain_visible_deck_is_one_metre_below_bank_elevations() -> None:
+def test_stock_bridge_chain_visible_deck_uses_tuned_downward_offset() -> None:
     spec = _Spec(procedural_bridges=False, bridge_module_length=50.0)
     raster = _dry_raster(spec)
     modules = tuple(
