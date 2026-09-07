@@ -2,14 +2,14 @@
 """Keep explicit bridges over mapped water on coarse CWA terrain grids.
 
 A short OSM ``bridge=yes`` can cross real mapped water even when a coarse WRP
-terrain grid has no sampled vertex below nominal sea level. The historical
+terrain grid has no sampled vertex below nominal sea level.  The historical
 terrain-only bridge test then downgraded the crossing to an ordinary road, while
 CWA's tide could still cover that road in game.
 
 This policy gives the terrain solver, stock-road fitter, bridge renderer and
-underlay cleanup one shared fallback: source-backed mapped water. Terrain below
+underlay cleanup one shared fallback: source-backed mapped water.  Terrain below
 sea level remains the primary signal; mapped water only fills the coarse-grid
-blind spot. It also raises ordinary road/causeway fallback above the same
+blind spot.  It also raises ordinary road/causeway fallback above the same
 5.5-metre tide-safe floor used by stock bridges.
 """
 from __future__ import annotations
@@ -115,6 +115,13 @@ def _point_on_segment(point: PointXZ, start: PointXZ, end: PointXZ) -> bool:
     ax, az = start
     bx, bz = end
     dx, dz = bx - ax, bz - az
+    length2 = dx * dx + dz * dz
+    # GeoJSON rings are normally explicitly closed, so the first ray-cast edge
+    # can be a zero-length last->first segment.  Treat only the actual coincident
+    # point as on that degenerate edge; otherwise every point would appear to be
+    # on every closed ring, which is an impressively efficient way to erase lakes.
+    if length2 <= 1.0e-14:
+        return math.hypot(px - ax, pz - az) <= 1.0e-7
     cross = (px - ax) * dz - (pz - az) * dx
     tolerance = 1.0e-7 * max(1.0, math.hypot(dx, dz))
     if abs(cross) > tolerance:
@@ -122,7 +129,7 @@ def _point_on_segment(point: PointXZ, start: PointXZ, end: PointXZ) -> bool:
     dot = (px - ax) * dx + (pz - az) * dz
     if dot < -tolerance:
         return False
-    return dot <= dx * dx + dz * dz + tolerance
+    return dot <= length2 + tolerance
 
 
 def _point_in_ring(point: PointXZ, ring: Sequence[PointXZ]) -> bool:
@@ -269,7 +276,7 @@ def _source_aware_water_test(
     cells: int,
     cell_size: float,
     sea_level: float,
-    width: float,
+    width: float = 6.0,
 ) -> bool:
     if _ORIGINAL_WATER_TEST(
         points,
@@ -422,7 +429,7 @@ def install_bridge_source_water_policy() -> None:
     _terrain.solve_terrain_constraints = source_aware_solve
 
     # If a crossing is intentionally rendered as an ordinary road/causeway, its
-    # terrain floor must also clear CWA's tide range. The previous 0.35 m floor
+    # terrain floor must also clear CWA's tide range.  The previous 0.35 m floor
     # was only safe for a static nominal water plane.
     _terrain.ROAD_WATER_MINIMUM_CLEARANCE_METRES = max(
         float(_terrain.ROAD_WATER_MINIMUM_CLEARANCE_METRES),
