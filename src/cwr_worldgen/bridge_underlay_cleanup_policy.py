@@ -19,8 +19,15 @@ _INSTALLED = False
 
 @dataclass(frozen=True, slots=True)
 class _BridgeSpan:
+    # Straight emitted bridge chord.
     points: tuple[tuple[float, float], ...]
     road_width: float
+    # Original OSM/fitted-road polyline and the along-range replaced by the
+    # emitted bridge. The stock bridge is straight, while the source road can
+    # bow several metres away from that chord.
+    source_points: tuple[tuple[float, float], ...] = ()
+    source_start_measure: float = 0.0
+    source_end_measure: float = 0.0
 
 
 def _undirected_heading_difference(first: float, second: float) -> float:
@@ -88,7 +95,7 @@ def _feature_needs_bridge(
 
 
 def _bridge_spans(dataset, projection, elevations, spec) -> tuple[_BridgeSpan, ...]:
-    """Reproduce the exact wet-only stock bridge corridor used by non-road output."""
+    """Reproduce the emitted bridge and source-road interval it replaces."""
 
     if not bool(getattr(spec, "bridges_enabled", True)):
         return ()
@@ -127,18 +134,69 @@ def _bridge_spans(dataset, projection, elevations, spec) -> tuple[_BridgeSpan, .
         # If the narrow centreline sampler cannot resolve a wet interval but the
         # core width-aware water test can, retain the historical full candidate
         # corridor rather than remove no underlay at all.
-        span_points = plan.points if plan is not None else points
+        span_points = tuple(plan.points) if plan is not None else points
         required = plan.module_count if plan is not None else len(source_chunks)
         if required > bridge_limit - used_objects:
             continue
         used_objects += required
+
+        source_start = 0.0
+        source_end = sum(
+            math.dist(start, end) for start, end in zip(points, points[1:])
+        )
+        if plan is not None:
+            # The emitted stock chain is a straight chord. Project both chord
+            # ends back onto the source road so cleanup can remove the curved
+            # duplicate road even when it bows several metres away from the
+            # bridge centreline.
+            first = _nearest_polyline_measure(points, span_points[0])[2]
+            second = _nearest_polyline_measure(points, span_points[-1])[2]
+            source_start, source_end = sorted((first, second))
+
         spans.append(
             _BridgeSpan(
-                points=tuple(span_points),
+                points=span_points,
                 road_width=max(6.0, _osm.road_width_metres(feature.tags)),
+                source_points=points,
+                source_start_measure=source_start,
+                source_end_measure=source_end,
             )
         )
     return tuple(spans)
+
+
+def _road_matches_interval(
+    obj,
+    points: tuple[tuple[float, float], ...],
+    road_width: float,
+    start_measure: float,
+    end_measure: float | None,
+) -> bool:
+    if len(points) < 2:
+        return False
+    distance, heading, along, total = _nearest_polyline_measure(
+        points, (float(obj.x), float(obj.z))
+    )
+    lower = max(0.0, float(start_measure))
+    upper = total if end_measure is None else min(total, float(end_measure))
+    if upper <= lower + 1.0e-9:
+        return False
+
+    endpoint_keep = min(_ENDPOINT_KEEP_METRES, (upper - lower) * 0.02)
+    if along <= lower + endpoint_keep or along >= upper - endpoint_keep:
+        return False
+
+    # Keep this narrow because the second check below follows the original
+    # bridge-tagged source road exactly. Nearby parallel roads should survive.
+    corridor = max(1.25, float(road_width) * 0.40)
+    if distance > corridor:
+        return False
+    if (
+        _undirected_heading_difference(obj.heading_degrees, heading)
+        > _ALIGNMENT_TOLERANCE_DEGREES
+    ):
+        return False
+    return True
 
 
 def _road_object_under_bridge(obj, spans: tuple[_BridgeSpan, ...]) -> bool:
@@ -148,24 +206,34 @@ def _road_object_under_bridge(obj, spans: tuple[_BridgeSpan, ...]) -> bool:
         return False
 
     for span in spans:
-        distance, heading, along, total = _nearest_polyline_measure(
-            span.points, (float(obj.x), float(obj.z))
-        )
-        endpoint_keep = min(_ENDPOINT_KEEP_METRES, total * 0.02)
-        if along <= endpoint_keep or along >= total - endpoint_keep:
-            continue
-        # Only the actual emitted bridge corridor is suppressed.  The dry
-        # prefix/suffix of a long bridge-tagged OSM way therefore remains normal
-        # fitted road all the way toward the stock bridge abutment.
-        corridor = max(1.25, span.road_width * 0.40)
-        if distance > corridor:
-            continue
-        if (
-            _undirected_heading_difference(obj.heading_degrees, heading)
-            > _ALIGNMENT_TOLERANCE_DEGREES
+        # First remove anything directly beneath the emitted straight stock
+        # bridge. This catches the common straight-road case.
+        if _road_matches_interval(
+            obj,
+            span.points,
+            span.road_width,
+            0.0,
+            None,
         ):
-            continue
-        return True
+            return True
+
+        # The stock bridge is a straight chord but the fitted OSM road can curve
+        # several metres away from it. Remove the matching source-road pieces only
+        # over the along-range actually replaced by the emitted bridge. This is
+        # what prevents a second curved road from surviving underwater while dry
+        # approach road outside the bridge remains intact.
+        if (
+            span.source_points
+            and span.source_end_measure > span.source_start_measure
+            and _road_matches_interval(
+                obj,
+                span.source_points,
+                span.road_width,
+                span.source_start_measure,
+                span.source_end_measure,
+            )
+        ):
+            return True
     return False
 
 
@@ -204,7 +272,7 @@ def _fit(
     if removed and progress_callback is not None:
         progress_callback(
             99,
-            f"Removed {removed:,} ordinary road piece(s) underneath emitted bridge footprints",
+            f"Removed {removed:,} ordinary road piece(s) underneath emitted bridge/source spans",
         )
     return cleaned
 
