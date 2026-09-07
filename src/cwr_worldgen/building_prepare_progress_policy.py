@@ -216,6 +216,15 @@ def install_building_prepare_progress_policy() -> None:
 
     install_bridge_render_policy()
 
+    # The in-game tuning offset is applied after approach-height safety clamping.
+    # On low shorelines that could put the rendered deck below sea level. Raise
+    # the pre-tuning approach floor so the final tuned deck always clears water.
+    from .bridge_water_deck_clamp_policy import (
+        install_bridge_water_deck_clamp_policy,
+    )
+
+    install_bridge_water_deck_clamp_policy()
+
     # Building placement was planned before the final road chain existed. Record
     # that post-dedupe road report and apply a bounded final-footprint correction
     # only when non-road objects are emitted. This must wrap the dedupe fitter,
