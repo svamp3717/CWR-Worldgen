@@ -9,9 +9,9 @@ embankment beneath it.
 
 This policy keeps tide-safe causeways for genuinely ordinary water crossings, but
 for explicit mapped-water bridges it reopens a coarse-grid water channel beneath
-the stock span after terrain solving.  It also runs the terrain solver with the
-same stock-bridge spec used by rendering so procedural bridge-underfill never
-fires on a bridge that will actually be emitted as a stock object.
+the actual mapped wet interval after terrain solving.  It also runs the terrain
+solver with the same stock-bridge spec used by rendering so procedural bridge
+underfill never fires on a bridge that will actually be emitted as a stock object.
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def _explicit_bridge(feature) -> bool:
 
 
 def _coarse_source_bridge_channels(dataset, projection, elevations, spec):
-    """Return stock-plan centre samples whose mapped water is missed by terrain."""
+    """Return mapped wet centres for stock bridges missed by coarse terrain."""
     context = _source._make_context(dataset, projection)
     channels: list[tuple[tuple[float, float], tuple[float, float]]] = []
 
@@ -73,7 +73,10 @@ def _coarse_source_bridge_channels(dataset, projection, elevations, spec):
 
         token = _source._CONTEXT.set(context)
         try:
-            plan = _source._mapped_water_stock_plan(
+            # Use the final installed stock-plan chain, including connected-road
+            # endpoint extension. The water opening still belongs at the mapped
+            # wet interval, not beneath every bridge module sitting on dry bank.
+            plan = _bridge.stock_bridge_span_plan(
                 points,
                 elevations,
                 _bridge._stock_bridge_spec(spec),
@@ -90,13 +93,11 @@ def _coarse_source_bridge_channels(dataset, projection, elevations, spec):
         if length <= 0.1:
             continue
         axis = (dx / length, dz / length)
-        for index in range(plan.module_count):
-            fraction = (index + 0.5) / plan.module_count
-            centre = (
-                float(start[0]) + dx * fraction,
-                float(start[1]) + dz * fraction,
-            )
-            channels.append((centre, axis))
+        wet_centre = (
+            (float(plan.wet_start[0]) + float(plan.wet_end[0])) * 0.5,
+            (float(plan.wet_start[1]) + float(plan.wet_end[1])) * 0.5,
+        )
+        channels.append((wet_centre, axis))
     return tuple(channels)
 
 
@@ -105,7 +106,7 @@ def _nearest_crossing_vertices(
     axis: tuple[float, float],
     spec,
 ) -> tuple[int, ...]:
-    """Choose the nearest terrain-vertex row crossing the bridge centre."""
+    """Choose the nearest terrain-vertex row crossing the mapped wet centre."""
     cell = float(spec.cell_size)
     fx = max(0.0, min(float(spec.cells - 1), float(centre[0]) / cell))
     fz = max(0.0, min(float(spec.cells - 1), float(centre[1]) / cell))
@@ -131,16 +132,16 @@ def _nearest_crossing_vertices(
         )
 
     candidates.sort()
-    # Two vertices are enough to make one coarse terrain row cross the road
-    # without sinking the next road segment beyond the stock bridge end.
+    # Two vertices make one coarse row cross the road. Do not lower the next
+    # terrain row merely because a second stock module extends onto dry land.
     return tuple(item[2] for item in candidates[:2])
 
 
 def _water_target(spec) -> float:
     depth = max(0.35, float(getattr(spec, "water_depth", 0.35) or 0.35))
     # A roughly three-metre centre channel keeps the interpolated shoreline
-    # inside a 50 m stock bridge on the usual 50 m terrain grid. Going to the
-    # full five-metre bed can move the shoreline beyond the bridge abutment.
+    # inside a stock bridge on the usual 50 m terrain grid. Going to the full
+    # five-metre bed can move the shoreline beyond the bridge abutment.
     return float(spec.sea_level) - min(3.0, depth)
 
 
@@ -176,10 +177,16 @@ def _reopen_bridge_water(report, elevations, dataset, projection, spec):
 
 
 def install_bridge_or_causeway_terrain_policy() -> None:
-    """Ensure an emitted stock bridge keeps water instead of a filled causeway."""
+    """Ensure an emitted stock bridge keeps water and reaches real road ends."""
     global _INSTALLED, _ORIGINAL_SOLVE
     if _INSTALLED:
         return
+
+    # Horizontal stock span selection must know the real connected road on both
+    # banks before this terrain wrapper decides where the water opening belongs.
+    from .bridge_road_connection_policy import install_bridge_road_connection_policy
+
+    install_bridge_road_connection_policy()
 
     _ORIGINAL_SOLVE = _terrain.solve_terrain_constraints
 
