@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -65,6 +66,42 @@ def test_cleanup_keeps_parallel_road_outside_narrow_bridge_corridor() -> None:
 
     assert removed == 1
     assert tuple(obj.object_id for obj in cleaned.objects) == (2,)
+
+
+def test_cleanup_removes_curved_source_road_that_bows_away_from_straight_bridge() -> None:
+    source = ((0.0, 0.0), (50.0, 8.0), (100.0, 0.0))
+    source_length = sum(
+        math.dist(start, end) for start, end in zip(source, source[1:])
+    )
+    span = cleanup._BridgeSpan(
+        points=((0.0, 0.0), (100.0, 0.0)),
+        road_width=6.0,
+        source_points=source,
+        source_start_measure=0.0,
+        source_end_measure=source_length,
+    )
+
+    # This is 8 m from the emitted straight bridge chord, so the old cleanup
+    # missed it. It lies exactly on the original curved bridge-tagged road.
+    curved_underlay = WorldObject(
+        1, r"o\road\sil25.p3d", 50.0, -4.9, 8.0, 81.0
+    )
+    # A separate parallel road outside the narrow source-road corridor survives.
+    parallel = WorldObject(
+        2, r"o\road\sil25.p3d", 50.0, 0.0, 12.0, 81.0
+    )
+    # An at-grade crossing on the same point also survives because its heading
+    # does not match the replaced source road.
+    crossing = WorldObject(
+        3, r"o\road\sil25.p3d", 50.0, 0.0, 8.0, 0.0
+    )
+
+    cleaned, removed = cleanup._remove_bridge_underlays(
+        _report(curved_underlay, parallel, crossing), (span,)
+    )
+
+    assert removed == 1
+    assert tuple(obj.object_id for obj in cleaned.objects) == (2, 3)
 
 
 def test_cleanup_preserves_dry_approach_roads_outside_emitted_bridge_span() -> None:
@@ -142,6 +179,8 @@ def test_bridge_spans_use_same_wet_only_stock_plan_as_bridge_renderer() -> None:
     assert len(spans) == 1
     assert spans[0].points == plan.points
     assert spans[0].points != points
+    assert spans[0].source_points == points
+    assert spans[0].source_start_measure < spans[0].source_end_measure
 
 
 def test_bridge_object_budget_uses_clipped_stock_module_count() -> None:
