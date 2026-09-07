@@ -259,3 +259,10 @@ def install_bridge_water_deck_clamp_policy() -> None:
     _bridge._dry_approach_height = _safe_dry_approach_height
     _bridge.stock_bridge_span_plan = _tide_safe_stock_bridge_span_plan
     _INSTALLED = True
+
+    # Explicit bridges over narrow mapped water can be missed entirely by a
+    # coarse WRP terrain grid. Install the shared source-water fallback only
+    # after the tide-safe stock-plan wrapper above is authoritative.
+    from .bridge_source_water_policy import install_bridge_source_water_policy
+
+    install_bridge_source_water_policy()
