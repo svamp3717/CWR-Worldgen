@@ -146,8 +146,12 @@ def _water_target(spec) -> float:
 
 
 def _reopen_bridge_water(report, elevations, dataset, projection, spec):
+    # Plan against the solved pre-reopen terrain, the same surface the road
+    # fitter and later bridge renderer will see. Using raw DEM elevations here
+    # can choose different approach endpoints and reopen water under the wrong
+    # stock span.
     channels = _coarse_source_bridge_channels(
-        dataset, projection, elevations, spec
+        dataset, projection, report.elevations, spec
     )
     if not channels:
         return report
