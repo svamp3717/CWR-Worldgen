@@ -266,3 +266,12 @@ def install_bridge_water_deck_clamp_policy() -> None:
     from .bridge_source_water_policy import install_bridge_source_water_policy
 
     install_bridge_source_water_policy()
+
+    # Stock bridges and terrain causeways are mutually exclusive.  Install this
+    # after source-water detection so it can preserve the mapped channel beneath
+    # an emitted bridge while leaving tide-safe causeways available elsewhere.
+    from .bridge_or_causeway_terrain_policy import (
+        install_bridge_or_causeway_terrain_policy,
+    )
+
+    install_bridge_or_causeway_terrain_policy()
