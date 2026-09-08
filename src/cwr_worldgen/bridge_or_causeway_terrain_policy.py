@@ -192,6 +192,13 @@ def install_bridge_or_causeway_terrain_policy() -> None:
 
     install_bridge_road_connection_policy()
 
+    # Once bridge endpoints come from actual connected roads, finish the job:
+    # cancel the legacy 0.7 m deck lowering at those sampled road heights and
+    # remove ordinary road centres across the full measured stock-bridge width.
+    from .bridge_final_alignment_policy import install_bridge_final_alignment_policy
+
+    install_bridge_final_alignment_policy()
+
     _ORIGINAL_SOLVE = _terrain.solve_terrain_constraints
 
     @wraps(_ORIGINAL_SOLVE)
