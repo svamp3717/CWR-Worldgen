@@ -21,11 +21,26 @@ import math
 
 from . import bridge_render_policy as _bridge
 from . import bridge_source_water_policy as _source
+from . import bridge_water_deck_clamp_policy as _clamp
 from . import osm as _osm
 from . import terrain_solver as _terrain
 
 _INSTALLED = False
 _ORIGINAL_SOLVE = None
+
+
+def _empirically_lowered_pre_tuning_height(height: float, spec) -> float:
+    """Restore the tested 0.7 m lowering while retaining the tide-safe floor.
+
+    ``bridge_final_alignment_policy`` currently returns an approach height with
+    the bridge render offset already added back, so the renderer's later
+    subtraction cancels the old in-game tuning.  Remove that compensation here.
+    Low-bank bridges still reserve one render offset above the final 5.5 m tide
+    floor so applying the renderer offset cannot put the deck back under water.
+    """
+    offset = float(_bridge._BRIDGE_WORLD_DOWNWARD_OFFSET_METRES)
+    minimum_pre_tuning = float(_clamp._minimum_final_deck(spec)) + offset
+    return max(float(height) - offset, minimum_pre_tuning)
 
 
 def _explicit_bridge(feature) -> bool:
@@ -192,12 +207,31 @@ def install_bridge_or_causeway_terrain_policy() -> None:
 
     install_bridge_road_connection_policy()
 
-    # Once bridge endpoints come from actual connected roads, finish the job:
-    # cancel the legacy 0.7 m deck lowering at those sampled road heights and
-    # remove ordinary road centres across the full measured stock-bridge width.
+    # Once bridge endpoints come from actual connected roads, retain the tested
+    # 0.7 m downward visual tuning while keeping the tide-safe low-bank floor and
+    # full-width ordinary-road cleanup.
     from .bridge_final_alignment_policy import install_bridge_final_alignment_policy
 
     install_bridge_final_alignment_policy()
+
+    final_approach_height = _bridge._dry_approach_height
+
+    @wraps(final_approach_height)
+    def empirically_lowered_approach_height(
+        endpoint, outward, raster, elevations, spec
+    ):
+        height = final_approach_height(
+            endpoint,
+            outward,
+            raster,
+            elevations,
+            spec,
+        )
+        if height is None:
+            return None
+        return _empirically_lowered_pre_tuning_height(height, spec)
+
+    _bridge._dry_approach_height = empirically_lowered_approach_height
 
     _ORIGINAL_SOLVE = _terrain.solve_terrain_constraints
 
