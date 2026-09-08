@@ -199,15 +199,6 @@ def install_bridge_or_causeway_terrain_policy() -> None:
 
     install_bridge_final_alignment_policy()
 
-    # The deck can be vertically correct and still expose a wall-like bridge
-    # corner when the fitted road arrives at a different heading. Replace the
-    # straight-only abutment filler with stock 10-degree tangent transitions.
-    from .bridge_tangent_transition_policy import (
-        install_bridge_tangent_transition_policy,
-    )
-
-    install_bridge_tangent_transition_policy()
-
     _ORIGINAL_SOLVE = _terrain.solve_terrain_constraints
 
     @wraps(_ORIGINAL_SOLVE)
