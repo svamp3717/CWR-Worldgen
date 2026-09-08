@@ -49,15 +49,17 @@ def test_tinybjorsund_submerged_road_chain_is_removed_beneath_bridge() -> None:
     assert {obj.object_id for obj in cleaned.objects} == {2000}
 
 
-def test_cleanup_keeps_parallel_road_outside_narrow_bridge_corridor() -> None:
+def test_cleanup_keeps_parallel_road_outside_stock_bridge_footprint() -> None:
     span = cleanup._BridgeSpan(
         points=((0.0, 0.0), (100.0, 0.0)), road_width=6.0
     )
     underlay = WorldObject(
         1, r"o\road\sil25.p3d", 50.0, 0.0, 0.0, 90.0
     )
+    # The stock bridge itself reaches roughly 6.64 m from centre. A genuinely
+    # separate parallel road beyond that physical footprint must still survive.
     parallel = WorldObject(
-        2, r"o\road\sil25.p3d", 50.0, 0.0, 4.0, 90.0
+        2, r"o\road\sil25.p3d", 50.0, 0.0, 7.5, 90.0
     )
 
     cleaned, removed = cleanup._remove_bridge_underlays(
