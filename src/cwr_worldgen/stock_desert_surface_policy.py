@@ -135,7 +135,7 @@ def _stock_desert_terrain_texture_path(
         try:
             return DESERT_STOCK_SURFACE_TEXTURES[str(material_code)]
         except KeyError as exc:
-            raise ValueError(f"unknown Desert terrain material code: {material_code}") from exc
+            raise ValueError(f"unknown Desert terrain material code: {material_code!r}") from exc
     return _ORIGINAL_TERRAIN_GROUND_TEXTURE_PATH(world_name, material_code, profile)
 
 
@@ -172,9 +172,10 @@ def install_stock_desert_surface_policy() -> None:
 
     _INSTALLED = True
 
-    # Runways are a dedicated stock terrain material. Install this only after the
-    # Desert wrapper owns the final ground-path helpers so the runway policy can
-    # extend both ordinary and Desert stock tables without wrapper-order races.
+    # Runway artwork is also stock O.pbo data, but arbitrary OSM bearings cannot
+    # be represented by RVW4's unrotatable terrain texture indices. Install the
+    # oriented runway P3D overlay after Desert owns the final terrain profile so
+    # grass/desert model variants select the correct verified stock texture set.
     from .runway_surface_policy import install_runway_surface_policy
 
     install_runway_surface_policy()
