@@ -171,3 +171,10 @@ def install_stock_desert_surface_policy() -> None:
     _generator.ground_texture_path = _stock_desert_terrain_texture_path
 
     _INSTALLED = True
+
+    # Runways are a dedicated stock terrain material. Install this only after the
+    # Desert wrapper owns the final ground-path helpers so the runway policy can
+    # extend both ordinary and Desert stock tables without wrapper-order races.
+    from .runway_surface_policy import install_runway_surface_policy
+
+    install_runway_surface_policy()
