@@ -14,11 +14,13 @@ from cwr_worldgen.runway_model_policy import (
     GRASS_RUNWAY_END_TEXTURE,
     GRASS_RUNWAY_MIDDLE_TEXTURE,
     GRASS_RUNWAY_START_TEXTURE,
+    RUNWAY_TEXTURE_TILE_METRES,
     _runway_lods,
     runway_model_path,
     runway_texture_triplet,
 )
 from cwr_worldgen.runway_surface_policy import (
+    _runway_tile_plan,
     install_runway_surface_policy,
     runway_overlay_objects,
 )
@@ -77,35 +79,36 @@ def test_runway_uses_verified_nogova_middle_and_end_textures() -> None:
     assert DESERT_RUNWAY_END_TEXTURE == r"o\runpi_k.paa"
 
 
-def test_grass_runway_uv_rotates_stock_east_west_artwork_onto_model_axis() -> None:
-    visual = _runway_lods("grass", 50.0, 250.0)[0]
-    assert [face.texture for face in visual.faces] == [
-        GRASS_RUNWAY_START_TEXTURE,
-        GRASS_RUNWAY_MIDDLE_TEXTURE,
-        GRASS_RUNWAY_END_TEXTURE,
-    ]
-    start_face = visual.faces[0]
-    middle_face = visual.faces[1]
-    # Moving from local -Z to +Z changes U, not V: a 90-degree UV rotation.
-    assert start_face.vertices[0][2:] == (0.0, 0.0)
-    assert start_face.vertices[1][2:] == (1.0, 0.0)
-    # 250 m runway = 50 m west cap + 150 m repeated middle + 50 m east cap.
-    assert middle_face.vertices[1][2:] == (3.0, 0.0)
+def test_grass_runway_tile_rotates_stock_east_west_artwork_onto_model_axis() -> None:
+    visual = _runway_lods("grass", "d")[0]
+    assert [face.texture for face in visual.faces] == [GRASS_RUNWAY_MIDDLE_TEXTURE]
+    face = visual.faces[0]
+    # Moving from local -Z to +Z changes U, not V: the required 90-degree UV turn.
+    assert face.vertices[0][2:] == (0.0, 0.0)
+    assert face.vertices[1][2:] == (1.0, 0.0)
 
 
-def test_desert_runway_keeps_stock_south_north_uv_axis() -> None:
-    visual = _runway_lods("desert", 50.0, 250.0)[0]
-    assert [face.texture for face in visual.faces] == [
-        DESERT_RUNWAY_START_TEXTURE,
-        DESERT_RUNWAY_MIDDLE_TEXTURE,
-        DESERT_RUNWAY_END_TEXTURE,
-    ]
-    start_face = visual.faces[0]
-    assert start_face.vertices[0][2:] == (0.0, 0.0)
-    assert start_face.vertices[1][2:] == (0.0, 1.0)
+def test_desert_runway_tile_keeps_stock_south_north_uv_axis() -> None:
+    visual = _runway_lods("desert", "d")[0]
+    assert [face.texture for face in visual.faces] == [DESERT_RUNWAY_MIDDLE_TEXTURE]
+    face = visual.faces[0]
+    assert face.vertices[0][2:] == (0.0, 0.0)
+    assert face.vertices[1][2:] == (0.0, 1.0)
 
 
-def test_runway_overlay_rotates_with_osm_bearing_and_uses_generated_model() -> None:
+def test_runway_tile_plan_is_gapless_and_uses_z_d_k_roles() -> None:
+    # 120 m cannot be represented by exact 50 m stock tiles. Cover it with three
+    # adjacent 50 m tiles and split the 30 m excess equally over the two ends.
+    plan = _runway_tile_plan(((80.0, 20.0), (80.0, 140.0)), "everon")
+    assert [role for role, _start, _end in plan] == ["z", "d", "k"]
+    assert len(plan) == 3
+    for (_role_a, _start_a, end_a), (_role_b, start_b, _end_b) in zip(plan, plan[1:]):
+        assert end_a == pytest.approx(start_b, abs=1.0e-7)
+    assert plan[0][1] == pytest.approx((80.0, 5.0), abs=1.0e-7)
+    assert plan[-1][2] == pytest.approx((80.0, 155.0), abs=1.0e-7)
+
+
+def test_runway_overlay_rotates_each_stock_tile_with_osm_bearing() -> None:
     projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 160.0)
     dataset = _runway_dataset(projection)
     spec = _spec("everon")
@@ -116,43 +119,84 @@ def test_runway_overlay_rotates_with_osm_bearing_and_uses_generated_model() -> N
         spec,
         starting_id=700,
     )
-    assert len(objects) == 1
-    runway = objects[0]
-    assert runway.object_id == 700
-    assert runway.heading_degrees == pytest.approx(0.0, abs=1.0e-6)
-    assert runway.model_path == runway_model_path("wg_runway", "everon", 120.0)
-    assert runway.model_path.endswith(r"\i\runway_grass_w500_l1200.p3d")
+    assert len(objects) == 3
+    assert [obj.object_id for obj in objects] == [700, 701, 702]
+    assert [obj.heading_degrees for obj in objects] == pytest.approx([0.0, 0.0, 0.0], abs=1.0e-6)
+    assert [obj.model_path for obj in objects] == [
+        runway_model_path("wg_runway", "everon", "z"),
+        runway_model_path("wg_runway", "everon", "d"),
+        runway_model_path("wg_runway", "everon", "k"),
+    ]
+    assert [obj.z for obj in objects] == pytest.approx([30.0, 80.0, 130.0], abs=1.0e-6)
+    assert RUNWAY_TEXTURE_TILE_METRES == 50.0
+
+
+def test_grass_end_roles_are_west_to_east_even_for_reversed_osm_way() -> None:
+    projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 160.0)
+    dataset = _runway_dataset(projection, start=(140.0, 80.0), end=(20.0, 80.0))
+    spec = _spec("everon")
+    objects = runway_overlay_objects(
+        dataset,
+        projection,
+        (10.0,) * (spec.cells * spec.cells),
+        spec,
+    )
+    assert [obj.model_path.rsplit("\\", 1)[-1] for obj in objects] == [
+        "runway_grass_z.p3d",
+        "runway_grass_d.p3d",
+        "runway_grass_k.p3d",
+    ]
+    assert [obj.heading_degrees for obj in objects] == pytest.approx([90.0, 90.0, 90.0], abs=1.0e-6)
+    assert [obj.x for obj in objects] == pytest.approx([30.0, 80.0, 130.0], abs=1.0e-6)
 
 
 def test_desert_end_roles_are_south_to_north_even_for_reversed_osm_way() -> None:
     projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 160.0)
     dataset = _runway_dataset(projection, start=(80.0, 140.0), end=(80.0, 20.0))
     spec = _spec("desert")
-    runway = runway_overlay_objects(
+    objects = runway_overlay_objects(
         dataset,
         projection,
         (10.0,) * (spec.cells * spec.cells),
         spec,
-    )[0]
-    # The source way is north->south, but runpi_z is the south cap and runpi_k
-    # the north cap, so the generated model is deliberately oriented south->north.
-    assert runway.heading_degrees == pytest.approx(0.0, abs=1.0e-6)
-    assert runway.model_path.endswith(r"\i\runway_desert_w500_l1200.p3d")
+    )
+    assert [obj.model_path.rsplit("\\", 1)[-1] for obj in objects] == [
+        "runway_desert_z.p3d",
+        "runway_desert_d.p3d",
+        "runway_desert_k.p3d",
+    ]
+    assert [obj.heading_degrees for obj in objects] == pytest.approx([0.0, 0.0, 0.0], abs=1.0e-6)
+    assert [obj.z for obj in objects] == pytest.approx([30.0, 80.0, 130.0], abs=1.0e-6)
 
 
-def test_runway_generated_asset_contains_all_three_stock_textures(tmp_path) -> None:
+def test_short_runway_uses_one_middle_tile_instead_of_overlapping_end_caps() -> None:
+    plan = _runway_tile_plan(((20.0, 50.0), (50.0, 50.0)), "everon")
+    assert len(plan) == 1
+    assert plan[0][0] == "d"
+    assert plan[0][1] == pytest.approx((10.0, 50.0), abs=1.0e-7)
+    assert plan[0][2] == pytest.approx((60.0, 50.0), abs=1.0e-7)
+
+
+def test_runway_generated_assets_reference_each_stock_role_texture(tmp_path) -> None:
     install_runway_surface_policy()
     library = generator.ProceduralInfrastructureLibrary(
         "wg_runway", cache_enabled=False
     )
-    model = runway_model_path("wg_runway", "everon", 250.0)
-    library.register_model(model)
+    for role in ("z", "d", "k"):
+        library.register_model(runway_model_path("wg_runway", "everon", role))
     catalogue = tmp_path / "infrastructure.json"
     result = library.write_assets(tmp_path, catalogue)
-    assert result.generated_variants == 1
-    p3d = tmp_path / "i" / "runway_grass_w500_l2500.p3d"
-    payload = p3d.read_bytes()
-    for texture in runway_texture_triplet("everon"):
+    assert result.generated_variants == 3
+
+    expected = {
+        "z": GRASS_RUNWAY_START_TEXTURE,
+        "d": GRASS_RUNWAY_MIDDLE_TEXTURE,
+        "k": GRASS_RUNWAY_END_TEXTURE,
+    }
+    for role, texture in expected.items():
+        p3d = tmp_path / "i" / f"runway_grass_{role}.p3d"
+        assert p3d.is_file()
+        payload = p3d.read_bytes()
         assert texture.encode("ascii") in payload
 
 
@@ -164,13 +208,13 @@ def test_line_runway_is_not_left_as_unrotatable_wrp_terrain_texture() -> None:
     assert not mask.any()
 
 
-def test_runway_policy_invalidates_sideways_terrain_cache() -> None:
+def test_runway_policy_invalidates_sideways_and_single_model_surface_cache() -> None:
     install_runway_surface_policy()
     payload = {"world": "runway-test"}
     assert generator.cache_key(
         "surface-pipeline-v11-vectorized-material-pass",
         payload,
     ) == raw_cache_key(
-        "surface-pipeline-v15-oriented-runway-models",
+        "surface-pipeline-v16-oriented-runway-tiles",
         payload,
     )
