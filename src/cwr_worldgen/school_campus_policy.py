@@ -2,19 +2,19 @@
 """Keep generic buildings inside mapped school campuses out of the barn fallback.
 
 OSM commonly maps the school grounds as ``amenity=school, building=no`` and the
-individual classroom blocks as plain ``building=yes``.  Normalization
+individual classroom blocks as plain ``building=yes``. Normalization
 intentionally does not replace those physical building tags with ``building=school``
 because a campus may also contain explicitly typed garages, sheds, warehouses,
-etc.  The unfortunate side effect is that a large generic rural classroom block
+etc. The unfortunate side effect is that a large generic rural classroom block
 then satisfies the procedural modeler's oversized-building heuristic and becomes
 a barn.
 
-This policy preserves that distinction.  Generic physical footprints whose
+This policy preserves that distinction. Generic physical footprints whose
 representative point lies inside a polygonal school campus receive the neutral
-``building:use=school`` semantic hint.  Their original ``building=yes`` and lack
-of a direct ``amenity=school`` tag remain intact.  Both CWR's base family chooser
+``building:use=school`` semantic hint. Their original ``building=yes`` and lack
+of a direct ``amenity=school`` tag remain intact. Both CWR's base family chooser
 and the house-modeler classifier understand the hint before size-based rural
-fallbacks run.  Explicit auxiliary building types remain authoritative.
+fallbacks run. Explicit auxiliary building types remain authoritative.
 """
 from __future__ import annotations
 
@@ -54,10 +54,12 @@ def _candidate_accepts_school_hint(properties: Mapping[str, Any], normalization)
 
     # Reconstruct enough OSM-style tags to detect explicit shop, worship or
     # social-facility meaning already attached to an otherwise generic shell.
+    # Candidate properties also contain lists such as source_ids, so avoid set
+    # membership tests on arbitrary values here.
     semantic_tags = {
         str(key): str(value)
         for key, value in properties.items()
-        if value not in {None, ""}
+        if value is not None and value != ""
     }
     semantic_tags["building"] = building_kind or "yes"
     existing_semantic = normalization._semantic_building_kind(semantic_tags)
@@ -92,7 +94,7 @@ def _install_normalization_hint() -> None:
 
     _ORIGINAL_NORMALIZE_BUILDINGS = normalization._normalize_buildings
     # Existing schema-20 bundles were normalized before this semantic hint
-    # existed.  Force one rebuild so a fixed executable cannot silently reuse
+    # existed. Force one rebuild so a fixed executable cannot silently reuse
     # the old building metadata forever.
     normalization.NORMALIZED_SCHEMA_VERSION = max(
         int(normalization.NORMALIZED_SCHEMA_VERSION),
