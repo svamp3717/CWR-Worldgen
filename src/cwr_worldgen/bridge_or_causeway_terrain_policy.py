@@ -196,14 +196,34 @@ def _coarse_source_bridge_channels(dataset, projection, elevations, spec):
         if len(cleaned) < 2:
             continue
         for wet_start_distance, wet_end_distance in intervals:
-            wet_start = _source._point_at(
+            source_start = _source._point_at(
                 cleaned, cumulative, wet_start_distance
             )
-            wet_end = _source._point_at(
+            source_end = _source._point_at(
                 cleaned, cumulative, wet_end_distance
             )
-            if math.dist(wet_start, wet_end) <= 0.05:
+            start_projection = (
+                (float(source_start[0]) - float(start[0])) * axis[0]
+                + (float(source_start[1]) - float(start[1])) * axis[1]
+            )
+            end_projection = (
+                (float(source_end[0]) - float(start[0])) * axis[0]
+                + (float(source_end[1]) - float(start[1])) * axis[1]
+            )
+            wet_min = max(0.0, min(start_projection, end_projection))
+            wet_max = min(length, max(start_projection, end_projection))
+            if wet_max <= wet_min + 0.05:
                 continue
+            # Terrain repair belongs under the straight rendered stock chain,
+            # not beside it if the source bridge polyline curves slightly.
+            wet_start = (
+                float(start[0]) + axis[0] * wet_min,
+                float(start[1]) + axis[1] * wet_min,
+            )
+            wet_end = (
+                float(start[0]) + axis[0] * wet_max,
+                float(start[1]) + axis[1] * wet_max,
+            )
             channels.append((wet_start, wet_end, axis))
     return tuple(channels)
 
@@ -296,12 +316,16 @@ def _reopen_bridge_water(report, elevations, dataset, projection, spec):
 
     values = list(report.elevations)
     target = _water_target(spec)
+    epsilon = float(getattr(_osm, "BRIDGE_WATER_EPSILON_METRES", 0.05))
+    dry_floor = float(spec.sea_level) - epsilon
     touched: set[int] = set()
     for wet_start, wet_end, axis in channels:
         for index in _wet_interval_crossing_vertices(
             wet_start, wet_end, axis, spec
         ):
-            if values[index] > target:
+            # Preserve terrain that is already genuinely underwater.  The repair
+            # exists to remove causeway fill, not to deepen valid source water.
+            if values[index] >= dry_floor:
                 values[index] = target
                 touched.add(index)
 
