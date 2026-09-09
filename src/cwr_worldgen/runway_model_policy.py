@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Generate rotatable runway surface models from stock Resistance artwork.
+"""Generate rotatable 50 m runway tiles from stock Resistance artwork.
 
 RVW4 terrain cells only store a texture-table index; they do not carry a per-cell
-UV rotation.  The Nogova runway artwork is cardinally authored, so writing
+UV rotation. The Nogova runway artwork is cardinally authored, so writing
 ``o\\runtr_d.paa`` directly into arbitrary OSM runway cells necessarily leaves the
 painted runway pointing the wrong way whenever the OSM bearing differs from the
 stock island.
 
-Use a very thin generated MLOD surface instead.  The P3D can rotate with the OSM
-runway object and can rotate/repeat the stock texture through UV coordinates.
-Nothing from O.pbo is copied into the generated world: the model keeps external
-references to the verified stock ``o\\runtr_*`` / ``o\\runpi_*`` textures.
+Use thin generated MLOD tiles instead. Each P3D rotates with its OSM runway
+segment and can rotate the stock texture through UV coordinates. Nothing from
+O.pbo is copied into the generated world: the models keep external references to
+the verified stock ``o\\runtr_*`` / ``o\\runpi_*`` textures.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ _VISUAL_LOD = 1.0
 _LAND_CONTACT_LOD = 2.0e15
 _ROADWAY_LOD = 3.0e15
 _RUNWAY_PATTERN = re.compile(
-    r"^runway_(grass|desert)_w(\d+)_l(\d+)\.p3d$", re.IGNORECASE
+    r"^runway_(grass|desert)_([dzk])\.p3d$", re.IGNORECASE
 )
 _INSTALLED = False
 
@@ -65,114 +65,67 @@ def runway_texture_triplet(profile: object) -> tuple[str, str, str]:
     )
 
 
-def runway_model_path(
-    world_name: str,
-    profile: object,
-    length_metres: float,
-    *,
-    width_metres: float = RUNWAY_MODEL_WIDTH_METRES,
-) -> str:
-    """Return a deterministic world-local model path for one straight runway."""
-    width_dm = max(10, int(round(float(width_metres) * 10.0)))
-    length_dm = max(10, int(round(float(length_metres) * 10.0)))
-    return (
-        rf"{world_name}\i\runway_{runway_family(profile)}_"
-        rf"w{width_dm}_l{length_dm}.p3d"
-    )
+def runway_texture_for_role(profile: object, role: str) -> str:
+    role = str(role).strip().casefold()
+    textures = runway_texture_triplet(profile)
+    try:
+        return {"z": textures[0], "d": textures[1], "k": textures[2]}[role]
+    except KeyError as exc:
+        raise ValueError(f"unknown runway tile role: {role!r}") from exc
 
 
-def _runway_face(
-    texture: str,
-    point_start: int,
-    *,
-    axial_repeats: float,
-    family: str,
-) -> _Face:
+def runway_model_path(world_name: str, profile: object, role: str) -> str:
+    """Return the reusable world-local P3D path for one runway tile role."""
+    role = str(role).strip().casefold()
+    if role not in {"z", "d", "k"}:
+        raise ValueError(f"unknown runway tile role: {role!r}")
+    return rf"{world_name}\i\runway_{runway_family(profile)}_{role}.p3d"
+
+
+def _runway_face(texture: str, *, family: str) -> _Face:
     """Map the stock cardinal texture so its runway axis follows local +Z."""
-    repeat = max(1.0e-6, float(axial_repeats))
     if family == "grass":
-        # runtr_* is authored west/east: its U axis is the runway axis.  Mapping
-        # U onto model Z is the 90-degree UV rotation missing from RVW4 terrain.
-        uvs = ((0.0, 0.0), (repeat, 0.0), (repeat, 1.0), (0.0, 1.0))
+        # runtr_* is authored west/east: U is the runway axis. Mapping U onto
+        # model Z is the 90-degree UV rotation RVW4 terrain cannot express.
+        uvs = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
     else:
-        # runpi_* is authored south/north: its V axis already is the runway axis.
-        uvs = ((0.0, 0.0), (0.0, repeat), (1.0, repeat), (1.0, 0.0))
+        # runpi_* is authored south/north: V already is the runway axis.
+        uvs = ((0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0))
     return _Face(
         texture,
-        tuple((point_start + index, 0, uv[0], uv[1]) for index, uv in enumerate(uvs)),
+        tuple((index, 0, uv[0], uv[1]) for index, uv in enumerate(uvs)),
     )
 
 
-def _runway_lods(family: str, width_metres: float, length_metres: float) -> tuple[_Lod, ...]:
-    """Build one straight runway with stock start/middle/end texture sections."""
+def _runway_lods(
+    family: str,
+    role: str,
+    width_metres: float = RUNWAY_MODEL_WIDTH_METRES,
+    length_metres: float = RUNWAY_TEXTURE_TILE_METRES,
+) -> tuple[_Lod, ...]:
+    """Build one stock-sized runway tile with Visual/Roadway/LandContact LODs."""
     family = runway_family(family)
+    role = str(role).strip().casefold()
     width = max(1.0, float(width_metres))
     length = max(1.0, float(length_metres))
     half_width = width * 0.5
     half_length = length * 0.5
-    start_texture, middle_texture, end_texture = runway_texture_triplet(family)
+    texture = runway_texture_for_role(family, role)
 
-    # The stock end-cap artwork occupies one 50 m terrain tile.  Long runways
-    # keep exactly one cap at each end and repeat runtr_d/runpi_d through the
-    # middle.  Tiny synthetic/test runways split the available length between the
-    # two end caps instead of overlapping faces.
-    if length <= RUNWAY_TEXTURE_TILE_METRES:
-        sections = ((-half_length, half_length, middle_texture, 1.0),)
-    elif length < RUNWAY_TEXTURE_TILE_METRES * 2.0:
-        midpoint = 0.0
-        sections = (
-            (-half_length, midpoint, start_texture, 1.0),
-            (midpoint, half_length, end_texture, 1.0),
-        )
-    else:
-        first_end = -half_length + RUNWAY_TEXTURE_TILE_METRES
-        last_start = half_length - RUNWAY_TEXTURE_TILE_METRES
-        middle_length = max(0.0, last_start - first_end)
-        sections = (
-            (-half_length, first_end, start_texture, 1.0),
-            (
-                first_end,
-                last_start,
-                middle_texture,
-                max(1.0, middle_length / RUNWAY_TEXTURE_TILE_METRES),
-            ),
-            (last_start, half_length, end_texture, 1.0),
-        )
-
-    visual_points: list[tuple[float, float, float]] = []
-    visual_faces: list[_Face] = []
-    for z0, z1, texture, repeats in sections:
-        point_start = len(visual_points)
-        # Same winding as the generated gravel road ribbon: left start, left end,
-        # right end, right start.  Local +Z is the runway's forward direction.
-        visual_points.extend((
-            (-half_width, 0.0, z0),
-            (-half_width, 0.0, z1),
-            (half_width, 0.0, z1),
-            (half_width, 0.0, z0),
-        ))
-        visual_faces.append(
-            _runway_face(
-                texture,
-                point_start,
-                axial_repeats=repeats,
-                family=family,
-            )
-        )
-
-    visual = _Lod(
-        tuple(visual_points),
-        ((0.0, 1.0, 0.0),),
-        tuple(visual_faces),
-        _VISUAL_LOD,
-        properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
-    )
-
+    # Same winding as the generated gravel road ribbon: left start, left end,
+    # right end, right start. Local +Z is the runway's canonical forward axis.
     plane_points = (
         (-half_width, 0.0, -half_length),
         (-half_width, 0.0, half_length),
         (half_width, 0.0, half_length),
         (half_width, 0.0, -half_length),
+    )
+    visual = _Lod(
+        plane_points,
+        ((0.0, 1.0, 0.0),),
+        (_runway_face(texture, family=family),),
+        _VISUAL_LOD,
+        properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
     )
     roadway = _Lod(
         plane_points,
@@ -184,13 +137,8 @@ def _runway_lods(family: str, width_metres: float, length_metres: float) -> tupl
     return visual, roadway, land
 
 
-def write_runway_mlod(
-    path: Path,
-    family: str,
-    width_metres: float,
-    length_metres: float,
-) -> None:
-    lods = _runway_lods(family, width_metres, length_metres)
+def write_runway_mlod(path: Path, family: str, role: str) -> None:
+    lods = _runway_lods(family, role)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as stream:
         stream.write(_MLOD_HEADER.pack(b"MLOD", 1, 1, 0, len(lods)))
@@ -203,7 +151,7 @@ class RunwayInfrastructureLibrary(_BaseInfrastructureLibrary):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._runway_usage: Counter[tuple[str, int, int]] = Counter()
+        self._runway_usage: Counter[tuple[str, str]] = Counter()
 
     def register_model_usage(self, model_path: str, count: int = 1) -> None:
         count = max(0, int(count))
@@ -213,8 +161,8 @@ class RunwayInfrastructureLibrary(_BaseInfrastructureLibrary):
             filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
             match = _RUNWAY_PATTERN.fullmatch(filename)
             if match:
-                family, width_dm, length_dm = match.groups()
-                self._runway_usage[(family.casefold(), int(width_dm), int(length_dm))] += count
+                family, role = match.groups()
+                self._runway_usage[(family.casefold(), role.casefold())] += count
                 return
         super().register_model_usage(model_path, count)
 
@@ -226,35 +174,27 @@ class RunwayInfrastructureLibrary(_BaseInfrastructureLibrary):
         runway_models: list[dict[str, object]] = []
         runway_files: list[str] = []
         runway_placements = sum(self._runway_usage.values())
-        for (family, width_dm, length_dm), usage_count in sorted(self._runway_usage.items()):
-            wire = (
-                rf"{self.world_name}\i\runway_{family}_"
-                rf"w{width_dm}_l{length_dm}.p3d"
-            )
+        for (family, role), usage_count in sorted(self._runway_usage.items()):
+            wire = rf"{self.world_name}\i\runway_{family}_{role}.p3d"
             relative = wire.split("\\", 1)[1].replace("\\", "/")
             destination = source_dir / relative
-            write_runway_mlod(
-                destination,
-                family,
-                width_dm / 10.0,
-                length_dm / 10.0,
-            )
+            write_runway_mlod(destination, family, role)
             summary = inspect_mlod(destination)
             if not any(math.isclose(value, _ROADWAY_LOD, rel_tol=1.0e-6) for value in summary.resolutions):
                 raise ValueError("generated runway lost its Roadway LOD")
             runway_models.append({
                 "key": {
                     "kind": "runway",
-                    "subtype": family,
-                    "width_dm": width_dm,
-                    "length_dm": length_dm,
+                    "subtype": f"{family}_{role}",
+                    "width_dm": int(round(RUNWAY_MODEL_WIDTH_METRES * 10.0)),
+                    "length_dm": int(round(RUNWAY_TEXTURE_TILE_METRES * 10.0)),
                 },
                 "model_path": wire,
                 "relative_path": relative,
                 "usage_count": usage_count,
                 "sha256": sha256(destination.read_bytes()).hexdigest(),
                 "lod_resolutions": summary.resolutions,
-                "stock_textures": runway_texture_triplet(family),
+                "stock_texture": runway_texture_for_role(family, role),
             })
             runway_files.append(relative)
 
