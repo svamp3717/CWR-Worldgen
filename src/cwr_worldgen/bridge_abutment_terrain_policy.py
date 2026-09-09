@@ -3,12 +3,19 @@
 
 CWA's tide can cover nominally dry two- or three-metre shoreline terrain. The
 bridge itself must still be planned from real water, so do not solve that visual
-road-to-bridge gap by extending the stock bridge inland. Instead, after mapped
+road-to-bridge gap by extending or moving the stock bridge. Instead, after mapped
 water has been reopened, grade the single coarse terrain cell containing each low
-but nominally dry bridge endpoint to the tide-safe ordinary-road ground level.
+but nominally dry bridge endpoint to a raised ordinary-road approach level.
+
+The approach terrain gets an additional 0.85 m lift. This is deliberately a
+terrain/road correction only: bridge position, pitch, length and module alignment
+are left untouched. Test22 showed both endpoint terrain cells at about 5.45 m and
+the first ordinary road pieces at about 5.48 m, leaving the stock bridge deck
+visually roughly a metre above the road. The extra lift brings the approach into
+the requested 0.7-1.0 m correction range.
 
 The whole four-vertex support cell is flattened, rather than merely raising low
-corners. On a 50 m WRP grid, leaving one seven-metre corner beside three 5.5 m
+corners. On a 50 m WRP grid, leaving one seven-metre corner beside three lower
 corners creates a bilinear terrain ramp that can cut directly through the stock
 bridge deck even though the bridge modules themselves are perfectly joined.
 
@@ -32,6 +39,11 @@ from . import terrain_solver as _terrain
 _INSTALLED = False
 _ORIGINAL_SOLVE = None
 _PLAN_CACHE: dict[tuple[object, ...], object] = {}
+
+# Empirical road-side correction from atinybridgetest22. Keep this on the
+# terrain side of the bridge/road joint so stock bridge transforms remain
+# completely unchanged.
+_ROAD_APPROACH_RAISE_METRES = 0.85
 
 
 def _plan_key(points, spec) -> tuple[object, ...]:
@@ -77,13 +89,13 @@ def _endpoint_cell_vertices(point, spec) -> tuple[int, ...]:
 
 
 def _abutment_ground_target(spec) -> float:
-    """Return terrain height that puts an ordinary stock-road surface at deck level."""
+    """Return the raised terrain level for the ordinary-road bridge approach."""
     deck = float(_clamp._minimum_final_deck(spec))
     road_offset = max(
         0.0,
         float(getattr(_osm, "NOGOVA_BRIDGE_APPROACH_OFFSET_METRES", 0.0)),
     )
-    return deck - road_offset
+    return deck - road_offset + _ROAD_APPROACH_RAISE_METRES
 
 
 def _explicit_bridge_plans(dataset, projection, elevations, spec):
@@ -151,14 +163,13 @@ def _raise_bridge_abutments(report, dataset, projection, spec):
             )
             # Do not turn genuinely underwater bridge endpoints into causeways.
             # High banks also remain untouched. This pass exists only for the
-            # low nominally-dry bank cell that CWA tide would otherwise flood.
+            # low nominally-dry bank cell that CWA tide would otherwise flood or
+            # leave visibly below the fixed stock bridge deck.
             if ground < nominal_dry_floor or ground >= target - 1.0e-6:
                 continue
 
-            # Grade all four support vertices to one road-ground plane. Raising
-            # only the low corners leaves any existing high corner in place; the
-            # resulting bilinear ramp can poke through the bridge deck, exactly
-            # as seen in atinybridgetest21.
+            # Grade all four support vertices to one road-ground plane. This
+            # raises the road approach without changing any bridge transform.
             for index in _endpoint_cell_vertices(endpoint, spec):
                 if abs(float(values[index]) - target) > 1.0e-7:
                     values[index] = target
@@ -175,7 +186,7 @@ def _raise_bridge_abutments(report, dataset, projection, spec):
 
 
 def install_bridge_abutment_terrain_policy() -> None:
-    """Apply one-cell tide-safe road grading after bridge-water reopening."""
+    """Apply one-cell raised road grading after bridge-water reopening."""
     global _INSTALLED, _ORIGINAL_SOLVE
     if _INSTALLED:
         return
