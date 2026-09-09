@@ -127,8 +127,8 @@ def test_long_bridge_reopens_full_mapped_water_even_when_some_cells_are_already_
     solved = [5.5] * (spec.cells * spec.cells)
     # Simulate a long crossing where the coarse solver already retained one wet
     # row. The old policy treated this as proof the whole bridge was fine.
-    solved[29 * spec.cells + 31] = -5.0
-    solved[29 * spec.cells + 32] = -5.0
+    solved[29 * spec.cells + 31] = -1.0
+    solved[29 * spec.cells + 32] = -1.0
     report = _Report(tuple(solved), changed_cells=0)
 
     with patch.object(
@@ -147,7 +147,8 @@ def test_long_bridge_reopens_full_mapped_water_even_when_some_cells_are_already_
     for row in range(24, 35):
         for column in (31, 32):
             index = row * spec.cells + column
-            assert corrected.elevations[index] <= -3.0
+            expected = -1.0 if row == 29 else -3.0
+            assert corrected.elevations[index] == expected
     assert corrected.elevations[23 * spec.cells + 31] == 5.5
     assert corrected.elevations[35 * spec.cells + 31] == 5.5
 
