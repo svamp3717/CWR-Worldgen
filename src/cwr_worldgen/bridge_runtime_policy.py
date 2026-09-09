@@ -1,16 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Install the complete stock-bridge policy chain used by real builds.
 
-Bridge length is water-authoritative.  A coarse CWA terrain grid can still leave
+Bridge length is water-authoritative. A coarse CWA terrain grid can still leave
 the ordinary road at a bridge abutment only two or three metres above nominal sea
-level, which is flooded by the game's roughly five-metre tide.  That is an
+level, which is flooded by the game's roughly five-metre tide. That is an
 approach-terrain problem, not a reason to turn hundreds of metres of dry road into
 bridge modules.
 
-The terrain policy therefore keeps the wet-only stock span and raises only the
-single coarse terrain cell supporting each low, nominally dry bridge abutment.
-The planner reuses the pre-raise wet span so that this small embankment cannot
-make the next bridge-planning pass shorten the bridge again.
+The terrain policy therefore keeps the wet-only stock span and grades only the
+single coarse terrain cell supporting each low, nominally dry bridge abutment to
+the ordinary-road ground level corresponding to the tide-safe deck. The planner
+reuses the pre-grade wet span so this small embankment cannot make the next
+bridge-planning pass shorten the bridge again.
 """
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ _INSTALLED = False
 
 
 def _runtime_stock_bridge_span_plan(points, elevations, spec):
-    """Use the pre-abutment-fill wet span when available, otherwise plan normally."""
+    """Use the pre-abutment-grade wet span when available, otherwise plan normally."""
     from . import bridge_abutment_terrain_policy as _abutment
     from . import bridge_source_water_policy as _source
 
@@ -29,7 +30,7 @@ def _runtime_stock_bridge_span_plan(points, elevations, spec):
 
 
 def install_bridge_runtime_policy() -> None:
-    """Install bridge policies and finish with wet-only, raised-road approaches."""
+    """Install bridge policies and finish with wet-only, graded-road approaches."""
     global _INSTALLED
     if _INSTALLED:
         return
@@ -64,8 +65,8 @@ def install_bridge_runtime_policy() -> None:
 
     install_bridge_or_causeway_terrain_policy()
 
-    # This outer terrain wrapper raises only the immediate low road abutment cell
-    # after mapped water has been restored, and remembers the pre-fill wet span.
+    # This outer terrain wrapper grades only the immediate low road abutment cell
+    # after mapped water has been restored, and remembers the pre-grade wet span.
     from .bridge_abutment_terrain_policy import (
         install_bridge_abutment_terrain_policy,
     )
@@ -84,9 +85,10 @@ def install_bridge_runtime_policy() -> None:
     _source._ORIGINAL_STOCK_PLAN = base_wet_plan
     _bridge.stock_bridge_span_plan = _runtime_stock_bridge_span_plan
 
-    # Test20 used the v4 maximum-tide span extender and can otherwise replay its
-    # 23-module bridge from the persistent build cache.
+    # Test21 used the raise-only abutment pass. Its cached terrain can contain a
+    # high support corner that produces a bilinear ramp through the terminal
+    # bridge deck, so force a fresh solve with the flat-cell grader.
     from . import build_cache_policy as _build_cache
 
-    _build_cache.BUILD_CACHE_REVISION = "v5-wet-bridge-raised-road-abutments"
+    _build_cache.BUILD_CACHE_REVISION = "v6-flat-road-bridge-abutments"
     _INSTALLED = True
