@@ -1,16 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Render OSM runways with the stock CWA/Resistance runway terrain textures.
+"""Render OSM runway centre-lines as oriented stock-texture surface models.
 
-The normalized source pipeline already preserves ``aeroway=runway`` centreline
-ways and their mapped widths. Milestone 9 historically merged those cells into
-the generic paved-aeroway mask, so generated WRP files used ordinary road ground
-artwork and a crossing service road could overwrite the runway entirely.
+RVW4 terrain cells contain only a texture-table index.  They cannot rotate one
+terrain texture per cell, which is why the verified Nogova ``runtr_d`` artwork
+appeared ninety degrees wrong on a north/south OSM runway.
 
-Runways get a dedicated one-character terrain material. Grass-family presets use
-the Resistance/Nogova ``o\\runtr_d.paa`` texture while the Desert preset uses
-``o\\runpi_d.paa``. These paths are taken directly from the stock Nogova
-``noe.wrp`` texture table rather than inferred from the texture basenames.
-Taxiways and aprons remain on the existing paved material.
+Keep the ordinary terrain underneath the airport and place one thin generated
+runway P3D over each OSM runway centre-line.  The model owns UV orientation and
+therefore rotates cleanly with the OSM bearing.  It also uses the verified stock
+end caps: runtr_z/runtr_k for grass-family worlds and runpi_z/runpi_k for Desert.
 """
 from __future__ import annotations
 
@@ -18,228 +16,194 @@ from dataclasses import replace
 import math
 from typing import Sequence
 
-import numpy as np
-from PIL import Image, ImageDraw
+from .runway_model_policy import (
+    DESERT_RUNWAY_END_TEXTURE,
+    DESERT_RUNWAY_MIDDLE_TEXTURE,
+    DESERT_RUNWAY_START_TEXTURE,
+    GRASS_RUNWAY_END_TEXTURE,
+    GRASS_RUNWAY_MIDDLE_TEXTURE,
+    GRASS_RUNWAY_START_TEXTURE,
+    RUNWAY_MODEL_WIDTH_METRES,
+    install_runway_model_policy,
+    runway_family,
+    runway_model_path,
+    runway_texture_triplet,
+)
 
 
-RUNWAY_MATERIAL_CODE = "n"
-GRASS_RUNWAY_TEXTURE = r"o\runtr_d.paa"
-DESERT_RUNWAY_TEXTURE = r"o\runpi_d.paa"
+# Compatibility names retained for callers/tests from the first runway pass.
+GRASS_RUNWAY_TEXTURE = GRASS_RUNWAY_MIDDLE_TEXTURE
+DESERT_RUNWAY_TEXTURE = DESERT_RUNWAY_MIDDLE_TEXTURE
+RUNWAY_SURFACE_OFFSET_METRES = 0.060
 _SURFACE_CACHE_V11 = "surface-pipeline-v11-vectorized-material-pass"
-_SURFACE_CACHE_V14 = "surface-pipeline-v14-nogova-runway-textures"
+_SURFACE_CACHE_V15 = "surface-pipeline-v15-oriented-runway-models"
 _INSTALLED = False
-_ORIGINAL_BUILD_SURFACE_PASS = None
+_ORIGINAL_FIT_ROAD_OBJECTS = None
 _ORIGINAL_CACHE_KEY = None
-_ORIGINAL_WRITE_SURFACE_TEXTURES = None
+_ORIGINAL_AEROWAY_MASK = None
 
 
 def runway_texture_for_profile(profile: object) -> str:
-    """Return the verified stock runway path for one ground preset."""
-    return (
-        DESERT_RUNWAY_TEXTURE
-        if str(profile or "").strip().casefold() == "desert"
-        else GRASS_RUNWAY_TEXTURE
-    )
+    """Return the repeating stock runway texture for one ground preset."""
+    return runway_texture_triplet(profile)[1]
 
 
-def _tagged_width_metres(feature, default: float = 36.0) -> float:
-    raw = feature.tags.get("width", "")
-    try:
-        value = float(str(raw or 0).replace(",", "."))
-    except (TypeError, ValueError):
-        value = 0.0
-    if not math.isfinite(value) or value <= 0.0:
-        value = default
-    return max(3.0, value)
+def _clean_projected_points(feature, projection) -> tuple[tuple[float, float], ...]:
+    points: list[tuple[float, float]] = []
+    for point in feature.points:
+        x, z = projection.to_world(point)
+        value = (float(x), float(z))
+        if not points or math.dist(points[-1], value) > 0.05:
+            points.append(value)
+    return tuple(points)
 
 
-def runway_mask(dataset, projection, cells: int) -> np.ndarray:
-    """Rasterize only mapped runway areas/centrelines onto the WRP cell grid."""
-    from . import surface_pass as surface
+def _canonical_runway_endpoints(
+    points: Sequence[tuple[float, float]],
+    profile: object,
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """Choose the stock end-cap direction independent of OSM node order.
 
-    resolution = int(cells) * 8
-    image = Image.new("L", (resolution, resolution), 0)
-    draw = ImageDraw.Draw(image)
-
-    for feature in dataset.aeroway_areas:
-        if feature.tags.get("aeroway", "").casefold() != "runway":
-            continue
-        surface._draw_polygon(draw, feature, projection, resolution, 255)
-
-    for feature in dataset.aeroway_lines:
-        if feature.tags.get("aeroway", "").casefold() != "runway":
-            continue
-        points = [projection.to_pixel(point, resolution) for point in feature.points]
-        if len(points) < 2:
-            continue
-        width_metres = _tagged_width_metres(feature)
-        width_pixels = max(
-            1,
-            int(round(width_metres / projection.world_size * resolution)),
-        )
-        draw.line(points, fill=255, width=width_pixels, joint="curve")
-
-    return surface._image_to_wrp_mask(image, int(cells), threshold=20)
+    Nogova names runtr_z/runtr_k are west/east ends.  The desert runpi_z/runpi_k
+    pair is south/north.  Canonicalising the chord before creating the object
+    keeps those end roles correct even when an OSM way happens to be digitised in
+    the reverse direction.
+    """
+    if len(points) < 2:
+        return None
+    first, last = points[0], points[-1]
+    if runway_family(profile) == "desert":
+        reverse = (last[1], last[0]) < (first[1], first[0])
+    else:
+        reverse = (last[0], last[1]) < (first[0], first[1])
+    return (last, first) if reverse else (first, last)
 
 
-def apply_runway_material_indices(
-    indices: Sequence[int],
+def runway_overlay_objects(
     dataset,
     projection,
-    raster,
     elevations: Sequence[float],
     spec,
-) -> tuple[int, ...]:
-    """Apply the dedicated runway material without overriding real surface water."""
-    from . import surface_pass as surface
+    *,
+    starting_id: int = 1,
+):
+    """Create one rotatable, terrain-following surface object per runway way."""
+    from . import playability as _playability
 
-    expected = int(spec.cells) * int(spec.cells)
-    if len(indices) != expected or len(elevations) != expected:
-        raise ValueError("runway surface grid size mismatch")
-
-    mask = runway_mask(dataset, projection, int(spec.cells))
-    if not np.any(mask):
-        return tuple(int(value) for value in indices)
-
-    water = (
-        np.asarray(raster.water, dtype=np.bool_)
-        & (
-            np.asarray(elevations, dtype=np.float64)
-            <= float(spec.sea_level) + 1.0e-7
+    objects = []
+    next_id = int(starting_id)
+    for feature in dataset.aeroway_lines:
+        if str(feature.tags.get("aeroway", "")).strip().casefold() != "runway":
+            continue
+        points = _clean_projected_points(feature, projection)
+        endpoints = _canonical_runway_endpoints(points, spec.ground_texture_profile)
+        if endpoints is None:
+            continue
+        start, end = endpoints
+        length = math.dist(start, end)
+        if length < 1.0:
+            continue
+        centre_x = (start[0] + end[0]) * 0.5
+        centre_z = (start[1] + end[1]) * 0.5
+        world_size = float(getattr(spec, "world_size", getattr(projection, "world_size", 0.0)))
+        if world_size > 0.0 and not (
+            0.0 <= centre_x < world_size and 0.0 <= centre_z < world_size
+        ):
+            continue
+        model_path = runway_model_path(
+            spec.name,
+            spec.ground_texture_profile,
+            length,
+            width_metres=RUNWAY_MODEL_WIDTH_METRES,
         )
-    )
-    buildings = np.asarray(raster.buildings, dtype=np.bool_)
-    selected = mask & (~water) & (~buildings)
-    if not np.any(selected):
-        return tuple(int(value) for value in indices)
-
-    result = np.asarray(indices, dtype=np.int16).copy()
-    result[selected] = int(surface.MATERIAL_INDEX[RUNWAY_MATERIAL_CODE])
-    return tuple(int(value) for value in result)
-
-
-def _install_runway_material() -> None:
-    from . import generator
-    from . import stock_desert_surface_policy as desert
-    from . import surface_pass as surface
-
-    if RUNWAY_MATERIAL_CODE not in surface.MATERIAL_INDEX:
-        material = surface.SurfaceMaterialDefinition(
-            RUNWAY_MATERIAL_CODE,
-            "runway",
-            (72, 72, 68),
-            GRASS_RUNWAY_TEXTURE,
+        objects.append(
+            _playability._road_object_on_slope(
+                next_id,
+                model_path,
+                start,
+                end,
+                elevations,
+                spec,
+                vertical_offset=RUNWAY_SURFACE_OFFSET_METRES,
+            )
         )
-        surface.MILESTONE9_MATERIALS = (*surface.MILESTONE9_MATERIALS, material)
-        surface.MATERIAL_INDEX = {
-            item.code: index
-            for index, item in enumerate(surface.MILESTONE9_MATERIALS)
-        }
-        # generator.py imports this tuple directly, so keep its module-level
-        # reference synchronized with the extended surface table.
-        generator.MILESTONE9_MATERIALS = surface.MILESTONE9_MATERIALS
-
-    stock_profiles = {
-        name: dict(paths)
-        for name, paths in surface.STOCK_SURFACE_TEXTURES.items()
-    }
-    for profile in ("generated", "everon", "nogova", "malden", "desert"):
-        paths = stock_profiles.setdefault(profile, {})
-        paths[RUNWAY_MATERIAL_CODE] = runway_texture_for_profile(profile)
-    surface.STOCK_SURFACE_TEXTURES = stock_profiles
-
-    # Desert's runtime policy performs its own exhaustive material-code lookup,
-    # so extend that stock table too.
-    desert_paths = dict(desert.DESERT_STOCK_SURFACE_TEXTURES)
-    desert_paths[RUNWAY_MATERIAL_CODE] = DESERT_RUNWAY_TEXTURE
-    desert.DESERT_STOCK_SURFACE_TEXTURES = desert_paths
+        next_id += 1
+    return tuple(objects)
 
 
 def install_runway_surface_policy() -> None:
-    """Install dedicated stock runway material handling exactly once."""
-    global _INSTALLED, _ORIGINAL_BUILD_SURFACE_PASS, _ORIGINAL_CACHE_KEY
-    global _ORIGINAL_WRITE_SURFACE_TEXTURES
+    """Install oriented runway models after the final road/surface wrappers."""
+    global _INSTALLED, _ORIGINAL_FIT_ROAD_OBJECTS, _ORIGINAL_CACHE_KEY
+    global _ORIGINAL_AEROWAY_MASK
     if _INSTALLED:
         return
 
     from . import generator
+    from . import playability
     from . import surface_pass as surface
 
-    _install_runway_material()
-    _ORIGINAL_BUILD_SURFACE_PASS = surface.build_surface_pass
+    install_runway_model_policy()
+    _ORIGINAL_FIT_ROAD_OBJECTS = generator.fit_road_objects
     _ORIGINAL_CACHE_KEY = generator.cache_key
-    _ORIGINAL_WRITE_SURFACE_TEXTURES = surface.write_surface_textures
+    _ORIGINAL_AEROWAY_MASK = surface._aeroway_mask
 
-    def build_surface_pass_with_runways(
+    def aeroway_mask_without_line_runways(dataset, projection, cells):
+        # The P3D contains its own grass/sand shoulders.  Leaving the historical
+        # generic paved runway underlay visible outside that 50 m stock tile
+        # produces a grey halo, so only line runways are removed here.  Aprons,
+        # taxiways and area-only runways retain the old paved fallback.
+        lines = tuple(
+            feature
+            for feature in dataset.aeroway_lines
+            if str(feature.tags.get("aeroway", "")).strip().casefold() != "runway"
+        )
+        if len(lines) == len(dataset.aeroway_lines):
+            return _ORIGINAL_AEROWAY_MASK(dataset, projection, cells)
+        filtered = replace(dataset, aeroway_lines=lines)
+        return _ORIGINAL_AEROWAY_MASK(filtered, projection, cells)
+
+    def fit_road_objects_with_runways(
         dataset,
         projection,
-        raster,
         elevations,
-        slopes,
         spec,
+        *,
+        starting_id: int = 1,
+        progress_callback=None,
     ):
-        report = _ORIGINAL_BUILD_SURFACE_PASS(
+        report = _ORIGINAL_FIT_ROAD_OBJECTS(
             dataset,
             projection,
-            raster,
             elevations,
-            slopes,
             spec,
+            starting_id=starting_id,
+            progress_callback=progress_callback,
         )
-        indices = apply_runway_material_indices(
-            report.indices,
+        next_id = max(
+            (int(obj.object_id) for obj in report.objects),
+            default=int(starting_id) - 1,
+        ) + 1
+        runways = runway_overlay_objects(
             dataset,
             projection,
-            raster,
             elevations,
             spec,
+            starting_id=next_id,
         )
-        return report if indices == report.indices else replace(report, indices=indices)
-
-    def write_surface_textures_with_runway_bookkeeping(
-        source_dir,
-        world_name,
-        profile,
-        seed,
-        size,
-    ):
-        paths = list(
-            _ORIGINAL_WRITE_SURFACE_TEXTURES(
-                source_dir,
-                world_name,
-                profile,
-                seed,
-                size,
-            )
-        )
-        # generator.py historically stages every material as a local file for
-        # generated/Malden profiles before it asks which WRP paths are external.
-        # The runway WRP entry is stock, but keep the expected unused n.paa in
-        # those two build trees so cache/PBO bookkeeping does not reference a
-        # file that the stock-texture skip deliberately omitted.
-        if str(profile or "").strip().casefold() in {"generated", "malden"}:
-            path = source_dir / "data" / f"{RUNWAY_MATERIAL_CODE}.paa"
-            if not path.is_file():
-                material = surface.MILESTONE9_MATERIALS[
-                    surface.MATERIAL_INDEX[RUNWAY_MATERIAL_CODE]
-                ]
-                surface.write_rgb_dxt1_paa(
-                    path,
-                    surface.create_surface_texture(material, seed, size),
-                )
-            if path not in paths:
-                paths.append(path)
-        return tuple(paths)
+        if not runways:
+            return report
+        return replace(report, objects=tuple((*report.objects, *runways)))
 
     def runway_cache_key(namespace: str, payload):
+        # v14 cached the sideways stock texture directly into WRP terrain cells.
+        # Force the ordinary surface pass to rebuild without that material before
+        # the oriented P3D overlay is emitted.
         if namespace == _SURFACE_CACHE_V11:
-            namespace = _SURFACE_CACHE_V14
+            namespace = _SURFACE_CACHE_V15
         return _ORIGINAL_CACHE_KEY(namespace, payload)
 
-    # Both modules hold direct references imported during package initialization.
-    surface.build_surface_pass = build_surface_pass_with_runways
-    generator.build_surface_pass = build_surface_pass_with_runways
-    surface.write_surface_textures = write_surface_textures_with_runway_bookkeeping
-    generator.write_surface_textures = write_surface_textures_with_runway_bookkeeping
+    surface._aeroway_mask = aeroway_mask_without_line_runways
+    generator.fit_road_objects = fit_road_objects_with_runways
+    playability.fit_road_objects = fit_road_objects_with_runways
     generator.cache_key = runway_cache_key
     _INSTALLED = True
