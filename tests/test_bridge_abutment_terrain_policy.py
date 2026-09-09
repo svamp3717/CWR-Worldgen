@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from cwr_worldgen import bridge_abutment_terrain_policy as policy
+from cwr_worldgen import bridge_render_policy as bridge
+
+
+@dataclass(frozen=True)
+class _Report:
+    elevations: tuple[float, ...]
+    changed_cells: int
+
+
+def _spec():
+    return SimpleNamespace(
+        cells=8,
+        cell_size=50.0,
+        sea_level=0.0,
+        water_depth=5.0,
+        world_size=400.0,
+    )
+
+
+def _plan():
+    return bridge.StockBridgeSpanPlan(
+        points=((75.0, 75.0), (275.0, 75.0)),
+        module_count=4,
+        wet_start=(90.0, 75.0),
+        wet_end=(260.0, 75.0),
+        wet_length=170.0,
+    )
+
+
+def test_low_nominally_dry_abutments_raise_only_endpoint_cells() -> None:
+    spec = _spec()
+    plan = _plan()
+    points = plan.points
+    report = _Report((2.0,) * (spec.cells * spec.cells), changed_cells=7)
+
+    policy._PLAN_CACHE.clear()
+    with patch.object(
+        policy,
+        "_explicit_bridge_plans",
+        return_value=((points, plan),),
+    ):
+        raised = policy._raise_bridge_abutments(
+            report,
+            None,
+            None,
+            spec,
+        )
+
+    expected = (
+        set(policy._endpoint_cell_vertices(plan.points[0], spec))
+        | set(policy._endpoint_cell_vertices(plan.points[1], spec))
+    )
+    assert len(expected) == 8
+    for index, value in enumerate(raised.elevations):
+        assert value == (5.5 if index in expected else 2.0)
+
+    assert raised.changed_cells == report.changed_cells + len(expected)
+    assert policy._cached_bridge_plan(points, spec) == plan
+    assert policy._cached_bridge_plan(tuple(reversed(points)), spec) == plan
+
+
+def test_genuinely_underwater_bridge_endpoint_is_not_filled() -> None:
+    spec = _spec()
+    plan = _plan()
+    points = plan.points
+    report = _Report((-1.0,) * (spec.cells * spec.cells), changed_cells=0)
+
+    policy._PLAN_CACHE.clear()
+    with patch.object(
+        policy,
+        "_explicit_bridge_plans",
+        return_value=((points, plan),),
+    ):
+        raised = policy._raise_bridge_abutments(
+            report,
+            None,
+            None,
+            spec,
+        )
+
+    assert raised == report
+    # The water-authoritative bridge plan is still retained for later rendering.
+    assert policy._cached_bridge_plan(points, spec) == plan
+
+
+def test_endpoint_cell_is_bounded_to_four_coarse_vertices() -> None:
+    spec = _spec()
+    indices = policy._endpoint_cell_vertices((123.0, 176.0), spec)
+    assert len(indices) == 4
+    assert set(indices) == {
+        3 * spec.cells + 2,
+        3 * spec.cells + 3,
+        4 * spec.cells + 2,
+        4 * spec.cells + 3,
+    }
