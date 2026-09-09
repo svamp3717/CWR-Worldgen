@@ -60,7 +60,8 @@ def test_low_nominally_dry_abutments_grade_only_endpoint_cells() -> None:
         | set(policy._endpoint_cell_vertices(plan.points[1], spec))
     )
     target = policy._abutment_ground_target(spec)
-    assert target == pytest.approx(5.465)
+    assert policy._ROAD_APPROACH_RAISE_METRES == pytest.approx(0.85)
+    assert target == pytest.approx(6.315)
     assert len(expected) == 8
     for index, value in enumerate(raised.elevations):
         assert value == pytest.approx(target if index in expected else 2.0)
@@ -68,6 +69,38 @@ def test_low_nominally_dry_abutments_grade_only_endpoint_cells() -> None:
     assert raised.changed_cells == report.changed_cells + len(expected)
     assert policy._cached_bridge_plan(points, spec) == plan
     assert policy._cached_bridge_plan(tuple(reversed(points)), spec) == plan
+
+
+def test_test22_height_is_raised_by_point_eight_five_metres() -> None:
+    spec = _spec()
+    plan = _plan()
+    points = plan.points
+    values = [9.0] * (spec.cells * spec.cells)
+    support = policy._endpoint_cell_vertices(plan.points[0], spec)
+
+    # atinybridgetest22 stores the endpoint terrain as 5.45 m after WRP
+    # quantization. Keep the bridge untouched and lift only its road support cell.
+    for index in support:
+        values[index] = 5.45
+    report = _Report(tuple(values), changed_cells=0)
+
+    policy._PLAN_CACHE.clear()
+    with patch.object(
+        policy,
+        "_explicit_bridge_plans",
+        return_value=((points, plan),),
+    ):
+        graded = policy._raise_bridge_abutments(
+            report,
+            None,
+            None,
+            spec,
+        )
+
+    target = policy._abutment_ground_target(spec)
+    assert target - 5.465 == pytest.approx(0.85)
+    for index in support:
+        assert graded.elevations[index] == pytest.approx(target)
 
 
 def test_mixed_high_corner_is_flattened_instead_of_cutting_through_bridge() -> None:
@@ -78,8 +111,8 @@ def test_mixed_high_corner_is_flattened_instead_of_cutting_through_bridge() -> N
     support = policy._endpoint_cell_vertices(plan.points[0], spec)
 
     # Model the test21 failure: one old bank corner remains high while the other
-    # support corners are low enough to require an abutment fill. Raising only
-    # the low corners would leave a bilinear ramp through the bridge deck.
+    # support corners are low enough to require an abutment fill. A single plane
+    # prevents the coarse terrain cell from forming a ramp through the bridge.
     for index in support:
         values[index] = 2.0
     values[support[0]] = 7.15
