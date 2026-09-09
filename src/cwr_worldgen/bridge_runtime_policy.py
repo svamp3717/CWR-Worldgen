@@ -7,14 +7,13 @@ level, which is flooded by the game's roughly five-metre tide. That is an
 approach-terrain problem, not a reason to turn hundreds of metres of dry road into
 bridge modules.
 
-The terrain policy therefore keeps the wet-only stock span and grades only the
-single coarse terrain cell supporting each low, nominally dry bridge abutment.
-The current road-side correction raises that approach terrain by 0.85 m while
-leaving all stock bridge transforms untouched. The road cleanup also retains the
-ordinary fitted road beneath the first stock bridge module at each end so coarse
-terrain cannot expose a grass patch through the terminal bridge piece. The
-planner reuses the pre-grade wet span so this small embankment cannot make the
-next bridge-planning pass shorten the bridge again.
+The terrain policy keeps the wet-only stock span and grades only the single coarse
+terrain cell supporting each low, nominally dry bridge abutment. The road-side
+correction raises that approach terrain by 0.85 m while leaving all stock bridge
+transforms untouched. The underlay policy explicitly synthesizes ordinary road
+pieces on the ground beneath the first stock bridge module at each end; it does
+not merely preserve road pieces that may not have been fitted there. The planner
+reuses the pre-grade wet span so this small embankment cannot shorten the bridge.
 """
 from __future__ import annotations
 
@@ -38,59 +37,37 @@ def install_bridge_runtime_policy() -> None:
     if _INSTALLED:
         return
 
-    # Rendering must capture the unwrapped OSM/generator functions first.
     from .bridge_render_policy import install_bridge_render_policy
-
     install_bridge_render_policy()
 
-    # Retain the tide-safe vertical deck sampler. Its historical horizontal
-    # extension is bypassed by the final planner below.
-    from .bridge_water_deck_clamp_policy import (
-        install_bridge_water_deck_clamp_policy,
-    )
-
+    from .bridge_water_deck_clamp_policy import install_bridge_water_deck_clamp_policy
     install_bridge_water_deck_clamp_policy()
 
-    # Underlay cleanup must precede final alignment, which wraps its road fitter
-    # and footprint test. Source-water then makes cleanup source-aware as well.
     from .bridge_underlay_cleanup_policy import install_bridge_underlay_cleanup_policy
-
     install_bridge_underlay_cleanup_policy()
 
     from .bridge_source_water_policy import install_bridge_source_water_policy
-
     install_bridge_source_water_policy()
 
-    # Install final alignment and the terrain pass that reopens mapped water.
-    from .bridge_or_causeway_terrain_policy import (
-        install_bridge_or_causeway_terrain_policy,
-    )
-
+    from .bridge_or_causeway_terrain_policy import install_bridge_or_causeway_terrain_policy
     install_bridge_or_causeway_terrain_policy()
 
-    # This outer terrain wrapper grades only the immediate low road abutment cell
-    # after mapped water has been restored, and remembers the pre-grade wet span.
-    from .bridge_abutment_terrain_policy import (
-        install_bridge_abutment_terrain_policy,
-    )
-
+    from .bridge_abutment_terrain_policy import install_bridge_abutment_terrain_policy
     install_bridge_abutment_terrain_policy()
 
     from . import bridge_render_policy as _bridge
     from . import bridge_source_water_policy as _source
     from . import bridge_water_deck_clamp_policy as _clamp
 
-    # Start source-water fallback directly from the original wet-only renderer,
-    # bypassing both historical dry-bank bridge extenders.
     base_wet_plan = _clamp._ORIGINAL_STOCK_BRIDGE_SPAN_PLAN
     if base_wet_plan is None:
         raise RuntimeError("bridge tide policy did not capture the wet stock planner")
     _source._ORIGINAL_STOCK_PLAN = base_wet_plan
     _bridge.stock_bridge_span_plan = _runtime_stock_bridge_span_plan
 
-    # Refit roads so the terminal-module underlays are present. Older cached
-    # road reports had those pieces deleted beneath the complete bridge span.
+    # Test26 proved that retaining terminal underlays was insufficient: the road
+    # fitter emitted no road objects inside either terminal bridge module. Force
+    # a fresh road fit with explicit terminal-mask synthesis.
     from . import build_cache_policy as _build_cache
-
-    _build_cache.BUILD_CACHE_REVISION = "v8-terminal-bridge-road-underlays"
+    _build_cache.BUILD_CACHE_REVISION = "v9-synthesized-terminal-bridge-road-underlays"
     _INSTALLED = True
