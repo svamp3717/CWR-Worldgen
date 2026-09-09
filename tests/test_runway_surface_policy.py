@@ -9,7 +9,6 @@ from cwr_worldgen.runway_surface_policy import (
     DESERT_RUNWAY_TEXTURE,
     GRASS_RUNWAY_TEXTURE,
     RUNWAY_MATERIAL_CODE,
-    _select_runway_texture_from_records,
     apply_runway_material_indices,
     install_runway_surface_policy,
 )
@@ -46,9 +45,12 @@ def _surface_spec(profile: str):
     )
 
 
-def test_runway_material_uses_requested_stock_texture_per_profile() -> None:
+def test_runway_material_uses_verified_nogova_stock_paths() -> None:
     install_runway_surface_policy()
     index = surface_pass.MATERIAL_INDEX[RUNWAY_MATERIAL_CODE]
+
+    assert GRASS_RUNWAY_TEXTURE == r"o\runtr_d.paa"
+    assert DESERT_RUNWAY_TEXTURE == r"o\runpi_d.paa"
 
     for profile in ("generated", "everon", "nogova", "malden"):
         paths = surface_pass.surface_texture_wire_paths("wg_runway", profile)
@@ -60,29 +62,6 @@ def test_runway_material_uses_requested_stock_texture_per_profile() -> None:
     assert desert_paths[index] == DESERT_RUNWAY_TEXTURE
     assert DESERT_RUNWAY_TEXTURE in surface_pass.external_surface_texture_paths("desert")
     assert generator._ground_texture_paths(_surface_spec("desert"))[index] == DESERT_RUNWAY_TEXTURE
-
-
-def test_runway_texture_resolver_uses_actual_scanned_paa_or_pac_path() -> None:
-    assert _select_runway_texture_from_records(
-        "everon",
-        (SimpleNamespace(path=r"data\runtr_d.pac"),),
-    ) == r"data\runtr_d.pac"
-    assert _select_runway_texture_from_records(
-        "desert",
-        (SimpleNamespace(path=r"data\runpi_d.pac"),),
-    ) == r"data\runpi_d.pac"
-    assert _select_runway_texture_from_records(
-        "everon",
-        (SimpleNamespace(path=r"custom_prefix\runtr_d.paa"),),
-    ) == r"custom_prefix\runtr_d.paa"
-
-
-def test_runway_texture_resolver_prefers_paa_when_both_are_available() -> None:
-    records = (
-        SimpleNamespace(path=r"data\runtr_d.pac"),
-        SimpleNamespace(path=r"data\runtr_d.paa"),
-    )
-    assert _select_runway_texture_from_records("nogova", records) == GRASS_RUNWAY_TEXTURE
 
 
 def test_runway_overlay_replaces_generic_paved_cells() -> None:
@@ -142,6 +121,6 @@ def test_runway_policy_invalidates_old_surface_pipeline_cache() -> None:
         "surface-pipeline-v11-vectorized-material-pass",
         payload,
     ) == raw_cache_key(
-        "surface-pipeline-v13-resolved-runway-texture",
+        "surface-pipeline-v14-nogova-runway-textures",
         payload,
     )
