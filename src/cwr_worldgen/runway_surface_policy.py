@@ -29,6 +29,7 @@ _SURFACE_CACHE_V12 = "surface-pipeline-v12-stock-runway-texture"
 _INSTALLED = False
 _ORIGINAL_BUILD_SURFACE_PASS = None
 _ORIGINAL_CACHE_KEY = None
+_ORIGINAL_WRITE_SURFACE_TEXTURES = None
 
 
 def runway_texture_for_profile(profile: object) -> str:
@@ -126,7 +127,7 @@ def _install_runway_material() -> None:
             RUNWAY_MATERIAL_CODE,
             "runway",
             (72, 72, 68),
-            None,
+            GRASS_RUNWAY_TEXTURE,
         )
         surface.MILESTONE9_MATERIALS = (*surface.MILESTONE9_MATERIALS, material)
         surface.MATERIAL_INDEX = {
@@ -156,6 +157,7 @@ def _install_runway_material() -> None:
 def install_runway_surface_policy() -> None:
     """Install dedicated stock runway material handling exactly once."""
     global _INSTALLED, _ORIGINAL_BUILD_SURFACE_PASS, _ORIGINAL_CACHE_KEY
+    global _ORIGINAL_WRITE_SURFACE_TEXTURES
     if _INSTALLED:
         return
 
@@ -165,6 +167,7 @@ def install_runway_surface_policy() -> None:
     _install_runway_material()
     _ORIGINAL_BUILD_SURFACE_PASS = surface.build_surface_pass
     _ORIGINAL_CACHE_KEY = generator.cache_key
+    _ORIGINAL_WRITE_SURFACE_TEXTURES = surface.write_surface_textures
 
     def build_surface_pass_with_runways(
         dataset,
@@ -192,14 +195,51 @@ def install_runway_surface_policy() -> None:
         )
         return report if indices == report.indices else replace(report, indices=indices)
 
+    def write_surface_textures_with_runway_bookkeeping(
+        source_dir,
+        world_name,
+        profile,
+        seed,
+        size,
+    ):
+        paths = list(
+            _ORIGINAL_WRITE_SURFACE_TEXTURES(
+                source_dir,
+                world_name,
+                profile,
+                seed,
+                size,
+            )
+        )
+        # generator.py historically stages every material as a local file for
+        # generated/Malden profiles before it asks which WRP paths are external.
+        # The runway WRP entry is stock, but keep the expected unused n.paa in
+        # those two build trees so cache/PBO bookkeeping does not reference a
+        # file that the stock-texture skip deliberately omitted.
+        if str(profile or "").strip().casefold() in {"generated", "malden"}:
+            path = source_dir / "data" / f"{RUNWAY_MATERIAL_CODE}.paa"
+            if not path.is_file():
+                material = surface.MILESTONE9_MATERIALS[
+                    surface.MATERIAL_INDEX[RUNWAY_MATERIAL_CODE]
+                ]
+                surface.write_rgb_dxt1_paa(
+                    path,
+                    surface.create_surface_texture(material, seed, size),
+                )
+            if path not in paths:
+                paths.append(path)
+        return tuple(paths)
+
     def runway_cache_key(namespace: str, payload):
         if namespace == _SURFACE_CACHE_V11:
             namespace = _SURFACE_CACHE_V12
         return _ORIGINAL_CACHE_KEY(namespace, payload)
 
     # Both modules hold direct references imported during package initialization.
-    # Patch the public surface helper and the generator's imported binding.
+    # Patch the public surface helpers and the generator's imported bindings.
     surface.build_surface_pass = build_surface_pass_with_runways
     generator.build_surface_pass = build_surface_pass_with_runways
+    surface.write_surface_textures = write_surface_textures_with_runway_bookkeeping
+    generator.write_surface_textures = write_surface_textures_with_runway_bookkeeping
     generator.cache_key = runway_cache_key
     _INSTALLED = True
