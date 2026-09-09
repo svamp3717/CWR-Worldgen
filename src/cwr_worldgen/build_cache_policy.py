@@ -7,9 +7,10 @@ source/download state with disposable terrain solves, placements, procedural
 assets, overview images and PBO blobs.  Keep the source cache for source-side
 work, but route the core generator to a build-local cache instead.
 
-Source storage also gets conservative garbage collection before a build.  The
-cleanup removes artifacts that current builds cannot consume, and bounds old
-fingerprinted/source-download history instead of letting it grow forever.
+Source storage also gets conservative garbage collection after source fetches
+and before builds.  The cleanup removes artifacts that current builds cannot
+consume, and bounds old fingerprinted/source-download history instead of letting
+it grow forever.
 """
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ BUILD_CACHE_REVISION = "v2-active-bridge-policies"
 _SOURCE_CACHE_HISTORY_KEEP = 2
 _OVERTURE_RELEASE_HISTORY_KEEP = 2
 _OVERTURE_RELEASE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
-# These directories are produced only by the core generator.  Since that cache
+# These directories are produced only by the core generator. Since that cache
 # moved below the selected build folder, copies left in the source cache are
 # unreachable by current Milestone 9 builds.
 _LEGACY_SOURCE_BUILD_CACHE_DIRS = (
@@ -129,7 +130,7 @@ def cleanup_source_storage(
     source_cache = resolve_cache_dir(source_root, requested)
     removed: list[Path] = []
 
-    # The individual OpenTopoMap tiles are only assembly inputs.  Once the final
+    # The individual OpenTopoMap tiles are only assembly inputs. Once the final
     # cropped reference image exists they are not part of the frozen manifest and
     # a refresh creates a fresh staged source tree anyway.
     reference_tiles = source_root / "reference" / "tiles"
@@ -163,7 +164,7 @@ def cleanup_source_storage(
                 pass
 
         # Core-generator OSM rasters historically shared the source-side spatial
-        # directory.  Preserve the actual source spatial index while dropping the
+        # directory. Preserve the actual source spatial index while dropping the
         # old raster-* entries that now belong exclusively to the build cache.
         spatial = source_cache / "spatial"
         if spatial.is_dir():
@@ -175,7 +176,7 @@ def cleanup_source_storage(
                     pass
 
         # Fingerprinted source-stage products are useful across nearby rebuilds,
-        # but keeping every historical fingerprint forever is not.  Two versions
+        # but keeping every historical fingerprint forever is not. Two versions
         # retain a practical rollback/retry window without unbounded accumulation.
         for directory in (source_cache / "sources", source_cache / "overture-conflation"):
             if directory.is_dir():
@@ -265,6 +266,20 @@ def install_build_cache_policy() -> None:
 
     from . import generator
     from . import milestone9
+    from . import source_pipeline
+
+    # SourceFetchSpec has no build cache setting, so cleanup can safely run from
+    # the completed bundle's root. During atomic refresh the recursive staged
+    # fetch is wrapped too, which removes transient reference tiles before swap.
+    original_fetch_sources = source_pipeline.fetch_sources
+
+    @wraps(original_fetch_sources)
+    def fetch_sources(spec, *args, **kwargs):
+        bundle = original_fetch_sources(spec, *args, **kwargs)
+        cleanup_source_storage(bundle.root)
+        return bundle
+
+    source_pipeline.fetch_sources = fetch_sources
 
     original_prepare = generator.prepare_output_directory
 
