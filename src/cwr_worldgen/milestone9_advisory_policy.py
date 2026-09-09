@@ -6,6 +6,7 @@ from contextvars import ContextVar
 from dataclasses import replace
 
 from . import milestone9 as _milestone9
+from .bridge_runtime_policy import install_bridge_runtime_policy
 
 _ADVISORY_OBJECT_LIMITS: ContextVar[bool | None] = ContextVar(
     "cwr_milestone9_advisory_object_limits", default=None
@@ -27,6 +28,11 @@ def install_milestone9_advisory_policy() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+
+    # Milestone 9 is the first final-world pipeline imported by package runtime.
+    # Activate the bridge chain here so GUI/CLI/library builds execute the same
+    # bridge policies that their dedicated tests exercise.
+    install_bridge_runtime_policy()
 
     def build_milestone9(output_dir, spec, *, clean: bool = True):
         token = _ADVISORY_OBJECT_LIMITS.set(
