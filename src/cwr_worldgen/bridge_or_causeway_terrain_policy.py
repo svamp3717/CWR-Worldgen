@@ -8,10 +8,10 @@ through adjacent approach roads.  The result is both a stock bridge and a filled
 embankment beneath it.
 
 This policy keeps tide-safe causeways for genuinely ordinary water crossings, but
-for explicit mapped-water bridges it reopens a coarse-grid water channel beneath
-the actual mapped wet interval after terrain solving.  It also runs the terrain
-solver with the same stock-bridge spec used by rendering so procedural bridge
-underfill never fires on a bridge that will actually be emitted as a stock object.
+for explicit mapped-water bridges it reopens coarse-grid water beneath every
+contiguous mapped wet run after terrain solving.  It also runs the terrain solver
+with the same stock-bridge spec used by rendering so procedural bridge underfill
+never fires on a bridge that will actually be emitted as a stock object.
 """
 from __future__ import annotations
 
@@ -53,10 +53,105 @@ def _explicit_bridge(feature) -> bool:
     )
 
 
+def _mapped_water_runs(points, context):
+    """Return contiguous along-road mapped-water intervals.
+
+    Bridge planning intentionally uses a first-to-last wet envelope so one stock
+    chain can span several mapped water polygons.  Terrain repair must be more
+    precise: lowering that whole envelope would turn real islands or dry gaps
+    into water.  Keep the wet runs separate here and refine each shoreline.
+    """
+    if context is None or not context.water:
+        return ()
+    cleaned, cumulative = _source._polyline_measure(points)
+    if len(cleaned) < 2 or cumulative[-1] <= 0.01:
+        return ()
+
+    min_x = min(point[0] for point in cleaned)
+    min_z = min(point[1] for point in cleaned)
+    max_x = max(point[0] for point in cleaned)
+    max_z = max(point[1] for point in cleaned)
+    candidates = tuple(
+        polygon
+        for polygon in context.water
+        if not (
+            polygon.bounds[2] < min_x
+            or polygon.bounds[0] > max_x
+            or polygon.bounds[3] < min_z
+            or polygon.bounds[1] > max_z
+        )
+    )
+    if not candidates:
+        return ()
+
+    total = float(cumulative[-1])
+    step = max(
+        0.1,
+        float(getattr(_source, "_SOURCE_WATER_SAMPLE_STEP_METRES", 0.5)),
+    )
+    count = max(1, int(math.ceil(total / step)))
+    distances = tuple(total * index / count for index in range(count + 1))
+    wet = tuple(
+        _source._point_in_water(
+            _source._point_at(cleaned, cumulative, distance), candidates
+        )
+        for distance in distances
+    )
+
+    refinement_steps = max(
+        0,
+        int(getattr(_source, "_SOURCE_WATER_REFINEMENT_STEPS", 12)),
+    )
+    runs: list[tuple[float, float]] = []
+    index = 0
+    while index < len(wet):
+        if not wet[index]:
+            index += 1
+            continue
+        first = index
+        while index + 1 < len(wet) and wet[index + 1]:
+            index += 1
+        last = index
+
+        start = distances[first]
+        end = distances[last]
+        if first > 0 and not wet[first - 1]:
+            low, high = distances[first - 1], distances[first]
+            for _ in range(refinement_steps):
+                middle = (low + high) * 0.5
+                point = _source._point_at(cleaned, cumulative, middle)
+                if _source._point_in_water(point, candidates):
+                    high = middle
+                else:
+                    low = middle
+            start = high
+        if last + 1 < len(distances) and not wet[last + 1]:
+            low, high = distances[last], distances[last + 1]
+            for _ in range(refinement_steps):
+                middle = (low + high) * 0.5
+                point = _source._point_at(cleaned, cumulative, middle)
+                if _source._point_in_water(point, candidates):
+                    low = middle
+                else:
+                    high = middle
+            end = low
+
+        if end > start + 1.0e-4:
+            runs.append((start, end))
+        index += 1
+    return tuple(runs)
+
+
 def _coarse_source_bridge_channels(dataset, projection, elevations, spec):
-    """Return mapped wet centres for stock bridges missed by coarse terrain."""
+    """Return actual mapped wet runs beneath explicit stock bridges."""
     context = _source._make_context(dataset, projection)
-    channels: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    channels: list[
+        tuple[
+            tuple[float, float],
+            tuple[float, float],
+            tuple[float, float],
+        ]
+    ] = []
 
     for feature, raw_points in zip(
         dataset.roads,
@@ -70,27 +165,15 @@ def _coarse_source_bridge_channels(dataset, projection, elevations, spec):
         if len(points) < 2:
             continue
 
-        width = max(6.0, _osm.road_width_metres(feature.tags))
-        if _source._ORIGINAL_WATER_TEST(
-            points,
-            elevations,
-            cells=spec.cells,
-            cell_size=spec.cell_size,
-            sea_level=spec.sea_level,
-            width=width,
-        ):
-            # Existing terrain already preserves real water. Do not touch it.
-            continue
-
-        interval = _source._source_mapped_water_interval(points, context)
-        if interval is None:
+        intervals = _mapped_water_runs(points, context)
+        if not intervals:
             continue
 
         token = _source._CONTEXT.set(context)
         try:
             # Use the final installed stock-plan chain, including connected-road
-            # endpoint extension. The water opening still belongs at the mapped
-            # wet interval, not beneath every bridge module sitting on dry bank.
+            # endpoint extension.  Its axis tells us where the rendered bridge
+            # lies, while the source runs tell us which parts should remain wet.
             plan = _bridge.stock_bridge_span_plan(
                 points,
                 elevations,
@@ -108,11 +191,20 @@ def _coarse_source_bridge_channels(dataset, projection, elevations, spec):
         if length <= 0.1:
             continue
         axis = (dx / length, dz / length)
-        wet_centre = (
-            (float(plan.wet_start[0]) + float(plan.wet_end[0])) * 0.5,
-            (float(plan.wet_start[1]) + float(plan.wet_end[1])) * 0.5,
-        )
-        channels.append((wet_centre, axis))
+
+        cleaned, cumulative = _source._polyline_measure(points)
+        if len(cleaned) < 2:
+            continue
+        for wet_start_distance, wet_end_distance in intervals:
+            wet_start = _source._point_at(
+                cleaned, cumulative, wet_start_distance
+            )
+            wet_end = _source._point_at(
+                cleaned, cumulative, wet_end_distance
+            )
+            if math.dist(wet_start, wet_end) <= 0.05:
+                continue
+            channels.append((wet_start, wet_end, axis))
     return tuple(channels)
 
 
@@ -121,7 +213,7 @@ def _nearest_crossing_vertices(
     axis: tuple[float, float],
     spec,
 ) -> tuple[int, ...]:
-    """Choose the nearest terrain-vertex row crossing the mapped wet centre."""
+    """Choose the nearest terrain-vertex row crossing one mapped wet point."""
     cell = float(spec.cell_size)
     fx = max(0.0, min(float(spec.cells - 1), float(centre[0]) / cell))
     fz = max(0.0, min(float(spec.cells - 1), float(centre[1]) / cell))
@@ -147,9 +239,40 @@ def _nearest_crossing_vertices(
         )
 
     candidates.sort()
-    # Two vertices make one coarse row cross the road. Do not lower the next
-    # terrain row merely because a second stock module extends onto dry land.
+    # Two vertices form the narrow coarse row crossing the bridge at this point.
     return tuple(item[2] for item in candidates[:2])
+
+
+def _wet_interval_crossing_vertices(
+    wet_start: tuple[float, float],
+    wet_end: tuple[float, float],
+    axis: tuple[float, float],
+    spec,
+) -> tuple[int, ...]:
+    """Cover one complete mapped wet run with coarse crossing rows."""
+    dx = float(wet_end[0]) - float(wet_start[0])
+    dz = float(wet_end[1]) - float(wet_start[1])
+    length = math.hypot(dx, dz)
+    if length <= 0.05:
+        centre = (
+            (float(wet_start[0]) + float(wet_end[0])) * 0.5,
+            (float(wet_start[1]) + float(wet_end[1])) * 0.5,
+        )
+        return _nearest_crossing_vertices(centre, axis, spec)
+
+    # Half-cell longitudinal sampling guarantees that adjacent 50 m terrain rows
+    # cannot be skipped even when the source shoreline falls between vertices.
+    sample_step = max(1.0, float(spec.cell_size) * 0.5)
+    count = max(1, int(math.ceil(length / sample_step)))
+    indices: set[int] = set()
+    for index in range(count + 1):
+        fraction = index / count
+        point = (
+            float(wet_start[0]) + dx * fraction,
+            float(wet_start[1]) + dz * fraction,
+        )
+        indices.update(_nearest_crossing_vertices(point, axis, spec))
+    return tuple(sorted(indices))
 
 
 def _water_target(spec) -> float:
@@ -174,8 +297,10 @@ def _reopen_bridge_water(report, elevations, dataset, projection, spec):
     values = list(report.elevations)
     target = _water_target(spec)
     touched: set[int] = set()
-    for centre, axis in channels:
-        for index in _nearest_crossing_vertices(centre, axis, spec):
+    for wet_start, wet_end, axis in channels:
+        for index in _wet_interval_crossing_vertices(
+            wet_start, wet_end, axis, spec
+        ):
             if values[index] > target:
                 values[index] = target
                 touched.add(index)
