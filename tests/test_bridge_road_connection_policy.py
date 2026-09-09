@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import patch
+import math
+import pytest
+
+from cwr_worldgen import bridge_render_policy as bridge
+from cwr_worldgen import bridge_road_connection_policy as policy
+from cwr_worldgen import bridge_source_water_policy as source
+
+
+def _spec():
+    return SimpleNamespace(
+        cells=64,
+        cell_size=50.0,
+        sea_level=0.0,
+        world_size=3200.0,
+    )
+
+
+def test_short_bridge_expands_to_two_modules_on_connected_safe_roads() -> None:
+    spec = _spec()
+    points = ((100.0, 100.0), (120.0, 100.0))
+    plan = bridge.StockBridgeSpanPlan(
+        points=((84.9, 100.0), (135.1, 100.0)),
+        module_count=1,
+        wet_start=(105.0, 100.0),
+        wet_end=(115.0, 100.0),
+        wet_length=10.0,
+    )
+    feature = SimpleNamespace()
+    start_path = ((100.0, 100.0), (0.0, 100.0))
+    end_path = ((120.0, 100.0), (240.0, 100.0))
+
+    def connected(_feature, _dataset, _projection, endpoint, *_args):
+        return start_path if endpoint[0] < 110.0 else end_path
+
+    token = source._CONTEXT.set(SimpleNamespace(dataset=object(), projection=object()))
+    try:
+        with (
+            patch.object(
+                policy,
+                "_matching_bridge_feature",
+                return_value=(feature, points),
+            ),
+            patch.object(
+                policy._osm,
+                "_connected_bridge_approach_path",
+                side_effect=connected,
+            ),
+            patch.object(
+                policy,
+                "_road_surface_at",
+                return_value=5.6,
+            ),
+        ):
+            fitted = policy._connected_stock_plan(
+                plan,
+                points,
+                (),
+                spec,
+            )
+    finally:
+        source._CONTEXT.reset(token)
+
+    assert fitted.module_count == 2
+    assert math.dist(*fitted.points) == pytest.approx(
+        2.0 * bridge._STOCK_MODULE_SPACING_METRES,
+        abs=policy._MAXIMUM_ENDPOINT_LENGTH_ERROR_METRES,
+    )
+    # Both abutments moved outward onto the connected roads rather than staying
+    # centred around the tiny 20 m source bridge.
+    assert fitted.points[0][0] < 72.5
+    assert fitted.points[1][0] > 147.5
+
+
+def test_missing_safe_approach_keeps_existing_bridge_plan() -> None:
+    spec = _spec()
+    points = ((100.0, 100.0), (120.0, 100.0))
+    plan = bridge.StockBridgeSpanPlan(
+        points=((84.9, 100.0), (135.1, 100.0)),
+        module_count=1,
+        wet_start=(105.0, 100.0),
+        wet_end=(115.0, 100.0),
+        wet_length=10.0,
+    )
+    feature = SimpleNamespace()
+    start_path = ((100.0, 100.0), (0.0, 100.0))
+    end_path = ((120.0, 100.0), (240.0, 100.0))
+
+    def connected(_feature, _dataset, _projection, endpoint, *_args):
+        return start_path if endpoint[0] < 110.0 else end_path
+
+    token = source._CONTEXT.set(SimpleNamespace(dataset=object(), projection=object()))
+    try:
+        with (
+            patch.object(
+                policy,
+                "_matching_bridge_feature",
+                return_value=(feature, points),
+            ),
+            patch.object(
+                policy._osm,
+                "_connected_bridge_approach_path",
+                side_effect=connected,
+            ),
+            patch.object(
+                policy,
+                "_road_surface_at",
+                return_value=2.0,
+            ),
+        ):
+            fitted = policy._connected_stock_plan(
+                plan,
+                points,
+                (),
+                spec,
+            )
+    finally:
+        source._CONTEXT.reset(token)
+
+    assert fitted == plan

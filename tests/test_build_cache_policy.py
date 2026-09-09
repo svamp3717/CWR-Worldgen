@@ -6,6 +6,7 @@ from pathlib import Path
 from cwr_worldgen import generator
 from cwr_worldgen.build_cache_policy import (
     BUILD_CACHE_DIRNAME,
+    BUILD_CACHE_REVISION,
     build_cache_dir,
     install_build_cache_policy,
     route_build_cache_spec,
@@ -20,7 +21,9 @@ class _CacheSpec:
 
 def test_build_cache_path_is_owned_by_selected_build_folder(tmp_path: Path) -> None:
     output = tmp_path / "build" / "demo"
-    assert build_cache_dir(output) == (output / BUILD_CACHE_DIRNAME).resolve()
+    assert build_cache_dir(output) == (
+        output / BUILD_CACHE_DIRNAME / BUILD_CACHE_REVISION
+    ).resolve()
 
 
 def test_playability_cache_is_routed_away_from_source_cache(tmp_path: Path) -> None:
@@ -28,8 +31,17 @@ def test_playability_cache_is_routed_away_from_source_cache(tmp_path: Path) -> N
     output = tmp_path / "build" / "demo"
     routed = route_build_cache_spec(output, _CacheSpec(cache_dir=source_cache))
 
-    assert routed.cache_dir == (output / BUILD_CACHE_DIRNAME).resolve()
+    assert routed.cache_dir == (
+        output / BUILD_CACHE_DIRNAME / BUILD_CACHE_REVISION
+    ).resolve()
     assert routed.cache_dir != source_cache
+
+
+def test_bridge_runtime_revision_does_not_reuse_legacy_build_cache_root(tmp_path: Path) -> None:
+    output = tmp_path / "build" / "demo"
+    legacy = (output / BUILD_CACHE_DIRNAME).resolve()
+    assert build_cache_dir(output).parent == legacy
+    assert build_cache_dir(output) != legacy
 
 
 def test_clean_build_preserves_existing_build_cache(tmp_path: Path) -> None:

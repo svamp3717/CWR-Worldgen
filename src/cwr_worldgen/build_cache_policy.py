@@ -21,12 +21,22 @@ from .cache import resolve_cache_dir
 
 
 BUILD_CACHE_DIRNAME = ".cwr-worldgen-build-cache"
+# Cache keys inside generator.py deliberately describe data contracts rather than
+# every runtime monkey-patch. Activating the bridge policy chain changes terrain
+# solving and non-road placement without changing those historical key strings,
+# so put this runtime generation in a fresh cache namespace. Old cache data can
+# remain on disk safely and cleanup still removes the common parent directory.
+BUILD_CACHE_REVISION = "v2-active-bridge-policies"
 _INSTALLED = False
 
 
 def build_cache_dir(output_dir: str | Path) -> Path:
-    """Return the persistent cache owned by one selected build folder."""
-    return Path(output_dir).expanduser().resolve() / BUILD_CACHE_DIRNAME
+    """Return the versioned persistent cache owned by one selected build folder."""
+    return (
+        Path(output_dir).expanduser().resolve()
+        / BUILD_CACHE_DIRNAME
+        / BUILD_CACHE_REVISION
+    )
 
 
 def route_build_cache_spec(output_dir: str | Path, spec: Any) -> Any:
@@ -102,6 +112,7 @@ def _rewrite_cache_report(result: Any, output_dir: str | Path, spec: Any) -> Non
     report["build_directory"] = str(local_build_cache)
     report["source_directory"] = str(source_cache)
     report["split_cache_layout"] = True
+    report["build_cache_revision"] = BUILD_CACHE_REVISION
     try:
         path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except OSError:

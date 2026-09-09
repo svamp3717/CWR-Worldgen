@@ -200,6 +200,31 @@ def install_building_prepare_progress_policy() -> None:
 
     install_final_road_dedup_policy()
 
+    # Bridge P3Ds are emitted later by the non-road pass, but their mapped road
+    # ways have already been fitted here. Remove only the aligned ordinary-road
+    # underlay now, after dedupe and before building-road clearance records the
+    # final road footprint. This preserves junction topology and land approaches.
+    from .bridge_underlay_cleanup_policy import install_bridge_underlay_cleanup_policy
+
+    install_bridge_underlay_cleanup_policy()
+
+    # A single several-hundred-metre procedural bridge P3D can exceed legacy
+    # OFP/CWA Geometry/Roadway extents and disappear even though the WRP and PBO
+    # references are valid. Split those generated spans into <=30 m modules
+    # before the final non-road/building wrappers capture their generation hooks.
+    from .bridge_render_policy import install_bridge_render_policy
+
+    install_bridge_render_policy()
+
+    # The in-game tuning offset is applied after approach-height safety clamping.
+    # On low shorelines that could put the rendered deck below sea level. Raise
+    # the pre-tuning approach floor so the final tuned deck always clears water.
+    from .bridge_water_deck_clamp_policy import (
+        install_bridge_water_deck_clamp_policy,
+    )
+
+    install_bridge_water_deck_clamp_policy()
+
     # Building placement was planned before the final road chain existed. Record
     # that post-dedupe road report and apply a bounded final-footprint correction
     # only when non-road objects are emitted. This must wrap the dedupe fitter,
