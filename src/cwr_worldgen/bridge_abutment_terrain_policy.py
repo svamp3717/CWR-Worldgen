@@ -1,16 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Raise only the immediate ordinary-road terrain at low stock-bridge abutments.
+"""Grade only the immediate ordinary-road terrain at low stock-bridge abutments.
 
-CWA's tide can cover nominally dry two- or three-metre shoreline terrain.  The
+CWA's tide can cover nominally dry two- or three-metre shoreline terrain. The
 bridge itself must still be planned from real water, so do not solve that visual
-road-to-bridge gap by extending the stock bridge inland.  Instead, after mapped
-water has been reopened, lift the single coarse terrain cell containing each low
-but nominally dry bridge endpoint to the same tide-safe floor used by the deck.
+road-to-bridge gap by extending the stock bridge inland. Instead, after mapped
+water has been reopened, grade the single coarse terrain cell containing each low
+but nominally dry bridge endpoint to the tide-safe ordinary-road ground level.
 
-Because that local fill changes the terrain water test, cache the bridge span
-computed immediately before the fill.  Later road cleanup and bridge rendering
-reuse that pre-fill span, preventing the raised abutment from shortening the
-bridge on the next planning pass.
+The whole four-vertex support cell is flattened, rather than merely raising low
+corners. On a 50 m WRP grid, leaving one seven-metre corner beside three 5.5 m
+corners creates a bilinear terrain ramp that can cut directly through the stock
+bridge deck even though the bridge modules themselves are perfectly joined.
+
+Because this local grading changes the terrain water test, cache the bridge span
+computed immediately before the grading. Later road cleanup and bridge rendering
+reuse that pre-grade span, preventing the abutment from shortening the bridge on
+the next planning pass.
 """
 from __future__ import annotations
 
@@ -46,7 +51,7 @@ def _plan_key(points, spec) -> tuple[object, ...]:
 
 
 def _cached_bridge_plan(points, spec):
-    """Return the wet span captured before abutment terrain was raised."""
+    """Return the wet span captured before abutment terrain was graded."""
     return _PLAN_CACHE.get(_plan_key(points, spec))
 
 
@@ -69,6 +74,16 @@ def _endpoint_cell_vertices(point, spec) -> tuple[int, ...]:
             }
         )
     )
+
+
+def _abutment_ground_target(spec) -> float:
+    """Return terrain height that puts an ordinary stock-road surface at deck level."""
+    deck = float(_clamp._minimum_final_deck(spec))
+    road_offset = max(
+        0.0,
+        float(getattr(_osm, "NOGOVA_BRIDGE_APPROACH_OFFSET_METRES", 0.0)),
+    )
+    return deck - road_offset
 
 
 def _explicit_bridge_plans(dataset, projection, elevations, spec):
@@ -103,7 +118,7 @@ def _explicit_bridge_plans(dataset, projection, elevations, spec):
 
 
 def _raise_bridge_abutments(report, dataset, projection, spec):
-    """Raise at most one coarse terrain cell at each low, nominally dry endpoint."""
+    """Grade at most one coarse terrain cell at each low, nominally dry endpoint."""
     plans = _explicit_bridge_plans(
         dataset,
         projection,
@@ -114,7 +129,7 @@ def _raise_bridge_abutments(report, dataset, projection, spec):
         return report
 
     values = list(report.elevations)
-    target = float(_clamp._minimum_final_deck(spec))
+    target = _abutment_ground_target(spec)
     epsilon = float(getattr(_osm, "BRIDGE_WATER_EPSILON_METRES", 0.05))
     nominal_dry_floor = float(spec.sea_level) - epsilon
     touched: set[int] = set()
@@ -135,12 +150,17 @@ def _raise_bridge_abutments(report, dataset, projection, spec):
                 )
             )
             # Do not turn genuinely underwater bridge endpoints into causeways.
-            # This pass exists only for nominally dry bank terrain flooded by tide.
+            # High banks also remain untouched. This pass exists only for the
+            # low nominally-dry bank cell that CWA tide would otherwise flood.
             if ground < nominal_dry_floor or ground >= target - 1.0e-6:
                 continue
 
+            # Grade all four support vertices to one road-ground plane. Raising
+            # only the low corners leaves any existing high corner in place; the
+            # resulting bilinear ramp can poke through the bridge deck, exactly
+            # as seen in atinybridgetest21.
             for index in _endpoint_cell_vertices(endpoint, spec):
-                if values[index] < target:
+                if abs(float(values[index]) - target) > 1.0e-7:
                     values[index] = target
                     touched.add(index)
 
@@ -155,7 +175,7 @@ def _raise_bridge_abutments(report, dataset, projection, spec):
 
 
 def install_bridge_abutment_terrain_policy() -> None:
-    """Apply one-cell tide-safe road embankments after bridge-water reopening."""
+    """Apply one-cell tide-safe road grading after bridge-water reopening."""
     global _INSTALLED, _ORIGINAL_SOLVE
     if _INSTALLED:
         return
