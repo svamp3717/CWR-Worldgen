@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Remove ordinary road pieces only beneath the stock bridge actually emitted."""
+"""Remove duplicate road beneath bridge interiors, but keep terminal road underlay."""
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -13,6 +13,11 @@ from . import playability as _p
 
 _ALIGNMENT_TOLERANCE_DEGREES = 30.0
 _ENDPOINT_KEEP_METRES = 0.10
+# Keep ordinary fitted road underneath the first stock bridge module at each
+# end.  The bridge remains the drivable/visible upper surface; this lower road
+# only masks coarse-grid grass/terrain that can otherwise show through around
+# the abutment.  Interior bridge modules still have their duplicate road removed.
+_TERMINAL_UNDERLAY_METRES = _bridge._STOCK_MODULE_SPACING_METRES
 _ORIGINAL_FIT = None
 _INSTALLED = False
 
@@ -199,6 +204,37 @@ def _road_matches_interval(
     return True
 
 
+def _road_matches_terminal_underlay(
+    obj,
+    points: tuple[tuple[float, float], ...],
+    road_width: float,
+    start_measure: float = 0.0,
+    end_measure: float | None = None,
+) -> bool:
+    """Return True for aligned road beneath the first bridge module at either end."""
+    if len(points) < 2:
+        return False
+    total = sum(math.dist(start, end) for start, end in zip(points, points[1:]))
+    lower = max(0.0, float(start_measure))
+    upper = total if end_measure is None else min(total, float(end_measure))
+    length = upper - lower
+    if length <= 1.0e-9:
+        return False
+
+    # If a bridge is only one or two stock modules long, its two terminal modules
+    # legitimately cover the whole span. In that case keeping all fitted road
+    # beneath it is intentional: the road is a lower visual mask, not the deck.
+    terminal = min(float(_TERMINAL_UNDERLAY_METRES), length * 0.5)
+    return (
+        _road_matches_interval(
+            obj, points, road_width, lower, lower + terminal
+        )
+        or _road_matches_interval(
+            obj, points, road_width, upper - terminal, upper
+        )
+    )
+
+
 def _road_object_under_bridge(obj, spans: tuple[_BridgeSpan, ...]) -> bool:
     # Reuse the road-family catalogue so this covers Data3D roads, Resistance
     # roads and generated gravel, while excluding bridge P3Ds.
@@ -206,8 +242,31 @@ def _road_object_under_bridge(obj, spans: tuple[_BridgeSpan, ...]) -> bool:
         return False
 
     for span in spans:
-        # First remove anything directly beneath the emitted straight stock
-        # bridge. This catches the common straight-road case.
+        # Preserve fitted road under the first stock module at both abutments.
+        # It sits on the graded terrain below the bridge and masks any grass that
+        # the coarse 50 m height grid would otherwise expose around the joint.
+        if _road_matches_terminal_underlay(
+            obj,
+            span.points,
+            span.road_width,
+        ):
+            return False
+        if (
+            span.source_points
+            and span.source_end_measure > span.source_start_measure
+            and _road_matches_terminal_underlay(
+                obj,
+                span.source_points,
+                span.road_width,
+                span.source_start_measure,
+                span.source_end_measure,
+            )
+        ):
+            return False
+
+        # Remove anything beneath the interior of the emitted straight stock
+        # bridge. This catches the common straight-road case while the terminal
+        # module underlays above are deliberately retained.
         if _road_matches_interval(
             obj,
             span.points,
@@ -219,9 +278,8 @@ def _road_object_under_bridge(obj, spans: tuple[_BridgeSpan, ...]) -> bool:
 
         # The stock bridge is a straight chord but the fitted OSM road can curve
         # several metres away from it. Remove the matching source-road pieces only
-        # over the along-range actually replaced by the emitted bridge. This is
-        # what prevents a second curved road from surviving underwater while dry
-        # approach road outside the bridge remains intact.
+        # over the along-range actually replaced by the emitted bridge. Terminal
+        # underlays remain as the grass-hiding abutment mask.
         if (
             span.source_points
             and span.source_end_measure > span.source_start_measure
@@ -272,7 +330,7 @@ def _fit(
     if removed and progress_callback is not None:
         progress_callback(
             99,
-            f"Removed {removed:,} ordinary road piece(s) underneath emitted bridge/source spans",
+            f"Removed {removed:,} ordinary road piece(s) underneath bridge interiors; kept terminal underlays",
         )
     return cleaned
 
