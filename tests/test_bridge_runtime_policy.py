@@ -31,17 +31,9 @@ def test_package_runtime_installs_complete_bridge_policy_chain() -> None:
     assert terrain_policy._ORIGINAL_SOLVE is not None
     assert abutment._ORIGINAL_SOLVE is not None
 
-    # Horizontal bridge length stays water-authoritative. Low-tide dry gaps are
-    # handled by one-cell road-abutment terrain grading, not extra bridge spans.
-    assert (
-        render_policy.stock_bridge_span_plan
-        is runtime_policy._runtime_stock_bridge_span_plan
-    )
-    assert (
-        source_water._ORIGINAL_STOCK_PLAN
-        is water_clamp._ORIGINAL_STOCK_BRIDGE_SPAN_PLAN
-    )
-    assert build_cache.BUILD_CACHE_REVISION == "v8-terminal-bridge-road-underlays"
+    assert render_policy.stock_bridge_span_plan is runtime_policy._runtime_stock_bridge_span_plan
+    assert source_water._ORIGINAL_STOCK_PLAN is water_clamp._ORIGINAL_STOCK_BRIDGE_SPAN_PLAN
+    assert build_cache.BUILD_CACHE_REVISION == "v9-synthesized-terminal-bridge-road-underlays"
 
 
 def test_runtime_planner_reuses_pre_fill_wet_plan() -> None:
@@ -62,11 +54,7 @@ def test_runtime_planner_reuses_pre_fill_wet_plan() -> None:
             side_effect=AssertionError("cached wet plan should win"),
         ),
     ):
-        resolved = runtime_policy._runtime_stock_bridge_span_plan(
-            plan.points,
-            (),
-            spec,
-        )
+        resolved = runtime_policy._runtime_stock_bridge_span_plan(plan.points, (), spec)
 
     assert resolved == plan
     assert resolved.module_count == 9
