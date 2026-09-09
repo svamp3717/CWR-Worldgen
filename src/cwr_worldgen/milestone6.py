@@ -15,7 +15,10 @@ from .normalization import (
     load_normalized_dataset,
     normalize_source_bundle,
 )
+from .school_campus_policy import install_school_campus_policy as _install_school_campus_policy
 from .source_pipeline import Milestone5Spec, _copy_provenance, validate_source_bundle
+
+_install_school_campus_policy()
 
 
 @dataclass(frozen=True, slots=True)
