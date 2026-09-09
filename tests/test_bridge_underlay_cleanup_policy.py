@@ -51,15 +51,15 @@ def test_tinybjorsund_submerged_road_chain_is_removed_beneath_bridge() -> None:
 
 def test_cleanup_keeps_parallel_road_outside_stock_bridge_footprint() -> None:
     span = cleanup._BridgeSpan(
-        points=((0.0, 0.0), (100.0, 0.0)), road_width=6.0
+        points=((0.0, 0.0), (200.0, 0.0)), road_width=6.0
     )
     underlay = WorldObject(
-        1, r"o\road\sil25.p3d", 50.0, 0.0, 0.0, 90.0
+        1, r"o\road\sil25.p3d", 100.0, 0.0, 0.0, 90.0
     )
     # The stock bridge itself reaches roughly 6.64 m from centre. A genuinely
     # separate parallel road beyond that physical footprint must still survive.
     parallel = WorldObject(
-        2, r"o\road\sil25.p3d", 50.0, 0.0, 7.5, 90.0
+        2, r"o\road\sil25.p3d", 100.0, 0.0, 7.5, 90.0
     )
 
     cleaned, removed = cleanup._remove_bridge_underlays(
@@ -70,32 +70,54 @@ def test_cleanup_keeps_parallel_road_outside_stock_bridge_footprint() -> None:
     assert tuple(obj.object_id for obj in cleaned.objects) == (2,)
 
 
+def test_cleanup_keeps_road_under_first_bridge_module_at_both_ends() -> None:
+    span = cleanup._BridgeSpan(
+        points=((0.0, 0.0), (250.0, 0.0)), road_width=7.0
+    )
+    first_end = WorldObject(
+        1, r"o\road\sil25.p3d", 25.0, 0.0, 0.0, 90.0
+    )
+    interior = WorldObject(
+        2, r"o\road\sil25.p3d", 125.0, 0.0, 0.0, 90.0
+    )
+    second_end = WorldObject(
+        3, r"o\road\sil25.p3d", 225.0, 0.0, 0.0, 90.0
+    )
+
+    cleaned, removed = cleanup._remove_bridge_underlays(
+        _report(first_end, interior, second_end), (span,)
+    )
+
+    assert removed == 1
+    assert tuple(obj.object_id for obj in cleaned.objects) == (1, 3)
+
+
 def test_cleanup_removes_curved_source_road_that_bows_away_from_straight_bridge() -> None:
-    source = ((0.0, 0.0), (50.0, 8.0), (100.0, 0.0))
+    source = ((0.0, 0.0), (100.0, 8.0), (200.0, 0.0))
     source_length = sum(
         math.dist(start, end) for start, end in zip(source, source[1:])
     )
     span = cleanup._BridgeSpan(
-        points=((0.0, 0.0), (100.0, 0.0)),
+        points=((0.0, 0.0), (200.0, 0.0)),
         road_width=6.0,
         source_points=source,
         source_start_measure=0.0,
         source_end_measure=source_length,
     )
 
-    # This is 8 m from the emitted straight bridge chord, so the old cleanup
-    # missed it. It lies exactly on the original curved bridge-tagged road.
+    # This is 8 m from the emitted straight bridge chord, so the straight-cord
+    # cleanup misses it. It lies exactly on the central original source road.
     curved_underlay = WorldObject(
-        1, r"o\road\sil25.p3d", 50.0, -4.9, 8.0, 81.0
+        1, r"o\road\sil25.p3d", 100.0, -4.9, 8.0, 90.0
     )
     # A separate parallel road outside the narrow source-road corridor survives.
     parallel = WorldObject(
-        2, r"o\road\sil25.p3d", 50.0, 0.0, 12.0, 81.0
+        2, r"o\road\sil25.p3d", 100.0, 0.0, 12.0, 90.0
     )
     # An at-grade crossing on the same point also survives because its heading
     # does not match the replaced source road.
     crossing = WorldObject(
-        3, r"o\road\sil25.p3d", 50.0, 0.0, 8.0, 0.0
+        3, r"o\road\sil25.p3d", 100.0, 0.0, 8.0, 0.0
     )
 
     cleaned, removed = cleanup._remove_bridge_underlays(
