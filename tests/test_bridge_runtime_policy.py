@@ -41,7 +41,7 @@ def test_package_runtime_installs_complete_bridge_policy_chain() -> None:
         source_water._ORIGINAL_STOCK_PLAN
         is water_clamp._ORIGINAL_STOCK_BRIDGE_SPAN_PLAN
     )
-    assert build_cache.BUILD_CACHE_REVISION == "v7-raised-road-bridge-approaches"
+    assert build_cache.BUILD_CACHE_REVISION == "v8-terminal-bridge-road-underlays"
 
 
 def test_runtime_planner_reuses_pre_fill_wet_plan() -> None:
