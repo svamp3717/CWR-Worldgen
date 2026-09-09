@@ -10,9 +10,11 @@ bridge modules.
 The terrain policy therefore keeps the wet-only stock span and grades only the
 single coarse terrain cell supporting each low, nominally dry bridge abutment.
 The current road-side correction raises that approach terrain by 0.85 m while
-leaving all stock bridge transforms untouched. The planner reuses the pre-grade
-wet span so this small embankment cannot make the next bridge-planning pass
-shorten the bridge again.
+leaving all stock bridge transforms untouched. The road cleanup also retains the
+ordinary fitted road beneath the first stock bridge module at each end so coarse
+terrain cannot expose a grass patch through the terminal bridge piece. The
+planner reuses the pre-grade wet span so this small embankment cannot make the
+next bridge-planning pass shorten the bridge again.
 """
 from __future__ import annotations
 
@@ -86,10 +88,9 @@ def install_bridge_runtime_policy() -> None:
     _source._ORIGINAL_STOCK_PLAN = base_wet_plan
     _bridge.stock_bridge_span_plan = _runtime_stock_bridge_span_plan
 
-    # Test22 showed that the flat 5.45 m endpoint cells still left both ordinary
-    # road approaches visibly below the fixed bridge deck. Force a fresh solve
-    # with the terrain-only +0.85 m approach correction.
+    # Refit roads so the terminal-module underlays are present. Older cached
+    # road reports had those pieces deleted beneath the complete bridge span.
     from . import build_cache_policy as _build_cache
 
-    _build_cache.BUILD_CACHE_REVISION = "v7-raised-road-bridge-approaches"
+    _build_cache.BUILD_CACHE_REVISION = "v8-terminal-bridge-road-underlays"
     _INSTALLED = True
