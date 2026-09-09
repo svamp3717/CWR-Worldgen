@@ -8,10 +8,11 @@ approach-terrain problem, not a reason to turn hundreds of metres of dry road in
 bridge modules.
 
 The terrain policy therefore keeps the wet-only stock span and grades only the
-single coarse terrain cell supporting each low, nominally dry bridge abutment to
-the ordinary-road ground level corresponding to the tide-safe deck. The planner
-reuses the pre-grade wet span so this small embankment cannot make the next
-bridge-planning pass shorten the bridge again.
+single coarse terrain cell supporting each low, nominally dry bridge abutment.
+The current road-side correction raises that approach terrain by 0.85 m while
+leaving all stock bridge transforms untouched. The planner reuses the pre-grade
+wet span so this small embankment cannot make the next bridge-planning pass
+shorten the bridge again.
 """
 from __future__ import annotations
 
@@ -85,10 +86,10 @@ def install_bridge_runtime_policy() -> None:
     _source._ORIGINAL_STOCK_PLAN = base_wet_plan
     _bridge.stock_bridge_span_plan = _runtime_stock_bridge_span_plan
 
-    # Test21 used the raise-only abutment pass. Its cached terrain can contain a
-    # high support corner that produces a bilinear ramp through the terminal
-    # bridge deck, so force a fresh solve with the flat-cell grader.
+    # Test22 showed that the flat 5.45 m endpoint cells still left both ordinary
+    # road approaches visibly below the fixed bridge deck. Force a fresh solve
+    # with the terrain-only +0.85 m approach correction.
     from . import build_cache_policy as _build_cache
 
-    _build_cache.BUILD_CACHE_REVISION = "v6-flat-road-bridge-abutments"
+    _build_cache.BUILD_CACHE_REVISION = "v7-raised-road-bridge-approaches"
     _INSTALLED = True
