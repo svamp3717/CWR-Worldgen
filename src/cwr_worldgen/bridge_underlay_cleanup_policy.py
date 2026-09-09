@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Remove duplicate road beneath bridge interiors, but keep terminal road underlay."""
+"""Remove duplicate road beneath bridge interiors and add terminal road underlays."""
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -13,26 +13,20 @@ from . import playability as _p
 
 _ALIGNMENT_TOLERANCE_DEGREES = 30.0
 _ENDPOINT_KEEP_METRES = 0.10
-# Keep ordinary fitted road underneath the first stock bridge module at each
-# end.  The bridge remains the drivable/visible upper surface; this lower road
-# only masks coarse-grid grass/terrain that can otherwise show through around
-# the abutment.  Interior bridge modules still have their duplicate road removed.
 _TERMINAL_UNDERLAY_METRES = _bridge._STOCK_MODULE_SPACING_METRES
+_TERMINAL_PIECE_LENGTH_METRES = 25.0
 _ORIGINAL_FIT = None
 _INSTALLED = False
 
 
 @dataclass(frozen=True, slots=True)
 class _BridgeSpan:
-    # Straight emitted bridge chord.
     points: tuple[tuple[float, float], ...]
     road_width: float
-    # Original OSM/fitted-road polyline and the along-range replaced by the
-    # emitted bridge. The stock bridge is straight, while the source road can
-    # bow several metres away from that chord.
     source_points: tuple[tuple[float, float], ...] = ()
     source_start_measure: float = 0.0
     source_end_measure: float = 0.0
+    road_model_path: str = r"o\road\sil25.p3d"
 
 
 def _undirected_heading_difference(first: float, second: float) -> float:
@@ -40,15 +34,10 @@ def _undirected_heading_difference(first: float, second: float) -> float:
     return min(difference, 180.0 - difference)
 
 
-def _nearest_polyline_measure(
-    points: tuple[tuple[float, float], ...],
-    point: tuple[float, float],
-) -> tuple[float, float, float, float]:
-    """Return distance, segment heading, along-distance and total polyline length."""
-
+def _nearest_polyline_measure(points, point) -> tuple[float, float, float, float]:
     cumulative = 0.0
     total = sum(math.dist(start, end) for start, end in zip(points, points[1:]))
-    best: tuple[float, float, float, int] | None = None
+    best = None
     px, pz = point
     for index, (start, end) in enumerate(zip(points, points[1:])):
         dx = end[0] - start[0]
@@ -72,12 +61,7 @@ def _nearest_polyline_measure(
     return best[0], best[1], best[2], total
 
 
-def _feature_needs_bridge(
-    feature,
-    points,
-    elevations,
-    spec,
-) -> bool:
+def _feature_needs_bridge(feature, points, elevations, spec) -> bool:
     tags = feature.tags
     bridge = str(tags.get("bridge", "")).strip().casefold()
     explicit = (
@@ -100,14 +84,9 @@ def _feature_needs_bridge(
 
 
 def _bridge_spans(dataset, projection, elevations, spec) -> tuple[_BridgeSpan, ...]:
-    """Reproduce the emitted bridge and source-road interval it replaces."""
-
     if not bool(getattr(spec, "bridges_enabled", True)):
         return ()
-
-    warning_threshold = max(
-        0, int(getattr(spec, "maximum_bridge_objects", 1000))
-    )
+    warning_threshold = max(0, int(getattr(spec, "maximum_bridge_objects", 1000)))
     if warning_threshold <= 0:
         return ()
     bridge_limit = _osm._advisory_object_limit(
@@ -115,8 +94,7 @@ def _bridge_spans(dataset, projection, elevations, spec) -> tuple[_BridgeSpan, .
         enabled=bool(getattr(spec, "advisory_object_limits", False)),
     )
     stock_spec = _bridge._stock_bridge_spec(spec)
-
-    spans: list[_BridgeSpan] = []
+    spans = []
     used_objects = 0
     projected = _osm.projected_road_polylines(dataset, projection)
     for feature, raw_points in zip(dataset.roads, projected):
@@ -125,39 +103,21 @@ def _bridge_spans(dataset, projection, elevations, spec) -> tuple[_BridgeSpan, .
             continue
         if _osm.road_bridge_crosses_ditch_only(feature, dataset, projection):
             continue
-        source_chunks = _osm._bridge_module_chunks(
-            points, _bridge._STOCK_MODULE_SPACING_METRES
-        )
-        if not source_chunks or not _feature_needs_bridge(
-            feature, points, elevations, stock_spec
-        ):
+        source_chunks = _osm._bridge_module_chunks(points, _bridge._STOCK_MODULE_SPACING_METRES)
+        if not source_chunks or not _feature_needs_bridge(feature, points, elevations, stock_spec):
             continue
-
-        plan = _bridge.stock_bridge_span_plan(
-            points, elevations, stock_spec
-        )
-        # If the narrow centreline sampler cannot resolve a wet interval but the
-        # core width-aware water test can, retain the historical full candidate
-        # corridor rather than remove no underlay at all.
+        plan = _bridge.stock_bridge_span_plan(points, elevations, stock_spec)
         span_points = tuple(plan.points) if plan is not None else points
         required = plan.module_count if plan is not None else len(source_chunks)
         if required > bridge_limit - used_objects:
             continue
         used_objects += required
-
         source_start = 0.0
-        source_end = sum(
-            math.dist(start, end) for start, end in zip(points, points[1:])
-        )
+        source_end = sum(math.dist(start, end) for start, end in zip(points, points[1:]))
         if plan is not None:
-            # The emitted stock chain is a straight chord. Project both chord
-            # ends back onto the source road so cleanup can remove the curved
-            # duplicate road even when it bows several metres away from the
-            # bridge centreline.
             first = _nearest_polyline_measure(points, span_points[0])[2]
             second = _nearest_polyline_measure(points, span_points[-1])[2]
             source_start, source_end = sorted((first, second))
-
         spans.append(
             _BridgeSpan(
                 points=span_points,
@@ -165,53 +125,30 @@ def _bridge_spans(dataset, projection, elevations, spec) -> tuple[_BridgeSpan, .
                 source_points=points,
                 source_start_measure=source_start,
                 source_end_measure=source_end,
+                road_model_path=_p.road_model_for_tags(spec, feature.tags),
             )
         )
     return tuple(spans)
 
 
-def _road_matches_interval(
-    obj,
-    points: tuple[tuple[float, float], ...],
-    road_width: float,
-    start_measure: float,
-    end_measure: float | None,
-) -> bool:
+def _road_matches_interval(obj, points, road_width, start_measure, end_measure) -> bool:
     if len(points) < 2:
         return False
-    distance, heading, along, total = _nearest_polyline_measure(
-        points, (float(obj.x), float(obj.z))
-    )
+    distance, heading, along, total = _nearest_polyline_measure(points, (float(obj.x), float(obj.z)))
     lower = max(0.0, float(start_measure))
     upper = total if end_measure is None else min(total, float(end_measure))
     if upper <= lower + 1.0e-9:
         return False
-
     endpoint_keep = min(_ENDPOINT_KEEP_METRES, (upper - lower) * 0.02)
     if along <= lower + endpoint_keep or along >= upper - endpoint_keep:
         return False
-
-    # Keep this narrow because the second check below follows the original
-    # bridge-tagged source road exactly. Nearby parallel roads should survive.
     corridor = max(1.25, float(road_width) * 0.40)
     if distance > corridor:
         return False
-    if (
-        _undirected_heading_difference(obj.heading_degrees, heading)
-        > _ALIGNMENT_TOLERANCE_DEGREES
-    ):
-        return False
-    return True
+    return _undirected_heading_difference(obj.heading_degrees, heading) <= _ALIGNMENT_TOLERANCE_DEGREES
 
 
-def _road_matches_terminal_underlay(
-    obj,
-    points: tuple[tuple[float, float], ...],
-    road_width: float,
-    start_measure: float = 0.0,
-    end_measure: float | None = None,
-) -> bool:
-    """Return True for aligned road beneath the first bridge module at either end."""
+def _road_matches_terminal_underlay(obj, points, road_width, start_measure=0.0, end_measure=None) -> bool:
     if len(points) < 2:
         return False
     total = sum(math.dist(start, end) for start, end in zip(points, points[1:]))
@@ -220,36 +157,18 @@ def _road_matches_terminal_underlay(
     length = upper - lower
     if length <= 1.0e-9:
         return False
-
-    # If a bridge is only one or two stock modules long, its two terminal modules
-    # legitimately cover the whole span. In that case keeping all fitted road
-    # beneath it is intentional: the road is a lower visual mask, not the deck.
     terminal = min(float(_TERMINAL_UNDERLAY_METRES), length * 0.5)
     return (
-        _road_matches_interval(
-            obj, points, road_width, lower, lower + terminal
-        )
-        or _road_matches_interval(
-            obj, points, road_width, upper - terminal, upper
-        )
+        _road_matches_interval(obj, points, road_width, lower, lower + terminal)
+        or _road_matches_interval(obj, points, road_width, upper - terminal, upper)
     )
 
 
-def _road_object_under_bridge(obj, spans: tuple[_BridgeSpan, ...]) -> bool:
-    # Reuse the road-family catalogue so this covers Data3D roads, Resistance
-    # roads and generated gravel, while excluding bridge P3Ds.
+def _road_object_under_bridge(obj, spans) -> bool:
     if _paved._family(obj.model_path) is None:
         return False
-
     for span in spans:
-        # Preserve fitted road under the first stock module at both abutments.
-        # It sits on the graded terrain below the bridge and masks any grass that
-        # the coarse 50 m height grid would otherwise expose around the joint.
-        if _road_matches_terminal_underlay(
-            obj,
-            span.points,
-            span.road_width,
-        ):
+        if _road_matches_terminal_underlay(obj, span.points, span.road_width):
             return False
         if (
             span.source_points
@@ -263,23 +182,8 @@ def _road_object_under_bridge(obj, spans: tuple[_BridgeSpan, ...]) -> bool:
             )
         ):
             return False
-
-        # Remove anything beneath the interior of the emitted straight stock
-        # bridge. This catches the common straight-road case while the terminal
-        # module underlays above are deliberately retained.
-        if _road_matches_interval(
-            obj,
-            span.points,
-            span.road_width,
-            0.0,
-            None,
-        ):
+        if _road_matches_interval(obj, span.points, span.road_width, 0.0, None):
             return True
-
-        # The stock bridge is a straight chord but the fitted OSM road can curve
-        # several metres away from it. Remove the matching source-road pieces only
-        # over the along-range actually replaced by the emitted bridge. Terminal
-        # underlays remain as the grass-hiding abutment mask.
         if (
             span.source_points
             and span.source_end_measure > span.source_start_measure
@@ -295,28 +199,111 @@ def _road_object_under_bridge(obj, spans: tuple[_BridgeSpan, ...]) -> bool:
     return False
 
 
-def _remove_bridge_underlays(report, spans: tuple[_BridgeSpan, ...]):
+def _remove_bridge_underlays(report, spans):
     if not spans or not getattr(report, "objects", ()):
         return report, 0
-    kept = tuple(
-        obj for obj in report.objects
-        if not _road_object_under_bridge(obj, spans)
-    )
+    kept = tuple(obj for obj in report.objects if not _road_object_under_bridge(obj, spans))
     removed = len(report.objects) - len(kept)
-    if not removed:
+    return (replace(report, objects=kept), removed) if removed else (report, 0)
+
+
+def _terminal_model(path: str) -> str | None:
+    family = _paved._family(path)
+    mapping = {
+        "sil": r"o\road\sil25.p3d",
+        "asf": r"o\road\asf25.p3d",
+        "kos": r"o\road\kos25.p3d",
+        "ces": r"o\road\ces25.p3d",
+        "silnice": r"data3d\silnice25.p3d",
+        "asfaltka": r"data3d\asfaltka25.p3d",
+        "cesta": r"data3d\cesta25.p3d",
+    }
+    return mapping.get(family)
+
+
+def _point_on_chord(span: _BridgeSpan, distance: float) -> tuple[float, float]:
+    start, end = span.points[0], span.points[-1]
+    total = max(1.0e-9, math.dist(start, end))
+    fraction = max(0.0, min(1.0, float(distance) / total))
+    return (
+        start[0] + (end[0] - start[0]) * fraction,
+        start[1] + (end[1] - start[1]) * fraction,
+    )
+
+
+def _terminal_segments(span: _BridgeSpan):
+    """Return 25 m ground-road segments covering the first bridge module at each end."""
+    total = math.dist(span.points[0], span.points[-1])
+    terminal = min(float(_TERMINAL_UNDERLAY_METRES), total * 0.5)
+    if terminal <= 0.5:
+        return ()
+    segments = []
+    seen = set()
+    for base in (0.0, total - terminal):
+        cursor = base
+        limit = base + terminal
+        while cursor + 0.5 < limit:
+            length = min(_TERMINAL_PIECE_LENGTH_METRES, limit - cursor)
+            if length < 5.0:
+                break
+            start = _point_on_chord(span, cursor)
+            end = _point_on_chord(span, cursor + length)
+            key = tuple(round(value, 3) for point in (start, end) for value in point)
+            reverse = tuple(round(value, 3) for point in (end, start) for value in point)
+            canonical = min(key, reverse)
+            if canonical not in seen:
+                seen.add(canonical)
+                segments.append((start, end))
+            cursor += length
+    return tuple(segments)
+
+
+def _has_matching_underlay(objects, start, end, model_path) -> bool:
+    midpoint = ((start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5)
+    heading = math.degrees(math.atan2(end[0] - start[0], end[1] - start[1])) % 360.0
+    target_family = _paved._family(model_path)
+    for obj in objects:
+        if _paved._family(obj.model_path) != target_family:
+            continue
+        if math.dist((float(obj.x), float(obj.z)), midpoint) > 4.0:
+            continue
+        if _undirected_heading_difference(obj.heading_degrees, heading) <= 12.0:
+            return True
+    return False
+
+
+def _add_terminal_underlays(report, spans, elevations, spec):
+    """Synthesize road pieces where the fitter stops before the terminal bridge modules."""
+    if not spans:
         return report, 0
-    return replace(report, objects=kept), removed
+    objects = list(getattr(report, "objects", ()))
+    next_id = max((int(obj.object_id) for obj in objects), default=0) + 1
+    added = 0
+    for span in spans:
+        model = _terminal_model(span.road_model_path)
+        if model is None:
+            continue
+        for start, end in _terminal_segments(span):
+            if _has_matching_underlay(objects, start, end, model):
+                continue
+            obj = _p._road_object_on_slope(
+                next_id,
+                model,
+                start,
+                end,
+                elevations,
+                spec,
+                vertical_offset=_p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
+            )
+            objects.append(obj)
+            next_id += 1
+            added += 1
+    if not added:
+        return report, 0
+    return replace(report, objects=tuple(objects)), added
 
 
-def _fit(
-    dataset,
-    projection,
-    elevations,
-    spec,
-    *,
-    starting_id: int = 1,
-    progress_callback=None,
-):
+def _fit(dataset, projection, elevations, spec, *, starting_id: int = 1, progress_callback=None):
     report = _ORIGINAL_FIT(
         dataset,
         projection,
@@ -327,17 +314,16 @@ def _fit(
     )
     spans = _bridge_spans(dataset, projection, elevations, spec)
     cleaned, removed = _remove_bridge_underlays(report, spans)
-    if removed and progress_callback is not None:
+    finished, added = _add_terminal_underlays(cleaned, spans, elevations, spec)
+    if progress_callback is not None and (removed or added):
         progress_callback(
             99,
-            f"Removed {removed:,} ordinary road piece(s) underneath bridge interiors; kept terminal underlays",
+            f"Bridge road underlay: removed {removed:,} interior piece(s), added {added:,} terminal mask piece(s)",
         )
-    return cleaned
+    return finished
 
 
 def install_bridge_underlay_cleanup_policy() -> None:
-    """Install after final road deduplication and before building-road clearance."""
-
     global _ORIGINAL_FIT, _INSTALLED
     if _INSTALLED:
         return
