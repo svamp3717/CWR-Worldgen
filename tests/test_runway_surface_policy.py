@@ -36,6 +36,15 @@ def _runway_dataset(projection: BboxProjection) -> OsmDataset:
     )
 
 
+def _surface_spec(profile: str):
+    return SimpleNamespace(
+        name="wg_runway",
+        ground_texture_profile=profile,
+        surface_pass_enabled=True,
+        surface_ground_mode="milestone9",
+    )
+
+
 def test_runway_material_uses_requested_stock_texture_per_profile() -> None:
     install_runway_surface_policy()
     index = surface_pass.MATERIAL_INDEX[RUNWAY_MATERIAL_CODE]
@@ -44,10 +53,12 @@ def test_runway_material_uses_requested_stock_texture_per_profile() -> None:
         paths = surface_pass.surface_texture_wire_paths("wg_runway", profile)
         assert paths[index] == GRASS_RUNWAY_TEXTURE
         assert GRASS_RUNWAY_TEXTURE in surface_pass.external_surface_texture_paths(profile)
+        assert generator._ground_texture_paths(_surface_spec(profile))[index] == GRASS_RUNWAY_TEXTURE
 
     desert_paths = surface_pass.surface_texture_wire_paths("wg_runway", "desert")
     assert desert_paths[index] == DESERT_RUNWAY_TEXTURE
     assert DESERT_RUNWAY_TEXTURE in surface_pass.external_surface_texture_paths("desert")
+    assert generator._ground_texture_paths(_surface_spec("desert"))[index] == DESERT_RUNWAY_TEXTURE
 
 
 def test_runway_overlay_replaces_generic_paved_cells() -> None:
