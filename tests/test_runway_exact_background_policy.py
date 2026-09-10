@@ -78,19 +78,19 @@ def test_exact_loader_reads_world_local_generated_and_malden_textures(tmp_path) 
         ("desert", r"o\ps.paa"),
     ),
 )
-def test_exact_loader_uses_same_asset_root_system_for_every_stock_profile(
+def test_exact_loader_skips_external_asset_roots_while_texture_scanning_is_disabled(
     tmp_path, profile: str, wire_path: str
 ) -> None:
     root = tmp_path / "game"
     local = root.joinpath(*wire_path.split("\\"))
     _write_test_texture(local, (37, 59, 29))
+
     exact = _load_exact_texture(root / "unused-world", _spec(profile, asset_roots=(root,)), wire_path)
-    assert exact is not None
-    assert _canonical(exact.wire_path) == _canonical(wire_path)
-    assert Path(exact.source) == local
+
+    assert exact is None
 
 
-def test_exact_loader_finds_o_pbo_beside_deployed_mod_without_asset_roots(tmp_path) -> None:
+def test_exact_loader_skips_game_pbo_discovery_while_texture_scanning_is_disabled(tmp_path) -> None:
     game = tmp_path / "CWA"
     deploy = game / "@generated"
     deploy.mkdir(parents=True)
@@ -104,8 +104,8 @@ def test_exact_loader_finds_o_pbo_beside_deployed_mod_without_asset_roots(tmp_pa
         _spec("nogova", deploy_mod_dir=deploy),
         r"o\t1.paa",
     )
-    assert exact is not None
-    assert Path(exact.source) == pbo
+
+    assert exact is None
 
 
 def test_pbo_asset_reader_respects_pbo_name_as_virtual_prefix(tmp_path) -> None:
