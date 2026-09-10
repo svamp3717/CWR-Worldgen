@@ -186,10 +186,3 @@ def install_stock_desert_surface_policy() -> None:
     from .runway_exact_background_policy import install_runway_exact_background_policy
 
     install_runway_exact_background_policy()
-
-    # Remember one game installation in the desktop GUI and automatically feed
-    # it into --asset-root on every build. This lets all runway presets resolve
-    # their original stock background textures after application restarts.
-    from .game_folder_gui_policy import install_game_folder_gui_policy
-
-    install_game_folder_gui_policy()
