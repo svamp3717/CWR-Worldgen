@@ -135,11 +135,6 @@ def _stock_desert_terrain_texture_path(
     return _ORIGINAL_TERRAIN_GROUND_TEXTURE_PATH(world_name, material_code, profile)
 
 
-def _disabled_external_runway_texture_roots(_spec) -> tuple[()]:
-    """Temporarily prevent exact-runway PAA lookup from walking game roots."""
-    return ()
-
-
 def install_stock_desert_surface_policy() -> None:
     """Make Desert use only stock game ground textures in every build path."""
     global _INSTALLED
@@ -175,19 +170,33 @@ def install_stock_desert_surface_policy() -> None:
     install_runway_surface_policy()
 
     # The first path-aware Nogova approximation was still visibly too bright in
-    # CWA. Keep that calibration as the fallback while external PAA scanning is
-    # disabled, and for any build where an exact source texture is unavailable.
+    # CWA. Keep that calibration as the fallback for builds where stock PAA bytes
+    # cannot be read from local files or the game installation.
     from .runway_nogova_calibration_policy import (
         install_runway_nogova_calibration_policy,
     )
 
     install_runway_nogova_calibration_policy()
 
-    # Exact matching remains useful for generated/Malden textures already present
-    # inside the world source directory. External roots are deliberately disabled
-    # for now so runway background matching cannot start a second game/PBO texture
-    # crawl behind the main asset scanner's back.
-    from . import runway_exact_background_policy as _runway_exact_background
+    # Prefer the exact terrain texture for every preset, not only Nogova. Local
+    # generated/Malden PAAs are read from the world source tree; stock Nogova,
+    # Everon and Desert PAAs are resolved from asset roots, CWR_GAME_ROOT, or the
+    # parent of the deployment @mod folder. The calibrated/profile colours above
+    # remain a bounded fallback when the source texture is unavailable.
+    from .runway_exact_background_policy import install_runway_exact_background_policy
 
-    _runway_exact_background._candidate_asset_roots = _disabled_external_runway_texture_roots
-    _runway_exact_background.install_runway_exact_background_policy()
+    install_runway_exact_background_policy()
+
+    # Rendering/compression is expensive and does not need to be repeated on
+    # unchanged builds. Persist three role textures per runway and restore
+    # them on later builds from the dedicated runway-ground-textures cache.
+    from .runway_texture_cache_policy import install_runway_texture_cache_policy
+
+    install_runway_texture_cache_policy()
+
+    # Remember one game installation in the desktop GUI and automatically feed
+    # it into --asset-root on every build. This lets all runway presets resolve
+    # their original stock background textures after application restarts.
+    from .game_folder_gui_policy import install_game_folder_gui_policy
+
+    install_game_folder_gui_policy()
