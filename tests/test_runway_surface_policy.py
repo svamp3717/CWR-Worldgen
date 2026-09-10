@@ -25,6 +25,9 @@ from cwr_worldgen.runway_nogova_calibration_policy import (
     NOGOVA_RUNWAY_BACKGROUND_COLOURS,
     install_runway_nogova_calibration_policy,
 )
+from cwr_worldgen.runway_exact_background_policy import (
+    install_runway_exact_background_policy,
+)
 from cwr_worldgen.runway_surface_policy import (
     RUNWAY_TEXTURE_PREFIX,
     RUNWAY_TEXTURE_SIZE,
@@ -314,11 +317,12 @@ def test_line_runway_is_removed_from_generic_paved_aeroway_mask() -> None:
 def test_runway_policy_invalidates_previous_surface_representations() -> None:
     install_runway_surface_policy()
     install_runway_nogova_calibration_policy()
+    install_runway_exact_background_policy()
     payload = {"world": "runway-test"}
     assert generator.cache_key(
         "surface-pipeline-v11-vectorized-material-pass",
         payload,
     ) == raw_cache_key(
-        "surface-pipeline-v19-darker-nogova-runway-backgrounds",
+        "surface-pipeline-v20-exact-runway-background-textures",
         payload,
     )
