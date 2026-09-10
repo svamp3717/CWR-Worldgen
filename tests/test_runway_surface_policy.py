@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from cwr_worldgen import generator, surface_pass
+import cwr_worldgen.runway_surface_policy as runway_policy
 from cwr_worldgen.cache import cache_key as raw_cache_key
 from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
 from cwr_worldgen.paa import inspect_paa
@@ -183,8 +184,6 @@ def test_vertical_runway_is_drawn_along_texture_v_not_sideways() -> None:
     spec = _spec("everon")
     geometries = _runway_geometries(dataset, projection, "everon")
     assert len(geometries) == 1
-    # Cell x=8,z=8 spans 80..90 m in each axis and therefore puts the runway
-    # centreline through the middle of the generated texture.
     cell_index = 8 * spec.cells + 8
     image = _render_runway_cell(
         cell_index=cell_index,
@@ -196,8 +195,6 @@ def test_vertical_runway_is_drawn_along_texture_v_not_sideways() -> None:
     pixels = np.asarray(image)
     marking = np.asarray((224, 221, 187), dtype=np.uint8)
     marked = np.all(pixels == marking, axis=2)
-    # A north/south runway must produce a long marked column. The old stock-WRP
-    # implementation produced the opposite, a horizontal line across the cell.
     assert int(marked.sum(axis=0).max()) > int(marked.sum(axis=1).max()) * 4
 
 
@@ -227,8 +224,8 @@ def test_horizontal_generated_runway_rotates_the_marking_with_world_bearing() ->
 def test_texture_budget_prefers_generated_paas_until_512_slots(monkeypatch) -> None:
     spec = _spec()
     monkeypatch.setattr(
-        generator,
-        "_ground_texture_paths",
+        runway_policy,
+        "_ORIGINAL_GROUND_TEXTURE_PATHS",
         lambda _spec: tuple(f"base{i}" for i in range(20)),
     )
     fits, base, final = _runway_texture_budget(spec, 100)
