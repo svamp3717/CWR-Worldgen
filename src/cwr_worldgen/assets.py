@@ -14,8 +14,13 @@ from .cache import CACHE_SCHEMA_VERSION, atomic_write_json, cache_key
 
 _ENTRY_FIELDS = struct.Struct("<IIIII")
 _PBO_PROPERTIES = 0x56657273  # 'Vers' in the legacy little-endian PBO header
-_ASSET_SUFFIXES = {".p3d", ".paa", ".pac"}
+_TEXTURE_SUFFIXES = {".paa", ".pac"}
 _TEXTURE_REFERENCE = re.compile(rb"(?i)([a-z0-9_.$@/\\-]{2,240}\.(?:paa|pac))")
+
+# Temporary performance switch. Texture discovery/validation can be restored by
+# setting this to True; model/PBO discovery remains active either way.
+TEXTURE_SCAN_ENABLED = False
+_ASSET_SUFFIXES = {".p3d"} | (_TEXTURE_SUFFIXES if TEXTURE_SCAN_ENABLED else set())
 
 
 def canonical_asset_path(value: str) -> str:
@@ -86,6 +91,8 @@ def _read_cstring(stream: io.BytesIO) -> str:
 
 
 def _p3d_dependencies(data: bytes) -> tuple[str, ...]:
+    if not TEXTURE_SCAN_ENABLED:
+        return ()
     found: set[str] = set()
     for match in _TEXTURE_REFERENCE.finditer(data):
         try:
@@ -97,7 +104,7 @@ def _p3d_dependencies(data: bytes) -> tuple[str, ...]:
 
 
 def _pbo_records(path: Path) -> tuple[list[AssetRecord], str | None]:
-    """List uncompressed and compressed PBO assets without requiring extraction.
+    """List selected assets in a PBO without requiring extraction.
 
     Compressed entries remain useful for existence checks. Their bytes and embedded
     P3D dependencies cannot be inspected, so they are marked unreadable rather than
@@ -187,8 +194,9 @@ def _loose_records(root: Path) -> tuple[list[AssetRecord], list[str]]:
     return records, errors
 
 
-
-_ASSET_CACHE_SCHEMA = 1
+# Schema 2 intentionally excludes texture records/dependencies while the
+# temporary TEXTURE_SCAN_ENABLED switch is off.
+_ASSET_CACHE_SCHEMA = 2
 _CATALOGUE_MEMORY: dict[str, tuple[tuple[str, ...], tuple[AssetRecord, ...], tuple[str, ...]]] = {}
 
 
@@ -256,7 +264,10 @@ def _load_or_scan_catalogue(
     refresh: bool,
 ) -> tuple[tuple[str, ...], tuple[AssetRecord, ...], tuple[str, ...], bool, str | None]:
     root_names, snapshot = _root_snapshot(roots)
-    key = cache_key("asset-catalogue-v1", {"schema": _ASSET_CACHE_SCHEMA, "entries": snapshot})
+    key = cache_key(
+        "asset-catalogue-v2",
+        {"schema": _ASSET_CACHE_SCHEMA, "texture_scan": TEXTURE_SCAN_ENABLED, "entries": snapshot},
+    )
     cache_path = cache_dir / "assets" / f"{key}.json" if cache_dir is not None else None
 
     if use_cache and not refresh and key in _CATALOGUE_MEMORY:
@@ -304,6 +315,11 @@ def _load_or_scan_catalogue(
     return names, records, errors, False, str(cache_path) if cache_path else None
 
 
+def _selected_asset_is_scanned(value: str) -> bool:
+    suffix = Path(value.replace("\\", "/")).suffix.casefold()
+    return suffix in _ASSET_SUFFIXES
+
+
 def scan_assets(
     roots: Sequence[Path],
     selected_models: Iterable[str],
@@ -317,7 +333,11 @@ def scan_assets(
     )
 
     by_path = {record.path: record for record in ordered}
-    selected = tuple(sorted({canonical_asset_path(model) for model in selected_models}))
+    selected = tuple(sorted({
+        canonical_asset_path(model)
+        for model in selected_models
+        if _selected_asset_is_scanned(str(model))
+    }))
     available = set(by_path)
     missing_models = tuple(model for model in selected if model not in available) if root_names else ()
 
