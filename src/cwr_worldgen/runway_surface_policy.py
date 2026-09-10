@@ -3,19 +3,25 @@
 
 RVW4 terrain cells carry a texture-table index but no per-cell UV transform. A
 single stock ``o\\runtr_d.paa`` therefore cannot follow an arbitrary OSM bearing.
-Instead, generate one compact world-local PAA for every terrain cell touched by a
-runway. Each PAA is rendered in world coordinates, so adjacent cells form one
-continuous runway at the mapped bearing and the runway is visible in the editor's
-terrain view as well as in game.
+Generate compact world-local PAA slices in world coordinates instead. Adjacent
+cells form one continuous runway at the mapped bearing and the runway remains
+visible in the editor terrain view.
 
-The texture table has 512 slots. Generated cell textures are the preferred path;
-if a world does not have enough free slots, retain the rotatable P3D runway
-implementation as a bounded fallback rather than emitting an invalid WRP.
+A generated slice replaces the whole 50 m terrain cell, so its background must
+also resemble the stock terrain it replaces. Nogova therefore uses path-aware
+approximations of its ``o\\t1`` / ``o\\trava*`` / field palette rather than the
+brighter generic semantic colours. Identical rendered slices are hashed and
+reused, allowing many cells to share one WRP texture slot.
+
+The WRP table has 512 slots. Generated cell textures are preferred when the
+worst-case cell count fits; otherwise the previous rotatable P3D runway remains a
+bounded fallback.
 """
 from __future__ import annotations
 
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
+from hashlib import sha256
 from pathlib import Path
 import json
 import math
@@ -46,7 +52,7 @@ RUNWAY_TEXTURE_SIZE = 128
 RUNWAY_TEXTURE_PREFIX = "rw"
 RUNWAY_SURFACE_OFFSET_METRES = 0.060
 _SURFACE_CACHE_V11 = "surface-pipeline-v11-vectorized-material-pass"
-_SURFACE_CACHE_V17 = "surface-pipeline-v17-generated-runway-cell-textures"
+_SURFACE_CACHE_V18 = "surface-pipeline-v18-nogova-runway-blend-dedup"
 _INSTALLED = False
 _ORIGINAL_FIT_ROAD_OBJECTS = None
 _ORIGINAL_CACHE_KEY = None
@@ -54,6 +60,22 @@ _ORIGINAL_AEROWAY_MASK = None
 _ORIGINAL_WRITE_RVW4 = None
 _ORIGINAL_VALIDATE_MILESTONE4 = None
 _ORIGINAL_GROUND_TEXTURE_PATHS = None
+
+# Approximate average colours of the stock Nogova terrain families. These are
+# intentionally darker and less saturated than the semantic overview palette.
+# We cannot composite BI's PAA bytes unless the user supplies/extracts them, but
+# matching the actual selected stock path removes the glaring rectangular colour
+# jump visible around generated runway cells.
+_NOGOVA_STOCK_COLOURS: dict[str, tuple[int, int, int]] = {
+    r"o\t1.paa": (58, 66, 45),
+    r"o\trava2.paa": (77, 88, 54),
+    r"o\trava3.paa": (96, 105, 65),
+    r"o\pole1.paa": (151, 143, 91),
+    r"o\pole2.paa": (126, 121, 72),
+    r"o\ps.paa": (177, 161, 110),
+    r"o\l1.paa": (100, 98, 90),
+    r"o\lom2.paa": (81, 79, 73),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,19 +217,51 @@ def runway_texture_cell_indices(dataset, projection, spec) -> tuple[int, ...]:
 
 
 def _runway_texture_budget(spec, runway_cells: int) -> tuple[bool, int, int]:
-    """Return (fits, base entries, final entries) against the 512-slot limit."""
+    """Return the conservative worst-case texture budget before deduplication."""
     from . import generator
 
-    base_entries = 1 + len(_ORIGINAL_GROUND_TEXTURE_PATHS(spec) if _ORIGINAL_GROUND_TEXTURE_PATHS else generator._ground_texture_paths(spec))
+    paths = (
+        _ORIGINAL_GROUND_TEXTURE_PATHS(spec)
+        if _ORIGINAL_GROUND_TEXTURE_PATHS is not None
+        else generator._ground_texture_paths(spec)
+    )
+    base_entries = 1 + len(paths)
     final_entries = base_entries + max(0, int(runway_cells))
     return final_entries <= RVW4_TEXTURE_LIMIT, base_entries, final_entries
 
 
-def _profile_surface_colour(material, profile: object) -> tuple[int, int, int]:
+def _canonical_texture_path(value: object) -> str:
+    path = str(value or "").replace("/", "\\").strip().lstrip("\\").casefold()
+    while "\\\\" in path:
+        path = path.replace("\\\\", "\\")
+    return path
+
+
+def _ground_path_for_material(spec, material_index: int) -> str:
+    """Return the actual stock/local WRP path replaced by a generated slice."""
+    from . import generator
+
+    paths = (
+        tuple(_ORIGINAL_GROUND_TEXTURE_PATHS(spec))
+        if _ORIGINAL_GROUND_TEXTURE_PATHS is not None
+        else tuple(generator._ground_texture_paths(spec))
+    )
+    if 0 <= material_index < len(paths):
+        return paths[material_index]
+    return ""
+
+
+def _profile_surface_colour(
+    material, profile: object, *, ground_path: str = ""
+) -> tuple[int, int, int]:
     from . import surface_pass as surface
 
     name = str(profile or "").strip().casefold()
     code = str(getattr(material, "code", "g"))
+    if name == "nogova":
+        stock = _NOGOVA_STOCK_COLOURS.get(_canonical_texture_path(ground_path))
+        if stock is not None:
+            return stock
     if name == "desert":
         return tuple(surface.DESERT_SURFACE_COLOURS.get(code, material.colour))
     if name == "malden":
@@ -215,29 +269,46 @@ def _profile_surface_colour(material, profile: object) -> tuple[int, int, int]:
     return tuple(material.colour)
 
 
-def _background_texture(material, profile: object, seed: str, size: int) -> Image.Image:
+def _background_texture(
+    material,
+    profile: object,
+    seed: str,
+    size: int,
+    *,
+    ground_path: str = "",
+) -> Image.Image:
+    """Generate a local background tuned to the actual replaced terrain path."""
     from . import surface_pass as surface
 
+    canonical = _canonical_texture_path(ground_path)
+    colour = _profile_surface_colour(material, profile, ground_path=canonical)
     proxy = surface.SurfaceMaterialDefinition(
         str(getattr(material, "code", "g")),
         str(getattr(material, "name", "ground")),
-        _profile_surface_colour(material, profile),
+        colour,
         None,
     )
-    return surface.create_surface_texture(proxy, seed, size)
+    # Include the selected stock path in the seed so t1/trava2/trava3 retain
+    # distinct deterministic grain even when semantic material codes coincide.
+    return surface.create_surface_texture(proxy, f"{seed}:{canonical}", size)
 
 
 def _runway_palette(profile: object) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return runway deck, wear and marking colours.
+
+    The former grass-family palette was literally green. ``runtr_d`` is runway
+    artwork, not an instruction to camouflage the landing strip as a lawn.
+    """
     if runway_family(profile) == "desert":
         return (
-            np.asarray((161, 145, 100), dtype=np.float32),
-            np.asarray((138, 124, 88), dtype=np.float32),
-            np.asarray((229, 220, 190), dtype=np.float32),
+            np.asarray((121, 116, 100), dtype=np.float32),
+            np.asarray((91, 88, 78), dtype=np.float32),
+            np.asarray((226, 219, 194), dtype=np.float32),
         )
     return (
-        np.asarray((113, 128, 77), dtype=np.float32),
-        np.asarray((91, 108, 66), dtype=np.float32),
-        np.asarray((224, 221, 187), dtype=np.float32),
+        np.asarray((108, 110, 104), dtype=np.float32),
+        np.asarray((78, 80, 76), dtype=np.float32),
+        np.asarray((224, 221, 207), dtype=np.float32),
     )
 
 
@@ -249,7 +320,7 @@ def _render_runway_cell(
     materials: Sequence[object],
     spec,
     size: int = RUNWAY_TEXTURE_SIZE,
-    background_cache: dict[int, Image.Image] | None = None,
+    background_cache: dict[tuple[int, str], Image.Image] | None = None,
 ) -> Image.Image:
     """Render one globally aligned runway slice into one terrain-cell texture."""
     cells, cell_size = int(spec.cells), float(spec.cell_size)
@@ -265,16 +336,19 @@ def _render_runway_cell(
             if str(getattr(material, "code", "")).casefold() == "g"
         ), 0)
 
+    ground_path = _ground_path_for_material(spec, material_index)
     cache = background_cache if background_cache is not None else {}
-    base = cache.get(material_index)
+    cache_key = (material_index, _canonical_texture_path(ground_path))
+    base = cache.get(cache_key)
     if base is None:
         base = _background_texture(
             materials[material_index],
             getattr(spec, "ground_texture_profile", "generated"),
             str(getattr(spec, "deterministic_seed", "cwr-worldgen")),
             size,
+            ground_path=ground_path,
         )
-        cache[material_index] = base
+        cache[cache_key] = base
 
     image = np.asarray(base, dtype=np.float32).copy()
     cz, cx = divmod(int(cell_index), cells)
@@ -300,18 +374,19 @@ def _render_runway_cell(
         if not bool(np.any(inside)):
             continue
 
-        image[inside] = image[inside] * 0.28 + body_colour * 0.72
+        # Runway deck. Keep a little source grain so it does not become a flat
+        # vector rectangle beside legacy low-frequency stock terrain.
+        image[inside] = image[inside] * 0.12 + body_colour * 0.88
         track_offset = min(geometry.half_width * 0.34, 6.0)
         tracks = inside & (
             np.abs(np.abs(lateral) - track_offset) <= max(0.75, pixel_scale * 1.5)
         )
-        image[tracks] = image[tracks] * 0.45 + wear_colour * 0.55
+        image[tracks] = image[tracks] * 0.42 + wear_colour * 0.58
 
         centreline = inside & (np.abs(lateral) <= marking_half_width)
         image[centreline] = marking_colour
 
-        # Reproduce the z/k end-cap intent procedurally. Grass is canonical
-        # west->east; Desert south->north, independent of OSM node order.
+        # Procedural equivalents of the stock z/k end-cap intent.
         threshold_span = max(2.0, geometry.half_width * 0.72)
         start_at = min(4.0, geometry.length * 0.12)
         end_at = max(geometry.length - 4.0, geometry.length * 0.88)
@@ -325,7 +400,7 @@ def _render_runway_cell(
         edge = inside & (
             np.abs(np.abs(lateral) - geometry.half_width) <= max(0.45, pixel_scale)
         )
-        image[edge] = image[edge] * 0.35 + wear_colour * 0.65
+        image[edge] = image[edge] * 0.28 + wear_colour * 0.72
 
     return Image.fromarray(np.clip(np.rint(image), 0, 255).astype(np.uint8), mode="RGB")
 
@@ -338,13 +413,15 @@ def apply_generated_runway_texture_table(
     texture_indices: Sequence[int],
     texture_paths: Sequence[str],
 ) -> tuple[tuple[int, ...], tuple[str, ...], tuple[str, ...]]:
-    """Write one unique PAA per runway cell and extend the WRP texture table."""
+    """Render runway cells, deduplicate identical images, and extend the WRP table."""
     from . import generator
 
     cell_indices = runway_texture_cell_indices(dataset, projection, spec)
     if not cell_indices:
         return tuple(map(int, texture_indices)), tuple(map(str, texture_paths)), ()
     if len(texture_paths) + len(cell_indices) > RVW4_TEXTURE_LIMIT:
+        # The install wrapper chooses the P3D path before this point. Keep this
+        # defensive check for direct callers and tests.
         raise ValueError("generated runway textures exceed the RVW4 512-entry texture table")
     if len(texture_indices) != int(spec.cells) * int(spec.cells):
         raise ValueError("runway texture generation received a mismatched WRP grid")
@@ -366,12 +443,13 @@ def apply_generated_runway_texture_table(
     revised_indices = [int(value) for value in texture_indices]
     revised_paths = [str(value) for value in texture_paths]
     generated_paths: list[str] = []
-    background_cache: dict[int, Image.Image] = {}
+    background_cache: dict[tuple[int, str], Image.Image] = {}
+    # digest -> (raw RGB bytes, WRP slot). Keep bytes to make even the theoretical
+    # SHA collision harmless rather than letting mathematics ruin an airport.
+    reusable: dict[bytes, tuple[bytes, int]] = {}
+    reused_cells = 0
 
-    for serial, cell_index in enumerate(cell_indices):
-        slot = len(revised_paths)
-        filename = f"{RUNWAY_TEXTURE_PREFIX}{serial:03x}.paa"
-        wire_path = rf"{spec.name}\{filename}"
+    for cell_index in cell_indices:
         image = _render_runway_cell(
             cell_index=cell_index,
             original_wrp_texture_index=revised_indices[cell_index],
@@ -381,25 +459,44 @@ def apply_generated_runway_texture_table(
             size=RUNWAY_TEXTURE_SIZE,
             background_cache=background_cache,
         )
+        raw = image.tobytes()
+        digest = sha256(raw).digest()
+        prior = reusable.get(digest)
+        if prior is not None and prior[0] == raw:
+            revised_indices[cell_index] = prior[1]
+            reused_cells += 1
+            continue
+
+        slot = len(revised_paths)
+        if slot >= RVW4_TEXTURE_LIMIT:
+            raise ValueError("deduplicated runway textures exceed the RVW4 texture table")
+        serial = len(generated_paths)
+        filename = f"{RUNWAY_TEXTURE_PREFIX}{serial:03x}.paa"
+        wire_path = rf"{spec.name}\{filename}"
         write_rgb_dxt1_paa(source_dir / filename, image)
         revised_paths.append(wire_path)
         revised_indices[cell_index] = slot
         generated_paths.append(wire_path)
+        reusable[digest] = (raw, slot)
 
     report_path.write_text(json.dumps({
-        "schema": 1,
+        "schema": 2,
         "mode": "generated-terrain-textures",
         "texture_limit": RVW4_TEXTURE_LIMIT,
         "texture_size": RUNWAY_TEXTURE_SIZE,
         "base_texture_entries": len(texture_paths),
+        "runway_cells": len(cell_indices),
         "generated_runway_textures": len(generated_paths),
+        "reused_runway_cell_assignments": reused_cells,
+        "reuse_ratio": (reused_cells / len(cell_indices)) if cell_indices else 0.0,
         "final_texture_entries": len(revised_paths),
-        "runway_cells": list(cell_indices),
+        "runway_cell_indices": list(cell_indices),
         "texture_paths": generated_paths,
         "stock_reference_family": {
             "grass": list(runway_texture_triplet("grass")),
             "desert": list(runway_texture_triplet("desert")),
         },
+        "nogova_background_mode": "selected-stock-path-colour-match",
     }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return tuple(revised_indices), tuple(revised_paths), tuple(generated_paths)
 
@@ -424,8 +521,16 @@ def _runway_tile_plan(points: Sequence[tuple[float, float]], profile: object):
         centre_x, centre_z, heading = measure.point(first_centre + index * tile)
         angle = math.radians(heading)
         dx, dz = math.sin(angle) * half, math.cos(angle) * half
-        role = "d" if tile_count == 1 else "z" if index == 0 else "k" if index == tile_count - 1 else "d"
-        planned.append((role, (centre_x - dx, centre_z - dz), (centre_x + dx, centre_z + dz)))
+        role = (
+            "d" if tile_count == 1 else
+            "z" if index == 0 else
+            "k" if index == tile_count - 1 else "d"
+        )
+        planned.append((
+            role,
+            (centre_x - dx, centre_z - dz),
+            (centre_x + dx, centre_z + dz),
+        ))
     return tuple(planned)
 
 
@@ -441,13 +546,23 @@ def runway_overlay_objects(
     for feature in dataset.aeroway_lines:
         if str(feature.tags.get("aeroway", "")).strip().casefold() != "runway":
             continue
-        for role, start, end in _runway_tile_plan(_clean_projected_points(feature, projection), profile):
-            centre_x, centre_z = (start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5
-            if world_size > 0.0 and not (0.0 <= centre_x < world_size and 0.0 <= centre_z < world_size):
+        for role, start, end in _runway_tile_plan(
+            _clean_projected_points(feature, projection), profile
+        ):
+            centre_x = (start[0] + end[0]) * 0.5
+            centre_z = (start[1] + end[1]) * 0.5
+            if world_size > 0.0 and not (
+                0.0 <= centre_x < world_size and 0.0 <= centre_z < world_size
+            ):
                 continue
             objects.append(_playability._road_object_on_slope(
-                next_id, runway_model_path(spec.name, profile, role), start, end,
-                elevations, spec, vertical_offset=RUNWAY_SURFACE_OFFSET_METRES,
+                next_id,
+                runway_model_path(spec.name, profile, role),
+                start,
+                end,
+                elevations,
+                spec,
+                vertical_offset=RUNWAY_SURFACE_OFFSET_METRES,
             ))
             next_id += 1
     return tuple(objects)
@@ -483,7 +598,7 @@ def _validation_with_generated_runway_textures(*args, **kwargs):
             )
             revised[index] = (
                 "[PASS] WRP terrain texture profile: "
-                f"generated runway cell textures={len(generated_paths)}, "
+                f"unique generated runway textures={len(generated_paths)}, "
                 f"texture table={final_count}/{RVW4_TEXTURE_LIMIT}"
             )
             break
@@ -511,51 +626,85 @@ def install_runway_surface_policy() -> None:
     _ORIGINAL_GROUND_TEXTURE_PATHS = generator._ground_texture_paths
 
     def aeroway_mask_without_line_runways(dataset, projection, cells):
-        # Generated runway cells include their own local background. Start from
-        # natural terrain instead of the historical rectangular paved underlay.
+        # Generated runway cells contain their own local background. Start from
+        # natural terrain instead of also painting the old rectangular pavement.
         lines = tuple(
             feature for feature in dataset.aeroway_lines
             if str(feature.tags.get("aeroway", "")).strip().casefold() != "runway"
         )
         if len(lines) == len(dataset.aeroway_lines):
             return _ORIGINAL_AEROWAY_MASK(dataset, projection, cells)
-        return _ORIGINAL_AEROWAY_MASK(replace(dataset, aeroway_lines=lines), projection, cells)
+        return _ORIGINAL_AEROWAY_MASK(
+            replace(dataset, aeroway_lines=lines), projection, cells
+        )
 
     def fit_road_objects_with_runways(
         dataset, projection, elevations, spec, *, starting_id: int = 1,
         progress_callback=None,
     ):
         report = _ORIGINAL_FIT_ROAD_OBJECTS(
-            dataset, projection, elevations, spec, starting_id=starting_id,
+            dataset,
+            projection,
+            elevations,
+            spec,
+            starting_id=starting_id,
             progress_callback=progress_callback,
         )
         cell_indices = runway_texture_cell_indices(dataset, projection, spec)
-        fits, base_entries, _final_entries = _runway_texture_budget(spec, len(cell_indices))
-        mode = "textures" if cell_indices and fits else "p3d-fallback" if cell_indices else "none"
+        fits, base_entries, _final_entries = _runway_texture_budget(
+            spec, len(cell_indices)
+        )
+        mode = (
+            "textures" if cell_indices and fits else
+            "p3d-fallback" if cell_indices else "none"
+        )
         _RUNWAY_CONTEXT.set(_RunwayBuildContext(
-            world_name=str(spec.name), cells=int(spec.cells), dataset=dataset,
-            projection=projection, spec=spec, cell_indices=cell_indices, mode=mode,
+            world_name=str(spec.name),
+            cells=int(spec.cells),
+            dataset=dataset,
+            projection=projection,
+            spec=spec,
+            cell_indices=cell_indices,
+            mode=mode,
             base_texture_entries=base_entries,
         ))
         _GENERATED_RUNWAY_PATHS.set(())
         if mode != "p3d-fallback":
             return report
-        next_id = max((int(obj.object_id) for obj in report.objects), default=int(starting_id) - 1) + 1
-        runways = runway_overlay_objects(dataset, projection, elevations, spec, starting_id=next_id)
-        return report if not runways else replace(report, objects=tuple((*report.objects, *runways)))
+        next_id = max(
+            (int(obj.object_id) for obj in report.objects),
+            default=int(starting_id) - 1,
+        ) + 1
+        runways = runway_overlay_objects(
+            dataset,
+            projection,
+            elevations,
+            spec,
+            starting_id=next_id,
+        )
+        return report if not runways else replace(
+            report, objects=tuple((*report.objects, *runways))
+        )
 
     def write_rvw4_with_runway_textures(
         path, width, height, elevations, texture_indices, texture_paths, objects, **kwargs
     ):
         context = _RUNWAY_CONTEXT.get()
         if (
-            context is not None and context.mode == "textures"
+            context is not None
+            and context.mode == "textures"
             and context.world_name.casefold() == Path(path).stem.casefold()
             and context.cells == int(width) == int(height)
         ):
-            revised_indices, revised_paths, generated_paths = apply_generated_runway_texture_table(
-                Path(path).parent, context.dataset, context.projection, context.spec,
-                texture_indices, texture_paths,
+            revised_indices, revised_paths, generated_paths = (
+                apply_generated_runway_texture_table(
+                    Path(path).parent,
+                    context.dataset,
+                    context.projection,
+                    context.spec,
+                    texture_indices,
+                    texture_paths,
+                )
             )
             _GENERATED_RUNWAY_PATHS.set(generated_paths)
             infrastructure = Path(path).parent / "i"
@@ -563,18 +712,30 @@ def install_runway_surface_policy() -> None:
                 for stale in infrastructure.glob("runway_*.p3d"):
                     stale.unlink()
             return _ORIGINAL_WRITE_RVW4(
-                path, width, height, elevations, revised_indices, revised_paths,
-                objects, **kwargs,
+                path,
+                width,
+                height,
+                elevations,
+                revised_indices,
+                revised_paths,
+                objects,
+                **kwargs,
             )
         _GENERATED_RUNWAY_PATHS.set(())
         return _ORIGINAL_WRITE_RVW4(
-            path, width, height, elevations, texture_indices, texture_paths,
-            objects, **kwargs,
+            path,
+            width,
+            height,
+            elevations,
+            texture_indices,
+            texture_paths,
+            objects,
+            **kwargs,
         )
 
     def runway_cache_key(namespace: str, payload):
         if namespace == _SURFACE_CACHE_V11:
-            namespace = _SURFACE_CACHE_V17
+            namespace = _SURFACE_CACHE_V18
         return _ORIGINAL_CACHE_KEY(namespace, payload)
 
     surface._aeroway_mask = aeroway_mask_without_line_runways
