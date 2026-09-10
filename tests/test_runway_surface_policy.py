@@ -21,6 +21,10 @@ from cwr_worldgen.runway_model_policy import (
     runway_model_path,
     runway_texture_triplet,
 )
+from cwr_worldgen.runway_nogova_calibration_policy import (
+    NOGOVA_RUNWAY_BACKGROUND_COLOURS,
+    install_runway_nogova_calibration_policy,
+)
 from cwr_worldgen.runway_surface_policy import (
     RUNWAY_TEXTURE_PREFIX,
     RUNWAY_TEXTURE_SIZE,
@@ -116,17 +120,20 @@ def test_runway_cells_are_selected_from_the_actual_mapped_width() -> None:
     assert all(0 <= index < spec.cells * spec.cells for index in wide)
 
 
-def test_nogova_runway_background_uses_selected_stock_ground_family() -> None:
+def test_nogova_runway_background_uses_darker_screenshot_calibration() -> None:
+    install_runway_nogova_calibration_policy()
     material_index = surface_pass.MATERIAL_INDEX["g"]
     material = surface_pass.MILESTONE9_MATERIALS[material_index]
     ground_path = surface_pass.surface_texture_wire_paths("wg_runway", "nogova")[material_index]
     assert ground_path == r"o\t1.paa"
+    assert NOGOVA_RUNWAY_BACKGROUND_COLOURS[ground_path] == (30, 34, 24)
     assert _profile_surface_colour(
         material, "nogova", ground_path=ground_path
-    ) == (58, 66, 45)
+    ) == (30, 34, 24)
 
 
 def test_generated_runway_table_reuses_identical_cell_textures(tmp_path) -> None:
+    install_runway_nogova_calibration_policy()
     projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 160.0)
     dataset = _runway_dataset(projection)
     spec = _spec("nogova")
@@ -252,7 +259,6 @@ def test_generated_runway_deck_is_neutral_not_green() -> None:
         spec=spec,
     )
     pixels = np.asarray(image)
-    # Sample inside the deck but away from the centre stripe and wheel tracks.
     sample = pixels[64, 20].astype(int)
     assert max(sample) - min(sample) < 20
 
@@ -307,11 +313,12 @@ def test_line_runway_is_removed_from_generic_paved_aeroway_mask() -> None:
 
 def test_runway_policy_invalidates_previous_surface_representations() -> None:
     install_runway_surface_policy()
+    install_runway_nogova_calibration_policy()
     payload = {"world": "runway-test"}
     assert generator.cache_key(
         "surface-pipeline-v11-vectorized-material-pass",
         payload,
     ) == raw_cache_key(
-        "surface-pipeline-v18-nogova-runway-blend-dedup",
+        "surface-pipeline-v19-darker-nogova-runway-backgrounds",
         payload,
     )
