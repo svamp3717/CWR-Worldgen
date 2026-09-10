@@ -168,3 +168,12 @@ def install_stock_desert_surface_policy() -> None:
     from .runway_surface_policy import install_runway_surface_policy
 
     install_runway_surface_policy()
+
+    # The first path-aware Nogova approximation was still visibly too bright in
+    # CWA. Apply screenshot-calibrated source colours after the runway wrapper is
+    # installed; its renderer resolves the colour table at build time.
+    from .runway_nogova_calibration_policy import (
+        install_runway_nogova_calibration_policy,
+    )
+
+    install_runway_nogova_calibration_policy()
