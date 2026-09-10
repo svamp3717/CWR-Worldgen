@@ -170,10 +170,19 @@ def install_stock_desert_surface_policy() -> None:
     install_runway_surface_policy()
 
     # The first path-aware Nogova approximation was still visibly too bright in
-    # CWA. Apply screenshot-calibrated source colours after the runway wrapper is
-    # installed; its renderer resolves the colour table at build time.
+    # CWA. Keep that calibration as the fallback for builds where stock PAA bytes
+    # cannot be read from local files or the game installation.
     from .runway_nogova_calibration_policy import (
         install_runway_nogova_calibration_policy,
     )
 
     install_runway_nogova_calibration_policy()
+
+    # Prefer the exact terrain texture for every preset, not only Nogova. Local
+    # generated/Malden PAAs are read from the world source tree; stock Nogova,
+    # Everon and Desert PAAs are resolved from asset roots, CWR_GAME_ROOT, or the
+    # parent of the deployment @mod folder. The calibrated/profile colours above
+    # remain a bounded fallback when the source texture is unavailable.
+    from .runway_exact_background_policy import install_runway_exact_background_policy
+
+    install_runway_exact_background_policy()
