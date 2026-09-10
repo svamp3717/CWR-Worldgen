@@ -88,14 +88,14 @@ class Milestone4Tests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "strict asset validation failed"):
                 build_milestone4(Path(temp) / "build", self.spec(asset_roots=(empty,)))
 
-    def test_asset_scan_detects_p3d_texture_dependencies(self) -> None:
+    def test_asset_scan_skips_p3d_texture_dependencies_while_disabled(self) -> None:
         scan = scan_assets((FIXTURES / "assets",), (r"data3d\les_su_ctver_pruhozi.p3d",))
         self.assertTrue(scan.verified)
         forest = next(record for record in scan.records if record.path.endswith("les_su_ctver_pruhozi.p3d"))
-        self.assertTrue(forest.dependencies)
+        self.assertEqual(forest.dependencies, ())
         self.assertFalse(scan.missing_dependencies)
 
-    def test_asset_scan_resolves_bare_texture_from_data_package(self) -> None:
+    def test_asset_scan_ignores_loose_paa_files_while_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             model = root / "data3d" / "forest.p3d"
@@ -105,12 +105,17 @@ class Milestone4Tests(unittest.TestCase):
             model.write_bytes(b"str_fikovnik.paa\0")
             texture.write_bytes(b"PAA")
 
-            scan = scan_assets((root,), (r"data3d\forest.p3d",))
+            scan = scan_assets(
+                (root,),
+                (r"data3d\forest.p3d", r"data\str_fikovnik.paa"),
+            )
 
             self.assertTrue(scan.verified)
+            self.assertEqual(scan.selected_models, (r"data3d\forest.p3d",))
+            self.assertEqual(tuple(record.path for record in scan.records), (r"data3d\forest.p3d",))
             self.assertFalse(scan.missing_dependencies)
 
-    def test_asset_scan_resolves_paa_reference_to_pac_asset(self) -> None:
+    def test_asset_scan_ignores_loose_pac_files_while_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             model = root / "data3d" / "forest.p3d"
@@ -120,12 +125,14 @@ class Milestone4Tests(unittest.TestCase):
             model.write_bytes(b"str_fikovnik.paa\0")
             texture.write_bytes(b"PAC")
 
-            scan = scan_assets((root,), (r"data3d\forest.p3d",))
+            scan = scan_assets((root,), (r"data3d\forest.p3d", r"data\str_fikovnik.pac"))
 
             self.assertTrue(scan.verified)
+            self.assertEqual(scan.selected_models, (r"data3d\forest.p3d",))
+            self.assertEqual(tuple(record.path for record in scan.records), (r"data3d\forest.p3d",))
             self.assertFalse(scan.missing_dependencies)
 
-    def test_asset_scan_keeps_ambiguous_bare_texture_missing(self) -> None:
+    def test_asset_scan_does_not_report_texture_dependencies_while_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             model = root / "data3d" / "forest.p3d"
@@ -138,9 +145,10 @@ class Milestone4Tests(unittest.TestCase):
 
             scan = scan_assets((root,), (r"data3d\forest.p3d",))
 
-            self.assertEqual(scan.missing_dependencies, ("shared.paa",))
+            self.assertEqual(scan.missing_dependencies, ())
+            self.assertEqual(tuple(record.path for record in scan.records), (r"data3d\forest.p3d",))
 
-    def test_asset_catalogue_scans_pbo_entries(self) -> None:
+    def test_asset_catalogue_skips_texture_entries_inside_pbo(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             pbo = Path(temp) / "data3d.pbo"
             write_pbo(
@@ -152,7 +160,9 @@ class Milestone4Tests(unittest.TestCase):
             )
             scan = scan_assets((pbo,), (r"data3d\les_su_ctver_pruhozi.p3d",))
             self.assertTrue(scan.verified)
-            self.assertEqual(len(scan.records), 2)
+            self.assertEqual(len(scan.records), 1)
+            self.assertEqual(scan.records[0].path, r"data3d\les_su_ctver_pruhozi.p3d")
+            self.assertEqual(scan.records[0].dependencies, ())
 
     def test_transition_seed_changes_dither_but_is_repeatable(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
