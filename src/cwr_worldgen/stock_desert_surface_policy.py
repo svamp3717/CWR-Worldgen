@@ -200,3 +200,10 @@ def install_stock_desert_surface_policy() -> None:
     from .game_folder_gui_policy import install_game_folder_gui_policy
 
     install_game_folder_gui_policy()
+
+    # Building validation only needs the selected game assets and the texture
+    # dependencies those models actually reference. Avoid recursively cataloguing
+    # the entire CWA installation at 82/83% and cache PBO header indexes instead.
+    from .fast_asset_scan_policy import install_fast_asset_scan_policy
+
+    install_fast_asset_scan_policy()
