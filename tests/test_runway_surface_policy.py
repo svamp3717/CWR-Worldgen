@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -24,6 +25,7 @@ from cwr_worldgen.runway_surface_policy import (
     RUNWAY_TEXTURE_PREFIX,
     RUNWAY_TEXTURE_SIZE,
     RVW4_TEXTURE_LIMIT,
+    _profile_surface_colour,
     _render_runway_cell,
     _runway_geometries,
     _runway_texture_budget,
@@ -114,11 +116,21 @@ def test_runway_cells_are_selected_from_the_actual_mapped_width() -> None:
     assert all(0 <= index < spec.cells * spec.cells for index in wide)
 
 
-def test_generated_runway_table_writes_one_unique_paa_per_touched_cell(tmp_path) -> None:
+def test_nogova_runway_background_uses_selected_stock_ground_family() -> None:
+    material_index = surface_pass.MATERIAL_INDEX["g"]
+    material = surface_pass.MILESTONE9_MATERIALS[material_index]
+    ground_path = surface_pass.surface_texture_wire_paths("wg_runway", "nogova")[material_index]
+    assert ground_path == r"o\t1.paa"
+    assert _profile_surface_colour(
+        material, "nogova", ground_path=ground_path
+    ) == (58, 66, 45)
+
+
+def test_generated_runway_table_reuses_identical_cell_textures(tmp_path) -> None:
     projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 160.0)
     dataset = _runway_dataset(projection)
-    spec = _spec()
-    base_paths = _base_texture_table("everon")
+    spec = _spec("nogova")
+    base_paths = _base_texture_table("nogova")
     grass_index = surface_pass.MATERIAL_INDEX["g"] + 1
     base_indices = (grass_index,) * (spec.cells * spec.cells)
     touched = runway_texture_cell_indices(dataset, projection, spec)
@@ -132,13 +144,18 @@ def test_generated_runway_table_writes_one_unique_paa_per_touched_cell(tmp_path)
         base_paths,
     )
 
-    assert len(generated) == len(touched) > 0
-    assert len(revised_paths) == len(base_paths) + len(touched)
+    assert 0 < len(generated) < len(touched)
+    assert len(revised_paths) == len(base_paths) + len(generated)
     assert len(revised_paths) <= RVW4_TEXTURE_LIMIT
     assert all(path.startswith(r"wg_runway\rw") for path in generated)
     assert len(set(generated)) == len(generated)
     assert all(revised_indices[index] >= len(base_paths) for index in touched)
-    untouched = next(index for index in range(spec.cells * spec.cells) if index not in set(touched))
+    assert len({revised_indices[index] for index in touched}) == len(generated)
+
+    untouched = next(
+        index for index in range(spec.cells * spec.cells)
+        if index not in set(touched)
+    )
     assert revised_indices[untouched] == grass_index
 
     for path in generated:
@@ -149,11 +166,13 @@ def test_generated_runway_table_writes_one_unique_paa_per_touched_cell(tmp_path)
         assert summary.width == RUNWAY_TEXTURE_SIZE
         assert summary.height == RUNWAY_TEXTURE_SIZE
 
-    report = tmp_path / "runway-textures.json"
-    assert report.is_file()
-    text = report.read_text(encoding="utf-8")
-    assert '"mode": "generated-terrain-textures"' in text
-    assert f'"generated_runway_textures": {len(generated)}' in text
+    report = json.loads((tmp_path / "runway-textures.json").read_text(encoding="utf-8"))
+    assert report["mode"] == "generated-terrain-textures"
+    assert report["runway_cells"] == len(touched)
+    assert report["generated_runway_textures"] == len(generated)
+    assert report["reused_runway_cell_assignments"] == len(touched) - len(generated)
+    assert report["reuse_ratio"] > 0.0
+    assert report["nogova_background_mode"] == "selected-stock-path-colour-match"
 
 
 def test_generated_texture_path_fits_rvw4_even_for_maximum_world_name(tmp_path) -> None:
@@ -193,7 +212,7 @@ def test_vertical_runway_is_drawn_along_texture_v_not_sideways() -> None:
         spec=spec,
     )
     pixels = np.asarray(image)
-    marking = np.asarray((224, 221, 187), dtype=np.uint8)
+    marking = np.asarray((224, 221, 207), dtype=np.uint8)
     marked = np.all(pixels == marking, axis=2)
     assert int(marked.sum(axis=0).max()) > int(marked.sum(axis=1).max()) * 4
 
@@ -216,9 +235,26 @@ def test_horizontal_generated_runway_rotates_the_marking_with_world_bearing() ->
         spec=spec,
     )
     pixels = np.asarray(image)
-    marking = np.asarray((224, 221, 187), dtype=np.uint8)
+    marking = np.asarray((224, 221, 207), dtype=np.uint8)
     marked = np.all(pixels == marking, axis=2)
     assert int(marked.sum(axis=1).max()) > int(marked.sum(axis=0).max()) * 4
+
+
+def test_generated_runway_deck_is_neutral_not_green() -> None:
+    projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 160.0)
+    dataset = _runway_dataset(projection, start=(85.0, 20.0), end=(85.0, 140.0))
+    spec = _spec("nogova")
+    image = _render_runway_cell(
+        cell_index=8 * spec.cells + 8,
+        original_wrp_texture_index=surface_pass.MATERIAL_INDEX["g"] + 1,
+        geometries=_runway_geometries(dataset, projection, "nogova"),
+        materials=surface_pass.MILESTONE9_MATERIALS,
+        spec=spec,
+    )
+    pixels = np.asarray(image)
+    # Sample inside the deck but away from the centre stripe and wheel tracks.
+    sample = pixels[64, 20].astype(int)
+    assert max(sample) - min(sample) < 20
 
 
 def test_texture_budget_prefers_generated_paas_until_512_slots(monkeypatch) -> None:
@@ -276,6 +312,6 @@ def test_runway_policy_invalidates_previous_surface_representations() -> None:
         "surface-pipeline-v11-vectorized-material-pass",
         payload,
     ) == raw_cache_key(
-        "surface-pipeline-v17-generated-runway-cell-textures",
+        "surface-pipeline-v18-nogova-runway-blend-dedup",
         payload,
     )
