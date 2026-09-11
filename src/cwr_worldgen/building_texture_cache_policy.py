@@ -55,7 +55,6 @@ def install_building_texture_cache_policy() -> None:
     from . import procedural_buildings as buildings
 
     original_texture_cache_tasks = budget._texture_cache_tasks
-    original_write_texture_task = budget._write_modeler_texture_cache_task
     original_restore_or_create_file = buildings.restore_or_create_file
 
     def shared_texture_cache_tasks(library, buildings_module):
@@ -77,19 +76,6 @@ def install_building_texture_cache_policy() -> None:
             except OSError:
                 remaining.append(task)
         return total, remaining
-
-    def write_texture_task_shared(task):
-        result = original_write_texture_task(task)
-        if getattr(task, "cache_enabled", True):
-            local = Path(task.cache_path)
-            shared = _shared_texture_path(local)
-            if shared is not None and local.is_file():
-                try:
-                    if getattr(task, "cache_refresh", False) or not shared.is_file():
-                        _atomic_copy(local, shared)
-                except OSError:
-                    pass
-        return result
 
     def restore_or_create_building_texture(
         *, cache_path, destination, producer, enabled, refresh
@@ -126,6 +112,5 @@ def install_building_texture_cache_policy() -> None:
         return hit
 
     budget._texture_cache_tasks = shared_texture_cache_tasks
-    budget._write_modeler_texture_cache_task = write_texture_task_shared
     buildings.restore_or_create_file = restore_or_create_building_texture
     _INSTALLED = True
