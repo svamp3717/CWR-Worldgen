@@ -8,7 +8,7 @@ with Shapely so dense worlds do not pay one geometry allocation per tree.
 """
 from __future__ import annotations
 
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 from pathlib import Path
 import json
 from typing import Iterable, Sequence
@@ -157,7 +157,10 @@ def filter_vegetation_objects(objects: Sequence[object], dataset, projection, sp
 
     runway_union = unary_union(runway_shapes) if runway_shapes else None
     sports_union = unary_union(sports_shapes) if sports_shapes else None
-    combined_parts = [shape for shape in (runway_union, sports_union) if shape is not None and not shape.is_empty]
+    combined_parts = [
+        shape for shape in (runway_union, sports_union)
+        if shape is not None and not shape.is_empty
+    ]
     combined = unary_union(combined_parts) if combined_parts else None
     configured = _configured_vegetation_models(spec)
 
@@ -248,4 +251,26 @@ def install_vegetation_clearance_policy() -> None:
         )
 
     runway._ORIGINAL_WRITE_RVW4 = write_rvw4_without_surface_vegetation
+
+    # Milestone validation compares the serialized WRP object count with
+    # generated.objects. Present the same filtered view to validation so the
+    # final write-time safety policy does not create a false count mismatch.
+    original_validate = runway._ORIGINAL_VALIDATE_MILESTONE4
+
+    def validate_without_surface_vegetation(*args, **kwargs):
+        if len(args) >= 10:
+            values = list(args)
+            spec = values[1]
+            dataset = values[3]
+            projection = values[4]
+            generated = values[9]
+            filtered, _report = filter_vegetation_objects(
+                tuple(getattr(generated, "objects", ())), dataset, projection, spec
+            )
+            if len(filtered) != len(getattr(generated, "objects", ())):
+                values[9] = replace(generated, objects=filtered)
+            args = tuple(values)
+        return original_validate(*args, **kwargs)
+
+    runway._ORIGINAL_VALIDATE_MILESTONE4 = validate_without_surface_vegetation
     _INSTALLED = True
