@@ -194,9 +194,9 @@ def install_stock_desert_surface_policy() -> None:
 
     install_runway_exact_background_policy()
 
-    # Rendering/compression is expensive and does not need to be repeated on
-    # unchanged builds. Persist three role textures per runway and restore
-    # them on later builds from the dedicated runway-ground-textures cache.
+    # Rendering/compression is expensive, but each WRP cell needs its own local
+    # runway alignment. Persist correctly rendered per-cell PAAs across builds and
+    # deduplicate only byte-identical results in the final WRP texture table.
     from .runway_texture_cache_policy import install_runway_texture_cache_policy
 
     install_runway_texture_cache_policy()
