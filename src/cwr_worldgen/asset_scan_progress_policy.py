@@ -122,19 +122,20 @@ def install_asset_scan_progress_policy() -> None:
 
     install_runway_performance_policy()
 
+    # Install parking before sports at policy-install time. Each policy wraps the
+    # previous writer, so runtime order is runway -> sports -> parking -> writer.
+    # That gives the scarce RVW4 texture slots to runways first, sports second,
+    # and parking last while parking can see/skip already generated sports cells.
+    from .parking_surface_policy import install_parking_surface_policy
+
+    install_parking_surface_policy()
+
     # Sports pitches use the same exact-background terrain-cell approach as
     # runways: keep the preset's ordinary grass artwork and paint only the field
     # markings in world coordinates, with persistent per-cell cache reuse.
     from .sports_pitch_surface_policy import install_sports_pitch_surface_policy
 
     install_sports_pitch_surface_policy()
-
-    # Parking lots are true terrain overlays as well. The nearest supported OSM
-    # road selects paved/asphalt versus gravel, while runways and sports pitches
-    # retain priority when semantic polygons overlap the same WRP terrain cell.
-    from .parking_surface_policy import install_parking_surface_policy
-
-    install_parking_surface_policy()
 
     # Apply tree/bush clearance at the final WRP boundary so even an old cached
     # placement result cannot put woody vegetation back onto runways or pitches.
