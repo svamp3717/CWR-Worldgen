@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Expose targeted CWA scan cache behavior and exhaustive fallbacks in progress."""
+"""Expose fast CWA scan behavior without recursively crawling the whole install."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,8 +10,25 @@ from typing import Iterable, Sequence
 _INSTALLED = False
 
 
+def _sample_unresolved(result, *, limit: int = 8) -> str:
+    values = [*result.missing_models, *result.missing_dependencies]
+    if not values:
+        return ""
+    sample = ", ".join(values[:limit])
+    if len(values) > limit:
+        sample += f", +{len(values) - limit} more"
+    return sample
+
+
 def install_asset_scan_progress_policy() -> None:
-    """Wrap generator asset validation with useful timing/cache diagnostics."""
+    """Wrap generator asset validation with timing/cache diagnostics.
+
+    The targeted scanner is now authoritative for normal GUI builds. If an asset
+    is not present in a standard package/loose-file layout, return that unresolved
+    result immediately instead of falling back to the historical recursive full
+    catalogue scan. Strict-assets mode can then fail explicitly; normal builds can
+    continue without paying minutes to search the entire game directory.
+    """
 
     global _INSTALLED
     if _INSTALLED:
@@ -66,25 +83,15 @@ def install_asset_scan_progress_policy() -> None:
             return result
 
         missing_count = len(result.missing_models) + len(result.missing_dependencies)
+        detail = _sample_unresolved(result)
         report_progress(
             82,
             "Targeted CWA lookup unresolved "
-            f"{missing_count} asset/dependency item(s) after {targeted_seconds:.2f}s; "
-            "falling back to exhaustive asset scan",
+            f"{missing_count} item(s) after {targeted_seconds:.2f}s; "
+            "skipping exhaustive full-install scan"
+            + (f" [{detail}]" if detail else ""),
         )
-        fallback_started = perf_counter()
-        full = fast._FULL_SCAN(
-            roots,
-            selected,
-            cache_dir=cache_dir,
-            use_cache=use_cache,
-            refresh=refresh,
-        )
-        report_progress(
-            82,
-            f"Exhaustive CWA asset scan complete ({perf_counter() - fallback_started:.2f}s)",
-        )
-        return full
+        return result
 
     generator.scan_assets = scan_assets_with_progress
     _INSTALLED = True
