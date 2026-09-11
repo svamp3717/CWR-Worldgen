@@ -22,6 +22,10 @@ from shapely.ops import unary_union
 _INSTALLED = False
 RUNWAY_CLEARANCE_METRES = 2.0
 SPORTS_CLEARANCE_METRES = 0.75
+# Generated forest/undergrowth clusters can place proxies roughly 12 m from the
+# WRP object's origin. Account for that footprint instead of testing only the
+# cluster centre against the semantic surface polygon.
+CLUSTER_EXTRA_CLEARANCE_METRES = 14.0
 
 
 def _canonical(value: object) -> str:
@@ -85,9 +89,6 @@ def _is_tree_or_bush(model_path: str, spec, configured: set[str]) -> bool:
     if canonical in configured:
         return True
     if is_generated_cluster_model(str(getattr(spec, "name", "")), model_path):
-        # Generated forest clusters contain tree/bush proxies. Clearing the
-        # whole cluster is the only way to guarantee none of those proxies sits
-        # on a runway or pitch.
         return True
     if canonical.startswith("o\\tree\\"):
         return True
@@ -150,6 +151,8 @@ def _contains(geometry, xs: np.ndarray, zs: np.ndarray) -> np.ndarray:
 
 
 def filter_vegetation_objects(objects: Sequence[object], dataset, projection, spec):
+    from .procedural_forests import is_generated_cluster_model
+
     runway_shapes = _runway_clear_shapes(dataset, projection, spec)
     sports_shapes = _sports_clear_shapes(dataset, projection)
     if not runway_shapes and not sports_shapes:
@@ -162,29 +165,63 @@ def filter_vegetation_objects(objects: Sequence[object], dataset, projection, sp
         if shape is not None and not shape.is_empty
     ]
     combined = unary_union(combined_parts) if combined_parts else None
+    runway_cluster_union = (
+        runway_union.buffer(CLUSTER_EXTRA_CLEARANCE_METRES, join_style=2)
+        if runway_union is not None and not runway_union.is_empty else None
+    )
+    sports_cluster_union = (
+        sports_union.buffer(CLUSTER_EXTRA_CLEARANCE_METRES, join_style=2)
+        if sports_union is not None and not sports_union.is_empty else None
+    )
+    cluster_parts = [
+        shape for shape in (runway_cluster_union, sports_cluster_union)
+        if shape is not None and not shape.is_empty
+    ]
+    cluster_combined = unary_union(cluster_parts) if cluster_parts else None
     configured = _configured_vegetation_models(spec)
 
     candidate_indices: list[int] = []
     xs: list[float] = []
     zs: list[float] = []
+    cluster_flags: list[bool] = []
+    model_classification: dict[str, tuple[bool, bool]] = {}
+    world_name = str(getattr(spec, "name", ""))
     for index, obj in enumerate(objects):
-        if not _is_tree_or_bush(str(getattr(obj, "model_path", "")), spec, configured):
+        model_path = str(getattr(obj, "model_path", ""))
+        canonical = _canonical(model_path)
+        classification = model_classification.get(canonical)
+        if classification is None:
+            cluster = is_generated_cluster_model(world_name, model_path)
+            classification = (_is_tree_or_bush(model_path, spec, configured), cluster)
+            model_classification[canonical] = classification
+        vegetation, cluster = classification
+        if not vegetation:
             continue
         candidate_indices.append(index)
         xs.append(float(getattr(obj, "x", 0.0)))
         zs.append(float(getattr(obj, "z", 0.0)))
+        cluster_flags.append(cluster)
 
     if not candidate_indices:
         return tuple(objects), {"removed": 0, "runway": 0, "sports_pitch": 0}
 
     x_array = np.asarray(xs, dtype=np.float64)
     z_array = np.asarray(zs, dtype=np.float64)
-    remove_mask = _contains(combined, x_array, z_array)
+    clusters = np.asarray(cluster_flags, dtype=bool)
+    normal_hits = _contains(combined, x_array, z_array)
+    cluster_hits = clusters & _contains(cluster_combined, x_array, z_array)
+    remove_mask = normal_hits | cluster_hits
     if not bool(np.any(remove_mask)):
         return tuple(objects), {"removed": 0, "runway": 0, "sports_pitch": 0}
 
-    runway_mask = _contains(runway_union, x_array, z_array) & remove_mask
-    sports_mask = _contains(sports_union, x_array, z_array) & remove_mask
+    runway_mask = (
+        _contains(runway_union, x_array, z_array)
+        | (clusters & _contains(runway_cluster_union, x_array, z_array))
+    ) & remove_mask
+    sports_mask = (
+        _contains(sports_union, x_array, z_array)
+        | (clusters & _contains(sports_cluster_union, x_array, z_array))
+    ) & remove_mask
     remove_indices = {
         candidate_indices[offset]
         for offset in np.flatnonzero(remove_mask)
@@ -195,6 +232,7 @@ def filter_vegetation_objects(objects: Sequence[object], dataset, projection, sp
         "runway": int(np.count_nonzero(runway_mask)),
         "sports_pitch": int(np.count_nonzero(sports_mask & ~runway_mask)),
         "candidate_vegetation": len(candidate_indices),
+        "cluster_candidates": int(np.count_nonzero(clusters)),
         "original_objects": len(objects),
         "final_objects": len(filtered),
     }
@@ -236,6 +274,7 @@ def install_vegetation_clearance_policy() -> None:
             "policy": "no-trees-or-bushes-on-runways-or-sports-pitches",
             "runway_clearance_metres": RUNWAY_CLEARANCE_METRES,
             "sports_pitch_clearance_metres": SPORTS_CLEARANCE_METRES,
+            "cluster_extra_clearance_metres": CLUSTER_EXTRA_CLEARANCE_METRES,
             **report,
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         removed = int(report.get("removed", 0))
