@@ -121,3 +121,10 @@ def install_asset_scan_progress_policy() -> None:
     from .runway_performance_policy import install_runway_performance_policy
 
     install_runway_performance_policy()
+
+    # Sports pitches use the same exact-background terrain-cell approach as
+    # runways: keep the preset's ordinary grass artwork and paint only the field
+    # markings in world coordinates, with persistent per-cell cache reuse.
+    from .sports_pitch_surface_policy import install_sports_pitch_surface_policy
+
+    install_sports_pitch_surface_policy()
