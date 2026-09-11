@@ -109,8 +109,15 @@ def install_asset_scan_progress_policy() -> None:
     install_shared_runway_cache_policy()
 
     # Dense maps can contain hundreds of thousands of SingleObject4 records.
-    # Serialize those records in NumPy chunks for normal generator builds while
-    # leaving the public scalar RVW4 writer untouched for compatibility callers.
+    # Install the vectorized serializer beneath the runway pre-write wrapper so
+    # texture preparation still runs before the final RVW4 bytes are emitted.
     from .fast_wrp_write_policy import install_fast_wrp_write_policy
 
     install_fast_wrp_write_policy()
+
+    # Exact runway backgrounds only need one PAA from a stock PBO. Read that
+    # entry by header offset instead of reading the whole package, and expose
+    # runway cache/render timing separately from RVW4 serialization.
+    from .runway_performance_policy import install_runway_performance_policy
+
+    install_runway_performance_policy()
