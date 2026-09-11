@@ -95,3 +95,9 @@ def install_asset_scan_progress_policy() -> None:
 
     generator.scan_assets = scan_assets_with_progress
     _INSTALLED = True
+
+    # Keep game-install validation intentionally narrow: one stock runway
+    # background texture per preset plus stock models in standard package paths.
+    from .single_runway_background_policy import install_single_runway_background_policy
+
+    install_single_runway_background_policy()
