@@ -128,3 +128,16 @@ def install_asset_scan_progress_policy() -> None:
     from .sports_pitch_surface_policy import install_sports_pitch_surface_policy
 
     install_sports_pitch_surface_policy()
+
+    # Parking lots are true terrain overlays as well. The nearest supported OSM
+    # road selects paved/asphalt versus gravel, while runways and sports pitches
+    # retain priority when semantic polygons overlap the same WRP terrain cell.
+    from .parking_surface_policy import install_parking_surface_policy
+
+    install_parking_surface_policy()
+
+    # Apply tree/bush clearance at the final WRP boundary so even an old cached
+    # placement result cannot put woody vegetation back onto runways or pitches.
+    from .vegetation_clearance_policy import install_vegetation_clearance_policy
+
+    install_vegetation_clearance_policy()
