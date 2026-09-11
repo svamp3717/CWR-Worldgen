@@ -1,25 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Persist reusable procedural-building PAAs outside disposable build caches."""
+"""Persist reusable procedural-building PAAs in the cross-world shared cache."""
 from __future__ import annotations
 
 import os
 from pathlib import Path
 import shutil
 
-from .build_cache_policy import BUILD_CACHE_DIRNAME
+from .shared_cache_policy import (
+    BUILDING_TEXTURE_CACHE_DIRNAME,
+    shared_building_texture_cache_dir,
+)
 
-BUILDING_TEXTURE_CACHE_DIRNAME = ".cwr-worldgen-building-texture-cache"
 _INSTALLED = False
-
-
-def shared_building_texture_cache_dir(cache_dir: str | Path | None) -> Path | None:
-    """Return the durable PAA cache associated with a generator cache directory."""
-    if cache_dir is None:
-        return None
-    resolved = Path(cache_dir).expanduser().resolve()
-    if resolved.parent.name == BUILD_CACHE_DIRNAME:
-        return resolved.parent.parent / BUILDING_TEXTURE_CACHE_DIRNAME
-    return resolved / BUILDING_TEXTURE_CACHE_DIRNAME
 
 
 def _shared_texture_path(cache_path: Path | None) -> Path | None:
