@@ -77,7 +77,11 @@ def _metadata_record_from_pbo(fast, path: Path, entry):
 def _standard_pbos(module, root: Path, prefix: str) -> tuple[Path, ...]:
     """Resolve one package prefix in known CWA layouts without recursive walking."""
     if root.is_file():
-        return (root,) if root.suffix.casefold() == ".pbo" else ()
+        return (
+            (root,)
+            if root.suffix.casefold() == ".pbo" and root.stem.casefold() == prefix.casefold()
+            else ()
+        )
     filename = f"{prefix}.pbo"
     layouts = (
         (filename,),
@@ -115,6 +119,10 @@ def _standard_model_candidate(fast, roots: Sequence[Path], canonical_path: str) 
             root = root.resolve()
         except OSError:
             pass
+        if root.is_file():
+            if root.suffix.casefold() == ".pbo" and root.stem.casefold() == prefix.casefold():
+                return True
+            continue
         if root.is_dir():
             loose = fast._casefold_relative(root, canonical_path)
             if loose is None and root.name.casefold() == prefix.casefold() and "\\" in canonical_path:
