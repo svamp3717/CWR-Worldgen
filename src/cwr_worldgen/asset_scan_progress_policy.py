@@ -130,6 +130,13 @@ def install_asset_scan_progress_policy() -> None:
 
     install_parking_surface_policy()
 
+    # Explicit dirt/gravel-like parking surfaces override the nearest-road rule.
+    # A dirt lot beside an asphalt road is still an unsealed lot, so render it
+    # with the gravel treatment rather than quietly paving it.
+    from .parking_dirt_surface_policy import install_parking_dirt_surface_policy
+
+    install_parking_dirt_surface_policy()
+
     # Sports pitches use the same exact-background terrain-cell approach as
     # runways: keep the preset's ordinary grass artwork and paint only the field
     # markings in world coordinates, with persistent per-cell cache reuse.
