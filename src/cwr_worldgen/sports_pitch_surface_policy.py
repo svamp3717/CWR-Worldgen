@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Render OSM sports pitches into world-aligned terrain textures.
 
-Sports pitches are terrain semantics, not floating slab objects.  This policy
+Sports pitches are terrain semantics, not floating slab objects. This policy
 uses the preset's ordinary grass texture as the exact background and paints
-field markings only where an OSM pitch crosses a WRP terrain cell.  Like the
+field markings only where an OSM pitch crosses a WRP terrain cell. Like the
 runway implementation, every cell is rendered in world coordinates and cached
 persistently, so rotated pitches stay aligned and unchanged stock DXT1 blocks
 remain byte-identical where possible.
@@ -259,6 +259,18 @@ def _geometry_fingerprint(geometry: _PitchGeometry) -> dict[str, object]:
     }
 
 
+def _is_generated_runway_cell(
+    cell_index: int,
+    texture_indices: Sequence[int],
+    texture_paths: Sequence[str],
+) -> bool:
+    slot = int(texture_indices[cell_index])
+    if not 0 <= slot < len(texture_paths):
+        return False
+    filename = Path(str(texture_paths[slot]).replace("\\", "/")).name.casefold()
+    return filename.startswith("rw") and filename.endswith(".paa")
+
+
 def apply_sports_pitch_textures(
     source_dir: Path,
     dataset,
@@ -278,6 +290,15 @@ def apply_sports_pitch_textures(
     if not cell_map:
         return tuple(map(int, texture_indices)), tuple(map(str, texture_paths)), ()
 
+    runway_overlap_cells = tuple(
+        index for index in sorted(cell_map)
+        if _is_generated_runway_cell(index, texture_indices, texture_paths)
+    )
+    for index in runway_overlap_cells:
+        cell_map.pop(index, None)
+    if not cell_map:
+        return tuple(map(int, texture_indices)), tuple(map(str, texture_paths)), ()
+
     source_dir = Path(source_dir)
     for stale in source_dir.glob(f"{SPORTS_TEXTURE_PREFIX}[0-9a-f][0-9a-f][0-9a-f].paa"):
         stale.unlink()
@@ -292,6 +313,7 @@ def apply_sports_pitch_textures(
             "mode": "skipped-texture-table-budget",
             "pitch_count": len(geometries),
             "pitch_cells": len(cell_map),
+            "runway_overlap_cells_skipped": len(runway_overlap_cells),
             "base_texture_entries": len(texture_paths),
             "texture_limit": RVW4_TEXTURE_LIMIT,
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -382,6 +404,7 @@ def apply_sports_pitch_textures(
         "strategy": "default-grass-plus-world-aligned-markings",
         "pitch_count": len(geometries),
         "pitch_cells": len(cell_map),
+        "runway_overlap_cells_skipped": len(runway_overlap_cells),
         "background_path": grass_path,
         "background_source": background_source,
         "generated_pitch_textures": len(generated_paths),
@@ -467,12 +490,12 @@ def install_sports_pitch_surface_policy() -> None:
             path, width, height, elevations, revised_indices, revised_paths, objects, **kwargs
         )
 
-    # The runway wrapper remains the outer write hook.  When a runway exists it
+    # The runway wrapper remains the outer write hook. When a runway exists it
     # first revises its own cells, then delegates here; without a runway it still
-    # delegates here directly.  The fast RVW4 writer remains underneath us.
+    # delegates here directly. The fast RVW4 writer remains underneath us.
     runway._ORIGINAL_WRITE_RVW4 = write_rvw4_with_sports
 
-    # Validation is similarly layered beneath the runway validator.  At call time
+    # Validation is similarly layered beneath the runway validator. At call time
     # it sees either the normal ground paths or the runway-extended paths, and then
     # appends the generated sports texture paths for the base validator.
     original_validate = runway._ORIGINAL_VALIDATE_MILESTONE4
