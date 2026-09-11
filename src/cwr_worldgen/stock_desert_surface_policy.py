@@ -161,6 +161,13 @@ def install_stock_desert_surface_policy() -> None:
 
     _INSTALLED = True
 
+    # Building textures are content-addressed and reused across many P3Ds/worlds.
+    # Keep their PAAs beside the disposable build cache so normal GUI cleanup does
+    # not force the next map to render and DXT1-compress identical artwork again.
+    from .building_texture_cache_policy import install_building_texture_cache_policy
+
+    install_building_texture_cache_policy()
+
     # Runways prefer generated per-cell WRP textures so arbitrary OSM bearings
     # remain correctly oriented and visible in the editor terrain view. Install
     # after Desert owns the final base palette; the runway policy then generates
