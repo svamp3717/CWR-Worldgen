@@ -48,6 +48,25 @@ def _spec(tmp_path=None):
     )
 
 
+def _patch_background(monkeypatch, base: Image.Image) -> None:
+    monkeypatch.setattr(
+        generator,
+        "_material_definitions",
+        lambda _spec: (SimpleNamespace(code="g", name="grass", colour=(62, 78, 49)),),
+    )
+    monkeypatch.setattr(
+        generator,
+        "_ground_texture_paths",
+        lambda _spec: (r"pitchworld\data\g.paa",),
+    )
+    monkeypatch.setattr(exact, "_load_exact_texture", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        runway,
+        "_background_texture",
+        lambda *_args, **_kwargs: base.copy(),
+    )
+
+
 def test_pitch_geometry_and_cells_follow_osm_rectangle() -> None:
     geometries = _pitch_geometries(_dataset(), _IdentityProjection())
     assert len(geometries) == 1
@@ -84,23 +103,7 @@ def test_pitch_texture_generation_reuses_persistent_cache(tmp_path, monkeypatch)
     dataset = _dataset()
     projection = _IdentityProjection()
     base = Image.new("RGB", (128, 128), (62, 78, 49))
-
-    monkeypatch.setattr(
-        generator,
-        "_material_definitions",
-        lambda _spec: (SimpleNamespace(code="g", name="grass", colour=(62, 78, 49)),),
-    )
-    monkeypatch.setattr(
-        generator,
-        "_ground_texture_paths",
-        lambda _spec: (r"pitchworld\data\g.paa",),
-    )
-    monkeypatch.setattr(exact, "_load_exact_texture", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        runway,
-        "_background_texture",
-        lambda *_args, **_kwargs: base.copy(),
-    )
+    _patch_background(monkeypatch, base)
 
     source_dir = tmp_path / "pitchworld"
     source_dir.mkdir()
@@ -136,3 +139,34 @@ def test_pitch_texture_generation_reuses_persistent_cache(tmp_path, monkeypatch)
     assert second_indices == first_indices
     assert second_paths == first_paths
     assert second_generated == first_generated
+
+
+def test_runway_texture_keeps_priority_over_pitch_overlay(tmp_path, monkeypatch) -> None:
+    spec = _spec(tmp_path)
+    base = Image.new("RGB", (128, 128), (62, 78, 49))
+    _patch_background(monkeypatch, base)
+    source_dir = tmp_path / "pitchworld"
+    source_dir.mkdir()
+
+    texture_indices = [1] * (spec.cells * spec.cells)
+    texture_indices[0] = 2
+    texture_paths = (
+        r"pitchworld\data\d.paa",
+        r"pitchworld\data\g.paa",
+        r"pitchworld\rw000.paa",
+    )
+
+    revised_indices, _revised_paths, _generated = apply_sports_pitch_textures(
+        source_dir,
+        _dataset(),
+        _IdentityProjection(),
+        spec,
+        tuple(texture_indices),
+        texture_paths,
+    )
+    report = json.loads((source_dir / "sports-pitch-textures.json").read_text())
+
+    assert revised_indices[0] == 2
+    assert report["runway_overlap_cells_skipped"] == 1
+    assert report["pitch_cells"] == 3
+    assert report["cache_misses"] == 3
