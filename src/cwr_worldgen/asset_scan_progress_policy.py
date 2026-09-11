@@ -107,3 +107,10 @@ def install_asset_scan_progress_policy() -> None:
     from .shared_runway_cache_policy import install_shared_runway_cache_policy
 
     install_shared_runway_cache_policy()
+
+    # Dense maps can contain hundreds of thousands of SingleObject4 records.
+    # Serialize those records in NumPy chunks for normal generator builds while
+    # leaving the public scalar RVW4 writer untouched for compatibility callers.
+    from .fast_wrp_write_policy import install_fast_wrp_write_policy
+
+    install_fast_wrp_write_policy()
