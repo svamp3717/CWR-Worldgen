@@ -8,6 +8,7 @@ import shutil
 
 from .shared_cache_policy import (
     BUILDING_TEXTURE_CACHE_DIRNAME,
+    install_shared_asset_index_cache_policy,
     shared_building_texture_cache_dir,
 )
 
@@ -105,4 +106,5 @@ def install_building_texture_cache_policy() -> None:
 
     budget._texture_cache_tasks = shared_texture_cache_tasks
     buildings.restore_or_create_file = restore_or_create_building_texture
+    install_shared_asset_index_cache_policy()
     _INSTALLED = True
