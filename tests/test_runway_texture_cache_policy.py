@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from types import SimpleNamespace
 
 from cwr_worldgen import surface_pass
@@ -72,7 +73,7 @@ def test_runway_cache_survives_disposable_build_cache_cleanup(tmp_path) -> None:
     assert BUILD_CACHE_DIRNAME not in runway_cache.parts
 
 
-def test_one_runway_uses_exactly_start_middle_end_and_reuses_cached_paas(
+def test_wide_runway_keeps_per_cell_alignment_and_reuses_cached_paas(
     tmp_path, monkeypatch
 ) -> None:
     projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 160.0)
@@ -93,24 +94,38 @@ def test_one_runway_uses_exactly_start_middle_end_and_reuses_cached_paas(
         _base_paths(),
     )
 
-    assert len(generated) == 3
-    assert [path.rsplit("\\", 1)[-1][-5] for path in generated] == ["z", "d", "k"]
     touched = runway.runway_texture_cell_indices(dataset, projection, spec)
-    assert len({revised_indices[index] for index in touched}) == 3
-    assert len(revised_paths) == len(_base_paths()) + 3
+    assert touched
+    # A 30 m-wide runway on 10 m cells spans several columns. The old triplet
+    # optimization reused one local image across those columns and visibly
+    # created parallel runways. At least one row must retain distinct local
+    # texture slots across its touched cells.
+    rows: dict[int, list[int]] = defaultdict(list)
+    for cell_index in touched:
+        row, _column = divmod(cell_index, spec.cells)
+        rows[row].append(cell_index)
+    multi_cell_rows = [values for values in rows.values() if len(values) >= 2]
+    assert multi_cell_rows
+    assert any(
+        len({revised_indices[index] for index in values}) >= 2
+        for values in multi_cell_rows
+    )
 
+    assert len(generated) > 3
+    assert len(revised_paths) == len(_base_paths()) + len(generated)
     report = json.loads((source_dir / "runway-textures.json").read_text(encoding="utf-8"))
-    assert report["strategy"] == "three-textures-per-runway"
+    assert report["strategy"] == "per-cell-content-addressed-cache"
     assert report["runway_count"] == 1
+    assert report["runway_cells"] == len(touched)
     assert report["cache_hits"] == 0
-    assert report["cache_misses"] == 3
+    assert report["cache_misses"] == len(touched)
     assert (cache_dir / RUNWAY_GROUND_CACHE_DIRNAME).is_dir()
 
     for path in generated:
         (source_dir / path.rsplit("\\", 1)[-1]).unlink()
 
     def fail_render(*args, **kwargs):
-        raise AssertionError("cached runway textures must not be repainted")
+        raise AssertionError("cached runway cells must not be repainted")
 
     monkeypatch.setattr(runway, "_render_runway_cell", fail_render)
     second_indices, second_paths, second_generated = runway.apply_generated_runway_texture_table(
@@ -128,7 +143,7 @@ def test_one_runway_uses_exactly_start_middle_end_and_reuses_cached_paas(
     second_report = json.loads(
         (source_dir / "runway-textures.json").read_text(encoding="utf-8")
     )
-    assert second_report["cache_hits"] == 3
+    assert second_report["cache_hits"] == len(touched)
     assert second_report["cache_misses"] == 0
     assert all(
         (source_dir / path.rsplit("\\", 1)[-1]).is_file()
