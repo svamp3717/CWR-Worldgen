@@ -208,9 +208,23 @@ def install_stock_desert_surface_policy() -> None:
 
     install_game_folder_gui_policy()
 
+    # OSM asset rules are evaluated for every mapped feature. Compile candidates
+    # by layer/tag and fold each feature's tags once rather than rebuilding the
+    # same case-insensitive mapping for every rule.
+    from .fast_asset_mapping_policy import install_fast_asset_mapping_policy
+
+    install_fast_asset_mapping_policy()
+
     # Building validation only needs the selected game assets and the texture
     # dependencies those models actually reference. Avoid recursively cataloguing
     # the entire CWA installation at 82/83% and cache PBO header indexes instead.
     from .fast_asset_scan_policy import install_fast_asset_scan_policy
 
     install_fast_asset_scan_policy()
+
+    # Make the targeted-vs-exhaustive path visible in the progress log, including
+    # PBO index hits/misses and elapsed time, so slow custom layouts stop being a
+    # mysterious minute-long "Scanning" message.
+    from .asset_scan_progress_policy import install_asset_scan_progress_policy
+
+    install_asset_scan_progress_policy()
