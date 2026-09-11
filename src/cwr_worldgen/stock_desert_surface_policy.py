@@ -33,28 +33,28 @@ from . import terrain as _terrain
 _DESERT_SAND_TEXTURE = r"o\ps.paa"
 
 DESERT_STOCK_SURFACE_TEXTURES: Mapping[str, str] = {
-    "w": _DESERT_SAND_TEXTURE,      # seabed / water-adjacent ground
-    "q": _DESERT_SAND_TEXTURE,      # wet shoreline semantics
-    "s": _DESERT_SAND_TEXTURE,      # dry shoreline sand
-    "g": _DESERT_SAND_TEXTURE,      # grass semantics, desert ground
-    "h": _DESERT_SAND_TEXTURE,      # dry grass / bare desert ground
-    "r": r"o\l1.paa",             # rock
-    "k": r"o\lom2.paa",           # steep rock / scree
-    "f": _DESERT_SAND_TEXTURE,      # forest interior beneath vegetation
-    "e": _DESERT_SAND_TEXTURE,      # forest edge beneath vegetation
-    "a": _DESERT_SAND_TEXTURE,      # farmland light
-    "b": _DESERT_SAND_TEXTURE,      # farmland dark
-    "c": _DESERT_SAND_TEXTURE,      # field boundary / dry strip
-    "u": _DESERT_SAND_TEXTURE,      # urban surface beneath buildings
-    "i": _DESERT_SAND_TEXTURE,      # industrial surface beneath buildings
-    "p": _DESERT_SAND_TEXTURE,      # paved-road underlay beneath road P3Ds
-    "o": _DESERT_SAND_TEXTURE,      # road shoulder
-    "d": _DESERT_SAND_TEXTURE,      # dirt road underlay
-    "t": _DESERT_SAND_TEXTURE,      # dirt-road blend
-    "v": _DESERT_SAND_TEXTURE,      # gravel underlay
-    "j": _DESERT_SAND_TEXTURE,      # park semantics, desert ground
-    "y": _DESERT_SAND_TEXTURE,      # sports field semantics, desert ground
-    "x": _DESERT_SAND_TEXTURE,      # mapped beach
+    "w": _DESERT_SAND_TEXTURE,
+    "q": _DESERT_SAND_TEXTURE,
+    "s": _DESERT_SAND_TEXTURE,
+    "g": _DESERT_SAND_TEXTURE,
+    "h": _DESERT_SAND_TEXTURE,
+    "r": r"o\l1.paa",
+    "k": r"o\lom2.paa",
+    "f": _DESERT_SAND_TEXTURE,
+    "e": _DESERT_SAND_TEXTURE,
+    "a": _DESERT_SAND_TEXTURE,
+    "b": _DESERT_SAND_TEXTURE,
+    "c": _DESERT_SAND_TEXTURE,
+    "u": _DESERT_SAND_TEXTURE,
+    "i": _DESERT_SAND_TEXTURE,
+    "p": _DESERT_SAND_TEXTURE,
+    "o": _DESERT_SAND_TEXTURE,
+    "d": _DESERT_SAND_TEXTURE,
+    "t": _DESERT_SAND_TEXTURE,
+    "v": _DESERT_SAND_TEXTURE,
+    "j": _DESERT_SAND_TEXTURE,
+    "y": _DESERT_SAND_TEXTURE,
+    "x": _DESERT_SAND_TEXTURE,
 }
 
 _INSTALLED = False
@@ -71,8 +71,6 @@ class _StockDesertProfile(str):
         return super().__new__(cls, "desert")
 
     def __hash__(self) -> int:
-        # The old generator checks membership in {"everon", "nogova"}. Sharing
-        # Everon's hash lets that existing set probe reach our equality method.
         return hash("everon")
 
     def __eq__(self, other: object) -> bool:
@@ -120,8 +118,6 @@ def _stock_desert_ground_texture_paths(spec) -> tuple[str, ...]:
 
 def _stock_desert_external_ground_texture_paths(spec) -> tuple[str, ...]:
     if _is_desert(getattr(spec, "ground_texture_profile", "")):
-        # Asset scanning only needs each physical dependency once even though the
-        # WRP semantic table intentionally reuses the sand texture many times.
         return tuple(dict.fromkeys(_stock_desert_ground_texture_paths(spec)))
     return _ORIGINAL_EXTERNAL_GROUND_TEXTURE_PATHS(spec)
 
@@ -135,7 +131,7 @@ def _stock_desert_terrain_texture_path(
         try:
             return DESERT_STOCK_SURFACE_TEXTURES[str(material_code)]
         except KeyError as exc:
-            raise ValueError(f"unknown Desert terrain material code: {material_code}") from exc
+            raise ValueError(f"unknown Desert terrain material code: {material_code!r}") from exc
     return _ORIGINAL_TERRAIN_GROUND_TEXTURE_PATH(world_name, material_code, profile)
 
 
@@ -152,22 +148,83 @@ def install_stock_desert_surface_policy() -> None:
     _ORIGINAL_EXTERNAL_GROUND_TEXTURE_PATHS = _generator._external_ground_texture_paths
     _ORIGINAL_TERRAIN_GROUND_TEXTURE_PATH = _terrain.ground_texture_path
 
-    # Direct surface-pass callers should see Desert as a stock profile too. The
-    # original object is a dict despite its Mapping annotation; replace it rather
-    # than mutating in place so tests/importers never observe a half-installed map.
     stock_profiles = dict(_surface.STOCK_SURFACE_TEXTURES)
     stock_profiles["desert"] = dict(DESERT_STOCK_SURFACE_TEXTURES)
     _surface.STOCK_SURFACE_TEXTURES = stock_profiles
 
-    # Core Milestone 9 helpers need both the actual Desert paths and the old
-    # generated/local-texture predicate suppressed. Keep the latter compatibility
-    # entirely inside this policy instead of teaching every caller about it.
     _generator._ground_texture_profile = _stock_desert_ground_texture_profile
     _generator._ground_texture_paths = _stock_desert_ground_texture_paths
     _generator._external_ground_texture_paths = _stock_desert_external_ground_texture_paths
 
-    # Milestone 8/direct terrain API callers also receive stock Desert paths.
     _terrain.ground_texture_path = _stock_desert_terrain_texture_path
     _generator.ground_texture_path = _stock_desert_terrain_texture_path
 
     _INSTALLED = True
+
+    # Building textures are content-addressed and reused across many P3Ds/worlds.
+    # Keep their PAAs beside the disposable build cache so normal GUI cleanup does
+    # not force the next map to render and DXT1-compress identical artwork again.
+    from .building_texture_cache_policy import install_building_texture_cache_policy
+
+    install_building_texture_cache_policy()
+
+    # Runways prefer generated per-cell WRP textures so arbitrary OSM bearings
+    # remain correctly oriented and visible in the editor terrain view. Install
+    # after Desert owns the final base palette; the runway policy then generates
+    # Desert-coloured cell backgrounds and uses P3D tiles only on table overflow.
+    from .runway_surface_policy import install_runway_surface_policy
+
+    install_runway_surface_policy()
+
+    # The first path-aware Nogova approximation was still visibly too bright in
+    # CWA. Keep that calibration as the fallback for builds where stock PAA bytes
+    # cannot be read from local files or the game installation.
+    from .runway_nogova_calibration_policy import (
+        install_runway_nogova_calibration_policy,
+    )
+
+    install_runway_nogova_calibration_policy()
+
+    # Prefer the exact terrain texture for every preset, not only Nogova. Local
+    # generated/Malden PAAs are read from the world source tree; stock Nogova,
+    # Everon and Desert PAAs are resolved from asset roots, CWR_GAME_ROOT, or the
+    # parent of the deployment @mod folder. The calibrated/profile colours above
+    # remain a bounded fallback when the source texture is unavailable.
+    from .runway_exact_background_policy import install_runway_exact_background_policy
+
+    install_runway_exact_background_policy()
+
+    # Rendering/compression is expensive, but each WRP cell needs its own local
+    # runway alignment. Persist correctly rendered per-cell PAAs across builds and
+    # deduplicate only byte-identical results in the final WRP texture table.
+    from .runway_texture_cache_policy import install_runway_texture_cache_policy
+
+    install_runway_texture_cache_policy()
+
+    # Remember one game installation in the desktop GUI and automatically feed
+    # it into --asset-root on every build. This lets all runway presets resolve
+    # their original stock background textures after application restarts.
+    from .game_folder_gui_policy import install_game_folder_gui_policy
+
+    install_game_folder_gui_policy()
+
+    # OSM asset rules are evaluated for every mapped feature. Compile candidates
+    # by layer/tag and fold each feature's tags once rather than rebuilding the
+    # same case-insensitive mapping for every rule.
+    from .fast_asset_mapping_policy import install_fast_asset_mapping_policy
+
+    install_fast_asset_mapping_policy()
+
+    # Building validation only needs the selected game assets and the texture
+    # dependencies those models actually reference. Avoid recursively cataloguing
+    # the entire CWA installation at 82/83% and cache PBO header indexes instead.
+    from .fast_asset_scan_policy import install_fast_asset_scan_policy
+
+    install_fast_asset_scan_policy()
+
+    # Make the targeted-vs-exhaustive path visible in the progress log, including
+    # PBO index hits/misses and elapsed time, so slow custom layouts stop being a
+    # mysterious minute-long "Scanning" message.
+    from .asset_scan_progress_policy import install_asset_scan_progress_policy
+
+    install_asset_scan_progress_policy()

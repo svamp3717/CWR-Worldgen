@@ -17,6 +17,10 @@ dist/
 
 # CWR Worldgen runtime caches and generated worlds
 .cwr-cache/
+.cwr-worldgen-shared-cache/
+.cwr-worldgen-runway-cache/
+.cwr-worldgen-asset-index-cache/
+.cwr-worldgen-building-texture-cache/
 source-data/
 output/
 outputs/
