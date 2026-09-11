@@ -8,10 +8,9 @@ from cwr_worldgen import surface_pass
 from cwr_worldgen.build_cache_policy import BUILD_CACHE_DIRNAME, build_cache_dir
 from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
 import cwr_worldgen.runway_surface_policy as runway
-from cwr_worldgen.runway_texture_cache_policy import (
-    RUNWAY_GROUND_CACHE_DIRNAME,
-    _runway_cache_dir,
-)
+from cwr_worldgen.runway_texture_cache_policy import _runway_cache_dir
+from cwr_worldgen.shared_cache_policy import SHARED_CACHE_DIRNAME
+from cwr_worldgen.shared_runway_cache_policy import RUNWAY_TEXTURE_CACHE_DIRNAME
 
 
 def _dataset(projection: BboxProjection) -> OsmDataset:
@@ -62,15 +61,24 @@ def _base_paths() -> tuple[str, ...]:
     )
 
 
-def test_runway_cache_survives_disposable_build_cache_cleanup(tmp_path) -> None:
-    build_dir = tmp_path / "build"
-    routed_cache = build_cache_dir(build_dir)
-    spec = _spec(routed_cache)
+def test_runway_cache_uses_cross_world_shared_cache_root(tmp_path) -> None:
+    world_a = tmp_path / "world-a"
+    world_b = tmp_path / "world-b"
+    spec_a = _spec(build_cache_dir(world_a))
+    spec_b = _spec(build_cache_dir(world_b))
 
-    runway_cache = _runway_cache_dir(tmp_path / "world", spec)
+    runway_cache_a = _runway_cache_dir(tmp_path / "source-a", spec_a)
+    runway_cache_b = _runway_cache_dir(tmp_path / "source-b", spec_b)
+    expected = (
+        tmp_path.resolve()
+        / SHARED_CACHE_DIRNAME
+        / RUNWAY_TEXTURE_CACHE_DIRNAME
+    )
 
-    assert runway_cache == build_dir.resolve() / RUNWAY_GROUND_CACHE_DIRNAME
-    assert BUILD_CACHE_DIRNAME not in runway_cache.parts
+    assert runway_cache_a == expected
+    assert runway_cache_b == expected
+    assert BUILD_CACHE_DIRNAME not in runway_cache_a.parts
+    assert ".cwr-worldgen-runway-cache" not in runway_cache_a.parts
 
 
 def test_wide_runway_keeps_per_cell_alignment_and_reuses_cached_paas(
@@ -119,7 +127,13 @@ def test_wide_runway_keeps_per_cell_alignment_and_reuses_cached_paas(
     assert report["runway_cells"] == len(touched)
     assert report["cache_hits"] == 0
     assert report["cache_misses"] == len(touched)
-    assert (cache_dir / RUNWAY_GROUND_CACHE_DIRNAME).is_dir()
+    expected_cache = (
+        cache_dir.resolve()
+        / SHARED_CACHE_DIRNAME
+        / RUNWAY_TEXTURE_CACHE_DIRNAME
+    )
+    assert expected_cache.is_dir()
+    assert report["cache_directory"] == str(expected_cache)
 
     for path in generated:
         (source_dir / path.rsplit("\\", 1)[-1]).unlink()
