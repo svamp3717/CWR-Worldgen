@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from cwr_worldgen import wrp
-from cwr_worldgen.fast_wrp_write_policy import _fast_write_rvw4
+from cwr_worldgen.fast_wrp_write_policy import _fast_write_rvw4, _install_writer_binding
 from cwr_worldgen.model import WorldObject
 
 
@@ -102,3 +103,38 @@ def test_vectorized_writer_keeps_scalar_fallback_for_general_iterables(tmp_path:
     )
 
     assert actual.read_bytes() == expected.read_bytes()
+
+
+def test_fast_writer_binds_beneath_existing_runway_wrapper() -> None:
+    calls: list[str] = []
+
+    def scalar_writer(*args, **kwargs):
+        calls.append("scalar")
+
+    runway = SimpleNamespace(_INSTALLED=True, _ORIGINAL_WRITE_RVW4=scalar_writer)
+
+    def runway_wrapper(*args, **kwargs):
+        calls.append("runway")
+        return runway._ORIGINAL_WRITE_RVW4(*args, **kwargs)
+
+    generator = SimpleNamespace(write_rvw4=runway_wrapper)
+    result = _install_writer_binding(generator, wrp, runway)
+
+    assert result == "runway-inner"
+    assert generator.write_rvw4 is runway_wrapper
+    assert runway._ORIGINAL_WRITE_RVW4 is not scalar_writer
+
+    # renumber=False takes the scalar fallback, but it must still pass through
+    # the runway-owned outer hook before reaching that inner writer in real use.
+    generator.write_rvw4(
+        Path("unused.wrp"),
+        1,
+        1,
+        (0.0,),
+        (0,),
+        (r"world\data\g.paa",),
+        (),
+        height_scale=0.05,
+        renumber_object_ids=False,
+    )
+    assert calls == ["runway", "scalar"]
