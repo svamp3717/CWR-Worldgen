@@ -121,3 +121,31 @@ def install_asset_scan_progress_policy() -> None:
     from .runway_performance_policy import install_runway_performance_policy
 
     install_runway_performance_policy()
+
+    # Install parking before sports at policy-install time. Each policy wraps the
+    # previous writer, so runtime order is runway -> sports -> parking -> writer.
+    # That gives the scarce RVW4 texture slots to runways first, sports second,
+    # and parking last while parking can see/skip already generated sports cells.
+    from .parking_surface_policy import install_parking_surface_policy
+
+    install_parking_surface_policy()
+
+    # Explicit dirt/gravel-like parking surfaces override the nearest-road rule.
+    # A dirt lot beside an asphalt road is still an unsealed lot, so render it
+    # with the gravel treatment rather than quietly paving it.
+    from .parking_dirt_surface_policy import install_parking_dirt_surface_policy
+
+    install_parking_dirt_surface_policy()
+
+    # Sports pitches use the same exact-background terrain-cell approach as
+    # runways: keep the preset's ordinary grass artwork and paint only the field
+    # markings in world coordinates, with persistent per-cell cache reuse.
+    from .sports_pitch_surface_policy import install_sports_pitch_surface_policy
+
+    install_sports_pitch_surface_policy()
+
+    # Apply tree/bush clearance at the final WRP boundary so even an old cached
+    # placement result cannot put woody vegetation back onto runways or pitches.
+    from .vegetation_clearance_policy import install_vegetation_clearance_policy
+
+    install_vegetation_clearance_policy()
