@@ -101,3 +101,9 @@ def install_asset_scan_progress_policy() -> None:
     from .single_runway_background_policy import install_single_runway_background_policy
 
     install_single_runway_background_policy()
+
+    # Reusable runway cell PAAs belong beside the other cross-world caches, not
+    # in a separate top-level dot-directory left over from the earlier cache.
+    from .shared_runway_cache_policy import install_shared_runway_cache_policy
+
+    install_shared_runway_cache_policy()
