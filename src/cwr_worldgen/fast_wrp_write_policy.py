@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Accelerate the generator's large RVW4 object stream without changing the public writer.
+"""Accelerate the generator's large RVW4 object stream without bypassing policies.
 
 The terrain grids and texture table are already vectorized/small. Dense worlds spend
 most of the RVW4 stage serializing 128-byte SingleObject4 records one at a time in
 Python. For the normal generator path, where object IDs are renumbered on write and
 objects are already materialized as a sequence, build those records in NumPy chunks.
-Direct/library calls keep the original scalar writer and its exact validation contract.
+
+Runway support wraps ``generator.write_rvw4`` so it can prepare the final terrain
+texture table immediately before serialization. The fast serializer must therefore
+sit *inside* that wrapper, not replace it. Direct/library calls keep the original
+scalar writer and its exact validation contract.
 """
 from __future__ import annotations
 
@@ -166,19 +170,44 @@ def _fast_write_rvw4(
                 pass
 
 
+def _make_fast_writer(original, wrp):
+    def write_rvw4_fast(*args, **kwargs):
+        return _fast_write_rvw4(original, wrp, *args, **kwargs)
+
+    write_rvw4_fast.__name__ = "write_rvw4_fast"
+    return write_rvw4_fast
+
+
+def _install_writer_binding(generator, wrp, runway=None) -> str:
+    """Install beneath the runway wrapper when it already owns the generator hook."""
+    if (
+        runway is not None
+        and bool(getattr(runway, "_INSTALLED", False))
+        and callable(getattr(runway, "_ORIGINAL_WRITE_RVW4", None))
+    ):
+        runway._ORIGINAL_WRITE_RVW4 = _make_fast_writer(
+            runway._ORIGINAL_WRITE_RVW4, wrp
+        )
+        # Leave generator.write_rvw4 pointing at the runway wrapper. It prepares
+        # revised texture indices/paths, then delegates here for fast serialization.
+        return "runway-inner"
+
+    generator.write_rvw4 = _make_fast_writer(generator.write_rvw4, wrp)
+    return "generator"
+
+
 def install_fast_wrp_write_policy() -> None:
-    """Patch only the generator's writer; keep cwr_worldgen.wrp.write_rvw4 public behavior."""
+    """Accelerate serialization while preserving any installed runway pre-write hook."""
     global _INSTALLED
     if _INSTALLED:
         return
 
     from . import generator
     from . import wrp
+    try:
+        from . import runway_surface_policy as runway
+    except ImportError:
+        runway = None
 
-    original = generator.write_rvw4
-
-    def write_rvw4_fast(*args, **kwargs):
-        return _fast_write_rvw4(original, wrp, *args, **kwargs)
-
-    generator.write_rvw4 = write_rvw4_fast
+    _install_writer_binding(generator, wrp, runway)
     _INSTALLED = True
