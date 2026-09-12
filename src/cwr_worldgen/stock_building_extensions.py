@@ -38,6 +38,14 @@ STOCK_BUILDING_OPTIONS = (
 _STOCK_PLACEMENT_CACHE_V96 = "nonroad-object-placement-v96-road-safe-settlement-clutter"
 _STOCK_PLACEMENT_CACHE_V97 = "nonroad-object-placement-v97-stock-model-origin-grounding"
 _INTERIOR_CHECKBOX_TEXT = "Enterable procedural-building interiors"
+_HIGH_QUALITY_TEXTURE_CHECKBOX_TEXT = "Higher-quality building textures (256 px)"
+_MATCH_TEXTURE_CHECKBOX_TEXT = "Match nearby same-shape town/city building textures"
+_PROCEDURAL_BRIDGES_CHECKBOX_TEXT = "Procedural bridges (instead of Nogova)"
+_STOCK_DISABLED_GUI_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("procedural_building_interiors", _INTERIOR_CHECKBOX_TEXT),
+    ("high_quality_building_textures", _HIGH_QUALITY_TEXTURE_CHECKBOX_TEXT),
+    ("match_nearby_building_textures", _MATCH_TEXTURE_CHECKBOX_TEXT),
+)
 _INSTALLED = False
 
 
@@ -52,6 +60,13 @@ def stock_model_source(model_path: object) -> str:
 
 def is_stock_building_preset(value: object) -> bool:
     return str(value or "").strip().casefold() in STOCK_BUILDING_PRESETS
+
+
+def stock_disabled_gui_option_keys(preset: object) -> tuple[str, ...]:
+    """Return GUI settings that are meaningless for original stock P3Ds."""
+    if not is_stock_building_preset(preset):
+        return ()
+    return tuple(key for key, _label in _STOCK_DISABLED_GUI_OPTIONS)
 
 
 def _filter_models(models: Iterable[stock.StockBuildingModel], preset: str):
@@ -152,6 +167,29 @@ def _find_widgets_by_text(root, text: str):
             pass
         result.extend(_find_widgets_by_text(child, text))
     return result
+
+
+def _set_widget_enabled(widget, enabled: bool) -> None:
+    try:
+        widget.state(["!disabled"] if enabled else ["disabled"])
+    except Exception:
+        try:
+            widget.configure(state="normal" if enabled else "disabled")
+        except Exception:
+            pass
+
+
+def _hide_widget(widget) -> None:
+    """Remove a built GUI control without changing the underlying CLI setting."""
+    for method_name in ("grid_remove", "pack_forget", "place_forget"):
+        method = getattr(widget, method_name, None)
+        if method is None:
+            continue
+        try:
+            method()
+            return
+        except Exception:
+            continue
 
 
 def _install_library_presets() -> None:
@@ -306,8 +344,16 @@ def _install_gui() -> None:
 
         class StockBuildingControlsWorldgenGui(original_class):
             def _sync_stock_building_controls(self) -> None:
+                # Procedural bridges remain the product default, but the GUI no
+                # longer exposes a second implementation switch. Old profiles
+                # that saved stock bridges are pushed back to the current default.
+                bridge_var = self.vars.get("procedural_bridges")
+                if bridge_var is not None and not bool(bridge_var.get()):
+                    bridge_var.set(True)
+                for widget in _find_widgets_by_text(self, _PROCEDURAL_BRIDGES_CHECKBOX_TEXT):
+                    _hide_widget(widget)
+
                 preset_var = self.vars.get("house_style_preset")
-                interiors_var = self.vars.get("procedural_building_interiors")
                 if preset_var is None:
                     return
                 try:
@@ -315,22 +361,24 @@ def _install_gui() -> None:
                 except Exception:
                     preset = str(preset_var.get() or "").strip().casefold()
                 stock_mode = preset in STOCK_BUILDING_PRESETS
-                if stock_mode and interiors_var is not None and bool(interiors_var.get()):
-                    interiors_var.set(False)
-                for widget in _find_widgets_by_text(self, _INTERIOR_CHECKBOX_TEXT):
-                    try:
-                        if stock_mode:
-                            widget.state(["disabled"])
-                        else:
-                            widget.state(["!disabled"])
-                    except Exception:
-                        try:
-                            widget.configure(state="disabled" if stock_mode else "normal")
-                        except Exception:
-                            pass
+
+                for key, label in _STOCK_DISABLED_GUI_OPTIONS:
+                    variable = self.vars.get(key)
+                    if stock_mode and variable is not None and bool(variable.get()):
+                        variable.set(False)
+                    for widget in _find_widgets_by_text(self, label):
+                        _set_widget_enabled(widget, not stock_mode)
 
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
+                preset_var = self.vars.get("house_style_preset")
+                if preset_var is not None:
+                    try:
+                        self._stock_preset_trace = preset_var.trace_add(
+                            "write", lambda *_args: self._sync_stock_building_controls()
+                        )
+                    except Exception:
+                        self._stock_preset_trace = None
                 self._sync_stock_building_controls()
 
             def _refresh_views(self) -> None:
