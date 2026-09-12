@@ -16,6 +16,13 @@ import multiprocessing as _multiprocessing
 # script usable as the build-analysis entry point on every supported platform.
 _multiprocessing.freeze_support()
 
+# Frozen distributions ship editable JSON in a sibling config directory. Mirror
+# it into PyInstaller's extracted package data before importing cwr_worldgen so
+# every existing catalogue/style loader sees the user's files transparently.
+from external_json_runtime import overlay_external_json as _overlay_external_json
+
+_overlay_external_json()
+
 # The frozen entry must use the guarded launcher. Besides reporting uncaught
 # exceptions, it provides a persistent log stream for windowed builds where
 # PyInstaller intentionally supplies no console stdout/stderr handles.
