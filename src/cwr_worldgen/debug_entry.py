@@ -12,13 +12,55 @@ from typing import Any
 
 
 CRASH_LOG_FILENAME = "cwr-worldgen-crash.log"
+STARTUP_SMOKE_ENV = "CWR_WORLDGEN_STARTUP_SMOKE"
 
 
 def _crash_log_path() -> Path:
     configured = os.environ.get("CWR_WORLDGEN_CRASH_LOG", "").strip()
     if configured:
         return Path(configured).expanduser()
+    if bool(getattr(sys, "frozen", False)):
+        return Path(sys.executable).resolve().parent / CRASH_LOG_FILENAME
     return Path.cwd() / CRASH_LOG_FILENAME
+
+
+class _CrashLogStream:
+    """Minimal text stream for PyInstaller windowed processes without a console."""
+
+    encoding = "utf-8"
+    errors = "replace"
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+
+    def write(self, text: str) -> int:
+        payload = str(text)
+        if not payload:
+            return 0
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8", newline="") as stream:
+                stream.write(payload)
+        except OSError:
+            pass
+        return len(payload)
+
+    def flush(self) -> None:
+        return None
+
+    def isatty(self) -> bool:
+        return False
+
+
+def _install_frozen_log_streams() -> None:
+    """Persist prints from a windowed EXE instead of silently discarding them."""
+    if not bool(getattr(sys, "frozen", False)):
+        return
+    path = _crash_log_path()
+    if sys.stdout is None:
+        sys.stdout = _CrashLogStream(path)  # type: ignore[assignment]
+    if sys.stderr is None:
+        sys.stderr = _CrashLogStream(path)  # type: ignore[assignment]
 
 
 def _format_exception(
@@ -53,11 +95,17 @@ def _report_exception(
         source=source,
     )
 
-    # Console builds and LAUNCH-GUI.cmd both have a real stderr stream.
+    stderr_is_crash_log = isinstance(sys.stderr, _CrashLogStream)
     try:
         print(report, file=sys.stderr, flush=True)
     except Exception:
         pass
+
+    # A frozen windowed build routes stderr directly to the same crash file, so
+    # avoid writing the traceback twice. Console/source launches still get the
+    # explicit persistent copy below.
+    if stderr_is_crash_log:
+        return
 
     path = _crash_log_path()
     try:
@@ -118,7 +166,6 @@ def _install_tk_exception_hook() -> None:
         )
 
     tk.Tk.report_callback_exception = report_callback_exception  # type: ignore[assignment]
-
 
 
 def _install_auto_enable_existing_mod_folder() -> None:
@@ -188,9 +235,29 @@ def _install_auto_enable_existing_mod_folder() -> None:
     gui.WorldgenGui = AutoEnableExistingModFolderGui
 
 
+def _run_frozen_startup_smoke() -> int:
+    """Construct the fully configured frozen GUI once, then close it immediately."""
+    from . import gui, gui_entry
+
+    base_dir = gui_entry.storage_base_dir()
+    os.environ.setdefault(
+        "CWR_WORLDGEN_GUI_STATE", str(base_dir / "config" / "gui-state.json")
+    )
+    os.environ.setdefault("CWR_WORLDGEN_RUNTIME_DIR", "CWR-Worldgen")
+    os.chdir(base_dir)
+    gui_entry._configure_gui(gui, base_dir)
+    app = gui.WorldgenGui()
+    try:
+        app.update_idletasks()
+    finally:
+        app.destroy()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     # Enables traceback output for fatal native signals where Python can still
     # report them, in addition to ordinary Python exception handling below.
+    _install_frozen_log_streams()
     try:
         faulthandler.enable(all_threads=True)
     except (RuntimeError, OSError):
@@ -205,6 +272,11 @@ def main(argv: list[str] | None = None) -> int:
         # top without replacing the normal GUI implementation.
         from .gui_entry import main as gui_main
         _install_auto_enable_existing_mod_folder()
+        if (
+            bool(getattr(sys, "frozen", False))
+            and os.environ.get(STARTUP_SMOKE_ENV, "").strip() == "1"
+        ):
+            return _run_frozen_startup_smoke()
         return int(gui_main(argv))
     except KeyboardInterrupt:
         print("\nCWR-Worldgen interrupted by user.", file=sys.stderr, flush=True)
