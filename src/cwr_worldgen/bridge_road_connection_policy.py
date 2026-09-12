@@ -1,16 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Extend stock bridges to real fitted-road approaches instead of leaving flying ends.
+"""Adjust stock bridges to nearby fitted-road approaches without redefining crossings.
 
-A fixed 50.190 m stock bridge can be longer than a short OSM ``bridge=yes`` way.
-On a coarse terrain grid, centring one module on the wet interval can put both
-abutments on the shoreline slope.  The bridge deck is then tide-safe but the
-ordinary approach road is several metres lower.
-
-Use the connected non-bridge road ways on both sides as the authoritative
-approach geometry.  Walk outward until the road reaches a tide-safe dry level,
-then choose the smallest whole stock-module span whose two ends still lie on
-those connected roads.  The existing bridge anchor subsequently takes its
-vertical grade from those endpoint locations.
+The water-derived stock bridge plan is authoritative.  Connected non-bridge roads
+may move an abutment enough to make a stock module meet the ordinary road cleanly,
+but they must not turn dry approach terrain into additional bridge span.  This is
+especially important on coarse terrain where requiring tide-safe road elevation can
+otherwise expand a short water crossing by hundreds of metres.
 """
 from __future__ import annotations
 
@@ -36,6 +31,12 @@ _MATCH_SAMPLE_STEP_METRES = 1.0
 _MATCH_REFINE_STEP_METRES = 0.10
 _MAXIMUM_ENDPOINT_LENGTH_ERROR_METRES = 1.0
 _MAXIMUM_EXTRA_MODULES_TO_SEARCH = 2
+
+# Road connection is a fit adjustment, not a second bridge planner.  The
+# water-derived plan may grow by at most one stock module, and neither endpoint
+# may move more than one module from the original wet-authoritative plan.
+_MAXIMUM_CONNECTED_MODULE_COUNT_INCREASE = 1
+_MAXIMUM_CONNECTED_ENDPOINT_SHIFT_MODULES = 1.0
 
 
 def _explicit_bridge(feature) -> bool:
@@ -194,6 +195,32 @@ def _refine_pair(
     return best
 
 
+def _connected_adjustment_is_bounded(plan, module_count, start, end) -> bool:
+    """Return whether road fitting stayed a small adjustment to the wet plan."""
+    original_modules = max(1, int(plan.module_count))
+    if int(module_count) > original_modules + _MAXIMUM_CONNECTED_MODULE_COUNT_INCREASE:
+        return False
+
+    original_points = tuple(plan.points)
+    if len(original_points) < 2:
+        return False
+
+    maximum_shift = (
+        float(_bridge._STOCK_MODULE_SPACING_METRES)
+        * _MAXIMUM_CONNECTED_ENDPOINT_SHIFT_MODULES
+        + _MAXIMUM_ENDPOINT_LENGTH_ERROR_METRES
+    )
+    direct = max(
+        math.dist(start, original_points[0]),
+        math.dist(end, original_points[-1]),
+    )
+    reverse = max(
+        math.dist(start, original_points[-1]),
+        math.dist(end, original_points[0]),
+    )
+    return min(direct, reverse) <= maximum_shift
+
+
 def _connected_stock_plan(plan, points, elevations, spec):
     context = _source._CONTEXT.get()
     if context is None or plan is None:
@@ -256,12 +283,20 @@ def _connected_stock_plan(plan, points, elevations, spec):
         1,
         int(math.ceil((minimum_span - 1.0e-6) / module_length)),
     )
+    maximum_modules = max(1, int(plan.module_count)) + _MAXIMUM_CONNECTED_MODULE_COUNT_INCREASE
+
+    # If the connected-road safety rule would require more than one extra stock
+    # module, keep the water-derived plan.  Dry approach terrain is handled by
+    # the abutment/road grading policies instead of being converted into bridge.
+    if minimum_modules > maximum_modules:
+        return plan
 
     selected = None
-    for module_count in range(
-        minimum_modules,
-        minimum_modules + _MAXIMUM_EXTRA_MODULES_TO_SEARCH + 1,
-    ):
+    search_stop = min(
+        maximum_modules,
+        minimum_modules + _MAXIMUM_EXTRA_MODULES_TO_SEARCH,
+    )
+    for module_count in range(minimum_modules, search_stop + 1):
         target = module_count * module_length
         coarse_best = None
         for sd, sp in start_candidates:
@@ -303,6 +338,9 @@ def _connected_stock_plan(plan, points, elevations, spec):
         return plan
 
     module_count, _error, start, end = selected
+    if not _connected_adjustment_is_bounded(plan, module_count, start, end):
+        return plan
+
     world_size = float(getattr(spec, "world_size", 0.0) or 0.0)
     if world_size > 0.0 and not all(
         0.0 <= coordinate < world_size
@@ -319,7 +357,7 @@ def _connected_stock_plan(plan, points, elevations, spec):
 
 
 def install_bridge_road_connection_policy() -> None:
-    """Require each stock bridge end to land on a connected ordinary road."""
+    """Allow only bounded stock-bridge adjustments onto connected roads."""
     global _INSTALLED, _ORIGINAL_PLAN
     if _INSTALLED:
         return

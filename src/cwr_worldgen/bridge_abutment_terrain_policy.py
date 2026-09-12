@@ -1,33 +1,37 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Grade only the immediate ordinary-road terrain at low stock-bridge abutments.
+"""Raise the immediate road approach so it physically meets a stock bridge.
 
-CWA's tide can cover nominally dry two- or three-metre shoreline terrain. The
-bridge itself must still be planned from real water, so do not solve that visual
-road-to-bridge gap by extending or moving the stock bridge. Instead, after mapped
-water has been reopened, grade the single coarse terrain cell containing each low
-but nominally dry bridge endpoint to a raised ordinary-road approach level.
+The stock bridge span remains water-authoritative. Fixed 50.190 m bridge modules
+can nevertheless end a short distance offshore on CWA's coarse terrain grid,
+leaving the terminal ordinary-road piece submerged between dry land and the
+bridge deck.
 
-The approach terrain gets an additional 0.85 m lift. This is deliberately a
-terrain/road correction only: bridge position, pitch, length and module alignment
-are left untouched. Test22 showed both endpoint terrain cells at about 5.45 m and
-the first ordinary road pieces at about 5.48 m, leaving the stock bridge deck
-visually roughly a metre above the road. The extra lift brings the approach into
-the requested 0.7-1.0 m correction range.
+Solve that as a terrain problem, not a bridge-length problem: after the wet span
+has been captured, flatten the single coarse terrain cell supporting each bridge
+endpoint to the road-approach height. This applies even when the endpoint itself
+is currently underwater. On the usual 50 m WRP grid that creates the smallest
+possible embankment needed to expose the terminal road piece and join it to the
+bridge without moving or extending the bridge.
 
-The whole four-vertex support cell is flattened, rather than merely raising low
-corners. On a 50 m WRP grid, leaving one seven-metre corner beside three lower
-corners creates a bilinear terrain ramp that can cut directly through the stock
-bridge deck even though the bridge modules themselves are perfectly joined.
+The approach terrain retains the existing empirical 0.85 m road-side correction.
+Bridge position, pitch, length and module alignment remain untouched.
+
+The whole four-vertex support cell is flattened rather than merely raising low
+corners. Otherwise bilinear terrain interpolation can leave a ramp or water notch
+through the road-to-bridge joint.
 
 Because this local grading changes the terrain water test, cache the bridge span
-computed immediately before the grading. Later road cleanup and bridge rendering
-reuse that pre-grade span, preventing the abutment from shortening the bridge on
-the next planning pass.
+computed immediately before grading. Later road cleanup and bridge rendering
+reuse that pre-grade span, preventing the new embankment from shortening or
+moving the bridge on the next planning pass. Final rendering may ask with a
+synthetic two-point component corridor instead of the original OSM polyline, so
+the cache also supports a tightly bounded aligned-corridor lookup.
 """
 from __future__ import annotations
 
 from dataclasses import replace
 from functools import wraps
+import math
 
 from . import bridge_or_causeway_terrain_policy as _terrain_policy
 from . import bridge_render_policy as _bridge
@@ -44,6 +48,15 @@ _PLAN_CACHE: dict[tuple[object, ...], object] = {}
 # terrain side of the bridge/road joint so stock bridge transforms remain
 # completely unchanged.
 _ROAD_APPROACH_RAISE_METRES = 0.85
+_CACHE_CORRIDOR_HEADING_TOLERANCE_DEGREES = 12.0
+
+
+def _plan_world_key(spec) -> tuple[object, ...]:
+    return (
+        int(getattr(spec, "cells", 0)),
+        round(float(getattr(spec, "cell_size", 0.0)), 6),
+        round(float(getattr(spec, "world_size", 0.0) or 0.0), 3),
+    )
 
 
 def _plan_key(points, spec) -> tuple[object, ...]:
@@ -54,17 +67,104 @@ def _plan_key(points, spec) -> tuple[object, ...]:
     )
     reversed_coordinates = tuple(reversed(coordinates))
     canonical = min(coordinates, reversed_coordinates) if coordinates else coordinates
-    return (
-        int(getattr(spec, "cells", 0)),
-        round(float(getattr(spec, "cell_size", 0.0)), 6),
-        round(float(getattr(spec, "world_size", 0.0) or 0.0), 3),
-        canonical,
-    )
+    return (*_plan_world_key(spec), canonical)
 
 
 def _cached_bridge_plan(points, spec):
-    """Return the wet span captured before abutment terrain was graded."""
+    """Return the exact wet span captured before abutment terrain was graded."""
     return _PLAN_CACHE.get(_plan_key(points, spec))
+
+
+def _cached_bridge_plan_for_corridor(points, spec):
+    """Match a final physical bridge corridor to its pre-fill wet plan.
+
+    Final component reconciliation works from the already-emitted stock bridge
+    objects, so it no longer has the original OSM polyline that keyed the cache.
+    Reuse a cached plan only when its centre lies within the physical component,
+    its axis closely matches the component axis, and its lateral displacement is
+    small. This keeps the terrain fill and final bridge placement tied to the
+    same plan without letting unrelated nearby bridges steal one another's span.
+    """
+    exact = _cached_bridge_plan(points, spec)
+    if exact is not None:
+        return exact
+
+    cleaned = _bridge._clean_points(points)
+    if len(cleaned) < 2:
+        return None
+    first = cleaned[0]
+    last = cleaned[-1]
+    dx = float(last[0]) - float(first[0])
+    dz = float(last[1]) - float(first[1])
+    length = math.hypot(dx, dz)
+    if length <= 0.1:
+        return None
+
+    ux, uz = dx / length, dz / length
+    midpoint = (
+        (float(first[0]) + float(last[0])) * 0.5,
+        (float(first[1]) + float(last[1])) * 0.5,
+    )
+    half_length = length * 0.5
+    spacing = float(_bridge._STOCK_MODULE_SPACING_METRES)
+    cell_size = max(0.0, float(getattr(spec, "cell_size", 0.0) or 0.0))
+    lateral_limit = max(5.0, min(spacing * 0.5, cell_size * 0.5 or spacing * 0.5))
+    minimum_alignment = math.cos(
+        math.radians(_CACHE_CORRIDOR_HEADING_TOLERANCE_DEGREES)
+    )
+    world_key = _plan_world_key(spec)
+    candidates: list[tuple[float, object]] = []
+
+    for key, plan in _PLAN_CACHE.items():
+        if tuple(key[:3]) != world_key:
+            continue
+        try:
+            plan_first, plan_last = plan.points
+        except (AttributeError, TypeError, ValueError):
+            continue
+        pdx = float(plan_last[0]) - float(plan_first[0])
+        pdz = float(plan_last[1]) - float(plan_first[1])
+        plan_length = math.hypot(pdx, pdz)
+        if plan_length <= 0.1:
+            continue
+        pux, puz = pdx / plan_length, pdz / plan_length
+        alignment = abs(pux * ux + puz * uz)
+        if alignment < minimum_alignment:
+            continue
+
+        plan_midpoint = (
+            (float(plan_first[0]) + float(plan_last[0])) * 0.5,
+            (float(plan_first[1]) + float(plan_last[1])) * 0.5,
+        )
+        rel_x = plan_midpoint[0] - midpoint[0]
+        rel_z = plan_midpoint[1] - midpoint[1]
+        along = rel_x * ux + rel_z * uz
+        lateral = abs(rel_x * uz - rel_z * ux)
+        if lateral > lateral_limit:
+            continue
+        if abs(along) > half_length + spacing * 0.5:
+            continue
+
+        # The cached bridge itself must fit inside (or at most one stock module
+        # beyond) the physical corridor supplied by the final component pass.
+        fits_corridor = True
+        for endpoint in (plan_first, plan_last):
+            endpoint_rel_x = float(endpoint[0]) - midpoint[0]
+            endpoint_rel_z = float(endpoint[1]) - midpoint[1]
+            projection = endpoint_rel_x * ux + endpoint_rel_z * uz
+            if abs(projection) > half_length + spacing:
+                fits_corridor = False
+                break
+        if not fits_corridor:
+            continue
+
+        score = lateral + abs(along) * 0.01 + (1.0 - alignment) * spacing
+        candidates.append((score, plan))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
 
 
 def _endpoint_cell_vertices(point, spec) -> tuple[int, ...]:
@@ -130,7 +230,7 @@ def _explicit_bridge_plans(dataset, projection, elevations, spec):
 
 
 def _raise_bridge_abutments(report, dataset, projection, spec):
-    """Grade at most one coarse terrain cell at each low, nominally dry endpoint."""
+    """Raise one coarse support cell at each bridge end to the road-join height."""
     plans = _explicit_bridge_plans(
         dataset,
         projection,
@@ -142,8 +242,6 @@ def _raise_bridge_abutments(report, dataset, projection, spec):
 
     values = list(report.elevations)
     target = _abutment_ground_target(spec)
-    epsilon = float(getattr(_osm, "BRIDGE_WATER_EPSILON_METRES", 0.05))
-    nominal_dry_floor = float(spec.sea_level) - epsilon
     touched: set[int] = set()
 
     for points, plan in plans:
@@ -161,15 +259,13 @@ def _raise_bridge_abutments(report, dataset, projection, spec):
                     float(endpoint[1]),
                 )
             )
-            # Do not turn genuinely underwater bridge endpoints into causeways.
-            # High banks also remain untouched. This pass exists only for the
-            # low nominally-dry bank cell that CWA tide would otherwise flood or
-            # leave visibly below the fixed stock bridge deck.
-            if ground < nominal_dry_floor or ground >= target - 1.0e-6:
+            # A fixed stock module can legitimately end just offshore. That is
+            # exactly where the terminal road piece otherwise disappears below
+            # water. Raise that one support cell too; only already-high banks are
+            # left untouched.
+            if ground >= target - 1.0e-6:
                 continue
 
-            # Grade all four support vertices to one road-ground plane. This
-            # raises the road approach without changing any bridge transform.
             for index in _endpoint_cell_vertices(endpoint, spec):
                 if abs(float(values[index]) - target) > 1.0e-7:
                     values[index] = target
@@ -186,7 +282,7 @@ def _raise_bridge_abutments(report, dataset, projection, spec):
 
 
 def install_bridge_abutment_terrain_policy() -> None:
-    """Apply one-cell raised road grading after bridge-water reopening."""
+    """Apply one-cell road-approach fill after bridge-water reopening."""
     global _INSTALLED, _ORIGINAL_SOLVE
     if _INSTALLED:
         return
