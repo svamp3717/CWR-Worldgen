@@ -92,6 +92,31 @@ def _updated_model_usage(result, bridge_delta: int):
     return tuple(sorted(values.items(), key=lambda item: item[0].casefold()))
 
 
+def _bridge_category_bounds(result) -> tuple[int, int] | None:
+    """Return the bridge block in ObjectGenerationResult.objects when available."""
+    required = (
+        "sidewalk_objects",
+        "street_furniture_objects",
+        "building_objects",
+        "forest_objects",
+        "rocky_forest_objects",
+        "forest_undergrowth_objects",
+        "steep_hill_bush_objects",
+        "forest_border_objects",
+        "ditch_grass_objects",
+        "barrier_objects",
+        "bridge_objects",
+    )
+    if not all(hasattr(result, name) for name in required):
+        return None
+    start = sum(
+        int(getattr(result, name, 0))
+        for name in required[:-1]
+    )
+    count = max(0, int(getattr(result, "bridge_objects", 0)))
+    return start, start + count
+
+
 def _reconcile_stock_bridge_components(result, elevations, spec):
     """Resize and recenter physical stock chains to the final wet-span plan."""
     if result is None or elevations is None or spec is None:
@@ -193,12 +218,18 @@ def _reconcile_stock_bridge_components(result, elevations, spec):
     if not changed:
         return result
 
-    reconciled = [
-        replacements.get(index, obj)
-        for index, obj in enumerate(objects)
-        if index not in removals
-    ]
-    reconciled.extend(additions)
+    category_bounds = _bridge_category_bounds(result)
+    bridge_block_end = category_bounds[1] if category_bounds is not None else None
+    reconciled: list[object] = []
+    additions_inserted = False
+    for index, obj in enumerate(objects):
+        if index not in removals:
+            reconciled.append(replacements.get(index, obj))
+        if bridge_block_end is not None and index + 1 == bridge_block_end:
+            reconciled.extend(additions)
+            additions_inserted = True
+    if not additions_inserted:
+        reconciled.extend(additions)
 
     stock_after = sum(1 for obj in reconciled if _bridge._is_stock_bridge(obj))
     bridge_delta = stock_after - stock_before
