@@ -2,18 +2,17 @@
 """Install the complete stock-bridge policy chain used by real builds.
 
 Bridge length is water-authoritative. A coarse CWA terrain grid can still leave
-the ordinary road at a bridge abutment only two or three metres above nominal sea
-level, which is flooded by the game's roughly five-metre tide. That is an
-approach-terrain problem, not a reason to turn hundreds of metres of dry road into
-bridge modules.
+the ordinary road at a bridge abutment submerged or below the stock bridge deck.
+That is an approach-terrain problem, not a reason to turn hundreds of metres of
+dry road into bridge modules.
 
-The terrain policy keeps the wet-only stock span and grades only the single coarse
-terrain cell supporting each low, nominally dry bridge abutment. The road-side
-correction raises that approach terrain by 0.85 m while leaving all stock bridge
-transforms untouched. The underlay policy explicitly synthesizes ordinary road
-pieces on the ground beneath the first stock bridge module at each end; it does
-not merely preserve road pieces that may not have been fitted there. The planner
-reuses the pre-grade wet span so this small embankment cannot shorten the bridge.
+The terrain policy keeps the wet-only stock span and grades the single coarse
+terrain cell supporting each bridge endpoint to the road-approach height, even
+when that endpoint sits just offshore. This creates the smallest possible
+embankment needed to expose the terminal ordinary-road piece while leaving all
+stock bridge transforms untouched. The underlay policy explicitly synthesizes
+ordinary road pieces beneath the first stock bridge module at each end. The
+planner reuses the pre-grade wet span so this embankment cannot shorten the bridge.
 
 Finally, the emitted physical stock-bridge component is reconciled against that
 wet plan before seam anchoring. This prevents overlapping source features or old
@@ -76,9 +75,8 @@ def install_bridge_runtime_policy() -> None:
     from .bridge_final_count_policy import install_bridge_final_count_policy
     install_bridge_final_count_policy()
 
-    # Test26 proved that retaining terminal underlays was insufficient: the road
-    # fitter emitted no road objects inside either terminal bridge module. Force
-    # a fresh road fit with explicit terminal-mask synthesis.
+    # Bridge approach terrain changed: use a fresh build-cache namespace so an
+    # existing world cannot reuse a terrain solve from before the endpoint fill.
     from . import build_cache_policy as _build_cache
-    _build_cache.BUILD_CACHE_REVISION = "v9-synthesized-terminal-bridge-road-underlays"
+    _build_cache.BUILD_CACHE_REVISION = "v10-submerged-bridge-approach-fill"
     _INSTALLED = True
