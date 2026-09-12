@@ -137,6 +137,13 @@ def install_asset_scan_progress_policy() -> None:
 
     install_parking_dirt_surface_policy()
 
+    # Make both paved and gravel lots read as actual parking areas. Paved lots
+    # gain clearer row stop-lines and aisle wear; unsealed lots gain compacted
+    # drive aisles, wheel ruts, coarse aggregate and repeated parking-row wear.
+    from .parking_visual_detail_policy import install_parking_visual_detail_policy
+
+    install_parking_visual_detail_policy()
+
     # Sports pitches use the same exact-background terrain-cell approach as
     # runways: keep the preset's ordinary grass artwork and paint only the field
     # markings in world coordinates, with persistent per-cell cache reuse.
