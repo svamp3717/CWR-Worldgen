@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Measure OFP/CWA P3D model bounds from loose files or PBO archives.
 
-The scanner is intentionally standalone.  It does not participate in world
+The scanner is intentionally standalone. It does not participate in world
 building; it is an offline catalogue tool for discovering the dimensions of
 stock game models before adding them to placement policies.
 
@@ -14,7 +14,7 @@ Examples::
     python tools/measure_p3d_models.py O.pbo Data3D.pbo --output all-models.json
 
 The native reader supports OFP/CWA-era ODOL v6/v7 first-LOD vertex tables and
-OFP MLOD/SP3X files.  PBO entries using the legacy Cprs LZSS packing method are
+OFP MLOD/SP3X files. PBO entries using the legacy Cprs LZSS packing method are
 decompressed in memory, so an extracted game data tree is not required.
 """
 from __future__ import annotations
@@ -28,12 +28,10 @@ import math
 from pathlib import Path
 import struct
 import sys
-from typing import Iterable, Iterator, Sequence
+from typing import Iterator, Sequence
 
 
 _U32 = struct.Struct("<I")
-_I32 = struct.Struct("<i")
-_F32 = struct.Struct("<f")
 _VEC3 = struct.Struct("<fff")
 _PBO_ENTRY = struct.Struct("<IIIII")
 _PBO_PROPERTIES = 0x56657273  # 'Vers'
@@ -41,6 +39,9 @@ _PBO_COMPRESSED = 0x43707273  # 'Cprs'
 
 _MAX_VERTEX_COUNT = 10_000_000
 _MAX_PBO_ENTRY_SIZE = 2_000_000_000
+_LZSS_WINDOW_SIZE = 0x1000
+_LZSS_WINDOW_MASK = _LZSS_WINDOW_SIZE - 1
+_LZSS_FILL_BYTE = 0x20
 
 
 class ModelReadError(ValueError):
@@ -108,49 +109,73 @@ def _read_cstring(stream: io.BytesIO, label: str) -> str:
 def _decompress_lzss_stream(stream: io.BytesIO, expected_size: int) -> bytes:
     """Expand legacy BIS LZSS when only the output length is known.
 
-    OFP ODOL compressed arrays use the same 4 KiB-window stream as packed PBO
-    entries.  Unlike a PBO entry, the compressed byte count is not stored, so we
-    stop once the requested output length has been produced and then consume the
-    four-byte checksum that terminates the compressed structure.
+    OFP ODOL compressed arrays and Cprs PBO entries use BIS' 4 KiB-window LZSS.
+    The dictionary starts filled with ASCII spaces. This matters for references
+    encountered before 4 KiB of real output exists: those references are valid
+    and read from the pre-filled dictionary rather than from already-emitted
+    output bytes.
+
+    ODOL blocks store only the uncompressed size, so decoding stops when exactly
+    ``expected_size`` bytes have been produced. The following four bytes are the
+    additive checksum for that decompressed block.
     """
     if expected_size < 0:
         raise ModelReadError("negative LZSS output size")
+    if expected_size == 0:
+        return b""
+
+    window = bytearray([_LZSS_FILL_BYTE]) * _LZSS_WINDOW_SIZE
+    window_pos = 0
     out = bytearray()
+    checksum = 0
+
+    def emit(value: int) -> None:
+        nonlocal window_pos, checksum
+        out.append(value)
+        checksum = (checksum + value) & 0xFFFFFFFF
+        window[window_pos] = value
+        window_pos = (window_pos + 1) & _LZSS_WINDOW_MASK
+
     while len(out) < expected_size:
-        flag_raw = stream.read(1)
-        if not flag_raw:
+        flags_raw = stream.read(1)
+        if not flags_raw:
             raise ModelReadError("truncated LZSS flag byte")
-        flags = flag_raw[0]
+        flags = flags_raw[0]
+
         for bit in range(8):
             if len(out) >= expected_size:
                 break
+
             if flags & (1 << bit):
                 literal = stream.read(1)
                 if not literal:
                     raise ModelReadError("truncated LZSS literal")
-                out.append(literal[0])
+                emit(literal[0])
                 continue
 
             pair = stream.read(2)
             if len(pair) != 2:
                 raise ModelReadError("truncated LZSS reference")
             b1, b2 = pair
-            encoded_offset = b1 | ((b2 & 0xF0) << 4)
+            offset = b1 | ((b2 & 0xF0) << 4)
             run_length = (b2 & 0x0F) + 3
-            ref = len(out) - ((len(out) - 18 - encoded_offset) & 0x0FFF)
-            for _ in range(run_length):
+
+            # BIS' decoder copies from the circular dictionary relative to the
+            # current write cursor. Keep the source cursor advancing separately:
+            # overlapping matches intentionally consume bytes written earlier in
+            # this same run, which is how repeated patterns are represented.
+            source_pos = window_pos
+            for index in range(run_length):
                 if len(out) >= expected_size:
                     break
-                out.append(0 if ref < 0 else out[ref])
-                ref += 1
+                value = window[(source_pos - offset + index) & _LZSS_WINDOW_MASK]
+                emit(value)
 
     checksum_raw = _read_exact(stream, 4, "LZSS checksum")
     stored_checksum = _U32.unpack(checksum_raw)[0]
-    calculated_checksum = sum(out) & 0xFFFFFFFF
-    if stored_checksum != calculated_checksum:
+    if stored_checksum != checksum:
         raise ModelReadError(
-            f"LZSS checksum mismatch: stored {stored_checksum:#x}, "
-            f"calculated {calculated_checksum:#x}"
+            f"LZSS checksum mismatch: stored {stored_checksum:#x}, calculated {checksum:#x}"
         )
     return bytes(out)
 
@@ -238,7 +263,7 @@ def _measure_odol(data: bytes, *, model_path: str, source: str) -> ModelMeasurem
     if lod_count <= 0 or lod_count > 128:
         raise ModelReadError(f"implausible ODOL LOD count {lod_count}")
 
-    # OFP/CWA ODOL v6/v7 starts with the first LOD vertex table.  For catalogue
+    # OFP/CWA ODOL v6/v7 starts with the first LOD vertex table. For catalogue
     # sizing we only need its vertices, not faces, selections, animations, etc.
     flag_count = _read_u32(stream, "ODOL point-flag count")
     _read_odol_array(stream, flag_count, 4, "ODOL point flags")
@@ -303,8 +328,6 @@ def _measure_mlod(data: bytes, *, model_path: str, source: str) -> ModelMeasurem
     if point_count <= 0 or point_count > _MAX_VERTEX_COUNT:
         raise ModelReadError(f"implausible SP3X point count {point_count}")
     if major not in {27, 28}:
-        # 28 is the normal OFP/O2Light value; accepting 27 keeps the inspector
-        # useful for a few older editable models without pretending P3DM works.
         raise ModelReadError(f"unsupported SP3X major version {major}")
 
     points: list[tuple[float, float, float]] = []
@@ -313,8 +336,6 @@ def _measure_mlod(data: bytes, *, model_path: str, source: str) -> ModelMeasurem
         x, y, z, _point_flags = struct.unpack("<fffi", raw)
         points.append((x, y, z))
 
-    # The normal table immediately follows the points.  Reading it is a cheap
-    # structural sanity check that catches a surprising number of false parses.
     _read_exact(stream, normal_count * _VEC3.size, "SP3X normals")
 
     return _measurement(
@@ -454,13 +475,18 @@ def _iter_models(inputs: Sequence[Path], patterns: Sequence[str]) -> Iterator[tu
                 yield from pbo(child)
 
 
-def scan_models(inputs: Sequence[Path], patterns: Sequence[str] = ()) -> tuple[list[ModelMeasurement], list[ModelFailure]]:
+def scan_models(
+    inputs: Sequence[Path], patterns: Sequence[str] = ()
+) -> tuple[list[ModelMeasurement], list[ModelFailure]]:
     measurements: list[ModelMeasurement] = []
     failures: list[ModelFailure] = []
     for model_path, source, data in _iter_models(inputs, patterns):
         try:
             measurements.append(measure_p3d(data, model_path=model_path, source=source))
-        except (ModelReadError, OSError, struct.error, OverflowError) as exc:
+        except (ModelReadError, OSError, struct.error, OverflowError, IndexError) as exc:
+            # A malformed/unsupported model should be recorded and scanning should
+            # continue. IndexError is defensive here: the native parser must not
+            # abort an entire catalogue because one legacy model has odd data.
             failures.append(ModelFailure(model_path=model_path, source=source, error=str(exc)))
     measurements.sort(key=lambda item: item.model_path)
     failures.sort(key=lambda item: item.model_path)
