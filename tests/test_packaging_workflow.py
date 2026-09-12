@@ -29,6 +29,25 @@ class PackagingWorkflowTests(unittest.TestCase):
                 self.assertIn(entry, text)
                 self.assertNotIn("build_gui.py", text)
 
+    def test_pyinstaller_collects_stock_building_catalogue(self) -> None:
+        catalogue = self.root / "src" / "cwr_worldgen" / "data" / "stock_building_models.json"
+        self.assertTrue(catalogue.is_file())
+
+        pyproject = (self.root / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('"data/*.json"', pyproject)
+
+        workflows = (
+            ".github/workflows/build-windows-exe.yml",
+            ".github/workflows/build-windows-loose.yml",
+            ".github/workflows/build-linux.yml",
+            ".github/workflows/build-macos.yml",
+            ".github/workflows/release.yml",
+        )
+        for relative in workflows:
+            with self.subTest(workflow=relative):
+                text = (self.root / relative).read_text(encoding="utf-8")
+                self.assertIn("--collect-all cwr_worldgen", text)
+
     def test_frozen_windows_gui_build_is_windowed(self) -> None:
         workflow = (self.root / ".github" / "workflows" / "build-windows-exe.yml").read_text(encoding="utf-8")
         self.assertIn("--windowed `", workflow)

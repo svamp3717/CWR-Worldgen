@@ -210,3 +210,24 @@ def install_foundation_visual_policy() -> None:
     from .stock_desert_surface_policy import install_stock_desert_surface_policy
 
     install_stock_desert_surface_policy()
+
+    # Stock-building mode is a final routing choice, not another procedural
+    # renderer. Install it after all semantic classifiers and GUI country wiring
+    # so the "stock" preset can reuse those classifications while guaranteeing
+    # that no procedural building P3D is authored for that mode.
+    from .stock_building_policy import install_stock_building_policy
+
+    install_stock_building_policy()
+
+    # Keep source filtering, GUI stock controls, and stock P3D origin grounding
+    # outside the base stock router. This also gives old mixed-stock profiles the
+    # corrected grounding behavior without changing their preset identifier.
+    from .stock_building_extensions import install_stock_building_extensions
+
+    install_stock_building_extensions()
+
+    # Keep the generated runway/sports/parking renderers default-on, but expose
+    # independent GUI/CLI opt-outs after their wrapper chain is fully installed.
+    from .dynamic_surface_controls import install_dynamic_surface_controls
+
+    install_dynamic_surface_controls()
