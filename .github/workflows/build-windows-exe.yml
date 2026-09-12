@@ -44,17 +44,33 @@ jobs:
             --collect-all duckdb `
             tools/pyinstaller_gui_entry.py
 
-      - name: Verify EXE was created
+      - name: Stage executable and editable JSON
         shell: pwsh
         run: |
-          if (-not (Test-Path "dist/CWR-Worldgen.exe")) {
-            throw "dist/CWR-Worldgen.exe was not created"
-          }
-          Get-Item "dist/CWR-Worldgen.exe" | Format-List Name,Length,LastWriteTime
+          $bundle = "dist/CWR-Worldgen-Windows"
+          New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+          Copy-Item "dist/CWR-Worldgen.exe" (Join-Path $bundle "CWR-Worldgen.exe")
+          python tools/stage_external_json.py (Join-Path $bundle "config")
 
-      - name: Upload EXE
+      - name: Verify EXE package was created
+        shell: pwsh
+        run: |
+          $bundle = "dist/CWR-Worldgen-Windows"
+          $exe = Join-Path $bundle "CWR-Worldgen.exe"
+          if (-not (Test-Path $exe)) {
+            throw "$exe was not created"
+          }
+          foreach ($dir in @("data", "house_styles", "country_styles")) {
+            $json = @(Get-ChildItem (Join-Path $bundle "config/$dir") -Filter *.json -File)
+            if ($json.Count -eq 0) {
+              throw "No editable JSON staged in config/$dir"
+            }
+          }
+          Get-Item $exe | Format-List Name,Length,LastWriteTime
+
+      - name: Upload Windows package
         uses: actions/upload-artifact@v7
         with:
           name: CWR-Worldgen-Windows
-          path: dist/CWR-Worldgen.exe
+          path: dist/CWR-Worldgen-Windows/**
           if-no-files-found: error
