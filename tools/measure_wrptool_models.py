@@ -5,23 +5,16 @@
 WrpTool's catalogue is used as the curated model list. Geometry is still read
 from the real loose P3D files via ``measure_p3d_models.py``.
 
-The INI contains human-maintained comment-delimited sections such as::
+WrpTool's actual object classes are the values on INI assignment lines, e.g.::
 
-    ;
-    ; houses
-    ;
     data3d\\dum01.p3d=houses
     data3d\\kostelik.p3d=houses
+    O\\Hous\\domek01.p3d=houses
 
-and later::
-
-    ;
-    ; old houses
-    ;
-    Data3D\\AFbarabizna.p3d=houses
-
-Use ``--houses`` to read both of those exact WrpTool sections. ``--section`` may
-also be repeated for any other comment-delimited section name.
+Those assignments are authoritative for ``--houses``. The human comment blocks
+(``; houses ;``, ``; old houses ;`` and so on) are retained only for the generic
+``--section`` selector because the Resistance house entries are scattered later
+in the INI and would otherwise be missed.
 
 Example::
 
@@ -45,9 +38,12 @@ from measure_p3d_models import ModelMeasurement, scan_models
 
 
 _CONFIG_NAMES = frozenset({"objects.ini", "objects.xml"})
-_HOUSE_SECTIONS = ("houses", "old houses")
 _P3D_REFERENCE = re.compile(
     r"(?i)([a-z0-9_.$@+()\-][a-z0-9_.$@+() /\\\-]{0,300}?\.p3d)"
+)
+_INI_ASSIGNMENT = re.compile(
+    r"^\s*(?P<path>[^;=]+?\.p3d)\s*=\s*(?P<category>[^;#\r\n]+?)\s*$",
+    re.IGNORECASE,
 )
 _COMMENT_TEXT = re.compile(r"^\s*;\s*([^;].*?)\s*$")
 
@@ -61,6 +57,10 @@ def canonical(value: str) -> str:
 
 def canonical_section(value: str) -> str:
     return " ".join(str(value).strip().casefold().split())
+
+
+def canonical_category(value: str) -> str:
+    return canonical_section(value)
 
 
 def matches(path: str, patterns: Sequence[str]) -> bool:
@@ -109,7 +109,7 @@ def references_from_ini_sections(
     include: Sequence[str],
     sections: Sequence[str],
 ) -> tuple[str, ...]:
-    """Read only P3Ds belonging to named WrpTool comment sections."""
+    """Read P3Ds belonging to named WrpTool comment-delimited sections."""
     wanted = {canonical_section(value) for value in sections if canonical_section(value)}
     if not wanted:
         return ()
@@ -132,24 +132,57 @@ def references_from_ini_sections(
     return tuple(sorted(refs))
 
 
+def references_from_ini_categories(
+    text: str,
+    include: Sequence[str],
+    categories: Sequence[str],
+) -> tuple[str, ...]:
+    """Read every P3D whose WrpTool INI assignment has a requested category."""
+    wanted = {
+        canonical_category(value)
+        for value in categories
+        if canonical_category(value)
+    }
+    if not wanted:
+        return ()
+
+    refs: set[str] = set()
+    for line in text.splitlines():
+        match = _INI_ASSIGNMENT.match(line)
+        if match is None:
+            continue
+        if canonical_category(match.group("category")) not in wanted:
+            continue
+        ref = canonical(match.group("path"))
+        if matches(ref, include):
+            refs.add(ref)
+    return tuple(sorted(refs))
+
+
 def read_references(
     catalogues: Sequence[Path],
     include: Sequence[str],
     sections: Sequence[str] = (),
+    categories: Sequence[str] = (),
 ) -> tuple[str, ...]:
     refs: set[str] = set()
     selected_sections = tuple(
         dict.fromkeys(canonical_section(value) for value in sections if canonical_section(value))
     )
+    selected_categories = tuple(
+        dict.fromkeys(canonical_category(value) for value in categories if canonical_category(value))
+    )
     for catalogue in catalogues:
         text = catalogue.read_bytes().decode("latin-1")
-        if selected_sections:
-            # The XML defines WrpTool classes/shapes but does not preserve the
-            # INI's comment-delimited object groups. Section selection therefore
-            # intentionally comes from objects.ini only.
+        if selected_sections or selected_categories:
+            # WrpTool's XML defines class shapes/colors, but the P3D-to-class
+            # assignments and comment sections are in objects.ini.
             if catalogue.suffix.casefold() != ".ini":
                 continue
-            refs.update(references_from_ini_sections(text, include, selected_sections))
+            if selected_sections:
+                refs.update(references_from_ini_sections(text, include, selected_sections))
+            if selected_categories:
+                refs.update(references_from_ini_categories(text, include, selected_categories))
             continue
         for hit in _P3D_REFERENCE.finditer(text):
             ref = canonical(hit.group(1))
@@ -188,9 +221,10 @@ def measure_from_wrptool(
     data_roots: Sequence[Path],
     include: Sequence[str],
     sections: Sequence[str] = (),
+    categories: Sequence[str] = (),
 ) -> dict[str, object]:
     catalogues = find_catalogues(wrptool)
-    references = read_references(catalogues, include, sections)
+    references = read_references(catalogues, include, sections, categories)
 
     roots: list[Path] = [wrptool if wrptool.is_dir() else wrptool.parent]
     roots.extend(data_roots)
@@ -217,6 +251,7 @@ def measure_from_wrptool(
         "source": "wrptool-object-catalogue",
         "catalogues": [str(item) for item in catalogues],
         "sections": [canonical_section(value) for value in sections],
+        "categories": [canonical_category(value) for value in categories],
         "reference_count": len(references),
         "model_count": len(repaired),
         "missing_count": len(missing),
@@ -255,9 +290,16 @@ def parser() -> argparse.ArgumentParser:
         help="Only include an exact '; / ; NAME / ;' objects.ini section; may be repeated",
     )
     result.add_argument(
+        "--category",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Only include P3Ds assigned '=NAME' in objects.ini; may be repeated",
+    )
+    result.add_argument(
         "--houses",
         action="store_true",
-        help="Include both WrpTool '; houses ;' and '; old houses ;' comment sections",
+        help="Include every P3D assigned '=houses' anywhere in WrpTool objects.ini",
     )
     result.add_argument("-o", "--output", type=Path, help="Write JSON report to this file")
     result.add_argument("--strict", action="store_true", help="Fail if any model is missing/unreadable")
@@ -266,13 +308,20 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    sections = list(args.section)
+    sections = list(dict.fromkeys(canonical_section(value) for value in args.section))
+    categories = list(args.category)
     if args.houses:
-        sections = [*_HOUSE_SECTIONS, *sections]
-    sections = list(dict.fromkeys(canonical_section(value) for value in sections))
+        categories = ["houses", *categories]
+    categories = list(dict.fromkeys(canonical_category(value) for value in categories))
 
     try:
-        report = measure_from_wrptool(args.wrptool, args.data_root, args.include, sections)
+        report = measure_from_wrptool(
+            args.wrptool,
+            args.data_root,
+            args.include,
+            sections,
+            categories,
+        )
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -281,10 +330,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text, encoding="utf-8")
-        section_note = f"; sections {', '.join(report['sections'])}" if report["sections"] else ""
+        filters = []
+        if report["sections"]:
+            filters.append(f"sections {', '.join(report['sections'])}")
+        if report["categories"]:
+            filters.append(f"categories {', '.join(report['categories'])}")
+        filter_note = f"; {'; '.join(filters)}" if filters else ""
         print(
             f"WrpTool refs {report['reference_count']:,}; measured {report['model_count']:,}; "
-            f"missing {report['missing_count']:,}; failed {report['failure_count']:,}{section_note}",
+            f"missing {report['missing_count']:,}; failed {report['failure_count']:,}{filter_note}",
             file=sys.stderr,
         )
     else:
