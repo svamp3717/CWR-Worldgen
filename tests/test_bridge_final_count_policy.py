@@ -15,6 +15,13 @@ class _Result:
     objects: tuple[WorldObject, ...]
 
 
+@dataclass(frozen=True)
+class _CategorizedResult:
+    objects: tuple[WorldObject, ...]
+    bridge_objects: int
+    model_usage: tuple[tuple[str, int], ...]
+
+
 def _spec():
     return SimpleNamespace(
         cells=64,
@@ -76,6 +83,33 @@ def test_final_physical_component_count_follows_wet_plan() -> None:
         abs((right - left) - bridge._STOCK_MODULE_SPACING_METRES) < 1.0e-6
         for left, right in zip(centres, centres[1:])
     )
+
+
+def test_trimming_bridge_objects_updates_parallel_category_metadata() -> None:
+    spec = _spec()
+    objects = _ten_module_component().objects
+    model = bridge._osm.NOGOVA_BRIDGE_MODEL
+    result = _CategorizedResult(
+        objects=objects,
+        bridge_objects=10,
+        model_usage=((model, 10), (r"data3d\strom.p3d", 4)),
+    )
+    elevations = (0.0,) * (spec.cells * spec.cells)
+
+    with patch.object(bridge._osm, "_sample_elevation", side_effect=_terrain):
+        reconciled = policy._reconcile_stock_bridge_components(
+            result,
+            elevations,
+            spec,
+        )
+
+    stock = [obj for obj in reconciled.objects if bridge._is_stock_bridge(obj)]
+    assert len(stock) == 3
+    assert reconciled.bridge_objects == 3
+    usage = dict(reconciled.model_usage)
+    assert usage[model] == 3
+    assert usage[r"data3d\strom.p3d"] == 4
+    assert reconciled.bridge_objects == len(stock)
 
 
 def test_final_count_guard_runs_before_existing_seam_anchor() -> None:
