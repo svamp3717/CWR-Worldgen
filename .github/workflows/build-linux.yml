@@ -46,16 +46,27 @@ jobs:
             --collect-all duckdb \
             tools/pyinstaller_gui_entry.py
 
-      - name: Verify executable was created
+      - name: Stage executable and editable JSON
         run: |
-          test -f "dist/CWR-Worldgen"
-          chmod +x "dist/CWR-Worldgen"
-          ls -lh "dist/CWR-Worldgen"
-          file "dist/CWR-Worldgen"
+          bundle="dist/CWR-Worldgen-Linux-x64"
+          mkdir -p "$bundle"
+          cp "dist/CWR-Worldgen" "$bundle/CWR-Worldgen"
+          chmod +x "$bundle/CWR-Worldgen"
+          python tools/stage_external_json.py "$bundle/config"
+
+      - name: Verify package was created
+        run: |
+          bundle="dist/CWR-Worldgen-Linux-x64"
+          test -f "$bundle/CWR-Worldgen"
+          for dir in data house_styles country_styles; do
+            find "$bundle/config/$dir" -maxdepth 1 -name '*.json' -type f | grep -q .
+          done
+          ls -lh "$bundle/CWR-Worldgen"
+          file "$bundle/CWR-Worldgen"
 
       - name: Package Linux executable
         run: |
-          tar -czf "CWR-Worldgen-Linux-x64.tar.gz" -C dist "CWR-Worldgen"
+          tar -czf "CWR-Worldgen-Linux-x64.tar.gz" -C dist "CWR-Worldgen-Linux-x64"
           ls -lh "CWR-Worldgen-Linux-x64.tar.gz"
 
       - name: Upload Linux build
