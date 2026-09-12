@@ -96,19 +96,27 @@ jobs:
             --collect-all duckdb `
             tools/pyinstaller_gui_entry.py
 
-      - name: Verify Windows executable
+      - name: Package Windows executable and editable JSON
         shell: pwsh
         run: |
-          if (-not (Test-Path "dist/CWR-Worldgen.exe")) {
-            throw "dist/CWR-Worldgen.exe was not created"
+          $bundle = "dist/CWR-Worldgen-Windows-x64"
+          New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+          Copy-Item "dist/CWR-Worldgen.exe" (Join-Path $bundle "CWR-Worldgen.exe")
+          python tools/stage_external_json.py (Join-Path $bundle "config")
+          foreach ($dir in @("data", "house_styles", "country_styles")) {
+            $json = @(Get-ChildItem (Join-Path $bundle "config/$dir") -Filter *.json -File)
+            if ($json.Count -eq 0) {
+              throw "No editable JSON staged in config/$dir"
+            }
           }
-          Get-Item "dist/CWR-Worldgen.exe" | Format-List Name,Length,LastWriteTime
+          Compress-Archive -Path "$bundle/*" -DestinationPath "CWR-Worldgen-Windows-x64.zip"
+          Get-Item "CWR-Worldgen-Windows-x64.zip" | Format-List Name,Length,LastWriteTime
 
       - name: Upload Windows release asset
         uses: actions/upload-artifact@v7
         with:
           name: release-windows
-          path: dist/CWR-Worldgen.exe
+          path: CWR-Worldgen-Windows-x64.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -152,11 +160,17 @@ jobs:
             --collect-all duckdb \
             tools/pyinstaller_gui_entry.py
 
-      - name: Package Linux executable
+      - name: Package Linux executable and editable JSON
         run: |
-          test -f "dist/CWR-Worldgen"
-          chmod +x "dist/CWR-Worldgen"
-          tar -czf "CWR-Worldgen-Linux-x64.tar.gz" -C dist "CWR-Worldgen"
+          bundle="dist/CWR-Worldgen-Linux-x64"
+          mkdir -p "$bundle"
+          cp "dist/CWR-Worldgen" "$bundle/CWR-Worldgen"
+          chmod +x "$bundle/CWR-Worldgen"
+          python tools/stage_external_json.py "$bundle/config"
+          for dir in data house_styles country_styles; do
+            find "$bundle/config/$dir" -maxdepth 1 -name '*.json' -type f | grep -q .
+          done
+          tar -czf "CWR-Worldgen-Linux-x64.tar.gz" -C dist "CWR-Worldgen-Linux-x64"
           ls -lh "CWR-Worldgen-Linux-x64.tar.gz"
 
       - name: Upload Linux release asset
@@ -203,11 +217,17 @@ jobs:
             --collect-all duckdb \
             tools/pyinstaller_gui_entry.py
 
-      - name: Package macOS application
+      - name: Package macOS application and editable JSON
         run: |
-          test -d "dist/CWR-Worldgen.app"
+          bundle="dist/CWR-Worldgen-macOS-Intel"
+          mkdir -p "$bundle"
+          cp -R "dist/CWR-Worldgen.app" "$bundle/CWR-Worldgen.app"
+          python tools/stage_external_json.py "$bundle/config"
+          for dir in data house_styles country_styles; do
+            find "$bundle/config/$dir" -maxdepth 1 -name '*.json' -type f | grep -q .
+          done
           ditto -c -k --sequesterRsrc --keepParent \
-            "dist/CWR-Worldgen.app" \
+            "$bundle" \
             "CWR-Worldgen-macOS-Intel.zip"
           ls -lh "CWR-Worldgen-macOS-Intel.zip"
 
@@ -242,7 +262,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f "release-assets/CWR-Worldgen.exe"
+          test -f "release-assets/CWR-Worldgen-Windows-x64.zip"
           test -f "release-assets/CWR-Worldgen-Linux-x64.tar.gz"
           test -f "release-assets/CWR-Worldgen-macOS-Intel.zip"
           ls -lh release-assets
@@ -255,7 +275,7 @@ jobs:
         shell: bash
         run: |
           gh release create "$TAG" \
-            "release-assets/CWR-Worldgen.exe" \
+            "release-assets/CWR-Worldgen-Windows-x64.zip" \
             "release-assets/CWR-Worldgen-Linux-x64.tar.gz" \
             "release-assets/CWR-Worldgen-macOS-Intel.zip" \
             --repo "$GITHUB_REPOSITORY" \
