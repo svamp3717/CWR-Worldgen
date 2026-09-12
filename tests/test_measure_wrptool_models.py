@@ -10,7 +10,7 @@ if str(TOOLS_DIR) not in sys.path:
 import measure_wrptool_models as wrptool
 
 
-def test_house_sections_include_houses_and_old_houses_only() -> None:
+def test_house_category_includes_assignments_anywhere_in_ini() -> None:
     text = """;
 ; houses
 ;
@@ -20,43 +20,65 @@ data3d\\kostelik.p3d=houses
 ; old houses
 ;
 Data3D\\AFbarabizna.p3d=houses
-Data3D\\kostel_trosky.p3d=houses
+;
+; bushes
+;
+data3d\\krovi.p3d=bushes
+;
+; resistance objects
+;
+O\\Hous\\domek01.p3d=houses
+O\\Hous\\domek02.p3d=houses
+O\\Hous\\plot.p3d=fences
+o\\misc\\leseni2x.p3d=houses
+"""
+
+    refs = wrptool.references_from_ini_categories(text, (), ("houses",))
+
+    assert refs == (
+        r"data3d\afbarabizna.p3d",
+        r"data3d\dum01.p3d",
+        r"data3d\kostelik.p3d",
+        r"o\hous\domek01.p3d",
+        r"o\hous\domek02.p3d",
+        r"o\misc\leseni2x.p3d",
+    )
+
+
+def test_house_category_still_honors_include_globs() -> None:
+    text = """data3d\\dum01.p3d=houses
+data3d\\kostelik.p3d=houses
+O\\Hous\\domek01.p3d=houses
+O\\Hous\\domek02.p3d=houses
+"""
+
+    refs = wrptool.references_from_ini_categories(
+        text,
+        (r"o\hous\domek*.p3d",),
+        ("houses",),
+    )
+
+    assert refs == (
+        r"o\hous\domek01.p3d",
+        r"o\hous\domek02.p3d",
+    )
+
+
+def test_comment_section_selector_is_still_available() -> None:
+    text = """;
+; houses
+;
+data3d\\dum01.p3d=houses
+;
+; old houses
+;
+Data3D\\AFbarabizna.p3d=houses
 ;
 ; bushes
 ;
 data3d\\krovi.p3d=bushes
 """
 
-    refs = wrptool.references_from_ini_sections(
-        text,
-        (),
-        wrptool._HOUSE_SECTIONS,
-    )
+    refs = wrptool.references_from_ini_sections(text, (), ("old houses",))
 
-    assert refs == (
-        r"data3d\afbarabizna.p3d",
-        r"data3d\dum01.p3d",
-        r"data3d\kostel_trosky.p3d",
-        r"data3d\kostelik.p3d",
-    )
-
-
-def test_house_sections_still_honor_include_globs() -> None:
-    text = """;
-; houses
-;
-data3d\\dum01.p3d=houses
-data3d\\kostelik.p3d=houses
-;
-; old houses
-;
-Data3D\\AFbarabizna.p3d=houses
-"""
-
-    refs = wrptool.references_from_ini_sections(
-        text,
-        (r"data3d\kost*.p3d",),
-        wrptool._HOUSE_SECTIONS,
-    )
-
-    assert refs == (r"data3d\kostelik.p3d",)
+    assert refs == (r"data3d\afbarabizna.p3d",)
