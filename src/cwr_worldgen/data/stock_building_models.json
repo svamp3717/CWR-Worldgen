@@ -1,0 +1,696 @@
+{
+  "schema": 1,
+  "source": "stock-houses.json measured with tools/measure_wrptool_models.py",
+  "notes": "Curated stock CWA/OFP building subset. Non-building O\\Hous props, ruins, fences, graves, bridge pieces and decorative objects are intentionally excluded.",
+  "models": [
+    {
+      "model_path": "data3d\\dum01.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 11.7537,
+      "length_m": 18.5986,
+      "height_m": 6.9945,
+      "aspect_ratio": 1.5824,
+      "origin_to_bottom_m": 3.4841
+    },
+    {
+      "model_path": "data3d\\dum02.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 7.6074,
+      "length_m": 13.3613,
+      "height_m": 12.0356,
+      "aspect_ratio": 1.7564,
+      "origin_to_bottom_m": 6.0178
+    },
+    {
+      "model_path": "data3d\\dum_m2.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 8.1762,
+      "length_m": 9.6137,
+      "height_m": 9.2029,
+      "aspect_ratio": 1.1758,
+      "origin_to_bottom_m": 4.6014
+    },
+    {
+      "model_path": "data3d\\dum_mesto.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 15.9232,
+      "length_m": 13.4177,
+      "height_m": 13.7208,
+      "aspect_ratio": 1.1867,
+      "origin_to_bottom_m": 6.8589
+    },
+    {
+      "model_path": "data3d\\dum_mesto2.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 9.2572,
+      "length_m": 18.1648,
+      "height_m": 13.4122,
+      "aspect_ratio": 1.9622,
+      "origin_to_bottom_m": 6.7003
+    },
+    {
+      "model_path": "data3d\\dum_mesto2l.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 14.996,
+      "length_m": 15.0073,
+      "height_m": 13.3381,
+      "aspect_ratio": 1.0008,
+      "origin_to_bottom_m": 6.669
+    },
+    {
+      "model_path": "data3d\\dum_mesto3.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 11.105,
+      "length_m": 20.8626,
+      "height_m": 15.83,
+      "aspect_ratio": 1.8787,
+      "origin_to_bottom_m": 7.9093
+    },
+    {
+      "model_path": "data3d\\dum_mesto_in.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 13.9983,
+      "length_m": 11.3352,
+      "height_m": 9.1263,
+      "aspect_ratio": 1.2349,
+      "origin_to_bottom_m": 4.5744
+    },
+    {
+      "model_path": "data3d\\dum_olezlina.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 17.2286,
+      "length_m": 8.5217,
+      "height_m": 10.7403,
+      "aspect_ratio": 2.0217,
+      "origin_to_bottom_m": 5.3701
+    },
+    {
+      "model_path": "data3d\\dum_rasovna.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 7.3323,
+      "length_m": 10.5267,
+      "height_m": 9.4714,
+      "aspect_ratio": 1.4356,
+      "origin_to_bottom_m": 4.7439
+    },
+    {
+      "model_path": "data3d\\dum_rasovna_in.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 7.3323,
+      "length_m": 10.5267,
+      "height_m": 9.4714,
+      "aspect_ratio": 1.4356,
+      "origin_to_bottom_m": 4.7439
+    },
+    {
+      "model_path": "o\\hous\\benzina.p3d",
+      "families": [
+        "shop",
+        "urban"
+      ],
+      "width_m": 14.0107,
+      "length_m": 17.0711,
+      "height_m": 6.7473,
+      "aspect_ratio": 1.2184,
+      "origin_to_bottom_m": 3.3735
+    },
+    {
+      "model_path": "o\\hous\\bouda_plech.p3d",
+      "families": [
+        "outbuilding"
+      ],
+      "width_m": 2.6382,
+      "length_m": 5.1656,
+      "height_m": 2.656,
+      "aspect_ratio": 1.9579,
+      "origin_to_bottom_m": 1.3151
+    },
+    {
+      "model_path": "o\\hous\\chata6.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 9.0484,
+      "length_m": 7.3914,
+      "height_m": 10.4912,
+      "aspect_ratio": 1.2242,
+      "origin_to_bottom_m": 5.2456
+    },
+    {
+      "model_path": "o\\hous\\domek01.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 7.5069,
+      "length_m": 7.455,
+      "height_m": 11.4866,
+      "aspect_ratio": 1.007,
+      "origin_to_bottom_m": 5.7433
+    },
+    {
+      "model_path": "o\\hous\\domek02.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 7.4946,
+      "length_m": 7.455,
+      "height_m": 9.8074,
+      "aspect_ratio": 1.0053,
+      "origin_to_bottom_m": 4.9037
+    },
+    {
+      "model_path": "o\\hous\\domek03.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 9.8643,
+      "length_m": 14.1355,
+      "height_m": 10.4213,
+      "aspect_ratio": 1.4328,
+      "origin_to_bottom_m": 5.2107
+    },
+    {
+      "model_path": "o\\hous\\domek04.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 8.1994,
+      "length_m": 7.754,
+      "height_m": 8.4638,
+      "aspect_ratio": 1.0574,
+      "origin_to_bottom_m": 4.2319
+    },
+    {
+      "model_path": "o\\hous\\domek05.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 10.2551,
+      "length_m": 5.717,
+      "height_m": 9.1852,
+      "aspect_ratio": 1.7937,
+      "origin_to_bottom_m": 4.5926
+    },
+    {
+      "model_path": "o\\hous\\domek_hospoda.p3d",
+      "families": [
+        "shop",
+        "urban"
+      ],
+      "width_m": 10.2027,
+      "length_m": 9.6095,
+      "height_m": 8.3097,
+      "aspect_ratio": 1.0617,
+      "origin_to_bottom_m": 4.1549
+    },
+    {
+      "model_path": "o\\hous\\domek_kovarna.p3d",
+      "families": [
+        "shop",
+        "urban"
+      ],
+      "width_m": 12.691,
+      "length_m": 10.9895,
+      "height_m": 6.6136,
+      "aspect_ratio": 1.1548,
+      "origin_to_bottom_m": 3.3068
+    },
+    {
+      "model_path": "o\\hous\\domek_podhradi_1.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 10.7693,
+      "length_m": 7.7518,
+      "height_m": 7.3441,
+      "aspect_ratio": 1.3892,
+      "origin_to_bottom_m": 3.672
+    },
+    {
+      "model_path": "o\\hous\\domek_radnice.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 24.1431,
+      "length_m": 28.8404,
+      "height_m": 17.4647,
+      "aspect_ratio": 1.1946,
+      "origin_to_bottom_m": 8.7324
+    },
+    {
+      "model_path": "o\\hous\\domek_rosa.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 10.219,
+      "length_m": 7.5642,
+      "height_m": 11.2073,
+      "aspect_ratio": 1.351,
+      "origin_to_bottom_m": 5.6037
+    },
+    {
+      "model_path": "o\\hous\\domek_sedy.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 10.2,
+      "length_m": 5.9036,
+      "height_m": 7.5101,
+      "aspect_ratio": 1.7277,
+      "origin_to_bottom_m": 3.755
+    },
+    {
+      "model_path": "o\\hous\\domek_sedy_bez.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 10.2,
+      "length_m": 5.9036,
+      "height_m": 7.5101,
+      "aspect_ratio": 1.7277,
+      "origin_to_bottom_m": 3.755
+    },
+    {
+      "model_path": "o\\hous\\domek_vilka.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 10.8202,
+      "length_m": 11.9381,
+      "height_m": 9.5446,
+      "aspect_ratio": 1.1033,
+      "origin_to_bottom_m": 4.7723
+    },
+    {
+      "model_path": "o\\hous\\domek_zluty.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 12.7361,
+      "length_m": 7.7354,
+      "height_m": 7.785,
+      "aspect_ratio": 1.6465,
+      "origin_to_bottom_m": 3.8925
+    },
+    {
+      "model_path": "o\\hous\\domek_zluty_bez.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 12.7361,
+      "length_m": 7.7354,
+      "height_m": 7.785,
+      "aspect_ratio": 1.6465,
+      "origin_to_bottom_m": 3.8925
+    },
+    {
+      "model_path": "o\\hous\\dum_patr_nizky_prujezd.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 11.6971,
+      "length_m": 9.2759,
+      "height_m": 11.2021,
+      "aspect_ratio": 1.261,
+      "origin_to_bottom_m": 5.6011
+    },
+    {
+      "model_path": "o\\hous\\dum_patrovy01.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 11.4467,
+      "length_m": 8.6783,
+      "height_m": 11.2316,
+      "aspect_ratio": 1.318,
+      "origin_to_bottom_m": 5.6158
+    },
+    {
+      "model_path": "o\\hous\\dum_patrovy01b.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 11.4549,
+      "length_m": 8.6783,
+      "height_m": 13.7872,
+      "aspect_ratio": 1.3199,
+      "origin_to_bottom_m": 6.8936
+    },
+    {
+      "model_path": "o\\hous\\dum_patrovy01c.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 11.4723,
+      "length_m": 8.6783,
+      "height_m": 13.7914,
+      "aspect_ratio": 1.3219,
+      "origin_to_bottom_m": 6.8957
+    },
+    {
+      "model_path": "o\\hous\\dum_patrovy01d.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 11.444,
+      "length_m": 8.6783,
+      "height_m": 13.7439,
+      "aspect_ratio": 1.3187,
+      "origin_to_bottom_m": 6.872
+    },
+    {
+      "model_path": "o\\hous\\dum_patrovy01prujezd.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 11.6971,
+      "length_m": 9.2759,
+      "height_m": 13.7609,
+      "aspect_ratio": 1.261,
+      "origin_to_bottom_m": 6.8805
+    },
+    {
+      "model_path": "o\\hous\\dum_patrovy02.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 10.3909,
+      "length_m": 9.7532,
+      "height_m": 10.1658,
+      "aspect_ratio": 1.0654,
+      "origin_to_bottom_m": 5.0829
+    },
+    {
+      "model_path": "o\\hous\\dum_patrovy03.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 10.0665,
+      "length_m": 10.2274,
+      "height_m": 10.2195,
+      "aspect_ratio": 1.016,
+      "origin_to_bottom_m": 5.1097
+    },
+    {
+      "model_path": "o\\hous\\dum_patrovy04.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 8.1067,
+      "length_m": 5.5909,
+      "height_m": 8.915,
+      "aspect_ratio": 1.45,
+      "origin_to_bottom_m": 4.4575
+    },
+    {
+      "model_path": "o\\hous\\dum_patrovy05.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 8.3122,
+      "length_m": 11.1319,
+      "height_m": 9.7849,
+      "aspect_ratio": 1.3392,
+      "origin_to_bottom_m": 4.8925
+    },
+    {
+      "model_path": "o\\hous\\dum_patrovy06.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 7.24,
+      "length_m": 5.2802,
+      "height_m": 9.8199,
+      "aspect_ratio": 1.3712,
+      "origin_to_bottom_m": 4.9099
+    },
+    {
+      "model_path": "o\\hous\\dum_podloubi.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 14.6156,
+      "length_m": 14.409,
+      "height_m": 9.8511,
+      "aspect_ratio": 1.0143,
+      "origin_to_bottom_m": 4.9256
+    },
+    {
+      "model_path": "o\\hous\\dum_podloubi02.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 14.6156,
+      "length_m": 14.409,
+      "height_m": 9.8511,
+      "aspect_ratio": 1.0143,
+      "origin_to_bottom_m": 4.9256
+    },
+    {
+      "model_path": "o\\hous\\dum_podloubi03.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 14.6156,
+      "length_m": 13.6462,
+      "height_m": 9.8511,
+      "aspect_ratio": 1.071,
+      "origin_to_bottom_m": 4.9256
+    },
+    {
+      "model_path": "o\\hous\\dum_podloubi03klaster.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 16.5458,
+      "length_m": 16.3626,
+      "height_m": 11.8696,
+      "aspect_ratio": 1.0112,
+      "origin_to_bottom_m": 5.9348
+    },
+    {
+      "model_path": "o\\hous\\hangar_2.p3d",
+      "families": [
+        "industrial"
+      ],
+      "width_m": 31.6456,
+      "length_m": 22.2464,
+      "height_m": 13.0745,
+      "aspect_ratio": 1.4225,
+      "origin_to_bottom_m": 6.5373
+    },
+    {
+      "model_path": "o\\hous\\hasic_zbroj.p3d",
+      "families": [
+        "outbuilding"
+      ],
+      "width_m": 10.1622,
+      "length_m": 6.2549,
+      "height_m": 6.6132,
+      "aspect_ratio": 1.6247,
+      "origin_to_bottom_m": 3.3066
+    },
+    {
+      "model_path": "o\\hous\\hlidac_budka.p3d",
+      "families": [
+        "outbuilding"
+      ],
+      "width_m": 7.5351,
+      "length_m": 4.2823,
+      "height_m": 4.6195,
+      "aspect_ratio": 1.7596,
+      "origin_to_bottom_m": 2.3098
+    },
+    {
+      "model_path": "o\\hous\\kbud.p3d",
+      "families": [
+        "outbuilding"
+      ],
+      "width_m": 1.2004,
+      "length_m": 1.9489,
+      "height_m": 2.7331,
+      "aspect_ratio": 1.6236,
+      "origin_to_bottom_m": 1.3666
+    },
+    {
+      "model_path": "o\\hous\\kostelin.p3d",
+      "families": [
+        "church"
+      ],
+      "width_m": 11.7544,
+      "length_m": 16.3409,
+      "height_m": 19.6132,
+      "aspect_ratio": 1.3902,
+      "origin_to_bottom_m": 9.8066
+    },
+    {
+      "model_path": "o\\hous\\orlhot.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 15.282,
+      "length_m": 11.9041,
+      "height_m": 13.6575,
+      "aspect_ratio": 1.2838,
+      "origin_to_bottom_m": 6.8288
+    },
+    {
+      "model_path": "o\\hous\\panelak.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 15.8004,
+      "length_m": 14.8326,
+      "height_m": 11.2208,
+      "aspect_ratio": 1.0652,
+      "origin_to_bottom_m": 5.6104
+    },
+    {
+      "model_path": "o\\hous\\panelak2.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 15.8004,
+      "length_m": 14.8326,
+      "height_m": 16.6208,
+      "aspect_ratio": 1.0652,
+      "origin_to_bottom_m": 8.3104
+    },
+    {
+      "model_path": "o\\hous\\panelak3.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 15.8004,
+      "length_m": 14.934,
+      "height_m": 29.7298,
+      "aspect_ratio": 1.058,
+      "origin_to_bottom_m": 14.8649
+    },
+    {
+      "model_path": "o\\hous\\skola.p3d",
+      "families": [
+        "school"
+      ],
+      "width_m": 23.9583,
+      "length_m": 14.9459,
+      "height_m": 17.8047,
+      "aspect_ratio": 1.603,
+      "origin_to_bottom_m": 8.9024
+    },
+    {
+      "model_path": "o\\hous\\stodola.p3d",
+      "families": [
+        "agricultural"
+      ],
+      "width_m": 10.2179,
+      "length_m": 6.5921,
+      "height_m": 7.9233,
+      "aspect_ratio": 1.5501,
+      "origin_to_bottom_m": 3.9617
+    },
+    {
+      "model_path": "o\\hous\\stodola2.p3d",
+      "families": [
+        "agricultural"
+      ],
+      "width_m": 10.2179,
+      "length_m": 6.5921,
+      "height_m": 7.9233,
+      "aspect_ratio": 1.5501,
+      "origin_to_bottom_m": 3.9617
+    },
+    {
+      "model_path": "o\\hous\\stodola3.p3d",
+      "families": [
+        "agricultural"
+      ],
+      "width_m": 14.1006,
+      "length_m": 6.5921,
+      "height_m": 7.9233,
+      "aspect_ratio": 2.139,
+      "origin_to_bottom_m": 3.9617
+    },
+    {
+      "model_path": "o\\hous\\tovarna1.p3d",
+      "families": [
+        "industrial"
+      ],
+      "width_m": 25.4977,
+      "length_m": 18.6624,
+      "height_m": 15.4041,
+      "aspect_ratio": 1.3663,
+      "origin_to_bottom_m": 7.7021
+    },
+    {
+      "model_path": "o\\hous\\zalchata.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 8.1872,
+      "length_m": 12.6503,
+      "height_m": 7.6717,
+      "aspect_ratio": 1.5451,
+      "origin_to_bottom_m": 3.8359
+    },
+    {
+      "model_path": "o\\hous\\zluty_statek.p3d",
+      "families": [
+        "agricultural"
+      ],
+      "width_m": 16.194,
+      "length_m": 9.792,
+      "height_m": 6.54,
+      "aspect_ratio": 1.6538,
+      "origin_to_bottom_m": 3.27
+    },
+    {
+      "model_path": "o\\hous\\zluty_statek_in.p3d",
+      "families": [
+        "agricultural"
+      ],
+      "width_m": 16.194,
+      "length_m": 9.792,
+      "height_m": 6.6585,
+      "aspect_ratio": 1.6538,
+      "origin_to_bottom_m": 3.3293
+    }
+  ]
+}
