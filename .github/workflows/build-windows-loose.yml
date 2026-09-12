@@ -46,6 +46,11 @@ jobs:
             --collect-all duckdb `
             tools/pyinstaller_gui_entry.py
 
+      - name: Stage editable JSON
+        shell: pwsh
+        run: |
+          python tools/stage_external_json.py "dist/CWR-Worldgen/config"
+
       - name: Verify loose-file package
         shell: pwsh
         run: |
@@ -58,6 +63,12 @@ jobs:
           $files = @(Get-ChildItem $bundle -Recurse -File)
           if ($files.Count -le 1) {
             throw "Expected a loose-file build, but only $($files.Count) file(s) were produced"
+          }
+          foreach ($dir in @("data", "house_styles", "country_styles")) {
+            $json = @(Get-ChildItem (Join-Path $bundle "config/$dir") -Filter *.json -File)
+            if ($json.Count -eq 0) {
+              throw "No editable JSON staged in config/$dir"
+            }
           }
 
           Write-Host "Loose-file package contains $($files.Count) files."
