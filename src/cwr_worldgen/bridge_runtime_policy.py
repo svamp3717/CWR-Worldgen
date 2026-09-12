@@ -12,12 +12,14 @@ when that endpoint sits just offshore. This creates the smallest possible
 embankment needed to expose the terminal ordinary-road piece while leaving all
 stock bridge transforms untouched. The underlay policy explicitly synthesizes
 ordinary road pieces beneath the first stock bridge module at each end. The
-planner reuses the pre-grade wet span so this embankment cannot shorten the bridge.
+planner reuses the pre-grade wet span so this embankment cannot shorten or move
+the bridge afterward.
 
-Finally, the emitted physical stock-bridge component is reconciled against that
-wet plan before seam anchoring. This prevents overlapping source features or old
-cached object counts from turning a short wet crossing back into a long land
-bridge after planning has already selected the correct span.
+Final reconciliation may ask the runtime planner with a synthetic corridor built
+from already-emitted bridge objects rather than with the original OSM polyline.
+That corridor is matched back to the same cached pre-fill plan before any
+post-fill re-planning is attempted, keeping the raised terrain and final bridge
+endpoints in the same place.
 """
 from __future__ import annotations
 
@@ -25,11 +27,13 @@ _INSTALLED = False
 
 
 def _runtime_stock_bridge_span_plan(points, elevations, spec):
-    """Use the pre-abutment-grade wet span when available, otherwise plan normally."""
+    """Reuse the pre-fill wet plan before considering post-fill terrain."""
     from . import bridge_abutment_terrain_policy as _abutment
     from . import bridge_source_water_policy as _source
 
     cached = _abutment._cached_bridge_plan(points, spec)
+    if cached is None:
+        cached = _abutment._cached_bridge_plan_for_corridor(points, spec)
     if cached is not None:
         return cached
     return _source._mapped_water_stock_plan(points, elevations, spec)
@@ -75,8 +79,9 @@ def install_bridge_runtime_policy() -> None:
     from .bridge_final_count_policy import install_bridge_final_count_policy
     install_bridge_final_count_policy()
 
-    # Bridge approach terrain changed: use a fresh build-cache namespace so an
-    # existing world cannot reuse a terrain solve from before the endpoint fill.
+    # Final placement now reuses the exact pre-fill wet plan that the terrain
+    # approach was graded against. Use a fresh namespace so old placement/cache
+    # state cannot retain the previous post-fill endpoint shift.
     from . import build_cache_policy as _build_cache
-    _build_cache.BUILD_CACHE_REVISION = "v10-submerged-bridge-approach-fill"
+    _build_cache.BUILD_CACHE_REVISION = "v11-authoritative-pre-fill-bridge-plan"
     _INSTALLED = True
