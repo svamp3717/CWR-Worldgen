@@ -14,6 +14,13 @@ class PackagingWorkflowTests(unittest.TestCase):
         package_index = source.index("from cwr_worldgen.debug_entry import main")
         self.assertLess(freeze_index, package_index)
 
+    def test_frozen_entry_overlays_external_json_before_importing_package(self) -> None:
+        source = (self.root / "tools" / "pyinstaller_gui_entry.py").read_text(encoding="utf-8")
+        overlay_index = source.index("_overlay_external_json()")
+        package_index = source.index("from cwr_worldgen.debug_entry import main")
+        self.assertLess(overlay_index, package_index)
+        self.assertIn("from external_json_runtime import overlay_external_json", source)
+
     def test_frozen_entry_uses_guarded_debug_launcher(self) -> None:
         source = (self.root / "tools" / "pyinstaller_gui_entry.py").read_text(encoding="utf-8")
         self.assertIn("from cwr_worldgen.debug_entry import main", source)
@@ -52,6 +59,28 @@ class PackagingWorkflowTests(unittest.TestCase):
             with self.subTest(workflow=relative):
                 text = (self.root / relative).read_text(encoding="utf-8")
                 self.assertIn("--collect-all cwr_worldgen", text)
+
+    def test_all_pyinstaller_workflows_ship_editable_json(self) -> None:
+        workflows = (
+            ".github/workflows/build-windows-exe.yml",
+            ".github/workflows/build-windows-loose.yml",
+            ".github/workflows/build-linux.yml",
+            ".github/workflows/build-macos.yml",
+            ".github/workflows/release.yml",
+        )
+        for relative in workflows:
+            with self.subTest(workflow=relative):
+                text = (self.root / relative).read_text(encoding="utf-8")
+                self.assertIn("tools/stage_external_json.py", text)
+                self.assertIn("config", text)
+
+        staging = (self.root / "tools" / "stage_external_json.py").read_text(encoding="utf-8")
+        self.assertIn('("data", "house_styles", "country_styles")', staging)
+
+    def test_release_packages_windows_exe_with_sidecar_config(self) -> None:
+        workflow = (self.root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        self.assertIn("CWR-Worldgen-Windows-x64.zip", workflow)
+        self.assertNotIn('"release-assets/CWR-Worldgen.exe"', workflow)
 
     def test_frozen_windows_gui_build_is_windowed(self) -> None:
         workflow = (self.root / ".github" / "workflows" / "build-windows-exe.yml").read_text(encoding="utf-8")
