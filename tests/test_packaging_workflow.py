@@ -65,6 +65,15 @@ class PackagingWorkflowTests(unittest.TestCase):
         self.assertIn("CWR_WORLDGEN_STARTUP_SMOKE", source)
         self.assertIn("_install_frozen_log_streams()", source)
 
+    def test_frozen_faulthandler_uses_real_log_file(self) -> None:
+        source = (self.root / "src" / "cwr_worldgen" / "debug_entry.py").read_text(encoding="utf-8")
+        self.assertIn("_FAULT_LOG_STREAM", source)
+        self.assertIn(
+            "faulthandler.enable(file=_FAULT_LOG_STREAM, all_threads=True)",
+            source,
+        )
+        self.assertIn("_enable_faulthandler()", source)
+
 
 if __name__ == "__main__":
     unittest.main()
