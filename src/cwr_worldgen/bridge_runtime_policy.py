@@ -14,6 +14,11 @@ transforms untouched. The underlay policy explicitly synthesizes ordinary road
 pieces on the ground beneath the first stock bridge module at each end; it does
 not merely preserve road pieces that may not have been fitted there. The planner
 reuses the pre-grade wet span so this small embankment cannot shorten the bridge.
+
+Finally, the emitted physical stock-bridge component is reconciled against that
+wet plan before seam anchoring. This prevents overlapping source features or old
+cached object counts from turning a short wet crossing back into a long land
+bridge after planning has already selected the correct span.
 """
 from __future__ import annotations
 
@@ -64,6 +69,12 @@ def install_bridge_runtime_policy() -> None:
         raise RuntimeError("bridge tide policy did not capture the wet stock planner")
     _source._ORIGINAL_STOCK_PLAN = base_wet_plan
     _bridge.stock_bridge_span_plan = _runtime_stock_bridge_span_plan
+
+    # The final planner assignment above intentionally bypasses earlier mutable
+    # wrapper chains. Install the component-count guard only now, so it sees the
+    # exact wet-only runtime planner that real GUI/CLI builds use.
+    from .bridge_final_count_policy import install_bridge_final_count_policy
+    install_bridge_final_count_policy()
 
     # Test26 proved that retaining terminal underlays was insufficient: the road
     # fitter emitted no road objects inside either terminal bridge module. Force
