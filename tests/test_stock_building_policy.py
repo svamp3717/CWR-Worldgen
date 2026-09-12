@@ -15,15 +15,18 @@ def _library() -> StockBuildingLibrary:
     return StockBuildingLibrary(world_name="wg_stock_test", house_style_preset=STOCK_BUILDING_PRESET)
 
 
-def test_measured_catalogue_contains_real_building_families_only() -> None:
+def test_measured_catalogue_contains_full_wrptool_house_pool() -> None:
     models = _load_catalogue()
     paths = {model.model_path.casefold() for model in models}
-    assert r"o\hous\domek_sedy.p3d" in paths
+    assert len(models) == 145
+    assert r"data3d\kostel.p3d" in paths
+    assert r"data3d\kostel2.p3d" in paths
+    assert r"data3d\kostel3.p3d" in paths
+    assert r"data3d\kostelik.p3d" in paths
     assert r"o\hous\kostelin.p3d" in paths
     assert r"o\hous\skola.p3d" in paths
     assert r"o\hous\tovarna1.p3d" in paths
-    assert r"o\hous\dd_pletivo.p3d" not in paths
-    assert r"o\hous\hrob1.p3d" not in paths
+    assert r"o\misc\leseni2x.p3d" in paths
 
 
 def test_stock_polygon_selection_uses_original_game_model_and_measured_dimensions() -> None:
@@ -53,8 +56,9 @@ def test_stock_special_buildings_stay_in_stock_family() -> None:
         {"building": "school", "amenity": "school"},
         ((0.0, 0.0), (24.0, 0.0), (24.0, 15.0), (0.0, 15.0)),
     )
-    assert church.model_path.casefold() == r"o\hous\kostelin.p3d"
-    assert school.model_path.casefold() == r"o\hous\skola.p3d"
+    catalogue = {model.model_path.casefold(): model for model in library.models}
+    assert "church" in catalogue[church.model_path.casefold()].families
+    assert "school" in catalogue[school.model_path.casefold()].families
 
 
 def test_stock_mode_factory_never_instantiates_procedural_library() -> None:
