@@ -218,3 +218,10 @@ def install_foundation_visual_policy() -> None:
     from .stock_building_policy import install_stock_building_policy
 
     install_stock_building_policy()
+
+    # Keep source filtering, GUI stock controls, and stock P3D origin grounding
+    # outside the base stock router. This also gives old mixed-stock profiles the
+    # corrected grounding behavior without changing their preset identifier.
+    from .stock_building_extensions import install_stock_building_extensions
+
+    install_stock_building_extensions()
