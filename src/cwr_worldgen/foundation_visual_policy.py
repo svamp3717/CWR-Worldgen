@@ -210,3 +210,11 @@ def install_foundation_visual_policy() -> None:
     from .stock_desert_surface_policy import install_stock_desert_surface_policy
 
     install_stock_desert_surface_policy()
+
+    # Stock-building mode is a final routing choice, not another procedural
+    # renderer. Install it after all semantic classifiers and GUI country wiring
+    # so the "stock" preset can reuse those classifications while guaranteeing
+    # that no procedural building P3D is authored for that mode.
+    from .stock_building_policy import install_stock_building_policy
+
+    install_stock_building_policy()
