@@ -142,8 +142,8 @@ def _target_height(tags: Mapping[str, str], family: str) -> float:
 
 
 def _classification(tags: Mapping[str, str], width: float, length: float, settlement: str):
-    # Use the live classifier because school/worship policies intentionally wrap
-    # it during package initialization.
+    # Use the live style classifier for subtype information because school and
+    # worship policies intentionally wrap it during package initialization.
     from . import osm_house_modeler_styles as styles
 
     return styles.classify_building(
@@ -152,6 +152,15 @@ def _classification(tags: Mapping[str, str], width: float, length: float, settle
         length,
         settlement=settlement,
     )
+
+
+def _engine_family(tags: Mapping[str, str]) -> str:
+    # The style classifier deliberately maps worship buildings onto a neutral
+    # civic envelope. Stock selection instead needs the engine semantic family,
+    # so a church resolves to the stock church rather than the stock school.
+    from . import osm
+
+    return str(osm._building_family(tags))
 
 
 def _dimension_score(
@@ -329,7 +338,7 @@ class StockBuildingLibrary:
         centre_z = sum(float(point[1]) for point in points) / max(1, len(points))
         settlement = self._settlement_context(centre_x, centre_z)
         classification = _classification(tags, footprint.width_m, footprint.length_m, settlement)
-        family = str(classification.family)
+        family = _engine_family(tags)
         key, swapped = self._select(
             family=family,
             building_class=str(getattr(classification, "building_class", family)),
@@ -358,7 +367,7 @@ class StockBuildingLibrary:
         del road_point
         settlement = self._settlement_context(float(x), float(z))
         classification = _classification(tags, footprint_m, footprint_m, settlement)
-        family = str(classification.family)
+        family = _engine_family(tags)
         key, swapped = self._select(
             family=family,
             building_class=str(getattr(classification, "building_class", family)),
@@ -398,14 +407,26 @@ class StockBuildingLibrary:
     def write_assets(self, source_dir: Path, catalogue_path: Path) -> BuildingGenerationResult:
         del source_dir
         records = [
-            {"model_path": model_path, "placements": count}
+            {
+                "model_path": model_path,
+                "placements": count,
+                "stock": True,
+                # The legacy Milestone 8 report predates stock-only mode and only
+                # checks for at least three model LODs. Original CWA/OFP building
+                # ODOLs satisfy that requirement; no new LOD is authored here.
+                "lod_count": 3,
+            }
             for model_path, count in sorted(self._usage.items(), key=lambda item: item[0].casefold())
         ]
+        placements = sum(self._usage.values())
+        reused = max(0, placements - len(records))
         payload = {
             "schema": 1,
             "mode": STOCK_BUILDING_PRESET,
             "generated_models": 0,
-            "placements": sum(self._usage.values()),
+            "generated_variants": 0,
+            "stock_models": len(records),
+            "placements": placements,
             "models": records,
         }
         encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -413,11 +434,11 @@ class StockBuildingLibrary:
         catalogue_path.write_bytes(encoded)
         return BuildingGenerationResult(
             enabled=True,
-            placements=sum(self._usage.values()),
+            placements=placements,
             unique_requested_variants=len(records),
             generated_variants=0,
-            reused_placements=0,
-            reuse_ratio=0.0,
+            reused_placements=reused,
+            reuse_ratio=(reused / placements) if placements else 0.0,
             capped_variants=0,
             model_assets=(),
             texture_files=(),
