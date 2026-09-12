@@ -126,6 +126,32 @@ def test_long_dry_source_bridge_does_not_redefine_water_crossing() -> None:
     assert fitted == plan
 
 
+def test_connected_adjustment_rejects_large_endpoint_drift() -> None:
+    plan = bridge.StockBridgeSpanPlan(
+        points=((100.0, 100.0), (250.0, 100.0)),
+        module_count=3,
+        wet_start=(100.0, 100.0),
+        wet_end=(250.0, 100.0),
+        wet_length=150.0,
+    )
+
+    # Preserving bridge length is not enough: a fitted bridge must not slide an
+    # entire crossing away from its water-derived position.
+    assert not policy._connected_adjustment_is_bounded(
+        plan,
+        3,
+        (40.0, 100.0),
+        (190.0, 100.0),
+    )
+
+    assert policy._connected_adjustment_is_bounded(
+        plan,
+        4,
+        (75.0, 100.0),
+        (275.0, 100.0),
+    )
+
+
 def test_missing_safe_approach_keeps_existing_bridge_plan() -> None:
     spec = _spec()
     points = ((100.0, 100.0), (120.0, 100.0))
