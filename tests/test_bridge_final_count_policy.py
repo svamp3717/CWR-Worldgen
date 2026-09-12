@@ -20,6 +20,16 @@ class _CategorizedResult:
     objects: tuple[WorldObject, ...]
     bridge_objects: int
     model_usage: tuple[tuple[str, int], ...]
+    sidewalk_objects: int = 0
+    street_furniture_objects: int = 0
+    building_objects: int = 0
+    forest_objects: int = 0
+    rocky_forest_objects: int = 0
+    forest_undergrowth_objects: int = 0
+    steep_hill_bush_objects: int = 0
+    forest_border_objects: int = 0
+    ditch_grass_objects: int = 0
+    barrier_objects: int = 0
 
 
 def _spec():
@@ -110,6 +120,39 @@ def test_trimming_bridge_objects_updates_parallel_category_metadata() -> None:
     assert usage[model] == 3
     assert usage[r"data3d\strom.p3d"] == 4
     assert reconciled.bridge_objects == len(stock)
+
+
+def test_added_bridge_module_stays_inside_bridge_category_block() -> None:
+    spec = _spec()
+    step = float(bridge._STOCK_MODULE_SPACING_METRES)
+    model = bridge._osm.NOGOVA_BRIDGE_MODEL
+    first = WorldObject(1, model, step * 0.5, 0.0, 200.0, 90.0, 0.0)
+    second = WorldObject(2, model, step * 1.5, 0.0, 200.0, 90.0, 0.0)
+    rural = WorldObject(3, r"data3d\strom.p3d", 800.0, 0.0, 800.0, 0.0, 0.0)
+    result = _CategorizedResult(
+        objects=(first, second, rural),
+        bridge_objects=2,
+        model_usage=((model, 2), (rural.model_path, 1)),
+    )
+    plan = bridge.StockBridgeSpanPlan(
+        points=((0.0, 200.0), (3.0 * step, 200.0)),
+        module_count=3,
+        wet_start=(step, 200.0),
+        wet_end=(2.0 * step, 200.0),
+        wet_length=step,
+    )
+
+    with patch.object(bridge, "stock_bridge_span_plan", return_value=plan):
+        reconciled = policy._reconcile_stock_bridge_components(
+            result,
+            (0.0,) * (spec.cells * spec.cells),
+            spec,
+        )
+
+    assert reconciled.bridge_objects == 3
+    assert all(bridge._is_stock_bridge(obj) for obj in reconciled.objects[:3])
+    assert reconciled.objects[3] == rural
+    assert dict(reconciled.model_usage)[model] == 3
 
 
 def test_final_count_guard_runs_before_existing_seam_anchor() -> None:
