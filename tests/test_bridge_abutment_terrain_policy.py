@@ -146,11 +146,47 @@ def test_mixed_high_corner_is_flattened_instead_of_cutting_through_bridge() -> N
     assert graded.changed_cells == len(support)
 
 
-def test_genuinely_underwater_bridge_endpoint_is_not_filled() -> None:
+def test_underwater_bridge_endpoint_is_filled_to_expose_terminal_road_piece() -> None:
     spec = _spec()
     plan = _plan()
     points = plan.points
-    report = _Report((-1.0,) * (spec.cells * spec.cells), changed_cells=0)
+    values = [8.0] * (spec.cells * spec.cells)
+    left_support = set(policy._endpoint_cell_vertices(plan.points[0], spec))
+    right_support = set(policy._endpoint_cell_vertices(plan.points[1], spec))
+    support = left_support | right_support
+
+    # The fixed stock bridge ends just offshore. Its ordinary terminal road piece
+    # is already present, but this support cell is underwater and therefore hides
+    # the road. Raise only those endpoint cells into a short embankment.
+    for index in support:
+        values[index] = -1.0
+    report = _Report(tuple(values), changed_cells=0)
+
+    policy._PLAN_CACHE.clear()
+    with patch.object(
+        policy,
+        "_explicit_bridge_plans",
+        return_value=((points, plan),),
+    ):
+        raised = policy._raise_bridge_abutments(
+            report,
+            None,
+            None,
+            spec,
+        )
+
+    target = policy._abutment_ground_target(spec)
+    for index, value in enumerate(raised.elevations):
+        assert value == pytest.approx(target if index in support else 8.0)
+    assert raised.changed_cells == len(support)
+    assert policy._cached_bridge_plan(points, spec) == plan
+
+
+def test_high_bridge_bank_is_not_lowered() -> None:
+    spec = _spec()
+    plan = _plan()
+    points = plan.points
+    report = _Report((9.0,) * (spec.cells * spec.cells), changed_cells=0)
 
     policy._PLAN_CACHE.clear()
     with patch.object(
@@ -166,7 +202,6 @@ def test_genuinely_underwater_bridge_endpoint_is_not_filled() -> None:
         )
 
     assert raised == report
-    # The water-authoritative bridge plan is still retained for later rendering.
     assert policy._cached_bridge_plan(points, spec) == plan
 
 
