@@ -225,3 +225,9 @@ def install_foundation_visual_policy() -> None:
     from .stock_building_extensions import install_stock_building_extensions
 
     install_stock_building_extensions()
+
+    # Keep the generated runway/sports/parking renderers default-on, but expose
+    # independent GUI/CLI opt-outs after their wrapper chain is fully installed.
+    from .dynamic_surface_controls import install_dynamic_surface_controls
+
+    install_dynamic_surface_controls()
