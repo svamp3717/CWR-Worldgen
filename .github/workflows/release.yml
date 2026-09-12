@@ -80,16 +80,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[sources]" pyinstaller
 
-      - name: Create GUI entry point
-        shell: pwsh
-        run: |
-          @'
-          from cwr_worldgen.gui_entry import main
-
-          if __name__ == "__main__":
-              raise SystemExit(main())
-          '@ | Set-Content -Encoding utf8 build_gui.py
-
       - name: Build Windows executable
         shell: pwsh
         run: |
@@ -104,7 +94,7 @@ jobs:
             --collect-all rasterio `
             --collect-all pyarrow `
             --collect-all duckdb `
-            build_gui.py
+            tools/pyinstaller_gui_entry.py
 
       - name: Verify Windows executable
         shell: pwsh
@@ -148,15 +138,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[sources]" pyinstaller
 
-      - name: Create GUI entry point
-        run: |
-          cat > build_gui.py <<'PY'
-          from cwr_worldgen.gui_entry import main
-
-          if __name__ == "__main__":
-              raise SystemExit(main())
-          PY
-
       - name: Build Linux executable
         run: |
           python -m PyInstaller \
@@ -169,7 +150,7 @@ jobs:
             --collect-all rasterio \
             --collect-all pyarrow \
             --collect-all duckdb \
-            build_gui.py
+            tools/pyinstaller_gui_entry.py
 
       - name: Package Linux executable
         run: |
@@ -207,15 +188,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[sources]" pyinstaller
 
-      - name: Create GUI entry point
-        run: |
-          cat > build_gui.py <<'PY'
-          from cwr_worldgen.gui_entry import main
-
-          if __name__ == "__main__":
-              raise SystemExit(main())
-          PY
-
       - name: Build macOS app
         run: |
           python -m PyInstaller \
@@ -229,7 +201,7 @@ jobs:
             --collect-all rasterio \
             --collect-all pyarrow \
             --collect-all duckdb \
-            build_gui.py
+            tools/pyinstaller_gui_entry.py
 
       - name: Package macOS application
         run: |

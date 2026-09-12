@@ -28,16 +28,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[sources]" pyinstaller
 
-      - name: Create GUI entry point
-        shell: pwsh
-        run: |
-          @'
-          from cwr_worldgen.gui_entry import main
-
-          if __name__ == "__main__":
-              raise SystemExit(main())
-          '@ | Set-Content -Encoding utf8 build_gui.py
-
       - name: Build EXE
         shell: pwsh
         run: |
@@ -52,7 +42,7 @@ jobs:
             --collect-all rasterio `
             --collect-all pyarrow `
             --collect-all duckdb `
-            build_gui.py
+            tools/pyinstaller_gui_entry.py
 
       - name: Verify EXE was created
         shell: pwsh
