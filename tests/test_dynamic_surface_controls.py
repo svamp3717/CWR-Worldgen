@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 from cwr_worldgen import cli
 from cwr_worldgen import parking_surface_policy as parking
 from cwr_worldgen import runway_surface_policy as runway
@@ -12,6 +14,8 @@ from cwr_worldgen.dynamic_surface_controls import (
     _append_disable_flags,
     _defaults_with_dynamic_surfaces,
     _dynamic_enabled,
+    _install_gui_controls,
+    _next_grid_row,
 )
 
 
@@ -63,3 +67,30 @@ def test_dynamic_enabled_defaults_to_true_and_understands_false_values(monkeypat
     assert not _dynamic_enabled(environment)
     monkeypatch.setenv(environment, "1")
     assert _dynamic_enabled(environment)
+
+
+def test_dynamic_gui_controls_keep_common_choices_on_grid() -> None:
+    source = inspect.getsource(_install_gui_controls)
+    assert "widget.grid(" in source
+    assert "widget.pack(" not in source
+
+
+class _GridChild:
+    def __init__(self, row: int | None) -> None:
+        self.row = row
+
+    def grid_info(self):
+        return {} if self.row is None else {"row": self.row}
+
+
+class _GridParent:
+    def __init__(self, *rows: int | None) -> None:
+        self.children = [_GridChild(row) for row in rows]
+
+    def winfo_children(self):
+        return self.children
+
+
+def test_next_grid_row_appends_after_existing_common_choices() -> None:
+    assert _next_grid_row(_GridParent()) == 0
+    assert _next_grid_row(_GridParent(0, 0, 1, 4, None)) == 5
