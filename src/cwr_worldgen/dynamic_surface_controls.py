@@ -65,6 +65,23 @@ def _find_widgets_by_text(root, text: str):
     return result
 
 
+def _next_grid_row(parent) -> int:
+    """Return the first unused grid row in a Tk container."""
+    rows: list[int] = []
+    try:
+        children = parent.winfo_children()
+    except Exception:
+        children = ()
+    for child in children:
+        try:
+            info = child.grid_info()
+            if info and "row" in info:
+                rows.append(int(info["row"]))
+        except Exception:
+            continue
+    return max(rows, default=-1) + 1
+
+
 def _install_gui_controls() -> None:
     from . import gui_entry
 
@@ -95,10 +112,11 @@ def _install_gui_controls() -> None:
                 anchors = _find_widgets_by_text(self, "Include minor roads")
                 if not anchors:
                     return
-                anchor = anchors[0]
-                parent = anchor.master
-                insert_after = anchor
-                for key, label, _flag, _environment in DYNAMIC_SURFACE_OPTIONS:
+                parent = anchors[0].master
+                first_row = _next_grid_row(parent)
+                for index, (key, label, _flag, _environment) in enumerate(
+                    DYNAMIC_SURFACE_OPTIONS
+                ):
                     variable = self._var(key, True, boolean=True)
                     widget = gui.ttk.Checkbutton(parent, text=label, variable=variable)
                     self._register_advanced_setting(
@@ -107,8 +125,15 @@ def _install_gui_controls() -> None:
                         normal_style="TCheckbutton",
                         changed_style="AdvancedChanged.TCheckbutton",
                     )
-                    widget.pack(anchor="w", pady=2, after=insert_after)
-                    insert_after = widget
+                    # The Common choices container is grid-managed. Mixing pack
+                    # into the same parent raises TclError during GUI startup.
+                    widget.grid(
+                        row=first_row + index // 2,
+                        column=index % 2,
+                        sticky="w",
+                        padx=(0, 32),
+                        pady=3,
+                    )
 
         gui.WorldgenGui = DynamicSurfaceControlsWorldgenGui
         gui._DYNAMIC_SURFACE_CONTROLS_INSTALLED = True
