@@ -32,15 +32,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[sources]" pyinstaller
 
-      - name: Create GUI entry point
-        run: |
-          cat > build_gui.py <<'PY'
-          from cwr_worldgen.gui_entry import main
-
-          if __name__ == "__main__":
-              raise SystemExit(main())
-          PY
-
       - name: Build Linux executable
         run: |
           python -m PyInstaller \
@@ -53,7 +44,7 @@ jobs:
             --collect-all rasterio \
             --collect-all pyarrow \
             --collect-all duckdb \
-            build_gui.py
+            tools/pyinstaller_gui_entry.py
 
       - name: Verify executable was created
         run: |
