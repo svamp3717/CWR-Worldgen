@@ -42,15 +42,26 @@ jobs:
             --collect-all duckdb \
             tools/pyinstaller_gui_entry.py
 
-      - name: Verify app was created
+      - name: Stage app and editable JSON
         run: |
-          test -d "dist/CWR-Worldgen.app"
-          du -sh "dist/CWR-Worldgen.app"
+          bundle="dist/CWR-Worldgen-macOS-Intel"
+          mkdir -p "$bundle"
+          cp -R "dist/CWR-Worldgen.app" "$bundle/CWR-Worldgen.app"
+          python tools/stage_external_json.py "$bundle/config"
+
+      - name: Verify app package was created
+        run: |
+          bundle="dist/CWR-Worldgen-macOS-Intel"
+          test -d "$bundle/CWR-Worldgen.app"
+          for dir in data house_styles country_styles; do
+            find "$bundle/config/$dir" -maxdepth 1 -name '*.json' -type f | grep -q .
+          done
+          du -sh "$bundle/CWR-Worldgen.app"
 
       - name: Package macOS app
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
-            "dist/CWR-Worldgen.app" \
+            "dist/CWR-Worldgen-macOS-Intel" \
             "CWR-Worldgen-macOS-Intel.zip"
           ls -lh "CWR-Worldgen-macOS-Intel.zip"
 
