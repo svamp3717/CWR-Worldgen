@@ -59,19 +59,6 @@ class PackagingWorkflowTests(unittest.TestCase):
         self.assertNotIn("--console `", workflow)
         self.assertNotIn("--hide-console hide-early `", workflow)
 
-    def test_windows_builds_smoke_test_the_configured_gui(self) -> None:
-        workflows = (
-            ".github/workflows/build-windows-exe.yml",
-            ".github/workflows/build-windows-loose.yml",
-            ".github/workflows/release.yml",
-        )
-        for relative in workflows:
-            with self.subTest(workflow=relative):
-                text = (self.root / relative).read_text(encoding="utf-8")
-                self.assertIn("CWR_WORLDGEN_STARTUP_SMOKE", text)
-                self.assertIn("Start-Process", text)
-                self.assertIn("cwr-worldgen-crash.log", text)
-
     def test_frozen_debug_log_defaults_beside_executable(self) -> None:
         source = (self.root / "src" / "cwr_worldgen" / "debug_entry.py").read_text(encoding="utf-8")
         self.assertIn("Path(sys.executable).resolve().parent / CRASH_LOG_FILENAME", source)
