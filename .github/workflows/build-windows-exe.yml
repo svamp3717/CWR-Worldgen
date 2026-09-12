@@ -52,6 +52,22 @@ jobs:
           }
           Get-Item "dist/CWR-Worldgen.exe" | Format-List Name,Length,LastWriteTime
 
+      - name: Smoke-test Windows GUI startup
+        shell: pwsh
+        run: |
+          $env:CWR_WORLDGEN_STARTUP_SMOKE = "1"
+          $exe = (Resolve-Path "dist/CWR-Worldgen.exe").Path
+          $process = Start-Process -FilePath $exe -Wait -PassThru
+          Remove-Item Env:CWR_WORLDGEN_STARTUP_SMOKE -ErrorAction SilentlyContinue
+          if ($process.ExitCode -ne 0) {
+            $log = "dist/cwr-worldgen-crash.log"
+            if (Test-Path $log) {
+              Write-Host "---- cwr-worldgen-crash.log ----"
+              Get-Content $log
+            }
+            throw "CWR-Worldgen.exe failed GUI startup smoke test with exit code $($process.ExitCode)"
+          }
+
       - name: Upload EXE
         uses: actions/upload-artifact@v7
         with:
