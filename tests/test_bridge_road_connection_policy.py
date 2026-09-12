@@ -69,10 +69,61 @@ def test_short_bridge_expands_to_two_modules_on_connected_safe_roads() -> None:
         2.0 * bridge._STOCK_MODULE_SPACING_METRES,
         abs=policy._MAXIMUM_ENDPOINT_LENGTH_ERROR_METRES,
     )
-    # Both abutments moved outward onto the connected roads rather than staying
-    # centred around the tiny 20 m source bridge.
+    # A short crossing may use one extra stock module to meet both roads.
     assert fitted.points[0][0] < 72.5
     assert fitted.points[1][0] > 147.5
+
+
+def test_long_dry_source_bridge_does_not_redefine_water_crossing() -> None:
+    """A Tostero-style dry OSM bridge must not turn ~3 wet modules into ~10."""
+    spec = _spec()
+    points = ((100.0, 100.0), (500.0, 100.0))
+    plan = bridge.StockBridgeSpanPlan(
+        points=((224.7, 100.0), (375.3, 100.0)),
+        module_count=3,
+        wet_start=(225.0, 100.0),
+        wet_end=(375.0, 100.0),
+        wet_length=150.0,
+    )
+    feature = SimpleNamespace()
+    start_path = ((100.0, 100.0), (0.0, 100.0))
+    end_path = ((500.0, 100.0), (700.0, 100.0))
+
+    def connected(_feature, _dataset, _projection, endpoint, *_args):
+        return start_path if endpoint[0] < 300.0 else end_path
+
+    token = source._CONTEXT.set(SimpleNamespace(dataset=object(), projection=object()))
+    try:
+        with (
+            patch.object(
+                policy,
+                "_matching_bridge_feature",
+                return_value=(feature, points),
+            ),
+            patch.object(
+                policy._osm,
+                "_connected_bridge_approach_path",
+                side_effect=connected,
+            ),
+            patch.object(
+                policy,
+                "_road_surface_at",
+                return_value=5.6,
+            ),
+        ):
+            fitted = policy._connected_stock_plan(
+                plan,
+                points,
+                (),
+                spec,
+            )
+    finally:
+        source._CONTEXT.reset(token)
+
+    # Connected dry roads would demand roughly ten stock modules here.  Keep
+    # the wet-authoritative three-module plan and let terrain/road grading solve
+    # the approaches instead.
+    assert fitted == plan
 
 
 def test_missing_safe_approach_keeps_existing_bridge_plan() -> None:
