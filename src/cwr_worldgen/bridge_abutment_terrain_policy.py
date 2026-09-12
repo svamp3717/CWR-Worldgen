@@ -1,28 +1,29 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Grade only the immediate ordinary-road terrain at low stock-bridge abutments.
+"""Raise the immediate road approach so it physically meets a stock bridge.
 
-CWA's tide can cover nominally dry two- or three-metre shoreline terrain. The
-bridge itself must still be planned from real water, so do not solve that visual
-road-to-bridge gap by extending or moving the stock bridge. Instead, after mapped
-water has been reopened, grade the single coarse terrain cell containing each low
-but nominally dry bridge endpoint to a raised ordinary-road approach level.
+The stock bridge span remains water-authoritative. Fixed 50.190 m bridge modules
+can nevertheless end a short distance offshore on CWA's coarse terrain grid,
+leaving the terminal ordinary-road piece submerged between dry land and the
+bridge deck.
 
-The approach terrain gets an additional 0.85 m lift. This is deliberately a
-terrain/road correction only: bridge position, pitch, length and module alignment
-are left untouched. Test22 showed both endpoint terrain cells at about 5.45 m and
-the first ordinary road pieces at about 5.48 m, leaving the stock bridge deck
-visually roughly a metre above the road. The extra lift brings the approach into
-the requested 0.7-1.0 m correction range.
+Solve that as a terrain problem, not a bridge-length problem: after the wet span
+has been captured, flatten the single coarse terrain cell supporting each bridge
+endpoint to the road-approach height. This applies even when the endpoint itself
+is currently underwater. On the usual 50 m WRP grid that creates the smallest
+possible embankment needed to expose the terminal road piece and join it to the
+bridge without moving or extending the bridge.
 
-The whole four-vertex support cell is flattened, rather than merely raising low
-corners. On a 50 m WRP grid, leaving one seven-metre corner beside three lower
-corners creates a bilinear terrain ramp that can cut directly through the stock
-bridge deck even though the bridge modules themselves are perfectly joined.
+The approach terrain retains the existing empirical 0.85 m road-side correction.
+Bridge position, pitch, length and module alignment remain untouched.
+
+The whole four-vertex support cell is flattened rather than merely raising low
+corners. Otherwise bilinear terrain interpolation can leave a ramp or water notch
+through the road-to-bridge joint.
 
 Because this local grading changes the terrain water test, cache the bridge span
-computed immediately before the grading. Later road cleanup and bridge rendering
-reuse that pre-grade span, preventing the abutment from shortening the bridge on
-the next planning pass.
+computed immediately before grading. Later road cleanup and bridge rendering
+reuse that pre-grade span, preventing the new embankment from shortening the
+bridge on the next planning pass.
 """
 from __future__ import annotations
 
@@ -130,7 +131,7 @@ def _explicit_bridge_plans(dataset, projection, elevations, spec):
 
 
 def _raise_bridge_abutments(report, dataset, projection, spec):
-    """Grade at most one coarse terrain cell at each low, nominally dry endpoint."""
+    """Raise one coarse support cell at each bridge end to the road-join height."""
     plans = _explicit_bridge_plans(
         dataset,
         projection,
@@ -142,8 +143,6 @@ def _raise_bridge_abutments(report, dataset, projection, spec):
 
     values = list(report.elevations)
     target = _abutment_ground_target(spec)
-    epsilon = float(getattr(_osm, "BRIDGE_WATER_EPSILON_METRES", 0.05))
-    nominal_dry_floor = float(spec.sea_level) - epsilon
     touched: set[int] = set()
 
     for points, plan in plans:
@@ -161,15 +160,13 @@ def _raise_bridge_abutments(report, dataset, projection, spec):
                     float(endpoint[1]),
                 )
             )
-            # Do not turn genuinely underwater bridge endpoints into causeways.
-            # High banks also remain untouched. This pass exists only for the
-            # low nominally-dry bank cell that CWA tide would otherwise flood or
-            # leave visibly below the fixed stock bridge deck.
-            if ground < nominal_dry_floor or ground >= target - 1.0e-6:
+            # A fixed stock module can legitimately end just offshore. That is
+            # exactly where the terminal road piece otherwise disappears below
+            # water. Raise that one support cell too; only already-high banks are
+            # left untouched.
+            if ground >= target - 1.0e-6:
                 continue
 
-            # Grade all four support vertices to one road-ground plane. This
-            # raises the road approach without changing any bridge transform.
             for index in _endpoint_cell_vertices(endpoint, spec):
                 if abs(float(values[index]) - target) > 1.0e-7:
                     values[index] = target
@@ -186,7 +183,7 @@ def _raise_bridge_abutments(report, dataset, projection, spec):
 
 
 def install_bridge_abutment_terrain_policy() -> None:
-    """Apply one-cell raised road grading after bridge-water reopening."""
+    """Apply one-cell road-approach fill after bridge-water reopening."""
     global _INSTALLED, _ORIGINAL_SOLVE
     if _INSTALLED:
         return
