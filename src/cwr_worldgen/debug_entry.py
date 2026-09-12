@@ -8,11 +8,12 @@ import sys
 import threading
 import traceback
 from types import TracebackType
-from typing import Any
+from typing import Any, TextIO
 
 
 CRASH_LOG_FILENAME = "cwr-worldgen-crash.log"
 STARTUP_SMOKE_ENV = "CWR_WORLDGEN_STARTUP_SMOKE"
+_FAULT_LOG_STREAM: TextIO | None = None
 
 
 def _crash_log_path() -> Path:
@@ -61,6 +62,27 @@ def _install_frozen_log_streams() -> None:
         sys.stdout = _CrashLogStream(path)  # type: ignore[assignment]
     if sys.stderr is None:
         sys.stderr = _CrashLogStream(path)  # type: ignore[assignment]
+
+
+def _enable_faulthandler() -> None:
+    """Enable native crash reporting even when a frozen GUI has no real stderr."""
+    global _FAULT_LOG_STREAM
+
+    try:
+        if isinstance(sys.stderr, _CrashLogStream):
+            path = _crash_log_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _FAULT_LOG_STREAM = path.open("a", encoding="utf-8", newline="")
+            faulthandler.enable(file=_FAULT_LOG_STREAM, all_threads=True)
+        else:
+            faulthandler.enable(all_threads=True)
+    except (AttributeError, RuntimeError, OSError, ValueError):
+        if _FAULT_LOG_STREAM is not None:
+            try:
+                _FAULT_LOG_STREAM.close()
+            except OSError:
+                pass
+            _FAULT_LOG_STREAM = None
 
 
 def _format_exception(
@@ -258,10 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     # Enables traceback output for fatal native signals where Python can still
     # report them, in addition to ordinary Python exception handling below.
     _install_frozen_log_streams()
-    try:
-        faulthandler.enable(all_threads=True)
-    except (RuntimeError, OSError):
-        pass
+    _enable_faulthandler()
 
     _install_exception_hooks()
 
