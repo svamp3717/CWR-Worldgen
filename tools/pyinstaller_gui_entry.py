@@ -16,7 +16,10 @@ import multiprocessing as _multiprocessing
 # script usable as the build-analysis entry point on every supported platform.
 _multiprocessing.freeze_support()
 
-from cwr_worldgen.gui_entry import main
+# The frozen entry must use the guarded launcher. Besides reporting uncaught
+# exceptions, it provides a persistent log stream for windowed builds where
+# PyInstaller intentionally supplies no console stdout/stderr handles.
+from cwr_worldgen.debug_entry import main
 
 
 if __name__ == "__main__":
