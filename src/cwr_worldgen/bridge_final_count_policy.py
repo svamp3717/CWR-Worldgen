@@ -2,16 +2,20 @@
 """Make the final wet bridge plan authoritative over emitted stock objects.
 
 Several bridge-generation paths can emit stock objects before the final runtime
-planner is installed.  Overlapping source features can also emit interleaved
-objects that later become one physical stock-bridge component.  The seam repair
+planner is installed. Overlapping source features can also emit interleaved
+objects that later become one physical stock-bridge component. The seam repair
 pass historically preserved however many objects already existed, so a correct
 three-module wet plan could still become a perfectly joined ten-module bridge.
 
 Normalize each physical bridge component against the final terrain-aware stock
-plan immediately before the existing 3-D seam anchoring pass.  The final plan
-controls both module count and horizontal placement.  If the final terrain has
+plan immediately before the existing 3-D seam anchoring pass. The final plan
+controls both module count and horizontal placement. If the final terrain has
 no wet span, leave the component alone so source-water fallback behavior remains
 available to the earlier source-aware generation path.
+
+ObjectGenerationResult also carries category counters and an optional model-usage
+aggregate beside the object tuple. Keep those in lockstep when bridge objects are
+removed or cloned; downstream ordering deliberately rejects inconsistent counts.
 """
 from __future__ import annotations
 
@@ -62,6 +66,32 @@ def _planned_centres(plan):
     )
 
 
+def _updated_model_usage(result, bridge_delta: int):
+    """Apply a stock-bridge population delta to an existing model aggregate."""
+    usage = tuple(getattr(result, "model_usage", ()) or ())
+    if not usage or bridge_delta == 0:
+        return usage
+
+    stock_key = None
+    values: dict[str, int] = {}
+    for model, count in usage:
+        key = str(model)
+        values[key] = int(count)
+        if key.replace("/", "\\").casefold() == _bridge._STOCK_MODEL:
+            stock_key = key
+
+    if stock_key is None:
+        # A non-empty aggregate should normally already contain the bridge model,
+        # but preserve correctness if an older cache omitted it.
+        stock_key = str(_bridge._osm.NOGOVA_BRIDGE_MODEL)
+        values.setdefault(stock_key, 0)
+
+    values[stock_key] = max(0, values.get(stock_key, 0) + int(bridge_delta))
+    if values[stock_key] <= 0:
+        values.pop(stock_key, None)
+    return tuple(sorted(values.items(), key=lambda item: item[0].casefold()))
+
+
 def _reconcile_stock_bridge_components(result, elevations, spec):
     """Resize and recenter physical stock chains to the final wet-span plan."""
     if result is None or elevations is None or spec is None:
@@ -70,6 +100,7 @@ def _reconcile_stock_bridge_components(result, elevations, spec):
     if not objects:
         return result
 
+    stock_before = sum(1 for obj in objects if _bridge._is_stock_bridge(obj))
     components = _bridge._bridge_components(objects)
     if not components:
         return result
@@ -90,7 +121,7 @@ def _reconcile_stock_bridge_components(result, elevations, spec):
 
         corridor = _component_corridor(objects, ordered, axis, midpoint)
         # The runtime installs its final wet-only planner into this module-level
-        # binding.  Calling it here therefore uses the same plan the renderer is
+        # binding. Calling it here therefore uses the same plan the renderer is
         # supposed to honor, rather than trusting the number of objects emitted
         # by an earlier source feature or cache entry.
         plan = _bridge.stock_bridge_span_plan(corridor, elevations, spec)
@@ -112,8 +143,8 @@ def _reconcile_stock_bridge_components(result, elevations, spec):
         ]
         placeholder_deck_y = sum(deck_heights) / len(deck_heights)
 
-        # Keep stable IDs for as many existing objects as possible.  Excess
-        # objects are deleted; missing objects are cloned with fresh IDs.  The
+        # Keep stable IDs for as many existing objects as possible. Excess
+        # objects are deleted; missing objects are cloned with fresh IDs. The
         # normal anchor pass immediately recomputes final Y/pitch from the banks.
         templates = list(ordered[:required])
         if len(ordered) > required:
@@ -150,8 +181,10 @@ def _reconcile_stock_bridge_components(result, elevations, spec):
                 replacements[template_index] = rewritten
         changed = changed or required != len(ordered) or any(
             math.dist(
-                (_bridge._visible_deck_point(objects[index], 0.0)[0],
-                 _bridge._visible_deck_point(objects[index], 0.0)[2]),
+                (
+                    _bridge._visible_deck_point(objects[index], 0.0)[0],
+                    _bridge._visible_deck_point(objects[index], 0.0)[2],
+                ),
                 centres[position],
             ) > 0.05
             for position, index in enumerate(ordered[:required])
@@ -166,7 +199,18 @@ def _reconcile_stock_bridge_components(result, elevations, spec):
         if index not in removals
     ]
     reconciled.extend(additions)
-    return replace(result, objects=tuple(reconciled))
+
+    stock_after = sum(1 for obj in reconciled if _bridge._is_stock_bridge(obj))
+    bridge_delta = stock_after - stock_before
+    updates: dict[str, object] = {"objects": tuple(reconciled)}
+    if hasattr(result, "bridge_objects"):
+        updates["bridge_objects"] = max(
+            0,
+            int(getattr(result, "bridge_objects", 0)) + bridge_delta,
+        )
+    if hasattr(result, "model_usage"):
+        updates["model_usage"] = _updated_model_usage(result, bridge_delta)
+    return replace(result, **updates)
 
 
 def install_bridge_final_count_policy() -> None:
