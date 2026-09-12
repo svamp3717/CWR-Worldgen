@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from cwr_worldgen import bridge_abutment_terrain_policy as abutment
 from cwr_worldgen import bridge_final_alignment_policy as final_alignment
+from cwr_worldgen import bridge_final_count_policy as final_count
 from cwr_worldgen import bridge_or_causeway_terrain_policy as terrain_policy
 from cwr_worldgen import bridge_render_policy as render_policy
 from cwr_worldgen import bridge_road_connection_policy as road_connection
@@ -25,11 +26,13 @@ def test_package_runtime_installs_complete_bridge_policy_chain() -> None:
     assert final_alignment._INSTALLED
     assert terrain_policy._INSTALLED
     assert abutment._INSTALLED
+    assert final_count._INSTALLED
 
     assert source_water._ORIGINAL_WATER_TEST is not None
     assert source_water._ORIGINAL_STOCK_PLAN is not None
     assert terrain_policy._ORIGINAL_SOLVE is not None
     assert abutment._ORIGINAL_SOLVE is not None
+    assert final_count._ORIGINAL_ANCHOR is not None
 
     assert render_policy.stock_bridge_span_plan is runtime_policy._runtime_stock_bridge_span_plan
     assert source_water._ORIGINAL_STOCK_PLAN is water_clamp._ORIGINAL_STOCK_BRIDGE_SPAN_PLAN
