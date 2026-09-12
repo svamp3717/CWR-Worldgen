@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from cwr_worldgen import generator
+from cwr_worldgen.gui import default_gui_values
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.stock_building_policy import STOCK_BUILDING_PRESET, StockBuildingLibrary
 from cwr_worldgen.stock_building_extensions import (
@@ -12,8 +13,10 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_PRESETS,
     STOCK_BUILDING_RESISTANCE_PRESET,
     STOCK_BUILDING_VANILLA_PRESET,
+    _PROCEDURAL_BRIDGES_CHECKBOX_TEXT,
     _lift_stock_objects,
     _stock_options_first,
+    stock_disabled_gui_option_keys,
     stock_model_source,
 )
 
@@ -54,6 +57,22 @@ def test_stock_options_are_directly_below_automatic() -> None:
     assert options[:3] == STOCK_BUILDING_OPTIONS
     assert labels[0] == "Automatic (area / country)"
     assert labels[1:4] == tuple(label for _identifier, label in STOCK_BUILDING_OPTIONS)
+
+
+def test_stock_presets_disable_procedural_building_gui_options() -> None:
+    expected = {
+        "procedural_building_interiors",
+        "high_quality_building_textures",
+        "match_nearby_building_textures",
+    }
+    for preset in STOCK_BUILDING_PRESETS:
+        assert set(stock_disabled_gui_option_keys(preset)) == expected
+    assert stock_disabled_gui_option_keys("auto") == ()
+
+
+def test_procedural_bridges_remain_default_while_gui_switch_is_hidden() -> None:
+    assert default_gui_values()["procedural_bridges"] is True
+    assert _PROCEDURAL_BRIDGES_CHECKBOX_TEXT == "Procedural bridges (instead of Nogova)"
 
 
 def test_measured_origin_lift_is_added_to_stock_building_object() -> None:
