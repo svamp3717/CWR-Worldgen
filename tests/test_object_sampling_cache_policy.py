@@ -20,7 +20,9 @@ def test_object_sampling_cache_policy_is_installed_under_multicore_wrappers() ->
     assert osm._triangle_elevation_bounds is perf._fast_triangle_elevation_bounds
     assert osm._terrain_axis_breakpoints is perf._fast_terrain_axis_breakpoints
     assert osm._terrain_patch_centres is perf._fast_terrain_patch_centres
-    assert playability._sample_elevation is road_finish._cached_sample
+    # Final stock-road transforms now sample terrain in one NumPy batch, so the
+    # normal scalar helper can point straight at the underlying fast cache again.
+    assert playability._sample_elevation is road_finish._BASE_SAMPLE
     assert road_finish._BASE_SAMPLE is perf._fast_playability_sample
     assert playability._PolylineMeasure.point is perf._fast_measure_point
 
