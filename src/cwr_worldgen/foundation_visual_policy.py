@@ -222,9 +222,21 @@ def install_foundation_visual_policy() -> None:
     # Keep source filtering, GUI stock controls, and stock P3D origin grounding
     # outside the base stock router. This also gives old mixed-stock profiles the
     # corrected grounding behavior without changing their preset identifier.
-    from .stock_building_extensions import install_stock_building_extensions
+    from . import stock_building_policy as stock_buildings
+    from . import stock_building_extensions as stock_extensions
 
-    install_stock_building_extensions()
+    stock_extensions.install_stock_building_extensions()
+
+    # The historical mixed "stock" preset contains both the original vanilla
+    # game buildings and Resistance/O.pbo buildings. Name that explicitly in the
+    # GUI so it cannot be mistaken for either of the two source-filtered presets.
+    mixed_stock_label = "Stock Vanilla + Resistance buildings only"
+    stock_buildings.STOCK_BUILDING_PRESET_LABEL = mixed_stock_label
+    stock_extensions.STOCK_BUILDING_OPTIONS = (
+        (stock_buildings.STOCK_BUILDING_PRESET, mixed_stock_label),
+        (stock_extensions.STOCK_BUILDING_VANILLA_PRESET, stock_extensions.STOCK_BUILDING_VANILLA_LABEL),
+        (stock_extensions.STOCK_BUILDING_RESISTANCE_PRESET, stock_extensions.STOCK_BUILDING_RESISTANCE_LABEL),
+    )
 
     # Keep the generated runway/sports/parking renderers default-on, but expose
     # independent GUI/CLI opt-outs after their wrapper chain is fully installed.

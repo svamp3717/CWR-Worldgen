@@ -21,6 +21,9 @@ from cwr_worldgen.stock_building_extensions import (
 )
 
 
+MIXED_STOCK_LABEL = "Stock Vanilla + Resistance buildings only"
+
+
 def _library(preset: str) -> StockBuildingLibrary:
     return StockBuildingLibrary(world_name="wg_stock_ext_test", house_style_preset=preset)
 
@@ -50,13 +53,15 @@ def test_all_stock_presets_use_stock_library_factory() -> None:
 
 def test_stock_options_are_directly_below_automatic() -> None:
     options, labels = _stock_options_first(
-        (("se", "Sweden"), ("stock", "Stock CWA/OFP buildings only"), ("de", "Germany")),
-        ("Automatic (area / country)", "Sweden", "Germany", "Stock CWA/OFP buildings only"),
+        (("se", "Sweden"), ("stock", MIXED_STOCK_LABEL), ("de", "Germany")),
+        ("Automatic (area / country)", "Sweden", "Germany", MIXED_STOCK_LABEL),
         auto_label="Automatic (area / country)",
     )
     assert options[:3] == STOCK_BUILDING_OPTIONS
     assert labels[0] == "Automatic (area / country)"
     assert labels[1:4] == tuple(label for _identifier, label in STOCK_BUILDING_OPTIONS)
+    assert MIXED_STOCK_LABEL in labels
+    assert "Stock CWA/OFP buildings only" not in labels
 
 
 def test_stock_presets_disable_procedural_building_gui_options() -> None:
