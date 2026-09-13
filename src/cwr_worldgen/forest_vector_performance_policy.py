@@ -1,14 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Vectorized prefilters for the large forest placement grids.
 
-Primary Everon forest placement can visit tens or hundreds of thousands of
-regular lattice cells. Most cells are outside mapped forest, yet the historical
-loop still built five probe tuples and converted each probe to raster indices in
-Python before learning that fact. Undergrowth/cluster candidates likewise tested
-each fixed proxy one at a time.
-
-This policy preserves the exact detailed grounding path for candidates that can
-matter while using NumPy for the cheap reject stages.
+The default Everon primary-forest pass already rejects cells with fewer than two
+forest probes before doing road geometry. This policy moves the remaining costly
+regular-grid road eligibility test into one Shapely STRtree batch and vectorizes
+fixed cluster proxy mask/terrain checks. Detailed grounding and fallback rules
+remain unchanged for candidates that survive those cheap rejects.
 """
 from __future__ import annotations
 
@@ -19,13 +16,16 @@ import math
 from typing import Any, Sequence
 
 import numpy as np
+from shapely import box as shapely_box
+from shapely.geometry import MultiPoint
+from shapely.strtree import STRtree
 
 from . import generator as _generator
 from . import osm as _osm
 
 _INSTALLED = False
 _ORIGINAL_GENERATE: Any = None
-_ORIGINAL_EDGE_GUARD: Any = None
+_ORIGINAL_FOREST_ROAD_TEST: Any = None
 _ORIGINAL_PLACE_CLUSTER: Any = None
 
 
@@ -35,6 +35,8 @@ class _ForestVectorContext:
     world_size: float
     possible_primary: np.ndarray
     primary_active: bool = False
+    road_owner: Any = None
+    road_hits: np.ndarray | None = None
 
 
 _CONTEXT: ContextVar[_ForestVectorContext | None] = ContextVar(
@@ -43,7 +45,7 @@ _CONTEXT: ContextVar[_ForestVectorContext | None] = ContextVar(
 
 
 def _primary_forest_possible(raster: Any, spec: Any) -> _ForestVectorContext | None:
-    """Bulk-evaluate the exact Everon two-of-five coarse forest prefilter."""
+    """Bulk-evaluate the Everon two-of-five coarse forest eligibility mask."""
 
     if str(getattr(spec, "forest_profile", "malden")).casefold() != "everon":
         return None
@@ -88,26 +90,81 @@ def _primary_forest_possible(raster: Any, spec: Any) -> _ForestVectorContext | N
         rows_index = np.clip((sz * scale).astype(np.int64), 0, cells - 1)
         forest_count += valid & forest[rows_index, cols]
 
-    # This is the first semantic reject in the default Everon primary loop. A
-    # block with fewer than two forest probes was historically discarded before
-    # any road query or diagnostic counter changed, so moving it ahead of tuple
-    # construction is result-equivalent.
-    possible = forest_count >= 2
-    return _ForestVectorContext(spacing, world_size, possible)
+    return _ForestVectorContext(spacing, world_size, forest_count >= 2)
 
 
-def _fast_edge_guard(x: float, z: float, margin: float) -> bool:
-    if not _ORIGINAL_EDGE_GUARD(x, z, margin):
-        return False
-    context = _CONTEXT.get()
-    if context is None or not context.primary_active:
-        return True
+def _linf_corridor_geometry(start, end, radius: float):
+    """Exact geometry for the old segment-vs-radius-expanded rectangle test."""
 
+    radius = max(0.0, float(radius))
+    sx, sz = float(start[0]), float(start[1])
+    ex, ez = float(end[0]), float(end[1])
+    points = (
+        (sx - radius, sz - radius),
+        (sx - radius, sz + radius),
+        (sx + radius, sz - radius),
+        (sx + radius, sz + radius),
+        (ex - radius, ez - radius),
+        (ex - radius, ez + radius),
+        (ex + radius, ez - radius),
+        (ex + radius, ez + radius),
+    )
+    return MultiPoint(points).convex_hull
+
+
+def _batch_primary_road_hits(
+    corridors: Sequence[object], context: _ForestVectorContext
+) -> np.ndarray:
+    """Compute every regular primary-block road intersection in one spatial query."""
+
+    shape = context.possible_primary.shape
+    hits = np.zeros(shape, dtype=np.bool_)
+    selected = np.flatnonzero(context.possible_primary.ravel())
+    if selected.size == 0:
+        return hits
+
+    source = tuple(getattr(corridors, "corridors", corridors))
+    if not source:
+        return hits
+    corridor_geometries = tuple(
+        _linf_corridor_geometry(start, end, radius)
+        for start, end, radius in source
+    )
+    tree = STRtree(corridor_geometries)
+
+    columns = shape[1]
+    rows = selected // columns
+    cols = selected % columns
+    xs = np.minimum(
+        context.world_size - 0.001,
+        (cols.astype(np.float64) + 0.5) * context.spacing,
+    )
+    zs = np.minimum(
+        context.world_size - 0.001,
+        (rows.astype(np.float64) + 0.5) * context.spacing,
+    )
+    half = context.spacing * 0.5
+    blocks = shapely_box(xs - half, zs - half, xs + half, zs + half)
+    pairs = np.asarray(tree.query(blocks, predicate="intersects"))
+    if pairs.size:
+        # For an array query Shapely returns [input_index, tree_index]. Only the
+        # input side is needed because this is a boolean eligibility field.
+        input_offsets = pairs[0] if pairs.ndim == 2 else pairs
+        hit_flat = selected[np.asarray(input_offsets, dtype=np.int64)]
+        hits.ravel()[hit_flat] = True
+    return hits
+
+
+def _regular_primary_cell(
+    context: _ForestVectorContext, x: float, z: float, block_size: float
+) -> tuple[int, int] | None:
+    if abs(float(block_size) - context.spacing) > 1.0e-6:
+        return None
     column = int(math.floor(float(x) / context.spacing))
     row = int(math.floor(float(z) / context.spacing))
     rows, columns = context.possible_primary.shape
     if not (0 <= row < rows and 0 <= column < columns):
-        return True
+        return None
     expected_x = min(
         context.world_size - 0.001,
         (column + 0.5) * context.spacing,
@@ -116,12 +173,32 @@ def _fast_edge_guard(x: float, z: float, margin: float) -> bool:
         context.world_size - 0.001,
         (row + 0.5) * context.spacing,
     )
-    # The edge-guard helper is reused by later vegetation passes. Only intercept
-    # the exact regular primary-block centres; every other call keeps the old
-    # behaviour even while a nested helper happens to run during this stage.
     if abs(float(x) - expected_x) > 1.0e-6 or abs(float(z) - expected_z) > 1.0e-6:
-        return True
-    return bool(context.possible_primary[row, column])
+        return None
+    return row, column
+
+
+def _fast_forest_block_intersects_road_corridors(
+    corridors,
+    x: float,
+    z: float,
+    *,
+    block_size: float,
+) -> bool:
+    context = _CONTEXT.get()
+    if context is None or not context.primary_active:
+        return _ORIGINAL_FOREST_ROAD_TEST(
+            corridors, x, z, block_size=block_size
+        )
+    cell = _regular_primary_cell(context, x, z, block_size)
+    if cell is None:
+        return _ORIGINAL_FOREST_ROAD_TEST(
+            corridors, x, z, block_size=block_size
+        )
+    if context.road_hits is None or context.road_owner is not corridors:
+        context.road_hits = _batch_primary_road_hits(corridors, context)
+        context.road_owner = corridors
+    return bool(context.road_hits[cell])
 
 
 @lru_cache(maxsize=128)
@@ -219,7 +296,6 @@ def _vector_place_cluster_at(
         ):
             return None
 
-    # Cheap indexed road rejection stays ahead of terrain work.
     if avoid_roads and _osm.forest_block_intersects_road_corridors(
         road_corridors,
         x,
@@ -246,11 +322,10 @@ def _vector_place_cluster_at(
     length_x, length_z = math.sin(angle), math.cos(angle)
     world_x = x + local_x * width_x + local_z * length_x
     world_z = z + local_x * width_z + local_z * length_z
-    in_world = (
+    if not bool(np.all(
         (world_x >= 0.0) & (world_x < world_size)
         & (world_z >= 0.0) & (world_z < world_size)
-    )
-    if not bool(np.all(in_world)):
+    )):
         return None
 
     scale = cells / world_size
@@ -303,18 +378,12 @@ def _vector_place_cluster_at(
             return None
         anchor, burial, floating = fitted
 
-    flags = np.asarray(
-        _proxy_tree_flags(variant.name, models), dtype=np.bool_
-    )
+    flags = np.asarray(_proxy_tree_flags(variant.name, models), dtype=np.bool_)
     proxy_float = np.maximum(0.0, anchor + model_y - lower_ground)
     tree_count = int(np.count_nonzero(flags))
     bush_count = len(flags) - tree_count
-    maximum_tree_float = (
-        float(np.max(proxy_float[flags])) if tree_count else 0.0
-    )
-    maximum_bush_float = (
-        float(np.max(proxy_float[~flags])) if bush_count else 0.0
-    )
+    maximum_tree_float = float(np.max(proxy_float[flags])) if tree_count else 0.0
+    maximum_bush_float = float(np.max(proxy_float[~flags])) if bush_count else 0.0
     tree_limit = min(
         max(0.0, maximum_float),
         max(0.0, float(getattr(spec, "forest_cluster_tree_maximum_float", 0.20))),
@@ -360,8 +429,7 @@ def _generate_with_vector_forest_context(*args, **kwargs):
     original_progress = kwargs.get("progress_callback")
 
     def progress(value: int, stage: str) -> None:
-        text = str(stage)
-        context.primary_active = text.startswith("Placing primary forest blocks")
+        context.primary_active = str(stage).startswith("Placing primary forest blocks")
         if original_progress is not None:
             original_progress(value, stage)
 
@@ -374,14 +442,17 @@ def _generate_with_vector_forest_context(*args, **kwargs):
 
 
 def install_forest_vector_performance_policy() -> None:
-    global _INSTALLED, _ORIGINAL_GENERATE, _ORIGINAL_EDGE_GUARD, _ORIGINAL_PLACE_CLUSTER
+    global _INSTALLED, _ORIGINAL_GENERATE
+    global _ORIGINAL_FOREST_ROAD_TEST, _ORIGINAL_PLACE_CLUSTER
     if _INSTALLED:
         return
 
     _ORIGINAL_GENERATE = _generator.generate_world_objects
-    _ORIGINAL_EDGE_GUARD = _osm.forest_point_inside_edge_guard
+    _ORIGINAL_FOREST_ROAD_TEST = _osm.forest_block_intersects_road_corridors
     _ORIGINAL_PLACE_CLUSTER = _osm._place_cluster_at
-    _osm.forest_point_inside_edge_guard = _fast_edge_guard
+    _osm.forest_block_intersects_road_corridors = (
+        _fast_forest_block_intersects_road_corridors
+    )
     _osm._place_cluster_at = _vector_place_cluster_at
     _generator.generate_world_objects = _generate_with_vector_forest_context
     _INSTALLED = True
