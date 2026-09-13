@@ -62,8 +62,9 @@ def install_milestone9_advisory_policy() -> None:
     # Multicore object-stage precomputation is deliberately late: it must wrap
     # the final bridge-aware stock fitter and the vector/cached forest helpers.
     install_object_stage_parallel_policy()
-    # Supersede only the road half with a Windows-spawn-safe endpoint pool. The
-    # non-road building/forest/barrier/rural caches above remain active.
+    # Supersede only the road half with NumPy endpoint sampling plus parallel
+    # whole-chain transform/model/axis finalization. The non-road caches above
+    # remain active and the parent still owns object ids and junction validation.
     install_road_finish_parallel_policy()
     install_shared_object_index_policy()
 
