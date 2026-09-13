@@ -82,7 +82,11 @@ _SESSION: ContextVar[_PlanningSession | None] = ContextVar(
 _ACTIVE_STATE: ContextVar[tuple[Any, Any] | None] = ContextVar(
     "cwr_paved_junction_prebuilt_state", default=None
 )
-_ACTIVE_CHOICES: ContextVar[dict[Key, Any] | None] = ContextVar(
+# The indexed apply callback receives only the plan object, not the dictionary key
+# used by _plans().  Key precomputed choices by the exact live plan object identity
+# rather than trying to reconstruct that key from coordinates through a helper on
+# the wrong module.
+_ACTIVE_CHOICES: ContextVar[dict[int, Any] | None] = ContextVar(
     "cwr_paved_junction_precomputed_choices", default=None
 )
 
@@ -309,9 +313,9 @@ def _cached_build_spatial_state(report, spec, reporter):
 def _cached_plan_application(state, plan, spec):
     choices = _ACTIVE_CHOICES.get()
     if choices is not None:
-        key = _paved._road_node_key(plan.point)
-        if key in choices:
-            return choices[key]
+        plan_identity = id(plan)
+        if plan_identity in choices:
+            return choices[plan_identity]
     return _BASE_PLAN_APPLICATION(state, plan, spec)
 
 
@@ -475,17 +479,21 @@ def apply_paved_junctions_parallel(report, plans, elevations, spec):
                     previous_bucket=progress_bucket,
                 )
 
-    _emit_progress(
-        callback,
-        label,
-        planning_total,
-        planning_total,
-        applicable=applicable,
-        reused=reused,
-        workers=workers,
-        force=True,
-        previous_bucket=progress_bucket,
-    )
+    # The completion event is normally emitted by the last serial job/future.  Do
+    # not print a second 100% line after ProcessPoolExecutor waits for worker
+    # shutdown, which previously made the phase look like it had run twice.
+    if progress_bucket[0] < 50:
+        _emit_progress(
+            callback,
+            label,
+            planning_total,
+            planning_total,
+            applicable=applicable,
+            reused=reused,
+            workers=workers,
+            force=True,
+            previous_bucket=progress_bucket,
+        )
 
     snapshot = _PlanningSnapshot(
         {
@@ -496,8 +504,15 @@ def apply_paved_junctions_parallel(report, plans, elevations, spec):
     if session is not None:
         session.latest = snapshot
 
+    # _BASE_APPLY iterates the exact plan instances supplied in this mapping.
+    # Identity is therefore a collision-free lookup key and avoids duplicating the
+    # road-node quantisation implementation in this performance layer.
+    active_choices = {
+        id(plans[key]): choices.get(key)
+        for key in ordered
+    }
     state_token = _ACTIVE_STATE.set((report, state))
-    choices_token = _ACTIVE_CHOICES.set(choices)
+    choices_token = _ACTIVE_CHOICES.set(active_choices)
     callback_token = None
     filtered = _filtered_callback(callback)
     if filtered is not None:
