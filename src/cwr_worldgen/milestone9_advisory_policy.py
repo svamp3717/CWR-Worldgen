@@ -17,6 +17,7 @@ from .object_placement_performance_policy import install_object_placement_perfor
 from .object_sampling_cache_policy import install_object_sampling_cache_policy
 from .forest_vector_performance_policy import install_forest_vector_performance_policy
 from .forest_array_cache_policy import install_forest_array_cache_policy
+from .forest_generation_binding_policy import install_forest_generation_binding_policy
 from .shared_object_index_policy import install_shared_object_index_policy
 
 _ADVISORY_OBJECT_LIMITS: ContextVar[bool | None] = ContextVar(
@@ -55,6 +56,7 @@ def install_milestone9_advisory_policy() -> None:
     install_object_sampling_cache_policy()
     install_forest_vector_performance_policy()
     install_forest_array_cache_policy()
+    install_forest_generation_binding_policy()
     install_shared_object_index_policy()
 
     def build_milestone9(output_dir, spec, *, clean: bool = True):
