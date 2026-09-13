@@ -44,6 +44,7 @@ def _install_catalogue_transport() -> tuple[str, ...]:
     from . import house_style_catalogue as catalogue
     from . import procedural_buildings as buildings
     from . import osm_house_modeler_runtime as runtime
+    from . import milestone8
     from . import cli
 
     old_region_identifiers = tuple(catalogue.HOUSE_STYLE_PRESET_IDENTIFIERS)
@@ -77,6 +78,7 @@ def _install_catalogue_transport() -> tuple[str, ...]:
     buildings.normalise_house_style_preset = normalise_transport
     buildings.house_style_preset_profile = profile_for_transport
     runtime.house_style_preset_profile = profile_for_transport
+    milestone8.normalise_house_style_preset = normalise_transport
     return old_region_identifiers
 
 
