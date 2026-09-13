@@ -33,7 +33,7 @@ def test_vector_endpoint_sampling_matches_scalar_bilinear_sampling() -> None:
         assert np.isclose(actual[point], expected, rtol=0.0, atol=1.0e-12)
 
 
-def test_chain_finalize_cache_preserves_stock_object_transform_and_axis() -> None:
+def test_vector_prepare_preserves_stock_object_transform_and_axis() -> None:
     cells = 2
     cell_size = 25.0
     elevations = (3.0, 4.0, 3.0, 4.0)
@@ -46,15 +46,13 @@ def test_chain_finalize_cache_preserves_stock_object_transform_and_axis() -> Non
     )
     start = (0.0, 0.0)
     end = (25.0, 0.0)
-    job = perf._FinalizeJob(
-        0,
-        run,
-        ((piece.model_path, piece.length_metres, piece.nominal_length, start, end, 3.0, 4.0),),
+    plan = SimpleNamespace(
+        order=0,
+        run=run,
+        fitted_pieces=((piece, start, end),),
     )
-    result = perf._finalize_job(job)
     context = perf._Context(elevations, cells, cell_size)
-    context.samples.update({start: 3.0, end: 4.0})
-    perf._store_result(context, result)
+    assert perf._vector_prepare((plan,), context) == 1
 
     expected_model = perf._BASE_CURVED_MODEL(piece.model_path, run, start, end)
     expected = perf._BASE_ROAD_OBJECT(
@@ -91,13 +89,76 @@ def test_chain_finalize_cache_preserves_stock_object_transform_and_axis() -> Non
     assert np.isclose(actual.z, expected.z, rtol=0.0, atol=1.0e-12)
     assert np.isclose(actual.heading_degrees, expected.heading_degrees, rtol=0.0, atol=1.0e-12)
     assert np.isclose(actual.pitch_degrees, expected.pitch_degrees, rtol=0.0, atol=1.0e-12)
-    assert actual_axis == expected_axis
+    assert np.allclose(actual_axis, expected_axis, rtol=0.0, atol=1.0e-12)
 
 
-def test_road_finish_parallel_policy_is_live() -> None:
+def test_vector_chain_diagnostics_match_scalar_axis_formula() -> None:
+    cells = 4
+    elevations = (2.0,) * (cells * cells)
+    piece = next(
+        value
+        for value in playability.road_model_variants(r"data3d\sil25.p3d", 25.0)
+        if value.nominal_length == 25
+    )
+    first = (piece, (0.0, 0.0), (25.0, 0.0))
+    second = (piece, (24.0, 0.0), (49.0, 0.0))
+    plan = SimpleNamespace(
+        order=0,
+        run=((0.0, 0.0), (49.0, 0.0)),
+        fitted_pieces=(first, second),
+    )
+    context = perf._Context(elevations, cells, 25.0)
+    perf._vector_prepare((plan,), context)
+
+    objects = []
+    for object_id, (_piece, start, end) in enumerate(plan.fitted_pieces, start=1):
+        objects.append(
+            perf._BASE_ROAD_OBJECT(
+                object_id,
+                piece.model_path,
+                start,
+                end,
+                elevations,
+                SimpleNamespace(cells=cells, cell_size=25.0),
+                vertical_offset=0.035,
+            )
+        )
+    previous_axis = perf._BASE_MODEL_AXIS(objects[0], piece.length_metres)
+    current_axis = perf._BASE_MODEL_AXIS(objects[1], piece.length_metres)
+    offset = (
+        current_axis[0][0] - previous_axis[1][0],
+        current_axis[0][1] - previous_axis[1][1],
+    )
+    expected_gap = float(np.hypot(*offset))
+    angle = np.radians(objects[0].heading_degrees)
+    direction = (np.sin(angle), np.cos(angle))
+    lateral = abs(direction[0] * offset[1] - direction[1] * offset[0])
+    longitudinal = direction[0] * offset[0] + direction[1] * offset[1]
+    expected_overlap = -longitudinal if lateral <= 0.10 and longitudinal < 0.0 else 0.0
+
+    assert np.isclose(context.maximum_chain_gap, expected_gap, rtol=0.0, atol=1.0e-12)
+    assert np.isclose(context.maximum_model_overlap, expected_overlap, rtol=0.0, atol=1.0e-12)
+
+
+def test_diagnostic_zip_only_skips_worldobject_chain_adjacency() -> None:
+    first = playability.WorldObject(1, "a", 0.0, 0.0, 0.0, 0.0)
+    second = playability.WorldObject(2, "b", 0.0, 0.0, 1.0, 0.0)
+    left = [(first, 25.0), (second, 25.0)]
+    right = left[1:]
+    context = perf._Context((0.0,), 1, 1.0, prepared=True)
+    token = perf._CONTEXT.set(context)
+    try:
+        assert list(perf._diagnostic_zip(left, right)) == []
+        assert list(perf._diagnostic_zip([1, 2], [3])) == [(1, 3)]
+    finally:
+        perf._CONTEXT.reset(token)
+
+
+def test_road_finish_vector_policy_is_live() -> None:
     assert road_chain_parallel_policy._execute_run_jobs is perf._execute
+    assert road_chain_parallel_policy.zip is perf._diagnostic_zip
     assert playability._fit_stock_piece_road_objects is perf._fit
-    assert playability._sample_elevation is perf._cached_sample
+    assert playability._sample_elevation is perf._BASE_SAMPLE
     assert playability._curved_gravel_model_for_run is perf._cached_curved_model
     assert playability._road_object_on_slope is perf._cached_road_object
     assert playability._model_axis is perf._cached_model_axis
