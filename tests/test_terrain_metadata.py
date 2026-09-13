@@ -2,6 +2,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 
+from cwr_worldgen import cli, milestone9
 from cwr_worldgen.map_picker_coords import (
     parse_bbox_coordinates,
     parse_center_coordinates,
@@ -64,3 +65,8 @@ def test_terrain_readme_contains_reproduction_metadata(tmp_path: Path) -> None:
 
 def test_terrain_readme_filename_is_windows_safe() -> None:
     assert terrain_readme_filename('North:Lake/Test*') == "North_Lake_Test_ ReadMe.txt"
+
+
+def test_cli_milestone9_build_uses_terrain_readme_wrapper() -> None:
+    assert cli.build_milestone9 is milestone9.build_milestone9
+    assert getattr(cli.build_milestone9, "_cwr_terrain_readme", False)
