@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import cwr_worldgen.cli as cli
+from cwr_worldgen import milestone8
 from cwr_worldgen import osm_house_modeler_runtime as runtime
 from cwr_worldgen.building_country_policy import (
     _replace_building_preset_labels,
@@ -13,10 +14,19 @@ def test_country_catalogue_drives_public_building_override_choices() -> None:
     options = dict(building_country_options())
     assert len(options) == 249
     assert options["se_sweden"] == "SE — Sweden"
+    assert options["do_dominican_republic"] == "DO — Dominican Republic"
     assert normalise_building_country("SE") == "se_sweden"
     assert normalise_building_country("SE — Sweden") == "se_sweden"
     assert "se_sweden" in cli.HOUSE_STYLE_PRESET_IDENTIFIERS
+    assert "do_dominican_republic" in cli.HOUSE_STYLE_PRESET_IDENTIFIERS
     assert "east_asia" not in cli.HOUSE_STYLE_PRESET_IDENTIFIERS
+
+
+def test_country_transport_reaches_milestone8_validation_alias() -> None:
+    assert (
+        milestone8.normalise_house_style_preset("do_dominican_republic")
+        == "do_dominican_republic"
+    )
 
 
 def test_forced_country_overrides_map_location() -> None:
