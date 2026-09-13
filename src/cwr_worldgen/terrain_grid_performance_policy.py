@@ -372,9 +372,14 @@ def _fast_solve_terrain_constraints(*args: Any, **kwargs: Any) -> Any:
 
 def install_terrain_grid_performance_policy() -> None:
     """Install grid-wide NumPy implementations after terrain bridge policies."""
-    global _INSTALLED
+    global _INSTALLED, _ORIGINAL_SOLVE
     if _INSTALLED:
         return
+
+    # This module is imported before the bridge runtime chain is activated.
+    # Capture the solver only now, after the caller has installed those wrappers,
+    # so the performance layer encloses rather than bypasses bridge terrain work.
+    _ORIGINAL_SOLVE = _terrain.solve_terrain_constraints
 
     _terrain._components = _fast_components
     _terrain._distance_from_mask = _fast_distance_from_mask
