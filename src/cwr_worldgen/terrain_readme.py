@@ -6,6 +6,7 @@ from datetime import datetime
 from functools import wraps
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 from ._version import __version__
@@ -198,3 +199,12 @@ def install_milestone9_terrain_readme() -> None:
 
     build_with_terrain_readme._cwr_terrain_readme = True  # type: ignore[attr-defined]
     milestone9_module.build_milestone9 = build_with_terrain_readme
+
+    # building_country_policy imports cli.py before this wrapper is installed.
+    # cli.py imports build_milestone9 by value, so without refreshing that cached
+    # reference GUI/CLI builds bypass this wrapper and never create the ReadMe.
+    # Patch only the stale binding we wrapped; a later independent wrapper should
+    # not be overwritten here.
+    cli_module = sys.modules.get(f"{__package__}.cli")
+    if cli_module is not None and getattr(cli_module, "build_milestone9", None) is original:
+        cli_module.build_milestone9 = build_with_terrain_readme
