@@ -2,6 +2,7 @@
 """Terrain ReadMe generation for final CWR-Worldgen runtime folders."""
 from __future__ import annotations
 
+from contextvars import ContextVar
 from datetime import datetime
 from functools import wraps
 import json
@@ -12,6 +13,10 @@ from typing import Any
 from ._version import __version__
 
 _INVALID_FILENAME_CHARS = frozenset('<>:"/\\|?*')
+_ACTIVE_TERRAIN_SPEC: ContextVar[Any | None] = ContextVar(
+    "cwr_worldgen_active_terrain_readme_spec",
+    default=None,
+)
 
 
 def terrain_readme_filename(display_name: str) -> str:
@@ -117,9 +122,14 @@ def terrain_readme_text(
     return "\n".join(lines)
 
 
+def terrain_readme_path(result: Any, spec: Any) -> Path:
+    """Return the ReadMe path in the same Addons directory as the terrain PBO."""
+    return result.pbo_path.parent / terrain_readme_filename(spec.display_name)
+
+
 def write_terrain_readme(result: Any, spec: Any) -> Path:
     """Write the terrain ReadMe beside the generated PBO."""
-    readme_path = result.pbo_path.parent / terrain_readme_filename(spec.display_name)
+    readme_path = terrain_readme_path(result, spec)
     readme_path.write_text(
         terrain_readme_text(
             display_name=spec.display_name,
@@ -134,77 +144,48 @@ def write_terrain_readme(result: Any, spec: Any) -> Path:
     return readme_path
 
 
-def _deploy_readme(result: Any, spec: Any, readme_path: Path) -> Path | None:
-    target = getattr(spec, "deploy_mod_dir", None)
-    if target is None:
-        return None
-
-    # Reuse the same case-insensitive Addons-folder and atomic-copy rules as the
-    # normal Milestone 9 deployment.
-    from . import milestone9 as milestone9_module
-
-    target_root = milestone9_module._normalise_mod_root(Path(target))
-    addons_dir = milestone9_module._existing_mod_child(target_root, "Addons")
-    addons_dir.mkdir(parents=True, exist_ok=True)
-    destination = addons_dir / readme_path.name
-    milestone9_module._atomic_copy_file(readme_path, destination)
-
-    report_path = result.output_dir / "deployment-report.json"
-    try:
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        report = {}
-    if isinstance(report, dict):
-        files = report.get("files")
-        if not isinstance(files, list):
-            files = []
-            report["files"] = files
-        destination_text = str(destination)
-        files[:] = [
-            item
-            for item in files
-            if not isinstance(item, dict) or str(item.get("destination", "")) != destination_text
-        ]
-        files.append(
-            {
-                "kind": "addon",
-                "source": str(readme_path),
-                "destination": destination_text,
-                "sha256": milestone9_module._sha256(destination),
-            }
-        )
-        report["readme"] = destination_text
-        report["file_count"] = len(files)
-        report_path.write_text(
-            json.dumps(report, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-    return destination
-
-
 def install_milestone9_terrain_readme() -> None:
-    """Wrap the final Milestone 9 build so every terrain gets its Addons ReadMe."""
+    """Make the terrain ReadMe part of the normal Milestone 9 deployment pass."""
     from . import milestone9 as milestone9_module
 
-    original = milestone9_module.build_milestone9
-    if bool(getattr(original, "_cwr_terrain_readme", False)):
+    original_build = milestone9_module.build_milestone9
+    if bool(getattr(original_build, "_cwr_terrain_readme", False)):
         return
 
-    @wraps(original)
+    original_deploy = milestone9_module._deploy_runtime_to_existing_mod
+
+    @wraps(original_deploy)
+    def deploy_with_terrain_readme(result: Any, target_root: Path):
+        # Milestone 9's normal deployer recursively copies and verifies every file
+        # below runtime/Addons. Create the ReadMe before that scan so it follows
+        # exactly the same path as the PBO instead of relying on a second copy.
+        spec = _ACTIVE_TERRAIN_SPEC.get()
+        if spec is not None:
+            write_terrain_readme(result, spec)
+        return original_deploy(result, target_root)
+
+    deploy_with_terrain_readme._cwr_terrain_readme = True  # type: ignore[attr-defined]
+    milestone9_module._deploy_runtime_to_existing_mod = deploy_with_terrain_readme
+
+    @wraps(original_build)
     def build_with_terrain_readme(output_dir: Path, spec: Any, *, clean: bool = True):
-        result = original(output_dir, spec, clean=clean)
-        readme_path = write_terrain_readme(result, spec)
-        _deploy_readme(result, spec, readme_path)
-        return result
+        token = _ACTIVE_TERRAIN_SPEC.set(spec)
+        try:
+            result = original_build(output_dir, spec, clean=clean)
+            # With deployment enabled the deploy wrapper already created the file
+            # before copying. Builds without deployment still need the local copy.
+            readme_path = terrain_readme_path(result, spec)
+            if not readme_path.is_file():
+                write_terrain_readme(result, spec)
+            return result
+        finally:
+            _ACTIVE_TERRAIN_SPEC.reset(token)
 
     build_with_terrain_readme._cwr_terrain_readme = True  # type: ignore[attr-defined]
     milestone9_module.build_milestone9 = build_with_terrain_readme
 
-    # building_country_policy imports cli.py before this wrapper is installed.
-    # cli.py imports build_milestone9 by value, so without refreshing that cached
-    # reference GUI/CLI builds bypass this wrapper and never create the ReadMe.
-    # Patch only the stale binding we wrapped; a later independent wrapper should
-    # not be overwritten here.
+    # cli.py imports build_milestone9 by value during package initialization.
+    # Refresh only that stale binding so GUI/CLI builds use the same wrapped path.
     cli_module = sys.modules.get(f"{__package__}.cli")
-    if cli_module is not None and getattr(cli_module, "build_milestone9", None) is original:
+    if cli_module is not None and getattr(cli_module, "build_milestone9", None) is original_build:
         cli_module.build_milestone9 = build_with_terrain_readme
