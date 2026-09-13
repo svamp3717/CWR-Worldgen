@@ -75,6 +75,17 @@ def test_cli_milestone9_build_uses_terrain_readme_wrapper() -> None:
     assert getattr(milestone9._deploy_runtime_to_existing_mod, "_cwr_terrain_readme", False)
 
 
+def test_cli_readme_binding_replaces_any_stale_build_reference() -> None:
+    current = cli.build_milestone9
+    try:
+        cli.build_milestone9 = lambda *_args, **_kwargs: None
+        assert cli.build_milestone9 is not milestone9.build_milestone9
+        terrain_readme_module._sync_cli_build_binding(milestone9.build_milestone9)
+        assert cli.build_milestone9 is milestone9.build_milestone9
+    finally:
+        cli.build_milestone9 = current
+
+
 def test_terrain_readme_is_copied_by_same_deployment_pass_as_pbo(tmp_path: Path) -> None:
     output_dir = tmp_path / "build"
     runtime_root = output_dir / "runtime"
