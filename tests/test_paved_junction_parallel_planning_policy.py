@@ -79,6 +79,16 @@ def test_ambiguous_duplicate_target_geometry_forces_replan() -> None:
     assert parallel._rebind_choices((duplicate_targets,), cached) is None
 
 
+def test_cached_plan_application_uses_live_plan_identity() -> None:
+    plan = SimpleNamespace(point=(123.4, 567.8))
+    sentinel = object()
+    token = parallel._ACTIVE_CHOICES.set({id(plan): sentinel})
+    try:
+        assert parallel._cached_plan_application(None, plan, None) is sentinel
+    finally:
+        parallel._ACTIVE_CHOICES.reset(token)
+
+
 def test_fallback_dependency_radius_marks_only_near_active_plans() -> None:
     changed = (0, 0)
     near = (1, 0)
