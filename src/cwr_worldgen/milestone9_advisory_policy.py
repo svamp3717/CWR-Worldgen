@@ -12,6 +12,7 @@ from .building_pad_performance_policy import install_building_pad_performance_po
 from .terrain_postprocess_performance_policy import install_terrain_postprocess_performance_policy
 from .terrain_grid_performance_policy import install_terrain_grid_performance_policy
 from .object_placement_performance_policy import install_object_placement_performance_policy
+from .object_sampling_cache_policy import install_object_sampling_cache_policy
 
 _ADVISORY_OBJECT_LIMITS: ContextVar[bool | None] = ContextVar(
     "cwr_milestone9_advisory_object_limits", default=None
@@ -44,6 +45,7 @@ def install_milestone9_advisory_policy() -> None:
     install_terrain_postprocess_performance_policy()
     install_terrain_grid_performance_policy()
     install_object_placement_performance_policy()
+    install_object_sampling_cache_policy()
 
     def build_milestone9(output_dir, spec, *, clean: bool = True):
         token = _ADVISORY_OBJECT_LIMITS.set(
