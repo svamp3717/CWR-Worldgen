@@ -7,6 +7,7 @@ from dataclasses import replace
 
 from . import milestone9 as _milestone9
 from .road_chain_parallel_policy import install_road_chain_parallel_policy
+from .road_quality_parallel_compat_policy import install_road_quality_parallel_compat_policy
 from .bridge_runtime_policy import install_bridge_runtime_policy
 from .road_constraint_performance_policy import install_road_constraint_performance_policy
 from .building_pad_performance_policy import install_building_pad_performance_policy
@@ -38,12 +39,12 @@ def install_milestone9_advisory_policy() -> None:
     if _INSTALLED:
         return
 
-    # The stock-road process pool must become the base implementation before the
-    # bridge runtime wraps road fitting. That preserves source-water bridge
-    # context while still letting independent ordinary road chains run in worker
-    # processes. Remaining performance layers are installed after bridge policy
-    # so they wrap the final bridge-aware terrain/object helpers.
+    # The stock-road process pool and its road-quality ContextVar bridge must
+    # become the base implementation before source-water bridge policy captures
+    # the fitter. Workers therefore use the same terrain/junction scoring as the
+    # serial road-quality path, while object IDs remain assigned in the parent.
     install_road_chain_parallel_policy()
+    install_road_quality_parallel_compat_policy()
     install_bridge_runtime_policy()
     install_road_constraint_performance_policy()
     install_building_pad_performance_policy()
