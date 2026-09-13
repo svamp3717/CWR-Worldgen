@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from cwr_worldgen import playability
 from cwr_worldgen import road_chain_parallel_policy as perf
+from cwr_worldgen import road_finish_parallel_policy as road_finish
 from cwr_worldgen import road_quality_parallel_compat_policy as quality_perf
 from cwr_worldgen import road_quality_policy as road_quality
 
@@ -103,9 +104,9 @@ def test_run_job_preserves_quality_aware_chain_plan() -> None:
 
 
 def test_parallel_policy_is_bridge_base_and_quality_chain_is_live() -> None:
-    # Source-water bridge policy wraps the optimized base fitter. The chain
-    # function itself remains quality-aware so serial and worker paths use the
-    # same terrain-bulge/junction score.
+    # Source-water bridge policy wraps the optimized base fitter. The final road
+    # endpoint sampler then wraps the quality-aware executor without replacing
+    # its chain scoring.
     from cwr_worldgen import bridge_source_water_policy
 
     assert (
@@ -114,4 +115,5 @@ def test_parallel_policy_is_bridge_base_and_quality_chain_is_live() -> None:
     )
     assert playability._stock_piece_chain is quality_perf._batched_quality_chain
     assert perf._plan_run is quality_perf._quality_aware_plan_run
-    assert perf._execute_run_jobs is quality_perf._quality_aware_execute_run_jobs
+    assert perf._execute_run_jobs is road_finish._execute
+    assert road_finish._BASE_EXECUTE is quality_perf._quality_aware_execute_run_jobs
