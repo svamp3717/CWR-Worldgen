@@ -10,6 +10,7 @@ from .bridge_runtime_policy import install_bridge_runtime_policy
 from .road_constraint_performance_policy import install_road_constraint_performance_policy
 from .building_pad_performance_policy import install_building_pad_performance_policy
 from .terrain_postprocess_performance_policy import install_terrain_postprocess_performance_policy
+from .terrain_grid_performance_policy import install_terrain_grid_performance_policy
 
 _ADVISORY_OBJECT_LIMITS: ContextVar[bool | None] = ContextVar(
     "cwr_milestone9_advisory_object_limits", default=None
@@ -40,6 +41,7 @@ def install_milestone9_advisory_policy() -> None:
     install_road_constraint_performance_policy()
     install_building_pad_performance_policy()
     install_terrain_postprocess_performance_policy()
+    install_terrain_grid_performance_policy()
 
     def build_milestone9(output_dir, spec, *, clean: bool = True):
         token = _ADVISORY_OBJECT_LIMITS.set(
