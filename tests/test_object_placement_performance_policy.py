@@ -1,14 +1,16 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from cwr_worldgen import forest_array_cache_policy as array_cache
 from cwr_worldgen import object_placement_performance_policy as perf
+from cwr_worldgen import object_stage_parallel_policy as stage_parallel
 from cwr_worldgen import osm
 from cwr_worldgen import paved_junction_performance_policy as paved_perf
 from cwr_worldgen import playability
 from cwr_worldgen.procedural_forests import FOREST_UNDERGROWTH_VARIANTS
 
 
-def test_object_placement_performance_policy_is_installed() -> None:
+def test_object_placement_performance_policy_is_installed_under_late_wrappers() -> None:
     assert paved_perf._approach_choice_to_target is perf._fast_approach_choice_to_target
     assert paved_perf._plan_application is perf._fast_plan_application
     assert playability._PolylineMeasure.chord_endpoint is perf._fast_chord_endpoint
@@ -17,7 +19,8 @@ def test_object_placement_performance_policy_is_installed() -> None:
     assert playability._nearest_polyline_heading is perf._fast_nearest_polyline_heading
     assert osm.IndexedRoadCorridors.intersects_rectangle is perf._fast_corridor_intersects_rectangle
     assert osm._roadside_vegetation_candidates is perf._fast_roadside_vegetation_candidates
-    assert osm._place_cluster_at is perf._fast_place_cluster_at
+    assert osm._place_cluster_at is stage_parallel._cached_place_cluster_at
+    assert stage_parallel._BASE_PLACE_CLUSTER is array_cache._cached_vector_cluster
 
 
 def test_paved_approach_prefilter_matches_previous_solver() -> None:
