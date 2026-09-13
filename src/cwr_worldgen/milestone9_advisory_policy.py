@@ -8,6 +8,8 @@ from dataclasses import replace
 from . import milestone9 as _milestone9
 from .bridge_runtime_policy import install_bridge_runtime_policy
 from .road_constraint_performance_policy import install_road_constraint_performance_policy
+from .building_pad_performance_policy import install_building_pad_performance_policy
+from .terrain_postprocess_performance_policy import install_terrain_postprocess_performance_policy
 
 _ADVISORY_OBJECT_LIMITS: ContextVar[bool | None] = ContextVar(
     "cwr_milestone9_advisory_object_limits", default=None
@@ -32,11 +34,12 @@ def install_milestone9_advisory_policy() -> None:
 
     # Milestone 9 is the first final-world pipeline imported by package runtime.
     # Activate the bridge chain here so GUI/CLI/library builds execute the same
-    # bridge policies that their dedicated tests exercise. Install the road
-    # performance policy afterwards so it wraps the final bridge-aware water
-    # predicate rather than an earlier implementation.
+    # bridge policies that their dedicated tests exercise. Install performance
+    # layers afterwards so they wrap the final bridge-aware terrain helpers.
     install_bridge_runtime_policy()
     install_road_constraint_performance_policy()
+    install_building_pad_performance_policy()
+    install_terrain_postprocess_performance_policy()
 
     def build_milestone9(output_dir, spec, *, clean: bool = True):
         token = _ADVISORY_OBJECT_LIMITS.set(
