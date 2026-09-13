@@ -39,9 +39,11 @@ def test_multicore_object_context_survives_late_building_wrapper() -> None:
 def test_final_road_endpoint_pool_supersedes_only_road_half() -> None:
     assert playability._fit_stock_piece_road_objects is road_finish_parallel_policy._fit
     assert road_chain_parallel_policy._execute_run_jobs is road_finish_parallel_policy._execute
+    assert road_finish_parallel_policy._BASE_STOCK_FIT is object_stage_parallel_policy._BASE_STOCK_FIT
+    # bridge_source_water_policy used functools.wraps around the parallel base.
     assert (
-        road_finish_parallel_policy._BASE_STOCK_FIT
-        is bridge_source_water_policy.source_aware_stock_fit
+        getattr(road_finish_parallel_policy._BASE_STOCK_FIT, "__wrapped__", None)
+        is road_chain_parallel_policy._fit_stock_piece_road_objects_parallel
     )
 
 
