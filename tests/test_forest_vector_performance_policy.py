@@ -30,6 +30,28 @@ def test_primary_everon_prefilter_rejects_empty_lattice_cells() -> None:
     assert bool(context.possible_primary[1, 1])
 
 
+def test_batched_primary_road_hits_match_scalar_corridor_queries() -> None:
+    context = perf._ForestVectorContext(
+        spacing=50.0,
+        world_size=200.0,
+        possible_primary=np.ones((4, 4), dtype=np.bool_),
+    )
+    corridors = (
+        ((0.0, 60.0), (200.0, 60.0), 4.0),
+        ((110.0, 0.0), (110.0, 200.0), 6.0),
+        ((145.0, 145.0), (195.0, 195.0), 3.0),
+    )
+    hits = perf._batch_primary_road_hits(corridors, context)
+    for row in range(4):
+        for column in range(4):
+            x = (column + 0.5) * context.spacing
+            z = (row + 0.5) * context.spacing
+            expected = perf._ORIGINAL_FOREST_ROAD_TEST(
+                corridors, x, z, block_size=context.spacing
+            )
+            assert bool(hits[row, column]) == expected
+
+
 def test_triangle_bounds_batch_matches_scalar_terrain_sampler() -> None:
     cells = 6
     cell_size = 25.0
@@ -102,4 +124,7 @@ def test_vector_cluster_grounding_matches_previous_optimized_result() -> None:
 
 def test_vector_forest_policy_is_live() -> None:
     assert osm._place_cluster_at is perf._vector_place_cluster_at
-    assert osm.forest_point_inside_edge_guard is perf._fast_edge_guard
+    assert (
+        osm.forest_block_intersects_road_corridors
+        is perf._fast_forest_block_intersects_road_corridors
+    )
