@@ -12,6 +12,16 @@ from . import road_quality_policy as _rq
 
 _SUCCESS_DISTANCE_METRES = 0.75
 _MAX_STABILIZATION_REFITS = 2
+# A failed stock junction changes trimming around its 32 m reserve.  Include the
+# target-search reach, clear zone and one full stock slab when proactively marking
+# neighbouring plans dirty.  The parallel planner also compares complete target
+# fingerprints, so long road-chain changes outside this radius are still caught.
+_FALLBACK_DEPENDENCY_RADIUS_METRES = (
+    float(_paved._APPROACH_RESERVE)
+    + 55.0
+    + float(_paved._CLEAR_RADIUS)
+    + max(float(value) for value in _paved._STRAIGHTS.values())
+)
 _ORIGINAL_FIT = None
 _INSTALLED = False
 
@@ -102,6 +112,50 @@ def _base_refit(
         _paved._PLANS.reset(token)
 
 
+def _planning_runtime():
+    """Return the late parallel planner only when its indexed base is live.
+
+    Keeping this conditional matters for low-level tests and custom callers that
+    deliberately replace ``_apply_plans``.  Production package startup installs
+    the indexed performance policy before road fitting begins.
+    """
+    from . import paved_junction_performance_policy as performance
+    from . import paved_junction_parallel_planning_policy as parallel
+
+    current = _paved._apply_plans
+    if current is parallel.apply_paved_junctions_parallel:
+        return parallel
+    if current is performance.apply_paved_junctions_fast:
+        parallel.install_paved_junction_parallel_planning_policy()
+        return parallel
+    return None
+
+
+def _affected_plan_keys(
+    plans,
+    active_keys,
+    changed_keys,
+    *,
+    radius: float = _FALLBACK_DEPENDENCY_RADIUS_METRES,
+) -> frozenset[tuple[int, int]]:
+    """Return active stock plans near junctions that just became ordinary."""
+    changed_points = tuple(
+        plans[key].point
+        for key in changed_keys
+        if key in plans
+    )
+    if not changed_points:
+        return frozenset()
+    result = []
+    for key in active_keys:
+        plan = plans.get(key)
+        if plan is None:
+            continue
+        if any(math.dist(plan.point, point) <= radius for point in changed_points):
+            result.append(key)
+    return frozenset(result)
+
+
 def _fit(
     dataset,
     projection,
@@ -132,70 +186,108 @@ def _fit(
             progress_callback=progress_callback,
         )
 
-    # First preserve the normal paved-junction path. Most maps never need the
-    # fallback and therefore pay only a cheap scan for emitted junction models.
-    report = _ORIGINAL_FIT(
-        dataset,
-        projection,
-        elevations,
-        spec,
-        starting_id=starting_id,
-        progress_callback=progress_callback,
-    )
-    successful_keys = _successful_plan_keys(report, plans)
-    if len(successful_keys) == len(plans):
-        return report
-
-    active = {
-        key: plans[key]
-        for key in successful_keys
-    }
-    if progress_callback is not None:
-        progress_callback(
-            99,
-            "Refitting paved junction fallbacks: "
-            f"{len(plans) - len(active):,} stock junction(s) use ordinary connected roads",
+    planning = _planning_runtime()
+    session = None
+    session_token = None
+    if planning is not None:
+        session, session_token = planning.begin_planning_session(
+            "Planning paved-junction approaches, initial pass"
         )
 
-    # Refit from the road-quality layer with failed plans restored to ordinary
-    # junction geometry. Re-apply only the stock junctions proven viable above.
-    # A neighbouring fallback can very occasionally invalidate a formerly viable
-    # stock approach, so allow two shrinking stabilization passes. If it still
-    # changes after that, prefer a fully ordinary connected result over gaps.
-    for _attempt in range(_MAX_STABILIZATION_REFITS):
-        base_report = _base_refit(
+    try:
+        # First preserve the normal paved-junction path. Most maps never need the
+        # fallback and therefore pay only a cheap scan for emitted junction models.
+        report = _ORIGINAL_FIT(
             dataset,
             projection,
             elevations,
             spec,
-            active,
             starting_id=starting_id,
             progress_callback=progress_callback,
         )
-        if not active:
-            return base_report
+        successful_keys = _successful_plan_keys(report, plans)
+        if len(successful_keys) == len(plans):
+            return report
 
-        fitted = _paved._apply_plans(base_report, active, elevations, spec)
-        stable_keys = _successful_plan_keys(fitted, active)
-        if len(stable_keys) == len(active):
-            return fitted
         active = {
-            key: active[key]
-            for key in stable_keys
+            key: plans[key]
+            for key in successful_keys
         }
+        changed_keys = frozenset(set(plans).difference(successful_keys))
+        snapshot = session.latest if session is not None else None
+        affected = _affected_plan_keys(plans, active, changed_keys)
+        if progress_callback is not None:
+            suffix = (
+                f"; {len(affected):,} nearby paved plan(s) marked for fresh search"
+                if planning is not None and active
+                else ""
+            )
+            progress_callback(
+                99,
+                "Refitting paved junction fallbacks: "
+                f"{len(plans) - len(active):,} stock junction(s) use ordinary connected roads"
+                + suffix,
+            )
 
-    # Geometry remained coupled after the bounded stabilization attempts. An
-    # ordinary junction is visually less fancy but, unlike a 30 m grass gap,
-    # remains a road.
-    return _base_refit(
-        dataset,
-        projection,
-        elevations,
-        spec,
-        {},
-        starting_id=starting_id,
-        progress_callback=progress_callback,
-    )
+        # Refit from the road-quality layer with failed plans restored to ordinary
+        # junction geometry.  The expensive paved approach search is not repeated
+        # wholesale: unchanged target fingerprints reuse their previous solution,
+        # while nearby/changed candidate sets are solved again.  A neighbouring
+        # fallback can still invalidate another stock approach, so retain the same
+        # bounded two-pass stabilization safety net.
+        for attempt in range(_MAX_STABILIZATION_REFITS):
+            base_report = _base_refit(
+                dataset,
+                projection,
+                elevations,
+                spec,
+                active,
+                starting_id=starting_id,
+                progress_callback=progress_callback,
+            )
+            if not active:
+                return base_report
+
+            if planning is not None and session is not None:
+                planning.configure_planning_session(
+                    session,
+                    reuse=snapshot,
+                    replan_keys=affected,
+                    label=(
+                        "Replanning paved junctions affected by fallbacks, "
+                        f"stabilization {attempt + 1}/{_MAX_STABILIZATION_REFITS}"
+                    ),
+                )
+
+            fitted = _paved._apply_plans(base_report, active, elevations, spec)
+            next_snapshot = session.latest if session is not None else None
+            stable_keys = _successful_plan_keys(fitted, active)
+            if len(stable_keys) == len(active):
+                return fitted
+
+            newly_failed = frozenset(set(active).difference(stable_keys))
+            active = {
+                key: active[key]
+                for key in stable_keys
+            }
+            snapshot = next_snapshot
+            affected = _affected_plan_keys(plans, active, newly_failed)
+
+        # Geometry remained coupled after the bounded stabilization attempts. An
+        # ordinary junction is visually less fancy but, unlike a 30 m grass gap,
+        # remains a road.
+        return _base_refit(
+            dataset,
+            projection,
+            elevations,
+            spec,
+            {},
+            starting_id=starting_id,
+            progress_callback=progress_callback,
+        )
+    finally:
+        if planning is not None and session_token is not None:
+            planning.end_planning_session(session_token)
 
 
 def install_paved_junction_fallback_policy() -> None:
