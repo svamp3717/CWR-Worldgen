@@ -6,6 +6,7 @@ from contextvars import ContextVar
 from dataclasses import replace
 
 from . import milestone9 as _milestone9
+from .road_chain_parallel_policy import install_road_chain_parallel_policy
 from .bridge_runtime_policy import install_bridge_runtime_policy
 from .road_constraint_performance_policy import install_road_constraint_performance_policy
 from .building_pad_performance_policy import install_building_pad_performance_policy
@@ -35,10 +36,12 @@ def install_milestone9_advisory_policy() -> None:
     if _INSTALLED:
         return
 
-    # Milestone 9 is the first final-world pipeline imported by package runtime.
-    # Activate the bridge chain here so GUI/CLI/library builds execute the same
-    # bridge policies that their dedicated tests exercise. Install performance
-    # layers afterwards so they wrap the final bridge-aware terrain helpers.
+    # The stock-road process pool must become the base implementation before the
+    # bridge runtime wraps road fitting. That preserves source-water bridge
+    # context while still letting independent ordinary road chains run in worker
+    # processes. Remaining performance layers are installed after bridge policy
+    # so they wrap the final bridge-aware terrain/object helpers.
+    install_road_chain_parallel_policy()
     install_bridge_runtime_policy()
     install_road_constraint_performance_policy()
     install_building_pad_performance_policy()
