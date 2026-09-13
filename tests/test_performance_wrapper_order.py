@@ -1,8 +1,10 @@
 from cwr_worldgen import bridge_source_water_policy
 from cwr_worldgen import final_building_road_clearance_policy
 from cwr_worldgen import forest_vector_performance_policy
+from cwr_worldgen import object_stage_parallel_policy
 from cwr_worldgen import playability
 from cwr_worldgen import road_chain_parallel_policy
+from cwr_worldgen import road_finish_parallel_policy
 from cwr_worldgen import road_quality_parallel_compat_policy
 from cwr_worldgen import shared_object_index_policy
 from cwr_worldgen import stock_utility_policy
@@ -20,13 +22,26 @@ def test_parallel_road_fitter_sits_under_source_water_bridge_wrapper() -> None:
     )
 
 
-def test_vector_forest_context_survives_late_building_wrapper() -> None:
-    # final_building_road_clearance_policy is installed later in package startup.
-    # Its captured core must already contain the forest ContextVar wrapper or the
-    # primary-grid STRtree batch would never activate in real GUI/CLI builds.
+def test_multicore_object_context_survives_late_building_wrapper() -> None:
+    # The multicore wrapper is installed after vector forest setup and rebound in
+    # both osm/generator namespaces. Late final-building policy must therefore
+    # capture it, while its own base still contains the vector forest context.
+    assert (
+        object_stage_parallel_policy._BASE_GENERATE
+        is forest_vector_performance_policy._generate_with_vector_forest_context
+    )
     assert (
         final_building_road_clearance_policy._ORIGINAL_GENERATE_WORLD_OBJECTS
-        is forest_vector_performance_policy._generate_with_vector_forest_context
+        is object_stage_parallel_policy._parallel_generate_world_objects
+    )
+
+
+def test_final_road_endpoint_pool_supersedes_only_road_half() -> None:
+    assert playability._fit_stock_piece_road_objects is road_finish_parallel_policy._fit
+    assert road_chain_parallel_policy._execute_run_jobs is road_finish_parallel_policy._execute
+    assert (
+        road_finish_parallel_policy._BASE_STOCK_FIT
+        is bridge_source_water_policy.source_aware_stock_fit
     )
 
 
