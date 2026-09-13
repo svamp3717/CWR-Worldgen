@@ -120,10 +120,12 @@ def _cell_polygon(index: int, cells: int, cell_size: float) -> Any:
 
 def _point(*args: Any, **kwargs: Any) -> Any:
     # Building transition code passes the centre to Polygon.distance(). That API
-    # requires a real Shapely geometry. The road layer normally substitutes its
-    # lightweight point while a batch is active, so bypass that substitution for
-    # building batches while retaining it for line-buffer road/watercourse loops.
-    if _ACTIVE_BUILDING_BATCH.get() is not None:
+    # requires a real Shapely geometry. Only bypass the road layer while the
+    # currently active terrain-cell batch is the building batch itself. A later
+    # road/watercourse batch must still receive its lightweight point proxy.
+    active = _ACTIVE_BUILDING_BATCH.get()
+    current = _road_perf._ACTIVE_CELL_BATCH.get()
+    if active is not None and active.batch is current:
         return _road_perf._ORIGINAL_POINT(*args, **kwargs)
     return _ORIGINAL_POINT(*args, **kwargs)
 
