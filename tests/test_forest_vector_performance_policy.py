@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from cwr_worldgen import forest_array_cache_policy as array_cache
 from cwr_worldgen import forest_vector_performance_policy as perf
 from cwr_worldgen import osm
 from cwr_worldgen.procedural_forests import FOREST_UNDERGROWTH_VARIANTS
@@ -52,7 +53,7 @@ def test_batched_primary_road_hits_match_scalar_corridor_queries() -> None:
             assert bool(hits[row, column]) == expected
 
 
-def test_triangle_bounds_batch_matches_scalar_terrain_sampler() -> None:
+def test_triangle_bounds_batch_matches_scalar_terrain_sampler_and_reuses_grid() -> None:
     cells = 6
     cell_size = 25.0
     elevations = tuple(
@@ -61,6 +62,9 @@ def test_triangle_bounds_batch_matches_scalar_terrain_sampler() -> None:
     )
     xs = np.asarray((3.0, 24.0, 31.5, 72.0, 118.0), dtype=np.float64)
     zs = np.asarray((4.0, 19.0, 54.0, 80.5, 123.0), dtype=np.float64)
+    first_grid = array_cache._terrain_grid(elevations, cells)
+    second_grid = array_cache._terrain_grid(elevations, cells)
+    assert first_grid is second_grid
     lower, upper = perf._triangle_bounds_batch(
         elevations, cells, cell_size, xs, zs
     )
@@ -123,7 +127,9 @@ def test_vector_cluster_grounding_matches_previous_optimized_result() -> None:
 
 
 def test_vector_forest_policy_is_live() -> None:
-    assert osm._place_cluster_at is perf._vector_place_cluster_at
+    assert osm._place_cluster_at is array_cache._cached_vector_cluster
+    assert perf._vector_place_cluster_at is array_cache._cached_vector_cluster
+    assert perf._triangle_bounds_batch is array_cache._cached_triangle_bounds_batch
     assert (
         osm.forest_block_intersects_road_corridors
         is perf._fast_forest_block_intersects_road_corridors
