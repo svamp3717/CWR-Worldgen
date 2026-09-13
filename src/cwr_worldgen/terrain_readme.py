@@ -144,12 +144,20 @@ def write_terrain_readme(result: Any, spec: Any) -> Path:
     return readme_path
 
 
+def _sync_cli_build_binding(build_callable: Any) -> None:
+    """Point an already-imported CLI at the final Milestone 9 build callable."""
+    cli_module = sys.modules.get(f"{__package__}.cli")
+    if cli_module is not None:
+        cli_module.build_milestone9 = build_callable
+
+
 def install_milestone9_terrain_readme() -> None:
     """Make the terrain ReadMe part of the normal Milestone 9 deployment pass."""
     from . import milestone9 as milestone9_module
 
     original_build = milestone9_module.build_milestone9
     if bool(getattr(original_build, "_cwr_terrain_readme", False)):
+        _sync_cli_build_binding(original_build)
         return
 
     original_deploy = milestone9_module._deploy_runtime_to_existing_mod
@@ -184,8 +192,7 @@ def install_milestone9_terrain_readme() -> None:
     build_with_terrain_readme._cwr_terrain_readme = True  # type: ignore[attr-defined]
     milestone9_module.build_milestone9 = build_with_terrain_readme
 
-    # cli.py imports build_milestone9 by value during package initialization.
-    # Refresh only that stale binding so GUI/CLI builds use the same wrapped path.
-    cli_module = sys.modules.get(f"{__package__}.cli")
-    if cli_module is not None and getattr(cli_module, "build_milestone9", None) is original_build:
-        cli_module.build_milestone9 = build_with_terrain_readme
+    # cli.py imports build_milestone9 by value. Always synchronize that binding
+    # with the final wrapped callable, regardless of which earlier policy wrapper
+    # happened to be present when cli.py was first imported.
+    _sync_cli_build_binding(build_with_terrain_readme)
