@@ -1,8 +1,10 @@
 from unittest.mock import patch
 
 from cwr_worldgen import object_sampling_cache_policy as perf
+from cwr_worldgen import object_stage_parallel_policy as stage_parallel
 from cwr_worldgen import osm
 from cwr_worldgen import playability
+from cwr_worldgen import road_finish_parallel_policy as road_finish
 
 
 def _terrain(cells: int = 6) -> tuple[float, ...]:
@@ -12,12 +14,14 @@ def _terrain(cells: int = 6) -> tuple[float, ...]:
     )
 
 
-def test_object_sampling_cache_policy_is_installed() -> None:
-    assert osm._sample_elevation is perf._fast_osm_sample
+def test_object_sampling_cache_policy_is_installed_under_multicore_wrappers() -> None:
+    assert osm._sample_elevation is stage_parallel._cached_osm_sample
+    assert stage_parallel._BASE_OSM_SAMPLE is perf._fast_osm_sample
     assert osm._triangle_elevation_bounds is perf._fast_triangle_elevation_bounds
     assert osm._terrain_axis_breakpoints is perf._fast_terrain_axis_breakpoints
     assert osm._terrain_patch_centres is perf._fast_terrain_patch_centres
-    assert playability._sample_elevation is perf._fast_playability_sample
+    assert playability._sample_elevation is road_finish._cached_sample
+    assert road_finish._BASE_SAMPLE is perf._fast_playability_sample
     assert playability._PolylineMeasure.point is perf._fast_measure_point
 
 
