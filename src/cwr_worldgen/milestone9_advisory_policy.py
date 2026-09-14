@@ -21,6 +21,9 @@ from .forest_array_cache_policy import install_forest_array_cache_policy
 from .forest_generation_binding_policy import install_forest_generation_binding_policy
 from .object_stage_parallel_policy import install_object_stage_parallel_policy
 from .forest_primary_parallel_policy import install_forest_primary_parallel_policy
+from .forest_primary_fallback_parallel_policy import (
+    install_forest_primary_fallback_parallel_policy,
+)
 from .road_finish_parallel_policy import install_road_finish_parallel_policy
 from .shared_object_index_policy import install_shared_object_index_policy
 
@@ -68,10 +71,11 @@ def install_milestone9_advisory_policy() -> None:
     # Multicore object-stage precomputation is deliberately late: it must wrap
     # the final bridge-aware stock fitter and the vector/cached forest helpers.
     install_object_stage_parallel_policy()
-    # Replace the bounded primary-forest tuple cache with compact worker plans
-    # for every regular eligible block. The parent remains authoritative for
-    # row-major acceptance, object limits, counters and object ids.
+    # Keep the compact regular-block cache as the compatibility layer, then wrap
+    # it with the broader fallback planner. The latter suppresses the narrower
+    # worker pool during its own invocation so primary forest pays for one pool.
     install_forest_primary_parallel_policy()
+    install_forest_primary_fallback_parallel_policy()
     # Supersede only the road half with NumPy endpoint sampling plus parallel
     # whole-chain transform/model/axis finalization. The non-road caches above
     # remain active and the parent still owns object ids and junction validation.
