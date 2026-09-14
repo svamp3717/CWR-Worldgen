@@ -1,5 +1,6 @@
 from cwr_worldgen import bridge_source_water_policy
 from cwr_worldgen import final_building_road_clearance_policy
+from cwr_worldgen import forest_primary_fallback_parallel_policy
 from cwr_worldgen import forest_primary_parallel_policy
 from cwr_worldgen import forest_vector_performance_policy
 from cwr_worldgen import object_stage_parallel_policy
@@ -24,9 +25,9 @@ def test_parallel_road_fitter_sits_under_source_water_bridge_wrapper() -> None:
 
 
 def test_multicore_object_context_survives_late_building_wrapper() -> None:
-    # The generic object-stage precompute stays immediately above vector forest,
-    # while the primary-forest planner wraps it before the late building policy
-    # captures the complete non-road generation chain.
+    # Generic object precompute remains above vector forest. The compact primary
+    # cache wraps that, then the broad fallback planner becomes the final forest
+    # generation wrapper captured by the late building policy.
     assert (
         object_stage_parallel_policy._BASE_GENERATE
         is forest_vector_performance_policy._generate_with_vector_forest_context
@@ -36,8 +37,12 @@ def test_multicore_object_context_survives_late_building_wrapper() -> None:
         is object_stage_parallel_policy._parallel_generate_world_objects
     )
     assert (
-        final_building_road_clearance_policy._ORIGINAL_GENERATE_WORLD_OBJECTS
+        forest_primary_fallback_parallel_policy._BASE_GENERATE
         is forest_primary_parallel_policy._parallel_generate
+    )
+    assert (
+        final_building_road_clearance_policy._ORIGINAL_GENERATE_WORLD_OBJECTS
+        is forest_primary_fallback_parallel_policy._parallel_generate
     )
     assert object_stage_parallel_policy._MAX_PRIMARY_JOBS == 0
 
