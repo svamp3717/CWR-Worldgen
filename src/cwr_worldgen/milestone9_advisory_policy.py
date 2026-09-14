@@ -9,6 +9,7 @@ from . import milestone9 as _milestone9
 from .road_chain_parallel_policy import install_road_chain_parallel_policy
 from .road_quality_parallel_compat_policy import install_road_quality_parallel_compat_policy
 from .bridge_runtime_policy import install_bridge_runtime_policy
+from .bridge_plan_cache_policy import install_bridge_plan_cache_policy
 from .road_constraint_performance_policy import install_road_constraint_performance_policy
 from .building_pad_performance_policy import install_building_pad_performance_policy
 from .terrain_postprocess_performance_policy import install_terrain_postprocess_performance_policy
@@ -50,6 +51,10 @@ def install_milestone9_advisory_policy() -> None:
     install_road_chain_parallel_policy()
     install_road_quality_parallel_compat_policy()
     install_bridge_runtime_policy()
+    # Bridge abutment grading stores the authoritative pre-fill span in memory.
+    # Keep that tiny state beside cached terrain so a cache hit cannot replan a
+    # shorter bridge against the already-raised endpoint cells.
+    install_bridge_plan_cache_policy()
     install_road_constraint_performance_policy()
     install_building_pad_performance_policy()
     install_terrain_postprocess_performance_policy()
