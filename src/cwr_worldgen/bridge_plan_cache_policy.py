@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Persist pre-fill stock-bridge plans beside cached terrain solutions.
 
-Bridge abutment grading intentionally changes the terrain at each bridge end.  The
+Bridge abutment grading intentionally changes the terrain at each bridge end. The
 final stock-bridge planner must therefore reuse the plan captured immediately
 before that fill; replanning against the filled terrain can shorten a bridge by a
 module and leave its real endpoint over the reopened water channel.
 
-The abutment policy historically kept those plans only in process memory.  A
+The abutment policy historically kept those plans only in process memory. A
 terrain-solution cache hit restores the raised terrain but cannot restore that
 memory, so the final planner sees half of an old build and half of a new one.
 Keep the small plan dictionary in a sidecar keyed by the terrain cache itself.
@@ -64,19 +64,22 @@ def _valid_plan(plan: Any) -> bool:
     )
 
 
-def _write_plan_sidecar(cache_path: str | Path | None, spec: Any) -> None:
+def _write_plan_sidecar(cache_path: str | Path | None, spec: Any) -> bool:
+    """Best-effort persistence; cache metadata must never fail a valid build."""
     path = _sidecar_path(cache_path)
     if path is None:
-        return
+        return False
     payload = {
         "schema": _SCHEMA,
         "world_key": _abutment._plan_world_key(spec),
         "plans": dict(_abutment._PLAN_CACHE),
     }
-    atomic_write_bytes(
-        path,
-        pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL),
-    )
+    try:
+        encoded = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
+        atomic_write_bytes(path, encoded)
+    except (OSError, pickle.PickleError, AttributeError, TypeError, ValueError):
+        return False
+    return True
 
 
 def _restore_plan_sidecar(cache_path: str | Path | None, spec: Any) -> bool:
@@ -85,9 +88,19 @@ def _restore_plan_sidecar(cache_path: str | Path | None, spec: Any) -> bool:
         return False
     try:
         payload = pickle.loads(path.read_bytes())
-    except (OSError, EOFError, pickle.PickleError, AttributeError, ValueError, TypeError):
+        schema = int(payload.get("schema", 0)) if isinstance(payload, dict) else 0
+    except (
+        OSError,
+        EOFError,
+        pickle.PickleError,
+        AttributeError,
+        ImportError,
+        IndexError,
+        TypeError,
+        ValueError,
+    ):
         return False
-    if not isinstance(payload, dict) or int(payload.get("schema", 0)) != _SCHEMA:
+    if not isinstance(payload, dict) or schema != _SCHEMA:
         return False
     world_key = _abutment._plan_world_key(spec)
     if tuple(payload.get("world_key", ())) != tuple(world_key):
@@ -153,7 +166,7 @@ def install_bridge_plan_cache_policy() -> None:
             building_placement_plans=building_placement_plans,
             progress_callback=progress_callback,
         )
-        grading, slopes, hit, key, cache_path = value
+        _grading, _slopes, hit, _key, cache_path = value
 
         if not _has_explicit_bridge(dataset):
             return value
@@ -164,7 +177,7 @@ def install_bridge_plan_cache_policy() -> None:
 
             # Old caches contain the post-fill terrain but not the pre-fill plan.
             # Rebuild exactly once so the authoritative plan is captured from the
-            # same solver pass that produced the terrain.  Future hits restore the
+            # same solver pass that produced the terrain. Future hits restore the
             # tiny sidecar and retain the normal terrain-cache speedup.
             refresh_spec = _refresh_spec(spec)
             if refresh_spec is None:
@@ -182,12 +195,13 @@ def install_bridge_plan_cache_policy() -> None:
                 building_placement_plans=building_placement_plans,
                 progress_callback=progress_callback,
             )
-            grading, slopes, hit, key, cache_path = value
+            _grading, _slopes, _hit, _key, cache_path = value
             _write_plan_sidecar(cache_path, refresh_spec)
             return value
 
         _write_plan_sidecar(cache_path, spec)
         return value
 
+    load_terrain_solution._cwr_bridge_plan_cache_policy = True  # type: ignore[attr-defined]
     generator._load_terrain_solution = load_terrain_solution
     _INSTALLED = True
