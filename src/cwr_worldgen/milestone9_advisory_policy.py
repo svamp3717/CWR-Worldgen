@@ -19,6 +19,7 @@ from .object_sampling_cache_policy import install_object_sampling_cache_policy
 from .forest_vector_performance_policy import install_forest_vector_performance_policy
 from .forest_array_cache_policy import install_forest_array_cache_policy
 from .forest_generation_binding_policy import install_forest_generation_binding_policy
+from .forest_corridor_performance_policy import install_forest_corridor_performance_policy
 from .object_stage_parallel_policy import install_object_stage_parallel_policy
 from .forest_primary_parallel_policy import install_forest_primary_parallel_policy
 from .road_finish_parallel_policy import install_road_finish_parallel_policy
@@ -65,6 +66,10 @@ def install_milestone9_advisory_policy() -> None:
     install_forest_vector_performance_policy()
     install_forest_array_cache_policy()
     install_forest_generation_binding_policy()
+    # Forest fallback trees and bushes use tiny exact road-clearance rectangles.
+    # Re-bucket the already projected corridor geometry more finely so those
+    # serial queries inspect fewer segments without changing their predicate.
+    install_forest_corridor_performance_policy()
     # Multicore object-stage precomputation is deliberately late: it must wrap
     # the final bridge-aware stock fitter and the vector/cached forest helpers.
     install_object_stage_parallel_policy()
