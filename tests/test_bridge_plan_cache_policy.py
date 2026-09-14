@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from cwr_worldgen import generator
 from cwr_worldgen import bridge_abutment_terrain_policy as abutment
 from cwr_worldgen import bridge_plan_cache_policy as policy
+from cwr_worldgen import bridge_runtime_policy as runtime
 from cwr_worldgen.bridge_render_policy import StockBridgeSpanPlan
 
 
@@ -50,6 +51,41 @@ def test_bridge_plan_sidecar_round_trip(tmp_path) -> None:
         abutment._PLAN_CACHE.clear()
         assert policy._restore_plan_sidecar(cache_path, spec)
         assert abutment._PLAN_CACHE == {key: plan}
+    finally:
+        abutment._PLAN_CACHE.clear()
+
+
+def test_restored_plan_can_expand_short_cached_bridge_component(tmp_path) -> None:
+    spec = _Spec()
+    cache_path = tmp_path / "terrain.pickle"
+    original_points = ((25.0, 100.0), (275.0, 100.0))
+    plan = _plan()
+    key = abutment._plan_key(original_points, spec)
+
+    # This models the failure visible in wg_stocktest27.pbo: final placement has
+    # already shrunk to one module, while the authoritative pre-fill plan spans
+    # three. Corridor lookup must still find the restored wider plan so final
+    # reconciliation can clone the missing modules back into the bridge chain.
+    step = 50.190284729003906
+    short_corridor = (
+        (150.0 - step * 0.5, 100.0),
+        (150.0 + step * 0.5, 100.0),
+    )
+
+    abutment._PLAN_CACHE.clear()
+    try:
+        abutment._PLAN_CACHE[key] = plan
+        assert policy._write_plan_sidecar(cache_path, spec)
+        abutment._PLAN_CACHE.clear()
+        assert policy._restore_plan_sidecar(cache_path, spec)
+
+        resolved = runtime._runtime_stock_bridge_span_plan(
+            short_corridor,
+            (),
+            spec,
+        )
+        assert resolved is plan
+        assert resolved.module_count == 3
     finally:
         abutment._PLAN_CACHE.clear()
 
