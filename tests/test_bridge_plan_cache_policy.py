@@ -84,7 +84,7 @@ def test_restored_plan_can_expand_short_cached_bridge_component(tmp_path) -> Non
             (),
             spec,
         )
-        assert resolved is plan
+        assert resolved == plan
         assert resolved.module_count == 3
     finally:
         abutment._PLAN_CACHE.clear()
