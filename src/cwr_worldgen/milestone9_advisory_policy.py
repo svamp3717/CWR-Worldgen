@@ -13,6 +13,7 @@ from .bridge_underlay_spatial_policy import install_bridge_underlay_spatial_poli
 from .bridge_plan_cache_policy import install_bridge_plan_cache_policy
 from .road_constraint_performance_policy import install_road_constraint_performance_policy
 from .building_pad_performance_policy import install_building_pad_performance_policy
+from .residential_infill_performance_policy import install_residential_infill_performance_policy
 from .terrain_postprocess_performance_policy import install_terrain_postprocess_performance_policy
 from .terrain_grid_performance_policy import install_terrain_grid_performance_policy
 from .object_placement_performance_policy import install_object_placement_performance_policy
@@ -63,6 +64,10 @@ def install_milestone9_advisory_policy() -> None:
     install_bridge_plan_cache_policy()
     install_road_constraint_performance_policy()
     install_building_pad_performance_policy()
+    # Residential infill must not rescan every mapped building for every
+    # residential polygon. Index source building occupancy once per world while
+    # preserving the existing exact point/centroid/vertex containment rules.
+    install_residential_infill_performance_policy()
     install_terrain_postprocess_performance_policy()
     install_terrain_grid_performance_policy()
     install_object_placement_performance_policy()
