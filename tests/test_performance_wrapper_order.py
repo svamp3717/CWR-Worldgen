@@ -1,4 +1,6 @@
 from cwr_worldgen import bridge_source_water_policy
+from cwr_worldgen import bridge_underlay_cleanup_policy
+from cwr_worldgen import bridge_underlay_spatial_policy
 from cwr_worldgen import final_building_road_clearance_policy
 from cwr_worldgen import forest_primary_parallel_policy
 from cwr_worldgen import forest_vector_performance_policy
@@ -20,6 +22,17 @@ def test_parallel_road_fitter_sits_under_source_water_bridge_wrapper() -> None:
     assert (
         playability._stock_piece_chain
         is road_quality_parallel_compat_policy._batched_quality_chain
+    )
+
+
+def test_bridge_underlay_cleanup_uses_spatial_candidate_pruning() -> None:
+    assert (
+        bridge_underlay_cleanup_policy._remove_bridge_underlays
+        is bridge_underlay_spatial_policy._remove_bridge_underlays
+    )
+    assert (
+        bridge_underlay_cleanup_policy._add_terminal_underlays
+        is bridge_underlay_spatial_policy._add_terminal_underlays
     )
 
 
