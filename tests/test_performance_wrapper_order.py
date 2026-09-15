@@ -38,10 +38,18 @@ def test_bridge_underlay_cleanup_uses_spatial_candidate_pruning() -> None:
     )
 
 
-def test_residential_infill_uses_indexed_mapped_building_occupancy() -> None:
+def test_residential_infill_uses_indexed_source_lookups() -> None:
     assert (
         osm._residential_area_has_mapped_building
         is residential_infill_performance_policy._indexed_residential_area_has_mapped_building
+    )
+    assert (
+        osm._mapped_building_near_world_point
+        is residential_infill_performance_policy._indexed_mapped_building_near_world_point
+    )
+    assert (
+        osm._place_inside_residential_area
+        is residential_infill_performance_policy._indexed_place_inside_residential_area
     )
 
 
