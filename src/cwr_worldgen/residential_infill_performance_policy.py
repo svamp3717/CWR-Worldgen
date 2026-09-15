@@ -10,6 +10,7 @@ vertex and polygon-with-holes predicates after spatial candidate pruning.
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 import math
 from typing import Any, Sequence
@@ -20,12 +21,27 @@ _INSTALLED = False
 _ORIGINAL_HAS_MAPPED_BUILDING: Any = None
 _ORIGINAL_MAPPED_BUILDING_NEAR_POINT: Any = None
 _ORIGINAL_PLACE_INSIDE_RESIDENTIAL_AREA: Any = None
+_ORIGINAL_PLAN_BUILDINGS: Any = None
 _DEFAULT_BUCKET_METRES = 256.0
 _RESIDENTIAL_BUCKET_METRES = 512.0
 _MAX_CACHED_INDEXES = 4
 _CONTEXT_CACHE: dict[tuple[int, int], tuple[Any, Any, "_InfillSpatialContext"]] = {}
 
 PointXZ = tuple[float, float]
+
+
+@dataclass(slots=True)
+class _InfillRunState:
+    callback: Any
+    place_total: int
+    active: bool = False
+    place_queries: int = 0
+    area_queries: int = 0
+
+
+_RUN_STATE: ContextVar[_InfillRunState | None] = ContextVar(
+    "cwr_residential_infill_performance_run", default=None
+)
 
 
 def _bucket_range(minimum: float, maximum: float, bucket_size: float) -> range:
@@ -46,6 +62,36 @@ def _bounds(points: Sequence[PointXZ]) -> tuple[float, float, float, float] | No
 def _is_overture(feature: Any) -> bool:
     tags = getattr(feature, "tags", {}) or {}
     return str(tags.get("source", "")).casefold() == "overturemaps"
+
+
+def _report_place_progress() -> None:
+    state = _RUN_STATE.get()
+    if state is None or not state.active:
+        return
+    state.place_queries += 1
+    total = max(0, int(state.place_total))
+    if state.callback is None:
+        return
+    if state.place_queries == 1 or state.place_queries == total or state.place_queries % 128 == 0:
+        suffix = f"/{total:,}" if total else ""
+        state.callback(
+            90,
+            f"Planning residential infill settlement sources {state.place_queries:,}{suffix}",
+        )
+
+
+def _report_area_progress() -> None:
+    state = _RUN_STATE.get()
+    if state is None or not state.active:
+        return
+    state.area_queries += 1
+    if state.callback is None:
+        return
+    if state.area_queries == 1 or state.area_queries % 64 == 0:
+        state.callback(
+            91,
+            f"Planning residential infill area occupancy {state.area_queries:,} checked",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,6 +352,7 @@ def _indexed_residential_area_has_mapped_building(
     outer: Sequence[PointXZ],
     holes: Sequence[Sequence[PointXZ]],
 ) -> bool:
+    _report_area_progress()
     return _context_for(dataset, projection).buildings.contains_mapped_building(
         outer, holes
     )
@@ -330,10 +377,44 @@ def _indexed_place_inside_residential_area(
     dataset: Any,
     projection: Any,
 ) -> bool:
+    _report_place_progress()
     point = projection.to_world(place.point)
     return _context_for(dataset, projection).residential.contains_point(
         (float(point[0]), float(point[1]))
     )
+
+
+def _plan_buildings_with_infill_progress(*args, **kwargs):
+    dataset = args[0] if args else kwargs.get("dataset")
+    positional_callback = len(args) >= 6
+    if positional_callback:
+        original_callback = args[5]
+    else:
+        original_callback = kwargs.get("progress_callback")
+    state = _InfillRunState(
+        callback=original_callback,
+        place_total=len(getattr(dataset, "places", ())) if dataset is not None else 0,
+    )
+
+    def progress(percent: int, stage: str) -> None:
+        if stage == "Planning residential infill":
+            state.active = True
+        if original_callback is not None:
+            original_callback(percent, stage)
+
+    call_args = list(args)
+    call_kwargs = dict(kwargs)
+    if positional_callback:
+        call_args[5] = progress
+        call_kwargs.pop("progress_callback", None)
+    else:
+        call_kwargs["progress_callback"] = progress
+
+    token = _RUN_STATE.set(state)
+    try:
+        return _ORIGINAL_PLAN_BUILDINGS(*call_args, **call_kwargs)
+    finally:
+        _RUN_STATE.reset(token)
 
 
 def _clear_index_cache() -> None:
@@ -345,12 +426,15 @@ def install_residential_infill_performance_policy() -> None:
     global _ORIGINAL_HAS_MAPPED_BUILDING
     global _ORIGINAL_MAPPED_BUILDING_NEAR_POINT
     global _ORIGINAL_PLACE_INSIDE_RESIDENTIAL_AREA
+    global _ORIGINAL_PLAN_BUILDINGS
     if _INSTALLED:
         return
     _ORIGINAL_HAS_MAPPED_BUILDING = _osm._residential_area_has_mapped_building
     _ORIGINAL_MAPPED_BUILDING_NEAR_POINT = _osm._mapped_building_near_world_point
     _ORIGINAL_PLACE_INSIDE_RESIDENTIAL_AREA = _osm._place_inside_residential_area
+    _ORIGINAL_PLAN_BUILDINGS = _osm.plan_building_placements
     _osm._residential_area_has_mapped_building = _indexed_residential_area_has_mapped_building
     _osm._mapped_building_near_world_point = _indexed_mapped_building_near_world_point
     _osm._place_inside_residential_area = _indexed_place_inside_residential_area
+    _osm.plan_building_placements = _plan_buildings_with_infill_progress
     _INSTALLED = True
