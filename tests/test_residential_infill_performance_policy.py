@@ -14,15 +14,17 @@ class _Projection:
         return point
 
 
-def _polygon(*points):
+def _polygon(*points, holes=()):
     closed = (*points, points[0])
-    return SimpleNamespace(outer=closed, holes=())
+    closed_holes = tuple((*hole, hole[0]) for hole in holes)
+    return SimpleNamespace(outer=closed, holes=closed_holes)
 
 
-def _dataset(*, points=(), polygons=()):
+def _dataset(*, points=(), polygons=(), urban=()):
     return SimpleNamespace(
-        building_points=tuple(SimpleNamespace(point=point) for point in points),
-        building_polygons=(SimpleNamespace(polygons=tuple(polygons)),),
+        building_points=tuple(SimpleNamespace(point=point, tags={}) for point in points),
+        building_polygons=(SimpleNamespace(polygons=tuple(polygons), tags={}),),
+        urban=tuple(urban),
     )
 
 
@@ -61,7 +63,60 @@ def test_index_accepts_polygon_when_historical_centroid_or_vertex_test_would() -
     assert index.contains_mapped_building(outer, ()) is True
 
 
-def test_cached_index_projects_large_mapped_building_set_only_once() -> None:
+def test_near_point_lookup_preserves_overture_filtering() -> None:
+    policy._clear_index_cache()
+    projection = _Projection()
+    dataset = SimpleNamespace(
+        building_points=(
+            SimpleNamespace(point=(100.0, 100.0), tags={}),
+            SimpleNamespace(point=(500.0, 500.0), tags={"source": "overturemaps"}),
+        ),
+        building_polygons=(),
+        urban=(),
+    )
+
+    assert policy._indexed_mapped_building_near_world_point(
+        dataset, projection, 105.0, 100.0, 10.0
+    ) is True
+    assert policy._indexed_mapped_building_near_world_point(
+        dataset, projection, 500.0, 500.0, 10.0
+    ) is False
+    assert policy._indexed_mapped_building_near_world_point(
+        dataset, projection, 500.0, 500.0, 10.0, include_overture=True
+    ) is True
+
+
+def test_residential_area_index_preserves_holes_and_landuse_filter() -> None:
+    policy._clear_index_cache()
+    projection = _Projection()
+    residential = SimpleNamespace(
+        tags={"landuse": "residential"},
+        polygons=(
+            _polygon(
+                (0.0, 0.0),
+                (200.0, 0.0),
+                (200.0, 200.0),
+                (0.0, 200.0),
+                holes=(((80.0, 80.0), (120.0, 80.0), (120.0, 120.0), (80.0, 120.0)),),
+            ),
+        ),
+    )
+    industrial = SimpleNamespace(
+        tags={"landuse": "industrial"},
+        polygons=(_polygon((300.0, 0.0), (500.0, 0.0), (500.0, 200.0), (300.0, 200.0)),),
+    )
+    dataset = _dataset(urban=(residential, industrial))
+
+    inside = SimpleNamespace(point=(50.0, 50.0))
+    hole = SimpleNamespace(point=(100.0, 100.0))
+    industrial_only = SimpleNamespace(point=(400.0, 100.0))
+
+    assert policy._indexed_place_inside_residential_area(inside, dataset, projection) is True
+    assert policy._indexed_place_inside_residential_area(hole, dataset, projection) is False
+    assert policy._indexed_place_inside_residential_area(industrial_only, dataset, projection) is False
+
+
+def test_cached_context_projects_large_source_sets_only_once() -> None:
     policy._clear_index_cache()
     projection = _Projection()
     dataset = _dataset(
@@ -82,6 +137,9 @@ def test_cached_index_projects_large_mapped_building_set_only_once() -> None:
     policy._indexed_residential_area_has_mapped_building(dataset, projection, first, ())
     calls_after_first = projection.calls
     policy._indexed_residential_area_has_mapped_building(dataset, projection, second, ())
+    policy._indexed_mapped_building_near_world_point(
+        dataset, projection, 100.0, 5000.0, 30.0
+    )
 
     assert calls_after_first == 5000
     assert projection.calls == calls_after_first
