@@ -5,7 +5,9 @@ from cwr_worldgen import final_building_road_clearance_policy
 from cwr_worldgen import forest_primary_parallel_policy
 from cwr_worldgen import forest_vector_performance_policy
 from cwr_worldgen import object_stage_parallel_policy
+from cwr_worldgen import osm
 from cwr_worldgen import playability
+from cwr_worldgen import residential_infill_performance_policy
 from cwr_worldgen import road_chain_parallel_policy
 from cwr_worldgen import road_finish_parallel_policy
 from cwr_worldgen import road_quality_parallel_compat_policy
@@ -33,6 +35,13 @@ def test_bridge_underlay_cleanup_uses_spatial_candidate_pruning() -> None:
     assert (
         bridge_underlay_cleanup_policy._add_terminal_underlays
         is bridge_underlay_spatial_policy._add_terminal_underlays
+    )
+
+
+def test_residential_infill_uses_indexed_mapped_building_occupancy() -> None:
+    assert (
+        osm._residential_area_has_mapped_building
+        is residential_infill_performance_policy._indexed_residential_area_has_mapped_building
     )
 
 
