@@ -143,3 +143,53 @@ def test_cached_context_projects_large_source_sets_only_once() -> None:
 
     assert calls_after_first == 5000
     assert projection.calls == calls_after_first
+
+
+def test_plan_wrapper_reports_infill_subprogress(monkeypatch) -> None:
+    policy._clear_index_cache()
+    projection = _Projection()
+    residential_polygon = _polygon(
+        (0.0, 0.0), (200.0, 0.0), (200.0, 200.0), (0.0, 200.0)
+    )
+    residential = SimpleNamespace(
+        tags={"landuse": "residential"}, polygons=(residential_polygon,)
+    )
+    place = SimpleNamespace(point=(50.0, 50.0))
+    dataset = SimpleNamespace(
+        building_points=(),
+        building_polygons=(),
+        urban=(residential,),
+        places=(place,),
+    )
+    progress_messages: list[str] = []
+
+    def fake_plan(
+        dataset,
+        projection,
+        raster,
+        spec,
+        building_asset_library=None,
+        progress_callback=None,
+    ):
+        assert progress_callback is not None
+        progress_callback(90, "Planning residential infill")
+        policy._indexed_place_inside_residential_area(place, dataset, projection)
+        outer = tuple(residential_polygon.outer[:-1])
+        policy._indexed_residential_area_has_mapped_building(
+            dataset, projection, outer, ()
+        )
+        return (), False
+
+    monkeypatch.setattr(policy, "_ORIGINAL_PLAN_BUILDINGS", fake_plan)
+    plans, truncated = policy._plan_buildings_with_infill_progress(
+        dataset,
+        projection,
+        None,
+        None,
+        progress_callback=lambda _percent, stage: progress_messages.append(stage),
+    )
+
+    assert plans == ()
+    assert truncated is False
+    assert "Planning residential infill settlement sources 1/1" in progress_messages
+    assert "Planning residential infill area occupancy 1 checked" in progress_messages
