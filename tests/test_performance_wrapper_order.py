@@ -1,6 +1,7 @@
 from cwr_worldgen import bridge_source_water_policy
 from cwr_worldgen import bridge_underlay_cleanup_policy
 from cwr_worldgen import bridge_underlay_spatial_policy
+from cwr_worldgen import church_native_polygon_policy
 from cwr_worldgen import final_building_road_clearance_policy
 from cwr_worldgen import forest_primary_parallel_policy
 from cwr_worldgen import forest_vector_performance_policy
@@ -50,6 +51,12 @@ def test_residential_infill_uses_indexed_source_lookups() -> None:
     assert (
         osm._place_inside_residential_area
         is residential_infill_performance_policy._indexed_place_inside_residential_area
+    )
+    # The later church wrapper must delegate into the infill progress wrapper;
+    # otherwise the helper indexes are live but the new sub-progress is lost.
+    assert (
+        church_native_polygon_policy._ORIGINAL_OSM_PLAN_BUILDINGS
+        is residential_infill_performance_policy._plan_buildings_with_infill_progress
     )
 
 
