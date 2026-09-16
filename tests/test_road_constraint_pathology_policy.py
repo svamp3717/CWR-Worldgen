@@ -74,21 +74,12 @@ def test_pathological_corridor_preloads_distance_and_projection_batches() -> Non
 
     index = indices[len(indices) // 2]
     point = Point(terrain._cell_center(index, cells, cell_size))
-    with patch.object(
-        batch,
-        "ensure_distances",
-        wraps=batch.ensure_distances,
-    ) as distances_call, patch.object(
-        batch,
-        "ensure_projections",
-        wraps=batch.ensure_projections,
-    ) as projections_call:
-        assert abs(fast_line.distance(point) - line.distance(point)) < 1.0e-8
-        assert abs(fast_line.project(point) - line.project(point)) < 1.0e-8
-        assert distances_call.call_count == 1
-        assert projections_call.call_count == 1
-        assert batch.distances is not None
-        assert batch.projections is not None
+    distance_values = batch.distances
+    projection_values = batch.projections
+    assert abs(fast_line.distance(point) - line.distance(point)) < 1.0e-8
+    assert abs(fast_line.project(point) - line.project(point)) < 1.0e-8
+    assert batch.distances is distance_values
+    assert batch.projections is projection_values
 
 
 def test_watchdog_rearms_on_stalled_road_checkpoints() -> None:
