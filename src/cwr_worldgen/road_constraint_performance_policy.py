@@ -2,11 +2,12 @@
 """Performance policy for the road-constraint phase of the terrain solver.
 
 Dense road networks used to spend most of this stage crossing the Python/GEOS
-boundary one terrain cell at a time.  Keep the solver's existing grading and
+boundary one terrain cell at a time. Keep the solver's existing grading and
 priority semantics, but batch geometric queries with Shapely 2, discard bounding
 box cells that cannot touch the road before entering the Python loop, avoid
-constructing Shapely Point objects for grid-cell centres, and interpolate road
-profiles in NumPy batches.
+constructing Shapely Point objects for grid-cell centres, interpolate road
+profiles in NumPy batches, and prevent long winding roads from materializing
+world-scale bounding-box candidate arrays.
 """
 from __future__ import annotations
 
@@ -24,6 +25,13 @@ from shapely import (
 )
 
 from . import terrain_solver as _terrain
+
+_SEGMENT_BROAD_PHASE_THRESHOLD = 16_384
+_SEGMENT_MINIMUM_SPAN_METRES = 256.0
+_SEGMENT_SPAN_CELLS = 32.0
+_SEGMENT_SPAN_RADII = 8.0
+_PATHOLOGICAL_BBOX_CANDIDATES = 250_000
+_PATHOLOGICAL_POINT_COUNT = 4_096
 
 
 class _CellPoint:
@@ -171,7 +179,8 @@ class _FastLine:
         radius = args[0] if args else kwargs.get("distance")
         corridor = _FastCorridor(
             self,
-            self._geometry.buffer(*args, **kwargs),
+            args,
+            kwargs,
             None if radius is None else float(radius),
         )
         _PENDING_CORRIDOR.set(corridor)
@@ -199,16 +208,55 @@ class _FastLine:
 
 
 class _FastCorridor:
-    __slots__ = ("line", "_geometry", "_batch", "radius")
+    """Lazy road buffer used by terrain line-distance loops."""
 
-    def __init__(self, line: _FastLine, geometry: Any, radius: float | None) -> None:
+    __slots__ = (
+        "line", "_geometry", "_batch", "radius", "_buffer_args",
+        "_buffer_kwargs", "_bounds",
+    )
+
+    def __init__(
+        self,
+        line: _FastLine,
+        buffer_args: Sequence[Any],
+        buffer_kwargs: Mapping[str, Any],
+        radius: float | None,
+    ) -> None:
         self.line = line
-        self._geometry = geometry
+        self._geometry: Any | None = None
         self._batch: _CellBatch | None = None
         self.radius = radius
+        self._buffer_args = tuple(buffer_args)
+        self._buffer_kwargs = dict(buffer_kwargs)
+        min_x, min_z, max_x, max_z = (
+            float(value) for value in self.line._geometry.bounds
+        )
+        padding = max(0.0, float(radius)) if radius is not None else 0.0
+        self._bounds = (
+            min_x - padding,
+            min_z - padding,
+            max_x + padding,
+            max_z + padding,
+        )
+
+    def _materialize_geometry(self) -> Any:
+        geometry = self._geometry
+        if geometry is None:
+            geometry = self.line._geometry.buffer(
+                *self._buffer_args,
+                **self._buffer_kwargs,
+            )
+            self._geometry = geometry
+        return geometry
+
+    @property
+    def bounds(self) -> tuple[float, float, float, float]:
+        if self.radius is None:
+            return tuple(float(value) for value in self._materialize_geometry().bounds)
+        return self._bounds
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self._geometry, name)
+        return getattr(self._materialize_geometry(), name)
 
     def attach_batch(self, batch: _CellBatch) -> None:
         self._batch = batch
@@ -221,11 +269,11 @@ class _FastCorridor:
             if position is not None:
                 if batch.covered is None:
                     batch.covered = np.asarray(
-                        vectorized_covers(self._geometry, batch.points),
+                        vectorized_covers(self._materialize_geometry(), batch.points),
                         dtype=np.bool_,
                     )
                 return bool(batch.covered[position])
-        return bool(self._geometry.covers(other))
+        return bool(self._materialize_geometry().covers(other))
 
 
 _PENDING_CORRIDOR: ContextVar[_FastCorridor | None] = ContextVar(
@@ -266,6 +314,117 @@ def _bounds_match(left: tuple[float, float, float, float], right: Any) -> bool:
     )
 
 
+def _candidate_window(
+    bounds: tuple[float, float, float, float],
+    cells: int,
+    cell_size: float,
+) -> tuple[int, int, int, int] | None:
+    if cells <= 0 or cell_size <= 0.0:
+        return None
+    min_x, min_z, max_x, max_z = (float(value) for value in bounds)
+    x0 = max(0, min(cells - 1, int(math.ceil(min_x / cell_size - 0.5))))
+    z0 = max(0, min(cells - 1, int(math.ceil(min_z / cell_size - 0.5))))
+    x1 = max(0, min(cells - 1, int(math.floor(max_x / cell_size + 0.5))))
+    z1 = max(0, min(cells - 1, int(math.floor(max_z / cell_size + 0.5))))
+    if x1 < x0 or z1 < z0:
+        return None
+    return x0, z0, x1, z1
+
+
+def _candidate_count(
+    bounds: tuple[float, float, float, float],
+    cells: int,
+    cell_size: float,
+) -> int:
+    window = _candidate_window(bounds, cells, cell_size)
+    if window is None:
+        return 0
+    x0, z0, x1, z1 = window
+    return (x1 - x0 + 1) * (z1 - z0 + 1)
+
+
+def _candidate_indices_for_bounds(
+    bounds: tuple[float, float, float, float],
+    cells: int,
+    cell_size: float,
+) -> np.ndarray:
+    """Vector form of terrain_solver._candidate_cells for one rectangle."""
+
+    window = _candidate_window(bounds, cells, cell_size)
+    if window is None:
+        return np.empty(0, dtype=np.int64)
+    x0, z0, x1, z1 = window
+    xs = np.arange(x0, x1 + 1, dtype=np.int64)
+    zs = np.arange(z0, z1 + 1, dtype=np.int64)
+    return (zs[:, None] * int(cells) + xs[None, :]).reshape(-1)
+
+
+def _segment_candidate_indices(
+    geometry: Any,
+    radius: float,
+    cells: int,
+    cell_size: float,
+) -> np.ndarray:
+    """Return conservative cells around short pieces of the source polyline."""
+
+    coords = np.asarray(geometry.coords, dtype=np.float64)
+    if coords.ndim != 2 or coords.shape[0] < 2:
+        min_x, min_z, max_x, max_z = (
+            float(value) for value in geometry.bounds
+        )
+        return _candidate_indices_for_bounds(
+            (min_x - radius, min_z - radius, max_x + radius, max_z + radius),
+            cells,
+            cell_size,
+        )
+
+    max_span = max(
+        _SEGMENT_MINIMUM_SPAN_METRES,
+        float(cell_size) * _SEGMENT_SPAN_CELLS,
+        max(0.0, float(radius)) * _SEGMENT_SPAN_RADII,
+    )
+    arrays: list[np.ndarray] = []
+    for start, end in zip(coords[:-1, :2], coords[1:, :2]):
+        delta = end - start
+        length = float(np.hypot(delta[0], delta[1]))
+        if length <= 1.0e-12:
+            continue
+        piece_count = max(1, int(math.ceil(length / max_span)))
+        for piece_index in range(piece_count):
+            t0 = piece_index / piece_count
+            t1 = (piece_index + 1) / piece_count
+            a = start + delta * t0
+            b = start + delta * t1
+            piece_bounds = (
+                min(float(a[0]), float(b[0])) - radius,
+                min(float(a[1]), float(b[1])) - radius,
+                max(float(a[0]), float(b[0])) + radius,
+                max(float(a[1]), float(b[1])) + radius,
+            )
+            values = _candidate_indices_for_bounds(piece_bounds, cells, cell_size)
+            if values.size:
+                arrays.append(values)
+
+    if not arrays:
+        return np.empty(0, dtype=np.int64)
+    if len(arrays) == 1:
+        return arrays[0]
+    return np.unique(np.concatenate(arrays))
+
+
+def _corridor_candidate_indices(
+    geometry: Any,
+    radius: float,
+    bounds: tuple[float, float, float, float],
+    cells: int,
+    cell_size: float,
+) -> tuple[np.ndarray, int]:
+    full_count = _candidate_count(bounds, cells, cell_size)
+    if full_count <= _SEGMENT_BROAD_PHASE_THRESHOLD:
+        return _candidate_indices_for_bounds(bounds, cells, cell_size), full_count
+    return _segment_candidate_indices(geometry, radius, cells, cell_size), full_count
+
+
 def _needs_bridge_water_test(tags: Mapping[str, str]) -> bool:
     bridge_value = str(tags.get("bridge", "")).casefold()
     explicit_bridge = (
@@ -297,27 +456,63 @@ def _fast_candidate_cells(
     cells: int,
     cell_size: float,
 ) -> Iterable[int]:
-    indices = np.fromiter(
-        _ORIGINAL_CANDIDATE_CELLS(bounds, cells, cell_size),
-        dtype=np.int64,
-    )
     pending = _PENDING_CORRIDOR.get()
     _PENDING_CORRIDOR.set(None)
-    if pending is None or not _bounds_match(bounds, pending.bounds) or indices.size == 0:
-        _ACTIVE_CELL_BATCH.set(None)
-        return (int(index) for index in indices)
 
-    # The terrain solver's line-buffer loops immediately reject cells whose
-    # centre lies farther from the source line than the requested corridor
-    # radius. Do that rejection once in vectorized GEOS before entering Python.
-    # The bridge/water corridor predicate has its own exact vectorized `covers`
-    # implementation below because mitred buffer corners have different semantics.
+    # Do not build a bbox-sized NumPy array before checking for a road corridor.
+    if pending is None or not _bounds_match(bounds, pending.bounds):
+        _ACTIVE_CELL_BATCH.set(None)
+        return _ORIGINAL_CANDIDATE_CELLS(bounds, cells, cell_size)
+
+    if pending.radius is None:
+        indices = _candidate_indices_for_bounds(bounds, cells, cell_size)
+        if indices.size == 0:
+            _ACTIVE_CELL_BATCH.set(None)
+            return iter(())
+        batch = _CellBatch.create(indices, cells, cell_size)
+        pending.attach_batch(batch)
+        _ACTIVE_CELL_BATCH.set(batch)
+        return (int(index) for index in batch.indices)
+
+    geometry = pending.line._geometry
+    full_count = _candidate_count(bounds, cells, cell_size)
+    point_count = len(geometry.coords)
+    diagnostic = (
+        full_count >= _PATHOLOGICAL_BBOX_CANDIDATES
+        or point_count >= _PATHOLOGICAL_POINT_COUNT
+    )
+    if diagnostic:
+        print(
+            "[road-constraint] large corridor broad phase: "
+            f"points={point_count:,}, length={float(geometry.length):,.1f}m, "
+            f"bbox_candidates={full_count:,}, radius={pending.radius:.1f}m; "
+            "using segment-wise candidates",
+            flush=True,
+        )
+
+    indices, _ = _corridor_candidate_indices(
+        geometry,
+        pending.radius,
+        bounds,
+        cells,
+        cell_size,
+    )
+    if indices.size == 0:
+        _ACTIVE_CELL_BATCH.set(None)
+        return iter(())
+
     batch = _CellBatch.create(indices, cells, cell_size)
-    if pending.radius is not None:
-        distances = batch.ensure_distances(pending.line._geometry)
-        keep = distances <= pending.radius + 1.0e-9
-        if not np.all(keep):
-            batch = batch.subset(keep)
+    distances = batch.ensure_distances(geometry)
+    keep = distances <= pending.radius + 1.0e-9
+    if not np.all(keep):
+        batch = batch.subset(keep)
+
+    if diagnostic:
+        print(
+            "[road-constraint] large corridor broad phase complete: "
+            f"segment_candidates={indices.size:,}, exact_candidates={batch.indices.size:,}",
+            flush=True,
+        )
 
     pending.attach_batch(batch)
     _ACTIVE_CELL_BATCH.set(batch)
@@ -384,20 +579,36 @@ def _fast_road_corridor_intersects_mask(
 
     geometry = line._geometry if isinstance(line, _FastLine) else line
     radius = max(float(width) * 0.5, float(spec.cell_size) * 0.35)
-    corridor = geometry.buffer(radius, cap_style=2, join_style=2)
-    indices = np.fromiter(
-        _ORIGINAL_CANDIDATE_CELLS(corridor.bounds, spec.cells, spec.cell_size),
-        dtype=np.int64,
+
+    # Square caps and mitred joins can extend beyond the simple radius around
+    # the line. Shapely's default mitre_limit is 5, so use that as a conservative
+    # broad phase and only build the exact GEOS buffer if a water cell is nearby.
+    broad_radius = radius * 5.0 + 1.0e-9
+    min_x, min_z, max_x, max_z = (float(value) for value in geometry.bounds)
+    broad_bounds = (
+        min_x - broad_radius,
+        min_z - broad_radius,
+        max_x + broad_radius,
+        max_z + broad_radius,
+    )
+    indices, _ = _corridor_candidate_indices(
+        geometry,
+        broad_radius,
+        broad_bounds,
+        int(spec.cells),
+        float(spec.cell_size),
     )
     if indices.size == 0:
         return False
     selected = _mask_array(mask)[indices]
     if not np.any(selected):
         return False
+
     indices = indices[selected]
     xs = (indices % spec.cells).astype(np.float64) * float(spec.cell_size)
     zs = (indices // spec.cells).astype(np.float64) * float(spec.cell_size)
     points = vectorized_points(xs, zs)
+    corridor = geometry.buffer(radius, cap_style=2, join_style=2)
     return bool(np.any(vectorized_covers(corridor, points)))
 
 
@@ -408,9 +619,6 @@ def install_road_constraint_performance_policy() -> None:
     if _INSTALLED:
         return
 
-    # Bridge runtime installation can replace the water-span predicate. Capture
-    # whichever implementation is final at install time, then add only the
-    # cheap ordinary-road guard around it.
     _ORIGINAL_ROAD_SPAN_WATER_TEST = _terrain.road_span_has_in_game_water
 
     _terrain._line_geometry = _fast_line_geometry
