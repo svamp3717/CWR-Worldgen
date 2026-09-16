@@ -14,6 +14,7 @@ from .bridge_plan_cache_policy import install_bridge_plan_cache_policy
 from .road_constraint_performance_policy import install_road_constraint_performance_policy
 from .road_profile_performance_policy import install_road_profile_performance_policy
 from .building_pad_performance_policy import install_building_pad_performance_policy
+from .road_constraint_pathology_policy import install_road_constraint_pathology_policy
 from .residential_infill_performance_policy import install_residential_infill_performance_policy
 from .terrain_postprocess_performance_policy import install_terrain_postprocess_performance_policy
 from .terrain_grid_performance_policy import install_terrain_grid_performance_policy
@@ -69,6 +70,10 @@ def install_milestone9_advisory_policy() -> None:
     # station, so batch those profile samples as well before building pads run.
     install_road_profile_performance_policy()
     install_building_pad_performance_policy()
+    # Complex roads can still make vectorized GEOS distance/project operations
+    # scale with both corridor-cell count and source vertex count. Resolve those
+    # values while walking local segments and arm a no-progress traceback guard.
+    install_road_constraint_pathology_policy()
     # Residential infill must not rescan every mapped building for every
     # residential polygon. Index source building occupancy once per world while
     # preserving the existing exact point/centroid/vertex containment rules.
