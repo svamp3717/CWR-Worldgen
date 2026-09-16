@@ -24,7 +24,8 @@ def test_vectorized_cell_batch_matches_scalar_shapely_geometry() -> None:
     fast_line = perf._FastLine(scalar_line, {"highway": "residential"})
     corridor = fast_line.buffer(28.0, cap_style=2, join_style=2)
 
-    all_indices = tuple(perf._ORIGINAL_CANDIDATE_CELLS(corridor.bounds, 8, 25.0))
+    scalar_corridor = scalar_line.buffer(28.0, cap_style=2, join_style=2)
+    all_indices = tuple(perf._ORIGINAL_CANDIDATE_CELLS(scalar_corridor.bounds, 8, 25.0))
     expected_indices = tuple(
         index
         for index in all_indices
@@ -45,12 +46,83 @@ def test_vectorized_cell_batch_matches_scalar_shapely_geometry() -> None:
         point = Point(x, z)
         assert abs(fast_line.distance(point) - scalar_line.distance(point)) < 1.0e-9
         assert abs(fast_line.project(point) - scalar_line.project(point)) < 1.0e-9
-        assert corridor.covers(point) == scalar_line.buffer(
-            28.0, cap_style=2, join_style=2
-        ).covers(point)
+        assert corridor.covers(point) == scalar_corridor.covers(point)
 
     assert fast_line._batch.projections is not None
     assert fast_line._batch.covered is not None
+
+
+def test_large_diagonal_corridor_uses_segment_candidates_without_eager_buffer() -> None:
+    scalar_line = LineString([(0.0, 0.0), (5000.0, 5000.0)])
+    fast_line = perf._FastLine(scalar_line, {"highway": "primary"})
+    radius = 24.0
+    cells = 256
+    cell_size = 25.0
+    corridor = fast_line.buffer(radius, cap_style=2, join_style=2)
+
+    assert corridor._geometry is None
+    full_count = perf._candidate_count(corridor.bounds, cells, cell_size)
+    assert full_count > perf._SEGMENT_BROAD_PHASE_THRESHOLD
+
+    original_helper = perf._candidate_indices_for_bounds
+    seen_counts: list[int] = []
+
+    def recording_helper(bounds, helper_cells, helper_cell_size):
+        seen_counts.append(perf._candidate_count(bounds, helper_cells, helper_cell_size))
+        return original_helper(bounds, helper_cells, helper_cell_size)
+
+    with patch.object(perf, "_candidate_indices_for_bounds", side_effect=recording_helper):
+        indices = tuple(perf._fast_candidate_cells(corridor.bounds, cells, cell_size))
+
+    assert corridor._geometry is None
+    assert seen_counts
+    assert max(seen_counts) < full_count
+
+    scalar_corridor = scalar_line.buffer(radius, cap_style=2, join_style=2)
+    expected = tuple(
+        index
+        for index in perf._ORIGINAL_CANDIDATE_CELLS(scalar_corridor.bounds, cells, cell_size)
+        if scalar_line.distance(Point(terrain._cell_center(index, cells, cell_size)))
+        <= radius + 1.0e-9
+    )
+    assert indices == expected
+
+    corridor.covers(Point(2500.0, 2500.0))
+    assert corridor._geometry is not None
+
+
+def test_long_source_segment_is_split_before_grid_rectangle_expansion() -> None:
+    line = LineString([(100.0, 100.0), (12_000.0, 12_000.0)])
+    radius = 30.0
+    cells = 1024
+    cell_size = 25.0
+    bounds = (
+        line.bounds[0] - radius,
+        line.bounds[1] - radius,
+        line.bounds[2] + radius,
+        line.bounds[3] + radius,
+    )
+    full_count = perf._candidate_count(bounds, cells, cell_size)
+    original_helper = perf._candidate_indices_for_bounds
+    seen_counts: list[int] = []
+
+    def recording_helper(piece_bounds, helper_cells, helper_cell_size):
+        seen_counts.append(
+            perf._candidate_count(piece_bounds, helper_cells, helper_cell_size)
+        )
+        return original_helper(piece_bounds, helper_cells, helper_cell_size)
+
+    with patch.object(perf, "_candidate_indices_for_bounds", side_effect=recording_helper):
+        candidates = perf._segment_candidate_indices(
+            line,
+            radius,
+            cells,
+            cell_size,
+        )
+
+    assert candidates.size
+    assert seen_counts
+    assert max(seen_counts) < full_count // 20
 
 
 def test_grid_cell_points_and_profile_interpolation_stay_out_of_scalar_shapely_loop() -> None:
