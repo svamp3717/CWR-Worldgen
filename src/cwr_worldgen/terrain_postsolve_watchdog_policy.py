@@ -10,7 +10,7 @@ from . import terrain_solver as _terrain
 
 _INSTALLED = False
 _ORIGINAL_SOLVE_TERRAIN: Any = None
-_WATCHDOG_SECONDS = 60.0
+_WATCHDOG_SECONDS = 300.0
 
 
 def _cancel_watchdog() -> None:
