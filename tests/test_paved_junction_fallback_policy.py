@@ -1,3 +1,4 @@
+import math
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -17,6 +18,48 @@ def _plan(model: str, point: tuple[float, float], axis=(0.0, 1.0)):
             SimpleNamespace(direction=(1.0, 0.0)),
         ),
     )
+
+
+def _object(object_id: int, model: str, x: float, z: float):
+    return SimpleNamespace(
+        object_id=object_id,
+        model_path=model,
+        x=x,
+        z=z,
+    )
+
+
+def test_successful_plan_keys_preserves_boundary_match_across_buckets() -> None:
+    model = r"o\road\kr_new_sil_sil_t.p3d"
+    key = (1, 2)
+    plans = {key: _plan(model, (0.0, 0.0))}
+    report = SimpleNamespace(
+        objects=(
+            _object(1, model, fallback._SUCCESS_DISTANCE_METRES, 0.0),
+            _object(2, r"o\road\other.p3d", 0.0, 0.0),
+        )
+    )
+
+    assert fallback._successful_plan_keys(report, plans) == frozenset({key})
+
+
+def test_successful_plan_keys_prunes_distant_same_model_positions() -> None:
+    model = r"o\road\kr_new_sil_sil_t.p3d"
+    key = (5, 6)
+    plans = {key: _plan(model, (0.0, 0.0))}
+    objects = [
+        _object(index + 1, model, 1000.0 + index * 2.0, 1000.0)
+        for index in range(5000)
+    ]
+    objects.append(_object(6000, model, 0.10, 0.10))
+    report = SimpleNamespace(objects=tuple(objects))
+    original_dist = math.dist
+
+    with patch.object(fallback.math, "dist", wraps=original_dist) as distance:
+        result = fallback._successful_plan_keys(report, plans)
+
+    assert result == frozenset({key})
+    assert distance.call_count <= 4
 
 
 def test_failed_stock_plan_uses_ordinary_junction_geometry_on_refit() -> None:
