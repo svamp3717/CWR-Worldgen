@@ -11,6 +11,7 @@ from . import playability as _p
 from . import road_quality_policy as _rq
 
 _SUCCESS_DISTANCE_METRES = 0.75
+_SUCCESS_BUCKET_METRES = _SUCCESS_DISTANCE_METRES
 _MAX_STABILIZATION_REFITS = 2
 # A failed stock junction changes trimming around its 32 m reserve.  Include the
 # target-search reach, clear zone and one full stock slab when proactively marking
@@ -63,28 +64,92 @@ def _junction_geometry(dataset, projection, spec):
     return result
 
 
-def _successful_plan_keys(report, plans) -> frozenset[tuple[int, int]]:
-    """Identify plans that actually emitted their stock T/X junction model."""
+def _success_bucket(point: tuple[float, float]) -> tuple[int, int]:
+    return (
+        math.floor(float(point[0]) / _SUCCESS_BUCKET_METRES),
+        math.floor(float(point[1]) / _SUCCESS_BUCKET_METRES),
+    )
+
+
+def _successful_plan_keys(report, plans, progress_callback=None) -> frozenset[tuple[int, int]]:
+    """Identify plans that actually emitted their stock T/X junction model.
+
+    Junction models are heavily reused.  Grouping only by model path and then
+    linearly scanning every emitted position for every plan therefore approaches
+    O(plans * emitted junctions) on large worlds.  Keep the exact 0.75 m success
+    predicate, but spatially bucket emitted positions by model so each plan checks
+    only its own bucket and the eight neighbours.
+    """
 
     wanted_models = {
         plan.model_path.replace("/", "\\").casefold()
         for plan in plans.values()
     }
-    emitted_by_model: dict[str, list[tuple[float, float]]] = {}
-    for obj in getattr(report, "objects", ()):
+    emitted_by_model: dict[
+        str, dict[tuple[int, int], list[tuple[float, float]]]
+    ] = {}
+    objects = tuple(getattr(report, "objects", ()))
+    total_objects = len(objects)
+    progress_interval = max(1, total_objects // 50) if total_objects else 1
+
+    if progress_callback is not None and total_objects:
+        progress_callback(
+            99,
+            f"Indexing fitted paved junctions for fallback validation (0/{total_objects:,})",
+        )
+
+    for object_index, obj in enumerate(objects, start=1):
         model = obj.model_path.replace("/", "\\").casefold()
-        if model not in wanted_models:
-            continue
-        emitted_by_model.setdefault(model, []).append((float(obj.x), float(obj.z)))
+        if model in wanted_models:
+            position = (float(obj.x), float(obj.z))
+            buckets = emitted_by_model.setdefault(model, {})
+            buckets.setdefault(_success_bucket(position), []).append(position)
+        if (
+            progress_callback is not None
+            and (
+                object_index == total_objects
+                or object_index % progress_interval == 0
+            )
+        ):
+            progress_callback(
+                99,
+                "Indexing fitted paved junctions for fallback validation "
+                f"({object_index:,}/{total_objects:,})",
+            )
 
     successful = []
-    for key, plan in plans.items():
+    total_plans = len(plans)
+    plan_interval = max(1, total_plans // 50) if total_plans else 1
+    for plan_index, (key, plan) in enumerate(plans.items(), start=1):
         model = plan.model_path.replace("/", "\\").casefold()
-        if any(
-            math.dist(position, plan.point) <= _SUCCESS_DISTANCE_METRES
-            for position in emitted_by_model.get(model, ())
-        ):
+        buckets = emitted_by_model.get(model, {})
+        bx, bz = _success_bucket(plan.point)
+        matched = False
+        for nx in range(bx - 1, bx + 2):
+            if matched:
+                break
+            for nz in range(bz - 1, bz + 2):
+                if any(
+                    math.dist(position, plan.point) <= _SUCCESS_DISTANCE_METRES
+                    for position in buckets.get((nx, nz), ())
+                ):
+                    matched = True
+                    break
+        if matched:
             successful.append(key)
+        if (
+            progress_callback is not None
+            and total_plans
+            and (
+                plan_index == total_plans
+                or plan_index % plan_interval == 0
+            )
+        ):
+            progress_callback(
+                99,
+                "Validating fitted paved junctions "
+                f"({plan_index:,}/{total_plans:,}; {len(successful):,} successful)",
+            )
     return frozenset(successful)
 
 
@@ -205,7 +270,9 @@ def _fit(
             starting_id=starting_id,
             progress_callback=progress_callback,
         )
-        successful_keys = _successful_plan_keys(report, plans)
+        successful_keys = _successful_plan_keys(
+            report, plans, progress_callback=progress_callback
+        )
         if len(successful_keys) == len(plans):
             return report
 
@@ -261,7 +328,9 @@ def _fit(
 
             fitted = _paved._apply_plans(base_report, active, elevations, spec)
             next_snapshot = session.latest if session is not None else None
-            stable_keys = _successful_plan_keys(fitted, active)
+            stable_keys = _successful_plan_keys(
+                fitted, active, progress_callback=progress_callback
+            )
             if len(stable_keys) == len(active):
                 return fitted
 
