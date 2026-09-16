@@ -10,7 +10,7 @@ building the local broad phase, so the later terrain loop reuses those arrays
 without another full-line GEOS pass.
 
 It also arms a one-shot Python traceback dump when a reported road-constraint
-checkpoint makes no progress for 60 seconds. That diagnostic is deliberately
+checkpoint makes no progress for 5 minutes. That diagnostic is deliberately
 silent during normal runs and resets at each progress checkpoint.
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ from . import terrain_solver as _terrain
 _ANALYTIC_BBOX_THRESHOLD = 16_384
 _ANALYTIC_POINT_THRESHOLD = 512
 _WATCHDOG_AFTER_ROAD = 45_708
-_WATCHDOG_SECONDS = 60.0
+_WATCHDOG_SECONDS = 300.0
 
 _ORIGINAL_INNER_CANDIDATE_CELLS: Any = None
 _ORIGINAL_SOLVE_TERRAIN: Any = None
