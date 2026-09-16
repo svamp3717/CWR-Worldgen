@@ -4,6 +4,7 @@ from unittest.mock import patch
 from shapely.geometry import LineString, Point
 
 from cwr_worldgen import building_pad_performance_policy as building_perf
+from cwr_worldgen import road_constraint_pathology_policy as pathology
 from cwr_worldgen import road_constraint_performance_policy as perf
 from cwr_worldgen import terrain_solver as terrain
 
@@ -11,7 +12,8 @@ from cwr_worldgen import terrain_solver as terrain
 def test_milestone9_installs_road_constraint_performance_policy() -> None:
     assert terrain._line_geometry is perf._fast_line_geometry
     assert terrain._candidate_cells is building_perf._candidate_cells
-    assert building_perf._ORIGINAL_CANDIDATE_CELLS is perf._fast_candidate_cells
+    assert building_perf._ORIGINAL_CANDIDATE_CELLS is pathology._pathological_candidate_cells
+    assert pathology._ORIGINAL_INNER_CANDIDATE_CELLS is perf._fast_candidate_cells
     assert terrain.Point is building_perf._point
     assert building_perf._ORIGINAL_POINT is perf._fast_point
     assert terrain._profile_height is perf._fast_profile_height
