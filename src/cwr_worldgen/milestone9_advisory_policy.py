@@ -11,6 +11,7 @@ from .road_quality_parallel_compat_policy import install_road_quality_parallel_c
 from .bridge_runtime_policy import install_bridge_runtime_policy
 from .bridge_source_water_performance_policy import install_bridge_source_water_performance_policy
 from .bridge_postsolve_water_performance_policy import install_bridge_postsolve_water_performance_policy
+from .bridge_ditch_spatial_policy import install_bridge_ditch_spatial_policy
 from .bridge_underlay_spatial_policy import install_bridge_underlay_spatial_policy
 from .bridge_plan_cache_policy import install_bridge_plan_cache_policy
 from .road_constraint_performance_policy import install_road_constraint_performance_policy
@@ -67,6 +68,10 @@ def install_milestone9_advisory_policy() -> None:
     # the core terrain solver returned. Batch its separate wet-run detection too,
     # preserving islands/dry gaps while avoiding silent post-solve stalls.
     install_bridge_postsolve_water_performance_policy()
+    # Explicit bridge classification historically compared every bridge segment
+    # against every mapped watercourse segment. Bound that exact predicate with a
+    # cached spatial watercourse index before terrain road processing begins.
+    install_bridge_ditch_spatial_policy()
     # Bridge runtime installs exact underlay cleanup. Add only a conservative
     # spatial candidate layer around it so distant road objects never reach the
     # existing distance/heading predicates.
