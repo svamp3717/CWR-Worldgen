@@ -12,6 +12,7 @@ from .bridge_runtime_policy import install_bridge_runtime_policy
 from .bridge_underlay_spatial_policy import install_bridge_underlay_spatial_policy
 from .bridge_plan_cache_policy import install_bridge_plan_cache_policy
 from .road_constraint_performance_policy import install_road_constraint_performance_policy
+from .road_profile_performance_policy import install_road_profile_performance_policy
 from .building_pad_performance_policy import install_building_pad_performance_policy
 from .residential_infill_performance_policy import install_residential_infill_performance_policy
 from .terrain_postprocess_performance_policy import install_terrain_postprocess_performance_policy
@@ -63,6 +64,10 @@ def install_milestone9_advisory_policy() -> None:
     # shorter bridge against the already-raised endpoint cells.
     install_bridge_plan_cache_policy()
     install_road_constraint_performance_policy()
+    # The corridor/cell half above is vectorized already. Long roads still paid
+    # for scalar line interpolation and six terrain samples per cross-slope
+    # station, so batch those profile samples as well before building pads run.
+    install_road_profile_performance_policy()
     install_building_pad_performance_policy()
     # Residential infill must not rescan every mapped building for every
     # residential polygon. Index source building occupancy once per world while
