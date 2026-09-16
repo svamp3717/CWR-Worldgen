@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from cwr_worldgen import terrain_grid_performance_policy as grid_perf
 from cwr_worldgen import terrain_postsolve_watchdog_policy as watchdog
 from cwr_worldgen import terrain_solver as terrain
 
 
-def test_runtime_uses_postsolve_watchdog_wrapper() -> None:
-    assert terrain.solve_terrain_constraints is watchdog._solve_with_postsolve_watchdog
+def test_runtime_uses_postsolve_watchdog_inside_grid_wrapper() -> None:
+    assert terrain.solve_terrain_constraints is grid_perf._fast_solve_terrain_constraints
+    assert grid_perf._ORIGINAL_SOLVE is watchdog._solve_with_postsolve_watchdog
 
 
 def test_watchdog_arms_after_core_solver_ready_and_cancels_on_return() -> None:
