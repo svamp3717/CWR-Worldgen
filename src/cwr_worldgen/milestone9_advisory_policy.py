@@ -9,6 +9,7 @@ from . import milestone9 as _milestone9
 from .road_chain_parallel_policy import install_road_chain_parallel_policy
 from .road_quality_parallel_compat_policy import install_road_quality_parallel_compat_policy
 from .bridge_runtime_policy import install_bridge_runtime_policy
+from .bridge_source_water_performance_policy import install_bridge_source_water_performance_policy
 from .bridge_underlay_spatial_policy import install_bridge_underlay_spatial_policy
 from .bridge_plan_cache_policy import install_bridge_plan_cache_policy
 from .road_constraint_performance_policy import install_road_constraint_performance_policy
@@ -56,6 +57,10 @@ def install_milestone9_advisory_policy() -> None:
     install_road_chain_parallel_policy()
     install_road_quality_parallel_compat_policy()
     install_bridge_runtime_policy()
+    # Source-water bridge detection is exact but its historical 0.5 m sampling
+    # performed Python point-in-ring work for every sample. Index and batch that
+    # lookup before road terrain constraints capture the live water predicate.
+    install_bridge_source_water_performance_policy()
     # Bridge runtime installs exact underlay cleanup. Add only a conservative
     # spatial candidate layer around it so distant road objects never reach the
     # existing distance/heading predicates.
