@@ -31,6 +31,7 @@ from .object_stage_parallel_policy import install_object_stage_parallel_policy
 from .forest_primary_parallel_policy import install_forest_primary_parallel_policy
 from .road_finish_parallel_policy import install_road_finish_parallel_policy
 from .shared_object_index_policy import install_shared_object_index_policy
+from .road_fit_cache_policy import install_road_fit_cache_policy
 
 _ADVISORY_OBJECT_LIMITS: ContextVar[bool | None] = ContextVar(
     "cwr_milestone9_advisory_object_limits", default=None
@@ -116,6 +117,10 @@ def install_milestone9_advisory_policy() -> None:
     # remain active and the parent still owns object ids and junction validation.
     install_road_finish_parallel_policy()
     install_shared_object_index_policy()
+    # Cache the deterministic expensive inner road fit after the parallel finish
+    # layer is final. Later package-startup wrappers still perform final dedupe,
+    # bridge underlay cleanup and road/building ContextVar recording on every run.
+    install_road_fit_cache_policy()
 
     def build_milestone9(output_dir, spec, *, clean: bool = True):
         token = _ADVISORY_OBJECT_LIMITS.set(
