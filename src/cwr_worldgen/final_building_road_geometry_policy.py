@@ -77,3 +77,11 @@ def install_final_building_road_geometry_policy() -> None:
     from .physical_road_overlap_policy import install_physical_road_overlap_policy
 
     install_physical_road_overlap_policy()
+
+    # Final diagnostic boundary: once the inner stock fitter announces completion,
+    # keep a traceback timer armed until every outer road wrapper has actually
+    # returned. This exposes otherwise silent gravel/dedupe/bridge post-processing
+    # without changing road semantics or stopping the build.
+    from .road_postfit_watchdog_policy import install_road_postfit_watchdog_policy
+
+    install_road_postfit_watchdog_policy()
