@@ -110,10 +110,18 @@ def _indexed_road_bridge_crosses_ditch_only(
     *,
     tolerance_metres: float = _osm.BRIDGE_DITCH_CROSSING_TOLERANCE_METRES,
 ) -> bool:
-    points = tuple(projection.to_world(point) for point in getattr(feature, "points", ()))
-    if len(points) < 2:
+    tags = getattr(feature, "tags", {}) or {}
+    bridge = str(tags.get("bridge", "")).strip().casefold()
+    explicit = (
+        bridge not in {"", "no", "false", "0", "none"}
+        or str(tags.get("man_made", "")).strip().casefold() == "bridge"
+        or str(tags.get("special", "")).strip().casefold() == "bridge"
+    )
+    feature_points = getattr(feature, "points", ())
+    if not explicit or len(feature_points) < 2:
         return False
 
+    points = tuple(projection.to_world(point) for point in feature_points)
     index = _watercourse_index(dataset, projection)
     if not index.segments:
         return False
@@ -125,7 +133,7 @@ def _indexed_road_bridge_crosses_ditch_only(
     for road_start, road_end in zip(points, points[1:]):
         for candidate_index in _candidate_indices(index, road_start, road_end, tolerance):
             water = index.segments[candidate_index]
-            # Buckets are only a conservative broad phase.  Preserve the exact
+            # Buckets are only a conservative broad phase. Preserve the exact
             # historical segment-distance predicate for the final decision.
             if _osm._segment_distance_squared(
                 road_start,
@@ -136,7 +144,7 @@ def _indexed_road_bridge_crosses_ditch_only(
                 continue
             if water.kind != "ditch":
                 # Historical semantics are false if any crossed mapped
-                # watercourse is not a ditch.  We can therefore stop here.
+                # watercourse is not a ditch. We can therefore stop here.
                 return False
             found_ditch = True
 
