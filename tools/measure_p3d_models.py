@@ -207,7 +207,7 @@ def _measurement(
     lod: str,
     points: Sequence[tuple[float, float, float]],
 ) -> ModelMeasurement:
-    if not points:
+    if len(points) == 0:
         raise ModelReadError("selected LOD has no vertices")
     if any(not all(math.isfinite(value) for value in point) for point in points):
         raise ModelReadError("selected LOD contains non-finite vertex coordinates")
