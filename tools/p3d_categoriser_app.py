@@ -18,9 +18,13 @@ from p3d_texture_io import TextureResolver
 from p3d_texture_render import render_textured_model
 
 
+PLACEMENTS = ("Urban", "Rural", "Both")
+
+
 @dataclass(slots=True)
 class Classification:
     categories: list[str]
+    placement: str = ""
     reviewed: bool = False
 
 
@@ -37,9 +41,13 @@ def load_state(path: Path) -> tuple[dict[str, Classification], list[str]]:
         if not isinstance(item, dict) or "model_path" not in item:
             continue
         key = measure._canonical_model_path(str(item["model_path"]))
+        placement = str(item.get("placement", "")).strip()
+        if placement not in PLACEMENTS:
+            placement = ""
         result[key] = Classification(
-            [str(v) for v in item.get("categories", [])],
-            bool(item.get("reviewed", True)),
+            categories=[str(v) for v in item.get("categories", [])],
+            placement=placement,
+            reviewed=bool(item.get("reviewed", True)),
         )
     return result, categories
 
@@ -128,6 +136,31 @@ class CategoriserApp:
             ).pack(anchor="w", fill="x", pady=2)
 
         ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
+        ttk.Label(side, text="Placement", font=("TkDefaultFont", 11, "bold")).pack(
+            anchor="w", pady=(0, 4)
+        )
+        self.placement_var = tk.StringVar(master=self.root, value="")
+        for placement in PLACEMENTS:
+            label = {
+                "Urban": "Urban only",
+                "Rural": "Rural only",
+                "Both": "Both / anywhere",
+            }[placement]
+            ttk.Radiobutton(
+                side,
+                text=label,
+                value=placement,
+                variable=self.placement_var,
+                command=self._placement_changed,
+            ).pack(anchor="w", fill="x", pady=1)
+        ttk.Label(
+            side,
+            text="Urban = towns/cities only; Rural = countryside only; Both = valid in either.",
+            wraplength=300,
+            justify=tk.LEFT,
+        ).pack(anchor="w", pady=(4, 0))
+
+        ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
         ttk.Label(side, text="View", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
         row = ttk.Frame(side)
         row.pack(fill="x", pady=4)
@@ -167,7 +200,7 @@ class CategoriserApp:
         self.prev_button.grid(row=0, column=0, padx=(0, 6))
         ttk.Label(
             nav,
-            text="Left/Right navigate • Ctrl+S saves • checkbox changes autosave",
+            text="Left/Right navigate • Ctrl+S saves • category/placement changes autosave",
         ).grid(row=0, column=1)
         self.next_button = ttk.Button(nav, text="Next ▶", command=self.next_model)
         self.next_button.grid(row=0, column=2, padx=(6, 0))
@@ -197,15 +230,27 @@ class CategoriserApp:
     def _current_categories(self) -> list[str]:
         return [name for name, var in self.category_vars.items() if var.get()]
 
+    def _current_placement(self) -> str:
+        placement = self.placement_var.get().strip()
+        return placement if placement in PLACEMENTS else ""
+
     def _commit(self, reviewed: bool) -> None:
         if self.current is None or self._updating_checks:
             return
         old = self.state.get(self.current.model_path, Classification([]))
         self.state[self.current.model_path] = Classification(
-            self._current_categories(), reviewed or old.reviewed
+            categories=self._current_categories(),
+            placement=self._current_placement(),
+            reviewed=reviewed or old.reviewed,
         )
 
     def _category_changed(self) -> None:
+        if self._updating_checks or self.current is None:
+            return
+        self._commit(True)
+        self.save_state()
+
+    def _placement_changed(self) -> None:
         if self._updating_checks or self.current is None:
             return
         self._commit(True)
@@ -274,10 +319,12 @@ class CategoriserApp:
         try:
             for category, var in self.category_vars.items():
                 var.set(category in selected)
+            self.placement_var.set(classification.placement)
         finally:
             self._updating_checks = False
 
         m = model.measurement
+        placement_text = classification.placement or "Unspecified"
         self.info_var.set(
             f"Format: {m.format} v{m.version}\n"
             f"Vertices: {model.original_vertex_count:,}\n"
@@ -286,6 +333,7 @@ class CategoriserApp:
             f"Height: {m.height_m:g} m\n"
             f"Length: {m.length_m:g} m\n"
             f"Footprint: {m.footprint_area_m2:g} m²\n"
+            f"Placement: {placement_text}\n"
             f"Reviewed: {'yes' if classification.reviewed else 'no'}"
         )
         names = [measure._canonical_model_path(n) for n in model.texture_paths if n]
@@ -347,14 +395,17 @@ class CategoriserApp:
     def save_state(self) -> None:
         self.output.parent.mkdir(parents=True, exist_ok=True)
         report = {
-            "schema": 1,
+            "schema": 2,
             "categories": self.categories,
+            "placements": list(PLACEMENTS),
             "reviewed_count": sum(1 for x in self.state.values() if x.reviewed),
             "classified_count": sum(1 for x in self.state.values() if x.categories),
+            "placement_count": sum(1 for x in self.state.values() if x.placement),
             "models": [
                 {
                     "model_path": key,
                     "categories": self.state[key].categories,
+                    "placement": self.state[key].placement,
                     "reviewed": self.state[key].reviewed,
                 }
                 for key in sorted(self.state)
