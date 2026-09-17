@@ -30,7 +30,6 @@ def test_complete_and_incomplete_reviews_are_saved_separately(tmp_path: Path) ->
         output,
         categories=["Residential"],
         state=state,
-        failures=[],
         resume_model_path=r"o\hous\missing-placement.p3d",
     )
 
@@ -47,6 +46,8 @@ def test_complete_and_incomplete_reviews_are_saved_separately(tmp_path: Path) ->
     ]
     assert r"o\hous\untouched.p3d" not in json.dumps(primary)
     assert r"o\hous\untouched.p3d" not in json.dumps(companion)
+    assert "failures" not in primary
+    assert "failures" not in companion
 
     loaded, categories = load_state(output)
     assert categories == ["Residential"]
@@ -63,7 +64,6 @@ def test_completing_a_review_removes_stale_companion_entry(tmp_path: Path) -> No
         output,
         categories=["Residential"],
         state={key: Classification(["Residential"], "", True)},
-        failures=[],
     )
     assert incomplete_state_path(output).exists()
 
@@ -71,8 +71,8 @@ def test_completing_a_review_removes_stale_companion_entry(tmp_path: Path) -> No
         output,
         categories=["Residential"],
         state={key: Classification(["Residential"], "Both", True)},
-        failures=[],
     )
     assert not incomplete_state_path(output).exists()
     primary = json.loads(output.read_text(encoding="utf-8"))
     assert [item["model_path"] for item in primary["models"]] == [key]
+    assert "failures" not in primary
