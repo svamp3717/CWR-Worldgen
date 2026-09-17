@@ -263,9 +263,17 @@ def _preview_models(
             IndexError,
             ValueError,
         ) as exc:
-            yield measure.ModelFailure(
+            failure = measure.ModelFailure(
                 model_path=model_path, source=source, error=str(exc)
             )
+            print(
+                f"[model error] {failure.model_path}\n"
+                f"  source: {failure.source}\n"
+                f"  error:  {failure.error}",
+                file=sys.stderr,
+                flush=True,
+            )
+            yield failure
 
 
 def _load_state(path: Path) -> tuple[dict[str, Classification], list[str]]:
@@ -479,11 +487,17 @@ class CategoriserApp:
                 model = self._load_next_from_generator()
             except (OSError, ValueError) as exc:
                 self._clear_busy()
+                print(f"[scan error] {exc}", file=sys.stderr, flush=True)
                 messagebox.showerror("Scan error", str(exc))
                 return
             finally:
                 self._clear_busy()
             if model is None:
+                summary = (
+                    f"End of scan: {len(self.models)} model(s), "
+                    f"{len(self.failures)} failure(s)"
+                )
+                print(f"[scan] {summary}", file=sys.stderr, flush=True)
                 self.progress_var.set(
                     f"End of scan • {len(self.models)} models • {len(self.failures)} failures"
                 )
@@ -625,6 +639,7 @@ class CategoriserApp:
                 self._commit_current(reviewed=False)
             self.save_state()
         except OSError as exc:
+            print(f"[save error] {exc}", file=sys.stderr, flush=True)
             if not messagebox.askyesno(
                 "Could not save",
                 f"Could not save classifications:\n{exc}\n\nClose anyway?",
