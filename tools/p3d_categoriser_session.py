@@ -10,6 +10,7 @@ from tkinter import ttk
 
 import measure_p3d_models as measure
 from p3d_categoriser_app import CategoriserApp, Classification, PLACEMENTS
+from p3d_texture_render import render_textured_model
 
 
 def load_resume_path(path: Path) -> str:
@@ -42,18 +43,25 @@ class SessionCategoriserApp(CategoriserApp):
         self._navigation_label_var = tk.StringVar(master=root, value="")
         self._navigation_detail_var = tk.StringVar(master=root, value="")
         self._navigation_bar: ttk.Progressbar | None = None
+        self.zoom = 1.0
 
         root.withdraw()
         self._create_loading_screen(root)
         root.update()
 
         super().__init__(root, **kwargs)
+        self.canvas.mpl_connect("scroll_event", self._on_scroll_zoom)
         self._install_session_menu()
         self._startup_active = False
         self._finish_loading_screen()
 
     @staticmethod
-    def _center_window(window: tk.Toplevel, width: int, height: int, parent: tk.Misc | None = None) -> None:
+    def _center_window(
+        window: tk.Toplevel,
+        width: int,
+        height: int,
+        parent: tk.Misc | None = None,
+    ) -> None:
         """Place a utility window over its parent, or centre it on screen."""
         window.update_idletasks()
         if parent is not None and parent.winfo_ismapped():
@@ -228,8 +236,44 @@ class SessionCategoriserApp(CategoriserApp):
             accelerator="Ctrl+Home",
         )
         menu.add_cascade(label="Session", menu=session_menu)
+
+        view_menu = tk.Menu(menu, tearoff=False)
+        view_menu.add_command(label="Zoom in", command=lambda: self._zoom_by(1.25), accelerator="+")
+        view_menu.add_command(label="Zoom out", command=lambda: self._zoom_by(1 / 1.25), accelerator="-")
+        view_menu.add_command(label="Fit model", command=self._reset_zoom, accelerator="0")
+        menu.add_cascade(label="View", menu=view_menu)
+
         self.root.configure(menu=menu)
         self.root.bind("<Control-Home>", lambda _event: self.restart_from_beginning())
+        self.root.bind("<Key-plus>", lambda _event: self._zoom_by(1.25))
+        self.root.bind("<Key-equal>", lambda _event: self._zoom_by(1.25))
+        self.root.bind("<Key-minus>", lambda _event: self._zoom_by(1 / 1.25))
+        self.root.bind("<Key-0>", lambda _event: self._reset_zoom())
+
+    def _zoom_by(self, factor: float) -> None:
+        if self.current is None:
+            return
+        new_zoom = max(0.65, min(5.0, self.zoom * factor))
+        if abs(new_zoom - self.zoom) < 1e-6:
+            return
+        self.zoom = new_zoom
+        self._redraw()
+
+    def _reset_zoom(self) -> None:
+        if self.current is None or abs(self.zoom - 1.0) < 1e-6:
+            return
+        self.zoom = 1.0
+        self._redraw()
+
+    def _on_scroll_zoom(self, event) -> None:
+        if self.current is None:
+            return
+        step = getattr(event, "step", 0)
+        button = getattr(event, "button", None)
+        if button == "up" or step > 0:
+            self._zoom_by(1.25)
+        elif button == "down" or step < 0:
+            self._zoom_by(1 / 1.25)
 
     def _busy(self, text: str) -> None:
         if self._startup_active:
@@ -328,11 +372,61 @@ class SessionCategoriserApp(CategoriserApp):
 
     def _show_model(self, model) -> None:
         self._resume_model_path = model.model_path
+        self.zoom = 1.0
         if self._startup_active:
             self._set_loading_status("Rendering textured model...", model.model_path)
         elif self._navigation_window is not None:
             self._set_navigation_status("Rendering textured model...", model.model_path)
         super()._show_model(model)
+
+    def _draw_model(self, model) -> None:
+        """Render a larger, zoomable, filtered textured view for close inspection."""
+        self.ax_preview.clear()
+        self.status_var.set("")
+
+        if not model.faces:
+            self.ax_preview.text(
+                0.5,
+                0.5,
+                "Textured preview unavailable\nNo polygon topology was parsed for this model.",
+                ha="center",
+                va="center",
+                transform=self.ax_preview.transAxes,
+                fontsize=13,
+            )
+            self.ax_preview.axis("off")
+            self.figure.tight_layout(pad=1.2)
+            self.canvas.draw_idle()
+            return
+
+        image, hits, misses = render_textured_model(
+            model.points,
+            model.faces,
+            self.texture_resolver,
+            model.source,
+            width=1400,
+            height=980,
+            azim_deg=self.azim,
+            elev_deg=self.elev,
+            zoom=self.zoom,
+        )
+        self.ax_preview.imshow(image, interpolation="nearest")
+        self.ax_preview.set_title(
+            f"Textured model • az {self.azim:.0f}° / el {self.elev:.0f}° • zoom {self.zoom:.2f}×"
+        )
+        self.ax_preview.axis("off")
+        if misses:
+            self.status_var.set(
+                f"Texture sampling: {hits} textured face hit(s), "
+                f"{misses} missing/unreadable face texture(s). See console."
+            )
+        else:
+            self.status_var.set(
+                f"Texture sampling: {hits} textured face hit(s). "
+                "Mouse wheel zooms for signs and small details."
+            )
+        self.figure.tight_layout(pad=1.0)
+        self.canvas.draw_idle()
 
     def restart_from_beginning(self) -> None:
         """Move navigation to the first model without clearing classifications."""
