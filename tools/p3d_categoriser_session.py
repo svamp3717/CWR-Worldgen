@@ -25,7 +25,7 @@ def load_resume_path(path: Path) -> str:
 
 
 class SessionCategoriserApp(CategoriserApp):
-    """Categoriser with a startup loading screen and persistent list position."""
+    """Categoriser with loading screens and persistent list position."""
 
     def __init__(self, root: tk.Tk, *, resume_model_path: str = "", **kwargs) -> None:
         self._startup_active = True
@@ -38,6 +38,11 @@ class SessionCategoriserApp(CategoriserApp):
         self._loading_detail_var = tk.StringVar(master=root, value="")
         self._loading_bar: ttk.Progressbar | None = None
 
+        self._navigation_window: tk.Toplevel | None = None
+        self._navigation_label_var = tk.StringVar(master=root, value="")
+        self._navigation_detail_var = tk.StringVar(master=root, value="")
+        self._navigation_bar: ttk.Progressbar | None = None
+
         root.withdraw()
         self._create_loading_screen(root)
         root.update()
@@ -46,6 +51,20 @@ class SessionCategoriserApp(CategoriserApp):
         self._install_session_menu()
         self._startup_active = False
         self._finish_loading_screen()
+
+    @staticmethod
+    def _center_window(window: tk.Toplevel, width: int, height: int, parent: tk.Misc | None = None) -> None:
+        """Place a utility window over its parent, or centre it on screen."""
+        window.update_idletasks()
+        if parent is not None and parent.winfo_ismapped():
+            px, py = parent.winfo_rootx(), parent.winfo_rooty()
+            pw, ph = parent.winfo_width(), parent.winfo_height()
+            x = px + max(0, (pw - width) // 2)
+            y = py + max(0, (ph - height) // 2)
+        else:
+            sw, sh = window.winfo_screenwidth(), window.winfo_screenheight()
+            x, y = max(0, (sw - width) // 2), max(0, (sh - height) // 2)
+        window.geometry(f"{width}x{height}+{x}+{y}")
 
     def _create_loading_screen(self, root: tk.Tk) -> None:
         window = tk.Toplevel(root)
@@ -87,9 +106,7 @@ class SessionCategoriserApp(CategoriserApp):
         window.update_idletasks()
         width = max(window.winfo_reqwidth(), 540)
         height = max(window.winfo_reqheight(), 180)
-        sw, sh = window.winfo_screenwidth(), window.winfo_screenheight()
-        x, y = max(0, (sw - width) // 2), max(0, (sh - height) // 2)
-        window.geometry(f"{width}x{height}+{x}+{y}")
+        self._center_window(window, width, height)
         window.lift()
 
     def _set_loading_status(self, text: str, detail: str = "") -> None:
@@ -122,6 +139,86 @@ class SessionCategoriserApp(CategoriserApp):
         self.root.lift()
         self.root.focus_force()
 
+    def _begin_navigation_loading(self, text: str, detail: str = "") -> bool:
+        """Show a modal-ish loading overlay. Return False if one is already active."""
+        if self._startup_active:
+            return True
+        if self._navigation_window is not None:
+            return False
+
+        window = tk.Toplevel(self.root)
+        self._navigation_window = window
+        window.title("Loading model")
+        window.resizable(False, False)
+        window.transient(self.root)
+        window.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        frame = ttk.Frame(window, padding=22)
+        frame.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(
+            frame,
+            textvariable=self._navigation_label_var,
+            font=("TkDefaultFont", 12, "bold"),
+            wraplength=430,
+            justify=tk.LEFT,
+        ).pack(anchor="w")
+        ttk.Label(
+            frame,
+            textvariable=self._navigation_detail_var,
+            wraplength=430,
+            justify=tk.LEFT,
+        ).pack(anchor="w", pady=(8, 12))
+        bar = ttk.Progressbar(frame, mode="indeterminate", length=430)
+        self._navigation_bar = bar
+        bar.pack(fill=tk.X)
+        bar.start(10)
+
+        self._navigation_label_var.set(text)
+        self._navigation_detail_var.set(detail)
+        window.update_idletasks()
+        width = max(window.winfo_reqwidth(), 490)
+        height = max(window.winfo_reqheight(), 135)
+        self._center_window(window, width, height, self.root)
+        try:
+            window.grab_set()
+        except tk.TclError:
+            pass
+        window.lift()
+        try:
+            self.root.update()
+        except tk.TclError:
+            pass
+        return True
+
+    def _set_navigation_status(self, text: str, detail: str = "") -> None:
+        if self._navigation_window is None:
+            return
+        self._navigation_label_var.set(text)
+        self._navigation_detail_var.set(detail)
+        try:
+            self.root.update_idletasks()
+        except tk.TclError:
+            pass
+
+    def _finish_navigation_loading(self) -> None:
+        if self._navigation_bar is not None:
+            self._navigation_bar.stop()
+            self._navigation_bar = None
+        if self._navigation_window is not None:
+            try:
+                self._navigation_window.grab_release()
+            except tk.TclError:
+                pass
+            try:
+                self._navigation_window.destroy()
+            except tk.TclError:
+                pass
+            self._navigation_window = None
+        try:
+            self.root.update_idletasks()
+        except tk.TclError:
+            pass
+
     def _install_session_menu(self) -> None:
         menu = tk.Menu(self.root)
         session_menu = tk.Menu(menu, tearoff=False)
@@ -137,6 +234,8 @@ class SessionCategoriserApp(CategoriserApp):
     def _busy(self, text: str) -> None:
         if self._startup_active:
             self._set_loading_status(text, self._loading_detail_var.get())
+        elif self._navigation_window is not None:
+            self._set_navigation_status(text, self._navigation_detail_var.get())
         super()._busy(text)
 
     def next_model(self, *, mark_current: bool = True) -> None:
@@ -197,12 +296,42 @@ class SessionCategoriserApp(CategoriserApp):
             self._show_model(self.models[self.index])
             return
 
-        super().next_model(mark_current=mark_current)
+        if not self._begin_navigation_loading(
+            "Loading next model...",
+            "Saving the current classification and scanning the next asset.",
+        ):
+            return
+        try:
+            super().next_model(mark_current=mark_current)
+            if hasattr(self, "canvas"):
+                self.canvas.draw()
+        finally:
+            self._finish_navigation_loading()
+
+    def previous_model(self) -> None:
+        if self._startup_active:
+            super().previous_model()
+            return
+        if self.index <= 0:
+            return
+        if not self._begin_navigation_loading(
+            "Loading previous model...",
+            "Saving the current classification and restoring the previous asset.",
+        ):
+            return
+        try:
+            super().previous_model()
+            if hasattr(self, "canvas"):
+                self.canvas.draw()
+        finally:
+            self._finish_navigation_loading()
 
     def _show_model(self, model) -> None:
         self._resume_model_path = model.model_path
         if self._startup_active:
             self._set_loading_status("Rendering textured model...", model.model_path)
+        elif self._navigation_window is not None:
+            self._set_navigation_status("Rendering textured model...", model.model_path)
         super()._show_model(model)
 
     def restart_from_beginning(self) -> None:
