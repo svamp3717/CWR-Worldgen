@@ -1,10 +1,9 @@
 """Persistent storage helpers for the P3D model categoriser."""
 from __future__ import annotations
 
-from dataclasses import asdict
 import json
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import measure_p3d_models as measure
 from p3d_categoriser_app import Classification, PLACEMENTS
@@ -46,7 +45,9 @@ def load_state(path: Path) -> tuple[dict[str, Classification], list[str]]:
     """Load complete state plus the reviewed-incomplete companion file.
 
     Legacy files that still contain incomplete entries in their main ``models`` array
-    are accepted. The next save migrates those entries to the companion file.
+    are accepted. Legacy diagnostic fields such as ``failures`` are simply ignored.
+    The next save migrates incomplete entries to the companion file and writes no
+    scan failures to either catalogue file.
     """
     result: dict[str, Classification] = {}
     categories: list[str] = []
@@ -101,12 +102,12 @@ def save_split_state(
     *,
     categories: Sequence[str],
     state: dict[str, Classification],
-    failures: Iterable[object],
     resume_model_path: str = "",
 ) -> tuple[int, int]:
     """Save completed models separately from reviewed-but-incomplete models.
 
-    Returns ``(complete_count, incomplete_count)``.
+    Runtime scan/parser failures are intentionally not persisted. They remain console
+    diagnostics only. Returns ``(complete_count, incomplete_count)``.
     """
     complete_keys = [key for key in sorted(state) if _complete(state[key])]
     incomplete_keys = [
@@ -127,7 +128,6 @@ def save_split_state(
         "incomplete_reviewed_count": len(incomplete_keys),
         "incomplete_reviewed_file": companion.name,
         "models": [_model_record(key, state[key]) for key in complete_keys],
-        "failures": [asdict(value) for value in failures],
     }
     _atomic_write_json(path, main_report)
 
