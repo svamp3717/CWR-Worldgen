@@ -18,7 +18,6 @@ class SplitStateCategoriserApp(SessionCategoriserApp):
             self.output,
             categories=self.categories,
             state=self.state,
-            failures=self.failures,
             resume_model_path=resume_path,
         )
         if hasattr(self, "status_var"):
