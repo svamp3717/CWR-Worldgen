@@ -24,7 +24,7 @@ from p3d_categoriser_session import load_resume_path
 from p3d_categoriser_split import SplitStateCategoriserApp
 from p3d_categoriser_storage import load_state
 from p3d_preview_geometry import preview_models
-from p3d_texture_io import TextureResolver
+from p3d_texture_sources import TextureResolver
 
 DEFAULT_CATEGORIES = (
     "Residential", "Commercial", "Industrial", "Agricultural", "Military",
@@ -55,6 +55,18 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
         metavar="GLOB",
         help="Only include canonical model paths matching GLOB. May be repeated.",
+    )
+    p.add_argument(
+        "--texture-source",
+        action="append",
+        default=[],
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Additional PBO or directory used only for texture lookup. May be repeated; "
+            "it does not add models to the scan. Sibling namespace PBOs such as Data.pbo "
+            "for data\\*.paa/.pac references are also discovered automatically."
+        ),
     )
     p.add_argument(
         "-o",
@@ -112,6 +124,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             pass
         return 2
 
+    texture_sources = [path.expanduser() for path in args.texture_source]
+    missing_texture_sources = [path for path in texture_sources if not path.exists()]
+    if missing_texture_sources:
+        text = (
+            "Texture source path does not exist:\n"
+            + "\n".join(f"  {path}" for path in missing_texture_sources)
+        )
+        print(f"error: {text}", file=sys.stderr)
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Texture source not found", text, parent=root)
+            root.destroy()
+        except tk.TclError:
+            pass
+        return 2
+
     try:
         state, saved = load_state(args.output)
     except ValueError as exc:
@@ -130,12 +159,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.restart:
         print("[resume] restart requested; starting from first model", file=sys.stderr, flush=True)
 
+    texture_inputs = list(dict.fromkeys([*inputs, *texture_sources]))
+    if texture_sources:
+        print(
+            "[textures] additional source(s): " + ", ".join(str(path) for path in texture_sources),
+            file=sys.stderr,
+            flush=True,
+        )
+
     iterator = preview_models(inputs, args.include, args.max_preview_points)
     root = tk.Tk()
     app = SplitStateCategoriserApp(
         root,
         model_iter=iterator,
-        texture_resolver=TextureResolver(inputs),
+        texture_resolver=TextureResolver(texture_inputs),
         output=args.output,
         categories=categories,
         state=state,
