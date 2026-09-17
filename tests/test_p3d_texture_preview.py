@@ -11,7 +11,12 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from p3d_texture_io import decode_paa
-from p3d_texture_render import RenderFace, render_textured_model
+from p3d_texture_render import (
+    RenderFace,
+    _project,
+    _sample_bilinear,
+    render_textured_model,
+)
 
 
 def test_decode_dxt1_paa() -> None:
@@ -53,9 +58,48 @@ def test_textured_renderer_applies_face_texture() -> None:
         [(-1.0, -1.0, 0.0), (1.0, -1.0, 0.0), (1.0, 1.0, 0.0), (-1.0, 1.0, 0.0)],
         dtype=np.float32,
     )
-    face = RenderFace((0, 1, 2, 3), ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), r"data\red.paa")
-    image, hits, misses = render_textured_model(points, (face,), _Resolver(), "fixture", width=160, height=120)
+    face = RenderFace(
+        (0, 1, 2, 3),
+        ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)),
+        r"data\red.paa",
+    )
+    image, hits, misses = render_textured_model(
+        points,
+        (face,),
+        _Resolver(),
+        "fixture",
+        width=160,
+        height=120,
+    )
     assert hits > 0
     assert misses == 0
     red = (image[:, :, 0] > 240) & (image[:, :, 1] < 20) & (image[:, :, 2] < 20)
     assert int(red.sum()) > 100
+
+
+def test_projection_zoom_doubles_screen_distance() -> None:
+    points = np.asarray(
+        [(-1.0, -1.0, 0.0), (1.0, -1.0, 0.0), (1.0, 1.0, 0.0), (-1.0, 1.0, 0.0)],
+        dtype=np.float32,
+    )
+    normal = _project(points, 800, 600, 35.0, 25.0, 1.0)
+    zoomed = _project(points, 800, 600, 35.0, 25.0, 2.0)
+    centre = np.asarray((400.0, 300.0))
+    normal_distance = np.linalg.norm(normal[:, :2] - centre, axis=1)
+    zoomed_distance = np.linalg.norm(zoomed[:, :2] - centre, axis=1)
+    assert np.allclose(zoomed_distance, normal_distance * 2.0)
+
+
+def test_bilinear_sampling_blends_adjacent_texels() -> None:
+    texture = np.asarray(
+        [
+            [(255, 0, 0, 255), (0, 255, 0, 255)],
+            [(0, 0, 255, 255), (255, 255, 255, 255)],
+        ],
+        dtype=np.uint8,
+    )
+    sampled = _sample_bilinear(texture, np.asarray([[0.5]]), np.asarray([[0.5]]))[0, 0]
+    assert 110 <= int(sampled[0]) <= 145
+    assert 110 <= int(sampled[1]) <= 145
+    assert 110 <= int(sampled[2]) <= 145
+    assert int(sampled[3]) == 255
