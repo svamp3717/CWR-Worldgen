@@ -201,12 +201,8 @@ class TextureResolver:
             print(f"[texture missing] {canonical}", file=sys.stderr, flush=True)
             self.image_cache[canonical] = None
             return None
-        if canonical.endswith(".pac"):
-            print(f"[texture warning] PAC decoding is not implemented: {canonical}", file=sys.stderr, flush=True)
-            self.image_cache[canonical] = None
-            return None
         try:
-            image = decode_paa(data)
+            image = decode_paa(data, is_paa=canonical.endswith(".paa"))
         except (ValueError, struct.error, IndexError) as exc:
             print(f"[texture decode error] {canonical}: {exc}", file=sys.stderr, flush=True)
             image = None
@@ -362,13 +358,45 @@ def _decode_1555(raw: bytes, width: int, height: int) -> np.ndarray:
     return np.stack(channels, axis=1).astype(np.uint8).reshape((height, width, 4))
 
 
-def decode_paa(data: bytes) -> np.ndarray:
-    """Decode the first PAA mip to HxWx4 RGBA, following CWR-CE's decoder."""
+def _decode_p8_payload(stream: io.BytesIO, width: int, height: int, palette: np.ndarray, *, lzw: bool) -> np.ndarray:
+    expected = width * height
+    if lzw:
+        indices = np.frombuffer(_decode_paa_lzw(stream, expected), dtype=np.uint8)
+    else:
+        out = bytearray()
+        while len(out) < expected:
+            raw = stream.read(1)
+            if not raw:
+                raise ValueError("truncated PAC RLE control byte")
+            control = raw[0]
+            if control & 0x80:
+                value = stream.read(1)
+                if not value:
+                    raise ValueError("truncated PAC RLE value")
+                count = (control & 0x7F) + 1
+                out.extend(value * min(count, expected - len(out)))
+            else:
+                count = control + 1
+                chunk = stream.read(count)
+                if len(chunk) != count:
+                    raise ValueError("truncated PAC RLE literal run")
+                out.extend(chunk[: expected - len(out)])
+        indices = np.frombuffer(bytes(out), dtype=np.uint8)
+    if len(palette) == 0:
+        raise ValueError("paletted PAC has no palette")
+    if int(indices.max(initial=0)) >= len(palette):
+        raise ValueError("PAC palette index out of range")
+    return palette[indices].reshape((height, width, 4)).copy()
+
+
+def decode_paa(data: bytes, *, is_paa: bool = True) -> np.ndarray:
+    """Decode the first PAA/PAC mip to HxWx4 RGBA, following CWR-CE's decoder."""
     stream = io.BytesIO(data)
     magic = _u16(stream)
     kind = _PAA_FORMATS.get(magic)
     if kind is None:
-        raise ValueError(f"unsupported PAA descriptor {magic:#06x}")
+        stream.seek(0)
+        kind = "ARGB4444" if is_paa else "P8"
     while True:
         pos = stream.tell()
         if stream.read(4) != b"GGAT":
@@ -381,16 +409,28 @@ def decode_paa(data: bytes) -> np.ndarray:
             raise ValueError("truncated PAA TAGG payload")
         stream.seek(size, io.SEEK_CUR)
     palette_count = _u16(stream)
-    stream.seek(palette_count * 3, io.SEEK_CUR)
+    if palette_count > 256:
+        raise ValueError(f"invalid PAA/PAC palette size {palette_count}")
+    palette_raw = stream.read(palette_count * 3)
+    if len(palette_raw) != palette_count * 3:
+        raise ValueError("truncated PAA/PAC palette")
+    palette = np.empty((palette_count, 4), dtype=np.uint8)
+    for index in range(palette_count):
+        b, g, r = palette_raw[index * 3 : index * 3 + 3]
+        packed = b | (g << 8) | (r << 16)
+        palette[index] = (r, g, b, 0 if packed in {0xFF00FF, 0x00FFFF} else 255)
     width, height = _u16(stream), _u16(stream)
-    if width == 1234 and height == 8765:
+    lzw_p8 = width == 1234 and height == 8765
+    if lzw_p8:
         width, height = _u16(stream), _u16(stream)
     if width <= 0 or height <= 0 or width > 8192 or height > 8192:
         raise ValueError(f"invalid PAA dimensions {width}x{height}")
     data_size = _u24(stream)
     payload_start = stream.tell()
     if payload_start + data_size > len(data):
-        raise ValueError(f"truncated PAA mip payload: need {data_size} bytes")
+        raise ValueError(f"truncated PAA/PAC mip payload: need {data_size} bytes")
+    if kind == "P8":
+        return _decode_p8_payload(stream, width, height, palette, lzw=lzw_p8)
     if kind.startswith("DXT"):
         return _decode_dxt(stream.read(data_size), width, height, kind)
     if kind == "ARGB8888":
