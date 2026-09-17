@@ -20,8 +20,9 @@ try:
 except ImportError as exc:
     raise SystemExit("Install dependencies with: python -m pip install matplotlib numpy") from exc
 
-from p3d_categoriser_app import load_state
-from p3d_categoriser_session import SessionCategoriserApp, load_resume_path
+from p3d_categoriser_session import load_resume_path
+from p3d_categoriser_split import SplitStateCategoriserApp
+from p3d_categoriser_storage import load_state
 from p3d_preview_geometry import preview_models
 from p3d_texture_io import TextureResolver
 
@@ -60,7 +61,10 @@ def _parser() -> argparse.ArgumentParser:
         "--output",
         type=Path,
         default=Path("p3d-model-categories.json"),
-        help="Classification JSON; existing state and browsing position are loaded automatically.",
+        help=(
+            "Completed classification JSON; reviewed incomplete models are stored "
+            "automatically in a .unclassified.json companion file."
+        ),
     )
     p.add_argument(
         "--category",
@@ -128,7 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     iterator = preview_models(inputs, args.include, args.max_preview_points)
     root = tk.Tk()
-    app = SessionCategoriserApp(
+    app = SplitStateCategoriserApp(
         root,
         model_iter=iterator,
         texture_resolver=TextureResolver(inputs),
