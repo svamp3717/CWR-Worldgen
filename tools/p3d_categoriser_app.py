@@ -105,7 +105,7 @@ class CategoriserApp:
         ttk.Label(side,text="Categories",font=("TkDefaultFont",11,"bold")).pack(anchor="w",pady=(0,6))
         self.category_vars: dict[str, tk.BooleanVar] = {}
         for category in self.categories:
-            var = tk.BooleanVar(False); self.category_vars[category] = var
+            var = tk.BooleanVar(master=self.root, value=False); self.category_vars[category] = var
             ttk.Checkbutton(side,text=category,variable=var,command=self._category_changed).pack(anchor="w",fill="x",pady=2)
         ttk.Separator(side,orient=tk.HORIZONTAL).pack(fill="x",pady=10)
         ttk.Label(side,text="View",font=("TkDefaultFont",10,"bold")).pack(anchor="w")
