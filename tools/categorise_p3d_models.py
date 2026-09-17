@@ -220,6 +220,26 @@ def _decimate_points(points: np.ndarray, max_points: int) -> np.ndarray:
     return points[indices].astype(np.float32, copy=False)
 
 
+def _resolve_inputs(raw_inputs: Sequence[Path]) -> list[Path]:
+    """Resolve CLI inputs and recover a single unquoted path containing spaces.
+
+    Windows shells split an unquoted path such as ``ARMA Cold War Assault`` into
+    several positional arguments. If the arguments do not exist individually
+    but joining them with spaces produces a real path, treat that joined path as
+    the intended single input. Genuine multi-input scans are left untouched.
+    """
+    inputs = [path.expanduser() for path in raw_inputs]
+    if not inputs or all(path.exists() for path in inputs):
+        return inputs
+
+    if len(inputs) > 1:
+        joined = Path(" ".join(str(path) for path in inputs)).expanduser()
+        if joined.exists():
+            return [joined]
+
+    return inputs
+
+
 def _preview_models(
     inputs: Sequence[Path], patterns: Sequence[str], max_points: int
 ) -> Iterator[PreviewModel | measure.ModelFailure]:
@@ -665,6 +685,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("error: --max-preview-points must be at least 100", file=sys.stderr)
         return 2
 
+    inputs = _resolve_inputs(args.inputs)
+    missing = [path for path in inputs if not path.exists()]
+    if missing:
+        joined = "\n".join(f"  {path}" for path in missing)
+        message = (
+            "Input path does not exist:\n"
+            f"{joined}\n\n"
+            "If the path contains spaces, put the whole path in double quotes."
+        )
+        print(f"error: {message}", file=sys.stderr)
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Scan path not found", message, parent=root)
+            root.destroy()
+        except tk.TclError:
+            pass
+        return 2
+
     try:
         state, saved_categories = _load_state(args.output)
     except ValueError as exc:
@@ -678,7 +717,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("error: at least one category is required", file=sys.stderr)
         return 2
 
-    iterator = _preview_models(args.inputs, args.include, args.max_preview_points)
+    iterator = _preview_models(inputs, args.include, args.max_preview_points)
     root = tk.Tk()
     app = CategoriserApp(
         root,
