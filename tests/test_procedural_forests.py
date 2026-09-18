@@ -118,7 +118,11 @@ class ProceduralForestClusterTests(unittest.TestCase):
             self.assertTrue(all("data3d" in name.casefold() for name in proxy_names))
             self.assertTrue(all("af str" not in name.casefold() for name in proxy_names))
             self.assertTrue(all("les " in name.casefold() for name in proxy_names))
-            self.assertIn(("class", "forest"), summary.named_properties[1])
+            # Generated proxy carriers must stay ordinary ObjectPlain-style
+            # vegetation containers. class=forest sends CWA 1.99 through
+            # ForestPlain's special matrix/skew path and corrupts child proxies.
+            self.assertIn(("class", "bushsoft"), summary.named_properties[1])
+            self.assertNotIn(("class", "forest"), summary.named_properties[1])
 
     def test_content_addressed_cluster_assets_are_reused(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
