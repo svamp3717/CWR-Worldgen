@@ -74,15 +74,19 @@ class ForestClusterAssetResult:
         }
 
 
-# Performance-oriented interior fallback clusters reuse scaled instances of the
-# two stock Everon forest groups. One WRP object therefore represents a dense
-# stand without expanding it into many individual tree proxies.
+# Interior generated clusters must proxy ordinary tree objects, never complete
+# stock forest blocks. Forest-block P3Ds are themselves special forest objects;
+# nesting them behind another proxy carrier produces invalid/skewed rendering in
+# CWA 1.99 and becomes visible in CWR-CE as soon as ForestPlain suppression is
+# bypassed. Keep the carrier cheap and let it reference plain stock trees.
 DEFAULT_PROXY_MODELS: tuple[str, ...] = (
-    r"data3d\les ctverec pruchozi_T1.p3d",
-    r"data3d\les trojuhelnik pruchozi.p3d",
+    r"data3d\str smrk_medium.p3d",
+    r"data3d\str smrk vysoky.p3d",
 )
 
-_INTERIOR_PROXY_SCALE: tuple[float, ...] = (0.28, 0.40)
+# Proxy triangles define position/orientation. The engine normalizes their basis,
+# so this is only the marker-triangle arm length, not model scale.
+_INTERIOR_PROXY_SCALE: tuple[float, ...] = (1.0, 1.0)
 
 # Original Cold War Crisis Data3D vegetation used for the soft forest edge.
 # These match the asset family used by the Everon square and triangle forests,
@@ -115,12 +119,12 @@ EVERON_SAFE_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = EVERON_SAFE_BORDER_PROXY
 # the external stock proxies change, so steep/fallback stands do not quietly
 # reintroduce Everon/Data3D trees and bushes.
 NOGOVA_LEAF_PROXY_MODELS: tuple[str, ...] = (
-    r"o\tree\les_nw_ctver_pruhozi_T1.p3d",
-    r"o\tree\les_nw_trojuhelnik.p3d",
+    r"o\tree\Javor01.p3d",
+    r"o\tree\Javor02.p3d",
 )
 NOGOVA_PINE_PROXY_MODELS: tuple[str, ...] = (
-    r"o\tree\les_nw_jehl_ctver_pruhozi.p3d",
-    r"o\tree\les_nw_jehl_trojuhelnik.p3d",
+    r"o\tree\smrk_maly.p3d",
+    r"o\tree\smrk_velky.p3d",
 )
 NOGOVA_LEAF_BORDER_PROXY_MODELS: tuple[str, ...] = (
     r"o\tree\dd_bush01.p3d",
@@ -556,7 +560,11 @@ def _cluster_geometry_lod(variant: ForestClusterVariant) -> _Lod:
     # stand. The proxied stock vegetation remains the visible and physical detail.
     key = BuildingVariantKey("residential", "flat", 0.25, 0.25, 0.25)
     lod = _geometry_lod(key)
-    model_class = "forest" if variant.category == "interior" else "bushsoft"
+    # Generated carriers are ordinary proxy containers. In particular, interior
+    # carriers must not become ForestPlain: CWR-CE suppresses ForestPlain proxies,
+    # while CWA 1.99 applies special forest transforms to them. The proxied models
+    # above are now ordinary individual trees, so ObjectPlain-style rendering is
+    # the common compatible path.
     return _Lod(
         lod.points,
         lod.normals,
@@ -564,7 +572,7 @@ def _cluster_geometry_lod(variant: ForestClusterVariant) -> _Lod:
         lod.resolution,
         lod.mass_per_point,
         lod.selections,
-        (("autocenter", "0"), ("class", model_class)),
+        (("autocenter", "0"), ("class", "bushsoft")),
     )
 
 
@@ -695,7 +703,7 @@ class ProceduralForestClusterLibrary:
             relative = wire.split("\\", 1)[1].replace("\\", "/")
             destination = source_dir / relative
             asset_key = cache_key(
-                "procedural-forest-cluster-model-v8-proxy-encoding-investigation",
+                "procedural-forest-cluster-model-v9-no-nested-forest-proxies",
                 {
                     "world_name": self.world_name,
                     "proxy_profile": self.proxy_profile,
