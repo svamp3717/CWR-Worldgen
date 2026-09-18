@@ -21,11 +21,33 @@ from cwr_worldgen.stock_building_extensions import (
 )
 
 
-MIXED_STOCK_LABEL = "Stock Vanilla + Resistance buildings only"
+MIXED_STOCK_LABEL = "Stock combined (non-Resistance + Resistance) buildings"
 
 
 def _library(preset: str) -> StockBuildingLibrary:
     return StockBuildingLibrary(world_name="wg_stock_ext_test", house_style_preset=preset)
+
+
+def test_split_catalogue_files_partition_combined_catalogue() -> None:
+    data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
+    combined = json.loads((data_dir / "stock_building_models.json").read_text(encoding="utf-8"))
+    non_resistance = json.loads(
+        (data_dir / "stock_building_models_non_resistance.json").read_text(encoding="utf-8")
+    )
+    resistance = json.loads(
+        (data_dir / "stock_building_models_resistance.json").read_text(encoding="utf-8")
+    )
+
+    combined_paths = {row["model_path"].casefold() for row in combined["models"]}
+    non_resistance_paths = {row["model_path"].casefold() for row in non_resistance["models"]}
+    resistance_paths = {row["model_path"].casefold() for row in resistance["models"]}
+
+    assert non_resistance_paths
+    assert resistance_paths
+    assert non_resistance_paths.isdisjoint(resistance_paths)
+    assert combined_paths == non_resistance_paths | resistance_paths
+    assert all(not path.startswith("o\\") for path in non_resistance_paths)
+    assert all(path.startswith("o\\") for path in resistance_paths)
 
 
 def test_stock_presets_keep_mixed_and_split_vanilla_from_resistance() -> None:
