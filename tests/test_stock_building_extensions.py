@@ -45,9 +45,11 @@ def test_split_catalogue_files_partition_combined_catalogue() -> None:
     assert combined["schema"] == 5
     assert non_resistance["schema"] == 5
     assert resistance["schema"] == 5
-    assert len(combined_paths) == 131
-    assert len(non_resistance_paths) == 78
+    assert len(combined_paths) == 130
+    assert len(non_resistance_paths) == 77
     assert len(resistance_paths) == 53
+    assert r"data3d\hospital.p3d" not in combined_paths
+    assert r"data3d\hospital.p3d" not in non_resistance_paths
     assert non_resistance_paths.isdisjoint(resistance_paths)
     assert combined_paths == non_resistance_paths | resistance_paths
     assert all(not path.startswith("o\\") for path in non_resistance_paths)

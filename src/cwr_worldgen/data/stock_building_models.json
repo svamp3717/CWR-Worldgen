@@ -19,8 +19,8 @@
     "Rural",
     "Both"
   ],
-  "complete_count": 131,
-  "reviewed_count": 131,
+  "complete_count": 130,
+  "reviewed_count": 130,
   "models": [
     {
       "model_path": "data3d\\afbarabizna.p3d",
@@ -712,20 +712,6 @@
       "height_m": 9.3957,
       "aspect_ratio": 1.1354,
       "origin_to_bottom_m": 4.759
-    },
-    {
-      "model_path": "data3d\\hospital.p3d",
-      "categories": [
-        "Military",
-        "Civic / Public"
-      ],
-      "placement": "Both",
-      "reviewed": true,
-      "width_m": 20.8764,
-      "length_m": 29.8258,
-      "height_m": 6.8222,
-      "aspect_ratio": 1.4287,
-      "origin_to_bottom_m": 3.4111
     },
     {
       "model_path": "data3d\\hospoda_mesto.p3d",
