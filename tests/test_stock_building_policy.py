@@ -15,18 +15,23 @@ def _library() -> StockBuildingLibrary:
     return StockBuildingLibrary(world_name="wg_stock_test", house_style_preset=STOCK_BUILDING_PRESET)
 
 
-def test_measured_catalogue_contains_full_wrptool_house_pool() -> None:
+def test_reviewed_catalogue_contains_only_curated_stock_pool() -> None:
     models = _load_catalogue()
     paths = {model.model_path.casefold() for model in models}
-    assert len(models) == 145
+    assert len(models) == 131
     assert r"data3d\kostel.p3d" in paths
-    assert r"data3d\kostel2.p3d" in paths
-    assert r"data3d\kostel3.p3d" in paths
-    assert r"data3d\kostelik.p3d" in paths
+    assert r"data3d\hangar.p3d" in paths
+    assert r"data3d\helfenburk.p3d" in paths
     assert r"o\hous\kostelin.p3d" in paths
     assert r"o\hous\skola.p3d" in paths
-    assert r"o\hous\tovarna1.p3d" in paths
-    assert r"o\misc\leseni2x.p3d" in paths
+    assert r"o\hous\hangar_2.p3d" in paths
+    assert r"o\hous\vysilac_fm.p3d" in paths
+    assert r"o\misc\leseni2x.p3d" not in paths
+    assert r"o\misc\leseni4x.p3d" not in paths
+    assert r"data3d\zvonice.p3d" not in paths
+    assert all(model.categories for model in models)
+    assert all(model.placement in {"Urban", "Rural", "Both"} for model in models)
+    assert all(min(model.width_m, model.length_m, model.height_m) > 0.0 for model in models)
 
 
 def test_stock_polygon_selection_uses_original_game_model_and_measured_dimensions() -> None:
@@ -81,3 +86,34 @@ def test_stock_asset_report_writes_catalogue_but_no_generated_models(tmp_path: P
     assert document["placements"] == 1
     assert result.generated_variants == 0
     assert result.model_assets == ()
+
+
+def test_rural_residential_uses_house_pool_while_city_prefers_dense_stock() -> None:
+    rural = _library()
+    rural_placement = rural.plan_point(
+        {"building": "house"},
+        10.0,
+        0.0,
+        x=5000.0,
+        z=5000.0,
+    )
+    rural_catalogue = {model.model_path.casefold(): model for model in rural.models}
+    rural_model = rural_catalogue[rural_placement.model_path.casefold()]
+    assert rural_model.placement in {"Rural", "Both"}
+    assert "residential" in rural_model.families
+    assert "urban" not in rural_model.families
+    assert "townhouse" not in rural_model.families
+
+    city = _library()
+    city._settlements = ((0.0, 0.0, "city"),)
+    city_placement = city.plan_point(
+        {"building": "house"},
+        10.0,
+        0.0,
+        x=0.0,
+        z=0.0,
+    )
+    city_catalogue = {model.model_path.casefold(): model for model in city.models}
+    city_model = city_catalogue[city_placement.model_path.casefold()]
+    assert city_model.placement in {"Urban", "Both"}
+    assert "townhouse" in city_model.families or "urban" in city_model.families

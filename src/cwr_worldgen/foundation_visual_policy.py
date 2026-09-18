@@ -227,10 +227,10 @@ def install_foundation_visual_policy() -> None:
 
     stock_extensions.install_stock_building_extensions()
 
-    # The historical mixed "stock" preset contains both the original vanilla
+    # The historical mixed "stock" preset contains both the original non-Resistance
     # game buildings and Resistance/O.pbo buildings. Name that explicitly in the
     # GUI so it cannot be mistaken for either of the two source-filtered presets.
-    mixed_stock_label = "Stock Vanilla + Resistance buildings only"
+    mixed_stock_label = "Stock combined (non-Resistance + Resistance) buildings"
     stock_buildings.STOCK_BUILDING_PRESET_LABEL = mixed_stock_label
     stock_extensions.STOCK_BUILDING_OPTIONS = (
         (stock_buildings.STOCK_BUILDING_PRESET, mixed_stock_label),

@@ -1,0 +1,473 @@
+"""Tk/Matplotlib UI for browsing and categorising textured P3D models."""
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+import json
+from pathlib import Path
+import sys
+from typing import Iterator, Sequence
+
+import tkinter as tk
+from tkinter import messagebox, ttk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.figure import Figure
+
+import measure_p3d_models as measure
+from p3d_preview_geometry import PreviewModel
+from p3d_texture_io import TextureResolver
+from p3d_texture_render import render_textured_model
+
+
+PLACEMENTS = ("Urban", "Rural", "Both")
+
+
+@dataclass(slots=True)
+class Classification:
+    categories: list[str]
+    placement: str = ""
+    reviewed: bool = False
+    width_m: float | None = None
+    length_m: float | None = None
+    height_m: float | None = None
+    aspect_ratio: float | None = None
+    origin_to_bottom_m: float | None = None
+
+
+def _optional_float(value: object) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _measurement_values(model: PreviewModel) -> dict[str, float]:
+    measurement = model.measurement
+    return {
+        "width_m": float(measurement.width_m),
+        "length_m": float(measurement.length_m),
+        "height_m": float(measurement.height_m),
+        "aspect_ratio": float(measurement.aspect_ratio),
+        "origin_to_bottom_m": float(measurement.origin_to_bottom_m),
+    }
+
+
+def load_state(path: Path) -> tuple[dict[str, Classification], list[str]]:
+    if not path.exists():
+        return {}, []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"could not read existing classification file {path}: {exc}") from exc
+    result: dict[str, Classification] = {}
+    categories = [str(v) for v in raw.get("categories", []) if str(v).strip()]
+    for item in raw.get("models", []):
+        if not isinstance(item, dict) or "model_path" not in item:
+            continue
+        key = measure._canonical_model_path(str(item["model_path"]))
+        placement = str(item.get("placement", "")).strip()
+        if placement not in PLACEMENTS:
+            placement = ""
+        result[key] = Classification(
+            categories=[str(v) for v in item.get("categories", [])],
+            placement=placement,
+            reviewed=bool(item.get("reviewed", True)),
+            width_m=_optional_float(item.get("width_m")),
+            length_m=_optional_float(item.get("length_m")),
+            height_m=_optional_float(item.get("height_m")),
+            aspect_ratio=_optional_float(item.get("aspect_ratio")),
+            origin_to_bottom_m=_optional_float(item.get("origin_to_bottom_m")),
+        )
+    return result, categories
+
+
+class CategoriserApp:
+    def __init__(
+        self,
+        root: tk.Tk,
+        *,
+        model_iter: Iterator[PreviewModel | measure.ModelFailure],
+        texture_resolver: TextureResolver,
+        output: Path,
+        categories: Sequence[str],
+        state: dict[str, Classification],
+    ) -> None:
+        self.root = root
+        self.model_iter = model_iter
+        self.texture_resolver = texture_resolver
+        self.output = output
+        self.categories = list(categories)
+        self.state = state
+        self.models: list[PreviewModel] = []
+        self.failures: list[measure.ModelFailure] = []
+        self.index = -1
+        self.current: PreviewModel | None = None
+        self.exhausted = False
+        self._updating_checks = False
+        self.azim = 35.0
+        self.elev = 25.0
+
+        root.title("CWR P3D Model Categoriser")
+        root.geometry("1500x920")
+        root.minsize(1050, 700)
+        self._build_ui()
+        root.bind("<Left>", lambda _e: self.previous_model())
+        root.bind("<Right>", lambda _e: self.next_model())
+        root.bind("<Control-s>", lambda _e: self.save_state())
+        root.protocol("WM_DELETE_WINDOW", self.close)
+        self.next_model(mark_current=False)
+
+    def _build_ui(self) -> None:
+        outer = ttk.Frame(self.root, padding=8)
+        outer.pack(fill=tk.BOTH, expand=True)
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(1, weight=1)
+
+        header = ttk.Frame(outer)
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        header.columnconfigure(0, weight=1)
+        self.path_var = tk.StringVar(master=self.root, value="Loading model...")
+        self.progress_var = tk.StringVar(master=self.root, value="")
+        ttk.Label(
+            header,
+            textvariable=self.path_var,
+            font=("TkDefaultFont", 11, "bold"),
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(header, textvariable=self.progress_var).grid(row=0, column=1, sticky="e")
+
+        frame = ttk.Frame(outer)
+        frame.grid(row=1, column=0, sticky="nsew", padx=(0, 8))
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        self.figure = Figure(figsize=(12, 8), dpi=100)
+        self.ax_preview = self.figure.add_subplot(1, 1, 1)
+        self.canvas = FigureCanvasTkAgg(self.figure, master=frame)
+        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        toolbar = NavigationToolbar2Tk(self.canvas, frame, pack_toolbar=False)
+        toolbar.update()
+        toolbar.grid(row=1, column=0, sticky="ew")
+
+        side = ttk.Frame(outer, padding=(8, 4))
+        side.grid(row=1, column=1, sticky="ns")
+        ttk.Label(side, text="Categories", font=("TkDefaultFont", 11, "bold")).pack(
+            anchor="w", pady=(0, 6)
+        )
+        self.category_vars: dict[str, tk.BooleanVar] = {}
+        for category in self.categories:
+            var = tk.BooleanVar(master=self.root, value=False)
+            self.category_vars[category] = var
+            ttk.Checkbutton(
+                side,
+                text=category,
+                variable=var,
+                command=self._category_changed,
+            ).pack(anchor="w", fill="x", pady=2)
+
+        ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
+        ttk.Label(side, text="Placement", font=("TkDefaultFont", 11, "bold")).pack(
+            anchor="w", pady=(0, 4)
+        )
+        self.placement_var = tk.StringVar(master=self.root, value="")
+        for placement in PLACEMENTS:
+            label = {
+                "Urban": "Urban only",
+                "Rural": "Rural only",
+                "Both": "Both / anywhere",
+            }[placement]
+            ttk.Radiobutton(
+                side,
+                text=label,
+                value=placement,
+                variable=self.placement_var,
+                command=self._placement_changed,
+            ).pack(anchor="w", fill="x", pady=1)
+        ttk.Label(
+            side,
+            text="Urban = towns/cities only; Rural = countryside only; Both = valid in either.",
+            wraplength=300,
+            justify=tk.LEFT,
+        ).pack(anchor="w", pady=(4, 0))
+
+        ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
+        ttk.Label(side, text="View", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
+        row = ttk.Frame(side)
+        row.pack(fill="x", pady=4)
+        ttk.Button(row, text="↶ 15°", command=lambda: self._rotate(-15)).pack(side=tk.LEFT)
+        ttk.Button(row, text="15° ↷", command=lambda: self._rotate(15)).pack(
+            side=tk.LEFT, padx=4
+        )
+        row2 = ttk.Frame(side)
+        row2.pack(fill="x")
+        ttk.Button(row2, text="Tilt +", command=lambda: self._tilt(10)).pack(side=tk.LEFT)
+        ttk.Button(row2, text="Tilt -", command=lambda: self._tilt(-10)).pack(
+            side=tk.LEFT, padx=4
+        )
+
+        ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
+        self.info_var = tk.StringVar(master=self.root, value="")
+        self.texture_var = tk.StringVar(master=self.root, value="")
+        self.status_var = tk.StringVar(master=self.root, value="")
+        ttk.Label(side, textvariable=self.info_var, justify=tk.LEFT, wraplength=300).pack(
+            anchor="w"
+        )
+        ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
+        ttk.Label(side, text="Textures", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
+        ttk.Label(
+            side,
+            textvariable=self.texture_var,
+            justify=tk.LEFT,
+            wraplength=300,
+        ).pack(anchor="w")
+        ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
+        ttk.Label(side, textvariable=self.status_var, wraplength=300).pack(anchor="w")
+
+        nav = ttk.Frame(outer)
+        nav.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        nav.columnconfigure(1, weight=1)
+        self.prev_button = ttk.Button(nav, text="◀ Previous", command=self.previous_model)
+        self.prev_button.grid(row=0, column=0, padx=(0, 6))
+        ttk.Label(
+            nav,
+            text="Left/Right navigate • Ctrl+S saves • category/placement changes autosave",
+        ).grid(row=0, column=1)
+        self.next_button = ttk.Button(nav, text="Next ▶", command=self.next_model)
+        self.next_button.grid(row=0, column=2, padx=(6, 0))
+
+    def _busy(self, text: str) -> None:
+        self.progress_var.set(text)
+        self.root.configure(cursor="watch")
+        self.root.update_idletasks()
+
+    def _unbusy(self) -> None:
+        self.root.configure(cursor="")
+
+    def _load_next(self) -> PreviewModel | None:
+        while not self.exhausted:
+            try:
+                item = next(self.model_iter)
+            except StopIteration:
+                self.exhausted = True
+                return None
+            if isinstance(item, measure.ModelFailure):
+                self.failures.append(item)
+                continue
+            self.models.append(item)
+            existing = self.state.get(item.model_path)
+            if existing is not None:
+                for field, value in _measurement_values(item).items():
+                    setattr(existing, field, value)
+            return item
+        return None
+
+    def _current_categories(self) -> list[str]:
+        return [name for name, var in self.category_vars.items() if var.get()]
+
+    def _current_placement(self) -> str:
+        placement = self.placement_var.get().strip()
+        return placement if placement in PLACEMENTS else ""
+
+    def _commit(self, reviewed: bool) -> None:
+        if self.current is None or self._updating_checks:
+            return
+        old = self.state.get(self.current.model_path, Classification([]))
+        self.state[self.current.model_path] = Classification(
+            categories=self._current_categories(),
+            placement=self._current_placement(),
+            reviewed=reviewed or old.reviewed,
+            **_measurement_values(self.current),
+        )
+
+    def _category_changed(self) -> None:
+        if self._updating_checks or self.current is None:
+            return
+        self._commit(True)
+        self.save_state()
+
+    def _placement_changed(self) -> None:
+        if self._updating_checks or self.current is None:
+            return
+        self._commit(True)
+        self.save_state()
+
+    def _rotate(self, amount: float) -> None:
+        self.azim = (self.azim + amount) % 360
+        self._redraw()
+
+    def _tilt(self, amount: float) -> None:
+        self.elev = max(-80, min(80, self.elev + amount))
+        self._redraw()
+
+    def _redraw(self) -> None:
+        if self.current is None:
+            return
+        self._busy("Rendering textured model...")
+        try:
+            self._draw_model(self.current)
+        finally:
+            self._unbusy()
+
+    def next_model(self, *, mark_current: bool = True) -> None:
+        if mark_current and self.current is not None:
+            self._commit(True)
+            self.save_state()
+        target = self.index + 1
+        if target >= len(self.models):
+            self._busy("Loading next model...")
+            try:
+                model = self._load_next()
+            except (OSError, ValueError) as exc:
+                print(f"[scan error] {exc}", file=sys.stderr, flush=True)
+                messagebox.showerror("Scan error", str(exc))
+                return
+            finally:
+                self._unbusy()
+            if model is None:
+                summary = f"End of scan: {len(self.models)} model(s), {len(self.failures)} failure(s)"
+                print(f"[scan] {summary}", file=sys.stderr, flush=True)
+                self.progress_var.set(summary)
+                self.next_button.configure(state=tk.DISABLED)
+                return
+        self.index = target
+        self._show_model(self.models[self.index])
+
+    def previous_model(self) -> None:
+        if self.current is not None:
+            self._commit(True)
+            self.save_state()
+        if self.index <= 0:
+            return
+        self.index -= 1
+        self._show_model(self.models[self.index])
+
+    def _show_model(self, model: PreviewModel) -> None:
+        self.current = model
+        self.path_var.set(model.model_path)
+        suffix = " +" if not self.exhausted else ""
+        self.progress_var.set(
+            f"Model {self.index + 1}/{len(self.models)}{suffix} • failures skipped: {len(self.failures)}"
+        )
+        classification = self.state.get(model.model_path, Classification([]))
+        selected = set(classification.categories)
+        self._updating_checks = True
+        try:
+            for category, var in self.category_vars.items():
+                var.set(category in selected)
+            self.placement_var.set(classification.placement)
+        finally:
+            self._updating_checks = False
+
+        m = model.measurement
+        placement_text = classification.placement or "Unspecified"
+        self.info_var.set(
+            f"Format: {m.format} v{m.version}\n"
+            f"Vertices: {model.original_vertex_count:,}\n"
+            f"Faces: {len(model.faces):,}\n"
+            f"Width: {m.width_m:g} m\n"
+            f"Height: {m.height_m:g} m\n"
+            f"Length: {m.length_m:g} m\n"
+            f"Footprint: {m.footprint_area_m2:g} m²\n"
+            f"Placement: {placement_text}\n"
+            f"Reviewed: {'yes' if classification.reviewed else 'no'}"
+        )
+        names = [measure._canonical_model_path(n) for n in model.texture_paths if n]
+        self.texture_var.set(
+            "No texture references in this LOD"
+            if not names
+            else f"{len(names)} referenced\n"
+            + "\n".join(names[:8])
+            + (f"\n… +{len(names)-8} more" if len(names) > 8 else "")
+        )
+        self.prev_button.configure(state=tk.NORMAL if self.index > 0 else tk.DISABLED)
+        self.next_button.configure(state=tk.NORMAL)
+        self._redraw()
+
+    def _draw_model(self, model: PreviewModel) -> None:
+        self.ax_preview.clear()
+        self.status_var.set("")
+
+        if not model.faces:
+            self.ax_preview.text(
+                0.5,
+                0.5,
+                "Textured preview unavailable\nNo polygon topology was parsed for this model.",
+                ha="center",
+                va="center",
+                transform=self.ax_preview.transAxes,
+                fontsize=13,
+            )
+            self.ax_preview.axis("off")
+            self.figure.tight_layout(pad=1.2)
+            self.canvas.draw_idle()
+            return
+
+        image, hits, misses = render_textured_model(
+            model.points,
+            model.faces,
+            self.texture_resolver,
+            model.source,
+            width=1100,
+            height=760,
+            azim_deg=self.azim,
+            elev_deg=self.elev,
+        )
+        self.ax_preview.imshow(image)
+        self.ax_preview.set_title(
+            f"Textured model • az {self.azim:.0f}° / el {self.elev:.0f}°"
+        )
+        self.ax_preview.axis("off")
+        if misses:
+            self.status_var.set(
+                f"Texture sampling: {hits} textured face hit(s), "
+                f"{misses} missing/unreadable face texture(s). See console."
+            )
+        else:
+            self.status_var.set(f"Texture sampling: {hits} textured face hit(s).")
+        self.figure.tight_layout(pad=1.2)
+        self.canvas.draw_idle()
+
+    def save_state(self) -> None:
+        self.output.parent.mkdir(parents=True, exist_ok=True)
+        report = {
+            "schema": 2,
+            "categories": self.categories,
+            "placements": list(PLACEMENTS),
+            "reviewed_count": sum(1 for x in self.state.values() if x.reviewed),
+            "classified_count": sum(1 for x in self.state.values() if x.categories),
+            "placement_count": sum(1 for x in self.state.values() if x.placement),
+            "models": [
+                {
+                    "model_path": key,
+                    "categories": self.state[key].categories,
+                    "placement": self.state[key].placement,
+                    "reviewed": self.state[key].reviewed,
+                    "width_m": self.state[key].width_m,
+                    "length_m": self.state[key].length_m,
+                    "height_m": self.state[key].height_m,
+                    "aspect_ratio": self.state[key].aspect_ratio,
+                    "origin_to_bottom_m": self.state[key].origin_to_bottom_m,
+                }
+                for key in sorted(self.state)
+            ],
+            "failures": [asdict(x) for x in self.failures],
+        }
+        temp = self.output.with_name(self.output.name + ".tmp")
+        temp.write_text(
+            json.dumps(report, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        temp.replace(self.output)
+        self.status_var.set(f"Saved: {self.output}")
+
+    def close(self) -> None:
+        try:
+            if self.current is not None:
+                self._commit(False)
+            self.save_state()
+        except OSError as exc:
+            print(f"[save error] {exc}", file=sys.stderr, flush=True)
+            if not messagebox.askyesno(
+                "Could not save",
+                f"Could not save classifications:\n{exc}\n\nClose anyway?",
+            ):
+                return
+        self.root.destroy()

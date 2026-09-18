@@ -52,11 +52,22 @@ _SETTLEMENT_RADIUS_M: Mapping[str, float] = {
     "hamlet": 260.0,
 }
 
+_REVIEWED_CATEGORY_FAMILIES: Mapping[str, tuple[str, ...]] = {
+    "residential": ("residential",),
+    "commercial": ("shop", "urban"),
+    "industrial": ("industrial",),
+    "agricultural": ("agricultural", "outbuilding"),
+    "civic / public": ("school", "urban"),
+    "religious": ("church",),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class StockBuildingModel:
     model_path: str
     families: tuple[str, ...]
+    categories: tuple[str, ...]
+    placement: str
     width_m: float
     length_m: float
     height_m: float
@@ -82,29 +93,80 @@ class StockBuildingKey:
     footprint_holes: tuple[tuple[tuple[float, float], ...], ...] = ()
 
 
+def _reviewed_families(categories: Sequence[str], placement: str) -> tuple[str, ...]:
+    """Map hand-reviewed catalogue categories onto the legacy selector families."""
+    result: list[str] = []
+    for category in categories:
+        for family in _REVIEWED_CATEGORY_FAMILIES.get(str(category).strip().casefold(), ()):
+            if family not in result:
+                result.append(family)
+
+    # Urban-only residential stock should be preferred as townhouse/city fabric,
+    # while Rural-only stock must never leak into town/city selection.
+    if "residential" in result and placement == "Urban":
+        result = ["townhouse", "urban", *result]
+    elif "residential" in result and placement == "Both":
+        result.extend(family for family in ("townhouse", "urban") if family not in result)
+    return tuple(result)
+
+
 def _load_catalogue(path: Path = _STOCK_CATALOGUE_PATH) -> tuple[StockBuildingModel, ...]:
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Unable to load stock building catalogue: {path}") from exc
-    if int(document.get("schema", 0)) != 1:
+
+    schema = int(document.get("schema", 0))
+    if schema not in {1, 5}:
         raise RuntimeError(f"Unsupported stock building catalogue schema in {path}")
+
     models: list[StockBuildingModel] = []
     for row in document.get("models", ()):
         if not isinstance(row, Mapping):
             continue
         try:
             model_path = str(row["model_path"]).replace("/", "\\").lstrip("\\")
-            families = tuple(str(value).strip().casefold() for value in row["families"] if str(value).strip())
             width = float(row["width_m"])
             length = float(row["length_m"])
             height = float(row["height_m"])
             origin = float(row.get("origin_to_bottom_m", 0.0))
         except (KeyError, TypeError, ValueError):
             continue
-        if not model_path or not families or min(width, length, height) <= 0.0:
+
+        if schema == 5:
+            categories = tuple(
+                str(value).strip()
+                for value in row.get("categories", ())
+                if str(value).strip()
+            )
+            placement = str(row.get("placement", "")).strip()
+            if placement not in {"Urban", "Rural", "Both"}:
+                continue
+            families = _reviewed_families(categories, placement)
+        else:
+            categories = ()
+            placement = ""
+            families = tuple(
+                str(value).strip().casefold()
+                for value in row.get("families", ())
+                if str(value).strip()
+            )
+
+        if not model_path or min(width, length, height) <= 0.0:
             continue
-        models.append(StockBuildingModel(model_path, families, width, length, height, origin))
+        models.append(
+            StockBuildingModel(
+                model_path,
+                families,
+                categories,
+                placement,
+                width,
+                length,
+                height,
+                origin,
+            )
+        )
+
     if not models:
         raise RuntimeError(f"Stock building catalogue contains no usable models: {path}")
     return tuple(models)
@@ -278,13 +340,41 @@ class StockBuildingLibrary:
             return "rural"
         return "city" if best[1] == "city" else "town" if best[1] == "town" else "village"
 
-    def _candidate_models(self, family: str) -> tuple[StockBuildingModel, ...]:
-        wanted = _FAMILY_FALLBACKS.get(family, (family, "residential"))
+    def _candidate_models(
+        self,
+        family: str,
+        settlement: str = "rural",
+    ) -> tuple[StockBuildingModel, ...]:
+        """Return stock models appropriate for both semantic family and settlement.
+
+        The old selector calculated rural/town/city context but never used it when
+        choosing a stock P3D. Keep villages in the rural-style pool, while towns
+        and cities may prefer denser townhouse/urban residential stock.
+        """
+        context = str(settlement or "rural").strip().casefold()
+        wanted_placement = "Rural" if context in {"rural", "village"} else "Urban"
+        eligible = tuple(
+            model
+            for model in self.models
+            if not model.placement or model.placement in {"Both", wanted_placement}
+        )
+        if not eligible:
+            eligible = self.models
+
+        if family == "residential":
+            wanted = (
+                ("residential",)
+                if wanted_placement == "Rural"
+                else ("townhouse", "urban", "residential")
+            )
+        else:
+            wanted = _FAMILY_FALLBACKS.get(family, (family, "residential"))
+
         for wanted_family in wanted:
-            candidates = tuple(model for model in self.models if wanted_family in model.families)
+            candidates = tuple(model for model in eligible if wanted_family in model.families)
             if candidates:
                 return candidates
-        return self.models
+        return eligible
 
     def _select(
         self,
@@ -296,9 +386,10 @@ class StockBuildingLibrary:
         target_length: float,
         target_height: float,
         seed: str,
+        settlement: str = "rural",
     ) -> tuple[StockBuildingKey, bool]:
         scored: list[tuple[float, str, StockBuildingModel, bool]] = []
-        for model in self._candidate_models(family):
+        for model in self._candidate_models(family, settlement):
             direct = _dimension_score(model, target_width, target_length, target_height, swapped=False)
             swapped = _dimension_score(model, target_width, target_length, target_height, swapped=True)
             use_swapped = swapped + 1.0e-9 < direct
@@ -347,6 +438,7 @@ class StockBuildingLibrary:
             target_length=footprint.length_m,
             target_height=_target_height(tags, family),
             seed=f"polygon:{centre_x:.2f}:{centre_z:.2f}:{footprint.width_m:.2f}:{footprint.length_m:.2f}:{family}",
+            settlement=settlement,
         )
         heading = (footprint.heading_degrees + (90.0 if swapped else 0.0)) % 360.0
         return BuildingPlacement(key.stock_model_path, heading, key, key)
@@ -376,6 +468,7 @@ class StockBuildingLibrary:
             target_length=footprint_m,
             target_height=_target_height(tags, family),
             seed=f"point:{x:.2f}:{z:.2f}:{footprint_m:.2f}:{family}",
+            settlement=settlement,
         )
         heading = (float(heading_degrees) + (90.0 if swapped else 0.0)) % 360.0
         return BuildingPlacement(key.stock_model_path, heading, key, key)
