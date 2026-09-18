@@ -16,7 +16,14 @@ def test_complete_and_incomplete_reviews_are_saved_separately(tmp_path: Path) ->
     output = tmp_path / "catalogue.json"
     state = {
         r"o\hous\complete.p3d": Classification(
-            categories=["Residential"], placement="Urban", reviewed=True
+            categories=["Residential"],
+            placement="Urban",
+            reviewed=True,
+            width_m=10.25,
+            length_m=7.5,
+            height_m=8.75,
+            aspect_ratio=1.3667,
+            origin_to_bottom_m=4.125,
         ),
         r"o\hous\missing-placement.p3d": Classification(
             categories=["Residential"], placement="", reviewed=True
@@ -41,6 +48,12 @@ def test_complete_and_incomplete_reviews_are_saved_separately(tmp_path: Path) ->
     companion = json.loads(companion_path.read_text(encoding="utf-8"))
 
     assert [item["model_path"] for item in primary["models"]] == [r"o\hous\complete.p3d"]
+    saved = primary["models"][0]
+    assert saved["width_m"] == 10.25
+    assert saved["length_m"] == 7.5
+    assert saved["height_m"] == 8.75
+    assert saved["aspect_ratio"] == 1.3667
+    assert saved["origin_to_bottom_m"] == 4.125
     assert [item["model_path"] for item in companion["models"]] == [
         r"o\hous\missing-placement.p3d"
     ]
@@ -52,6 +65,11 @@ def test_complete_and_incomplete_reviews_are_saved_separately(tmp_path: Path) ->
     loaded, categories = load_state(output)
     assert categories == ["Residential"]
     assert loaded[r"o\hous\complete.p3d"].placement == "Urban"
+    assert loaded[r"o\hous\complete.p3d"].width_m == 10.25
+    assert loaded[r"o\hous\complete.p3d"].length_m == 7.5
+    assert loaded[r"o\hous\complete.p3d"].height_m == 8.75
+    assert loaded[r"o\hous\complete.p3d"].aspect_ratio == 1.3667
+    assert loaded[r"o\hous\complete.p3d"].origin_to_bottom_m == 4.125
     assert loaded[r"o\hous\missing-placement.p3d"].reviewed is True
     assert r"o\hous\untouched.p3d" not in loaded
 
