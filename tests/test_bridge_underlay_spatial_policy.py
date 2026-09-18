@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -124,3 +125,32 @@ def test_spatial_terminal_generation_matches_existing_geometry() -> None:
     assert all(obj.z == pytest.approx(100.0) for obj in filled.objects)
     assert all(obj.y == pytest.approx(6.335) for obj in filled.objects)
     assert all(obj.heading_degrees == pytest.approx(90.0) for obj in filled.objects)
+
+
+def test_spatial_terminal_underlays_follow_bridge_plane_over_reopened_water() -> None:
+    span = cleanup._BridgeSpan(
+        points=((0.0, 100.0), (250.0, 100.0)),
+        road_width=7.0,
+        road_model_path=r"o\road\sil25.p3d",
+    )
+    spec = SimpleNamespace(cells=16, cell_size=50.0)
+    elevations = (0.0,) * (spec.cells * spec.cells)
+
+    def reopened_water(_elevations, _cells, _cell_size, x, _z):
+        return 6.30 if x <= 0.001 or x >= 249.999 else -5.0
+
+    with patch.object(
+        cleanup._p,
+        "_sample_elevation",
+        side_effect=reopened_water,
+    ):
+        filled, added = spatial._add_terminal_underlays(
+            _report(),
+            (span,),
+            elevations,
+            spec,
+        )
+
+    assert added == 4
+    assert all(obj.y == pytest.approx(6.335) for obj in filled.objects)
+    assert all(obj.pitch_degrees == pytest.approx(0.0) for obj in filled.objects)
