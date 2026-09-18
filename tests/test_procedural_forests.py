@@ -26,14 +26,15 @@ from cwr_worldgen.procedural_forests import (
 
 
 class ProceduralForestClusterTests(unittest.TestCase):
-    def test_interior_clusters_use_grouped_everon_forest_models(self) -> None:
+    def test_interior_clusters_use_individual_everon_tree_models(self) -> None:
         self.assertEqual(
             DEFAULT_PROXY_MODELS,
             (
-                r"data3d\les ctverec pruchozi_T1.p3d",
-                r"data3d\les trojuhelnik pruchozi.p3d",
+                r"data3d\str smrk_medium.p3d",
+                r"data3d\str smrk vysoky.p3d",
             ),
         )
+        self.assertFalse(any("\\les " in path.casefold() for path in DEFAULT_PROXY_MODELS))
 
     def test_border_and_undergrowth_use_original_data3d_vegetation(self) -> None:
         self.assertEqual(DEFAULT_UNDERGROWTH_PROXY_MODELS, DEFAULT_BORDER_PROXY_MODELS)
@@ -62,7 +63,8 @@ class ProceduralForestClusterTests(unittest.TestCase):
         )
         self.assertNotIn(r"data3d\ker pichlavej.p3d", models)
         self.assertNotIn(r"data3d\ker deravej.p3d", models)
-        self.assertTrue(any(path.startswith("data3d\\les ") for path in models))
+        self.assertTrue(any(path.startswith("data3d\\str ") for path in models))
+        self.assertFalse(any(path.startswith("data3d\\les ") for path in models))
 
     def test_nogova_proxy_profile_remaps_forest_and_bush_clusters(self) -> None:
         library = ProceduralForestClusterLibrary("cwr_cluster", proxy_profile="nogova")
@@ -87,7 +89,7 @@ class ProceduralForestClusterTests(unittest.TestCase):
         self.assertTrue(set(NOGOVA_PINE_BORDER_PROXY_MODELS).intersection(models))
         self.assertFalse(any(path.casefold().startswith("data3d" + "\\") for path in models))
 
-    def test_nogova_leaf_proxy_profile_uses_leaf_polygons_and_resistance_trees(self) -> None:
+    def test_nogova_leaf_proxy_profile_uses_individual_resistance_trees(self) -> None:
         library = ProceduralForestClusterLibrary("cwr_cluster", proxy_profile="nogova_leaf")
         library.register_models((
             cluster_model_path("cwr_cluster", "pine", 0.30),
@@ -117,10 +119,11 @@ class ProceduralForestClusterTests(unittest.TestCase):
             self.assertEqual(len(proxy_names), len(variant.proxy_layout))
             self.assertTrue(all("data3d" in name.casefold() for name in proxy_names))
             self.assertTrue(all("af str" not in name.casefold() for name in proxy_names))
-            self.assertTrue(all("les " in name.casefold() for name in proxy_names))
+            self.assertTrue(all("\\str " in name.casefold() for name in proxy_names))
+            self.assertFalse(any("\\les " in name.casefold() for name in proxy_names))
             # Generated proxy carriers must stay ordinary ObjectPlain-style
-            # vegetation containers. class=forest sends CWA 1.99 through
-            # ForestPlain's special matrix/skew path and corrupts child proxies.
+            # vegetation containers. Interior carriers now proxy only individual
+            # trees, never another special forest-block object.
             self.assertIn(("class", "bushsoft"), summary.named_properties[1])
             self.assertNotIn(("class", "forest"), summary.named_properties[1])
 
