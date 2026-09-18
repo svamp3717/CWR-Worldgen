@@ -13,6 +13,7 @@ from cwr_worldgen.gui import (
     HOUSE_STYLE_AUTO_LABEL,
     HOUSE_STYLE_PRESET_LABELS,
     RECOMMENDED_APPEARANCE_PRESET,
+    SAFE_EVERON_APPEARANCE_PRESET,
     RESISTANCE_APPEARANCE_PRESET,
     PINE_NOGOVA_APPEARANCE_PRESET,
     NOGOVA_FOREST_BLOCK_MODEL,
@@ -208,6 +209,7 @@ class GuiCommandTests(unittest.TestCase):
             APPEARANCE_PRESETS,
             (
                 "Nogova textures + Everon trees (recommended)",
+                "Nogova textures + Everon trees (safe bushes)",
                 "Nogova Resistance leaf forests",
                 "Nogova Resistance pine forests",
                 "Malden classic",
@@ -216,6 +218,17 @@ class GuiCommandTests(unittest.TestCase):
                 "Generated ground textures",
                 "Custom",
             ),
+        )
+
+    def test_safe_everon_profile_is_forwarded_to_cli(self) -> None:
+        values = default_gui_values()
+        values["appearance_preset"] = SAFE_EVERON_APPEARANCE_PRESET
+        values["forest_profile"] = "everon-safe"
+        command = build_milestone9_command(values, python="python")
+        self.assertIn("--forest-profile", command)
+        self.assertEqual(
+            command[command.index("--forest-profile") + 1],
+            "everon-safe",
         )
 
     def test_obsolete_terrainfit_test_preset_is_removed(self) -> None:
