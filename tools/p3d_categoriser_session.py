@@ -458,6 +458,11 @@ class SessionCategoriserApp(CategoriserApp):
                     "categories": self.state[key].categories,
                     "placement": self.state[key].placement,
                     "reviewed": self.state[key].reviewed,
+                    "width_m": self.state[key].width_m,
+                    "length_m": self.state[key].length_m,
+                    "height_m": self.state[key].height_m,
+                    "aspect_ratio": self.state[key].aspect_ratio,
+                    "origin_to_bottom_m": self.state[key].origin_to_bottom_m,
                 }
                 for key in sorted(self.state)
             ],
