@@ -685,14 +685,15 @@ def _building_overlaps_tidal_water(
 
 
 def _filter_tidal_water_buildings(plans, elevations, raster, spec):
+    frozen = tuple(plans or ())
     kept = tuple(
         plan
-        for plan in tuple(plans or ())
+        for plan in frozen
         if not _building_overlaps_tidal_water(
             plan, elevations, raster, spec
         )
     )
-    return kept, len(tuple(plans or ())) - len(kept)
+    return kept, len(frozen) - len(kept)
 
 
 def _candidate_allowed(
