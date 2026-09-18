@@ -554,9 +554,16 @@ def _cluster_geometry_lod(variant: ForestClusterVariant) -> _Lod:
     # A very small closed component keeps a valid Geometry LOD and fixes the
     # cluster origin without imposing a giant invisible collision box over the
     # stand. The proxied stock vegetation remains the visible and physical detail.
+    #
+    # Do not mark generated proxy carriers as class=forest. CWA 1.99 routes that
+    # class through ForestPlain, which applies the engine's special forest matrix
+    # and terrain-skew path to the carrier before drawing its child proxies. These
+    # clusters already encode per-proxy slope support in model space, so the extra
+    # forest transform can stretch/corrupt the proxied vegetation. CWR-CE also
+    # disables ForestPlain proxy drawing entirely. Treat every generated carrier
+    # as an ordinary soft-vegetation object instead.
     key = BuildingVariantKey("residential", "flat", 0.25, 0.25, 0.25)
     lod = _geometry_lod(key)
-    model_class = "forest" if variant.category == "interior" else "bushsoft"
     return _Lod(
         lod.points,
         lod.normals,
@@ -564,7 +571,7 @@ def _cluster_geometry_lod(variant: ForestClusterVariant) -> _Lod:
         lod.resolution,
         lod.mass_per_point,
         lod.selections,
-        (("autocenter", "0"), ("class", model_class)),
+        (("autocenter", "0"), ("class", "bushsoft")),
     )
 
 
@@ -695,7 +702,7 @@ class ProceduralForestClusterLibrary:
             relative = wire.split("\\", 1)[1].replace("\\", "/")
             destination = source_dir / relative
             asset_key = cache_key(
-                "procedural-forest-cluster-model-v6-profiled-stock-vegetation",
+                "procedural-forest-cluster-model-v7-objectplain-proxy-carriers",
                 {
                     "world_name": self.world_name,
                     "proxy_profile": self.proxy_profile,
