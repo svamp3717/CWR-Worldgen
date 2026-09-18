@@ -1,0 +1,906 @@
+{
+  "schema": 1,
+  "source": "WrpTool category=houses measured with tools/measure_wrptool_models.py; non-Resistance/base-game Data3D subset",
+  "notes": "All measured P3Ds assigned to WrpTool's houses category. Families gate eligibility for normal OSM building types; decorative/non-building entries remain catalogued but are not selected as ordinary buildings. This file contains only non-Resistance/base-game Data3D models; stock_building_models.json remains the combined catalogue.",
+  "reference_count": 80,
+  "model_count": 80,
+  "models": [
+    {
+      "model_path": "data3d\\afbarabizna.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 18.3126,
+      "length_m": 12.6617,
+      "height_m": 11.6507,
+      "aspect_ratio": 1.4463,
+      "origin_to_bottom_m": 5.8253
+    },
+    {
+      "model_path": "data3d\\afdum_mesto2.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 9.198,
+      "length_m": 16.9906,
+      "height_m": 14.0224,
+      "aspect_ratio": 1.8472,
+      "origin_to_bottom_m": 7.0094
+    },
+    {
+      "model_path": "data3d\\afdum_mesto2l.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 13.2342,
+      "length_m": 13.2496,
+      "height_m": 13.1065,
+      "aspect_ratio": 1.0012,
+      "origin_to_bottom_m": 6.55
+    },
+    {
+      "model_path": "data3d\\afdum_mesto3.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 10.1037,
+      "length_m": 18.1689,
+      "height_m": 15.7281,
+      "aspect_ratio": 1.7982,
+      "origin_to_bottom_m": 7.8607
+    },
+    {
+      "model_path": "data3d\\afhospoda_mesto.p3d",
+      "families": [
+        "shop",
+        "urban"
+      ],
+      "width_m": 17.2892,
+      "length_m": 16.2954,
+      "height_m": 12.7823,
+      "aspect_ratio": 1.061,
+      "origin_to_bottom_m": 6.3911
+    },
+    {
+      "model_path": "data3d\\ammostore2.p3d",
+      "families": [
+        "industrial"
+      ],
+      "width_m": 8.1832,
+      "length_m": 12.4197,
+      "height_m": 9.3046,
+      "aspect_ratio": 1.5177,
+      "origin_to_bottom_m": 4.7158
+    },
+    {
+      "model_path": "data3d\\astan.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 4.6603,
+      "length_m": 1.8829,
+      "height_m": 1.8386,
+      "aspect_ratio": 2.475,
+      "origin_to_bottom_m": 0.9193
+    },
+    {
+      "model_path": "data3d\\bouda1.p3d",
+      "families": [
+        "outbuilding"
+      ],
+      "width_m": 8.4149,
+      "length_m": 8.3517,
+      "height_m": 10.5418,
+      "aspect_ratio": 1.0076,
+      "origin_to_bottom_m": 5.2681
+    },
+    {
+      "model_path": "data3d\\bouda2.p3d",
+      "families": [
+        "outbuilding"
+      ],
+      "width_m": 5.8955,
+      "length_m": 5.3994,
+      "height_m": 3.9276,
+      "aspect_ratio": 1.0919,
+      "origin_to_bottom_m": 1.9395
+    },
+    {
+      "model_path": "data3d\\bouda2_vnitrek.p3d",
+      "families": [
+        "outbuilding"
+      ],
+      "width_m": 7.5212,
+      "length_m": 6.4848,
+      "height_m": 4.8258,
+      "aspect_ratio": 1.1598,
+      "origin_to_bottom_m": 2.4129
+    },
+    {
+      "model_path": "data3d\\bouda3.p3d",
+      "families": [
+        "outbuilding"
+      ],
+      "width_m": 8.7536,
+      "length_m": 12.1624,
+      "height_m": 6.8377,
+      "aspect_ratio": 1.3894,
+      "origin_to_bottom_m": 3.4053
+    },
+    {
+      "model_path": "data3d\\bozi_muka.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 0.8074,
+      "length_m": 0.3028,
+      "height_m": 3.6305,
+      "aspect_ratio": 2.6666,
+      "origin_to_bottom_m": 1.8229
+    },
+    {
+      "model_path": "data3d\\budova1.p3d",
+      "families": [
+        "urban"
+      ],
+      "width_m": 17.8676,
+      "length_m": 10.7479,
+      "height_m": 6.8795,
+      "aspect_ratio": 1.6624,
+      "origin_to_bottom_m": 3.4074
+    },
+    {
+      "model_path": "data3d\\budova2.p3d",
+      "families": [
+        "urban"
+      ],
+      "width_m": 18.7153,
+      "length_m": 14.3585,
+      "height_m": 5.4791,
+      "aspect_ratio": 1.3034,
+      "origin_to_bottom_m": 2.2523
+    },
+    {
+      "model_path": "data3d\\budova3.p3d",
+      "families": [
+        "urban"
+      ],
+      "width_m": 7.9637,
+      "length_m": 7.6173,
+      "height_m": 5.3805,
+      "aspect_ratio": 1.0455,
+      "origin_to_bottom_m": 2.6903
+    },
+    {
+      "model_path": "data3d\\budova4.p3d",
+      "families": [
+        "urban"
+      ],
+      "width_m": 15.9098,
+      "length_m": 7.7324,
+      "height_m": 5.5784,
+      "aspect_ratio": 2.0576,
+      "origin_to_bottom_m": 2.7892
+    },
+    {
+      "model_path": "data3d\\budova4_in.p3d",
+      "families": [
+        "urban"
+      ],
+      "width_m": 15.9098,
+      "length_m": 7.7324,
+      "height_m": 5.6584,
+      "aspect_ratio": 2.0576,
+      "origin_to_bottom_m": 2.8292
+    },
+    {
+      "model_path": "data3d\\budova5.p3d",
+      "families": [
+        "urban"
+      ],
+      "width_m": 8.9003,
+      "length_m": 9.0034,
+      "height_m": 5.9464,
+      "aspect_ratio": 1.0116,
+      "origin_to_bottom_m": 3.0019
+    },
+    {
+      "model_path": "data3d\\cihlovej_dum.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 6.9729,
+      "length_m": 7.1438,
+      "height_m": 14.2672,
+      "aspect_ratio": 1.0245,
+      "origin_to_bottom_m": 7.1336
+    },
+    {
+      "model_path": "data3d\\cihlovej_dum_in.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 6.9729,
+      "length_m": 7.1438,
+      "height_m": 14.2613,
+      "aspect_ratio": 1.0245,
+      "origin_to_bottom_m": 7.1224
+    },
+    {
+      "model_path": "data3d\\cihlovej_dum_mini.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 6.9729,
+      "length_m": 7.1438,
+      "height_m": 8.6345,
+      "aspect_ratio": 1.0245,
+      "origin_to_bottom_m": 4.309
+    },
+    {
+      "model_path": "data3d\\deutshe.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 14.4458,
+      "length_m": 8.1751,
+      "height_m": 12.5315,
+      "aspect_ratio": 1.767,
+      "origin_to_bottom_m": 6.2435
+    },
+    {
+      "model_path": "data3d\\deutshe_mini.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 10.2785,
+      "length_m": 7.7658,
+      "height_m": 9.6045,
+      "aspect_ratio": 1.3236,
+      "origin_to_bottom_m": 4.8023
+    },
+    {
+      "model_path": "data3d\\dulni_bs.p3d",
+      "families": [
+        "industrial"
+      ],
+      "width_m": 5.7471,
+      "length_m": 7.6578,
+      "height_m": 7.9883,
+      "aspect_ratio": 1.3325,
+      "origin_to_bottom_m": 4.0021
+    },
+    {
+      "model_path": "data3d\\dum01.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 11.7537,
+      "length_m": 18.5986,
+      "height_m": 6.9945,
+      "aspect_ratio": 1.5824,
+      "origin_to_bottom_m": 3.4841
+    },
+    {
+      "model_path": "data3d\\dum02.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 7.6074,
+      "length_m": 13.3613,
+      "height_m": 12.0356,
+      "aspect_ratio": 1.7564,
+      "origin_to_bottom_m": 6.0178
+    },
+    {
+      "model_path": "data3d\\dum_m2.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 8.1762,
+      "length_m": 9.6137,
+      "height_m": 9.2029,
+      "aspect_ratio": 1.1758,
+      "origin_to_bottom_m": 4.6014
+    },
+    {
+      "model_path": "data3d\\dum_mesto.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 15.9232,
+      "length_m": 13.4177,
+      "height_m": 13.7208,
+      "aspect_ratio": 1.1867,
+      "origin_to_bottom_m": 6.8589
+    },
+    {
+      "model_path": "data3d\\dum_mesto2.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 9.2572,
+      "length_m": 18.1648,
+      "height_m": 13.4122,
+      "aspect_ratio": 1.9622,
+      "origin_to_bottom_m": 6.7003
+    },
+    {
+      "model_path": "data3d\\dum_mesto2l.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 14.996,
+      "length_m": 15.0073,
+      "height_m": 13.3381,
+      "aspect_ratio": 1.0008,
+      "origin_to_bottom_m": 6.669
+    },
+    {
+      "model_path": "data3d\\dum_mesto3.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 11.105,
+      "length_m": 20.8626,
+      "height_m": 15.83,
+      "aspect_ratio": 1.8787,
+      "origin_to_bottom_m": 7.9093
+    },
+    {
+      "model_path": "data3d\\dum_mesto_in.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 13.9983,
+      "length_m": 11.3352,
+      "height_m": 9.1263,
+      "aspect_ratio": 1.2349,
+      "origin_to_bottom_m": 4.5744
+    },
+    {
+      "model_path": "data3d\\dum_olezlina.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 17.2286,
+      "length_m": 8.5217,
+      "height_m": 10.7403,
+      "aspect_ratio": 2.0217,
+      "origin_to_bottom_m": 5.3701
+    },
+    {
+      "model_path": "data3d\\dum_rasovna.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 7.3323,
+      "length_m": 10.5267,
+      "height_m": 9.4714,
+      "aspect_ratio": 1.4356,
+      "origin_to_bottom_m": 4.7439
+    },
+    {
+      "model_path": "data3d\\dum_rasovna_in.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 7.3323,
+      "length_m": 10.5267,
+      "height_m": 9.4714,
+      "aspect_ratio": 1.4356,
+      "origin_to_bottom_m": 4.7439
+    },
+    {
+      "model_path": "data3d\\fuelstation.p3d",
+      "families": [
+        "industrial"
+      ],
+      "width_m": 16.2639,
+      "length_m": 14.2582,
+      "height_m": 5.794,
+      "aspect_ratio": 1.1407,
+      "origin_to_bottom_m": 2.897
+    },
+    {
+      "model_path": "data3d\\fuelstation_army.p3d",
+      "families": [
+        "industrial"
+      ],
+      "width_m": 16.9341,
+      "length_m": 14.4366,
+      "height_m": 5.8226,
+      "aspect_ratio": 1.173,
+      "origin_to_bottom_m": 2.9113
+    },
+    {
+      "model_path": "data3d\\fuelstation_new.p3d",
+      "families": [
+        "industrial"
+      ],
+      "width_m": 16.2639,
+      "length_m": 14.2582,
+      "height_m": 5.794,
+      "aspect_ratio": 1.1407,
+      "origin_to_bottom_m": 2.897
+    },
+    {
+      "model_path": "data3d\\garaz.p3d",
+      "families": [
+        "industrial",
+        "outbuilding"
+      ],
+      "width_m": 15.8353,
+      "length_m": 9.9673,
+      "height_m": 4.2362,
+      "aspect_ratio": 1.5887,
+      "origin_to_bottom_m": 2.1171
+    },
+    {
+      "model_path": "data3d\\garaz_bez_tanku.p3d",
+      "families": [
+        "industrial",
+        "outbuilding"
+      ],
+      "width_m": 18.0148,
+      "length_m": 12.4197,
+      "height_m": 9.2373,
+      "aspect_ratio": 1.4505,
+      "origin_to_bottom_m": 4.6152
+    },
+    {
+      "model_path": "data3d\\garaz_s_tankem.p3d",
+      "families": [
+        "industrial",
+        "outbuilding"
+      ],
+      "width_m": 18.0148,
+      "length_m": 12.4197,
+      "height_m": 9.2993,
+      "aspect_ratio": 1.4505,
+      "origin_to_bottom_m": 4.6497
+    },
+    {
+      "model_path": "data3d\\hospital.p3d",
+      "families": [
+        "urban"
+      ],
+      "width_m": 20.8764,
+      "length_m": 29.8258,
+      "height_m": 6.8222,
+      "aspect_ratio": 1.4287,
+      "origin_to_bottom_m": 3.4111
+    },
+    {
+      "model_path": "data3d\\hospoda_mesto.p3d",
+      "families": [
+        "shop",
+        "urban"
+      ],
+      "width_m": 16.4211,
+      "length_m": 16.3054,
+      "height_m": 14.726,
+      "aspect_ratio": 1.0071,
+      "origin_to_bottom_m": 7.363
+    },
+    {
+      "model_path": "data3d\\hrobecek2.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 1.3151,
+      "length_m": 0.4329,
+      "height_m": 2.1596,
+      "aspect_ratio": 3.0377,
+      "origin_to_bottom_m": 1.0718
+    },
+    {
+      "model_path": "data3d\\hruzdum.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 7.6194,
+      "length_m": 7.6186,
+      "height_m": 13.669,
+      "aspect_ratio": 1.0001,
+      "origin_to_bottom_m": 6.8345
+    },
+    {
+      "model_path": "data3d\\kaple.p3d",
+      "families": [
+        "church"
+      ],
+      "width_m": 2.2618,
+      "length_m": 1.0425,
+      "height_m": 4.1765,
+      "aspect_ratio": 2.1696,
+      "origin_to_bottom_m": 2.0882
+    },
+    {
+      "model_path": "data3d\\kasna.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 8.0189,
+      "length_m": 7.7895,
+      "height_m": 3.368,
+      "aspect_ratio": 1.0295,
+      "origin_to_bottom_m": 1.6693
+    },
+    {
+      "model_path": "data3d\\kostel.p3d",
+      "families": [
+        "church"
+      ],
+      "width_m": 12.8767,
+      "length_m": 21.0894,
+      "height_m": 18.4066,
+      "aspect_ratio": 1.6378,
+      "origin_to_bottom_m": 9.1912
+    },
+    {
+      "model_path": "data3d\\kostel2.p3d",
+      "families": [
+        "church"
+      ],
+      "width_m": 19.5258,
+      "length_m": 40.9195,
+      "height_m": 39.8146,
+      "aspect_ratio": 2.0957,
+      "origin_to_bottom_m": 19.8581
+    },
+    {
+      "model_path": "data3d\\kostel3.p3d",
+      "families": [
+        "church"
+      ],
+      "width_m": 13.0603,
+      "length_m": 35.9086,
+      "height_m": 35.6953,
+      "aspect_ratio": 2.7495,
+      "origin_to_bottom_m": 17.8453
+    },
+    {
+      "model_path": "data3d\\kostelik.p3d",
+      "families": [
+        "church"
+      ],
+      "width_m": 9.2688,
+      "length_m": 11.8537,
+      "height_m": 12.1224,
+      "aspect_ratio": 1.2789,
+      "origin_to_bottom_m": 6.0438
+    },
+    {
+      "model_path": "data3d\\krater.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 11.8776,
+      "length_m": 11.8988,
+      "height_m": 0.2444,
+      "aspect_ratio": 1.0018,
+      "origin_to_bottom_m": 0
+    },
+    {
+      "model_path": "data3d\\majak.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 4.7878,
+      "length_m": 5.0437,
+      "height_m": 19.958,
+      "aspect_ratio": 1.0534,
+      "origin_to_bottom_m": 9.979
+    },
+    {
+      "model_path": "data3d\\majak_podesta.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 11.2759,
+      "length_m": 20.1483,
+      "height_m": 7.08,
+      "aspect_ratio": 1.7869,
+      "origin_to_bottom_m": 3.5622
+    },
+    {
+      "model_path": "data3d\\majak_v_celku.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 11.2759,
+      "length_m": 20.1483,
+      "height_m": 23.8501,
+      "aspect_ratio": 1.7869,
+      "origin_to_bottom_m": 11.925
+    },
+    {
+      "model_path": "data3d\\mesto_dum.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 15.9232,
+      "length_m": 13.4177,
+      "height_m": 13.7208,
+      "aspect_ratio": 1.1867,
+      "origin_to_bottom_m": 6.8589
+    },
+    {
+      "model_path": "data3d\\molo_beton.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 19.9333,
+      "length_m": 17.7465,
+      "height_m": 5.0015,
+      "aspect_ratio": 1.1232,
+      "origin_to_bottom_m": 2.5098
+    },
+    {
+      "model_path": "data3d\\molo_drevo.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 36.9857,
+      "length_m": 2.597,
+      "height_m": 8.2998,
+      "aspect_ratio": 14.2419,
+      "origin_to_bottom_m": 4.1499
+    },
+    {
+      "model_path": "data3d\\molo_drevo_bs.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 36.6252,
+      "length_m": 2.2958,
+      "height_m": 5.0505,
+      "aspect_ratio": 15.9531,
+      "origin_to_bottom_m": 2.6154
+    },
+    {
+      "model_path": "data3d\\molo_drevo_end.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 6.0956,
+      "length_m": 6.2857,
+      "height_m": 8.2998,
+      "aspect_ratio": 1.0312,
+      "origin_to_bottom_m": 4.2341
+    },
+    {
+      "model_path": "data3d\\molo_krychle.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 19.9333,
+      "length_m": 7.906,
+      "height_m": 5,
+      "aspect_ratio": 2.5213,
+      "origin_to_bottom_m": 2.5
+    },
+    {
+      "model_path": "data3d\\obihacka.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 3.117,
+      "length_m": 6.3105,
+      "height_m": 1.2202,
+      "aspect_ratio": 2.0246,
+      "origin_to_bottom_m": 0.816
+    },
+    {
+      "model_path": "data3d\\olezlina.p3d",
+      "families": [
+        "urban",
+        "townhouse"
+      ],
+      "width_m": 17.2286,
+      "length_m": 9.6708,
+      "height_m": 11.18,
+      "aspect_ratio": 1.7815,
+      "origin_to_bottom_m": 5.5678
+    },
+    {
+      "model_path": "data3d\\plechbud.p3d",
+      "families": [
+        "outbuilding"
+      ],
+      "width_m": 1.9752,
+      "length_m": 2.1543,
+      "height_m": 2.0452,
+      "aspect_ratio": 1.0907,
+      "origin_to_bottom_m": 1.0232
+    },
+    {
+      "model_path": "data3d\\podesta_pod_majak.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 11.2759,
+      "length_m": 20.1483,
+      "height_m": 7.08,
+      "aspect_ratio": 1.7869,
+      "origin_to_bottom_m": 3.5622
+    },
+    {
+      "model_path": "data3d\\podlejzacka.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 2.634,
+      "length_m": 5.0878,
+      "height_m": 1.0479,
+      "aspect_ratio": 1.9316,
+      "origin_to_bottom_m": 1.0347
+    },
+    {
+      "model_path": "data3d\\prebehlavka.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 0.7317,
+      "length_m": 9.4429,
+      "height_m": 1.6471,
+      "aspect_ratio": 12.9058,
+      "origin_to_bottom_m": 0.8291
+    },
+    {
+      "model_path": "data3d\\prolejzacka.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 2.3661,
+      "length_m": 1.6523,
+      "height_m": 3.2675,
+      "aspect_ratio": 1.432,
+      "origin_to_bottom_m": 1.6338
+    },
+    {
+      "model_path": "data3d\\repair_center.p3d",
+      "families": [
+        "industrial"
+      ],
+      "width_m": 7.0204,
+      "length_m": 13.0989,
+      "height_m": 5.1472,
+      "aspect_ratio": 1.8658,
+      "origin_to_bottom_m": 2.5736
+    },
+    {
+      "model_path": "data3d\\ryb_domek.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 6.7462,
+      "length_m": 6.3119,
+      "height_m": 6.1111,
+      "aspect_ratio": 1.0688,
+      "origin_to_bottom_m": 3.0556
+    },
+    {
+      "model_path": "data3d\\ryb_domek_in.p3d",
+      "families": [
+        "residential"
+      ],
+      "width_m": 6.7462,
+      "length_m": 6.3119,
+      "height_m": 6.1111,
+      "aspect_ratio": 1.0688,
+      "origin_to_bottom_m": 3.0556
+    },
+    {
+      "model_path": "data3d\\stanice.p3d",
+      "families": [
+        "urban",
+        "outbuilding"
+      ],
+      "width_m": 9.7714,
+      "length_m": 8.5295,
+      "height_m": 7.5165,
+      "aspect_ratio": 1.1456,
+      "origin_to_bottom_m": 3.7547
+    },
+    {
+      "model_path": "data3d\\statek_hl_bud.p3d",
+      "families": [
+        "agricultural"
+      ],
+      "width_m": 8.2695,
+      "length_m": 13.2821,
+      "height_m": 10.2906,
+      "aspect_ratio": 1.6062,
+      "origin_to_bottom_m": 5.219
+    },
+    {
+      "model_path": "data3d\\statek_kulna.p3d",
+      "families": [
+        "agricultural"
+      ],
+      "width_m": 6.5567,
+      "length_m": 6.3027,
+      "height_m": 7.8519,
+      "aspect_ratio": 1.0403,
+      "origin_to_bottom_m": 3.926
+    },
+    {
+      "model_path": "data3d\\stodola.p3d",
+      "families": [
+        "agricultural"
+      ],
+      "width_m": 11.1345,
+      "length_m": 24.5388,
+      "height_m": 13.8532,
+      "aspect_ratio": 2.2039,
+      "origin_to_bottom_m": 6.9211
+    },
+    {
+      "model_path": "data3d\\stodola_open.p3d",
+      "families": [
+        "agricultural"
+      ],
+      "width_m": 8.2148,
+      "length_m": 15.8204,
+      "height_m": 11.457,
+      "aspect_ratio": 1.9258,
+      "origin_to_bottom_m": 5.7285
+    },
+    {
+      "model_path": "data3d\\strel_post.p3d",
+      "families": [
+        "outbuilding"
+      ],
+      "width_m": 4.0473,
+      "length_m": 4.1618,
+      "height_m": 0.9858,
+      "aspect_ratio": 1.0283,
+      "origin_to_bottom_m": 0.4628
+    },
+    {
+      "model_path": "data3d\\strel_post_panel.p3d",
+      "families": [
+        "outbuilding"
+      ],
+      "width_m": 0.3113,
+      "length_m": 2.0422,
+      "height_m": 2.3094,
+      "aspect_ratio": 6.5593,
+      "origin_to_bottom_m": 1.1547
+    },
+    {
+      "model_path": "data3d\\zed_kamenna.p3d",
+      "families": [
+        "misc"
+      ],
+      "width_m": 4.1804,
+      "length_m": 0.4127,
+      "height_m": 2.6538,
+      "aspect_ratio": 10.1296,
+      "origin_to_bottom_m": 1.3269
+    },
+    {
+      "model_path": "data3d\\zvonice.p3d",
+      "families": [
+        "church"
+      ],
+      "width_m": 0.526,
+      "length_m": 0.4906,
+      "height_m": 2.2078,
+      "aspect_ratio": 1.0721,
+      "origin_to_bottom_m": 1.1047
+    }
+  ]
+}
