@@ -14,6 +14,7 @@ def _spec(**overrides):
         building_foundation_maximum_depth=2.5,
         building_ground_clearance=0.05,
         building_foundation_safety=0.20,
+        sea_level=0.0,
     )
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -193,3 +194,53 @@ def test_progress_reports_move_and_rejection_counters():
     assert events
     assert all(value == 52 for value, _text in events)
     assert any("moved" in text and "rejected" in text for _value, text in events)
+
+
+def test_tidal_water_filter_rejects_low_final_pad() -> None:
+    spec = _spec(cells=8, cell_size=10.0, world_size=80.0)
+    plan = _plan("way/tidal", 40.0, 40.0, width=6.0, length=8.0)
+    water = SimpleNamespace(water=(True,) * (spec.cells * spec.cells))
+    elevations = (4.50,) * (spec.cells * spec.cells)
+
+    assert policy._building_overlaps_tidal_water(
+        plan,
+        elevations,
+        water,
+        spec,
+    )
+
+    kept, rejected = policy._filter_tidal_water_buildings(
+        (plan,),
+        elevations,
+        water,
+        spec,
+    )
+    assert kept == ()
+    assert rejected == 1
+
+
+def test_tidal_water_filter_keeps_high_dry_pad_touching_coarse_water_cell() -> None:
+    spec = _spec(cells=8, cell_size=10.0, world_size=80.0)
+    plan = _plan("way/high-bank", 40.0, 40.0, width=6.0, length=8.0)
+    water = SimpleNamespace(water=(True,) * (spec.cells * spec.cells))
+    elevations = (6.00,) * (spec.cells * spec.cells)
+
+    assert not policy._building_overlaps_tidal_water(
+        plan,
+        elevations,
+        water,
+        spec,
+    )
+
+
+def test_tidal_water_filter_keeps_low_building_when_no_water_overlaps() -> None:
+    spec = _spec(cells=8, cell_size=10.0, world_size=80.0)
+    plan = _plan("way/low-dry", 40.0, 40.0, width=6.0, length=8.0)
+    elevations = (4.50,) * (spec.cells * spec.cells)
+
+    assert not policy._building_overlaps_tidal_water(
+        plan,
+        elevations,
+        _raster(spec),
+        spec,
+    )
