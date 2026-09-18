@@ -10,6 +10,8 @@ from cwr_worldgen.procedural_forests import (
     DEFAULT_BORDER_PROXY_MODELS,
     DEFAULT_PROXY_MODELS,
     DEFAULT_UNDERGROWTH_PROXY_MODELS,
+    EVERON_SAFE_BORDER_PROXY_MODELS,
+    EVERON_SAFE_UNDERGROWTH_PROXY_MODELS,
     NOGOVA_LEAF_BORDER_PROXY_MODELS,
     NOGOVA_LEAF_PROXY_MODELS,
     NOGOVA_PINE_BORDER_PROXY_MODELS,
@@ -38,6 +40,29 @@ class ProceduralForestClusterTests(unittest.TestCase):
         self.assertTrue(DEFAULT_BORDER_PROXY_MODELS)
         self.assertTrue(all(path.casefold().startswith("data3d" + "\\") for path in DEFAULT_BORDER_PROXY_MODELS))
         self.assertFalse(any(path.casefold().startswith("o\\tree" + "\\") for path in DEFAULT_BORDER_PROXY_MODELS))
+
+    def test_everon_safe_proxy_profile_excludes_suspect_bushes(self) -> None:
+        library = ProceduralForestClusterLibrary(
+            "cwr_cluster", proxy_profile="everon-safe"
+        )
+        library.register_models((
+            cluster_model_path("cwr_cluster", "pine", 0.30),
+            cluster_model_path("cwr_cluster", "border_thicket", 0.15),
+            cluster_model_path("cwr_cluster", "undergrowth_patch", 0.15),
+        ))
+        models = {path.casefold() for path in library.required_proxy_models()}
+
+        self.assertTrue(
+            {path.casefold() for path in EVERON_SAFE_BORDER_PROXY_MODELS}
+            .intersection(models)
+        )
+        self.assertTrue(
+            {path.casefold() for path in EVERON_SAFE_UNDERGROWTH_PROXY_MODELS}
+            .intersection(models)
+        )
+        self.assertNotIn(r"data3d\ker pichlavej.p3d", models)
+        self.assertNotIn(r"data3d\ker deravej.p3d", models)
+        self.assertTrue(any(path.startswith("data3d\\les ") for path in models))
 
     def test_nogova_proxy_profile_remaps_forest_and_bush_clusters(self) -> None:
         library = ProceduralForestClusterLibrary("cwr_cluster", proxy_profile="nogova")
