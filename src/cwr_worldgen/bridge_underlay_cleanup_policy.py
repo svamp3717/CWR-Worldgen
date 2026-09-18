@@ -10,6 +10,7 @@ from . import generator as _generator
 from . import osm as _osm
 from . import paved_junction_policy as _paved
 from . import playability as _p
+from .model import WorldObject
 
 _ALIGNMENT_TOLERANCE_DEGREES = 30.0
 _ENDPOINT_KEEP_METRES = 0.10
@@ -272,6 +273,72 @@ def _has_matching_underlay(objects, start, end, model_path) -> bool:
     return False
 
 
+def _terminal_underlay_object(
+    object_id: int,
+    model_path: str,
+    span: _BridgeSpan,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    elevations,
+    spec,
+) -> WorldObject:
+    """Keep terminal mask roads on the bridge approach plane, not the water bed.
+
+    The first stock bridge module deliberately retains an ordinary-road underlay
+    to hide edge gaps in the bridge model. Sampling that underlay from terrain is
+    wrong once bridge terrain repair has reopened water beneath the span: the
+    second 25 m piece can dive toward the water bed and protrude through the
+    otherwise level bridge. Interpolate the final road surface between the two
+    graded bridge endpoints instead. This is the same linear bank-to-bank plane
+    the stock bridge chain is intended to follow.
+    """
+    span_start = (float(span.points[0][0]), float(span.points[0][1]))
+    span_end = (float(span.points[-1][0]), float(span.points[-1][1]))
+    total = math.dist(span_start, span_end)
+    if total <= 1.0e-9:
+        return _p._road_object_on_slope(
+            object_id,
+            model_path,
+            start,
+            end,
+            elevations,
+            spec,
+            vertical_offset=_p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
+        )
+
+    offset = float(_p._STOCK_ROAD_VERTICAL_OFFSET_METRES)
+    start_surface = float(
+        _p._sample_elevation(
+            elevations, spec.cells, spec.cell_size, span_start[0], span_start[1]
+        )
+    ) + offset
+    end_surface = float(
+        _p._sample_elevation(
+            elevations, spec.cells, spec.cell_size, span_end[0], span_end[1]
+        )
+    ) + offset
+
+    start_along = max(0.0, min(total, math.dist(span_start, start)))
+    end_along = max(0.0, min(total, math.dist(span_start, end)))
+    start_y = start_surface + (end_surface - start_surface) * start_along / total
+    end_y = start_surface + (end_surface - start_surface) * end_along / total
+
+    dx = float(end[0]) - float(start[0])
+    dz = float(end[1]) - float(start[1])
+    horizontal = max(0.01, math.hypot(dx, dz))
+    heading = math.degrees(math.atan2(dx, dz)) % 360.0
+    pitch = math.degrees(math.atan2(end_y - start_y, horizontal))
+    return WorldObject(
+        int(object_id),
+        model_path,
+        (float(start[0]) + float(end[0])) * 0.5,
+        (start_y + end_y) * 0.5,
+        (float(start[1]) + float(end[1])) * 0.5,
+        heading,
+        pitch,
+    )
+
+
 def _add_terminal_underlays(report, spans, elevations, spec):
     """Synthesize road pieces where the fitter stops before the terminal bridge modules."""
     if not spans:
@@ -286,14 +353,14 @@ def _add_terminal_underlays(report, spans, elevations, spec):
         for start, end in _terminal_segments(span):
             if _has_matching_underlay(objects, start, end, model):
                 continue
-            obj = _p._road_object_on_slope(
+            obj = _terminal_underlay_object(
                 next_id,
                 model,
+                span,
                 start,
                 end,
                 elevations,
                 spec,
-                vertical_offset=_p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
             )
             objects.append(obj)
             next_id += 1

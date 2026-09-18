@@ -22,6 +22,7 @@ import math
 import re
 from typing import Callable, Sequence
 
+from . import bridge_water_deck_clamp_policy as _bridge_clamp
 from . import generator as _generator
 from . import osm as _osm
 from . import playability as _p
@@ -39,7 +40,7 @@ _MAXIMUM_CORRECTION_VECTORS = 4
 _MAXIMUM_VERTICAL_TERRAIN_GAP_METRES = 2.0
 _PROGRESS_BUCKET_PERCENT = 2
 _RAW_PROGRESS_PERCENT = 52
-_CACHE_REVISION = "final-road-building-clearance-v1"
+_CACHE_REVISION = "final-road-building-clearance-v2-tidal-water"
 
 _WIDTHS = {
     "sil": 4.55,
@@ -640,6 +641,61 @@ def _terrain_relocation_allowed(
     return candidate_relief <= allowed_relief + 1.0e-9
 
 
+def _building_overlaps_tidal_water(
+    plan,
+    elevations,
+    raster,
+    spec,
+) -> bool:
+    """Return whether a final building would sit inside visibly tidal water.
+
+    Historical placement rejected only footprints fully covered by the mapped
+    water mask and fully below nominal sea level. CWA/OFP tide can render water
+    several metres above that nominal plane, so a shoreline building could be
+    accepted with its entire physical base below the visible tide. Require both
+    mapped-water overlap and a final pad below maximum tide; high dry structures
+    that merely touch a coarse shoreline raster cell are preserved.
+    """
+    polygon = tuple(getattr(plan, "support_polygon", ()) or ())
+    if len(polygon) < 3:
+        return False
+    if not _osm._polygon_overlaps_mask(
+        raster.water,
+        int(spec.cells),
+        float(spec.world_size),
+        polygon,
+    ):
+        return False
+
+    _minimum, maximum = _osm._polygon_elevation_extrema(
+        elevations,
+        int(spec.cells),
+        float(spec.cell_size),
+        polygon,
+    )
+    ground_clearance = max(
+        0.0,
+        float(getattr(spec, "building_ground_clearance", 0.0)),
+    )
+    maximum_tide = (
+        float(spec.sea_level)
+        + float(getattr(_bridge_clamp, "_OFP_MAX_TIDE_METRES", 5.0))
+    )
+    return float(maximum) + ground_clearance < maximum_tide - 1.0e-6
+
+
+def _filter_tidal_water_buildings(plans, elevations, raster, spec):
+    frozen = tuple(plans or ())
+    kept = tuple(
+        plan
+        for plan in frozen
+        if not _building_overlaps_tidal_water(
+            plan, elevations, raster, spec
+        )
+    )
+    return kept, len(frozen) - len(kept)
+
+
 def _candidate_allowed(
     plan_index: int,
     original_polygon: Sequence[PointXZ],
@@ -940,19 +996,29 @@ def install_final_building_road_clearance_policy() -> None:
         include_roads = bool(kwargs.get("include_roads", True))
         plans = kwargs.get("building_placement_plans")
         report = _road_context_matches(dataset, projection, elevations, spec)
-        if (
-            not include_roads
-            and plans is not None
-            and report is not None
-        ):
-            plans, _conflict_report = resolve_final_building_road_conflicts(
+        if not include_roads and plans is not None:
+            plans, water_rejected = _filter_tidal_water_buildings(
                 plans,
-                report,
                 elevations,
                 raster,
                 spec,
-                progress_callback=kwargs.get("progress_callback"),
             )
+            callback = kwargs.get("progress_callback")
+            if water_rejected and callback is not None:
+                callback(
+                    _RAW_PROGRESS_PERCENT,
+                    "Rejecting final building footprints in tidal water "
+                    f"({water_rejected:,} rejected)",
+                )
+            if report is not None:
+                plans, _conflict_report = resolve_final_building_road_conflicts(
+                    plans,
+                    report,
+                    elevations,
+                    raster,
+                    spec,
+                    progress_callback=callback,
+                )
             kwargs["building_placement_plans"] = plans
         return _ORIGINAL_GENERATE_WORLD_OBJECTS(
             dataset,
