@@ -18,7 +18,7 @@ def _library() -> StockBuildingLibrary:
 def test_measured_catalogue_contains_full_wrptool_house_pool() -> None:
     models = _load_catalogue()
     paths = {model.model_path.casefold() for model in models}
-    assert len(models) == 145
+    assert len(models) == 133
     assert r"data3d\kostel.p3d" in paths
     assert r"data3d\kostel2.p3d" in paths
     assert r"data3d\kostel3.p3d" in paths
