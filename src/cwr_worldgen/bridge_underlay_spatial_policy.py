@@ -232,14 +232,14 @@ def _add_terminal_underlays(report, spans, elevations, spec):
         for start, end in _cleanup._terminal_segments(span):
             if _has_matching_underlay(index, start, end, model):
                 continue
-            obj = _cleanup._p._road_object_on_slope(
+            obj = _cleanup._terminal_underlay_object(
                 next_id,
                 model,
+                span,
                 start,
                 end,
                 elevations,
                 spec,
-                vertical_offset=_cleanup._p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
             )
             index.append(obj)
             next_id += 1
