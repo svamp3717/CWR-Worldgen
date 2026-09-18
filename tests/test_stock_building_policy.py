@@ -18,7 +18,7 @@ def _library() -> StockBuildingLibrary:
 def test_reviewed_catalogue_contains_only_curated_stock_pool() -> None:
     models = _load_catalogue()
     paths = {model.model_path.casefold() for model in models}
-    assert len(models) == 131
+    assert len(models) == 130
     assert r"data3d\kostel.p3d" in paths
     assert r"data3d\hangar.p3d" in paths
     assert r"data3d\helfenburk.p3d" in paths
@@ -29,6 +29,7 @@ def test_reviewed_catalogue_contains_only_curated_stock_pool() -> None:
     assert r"o\misc\leseni2x.p3d" not in paths
     assert r"o\misc\leseni4x.p3d" not in paths
     assert r"data3d\zvonice.p3d" not in paths
+    assert r"data3d\hospital.p3d" not in paths
     assert all(model.categories for model in models)
     assert all(model.placement in {"Urban", "Rural", "Both"} for model in models)
     assert all(min(model.width_m, model.length_m, model.height_m) > 0.0 for model in models)
