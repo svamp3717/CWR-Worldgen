@@ -81,3 +81,32 @@ def test_stock_asset_report_writes_catalogue_but_no_generated_models(tmp_path: P
     assert document["placements"] == 1
     assert result.generated_variants == 0
     assert result.model_assets == ()
+
+
+def test_rural_residential_uses_house_pool_while_city_prefers_dense_stock() -> None:
+    rural = _library()
+    rural_placement = rural.plan_point(
+        {"building": "house"},
+        10.0,
+        0.0,
+        x=5000.0,
+        z=5000.0,
+    )
+    rural_catalogue = {model.model_path.casefold(): model for model in rural.models}
+    rural_model = rural_catalogue[rural_placement.model_path.casefold()]
+    assert "residential" in rural_model.families
+    assert "urban" not in rural_model.families
+    assert "townhouse" not in rural_model.families
+
+    city = _library()
+    city._settlements = ((0.0, 0.0, "city"),)
+    city_placement = city.plan_point(
+        {"building": "house"},
+        10.0,
+        0.0,
+        x=0.0,
+        z=0.0,
+    )
+    city_catalogue = {model.model_path.casefold(): model for model in city.models}
+    city_model = city_catalogue[city_placement.model_path.casefold()]
+    assert "townhouse" in city_model.families or "urban" in city_model.families
