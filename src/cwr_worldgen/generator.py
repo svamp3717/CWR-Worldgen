@@ -167,6 +167,9 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 def _forest_proxy_profile(spec: object) -> str:
+    profile = str(getattr(spec, "forest_profile", "everon")).casefold()
+    if profile == "everon-safe":
+        return "everon_safe"
     model = str(getattr(spec, "forest_tree_model", "")).casefold()
     if model.startswith(r"o\tree\les_nw_jehl_"):
         return "nogova_pine"
@@ -956,7 +959,7 @@ def _validate_milestone3(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() == "everon":
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "everon-safe"}:
         checks.append((
             "Steep forest blocks use the normal/sunk triangle or reusable fallback ladder",
             (
@@ -1564,7 +1567,7 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
         canonical_asset_path(spec.forest_tree_model),
     }
     if milestone_number >= 9:
-        if str(getattr(spec, "forest_profile", "malden")).casefold() == "everon":
+        if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "everon-safe"}:
             trusted.add(canonical_asset_path(str(getattr(spec, "forest_everon_steep_model", ""))))
         # Road-cut forest blocks use individually checked stock trees and bushes
         # in both the Everon and Malden profiles. Keep those original game assets
@@ -1879,7 +1882,7 @@ def _validate_milestone4(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() == "everon":
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "everon-safe"}:
         checks.append((
             "Steep forest blocks use the normal/sunk triangle or reusable fallback ladder",
             (
