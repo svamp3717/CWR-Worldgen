@@ -203,3 +203,36 @@ def test_bridge_object_budget_uses_clipped_stock_module_count() -> None:
         spans = cleanup._bridge_spans(dataset, None, [0.0] * (64 * 64), spec)
 
     assert spans == ()
+
+
+def test_terminal_underlays_follow_bridge_plane_not_reopened_water_bed() -> None:
+    span = cleanup._BridgeSpan(
+        points=((0.0, 100.0), (250.0, 100.0)),
+        road_width=7.0,
+        road_model_path=r"o\road\sil25.p3d",
+    )
+    spec = SimpleNamespace(cells=16, cell_size=50.0)
+    elevations = (0.0,) * (spec.cells * spec.cells)
+
+    def reopened_water(_elevations, _cells, _cell_size, x, _z):
+        # Both graded bridge abutments are 6.30 m, while the reopened water bed
+        # beneath the interior is -5 m. The historical terminal underlay sampler
+        # therefore pitched its second 25 m slab steeply down into the water.
+        return 6.30 if x <= 0.001 or x >= 249.999 else -5.0
+
+    with patch.object(
+        cleanup._p,
+        "_sample_elevation",
+        side_effect=reopened_water,
+    ):
+        filled, added = cleanup._add_terminal_underlays(
+            _report(),
+            (span,),
+            elevations,
+            spec,
+        )
+
+    assert added == 4
+    assert len(filled.objects) == 4
+    assert all(obj.y == pytest.approx(6.335) for obj in filled.objects)
+    assert all(obj.pitch_degrees == pytest.approx(0.0) for obj in filled.objects)
