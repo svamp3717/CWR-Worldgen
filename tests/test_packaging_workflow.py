@@ -34,9 +34,14 @@ class PackagingWorkflowTests(unittest.TestCase):
                 self.assertIn(entry, text)
                 self.assertNotIn("build_gui.py", text)
 
-    def test_pyinstaller_collects_stock_building_catalogue(self) -> None:
-        catalogue = self.root / "src" / "cwr_worldgen" / "data" / "stock_building_models.json"
-        self.assertTrue(catalogue.is_file())
+    def test_pyinstaller_collects_stock_building_catalogues(self) -> None:
+        data_dir = self.root / "src" / "cwr_worldgen" / "data"
+        for name in (
+            "stock_building_models.json",
+            "stock_building_models_non_resistance.json",
+            "stock_building_models_resistance.json",
+        ):
+            self.assertTrue((data_dir / name).is_file(), name)
 
         pyproject = (self.root / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('"data/*.json"', pyproject)
