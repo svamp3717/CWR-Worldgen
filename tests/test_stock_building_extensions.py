@@ -42,12 +42,31 @@ def test_split_catalogue_files_partition_combined_catalogue() -> None:
     non_resistance_paths = {row["model_path"].casefold() for row in non_resistance["models"]}
     resistance_paths = {row["model_path"].casefold() for row in resistance["models"]}
 
-    assert non_resistance_paths
-    assert resistance_paths
+    assert combined["schema"] == 5
+    assert non_resistance["schema"] == 5
+    assert resistance["schema"] == 5
+    assert len(combined_paths) == 131
+    assert len(non_resistance_paths) == 78
+    assert len(resistance_paths) == 53
     assert non_resistance_paths.isdisjoint(resistance_paths)
     assert combined_paths == non_resistance_paths | resistance_paths
     assert all(not path.startswith("o\\") for path in non_resistance_paths)
     assert all(path.startswith("o\\") for path in resistance_paths)
+    assert all(
+        all(
+            field in row
+            for field in (
+                "categories",
+                "placement",
+                "width_m",
+                "length_m",
+                "height_m",
+                "aspect_ratio",
+                "origin_to_bottom_m",
+            )
+        )
+        for row in combined["models"]
+    )
 
 
 def test_stock_presets_keep_mixed_and_split_vanilla_from_resistance() -> None:
