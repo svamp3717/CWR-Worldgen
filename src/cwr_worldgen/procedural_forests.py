@@ -99,10 +99,10 @@ DEFAULT_BORDER_PROXY_MODELS: tuple[str, ...] = (
 # Diagnostic Everon proxy set used by the everon-safe forest profile.
 # Keep layout cardinality stable while replacing the two suspect bush models.
 EVERON_SAFE_BORDER_PROXY_MODELS: tuple[str, ...] = (
-    r"data3d\\ker listnac.p3d",
-    r"data3d\\ker buxus.p3d",
-    r"data3d\\ker listnac.p3d",
-    r"data3d\\str smrcicicek.p3d",
+    r"data3d\ker listnac.p3d",
+    r"data3d\ker buxus.p3d",
+    r"data3d\ker listnac.p3d",
+    r"data3d\str smrcicicek.p3d",
 )
 
 
