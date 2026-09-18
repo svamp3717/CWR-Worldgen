@@ -167,14 +167,14 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 def _forest_proxy_profile(spec: object) -> str:
-    profile = str(getattr(spec, "forest_profile", "everon")).casefold()
-    if profile == "everon-safe":
-        return "everon_safe"
     model = str(getattr(spec, "forest_tree_model", "")).casefold()
     if model.startswith(r"o\tree\les_nw_jehl_"):
         return "nogova_pine"
     if model.startswith(r"o\tree\les_nw_"):
         return "nogova_leaf"
+    profile = str(getattr(spec, "forest_profile", "everon")).casefold()
+    if profile == "everon-safe":
+        return "everon_safe"
     return "everon"
 
 
