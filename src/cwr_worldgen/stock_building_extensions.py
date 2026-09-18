@@ -2,8 +2,8 @@
 """Extended stock-building presets, GUI behavior, and stock-model grounding.
 
 This module layers on top of :mod:`stock_building_policy`. The original mixed
-stock preset stays backward compatible, while source-specific presets filter the
-same measured catalogue. Stock model origins are also lifted by the measured
+stock preset stays backward compatible, while source-specific presets load
+their own measured catalogue files. Stock model origins are also lifted by the measured
 distance from model origin to visible base before RVW4 serialization.
 """
 from __future__ import annotations
@@ -71,15 +71,6 @@ def stock_disabled_gui_option_keys(preset: object) -> tuple[str, ...]:
     if not is_stock_building_preset(preset):
         return ()
     return tuple(key for key, _label in _STOCK_DISABLED_GUI_OPTIONS)
-
-
-def _filter_models(models: Iterable[stock.StockBuildingModel], preset: str):
-    values = tuple(models)
-    if preset == STOCK_BUILDING_VANILLA_PRESET:
-        return tuple(model for model in values if stock_model_source(model.model_path) == "vanilla")
-    if preset == STOCK_BUILDING_RESISTANCE_PRESET:
-        return tuple(model for model in values if stock_model_source(model.model_path) == "resistance")
-    return values
 
 
 def _origin_lift_for_model(self, model_path: str) -> float:
