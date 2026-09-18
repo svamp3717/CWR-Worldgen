@@ -21,8 +21,12 @@ from . import stock_building_policy as stock
 STOCK_BUILDING_VANILLA_PRESET = "stock-vanilla"
 STOCK_BUILDING_RESISTANCE_PRESET = "stock-resistance"
 
-STOCK_BUILDING_VANILLA_LABEL = "Stock vanilla buildings only"
+STOCK_BUILDING_VANILLA_LABEL = "Stock non-Resistance buildings only"
 STOCK_BUILDING_RESISTANCE_LABEL = "Stock Resistance buildings only"
+
+_DATA_DIR = Path(__file__).with_name("data")
+_STOCK_NON_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_non_resistance.json"
+_STOCK_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_resistance.json"
 
 STOCK_BUILDING_PRESETS = (
     stock.STOCK_BUILDING_PRESET,
@@ -201,10 +205,17 @@ def _install_library_presets() -> None:
             requested = stock.STOCK_BUILDING_PRESET
         original_init(self, *args, **kwargs)
         self.house_style_preset = requested
-        filtered = _filter_models(self.models, requested)
-        if not filtered:
+
+        if requested == STOCK_BUILDING_VANILLA_PRESET:
+            models = stock._load_catalogue(_STOCK_NON_RESISTANCE_CATALOGUE_PATH)
+        elif requested == STOCK_BUILDING_RESISTANCE_PRESET:
+            models = stock._load_catalogue(_STOCK_RESISTANCE_CATALOGUE_PATH)
+        else:
+            models = self.models
+
+        if not models:
             raise RuntimeError(f"Stock building preset {requested!r} has no measured models")
-        self.models = filtered
+        self.models = tuple(models)
 
     stock.StockBuildingLibrary.__init__ = stock_init
     stock.StockBuildingLibrary.origin_lift_for_model = _origin_lift_for_model
