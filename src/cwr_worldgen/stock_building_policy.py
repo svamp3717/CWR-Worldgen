@@ -278,8 +278,27 @@ class StockBuildingLibrary:
             return "rural"
         return "city" if best[1] == "city" else "town" if best[1] == "town" else "village"
 
-    def _candidate_models(self, family: str) -> tuple[StockBuildingModel, ...]:
-        wanted = _FAMILY_FALLBACKS.get(family, (family, "residential"))
+    def _candidate_models(
+        self,
+        family: str,
+        settlement: str = "rural",
+    ) -> tuple[StockBuildingModel, ...]:
+        """Return stock models appropriate for both semantic family and settlement.
+
+        The old selector calculated rural/town/city context but never used it when
+        choosing a stock P3D. Keep villages in the rural-style pool, while towns
+        and cities may prefer denser townhouse/urban residential stock.
+        """
+        context = str(settlement or "rural").strip().casefold()
+        if family == "residential":
+            wanted = (
+                ("residential",)
+                if context in {"rural", "village"}
+                else ("townhouse", "urban", "residential")
+            )
+        else:
+            wanted = _FAMILY_FALLBACKS.get(family, (family, "residential"))
+
         for wanted_family in wanted:
             candidates = tuple(model for model in self.models if wanted_family in model.families)
             if candidates:
@@ -296,9 +315,10 @@ class StockBuildingLibrary:
         target_length: float,
         target_height: float,
         seed: str,
+        settlement: str = "rural",
     ) -> tuple[StockBuildingKey, bool]:
         scored: list[tuple[float, str, StockBuildingModel, bool]] = []
-        for model in self._candidate_models(family):
+        for model in self._candidate_models(family, settlement):
             direct = _dimension_score(model, target_width, target_length, target_height, swapped=False)
             swapped = _dimension_score(model, target_width, target_length, target_height, swapped=True)
             use_swapped = swapped + 1.0e-9 < direct
@@ -347,6 +367,7 @@ class StockBuildingLibrary:
             target_length=footprint.length_m,
             target_height=_target_height(tags, family),
             seed=f"polygon:{centre_x:.2f}:{centre_z:.2f}:{footprint.width_m:.2f}:{footprint.length_m:.2f}:{family}",
+            settlement=settlement,
         )
         heading = (footprint.heading_degrees + (90.0 if swapped else 0.0)) % 360.0
         return BuildingPlacement(key.stock_model_path, heading, key, key)
@@ -376,6 +397,7 @@ class StockBuildingLibrary:
             target_length=footprint_m,
             target_height=_target_height(tags, family),
             seed=f"point:{x:.2f}:{z:.2f}:{footprint_m:.2f}:{family}",
+            settlement=settlement,
         )
         heading = (float(heading_degrees) + (90.0 if swapped else 0.0)) % 360.0
         return BuildingPlacement(key.stock_model_path, heading, key, key)
