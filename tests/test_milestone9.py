@@ -524,6 +524,7 @@ class SurfacePassTests(unittest.TestCase):
 
     def test_everon_safe_profile_excludes_suspect_bushes(self) -> None:
         spec = Milestone9Spec(source_dir=Path("unused"), forest_profile="everon-safe")
+        spec.validate()
         resolved = _resolved_forest_profile_models(spec)
 
         self.assertEqual(
