@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Sequence
 
 import measure_p3d_models as measure
-from p3d_categoriser_app import Classification, PLACEMENTS
+from p3d_categoriser_app import Classification, PLACEMENTS, _optional_float
 
 
 def incomplete_state_path(path: Path) -> Path:
@@ -38,6 +38,11 @@ def _classification_from_item(item: object) -> tuple[str, Classification] | None
         categories=categories,
         placement=placement,
         reviewed=bool(item.get("reviewed", True)),
+        width_m=_optional_float(item.get("width_m")),
+        length_m=_optional_float(item.get("length_m")),
+        height_m=_optional_float(item.get("height_m")),
+        aspect_ratio=_optional_float(item.get("aspect_ratio")),
+        origin_to_bottom_m=_optional_float(item.get("origin_to_bottom_m")),
     )
 
 
@@ -84,6 +89,11 @@ def _model_record(model_path: str, classification: Classification) -> dict:
         "categories": list(classification.categories),
         "placement": classification.placement,
         "reviewed": classification.reviewed,
+        "width_m": classification.width_m,
+        "length_m": classification.length_m,
+        "height_m": classification.height_m,
+        "aspect_ratio": classification.aspect_ratio,
+        "origin_to_bottom_m": classification.origin_to_bottom_m,
     }
 
 
@@ -118,7 +128,7 @@ def save_split_state(
 
     companion = incomplete_state_path(path)
     main_report = {
-        "schema": 4,
+        "schema": 5,
         "kind": "completed_model_classifications",
         "categories": list(categories),
         "placements": list(PLACEMENTS),
@@ -133,7 +143,7 @@ def save_split_state(
 
     if incomplete_keys:
         incomplete_report = {
-            "schema": 1,
+            "schema": 2,
             "kind": "reviewed_incomplete_model_classifications",
             "source_catalogue": path.name,
             "model_count": len(incomplete_keys),
