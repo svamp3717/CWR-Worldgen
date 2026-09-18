@@ -26,6 +26,29 @@ class Classification:
     categories: list[str]
     placement: str = ""
     reviewed: bool = False
+    width_m: float | None = None
+    length_m: float | None = None
+    height_m: float | None = None
+    aspect_ratio: float | None = None
+    origin_to_bottom_m: float | None = None
+
+
+def _optional_float(value: object) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _measurement_values(model: PreviewModel) -> dict[str, float]:
+    measurement = model.measurement
+    return {
+        "width_m": float(measurement.width_m),
+        "length_m": float(measurement.length_m),
+        "height_m": float(measurement.height_m),
+        "aspect_ratio": float(measurement.aspect_ratio),
+        "origin_to_bottom_m": float(measurement.origin_to_bottom_m),
+    }
 
 
 def load_state(path: Path) -> tuple[dict[str, Classification], list[str]]:
@@ -48,6 +71,11 @@ def load_state(path: Path) -> tuple[dict[str, Classification], list[str]]:
             categories=[str(v) for v in item.get("categories", [])],
             placement=placement,
             reviewed=bool(item.get("reviewed", True)),
+            width_m=_optional_float(item.get("width_m")),
+            length_m=_optional_float(item.get("length_m")),
+            height_m=_optional_float(item.get("height_m")),
+            aspect_ratio=_optional_float(item.get("aspect_ratio")),
+            origin_to_bottom_m=_optional_float(item.get("origin_to_bottom_m")),
         )
     return result, categories
 
@@ -224,6 +252,10 @@ class CategoriserApp:
                 self.failures.append(item)
                 continue
             self.models.append(item)
+            existing = self.state.get(item.model_path)
+            if existing is not None:
+                for field, value in _measurement_values(item).items():
+                    setattr(existing, field, value)
             return item
         return None
 
@@ -242,6 +274,7 @@ class CategoriserApp:
             categories=self._current_categories(),
             placement=self._current_placement(),
             reviewed=reviewed or old.reviewed,
+            **_measurement_values(self.current),
         )
 
     def _category_changed(self) -> None:
@@ -407,6 +440,11 @@ class CategoriserApp:
                     "categories": self.state[key].categories,
                     "placement": self.state[key].placement,
                     "reviewed": self.state[key].reviewed,
+                    "width_m": self.state[key].width_m,
+                    "length_m": self.state[key].length_m,
+                    "height_m": self.state[key].height_m,
+                    "aspect_ratio": self.state[key].aspect_ratio,
+                    "origin_to_bottom_m": self.state[key].origin_to_bottom_m,
                 }
                 for key in sorted(self.state)
             ],
