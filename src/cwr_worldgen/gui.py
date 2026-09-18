@@ -43,6 +43,7 @@ FROZEN_CLI_MARKER = "--cwr-cli"
 
 RECOMMENDED_APPEARANCE_PRESET = "Nogova textures + Everon trees (recommended)"
 SAFE_EVERON_APPEARANCE_PRESET = "Nogova textures + Everon trees (safe bushes)"
+NO_GROUPED_CLUSTERS_APPEARANCE_PRESET = "Nogova textures + Everon trees (diagnostic: no grouped clusters)"
 RESISTANCE_APPEARANCE_PRESET = "Nogova Resistance leaf forests"
 LEGACY_RESISTANCE_APPEARANCE_PRESET = "Nogova Resistance forests"
 PINE_NOGOVA_APPEARANCE_PRESET = "Nogova Resistance pine forests"
@@ -50,6 +51,7 @@ LEGACY_NOGOVA_APPEARANCE_PRESET = "Nogova (recommended)"
 APPEARANCE_PRESETS = (
     RECOMMENDED_APPEARANCE_PRESET,
     SAFE_EVERON_APPEARANCE_PRESET,
+    NO_GROUPED_CLUSTERS_APPEARANCE_PRESET,
     RESISTANCE_APPEARANCE_PRESET,
     PINE_NOGOVA_APPEARANCE_PRESET,
     "Malden classic",
@@ -569,6 +571,7 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     if not bool(values.get("procedural_bridges", True)):
         command.append("--stock-bridges")
 
+    preset = str(values.get("appearance_preset", "")).strip()
     negative_flags = {
         "include_minor_roads": "--no-minor-roads",
         "forest_clusters": "--no-forest-clusters",
@@ -591,7 +594,10 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         "cemeteries": "--no-cemeteries",
     }
     for key, option in negative_flags.items():
-        if values.get(key, True) is False:
+        if (
+            key == "forest_clusters"
+            and preset == NO_GROUPED_CLUSTERS_APPEARANCE_PRESET
+        ) or values.get(key, True) is False:
             command.append(option)
 
     if bool(values.get("deploy_to_mod_folder", False)):
@@ -604,7 +610,6 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     if advanced:
         command.extend(shlex.split(advanced, posix=os.name != "nt"))
 
-    preset = str(values.get("appearance_preset", "")).strip()
     if preset == PINE_NOGOVA_APPEARANCE_PRESET:
         # Clone of the Resistance/Nogova preset using its separate conifer
         # (jehl = needle-tree) polygon forest pieces. The GUI fields already
@@ -2252,23 +2257,25 @@ class WorldgenGui(tk.Tk):
         if self._preset_guard or "appearance_preset" not in self.vars:
             return
         preset = str(self.vars["appearance_preset"].get())
-        desired: tuple[str, str, str] | None
+        desired: tuple[str, str, str, bool] | None
         if preset == RECOMMENDED_APPEARANCE_PRESET:
-            desired = ("nogova", "everon", EVERON_SINGLE_TREE_MODEL)
+            desired = ("nogova", "everon", EVERON_SINGLE_TREE_MODEL, True)
         elif preset == SAFE_EVERON_APPEARANCE_PRESET:
-            desired = ("nogova", "everon-safe", EVERON_SINGLE_TREE_MODEL)
+            desired = ("nogova", "everon-safe", EVERON_SINGLE_TREE_MODEL, True)
+        elif preset == NO_GROUPED_CLUSTERS_APPEARANCE_PRESET:
+            desired = ("nogova", "everon-safe", EVERON_SINGLE_TREE_MODEL, False)
         elif preset == PINE_NOGOVA_APPEARANCE_PRESET:
-            desired = ("nogova", "everon", NOGOVA_PINE_SINGLE_TREE_MODEL)
+            desired = ("nogova", "everon", NOGOVA_PINE_SINGLE_TREE_MODEL, True)
         elif preset in {RESISTANCE_APPEARANCE_PRESET, LEGACY_RESISTANCE_APPEARANCE_PRESET, LEGACY_NOGOVA_APPEARANCE_PRESET}:
-            desired = ("nogova", "everon", NOGOVA_LEAF_SINGLE_TREE_MODEL)
+            desired = ("nogova", "everon", NOGOVA_LEAF_SINGLE_TREE_MODEL, True)
         elif preset == "Malden classic":
-            desired = ("malden", "malden", r"data3d\str_fikovnik.p3d")
+            desired = ("malden", "malden", r"data3d\str_fikovnik.p3d", True)
         elif preset in {"Everon classic", "Everon classic (recommended)"}:
-            desired = ("everon", "everon", EVERON_SINGLE_TREE_MODEL)
+            desired = ("everon", "everon", EVERON_SINGLE_TREE_MODEL, True)
         elif preset == "Desert ground textures":
-            desired = ("desert", "malden", r"data3d\str_fikovnik.p3d")
+            desired = ("desert", "malden", r"data3d\str_fikovnik.p3d", True)
         elif preset == "Generated ground textures":
-            desired = ("generated", "everon", EVERON_SINGLE_TREE_MODEL)
+            desired = ("generated", "everon", EVERON_SINGLE_TREE_MODEL, True)
         else:
             desired = None
         if desired is None:
@@ -2281,6 +2288,8 @@ class WorldgenGui(tk.Tk):
                 self.vars["forest_profile"].set(desired[1])
             if "forest_single_tree_model" in self.vars and self.vars["forest_single_tree_model"].get() != desired[2]:
                 self.vars["forest_single_tree_model"].set(desired[2])
+            if "forest_clusters" in self.vars and bool(self.vars["forest_clusters"].get()) != desired[3]:
+                self.vars["forest_clusters"].set(desired[3])
         finally:
             self._preset_guard = False
 
@@ -3243,6 +3252,12 @@ class WorldgenGui(tk.Tk):
                 forest = str(values.get("forest_profile", "everon"))
                 if ground == "nogova" and forest == "everon":
                     self.vars["appearance_preset"].set(RECOMMENDED_APPEARANCE_PRESET)
+                elif (
+                    ground == "nogova"
+                    and forest == "everon-safe"
+                    and values.get("forest_clusters", True) is False
+                ):
+                    self.vars["appearance_preset"].set(NO_GROUPED_CLUSTERS_APPEARANCE_PRESET)
                 elif ground == "nogova" and forest == "everon-safe":
                     self.vars["appearance_preset"].set(SAFE_EVERON_APPEARANCE_PRESET)
                 elif ground == "malden" and forest == "malden":
