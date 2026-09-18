@@ -364,8 +364,8 @@ class Milestone9Spec(Milestone8Spec):
         Milestone8Spec.validate(self)
         if self.surface_ground_mode not in {"milestone8", "milestone9"}:
             raise ValueError("surface ground mode must be milestone8 or milestone9")
-        if self.forest_profile not in {"everon", "malden"}:
-            raise ValueError("forest profile must be everon or malden")
+        if self.forest_profile not in {"everon", "everon-safe", "malden"}:
+            raise ValueError("forest profile must be everon, everon-safe, or malden")
         for label, value in (
             ("wet shoreline cells", self.surface_shoreline_wet_cells),
             ("sand shoreline cells", self.surface_shoreline_sand_cells),
