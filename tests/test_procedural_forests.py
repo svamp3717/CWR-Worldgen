@@ -78,7 +78,7 @@ class ProceduralForestClusterTests(unittest.TestCase):
         self.assertFalse(any(path.casefold().startswith("data3d\\les ") for path in models))
         self.assertFalse(any(path.casefold().startswith("data3d\\ker ") for path in models))
 
-    def test_nogova_pine_proxy_profile_uses_jehl_polygons_and_resistance_trees(self) -> None:
+    def test_nogova_pine_proxy_profile_uses_individual_resistance_pines(self) -> None:
         library = ProceduralForestClusterLibrary("cwr_cluster", proxy_profile="nogova_pine")
         library.register_models((
             cluster_model_path("cwr_cluster", "pine", 0.30),
