@@ -154,6 +154,10 @@ def _stock_checkbox_key(identifier: str) -> str:
 
 _STOCK_PLACEMENT_CACHE_V96 = "nonroad-object-placement-v96-road-safe-settlement-clutter"
 _STOCK_PLACEMENT_CACHE_V98 = "nonroad-object-placement-v98-stock-fit-and-overlap"
+# Stable cross-module symbol. Mixed preset routing must not depend on a private
+# version-suffixed constant, otherwise every cache bump becomes an import-time
+# AttributeError waiting for one wrapper to miss the rename.
+STOCK_PLACEMENT_CACHE_NAMESPACE = _STOCK_PLACEMENT_CACHE_V98
 _BUILDING_PLACEMENT_CACHE_REVISION = "final-road-building-clearance-v7-stock-fit-overlap"
 _INTERIOR_CHECKBOX_TEXT = "Enterable procedural-building interiors"
 _HIGH_QUALITY_TEXTURE_CHECKBOX_TEXT = "Higher-quality building textures (256 px)"
@@ -671,7 +675,7 @@ def _install_grounding() -> None:
             spec = payload.get("spec") if isinstance(payload, Mapping) else None
             preset = spec.get("house_style_preset") if isinstance(spec, Mapping) else None
             if is_stock_building_preset(preset):
-                namespace = _STOCK_PLACEMENT_CACHE_V98
+                namespace = STOCK_PLACEMENT_CACHE_NAMESPACE
         return original_cache_key(namespace, payload)
 
     generator.cache_key = cache_key_with_stock_grounding
