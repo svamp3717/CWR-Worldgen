@@ -94,6 +94,53 @@ class LegacyProxyModelTests(unittest.TestCase):
             self.assertIn(r"data\leaf.paa", summary.textures)
             self.assertIn(("class", "bushsoft"), summary.named_properties[0])
 
+    def test_cwa_safe_clusters_reject_missing_proxy_source_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            library = ProceduralForestClusterLibrary(
+                "testworld",
+                proxy_profile="everon-safe",
+                cache_enabled=False,
+                require_proxy_safe_clones=True,
+            )
+            library.register_model(
+                cluster_model_path("testworld", "border_thicket", 0.15)
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "CWA 1\\.99-safe generated vegetation requires readable source P3Ds",
+            ):
+                library.write_assets(
+                    root / "world",
+                    root / "catalogue.json",
+                    asset_records=(),
+                )
+
+    def test_ce_clusters_report_incomplete_proxy_clone_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            library = ProceduralForestClusterLibrary(
+                "testworld",
+                proxy_profile="everon-safe",
+                cache_enabled=False,
+            )
+            library.register_model(
+                cluster_model_path("testworld", "border_thicket", 0.15)
+            )
+
+            result = library.write_assets(
+                root / "world",
+                root / "catalogue.json",
+                asset_records=(),
+            )
+            self.assertFalse(result.to_manifest()["proxy_safe_complete"])
+            self.assertEqual(
+                set(result.proxy_safe_missing_models),
+                set(library.required_proxy_models()),
+            )
+            self.assertEqual(result.proxy_safe_cloned_models, ())
+
     def test_forest_carriers_proxy_generated_safe_clones(self) -> None:
         source_bytes = _synthetic_odol()
         with tempfile.TemporaryDirectory() as temp:
@@ -127,6 +174,12 @@ class LegacyProxyModelTests(unittest.TestCase):
                 asset_records=records,
             )
             self.assertGreaterEqual(len(result.model_files), 2)
+            self.assertTrue(result.to_manifest()["proxy_safe_complete"])
+            self.assertFalse(result.proxy_safe_missing_models)
+            self.assertEqual(
+                set(result.proxy_safe_cloned_models),
+                set(library.required_proxy_models()),
+            )
 
             cluster_file = root / "world" / "f" / "b_border_thicket_15.p3d"
             summary = inspect_mlod(cluster_file)
