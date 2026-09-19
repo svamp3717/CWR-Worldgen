@@ -562,6 +562,10 @@ def _install_gui() -> None:
                     wraplength=700,
                 ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
+            def _stock_building_controls_are_exclusive(self) -> bool:
+                """Whether stock selection should disable procedural-only settings."""
+                return bool(self._selected_stock_building_presets())
+
             def _sync_stock_building_controls(self) -> None:
                 # Procedural bridges remain the product default, but the GUI no
                 # longer exposes a second implementation switch. Old profiles
@@ -573,7 +577,7 @@ def _install_gui() -> None:
                     _hide_widget(widget)
 
                 selected = self._selected_stock_building_presets()
-                stock_mode = bool(selected)
+                stock_mode = self._stock_building_controls_are_exclusive()
                 if hasattr(self, "stock_building_selection_var"):
                     if selected:
                         labels = dict(STOCK_BUILDING_OPTIONS)
