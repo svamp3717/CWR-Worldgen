@@ -7,9 +7,15 @@ from hashlib import sha256
 from pathlib import Path
 import json
 import math
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
+from .assets import AssetRecord, canonical_asset_path, read_asset_record_bytes
 from .cache import cache_key, restore_or_create_file
+from .legacy_proxy_models import (
+    ProxyCloneError,
+    proxy_safe_model_path,
+    write_proxy_safe_visual_clone,
+)
 from .parallel_assets import process_asset_tasks
 from .procedural_buildings import (
     _Face,
@@ -62,6 +68,8 @@ class ForestClusterAssetResult:
     proxy_models: tuple[str, ...]
     model_files: tuple[str, ...]
     texture_files: tuple[str, ...] = ()
+    proxy_safe_cloned_models: tuple[str, ...] = ()
+    proxy_safe_missing_models: tuple[str, ...] = ()
 
     def to_manifest(self) -> dict[str, object]:
         return {
@@ -71,18 +79,25 @@ class ForestClusterAssetResult:
             "proxy_models": self.proxy_models,
             "model_files": self.model_files,
             "texture_files": self.texture_files,
+            "proxy_safe_cloned_models": self.proxy_safe_cloned_models,
+            "proxy_safe_missing_models": self.proxy_safe_missing_models,
+            "proxy_safe_complete": not self.proxy_safe_missing_models,
         }
 
 
-# Performance-oriented interior fallback clusters reuse scaled instances of the
-# two stock Everon forest groups. One WRP object therefore represents a dense
-# stand without expanding it into many individual tree proxies.
+# Interior generated clusters must proxy ordinary tree objects, never complete
+# stock forest blocks. Forest-block P3Ds are themselves special forest objects;
+# nesting them behind another proxy carrier produces invalid/skewed rendering in
+# CWA 1.99 and becomes visible in CWR-CE as soon as ForestPlain suppression is
+# bypassed. Keep the carrier cheap and let it reference plain stock trees.
 DEFAULT_PROXY_MODELS: tuple[str, ...] = (
-    r"data3d\les ctverec pruchozi_T1.p3d",
-    r"data3d\les trojuhelnik pruchozi.p3d",
+    r"data3d\str smrk_medium.p3d",
+    r"data3d\str smrk vysoky.p3d",
 )
 
-_INTERIOR_PROXY_SCALE: tuple[float, ...] = (0.28, 0.40)
+# Proxy triangles define position/orientation. The engine normalizes their basis,
+# so this is only the marker-triangle arm length, not model scale.
+_INTERIOR_PROXY_SCALE: tuple[float, ...] = (1.0, 1.0)
 
 # Original Cold War Crisis Data3D vegetation used for the soft forest edge.
 # These match the asset family used by the Everon square and triangle forests,
@@ -96,20 +111,31 @@ DEFAULT_BORDER_PROXY_MODELS: tuple[str, ...] = (
 )
 
 
+# Diagnostic Everon proxy set used by the everon-safe forest profile.
+# Keep layout cardinality stable while replacing the two suspect bush models.
+EVERON_SAFE_BORDER_PROXY_MODELS: tuple[str, ...] = (
+    r"data3d\ker listnac.p3d",
+    r"data3d\ker buxus.p3d",
+    r"data3d\ker listnac.p3d",
+    r"data3d\str smrcicicek.p3d",
+)
+
+
 # Interior undergrowth reuses the same original Data3D bush and small-tree set.
 DEFAULT_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = DEFAULT_BORDER_PROXY_MODELS
+EVERON_SAFE_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = EVERON_SAFE_BORDER_PROXY_MODELS
 
 # Resistance/Nogova equivalents used when the selected forest profile is the
 # Nogova O.pbo family.  Cluster geometry and placement remain identical; only
 # the external stock proxies change, so steep/fallback stands do not quietly
 # reintroduce Everon/Data3D trees and bushes.
 NOGOVA_LEAF_PROXY_MODELS: tuple[str, ...] = (
-    r"o\tree\les_nw_ctver_pruhozi_T1.p3d",
-    r"o\tree\les_nw_trojuhelnik.p3d",
+    r"o\tree\Javor01.p3d",
+    r"o\tree\Javor02.p3d",
 )
 NOGOVA_PINE_PROXY_MODELS: tuple[str, ...] = (
-    r"o\tree\les_nw_jehl_ctver_pruhozi.p3d",
-    r"o\tree\les_nw_jehl_trojuhelnik.p3d",
+    r"o\tree\smrk_maly.p3d",
+    r"o\tree\smrk_velky.p3d",
 )
 NOGOVA_LEAF_BORDER_PROXY_MODELS: tuple[str, ...] = (
     r"o\tree\dd_bush01.p3d",
@@ -402,9 +428,19 @@ def cluster_variant(name: str) -> ForestClusterVariant:
 
 
 def _profiled_cluster_variant(variant: ForestClusterVariant, proxy_profile: str) -> ForestClusterVariant:
-    profile = str(proxy_profile or "everon").strip().casefold()
+    profile = str(proxy_profile or "everon").strip().casefold().replace("-", "_")
     if profile == "everon":
         return variant
+    if profile == "everon_safe":
+        replacements = {
+            **dict(zip(DEFAULT_BORDER_PROXY_MODELS, EVERON_SAFE_BORDER_PROXY_MODELS)),
+            **dict(zip(DEFAULT_UNDERGROWTH_PROXY_MODELS, EVERON_SAFE_UNDERGROWTH_PROXY_MODELS)),
+        }
+        remapped = tuple(
+            (replacements.get(model_path, model_path), x, z, scale, heading)
+            for model_path, x, z, scale, heading in variant.proxy_layout
+        )
+        return replace(variant, proxy_layout=remapped)
     if profile == "nogova":
         profile = "nogova_leaf"
     if profile not in {"nogova_leaf", "nogova_pine"}:
@@ -424,7 +460,6 @@ def _profiled_cluster_variant(variant: ForestClusterVariant, proxy_profile: str)
     )
     return replace(variant, proxy_layout=remapped)
 
-
 def quantize_cluster_grade(grade: float) -> float:
     value = max(0.0, float(grade))
     return min(FOREST_CLUSTER_GRADES, key=lambda candidate: (abs(candidate - value), candidate))
@@ -436,6 +471,35 @@ def cluster_model_path(world_name: str, variant_name: str, grade: float) -> str:
     category = cluster_variant(variant_name).category
     prefix = {"interior": "c", "border": "b", "undergrowth": "u", "ditch": "g", "rural": "r"}[category]
     return rf"{world_name}\f\{prefix}_{variant_name}_{grade_label:02d}.p3d"
+
+
+def generated_cluster_variant(
+    world_name: str,
+    model_path: str,
+    *,
+    proxy_profile: str = "everon",
+) -> tuple[ForestClusterVariant, float] | None:
+    """Resolve a generated carrier path to the profiled child layout and grade."""
+    value = str(model_path).replace("/", "\\")
+    prefix = world_name + "\\f\\"
+    if (
+        not value.casefold().startswith(prefix.casefold())
+        or not value.casefold().endswith(".p3d")
+    ):
+        return None
+    stem = value.rsplit("\\", 1)[-1][:-4]
+    if len(stem) < 5 or stem[1] != "_":
+        return None
+    try:
+        variant_name, grade_label = stem[2:].rsplit("_", 1)
+        variant = _profiled_cluster_variant(
+            cluster_variant(variant_name),
+            proxy_profile,
+        )
+        grade = quantize_cluster_grade(int(grade_label) / 100.0)
+    except (KeyError, ValueError):
+        return None
+    return variant, grade
 
 
 def cluster_proxy_models(
@@ -461,6 +525,25 @@ def is_generated_cluster_model(world_name: str, model_path: str) -> bool:
         (world_name + r"\f\r_").casefold(),
     )
     return folded.endswith(".p3d") and any(folded.startswith(prefix) for prefix in prefixes)
+
+
+def _remap_proxy_models(
+    variant: ForestClusterVariant,
+    model_map: Mapping[str, str],
+) -> ForestClusterVariant:
+    if not model_map:
+        return variant
+    layout = tuple(
+        (
+            model_map.get(canonical_asset_path(model), model),
+            x,
+            z,
+            scale,
+            heading,
+        )
+        for model, x, z, scale, heading in variant.proxy_layout
+    )
+    return replace(variant, proxy_layout=layout)
 
 
 def _proxy_selection_name(model_path: str, index: int) -> str:
@@ -536,7 +619,11 @@ def _cluster_geometry_lod(variant: ForestClusterVariant) -> _Lod:
     # stand. The proxied stock vegetation remains the visible and physical detail.
     key = BuildingVariantKey("residential", "flat", 0.25, 0.25, 0.25)
     lod = _geometry_lod(key)
-    model_class = "forest" if variant.category == "interior" else "bushsoft"
+    # Generated carriers are ordinary proxy containers. In particular, interior
+    # carriers must not become ForestPlain: CWR-CE suppresses ForestPlain proxies,
+    # while CWA 1.99 applies special forest transforms to them. The proxied models
+    # above are now ordinary individual trees, so ObjectPlain-style rendering is
+    # the common compatible path.
     return _Lod(
         lod.points,
         lod.normals,
@@ -544,7 +631,7 @@ def _cluster_geometry_lod(variant: ForestClusterVariant) -> _Lod:
         lod.resolution,
         lod.mass_per_point,
         lod.selections,
-        (("autocenter", "0"), ("class", model_class)),
+        (("autocenter", "0"), ("class", "bushsoft")),
     )
 
 
@@ -624,15 +711,21 @@ class ProceduralForestClusterLibrary:
         cache_enabled: bool = True,
         cache_refresh: bool = False,
         proxy_profile: str = "everon",
+        require_proxy_safe_clones: bool = False,
     ) -> None:
         self.world_name = world_name
         self.cache_dir = cache_dir
         self.cache_enabled = cache_enabled
         self.cache_refresh = cache_refresh
-        self.proxy_profile = str(proxy_profile or "everon").strip().casefold()
+        self.proxy_profile = (
+            str(proxy_profile or "everon").strip().casefold().replace("-", "_")
+        )
+        self.require_proxy_safe_clones = bool(require_proxy_safe_clones)
         if self.proxy_profile == "nogova":
             self.proxy_profile = "nogova_leaf"
-        if self.proxy_profile not in {"everon", "nogova_leaf", "nogova_pine"}:
+        if self.proxy_profile not in {
+            "everon", "everon_safe", "nogova_leaf", "nogova_pine"
+        }:
             raise ValueError(f"unsupported forest proxy profile: {proxy_profile!r}")
         self.cache_hits = 0
         self.cache_misses = 0
@@ -663,15 +756,92 @@ class ProceduralForestClusterLibrary:
             models.update(entry[0] for entry in variant.proxy_layout)
         return tuple(sorted(models, key=str.casefold))
 
-    def write_assets(self, source_dir: Path, catalogue_path: Path) -> ForestClusterAssetResult:
+    def write_assets(
+        self,
+        source_dir: Path,
+        catalogue_path: Path,
+        *,
+        asset_records: Sequence[AssetRecord] = (),
+    ) -> ForestClusterAssetResult:
+        record_by_path = {
+            canonical_asset_path(record.path): record
+            for record in asset_records
+        }
+        proxy_model_map: dict[str, str] = {}
+        clone_documents: list[dict[str, object]] = []
+        clone_files: list[str] = []
+        cloned_source_models: list[str] = []
+        missing_source_models: list[str] = []
+
+        # This clone path is retained only as a defensive fallback for callers
+        # that explicitly request legacy-safe carriers. Normal profile=cwa builds
+        # flatten generated vegetation into direct WRP objects before assets are
+        # generated, while CWR-CE uses the stock proxy children unchanged.
+        source_models_to_clone = (
+            self.required_proxy_models() if self.require_proxy_safe_clones else ()
+        )
+        for source_model in source_models_to_clone:
+            canonical = canonical_asset_path(source_model)
+            record = record_by_path.get(canonical)
+            if record is None:
+                missing_source_models.append(source_model)
+                continue
+            try:
+                source_bytes = read_asset_record_bytes(record)
+            except (OSError, ValueError, FileNotFoundError) as exc:
+                raise ValueError(
+                    f"cannot read forest proxy source {source_model!r}: {exc}"
+                ) from exc
+
+            generated_model = proxy_safe_model_path(self.world_name, source_model)
+            relative = generated_model.split("\\", 1)[1].replace("\\", "/")
+            destination = source_dir / relative
+            try:
+                info = write_proxy_safe_visual_clone(
+                    destination,
+                    source_bytes,
+                    source_model=source_model,
+                    generated_model=generated_model,
+                )
+            except ProxyCloneError as exc:
+                raise ValueError(
+                    f"cannot create CWA 1.99-safe forest proxy clone "
+                    f"for {source_model!r}: {exc}"
+                ) from exc
+
+            proxy_model_map[canonical] = generated_model
+            clone_files.append(relative)
+            cloned_source_models.append(source_model)
+            clone_documents.append({
+                "source_model": info.source_model,
+                "generated_model": info.generated_model,
+                "source_format": info.source_format,
+                "point_count": info.point_count,
+                "face_count": info.face_count,
+                "land_flagged_points": info.land_flagged_points,
+                "texture_paths": list(info.texture_paths),
+                "sha256": sha256(destination.read_bytes()).hexdigest(),
+            })
+
+        if self.require_proxy_safe_clones and missing_source_models:
+            missing = ", ".join(sorted(missing_source_models, key=str.casefold))
+            raise ValueError(
+                "CWA 1.99-safe generated vegetation requires readable source P3Ds "
+                "for every proxy child. Add the game/mod folder or PBO containing: "
+                + missing
+            )
+
         model_tasks: list[_ForestAssetTask] = []
         for key in sorted(self._usage):
-            variant = _profiled_cluster_variant(cluster_variant(key.variant), self.proxy_profile)
+            variant = _profiled_cluster_variant(
+                cluster_variant(key.variant), self.proxy_profile
+            )
+            variant = _remap_proxy_models(variant, proxy_model_map)
             wire = cluster_model_path(self.world_name, key.variant, key.grade)
             relative = wire.split("\\", 1)[1].replace("\\", "/")
             destination = source_dir / relative
             asset_key = cache_key(
-                "procedural-forest-cluster-model-v6-profiled-stock-vegetation",
+                "procedural-forest-cluster-model-v14-cwr-ce-carriers",
                 {
                     "world_name": self.world_name,
                     "proxy_profile": self.proxy_profile,
@@ -702,6 +872,10 @@ class ProceduralForestClusterLibrary:
             "placements": sum(self._usage.values()),
             "generated_variants": len(models),
             "proxy_models": list(self.required_proxy_models()),
+            "proxy_safe_clones": clone_documents,
+            "proxy_safe_clone_count": len(clone_documents),
+            "proxy_safe_missing_models": sorted(missing_source_models, key=str.casefold),
+            "proxy_safe_complete": not missing_source_models,
             "models": models,
         }
         canonical = json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
@@ -719,5 +893,13 @@ class ProceduralForestClusterLibrary:
             cache_hits=self.cache_hits,
             cache_misses=self.cache_misses,
             proxy_models=self.required_proxy_models(),
-            model_files=tuple(str(item["relative_path"]) for item in models),
+            model_files=tuple(
+                [str(item["relative_path"]) for item in models] + clone_files
+            ),
+            proxy_safe_cloned_models=tuple(
+                sorted(cloned_source_models, key=str.casefold)
+            ),
+            proxy_safe_missing_models=tuple(
+                sorted(missing_source_models, key=str.casefold)
+            ),
         )

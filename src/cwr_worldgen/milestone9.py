@@ -45,6 +45,12 @@ DEFAULT_STEEP_HILL_BUSH_MODELS: tuple[str, ...] = (
     r"data3d\ker deravej.p3d",
     r"data3d\ker buxus.p3d",
 )
+# Diagnostic Everon variant that excludes the two Data3D bushes currently
+# suspected of rendering with stretched/corrupt geometry in CWA.
+EVERON_SAFE_BUSH_MODELS: tuple[str, ...] = (
+    r"data3d\ker listnac.p3d",
+    r"data3d\ker buxus.p3d",
+)
 
 # Resistance/Nogova vegetation from O.pbo. Keep the leaf and pine families
 # explicit so neither named preset silently falls back to Data3D trees.
@@ -126,7 +132,27 @@ def _resolved_forest_profile_models(spec: "Milestone9Spec") -> dict[str, object]
             "forest_hillside_tree_model": hillside if spec.forest_hillside_tree_model == r"data3d\str_fikovnik.p3d" else spec.forest_hillside_tree_model,
         }
 
-    if str(spec.forest_profile).casefold() != "malden":
+    forest_profile = str(spec.forest_profile).casefold()
+    if forest_profile == "everon-safe":
+        return {
+            "forest_tree_model": forest_tree_model,
+            "forest_single_tree_model": spec.forest_single_tree_model,
+            "forest_roadside_tree_model": spec.forest_roadside_tree_model,
+            "forest_roadside_tree_models": spec.forest_roadside_tree_models,
+            "forest_roadside_bush_models": (
+                EVERON_SAFE_BUSH_MODELS
+                if spec.forest_roadside_bush_models == ROADSIDE_BUSH_MODELS
+                else spec.forest_roadside_bush_models
+            ),
+            "steep_hill_bush_models": (
+                EVERON_SAFE_BUSH_MODELS
+                if spec.steep_hill_bush_models == DEFAULT_STEEP_HILL_BUSH_MODELS
+                else spec.steep_hill_bush_models
+            ),
+            "forest_hillside_tree_model": spec.forest_hillside_tree_model,
+        }
+
+    if forest_profile != "malden":
         return {
             "forest_tree_model": forest_tree_model,
             "forest_single_tree_model": spec.forest_single_tree_model,
@@ -338,8 +364,8 @@ class Milestone9Spec(Milestone8Spec):
         Milestone8Spec.validate(self)
         if self.surface_ground_mode not in {"milestone8", "milestone9"}:
             raise ValueError("surface ground mode must be milestone8 or milestone9")
-        if self.forest_profile not in {"everon", "malden"}:
-            raise ValueError("forest profile must be everon or malden")
+        if self.forest_profile not in {"everon", "everon-safe", "malden"}:
+            raise ValueError("forest profile must be everon, everon-safe, or malden")
         for label, value in (
             ("wet shoreline cells", self.surface_shoreline_wet_cells),
             ("sand shoreline cells", self.surface_shoreline_sand_cells),

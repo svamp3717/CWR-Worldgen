@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import struct
 from pathlib import Path
+from types import SimpleNamespace
 
 from cwr_worldgen.cache import streaming_hash
-from cwr_worldgen.generator import _assemble_world_objects
+from cwr_worldgen.generator import (
+    _assemble_world_objects,
+    _expand_cwa_generated_vegetation,
+)
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.osm import (
     BboxProjection, CompactOrientedRectangle, ObjectGenerationResult,
@@ -13,6 +17,11 @@ from cwr_worldgen.osm import (
 from cwr_worldgen.procedural_buildings import (
     _polygon_with_footprint,
     _simple_rectangle_footprint,
+)
+from cwr_worldgen.procedural_forests import (
+    cluster_model_path,
+    generated_cluster_variant,
+    is_generated_cluster_model,
 )
 from cwr_worldgen.wrp import _height_grid_bytes, inspect_rvw4, quantize_height, write_rvw4
 
@@ -82,6 +91,156 @@ def test_large_world_ordering_can_skip_clone_and_writer_renumbers(tmp_path: Path
     summary = inspect_rvw4(wrp, height_scale=0.05)
     assert summary.object_ids == (1, 2, 3, 4, 5, 6)
     assert summary.object_models == tuple(obj.model_path for obj in ordered)
+
+
+def test_cwa_flattens_generated_vegetation_carrier_into_direct_wrp_objects() -> None:
+    parent = WorldObject(
+        40,
+        cluster_model_path("testworld", "border_thicket", 0.15),
+        100.0,
+        20.0,
+        200.0,
+        90.0,
+    )
+    nonroads = ObjectGenerationResult(
+        objects=(parent,),
+        road_objects=0,
+        building_objects=0,
+        forest_objects=0,
+        road_objects_truncated=False,
+        building_objects_truncated=False,
+        forest_objects_truncated=False,
+        forest_border_objects=1,
+        forest_cluster_objects=0,
+        model_usage=((parent.model_path, 1),),
+    )
+    spec = SimpleNamespace(
+        profile="cwa",
+        name="testworld",
+        forest_profile="everon-safe",
+        forest_tree_model=r"data3d\les ctverec pruchozi_T1.p3d",
+    )
+
+    expanded = _expand_cwa_generated_vegetation(nonroads, spec)
+    parsed = generated_cluster_variant(
+        "testworld",
+        parent.model_path,
+        proxy_profile="everon_safe",
+    )
+    assert parsed is not None
+    variant, grade = parsed
+
+    assert len(expanded.objects) == len(variant.proxy_layout)
+    assert expanded.forest_border_objects == len(variant.proxy_layout)
+    assert expanded.forest_cluster_objects == 0
+    assert [obj.object_id for obj in expanded.objects] == list(
+        range(parent.object_id, parent.object_id + len(variant.proxy_layout))
+    )
+    assert not any(
+        is_generated_cluster_model("testworld", model)
+        for model, _count in expanded.model_usage
+    )
+
+    first = expanded.objects[0]
+    model, local_x, local_z, _marker_scale, proxy_heading = variant.proxy_layout[0]
+    assert first.model_path == model
+    assert abs(first.x - (parent.x + local_z)) < 1.0e-6
+    assert abs(first.z - (parent.z - local_x)) < 1.0e-6
+    expected_local_y = grade * (
+        local_x if variant.slope_axis == "width" else local_z
+    )
+    assert abs(first.y - (parent.y + expected_local_y)) < 1.0e-6
+    assert abs(first.heading_degrees - ((parent.heading_degrees + proxy_heading) % 360.0)) < 1.0e-6
+
+
+def test_cwa_flattening_keeps_category_counts_assembly_consistent() -> None:
+    carriers = (
+        WorldObject(1, cluster_model_path("testworld", "pine", 0.15), 100.0, 10.0, 100.0),
+        WorldObject(2, cluster_model_path("testworld", "undergrowth_patch", 0.15), 130.0, 10.0, 100.0),
+        WorldObject(3, cluster_model_path("testworld", "border_thicket", 0.15), 160.0, 10.0, 100.0),
+        WorldObject(4, cluster_model_path("testworld", "ditch_grass", 0.15), 190.0, 10.0, 100.0),
+        WorldObject(5, cluster_model_path("testworld", "orchard_row", 0.15), 220.0, 10.0, 100.0),
+    )
+    nonroads = ObjectGenerationResult(
+        objects=carriers,
+        road_objects=0,
+        building_objects=0,
+        forest_objects=1,
+        road_objects_truncated=False,
+        building_objects_truncated=False,
+        forest_objects_truncated=False,
+        forest_undergrowth_objects=1,
+        forest_border_objects=1,
+        ditch_grass_objects=1,
+        orchard_objects=1,
+        forest_cluster_objects=1,
+        model_usage=tuple((obj.model_path, 1) for obj in carriers),
+    )
+    spec = SimpleNamespace(
+        profile="cwa",
+        name="testworld",
+        forest_profile="everon",
+        forest_tree_model=r"data3d\les ctverec pruchozi_T1.p3d",
+    )
+
+    expanded = _expand_cwa_generated_vegetation(nonroads, spec)
+    assembled = _assemble_world_objects((), expanded, (), renumber=False)
+
+    assert len(assembled) == len(expanded.objects)
+    assert expanded.forest_cluster_objects == 0
+    assert not any(
+        is_generated_cluster_model("testworld", obj.model_path)
+        for obj in expanded.objects
+    )
+
+    expected_counts = {}
+    for variant_name, field in (
+        ("pine", "forest_objects"),
+        ("undergrowth_patch", "forest_undergrowth_objects"),
+        ("border_thicket", "forest_border_objects"),
+        ("ditch_grass", "ditch_grass_objects"),
+        ("orchard_row", "orchard_objects"),
+    ):
+        parsed = generated_cluster_variant(
+            "testworld",
+            cluster_model_path("testworld", variant_name, 0.15),
+            proxy_profile="everon",
+        )
+        assert parsed is not None
+        expected_counts[field] = len(parsed[0].proxy_layout)
+
+    for field, expected in expected_counts.items():
+        assert getattr(expanded, field) == expected
+
+
+def test_cwr_ce_keeps_generated_vegetation_carrier_compact() -> None:
+    parent = WorldObject(
+        10,
+        cluster_model_path("testworld", "undergrowth_patch", 0.30),
+        50.0,
+        12.0,
+        75.0,
+        17.0,
+    )
+    nonroads = ObjectGenerationResult(
+        objects=(parent,),
+        road_objects=0,
+        building_objects=0,
+        forest_objects=0,
+        road_objects_truncated=False,
+        building_objects_truncated=False,
+        forest_objects_truncated=False,
+        forest_undergrowth_objects=1,
+        model_usage=((parent.model_path, 1),),
+    )
+    spec = SimpleNamespace(
+        profile="cwr-ce",
+        name="testworld",
+        forest_profile="everon",
+        forest_tree_model=r"data3d\les ctverec pruchozi_T1.p3d",
+    )
+
+    assert _expand_cwa_generated_vegetation(nonroads, spec) is nonroads
 
 
 def test_streaming_hash_consumes_large_style_iterables_once_and_deterministically() -> None:

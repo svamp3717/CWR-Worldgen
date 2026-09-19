@@ -404,6 +404,7 @@ class _Lod:
     mass_per_point: tuple[float, ...] = ()
     selections: tuple[_NamedSelection, ...] = ()
     properties: tuple[tuple[str, str], ...] = ()
+    point_flags: tuple[int, ...] = ()
 
 
 _FAMILY_COLOURS: dict[str, tuple[int, int, int]] = {
@@ -7469,8 +7470,11 @@ def _write_tag(stream, name: str, payload: bytes) -> None:
 
 def _write_lod(stream, lod: _Lod) -> None:
     stream.write(_SP3X_HEADER.pack(b"SP3X", 28, 1, len(lod.points), len(lod.normals), len(lod.faces), 0))
-    for point in lod.points:
-        stream.write(_POINT.pack(*point, 0))
+    if lod.point_flags and len(lod.point_flags) != len(lod.points):
+        raise ValueError("MLOD point flag table must contain one value per point")
+    for index, point in enumerate(lod.points):
+        flags = lod.point_flags[index] if lod.point_flags else 0
+        stream.write(_POINT.pack(*point, int(flags)))
     for normal in lod.normals:
         stream.write(_NORMAL.pack(*normal))
     for face in lod.faces:
