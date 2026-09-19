@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
+import struct
 import tempfile
 import unittest
 
@@ -18,6 +20,8 @@ from cwr_worldgen.procedural_forests import (
     NOGOVA_PINE_PROXY_MODELS,
     NOGOVA_BORDER_PROXY_MODELS,
     NOGOVA_PROXY_MODELS,
+    ALL_FOREST_CLUSTER_VARIANTS,
+    FOREST_CLUSTER_GRADES,
     FOREST_CLUSTER_VARIANTS,
     ProceduralForestClusterLibrary,
     cluster_model_path,
@@ -99,6 +103,90 @@ class ProceduralForestClusterTests(unittest.TestCase):
         self.assertTrue(set(NOGOVA_LEAF_PROXY_MODELS).intersection(models))
         self.assertTrue(set(NOGOVA_LEAF_BORDER_PROXY_MODELS).intersection(models))
         self.assertFalse(any(path.casefold().startswith("data3d" + "\\") for path in models))
+
+    def test_serialized_proxy_markers_are_unambiguous_to_cwa_199(self) -> None:
+        def squared_distance(a, b):
+            return sum((a[index] - b[index]) ** 2 for index in range(3))
+
+        def legacy_proxy_axes(p0, p1, p2):
+            dist01 = squared_distance(p0, p1)
+            dist02 = squared_distance(p0, p2)
+            dist12 = squared_distance(p1, p2)
+
+            if dist01 > dist02:
+                p1, p2 = p2, p1
+                dist01, dist02 = dist02, dist01
+            if dist01 > dist12:
+                p0, p2 = p2, p0
+                dist01, dist12 = dist12, dist01
+            if dist02 > dist12:
+                p0, p1 = p1, p0
+
+            direction = tuple(p1[index] - p0[index] for index in range(3))
+            up_candidate = tuple(p2[index] - p0[index] for index in range(3))
+
+            direction_length = math.sqrt(sum(value * value for value in direction))
+            direction = tuple(value / direction_length for value in direction)
+            projection = sum(direction[index] * up_candidate[index] for index in range(3))
+            up = tuple(
+                up_candidate[index] - direction[index] * projection
+                for index in range(3)
+            )
+            up_length = math.sqrt(sum(value * value for value in up))
+            up = tuple(value / up_length for value in up)
+            return direction, up
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for variant in ALL_FOREST_CLUSTER_VARIANTS:
+                for grade in FOREST_CLUSTER_GRADES:
+                    path = root / f"{variant.name}_{int(round(grade * 100)):02d}.p3d"
+                    write_forest_cluster_mlod(path, variant, grade)
+                    data = path.read_bytes()
+
+                    self.assertEqual(data[:4], b"MLOD")
+                    offset = 12
+                    self.assertEqual(data[offset:offset + 4], b"SP3X")
+                    head_size = struct.unpack_from("<i", data, offset + 4)[0]
+                    point_count = struct.unpack_from("<i", data, offset + 12)[0]
+                    self.assertEqual(point_count, len(variant.proxy_layout) * 3)
+                    offset += head_size
+
+                    points = [
+                        struct.unpack_from("<3f", data, offset + point_index * 16)
+                        for point_index in range(point_count)
+                    ]
+                    for proxy_index in range(len(variant.proxy_layout)):
+                        p0, p1, p2 = points[proxy_index * 3:proxy_index * 3 + 3]
+                        direction, up = legacy_proxy_axes(p0, p1, p2)
+
+                        # Exercise the float32 coordinates actually consumed by
+                        # CWA 1.99. Direction must remain horizontal and the
+                        # orthogonalized Up vector must remain vertical.
+                        self.assertAlmostEqual(
+                            direction[1],
+                            0.0,
+                            places=5,
+                            msg=f"{variant.name} grade={grade} proxy={proxy_index}",
+                        )
+                        self.assertAlmostEqual(
+                            abs(up[1]),
+                            1.0,
+                            places=5,
+                            msg=f"{variant.name} grade={grade} proxy={proxy_index}",
+                        )
+                        self.assertAlmostEqual(
+                            up[0],
+                            0.0,
+                            places=5,
+                            msg=f"{variant.name} grade={grade} proxy={proxy_index}",
+                        )
+                        self.assertAlmostEqual(
+                            up[2],
+                            0.0,
+                            places=5,
+                            msg=f"{variant.name} grade={grade} proxy={proxy_index}",
+                        )
 
     def test_cluster_model_contains_reusable_stock_proxies_and_support_lods(self) -> None:
         variant = FOREST_CLUSTER_VARIANTS[0]
