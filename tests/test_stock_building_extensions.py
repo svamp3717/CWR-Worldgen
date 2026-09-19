@@ -9,6 +9,10 @@ from cwr_worldgen.gui import default_gui_values
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.stock_building_policy import STOCK_BUILDING_PRESET, StockBuildingLibrary
 from cwr_worldgen.stock_building_extensions import (
+    STOCK_BUILDING_AGS_COMBINED_LABEL,
+    STOCK_BUILDING_AGS_COMBINED_PRESET,
+    STOCK_BUILDING_AGS_ONLY_LABEL,
+    STOCK_BUILDING_AGS_ONLY_PRESET,
     STOCK_BUILDING_COMBINED_LABEL,
     STOCK_BUILDING_HAUS_COMBINED_LABEL,
     STOCK_BUILDING_HAUS_COMBINED_PRESET,
@@ -48,32 +52,49 @@ def test_split_catalogue_files_partition_combined_catalogue() -> None:
     haus_only = json.loads(
         (data_dir / "haus.pbo buildings only.json").read_text(encoding="utf-8")
     )
+    ags_only = json.loads(
+        (data_dir / "ags inds+port.json").read_text(encoding="utf-8")
+    )
+    ags_combined = json.loads(
+        (data_dir / "ags inds+port and combined stock.json").read_text(encoding="utf-8")
+    )
 
     combined_paths = {row["model_path"].casefold() for row in combined["models"]}
     non_resistance_paths = {row["model_path"].casefold() for row in non_resistance["models"]}
     resistance_paths = {row["model_path"].casefold() for row in resistance["models"]}
     haus_combined_paths = {row["model_path"].casefold() for row in haus_combined["models"]}
     haus_only_paths = {row["model_path"].casefold() for row in haus_only["models"]}
+    ags_only_paths = {row["model_path"].casefold() for row in ags_only["models"]}
+    ags_combined_paths = {row["model_path"].casefold() for row in ags_combined["models"]}
 
     assert combined["schema"] == 5
     assert non_resistance["schema"] == 5
     assert resistance["schema"] == 5
     assert haus_combined["schema"] == 5
     assert haus_only["schema"] == 5
+    assert ags_only["schema"] == 5
+    assert ags_combined["schema"] == 5
     assert combined["display_name"] == STOCK_BUILDING_COMBINED_LABEL
     assert non_resistance["display_name"] == "Stock non-Resistance buildings only"
     assert resistance["display_name"] == "Stock Resistance buildings only"
     assert haus_combined["display_name"] == STOCK_BUILDING_HAUS_COMBINED_LABEL
     assert haus_only["display_name"] == STOCK_BUILDING_HAUS_ONLY_LABEL
+    assert ags_only["display_name"] == STOCK_BUILDING_AGS_ONLY_LABEL
+    assert ags_combined["display_name"] == STOCK_BUILDING_AGS_COMBINED_LABEL
     assert len(combined_paths) == 130
     assert len(non_resistance_paths) == 77
     assert len(resistance_paths) == 53
     assert len(haus_combined_paths) == 172
     assert len(haus_only_paths) == 42
+    assert len(ags_only_paths) == 15
+    assert len(ags_combined_paths) == 145
     assert combined_paths.issubset(haus_combined_paths)
     assert sum(path.startswith("haus\\") for path in haus_combined_paths) == 42
     assert all(path.startswith("haus\\") for path in haus_only_paths)
     assert haus_only_paths.issubset(haus_combined_paths)
+    assert all(path.startswith(("ags_inds\\", "ags_port\\")) for path in ags_only_paths)
+    assert combined_paths.issubset(ags_combined_paths)
+    assert ags_only_paths.issubset(ags_combined_paths)
     assert r"data3d\hospital.p3d" not in combined_paths
     assert r"data3d\hospital.p3d" not in non_resistance_paths
     assert non_resistance_paths.isdisjoint(resistance_paths)
@@ -103,15 +124,21 @@ def test_stock_presets_keep_mixed_and_split_vanilla_from_resistance() -> None:
     resistance = _library(STOCK_BUILDING_RESISTANCE_PRESET)
     haus_combined = _library(STOCK_BUILDING_HAUS_COMBINED_PRESET)
     haus_only = _library(STOCK_BUILDING_HAUS_ONLY_PRESET)
+    ags_only = _library(STOCK_BUILDING_AGS_ONLY_PRESET)
+    ags_combined = _library(STOCK_BUILDING_AGS_COMBINED_PRESET)
 
     assert mixed.models
     assert vanilla.models
     assert resistance.models
     assert haus_combined.models
     assert haus_only.models
+    assert ags_only.models
+    assert ags_combined.models
     assert len(mixed.models) == len(vanilla.models) + len(resistance.models)
     assert len(haus_combined.models) == 172
     assert len(haus_only.models) == 42
+    assert len(ags_only.models) == 15
+    assert len(ags_combined.models) == 145
     assert {stock_model_source(model.model_path) for model in vanilla.models} == {"vanilla"}
     assert {stock_model_source(model.model_path) for model in resistance.models} == {"resistance"}
     assert {stock_model_source(model.model_path) for model in haus_combined.models} == {
@@ -120,6 +147,12 @@ def test_stock_presets_keep_mixed_and_split_vanilla_from_resistance() -> None:
         "haus",
     }
     assert {stock_model_source(model.model_path) for model in haus_only.models} == {"haus"}
+    assert {stock_model_source(model.model_path) for model in ags_only.models} == {"ags"}
+    assert {stock_model_source(model.model_path) for model in ags_combined.models} == {
+        "vanilla",
+        "resistance",
+        "ags",
+    }
 
 
 def test_all_stock_presets_use_stock_library_factory() -> None:
@@ -138,9 +171,9 @@ def test_stock_options_are_directly_below_automatic() -> None:
         ("Automatic (area / country)", "Sweden", "Germany", MIXED_STOCK_LABEL),
         auto_label="Automatic (area / country)",
     )
-    assert options[:5] == STOCK_BUILDING_OPTIONS
+    assert options[:7] == STOCK_BUILDING_OPTIONS
     assert labels[0] == "Automatic (area / country)"
-    assert labels[1:6] == tuple(label for _identifier, label in STOCK_BUILDING_OPTIONS)
+    assert labels[1:8] == tuple(label for _identifier, label in STOCK_BUILDING_OPTIONS)
     assert MIXED_STOCK_LABEL in labels
     assert "Stock CWA/OFP buildings only" not in labels
 
