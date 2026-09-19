@@ -117,7 +117,7 @@ def test_cwa_flattens_generated_vegetation_carrier_into_direct_wrp_objects() -> 
     spec = SimpleNamespace(
         profile="cwa",
         name="testworld",
-        forest_profile="everon-safe",
+        forest_profile="everon",
         forest_tree_model=r"data3d\les ctverec pruchozi_T1.p3d",
     )
 
@@ -125,7 +125,7 @@ def test_cwa_flattens_generated_vegetation_carrier_into_direct_wrp_objects() -> 
     parsed = generated_cluster_variant(
         "testworld",
         parent.model_path,
-        proxy_profile="everon_safe",
+        proxy_profile="everon",
     )
     assert parsed is not None
     variant, grade = parsed
