@@ -18,6 +18,7 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_HAUS_COMBINED_PRESET,
     STOCK_BUILDING_HAUS_ONLY_LABEL,
     STOCK_BUILDING_HAUS_ONLY_PRESET,
+    STOCK_BUILDING_MULTI_PREFIX,
     STOCK_BUILDING_OPTIONS,
     STOCK_BUILDING_PRESETS,
     STOCK_BUILDING_RESISTANCE_PRESET,
@@ -25,6 +26,8 @@ from cwr_worldgen.stock_building_extensions import (
     _PROCEDURAL_BRIDGES_CHECKBOX_TEXT,
     _lift_stock_objects,
     _stock_options_first,
+    encode_stock_building_presets,
+    stock_building_preset_ids,
     stock_disabled_gui_option_keys,
     stock_model_source,
 )
@@ -35,6 +38,33 @@ MIXED_STOCK_LABEL = "Stock combined (non-Resistance + Resistance) buildings"
 
 def _library(preset: str) -> StockBuildingLibrary:
     return StockBuildingLibrary(world_name="wg_stock_ext_test", house_style_preset=preset)
+
+
+def test_multi_stock_preset_encoding_is_canonical_and_round_trips() -> None:
+    encoded = encode_stock_building_presets(
+        (STOCK_BUILDING_AGS_ONLY_PRESET, STOCK_BUILDING_VANILLA_PRESET)
+    )
+    assert encoded.startswith(STOCK_BUILDING_MULTI_PREFIX)
+    assert stock_building_preset_ids(encoded) == (
+        STOCK_BUILDING_VANILLA_PRESET,
+        STOCK_BUILDING_AGS_ONLY_PRESET,
+    )
+
+
+def test_multi_stock_library_merges_and_deduplicates_selected_catalogues() -> None:
+    combined = encode_stock_building_presets(
+        (STOCK_BUILDING_PRESET, STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_AGS_ONLY_PRESET)
+    )
+    library = _library(combined)
+
+    paths = {model.model_path.casefold() for model in library.models}
+    assert len(paths) == 145
+    assert any(path.startswith("data3d\\") for path in paths)
+    assert any(path.startswith("o\\") for path in paths)
+    assert any(path.startswith(("ags_inds\\", "ags_port\\")) for path in paths)
+    assert library.house_style_preset == encode_stock_building_presets(
+        (STOCK_BUILDING_PRESET, STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_AGS_ONLY_PRESET)
+    )
 
 
 def test_split_catalogue_files_partition_combined_catalogue() -> None:
@@ -186,6 +216,10 @@ def test_stock_presets_disable_procedural_building_gui_options() -> None:
     }
     for preset in STOCK_BUILDING_PRESETS:
         assert set(stock_disabled_gui_option_keys(preset)) == expected
+    combined = encode_stock_building_presets(
+        (STOCK_BUILDING_HAUS_ONLY_PRESET, STOCK_BUILDING_AGS_ONLY_PRESET)
+    )
+    assert set(stock_disabled_gui_option_keys(combined)) == expected
     assert stock_disabled_gui_option_keys("auto") == ()
 
 
