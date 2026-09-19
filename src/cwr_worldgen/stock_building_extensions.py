@@ -93,6 +93,65 @@ STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_AGS_COMBINED_PRESET, STOCK_BUILDING_AGS_COMBINED_LABEL),
 )
 
+STOCK_BUILDING_MULTI_PREFIX = "stock-multi:"
+_STOCK_CATALOGUE_BY_PRESET = {
+    stock.STOCK_BUILDING_PRESET: _STOCK_COMBINED_CATALOGUE_PATH,
+    STOCK_BUILDING_VANILLA_PRESET: _STOCK_NON_RESISTANCE_CATALOGUE_PATH,
+    STOCK_BUILDING_RESISTANCE_PRESET: _STOCK_RESISTANCE_CATALOGUE_PATH,
+    STOCK_BUILDING_HAUS_COMBINED_PRESET: _STOCK_HAUS_COMBINED_CATALOGUE_PATH,
+    STOCK_BUILDING_HAUS_ONLY_PRESET: _STOCK_HAUS_ONLY_CATALOGUE_PATH,
+    STOCK_BUILDING_AGS_ONLY_PRESET: _STOCK_AGS_ONLY_CATALOGUE_PATH,
+    STOCK_BUILDING_AGS_COMBINED_PRESET: _STOCK_AGS_COMBINED_CATALOGUE_PATH,
+}
+
+
+def stock_building_preset_ids(value: object) -> tuple[str, ...]:
+    """Return canonical stock catalogue IDs from a single or composite preset."""
+    text = str(value or "").strip().casefold()
+    if text in STOCK_BUILDING_PRESETS:
+        return (text,)
+    if not text.startswith(STOCK_BUILDING_MULTI_PREFIX):
+        return ()
+    raw = text[len(STOCK_BUILDING_MULTI_PREFIX):]
+    requested = {item.strip().casefold() for item in raw.split(",") if item.strip()}
+    if not requested:
+        raise ValueError("stock-multi requires at least one stock building preset")
+    unknown = sorted(requested.difference(STOCK_BUILDING_PRESETS))
+    if unknown:
+        raise ValueError("unknown stock building preset(s): " + ", ".join(unknown))
+    # Canonical catalogue order makes cache keys and generated reports stable
+    # regardless of checkbox click order or command-line ordering.
+    return tuple(identifier for identifier in STOCK_BUILDING_PRESETS if identifier in requested)
+
+
+def encode_stock_building_presets(values: Sequence[str]) -> str:
+    """Encode one or more stock catalogue IDs into the existing preset field."""
+    requested = {str(value).strip().casefold() for value in values if str(value).strip()}
+    unknown = sorted(requested.difference(STOCK_BUILDING_PRESETS))
+    if unknown:
+        raise ValueError("unknown stock building preset(s): " + ", ".join(unknown))
+    ordered = tuple(identifier for identifier in STOCK_BUILDING_PRESETS if identifier in requested)
+    if not ordered:
+        raise ValueError("at least one stock building preset is required")
+    if len(ordered) == 1:
+        return ordered[0]
+    return STOCK_BUILDING_MULTI_PREFIX + ",".join(ordered)
+
+
+def _load_stock_preset_models(presets: Sequence[str]):
+    """Load and de-duplicate models from all selected stock catalogues."""
+    by_path = {}
+    for preset in presets:
+        path = _STOCK_CATALOGUE_BY_PRESET[preset]
+        for model in stock._load_catalogue(path):
+            by_path.setdefault(_canonical_model_path(model.model_path), model)
+    return tuple(by_path.values())
+
+
+def _stock_checkbox_key(identifier: str) -> str:
+    return "stock_building_set__" + identifier.replace("-", "_")
+
+
 _STOCK_PLACEMENT_CACHE_V96 = "nonroad-object-placement-v96-road-safe-settlement-clutter"
 _STOCK_PLACEMENT_CACHE_V97 = "nonroad-object-placement-v97-stock-model-origin-grounding"
 _INTERIOR_CHECKBOX_TEXT = "Enterable procedural-building interiors"
@@ -124,7 +183,7 @@ def stock_model_source(model_path: object) -> str:
 
 
 def is_stock_building_preset(value: object) -> bool:
-    return str(value or "").strip().casefold() in STOCK_BUILDING_PRESETS
+    return bool(stock_building_preset_ids(value))
 
 
 def stock_disabled_gui_option_keys(preset: object) -> tuple[str, ...]:
@@ -225,6 +284,24 @@ def _find_widgets_by_text(root, text: str):
     return result
 
 
+def _find_combobox_for_variable(root, variable):
+    try:
+        children = root.winfo_children()
+    except Exception:
+        return None
+    target = str(variable)
+    for child in children:
+        try:
+            if child.winfo_class() == "TCombobox" and str(child.cget("textvariable")) == target:
+                return child
+        except Exception:
+            pass
+        nested = _find_combobox_for_variable(child, variable)
+        if nested is not None:
+            return nested
+    return None
+
+
 def _set_widget_enabled(widget, enabled: bool) -> None:
     try:
         widget.state(["!disabled"] if enabled else ["disabled"])
@@ -252,27 +329,17 @@ def _install_library_presets() -> None:
     original_init = stock.StockBuildingLibrary.__init__
 
     def stock_init(self, *args, **kwargs):
-        requested = str(kwargs.get("house_style_preset", stock.STOCK_BUILDING_PRESET) or "").strip().casefold()
-        if requested not in STOCK_BUILDING_PRESETS:
-            requested = stock.STOCK_BUILDING_PRESET
+        requested = str(
+            kwargs.get("house_style_preset", stock.STOCK_BUILDING_PRESET) or ""
+        ).strip().casefold()
+        selected = stock_building_preset_ids(requested)
+        if not selected:
+            selected = (stock.STOCK_BUILDING_PRESET,)
+        requested = encode_stock_building_presets(selected)
         original_init(self, *args, **kwargs)
         self.house_style_preset = requested
 
-        if requested == STOCK_BUILDING_VANILLA_PRESET:
-            models = stock._load_catalogue(_STOCK_NON_RESISTANCE_CATALOGUE_PATH)
-        elif requested == STOCK_BUILDING_RESISTANCE_PRESET:
-            models = stock._load_catalogue(_STOCK_RESISTANCE_CATALOGUE_PATH)
-        elif requested == STOCK_BUILDING_HAUS_COMBINED_PRESET:
-            models = stock._load_catalogue(_STOCK_HAUS_COMBINED_CATALOGUE_PATH)
-        elif requested == STOCK_BUILDING_HAUS_ONLY_PRESET:
-            models = stock._load_catalogue(_STOCK_HAUS_ONLY_CATALOGUE_PATH)
-        elif requested == STOCK_BUILDING_AGS_ONLY_PRESET:
-            models = stock._load_catalogue(_STOCK_AGS_ONLY_CATALOGUE_PATH)
-        elif requested == STOCK_BUILDING_AGS_COMBINED_PRESET:
-            models = stock._load_catalogue(_STOCK_AGS_COMBINED_CATALOGUE_PATH)
-        else:
-            models = self.models
-
+        models = _load_stock_preset_models(selected)
         if not models:
             raise RuntimeError(f"Stock building preset {requested!r} has no measured models")
         self.models = tuple(models)
@@ -335,7 +402,7 @@ def _install_factory_and_cli() -> None:
     class StockPresetBuildingLibraryFactory:
         def __new__(cls, *args, **kwargs):
             preset = str(kwargs.get("house_style_preset", "") or "").strip().casefold()
-            if preset in STOCK_BUILDING_PRESETS:
+            if is_stock_building_preset(preset):
                 return stock.StockBuildingLibrary(*args, **kwargs)
             return previous_factory(*args, **kwargs)
 
@@ -344,9 +411,9 @@ def _install_factory_and_cli() -> None:
     previous_normalise = milestone8.normalise_house_style_preset
 
     def normalise_with_stock_sources(value):
-        preset = str(value or "").strip().casefold()
-        if preset in STOCK_BUILDING_PRESETS:
-            return preset
+        selected = stock_building_preset_ids(value)
+        if selected:
+            return encode_stock_building_presets(selected)
         return previous_normalise(value)
 
     milestone8.normalise_house_style_preset = normalise_with_stock_sources
@@ -397,15 +464,19 @@ def _install_gui() -> None:
             mapped = label_to_identifier.get(text)
             if mapped in STOCK_BUILDING_PRESETS:
                 return mapped
-            folded = text.casefold()
-            if folded in STOCK_BUILDING_PRESETS:
-                return folded
+            selected = stock_building_preset_ids(text)
+            if selected:
+                return encode_stock_building_presets(selected)
             return previous_identifier(value)
 
         def stock_label(value: object) -> str:
-            folded = str(value or "").strip().casefold()
-            if folded in STOCK_BUILDING_PRESETS:
-                return identifier_to_label[folded]
+            selected = stock_building_preset_ids(value)
+            if len(selected) == 1:
+                return identifier_to_label[selected[0]]
+            if selected:
+                # Preserve the encoded selection during legacy profile loading;
+                # the GUI subclass migrates it into the checkbox variables.
+                return encode_stock_building_presets(selected)
             return previous_label(value)
 
         gui.gui_house_style_preset_identifier = stock_identifier
@@ -414,6 +485,80 @@ def _install_gui() -> None:
         original_class = gui.WorldgenGui
 
         class StockBuildingControlsWorldgenGui(original_class):
+            def _selected_stock_building_presets(self) -> tuple[str, ...]:
+                selected = []
+                for identifier, _label in STOCK_BUILDING_OPTIONS:
+                    variable = self.vars.get(_stock_checkbox_key(identifier))
+                    if variable is not None and bool(variable.get()):
+                        selected.append(identifier)
+                return tuple(selected)
+
+            def _migrate_stock_dropdown_selection(self) -> None:
+                preset_var = self.vars.get("house_style_preset")
+                if preset_var is None:
+                    return
+                try:
+                    selected = stock_building_preset_ids(
+                        gui.gui_house_style_preset_identifier(preset_var.get())
+                    )
+                except ValueError:
+                    selected = ()
+                if not selected:
+                    return
+                for identifier in selected:
+                    variable = self.vars.get(_stock_checkbox_key(identifier))
+                    if variable is not None:
+                        variable.set(True)
+                preset_var.set(gui.HOUSE_STYLE_AUTO_LABEL)
+
+            def _install_stock_building_checkboxes(self) -> None:
+                preset_var = self.vars.get("house_style_preset")
+                if preset_var is None:
+                    return
+                for identifier, _label in STOCK_BUILDING_OPTIONS:
+                    self._var(_stock_checkbox_key(identifier), False, boolean=True)
+
+                labels = _find_widgets_by_text(self, "Building preset")
+                if not labels:
+                    return
+                label = labels[0]
+                parent = label.master
+                try:
+                    label.configure(text="Procedural / country preset")
+                except Exception:
+                    pass
+
+                combo = _find_combobox_for_variable(self, preset_var)
+                if combo is not None:
+                    stock_labels = {label for _identifier, label in STOCK_BUILDING_OPTIONS}
+                    current_values = tuple(combo.cget("values"))
+                    combo.configure(values=tuple(value for value in current_values if value not in stock_labels))
+
+                gui.ttk.Label(parent, text="Stock building sets").grid(
+                    row=4, column=0, sticky="nw", padx=(0, 10), pady=(8, 3)
+                )
+                box = gui.ttk.Frame(parent)
+                box.grid(row=4, column=1, sticky="w", pady=(8, 3))
+                for index, (identifier, text) in enumerate(STOCK_BUILDING_OPTIONS):
+                    gui.ttk.Checkbutton(
+                        box,
+                        text=text,
+                        variable=self.vars[_stock_checkbox_key(identifier)],
+                    ).grid(
+                        row=index // 2,
+                        column=index % 2,
+                        sticky="w",
+                        padx=(0, 18),
+                        pady=2,
+                    )
+                self.stock_building_selection_var = gui.tk.StringVar(master=self, value="")
+                gui.ttk.Label(
+                    parent,
+                    textvariable=self.stock_building_selection_var,
+                    style="Hint.TLabel",
+                    wraplength=700,
+                ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
             def _sync_stock_building_controls(self) -> None:
                 # Procedural bridges remain the product default, but the GUI no
                 # longer exposes a second implementation switch. Old profiles
@@ -424,14 +569,20 @@ def _install_gui() -> None:
                 for widget in _find_widgets_by_text(self, _PROCEDURAL_BRIDGES_CHECKBOX_TEXT):
                     _hide_widget(widget)
 
-                preset_var = self.vars.get("house_style_preset")
-                if preset_var is None:
-                    return
-                try:
-                    preset = gui.gui_house_style_preset_identifier(preset_var.get())
-                except Exception:
-                    preset = str(preset_var.get() or "").strip().casefold()
-                stock_mode = preset in STOCK_BUILDING_PRESETS
+                selected = self._selected_stock_building_presets()
+                stock_mode = bool(selected)
+                if hasattr(self, "stock_building_selection_var"):
+                    if selected:
+                        labels = dict(STOCK_BUILDING_OPTIONS)
+                        self.stock_building_selection_var.set(
+                            "Selected stock sets: "
+                            + ", ".join(labels[identifier] for identifier in selected)
+                            + ". Model paths are merged and duplicates are removed."
+                        )
+                    else:
+                        self.stock_building_selection_var.set(
+                            "No stock sets selected. The procedural / country preset above is used."
+                        )
 
                 for key, label in _STOCK_DISABLED_GUI_OPTIONS:
                     variable = self.vars.get(key)
@@ -440,8 +591,17 @@ def _install_gui() -> None:
                     for widget in _find_widgets_by_text(self, label):
                         _set_widget_enabled(widget, not stock_mode)
 
+            def _collect_build_values(self) -> dict[str, object]:
+                values = super()._collect_build_values()
+                selected = self._selected_stock_building_presets()
+                if selected:
+                    values["house_style_preset"] = encode_stock_building_presets(selected)
+                return values
+
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
+                self._install_stock_building_checkboxes()
+                self._migrate_stock_dropdown_selection()
                 preset_var = self.vars.get("house_style_preset")
                 if preset_var is not None:
                     try:
@@ -450,6 +610,11 @@ def _install_gui() -> None:
                         )
                     except Exception:
                         self._stock_preset_trace = None
+                self._sync_stock_building_controls()
+
+            def _load_profile(self) -> None:
+                super()._load_profile()
+                self._migrate_stock_dropdown_selection()
                 self._sync_stock_building_controls()
 
             def _refresh_views(self) -> None:
