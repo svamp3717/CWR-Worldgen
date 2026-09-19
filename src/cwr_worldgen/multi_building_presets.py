@@ -777,6 +777,15 @@ def _install_gui() -> None:
                         )
                     self.multi_building_selection_var.set(message)
 
+            def _stock_building_controls_are_exclusive(self) -> bool:
+                # Stock P3Ds only disable procedural-specific options when they
+                # are the whole pool. In mixed mode those settings still apply
+                # to every building delegated to the procedural child library.
+                return (
+                    bool(self._selected_stock_building_presets())
+                    and not bool(self._selected_procedural_presets())
+                )
+
             def _sync_stock_building_controls(self) -> None:
                 super()._sync_stock_building_controls()
                 if any(
