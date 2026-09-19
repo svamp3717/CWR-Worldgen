@@ -2707,7 +2707,7 @@ def _expand_cwa_generated_vegetation(
     coordinates. Direct WRP vegetation receives a true world transform and uses
     the stock 1.99 path correctly. CWR-CE keeps the compact proxy carriers.
     """
-    if str(getattr(spec, "profile", "cwr-ce")).casefold() != "cwa":
+    if str(getattr(spec, "profile", "cwa")).casefold() != "cwa":
         return nonroads
 
     world_name = str(getattr(spec, "name", ""))
