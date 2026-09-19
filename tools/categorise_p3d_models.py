@@ -23,6 +23,7 @@ except ImportError as exc:
 from p3d_categoriser_session import load_resume_path
 from p3d_categoriser_split import SplitStateCategoriserApp
 from p3d_categoriser_storage import load_state
+import measure_p3d_models as measure
 from p3d_preview_geometry import preview_models
 from p3d_texture_sources import TextureResolver
 
@@ -167,6 +168,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             flush=True,
         )
 
+    try:
+        total_models = measure.count_models(inputs, args.include)
+    except (OSError, ValueError) as exc:
+        print(f"error: could not count models: {exc}", file=sys.stderr)
+        return 2
+
     iterator = preview_models(inputs, args.include, args.max_preview_points)
     root = tk.Tk()
     app = SplitStateCategoriserApp(
@@ -177,6 +184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         categories=categories,
         state=state,
         resume_model_path=resume_model_path,
+        total_models=total_models,
     )
     root.mainloop()
     del app
