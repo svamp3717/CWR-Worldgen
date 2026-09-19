@@ -155,27 +155,6 @@ def _load_catalogue(path: Path = _STOCK_CATALOGUE_PATH) -> tuple[StockBuildingMo
     return tuple(models)
 
 
-def _parse_number(value: object) -> float | None:
-    if value is None:
-        return None
-    text = str(value).strip().casefold()
-    if not text:
-        return None
-    token = []
-    seen_digit = False
-    for char in text:
-        if char.isdigit() or char in ".-+":
-            token.append(char)
-            seen_digit = seen_digit or char.isdigit()
-        elif seen_digit:
-            break
-    try:
-        result = float("".join(token))
-    except (TypeError, ValueError):
-        return None
-    return result if math.isfinite(result) else None
-
-
 def _target_height(
     tags: Mapping[str, str],
     family: str,
@@ -188,15 +167,16 @@ def _target_height(
 
 
 def _classification(tags: Mapping[str, str], width: float, length: float, settlement: str):
-    # Use the live style classifier for subtype information because school and
-    # worship policies intentionally wrap it during package initialization.
+    # Use the same live style classifier and settlement adapter as procedural
+    # generation. School/worship policies intentionally wrap this classifier.
     from . import osm_house_modeler_styles as styles
+    from .osm_house_modeler_full_style import modeler_context
 
     return styles.classify_building(
         tags,
         width,
         length,
-        settlement=settlement,
+        settlement=modeler_context(settlement),
     )
 
 
