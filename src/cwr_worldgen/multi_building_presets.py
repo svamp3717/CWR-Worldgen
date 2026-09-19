@@ -900,7 +900,7 @@ def _install_mixed_grounding_and_cache() -> None:
             spec = payload.get("spec") if isinstance(payload, Mapping) else None
             preset = spec.get("house_style_preset") if isinstance(spec, Mapping) else None
             if has_stock_building_presets(preset):
-                namespace = stock_ext._STOCK_PLACEMENT_CACHE_V97
+                namespace = stock_ext._STOCK_PLACEMENT_CACHE_V98
         return previous_cache_key(namespace, payload)
 
     generator.cache_key = cache_key_with_mixed_stock
