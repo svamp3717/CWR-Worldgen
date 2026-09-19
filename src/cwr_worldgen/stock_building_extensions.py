@@ -22,14 +22,39 @@ STOCK_BUILDING_VANILLA_PRESET = "stock-vanilla"
 STOCK_BUILDING_RESISTANCE_PRESET = "stock-resistance"
 STOCK_BUILDING_HAUS_COMBINED_PRESET = "stock-haus-combined"
 
-STOCK_BUILDING_VANILLA_LABEL = "Stock non-Resistance buildings only"
-STOCK_BUILDING_RESISTANCE_LABEL = "Stock Resistance buildings only"
-STOCK_BUILDING_HAUS_COMBINED_LABEL = "Haus.pbo + Resistance + vanilla buildings"
-
 _DATA_DIR = Path(__file__).with_name("data")
+_STOCK_COMBINED_CATALOGUE_PATH = _DATA_DIR / "stock_building_models.json"
 _STOCK_NON_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_non_resistance.json"
 _STOCK_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_resistance.json"
 _STOCK_HAUS_COMBINED_CATALOGUE_PATH = _DATA_DIR / "haus.pbo + resistance and vanilla.json"
+
+
+def _catalogue_display_name(path: Path, fallback: str) -> str:
+    """Read the human-facing preset name from a bundled stock catalogue."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return fallback
+    return str(document.get("display_name", "")).strip() or fallback
+
+
+STOCK_BUILDING_COMBINED_LABEL = _catalogue_display_name(
+    _STOCK_COMBINED_CATALOGUE_PATH,
+    "Stock combined (non-Resistance + Resistance) buildings",
+)
+STOCK_BUILDING_VANILLA_LABEL = _catalogue_display_name(
+    _STOCK_NON_RESISTANCE_CATALOGUE_PATH,
+    "Stock non-Resistance buildings only",
+)
+STOCK_BUILDING_RESISTANCE_LABEL = _catalogue_display_name(
+    _STOCK_RESISTANCE_CATALOGUE_PATH,
+    "Stock Resistance buildings only",
+)
+STOCK_BUILDING_HAUS_COMBINED_LABEL = _catalogue_display_name(
+    _STOCK_HAUS_COMBINED_CATALOGUE_PATH,
+    "Haus.pbo + Resistance + vanilla buildings",
+)
+stock.STOCK_BUILDING_PRESET_LABEL = STOCK_BUILDING_COMBINED_LABEL
 
 STOCK_BUILDING_PRESETS = (
     stock.STOCK_BUILDING_PRESET,
@@ -38,7 +63,7 @@ STOCK_BUILDING_PRESETS = (
     STOCK_BUILDING_HAUS_COMBINED_PRESET,
 )
 STOCK_BUILDING_OPTIONS = (
-    (stock.STOCK_BUILDING_PRESET, stock.STOCK_BUILDING_PRESET_LABEL),
+    (stock.STOCK_BUILDING_PRESET, STOCK_BUILDING_COMBINED_LABEL),
     (STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_VANILLA_LABEL),
     (STOCK_BUILDING_RESISTANCE_PRESET, STOCK_BUILDING_RESISTANCE_LABEL),
     (STOCK_BUILDING_HAUS_COMBINED_PRESET, STOCK_BUILDING_HAUS_COMBINED_LABEL),
