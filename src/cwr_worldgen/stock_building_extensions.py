@@ -516,11 +516,18 @@ def _install_gui() -> None:
                     )
                 except ValueError:
                     selected = ()
+                procedural_var = self.vars.get(_PROCEDURAL_BUILDING_CHECKBOX_KEY)
+                existing_stock = self._selected_stock_building_presets()
+                if not selected and existing_stock:
+                    # New checkbox-based profiles persist the source booleans
+                    # directly. Their retired dropdown transport is already auto,
+                    # so do not overwrite a saved procedural=True/False choice.
+                    preset_var.set(gui.HOUSE_STYLE_AUTO_LABEL)
+                    return
                 for identifier in selected:
                     variable = self.vars.get(_stock_checkbox_key(identifier))
                     if variable is not None:
                         variable.set(True)
-                procedural_var = self.vars.get(_PROCEDURAL_BUILDING_CHECKBOX_KEY)
                 if procedural_var is not None:
                     # Old stock-only profiles remain stock-only. Every historical
                     # procedural/country value migrates to the automatic procedural
