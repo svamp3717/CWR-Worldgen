@@ -231,3 +231,22 @@ def test_multiple_procedural_presets_drive_multiple_country_styles() -> None:
         for index in range(96)
     }
     assert selected == set(countries)
+
+
+def test_generalized_stock_only_composite_routes_to_stock_library() -> None:
+    raw = (
+        BUILDING_MULTI_PREFIX
+        + STOCK_BUILDING_VANILLA_PRESET
+        + ","
+        + STOCK_BUILDING_RESISTANCE_PRESET
+    )
+    library = generator.ProceduralBuildingLibrary(
+        world_name="wg_generalized_stock_multi_test",
+        house_style_preset=raw,
+        maximum_variants=8,
+    )
+
+    assert isinstance(library, StockBuildingLibrary)
+    assert library.house_style_preset == encode_stock_building_presets(
+        (STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_RESISTANCE_PRESET)
+    )
