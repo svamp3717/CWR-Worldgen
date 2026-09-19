@@ -173,9 +173,6 @@ def _forest_proxy_profile(spec: object) -> str:
         return "nogova_pine"
     if model.startswith(r"o\tree\les_nw_"):
         return "nogova_leaf"
-    profile = str(getattr(spec, "forest_profile", "everon")).casefold()
-    if profile == "everon-safe":
-        return "everon_safe"
     return "everon"
 
 
@@ -960,7 +957,7 @@ def _validate_milestone3(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "everon-safe"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon"}:
         checks.append((
             "Steep forest blocks use the normal/sunk triangle or reusable fallback ladder",
             (
@@ -1568,7 +1565,7 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
         canonical_asset_path(spec.forest_tree_model),
     }
     if milestone_number >= 9:
-        if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "everon-safe"}:
+        if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon"}:
             trusted.add(canonical_asset_path(str(getattr(spec, "forest_everon_steep_model", ""))))
         # Road-cut forest blocks use individually checked stock trees and bushes
         # in both the Everon and Malden profiles. Keep those original game assets
@@ -1883,7 +1880,7 @@ def _validate_milestone4(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "everon-safe"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon"}:
         checks.append((
             "Steep forest blocks use the normal/sunk triangle or reusable fallback ladder",
             (
@@ -2710,7 +2707,7 @@ def _expand_cwa_generated_vegetation(
     coordinates. Direct WRP vegetation receives a true world transform and uses
     the stock 1.99 path correctly. CWR-CE keeps the compact proxy carriers.
     """
-    if str(getattr(spec, "profile", "cwr-ce")).casefold() != "cwa":
+    if str(getattr(spec, "profile", "cwa")).casefold() != "cwa":
         return nonroads
 
     world_name = str(getattr(spec, "name", ""))

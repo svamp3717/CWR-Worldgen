@@ -42,25 +42,12 @@ TRAILING_NUMBER = re.compile(r"^(.*?)(\d+)$")
 FROZEN_CLI_MARKER = "--cwr-cli"
 
 RECOMMENDED_APPEARANCE_PRESET = "Nogova textures + Everon trees (recommended)"
-SAFE_EVERON_APPEARANCE_PRESET = "Nogova textures + Everon trees (safe bushes)"
-CWA_199_PROXY_DIAGNOSTIC_APPEARANCE_PRESET = (
-    "Nogova textures + Everon trees (1.99 diagnostic: no generated vegetation proxies)"
-)
-_CWA_199_PROXY_FEATURE_KEYS = (
-    "forest_clusters",
-    "forest_undergrowth",
-    "forest_borders",
-    "ditch_grass",
-    "rural_vegetation",
-)
 RESISTANCE_APPEARANCE_PRESET = "Nogova Resistance leaf forests"
 LEGACY_RESISTANCE_APPEARANCE_PRESET = "Nogova Resistance forests"
 PINE_NOGOVA_APPEARANCE_PRESET = "Nogova Resistance pine forests"
 LEGACY_NOGOVA_APPEARANCE_PRESET = "Nogova (recommended)"
 APPEARANCE_PRESETS = (
     RECOMMENDED_APPEARANCE_PRESET,
-    SAFE_EVERON_APPEARANCE_PRESET,
-    CWA_199_PROXY_DIAGNOSTIC_APPEARANCE_PRESET,
     RESISTANCE_APPEARANCE_PRESET,
     PINE_NOGOVA_APPEARANCE_PRESET,
     "Malden classic",
@@ -466,7 +453,7 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     validate_world_identity(
         name=str(values.get("name", "")),
         display_name=str(values.get("display_name", "")),
-        profile=str(values.get("profile", "cwr-ce")),
+        profile=str(values.get("profile", "cwa")),
     )
 
     command = cli_command_prefix(python) + ["milestone9"]
@@ -603,11 +590,7 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         "cemeteries": "--no-cemeteries",
     }
     for key, option in negative_flags.items():
-        diagnostic_disable = (
-            preset == CWA_199_PROXY_DIAGNOSTIC_APPEARANCE_PRESET
-            and key in _CWA_199_PROXY_FEATURE_KEYS
-        )
-        if diagnostic_disable or values.get(key, True) is False:
+        if values.get(key, True) is False:
             command.append(option)
 
     if bool(values.get("deploy_to_mod_folder", False)):
@@ -787,7 +770,7 @@ def default_gui_values() -> dict[str, object]:
         "deploy_mod_dir": "",
         "name": "cwr_my_world",
         "display_name": "My CWA World",
-        "profile": "cwr-ce",
+        "profile": "cwa",
         "appearance_preset": RECOMMENDED_APPEARANCE_PRESET,
         "house_style_preset": HOUSE_STYLE_AUTO_LABEL,
         "ground_textures": "nogova",
@@ -1345,7 +1328,7 @@ class WorldgenGui(tk.Tk):
             wraplength=700,
         ).grid(row=5, column=1, columnspan=2, sticky="w", pady=(0, 8))
         ttk.Label(world, text="Game profile").grid(row=6, column=0, sticky="w", padx=(0, 10), pady=4)
-        ttk.Combobox(world, textvariable=self._var("profile"), values=("cwr-ce", "cwa"), state="readonly", width=18).grid(row=6, column=1, sticky="w", pady=4)
+        ttk.Combobox(world, textvariable=self._var("profile"), values=("cwa", "cwr-ce"), state="readonly", width=18).grid(row=6, column=1, sticky="w", pady=4)
         ttk.Button(world, text="Suggest names from display name", command=self._suggest_names).grid(row=7, column=1, sticky="w", pady=(10, 0))
         ttk.Label(
             world,
@@ -1989,7 +1972,7 @@ class WorldgenGui(tk.Tk):
         self._register_advanced_setting(
             "forest_profile", forest_profile_label, normal_style="TLabel", changed_style="AdvancedChanged.TLabel"
         )
-        ttk.Combobox(custom, textvariable=self._var("forest_profile"), values=("everon", "everon-safe", "malden"), state="readonly", width=18).grid(row=1, column=1, sticky="w")
+        ttk.Combobox(custom, textvariable=self._var("forest_profile"), values=("everon", "malden"), state="readonly", width=18).grid(row=1, column=1, sticky="w")
 
         features = ttk.LabelFrame(advanced.body, text="Additional generated features", padding=10)
         features.pack(fill="x", pady=(0, 10))
@@ -2270,11 +2253,6 @@ class WorldgenGui(tk.Tk):
         desired: tuple[str, str, str] | None
         if preset == RECOMMENDED_APPEARANCE_PRESET:
             desired = ("nogova", "everon", EVERON_SINGLE_TREE_MODEL)
-        elif preset in {
-            SAFE_EVERON_APPEARANCE_PRESET,
-            CWA_199_PROXY_DIAGNOSTIC_APPEARANCE_PRESET,
-        }:
-            desired = ("nogova", "everon-safe", EVERON_SINGLE_TREE_MODEL)
         elif preset == PINE_NOGOVA_APPEARANCE_PRESET:
             desired = ("nogova", "everon", NOGOVA_PINE_SINGLE_TREE_MODEL)
         elif preset in {RESISTANCE_APPEARANCE_PRESET, LEGACY_RESISTANCE_APPEARANCE_PRESET, LEGACY_NOGOVA_APPEARANCE_PRESET}:
@@ -2299,10 +2277,6 @@ class WorldgenGui(tk.Tk):
                 self.vars["forest_profile"].set(desired[1])
             if "forest_single_tree_model" in self.vars and self.vars["forest_single_tree_model"].get() != desired[2]:
                 self.vars["forest_single_tree_model"].set(desired[2])
-            if preset == CWA_199_PROXY_DIAGNOSTIC_APPEARANCE_PRESET:
-                for key in _CWA_199_PROXY_FEATURE_KEYS:
-                    if key in self.vars and bool(self.vars[key].get()):
-                        self.vars[key].set(False)
         finally:
             self._preset_guard = False
 
@@ -3254,25 +3228,31 @@ class WorldgenGui(tk.Tk):
             if loaded_house_style is not None:
                 self.vars["house_style_preset"].set(gui_house_style_preset_label(loaded_house_style))
             loaded_preset = str(values.get("appearance_preset", "")).strip()
-            if loaded_preset in {LEGACY_NOGOVA_APPEARANCE_PRESET, LEGACY_RESISTANCE_APPEARANCE_PRESET}:
+            if loaded_preset in {
+                "Nogova textures + Everon trees (safe bushes)",
+                "Nogova textures + Everon trees (1.99 diagnostic: no generated vegetation proxies)",
+            }:
+                # Retired debugging presets now map to the normal Everon setup.
+                self.vars["appearance_preset"].set(RECOMMENDED_APPEARANCE_PRESET)
+                if "forest_profile" in self.vars:
+                    self.vars["forest_profile"].set("everon")
+            elif loaded_preset in {LEGACY_NOGOVA_APPEARANCE_PRESET, LEGACY_RESISTANCE_APPEARANCE_PRESET}:
                 # Historical generic Resistance/Nogova presets now map to the
                 # explicitly named leaf family.
                 self.vars["appearance_preset"].set(RESISTANCE_APPEARANCE_PRESET)
+            if str(values.get("forest_profile", "")).casefold() == "everon-safe":
+                # Profiles saved during the vegetation-debugging cycle migrate
+                # to the supported Everon profile.
+                self.vars["forest_profile"].set("everon")
             if "bus_stop_signs" not in values and "bus_stops" in values:
                 self.vars["bus_stop_signs"].set(values["bus_stops"])
             if "appearance_preset" not in values:
                 ground = str(values.get("ground_textures", "nogova"))
                 forest = str(values.get("forest_profile", "everon"))
-                if ground == "nogova" and forest == "everon":
+                if ground == "nogova" and forest in {"everon", "everon-safe"}:
                     self.vars["appearance_preset"].set(RECOMMENDED_APPEARANCE_PRESET)
-                elif (
-                    ground == "nogova"
-                    and forest == "everon-safe"
-                    and all(values.get(key, True) is False for key in _CWA_199_PROXY_FEATURE_KEYS)
-                ):
-                    self.vars["appearance_preset"].set(CWA_199_PROXY_DIAGNOSTIC_APPEARANCE_PRESET)
-                elif ground == "nogova" and forest == "everon-safe":
-                    self.vars["appearance_preset"].set(SAFE_EVERON_APPEARANCE_PRESET)
+                    if forest == "everon-safe":
+                        self.vars["forest_profile"].set("everon")
                 elif ground == "malden" and forest == "malden":
                     self.vars["appearance_preset"].set("Malden classic")
                 elif ground == "everon" and forest == "everon":

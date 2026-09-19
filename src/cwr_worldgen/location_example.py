@@ -111,7 +111,7 @@ class LocationExampleSpec:
     display_name: str = "Malaren Topographic Example"
     cells: int = 256
     cell_size: float = 25.0
-    profile: str = "cwr-ce"
+    profile: str = "cwa"
     include_minor_roads: bool = False
     forest_road_clearance: float = 0.0
     asset_roots: tuple[Path, ...] = ()

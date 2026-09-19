@@ -27,6 +27,7 @@ class LocationExampleTests(unittest.TestCase):
             output_dir=Path("build"),
             cache_dir=Path("cache"),
         )
+        self.assertEqual(spec.profile, "cwa")
         self.assertEqual(spec.cells, 256)
         self.assertEqual(spec.cell_size, 25.0)
         self.assertEqual(spec.world_size, 6400.0)

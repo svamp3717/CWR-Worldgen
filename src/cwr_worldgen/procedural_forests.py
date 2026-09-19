@@ -111,19 +111,8 @@ DEFAULT_BORDER_PROXY_MODELS: tuple[str, ...] = (
 )
 
 
-# Diagnostic Everon proxy set used by the everon-safe forest profile.
-# Keep layout cardinality stable while replacing the two suspect bush models.
-EVERON_SAFE_BORDER_PROXY_MODELS: tuple[str, ...] = (
-    r"data3d\ker listnac.p3d",
-    r"data3d\ker buxus.p3d",
-    r"data3d\ker listnac.p3d",
-    r"data3d\str smrcicicek.p3d",
-)
-
-
 # Interior undergrowth reuses the same original Data3D bush and small-tree set.
 DEFAULT_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = DEFAULT_BORDER_PROXY_MODELS
-EVERON_SAFE_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = EVERON_SAFE_BORDER_PROXY_MODELS
 
 # Resistance/Nogova equivalents used when the selected forest profile is the
 # Nogova O.pbo family.  Cluster geometry and placement remain identical; only
@@ -431,16 +420,6 @@ def _profiled_cluster_variant(variant: ForestClusterVariant, proxy_profile: str)
     profile = str(proxy_profile or "everon").strip().casefold().replace("-", "_")
     if profile == "everon":
         return variant
-    if profile == "everon_safe":
-        replacements = {
-            **dict(zip(DEFAULT_BORDER_PROXY_MODELS, EVERON_SAFE_BORDER_PROXY_MODELS)),
-            **dict(zip(DEFAULT_UNDERGROWTH_PROXY_MODELS, EVERON_SAFE_UNDERGROWTH_PROXY_MODELS)),
-        }
-        remapped = tuple(
-            (replacements.get(model_path, model_path), x, z, scale, heading)
-            for model_path, x, z, scale, heading in variant.proxy_layout
-        )
-        return replace(variant, proxy_layout=remapped)
     if profile == "nogova":
         profile = "nogova_leaf"
     if profile not in {"nogova_leaf", "nogova_pine"}:
@@ -724,7 +703,7 @@ class ProceduralForestClusterLibrary:
         if self.proxy_profile == "nogova":
             self.proxy_profile = "nogova_leaf"
         if self.proxy_profile not in {
-            "everon", "everon_safe", "nogova_leaf", "nogova_pine"
+            "everon", "nogova_leaf", "nogova_pine"
         }:
             raise ValueError(f"unsupported forest proxy profile: {proxy_profile!r}")
         self.cache_hits = 0

@@ -351,6 +351,7 @@ class Milestone5Tests(unittest.TestCase):
                 asset_roots=(FIXTURES / "assets",),
                 strict_assets=True,
             )
+            self.assertEqual(spec.profile, "cwa")
             with patch("urllib.request.urlopen", side_effect=AssertionError("network access")):
                 first = build_milestone5(Path(temp) / "one", spec)
                 second = build_milestone5(Path(temp) / "two", spec)
