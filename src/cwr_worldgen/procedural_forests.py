@@ -509,27 +509,13 @@ def _proxy_visual_lod(variant: ForestClusterVariant, grade: float) -> _Lod:
         # the hill; for all other shapes the local Z axis follows it.
         y = grade * (x if variant.slope_axis == "width" else z)
         angle = math.radians(heading)
-        # CWA 1.99 does not trust proxy vertex order. It sorts the three marker
-        # edges by length, then interprets the shortest anchor edge as Direction
-        # and the second-shortest as Up. Equal legs are therefore ambiguous and
-        # can swap the vertical and horizontal axes. CWR-CE's newer loader uses
-        # vertex order directly, so an asymmetric right triangle is compatible
-        # with both paths. Proxy basis vectors are normalized by both engines;
-        # these lengths are disambiguation geometry, not child-model scale.
-        marker_size = max(0.25, abs(scale))
-        direction_length = marker_size * 0.5
-        up_length = marker_size
-        direction = (
-            math.cos(angle) * direction_length,
-            0.0,
-            -math.sin(angle) * direction_length,
-        )
-        up = (0.0, up_length, 0.0)
+        aside = (math.cos(angle) * scale, 0.0, -math.sin(angle) * scale)
+        up = (0.0, scale, 0.0)
         point_start = len(points)
         face_index = len(faces)
         points.extend((
             (x, y, z),
-            (x + direction[0], y + direction[1], z + direction[2]),
+            (x + aside[0], y + aside[1], z + aside[2]),
             (x + up[0], y + up[1], z + up[2]),
         ))
         faces.append(_Face("", (
@@ -717,7 +703,7 @@ class ProceduralForestClusterLibrary:
             relative = wire.split("\\", 1)[1].replace("\\", "/")
             destination = source_dir / relative
             asset_key = cache_key(
-                "procedural-forest-cluster-model-v10-cwa199-asymmetric-proxy-markers",
+                "procedural-forest-cluster-model-v11-stock-marker-investigation",
                 {
                     "world_name": self.world_name,
                     "proxy_profile": self.proxy_profile,
