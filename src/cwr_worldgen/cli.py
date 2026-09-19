@@ -43,7 +43,16 @@ def _add_common_world_arguments(
     parser.add_argument("--output", type=Path, required=True, help="output directory")
     parser.add_argument("--name", default=default_name, help="3-20 character lowercase world and PBO root name")
     parser.add_argument("--display-name", default=default_display_name, help="name shown in the island list")
-    parser.add_argument("--profile", choices=("cwa", "cwr-ce"), default=default_profile)
+    parser.add_argument(
+        "--profile",
+        choices=("cwa", "cwr-ce"),
+        default=default_profile,
+        help=(
+            "target runtime: cwa for original 1.99 compatibility; cwr-ce for "
+            "the remastered engine. Original CWA proxy-safe generated vegetation "
+            "needs readable stock P3Ds from --asset-root."
+        ),
+    )
     if include_grid:
         parser.add_argument("--cells", type=int, default=256, help="power-of-two terrain grid size")
         parser.add_argument("--cell-size", type=float, default=25.0, help="terrain cell size in metres")
