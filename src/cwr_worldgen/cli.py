@@ -49,8 +49,7 @@ def _add_common_world_arguments(
         default=default_profile,
         help=(
             "target runtime: cwa for original 1.99 compatibility; cwr-ce for "
-            "the remastered engine. Original CWA proxy-safe generated vegetation "
-            "needs readable stock P3Ds from --asset-root."
+            "the remastered engine"
         ),
     )
     if include_grid:
