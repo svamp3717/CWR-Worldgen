@@ -13,8 +13,6 @@ from cwr_worldgen.gui import (
     HOUSE_STYLE_AUTO_LABEL,
     HOUSE_STYLE_PRESET_LABELS,
     RECOMMENDED_APPEARANCE_PRESET,
-    SAFE_EVERON_APPEARANCE_PRESET,
-    CWA_199_PROXY_DIAGNOSTIC_APPEARANCE_PRESET,
     RESISTANCE_APPEARANCE_PRESET,
     PINE_NOGOVA_APPEARANCE_PRESET,
     NOGOVA_FOREST_BLOCK_MODEL,
@@ -210,8 +208,6 @@ class GuiCommandTests(unittest.TestCase):
             APPEARANCE_PRESETS,
             (
                 "Nogova textures + Everon trees (recommended)",
-                "Nogova textures + Everon trees (safe bushes)",
-                "Nogova textures + Everon trees (1.99 diagnostic: no generated vegetation proxies)",
                 "Nogova Resistance leaf forests",
                 "Nogova Resistance pine forests",
                 "Malden classic",
@@ -222,38 +218,10 @@ class GuiCommandTests(unittest.TestCase):
             ),
         )
 
-    def test_safe_everon_profile_is_forwarded_to_cli(self) -> None:
-        values = default_gui_values()
-        values["appearance_preset"] = SAFE_EVERON_APPEARANCE_PRESET
-        values["forest_profile"] = "everon-safe"
-        command = build_milestone9_command(values, python="python")
-        self.assertIn("--forest-profile", command)
-        self.assertEqual(
-            command[command.index("--forest-profile") + 1],
-            "everon-safe",
-        )
-        self.assertNotIn("--no-forest-clusters", command)
-
-    def test_199_proxy_diagnostic_disables_generated_vegetation_carriers(self) -> None:
-        values = default_gui_values()
-        values["appearance_preset"] = CWA_199_PROXY_DIAGNOSTIC_APPEARANCE_PRESET
-        values["forest_profile"] = "everon-safe"
-        command = build_milestone9_command(values, python="python")
-
-        self.assertEqual(
-            command[command.index("--forest-profile") + 1],
-            "everon-safe",
-        )
-        for option in (
-            "--no-forest-clusters",
-            "--no-forest-undergrowth",
-            "--no-forest-borders",
-            "--no-ditch-grass",
-            "--no-rural-vegetation",
-        ):
-            self.assertIn(option, command)
-        self.assertNotIn("--no-forest-single-trees", command)
-        self.assertNotIn("--no-steep-hill-bushes", command)
+    def test_debug_vegetation_presets_are_removed(self) -> None:
+        labels = {preset.casefold() for preset in APPEARANCE_PRESETS}
+        self.assertFalse(any("safe bushes" in preset for preset in labels))
+        self.assertFalse(any("diagnostic" in preset for preset in labels))
 
     def test_obsolete_terrainfit_test_preset_is_removed(self) -> None:
         self.assertFalse(any("terrain-fit" in preset.casefold() for preset in APPEARANCE_PRESETS))
