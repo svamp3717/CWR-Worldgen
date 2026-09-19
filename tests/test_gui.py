@@ -203,6 +203,7 @@ class GuiCommandTests(unittest.TestCase):
 
     def test_v5_appearance_presets_are_native_and_recommended_by_default(self) -> None:
         values = default_gui_values()
+        self.assertEqual(values["profile"], "cwa")
         self.assertEqual(values["appearance_preset"], RECOMMENDED_APPEARANCE_PRESET)
         self.assertEqual(
             APPEARANCE_PRESETS,
