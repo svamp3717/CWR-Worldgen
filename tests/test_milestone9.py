@@ -715,6 +715,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             "--source-dir",
             "source-data/test",
         ])
+        self.assertEqual(args.profile, "cwa")
         self.assertEqual(args.max_road_objects, 1024000)
         self.assertEqual(args.max_buildings, 1000000)
         self.assertEqual(args.max_forest_objects, 500000)
