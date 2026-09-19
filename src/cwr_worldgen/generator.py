@@ -2744,6 +2744,11 @@ def _expand_cwa_generated_vegetation(
             proxy_profile=proxy_profile,
         )
         if parsed is None:
+            if is_generated_cluster_model(world_name, obj.model_path):
+                raise ValueError(
+                    "cannot flatten generated CWA vegetation carrier "
+                    f"{obj.model_path!r}; its variant/grade name is invalid"
+                )
             expanded.append(obj)
             continue
 
@@ -3496,7 +3501,7 @@ def build_milestone4(
         )
 
     if forest_cluster_library is not None:
-        report_progress(83, "Generating CWA 1.99-safe forest cluster assets")
+        report_progress(83, "Generating procedural forest cluster assets")
         forest_cluster_generation = forest_cluster_library.write_assets(
             source_dir,
             forest_cluster_catalogue_path,
