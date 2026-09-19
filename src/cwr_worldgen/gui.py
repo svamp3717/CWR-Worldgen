@@ -453,7 +453,7 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     validate_world_identity(
         name=str(values.get("name", "")),
         display_name=str(values.get("display_name", "")),
-        profile=str(values.get("profile", "cwr-ce")),
+        profile=str(values.get("profile", "cwa")),
     )
 
     command = cli_command_prefix(python) + ["milestone9"]
@@ -770,7 +770,7 @@ def default_gui_values() -> dict[str, object]:
         "deploy_mod_dir": "",
         "name": "cwr_my_world",
         "display_name": "My CWA World",
-        "profile": "cwr-ce",
+        "profile": "cwa",
         "appearance_preset": RECOMMENDED_APPEARANCE_PRESET,
         "house_style_preset": HOUSE_STYLE_AUTO_LABEL,
         "ground_textures": "nogova",
@@ -1328,7 +1328,7 @@ class WorldgenGui(tk.Tk):
             wraplength=700,
         ).grid(row=5, column=1, columnspan=2, sticky="w", pady=(0, 8))
         ttk.Label(world, text="Game profile").grid(row=6, column=0, sticky="w", padx=(0, 10), pady=4)
-        ttk.Combobox(world, textvariable=self._var("profile"), values=("cwr-ce", "cwa"), state="readonly", width=18).grid(row=6, column=1, sticky="w", pady=4)
+        ttk.Combobox(world, textvariable=self._var("profile"), values=("cwa", "cwr-ce"), state="readonly", width=18).grid(row=6, column=1, sticky="w", pady=4)
         ttk.Button(world, text="Suggest names from display name", command=self._suggest_names).grid(row=7, column=1, sticky="w", pady=(10, 0))
         ttk.Label(
             world,
