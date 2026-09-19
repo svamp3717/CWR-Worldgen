@@ -102,6 +102,54 @@ def test_stock_generic_city_footprint_reuses_procedural_settlement_classificatio
     assert "urban" in selected_model.families
 
 
+def test_stock_outbuilding_subtype_reuses_procedural_dimension_inference() -> None:
+    library = _library()
+    shed = library.plan_point(
+        {"building": "outbuilding"},
+        3.0,
+        0.0,
+        x=5000.0,
+        z=5000.0,
+    )
+    garage = library.plan_point(
+        {"building": "outbuilding"},
+        6.0,
+        0.0,
+        x=5100.0,
+        z=5000.0,
+    )
+
+    assert shed.selected.family == "outbuilding"
+    assert shed.selected.building_class == "shed"
+    assert shed.selected.outbuilding_kind == "shed"
+    assert garage.selected.family == "outbuilding"
+    assert garage.selected.building_class == "garage"
+    assert garage.selected.outbuilding_kind == "garage"
+
+
+def test_stock_settlement_boundary_matches_procedural_one_kilometre_rule() -> None:
+    library = _library()
+    library._settlements = ((0.0, 0.0, "city"),)
+
+    near = library.plan_point(
+        {"building": "yes"},
+        10.0,
+        0.0,
+        x=999.0,
+        z=0.0,
+    )
+    far = library.plan_point(
+        {"building": "yes"},
+        10.0,
+        0.0,
+        x=1001.0,
+        z=0.0,
+    )
+
+    assert near.selected.family == "townhouse"
+    assert far.selected.family == "residential"
+
+
 def test_stock_mode_factory_never_instantiates_procedural_library() -> None:
     library = generator.ProceduralBuildingLibrary(
         world_name="wg_stock_factory",
