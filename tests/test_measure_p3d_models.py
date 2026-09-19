@@ -60,3 +60,42 @@ def test_count_models_reads_pbo_header_without_parsing_payloads(tmp_path: Path) 
     assert measure.count_models((pbo,)) == 2
     assert measure.count_models((pbo,), (r"archive\\sub\\*.p3d",)) == 1
 
+
+
+def test_cprs_empty_name_record_is_accepted_as_pbo_terminator(tmp_path: Path) -> None:
+    entry = struct.Struct("<IIIII")
+    members = (
+        ("MAP_Shed_brown.p3d", b"brown"),
+        ("metal.paa", b"texture"),
+        ("MAP_Shed_green.p3d", b"green"),
+        ("MAP_Shed_grey.p3d", b"grey"),
+    )
+    header = bytearray()
+    payload = bytearray()
+    for name, data in members:
+        header += name.encode("latin-1") + b"\0"
+        header += entry.pack(measure._PBO_COMPRESSED, len(data), 0, 0, len(data))
+        payload += data
+
+    # MAP_Shed.pbo and some other legacy/addon archives use an empty-name Cprs
+    # record with zero sizes as the header terminator.
+    header += b"\0" + entry.pack(measure._PBO_COMPRESSED, 0, 0, 0, 0)
+
+    pbo = tmp_path / "MAP_Shed.pbo"
+    pbo.write_bytes(bytes(header + payload))
+
+    assert measure.count_models((pbo,)) == 3
+    assert [model_path for model_path, _data in measure._pbo_entries(pbo)] == [
+        r"map_shed\map_shed_brown.p3d",
+        r"map_shed\map_shed_green.p3d",
+        r"map_shed\map_shed_grey.p3d",
+    ]
+
+
+def test_unknown_empty_name_pbo_extension_record_remains_rejected(tmp_path: Path) -> None:
+    entry = struct.Struct("<IIIII")
+    pbo = tmp_path / "bad-extension.pbo"
+    pbo.write_bytes(b"\0" + entry.pack(0x12345678, 1, 0, 0, 0))
+
+    with pytest.raises(measure.ModelReadError, match="unsupported PBO extension record"):
+        measure.count_models((pbo,))
