@@ -242,6 +242,20 @@ class CategoriserApp:
 
     def _unbusy(self) -> None:
         self.root.configure(cursor="")
+        if self.current is not None:
+            self._update_progress_counter()
+
+    def _update_progress_counter(self) -> None:
+        if self.current is None or self.index < 0:
+            return
+        if self.total_models is not None:
+            counter = f"Model {self.index + 1:,} / {self.total_models:,}"
+        else:
+            suffix = " +" if not self.exhausted else ""
+            counter = f"Model {self.index + 1:,} / {len(self.models):,}{suffix}"
+        self.progress_var.set(
+            f"{counter} • failures skipped: {len(self.failures):,}"
+        )
 
     def _load_next(self) -> PreviewModel | None:
         while not self.exhausted:
@@ -344,14 +358,7 @@ class CategoriserApp:
     def _show_model(self, model: PreviewModel) -> None:
         self.current = model
         self.path_var.set(model.model_path)
-        if self.total_models is not None:
-            counter = f"Model {self.index + 1:,} / {self.total_models:,}"
-        else:
-            suffix = " +" if not self.exhausted else ""
-            counter = f"Model {self.index + 1:,} / {len(self.models):,}{suffix}"
-        self.progress_var.set(
-            f"{counter} • failures skipped: {len(self.failures):,}"
-        )
+        self._update_progress_counter()
         classification = self.state.get(model.model_path, Classification([]))
         selected = set(classification.categories)
         self._updating_checks = True
