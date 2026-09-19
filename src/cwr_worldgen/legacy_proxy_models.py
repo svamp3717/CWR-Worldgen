@@ -30,7 +30,7 @@ _VEC3 = struct.Struct("<fff")
 _POINT = struct.Struct("<fffi")
 _FACE_VERTEX = struct.Struct("<iiff")
 
-_LAND_MASK = 0x0F00
+_LAND_DEFORM_MASK = 0x0900  # ClipLandOn | ClipLandKeep
 _MAX_VERTEX_COUNT = 2_000_000
 _MAX_FACE_COUNT = 2_000_000
 _MAX_TEXTURE_COUNT = 100_000
@@ -238,8 +238,8 @@ def _read_odol_visual(data: bytes) -> tuple[_Lod, int, tuple[str, ...]]:
         )
         faces.append(_Face(texture, vertices, int(face_flags)))
 
-    land_count = sum(bool(flag & _LAND_MASK) for flag in flags)
-    safe_flags = tuple(int(flag & ~_LAND_MASK) for flag in flags)
+    land_count = sum(bool(flag & _LAND_DEFORM_MASK) for flag in flags)
+    safe_flags = tuple(int(flag & ~_LAND_DEFORM_MASK) for flag in flags)
     lod = _proxy_lod(
         points=points,
         normals=normals,
@@ -323,8 +323,8 @@ def _read_mlod_visual(data: bytes) -> tuple[_Lod, int, tuple[str, ...]]:
             continue
         faces.append(_Face(texture, vertices, face_flags))
 
-    land_count = sum(bool(flag & _LAND_MASK) for flag in flags)
-    safe_flags = tuple(int(flag & ~_LAND_MASK) for flag in flags)
+    land_count = sum(bool(flag & _LAND_DEFORM_MASK) for flag in flags)
+    safe_flags = tuple(int(flag & ~_LAND_DEFORM_MASK) for flag in flags)
     lod = _proxy_lod(
         points=tuple(points),
         normals=normals,
