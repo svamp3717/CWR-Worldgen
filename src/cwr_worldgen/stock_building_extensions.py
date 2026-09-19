@@ -158,6 +158,10 @@ _INTERIOR_CHECKBOX_TEXT = "Enterable procedural-building interiors"
 _HIGH_QUALITY_TEXTURE_CHECKBOX_TEXT = "Higher-quality building textures (256 px)"
 _MATCH_TEXTURE_CHECKBOX_TEXT = "Match nearby same-shape town/city building textures"
 _PROCEDURAL_BRIDGES_CHECKBOX_TEXT = "Procedural bridges (instead of Nogova)"
+_BUILDING_PRESET_HINT_TEXT = (
+    "Automatic uses the selected map area/country. Choose one of the 23 regional presets here "
+    "to override procedural building façades and roof defaults for the entire world."
+)
 _STOCK_DISABLED_GUI_OPTIONS: tuple[tuple[str, str], ...] = (
     ("procedural_building_interiors", _INTERIOR_CHECKBOX_TEXT),
     ("high_quality_building_textures", _HIGH_QUALITY_TEXTURE_CHECKBOX_TEXT),
@@ -494,6 +498,7 @@ def _install_gui() -> None:
                 return tuple(selected)
 
             def _migrate_stock_dropdown_selection(self) -> None:
+                """Migrate an old single stock dropdown choice, then retire the dropdown value."""
                 preset_var = self.vars.get("house_style_preset")
                 if preset_var is None:
                     return
@@ -503,15 +508,16 @@ def _install_gui() -> None:
                     )
                 except ValueError:
                     selected = ()
-                if not selected:
-                    return
                 for identifier in selected:
                     variable = self.vars.get(_stock_checkbox_key(identifier))
                     if variable is not None:
                         variable.set(True)
+                # The country/procedural dropdown is no longer a user-facing choice.
+                # With no stock boxes selected, Automatic remains the fallback.
                 preset_var.set(gui.HOUSE_STYLE_AUTO_LABEL)
 
             def _install_stock_building_checkboxes(self) -> None:
+                """Replace the old building-country combobox with multi-select stock sets."""
                 preset_var = self.vars.get("house_style_preset")
                 if preset_var is None:
                     return
@@ -524,21 +530,18 @@ def _install_gui() -> None:
                 label = labels[0]
                 parent = label.master
                 try:
-                    label.configure(text="Procedural / country preset")
+                    label.configure(text="Building presets")
                 except Exception:
                     pass
 
                 combo = _find_combobox_for_variable(self, preset_var)
                 if combo is not None:
-                    stock_labels = {label for _identifier, label in STOCK_BUILDING_OPTIONS}
-                    current_values = tuple(combo.cget("values"))
-                    combo.configure(values=tuple(value for value in current_values if value not in stock_labels))
+                    _hide_widget(combo)
+                for hint in _find_widgets_by_text(self, _BUILDING_PRESET_HINT_TEXT):
+                    _hide_widget(hint)
 
-                gui.ttk.Label(parent, text="Stock building sets").grid(
-                    row=4, column=0, sticky="nw", padx=(0, 10), pady=(8, 3)
-                )
                 box = gui.ttk.Frame(parent)
-                box.grid(row=4, column=1, sticky="w", pady=(8, 3))
+                box.grid(row=2, column=1, sticky="w", pady=3)
                 for index, (identifier, text) in enumerate(STOCK_BUILDING_OPTIONS):
                     gui.ttk.Checkbutton(
                         box,
@@ -557,7 +560,7 @@ def _install_gui() -> None:
                     textvariable=self.stock_building_selection_var,
                     style="Hint.TLabel",
                     wraplength=700,
-                ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+                ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
             def _sync_stock_building_controls(self) -> None:
                 # Procedural bridges remain the product default, but the GUI no
@@ -581,7 +584,7 @@ def _install_gui() -> None:
                         )
                     else:
                         self.stock_building_selection_var.set(
-                            "No stock sets selected. The procedural / country preset above is used."
+                            "No building presets selected. Automatic country/procedural buildings are used."
                         )
 
                 for key, label in _STOCK_DISABLED_GUI_OPTIONS:
@@ -594,8 +597,11 @@ def _install_gui() -> None:
             def _collect_build_values(self) -> dict[str, object]:
                 values = super()._collect_build_values()
                 selected = self._selected_stock_building_presets()
-                if selected:
-                    values["house_style_preset"] = encode_stock_building_presets(selected)
+                values["house_style_preset"] = (
+                    encode_stock_building_presets(selected)
+                    if selected
+                    else gui.HOUSE_STYLE_PRESET_AUTO
+                )
                 return values
 
             def __init__(self, *args, **kwargs):
