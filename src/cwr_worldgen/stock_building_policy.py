@@ -15,6 +15,8 @@ import json
 import math
 from typing import Mapping, Sequence
 
+from shapely.geometry import Point, Polygon
+
 from .procedural_buildings import BuildingGenerationResult, BuildingPlacement, footprint_from_polygon
 
 STOCK_BUILDING_PRESET = "stock"
@@ -31,25 +33,6 @@ _FAMILY_FALLBACKS: Mapping[str, tuple[str, ...]] = {
     "industrial": ("industrial", "agricultural"),
     "agricultural": ("agricultural", "industrial", "outbuilding"),
     "outbuilding": ("outbuilding", "agricultural", "residential"),
-}
-
-_DEFAULT_HEIGHTS: Mapping[str, float] = {
-    "residential": 6.0,
-    "townhouse": 8.0,
-    "urban": 12.0,
-    "shop": 4.0,
-    "school": 8.0,
-    "church": 14.0,
-    "industrial": 8.0,
-    "agricultural": 7.0,
-    "outbuilding": 3.5,
-}
-
-_SETTLEMENT_RADIUS_M: Mapping[str, float] = {
-    "city": 1600.0,
-    "town": 900.0,
-    "village": 450.0,
-    "hamlet": 260.0,
 }
 
 _REVIEWED_CATEGORY_FAMILIES: Mapping[str, tuple[str, ...]] = {
@@ -193,14 +176,15 @@ def _parse_number(value: object) -> float | None:
     return result if math.isfinite(result) else None
 
 
-def _target_height(tags: Mapping[str, str], family: str) -> float:
-    explicit = _parse_number(tags.get("height"))
-    if explicit is not None and explicit > 0.5:
-        return explicit
-    levels = _parse_number(tags.get("building:levels"))
-    if levels is not None and levels > 0.0:
-        return max(2.5, levels * 3.0)
-    return _DEFAULT_HEIGHTS.get(family, 6.0)
+def _target_height(
+    tags: Mapping[str, str],
+    family: str,
+    level_height: float,
+) -> float:
+    """Use the procedural generator's height semantics for stock model fitting."""
+    from . import procedural_buildings as buildings
+
+    return float(buildings._height(tags, family, level_height))
 
 
 def _classification(tags: Mapping[str, str], width: float, length: float, settlement: str):
@@ -327,35 +311,138 @@ class StockBuildingLibrary:
         self.cache_refresh = cache_refresh
         self.models = _load_catalogue()
         self._usage: dict[str, int] = {}
+        # Keep the same settlement evidence used by procedural generation.
+        # _settlements remains as a tiny compatibility/debug view of place nodes.
         self._settlements: tuple[tuple[float, float, str], ...] = ()
+        self._settlement_points: tuple[tuple[float, float, float, str], ...] = ()
+        self._settlement_scale_x = 1.0
+        self._settlement_scale_z = 1.0
+        self._settlement_bucket_size = 1000.0
+        self._settlement_buckets: dict[tuple[int, int], tuple[int, ...]] = {}
+        self._isolated_dwelling_cabins: tuple[Polygon, ...] = ()
 
     def prepare(self, dataset, projection, point_building_footprint: float) -> None:
         del point_building_footprint
-        settlements: list[tuple[float, float, str]] = []
+        # Procedural generation measures settlement radii in source-ground
+        # metres, not projected world-space metres. Reuse the same scale-aware
+        # 1 km rule for city/town/village/hamlet place nodes.
+        self._settlement_scale_x = max(1.0e-9, float(projection.scale_x))
+        self._settlement_scale_z = max(1.0e-9, float(projection.scale_z))
+        settlement_points: list[tuple[float, float, float, str]] = []
         for feature in getattr(dataset, "places", ()):
             kind = str(getattr(feature, "tags", {}).get("place", "")).casefold()
-            if kind not in _SETTLEMENT_RADIUS_M:
+            if kind not in {"city", "town", "village", "hamlet"}:
                 continue
             try:
                 x, z = projection.to_world(feature.point)
             except Exception:
                 continue
-            settlements.append((float(x), float(z), kind))
-        self._settlements = tuple(settlements)
+            settlement_points.append((float(x), float(z), 1000.0, kind))
+        self._settlement_points = tuple(settlement_points)
+        self._settlements = tuple((x, z, kind) for x, z, _radius, kind in settlement_points)
+
+        self._settlement_bucket_size = max(
+            1.0,
+            1000.0 * self._settlement_scale_x,
+            1000.0 * self._settlement_scale_z,
+        )
+        mutable_buckets: dict[tuple[int, int], list[int]] = {}
+        for index, (centre_x, centre_z, _radius, _kind) in enumerate(self._settlement_points):
+            key = (
+                math.floor(centre_x / self._settlement_bucket_size),
+                math.floor(centre_z / self._settlement_bucket_size),
+            )
+            mutable_buckets.setdefault(key, []).append(index)
+        self._settlement_buckets = {
+            key: tuple(values) for key, values in mutable_buckets.items()
+        }
+
+        # Match procedural generation's exact isolated-dwelling rule: only the
+        # lone generic footprint inside a mapped place=isolated_dwelling polygon
+        # receives isolated_dwelling_single context.
+        building_geometries: list[tuple[Polygon, Mapping[str, str]]] = []
+        for building_feature in getattr(dataset, "building_polygons", ()):
+            for geo_polygon in getattr(building_feature, "polygons", ()):
+                outer = [projection.to_world(point) for point in geo_polygon.outer]
+                holes = [
+                    [projection.to_world(point) for point in hole]
+                    for hole in geo_polygon.holes
+                ]
+                if len(outer) < 4:
+                    continue
+                geometry = Polygon(outer, holes)
+                if not geometry.is_empty:
+                    building_geometries.append((geometry, building_feature.tags))
+
+        isolated_dwelling_cabins: list[Polygon] = []
+        for place_feature in getattr(dataset, "place_areas", ()):
+            if str(getattr(place_feature, "tags", {}).get("place", "")).casefold() != "isolated_dwelling":
+                continue
+            for geo_polygon in getattr(place_feature, "polygons", ()):
+                outer = [projection.to_world(point) for point in geo_polygon.outer]
+                holes = [
+                    [projection.to_world(point) for point in hole]
+                    for hole in geo_polygon.holes
+                ]
+                if len(outer) < 4:
+                    continue
+                area = Polygon(outer, holes)
+                if area.is_empty:
+                    continue
+                inside: list[tuple[Polygon, str]] = []
+                for building_geometry, building_tags in building_geometries:
+                    if not area.covers(building_geometry.representative_point()):
+                        continue
+                    inside.append((
+                        building_geometry,
+                        str(building_tags.get("building", "")).casefold(),
+                    ))
+                plausible = [
+                    geometry
+                    for geometry, building_kind in inside
+                    if building_kind in {"", "yes"}
+                ]
+                if len(plausible) == 1:
+                    isolated_dwelling_cabins.append(plausible[0])
+        self._isolated_dwelling_cabins = tuple(isolated_dwelling_cabins)
 
     def _settlement_context(self, x: float, z: float) -> str:
-        best: tuple[float, str] | None = None
-        for sx, sz, kind in self._settlements:
-            radius = _SETTLEMENT_RADIUS_M[kind]
-            distance = math.hypot(x - sx, z - sz)
-            if distance > radius:
-                continue
-            candidate = (distance / radius, kind)
-            if best is None or candidate < best:
-                best = candidate
-        if best is None:
+        priority = {"city": 0, "town": 1, "village": 2, "hamlet": 3}
+        if self._isolated_dwelling_cabins:
+            point = Point(float(x), float(z))
+            if any(footprint.covers(point) for footprint in self._isolated_dwelling_cabins):
+                return "isolated_dwelling_single"
+
+        matches: list[tuple[int, float, str]] = []
+        if self._settlement_points:
+            bucket_size = self._settlement_bucket_size
+            bucket_x = math.floor(float(x) / bucket_size)
+            bucket_z = math.floor(float(z) / bucket_size)
+            candidate_indices: list[int] = []
+            for dz in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    candidate_indices.extend(
+                        self._settlement_buckets.get((bucket_x + dx, bucket_z + dz), ())
+                    )
+            candidates = (self._settlement_points[index] for index in candidate_indices)
+        else:
+            # Backward-compatible support for tests/tools that populated the old
+            # internal place-node tuple directly.
+            candidates = (
+                (centre_x, centre_z, 1000.0, kind)
+                for centre_x, centre_z, kind in self._settlements
+            )
+
+        for centre_x, centre_z, radius, kind in candidates:
+            distance = math.hypot(
+                (float(x) - centre_x) / self._settlement_scale_x,
+                (float(z) - centre_z) / self._settlement_scale_z,
+            )
+            if distance <= radius:
+                matches.append((priority.get(kind, 99), distance, kind))
+        if not matches:
             return "rural"
-        return "city" if best[1] == "city" else "town" if best[1] == "town" else "village"
+        return min(matches)[2]
 
     def _candidate_models(
         self,
@@ -455,7 +542,7 @@ class StockBuildingLibrary:
             outbuilding_kind=str(getattr(classification, "outbuilding_kind", "")),
             target_width=footprint.width_m,
             target_length=footprint.length_m,
-            target_height=_target_height(tags, family),
+            target_height=_target_height(tags, family, self.default_level_height),
             seed=f"polygon:{centre_x:.2f}:{centre_z:.2f}:{footprint.width_m:.2f}:{footprint.length_m:.2f}:{family}",
             settlement=settlement,
         )
@@ -485,7 +572,7 @@ class StockBuildingLibrary:
             outbuilding_kind=str(getattr(classification, "outbuilding_kind", "")),
             target_width=footprint_m,
             target_length=footprint_m,
-            target_height=_target_height(tags, family),
+            target_height=_target_height(tags, family, self.default_level_height),
             seed=f"point:{x:.2f}:{z:.2f}:{footprint_m:.2f}:{family}",
             settlement=settlement,
         )
