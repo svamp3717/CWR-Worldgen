@@ -387,7 +387,7 @@ def _parser() -> argparse.ArgumentParser:
 
     milestone5 = subparsers.add_parser("milestone5", help="build the playability pipeline exclusively from a validated frozen source bundle")
     _add_common_world_arguments(
-        milestone5, default_name="cwr_milestone5", default_display_name="CWR Milestone 5", include_grid=False, default_profile="cwr-ce"
+        milestone5, default_name="cwr_milestone5", default_display_name="CWR Milestone 5", include_grid=False
     )
     milestone5.add_argument("--source-dir", type=Path, required=True)
     _add_source_feature_arguments(milestone5)
@@ -404,7 +404,7 @@ def _parser() -> argparse.ArgumentParser:
 
     milestone6 = subparsers.add_parser("milestone6", help="normalize frozen geometry, emit GeoJSON, and build the world from that intermediate representation")
     _add_common_world_arguments(
-        milestone6, default_name="cwr_milestone6", default_display_name="CWR Milestone 6", include_grid=False, default_profile="cwr-ce"
+        milestone6, default_name="cwr_milestone6", default_display_name="CWR Milestone 6", include_grid=False
     )
     milestone6.add_argument("--source-dir", type=Path, required=True)
     _add_source_feature_arguments(milestone6)
@@ -413,7 +413,7 @@ def _parser() -> argparse.ArgumentParser:
 
     milestone7 = subparsers.add_parser("milestone7", help="solve water, roads, buildings, streams, smoothing, and world edges in one priority-based terrain field")
     _add_common_world_arguments(
-        milestone7, default_name="cwr_milestone7", default_display_name="CWR Milestone 7", include_grid=False, default_profile="cwr-ce"
+        milestone7, default_name="cwr_milestone7", default_display_name="CWR Milestone 7", include_grid=False
     )
     milestone7.add_argument("--source-dir", type=Path, required=True)
     _add_source_feature_arguments(milestone7)
@@ -423,7 +423,7 @@ def _parser() -> argparse.ArgumentParser:
 
     milestone8 = subparsers.add_parser("milestone8", help="generate reusable procedural MLOD buildings from normalized OSM footprints")
     _add_common_world_arguments(
-        milestone8, default_name="cwr_milestone8", default_display_name="CWR Milestone 8", include_grid=False, default_profile="cwr-ce"
+        milestone8, default_name="cwr_milestone8", default_display_name="CWR Milestone 8", include_grid=False
     )
     milestone8.add_argument("--source-dir", type=Path, required=True)
     _add_source_feature_arguments(milestone8)
@@ -440,7 +440,7 @@ def _parser() -> argparse.ArgumentParser:
 
     milestone9 = subparsers.add_parser("milestone9", help="apply deterministic surface transitions, shoreline/forest/farm/road materials, overview map, and improved icon")
     _add_common_world_arguments(
-        milestone9, default_name="cwr_milestone9", default_display_name="CWR Milestone 9", include_grid=False, default_profile="cwr-ce"
+        milestone9, default_name="cwr_milestone9", default_display_name="CWR Milestone 9", include_grid=False
     )
     milestone9.add_argument("--source-dir", type=Path, required=True)
     milestone9.add_argument(
