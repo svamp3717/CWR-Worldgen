@@ -258,3 +258,14 @@ def test_stock_asset_catalogue_records_source_and_origin_without_generated_p3ds(
     assert document["models"][0]["origin_lift_m"] > 0.0
     assert result.generated_variants == 0
     assert result.model_assets == ()
+
+
+def test_stock_fit_revision_is_final_active_placement_cache_salt() -> None:
+    from cwr_worldgen import final_building_road_clearance_policy as clearance
+    from cwr_worldgen import stock_building_extensions as extensions
+
+    assert (
+        clearance._CACHE_REVISION
+        == extensions._BUILDING_PLACEMENT_CACHE_REVISION
+    )
+    assert "stock-fit-overlap" in clearance._CACHE_REVISION
