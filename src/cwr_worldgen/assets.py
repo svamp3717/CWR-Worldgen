@@ -14,6 +14,10 @@ from .cache import CACHE_SCHEMA_VERSION, atomic_write_json, cache_key
 
 _ENTRY_FIELDS = struct.Struct("<IIIII")
 _PBO_PROPERTIES = 0x56657273  # 'Vers' in the legacy little-endian PBO header
+_PBO_COMPRESSED = 0x43707273  # 'Cprs' legacy BIS LZSS
+_LZSS_WINDOW_SIZE = 0x1000
+_LZSS_WINDOW_MASK = _LZSS_WINDOW_SIZE - 1
+_LZSS_FILL_BYTE = 0x20
 _ASSET_SUFFIXES = {".p3d", ".paa", ".pac"}
 _TEXTURE_REFERENCE = re.compile(rb"(?i)([a-z0-9_.$@/\\-]{2,240}\.(?:paa|pac))")
 
@@ -94,6 +98,140 @@ def _p3d_dependencies(data: bytes) -> tuple[str, ...]:
             continue
         found.add(canonical_asset_path(decoded))
     return tuple(sorted(found))
+
+
+def _decompress_lzss_stream(stream: io.BytesIO, expected_size: int) -> bytes:
+    """Decode the BIS/OFP 4 KiB-window LZSS stream plus additive checksum."""
+    if expected_size < 0:
+        raise ValueError("negative LZSS output size")
+    if expected_size == 0:
+        return b""
+
+    window = bytearray([_LZSS_FILL_BYTE]) * _LZSS_WINDOW_SIZE
+    window_pos = 0
+    output = bytearray()
+    checksum = 0
+
+    def emit(value: int) -> None:
+        nonlocal window_pos, checksum
+        output.append(value)
+        checksum = (checksum + value) & 0xFFFFFFFF
+        window[window_pos] = value
+        window_pos = (window_pos + 1) & _LZSS_WINDOW_MASK
+
+    while len(output) < expected_size:
+        raw_flags = stream.read(1)
+        if not raw_flags:
+            raise ValueError("truncated LZSS flag byte")
+        flags = raw_flags[0]
+        for bit in range(8):
+            if len(output) >= expected_size:
+                break
+            if flags & (1 << bit):
+                literal = stream.read(1)
+                if not literal:
+                    raise ValueError("truncated LZSS literal")
+                emit(literal[0])
+                continue
+
+            pair = stream.read(2)
+            if len(pair) != 2:
+                raise ValueError("truncated LZSS reference")
+            b1, b2 = pair
+            offset = b1 | ((b2 & 0xF0) << 4)
+            run_length = (b2 & 0x0F) + 3
+            source_pos = window_pos
+            for index in range(run_length):
+                if len(output) >= expected_size:
+                    break
+                emit(window[(source_pos - offset + index) & _LZSS_WINDOW_MASK])
+
+    checksum_raw = stream.read(4)
+    if len(checksum_raw) != 4:
+        raise ValueError("truncated LZSS checksum")
+    stored_checksum = struct.unpack("<I", checksum_raw)[0]
+    if stored_checksum != checksum:
+        raise ValueError(
+            f"LZSS checksum mismatch: stored {stored_checksum:#x}, calculated {checksum:#x}"
+        )
+    return bytes(output)
+
+
+def read_asset_record_bytes(record: AssetRecord) -> bytes:
+    """Read one previously scanned loose/PBO asset, decompressing Cprs if needed.
+
+    Asset scanning deliberately avoids decompressing every archive entry. Generated
+    proxy-safe vegetation only needs a handful of selected models, so decode those
+    exact records on demand instead of making every scan pay the price.
+    """
+    source = Path(record.source)
+    if source.suffix.casefold() != ".pbo":
+        data = source.read_bytes()
+        if record.sha256 is not None and _sha256_bytes(data) != record.sha256:
+            raise ValueError(f"asset changed since scan: {source}")
+        return data
+
+    raw = source.read_bytes()
+    stream = io.BytesIO(raw)
+    metadata: list[tuple[str, int, int, int]] = []
+    properties: dict[str, str] = {}
+    while True:
+        name = _read_cstring(stream)
+        fields = stream.read(_ENTRY_FIELDS.size)
+        if len(fields) != _ENTRY_FIELDS.size:
+            raise ValueError(f"truncated PBO header: {source}")
+        packing, original_size, reserved, timestamp, data_size = _ENTRY_FIELDS.unpack(fields)
+        del reserved, timestamp
+        if not name:
+            if packing == _PBO_PROPERTIES:
+                while True:
+                    key = _read_cstring(stream)
+                    if not key:
+                        break
+                    properties[key.casefold()] = _read_cstring(stream)
+                continue
+            if any((packing, original_size, data_size)):
+                raise ValueError(f"unsupported PBO extension record: {source}")
+            break
+        metadata.append((name, packing, original_size, data_size))
+
+    prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or source.stem
+    cursor = stream.tell()
+    target = canonical_asset_path(record.path)
+    for name, packing, original_size, data_size in metadata:
+        end = cursor + data_size
+        if end > len(raw):
+            raise ValueError(f"truncated PBO entry {name!r}: {source}")
+        stored = raw[cursor:end]
+        cursor = end
+
+        combined = name.replace("/", "\\").lstrip("\\")
+        if prefix and not canonical_asset_path(combined).startswith(
+            canonical_asset_path(prefix) + "\\"
+        ):
+            combined = prefix + "\\" + combined
+        if canonical_asset_path(combined) != target:
+            continue
+
+        if packing == 0:
+            data = stored
+        elif packing == _PBO_COMPRESSED:
+            if original_size <= 0:
+                raise ValueError(f"compressed PBO entry {target} has no original size")
+            packed = io.BytesIO(stored)
+            data = _decompress_lzss_stream(packed, original_size)
+            if packed.read():
+                raise ValueError(f"compressed PBO entry {target} has trailing bytes")
+        else:
+            raise ValueError(
+                f"unsupported PBO packing method {packing:#x} for {target}"
+            )
+
+        if record.sha256 is not None and _sha256_bytes(data) != record.sha256:
+            raise ValueError(f"asset changed since scan: {source}!{target}")
+        return data
+
+    raise FileNotFoundError(f"{target} not found in scanned source {source}")
 
 
 def _pbo_records(path: Path) -> tuple[list[AssetRecord], str | None]:
