@@ -98,6 +98,23 @@ def test_mixed_stock_cache_wrapper_uses_current_stock_revision() -> None:
     assert legacy_key == current_key
 
 
+def test_procedural_country_catalogue_records_selected_json(tmp_path: Path) -> None:
+    library = generator.ProceduralBuildingLibrary(
+        world_name="wg_proc_json_test",
+        house_style_preset="se_sweden",
+        maximum_variants=4,
+    )
+    catalogue = tmp_path / "building-asset-catalogue.json"
+
+    result = library.write_assets(tmp_path / "source", catalogue)
+    document = json.loads(catalogue.read_text(encoding="utf-8"))
+
+    assert document["selected_building_jsons"] == [
+        "country_styles/SE_Sweden.json"
+    ]
+    assert result.catalogue_sha256 == document["catalogue_sha256"]
+
+
 def test_mixed_factory_builds_stock_and_procedural_children() -> None:
     encoded = encode_building_presets(
         (STOCK_BUILDING_VANILLA_PRESET, PROCEDURAL_AUTO_PRESET)
