@@ -164,7 +164,7 @@ def _stock_options_first(
     *,
     auto_label: str,
 ) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
-    """Put the three stock choices directly after Automatic."""
+    """Put the stock catalogue choices directly after Automatic."""
     stock_ids = frozenset(STOCK_BUILDING_PRESETS)
     stock_labels = frozenset(label for _identifier, label in STOCK_BUILDING_OPTIONS)
     remaining_options = tuple(
