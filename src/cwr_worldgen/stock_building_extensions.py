@@ -22,6 +22,8 @@ STOCK_BUILDING_VANILLA_PRESET = "stock-vanilla"
 STOCK_BUILDING_RESISTANCE_PRESET = "stock-resistance"
 STOCK_BUILDING_HAUS_COMBINED_PRESET = "stock-haus-combined"
 STOCK_BUILDING_HAUS_ONLY_PRESET = "stock-haus-only"
+STOCK_BUILDING_AGS_ONLY_PRESET = "stock-ags-only"
+STOCK_BUILDING_AGS_COMBINED_PRESET = "stock-ags-combined"
 
 _DATA_DIR = Path(__file__).with_name("data")
 _STOCK_COMBINED_CATALOGUE_PATH = _DATA_DIR / "stock_building_models.json"
@@ -29,6 +31,8 @@ _STOCK_NON_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_non_re
 _STOCK_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_resistance.json"
 _STOCK_HAUS_COMBINED_CATALOGUE_PATH = _DATA_DIR / "haus.pbo + resistance and vanilla.json"
 _STOCK_HAUS_ONLY_CATALOGUE_PATH = _DATA_DIR / "haus.pbo buildings only.json"
+_STOCK_AGS_ONLY_CATALOGUE_PATH = _DATA_DIR / "ags inds+port.json"
+_STOCK_AGS_COMBINED_CATALOGUE_PATH = _DATA_DIR / "ags inds+port and combined stock.json"
 
 
 def _catalogue_display_name(path: Path, fallback: str) -> str:
@@ -60,6 +64,14 @@ STOCK_BUILDING_HAUS_ONLY_LABEL = _catalogue_display_name(
     _STOCK_HAUS_ONLY_CATALOGUE_PATH,
     "Haus.pbo buildings only",
 )
+STOCK_BUILDING_AGS_ONLY_LABEL = _catalogue_display_name(
+    _STOCK_AGS_ONLY_CATALOGUE_PATH,
+    "AGS inds+port",
+)
+STOCK_BUILDING_AGS_COMBINED_LABEL = _catalogue_display_name(
+    _STOCK_AGS_COMBINED_CATALOGUE_PATH,
+    "AGS inds+port and combined stock",
+)
 stock.STOCK_BUILDING_PRESET_LABEL = STOCK_BUILDING_COMBINED_LABEL
 
 STOCK_BUILDING_PRESETS = (
@@ -68,6 +80,8 @@ STOCK_BUILDING_PRESETS = (
     STOCK_BUILDING_RESISTANCE_PRESET,
     STOCK_BUILDING_HAUS_COMBINED_PRESET,
     STOCK_BUILDING_HAUS_ONLY_PRESET,
+    STOCK_BUILDING_AGS_ONLY_PRESET,
+    STOCK_BUILDING_AGS_COMBINED_PRESET,
 )
 STOCK_BUILDING_OPTIONS = (
     (stock.STOCK_BUILDING_PRESET, STOCK_BUILDING_COMBINED_LABEL),
@@ -75,6 +89,8 @@ STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_RESISTANCE_PRESET, STOCK_BUILDING_RESISTANCE_LABEL),
     (STOCK_BUILDING_HAUS_COMBINED_PRESET, STOCK_BUILDING_HAUS_COMBINED_LABEL),
     (STOCK_BUILDING_HAUS_ONLY_PRESET, STOCK_BUILDING_HAUS_ONLY_LABEL),
+    (STOCK_BUILDING_AGS_ONLY_PRESET, STOCK_BUILDING_AGS_ONLY_LABEL),
+    (STOCK_BUILDING_AGS_COMBINED_PRESET, STOCK_BUILDING_AGS_COMBINED_LABEL),
 )
 
 _STOCK_PLACEMENT_CACHE_V96 = "nonroad-object-placement-v96-road-safe-settlement-clutter"
@@ -102,6 +118,8 @@ def stock_model_source(model_path: object) -> str:
         return "resistance"
     if path.startswith("haus\\"):
         return "haus"
+    if path.startswith("ags_inds\\") or path.startswith("ags_port\\"):
+        return "ags"
     return "vanilla"
 
 
@@ -248,6 +266,10 @@ def _install_library_presets() -> None:
             models = stock._load_catalogue(_STOCK_HAUS_COMBINED_CATALOGUE_PATH)
         elif requested == STOCK_BUILDING_HAUS_ONLY_PRESET:
             models = stock._load_catalogue(_STOCK_HAUS_ONLY_CATALOGUE_PATH)
+        elif requested == STOCK_BUILDING_AGS_ONLY_PRESET:
+            models = stock._load_catalogue(_STOCK_AGS_ONLY_CATALOGUE_PATH)
+        elif requested == STOCK_BUILDING_AGS_COMBINED_PRESET:
+            models = stock._load_catalogue(_STOCK_AGS_COMBINED_CATALOGUE_PATH)
         else:
             models = self.models
 
