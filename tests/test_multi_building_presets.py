@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import pickle
 
 from cwr_worldgen import generator
 from cwr_worldgen.building_country_policy import building_country_options
@@ -155,3 +156,23 @@ def test_mixed_cache_state_updates_both_child_libraries(tmp_path: Path) -> None:
         assert child.cache_refresh is True
         assert child.cache_hits == 0
         assert child.cache_misses == 0
+
+
+def test_mixed_library_survives_pickle_round_trip() -> None:
+    encoded = encode_building_presets(
+        (STOCK_BUILDING_VANILLA_PRESET, PROCEDURAL_AUTO_PRESET)
+    )
+    library = generator.ProceduralBuildingLibrary(
+        world_name="wg_mixed_pickle_test",
+        house_style_preset=encoded,
+        maximum_variants=8,
+    )
+    assert isinstance(library, MultiBuildingLibrary)
+
+    restored = pickle.loads(pickle.dumps(library))
+
+    assert isinstance(restored, MultiBuildingLibrary)
+    assert restored.house_style_preset == encoded
+    assert restored.stock_presets == library.stock_presets
+    assert restored.procedural_presets == library.procedural_presets
+    assert restored.world_name == "wg_mixed_pickle_test"
