@@ -473,6 +473,35 @@ def cluster_model_path(world_name: str, variant_name: str, grade: float) -> str:
     return rf"{world_name}\f\{prefix}_{variant_name}_{grade_label:02d}.p3d"
 
 
+def generated_cluster_variant(
+    world_name: str,
+    model_path: str,
+    *,
+    proxy_profile: str = "everon",
+) -> tuple[ForestClusterVariant, float] | None:
+    """Resolve a generated carrier path to the profiled child layout and grade."""
+    value = str(model_path).replace("/", "\\")
+    prefix = world_name + "\\f\\"
+    if (
+        not value.casefold().startswith(prefix.casefold())
+        or not value.casefold().endswith(".p3d")
+    ):
+        return None
+    stem = value.rsplit("\\", 1)[-1][:-4]
+    if len(stem) < 5 or stem[1] != "_":
+        return None
+    try:
+        variant_name, grade_label = stem[2:].rsplit("_", 1)
+        variant = _profiled_cluster_variant(
+            cluster_variant(variant_name),
+            proxy_profile,
+        )
+        grade = quantize_cluster_grade(int(grade_label) / 100.0)
+    except (KeyError, ValueError):
+        return None
+    return variant, grade
+
+
 def cluster_proxy_models(
     *, include_border: bool = True, include_undergrowth: bool = True, include_ditch: bool = True
 ) -> tuple[str, ...]:
