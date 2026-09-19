@@ -153,6 +153,66 @@ def test_cwa_flattens_generated_vegetation_carrier_into_direct_wrp_objects() -> 
     assert abs(first.heading_degrees - ((parent.heading_degrees + proxy_heading) % 360.0)) < 1.0e-6
 
 
+def test_cwa_flattening_keeps_category_counts_assembly_consistent() -> None:
+    carriers = (
+        WorldObject(1, cluster_model_path("testworld", "pine", 0.15), 100.0, 10.0, 100.0),
+        WorldObject(2, cluster_model_path("testworld", "undergrowth_patch", 0.15), 130.0, 10.0, 100.0),
+        WorldObject(3, cluster_model_path("testworld", "border_thicket", 0.15), 160.0, 10.0, 100.0),
+        WorldObject(4, cluster_model_path("testworld", "ditch_grass", 0.15), 190.0, 10.0, 100.0),
+        WorldObject(5, cluster_model_path("testworld", "orchard_row", 0.15), 220.0, 10.0, 100.0),
+    )
+    nonroads = ObjectGenerationResult(
+        objects=carriers,
+        road_objects=0,
+        building_objects=0,
+        forest_objects=1,
+        road_objects_truncated=False,
+        building_objects_truncated=False,
+        forest_objects_truncated=False,
+        forest_undergrowth_objects=1,
+        forest_border_objects=1,
+        ditch_grass_objects=1,
+        orchard_objects=1,
+        forest_cluster_objects=1,
+        model_usage=tuple((obj.model_path, 1) for obj in carriers),
+    )
+    spec = SimpleNamespace(
+        profile="cwa",
+        name="testworld",
+        forest_profile="everon",
+        forest_tree_model=r"data3d\les ctverec pruchozi_T1.p3d",
+    )
+
+    expanded = _expand_cwa_generated_vegetation(nonroads, spec)
+    assembled = _assemble_world_objects((), expanded, (), renumber=False)
+
+    assert len(assembled) == len(expanded.objects)
+    assert expanded.forest_cluster_objects == 0
+    assert not any(
+        is_generated_cluster_model("testworld", obj.model_path)
+        for obj in expanded.objects
+    )
+
+    expected_counts = {}
+    for variant_name, field in (
+        ("pine", "forest_objects"),
+        ("undergrowth_patch", "forest_undergrowth_objects"),
+        ("border_thicket", "forest_border_objects"),
+        ("ditch_grass", "ditch_grass_objects"),
+        ("orchard_row", "orchard_objects"),
+    ):
+        parsed = generated_cluster_variant(
+            "testworld",
+            cluster_model_path("testworld", variant_name, 0.15),
+            proxy_profile="everon",
+        )
+        assert parsed is not None
+        expected_counts[field] = len(parsed[0].proxy_layout)
+
+    for field, expected in expected_counts.items():
+        assert getattr(expanded, field) == expected
+
+
 def test_cwr_ce_keeps_generated_vegetation_carrier_compact() -> None:
     parent = WorldObject(
         10,
