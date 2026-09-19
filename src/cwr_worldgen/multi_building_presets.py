@@ -54,7 +54,7 @@ def _procedural_json_by_identifier() -> dict[str, str]:
             document = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if not isinstance(document, Mapping):
+        if not isinstance(document, Mapping) or not document.get("iso_alpha2"):
             continue
         identifier = str(document.get("identifier", path.stem)).strip().casefold()
         if identifier:
