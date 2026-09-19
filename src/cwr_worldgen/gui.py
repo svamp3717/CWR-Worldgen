@@ -2403,6 +2403,26 @@ class WorldgenGui(tk.Tk):
         warnings: list[str] = []
         if bool(self.vars["strict_assets"].get()) and not self.asset_roots:
             warnings.append("⚠ Strict asset validation is enabled, but no asset roots are listed.")
+        if (
+            str(self.vars["profile"].get()).casefold() == "cwa"
+            and not self.asset_roots
+            and any(
+                bool(self.vars[key].get())
+                for key in (
+                    "forest_clusters",
+                    "forest_undergrowth",
+                    "forest_borders",
+                    "ditch_grass",
+                    "rural_vegetation",
+                )
+                if key in self.vars
+            )
+        ):
+            warnings.append(
+                "⚠ Original CWA 1.99 with generated vegetation needs the game/mod "
+                "folder or relevant PBOs under Asset roots so proxy-safe stock "
+                "vegetation clones can be built."
+            )
         try:
             cells, _cell_size = resolve_wizard_world_grid(self._validation_values())
             if cells > 256:
