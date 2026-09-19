@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from cwr_worldgen import generator
 from cwr_worldgen.building_country_policy import building_country_options
+from cwr_worldgen.osm import BboxProjection, OsmDataset
 from cwr_worldgen.multi_building_presets import (
     BUILDING_MULTI_PREFIX,
     PROCEDURAL_AUTO_PRESET,
@@ -81,3 +84,74 @@ def test_multiple_procedural_country_presets_use_one_procedural_library() -> Non
 def test_no_checked_presets_keeps_automatic_transport() -> None:
     assert encode_building_presets(()) == "auto"
     assert building_preset_ids("auto") == ()
+
+
+def _empty_dataset() -> OsmDataset:
+    return OsmDataset(
+        source_generator="multi-building-presets-test",
+        element_count=0,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(),
+    )
+
+
+def test_mixed_place_point_registers_usage_for_both_child_libraries() -> None:
+    encoded = encode_building_presets(
+        (STOCK_BUILDING_VANILLA_PRESET, PROCEDURAL_AUTO_PRESET)
+    )
+    library = generator.ProceduralBuildingLibrary(
+        world_name="wg_mixed_usage_test",
+        house_style_preset=encoded,
+        maximum_variants=16,
+    )
+    assert isinstance(library, MultiBuildingLibrary)
+
+    projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 1000.0)
+    library.prepare(_empty_dataset(), projection, 12.0)
+
+    placements = [
+        library.place_point(
+            {"building": "house", "name": f"House {index}"},
+            10.0,
+            0.0,
+            x=20.0 + index * 7.0,
+            z=100.0 + (index % 7) * 9.0,
+        )
+        for index in range(64)
+    ]
+
+    procedural_count = sum(library.procedural_library._usage.values())
+    stock_count = sum(library.stock_library._usage.values())
+    assert procedural_count > 0
+    assert stock_count > 0
+    assert procedural_count + stock_count == len(placements)
+
+
+def test_mixed_cache_state_updates_both_child_libraries(tmp_path: Path) -> None:
+    encoded = encode_building_presets(
+        (STOCK_BUILDING_VANILLA_PRESET, PROCEDURAL_AUTO_PRESET)
+    )
+    library = generator.ProceduralBuildingLibrary(
+        world_name="wg_mixed_cache_test",
+        house_style_preset=encoded,
+        maximum_variants=8,
+    )
+    assert isinstance(library, MultiBuildingLibrary)
+
+    cache_dir = tmp_path / "cache"
+    library.cache_dir = cache_dir
+    library.cache_enabled = False
+    library.cache_refresh = True
+    library.cache_hits = 0
+    library.cache_misses = 0
+
+    for child in (library.stock_library, library.procedural_library):
+        assert child.cache_dir == cache_dir
+        assert child.cache_enabled is False
+        assert child.cache_refresh is True
+        assert child.cache_hits == 0
+        assert child.cache_misses == 0
