@@ -171,8 +171,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         total_models = measure.count_models(inputs, args.include)
     except (OSError, ValueError) as exc:
-        print(f"error: could not count models: {exc}", file=sys.stderr)
-        return 2
+        # Counting is only a progress-bar convenience. Do not block browsing
+        # archives whose header variant the lightweight counter cannot understand
+        # if the streaming scanner can still read models from them.
+        total_models = None
+        print(
+            f"[count warning] could not count models: {exc}; continuing without a total",
+            file=sys.stderr,
+            flush=True,
+        )
 
     iterator = preview_models(inputs, args.include, args.max_preview_points)
     root = tk.Tk()
