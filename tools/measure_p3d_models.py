@@ -446,7 +446,7 @@ def _pbo_model_paths(path: Path) -> Iterator[str]:
             name = _read_cstring(stream, "PBO entry name")
             fields = _read_exact(stream, _PBO_ENTRY.size, "PBO entry header")
             packing, original_size, reserved, timestamp, data_size = _PBO_ENTRY.unpack(fields)
-                if data_size > _MAX_PBO_ENTRY_SIZE or original_size > _MAX_PBO_ENTRY_SIZE:
+            if data_size > _MAX_PBO_ENTRY_SIZE or original_size > _MAX_PBO_ENTRY_SIZE:
                 raise ModelReadError(f"implausible PBO entry size for {name!r}")
             if not name:
                 if packing == _PBO_PROPERTIES:
