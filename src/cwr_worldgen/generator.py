@@ -3272,9 +3272,6 @@ def build_milestone4(
         )
         for model_path, count in generated_cluster_usage:
             forest_cluster_library.register_model_usage(model_path, count)
-        forest_cluster_generation = forest_cluster_library.write_assets(
-            source_dir, forest_cluster_catalogue_path
-        )
 
     report_progress(79, "Generating infrastructure and rock assets")
     infrastructure_library: ProceduralInfrastructureLibrary | None = None
@@ -3359,6 +3356,14 @@ def build_milestone4(
             f"missing required assets={strict_asset_scan.missing_models}, "
             f"dependencies={strict_asset_scan.missing_dependencies}; "
             f"trusted legacy assets={trusted_legacy_assets}"
+        )
+
+    if forest_cluster_library is not None:
+        report_progress(83, "Generating CWA 1.99-safe forest cluster assets")
+        forest_cluster_generation = forest_cluster_library.write_assets(
+            source_dir,
+            forest_cluster_catalogue_path,
+            asset_records=asset_scan.records,
         )
 
     report_progress(84, "Preparing terrain texture table")
@@ -3804,7 +3809,9 @@ def build_milestone4(
         if repeat_forest_cluster_library is not None:
             repeat_forest_cluster_catalogue = temp_dir / "forest-cluster-catalogue.json"
             repeat_forest_cluster_library.write_assets(
-                temp_source, repeat_forest_cluster_catalogue
+                temp_source,
+                repeat_forest_cluster_catalogue,
+                asset_records=asset_scan.records,
             )
         repeat_infrastructure_catalogue: Path | None = None
         if repeat_infrastructure_library is not None:
