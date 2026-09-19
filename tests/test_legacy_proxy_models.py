@@ -99,7 +99,7 @@ class LegacyProxyModelTests(unittest.TestCase):
             root = Path(temp)
             library = ProceduralForestClusterLibrary(
                 "testworld",
-                proxy_profile="everon-safe",
+                proxy_profile="everon",
                 cache_enabled=False,
                 require_proxy_safe_clones=True,
             )
@@ -122,7 +122,7 @@ class LegacyProxyModelTests(unittest.TestCase):
             root = Path(temp)
             library = ProceduralForestClusterLibrary(
                 "testworld",
-                proxy_profile="everon-safe",
+                proxy_profile="everon",
                 cache_enabled=False,
             )
             library.register_model(
@@ -159,7 +159,7 @@ class LegacyProxyModelTests(unittest.TestCase):
 
             library = ProceduralForestClusterLibrary(
                 "testworld",
-                proxy_profile="everon-safe",
+                proxy_profile="everon",
                 cache_enabled=False,
                 require_proxy_safe_clones=True,
             )
