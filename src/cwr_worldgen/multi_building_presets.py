@@ -147,6 +147,55 @@ class MultiBuildingLibrary:
         # attributes and eventually forgetting the one added next Tuesday.
         return getattr(self.procedural_library, name)
 
+    @property
+    def cache_dir(self):
+        return getattr(self.procedural_library, "cache_dir", None)
+
+    @cache_dir.setter
+    def cache_dir(self, value) -> None:
+        self.procedural_library.cache_dir = value
+        self.stock_library.cache_dir = value
+
+    @property
+    def cache_enabled(self) -> bool:
+        return bool(getattr(self.procedural_library, "cache_enabled", True))
+
+    @cache_enabled.setter
+    def cache_enabled(self, value: bool) -> None:
+        self.procedural_library.cache_enabled = bool(value)
+        self.stock_library.cache_enabled = bool(value)
+
+    @property
+    def cache_refresh(self) -> bool:
+        return bool(getattr(self.procedural_library, "cache_refresh", False))
+
+    @cache_refresh.setter
+    def cache_refresh(self, value: bool) -> None:
+        self.procedural_library.cache_refresh = bool(value)
+        self.stock_library.cache_refresh = bool(value)
+
+    @property
+    def cache_hits(self) -> int:
+        return int(getattr(self.procedural_library, "cache_hits", 0)) + int(
+            getattr(self.stock_library, "cache_hits", 0)
+        )
+
+    @cache_hits.setter
+    def cache_hits(self, value: int) -> None:
+        self.procedural_library.cache_hits = int(value)
+        self.stock_library.cache_hits = int(value)
+
+    @property
+    def cache_misses(self) -> int:
+        return int(getattr(self.procedural_library, "cache_misses", 0)) + int(
+            getattr(self.stock_library, "cache_misses", 0)
+        )
+
+    @cache_misses.setter
+    def cache_misses(self, value: int) -> None:
+        self.procedural_library.cache_misses = int(value)
+        self.stock_library.cache_misses = int(value)
+
     @staticmethod
     def _tag_signature(tags: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
         return tuple(sorted((str(key), str(value)) for key, value in tags.items()))
@@ -176,7 +225,7 @@ class MultiBuildingLibrary:
         return library.plan_polygon(tags, points, **kwargs)
 
     def place_polygon(self, tags, points, **kwargs):
-        return self.plan_polygon(tags, points, **kwargs)
+        return self.register_placement(self.plan_polygon(tags, points, **kwargs))
 
     def plan_point(self, tags, footprint_m, heading_degrees, **kwargs):
         signature = (
@@ -190,7 +239,9 @@ class MultiBuildingLibrary:
         return library.plan_point(tags, footprint_m, heading_degrees, **kwargs)
 
     def place_point(self, tags, footprint_m, heading_degrees, **kwargs):
-        return self.plan_point(tags, footprint_m, heading_degrees, **kwargs)
+        return self.register_placement(
+            self.plan_point(tags, footprint_m, heading_degrees, **kwargs)
+        )
 
     def model_path(self, key) -> str:
         if hasattr(key, "stock_model_path"):
