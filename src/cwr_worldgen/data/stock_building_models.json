@@ -2,6 +2,7 @@
   "schema": 5,
   "kind": "completed_model_classifications",
   "source_set": "combined",
+  "display_name": "Stock combined (non-Resistance + Resistance) buildings",
   "categories": [
     "Residential",
     "Commercial",
