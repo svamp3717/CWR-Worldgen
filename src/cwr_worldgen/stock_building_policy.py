@@ -596,7 +596,7 @@ class StockBuildingLibrary:
             # fallback chain. Later road/building collision gates may still
             # reject it, but we never knowingly choose a larger alternative.
             fallback: list[
-                tuple[float, int, float, str, StockBuildingModel, bool]
+                tuple[int, float, float, str, StockBuildingModel, bool]
             ] = []
             target_w = max(0.1, float(target_width))
             target_l = max(0.1, float(target_length))
@@ -620,14 +620,16 @@ class StockBuildingLibrary:
                         )
                         fallback.append(
                             (
-                                overflow,
                                 group_index,
+                                overflow,
                                 score,
                                 model.model_path.casefold(),
                                 model,
                                 use_swapped,
                             )
                         )
+            # Preserve semantic fallback order first, then take the smallest
+            # unavoidable physical overflow within that family.
             fallback.sort(key=lambda item: item[:4])
             choice = fallback[0]
             model, swapped = choice[4], choice[5]
