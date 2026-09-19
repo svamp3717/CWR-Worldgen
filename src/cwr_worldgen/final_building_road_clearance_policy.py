@@ -22,6 +22,8 @@ import math
 import re
 from typing import Callable, Sequence
 
+from shapely.geometry import Polygon
+
 from . import bridge_water_deck_clamp_policy as _bridge_clamp
 from . import generator as _generator
 from . import osm as _osm
@@ -40,7 +42,7 @@ _MAXIMUM_CORRECTION_VECTORS = 4
 _MAXIMUM_VERTICAL_TERRAIN_GAP_METRES = 2.0
 _PROGRESS_BUCKET_PERCENT = 2
 _RAW_PROGRESS_PERCENT = 52
-_CACHE_REVISION = "final-road-building-clearance-v2-tidal-water"
+_CACHE_REVISION = "final-road-building-clearance-v3-stock-fit-overlap"
 
 _WIDTHS = {
     "sil": 4.55,
@@ -684,6 +686,51 @@ def _building_overlaps_tidal_water(
     return float(maximum) + ground_clearance < maximum_tide - 1.0e-6
 
 
+def _filter_overlapping_buildings(plans):
+    """Reject residual positive-area building/model overlaps.
+
+    Stock models are now selected to fit their mapped OSM footprint whenever a
+    suitable asset exists. This final pass is deliberately conservative anyway:
+    it catches impossible catalogue fits, malformed/overlapping source geometry,
+    and any other path that would otherwise write two rigid building models
+    through each other. Mere shared walls or touching corners are preserved.
+    """
+    frozen = tuple(plans or ())
+    accepted = []
+    rejected = 0
+    index = _osm._PolygonBucketIndex.from_polygons(())
+    for plan in frozen:
+        polygon = tuple(getattr(plan, "support_polygon", ()) or ())
+        if len(polygon) < 3:
+            accepted.append(plan)
+            continue
+        try:
+            shape = Polygon(polygon)
+        except Exception:
+            accepted.append(plan)
+            index.add(polygon)
+            continue
+        conflicts = False
+        for other in index.candidates(polygon):
+            if not _osm._polygons_intersect(polygon, other):
+                continue
+            try:
+                overlap_area = float(shape.intersection(Polygon(other)).area)
+            except Exception:
+                # Invalid geometry should not be allowed to defeat the safety
+                # gate after the cheap polygon test already found an overlap.
+                overlap_area = 1.0
+            if overlap_area > 0.25:
+                conflicts = True
+                break
+        if conflicts:
+            rejected += 1
+            continue
+        accepted.append(plan)
+        index.add(polygon)
+    return tuple(accepted), rejected
+
+
 def _filter_tidal_water_buildings(plans, elevations, raster, spec):
     frozen = tuple(plans or ())
     kept = tuple(
@@ -997,13 +1044,20 @@ def install_final_building_road_clearance_policy() -> None:
         plans = kwargs.get("building_placement_plans")
         report = _road_context_matches(dataset, projection, elevations, spec)
         if not include_roads and plans is not None:
+            callback = kwargs.get("progress_callback")
+            plans, overlap_rejected = _filter_overlapping_buildings(plans)
+            if overlap_rejected and callback is not None:
+                callback(
+                    _RAW_PROGRESS_PERCENT,
+                    "Rejecting final overlapping building models "
+                    f"({overlap_rejected:,} rejected)",
+                )
             plans, water_rejected = _filter_tidal_water_buildings(
                 plans,
                 elevations,
                 raster,
                 spec,
             )
-            callback = kwargs.get("progress_callback")
             if water_rejected and callback is not None:
                 callback(
                     _RAW_PROGRESS_PERCENT,
