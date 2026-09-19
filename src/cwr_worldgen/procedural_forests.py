@@ -7,9 +7,15 @@ from hashlib import sha256
 from pathlib import Path
 import json
 import math
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
+from .assets import AssetRecord, canonical_asset_path, read_asset_record_bytes
 from .cache import cache_key, restore_or_create_file
+from .legacy_proxy_models import (
+    ProxyCloneError,
+    proxy_safe_model_path,
+    write_proxy_safe_visual_clone,
+)
 from .parallel_assets import process_asset_tasks
 from .procedural_buildings import (
     _Face,
@@ -487,6 +493,25 @@ def is_generated_cluster_model(world_name: str, model_path: str) -> bool:
     return folded.endswith(".p3d") and any(folded.startswith(prefix) for prefix in prefixes)
 
 
+def _remap_proxy_models(
+    variant: ForestClusterVariant,
+    model_map: Mapping[str, str],
+) -> ForestClusterVariant:
+    if not model_map:
+        return variant
+    layout = tuple(
+        (
+            model_map.get(canonical_asset_path(model), model),
+            x,
+            z,
+            scale,
+            heading,
+        )
+        for model, x, z, scale, heading in variant.proxy_layout
+    )
+    return replace(variant, proxy_layout=layout)
+
+
 def _proxy_selection_name(model_path: str, index: int) -> str:
     path = model_path.replace("/", "\\")
     if path.casefold().endswith(".p3d"):
@@ -718,15 +743,79 @@ class ProceduralForestClusterLibrary:
             models.update(entry[0] for entry in variant.proxy_layout)
         return tuple(sorted(models, key=str.casefold))
 
-    def write_assets(self, source_dir: Path, catalogue_path: Path) -> ForestClusterAssetResult:
+    def write_assets(
+        self,
+        source_dir: Path,
+        catalogue_path: Path,
+        *,
+        asset_records: Sequence[AssetRecord] = (),
+    ) -> ForestClusterAssetResult:
+        record_by_path = {
+            canonical_asset_path(record.path): record
+            for record in asset_records
+        }
+        proxy_model_map: dict[str, str] = {}
+        clone_documents: list[dict[str, object]] = []
+        clone_files: list[str] = []
+
+        # CWA 1.99 applies ClipLandKeep/ClipLandOn to proxy children with the
+        # child's parent-local Object::Transform instead of the world transform
+        # supplied to Object::Draw. Clone only the visual LOD and remove those
+        # land bits so the generated carrier's already-grounded support plane is
+        # the sole terrain-fitting step. Current CWR-CE no longer needs this, but
+        # the clone is harmless there and gives both engines one asset set.
+        for source_model in self.required_proxy_models():
+            canonical = canonical_asset_path(source_model)
+            record = record_by_path.get(canonical)
+            if record is None:
+                continue
+            try:
+                source_bytes = read_asset_record_bytes(record)
+            except (OSError, ValueError, FileNotFoundError) as exc:
+                raise ValueError(
+                    f"cannot read forest proxy source {source_model!r}: {exc}"
+                ) from exc
+
+            generated_model = proxy_safe_model_path(self.world_name, source_model)
+            relative = generated_model.split("\\", 1)[1].replace("\\", "/")
+            destination = source_dir / relative
+            try:
+                info = write_proxy_safe_visual_clone(
+                    destination,
+                    source_bytes,
+                    source_model=source_model,
+                    generated_model=generated_model,
+                )
+            except ProxyCloneError as exc:
+                raise ValueError(
+                    f"cannot create CWA 1.99-safe forest proxy clone "
+                    f"for {source_model!r}: {exc}"
+                ) from exc
+
+            proxy_model_map[canonical] = generated_model
+            clone_files.append(relative)
+            clone_documents.append({
+                "source_model": info.source_model,
+                "generated_model": info.generated_model,
+                "source_format": info.source_format,
+                "point_count": info.point_count,
+                "face_count": info.face_count,
+                "land_flagged_points": info.land_flagged_points,
+                "texture_paths": list(info.texture_paths),
+                "sha256": sha256(destination.read_bytes()).hexdigest(),
+            })
+
         model_tasks: list[_ForestAssetTask] = []
         for key in sorted(self._usage):
-            variant = _profiled_cluster_variant(cluster_variant(key.variant), self.proxy_profile)
+            variant = _profiled_cluster_variant(
+                cluster_variant(key.variant), self.proxy_profile
+            )
+            variant = _remap_proxy_models(variant, proxy_model_map)
             wire = cluster_model_path(self.world_name, key.variant, key.grade)
             relative = wire.split("\\", 1)[1].replace("\\", "/")
             destination = source_dir / relative
             asset_key = cache_key(
-                "procedural-forest-cluster-model-v12-cwa199-scalene-proxy-markers",
+                "procedural-forest-cluster-model-v13-proxy-safe-vegetation",
                 {
                     "world_name": self.world_name,
                     "proxy_profile": self.proxy_profile,
@@ -757,6 +846,8 @@ class ProceduralForestClusterLibrary:
             "placements": sum(self._usage.values()),
             "generated_variants": len(models),
             "proxy_models": list(self.required_proxy_models()),
+            "proxy_safe_clones": clone_documents,
+            "proxy_safe_clone_count": len(clone_documents),
             "models": models,
         }
         canonical = json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
@@ -774,5 +865,7 @@ class ProceduralForestClusterLibrary:
             cache_hits=self.cache_hits,
             cache_misses=self.cache_misses,
             proxy_models=self.required_proxy_models(),
-            model_files=tuple(str(item["relative_path"]) for item in models),
+            model_files=tuple(
+                [str(item["relative_path"]) for item in models] + clone_files
+            ),
         )
