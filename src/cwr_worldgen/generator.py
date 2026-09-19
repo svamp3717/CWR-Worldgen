@@ -35,6 +35,7 @@ from .procedural_infrastructure import InfrastructureAssetResult, ProceduralInfr
 from .procedural_forests import (
     ForestClusterAssetResult,
     ProceduralForestClusterLibrary,
+    generated_cluster_variant,
     is_generated_cluster_model,
 )
 from .semantic_features import (
@@ -2698,6 +2699,138 @@ def _load_nonroad_objects(
     return result, cached_library, hit, key, str(path) if path is not None else None
 
 
+def _expand_cwa_generated_vegetation(
+    nonroads: ObjectGenerationResult,
+    spec: object,
+) -> ObjectGenerationResult:
+    """Flatten generated vegetation carriers into direct WRP objects for CWA 1.99.
+
+    Original CWA performs land clipping inside proxy children using each child's
+    parent-local Object::Transform(), so terrain samples come from the wrong map
+    coordinates. Direct WRP vegetation receives a true world transform and uses
+    the stock 1.99 path correctly. CWR-CE keeps the compact proxy carriers.
+    """
+    if str(getattr(spec, "profile", "cwr-ce")).casefold() != "cwa":
+        return nonroads
+
+    world_name = str(getattr(spec, "name", ""))
+    proxy_profile = _forest_proxy_profile(spec)
+    if not world_name or not nonroads.objects:
+        return nonroads
+
+    expanded: list[WorldObject] = []
+    count_deltas: Counter[str] = Counter()
+    expanded_tree_children = 0
+    expanded_bush_children = 0
+    carrier_count = 0
+
+    rural_count_field = {
+        "orchard_row": "orchard_objects",
+        "vineyard_row": "vineyard_objects",
+        "tree_row": "tree_row_objects",
+        "scrub_patch": "scrub_objects",
+    }
+    category_count_field = {
+        "interior": "forest_objects",
+        "border": "forest_border_objects",
+        "undergrowth": "forest_undergrowth_objects",
+        "ditch": "ditch_grass_objects",
+    }
+
+    for obj in nonroads.objects:
+        parsed = generated_cluster_variant(
+            world_name,
+            obj.model_path,
+            proxy_profile=proxy_profile,
+        )
+        if parsed is None:
+            expanded.append(obj)
+            continue
+
+        variant, grade = parsed
+        carrier_count += 1
+        parent_angle = math.radians(obj.heading_degrees)
+        width_axis = (math.cos(parent_angle), -math.sin(parent_angle))
+        length_axis = (math.sin(parent_angle), math.cos(parent_angle))
+
+        for model_path, local_x, local_z, _marker_scale, proxy_heading in variant.proxy_layout:
+            world_x = (
+                obj.x
+                + local_x * width_axis[0]
+                + local_z * length_axis[0]
+            )
+            world_z = (
+                obj.z
+                + local_x * width_axis[1]
+                + local_z * length_axis[1]
+            )
+            local_y = grade * (
+                local_x if variant.slope_axis == "width" else local_z
+            )
+            expanded.append(
+                WorldObject(
+                    0,
+                    model_path,
+                    world_x,
+                    obj.y + local_y,
+                    world_z,
+                    (obj.heading_degrees + proxy_heading) % 360.0,
+                )
+            )
+            folded = model_path.replace("/", "\\").casefold()
+            if any(
+                token in folded
+                for token in ("\\ker", "bush", "rakosi", "travy", "grass", "reed")
+            ):
+                expanded_bush_children += 1
+            else:
+                expanded_tree_children += 1
+
+        delta = len(variant.proxy_layout) - 1
+        if variant.category == "rural":
+            field = rural_count_field.get(variant.name)
+            if field is None:
+                raise ValueError(
+                    f"unmapped rural generated vegetation variant {variant.name!r}"
+                )
+        else:
+            field = category_count_field.get(variant.category)
+            if field is None:
+                raise ValueError(
+                    f"unmapped generated vegetation category {variant.category!r}"
+                )
+        count_deltas[field] += delta
+
+    if carrier_count == 0:
+        return nonroads
+
+    start_id = nonroads.objects[0].object_id
+    renumbered = tuple(
+        replace(obj, object_id=start_id + index)
+        for index, obj in enumerate(expanded)
+    )
+    usage = Counter(obj.model_path for obj in renumbered)
+
+    updates: dict[str, object] = {
+        "objects": renumbered,
+        "model_usage": tuple(
+            sorted(usage.items(), key=lambda item: item[0].casefold())
+        ),
+        # These fields count runtime proxy children. They are direct WRP objects
+        # after flattening, so there are no generated vegetation proxies in CWA.
+        "forest_cluster_objects": 0,
+        "vegetation_audit_tree_objects": (
+            nonroads.vegetation_audit_tree_objects + expanded_tree_children
+        ),
+        "vegetation_audit_cluster_tree_proxies": 0,
+        "vegetation_audit_cluster_bush_proxies": 0,
+    }
+    for field, delta in count_deltas.items():
+        updates[field] = int(getattr(nonroads, field)) + delta
+
+    return replace(nonroads, **updates)
+
+
 def _assemble_world_objects(
     road_objects: Sequence[WorldObject],
     nonroads: ObjectGenerationResult,
@@ -3092,6 +3225,7 @@ def build_milestone4(
         building_placement_plans=building_placement_plans,
         building_plans_truncated=building_plans_truncated,
     )
+    nonroads = _expand_cwa_generated_vegetation(nonroads, spec)
     if placement_cache_hit and bool(getattr(spec, "advisory_object_limits", False)):
         cached_thresholds = (
             ("sidewalk object", nonroads.sidewalk_objects, getattr(spec, "maximum_sidewalk_objects", 30000)),
@@ -3708,6 +3842,7 @@ def build_milestone4(
             building_placement_plans=building_placement_plans,
             building_plans_truncated=building_plans_truncated,
         )
+        repeat_nonroads = _expand_cwa_generated_vegetation(repeat_nonroads, spec)
         repeat_material_indices, repeat_surface_report, _repeat_surface_counts = _placement_driven_surface_overlay(
             repeat_material_indices, repeat_surface_report, repeat_nonroads, raster, spec, slopes=repeat_slopes
         )
