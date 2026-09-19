@@ -7,6 +7,7 @@ heterogeneous or multi-procedural selections use building-multi:...
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import lru_cache
 from hashlib import blake2s, sha256
 import json
@@ -37,6 +38,72 @@ def _procedural_options() -> tuple[tuple[str, str], ...]:
 @lru_cache(maxsize=1)
 def _procedural_identifiers() -> tuple[str, ...]:
     return tuple(identifier for identifier, _label in _procedural_options())
+
+
+@lru_cache(maxsize=1)
+def _procedural_json_by_identifier() -> dict[str, str]:
+    """Return country preset identifiers mapped to their source JSON filenames."""
+    from .osm_house_modeler_styles import discover_country_style_dir
+
+    directory = discover_country_style_dir()
+    if directory is None:
+        return {}
+    result: dict[str, str] = {}
+    for path in sorted(directory.glob("*.json"), key=lambda item: item.name.casefold()):
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(document, Mapping):
+            continue
+        identifier = str(document.get("identifier", path.stem)).strip().casefold()
+        if identifier:
+            result[identifier] = f"country_styles/{path.name}"
+    return result
+
+
+def selected_building_jsons(value: object) -> tuple[str, ...]:
+    """Return the concrete catalogue/style JSONs behind an explicit selection."""
+    selected = building_preset_ids(value)
+    result: list[str] = []
+    for identifier in selected:
+        if identifier in stock_ext.STOCK_BUILDING_PRESETS:
+            path = stock_ext._STOCK_CATALOGUE_BY_PRESET[identifier]
+            name = f"data/{path.name}"
+        elif identifier == PROCEDURAL_AUTO_PRESET:
+            # Automatic is deliberately not one concrete JSON selection.
+            continue
+        else:
+            name = _procedural_json_by_identifier().get(identifier, "")
+        if name and name not in result:
+            result.append(name)
+    return tuple(result)
+
+
+def _annotate_building_catalogue(
+    catalogue_path: Path,
+    source_dir: Path,
+    *,
+    preset: object,
+) -> str | None:
+    """Persist source JSON names in both external and embedded catalogues."""
+    try:
+        document = json.loads(catalogue_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(document, dict):
+        return None
+    document["selected_building_jsons"] = list(selected_building_jsons(preset))
+    document.pop("catalogue_sha256", None)
+    canonical = json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+    digest = sha256(canonical.encode("utf-8")).hexdigest()
+    document["catalogue_sha256"] = digest
+    rendered = json.dumps(document, indent=2, sort_keys=True) + "\n"
+    catalogue_path.write_text(rendered, encoding="utf-8", newline="\n")
+    embedded = source_dir / "g" / "buildings.json"
+    if embedded.is_file():
+        embedded.write_text(rendered, encoding="utf-8", newline="\n")
+    return digest
 
 
 @lru_cache(maxsize=1)
@@ -302,6 +369,9 @@ class MultiBuildingLibrary:
         document["house_style_preset"] = self.house_style_preset
         document["selected_stock_presets"] = list(self.stock_presets)
         document["selected_procedural_presets"] = list(self.procedural_presets)
+        document["selected_building_jsons"] = list(
+            selected_building_jsons(self.house_style_preset)
+        )
         document["stock_models"] = len(stock_document.get("models", ()))
         document["placements"] = placements
         document["unique_requested_variants"] = unique_requested
@@ -480,6 +550,34 @@ def _install_multi_procedural_runtime() -> None:
 
     runtime._regional_preset = regional_preset
     runtime.resolve_style = resolve_style_multi
+
+    from . import procedural_buildings as buildings
+
+    previous_write_assets = buildings.ProceduralBuildingLibrary.write_assets
+
+    def write_assets_with_selected_jsons(self, source_dir: Path, catalogue_path: Path):
+        result = previous_write_assets(self, source_dir, catalogue_path)
+        digest = _annotate_building_catalogue(
+            catalogue_path,
+            source_dir,
+            preset=getattr(self, "house_style_preset", "auto"),
+        )
+        return replace(result, catalogue_sha256=digest) if digest else result
+
+    buildings.ProceduralBuildingLibrary.write_assets = write_assets_with_selected_jsons
+
+    previous_stock_write_assets = stock.StockBuildingLibrary.write_assets
+
+    def stock_write_assets_with_selected_jsons(self, source_dir: Path, catalogue_path: Path):
+        result = previous_stock_write_assets(self, source_dir, catalogue_path)
+        digest = _annotate_building_catalogue(
+            catalogue_path,
+            source_dir,
+            preset=getattr(self, "house_style_preset", stock.STOCK_BUILDING_PRESET),
+        )
+        return replace(result, catalogue_sha256=digest) if digest else result
+
+    stock.StockBuildingLibrary.write_assets = stock_write_assets_with_selected_jsons
 
 
 def _checkbox_key(identifier: str) -> str:
@@ -817,6 +915,19 @@ def _install_gui() -> None:
                     self._all_selected_building_presets()
                 )
                 return values
+
+            def _profile_document(self) -> dict[str, object]:
+                document = super()._profile_document()
+                selected = encode_building_presets(
+                    self._all_selected_building_presets()
+                )
+                values = document.get("values")
+                if isinstance(values, dict):
+                    values["house_style_preset"] = selected
+                document["selected_building_jsons"] = list(
+                    selected_building_jsons(selected)
+                )
+                return document
 
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
