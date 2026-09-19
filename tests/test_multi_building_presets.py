@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import pickle
 
 from cwr_worldgen import generator
 from cwr_worldgen import osm_house_modeler_runtime as runtime
 from cwr_worldgen.building_country_policy import building_country_options
 from cwr_worldgen.osm import BboxProjection, OsmDataset
+from cwr_worldgen.procedural_buildings import BuildingGenerationResult
 from cwr_worldgen.multi_building_presets import (
     BUILDING_MULTI_PREFIX,
     PROCEDURAL_AUTO_PRESET,
@@ -263,3 +265,120 @@ def test_generalized_stock_only_composite_routes_to_stock_library() -> None:
     assert library.house_style_preset == encode_stock_building_presets(
         (STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_RESISTANCE_PRESET)
     )
+
+
+def test_mixed_asset_catalogue_merges_procedural_and_stock_rows(tmp_path: Path) -> None:
+    class FakeProcedural:
+        cache_dir = None
+        cache_enabled = True
+        cache_refresh = False
+        cache_hits = 2
+        cache_misses = 3
+
+        @staticmethod
+        def is_generated_model(model_path: str) -> bool:
+            return str(model_path).startswith("wg_catalogue\\g\\")
+
+        def write_assets(self, source_dir: Path, catalogue_path: Path) -> BuildingGenerationResult:
+            document = {
+                "schema": 18,
+                "generator": "fake procedural",
+                "placements": 3,
+                "models": [
+                    {
+                        "model_path": r"wg_catalogue\g\b_generated.p3d",
+                        "placements": 3,
+                        "stock": False,
+                    }
+                ],
+            }
+            catalogue_path.parent.mkdir(parents=True, exist_ok=True)
+            catalogue_path.write_text(
+                json.dumps(document, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            return BuildingGenerationResult(
+                enabled=True,
+                placements=3,
+                unique_requested_variants=1,
+                generated_variants=1,
+                reused_placements=2,
+                reuse_ratio=2 / 3,
+                capped_variants=0,
+                model_assets=(),
+                texture_files=("d/generated.paa",),
+                catalogue_sha256="procedural",
+                cache_hits=2,
+                cache_misses=3,
+            )
+
+    class FakeStock:
+        cache_dir = None
+        cache_enabled = True
+        cache_refresh = False
+        cache_hits = 0
+        cache_misses = 0
+
+        def write_assets(self, source_dir: Path, catalogue_path: Path) -> BuildingGenerationResult:
+            del source_dir
+            document = {
+                "schema": 2,
+                "mode": STOCK_BUILDING_HAUS_ONLY_PRESET,
+                "placements": 2,
+                "models": [
+                    {
+                        "model_path": r"haus\h1.p3d",
+                        "placements": 2,
+                        "stock": True,
+                        "source_set": "haus",
+                    }
+                ],
+            }
+            catalogue_path.parent.mkdir(parents=True, exist_ok=True)
+            catalogue_path.write_text(
+                json.dumps(document, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            return BuildingGenerationResult(
+                enabled=True,
+                placements=2,
+                unique_requested_variants=1,
+                generated_variants=0,
+                reused_placements=1,
+                reuse_ratio=0.5,
+                capped_variants=0,
+                model_assets=(),
+                texture_files=(),
+                catalogue_sha256="stock",
+            )
+
+    encoded = encode_building_presets(
+        (STOCK_BUILDING_HAUS_ONLY_PRESET, "se_sweden")
+    )
+    library = MultiBuildingLibrary(
+        stock_library=FakeStock(),
+        procedural_library=FakeProcedural(),
+        house_style_preset=encoded,
+        stock_presets=(STOCK_BUILDING_HAUS_ONLY_PRESET,),
+        procedural_presets=("se_sweden",),
+    )
+    source_dir = tmp_path / "source"
+    catalogue = tmp_path / "building-asset-catalogue.json"
+
+    result = library.write_assets(source_dir, catalogue)
+    document = json.loads(catalogue.read_text(encoding="utf-8"))
+    embedded = json.loads((source_dir / "g" / "buildings.json").read_text(encoding="utf-8"))
+
+    assert result.placements == 5
+    assert result.generated_variants == 1
+    assert result.cache_hits == 2
+    assert result.cache_misses == 3
+    assert document == embedded
+    assert document["selected_stock_presets"] == [STOCK_BUILDING_HAUS_ONLY_PRESET]
+    assert document["selected_procedural_presets"] == ["se_sweden"]
+    assert document["stock_models"] == 1
+    assert {row["model_path"] for row in document["models"]} == {
+        r"wg_catalogue\g\b_generated.p3d",
+        r"haus\h1.p3d",
+    }
+    assert not catalogue.with_name("building-asset-catalogue-stock.json").exists()
