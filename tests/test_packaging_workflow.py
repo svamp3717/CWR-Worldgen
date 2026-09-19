@@ -40,6 +40,7 @@ class PackagingWorkflowTests(unittest.TestCase):
             "stock_building_models.json",
             "stock_building_models_non_resistance.json",
             "stock_building_models_resistance.json",
+            "haus.pbo + resistance and vanilla.json",
         ):
             self.assertTrue((data_dir / name).is_file(), name)
 
