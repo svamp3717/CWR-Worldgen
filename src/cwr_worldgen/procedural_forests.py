@@ -569,30 +569,7 @@ def _proxy_visual_lod(variant: ForestClusterVariant, grade: float) -> _Lod:
         y = grade * (x if variant.slope_axis == "width" else z)
         angle = math.radians(heading)
         aside = (math.cos(angle) * scale, 0.0, -math.sin(angle) * scale)
-
-        # Oxygen proxy triangles cannot use an isosceles right marker if they
-        # need to survive the original CWA 1.99 MLOD loader. That loader ignores
-        # vertex order and reconstructs the basis by sorting the triangle's three
-        # edge lengths. With equal anchor legs, float32 rounding decides whether
-        # the horizontal and vertical axes are swapped.
-        #
-        # Keep both legs at the historical marker scale, but offset the Up point
-        # 1/4 of the way along Aside. This makes the serialized triangle scalene:
-        #
-        #   anchor->aside = 1.000 * scale
-        #   anchor->up    = sqrt(1.0625) * scale
-        #   aside->up     = 1.250 * scale
-        #
-        # CWA therefore always selects the horizontal edge first and the slanted
-        # Up edge second; SetDirectionAndUp removes the parallel 1/4 component,
-        # yielding a vertical Up vector. CWR-CE's ordered-vertex path produces
-        # the same upright basis. The Y extent and triangle area are unchanged.
-        up_skew = 0.25
-        up = (
-            aside[0] * up_skew,
-            scale,
-            aside[2] * up_skew,
-        )
+        up = (0.0, scale, 0.0)
         point_start = len(points)
         face_index = len(faces)
         points.extend((
@@ -796,13 +773,14 @@ class ProceduralForestClusterLibrary:
         cloned_source_models: list[str] = []
         missing_source_models: list[str] = []
 
-        # CWA 1.99 applies ClipLandKeep/ClipLandOn to proxy children with the
-        # child's parent-local Object::Transform instead of the world transform
-        # supplied to Object::Draw. Clone only the visual LOD and remove those
-        # land bits so the generated carrier's already-grounded support plane is
-        # the sole terrain-fitting step. Current CWR-CE no longer needs this, but
-        # the clone is harmless there and gives both engines one asset set.
-        for source_model in self.required_proxy_models():
+        # This clone path is retained only as a defensive fallback for callers
+        # that explicitly request legacy-safe carriers. Normal profile=cwa builds
+        # flatten generated vegetation into direct WRP objects before assets are
+        # generated, while CWR-CE uses the stock proxy children unchanged.
+        source_models_to_clone = (
+            self.required_proxy_models() if self.require_proxy_safe_clones else ()
+        )
+        for source_model in source_models_to_clone:
             canonical = canonical_asset_path(source_model)
             record = record_by_path.get(canonical)
             if record is None:
@@ -863,7 +841,7 @@ class ProceduralForestClusterLibrary:
             relative = wire.split("\\", 1)[1].replace("\\", "/")
             destination = source_dir / relative
             asset_key = cache_key(
-                "procedural-forest-cluster-model-v13-proxy-safe-vegetation",
+                "procedural-forest-cluster-model-v14-cwr-ce-carriers",
                 {
                     "world_name": self.world_name,
                     "proxy_profile": self.proxy_profile,
