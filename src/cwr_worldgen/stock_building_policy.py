@@ -668,8 +668,11 @@ class StockBuildingLibrary:
             tuple((float(x), float(z)) for x, z in points),
             [tuple((float(x), float(z)) for x, z in ring) for ring in holes if len(ring) >= 3],
         )
+        if not source_shape.is_valid:
+            source_shape = source_shape.buffer(0.0)
         if source_shape.is_empty or source_shape.area <= 0.0:
             source_shape = Polygon(tuple((float(x), float(z)) for x, z in points))
+        fit_shape = source_shape.buffer(_STOCK_MODEL_FIT_TOLERANCE_METRES)
         footprint = footprint_from_polygon(points)
         centre = source_shape.centroid
         centre_x, centre_z = float(centre.x), float(centre.y)
@@ -694,9 +697,7 @@ class StockBuildingLibrary:
             target_height=_target_height(tags, family, self.default_level_height),
             seed=f"polygon:{centre_x:.2f}:{centre_z:.2f}:{footprint.width_m:.2f}:{footprint.length_m:.2f}:{family}",
             settlement=settlement,
-            fit_predicate=lambda model, swapped: source_shape.buffer(
-                _STOCK_MODEL_FIT_TOLERANCE_METRES
-            ).covers(
+            fit_predicate=lambda model, swapped: fit_shape.covers(
                 Polygon(
                     _model_support_polygon(
                         centre_x,
