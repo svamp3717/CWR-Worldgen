@@ -4,6 +4,7 @@ from pathlib import Path
 import pickle
 
 from cwr_worldgen import generator
+from cwr_worldgen import osm_house_modeler_runtime as runtime
 from cwr_worldgen.building_country_policy import building_country_options
 from cwr_worldgen.osm import BboxProjection, OsmDataset
 from cwr_worldgen.multi_building_presets import (
@@ -16,7 +17,9 @@ from cwr_worldgen.multi_building_presets import (
 from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_VANILLA_PRESET,
     STOCK_BUILDING_RESISTANCE_PRESET,
+    STOCK_BUILDING_HAUS_ONLY_PRESET,
     encode_stock_building_presets,
+    stock_model_source,
 )
 from cwr_worldgen.stock_building_policy import StockBuildingLibrary
 
@@ -176,3 +179,55 @@ def test_mixed_library_survives_pickle_round_trip() -> None:
     assert restored.stock_presets == library.stock_presets
     assert restored.procedural_presets == library.procedural_presets
     assert restored.world_name == "wg_mixed_pickle_test"
+
+
+def test_mixed_pool_accepts_stock_modded_and_procedural_sources_together() -> None:
+    country = "se_sweden"
+    encoded = encode_building_presets(
+        (
+            STOCK_BUILDING_VANILLA_PRESET,
+            STOCK_BUILDING_HAUS_ONLY_PRESET,
+            country,
+        )
+    )
+    library = generator.ProceduralBuildingLibrary(
+        world_name="wg_stock_mod_proc_test",
+        house_style_preset=encoded,
+        maximum_variants=8,
+    )
+
+    assert isinstance(library, MultiBuildingLibrary)
+    assert library.stock_presets == (
+        STOCK_BUILDING_VANILLA_PRESET,
+        STOCK_BUILDING_HAUS_ONLY_PRESET,
+    )
+    assert library.procedural_presets == (country,)
+    sources = {stock_model_source(model.model_path) for model in library.stock_library.models}
+    assert "vanilla" in sources
+    assert "haus" in sources
+
+
+def test_multiple_procedural_presets_drive_multiple_country_styles() -> None:
+    countries = ("se_sweden", "jp_japan")
+    encoded = encode_building_presets(countries)
+
+    class Library:
+        house_style_preset = encoded
+
+    marker = runtime._regional_preset(Library())
+    assert marker.startswith("cwr-procedural-multi:")
+
+    selected = {
+        runtime.resolve_style(
+            tags={"building": "house", "name": f"House {index}"},
+            latitude=35.0 + index * 0.01,
+            longitude=18.0 + index * 0.01,
+            width_m=8.0 + (index % 5),
+            length_m=12.0 + (index % 7),
+            settlement_context="rural",
+            regional_preset=marker,
+            seed="multi-procedural-test",
+        ).country_profile_identifier
+        for index in range(96)
+    }
+    assert selected == set(countries)
