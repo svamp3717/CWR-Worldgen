@@ -455,6 +455,100 @@ def _install_gui() -> None:
         gui.gui_house_style_preset_label = multi_label
 
         class MultiPresetWorldgenGui(original_class):
+            def _normalise_building_preset_heading(self) -> None:
+                for text in (
+                    "Building country",
+                    "Building countrys",
+                    "Building preset",
+                    "Building presets",
+                ):
+                    for widget in _find_widgets_by_text(self, text):
+                        try:
+                            widget.configure(text="Building presets")
+                        except Exception:
+                            pass
+
+            def _install_stock_building_checkboxes(self) -> None:
+                """Install stock/mod checkboxes after country-label rewriting."""
+                preset_var = self.vars.get("house_style_preset")
+                if preset_var is None:
+                    return
+                for identifier, _label in stock_ext.STOCK_BUILDING_OPTIONS:
+                    self._var(
+                        stock_ext._stock_checkbox_key(identifier),
+                        False,
+                        boolean=True,
+                    )
+
+                labels = []
+                for text in (
+                    "Building country",
+                    "Building countrys",
+                    "Building preset",
+                    "Building presets",
+                ):
+                    labels.extend(_find_widgets_by_text(self, text))
+                if not labels:
+                    return
+                label = labels[0]
+                parent = label.master
+                try:
+                    label.configure(text="Building presets")
+                except Exception:
+                    pass
+
+                combo = stock_ext._find_combobox_for_variable(self, preset_var)
+                if combo is not None:
+                    stock_ext._hide_widget(combo)
+
+                # Country policy rewrites the original hint before this subclass
+                # gets control. Hide either wording, leaving the selection summary
+                # below the checkbox groups as the one source of truth.
+                for widget in tuple(parent.winfo_children()):
+                    try:
+                        text = str(widget.cget("text"))
+                    except Exception:
+                        text = ""
+                    if (
+                        text == stock_ext._BUILDING_PRESET_HINT_TEXT
+                        or "Choose a country here to use that country's procedural building architecture"
+                        in text
+                        or "Automatic uses the selected map area/country" in text
+                    ):
+                        stock_ext._hide_widget(widget)
+
+                box = gui.ttk.Frame(parent)
+                box.grid(row=2, column=1, sticky="w", pady=3)
+                for index, (identifier, text) in enumerate(
+                    stock_ext.STOCK_BUILDING_OPTIONS
+                ):
+                    gui.ttk.Checkbutton(
+                        box,
+                        text=text,
+                        variable=self.vars[stock_ext._stock_checkbox_key(identifier)],
+                    ).grid(
+                        row=index // 2,
+                        column=index % 2,
+                        sticky="w",
+                        padx=(0, 18),
+                        pady=2,
+                    )
+                self.stock_building_selection_var = gui.tk.StringVar(
+                    master=self, value=""
+                )
+                gui.ttk.Label(
+                    parent,
+                    textvariable=self.stock_building_selection_var,
+                    style="Hint.TLabel",
+                    wraplength=700,
+                ).grid(
+                    row=3,
+                    column=0,
+                    columnspan=2,
+                    sticky="w",
+                    pady=(6, 0),
+                )
+
             def _selected_procedural_presets(self) -> tuple[str, ...]:
                 selected = []
                 for identifier, _label in procedural_options:
@@ -642,6 +736,7 @@ def _install_gui() -> None:
                     if self.vars.get("house_style_preset") is not None
                     else "auto"
                 )
+                self._normalise_building_preset_heading()
                 self._install_procedural_building_checkboxes()
                 self._apply_encoded_selection(raw)
 
@@ -677,6 +772,7 @@ def _install_gui() -> None:
 
             def _refresh_views(self) -> None:
                 super()._refresh_views()
+                self._normalise_building_preset_heading()
                 self._sync_multi_building_controls()
 
         gui.WorldgenGui = MultiPresetWorldgenGui
