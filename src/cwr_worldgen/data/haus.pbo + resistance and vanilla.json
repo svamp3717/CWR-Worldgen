@@ -2,6 +2,7 @@
   "schema": 5,
   "kind": "completed_model_classifications",
   "source_set": "haus.pbo + resistance and vanilla",
+  "display_name": "Haus.pbo + Resistance + vanilla buildings",
   "categories": [
     "Residential",
     "Commercial",
