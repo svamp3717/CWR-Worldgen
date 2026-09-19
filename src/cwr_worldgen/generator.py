@@ -3269,6 +3269,9 @@ def build_milestone4(
             cache_dir=getattr(spec, "cache_dir", None),
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
+            require_proxy_safe_clones=(
+                str(getattr(spec, "profile", "cwr-ce")).casefold() == "cwa"
+            ),
         )
         for model_path, count in generated_cluster_usage:
             forest_cluster_library.register_model_usage(model_path, count)
@@ -3724,6 +3727,9 @@ def build_milestone4(
                 cache_dir=getattr(spec, "cache_dir", None),
                 cache_enabled=bool(getattr(spec, "cache_enabled", True)),
                 cache_refresh=bool(getattr(spec, "cache_refresh", False)),
+                require_proxy_safe_clones=(
+                    str(getattr(spec, "profile", "cwr-ce")).casefold() == "cwa"
+                ),
             )
             repeat_forest_cluster_library.register_models(repeat_cluster_paths)
 
