@@ -431,10 +431,18 @@ def _install_gui() -> None:
                     )
                 except (TypeError, ValueError):
                     selected = ()
-                for identifier in selected:
+                selected_set = frozenset(selected)
+                for identifier, _label in stock_ext.STOCK_BUILDING_OPTIONS:
                     variable = self.vars.get(stock_ext._stock_checkbox_key(identifier))
                     if variable is not None:
-                        variable.set(True)
+                        variable.set(identifier in selected_set)
+                # During initial construction these variables do not exist yet.
+                # During profile loading they do, so restore the whole mixed
+                # selection before the stock superclass performs its sync pass.
+                for identifier, _label in procedural_options:
+                    variable = self.vars.get(_checkbox_key(identifier))
+                    if variable is not None:
+                        variable.set(identifier in selected_set)
 
             def _install_procedural_building_checkboxes(self) -> None:
                 for identifier, _label in procedural_options:
