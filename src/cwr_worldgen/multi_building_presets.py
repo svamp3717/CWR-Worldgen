@@ -145,7 +145,13 @@ class MultiBuildingLibrary:
         # The generator reads the procedural library's quantization/budget fields
         # directly. Keep that mature interface rather than mirroring dozens of
         # attributes and eventually forgetting the one added next Tuesday.
-        return getattr(self.procedural_library, name)
+        #
+        # Pickle probes special attributes before instance state has been restored.
+        # Avoid recursively looking up procedural_library during that window.
+        procedural_library = self.__dict__.get("procedural_library")
+        if procedural_library is None:
+            raise AttributeError(name)
+        return getattr(procedural_library, name)
 
     @property
     def cache_dir(self):
