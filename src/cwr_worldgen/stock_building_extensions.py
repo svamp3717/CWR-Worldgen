@@ -153,7 +153,8 @@ def _stock_checkbox_key(identifier: str) -> str:
 
 
 _STOCK_PLACEMENT_CACHE_V96 = "nonroad-object-placement-v96-road-safe-settlement-clutter"
-_STOCK_PLACEMENT_CACHE_V97 = "nonroad-object-placement-v97-stock-model-origin-grounding"
+_STOCK_PLACEMENT_CACHE_V98 = "nonroad-object-placement-v98-stock-fit-and-overlap"
+_BUILDING_PLACEMENT_CACHE_REVISION = "final-road-building-clearance-v7-stock-fit-overlap"
 _INTERIOR_CHECKBOX_TEXT = "Enterable procedural-building interiors"
 _HIGH_QUALITY_TEXTURE_CHECKBOX_TEXT = "Higher-quality building textures (256 px)"
 _MATCH_TEXTURE_CHECKBOX_TEXT = "Match nearby same-shape town/city building textures"
@@ -637,7 +638,14 @@ def _install_gui() -> None:
 
 
 def _install_grounding() -> None:
+    from . import final_building_road_clearance_policy as clearance
     from . import generator, osm
+
+    # This module installs after the road/church policy chain, several members
+    # of which intentionally replace the shared placement-cache salt. Make the
+    # stock-fit/overlap revision the final active salt so existing cached plans
+    # cannot replay oversized or rural-urban-mismatched model selections.
+    clearance._CACHE_REVISION = _BUILDING_PLACEMENT_CACHE_REVISION
 
     original_generate = osm.generate_world_objects
 
@@ -663,7 +671,7 @@ def _install_grounding() -> None:
             spec = payload.get("spec") if isinstance(payload, Mapping) else None
             preset = spec.get("house_style_preset") if isinstance(spec, Mapping) else None
             if is_stock_building_preset(preset):
-                namespace = _STOCK_PLACEMENT_CACHE_V97
+                namespace = _STOCK_PLACEMENT_CACHE_V98
         return original_cache_key(namespace, payload)
 
     generator.cache_key = cache_key_with_stock_grounding
