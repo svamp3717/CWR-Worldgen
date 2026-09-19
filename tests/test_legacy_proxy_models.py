@@ -117,7 +117,7 @@ class LegacyProxyModelTests(unittest.TestCase):
                     asset_records=(),
                 )
 
-    def test_ce_clusters_report_incomplete_proxy_clone_coverage(self) -> None:
+    def test_ce_clusters_keep_stock_proxy_children_without_cloning(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             library = ProceduralForestClusterLibrary(
@@ -134,12 +134,21 @@ class LegacyProxyModelTests(unittest.TestCase):
                 root / "catalogue.json",
                 asset_records=(),
             )
-            self.assertFalse(result.to_manifest()["proxy_safe_complete"])
-            self.assertEqual(
-                set(result.proxy_safe_missing_models),
-                set(library.required_proxy_models()),
-            )
+            self.assertTrue(result.to_manifest()["proxy_safe_complete"])
+            self.assertEqual(result.proxy_safe_missing_models, ())
             self.assertEqual(result.proxy_safe_cloned_models, ())
+
+            cluster_file = root / "world" / "f" / "b_border_thicket_15.p3d"
+            summary = inspect_mlod(cluster_file)
+            proxies = tuple(
+                name
+                for lod in summary.selection_names
+                for name in lod
+                if name.casefold().startswith("proxy:")
+            )
+            self.assertTrue(proxies)
+            self.assertTrue(any("data3d" in name.casefold() for name in proxies))
+            self.assertFalse(any("testworld\\f\\p\\" in name.casefold() for name in proxies))
 
     def test_forest_carriers_proxy_generated_safe_clones(self) -> None:
         source_bytes = _synthetic_odol()
@@ -152,6 +161,7 @@ class LegacyProxyModelTests(unittest.TestCase):
                 "testworld",
                 proxy_profile="everon-safe",
                 cache_enabled=False,
+                require_proxy_safe_clones=True,
             )
             model = cluster_model_path("testworld", "border_thicket", 0.15)
             library.register_model(model)
