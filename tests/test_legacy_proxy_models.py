@@ -28,7 +28,7 @@ def _synthetic_odol() -> bytes:
     flags = (
         0x0100 | 0x10000,  # LandOn + LightSky
         0x0800 | 0x20000,  # LandKeep + LightCloud
-        0x0400 | 0x4000,   # LandAbove + FogDisable
+        0x0400 | 0x4000,   # LandAbove + FogDisable, preserved
     )
     uvs = ((0.0, 0.0), (1.0, 0.0), (0.5, 1.0))
     normals = ((0.0, 0.0, 1.0),) * 3
@@ -80,14 +80,14 @@ class LegacyProxyModelTests(unittest.TestCase):
             )
 
             self.assertEqual(info.source_format, "ODOL")
-            self.assertEqual(info.land_flagged_points, 3)
+            self.assertEqual(info.land_flagged_points, 2)
             self.assertEqual(info.point_count, 3)
             self.assertEqual(info.face_count, 1)
             self.assertIn(r"data\leaf.paa", info.texture_paths)
 
             flags = _first_lod_point_flags(path.read_bytes())
-            self.assertEqual(flags, (0x10000, 0x20000, 0x4000))
-            self.assertTrue(all((value & 0x0F00) == 0 for value in flags))
+            self.assertEqual(flags, (0x10000, 0x20000, 0x4400))
+            self.assertTrue(all((value & 0x0900) == 0 for value in flags))
 
             summary = inspect_mlod(path)
             self.assertEqual(summary.lod_count, 1)
@@ -149,7 +149,7 @@ class LegacyProxyModelTests(unittest.TestCase):
                 self.assertTrue(clone.is_file())
                 self.assertTrue(
                     all(
-                        (flag & 0x0F00) == 0
+                        (flag & 0x0900) == 0
                         for flag in _first_lod_point_flags(clone.read_bytes())
                     )
                 )
