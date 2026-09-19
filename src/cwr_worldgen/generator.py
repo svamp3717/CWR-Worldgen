@@ -2782,12 +2782,10 @@ def _expand_cwa_generated_vegetation(
                 )
             )
             folded = model_path.replace("/", "\\").casefold()
-            if any(
+            if not any(
                 token in folded
                 for token in ("\\ker", "bush", "rakosi", "travy", "grass", "reed")
             ):
-                pass
-            else:
                 expanded_tree_children += 1
 
         delta = len(variant.proxy_layout) - 1
