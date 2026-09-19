@@ -23,7 +23,6 @@ from cwr_worldgen.milestone9 import (
     MALDEN_FOREST_BLOCK_MODEL,
     MALDEN_ROADSIDE_TREE_MODELS,
     MALDEN_SINGLE_TREE_MODEL,
-    EVERON_SAFE_BUSH_MODELS,
     NOGOVA_BUSH_MODELS,
     NOGOVA_LEAF_HILLSIDE_TREE_MODEL,
     NOGOVA_LEAF_ROADSIDE_TREE_MODEL,
@@ -522,30 +521,10 @@ class SurfacePassTests(unittest.TestCase):
         self.assertEqual(tuple(resolved["forest_roadside_bush_models"]), MALDEN_BUSH_MODELS)
         self.assertEqual(tuple(resolved["steep_hill_bush_models"]), MALDEN_BUSH_MODELS)
 
-    def test_everon_safe_profile_excludes_suspect_bushes(self) -> None:
+    def test_retired_everon_safe_profile_is_rejected(self) -> None:
         spec = Milestone9Spec(source_dir=Path("unused"), forest_profile="everon-safe")
-        spec.validate()
-        resolved = _resolved_forest_profile_models(spec)
-
-        self.assertEqual(
-            tuple(resolved["forest_roadside_bush_models"]),
-            EVERON_SAFE_BUSH_MODELS,
-        )
-        self.assertEqual(
-            tuple(resolved["steep_hill_bush_models"]),
-            EVERON_SAFE_BUSH_MODELS,
-        )
-        models = {
-            path.casefold()
-            for path in (
-                *tuple(resolved["forest_roadside_bush_models"]),
-                *tuple(resolved["steep_hill_bush_models"]),
-            )
-        }
-        self.assertNotIn(r"data3d\ker pichlavej.p3d", models)
-        self.assertNotIn(r"data3d\ker deravej.p3d", models)
-        self.assertIn(r"data3d\ker listnac.p3d", models)
-        self.assertIn(r"data3d\ker buxus.p3d", models)
+        with self.assertRaisesRegex(ValueError, "forest profile must be everon or malden"):
+            spec.validate()
 
     def test_nogova_leaf_blocks_resolve_only_resistance_leaf_trees(self) -> None:
         spec = Milestone9Spec(
