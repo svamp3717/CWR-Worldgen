@@ -21,12 +21,14 @@ from . import stock_building_policy as stock
 STOCK_BUILDING_VANILLA_PRESET = "stock-vanilla"
 STOCK_BUILDING_RESISTANCE_PRESET = "stock-resistance"
 STOCK_BUILDING_HAUS_COMBINED_PRESET = "stock-haus-combined"
+STOCK_BUILDING_HAUS_ONLY_PRESET = "stock-haus-only"
 
 _DATA_DIR = Path(__file__).with_name("data")
 _STOCK_COMBINED_CATALOGUE_PATH = _DATA_DIR / "stock_building_models.json"
 _STOCK_NON_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_non_resistance.json"
 _STOCK_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_resistance.json"
 _STOCK_HAUS_COMBINED_CATALOGUE_PATH = _DATA_DIR / "haus.pbo + resistance and vanilla.json"
+_STOCK_HAUS_ONLY_CATALOGUE_PATH = _DATA_DIR / "haus.pbo buildings only.json"
 
 
 def _catalogue_display_name(path: Path, fallback: str) -> str:
@@ -54,6 +56,10 @@ STOCK_BUILDING_HAUS_COMBINED_LABEL = _catalogue_display_name(
     _STOCK_HAUS_COMBINED_CATALOGUE_PATH,
     "Haus.pbo + Resistance + vanilla buildings",
 )
+STOCK_BUILDING_HAUS_ONLY_LABEL = _catalogue_display_name(
+    _STOCK_HAUS_ONLY_CATALOGUE_PATH,
+    "Haus.pbo buildings only",
+)
 stock.STOCK_BUILDING_PRESET_LABEL = STOCK_BUILDING_COMBINED_LABEL
 
 STOCK_BUILDING_PRESETS = (
@@ -61,12 +67,14 @@ STOCK_BUILDING_PRESETS = (
     STOCK_BUILDING_VANILLA_PRESET,
     STOCK_BUILDING_RESISTANCE_PRESET,
     STOCK_BUILDING_HAUS_COMBINED_PRESET,
+    STOCK_BUILDING_HAUS_ONLY_PRESET,
 )
 STOCK_BUILDING_OPTIONS = (
     (stock.STOCK_BUILDING_PRESET, STOCK_BUILDING_COMBINED_LABEL),
     (STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_VANILLA_LABEL),
     (STOCK_BUILDING_RESISTANCE_PRESET, STOCK_BUILDING_RESISTANCE_LABEL),
     (STOCK_BUILDING_HAUS_COMBINED_PRESET, STOCK_BUILDING_HAUS_COMBINED_LABEL),
+    (STOCK_BUILDING_HAUS_ONLY_PRESET, STOCK_BUILDING_HAUS_ONLY_LABEL),
 )
 
 _STOCK_PLACEMENT_CACHE_V96 = "nonroad-object-placement-v96-road-safe-settlement-clutter"
@@ -238,6 +246,8 @@ def _install_library_presets() -> None:
             models = stock._load_catalogue(_STOCK_RESISTANCE_CATALOGUE_PATH)
         elif requested == STOCK_BUILDING_HAUS_COMBINED_PRESET:
             models = stock._load_catalogue(_STOCK_HAUS_COMBINED_CATALOGUE_PATH)
+        elif requested == STOCK_BUILDING_HAUS_ONLY_PRESET:
+            models = stock._load_catalogue(_STOCK_HAUS_ONLY_CATALOGUE_PATH)
         else:
             models = self.models
 
