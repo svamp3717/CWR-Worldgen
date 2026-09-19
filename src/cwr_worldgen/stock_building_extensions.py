@@ -152,6 +152,10 @@ def _stock_checkbox_key(identifier: str) -> str:
     return "stock_building_set__" + identifier.replace("-", "_")
 
 
+_PROCEDURAL_BUILDING_CHECKBOX_KEY = "building_set__procedural"
+_PROCEDURAL_BUILDING_CHECKBOX_TEXT = "Procedural buildings (automatic area / country)"
+
+
 _STOCK_PLACEMENT_CACHE_V96 = "nonroad-object-placement-v96-road-safe-settlement-clutter"
 _STOCK_PLACEMENT_CACHE_V97 = "nonroad-object-placement-v97-stock-model-origin-grounding"
 _INTERIOR_CHECKBOX_TEXT = "Enterable procedural-building interiors"
@@ -497,6 +501,10 @@ def _install_gui() -> None:
                         selected.append(identifier)
                 return tuple(selected)
 
+            def _procedural_buildings_selected(self) -> bool:
+                variable = self.vars.get(_PROCEDURAL_BUILDING_CHECKBOX_KEY)
+                return True if variable is None else bool(variable.get())
+
             def _migrate_stock_dropdown_selection(self) -> None:
                 """Migrate an old single stock dropdown choice, then retire the dropdown value."""
                 preset_var = self.vars.get("house_style_preset")
@@ -512,8 +520,13 @@ def _install_gui() -> None:
                     variable = self.vars.get(_stock_checkbox_key(identifier))
                     if variable is not None:
                         variable.set(True)
+                procedural_var = self.vars.get(_PROCEDURAL_BUILDING_CHECKBOX_KEY)
+                if procedural_var is not None:
+                    # Old stock-only profiles remain stock-only. Every historical
+                    # procedural/country value migrates to the automatic procedural
+                    # checkbox because the old country dropdown is no longer visible.
+                    procedural_var.set(not bool(selected))
                 # The country/procedural dropdown is no longer a user-facing choice.
-                # With no stock boxes selected, Automatic remains the fallback.
                 preset_var.set(gui.HOUSE_STYLE_AUTO_LABEL)
 
             def _install_stock_building_checkboxes(self) -> None:
@@ -521,6 +534,7 @@ def _install_gui() -> None:
                 preset_var = self.vars.get("house_style_preset")
                 if preset_var is None:
                     return
+                self._var(_PROCEDURAL_BUILDING_CHECKBOX_KEY, True, boolean=True)
                 for identifier, _label in STOCK_BUILDING_OPTIONS:
                     self._var(_stock_checkbox_key(identifier), False, boolean=True)
 
@@ -542,13 +556,25 @@ def _install_gui() -> None:
 
                 box = gui.ttk.Frame(parent)
                 box.grid(row=2, column=1, sticky="w", pady=3)
+                gui.ttk.Checkbutton(
+                    box,
+                    text=_PROCEDURAL_BUILDING_CHECKBOX_TEXT,
+                    variable=self.vars[_PROCEDURAL_BUILDING_CHECKBOX_KEY],
+                ).grid(
+                    row=0,
+                    column=0,
+                    columnspan=2,
+                    sticky="w",
+                    padx=(0, 18),
+                    pady=2,
+                )
                 for index, (identifier, text) in enumerate(STOCK_BUILDING_OPTIONS):
                     gui.ttk.Checkbutton(
                         box,
                         text=text,
                         variable=self.vars[_stock_checkbox_key(identifier)],
                     ).grid(
-                        row=index // 2,
+                        row=1 + index // 2,
                         column=index % 2,
                         sticky="w",
                         padx=(0, 18),
@@ -573,35 +599,52 @@ def _install_gui() -> None:
                     _hide_widget(widget)
 
                 selected = self._selected_stock_building_presets()
-                stock_mode = bool(selected)
+                procedural_selected = self._procedural_buildings_selected()
+                stock_only_mode = bool(selected) and not procedural_selected
                 if hasattr(self, "stock_building_selection_var"):
-                    if selected:
-                        labels = dict(STOCK_BUILDING_OPTIONS)
+                    labels = dict(STOCK_BUILDING_OPTIONS)
+                    selected_labels = []
+                    if procedural_selected:
+                        selected_labels.append(_PROCEDURAL_BUILDING_CHECKBOX_TEXT)
+                    selected_labels.extend(labels[identifier] for identifier in selected)
+                    if selected_labels:
+                        suffix = (
+                            " Stock/model paths are merged and duplicates are removed."
+                            if selected else ""
+                        )
                         self.stock_building_selection_var.set(
-                            "Selected stock sets: "
-                            + ", ".join(labels[identifier] for identifier in selected)
-                            + ". Model paths are merged and duplicates are removed."
+                            "Selected building presets: "
+                            + ", ".join(selected_labels)
+                            + "."
+                            + suffix
                         )
                     else:
                         self.stock_building_selection_var.set(
-                            "No building presets selected. Automatic country/procedural buildings are used."
+                            "No building presets selected. Automatic procedural buildings are used as a safe fallback."
                         )
 
                 for key, label in _STOCK_DISABLED_GUI_OPTIONS:
                     variable = self.vars.get(key)
-                    if stock_mode and variable is not None and bool(variable.get()):
+                    if stock_only_mode and variable is not None and bool(variable.get()):
                         variable.set(False)
                     for widget in _find_widgets_by_text(self, label):
-                        _set_widget_enabled(widget, not stock_mode)
+                        _set_widget_enabled(widget, not stock_only_mode)
 
             def _collect_build_values(self) -> dict[str, object]:
                 values = super()._collect_build_values()
                 selected = self._selected_stock_building_presets()
-                values["house_style_preset"] = (
-                    encode_stock_building_presets(selected)
-                    if selected
-                    else gui.HOUSE_STYLE_PRESET_AUTO
-                )
+                procedural_selected = self._procedural_buildings_selected()
+                if selected and procedural_selected:
+                    from .building_preset_mix import encode_building_presets
+                    values["house_style_preset"] = encode_building_presets(
+                        (gui.HOUSE_STYLE_PRESET_AUTO,), selected
+                    )
+                elif selected:
+                    values["house_style_preset"] = encode_stock_building_presets(selected)
+                else:
+                    # An empty selection is intentionally fail-soft: keep legacy
+                    # builds usable by falling back to the automatic procedural mode.
+                    values["house_style_preset"] = gui.HOUSE_STYLE_PRESET_AUTO
                 return values
 
             def __init__(self, *args, **kwargs):
@@ -616,6 +659,23 @@ def _install_gui() -> None:
                         )
                     except Exception:
                         self._stock_preset_trace = None
+                self._building_preset_checkbox_traces = []
+                for key in (
+                    _PROCEDURAL_BUILDING_CHECKBOX_KEY,
+                    *(_stock_checkbox_key(identifier) for identifier, _label in STOCK_BUILDING_OPTIONS),
+                ):
+                    variable = self.vars.get(key)
+                    if variable is None:
+                        continue
+                    try:
+                        self._building_preset_checkbox_traces.append(
+                            variable.trace_add(
+                                "write",
+                                lambda *_args: self._sync_stock_building_controls(),
+                            )
+                        )
+                    except Exception:
+                        pass
                 self._sync_stock_building_controls()
 
             def _load_profile(self) -> None:
@@ -640,7 +700,7 @@ def _install_grounding() -> None:
     def generate_with_stock_origin_lift(*args, **kwargs):
         result = original_generate(*args, **kwargs)
         library = kwargs.get("building_asset_library")
-        if not isinstance(library, stock.StockBuildingLibrary):
+        if library is None or not hasattr(library, "origin_lift_for_model"):
             return result
         plans = tuple(kwargs.get("building_placement_plans") or ())
         lifted = _lift_stock_objects(result.objects, library, plans)
@@ -658,7 +718,14 @@ def _install_grounding() -> None:
         if namespace == _STOCK_PLACEMENT_CACHE_V96:
             spec = payload.get("spec") if isinstance(payload, Mapping) else None
             preset = spec.get("house_style_preset") if isinstance(spec, Mapping) else None
-            if is_stock_building_preset(preset):
+            stock_selected = is_stock_building_preset(preset)
+            if not stock_selected:
+                try:
+                    from .building_preset_mix import contains_stock_building_presets
+                    stock_selected = contains_stock_building_presets(preset)
+                except (ImportError, ValueError):
+                    stock_selected = False
+            if stock_selected:
                 namespace = _STOCK_PLACEMENT_CACHE_V97
         return original_cache_key(namespace, payload)
 
@@ -674,4 +741,6 @@ def install_stock_building_extensions() -> None:
     _install_factory_and_cli()
     _install_gui()
     _install_grounding()
+    from .building_preset_mix import install_building_preset_mix
+    install_building_preset_mix()
     _INSTALLED = True
