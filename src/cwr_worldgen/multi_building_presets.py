@@ -7,6 +7,7 @@ heterogeneous or multi-procedural selections use building-multi:...
 """
 from __future__ import annotations
 
+from functools import lru_cache
 from hashlib import blake2s, sha256
 import json
 from pathlib import Path
@@ -23,6 +24,7 @@ _PROCEDURAL_MULTI_MARKER = "cwr-procedural-multi:"
 _INSTALLED = False
 
 
+@lru_cache(maxsize=1)
 def _procedural_options() -> tuple[tuple[str, str], ...]:
     from .building_country_policy import building_country_options
 
@@ -32,17 +34,18 @@ def _procedural_options() -> tuple[tuple[str, str], ...]:
     )
 
 
+@lru_cache(maxsize=1)
 def _procedural_identifiers() -> tuple[str, ...]:
     return tuple(identifier for identifier, _label in _procedural_options())
 
 
+@lru_cache(maxsize=1)
 def _canonical_building_order() -> tuple[str, ...]:
     return (*stock_ext.STOCK_BUILDING_PRESETS, *_procedural_identifiers())
 
 
-def building_preset_ids(value: object) -> tuple[str, ...]:
-    """Return canonical selected preset IDs, or an empty tuple for automatic mode."""
-    text = str(value or "").strip().casefold()
+@lru_cache(maxsize=512)
+def _building_preset_ids_text(text: str) -> tuple[str, ...]:
     if not text or text == "auto":
         return ()
 
@@ -65,6 +68,12 @@ def building_preset_ids(value: object) -> tuple[str, ...]:
     if unknown:
         raise ValueError("unknown building preset(s): " + ", ".join(unknown))
     return tuple(identifier for identifier in _canonical_building_order() if identifier in requested)
+
+
+def building_preset_ids(value: object) -> tuple[str, ...]:
+    """Return canonical selected preset IDs, or an empty tuple for automatic mode."""
+    text = str(value or "").strip().casefold()
+    return _building_preset_ids_text(text)
 
 
 def encode_building_presets(values: Sequence[str]) -> str:
