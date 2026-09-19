@@ -555,10 +555,12 @@ def install_building_preset_mix() -> None:
                 return previous_factory(*args, **kwargs)
             raw = kwargs.get("house_style_preset", PROCEDURAL_AUTOMATIC_PRESET)
             procedural, stock_presets = building_preset_selection(raw)
+            encoded = encode_building_presets(procedural, stock_presets)
             mixed = len(procedural) > 1 or bool(procedural and stock_presets)
             if not mixed:
-                return previous_factory(**kwargs)
-            encoded = encode_building_presets(procedural, stock_presets)
+                canonical_kwargs = dict(kwargs)
+                canonical_kwargs["house_style_preset"] = encoded
+                return previous_factory(**canonical_kwargs)
             child_kwargs = dict(kwargs)
             child_kwargs.pop("house_style_preset", None)
             return MixedBuildingLibrary(
