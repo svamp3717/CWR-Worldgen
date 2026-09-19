@@ -707,6 +707,16 @@ class RoadPieceFittingTests(unittest.TestCase):
             parser.parse_args(base + ["--forest-individual-objects-only"]).forest_individual_objects_only
         )
 
+    def test_milestone9_cli_accepts_composite_stock_building_preset(self) -> None:
+        composite = "stock-multi:stock-vanilla,stock-ags-only"
+        args = _parser().parse_args([
+            "milestone9",
+            "--output", "build/test",
+            "--source-dir", "source-data/test",
+            "--house-style-preset", composite,
+        ])
+        self.assertEqual(args.house_style_preset, composite)
+
     def test_milestone9_cli_uses_the_same_expanded_object_budgets(self) -> None:
         args = _parser().parse_args([
             "milestone9",
