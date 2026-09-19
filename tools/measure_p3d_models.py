@@ -380,9 +380,24 @@ def _pbo_entries(path: Path) -> Iterator[tuple[str, bytes]]:
                         break
                     properties[key.casefold()] = _read_cstring(stream, "PBO property value")
                 continue
-            if any((packing, original_size, data_size)):
-                raise ModelReadError("unsupported PBO extension record")
-            break
+            # Some legacy/addon PBOs terminate their header with an empty-name
+            # Cprs record whose remaining fields are all zero. It does not
+            # describe another payload; the real member data begins immediately
+            # afterwards. Accept it as a terminator while keeping genuinely
+            # non-empty/unknown extension records strict.
+            if (
+                packing in {0, _PBO_COMPRESSED}
+                and original_size == 0
+                and reserved == 0
+                and timestamp == 0
+                and data_size == 0
+            ):
+                break
+            raise ModelReadError(
+                "unsupported PBO extension record "
+                f"(packing={packing:#x}, original_size={original_size}, "
+                f"reserved={reserved}, timestamp={timestamp}, data_size={data_size})"
+            )
         metadata.append((name, packing, original_size, data_size))
 
     prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or path.stem
@@ -443,9 +458,19 @@ def _pbo_model_paths(path: Path) -> Iterator[str]:
                             break
                         properties[key.casefold()] = _read_cstring(stream, "PBO property value")
                     continue
-                if any((packing, original_size, data_size)):
-                    raise ModelReadError("unsupported PBO extension record")
-                break
+                if (
+                    packing in {0, _PBO_COMPRESSED}
+                    and original_size == 0
+                    and reserved == 0
+                    and timestamp == 0
+                    and data_size == 0
+                ):
+                    break
+                raise ModelReadError(
+                    "unsupported PBO extension record "
+                    f"(packing={packing:#x}, original_size={original_size}, "
+                    f"reserved={reserved}, timestamp={timestamp}, data_size={data_size})"
+                )
             metadata.append((name, data_size))
 
         prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or path.stem
