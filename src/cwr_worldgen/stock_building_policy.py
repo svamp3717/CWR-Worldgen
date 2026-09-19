@@ -216,13 +216,30 @@ def _classification(tags: Mapping[str, str], width: float, length: float, settle
     )
 
 
-def _engine_family(tags: Mapping[str, str]) -> str:
-    # The style classifier deliberately maps worship buildings onto a neutral
-    # civic envelope. Stock selection instead needs the engine semantic family,
-    # so a church resolves to the stock church rather than the stock school.
-    from . import osm
+def _engine_family(
+    tags: Mapping[str, str],
+    width_m: float,
+    length_m: float,
+    settlement: str,
+) -> str:
+    """Use the live procedural family classifier for stock-model selection.
 
-    return str(osm._building_family(tags))
+    Stock and procedural buildings should interpret the same OSM footprint the
+    same way. Delegating here also means semantic policies that wrap the live
+    procedural family classifier (for example school campuses and worship
+    buildings) automatically apply to stock presets instead of drifting into a
+    second, less capable classification system.
+    """
+    from . import procedural_buildings as buildings
+
+    return str(
+        buildings._family(
+            tags,
+            width_m,
+            length_m,
+            settlement_context=settlement,
+        )
+    )
 
 
 def _dimension_score(
@@ -429,7 +446,9 @@ class StockBuildingLibrary:
         centre_z = sum(float(point[1]) for point in points) / max(1, len(points))
         settlement = self._settlement_context(centre_x, centre_z)
         classification = _classification(tags, footprint.width_m, footprint.length_m, settlement)
-        family = _engine_family(tags)
+        family = _engine_family(
+            tags, footprint.width_m, footprint.length_m, settlement
+        )
         key, swapped = self._select(
             family=family,
             building_class=str(getattr(classification, "building_class", family)),
@@ -459,7 +478,7 @@ class StockBuildingLibrary:
         del road_point
         settlement = self._settlement_context(float(x), float(z))
         classification = _classification(tags, footprint_m, footprint_m, settlement)
-        family = _engine_family(tags)
+        family = _engine_family(tags, footprint_m, footprint_m, settlement)
         key, swapped = self._select(
             family=family,
             building_class=str(getattr(classification, "building_class", family)),
