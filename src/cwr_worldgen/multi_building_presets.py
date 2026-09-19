@@ -221,36 +221,50 @@ class MultiBuildingLibrary:
             pass
 
         document = dict(procedural_document)
+        placements = procedural_result.placements + stock_result.placements
+        reused = procedural_result.reused_placements + stock_result.reused_placements
+        unique_requested = (
+            procedural_result.unique_requested_variants
+            + stock_result.unique_requested_variants
+        )
+        capped = procedural_result.capped_variants + stock_result.capped_variants
         document["mode"] = self.house_style_preset
+        document["house_style_preset"] = self.house_style_preset
         document["selected_stock_presets"] = list(self.stock_presets)
         document["selected_procedural_presets"] = list(self.procedural_presets)
         document["stock_models"] = len(stock_document.get("models", ()))
-        document["placements"] = procedural_result.placements + stock_result.placements
+        document["placements"] = placements
+        document["unique_requested_variants"] = unique_requested
+        document["generated_variants"] = procedural_result.generated_variants
+        document["reused_placements"] = reused
+        document["reuse_ratio"] = round(reused / placements, 6) if placements else 0.0
+        document["capped_variants"] = capped
         document["models"] = [
             *list(procedural_document.get("models", ())),
             *list(stock_document.get("models", ())),
         ]
         document.pop("catalogue_sha256", None)
-        encoded = (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        canonical = json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+        digest = sha256(canonical.encode("utf-8")).hexdigest()
+        document["catalogue_sha256"] = digest
+        rendered = json.dumps(document, indent=2, sort_keys=True) + "\n"
         catalogue_path.parent.mkdir(parents=True, exist_ok=True)
-        catalogue_path.write_bytes(encoded)
+        catalogue_path.write_text(rendered, encoding="utf-8", newline="\n")
+        embedded_catalogue = source_dir / "g" / "buildings.json"
+        embedded_catalogue.parent.mkdir(parents=True, exist_ok=True)
+        embedded_catalogue.write_text(rendered, encoding="utf-8", newline="\n")
 
-        placements = procedural_result.placements + stock_result.placements
-        reused = procedural_result.reused_placements + stock_result.reused_placements
         return BuildingGenerationResult(
             enabled=procedural_result.enabled or stock_result.enabled,
             placements=placements,
-            unique_requested_variants=(
-                procedural_result.unique_requested_variants
-                + stock_result.unique_requested_variants
-            ),
+            unique_requested_variants=unique_requested,
             generated_variants=procedural_result.generated_variants,
             reused_placements=reused,
             reuse_ratio=(reused / placements) if placements else 0.0,
-            capped_variants=procedural_result.capped_variants + stock_result.capped_variants,
+            capped_variants=capped,
             model_assets=procedural_result.model_assets,
             texture_files=procedural_result.texture_files,
-            catalogue_sha256=sha256(encoded).hexdigest(),
+            catalogue_sha256=digest,
             cache_hits=procedural_result.cache_hits + stock_result.cache_hits,
             cache_misses=procedural_result.cache_misses + stock_result.cache_misses,
         )
