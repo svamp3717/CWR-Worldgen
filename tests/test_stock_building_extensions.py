@@ -252,6 +252,9 @@ def test_stock_asset_catalogue_records_source_and_origin_without_generated_p3ds(
     document = json.loads(catalogue.read_text(encoding="utf-8"))
 
     assert document["mode"] == STOCK_BUILDING_RESISTANCE_PRESET
+    assert document["selected_building_jsons"] == [
+        "data/stock_building_models_resistance.json"
+    ]
     assert document["generated_models"] == 0
     assert document["generated_variants"] == 0
     assert document["models"][0]["source_set"] == "resistance"
