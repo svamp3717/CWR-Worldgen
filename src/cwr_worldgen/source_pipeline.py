@@ -1458,7 +1458,7 @@ class Milestone5Spec:
     source_dir: Path
     name: str = "cwr_milestone5"
     display_name: str = "CWR Milestone 5"
-    profile: str = "cwr-ce"
+    profile: str = "cwa"
     include_minor_roads: bool = False
     forest_road_clearance: float = 0.0
     building_ground_clearance: float = 0.10
