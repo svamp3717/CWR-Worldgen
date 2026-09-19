@@ -138,7 +138,7 @@ class LegacyProxyModelTests(unittest.TestCase):
             )
             self.assertTrue(proxies)
             self.assertTrue(
-                all(r"testworld\f\p\" in name.casefold() for name in proxies)
+                all("testworld\\f\\p\\" in name.casefold() for name in proxies)
             )
             self.assertFalse(any("data3d" in name.casefold() for name in proxies))
 
