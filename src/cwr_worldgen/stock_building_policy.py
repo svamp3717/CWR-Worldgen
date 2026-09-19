@@ -13,7 +13,7 @@ from hashlib import blake2s, sha256
 from pathlib import Path
 import json
 import math
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 from shapely.geometry import Point, Polygon
 
@@ -22,6 +22,7 @@ from .procedural_buildings import BuildingGenerationResult, BuildingPlacement, f
 STOCK_BUILDING_PRESET = "stock"
 STOCK_BUILDING_PRESET_LABEL = "Stock CWA/OFP buildings only"
 _STOCK_CATALOGUE_PATH = Path(__file__).with_name("data") / "stock_building_models.json"
+_STOCK_MODEL_FIT_TOLERANCE_METRES = 0.25
 
 _FAMILY_FALLBACKS: Mapping[str, tuple[str, ...]] = {
     "residential": ("residential", "townhouse"),
@@ -215,6 +216,62 @@ def _engine_outbuilding_kind(
     from . import procedural_buildings as buildings
 
     return str(buildings._outbuilding_kind(tags, width_m, length_m))
+
+
+def _model_orientation_dimensions(
+    model: StockBuildingModel,
+    *,
+    swapped: bool,
+) -> tuple[float, float]:
+    return (
+        (model.length_m, model.width_m)
+        if swapped
+        else (model.width_m, model.length_m)
+    )
+
+
+def _orientation_fits_target(
+    model: StockBuildingModel,
+    target_width: float,
+    target_length: float,
+    *,
+    swapped: bool,
+    tolerance: float = _STOCK_MODEL_FIT_TOLERANCE_METRES,
+) -> bool:
+    width, length = _model_orientation_dimensions(model, swapped=swapped)
+    return (
+        width <= max(0.1, float(target_width)) + max(0.0, float(tolerance))
+        and length <= max(0.1, float(target_length)) + max(0.0, float(tolerance))
+    )
+
+
+def _model_support_polygon(
+    centre_x: float,
+    centre_z: float,
+    model: StockBuildingModel,
+    heading_degrees: float,
+) -> tuple[tuple[float, float], ...]:
+    half_width = max(0.05, float(model.width_m) * 0.5)
+    half_length = max(0.05, float(model.length_m) * 0.5)
+    angle = math.radians(float(heading_degrees))
+    width_axis = (math.cos(angle), -math.sin(angle))
+    length_axis = (math.sin(angle), math.cos(angle))
+    return tuple(
+        (
+            centre_x
+            + width_sign * half_width * width_axis[0]
+            + length_sign * half_length * length_axis[0],
+            centre_z
+            + width_sign * half_width * width_axis[1]
+            + length_sign * half_length * length_axis[1],
+        )
+        for width_sign, length_sign in (
+            (-1.0, -1.0),
+            (1.0, -1.0),
+            (1.0, 1.0),
+            (-1.0, 1.0),
+        )
+    )
 
 
 def _dimension_score(
@@ -435,19 +492,21 @@ class StockBuildingLibrary:
             return "rural"
         return min(matches)[2]
 
-    def _candidate_models(
+    def _candidate_model_groups(
         self,
         family: str,
         settlement: str = "rural",
-    ) -> tuple[StockBuildingModel, ...]:
-        """Return stock models appropriate for both semantic family and settlement.
-
-        The old selector calculated rural/town/city context but never used it when
-        choosing a stock P3D. Keep villages in the rural-style pool, while towns
-        and cities may prefer denser townhouse/urban residential stock.
-        """
+    ) -> tuple[tuple[str, tuple[StockBuildingModel, ...]], ...]:
+        """Return semantic fallback groups inside the correct settlement pool."""
         context = str(settlement or "rural").strip().casefold()
-        wanted_placement = "Rural" if context in {"rural", "village"} else "Urban"
+        # Procedural semantics treat village, hamlet, isolated dwellings and
+        # ordinary rural space as non-urban. Only explicit town/city context may
+        # draw from stock models reviewed as Urban.
+        wanted_placement = (
+            "Urban"
+            if context in {"urban", "town", "city", "town_city"}
+            else "Rural"
+        )
         eligible = tuple(
             model
             for model in self.models
@@ -465,11 +524,24 @@ class StockBuildingLibrary:
         else:
             wanted = _FAMILY_FALLBACKS.get(family, (family, "residential"))
 
-        for wanted_family in wanted:
-            candidates = tuple(model for model in eligible if wanted_family in model.families)
-            if candidates:
-                return candidates
-        return eligible
+        groups = tuple(
+            (wanted_family, candidates)
+            for wanted_family in wanted
+            if (
+                candidates := tuple(
+                    model for model in eligible if wanted_family in model.families
+                )
+            )
+        )
+        return groups or (("fallback", eligible),)
+
+    def _candidate_models(
+        self,
+        family: str,
+        settlement: str = "rural",
+    ) -> tuple[StockBuildingModel, ...]:
+        # Retain the historical helper contract for tests/tools that inspect it.
+        return self._candidate_model_groups(family, settlement)[0][1]
 
     def _select(
         self,
@@ -482,20 +554,93 @@ class StockBuildingLibrary:
         target_height: float,
         seed: str,
         settlement: str = "rural",
+        fit_predicate: Callable[[StockBuildingModel, bool], bool] | None = None,
     ) -> tuple[StockBuildingKey, bool]:
+        groups = self._candidate_model_groups(family, settlement)
+
+        # Prefer the first semantic family that has a model physically small
+        # enough for the mapped footprint. This is the important difference from
+        # merely penalising oversize models: a 32 m hangar must not beat a 24 m
+        # barn on style score when the source footprint is only 20 m wide.
         scored: list[tuple[float, str, StockBuildingModel, bool]] = []
-        for model in self._candidate_models(family, settlement):
-            direct = _dimension_score(model, target_width, target_length, target_height, swapped=False)
-            swapped = _dimension_score(model, target_width, target_length, target_height, swapped=True)
-            use_swapped = swapped + 1.0e-9 < direct
-            score = swapped if use_swapped else direct
-            scored.append((score, model.model_path.casefold(), model, use_swapped))
-        scored.sort(key=lambda item: (item[0], item[1]))
-        best_score = scored[0][0]
-        shortlist = [item for item in scored if item[0] <= best_score + 0.12][:4]
-        digest = blake2s(seed.encode("utf-8", "ignore"), digest_size=4).digest()
-        choice = shortlist[int.from_bytes(digest, "little") % len(shortlist)]
-        model, swapped = choice[2], choice[3]
+        for _group_name, candidates in groups:
+            group_scored: list[tuple[float, str, StockBuildingModel, bool]] = []
+            for model in candidates:
+                for use_swapped in (False, True):
+                    if not _orientation_fits_target(
+                        model,
+                        target_width,
+                        target_length,
+                        swapped=use_swapped,
+                    ):
+                        continue
+                    if fit_predicate is not None and not fit_predicate(model, use_swapped):
+                        continue
+                    score = _dimension_score(
+                        model,
+                        target_width,
+                        target_length,
+                        target_height,
+                        swapped=use_swapped,
+                    )
+                    group_scored.append(
+                        (score, model.model_path.casefold(), model, use_swapped)
+                    )
+            if group_scored:
+                scored = group_scored
+                break
+
+        if not scored:
+            # No stock asset can fit entirely inside the requested envelope.
+            # Choose the least-overflowing orientation across the semantic
+            # fallback chain. Later road/building collision gates may still
+            # reject it, but we never knowingly choose a larger alternative.
+            fallback: list[
+                tuple[float, int, float, str, StockBuildingModel, bool]
+            ] = []
+            target_w = max(0.1, float(target_width))
+            target_l = max(0.1, float(target_length))
+            for group_index, (_group_name, candidates) in enumerate(groups):
+                for model in candidates:
+                    for use_swapped in (False, True):
+                        width, length = _model_orientation_dimensions(
+                            model, swapped=use_swapped
+                        )
+                        overflow = max(
+                            width / target_w,
+                            length / target_l,
+                            1.0,
+                        )
+                        score = _dimension_score(
+                            model,
+                            target_width,
+                            target_length,
+                            target_height,
+                            swapped=use_swapped,
+                        )
+                        fallback.append(
+                            (
+                                overflow,
+                                group_index,
+                                score,
+                                model.model_path.casefold(),
+                                model,
+                                use_swapped,
+                            )
+                        )
+            fallback.sort(key=lambda item: item[:4])
+            choice = fallback[0]
+            model, swapped = choice[4], choice[5]
+        else:
+            scored.sort(key=lambda item: (item[0], item[1], item[3]))
+            best_score = scored[0][0]
+            shortlist = [
+                item for item in scored if item[0] <= best_score + 0.12
+            ][:4]
+            digest = blake2s(seed.encode("utf-8", "ignore"), digest_size=4).digest()
+            choice = shortlist[int.from_bytes(digest, "little") % len(shortlist)]
+            model, swapped = choice[2], choice[3]
+
         key = StockBuildingKey(
             family=family,
             building_class=building_class,
@@ -518,10 +663,16 @@ class StockBuildingLibrary:
         entrance_point=None,
         allow_native_polygon: bool = True,
     ) -> BuildingPlacement:
-        del holes, road_point, entrance_point, allow_native_polygon
+        del road_point, entrance_point, allow_native_polygon
+        source_shape = Polygon(
+            tuple((float(x), float(z)) for x, z in points),
+            [tuple((float(x), float(z)) for x, z in ring) for ring in holes if len(ring) >= 3],
+        )
+        if source_shape.is_empty or source_shape.area <= 0.0:
+            source_shape = Polygon(tuple((float(x), float(z)) for x, z in points))
         footprint = footprint_from_polygon(points)
-        centre_x = sum(float(point[0]) for point in points) / max(1, len(points))
-        centre_z = sum(float(point[1]) for point in points) / max(1, len(points))
+        centre = source_shape.centroid
+        centre_x, centre_z = float(centre.x), float(centre.y)
         settlement = self._settlement_context(centre_x, centre_z)
         classification = _classification(tags, footprint.width_m, footprint.length_m, settlement)
         family = _engine_family(
@@ -543,6 +694,22 @@ class StockBuildingLibrary:
             target_height=_target_height(tags, family, self.default_level_height),
             seed=f"polygon:{centre_x:.2f}:{centre_z:.2f}:{footprint.width_m:.2f}:{footprint.length_m:.2f}:{family}",
             settlement=settlement,
+            fit_predicate=lambda model, swapped: source_shape.buffer(
+                _STOCK_MODEL_FIT_TOLERANCE_METRES
+            ).covers(
+                Polygon(
+                    _model_support_polygon(
+                        centre_x,
+                        centre_z,
+                        model,
+                        (
+                            footprint.heading_degrees
+                            + (90.0 if swapped else 0.0)
+                        )
+                        % 360.0,
+                    )
+                )
+            ),
         )
         heading = (footprint.heading_degrees + (90.0 if swapped else 0.0)) % 360.0
         return BuildingPlacement(key.stock_model_path, heading, key, key)
