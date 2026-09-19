@@ -291,7 +291,8 @@ def _install_transport_and_factory() -> None:
 
     def normalise_spec(value):
         selected = building_preset_ids(value)
-        if len(selected) > 1:
+        raw_multi = str(value or "").strip().casefold().startswith(BUILDING_MULTI_PREFIX)
+        if len(selected) > 1 or (raw_multi and selected):
             return encode_building_presets(selected)
         if selected == (PROCEDURAL_AUTO_PRESET,):
             return "auto"
@@ -299,7 +300,10 @@ def _install_transport_and_factory() -> None:
 
     def normalise_procedural(value):
         stock_ids, procedural_ids = _split_presets(value)
-        if procedural_ids and not stock_ids and len(procedural_ids) > 1:
+        raw_multi = str(value or "").strip().casefold().startswith(BUILDING_MULTI_PREFIX)
+        if procedural_ids and not stock_ids and (
+            len(procedural_ids) > 1 or raw_multi
+        ):
             return _procedural_transport(procedural_ids)
         if procedural_ids == (PROCEDURAL_AUTO_PRESET,) and not stock_ids:
             return "auto"
@@ -330,6 +334,14 @@ def _install_transport_and_factory() -> None:
         def __new__(cls, *args, **kwargs):
             preset = str(kwargs.get("house_style_preset", "") or "").strip().casefold()
             stock_ids, procedural_ids = _split_presets(preset)
+            if preset.startswith(BUILDING_MULTI_PREFIX) and (
+                len(stock_ids) + len(procedural_ids) == 1
+            ):
+                canonical_kwargs = dict(kwargs)
+                canonical_kwargs["house_style_preset"] = encode_building_presets(
+                    (*stock_ids, *procedural_ids)
+                )
+                return previous_factory(*args, **canonical_kwargs)
             if not (stock_ids and procedural_ids):
                 return previous_factory(*args, **kwargs)
 
