@@ -454,7 +454,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_constraint_solver_arguments(milestone9)
     _add_procedural_building_arguments(milestone9)
     _add_surface_pass_arguments(milestone9)
-    milestone9.add_argument("--forest-profile", choices=("everon", "everon-safe", "malden"), default="everon", help="Everon square/triangle/cluster ladder by default; everon-safe excludes the two suspect Data3D bush models; malden restores the older block plus individual-tree fallback")
+    milestone9.add_argument("--forest-profile", choices=("everon", "malden"), default="everon", help="Everon square/triangle/cluster ladder by default; malden restores the older block plus individual-tree fallback")
     milestone9.add_argument("--replace-forest-polygons-with-clusters", "--no-forest-polygons", "--forest-individual-objects-only", dest="forest_individual_objects_only", action="store_true", help="replace stock square/triangle forest polygon models with tiled generated clusters; individually grounded trees fill patches where no safe cluster fits (default: off)")
     milestone9.set_defaults(forest_ground_clearance=0.02)
     milestone9.add_argument("--forest-block-model", default=r"data3d\les ctverec pruchozi_T1.p3d", help="primary stock forest block model")
