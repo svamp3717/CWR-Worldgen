@@ -245,9 +245,11 @@ def _add_procedural_building_arguments(parser: argparse.ArgumentParser) -> None:
         "--house-style-preset",
         "--building-preset",
         dest="house_style_preset",
-        choices=(HOUSE_STYLE_PRESET_AUTO, *HOUSE_STYLE_PRESET_IDENTIFIERS),
         default=HOUSE_STYLE_PRESET_AUTO,
-        help="override the geographically detected procedural-building style; auto uses the selected area/country",
+        help=(
+            "override the geographically detected building style; auto uses the selected "
+            "area/country. Stock catalogue combinations use stock-multi:<preset>,<preset>."
+        ),
     )
     parser.add_argument("--building-width-quantum", type=float, default=2.0, help="width reuse bucket in metres")
     parser.add_argument("--building-length-quantum", type=float, default=2.0, help="length reuse bucket in metres")
