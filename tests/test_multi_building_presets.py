@@ -16,6 +16,7 @@ from cwr_worldgen.multi_building_presets import (
     MultiBuildingLibrary,
     building_preset_ids,
     encode_building_presets,
+    selected_building_jsons,
 )
 from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_VANILLA_PRESET,
@@ -53,6 +54,28 @@ def test_stock_only_encoding_keeps_existing_stock_multi_transport() -> None:
         STOCK_BUILDING_VANILLA_PRESET,
     )
     assert encode_building_presets(selected) == encode_stock_building_presets(selected)
+
+
+def test_selected_building_jsons_records_stock_and_country_catalogues() -> None:
+    encoded = encode_building_presets(
+        (STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_HAUS_ONLY_PRESET, "se_sweden")
+    )
+
+    assert selected_building_jsons(encoded) == (
+        "data/stock_building_models_non_resistance.json",
+        "data/haus.pbo buildings only.json",
+        "country_styles/SE_Sweden.json",
+    )
+
+
+def test_selected_building_jsons_skips_procedural_auto_marker() -> None:
+    encoded = encode_building_presets(
+        (STOCK_BUILDING_VANILLA_PRESET, PROCEDURAL_AUTO_PRESET)
+    )
+
+    assert selected_building_jsons(encoded) == (
+        "data/stock_building_models_non_resistance.json",
+    )
 
 
 def test_mixed_stock_cache_wrapper_uses_current_stock_revision() -> None:
@@ -397,6 +420,10 @@ def test_mixed_asset_catalogue_merges_procedural_and_stock_rows(tmp_path: Path) 
     assert document == embedded
     assert document["selected_stock_presets"] == [STOCK_BUILDING_HAUS_ONLY_PRESET]
     assert document["selected_procedural_presets"] == ["se_sweden"]
+    assert document["selected_building_jsons"] == [
+        "data/haus.pbo buildings only.json",
+        "country_styles/SE_Sweden.json",
+    ]
     assert document["stock_models"] == 1
     assert {row["model_path"] for row in document["models"]} == {
         r"wg_catalogue\g\b_generated.p3d",
