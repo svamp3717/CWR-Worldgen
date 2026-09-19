@@ -405,6 +405,31 @@ def _install_gui() -> None:
         previous_configure(gui, base_dir)
         original_class = gui.WorldgenGui
         procedural_options = _procedural_options()
+        previous_identifier = gui.gui_house_style_preset_identifier
+        previous_label = gui.gui_house_style_preset_label
+
+        def multi_identifier(value: object) -> str:
+            text = str(value or "").strip()
+            folded = text.casefold()
+            if folded == PROCEDURAL_AUTO_PRESET:
+                return "auto"
+            if folded.startswith(BUILDING_MULTI_PREFIX):
+                selected = building_preset_ids(folded)
+                return encode_building_presets(selected)
+            return previous_identifier(value)
+
+        def multi_label(value: object) -> str:
+            text = str(value or "").strip()
+            folded = text.casefold()
+            if folded.startswith(BUILDING_MULTI_PREFIX):
+                selected = building_preset_ids(folded)
+                return encode_building_presets(selected)
+            if folded == PROCEDURAL_AUTO_PRESET:
+                return previous_label("auto")
+            return previous_label(value)
+
+        gui.gui_house_style_preset_identifier = multi_identifier
+        gui.gui_house_style_preset_label = multi_label
 
         class MultiPresetWorldgenGui(original_class):
             def _selected_procedural_presets(self) -> tuple[str, ...]:
@@ -452,6 +477,11 @@ def _install_gui() -> None:
                 if not labels:
                     return
                 parent = labels[0].master
+                for widget in _find_widgets_by_text(self, "Stock building sets"):
+                    try:
+                        widget.configure(text="Stock / modded building sets")
+                    except Exception:
+                        pass
                 gui.ttk.Label(parent, text="Procedural building styles").grid(
                     row=4, column=0, sticky="nw", padx=(0, 10), pady=(8, 3)
                 )
