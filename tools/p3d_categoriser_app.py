@@ -90,6 +90,7 @@ class CategoriserApp:
         output: Path,
         categories: Sequence[str],
         state: dict[str, Classification],
+        total_models: int | None = None,
     ) -> None:
         self.root = root
         self.model_iter = model_iter
@@ -97,6 +98,7 @@ class CategoriserApp:
         self.output = output
         self.categories = list(categories)
         self.state = state
+        self.total_models = total_models
         self.models: list[PreviewModel] = []
         self.failures: list[measure.ModelFailure] = []
         self.index = -1
@@ -342,9 +344,13 @@ class CategoriserApp:
     def _show_model(self, model: PreviewModel) -> None:
         self.current = model
         self.path_var.set(model.model_path)
-        suffix = " +" if not self.exhausted else ""
+        if self.total_models is not None:
+            counter = f"Model {self.index + 1:,} / {self.total_models:,}"
+        else:
+            suffix = " +" if not self.exhausted else ""
+            counter = f"Model {self.index + 1:,} / {len(self.models):,}{suffix}"
         self.progress_var.set(
-            f"Model {self.index + 1}/{len(self.models)}{suffix} • failures skipped: {len(self.failures)}"
+            f"{counter} • failures skipped: {len(self.failures):,}"
         )
         classification = self.state.get(model.model_path, Classification([]))
         selected = set(classification.categories)
