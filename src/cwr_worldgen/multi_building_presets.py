@@ -87,7 +87,11 @@ def encode_building_presets(values: Sequence[str]) -> str:
     if not ordered:
         return "auto"
     if ordered == (PROCEDURAL_AUTO_PRESET,):
-        return "auto"
+        # Keep an explicitly checked automatic-procedural source distinct from
+        # the legacy "no checkboxes selected" automatic fallback. Generation
+        # normalizes both to the same runtime behavior, but GUI profiles can now
+        # round-trip the checkbox state faithfully.
+        return PROCEDURAL_AUTO_PRESET
     if all(identifier in stock_ext.STOCK_BUILDING_PRESETS for identifier in ordered):
         return stock_ext.encode_stock_building_presets(ordered)
     if len(ordered) == 1:
@@ -509,7 +513,7 @@ def _install_gui() -> None:
             text = str(value or "").strip()
             folded = text.casefold()
             if folded == PROCEDURAL_AUTO_PRESET:
-                return "auto"
+                return PROCEDURAL_AUTO_PRESET
             if folded.startswith(BUILDING_MULTI_PREFIX):
                 selected = building_preset_ids(folded)
                 return encode_building_presets(selected)
@@ -522,7 +526,9 @@ def _install_gui() -> None:
                 selected = building_preset_ids(folded)
                 return encode_building_presets(selected)
             if folded == PROCEDURAL_AUTO_PRESET:
-                return previous_label("auto")
+                # The old combobox is hidden; preserve the transport token rather
+                # than converting it to the indistinguishable Automatic label.
+                return PROCEDURAL_AUTO_PRESET
             return previous_label(value)
 
         gui.gui_house_style_preset_identifier = multi_identifier
