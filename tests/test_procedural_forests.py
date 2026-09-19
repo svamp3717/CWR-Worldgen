@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
 import tempfile
 import unittest
 
@@ -22,6 +23,7 @@ from cwr_worldgen.procedural_forests import (
     ProceduralForestClusterLibrary,
     cluster_model_path,
     write_forest_cluster_mlod,
+    _proxy_visual_lod,
 )
 
 
@@ -99,6 +101,30 @@ class ProceduralForestClusterTests(unittest.TestCase):
         self.assertTrue(set(NOGOVA_LEAF_PROXY_MODELS).intersection(models))
         self.assertTrue(set(NOGOVA_LEAF_BORDER_PROXY_MODELS).intersection(models))
         self.assertFalse(any(path.casefold().startswith("data3d" + "\\") for path in models))
+
+    def test_proxy_marker_edges_are_unambiguous_for_cwa_199(self) -> None:
+        for variant in FOREST_CLUSTER_VARIANTS:
+            lod = _proxy_visual_lod(variant, 0.30)
+            self.assertEqual(len(lod.points), len(variant.proxy_layout) * 3)
+            for index in range(len(variant.proxy_layout)):
+                p0, p1, p2 = lod.points[index * 3:index * 3 + 3]
+
+                def distance(a, b):
+                    return math.sqrt(sum((a[i] - b[i]) ** 2 for i in range(3)))
+
+                direction_edge = distance(p0, p1)
+                up_edge = distance(p0, p2)
+                diagonal = distance(p1, p2)
+
+                # The original CWA 1.99 loader identifies proxy axes by edge
+                # length: shortest=Direction, second-shortest=Up. Equal legs
+                # let those axes swap and can rotate vegetation onto its side.
+                self.assertLess(direction_edge, up_edge)
+                self.assertLess(up_edge, diagonal)
+                self.assertAlmostEqual(p0[1], p1[1], places=6)
+                self.assertAlmostEqual(p0[0], p2[0], places=6)
+                self.assertAlmostEqual(p0[2], p2[2], places=6)
+                self.assertGreater(p2[1], p0[1])
 
     def test_cluster_model_contains_reusable_stock_proxies_and_support_lods(self) -> None:
         variant = FOREST_CLUSTER_VARIANTS[0]
