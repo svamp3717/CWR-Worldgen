@@ -5,6 +5,7 @@ import json
 import pickle
 
 from cwr_worldgen import generator
+from cwr_worldgen import stock_building_extensions as stock_ext
 from cwr_worldgen import osm_house_modeler_runtime as runtime
 from cwr_worldgen.building_country_policy import building_country_options
 from cwr_worldgen.osm import BboxProjection, OsmDataset
@@ -52,6 +53,24 @@ def test_stock_only_encoding_keeps_existing_stock_multi_transport() -> None:
         STOCK_BUILDING_VANILLA_PRESET,
     )
     assert encode_building_presets(selected) == encode_stock_building_presets(selected)
+
+
+def test_mixed_stock_cache_wrapper_uses_current_stock_revision() -> None:
+    encoded = encode_building_presets(
+        (STOCK_BUILDING_VANILLA_PRESET, PROCEDURAL_AUTO_PRESET)
+    )
+    payload = {"spec": {"house_style_preset": encoded}}
+
+    legacy_key = generator.cache_key(
+        stock_ext._STOCK_PLACEMENT_CACHE_V96,
+        payload,
+    )
+    current_key = generator.cache_key(
+        stock_ext._STOCK_PLACEMENT_CACHE_V98,
+        payload,
+    )
+
+    assert legacy_key == current_key
 
 
 def test_mixed_factory_builds_stock_and_procedural_children() -> None:
