@@ -391,9 +391,14 @@ def _install_transport_and_factory() -> None:
         def __new__(cls, *args, **kwargs):
             preset = str(kwargs.get("house_style_preset", "") or "").strip().casefold()
             stock_ids, procedural_ids = _split_presets(preset)
-            if preset.startswith(BUILDING_MULTI_PREFIX) and (
-                len(stock_ids) + len(procedural_ids) == 1
+            if preset.startswith(BUILDING_MULTI_PREFIX) and not (
+                stock_ids and procedural_ids
             ):
+                # Validation returns a canonical value but intentionally does not
+                # mutate the caller's frozen spec. Canonicalize again at the actual
+                # routing boundary so generalized stock-only composites become
+                # stock-multi, while multi-procedural composites keep their
+                # building-multi transport.
                 canonical_kwargs = dict(kwargs)
                 canonical_kwargs["house_style_preset"] = encode_building_presets(
                     (*stock_ids, *procedural_ids)
