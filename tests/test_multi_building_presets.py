@@ -90,6 +90,19 @@ def test_no_checked_presets_keeps_automatic_transport() -> None:
     assert building_preset_ids("auto") == ()
 
 
+def test_explicit_procedural_auto_keeps_distinct_checkbox_transport() -> None:
+    assert encode_building_presets((PROCEDURAL_AUTO_PRESET,)) == PROCEDURAL_AUTO_PRESET
+    assert building_preset_ids(PROCEDURAL_AUTO_PRESET) == (PROCEDURAL_AUTO_PRESET,)
+
+    library = generator.ProceduralBuildingLibrary(
+        world_name="wg_explicit_procedural_auto_test",
+        house_style_preset=PROCEDURAL_AUTO_PRESET,
+        maximum_variants=8,
+    )
+    assert not isinstance(library, MultiBuildingLibrary)
+    assert library.house_style_preset == "auto"
+
+
 def _empty_dataset() -> OsmDataset:
     return OsmDataset(
         source_generator="multi-building-presets-test",
