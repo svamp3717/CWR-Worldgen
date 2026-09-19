@@ -66,10 +66,12 @@ def test_mixed_stock_cache_wrapper_uses_current_stock_revision() -> None:
         payload,
     )
     current_key = generator.cache_key(
-        stock_ext._STOCK_PLACEMENT_CACHE_V98,
+        stock_ext.STOCK_PLACEMENT_CACHE_NAMESPACE,
         payload,
     )
 
+    assert stock_ext.STOCK_PLACEMENT_CACHE_NAMESPACE == stock_ext._STOCK_PLACEMENT_CACHE_V98
+    assert not hasattr(stock_ext, "_STOCK_PLACEMENT_CACHE_V97")
     assert legacy_key == current_key
 
 
