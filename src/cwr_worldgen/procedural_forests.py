@@ -68,6 +68,8 @@ class ForestClusterAssetResult:
     proxy_models: tuple[str, ...]
     model_files: tuple[str, ...]
     texture_files: tuple[str, ...] = ()
+    proxy_safe_cloned_models: tuple[str, ...] = ()
+    proxy_safe_missing_models: tuple[str, ...] = ()
 
     def to_manifest(self) -> dict[str, object]:
         return {
@@ -77,6 +79,9 @@ class ForestClusterAssetResult:
             "proxy_models": self.proxy_models,
             "model_files": self.model_files,
             "texture_files": self.texture_files,
+            "proxy_safe_cloned_models": self.proxy_safe_cloned_models,
+            "proxy_safe_missing_models": self.proxy_safe_missing_models,
+            "proxy_safe_complete": not self.proxy_safe_missing_models,
         }
 
 
@@ -700,6 +705,7 @@ class ProceduralForestClusterLibrary:
         cache_enabled: bool = True,
         cache_refresh: bool = False,
         proxy_profile: str = "everon",
+        require_proxy_safe_clones: bool = False,
     ) -> None:
         self.world_name = world_name
         self.cache_dir = cache_dir
@@ -708,6 +714,7 @@ class ProceduralForestClusterLibrary:
         self.proxy_profile = (
             str(proxy_profile or "everon").strip().casefold().replace("-", "_")
         )
+        self.require_proxy_safe_clones = bool(require_proxy_safe_clones)
         if self.proxy_profile == "nogova":
             self.proxy_profile = "nogova_leaf"
         if self.proxy_profile not in {
@@ -757,6 +764,8 @@ class ProceduralForestClusterLibrary:
         proxy_model_map: dict[str, str] = {}
         clone_documents: list[dict[str, object]] = []
         clone_files: list[str] = []
+        cloned_source_models: list[str] = []
+        missing_source_models: list[str] = []
 
         # CWA 1.99 applies ClipLandKeep/ClipLandOn to proxy children with the
         # child's parent-local Object::Transform instead of the world transform
@@ -768,6 +777,7 @@ class ProceduralForestClusterLibrary:
             canonical = canonical_asset_path(source_model)
             record = record_by_path.get(canonical)
             if record is None:
+                missing_source_models.append(source_model)
                 continue
             try:
                 source_bytes = read_asset_record_bytes(record)
@@ -794,6 +804,7 @@ class ProceduralForestClusterLibrary:
 
             proxy_model_map[canonical] = generated_model
             clone_files.append(relative)
+            cloned_source_models.append(source_model)
             clone_documents.append({
                 "source_model": info.source_model,
                 "generated_model": info.generated_model,
@@ -804,6 +815,14 @@ class ProceduralForestClusterLibrary:
                 "texture_paths": list(info.texture_paths),
                 "sha256": sha256(destination.read_bytes()).hexdigest(),
             })
+
+        if self.require_proxy_safe_clones and missing_source_models:
+            missing = ", ".join(sorted(missing_source_models, key=str.casefold))
+            raise ValueError(
+                "CWA 1.99-safe generated vegetation requires readable source P3Ds "
+                "for every proxy child. Add the game/mod folder or PBO containing: "
+                + missing
+            )
 
         model_tasks: list[_ForestAssetTask] = []
         for key in sorted(self._usage):
@@ -848,6 +867,8 @@ class ProceduralForestClusterLibrary:
             "proxy_models": list(self.required_proxy_models()),
             "proxy_safe_clones": clone_documents,
             "proxy_safe_clone_count": len(clone_documents),
+            "proxy_safe_missing_models": sorted(missing_source_models, key=str.casefold),
+            "proxy_safe_complete": not missing_source_models,
             "models": models,
         }
         canonical = json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
@@ -867,5 +888,11 @@ class ProceduralForestClusterLibrary:
             proxy_models=self.required_proxy_models(),
             model_files=tuple(
                 [str(item["relative_path"]) for item in models] + clone_files
+            ),
+            proxy_safe_cloned_models=tuple(
+                sorted(cloned_source_models, key=str.casefold)
+            ),
+            proxy_safe_missing_models=tuple(
+                sorted(missing_source_models, key=str.casefold)
             ),
         )
