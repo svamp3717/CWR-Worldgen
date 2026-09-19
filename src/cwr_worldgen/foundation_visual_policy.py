@@ -236,6 +236,10 @@ def install_foundation_visual_policy() -> None:
         (stock_buildings.STOCK_BUILDING_PRESET, mixed_stock_label),
         (stock_extensions.STOCK_BUILDING_VANILLA_PRESET, stock_extensions.STOCK_BUILDING_VANILLA_LABEL),
         (stock_extensions.STOCK_BUILDING_RESISTANCE_PRESET, stock_extensions.STOCK_BUILDING_RESISTANCE_LABEL),
+        (
+            stock_extensions.STOCK_BUILDING_HAUS_COMBINED_PRESET,
+            stock_extensions.STOCK_BUILDING_HAUS_COMBINED_LABEL,
+        ),
     )
 
     # Keep the generated runway/sports/parking renderers default-on, but expose
