@@ -422,6 +422,106 @@ def _matches(model_path: str, patterns: Sequence[str]) -> bool:
     return any(fnmatch.fnmatchcase(folded, _canonical_model_path(pattern)) for pattern in patterns)
 
 
+def _pbo_model_paths(path: Path) -> Iterator[str]:
+    """Yield canonical P3D paths from a PBO header without reading model payloads."""
+    with path.open("rb") as stream:
+        metadata: list[tuple[str, int]] = []
+        properties: dict[str, str] = {}
+
+        while True:
+            name = _read_cstring(stream, "PBO entry name")
+            fields = _read_exact(stream, _PBO_ENTRY.size, "PBO entry header")
+            packing, original_size, reserved, timestamp, data_size = _PBO_ENTRY.unpack(fields)
+            del reserved, timestamp
+            if data_size > _MAX_PBO_ENTRY_SIZE or original_size > _MAX_PBO_ENTRY_SIZE:
+                raise ModelReadError(f"implausible PBO entry size for {name!r}")
+            if not name:
+                if packing == _PBO_PROPERTIES:
+                    while True:
+                        key = _read_cstring(stream, "PBO property key")
+                        if not key:
+                            break
+                        properties[key.casefold()] = _read_cstring(stream, "PBO property value")
+                    continue
+                if any((packing, original_size, data_size)):
+                    raise ModelReadError("unsupported PBO extension record")
+                break
+            metadata.append((name, data_size))
+
+        prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or path.stem
+        cursor = stream.tell()
+        file_size = path.stat().st_size
+        canonical_prefix = _canonical_model_path(prefix)
+
+        for name, data_size in metadata:
+            end = cursor + data_size
+            if end > file_size:
+                raise ModelReadError(f"truncated PBO entry {name}")
+            cursor = end
+
+            combined = name.replace("/", "\\").lstrip("\\")
+            if canonical_prefix and not _canonical_model_path(combined).startswith(
+                canonical_prefix + "\\"
+            ):
+                combined = prefix + "\\" + combined
+            model_path = _canonical_model_path(combined)
+            if model_path.endswith(".p3d"):
+                yield model_path
+
+
+def count_models(inputs: Sequence[Path], patterns: Sequence[str] = ()) -> int:
+    """Count models the scanner will browse without parsing/decompressing their P3Ds."""
+    seen_loose: set[Path] = set()
+    seen_pbos: set[Path] = set()
+    count = 0
+
+    def count_loose(path: Path, root: Path | None = None) -> int:
+        resolved = path.resolve()
+        if resolved in seen_loose:
+            return 0
+        seen_loose.add(resolved)
+        if root is not None:
+            try:
+                model_path = path.relative_to(root).as_posix()
+            except ValueError:
+                model_path = path.name
+        else:
+            model_path = path.name
+        return int(_matches(_canonical_model_path(model_path), patterns))
+
+    def count_pbo(path: Path) -> int:
+        resolved = path.resolve()
+        if resolved in seen_pbos:
+            return 0
+        seen_pbos.add(resolved)
+        return sum(1 for model_path in _pbo_model_paths(path) if _matches(model_path, patterns))
+
+    for raw_input in inputs:
+        path = raw_input.expanduser()
+        if not path.exists():
+            raise FileNotFoundError(path)
+        if path.is_file():
+            suffix = path.suffix.casefold()
+            if suffix == ".p3d":
+                count += count_loose(path)
+            elif suffix == ".pbo":
+                count += count_pbo(path)
+            else:
+                raise ValueError(f"unsupported input file type: {path}")
+            continue
+
+        for child in sorted(path.rglob("*"), key=lambda item: item.as_posix().casefold()):
+            if not child.is_file():
+                continue
+            suffix = child.suffix.casefold()
+            if suffix == ".p3d":
+                count += count_loose(child, path)
+            elif suffix == ".pbo":
+                count += count_pbo(child)
+
+    return count
+
+
 def _iter_models(inputs: Sequence[Path], patterns: Sequence[str]) -> Iterator[tuple[str, str, bytes]]:
     seen_loose: set[Path] = set()
     seen_pbos: set[Path] = set()
