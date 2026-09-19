@@ -226,6 +226,17 @@ def _engine_family(
     )
 
 
+def _engine_outbuilding_kind(
+    tags: Mapping[str, str],
+    width_m: float,
+    length_m: float,
+) -> str:
+    """Use the procedural shed/garage inference for stock metadata."""
+    from . import procedural_buildings as buildings
+
+    return str(buildings._outbuilding_kind(tags, width_m, length_m))
+
+
 def _dimension_score(
     model: StockBuildingModel,
     target_width: float,
@@ -536,10 +547,17 @@ class StockBuildingLibrary:
         family = _engine_family(
             tags, footprint.width_m, footprint.length_m, settlement
         )
+        building_class = str(getattr(classification, "building_class", family))
+        outbuilding_kind = str(getattr(classification, "outbuilding_kind", ""))
+        if family == "outbuilding":
+            outbuilding_kind = _engine_outbuilding_kind(
+                tags, footprint.width_m, footprint.length_m
+            )
+            building_class = outbuilding_kind
         key, swapped = self._select(
             family=family,
-            building_class=str(getattr(classification, "building_class", family)),
-            outbuilding_kind=str(getattr(classification, "outbuilding_kind", "")),
+            building_class=building_class,
+            outbuilding_kind=outbuilding_kind,
             target_width=footprint.width_m,
             target_length=footprint.length_m,
             target_height=_target_height(tags, family, self.default_level_height),
@@ -566,10 +584,15 @@ class StockBuildingLibrary:
         settlement = self._settlement_context(float(x), float(z))
         classification = _classification(tags, footprint_m, footprint_m, settlement)
         family = _engine_family(tags, footprint_m, footprint_m, settlement)
+        building_class = str(getattr(classification, "building_class", family))
+        outbuilding_kind = str(getattr(classification, "outbuilding_kind", ""))
+        if family == "outbuilding":
+            outbuilding_kind = _engine_outbuilding_kind(tags, footprint_m, footprint_m)
+            building_class = outbuilding_kind
         key, swapped = self._select(
             family=family,
-            building_class=str(getattr(classification, "building_class", family)),
-            outbuilding_kind=str(getattr(classification, "outbuilding_kind", "")),
+            building_class=building_class,
+            outbuilding_kind=outbuilding_kind,
             target_width=footprint_m,
             target_length=footprint_m,
             target_height=_target_height(tags, family, self.default_level_height),
