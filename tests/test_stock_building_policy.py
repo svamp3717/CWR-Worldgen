@@ -67,6 +67,41 @@ def test_stock_special_buildings_stay_in_stock_family() -> None:
     assert "school" in catalogue[school.model_path.casefold()].families
 
 
+
+def test_stock_generic_rural_footprints_reuse_procedural_size_classification() -> None:
+    library = _library()
+    small = library.plan_polygon(
+        {"building": "yes"},
+        ((0.0, 0.0), (6.0, 0.0), (6.0, 6.0), (0.0, 6.0)),
+    )
+    large = library.plan_polygon(
+        {"building": "yes"},
+        ((0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)),
+    )
+
+    catalogue = {model.model_path.casefold(): model for model in library.models}
+    assert small.selected.family == "outbuilding"
+    assert large.selected.family == "agricultural"
+    assert large.selected.building_class == "barn"
+    assert "outbuilding" in catalogue[small.model_path.casefold()].families
+    assert "agricultural" in catalogue[large.model_path.casefold()].families
+
+
+def test_stock_generic_city_footprint_reuses_procedural_settlement_classification() -> None:
+    library = _library()
+    library._settlements = ((0.0, 0.0, "city"),)
+    placement = library.plan_polygon(
+        {"building": "yes"},
+        ((-20.0, -10.0), (20.0, -10.0), (20.0, 10.0), (-20.0, 10.0)),
+    )
+
+    catalogue = {model.model_path.casefold(): model for model in library.models}
+    selected_model = catalogue[placement.model_path.casefold()]
+    assert placement.selected.family == "urban"
+    assert selected_model.placement in {"Urban", "Both"}
+    assert "urban" in selected_model.families
+
+
 def test_stock_mode_factory_never_instantiates_procedural_library() -> None:
     library = generator.ProceduralBuildingLibrary(
         world_name="wg_stock_factory",
