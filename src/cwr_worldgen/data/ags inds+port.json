@@ -1,0 +1,222 @@
+{
+  "schema": 5,
+  "kind": "completed_model_classifications",
+  "source_set": "ags inds+port",
+  "display_name": "AGS inds+port",
+  "categories": [
+    "Residential",
+    "Commercial",
+    "Industrial",
+    "Agricultural",
+    "Military",
+    "Civic / Public",
+    "Religious",
+    "Infrastructure",
+    "Ruins",
+    "Prop / Misc"
+  ],
+  "placements": [
+    "Urban",
+    "Rural",
+    "Both"
+  ],
+  "complete_count": 15,
+  "reviewed_count": 15,
+  "models": [
+    {
+      "model_path": "ags_inds\\hangar.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 42,
+      "length_m": 45.6486,
+      "height_m": 16.4008,
+      "aspect_ratio": 1.0869,
+      "origin_to_bottom_m": 8.2004
+    },
+    {
+      "model_path": "ags_inds\\oiltank1.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 30.6794,
+      "length_m": 24.863,
+      "height_m": 14.5138,
+      "aspect_ratio": 1.2339,
+      "origin_to_bottom_m": 7.2569
+    },
+    {
+      "model_path": "ags_inds\\powerplant.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 52.5508,
+      "length_m": 45.5,
+      "height_m": 60.1147,
+      "aspect_ratio": 1.155,
+      "origin_to_bottom_m": 30.106
+    },
+    {
+      "model_path": "ags_inds\\powerplant2.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 43.9237,
+      "length_m": 50.0037,
+      "height_m": 23.5395,
+      "aspect_ratio": 1.1384,
+      "origin_to_bottom_m": 11.7697
+    },
+    {
+      "model_path": "ags_inds\\refinery1.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 33.77,
+      "length_m": 31.97,
+      "height_m": 35.3313,
+      "aspect_ratio": 1.0563,
+      "origin_to_bottom_m": 17.6993
+    },
+    {
+      "model_path": "ags_inds\\refinery2.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 56.2533,
+      "length_m": 51.7651,
+      "height_m": 32.455,
+      "aspect_ratio": 1.0867,
+      "origin_to_bottom_m": 15.8005
+    },
+    {
+      "model_path": "ags_inds\\refinery3.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 37.6306,
+      "length_m": 50.0037,
+      "height_m": 37.8471,
+      "aspect_ratio": 1.3288,
+      "origin_to_bottom_m": 18.9572
+    },
+    {
+      "model_path": "ags_inds\\tank2.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 20,
+      "length_m": 11.0194,
+      "height_m": 24.4161,
+      "aspect_ratio": 1.815,
+      "origin_to_bottom_m": 12.208
+    },
+    {
+      "model_path": "ags_inds\\tank3.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 25.6687,
+      "length_m": 10.0092,
+      "height_m": 10.5875,
+      "aspect_ratio": 2.5645,
+      "origin_to_bottom_m": 5.2938
+    },
+    {
+      "model_path": "ags_inds\\whouse1.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 43.26,
+      "length_m": 42.0537,
+      "height_m": 9.2372,
+      "aspect_ratio": 1.0287,
+      "origin_to_bottom_m": 4.3686
+    },
+    {
+      "model_path": "ags_inds\\whouse2.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 42.03,
+      "length_m": 45.8995,
+      "height_m": 16.44,
+      "aspect_ratio": 1.0921,
+      "origin_to_bottom_m": 8.22
+    },
+    {
+      "model_path": "ags_port\\crane1.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 48.7327,
+      "length_m": 39.3869,
+      "height_m": 28.6091,
+      "aspect_ratio": 1.2373,
+      "origin_to_bottom_m": 14.3046
+    },
+    {
+      "model_path": "ags_port\\crane1base.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 48.7327,
+      "length_m": 10.0262,
+      "height_m": 7.5479,
+      "aspect_ratio": 4.8605,
+      "origin_to_bottom_m": 3.8395
+    },
+    {
+      "model_path": "ags_port\\crates1.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 16,
+      "length_m": 8,
+      "height_m": 8,
+      "aspect_ratio": 2,
+      "origin_to_bottom_m": 4
+    },
+    {
+      "model_path": "ags_port\\crates2.p3d",
+      "categories": [
+        "Industrial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 16,
+      "length_m": 12,
+      "height_m": 8,
+      "aspect_ratio": 1.3333,
+      "origin_to_bottom_m": 4
+    }
+  ]
+}
