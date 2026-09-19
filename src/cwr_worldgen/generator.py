@@ -2721,7 +2721,6 @@ def _expand_cwa_generated_vegetation(
     expanded: list[WorldObject] = []
     count_deltas: Counter[str] = Counter()
     expanded_tree_children = 0
-    expanded_bush_children = 0
     carrier_count = 0
 
     rural_count_field = {
@@ -2787,7 +2786,7 @@ def _expand_cwa_generated_vegetation(
                 token in folded
                 for token in ("\\ker", "bush", "rakosi", "travy", "grass", "reed")
             ):
-                expanded_bush_children += 1
+                pass
             else:
                 expanded_tree_children += 1
 
@@ -3408,9 +3407,6 @@ def build_milestone4(
             cache_dir=getattr(spec, "cache_dir", None),
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
-            require_proxy_safe_clones=(
-                str(getattr(spec, "profile", "cwr-ce")).casefold() == "cwa"
-            ),
         )
         for model_path, count in generated_cluster_usage:
             forest_cluster_library.register_model_usage(model_path, count)
@@ -3867,9 +3863,6 @@ def build_milestone4(
                 cache_dir=getattr(spec, "cache_dir", None),
                 cache_enabled=bool(getattr(spec, "cache_enabled", True)),
                 cache_refresh=bool(getattr(spec, "cache_refresh", False)),
-                require_proxy_safe_clones=(
-                    str(getattr(spec, "profile", "cwr-ce")).casefold() == "cwa"
-                ),
             )
             repeat_forest_cluster_library.register_models(repeat_cluster_paths)
 
