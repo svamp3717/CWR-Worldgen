@@ -125,6 +125,36 @@ def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
     )
 
 
+def test_malden_runway_overlay_uses_wrp_paths_without_pbo_reads(tmp_path, monkeypatch) -> None:
+    from cwr_worldgen import runway_exact_background_policy as exact_policy
+
+    install_runway_exact_background_policy()
+    projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 160.0)
+    dataset = _runway_dataset(projection)
+    spec = _spec("malden")
+    base_paths = _base_texture_table("malden")
+    grass_index = surface_pass.MATERIAL_INDEX["g"] + 1
+
+    def fail_external_read(*_args, **_kwargs):
+        raise AssertionError("Malden overlay generation must not read Abel.pbo")
+
+    monkeypatch.setattr(exact_policy, "_read_external_asset_cached", fail_external_read)
+    revised_indices, revised_paths, generated = apply_generated_runway_texture_table(
+        tmp_path,
+        dataset,
+        projection,
+        spec,
+        (grass_index,) * (spec.cells * spec.cells),
+        base_paths,
+    )
+
+    assert base_paths[grass_index] == r"abel\tt.paa"
+    assert generated
+    assert all(path.startswith(r"wg_runway\rw") for path in generated)
+    assert len(revised_paths) == len(base_paths) + len(generated)
+    assert any(index >= len(base_paths) for index in revised_indices)
+
+
 def test_malden_stock_ground_textures_are_not_asset_scan_requirements() -> None:
     spec = SimpleNamespace(
         name="wg_malden",
