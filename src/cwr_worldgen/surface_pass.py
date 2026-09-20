@@ -103,7 +103,6 @@ _MALDEN_SEA_TEXTURE = r"abel\pi.paa"
 _MALDEN_LAND_TEXTURE = r"abel\tt.paa"
 _MALDEN_FOREST_TEXTURE = r"abel\pb.paa"
 _MALDEN_SHORE_TEXTURE = r"abel\sh.paa"
-_MALDEN_ROCK_TEXTURE = r"abel\p4.paa"
 _MALDEN_DIRT_TEXTURE = r"abel\bah.paa"
 MALDEN_SURFACE_TEXTURES: dict[str, str] = {
     "w": _MALDEN_SEA_TEXTURE,
