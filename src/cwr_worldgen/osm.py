@@ -294,6 +294,21 @@ NOGOVA_PINE_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
     r"o\tree\DD_borovice.p3d",
     r"o\tree\DD_borovice02.p3d",
 )
+# Original CWC Malden/Abel individual-tree family. Use this for mapped tree
+# points too, not only forest fallbacks, so the classic preset does not leak
+# Everon spruces/broadleaf assets into otherwise Malden vegetation.
+MALDEN_BROADLEAF_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
+    r"data3d\str_fikovnik.p3d",
+    r"data3d\str_fikovnik2.p3d",
+)
+MALDEN_CONIFER_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
+    r"data3d\str_pinie.p3d",
+    r"data3d\str borovice.p3d",
+)
+MALDEN_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
+    MALDEN_BROADLEAF_INDIVIDUAL_TREE_MODELS
+    + MALDEN_CONIFER_INDIVIDUAL_TREE_MODELS
+)
 # The 256x256, 25 m world is the visual-density baseline requested for
 # synthetic individual forest trees. Larger worlds retain the same density per
 # square kilometre, so their safety limits scale with physical area.
@@ -11394,13 +11409,28 @@ def generate_world_objects(
         leaf_type = feature.tags.get("leaf_type", "").casefold()
         species_text = " ".join((feature.tags.get("species", ""), feature.tags.get("genus", ""))).casefold()
         active_forest_model = str(getattr(spec, "forest_tree_model", "")).casefold()
-        if active_forest_model.startswith(r"o\tree\les_nw_jehl_"):
+        needle_tree = (
+            leaf_type == "needleleaved"
+            or any(
+                word in species_text
+                for word in ("picea", "pinus", "abies", "spruce", "pine", "fir")
+            )
+        )
+        broadleaf_tree = leaf_type == "broadleaved" or bool(species_text)
+        if forest_profile == "malden" or active_forest_model == r"data3d\les_su_ctver_pruhozi.p3d":
+            if needle_tree:
+                models = MALDEN_CONIFER_INDIVIDUAL_TREE_MODELS
+            elif broadleaf_tree:
+                models = MALDEN_BROADLEAF_INDIVIDUAL_TREE_MODELS
+            else:
+                models = MALDEN_INDIVIDUAL_TREE_MODELS
+        elif active_forest_model.startswith(r"o\tree\les_nw_jehl_"):
             models = NOGOVA_PINE_INDIVIDUAL_TREE_MODELS
         elif active_forest_model.startswith(r"o\tree\les_nw_"):
             models = NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS
-        elif leaf_type == "needleleaved" or any(word in species_text for word in ("picea", "pinus", "abies", "spruce", "pine", "fir")):
+        elif needle_tree:
             models = OSM_CONIFER_TREE_MODELS
-        elif leaf_type == "broadleaved" or species_text:
+        elif broadleaf_tree:
             models = OSM_BROADLEAF_TREE_MODELS
         else:
             models = OSM_INDIVIDUAL_TREE_MODELS
