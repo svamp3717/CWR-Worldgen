@@ -147,8 +147,8 @@ MALDEN_SURFACE_COLOURS: Mapping[str, tuple[int, int, int]] = {
     "k": (88, 85, 80),
     "f": (64, 86, 48),
     "e": (82, 101, 57),
-    # No assumed Malden farmland artwork: all farm semantics resolve to the
-    # same basic grass terrain in the WRP texture table.
+    # Preview/fallback colour only. Runtime Malden farmland resolves to the
+    # stock LandText vegetated tile, matching the rest of its green terrain.
     "a": (109, 118, 70),
     "b": (109, 118, 70),
     "c": (109, 118, 70),
