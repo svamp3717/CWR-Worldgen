@@ -1888,9 +1888,9 @@ def _validate_milestone4(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "malden"}:
         checks.append((
-            "Steep forest blocks use the normal/sunk triangle or reusable fallback ladder",
+            "Steep forest blocks use the modern terrain-fit fallback ladder",
             (
                 generated.forest_hillside_fallback_blocks
                 + generated.forest_hillside_unfilled_blocks
