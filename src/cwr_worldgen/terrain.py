@@ -57,9 +57,10 @@ NOGOVA_GROUND_TEXTURES.update({
     "a": r"o\pole1.paa",
 })
 
-# Literal direct terrain tiles from the stock Abel OPRW texture table.  Keep
-# these as hard-coded virtual paths, exactly like the Eden classic palette; the
-# Malden preset must not depend on scanning or opening Abel.pbo to discover them.
+# Literal direct terrain tiles from the stock Abel OPRW texture table. Keep
+# these as hard-coded virtual paths, exactly like the Eden classic palette.
+# Ordinary terrain references need no package scan; the shared overlay compositor
+# may open only the selected main background tile (abel\tt.paa), as for Everon.
 MALDEN_GROUND_TEXTURES: dict[str, str] = {
     "w": r"abel\pi.paa",
     "s": r"abel\sh.paa",
