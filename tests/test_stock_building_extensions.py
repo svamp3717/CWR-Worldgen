@@ -375,6 +375,13 @@ def test_airtest10_hangar_is_replaced_by_smaller_agricultural_model() -> None:
     assert replacement.model_path == r"o\hous\stodola3.p3d"
     assert replacement.x == hangar.x
     assert replacement.z == hangar.z
+    replacement_model = next(
+        model for model in library.models
+        if model.model_path.casefold() == replacement.model_path.casefold()
+    )
+    assert abs(
+        replacement.y - (11.4 + 0.10 + replacement_model.origin_to_bottom_m)
+    ) < 1.0e-6
     assert revised.objects[1] == clear_house
     assert revised.building_objects == 2
     assert dict(revised.model_usage) == {
