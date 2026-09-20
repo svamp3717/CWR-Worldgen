@@ -89,6 +89,30 @@ def _base_texture_table(profile: str = "everon") -> tuple[str, ...]:
     )
 
 
+def test_malden_classic_uses_only_stock_landtext_ground_tiles() -> None:
+    paths = surface_pass.surface_texture_wire_paths("wg_malden", "malden")
+
+    assert set(paths) == {r"LandText\mo.pac", r"LandText\pi.pac"}
+    assert paths[surface_pass.MATERIAL_INDEX["g"]] == r"LandText\mo.pac"
+    assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"LandText\mo.pac"
+    assert paths[surface_pass.MATERIAL_INDEX["a"]] == r"LandText\mo.pac"
+    assert paths[surface_pass.MATERIAL_INDEX["b"]] == r"LandText\mo.pac"
+    assert paths[surface_pass.MATERIAL_INDEX["c"]] == r"LandText\mo.pac"
+    assert paths[surface_pass.MATERIAL_INDEX["s"]] == r"LandText\pi.pac"
+    assert paths[surface_pass.MATERIAL_INDEX["u"]] == r"LandText\pi.pac"
+    assert not any(path.casefold().startswith("wg_malden\\data\\") for path in paths)
+
+    legacy = generator._ground_texture_paths(
+        SimpleNamespace(
+            name="wg_malden",
+            ground_texture_profile="malden",
+            surface_pass_enabled=False,
+            surface_ground_mode="milestone8",
+        )
+    )
+    assert set(legacy) == {r"LandText\mo.pac", r"LandText\pi.pac"}
+
+
 def test_everon_farmland_uses_eden_ground_texture_only() -> None:
     paths = surface_pass.surface_texture_wire_paths("wg_everon", "everon")
 
