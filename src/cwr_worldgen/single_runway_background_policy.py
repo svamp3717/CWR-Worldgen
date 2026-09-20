@@ -45,8 +45,17 @@ def runway_background_texture_path(spec) -> str:
 
 
 def external_runway_texture_paths(spec) -> tuple[str, ...]:
-    """Return the one stock texture that asset validation should locate."""
-    stock = STOCK_RUNWAY_BACKGROUND_TEXTURES.get(_profile_name(spec))
+    """Return the stock texture that validation should locate when required.
+
+    Malden Classic deliberately trusts the base-game LandText family exactly as
+    ordinary WRP references do. The runway renderer may still open mo.pac from a
+    configured game root for exact compositing, but absence from an asset scan is
+    never a build error.
+    """
+    profile = _profile_name(spec)
+    if profile == "malden":
+        return ()
+    stock = STOCK_RUNWAY_BACKGROUND_TEXTURES.get(profile)
     return (stock,) if stock is not None else ()
 
 
