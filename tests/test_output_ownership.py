@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import errno
 import json
 from pathlib import Path
 import tempfile
 
 import pytest
 
+from cwr_worldgen import output_ownership
 from cwr_worldgen.output_ownership import (
     OWNERSHIP_FILENAME,
     prepare_output_directory,
@@ -91,3 +93,31 @@ def test_incremental_build_allows_owned_and_unowned_collisions() -> None:
         user_file.write_text("mine", encoding="utf-8")
         prepare_output_directory(root, world, clean=False)
         assert user_file.read_text(encoding="utf-8") == "mine"
+
+
+def test_clean_retries_transient_directory_not_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp) / "build"
+        world = "safe_world"
+        root.mkdir()
+        (root / "stale.txt").write_text("stale", encoding="utf-8")
+
+        real_rmtree = output_ownership.shutil.rmtree
+        calls = 0
+
+        def flaky_rmtree(path: Path) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError(errno.ENOTEMPTY, "Directory not empty", str(path))
+            real_rmtree(path)
+
+        monkeypatch.setattr(output_ownership.shutil, "rmtree", flaky_rmtree)
+        monkeypatch.setattr(output_ownership.time, "sleep", lambda _seconds: None)
+
+        prepare_output_directory(root, world, clean=True)
+
+        assert calls == 2
+        assert root.is_dir()
+        assert list(root.iterdir()) == []
+
