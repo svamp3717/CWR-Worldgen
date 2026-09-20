@@ -46,15 +46,15 @@ def _catalogue_display_name(path: Path, fallback: str) -> str:
 
 STOCK_BUILDING_VANILLA_LABEL = _catalogue_display_name(
     _STOCK_NON_RESISTANCE_CATALOGUE_PATH,
-    "Stock non-Resistance buildings only",
+    "Stock non-Resistance buildings",
 )
 STOCK_BUILDING_RESISTANCE_LABEL = _catalogue_display_name(
     _STOCK_RESISTANCE_CATALOGUE_PATH,
-    "Stock Resistance buildings only",
+    "Stock Resistance buildings",
 )
 STOCK_BUILDING_HAUS_ONLY_LABEL = _catalogue_display_name(
     _STOCK_HAUS_ONLY_CATALOGUE_PATH,
-    "Haus.pbo buildings only",
+    "Haus.pbo buildings",
 )
 STOCK_BUILDING_AGS_ONLY_LABEL = _catalogue_display_name(
     _STOCK_AGS_ONLY_CATALOGUE_PATH,
