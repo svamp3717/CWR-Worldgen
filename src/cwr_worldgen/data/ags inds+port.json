@@ -2,7 +2,7 @@
   "schema": 5,
   "kind": "completed_model_classifications",
   "source_set": "ags inds+port",
-  "display_name": "AGS inds+port",
+  "display_name": "ags_inds.pbo and ags_port.pbo buildings",
   "categories": [
     "Residential",
     "Commercial",
