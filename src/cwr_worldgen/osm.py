@@ -8805,6 +8805,10 @@ def generate_world_objects(
     seed = str(getattr(spec, "deterministic_seed", "cwr-worldgen"))
     low_anchor = bool(getattr(spec, "forest_low_anchor", False))
     forest_profile = str(getattr(spec, "forest_profile", "malden")).casefold()
+    # Everon and Malden classic share the same road-safe, terrain-fit forest
+    # placement machinery. The profile now selects scenery assets, not an older
+    # placement algorithm.
+    modern_forest_profile = forest_profile in {"everon", "malden"}
     # Legacy field name from 0.9.252. In 0.9.254+ this means "replace the
     # rigid stock square/triangle forest polygon models with tiled generated
     # clusters". Individually grounded trees remain the last-resort fallback.
@@ -8874,8 +8878,16 @@ def generate_world_objects(
         block_maximum_float = max(
             0.0, float(getattr(spec, "forest_block_maximum_float", 0.5))
         )
-        everon_steep_model = str(
-            getattr(spec, "forest_everon_steep_model", r"data3d\les trojuhelnik pruchozi.p3d")
+        everon_steep_model = (
+            str(
+                getattr(
+                    spec,
+                    "forest_everon_steep_model",
+                    r"data3d\les trojuhelnik pruchozi.p3d",
+                )
+            )
+            if forest_profile == "everon"
+            else ""
         )
         everon_steep_footprint = max(
             8.0, float(getattr(spec, "forest_everon_steep_footprint", 35.0))
@@ -9007,9 +9019,9 @@ def generate_world_objects(
                 # forest probes. Empty/non-forest lattice cells therefore do not
                 # need a road-index query at all. On a 50 km world this removes
                 # road lookups from most of the ~1,000,000 primary candidates.
-                if forest_profile == "everon" and forest_sample_count < 2:
+                if modern_forest_profile and forest_sample_count < 2:
                     continue
-                if forest_profile != "everon" and forest_sample_count != len(samples):
+                if not modern_forest_profile and forest_sample_count != len(samples):
                     # Preserve legacy-profile accounting: it historically tests
                     # road overlap before rejecting partial forest blocks.
                     block_intersects_road = forest_block_intersects_road_corridors(
@@ -9023,7 +9035,7 @@ def generate_world_objects(
                     road_corridors, x, z, block_size=spacing
                 )
 
-                if block_intersects_road and forest_profile == "everon":
+                if block_intersects_road and modern_forest_profile:
                     geographic_column, geographic_row = _geographic_lattice_identity(
                         projection, x, z, spacing
                     )
@@ -9434,9 +9446,16 @@ def generate_world_objects(
                     continue
 
                 forest_slope_rejections += 1
-                if forest_profile == "everon":
-                    triangle_blocked_by_road = forest_block_intersects_road_corridors(
-                        road_corridors, x, z, block_size=everon_steep_footprint
+                if modern_forest_profile:
+                    triangle_blocked_by_road = (
+                        forest_block_intersects_road_corridors(
+                            road_corridors,
+                            x,
+                            z,
+                            block_size=everon_steep_footprint,
+                        )
+                        if everon_steep_model
+                        else False
                     )
                     gradient_x, gradient_z = _local_terrain_gradient(
                         elevations, spec.cells, spec.cell_size, x, z
@@ -9475,7 +9494,8 @@ def generate_world_objects(
                             maximum_float=everon_steep_maximum_float,
                         )
                         if (
-                            not triangle_blocked_by_road
+                            everon_steep_model
+                            and not triangle_blocked_by_road
                             and steep_relief <= everon_steep_maximum_relief
                         )
                         else None
@@ -9509,9 +9529,10 @@ def generate_world_objects(
                         maximum_forest_float = max(maximum_forest_float, floating)
                         continue
 
-                    forest_everon_steep_rejections += 1
-                    if triangle_blocked_by_road:
-                        forest_road_rejections += 1
+                    if everon_steep_model:
+                        forest_everon_steep_rejections += 1
+                        if triangle_blocked_by_road:
+                            forest_road_rejections += 1
                     cluster = (
                         _forest_cluster_placement(
                             elevations=elevations,
@@ -9775,7 +9796,7 @@ def generate_world_objects(
                             forest_hillside_unfilled_blocks += 1
                     continue
 
-                # Legacy Malden fallback, retained only behind an explicit profile.
+                # Compatibility fallback for any future non-classic forest profile.
                 accepted_candidates: list[tuple[float, float, float, float]] = []
                 if hillside_enabled and hillside_target > 0:
                     for tree_x, tree_z, tree_heading in _hillside_tree_candidates(
@@ -9941,7 +9962,7 @@ def generate_world_objects(
             float(getattr(spec, "forest_gap_infill_spacing", spec.cell_size)),
         )
         if (
-            (forest_profile == "everon" or forest_polygon_models_disabled)
+            (modern_forest_profile or forest_polygon_models_disabled)
             and gap_infill_enabled
             and not forest_truncated
             and forest_count < forest_limit
@@ -10026,7 +10047,7 @@ def generate_world_objects(
 
         progress(60, "Scattering individual forest trees")
         if (
-            forest_profile == "everon"
+            modern_forest_profile
             and extra_single_enabled
             and extra_single_limit > 0
             and not forest_truncated
