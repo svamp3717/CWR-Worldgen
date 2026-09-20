@@ -415,7 +415,10 @@ def _local_asset(source_dir: Path, world_name: str, canonical_path: str) -> tupl
 
 def _load_exact_texture(source_dir: Path, spec, wire_path: str) -> _ExactTexture | None:
     canonical_path = _canonical(wire_path)
-    if not canonical_path or not canonical_path.endswith(".paa"):
+    if (
+        not canonical_path
+        or Path(canonical_path).suffix.casefold() not in {".paa", ".pac"}
+    ):
         return None
     located = _local_asset(source_dir, str(getattr(spec, "name", "")), canonical_path)
     if located is None:
