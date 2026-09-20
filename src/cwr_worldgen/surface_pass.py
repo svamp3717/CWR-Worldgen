@@ -113,14 +113,15 @@ NOGOVA_SURFACE_TEXTURES.update({
 # as it loads Everon's selected background texture.
 _MALDEN_SEA_TEXTURE = r"abel\pi.paa"
 _MALDEN_LAND_TEXTURE = r"abel\tt.paa"
-_MALDEN_SHORE_TEXTURE = r"abel\sh.paa"
 _MALDEN_DIRT_TEXTURE = r"abel\bah.paa"
-# Keep Malden rock/scree and forest ground on the preset's default land tile.
-# Rock and forest semantics still drive object placement; only their WRP ground tile is shared.
+# The stock WRP's abel\sh.paa is a steep/mountain-looking terrain tile, not a
+# safe generic shoreline texture. Generated Malden therefore keeps shoreline,
+# mapped beach, rock/scree and forest semantics on the default abel\tt.paa tile.
+# The semantic classes still drive placement; only their WRP ground tile is shared.
 MALDEN_SURFACE_TEXTURES: dict[str, str] = {
     "w": _MALDEN_SEA_TEXTURE,
     "q": _MALDEN_SEA_TEXTURE,
-    "s": _MALDEN_SHORE_TEXTURE,
+    "s": _MALDEN_LAND_TEXTURE,
     "g": _MALDEN_LAND_TEXTURE,
     "h": _MALDEN_LAND_TEXTURE,
     "r": _MALDEN_LAND_TEXTURE,
@@ -139,7 +140,7 @@ MALDEN_SURFACE_TEXTURES: dict[str, str] = {
     "v": _MALDEN_DIRT_TEXTURE,
     "j": _MALDEN_LAND_TEXTURE,
     "y": _MALDEN_LAND_TEXTURE,
-    "x": _MALDEN_SHORE_TEXTURE,
+    "x": _MALDEN_LAND_TEXTURE,
 }
 
 STOCK_SURFACE_TEXTURES: Mapping[str, Mapping[str, str]] = {
