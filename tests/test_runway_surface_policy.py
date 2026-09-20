@@ -125,8 +125,8 @@ def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
     )
 
 
-def test_malden_runway_overlay_uses_wrp_paths_without_pbo_reads(tmp_path, monkeypatch) -> None:
-    from cwr_worldgen import runway_exact_background_policy as exact_policy
+def test_malden_runway_overlay_uses_shared_preset_background_system(tmp_path) -> None:
+    from cwr_worldgen.single_runway_background_policy import preset_background_texture_path
 
     install_runway_exact_background_policy()
     projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 160.0)
@@ -135,10 +135,6 @@ def test_malden_runway_overlay_uses_wrp_paths_without_pbo_reads(tmp_path, monkey
     base_paths = _base_texture_table("malden")
     grass_index = surface_pass.MATERIAL_INDEX["g"] + 1
 
-    def fail_external_read(*_args, **_kwargs):
-        raise AssertionError("Malden overlay generation must not read Abel.pbo")
-
-    monkeypatch.setattr(exact_policy, "_read_external_asset_cached", fail_external_read)
     revised_indices, revised_paths, generated = apply_generated_runway_texture_table(
         tmp_path,
         dataset,
@@ -148,6 +144,8 @@ def test_malden_runway_overlay_uses_wrp_paths_without_pbo_reads(tmp_path, monkey
         base_paths,
     )
 
+    assert preset_background_texture_path(_spec("everon")) == r"Eden\zbh.paa"
+    assert preset_background_texture_path(spec) == r"abel\tt.paa"
     assert base_paths[grass_index] == r"abel\tt.paa"
     assert generated
     assert all(path.startswith(r"wg_runway\rw") for path in generated)
@@ -155,7 +153,7 @@ def test_malden_runway_overlay_uses_wrp_paths_without_pbo_reads(tmp_path, monkey
     assert any(index >= len(base_paths) for index in revised_indices)
 
 
-def test_malden_stock_ground_textures_are_not_asset_scan_requirements() -> None:
+def test_malden_only_main_overlay_background_is_asset_scan_requirement() -> None:
     spec = SimpleNamespace(
         name="wg_malden",
         ground_texture_profile="malden",
@@ -163,7 +161,7 @@ def test_malden_stock_ground_textures_are_not_asset_scan_requirements() -> None:
         surface_ground_mode="milestone9",
     )
 
-    assert generator._external_ground_texture_paths(spec) == ()
+    assert generator._external_ground_texture_paths(spec) == (r"abel\tt.paa",)
 
 
 def test_malden_surface_writer_emits_no_world_local_ground_tiles(tmp_path) -> None:
@@ -437,6 +435,6 @@ def test_runway_policy_invalidates_previous_surface_representations() -> None:
         "surface-pipeline-v11-vectorized-material-pass",
         payload,
     ) == raw_cache_key(
-        "surface-pipeline-v26-malden-wrp-paths",
+        "surface-pipeline-v27-unified-preset-backgrounds",
         payload,
     )
