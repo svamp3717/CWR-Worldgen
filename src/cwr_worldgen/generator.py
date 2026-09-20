@@ -1537,9 +1537,14 @@ def _ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
 
 def _external_ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
     profile = _ground_texture_profile(spec)
+    # Malden Classic writes stock Abel paths directly into the WRP and assumes
+    # the base game provides Abel.pbo. Do not turn those ordinary stock
+    # references into an asset-scan requirement.
+    if profile == "malden":
+        return ()
     if _surface_ground_enabled(spec):
         return external_surface_texture_paths(profile)
-    return _ground_texture_paths(spec) if profile in {"everon", "nogova", "malden"} else ()
+    return _ground_texture_paths(spec) if profile in {"everon", "nogova"} else ()
 
 
 def _world_icon_filename(spec: PlayabilitySpec) -> str:
