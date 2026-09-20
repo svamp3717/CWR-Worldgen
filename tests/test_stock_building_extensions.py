@@ -308,8 +308,9 @@ def test_measured_origin_lift_is_added_to_stock_building_object() -> None:
     assert lifted[0].z == obj.z
 
 
-def test_stock_asset_catalogue_records_source_and_origin_without_generated_p3ds(tmp_path: Path) -> None:
+def test_stock_asset_catalogue_records_source_origin_and_terrain_without_generated_p3ds(tmp_path: Path) -> None:
     library = _library(STOCK_BUILDING_RESISTANCE_PRESET)
+    library.ground_texture_profile = "nogova"
     placement = library.plan_point({"building": "house"}, 10.0, 0.0, x=20.0, z=30.0)
     library.register_placement(placement, foundation_depth_m=2.0)
     catalogue = tmp_path / "building-asset-catalogue.json"
@@ -318,6 +319,7 @@ def test_stock_asset_catalogue_records_source_and_origin_without_generated_p3ds(
     document = json.loads(catalogue.read_text(encoding="utf-8"))
 
     assert document["mode"] == STOCK_BUILDING_RESISTANCE_PRESET
+    assert document["ground_texture_profile"] == "nogova"
     assert document["selected_building_jsons"] == [
         "data/stock_building_models_resistance.json"
     ]
@@ -327,6 +329,30 @@ def test_stock_asset_catalogue_records_source_and_origin_without_generated_p3ds(
     assert document["models"][0]["origin_lift_m"] > 0.0
     assert result.generated_variants == 0
     assert result.model_assets == ()
+
+
+def test_stock_asset_catalogue_saves_terrain_with_multiple_bas_o_building_sets(
+    tmp_path: Path,
+) -> None:
+    combined = encode_stock_building_presets(
+        (
+            STOCK_BUILDING_BAS_O_GENERAL_PRESET,
+            STOCK_BUILDING_BAS_O_SHANTY_PRESET,
+        )
+    )
+    library = _library(combined)
+    library.ground_texture_profile = "desert"
+    catalogue = tmp_path / "building-asset-catalogue.json"
+
+    library.write_assets(tmp_path / "source", catalogue)
+    document = json.loads(catalogue.read_text(encoding="utf-8"))
+
+    assert document["ground_texture_profile"] == "desert"
+    assert document["selected_building_jsons"] == [
+        "data/BAS_O.pbo general.json",
+        "data/BAS_O.pbo shanty.json",
+    ]
+
 
 
 def test_nonroad_cache_fingerprint_tracks_final_building_position_and_model() -> None:
