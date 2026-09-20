@@ -3970,7 +3970,7 @@ def build_milestone4(
                 spec.deterministic_seed,
                 int(getattr(spec, "surface_texture_size", 512)),
             )
-        elif _ground_texture_profile(spec) in {"generated", "desert", "malden"}:
+        elif _ground_texture_profile(spec) in {"generated", "desert"}:
             profile = _ground_texture_profile(spec)
             for path, material in zip(
                 (temp_source / "data" / f"{material.code}.paa" for material in OSM_MATERIALS),
