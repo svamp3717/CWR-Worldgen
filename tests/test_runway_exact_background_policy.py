@@ -55,19 +55,18 @@ def test_dxt1_decoder_round_trips_generated_paa(tmp_path) -> None:
     assert np.max(np.abs(sample - np.asarray((41, 72, 33)))) <= 8
 
 
-def test_exact_loader_reads_world_local_generated_and_malden_textures(tmp_path) -> None:
-    for profile in ("generated", "malden"):
-        source_dir = tmp_path / profile / "wg_runway"
-        local = source_dir / "data" / "g.paa"
-        _write_test_texture(local, (51, 78, 36))
-        exact = _load_exact_texture(
-            source_dir,
-            _spec(profile),
-            r"wg_runway\data\g.paa",
-        )
-        assert exact is not None
-        assert exact.top_image.size == (128, 128)
-        assert Path(exact.source) == local
+def test_exact_loader_reads_world_local_generated_texture(tmp_path) -> None:
+    source_dir = tmp_path / "generated" / "wg_runway"
+    local = source_dir / "data" / "g.paa"
+    _write_test_texture(local, (51, 78, 36))
+    exact = _load_exact_texture(
+        source_dir,
+        _spec("generated"),
+        r"wg_runway\data\g.paa",
+    )
+    assert exact is not None
+    assert exact.top_image.size == (128, 128)
+    assert Path(exact.source) == local
 
 
 @pytest.mark.parametrize(
@@ -75,6 +74,7 @@ def test_exact_loader_reads_world_local_generated_and_malden_textures(tmp_path) 
     (
         ("nogova", r"o\t1.paa"),
         ("everon", r"eden\zbh.paa"),
+        ("malden", r"landtext\mo.pac"),
         ("desert", r"o\ps.paa"),
     ),
 )
