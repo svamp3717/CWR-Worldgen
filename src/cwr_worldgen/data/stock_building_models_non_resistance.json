@@ -2,7 +2,7 @@
   "schema": 5,
   "kind": "completed_model_classifications",
   "source_set": "non-resistance",
-  "display_name": "Stock non-Resistance buildings only",
+  "display_name": "Stock non-Resistance buildings",
   "categories": [
     "Residential",
     "Commercial",
