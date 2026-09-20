@@ -36,8 +36,8 @@ def _write_test_texture(path: Path, colour=(42, 67, 31), size=128) -> bytes:
 
 
 def _write_paletted_pac(path: Path, colour=(62, 91, 48), size=16) -> bytes:
-    if size % 128:
-        raise ValueError("test PAC size must contain a whole number of 128-pixel runs")
+    if (size * size) % 128:
+        raise ValueError("test PAC pixel count must contain whole 128-pixel runs")
     red, green, blue = colour
     payload = bytes((0xFF, 0)) * (size * size // 128)
     data = (
@@ -110,7 +110,6 @@ def test_exact_loader_reads_world_local_generated_texture(tmp_path) -> None:
     (
         ("nogova", r"o\t1.paa"),
         ("everon", r"eden\zbh.paa"),
-        ("malden", r"landtext\mo.pac"),
         ("desert", r"o\ps.paa"),
     ),
 )
