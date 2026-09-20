@@ -20,23 +20,23 @@ from . import stock_building_policy as stock
 
 STOCK_BUILDING_VANILLA_PRESET = "stock-vanilla"
 STOCK_BUILDING_RESISTANCE_PRESET = "stock-resistance"
-STOCK_BUILDING_HAUS_COMBINED_PRESET = "stock-haus-combined"
 STOCK_BUILDING_HAUS_ONLY_PRESET = "stock-haus-only"
 STOCK_BUILDING_AGS_ONLY_PRESET = "stock-ags-only"
+
+# Legacy combined identifiers remain accepted when loading old profiles, but no
+# combined catalogue JSONs are shipped anymore. They expand into source sets.
+STOCK_BUILDING_HAUS_COMBINED_PRESET = "stock-haus-combined"
 STOCK_BUILDING_AGS_COMBINED_PRESET = "stock-ags-combined"
 
 _DATA_DIR = Path(__file__).with_name("data")
-_STOCK_COMBINED_CATALOGUE_PATH = _DATA_DIR / "stock_building_models.json"
 _STOCK_NON_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_non_resistance.json"
 _STOCK_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_resistance.json"
-_STOCK_HAUS_COMBINED_CATALOGUE_PATH = _DATA_DIR / "haus.pbo + resistance and vanilla.json"
 _STOCK_HAUS_ONLY_CATALOGUE_PATH = _DATA_DIR / "haus.pbo buildings only.json"
 _STOCK_AGS_ONLY_CATALOGUE_PATH = _DATA_DIR / "ags inds+port.json"
-_STOCK_AGS_COMBINED_CATALOGUE_PATH = _DATA_DIR / "ags inds+port and combined stock.json"
 
 
 def _catalogue_display_name(path: Path, fallback: str) -> str:
-    """Read the human-facing preset name from a bundled stock catalogue."""
+    """Read the human-facing preset name from one source catalogue."""
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -44,10 +44,6 @@ def _catalogue_display_name(path: Path, fallback: str) -> str:
     return str(document.get("display_name", "")).strip() or fallback
 
 
-STOCK_BUILDING_COMBINED_LABEL = _catalogue_display_name(
-    _STOCK_COMBINED_CATALOGUE_PATH,
-    "Stock combined (non-Resistance + Resistance) buildings",
-)
 STOCK_BUILDING_VANILLA_LABEL = _catalogue_display_name(
     _STOCK_NON_RESISTANCE_CATALOGUE_PATH,
     "Stock non-Resistance buildings only",
@@ -55,10 +51,6 @@ STOCK_BUILDING_VANILLA_LABEL = _catalogue_display_name(
 STOCK_BUILDING_RESISTANCE_LABEL = _catalogue_display_name(
     _STOCK_RESISTANCE_CATALOGUE_PATH,
     "Stock Resistance buildings only",
-)
-STOCK_BUILDING_HAUS_COMBINED_LABEL = _catalogue_display_name(
-    _STOCK_HAUS_COMBINED_CATALOGUE_PATH,
-    "Haus.pbo + Resistance + vanilla buildings",
 )
 STOCK_BUILDING_HAUS_ONLY_LABEL = _catalogue_display_name(
     _STOCK_HAUS_ONLY_CATALOGUE_PATH,
@@ -68,68 +60,108 @@ STOCK_BUILDING_AGS_ONLY_LABEL = _catalogue_display_name(
     _STOCK_AGS_ONLY_CATALOGUE_PATH,
     "AGS inds+port",
 )
-STOCK_BUILDING_AGS_COMBINED_LABEL = _catalogue_display_name(
-    _STOCK_AGS_COMBINED_CATALOGUE_PATH,
-    "AGS inds+port and combined stock",
-)
+
+# Compatibility labels for code/imports that still know the old combined IDs.
+STOCK_BUILDING_COMBINED_LABEL = "Stock combined (non-Resistance + Resistance) buildings"
+STOCK_BUILDING_HAUS_COMBINED_LABEL = "Haus.pbo + Resistance + vanilla buildings"
+STOCK_BUILDING_AGS_COMBINED_LABEL = "AGS inds+port and combined stock"
 stock.STOCK_BUILDING_PRESET_LABEL = STOCK_BUILDING_COMBINED_LABEL
 
+# These are the only real source presets exposed in the GUI. Multi-selection
+# composes them dynamically, so pre-combined JSON catalogues would just duplicate
+# the same model rows and eventually drift.
 STOCK_BUILDING_PRESETS = (
-    stock.STOCK_BUILDING_PRESET,
     STOCK_BUILDING_VANILLA_PRESET,
     STOCK_BUILDING_RESISTANCE_PRESET,
-    STOCK_BUILDING_HAUS_COMBINED_PRESET,
     STOCK_BUILDING_HAUS_ONLY_PRESET,
     STOCK_BUILDING_AGS_ONLY_PRESET,
-    STOCK_BUILDING_AGS_COMBINED_PRESET,
 )
 STOCK_BUILDING_OPTIONS = (
-    (stock.STOCK_BUILDING_PRESET, STOCK_BUILDING_COMBINED_LABEL),
     (STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_VANILLA_LABEL),
     (STOCK_BUILDING_RESISTANCE_PRESET, STOCK_BUILDING_RESISTANCE_LABEL),
-    (STOCK_BUILDING_HAUS_COMBINED_PRESET, STOCK_BUILDING_HAUS_COMBINED_LABEL),
     (STOCK_BUILDING_HAUS_ONLY_PRESET, STOCK_BUILDING_HAUS_ONLY_LABEL),
     (STOCK_BUILDING_AGS_ONLY_PRESET, STOCK_BUILDING_AGS_ONLY_LABEL),
-    (STOCK_BUILDING_AGS_COMBINED_PRESET, STOCK_BUILDING_AGS_COMBINED_LABEL),
 )
 
 STOCK_BUILDING_MULTI_PREFIX = "stock-multi:"
+_LEGACY_COMBINED_PRESET_EXPANSIONS = {
+    stock.STOCK_BUILDING_PRESET: (
+        STOCK_BUILDING_VANILLA_PRESET,
+        STOCK_BUILDING_RESISTANCE_PRESET,
+    ),
+    STOCK_BUILDING_HAUS_COMBINED_PRESET: (
+        STOCK_BUILDING_VANILLA_PRESET,
+        STOCK_BUILDING_RESISTANCE_PRESET,
+        STOCK_BUILDING_HAUS_ONLY_PRESET,
+    ),
+    STOCK_BUILDING_AGS_COMBINED_PRESET: (
+        STOCK_BUILDING_VANILLA_PRESET,
+        STOCK_BUILDING_RESISTANCE_PRESET,
+        STOCK_BUILDING_AGS_ONLY_PRESET,
+    ),
+}
+_ACCEPTED_STOCK_BUILDING_PRESETS = (
+    *STOCK_BUILDING_PRESETS,
+    *_LEGACY_COMBINED_PRESET_EXPANSIONS,
+)
 _STOCK_CATALOGUE_BY_PRESET = {
-    stock.STOCK_BUILDING_PRESET: _STOCK_COMBINED_CATALOGUE_PATH,
     STOCK_BUILDING_VANILLA_PRESET: _STOCK_NON_RESISTANCE_CATALOGUE_PATH,
     STOCK_BUILDING_RESISTANCE_PRESET: _STOCK_RESISTANCE_CATALOGUE_PATH,
-    STOCK_BUILDING_HAUS_COMBINED_PRESET: _STOCK_HAUS_COMBINED_CATALOGUE_PATH,
     STOCK_BUILDING_HAUS_ONLY_PRESET: _STOCK_HAUS_ONLY_CATALOGUE_PATH,
     STOCK_BUILDING_AGS_ONLY_PRESET: _STOCK_AGS_ONLY_CATALOGUE_PATH,
-    STOCK_BUILDING_AGS_COMBINED_PRESET: _STOCK_AGS_COMBINED_CATALOGUE_PATH,
 }
 
 
+def _expand_stock_identifier(identifier: str) -> tuple[str, ...]:
+    if identifier in _LEGACY_COMBINED_PRESET_EXPANSIONS:
+        return _LEGACY_COMBINED_PRESET_EXPANSIONS[identifier]
+    if identifier in STOCK_BUILDING_PRESETS:
+        return (identifier,)
+    return ()
+
+
 def stock_building_preset_ids(value: object) -> tuple[str, ...]:
-    """Return canonical stock catalogue IDs from a single or composite preset."""
+    """Return canonical source-catalogue IDs from a stock preset selection."""
     text = str(value or "").strip().casefold()
-    if text in STOCK_BUILDING_PRESETS:
-        return (text,)
+    direct = _expand_stock_identifier(text)
+    if direct:
+        return direct
     if not text.startswith(STOCK_BUILDING_MULTI_PREFIX):
         return ()
+
     raw = text[len(STOCK_BUILDING_MULTI_PREFIX):]
-    requested = {item.strip().casefold() for item in raw.split(",") if item.strip()}
-    if not requested:
+    requested: set[str] = set()
+    unknown: list[str] = []
+    for item in (part.strip().casefold() for part in raw.split(",")):
+        if not item:
+            continue
+        expanded = _expand_stock_identifier(item)
+        if not expanded:
+            unknown.append(item)
+            continue
+        requested.update(expanded)
+    if not requested and not unknown:
         raise ValueError("stock-multi requires at least one stock building preset")
-    unknown = sorted(requested.difference(STOCK_BUILDING_PRESETS))
     if unknown:
-        raise ValueError("unknown stock building preset(s): " + ", ".join(unknown))
-    # Canonical catalogue order makes cache keys and generated reports stable
-    # regardless of checkbox click order or command-line ordering.
+        raise ValueError("unknown stock building preset(s): " + ", ".join(sorted(set(unknown))))
     return tuple(identifier for identifier in STOCK_BUILDING_PRESETS if identifier in requested)
 
 
 def encode_stock_building_presets(values: Sequence[str]) -> str:
-    """Encode one or more stock catalogue IDs into the existing preset field."""
-    requested = {str(value).strip().casefold() for value in values if str(value).strip()}
-    unknown = sorted(requested.difference(STOCK_BUILDING_PRESETS))
+    """Encode one or more source catalogue IDs into the existing preset field."""
+    requested: set[str] = set()
+    unknown: list[str] = []
+    for value in values:
+        identifier = str(value).strip().casefold()
+        if not identifier:
+            continue
+        expanded = _expand_stock_identifier(identifier)
+        if not expanded:
+            unknown.append(identifier)
+            continue
+        requested.update(expanded)
     if unknown:
-        raise ValueError("unknown stock building preset(s): " + ", ".join(unknown))
+        raise ValueError("unknown stock building preset(s): " + ", ".join(sorted(set(unknown))))
     ordered = tuple(identifier for identifier in STOCK_BUILDING_PRESETS if identifier in requested)
     if not ordered:
         raise ValueError("at least one stock building preset is required")
@@ -139,7 +171,7 @@ def encode_stock_building_presets(values: Sequence[str]) -> str:
 
 
 def _load_stock_preset_models(presets: Sequence[str]):
-    """Load and de-duplicate models from all selected stock catalogues."""
+    """Load and de-duplicate models from selected source catalogues."""
     by_path = {}
     for preset in presets:
         path = _STOCK_CATALOGUE_BY_PRESET[preset]
@@ -259,7 +291,7 @@ def _stock_options_first(
     auto_label: str,
 ) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
     """Put the stock catalogue choices directly after Automatic."""
-    stock_ids = frozenset(STOCK_BUILDING_PRESETS)
+    stock_ids = frozenset(_ACCEPTED_STOCK_BUILDING_PRESETS)
     stock_labels = frozenset(label for _identifier, label in STOCK_BUILDING_OPTIONS)
     remaining_options = tuple(
         (identifier, label)
@@ -429,9 +461,9 @@ def _install_factory_and_cli() -> None:
 
     non_stock = tuple(
         identifier for identifier in tuple(cli.HOUSE_STYLE_PRESET_IDENTIFIERS)
-        if str(identifier).casefold() not in STOCK_BUILDING_PRESETS
+        if str(identifier).casefold() not in _ACCEPTED_STOCK_BUILDING_PRESETS
     )
-    cli.HOUSE_STYLE_PRESET_IDENTIFIERS = (*STOCK_BUILDING_PRESETS, *non_stock)
+    cli.HOUSE_STYLE_PRESET_IDENTIFIERS = (*_ACCEPTED_STOCK_BUILDING_PRESETS, *non_stock)
 
 
 def _install_gui() -> None:
@@ -453,8 +485,8 @@ def _install_gui() -> None:
 
         existing_ids = tuple(getattr(gui, "HOUSE_STYLE_PRESET_IDENTIFIERS", ()))
         gui.HOUSE_STYLE_PRESET_IDENTIFIERS = (
-            *STOCK_BUILDING_PRESETS,
-            *(value for value in existing_ids if str(value).casefold() not in STOCK_BUILDING_PRESETS),
+            *_ACCEPTED_STOCK_BUILDING_PRESETS,
+            *(value for value in existing_ids if str(value).casefold() not in _ACCEPTED_STOCK_BUILDING_PRESETS),
         )
 
         label_to_identifier = dict(getattr(gui, "_HOUSE_STYLE_LABEL_TO_IDENTIFIER", {}))
