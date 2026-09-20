@@ -450,6 +450,9 @@ def _install_library_presets() -> None:
         payload = {
             "schema": 2,
             "mode": mode,
+            "ground_texture_profile": str(
+                getattr(self, "ground_texture_profile", "generated") or "generated"
+            ),
             "selected_building_jsons": [
                 f"data/{_STOCK_CATALOGUE_BY_PRESET[preset].name}"
                 for preset in selected_sources
