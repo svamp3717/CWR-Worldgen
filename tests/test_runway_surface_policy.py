@@ -370,6 +370,6 @@ def test_runway_policy_invalidates_previous_surface_representations() -> None:
         "surface-pipeline-v11-vectorized-material-pass",
         payload,
     ) == raw_cache_key(
-        "surface-pipeline-v22-malden-abel-classic",
+        "surface-pipeline-v23-malden-stock-landtext",
         payload,
     )
