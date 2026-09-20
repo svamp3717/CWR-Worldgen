@@ -57,9 +57,21 @@ NOGOVA_GROUND_TEXTURES.update({
     "a": r"o\pole1.paa",
 })
 
+MALDEN_GROUND_TEXTURES: dict[str, str] = {
+    "w": r"LandText\pi.pac",
+    "s": r"LandText\pi.pac",
+    "g": r"LandText\mo.pac",
+    "r": r"LandText\pi.pac",
+    "f": r"LandText\mo.pac",
+    "a": r"LandText\mo.pac",
+    "u": r"LandText\pi.pac",
+    "p": r"LandText\pi.pac",
+}
+
 STOCK_GROUND_TEXTURES: dict[str, dict[str, str]] = {
     "everon": EVERON_GROUND_TEXTURES,
     "nogova": NOGOVA_GROUND_TEXTURES,
+    "malden": MALDEN_GROUND_TEXTURES,
 }
 
 GROUND_TEXTURE_PROFILES = ("nogova", "malden", "everon", "generated", "desert")
@@ -102,7 +114,7 @@ def material_colour_for_profile(material: MaterialDefinition, profile: str) -> t
 def ground_texture_path(world_name: str, material_code: str, profile: str = "generated") -> str:
     if material_code not in {material.code for material in OSM_MATERIALS}:
         raise ValueError(f"unknown terrain material code: {material_code}")
-    if profile in {"generated", "desert", "malden"}:
+    if profile in {"generated", "desert"}:
         return rf"{world_name}\data\{material_code}.paa"
     if profile in STOCK_GROUND_TEXTURES:
         return STOCK_GROUND_TEXTURES[profile][material_code]
