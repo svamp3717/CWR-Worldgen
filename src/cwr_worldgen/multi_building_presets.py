@@ -863,6 +863,14 @@ def _install_gui() -> None:
                         variable.set(identifier in selected_set)
 
             def _sync_multi_building_controls(self) -> None:
+                # Base WorldgenGui.__init__ refreshes views before this subclass
+                # has created the dynamic stock/procedural checkbox variables.
+                # Treating that temporary absence as "nothing selected" used to
+                # overwrite a remembered/profile selection with auto during startup.
+                if not bool(
+                    getattr(self, "_building_preset_controls_ready", False)
+                ):
+                    return
                 selected = self._all_selected_building_presets()
                 persisted = building_selection_state(selected)
                 encoded = str(persisted["house_style_preset"])
@@ -946,6 +954,7 @@ def _install_gui() -> None:
                 return document
 
             def __init__(self, *args, **kwargs):
+                self._building_preset_controls_ready = False
                 super().__init__(*args, **kwargs)
                 raw = (
                     self.vars.get("house_style_preset").get()
@@ -955,6 +964,7 @@ def _install_gui() -> None:
                 self._normalise_building_preset_heading()
                 self._install_procedural_building_checkboxes()
                 self._apply_encoded_selection(raw)
+                self._building_preset_controls_ready = True
 
                 self._multi_preset_traces = []
                 for identifier, _label in (
