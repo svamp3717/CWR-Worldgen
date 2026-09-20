@@ -961,6 +961,11 @@ def surface_texture_wire_paths(world_name: str, profile: str) -> tuple[str, ...]
     return tuple(paths)
 
 def external_surface_texture_paths(profile: str) -> tuple[str, ...]:
+    # Malden's literal Abel paths come from the stock WRP and are intentionally
+    # trusted without asset discovery.  They belong in the generated WRP texture
+    # table, not in Worldgen's external-asset validation list.
+    if profile == "malden":
+        return ()
     stock_paths = STOCK_SURFACE_TEXTURES.get(profile)
     if stock_paths is None:
         return ()
