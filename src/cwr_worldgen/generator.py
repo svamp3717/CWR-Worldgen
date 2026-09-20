@@ -3027,10 +3027,11 @@ def build_milestone4(
     if _surface_ground_enabled(spec):
         generated_material_texture_paths = tuple(
             path for path, material in zip(material_texture_paths, materials)
-            if _ground_texture_profile(spec) not in {"everon", "nogova"} or getattr(material, "everon_path", None) is None
+            if _ground_texture_profile(spec) not in {"everon", "nogova", "malden"}
+            or getattr(material, "everon_path", None) is None
         )
     else:
-        generated_material_texture_paths = material_texture_paths if _ground_texture_profile(spec) in {"generated", "desert", "malden"} else ()
+        generated_material_texture_paths = material_texture_paths if _ground_texture_profile(spec) in {"generated", "desert"} else ()
     texture_paths = generated_material_texture_paths + (dummy_texture_path,)
     mod_root = output_dir / mod_directory_name
     pbo_path = mod_root / "Addons" / f"{spec.name}.pbo"
