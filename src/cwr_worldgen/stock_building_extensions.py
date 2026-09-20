@@ -58,13 +58,13 @@ STOCK_BUILDING_HAUS_ONLY_LABEL = _catalogue_display_name(
 )
 STOCK_BUILDING_AGS_ONLY_LABEL = _catalogue_display_name(
     _STOCK_AGS_ONLY_CATALOGUE_PATH,
-    "AGS inds+port",
+    "ags_inds.pbo and ags_port.pbo buildings",
 )
 
 # Compatibility labels for code/imports that still know the old combined IDs.
 STOCK_BUILDING_COMBINED_LABEL = "Stock combined (non-Resistance + Resistance) buildings"
 STOCK_BUILDING_HAUS_COMBINED_LABEL = "Haus.pbo + Resistance + vanilla buildings"
-STOCK_BUILDING_AGS_COMBINED_LABEL = "AGS inds+port and combined stock"
+STOCK_BUILDING_AGS_COMBINED_LABEL = "ags_inds.pbo and ags_port.pbo buildings + combined stock"
 stock.STOCK_BUILDING_PRESET_LABEL = STOCK_BUILDING_COMBINED_LABEL
 
 # These are the only real source presets exposed in the GUI. Multi-selection
