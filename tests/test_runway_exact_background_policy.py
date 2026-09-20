@@ -72,23 +72,23 @@ def test_dxt1_decoder_round_trips_generated_paa(tmp_path) -> None:
     assert np.max(np.abs(sample - np.asarray((41, 72, 33)))) <= 8
 
 
-def test_exact_loader_decodes_classic_paletted_malden_pac(tmp_path) -> None:
+def test_exact_loader_resolves_malden_abel_texture_from_pbo(tmp_path) -> None:
     root = tmp_path / "game"
-    pac = root / "LandText" / "mo.pac"
-    _write_paletted_pac(pac, (62, 91, 48), 16)
+    source = tmp_path / "tt.paa"
+    texture = _write_test_texture(source, (62, 91, 48), 128)
+    pbo = root / "Abel.pbo"
+    _write_uncompressed_pbo(pbo, "tt.paa", texture)
 
     exact = _load_exact_texture(
         tmp_path / "unused-world",
         _spec("malden", asset_roots=(root,)),
-        r"LandText\mo.pac",
+        r"abel\tt.paa",
     )
 
     assert exact is not None
-    assert exact.mips == ()
-    assert exact.top_image.size == (16, 16)
-    pixel = exact.top_image.getpixel((7, 7))
-    assert pixel == (62, 91, 48)
-    assert Path(exact.source) == pac
+    assert exact.top_image.size == (128, 128)
+    assert _canonical(exact.wire_path) == r"abel\tt.paa"
+    assert Path(exact.source) == pbo
 
 
 def test_exact_loader_reads_world_local_generated_texture(tmp_path) -> None:
