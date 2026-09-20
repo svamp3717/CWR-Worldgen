@@ -219,6 +219,64 @@ class GuiCommandTests(unittest.TestCase):
             ),
         )
 
+    def test_malden_classic_selects_malden_ground_and_forest_profiles(self) -> None:
+        class Var:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        fake = type("FakeGui", (), {})()
+        fake._preset_guard = False
+        fake.vars = {
+            "appearance_preset": Var("Malden classic"),
+            "ground_textures": Var("everon"),
+            "forest_profile": Var("everon"),
+            "forest_single_tree_model": Var(r"data3d\str smrk_medium.p3d"),
+        }
+
+        WorldgenGui._apply_appearance_preset(fake)
+
+        self.assertEqual(fake.vars["ground_textures"].get(), "malden")
+        self.assertEqual(fake.vars["forest_profile"].get(), "malden")
+        self.assertEqual(
+            fake.vars["forest_single_tree_model"].get(),
+            r"data3d\str_fikovnik.p3d",
+        )
+
+    def test_everon_classic_keeps_matching_modern_profile_pair(self) -> None:
+        class Var:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        fake = type("FakeGui", (), {})()
+        fake._preset_guard = False
+        fake.vars = {
+            "appearance_preset": Var("Everon classic"),
+            "ground_textures": Var("malden"),
+            "forest_profile": Var("malden"),
+            "forest_single_tree_model": Var(r"data3d\str_fikovnik.p3d"),
+        }
+
+        WorldgenGui._apply_appearance_preset(fake)
+
+        self.assertEqual(fake.vars["ground_textures"].get(), "everon")
+        self.assertEqual(fake.vars["forest_profile"].get(), "everon")
+        self.assertEqual(
+            fake.vars["forest_single_tree_model"].get(),
+            r"data3d\str smrk_medium.p3d",
+        )
+
     def test_debug_vegetation_presets_are_removed(self) -> None:
         labels = {preset.casefold() for preset in APPEARANCE_PRESETS}
         self.assertFalse(any("safe bushes" in preset for preset in labels))
