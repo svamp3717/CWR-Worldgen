@@ -498,16 +498,21 @@ class SurfacePassTests(unittest.TestCase):
         )
         self.assertNotIn(r"o\b1.paa", external_surface_texture_paths("nogova"))
 
-    def test_malden_profile_reuses_basic_ground_for_farmland(self) -> None:
+    def test_malden_profile_uses_stock_landtext_for_all_surface_classes(self) -> None:
         world_name = "abcdefghijklmnopqrst"
         paths = surface_texture_wire_paths(world_name, "malden")
-        self.assertFalse(external_surface_texture_paths("malden"))
         self.assertEqual(len(paths), len(MILESTONE9_MATERIALS))
-        self.assertTrue(all(path.startswith(world_name + r"\data") for path in paths))
+        self.assertEqual(set(paths), {r"LandText\mo.pac", r"LandText\pi.pac"})
+        self.assertEqual(
+            set(external_surface_texture_paths("malden")),
+            {r"LandText\mo.pac", r"LandText\pi.pac"},
+        )
         grass = paths[MATERIAL_INDEX["g"]]
+        self.assertEqual(grass, r"LandText\mo.pac")
         self.assertEqual(paths[MATERIAL_INDEX["a"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["b"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["c"]], grass)
+        self.assertFalse(any(path.startswith(world_name + r"\data") for path in paths))
 
     def test_sidewalks_are_disabled_by_default(self) -> None:
         self.assertFalse(Milestone9Spec(source_dir=Path("unused")).sidewalks_enabled)
