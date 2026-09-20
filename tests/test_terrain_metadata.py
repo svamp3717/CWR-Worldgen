@@ -178,7 +178,7 @@ def test_cli_readme_binding_replaces_any_stale_build_reference() -> None:
         cli.build_milestone9 = current
 
 
-def test_terrain_readme_is_deployed_beside_pbo_without_missions(tmp_path: Path) -> None:
+def test_terrain_readme_is_deployed_beside_pbo_with_required_menu_intro(tmp_path: Path) -> None:
     output_dir = tmp_path / "build"
     runtime_root = output_dir / "runtime"
     source_addons = runtime_root / "Addons"
@@ -186,6 +186,12 @@ def test_terrain_readme_is_deployed_beside_pbo_without_missions(tmp_path: Path) 
 
     pbo_path = source_addons / "wg_test.pbo"
     pbo_path.write_bytes(b"pbo")
+    intro_dir = runtime_root / "Anims" / "intro1.wg_test"
+    intro_dir.mkdir(parents=True)
+    intro_mission = intro_dir / "mission.sqm"
+    intro_script = intro_dir / "intro.sqs"
+    intro_mission.write_text("mission", encoding="utf-8")
+    intro_script.write_text("camera", encoding="utf-8")
 
     source_dir = tmp_path / "source"
     source_dir.mkdir()
@@ -206,6 +212,8 @@ def test_terrain_readme_is_deployed_beside_pbo_without_missions(tmp_path: Path) 
     result = SimpleNamespace(
         output_dir=output_dir,
         pbo_path=pbo_path,
+        intro_mission_path=intro_mission,
+        intro_script_path=intro_script,
     )
     spec = SimpleNamespace(
         display_name="Test Terrain",
@@ -229,7 +237,11 @@ def test_terrain_readme_is_deployed_beside_pbo_without_missions(tmp_path: Path) 
     assert local_readme.is_file()
     assert deployed_readme.is_file()
     assert "PBO: wg_test.pbo" in deployed_readme.read_text(encoding="utf-8")
+    assert (deploy_root / "Anims" / "intro1.wg_test" / "mission.sqm").is_file()
+    assert (deploy_root / "Anims" / "intro1.wg_test" / "intro.sqs").is_file()
     assert {Path(item["destination"]).name for item in report["files"]} == {
         "wg_test.pbo",
         "Test Terrain ReadMe.txt",
+        "mission.sqm",
+        "intro.sqs",
     }
