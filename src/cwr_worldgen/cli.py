@@ -844,7 +844,7 @@ def main(argv: list[str] | None = None) -> int:
                 forest_everon_steep_model=args.forest_steep_model,
                 forest_everon_steep_footprint=args.forest_steep_footprint,
                 forest_everon_steep_maximum_relief=args.forest_steep_max_relief,
-                forest_hillside_fallback=args.forest_profile == "malden",
+                forest_hillside_fallback=False,
                 forest_hillside_tree_model=args.forest_hillside_tree_model,
                 forest_hillside_trees_per_block=args.forest_hillside_trees_per_block,
                 forest_hillside_tree_footprint=args.forest_hillside_tree_footprint,
