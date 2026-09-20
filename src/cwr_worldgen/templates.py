@@ -30,6 +30,7 @@ def render_config(
     milestone: int,
     town_names: Sequence[_TownLocation] = (),
     animated_building_models: Sequence[str] = (),
+    include_intro: bool = True,
 ) -> str:
     centre = int(spec.centre)
     icon_filename = "icon.paa" if bool(getattr(spec, "surface_pass_enabled", False)) else "g.paa"
@@ -46,6 +47,7 @@ def render_config(
             )
         names_block = "\n        class Names\n        {\n" + "\n\n".join(entries) + "\n        };"
 
+    cutscenes = f'{{"{WORLD_INTRO_NAME}"}}' if include_intro else "{}"
     vehicles_block = ""
     if animated_building_models:
         base_class = f"CWR_{spec.name}_ProceduralDoorHouse"
@@ -144,7 +146,7 @@ class CfgWorlds
         access = 3;
         description = "{spec.display_name}";
         worldName = "\\{spec.name}\\{spec.name}.wrp";
-        cutscenes[] = {{"{WORLD_INTRO_NAME}"}};
+        cutscenes[] = {cutscenes};
         icon = "\\{spec.name}\\data\\{icon_filename}";
         longitude = 0;
         latitude = 0;
