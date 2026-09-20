@@ -3072,6 +3072,13 @@ def build_milestone4(
     cache_report_path = output_dir / "cache-report.json"
 
     source_dir.mkdir(parents=True, exist_ok=True)
+    # Production builds no longer emit smoke-test or menu-intro missions. Remove
+    # stale copies from incremental output folders so an old build cannot make
+    # it look as though mission generation still happened.
+    if mission_path.parent.is_dir():
+        shutil.rmtree(mission_path.parent)
+    if intro_dir.is_dir():
+        shutil.rmtree(intro_dir)
     cache_dir, cache_enabled, cache_refresh = _cache_settings(spec)
 
     report_progress(0, "Starting core world generation")
