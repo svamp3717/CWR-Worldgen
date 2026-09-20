@@ -705,7 +705,7 @@ def _remove_stock_buildings_overlapping_final_roads(
         return result, ()
 
     road_objects = priority._filter_suppressed_roads(
-        tuple(getattr(road_report, "objects", ()) or ())
+        getattr(road_report, "objects", ()) or ()
     )
     primitives = clearance._road_primitives(
         SimpleNamespace(objects=road_objects),
