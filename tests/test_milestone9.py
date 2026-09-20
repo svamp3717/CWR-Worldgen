@@ -4477,7 +4477,7 @@ class SemanticFeatureTests(unittest.TestCase):
         self.assertIn(r"data3d\str_fikovnik.p3d", malden_trusted)
 
 class DeploymentTests(unittest.TestCase):
-    def test_deploy_copies_world_pbo_and_readme_without_missions(self) -> None:
+    def test_deploy_copies_world_pbo_readme_and_required_menu_intro(self) -> None:
         from types import SimpleNamespace
         from cwr_worldgen.milestone9 import _deploy_runtime_to_existing_mod
 
@@ -4491,12 +4491,23 @@ class DeploymentTests(unittest.TestCase):
             readme = source_mod / "Addons" / "CWR Test ReadMe.txt"
             readme.write_text("terrain metadata", encoding="utf-8")
             (source_mod / "Addons" / "not-deployed.txt").write_text("diagnostic", encoding="utf-8")
+            intro = source_mod / "Anims" / "intro1.cwr_test"
+            intro.mkdir(parents=True)
+            intro_mission = intro / "mission.sqm"
+            intro_script = intro / "intro.sqs"
+            intro_mission.write_text("mission", encoding="utf-8")
+            intro_script.write_text("camera", encoding="utf-8")
             target = root / "@ExistingMod"
             target.mkdir()
             # Existing mods are not always consistent about directory casing.
             selected_addons = target / "addons"
             selected_addons.mkdir()
-            result = SimpleNamespace(output_dir=output, pbo_path=pbo)
+            result = SimpleNamespace(
+                output_dir=output,
+                pbo_path=pbo,
+                intro_mission_path=intro_mission,
+                intro_script_path=intro_script,
+            )
             # Selecting Addons itself is recovered to the enclosing mod root.
             report = _deploy_runtime_to_existing_mod(result, selected_addons)
             self.assertEqual((target / "addons" / "cwr_test.pbo").read_bytes(), b"pbo")
@@ -4505,16 +4516,23 @@ class DeploymentTests(unittest.TestCase):
                 "terrain metadata",
             )
             self.assertFalse((target / "addons" / "not-deployed.txt").exists())
-            self.assertFalse((target / "Anims").exists())
+            self.assertEqual(
+                (target / "Anims" / "intro1.cwr_test" / "mission.sqm").read_text(encoding="utf-8"),
+                "mission",
+            )
+            self.assertEqual(
+                (target / "Anims" / "intro1.cwr_test" / "intro.sqs").read_text(encoding="utf-8"),
+                "camera",
+            )
             self.assertFalse((target / "@CWR-Milestone9").exists())
             self.assertFalse((selected_addons / "Addons").exists())
             self.assertEqual(report["mod_folder"], str(target.resolve()))
             self.assertEqual(report["requested_folder"], str(selected_addons.resolve()))
             self.assertTrue(report["verified"])
-            self.assertEqual(report["file_count"], 2)
+            self.assertEqual(report["file_count"], 4)
             self.assertEqual(
                 {Path(item["destination"]).name for item in report["files"]},
-                {"cwr_test.pbo", "CWR Test ReadMe.txt"},
+                {"cwr_test.pbo", "CWR Test ReadMe.txt", "mission.sqm", "intro.sqs"},
             )
 
     def test_deploy_runs_even_when_final_validation_report_fails(self) -> None:
