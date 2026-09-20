@@ -96,6 +96,8 @@ def test_source_catalogues_replace_precombined_json_files() -> None:
     assert resistance["schema"] == 5
     assert haus_only["schema"] == 5
     assert ags_only["schema"] == 5
+    assert ags_only["display_name"] == "ags_inds.pbo and ags_port.pbo buildings"
+    assert STOCK_BUILDING_AGS_ONLY_LABEL == "ags_inds.pbo and ags_port.pbo buildings"
     assert len(non_resistance_paths) == 77
     assert len(resistance_paths) == 53
     assert len(haus_only_paths) == 42
