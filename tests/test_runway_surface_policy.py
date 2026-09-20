@@ -113,6 +113,19 @@ def test_malden_classic_uses_only_stock_landtext_ground_tiles() -> None:
     assert set(legacy) == {r"LandText\mo.pac", r"LandText\pi.pac"}
 
 
+def test_malden_surface_writer_emits_no_world_local_ground_tiles(tmp_path) -> None:
+    written = surface_pass.write_surface_textures(
+        tmp_path,
+        "wg_malden",
+        "malden",
+        "malden-stock-test",
+        128,
+    )
+
+    assert written == ()
+    assert not (tmp_path / "data").exists()
+
+
 def test_everon_farmland_uses_eden_ground_texture_only() -> None:
     paths = surface_pass.surface_texture_wire_paths("wg_everon", "everon")
 
