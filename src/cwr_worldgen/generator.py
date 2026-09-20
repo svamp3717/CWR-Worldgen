@@ -1976,8 +1976,7 @@ def _validate_milestone4(
         ("class Names" in config) == bool(towns),
         f"{len(towns)} names",
     ))
-    checks.extend(_validate_world_intro(result, spec.name))
-    checks.append(("Smoke-test mission exists", result.mission_path.is_file(), result.mission_path.name))
+    checks.append(("Production config disables menu intro mission", "cutscenes[] = {};" in config, "cutscenes[] = {};"))
     checks.append(("OSM attribution accompanies mod", (result.output_dir / mod_directory_name / "OSM-ATTRIBUTION.txt").is_file(), "ODbL attribution"))
 
     lines = [f"CWR World Generator - Milestone {milestone_number} validation", ""]
@@ -3073,8 +3072,6 @@ def build_milestone4(
     cache_report_path = output_dir / "cache-report.json"
 
     source_dir.mkdir(parents=True, exist_ok=True)
-    mission_path.parent.mkdir(parents=True, exist_ok=True)
-    intro_dir.mkdir(parents=True, exist_ok=True)
     cache_dir, cache_enabled, cache_refresh = _cache_settings(spec)
 
     report_progress(0, "Starting core world generation")
@@ -3642,7 +3639,7 @@ def build_milestone4(
                 shutil.copyfile(overview_paa_path, overview_bundle / "overview.paa")
                 shutil.copyfile(world_icon_path, overview_bundle / "icon.paa")
 
-    report_progress(89, "Writing configuration and intro mission files")
+    report_progress(89, "Writing world configuration")
     animated_building_models = (
         tuple(
             asset.model_path for asset in building_generation.model_assets
@@ -3656,12 +3653,10 @@ def build_milestone4(
         milestone=milestone_number,
         town_names=towns,
         animated_building_models=animated_building_models,
+        include_intro=False,
     )
     validate_cwa_config(config_text)
     (source_dir / "config.cpp").write_text(config_text, encoding="ascii", newline="\n")
-    mission_path.write_text(render_mission(spec, spawn_x=spawn.x, spawn_z=spawn.z, milestone=milestone_number), encoding="ascii", newline="\n")
-    intro_mission_path.write_text(render_world_intro_mission(spec, spawn_x=spawn.x, spawn_z=spawn.z), encoding="ascii", newline="\n")
-    intro_script_path.write_text(render_world_intro_script(spawn_x=spawn.x, spawn_z=spawn.z), encoding="ascii", newline="\n")
 
     report_progress(90, "Rendering build previews and diagnostics")
     _write_composite_preview(preview_path, spec.cells, spec.cells, elevations, slopes, material_indices, materials)
@@ -4390,9 +4385,6 @@ def build_milestone4(
                 "infrastructure-asset-catalogue.json": _sha256(infrastructure_catalogue_path),
             } if infrastructure_generation else {}),
             f"{mod_directory_name}/Addons/{spec.name}.pbo": _sha256(pbo_path),
-            f"Missions/test_mission.{spec.name}/mission.sqm": _sha256(mission_path),
-            f"{mod_directory_name}/Anims/{WORLD_INTRO_NAME}.{spec.name}/mission.sqm": _sha256(intro_mission_path),
-            f"{mod_directory_name}/Anims/{WORLD_INTRO_NAME}.{spec.name}/intro.sqs": _sha256(intro_script_path),
             "preview.png": _sha256(preview_path),
             "height-preview.png": _sha256(height_preview_path),
             "material-preview.png": _sha256(material_preview_path),
@@ -4503,7 +4495,7 @@ def build_milestone4(
         lines = [
             "[FAIL] Final validation checks raised an exception",
             f"Reason: {type(exc).__name__}: {exc}",
-            "Generated runtime preserved; deployment may still copy the PBO and intro files.",
+            "Generated PBO preserved; deployment may still copy the PBO.",
             f"PBO SHA-256: {_sha256(pbo_path) if pbo_path.is_file() else 'missing'}",
         ]
     else:
