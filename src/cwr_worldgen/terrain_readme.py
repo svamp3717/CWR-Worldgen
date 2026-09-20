@@ -67,11 +67,12 @@ def _building_preset_label(value: object) -> str:
         return "Automatic (area / country)"
 
     try:
-        from .stock_building_extensions import STOCK_BUILDING_OPTIONS
+        from .stock_building_extensions import STOCK_BUILDING_OPTIONS, stock_building_preset_ids
         stock_labels = dict(STOCK_BUILDING_OPTIONS)
-        if identifier in stock_labels:
-            return stock_labels[identifier]
-    except (ImportError, RuntimeError):
+        selected_stock = stock_building_preset_ids(identifier)
+        if selected_stock:
+            return " + ".join(stock_labels.get(item, _humanize_identifier(item)) for item in selected_stock)
+    except (ImportError, RuntimeError, ValueError):
         pass
 
     try:
@@ -135,10 +136,9 @@ def _building_readme_details(result: Any, spec: Any) -> dict[str, object]:
         selected = row.get("selected")
         if not isinstance(selected, dict):
             continue
-        for key in ("regional_style", "country_style_identifier"):
-            value = str(selected.get(key, "")).strip()
-            if value:
-                style_identifiers.add(value)
+        value = str(selected.get("regional_style", "")).strip()
+        if value:
+            style_identifiers.add(value)
         value = str(selected.get("building_class", "")).strip()
         if value:
             class_names.add(value)
