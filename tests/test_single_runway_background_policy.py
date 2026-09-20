@@ -21,13 +21,13 @@ def test_one_runway_background_texture_per_preset() -> None:
     assert runway_background_texture_path(_spec("nogova")) == r"o\t1.paa"
     assert runway_background_texture_path(_spec("everon")) == r"Eden\zbh.paa"
     assert runway_background_texture_path(_spec("desert")) == r"o\ps.paa"
-    assert runway_background_texture_path(_spec("malden")) == r"wg_test\data\g.paa"
+    assert runway_background_texture_path(_spec("malden")) == r"LandText\mo.pac"
     assert runway_background_texture_path(_spec("generated")) == r"wg_test\data\g.paa"
 
     assert external_runway_texture_paths(_spec("nogova")) == (r"o\t1.paa",)
     assert external_runway_texture_paths(_spec("everon")) == (r"Eden\zbh.paa",)
     assert external_runway_texture_paths(_spec("desert")) == (r"o\ps.paa",)
-    assert external_runway_texture_paths(_spec("malden")) == ()
+    assert external_runway_texture_paths(_spec("malden")) == (r"LandText\mo.pac",)
     assert external_runway_texture_paths(_spec("generated")) == ()
 
 
