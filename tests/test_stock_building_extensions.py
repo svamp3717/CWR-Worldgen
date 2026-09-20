@@ -271,4 +271,4 @@ def test_stock_fit_revision_is_final_active_placement_cache_salt() -> None:
         clearance._CACHE_REVISION
         == extensions._BUILDING_PLACEMENT_CACHE_REVISION
     )
-    assert "stock-fit-overlap" in clearance._CACHE_REVISION
+    assert "malden-modern-forest" in clearance._CACHE_REVISION
