@@ -207,6 +207,27 @@ def test_procedural_bridges_remain_default_while_gui_switch_is_hidden() -> None:
     assert _PROCEDURAL_BRIDGES_CHECKBOX_TEXT == "Procedural bridges (instead of Nogova)"
 
 
+def test_stock_building_catalogue_paths_do_not_overlap_settlement_prop_models() -> None:
+    from cwr_worldgen import osm
+
+    catalogue_paths = {
+        model.model_path.replace("/", "\\").casefold()
+        for preset in STOCK_BUILDING_PRESETS
+        for model in _library(preset).models
+    }
+    prop_paths = {
+        str(model).replace("/", "\\").casefold()
+        for model in (
+            *osm.STOCK_SETTLEMENT_DETAIL_MODELS,
+            *osm.STOCK_STREET_BUS_SHELTER_MODELS,
+            *osm.STOCK_STREET_TREE_SURROUND_MODELS,
+            *osm.STOCK_STREET_TREE_MODELS,
+        )
+    }
+
+    assert catalogue_paths.isdisjoint(prop_paths)
+
+
 def test_measured_origin_lift_is_added_to_stock_building_object() -> None:
     library = _library(STOCK_BUILDING_PRESET)
     model = next(model for model in library.models if model.origin_to_bottom_m > 1.0)
