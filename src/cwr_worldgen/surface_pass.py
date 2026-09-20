@@ -33,39 +33,43 @@ class SurfaceMaterialDefinition(MaterialDefinition):
     everon_path: str | None = None
 
 
+_EVERON_DEFAULT_GRASS_TEXTURE = r"Eden\z.paa"
+_EVERON_FARMLAND_TEXTURE = r"Eden\zbh.paa"
+
+
 # One-character codes keep generated texture paths inside RVW4's 31-byte limit
 # even when the world name uses all twenty permitted characters.
 # The classic Everon and Malden profiles are complete stock-texture palettes.
 # OSM still supplies semantic placement masks, but no generated OSM-themed ground
 # artwork is written for those profiles. Everon rock classes still use the
-# verified O.pbo stone textures, but farmland deliberately stays on Eden grass
-# so the Everon Classic preset does not introduce Nogova/Resistance field tiles.
+# verified O.pbo stone textures. Clean Eden grass is the general/default terrain,
+# while the older dirtier Eden grass is reserved for farmland semantics.
 # The remaining semantic classes reuse the compact verified Eden palette.
 MILESTONE9_MATERIALS: tuple[SurfaceMaterialDefinition, ...] = (
     SurfaceMaterialDefinition("w", "seabed/water", (48, 75, 94), r"Eden\tn.paa"),
     SurfaceMaterialDefinition("q", "wet shoreline", (116, 104, 75), r"Eden\tn.paa"),
     SurfaceMaterialDefinition("s", "dry shoreline sand", (184, 168, 111), r"Eden\bak\bah.pac"),
-    SurfaceMaterialDefinition("g", "grass", (83, 121, 67), r"Eden\zbh.paa"),
-    SurfaceMaterialDefinition("h", "dry grass", (119, 126, 73), r"Eden\zbh.paa"),
+    SurfaceMaterialDefinition("g", "grass", (83, 121, 67), _EVERON_DEFAULT_GRASS_TEXTURE),
+    SurfaceMaterialDefinition("h", "dry grass", (119, 126, 73), _EVERON_DEFAULT_GRASS_TEXTURE),
     SurfaceMaterialDefinition("r", "rock", (109, 106, 101), r"o\l1.paa"),
     SurfaceMaterialDefinition("k", "steep rock/scree", (86, 84, 82), r"o\lom2.paa"),
-    SurfaceMaterialDefinition("f", "forest interior", (47, 83, 44), r"Eden\zbh.paa"),
-    SurfaceMaterialDefinition("e", "forest edge", (67, 99, 53), r"Eden\zbh.paa"),
-    SurfaceMaterialDefinition("a", "farmland light", (154, 144, 78), r"Eden\zbh.paa"),
-    SurfaceMaterialDefinition("b", "farmland dark", (126, 121, 64), r"Eden\zbh.paa"),
-    SurfaceMaterialDefinition("c", "field boundary", (91, 92, 52), r"Eden\zbh.paa"),
+    SurfaceMaterialDefinition("f", "forest interior", (47, 83, 44), _EVERON_DEFAULT_GRASS_TEXTURE),
+    SurfaceMaterialDefinition("e", "forest edge", (67, 99, 53), _EVERON_DEFAULT_GRASS_TEXTURE),
+    SurfaceMaterialDefinition("a", "farmland light", (154, 144, 78), _EVERON_FARMLAND_TEXTURE),
+    SurfaceMaterialDefinition("b", "farmland dark", (126, 121, 64), _EVERON_FARMLAND_TEXTURE),
+    SurfaceMaterialDefinition("c", "field boundary", (91, 92, 52), _EVERON_FARMLAND_TEXTURE),
     SurfaceMaterialDefinition("u", "urban surface", (139, 136, 130), r"Eden\tn.paa"),
     SurfaceMaterialDefinition("i", "industrial surface", (112, 113, 109), r"Eden\tn.paa"),
     SurfaceMaterialDefinition("p", "paved road", (57, 57, 55), r"Eden\tn.paa"),
     SurfaceMaterialDefinition("o", "road shoulder", (112, 105, 91), r"Eden\bak\bah.pac"),
     SurfaceMaterialDefinition("d", "dirt road", (113, 86, 55), r"Eden\bak\bah.pac"),
-    SurfaceMaterialDefinition("t", "dirt-road blend", (104, 101, 64), r"Eden\zbh.paa"),
+    SurfaceMaterialDefinition("t", "dirt-road blend", (104, 101, 64), _EVERON_DEFAULT_GRASS_TEXTURE),
     # Dedicated gravel underlay uses the generated gravel artwork while the
     # artwork as the road P3D. It hides sub-cell grass cracks beneath object joins
     # instead of letting a curved road reveal green triangles between cards.
     SurfaceMaterialDefinition("v", "gravel road", (80, 76, 68), r"Eden\bak\bah.pac"),
-    SurfaceMaterialDefinition("j", "park", (96, 127, 67), r"Eden\zbh.paa"),
-    SurfaceMaterialDefinition("y", "sports field", (103, 132, 74), r"Eden\zbh.paa"),
+    SurfaceMaterialDefinition("j", "park", (96, 127, 67), _EVERON_DEFAULT_GRASS_TEXTURE),
+    SurfaceMaterialDefinition("y", "sports field", (103, 132, 74), _EVERON_DEFAULT_GRASS_TEXTURE),
     SurfaceMaterialDefinition("x", "mapped beach", (194, 174, 116), r"Eden\bak\bah.pac"),
 )
 
