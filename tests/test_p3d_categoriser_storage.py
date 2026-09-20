@@ -31,6 +31,9 @@ def test_complete_and_incomplete_reviews_are_saved_separately(tmp_path: Path) ->
         r"o\hous\untouched.p3d": Classification(
             categories=[], placement="", reviewed=False
         ),
+        r"o\hous\cleared.p3d": Classification(
+            categories=[], placement="", reviewed=True
+        ),
     }
 
     complete_count, incomplete_count = save_split_state(
@@ -59,6 +62,8 @@ def test_complete_and_incomplete_reviews_are_saved_separately(tmp_path: Path) ->
     ]
     assert r"o\hous\untouched.p3d" not in json.dumps(primary)
     assert r"o\hous\untouched.p3d" not in json.dumps(companion)
+    assert r"o\hous\cleared.p3d" not in json.dumps(primary)
+    assert r"o\hous\cleared.p3d" not in json.dumps(companion)
     assert "failures" not in primary
     assert "failures" not in companion
 
@@ -72,6 +77,7 @@ def test_complete_and_incomplete_reviews_are_saved_separately(tmp_path: Path) ->
     assert loaded[r"o\hous\complete.p3d"].origin_to_bottom_m == 4.125
     assert loaded[r"o\hous\missing-placement.p3d"].reviewed is True
     assert r"o\hous\untouched.p3d" not in loaded
+    assert r"o\hous\cleared.p3d" not in loaded
 
 
 def test_completing_a_review_removes_stale_companion_entry(tmp_path: Path) -> None:
@@ -94,3 +100,28 @@ def test_completing_a_review_removes_stale_companion_entry(tmp_path: Path) -> No
     primary = json.loads(output.read_text(encoding="utf-8"))
     assert [item["model_path"] for item in primary["models"]] == [key]
     assert "failures" not in primary
+
+
+def test_clearing_categories_and_placement_removes_stale_incomplete_record(tmp_path: Path) -> None:
+    output = tmp_path / "catalogue.json"
+    key = r"o\hous\cleared.p3d"
+
+    save_split_state(
+        output,
+        categories=["Residential"],
+        state={key: Classification(["Residential"], "", True)},
+    )
+    companion = incomplete_state_path(output)
+    assert companion.exists()
+
+    complete_count, incomplete_count = save_split_state(
+        output,
+        categories=["Residential"],
+        state={key: Classification([], "", True)},
+    )
+
+    assert complete_count == 0
+    assert incomplete_count == 0
+    assert not companion.exists()
+    primary = json.loads(output.read_text(encoding="utf-8"))
+    assert primary["models"] == []
