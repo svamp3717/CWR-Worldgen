@@ -63,7 +63,7 @@ NOGOVA_GROUND_TEXTURES.update({
 # may open only the selected main background tile (abel\tt.paa), as for Everon.
 MALDEN_GROUND_TEXTURES: dict[str, str] = {
     "w": r"abel\pi.paa",
-    "s": r"abel\sh.paa",
+    "s": r"abel\tt.paa",
     "g": r"abel\tt.paa",
     "r": r"abel\tt.paa",
     "f": r"abel\tt.paa",
