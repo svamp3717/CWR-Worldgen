@@ -80,6 +80,17 @@ def selected_building_jsons(value: object) -> tuple[str, ...]:
     return tuple(result)
 
 
+def building_selection_state(values: Sequence[str]) -> dict[str, object]:
+    """Return stable persisted metadata for the visible building checkboxes."""
+    encoded = encode_building_presets(values)
+    selected = building_preset_ids(encoded)
+    return {
+        "house_style_preset": encoded,
+        "selected_building_presets": list(selected),
+        "selected_building_jsons": list(selected_building_jsons(encoded)),
+    }
+
+
 def _annotate_building_catalogue(
     catalogue_path: Path,
     source_dir: Path,
@@ -853,12 +864,19 @@ def _install_gui() -> None:
 
             def _sync_multi_building_controls(self) -> None:
                 selected = self._all_selected_building_presets()
-                encoded = encode_building_presets(selected)
+                persisted = building_selection_state(selected)
+                encoded = str(persisted["house_style_preset"])
                 preset_var = self.vars.get("house_style_preset")
                 if preset_var is not None:
                     current = str(preset_var.get() or "")
                     if current != encoded:
                         preset_var.set(encoded)
+                state_path = getattr(self, "state_path", None)
+                if state_path is not None:
+                    try:
+                        gui.update_gui_state(state_path, persisted)
+                    except OSError:
+                        pass
 
                 stock_ids = tuple(
                     value for value in selected
@@ -918,15 +936,13 @@ def _install_gui() -> None:
 
             def _profile_document(self) -> dict[str, object]:
                 document = super()._profile_document()
-                selected = encode_building_presets(
+                persisted = building_selection_state(
                     self._all_selected_building_presets()
                 )
                 values = document.get("values")
                 if isinstance(values, dict):
-                    values["house_style_preset"] = selected
-                document["selected_building_jsons"] = list(
-                    selected_building_jsons(selected)
-                )
+                    values["house_style_preset"] = persisted["house_style_preset"]
+                document.update(persisted)
                 return document
 
             def __init__(self, *args, **kwargs):
@@ -966,8 +982,24 @@ def _install_gui() -> None:
             def _load_profile(self) -> None:
                 super()._load_profile()
                 preset_var = self.vars.get("house_style_preset")
+                encoded = preset_var.get() if preset_var is not None else "auto"
+                profile_path = getattr(self, "profile_path", None)
+                if profile_path is not None:
+                    try:
+                        document = json.loads(profile_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        document = {}
+                    saved = document.get("selected_building_presets")
+                    if isinstance(saved, list):
+                        try:
+                            encoded = encode_building_presets(
+                                tuple(str(item) for item in saved)
+                            )
+                        except ValueError:
+                            pass
                 if preset_var is not None:
-                    self._apply_encoded_selection(preset_var.get())
+                    preset_var.set(encoded)
+                self._apply_encoded_selection(encoded)
                 self._sync_multi_building_controls()
 
             def _refresh_views(self) -> None:
