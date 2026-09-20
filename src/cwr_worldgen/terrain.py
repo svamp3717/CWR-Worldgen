@@ -79,7 +79,7 @@ GROUND_TEXTURE_PROFILES = ("nogova", "malden", "everon", "generated", "desert")
 
 MALDEN_MATERIAL_COLOURS: dict[str, tuple[int, int, int]] = {
     # Preview/fallback colours for classic Malden. Runtime ground references
-    # use the stock LandText mo/pi tiles directly.
+    # use the stock Abel texture namespace directly.
     "w": (48, 73, 91),
     "s": (184, 162, 109),
     "g": (109, 118, 70),
