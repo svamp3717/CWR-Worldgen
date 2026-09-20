@@ -188,11 +188,12 @@ def _stock_checkbox_key(identifier: str) -> str:
 _STOCK_PLACEMENT_CACHE_V96 = "nonroad-object-placement-v96-road-safe-settlement-clutter"
 _STOCK_PLACEMENT_CACHE_V99 = "nonroad-object-placement-v99-malden-modern-forest"
 _STOCK_PLACEMENT_CACHE_V100 = "nonroad-object-placement-v100-final-stock-road-audit"
+_STOCK_PLACEMENT_CACHE_V101 = "nonroad-object-placement-v101-stock-road-model-rescue"
 # Stable cross-module symbol. Mixed preset routing must not depend on a private
 # version-suffixed constant, otherwise every cache bump becomes an import-time
 # AttributeError waiting for one wrapper to miss the rename.
-STOCK_PLACEMENT_CACHE_NAMESPACE = _STOCK_PLACEMENT_CACHE_V100
-_BUILDING_PLACEMENT_CACHE_REVISION = "final-road-building-clearance-v9-serialized-stock-audit"
+STOCK_PLACEMENT_CACHE_NAMESPACE = _STOCK_PLACEMENT_CACHE_V101
+_BUILDING_PLACEMENT_CACHE_REVISION = "final-road-building-clearance-v10-stock-road-model-rescue"
 _INTERIOR_CHECKBOX_TEXT = "Enterable procedural-building interiors"
 _HIGH_QUALITY_TEXTURE_CHECKBOX_TEXT = "Higher-quality building textures (256 px)"
 _MATCH_TEXTURE_CHECKBOX_TEXT = "Match nearby same-shape town/city building textures"
@@ -680,18 +681,144 @@ def _install_gui() -> None:
     gui_entry._configure_gui = configure_gui
 
 
+def _stock_model_allowed_in_settlement(model, settlement: str) -> bool:
+    """Keep rescue models inside the same reviewed urban/rural placement pool."""
+    context = str(settlement or "rural").strip().casefold()
+    wanted = "Urban" if context in {"urban", "town", "city", "town_city"} else "Rural"
+    placement = str(getattr(model, "placement", "") or "")
+    return not placement or placement in {"Both", wanted}
+
+
+def _smaller_stock_road_replacement(
+    obj,
+    original_model,
+    stock_library: stock.StockBuildingLibrary,
+    road_index,
+    physical,
+    *,
+    preferred_family: str = "",
+):
+    """Return the largest smaller stock model that clears the road at this origin.
+
+    Preserve the mapped semantic family first. If every smaller model in that
+    family still intersects the road, allow a residential fallback before giving
+    up. Candidates must fit inside the original model's oriented rectangle, so
+    this late safety gate cannot create a new building/building overlap elsewhere.
+    """
+    original_width = max(0.05, float(original_model.width_m))
+    original_length = max(0.05, float(original_model.length_m))
+    original_area = original_width * original_length
+    original_path = _canonical_model_path(original_model.model_path)
+    settlement = stock_library._settlement_context(float(obj.x), float(obj.z))
+
+    family_order: list[str] = []
+    requested = str(preferred_family or "").strip().casefold()
+    if requested:
+        family_order.append(requested)
+    else:
+        for family in tuple(getattr(original_model, "families", ()) or ()):
+            folded = str(family).strip().casefold()
+            if folded and folded not in family_order:
+                family_order.append(folded)
+    if "residential" not in family_order:
+        family_order.append("residential")
+
+    for family in family_order:
+        safe: list[tuple[float, float, str, float, object]] = []
+        for candidate in tuple(getattr(stock_library, "models", ()) or ()):
+            if _canonical_model_path(candidate.model_path) == original_path:
+                continue
+            candidate_families = {
+                str(value).strip().casefold()
+                for value in tuple(getattr(candidate, "families", ()) or ())
+            }
+            if family not in candidate_families:
+                continue
+            if not _stock_model_allowed_in_settlement(candidate, settlement):
+                continue
+
+            candidate_area = float(candidate.width_m) * float(candidate.length_m)
+            if candidate_area >= original_area - 1.0e-6:
+                continue
+
+            for turn in (0.0, 90.0):
+                effective_width = (
+                    float(candidate.width_m)
+                    if turn == 0.0
+                    else float(candidate.length_m)
+                )
+                effective_length = (
+                    float(candidate.length_m)
+                    if turn == 0.0
+                    else float(candidate.width_m)
+                )
+                if (
+                    effective_width > original_width + 1.0e-6
+                    or effective_length > original_length + 1.0e-6
+                ):
+                    continue
+
+                heading = (float(obj.heading_degrees) + turn) % 360.0
+                polygon = stock._model_support_polygon(
+                    float(obj.x),
+                    float(obj.z),
+                    candidate,
+                    heading,
+                )
+                conflicts, _checked = physical.conflicts_at_clearance(
+                    polygon,
+                    road_index,
+                    0.0,
+                )
+                if conflicts:
+                    continue
+
+                # Largest safe footprint first means the rescue shrinks only as
+                # much as necessary. The remaining fields make ties deterministic.
+                dimension_loss = (
+                    (original_width - effective_width)
+                    + (original_length - effective_length)
+                )
+                safe.append(
+                    (
+                        -candidate_area,
+                        dimension_loss,
+                        _canonical_model_path(candidate.model_path),
+                        turn,
+                        candidate,
+                    )
+                )
+
+        if safe:
+            safe.sort(key=lambda item: item[:4])
+            _area, _loss, _path, turn, candidate = safe[0]
+            old_lift = float(stock_library.origin_lift_for_model(original_model.model_path))
+            new_lift = float(stock_library.origin_lift_for_model(candidate.model_path))
+            return replace(
+                obj,
+                model_path=candidate.model_path,
+                y=float(obj.y) - old_lift + new_lift,
+                heading_degrees=(float(obj.heading_degrees) + turn) % 360.0,
+            )
+    return None
+
+
 def _remove_stock_buildings_overlapping_final_roads(
     result,
     stock_library: stock.StockBuildingLibrary,
     road_report,
     elevations,
     spec,
+    *,
+    building_plans: Sequence[object] = (),
 ):
-    """Reject any serialized stock building that still physically overlaps a road.
+    """Rescue serialized stock buildings that still physically overlap a road.
 
     This is a last safety gate over the actual object transforms. It deliberately
-    runs after placement-cache restore and after minor-road suppression, so stale
-    cached building objects cannot bypass the plan-level road audit.
+    runs after placement-cache restore and after minor-road suppression. A
+    conflicting building first tries progressively smaller models from its mapped
+    semantic family, then a residential model. It is removed only if no selected
+    stock model can clear the final road at the same origin.
     """
     from . import final_building_road_clearance_policy as clearance
     from . import physical_road_overlap_policy as physical
@@ -703,6 +830,19 @@ def _remove_stock_buildings_overlapping_final_roads(
     }
     if not models:
         return result, ()
+
+    plan_families: dict[tuple[str, float, float], str] = {}
+    position_families: dict[tuple[float, float], str] = {}
+    for plan in tuple(building_plans or ()):
+        x = float(getattr(plan, "x", 0.0))
+        z = float(getattr(plan, "z", 0.0))
+        family = str(getattr(plan, "building_family", "") or "").strip().casefold()
+        if not family:
+            continue
+        position_families[(x, z)] = family
+        plan_families[
+            (_canonical_model_path(getattr(plan, "model_path", "")), x, z)
+        ] = family
 
     road_objects = priority._filter_suppressed_roads(
         getattr(road_report, "objects", ()) or ()
@@ -718,8 +858,10 @@ def _remove_stock_buildings_overlapping_final_roads(
 
     kept = []
     removed = []
+    changed = False
     for obj in tuple(getattr(result, "objects", ()) or ()):
-        model = models.get(_canonical_model_path(getattr(obj, "model_path", "")))
+        model_path = _canonical_model_path(getattr(obj, "model_path", ""))
+        model = models.get(model_path)
         if model is None:
             kept.append(obj)
             continue
@@ -734,18 +876,43 @@ def _remove_stock_buildings_overlapping_final_roads(
             road_index,
             0.0,
         )
-        if conflicts:
-            removed.append(obj)
+        if not conflicts:
+            kept.append(obj)
             continue
-        kept.append(obj)
 
-    if not removed:
+        x = float(obj.x)
+        z = float(obj.z)
+        family = plan_families.get(
+            (model_path, x, z),
+            position_families.get((x, z), ""),
+        )
+        replacement = _smaller_stock_road_replacement(
+            obj,
+            model,
+            stock_library,
+            road_index,
+            physical,
+            preferred_family=family,
+        )
+        if replacement is not None:
+            kept.append(replacement)
+            changed = True
+            continue
+
+        removed.append(obj)
+        changed = True
+
+    if not changed:
         return result, ()
 
     usage: dict[str, int] = {}
+    stock_usage: dict[str, int] = {}
     for obj in kept:
         key = str(obj.model_path)
         usage[key] = usage.get(key, 0) + 1
+        if _canonical_model_path(obj.model_path) in models:
+            stock_usage[key] = stock_usage.get(key, 0) + 1
+    stock_library._usage = stock_usage
 
     revised = replace(
         result,
@@ -835,16 +1002,31 @@ def _install_grounding() -> None:
             road_report,
             elevations,
             spec,
+            building_plans=kwargs.get("building_placement_plans", ()),
         )
-        if not removed:
+        if revised is result:
             return loaded
 
+        original_by_id = {
+            int(obj.object_id): obj
+            for obj in tuple(getattr(result, "objects", ()) or ())
+        }
+        replaced_count = sum(
+            1
+            for obj in tuple(getattr(revised, "objects", ()) or ())
+            if (
+                int(obj.object_id) in original_by_id
+                and _canonical_model_path(original_by_id[int(obj.object_id)].model_path)
+                != _canonical_model_path(obj.model_path)
+            )
+        )
         callback = kwargs.get("progress_callback")
         if callback is not None:
             callback(
                 52,
-                "Rejecting final stock buildings that physically overlap roads "
-                f"({len(removed):,} rejected after cache/final-road audit)",
+                "Resolving final stock buildings that physically overlap roads "
+                f"({replaced_count:,} replaced with smaller models; "
+                f"{len(removed):,} rejected after cache/final-road audit)",
             )
         return (revised, *loaded[1:])
 
