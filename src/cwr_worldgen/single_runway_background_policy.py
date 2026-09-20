@@ -47,10 +47,10 @@ def runway_background_texture_path(spec) -> str:
 def external_runway_texture_paths(spec) -> tuple[str, ...]:
     """Return the stock texture that validation should locate when required.
 
-    Malden Classic deliberately trusts the base-game Abel texture family exactly
-    as ordinary WRP references do. The runway renderer may still open tt.paa from a
-    configured game root for exact compositing, but absence from an asset scan is
-    never a build error.
+    Malden Classic deliberately trusts the Abel paths embedded in the stock WRP
+    exactly as ordinary terrain references do. Worldgen does not scan or open the
+    Malden texture package; those references are left entirely for the game to
+    resolve at runtime.
     """
     profile = _profile_name(spec)
     if profile == "malden":
