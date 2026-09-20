@@ -2650,6 +2650,44 @@ def _iterative_grounding_pass(
     return quantized, report, refined_key
 
 
+def _building_plan_fingerprint(
+    plans: Sequence[BuildingPlacementPlan],
+) -> str:
+    """Hash the actual final building placements used by the non-road cache.
+
+    A count alone is not a cache identity: two builds can have the same number
+    of buildings while selecting different stock models, headings or road-safe
+    positions. Serializing that stale payload is how a perfectly current road
+    network can end up running through yesterday's barn.
+    """
+    digest = hashlib.sha256()
+    for plan in plans:
+        for value in (
+            str(getattr(plan, "osm_key", "")),
+            str(int(getattr(plan, "geometry_index", 0))),
+            str(getattr(plan, "geometry_kind", "")),
+            float(getattr(plan, "x", 0.0)).hex(),
+            float(getattr(plan, "z", 0.0)).hex(),
+            float(getattr(plan, "heading_degrees", 0.0)).hex(),
+            str(getattr(plan, "model_path", "")).replace("/", "\\").casefold(),
+            str(getattr(plan, "building_family", "")).casefold(),
+            "1" if bool(getattr(plan, "synthetic_infill", False)) else "0",
+        ):
+            digest.update(value.encode("utf-8", "surrogatepass"))
+            digest.update(b"\0")
+        for point in tuple(getattr(plan, "support_polygon", ()) or ()):
+            try:
+                px, pz = point
+            except (TypeError, ValueError):
+                continue
+            digest.update(float(px).hex().encode("ascii"))
+            digest.update(b",")
+            digest.update(float(pz).hex().encode("ascii"))
+            digest.update(b";")
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
 def _load_nonroad_objects(
     dataset: OsmDataset,
     projection: BboxProjection,
@@ -2672,6 +2710,7 @@ def _load_nonroad_objects(
         "dataset": dataset_identity,
         "road_fingerprint": road_fingerprint,
         "building_plan_count": len(building_placement_plans),
+        "building_plan_fingerprint": _building_plan_fingerprint(building_placement_plans),
         "building_plans_truncated": building_plans_truncated,
         "starting_object_id": starting_object_id,
         "spec": _spec_fields(spec, _PLACEMENT_CACHE_FIELDS),
