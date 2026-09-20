@@ -19,13 +19,13 @@ def _spec(profile: str, name: str = "wg_test") -> SimpleNamespace:
 
 def test_one_runway_background_texture_per_preset() -> None:
     assert runway_background_texture_path(_spec("nogova")) == r"o\t1.paa"
-    assert runway_background_texture_path(_spec("everon")) == r"Eden\ps.paa"
+    assert runway_background_texture_path(_spec("everon")) == r"Eden\tn.paa"
     assert runway_background_texture_path(_spec("desert")) == r"o\ps.paa"
     assert runway_background_texture_path(_spec("malden")) == r"abel\tt.paa"
     assert runway_background_texture_path(_spec("generated")) == r"wg_test\data\g.paa"
 
     assert external_runway_texture_paths(_spec("nogova")) == (r"o\t1.paa",)
-    assert external_runway_texture_paths(_spec("everon")) == (r"Eden\ps.paa",)
+    assert external_runway_texture_paths(_spec("everon")) == (r"Eden\tn.paa",)
     assert external_runway_texture_paths(_spec("desert")) == (r"o\ps.paa",)
     assert external_runway_texture_paths(_spec("malden")) == (r"abel\tt.paa",)
     assert external_runway_texture_paths(_spec("generated")) == ()
