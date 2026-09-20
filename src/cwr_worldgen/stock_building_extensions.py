@@ -375,7 +375,7 @@ def _install_library_presets() -> None:
         ).strip().casefold()
         selected = stock_building_preset_ids(requested)
         if not selected:
-            selected = (stock.STOCK_BUILDING_PRESET,)
+            selected = stock_building_preset_ids(stock.STOCK_BUILDING_PRESET)
         requested = encode_stock_building_presets(selected)
         original_init(self, *args, **kwargs)
         self.house_style_preset = requested
@@ -405,9 +405,14 @@ def _install_library_presets() -> None:
         placements = sum(self._usage.values())
         reused = max(0, placements - len(records))
         mode = str(getattr(self, "house_style_preset", stock.STOCK_BUILDING_PRESET) or stock.STOCK_BUILDING_PRESET)
+        selected_sources = stock_building_preset_ids(mode)
         payload = {
             "schema": 2,
             "mode": mode,
+            "selected_building_jsons": [
+                f"data/{_STOCK_CATALOGUE_BY_PRESET[preset].name}"
+                for preset in selected_sources
+            ],
             "generated_models": 0,
             "generated_variants": 0,
             "stock_models": len(records),
