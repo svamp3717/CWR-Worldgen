@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from cwr_worldgen import generator
 from cwr_worldgen.gui import default_gui_values
 from cwr_worldgen.model import WorldObject
+from cwr_worldgen.osm import BuildingPlacementPlan, ObjectGenerationResult
 from cwr_worldgen.stock_building_policy import STOCK_BUILDING_PRESET, StockBuildingLibrary
 from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_AGS_COMBINED_PRESET,
@@ -21,6 +22,7 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_RESISTANCE_PRESET,
     STOCK_BUILDING_VANILLA_PRESET,
     _PROCEDURAL_BRIDGES_CHECKBOX_TEXT,
+    _remove_stock_buildings_overlapping_final_roads,
     _lift_stock_objects,
     _stock_options_first,
     encode_stock_building_presets,
@@ -239,6 +241,99 @@ def test_stock_asset_catalogue_records_source_and_origin_without_generated_p3ds(
     assert result.model_assets == ()
 
 
+def test_nonroad_cache_fingerprint_tracks_final_building_position_and_model() -> None:
+    base = BuildingPlacementPlan(
+        osm_key="way/airtest",
+        geometry_index=0,
+        geometry_kind="polygon",
+        x=3170.53955078125,
+        z=3193.103515625,
+        heading_degrees=110.31077571034629,
+        model_path=r"o\hous\hangar_2.p3d",
+        support_polygon=(
+            (3165.600234862171, 3211.80350857504),
+            (3154.6156662242006, 3182.1255158666754),
+            (3175.478866700329, 3174.40352267496),
+            (3186.4634353382994, 3204.0815153833246),
+        ),
+        building_family="agricultural",
+    )
+    moved = replace(
+        base,
+        x=base.x + 12.0,
+        support_polygon=tuple((x + 12.0, z) for x, z in base.support_polygon),
+    )
+    changed_model = replace(base, model_path=r"o\hous\stodola.p3d")
+
+    assert generator._building_plan_fingerprint((base,)) != generator._building_plan_fingerprint((moved,))
+    assert generator._building_plan_fingerprint((base,)) != generator._building_plan_fingerprint((changed_model,))
+
+
+def test_airtest10_hangar_is_rejected_if_cached_transform_still_crosses_final_road() -> None:
+    library = _library(STOCK_BUILDING_RESISTANCE_PRESET)
+    hangar = WorldObject(
+        55640,
+        r"o\hous\hangar_2.p3d",
+        3170.53955078125,
+        18.24526023864746,
+        3193.103515625,
+        110.31077571034629,
+    )
+    clear_house = WorldObject(
+        55641,
+        r"o\hous\domek03.p3d",
+        3300.0,
+        18.0,
+        3300.0,
+        15.0,
+    )
+    result = ObjectGenerationResult(
+        objects=(hangar, clear_house),
+        road_objects=0,
+        building_objects=2,
+        forest_objects=0,
+        road_objects_truncated=False,
+        building_objects_truncated=False,
+        forest_objects_truncated=False,
+        model_usage=(
+            (hangar.model_path, 1),
+            (clear_house.model_path, 1),
+        ),
+    )
+    road_report = SimpleNamespace(
+        objects=(
+            WorldObject(
+                8782,
+                r"o\road\sil12.p3d",
+                3168.87255859375,
+                11.318740844726562,
+                3175.530029296875,
+                276.5677121713669,
+            ),
+        )
+    )
+    spec = SimpleNamespace(
+        road_segment_length=24.5,
+        cells=128,
+        cell_size=50.0,
+        world_size=6400.0,
+    )
+    elevations = (11.4,) * (spec.cells * spec.cells)
+
+    revised, removed = _remove_stock_buildings_overlapping_final_roads(
+        result,
+        library,
+        road_report,
+        elevations,
+        spec,
+    )
+
+    assert removed == (hangar,)
+    assert revised.objects == (clear_house,)
+    assert revised.building_objects == 1
+    assert dict(revised.model_usage) == {clear_house.model_path: 1}
+
+
 def test_stock_fit_revision_is_final_active_placement_cache_salt() -> None:
     from cwr_worldgen import final_building_road_clearance_policy as clearance
     from cwr_worldgen import stock_building_extensions as extensions
@@ -247,4 +342,4 @@ def test_stock_fit_revision_is_final_active_placement_cache_salt() -> None:
         clearance._CACHE_REVISION
         == extensions._BUILDING_PLACEMENT_CACHE_REVISION
     )
-    assert "malden-modern-forest" in clearance._CACHE_REVISION
+    assert "serialized-stock-audit" in clearance._CACHE_REVISION
