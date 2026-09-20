@@ -95,35 +95,39 @@ NOGOVA_SURFACE_TEXTURES.update({
     # texture; 3D stone objects may still be placed independently.
 })
 
-# Classic Malden/Abel terrain uses the original LandText family. Keep the
-# semantic surface classes, but collapse them onto the two expected Malden tiles
-# instead of generating world-local approximations. mo is the vegetated terrain
-# tile; pi is the bare/sandy terrain tile.
-_MALDEN_GREEN_TEXTURE = r"LandText\mo.pac"
-_MALDEN_BARE_TEXTURE = r"LandText\pi.pac"
+# Classic Malden/Abel terrain references textures through the Abel PBO prefix.
+# These paths are taken from the stock Malden WRP. The WRP uses pi primarily for
+# sea/seabed, tt as the dominant land texture, pb for forest cells, sh around
+# shore/beach transitions, and bah for muddy/dirt-road ground.
+_MALDEN_SEA_TEXTURE = r"abel\pi.paa"
+_MALDEN_LAND_TEXTURE = r"abel\tt.paa"
+_MALDEN_FOREST_TEXTURE = r"abel\pb.paa"
+_MALDEN_SHORE_TEXTURE = r"abel\sh.paa"
+_MALDEN_ROCK_TEXTURE = r"abel\p4.paa"
+_MALDEN_DIRT_TEXTURE = r"abel\bah.paa"
 MALDEN_SURFACE_TEXTURES: dict[str, str] = {
-    "w": _MALDEN_BARE_TEXTURE,
-    "q": _MALDEN_BARE_TEXTURE,
-    "s": _MALDEN_BARE_TEXTURE,
-    "g": _MALDEN_GREEN_TEXTURE,
-    "h": _MALDEN_GREEN_TEXTURE,
-    "r": _MALDEN_BARE_TEXTURE,
-    "k": _MALDEN_BARE_TEXTURE,
-    "f": _MALDEN_GREEN_TEXTURE,
-    "e": _MALDEN_GREEN_TEXTURE,
-    "a": _MALDEN_GREEN_TEXTURE,
-    "b": _MALDEN_GREEN_TEXTURE,
-    "c": _MALDEN_GREEN_TEXTURE,
-    "u": _MALDEN_BARE_TEXTURE,
-    "i": _MALDEN_BARE_TEXTURE,
-    "p": _MALDEN_BARE_TEXTURE,
-    "o": _MALDEN_BARE_TEXTURE,
-    "d": _MALDEN_BARE_TEXTURE,
-    "t": _MALDEN_GREEN_TEXTURE,
-    "v": _MALDEN_BARE_TEXTURE,
-    "j": _MALDEN_GREEN_TEXTURE,
-    "y": _MALDEN_GREEN_TEXTURE,
-    "x": _MALDEN_BARE_TEXTURE,
+    "w": _MALDEN_SEA_TEXTURE,
+    "q": _MALDEN_SHORE_TEXTURE,
+    "s": _MALDEN_SHORE_TEXTURE,
+    "g": _MALDEN_LAND_TEXTURE,
+    "h": _MALDEN_LAND_TEXTURE,
+    "r": _MALDEN_ROCK_TEXTURE,
+    "k": _MALDEN_ROCK_TEXTURE,
+    "f": _MALDEN_FOREST_TEXTURE,
+    "e": _MALDEN_LAND_TEXTURE,
+    "a": _MALDEN_LAND_TEXTURE,
+    "b": _MALDEN_LAND_TEXTURE,
+    "c": _MALDEN_LAND_TEXTURE,
+    "u": _MALDEN_LAND_TEXTURE,
+    "i": _MALDEN_LAND_TEXTURE,
+    "p": _MALDEN_LAND_TEXTURE,
+    "o": _MALDEN_LAND_TEXTURE,
+    "d": _MALDEN_DIRT_TEXTURE,
+    "t": _MALDEN_LAND_TEXTURE,
+    "v": _MALDEN_DIRT_TEXTURE,
+    "j": _MALDEN_LAND_TEXTURE,
+    "y": _MALDEN_LAND_TEXTURE,
+    "x": _MALDEN_SHORE_TEXTURE,
 }
 
 STOCK_SURFACE_TEXTURES: Mapping[str, Mapping[str, str]] = {
