@@ -58,14 +58,14 @@ NOGOVA_GROUND_TEXTURES.update({
 })
 
 MALDEN_GROUND_TEXTURES: dict[str, str] = {
-    "w": r"LandText\pi.pac",
-    "s": r"LandText\pi.pac",
-    "g": r"LandText\mo.pac",
-    "r": r"LandText\pi.pac",
-    "f": r"LandText\mo.pac",
-    "a": r"LandText\mo.pac",
-    "u": r"LandText\pi.pac",
-    "p": r"LandText\pi.pac",
+    "w": r"abel\pi.paa",
+    "s": r"abel\sh.paa",
+    "g": r"abel\tt.paa",
+    "r": r"abel\p4.paa",
+    "f": r"abel\pb.paa",
+    "a": r"abel\tt.paa",
+    "u": r"abel\tt.paa",
+    "p": r"abel\tt.paa",
 }
 
 STOCK_GROUND_TEXTURES: dict[str, dict[str, str]] = {
