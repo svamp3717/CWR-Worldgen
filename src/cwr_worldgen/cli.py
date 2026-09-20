@@ -645,6 +645,7 @@ def _print_result(result, display_name: str, name: str) -> None:
         print(f"Texture:    {texture}")
     print(f"Mod root:   {result.pbo_path.parent.parent}")
     print(f"PBO:        {result.pbo_path}")
+    print(f"Menu intro: {result.intro_mission_path}")
     print(f"Preview:    {result.preview_path}")
     if result.height_preview_path:
         print(f"Height:     {result.height_preview_path}")
