@@ -108,7 +108,7 @@ def test_exact_loader_reads_world_local_generated_texture(tmp_path) -> None:
     ("profile", "wire_path"),
     (
         ("nogova", r"o\t1.paa"),
-        ("everon", r"eden\z.paa"),
+        ("everon", r"eden\ps.paa"),
         ("malden", r"abel\tt.paa"),
         ("desert", r"o\ps.paa"),
     ),
@@ -204,4 +204,4 @@ def test_unchanged_edge_dxt1_blocks_are_copied_verbatim(tmp_path) -> None:
 
 def test_exact_policy_bumps_runway_cache_after_nogova_calibration() -> None:
     install_runway_exact_background_policy()
-    assert runway._SURFACE_CACHE_V18 == "surface-pipeline-v29-eden-clean-default-grass"
+    assert runway._SURFACE_CACHE_V18 == "surface-pipeline-v30-eden-wrp-default-grass"
