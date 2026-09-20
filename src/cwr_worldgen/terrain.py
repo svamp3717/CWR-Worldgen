@@ -37,7 +37,7 @@ EVERON_GROUND_TEXTURES: dict[str, str] = {
     "g": r"Eden\zbh.paa",
     "r": r"o\l1.paa",
     "f": r"Eden\zbh.paa",
-    "a": r"o\pole1.paa",
+    "a": r"Eden\zbh.paa",
     "u": r"Eden\tn.paa",
     "p": r"Eden\tn.paa",
 }
