@@ -498,17 +498,30 @@ class SurfacePassTests(unittest.TestCase):
         )
         self.assertNotIn(r"o\b1.paa", external_surface_texture_paths("nogova"))
 
-    def test_malden_profile_uses_stock_landtext_for_all_surface_classes(self) -> None:
+    def test_malden_profile_uses_stock_abel_textures_for_all_surface_classes(self) -> None:
         world_name = "abcdefghijklmnopqrst"
         paths = surface_texture_wire_paths(world_name, "malden")
         self.assertEqual(len(paths), len(MILESTONE9_MATERIALS))
-        self.assertEqual(set(paths), {r"LandText\mo.pac", r"LandText\pi.pac"})
+        self.assertEqual(
+            set(paths),
+            {
+                r"abel\pi.paa",
+                r"abel\tt.paa",
+                r"abel\pb.paa",
+                r"abel\sh.paa",
+                r"abel\p4.paa",
+                r"abel\bah.paa",
+            },
+        )
         self.assertEqual(
             set(external_surface_texture_paths("malden")),
-            {r"LandText\mo.pac", r"LandText\pi.pac"},
+            set(paths),
         )
         grass = paths[MATERIAL_INDEX["g"]]
-        self.assertEqual(grass, r"LandText\mo.pac")
+        self.assertEqual(grass, r"abel\tt.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["f"]], r"abel\pb.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["w"]], r"abel\pi.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["s"]], r"abel\sh.paa")
         self.assertEqual(paths[MATERIAL_INDEX["a"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["b"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["c"]], grass)
