@@ -99,7 +99,7 @@ def test_pitch_render_keeps_background_outside_markings() -> None:
     assert int(actual.max()) > 180
 
 
-def test_malden_sports_overlay_uses_wrp_paths_without_pbo_reads(tmp_path, monkeypatch) -> None:
+def test_malden_sports_overlay_uses_shared_exact_preset_background(tmp_path, monkeypatch) -> None:
     spec = _spec(tmp_path)
     spec.ground_texture_profile = "malden"
     spec.surface_pass_enabled = True
@@ -110,10 +110,18 @@ def test_malden_sports_overlay_uses_wrp_paths_without_pbo_reads(tmp_path, monkey
     source_dir = tmp_path / "pitchworld"
     source_dir.mkdir()
 
-    def fail_external_read(*_args, **_kwargs):
-        raise AssertionError("Malden sports generation must not read Abel.pbo")
+    loaded_paths = []
+    exact_background = SimpleNamespace(
+        top_image=Image.new("RGB", (128, 128), (62, 91, 48)),
+        data=b"malden-main-terrain",
+        source="Abel.pbo",
+    )
 
-    monkeypatch.setattr(exact, "_read_external_asset_cached", fail_external_read)
+    def load_exact_background(_source_dir, _spec, wire_path):
+        loaded_paths.append(wire_path)
+        return exact_background
+
+    monkeypatch.setattr(exact, "_load_exact_texture", load_exact_background)
     texture_paths = (
         r"pitchworld\data\d.paa",
         *surface_pass.surface_texture_wire_paths("pitchworld", "malden"),
@@ -132,10 +140,11 @@ def test_malden_sports_overlay_uses_wrp_paths_without_pbo_reads(tmp_path, monkey
     report = json.loads((source_dir / "sports-pitch-textures.json").read_text())
 
     assert texture_paths[grass_slot] == r"abel\tt.paa"
+    assert loaded_paths == [r"abel\tt.paa"]
     assert generated
     assert all(path.startswith(r"pitchworld\sp") for path in generated)
     assert report["background_path"] == r"abel\tt.paa"
-    assert report["background_source"] == "generated-fallback"
+    assert report["background_source"] == "Abel.pbo"
     assert len(revised_paths) == len(texture_paths) + len(generated)
     assert any(index >= len(texture_paths) for index in revised_indices)
 
