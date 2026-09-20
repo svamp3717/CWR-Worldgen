@@ -183,9 +183,17 @@ class CategoriserApp:
                 variable=self.placement_var,
                 command=self._placement_changed,
             ).pack(anchor="w", fill="x", pady=1)
+        ttk.Button(
+            side,
+            text="Clear placement",
+            command=self._clear_placement,
+        ).pack(anchor="w", pady=(5, 0))
         ttk.Label(
             side,
-            text="Urban = towns/cities only; Rural = countryside only; Both = valid in either.",
+            text=(
+                "Urban = towns/cities only; Rural = countryside only; Both = valid in either. "
+                "Clear placement removes the saved model entirely when no categories are selected."
+            ),
             wraplength=300,
             justify=tk.LEFT,
         ).pack(anchor="w", pady=(4, 0))
@@ -285,13 +293,29 @@ class CategoriserApp:
     def _commit(self, reviewed: bool) -> None:
         if self.current is None or self._updating_checks:
             return
+        categories = self._current_categories()
+        placement = self._current_placement()
+        if not categories and not placement:
+            # Empty means genuinely unclassified. Remove the state entry rather
+            # than persisting a reviewed-but-empty record in the companion JSON.
+            self.state.pop(self.current.model_path, None)
+            return
         old = self.state.get(self.current.model_path, Classification([]))
         self.state[self.current.model_path] = Classification(
-            categories=self._current_categories(),
-            placement=self._current_placement(),
+            categories=categories,
+            placement=placement,
             reviewed=reviewed or old.reviewed,
             **_measurement_values(self.current),
         )
+
+    def _clear_placement(self) -> None:
+        if self._updating_checks or self.current is None:
+            return
+        if not self.placement_var.get():
+            return
+        self.placement_var.set("")
+        self._commit(True)
+        self.save_state()
 
     def _category_changed(self) -> None:
         if self._updating_checks or self.current is None:
