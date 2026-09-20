@@ -15,6 +15,7 @@ from cwr_worldgen.multi_building_presets import (
     PROCEDURAL_AUTO_PRESET,
     MultiBuildingLibrary,
     building_preset_ids,
+    building_selection_state,
     encode_building_presets,
     selected_building_jsons,
 )
@@ -54,6 +55,24 @@ def test_stock_only_encoding_keeps_existing_stock_multi_transport() -> None:
         STOCK_BUILDING_VANILLA_PRESET,
     )
     assert encode_building_presets(selected) == encode_stock_building_presets(selected)
+
+
+def test_building_selection_state_persists_presets_styles_and_jsons() -> None:
+    persisted = building_selection_state(
+        (STOCK_BUILDING_VANILLA_PRESET, "se_sweden")
+    )
+
+    assert persisted["house_style_preset"] == encode_building_presets(
+        (STOCK_BUILDING_VANILLA_PRESET, "se_sweden")
+    )
+    assert persisted["selected_building_presets"] == [
+        STOCK_BUILDING_VANILLA_PRESET,
+        "se_sweden",
+    ]
+    assert persisted["selected_building_jsons"] == [
+        "data/stock_building_models_non_resistance.json",
+        "country_styles/SE_Sweden.json",
+    ]
 
 
 def test_selected_building_jsons_records_stock_and_country_catalogues() -> None:
