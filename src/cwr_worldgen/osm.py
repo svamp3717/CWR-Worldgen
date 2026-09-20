@@ -8973,8 +8973,8 @@ def generate_world_objects(
             getattr(spec, "steep_hill_bush_ground_clearance", 0.03)
         )
 
-        # The legacy Malden profile remains available for comparisons. Its
-        # individually grounded trees are never used by the default Everon path.
+        # Compatibility hillside controls remain available for non-classic
+        # profiles. Everon and Malden classic both use the modern fallback ladder.
         hillside_enabled = bool(getattr(spec, "forest_hillside_fallback", False))
         hillside_model = str(
             getattr(spec, "forest_hillside_tree_model", r"data3d\str_fikovnik.p3d")
@@ -9947,9 +9947,9 @@ def generate_world_objects(
 
         # A sparse extra pass of individual trees softens the regular stock forest
         # ladder so woods do not end up looking like a regimented block pattern.
-        # This deliberately uses a Resistance/Nogova spruce from O.pbo rather
-        # than the Malden ``str_fikovnik`` model, whose texture commonly lives in
-        # a separate Data package and therefore broke strict validation.
+        # The selected classic profile supplies this tree family. Everon keeps
+        # its spruce defaults while Malden resolves the corresponding Data3D
+        # Mediterranean trees before object placement.
         progress(57, f"Placed primary forest blocks ({forest_count:,} forest objects so far)")
         extra_single_enabled = bool(getattr(spec, "forest_single_tree_enabled", True))
         extra_single_model = str(getattr(spec, "forest_single_tree_model", r"data3d\str smrk_medium.p3d"))
