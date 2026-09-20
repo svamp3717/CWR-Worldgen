@@ -2700,6 +2700,7 @@ def _load_nonroad_objects(
     terrain_key: str,
     dataset_identity: str,
     road_fingerprint: str,
+    road_report: RoadFitReport | None = None,
     building_placement_plans: Sequence[BuildingPlacementPlan] = (),
     building_plans_truncated: bool = False,
     progress_callback: Callable[[int, str], None] = report_progress,
@@ -3285,6 +3286,7 @@ def build_milestone4(
         terrain_key=terrain_cache_key,
         dataset_identity=dataset_identity,
         road_fingerprint=road_fingerprint,
+        road_report=road_fit,
         building_placement_plans=building_placement_plans,
         building_plans_truncated=building_plans_truncated,
     )
