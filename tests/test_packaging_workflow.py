@@ -44,6 +44,13 @@ class PackagingWorkflowTests(unittest.TestCase):
         ):
             self.assertTrue((data_dir / name).is_file(), name)
 
+        for removed in (
+            "stock_building_models.json",
+            "haus.pbo + resistance and vanilla.json",
+            "ags inds+port and combined stock.json",
+        ):
+            self.assertFalse((data_dir / removed).exists(), removed)
+
         pyproject = (self.root / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('"data/*.json"', pyproject)
 
