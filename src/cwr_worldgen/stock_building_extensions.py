@@ -742,16 +742,10 @@ def _remove_stock_buildings_overlapping_final_roads(
     if not removed:
         return result, ()
 
-    usage = {
-        str(model_path): int(count)
-        for model_path, count in tuple(getattr(result, "model_usage", ()) or ())
-    }
-    for obj in removed:
+    usage: dict[str, int] = {}
+    for obj in kept:
         key = str(obj.model_path)
-        if key in usage:
-            usage[key] = max(0, usage[key] - 1)
-            if usage[key] == 0:
-                usage.pop(key, None)
+        usage[key] = usage.get(key, 0) + 1
 
     revised = replace(
         result,
@@ -824,12 +818,14 @@ def _install_grounding() -> None:
         if not isinstance(stock_library, stock.StockBuildingLibrary):
             return loaded
 
-        road_report = clearance._road_context_matches(
-            dataset,
-            projection,
-            elevations,
-            spec,
-        )
+        road_report = kwargs.get("road_report")
+        if road_report is None:
+            road_report = clearance._road_context_matches(
+                dataset,
+                projection,
+                elevations,
+                spec,
+            )
         if road_report is None:
             return loaded
 
