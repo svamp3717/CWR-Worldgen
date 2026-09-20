@@ -211,6 +211,14 @@ def install_foundation_visual_policy() -> None:
 
     install_stock_desert_surface_policy()
 
+    # Malden Classic should mirror Everon Classic mechanically while sourcing
+    # terrain artwork from the installed original Malden (Abel) island. Install
+    # after the stock/runway policy chain so this final resolver can replace the
+    # old generated-Malden fallback whenever the game assets are available.
+    from .malden_classic_policy import install_malden_classic_policy
+
+    install_malden_classic_policy()
+
     # Stock-building mode is a final routing choice, not another procedural
     # renderer. Install it after all semantic classifiers and GUI country wiring
     # so the "stock" preset can reuse those classifications while guaranteeing
