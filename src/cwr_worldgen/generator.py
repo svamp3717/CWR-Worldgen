@@ -84,6 +84,7 @@ from .osm import (
     OSM_INDIVIDUAL_TREE_MODELS,
     NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS,
     NOGOVA_PINE_INDIVIDUAL_TREE_MODELS,
+    MALDEN_INDIVIDUAL_TREE_MODELS,
     STOCK_STONE_MODELS,
     STOCK_FARMLAND_FENCE_MODELS,
     STOCK_SETTLEMENT_DETAIL_MODELS,
@@ -1594,6 +1595,8 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
             if proxy_profile == "nogova_pine"
             else NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS
             if proxy_profile == "nogova_leaf"
+            else MALDEN_INDIVIDUAL_TREE_MODELS
+            if proxy_profile == "malden"
             else OSM_INDIVIDUAL_TREE_MODELS
         )
         trusted.update(canonical_asset_path(path) for path in mapped_tree_models)
