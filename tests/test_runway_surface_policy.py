@@ -145,7 +145,7 @@ def test_malden_runway_overlay_uses_shared_preset_background_system(tmp_path) ->
         base_paths,
     )
 
-    assert preset_background_texture_path(_spec("everon")) == r"Eden\z.paa"
+    assert preset_background_texture_path(_spec("everon")) == r"Eden\ps.paa"
     assert preset_background_texture_path(spec) == r"abel\tt.paa"
     assert base_paths[grass_index] == r"abel\tt.paa"
     assert generated
@@ -188,8 +188,8 @@ def test_legacy_everon_uses_clean_default_and_dirty_farmland_texture() -> None:
         )
     )
 
-    assert paths[2] == r"Eden\z.paa"
-    assert paths[4] == r"Eden\z.paa"
+    assert paths[2] == r"Eden\ps.paa"
+    assert paths[4] == r"Eden\ps.paa"
     assert paths[5] == r"Eden\zbh.paa"
     assert r"o\pole1.paa" not in paths
 
@@ -197,9 +197,9 @@ def test_legacy_everon_uses_clean_default_and_dirty_farmland_texture() -> None:
 def test_everon_uses_clean_default_and_dirty_farmland_texture_only() -> None:
     paths = surface_pass.surface_texture_wire_paths("wg_everon", "everon")
 
-    assert paths[surface_pass.MATERIAL_INDEX["g"]] == r"Eden\z.paa"
-    assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"Eden\z.paa"
-    assert paths[surface_pass.MATERIAL_INDEX["e"]] == r"Eden\z.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["g"]] == r"Eden\ps.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"Eden\ps.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["e"]] == r"Eden\ps.paa"
     assert paths[surface_pass.MATERIAL_INDEX["a"]] == r"Eden\zbh.paa"
     assert paths[surface_pass.MATERIAL_INDEX["b"]] == r"Eden\zbh.paa"
     assert paths[surface_pass.MATERIAL_INDEX["c"]] == r"Eden\zbh.paa"
@@ -441,6 +441,6 @@ def test_runway_policy_invalidates_previous_surface_representations() -> None:
         "surface-pipeline-v11-vectorized-material-pass",
         payload,
     ) == raw_cache_key(
-        "surface-pipeline-v29-eden-clean-default-grass",
+        "surface-pipeline-v30-eden-wrp-default-grass",
         payload,
     )
