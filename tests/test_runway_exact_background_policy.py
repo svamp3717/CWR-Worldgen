@@ -72,7 +72,7 @@ def test_dxt1_decoder_round_trips_generated_paa(tmp_path) -> None:
     assert np.max(np.abs(sample - np.asarray((41, 72, 33)))) <= 8
 
 
-def test_exact_loader_does_not_open_malden_abel_texture_package(tmp_path) -> None:
+def test_exact_loader_reads_malden_abel_texture_package(tmp_path) -> None:
     root = tmp_path / "game"
     source = tmp_path / "tt.paa"
     texture = _write_test_texture(source, (62, 91, 48), 128)
@@ -85,7 +85,9 @@ def test_exact_loader_does_not_open_malden_abel_texture_package(tmp_path) -> Non
         r"abel\tt.paa",
     )
 
-    assert exact is None
+    assert exact is not None
+    assert _canonical(exact.wire_path) == r"abel\tt.paa"
+    assert Path(exact.source) == pbo
 
 
 def test_exact_loader_reads_world_local_generated_texture(tmp_path) -> None:
@@ -107,6 +109,7 @@ def test_exact_loader_reads_world_local_generated_texture(tmp_path) -> None:
     (
         ("nogova", r"o\t1.paa"),
         ("everon", r"eden\zbh.paa"),
+        ("malden", r"abel\tt.paa"),
         ("desert", r"o\ps.paa"),
     ),
 )
@@ -201,4 +204,4 @@ def test_unchanged_edge_dxt1_blocks_are_copied_verbatim(tmp_path) -> None:
 
 def test_exact_policy_bumps_runway_cache_after_nogova_calibration() -> None:
     install_runway_exact_background_policy()
-    assert runway._SURFACE_CACHE_V18 == "surface-pipeline-v26-malden-wrp-paths"
+    assert runway._SURFACE_CACHE_V18 == "surface-pipeline-v27-unified-preset-backgrounds"
