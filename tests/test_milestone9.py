@@ -507,9 +507,7 @@ class SurfacePassTests(unittest.TestCase):
             {
                 r"abel\pi.paa",
                 r"abel\tt.paa",
-                r"abel\pb.paa",
                 r"abel\sh.paa",
-                r"abel\p4.paa",
                 r"abel\bah.paa",
             },
         )
@@ -517,11 +515,12 @@ class SurfacePassTests(unittest.TestCase):
         self.assertEqual(external_surface_texture_paths("malden"), ())
         grass = paths[MATERIAL_INDEX["g"]]
         self.assertEqual(grass, r"abel\tt.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["f"]], r"abel\pb.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["f"]], grass)
+        self.assertEqual(paths[MATERIAL_INDEX["e"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["w"]], r"abel\pi.paa")
         self.assertEqual(paths[MATERIAL_INDEX["s"]], r"abel\sh.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["r"]], r"abel\p4.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["k"]], r"abel\p4.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["r"]], grass)
+        self.assertEqual(paths[MATERIAL_INDEX["k"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["a"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["b"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["c"]], grass)
