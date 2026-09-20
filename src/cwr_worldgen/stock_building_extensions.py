@@ -695,6 +695,8 @@ def _smaller_stock_road_replacement(
     stock_library: stock.StockBuildingLibrary,
     road_index,
     physical,
+    elevations,
+    spec,
     *,
     preferred_family: str = "",
 ):
@@ -792,13 +794,31 @@ def _smaller_stock_road_replacement(
         if safe:
             safe.sort(key=lambda item: item[:4])
             _area, _loss, _path, turn, candidate = safe[0]
-            old_lift = float(stock_library.origin_lift_for_model(original_model.model_path))
+            heading = (float(obj.heading_degrees) + turn) % 360.0
+            polygon = stock._model_support_polygon(
+                float(obj.x),
+                float(obj.z),
+                candidate,
+                heading,
+            )
+            from . import osm as osm_module
+
+            _minimum_height, maximum_height = osm_module._polygon_elevation_extrema(
+                elevations,
+                spec.cells,
+                spec.cell_size,
+                polygon,
+            )
             new_lift = float(stock_library.origin_lift_for_model(candidate.model_path))
+            ground_clearance = max(
+                0.0,
+                float(getattr(spec, "building_ground_clearance", 0.10)),
+            )
             return replace(
                 obj,
                 model_path=candidate.model_path,
-                y=float(obj.y) - old_lift + new_lift,
-                heading_degrees=(float(obj.heading_degrees) + turn) % 360.0,
+                y=float(maximum_height) + ground_clearance + new_lift,
+                heading_degrees=heading,
             )
     return None
 
@@ -892,6 +912,8 @@ def _remove_stock_buildings_overlapping_final_roads(
             stock_library,
             road_index,
             physical,
+            elevations,
+            spec,
             preferred_family=family,
         )
         if replacement is not None:
