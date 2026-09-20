@@ -335,7 +335,7 @@ def install_milestone9_terrain_readme() -> None:
     @wraps(original_deploy)
     def deploy_with_terrain_readme(result: Any, target_root: Path):
         # Create the human-readable terrain note before deployment so the normal
-        # deploy pass can copy it beside the PBO without generating any mission.
+        # deploy pass can copy it beside the PBO together with the required menu intro.
         spec = _ACTIVE_TERRAIN_SPEC.get()
         if spec is not None:
             write_terrain_readme(result, spec)
