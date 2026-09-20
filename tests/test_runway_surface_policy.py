@@ -124,6 +124,17 @@ def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
     )
 
 
+def test_malden_stock_ground_textures_are_not_asset_scan_requirements() -> None:
+    spec = SimpleNamespace(
+        name="wg_malden",
+        ground_texture_profile="malden",
+        surface_pass_enabled=True,
+        surface_ground_mode="milestone9",
+    )
+
+    assert generator._external_ground_texture_paths(spec) == ()
+
+
 def test_malden_surface_writer_emits_no_world_local_ground_tiles(tmp_path) -> None:
     written = surface_pass.write_surface_textures(
         tmp_path,
