@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 import json
 from typing import Iterable, Mapping, Sequence
 
@@ -186,11 +187,12 @@ def _stock_checkbox_key(identifier: str) -> str:
 
 _STOCK_PLACEMENT_CACHE_V96 = "nonroad-object-placement-v96-road-safe-settlement-clutter"
 _STOCK_PLACEMENT_CACHE_V99 = "nonroad-object-placement-v99-malden-modern-forest"
+_STOCK_PLACEMENT_CACHE_V100 = "nonroad-object-placement-v100-final-stock-road-audit"
 # Stable cross-module symbol. Mixed preset routing must not depend on a private
 # version-suffixed constant, otherwise every cache bump becomes an import-time
 # AttributeError waiting for one wrapper to miss the rename.
-STOCK_PLACEMENT_CACHE_NAMESPACE = _STOCK_PLACEMENT_CACHE_V99
-_BUILDING_PLACEMENT_CACHE_REVISION = "final-road-building-clearance-v8-malden-modern-forest"
+STOCK_PLACEMENT_CACHE_NAMESPACE = _STOCK_PLACEMENT_CACHE_V100
+_BUILDING_PLACEMENT_CACHE_REVISION = "final-road-building-clearance-v9-serialized-stock-audit"
 _INTERIOR_CHECKBOX_TEXT = "Enterable procedural-building interiors"
 _HIGH_QUALITY_TEXTURE_CHECKBOX_TEXT = "Higher-quality building textures (256 px)"
 _MATCH_TEXTURE_CHECKBOX_TEXT = "Match nearby same-shape town/city building textures"
@@ -678,6 +680,93 @@ def _install_gui() -> None:
     gui_entry._configure_gui = configure_gui
 
 
+def _remove_stock_buildings_overlapping_final_roads(
+    result,
+    stock_library: stock.StockBuildingLibrary,
+    road_report,
+    elevations,
+    spec,
+):
+    """Reject any serialized stock building that still physically overlaps a road.
+
+    This is a last safety gate over the actual object transforms. It deliberately
+    runs after placement-cache restore and after minor-road suppression, so stale
+    cached building objects cannot bypass the plan-level road audit.
+    """
+    from . import final_building_road_clearance_policy as clearance
+    from . import physical_road_overlap_policy as physical
+    from . import road_building_priority_policy as priority
+
+    models = {
+        _canonical_model_path(model.model_path): model
+        for model in tuple(getattr(stock_library, "models", ()) or ())
+    }
+    if not models:
+        return result, ()
+
+    road_objects = priority._filter_suppressed_roads(
+        tuple(getattr(road_report, "objects", ()) or ())
+    )
+    primitives = clearance._road_primitives(
+        SimpleNamespace(objects=road_objects),
+        elevations,
+        spec,
+    )
+    if not primitives:
+        return result, ()
+    road_index = clearance._RoadPrimitiveIndex(primitives)
+
+    kept = []
+    removed = []
+    for obj in tuple(getattr(result, "objects", ()) or ()):
+        model = models.get(_canonical_model_path(getattr(obj, "model_path", "")))
+        if model is None:
+            kept.append(obj)
+            continue
+        polygon = stock._model_support_polygon(
+            float(obj.x),
+            float(obj.z),
+            model,
+            float(obj.heading_degrees),
+        )
+        conflicts, _checked = physical.conflicts_at_clearance(
+            polygon,
+            road_index,
+            0.0,
+        )
+        if conflicts:
+            removed.append(obj)
+            continue
+        kept.append(obj)
+
+    if not removed:
+        return result, ()
+
+    usage = {
+        str(model_path): int(count)
+        for model_path, count in tuple(getattr(result, "model_usage", ()) or ())
+    }
+    for obj in removed:
+        key = str(obj.model_path)
+        if key in usage:
+            usage[key] = max(0, usage[key] - 1)
+            if usage[key] == 0:
+                usage.pop(key, None)
+
+    revised = replace(
+        result,
+        objects=tuple(kept),
+        building_objects=max(
+            0,
+            int(getattr(result, "building_objects", 0)) - len(removed),
+        ),
+        model_usage=tuple(
+            sorted(usage.items(), key=lambda item: item[0].casefold())
+        ),
+    )
+    return revised, tuple(removed)
+
+
 def _install_grounding() -> None:
     from . import final_building_road_clearance_policy as clearance
     from . import generator, osm
@@ -689,6 +778,7 @@ def _install_grounding() -> None:
     clearance._CACHE_REVISION = _BUILDING_PLACEMENT_CACHE_REVISION
 
     original_generate = osm.generate_world_objects
+    original_load_nonroad_objects = generator._load_nonroad_objects
 
     def generate_with_stock_origin_lift(*args, **kwargs):
         result = original_generate(*args, **kwargs)
@@ -704,6 +794,65 @@ def _install_grounding() -> None:
     osm.generate_world_objects = generate_with_stock_origin_lift
     # generator imported this function by name, so patch its bound reference too.
     generator.generate_world_objects = generate_with_stock_origin_lift
+
+    def load_nonroad_objects_with_final_stock_road_audit(
+        dataset,
+        projection,
+        raster,
+        elevations,
+        spec,
+        **kwargs,
+    ):
+        loaded = original_load_nonroad_objects(
+            dataset,
+            projection,
+            raster,
+            elevations,
+            spec,
+            **kwargs,
+        )
+        if not isinstance(loaded, tuple) or len(loaded) < 2:
+            return loaded
+
+        result = loaded[0]
+        library = loaded[1]
+        stock_library = (
+            library
+            if isinstance(library, stock.StockBuildingLibrary)
+            else getattr(library, "stock_library", None)
+        )
+        if not isinstance(stock_library, stock.StockBuildingLibrary):
+            return loaded
+
+        road_report = clearance._road_context_matches(
+            dataset,
+            projection,
+            elevations,
+            spec,
+        )
+        if road_report is None:
+            return loaded
+
+        revised, removed = _remove_stock_buildings_overlapping_final_roads(
+            result,
+            stock_library,
+            road_report,
+            elevations,
+            spec,
+        )
+        if not removed:
+            return loaded
+
+        callback = kwargs.get("progress_callback")
+        if callback is not None:
+            callback(
+                52,
+                "Rejecting final stock buildings that physically overlap roads "
+                f"({len(removed):,} rejected after cache/final-road audit)",
+            )
+        return (revised, *loaded[1:])
+
+    generator._load_nonroad_objects = load_nonroad_objects_with_final_stock_road_audit
 
     original_cache_key = generator.cache_key
 
