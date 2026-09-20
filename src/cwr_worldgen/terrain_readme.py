@@ -123,12 +123,12 @@ def terrain_readme_text(
 
 
 def terrain_readme_path(result: Any, spec: Any) -> Path:
-    """Return the ReadMe path in the same Addons directory as the terrain PBO."""
-    return result.pbo_path.parent / terrain_readme_filename(spec.display_name)
+    """Return the diagnostic ReadMe path outside the deployable runtime."""
+    return result.output_dir / terrain_readme_filename(spec.display_name)
 
 
 def write_terrain_readme(result: Any, spec: Any) -> Path:
-    """Write the terrain ReadMe beside the generated PBO."""
+    """Write the terrain ReadMe as build metadata, not as a runtime addon file."""
     readme_path = terrain_readme_path(result, spec)
     readme_path.write_text(
         terrain_readme_text(
@@ -152,7 +152,7 @@ def _sync_cli_build_binding(build_callable: Any) -> None:
 
 
 def install_milestone9_terrain_readme() -> None:
-    """Make the terrain ReadMe part of the normal Milestone 9 deployment pass."""
+    """Keep the terrain ReadMe as local build metadata for Milestone 9."""
     from . import milestone9 as milestone9_module
 
     original_build = milestone9_module.build_milestone9
@@ -164,9 +164,8 @@ def install_milestone9_terrain_readme() -> None:
 
     @wraps(original_deploy)
     def deploy_with_terrain_readme(result: Any, target_root: Path):
-        # Milestone 9's normal deployer recursively copies and verifies every file
-        # below runtime/Addons. Create the ReadMe before that scan so it follows
-        # exactly the same path as the PBO instead of relying on a second copy.
+        # Deployment is intentionally PBO-only. Keep the reproduction note in
+        # the build output instead of placing another file in the mod's Addons.
         spec = _ACTIVE_TERRAIN_SPEC.get()
         if spec is not None:
             write_terrain_readme(result, spec)
@@ -180,8 +179,7 @@ def install_milestone9_terrain_readme() -> None:
         token = _ACTIVE_TERRAIN_SPEC.set(spec)
         try:
             result = original_build(output_dir, spec, clean=clean)
-            # With deployment enabled the deploy wrapper already created the file
-            # before copying. Builds without deployment still need the local copy.
+            # The ReadMe remains local build metadata regardless of deployment.
             readme_path = terrain_readme_path(result, spec)
             if not readme_path.is_file():
                 write_terrain_readme(result, spec)
