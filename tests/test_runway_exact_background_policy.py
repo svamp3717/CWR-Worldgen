@@ -204,4 +204,4 @@ def test_unchanged_edge_dxt1_blocks_are_copied_verbatim(tmp_path) -> None:
 
 def test_exact_policy_bumps_runway_cache_after_nogova_calibration() -> None:
     install_runway_exact_background_policy()
-    assert runway._SURFACE_CACHE_V18 == "surface-pipeline-v27-unified-preset-backgrounds"
+    assert runway._SURFACE_CACHE_V18 == "surface-pipeline-v28-malden-default-rock-forest"
