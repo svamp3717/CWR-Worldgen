@@ -224,8 +224,8 @@ def _build_milestone9_with_configured_runtime(*args, **kwargs):
 
 _milestone9_module.build_milestone4 = _build_milestone9_with_configured_runtime
 
-# Final worlds keep a small human-readable reproduction note as build metadata.
-# Runtime Addons and optional deployment remain PBO-only.
+# Final worlds keep a small human-readable reproduction note beside the PBO.
+# Runtime Addons and optional deployment contain the PBO plus that ReadMe only.
 from .terrain_readme import install_milestone9_terrain_readme as _install_milestone9_terrain_readme
 
 _install_milestone9_terrain_readme()
