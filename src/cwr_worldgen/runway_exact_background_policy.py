@@ -94,6 +94,146 @@ def _decode_rgb565(value: int) -> tuple[int, int, int]:
     return red * 255 // 31, green * 255 // 63, blue * 255 // 31
 
 
+def _read_u16(stream: io.BytesIO, label: str) -> int:
+    raw = stream.read(2)
+    if len(raw) != 2:
+        raise ValueError(f"truncated {label}")
+    return struct.unpack("<H", raw)[0]
+
+
+def _read_u24(stream: io.BytesIO, label: str) -> int:
+    raw = stream.read(3)
+    if len(raw) != 3:
+        raise ValueError(f"truncated {label}")
+    return int.from_bytes(raw, "little")
+
+
+def _decode_pac_lzw(stream: io.BytesIO, expected_size: int) -> bytes:
+    """Decode the legacy 4 KiB-window stream used by compressed PAC P8 mips."""
+    if expected_size < 0 or expected_size > 512 * 1024 * 1024:
+        raise ValueError("implausible PAC decompressed size")
+    window = bytearray(b" " * (4096 + 18 - 1))
+    window_pos = 4096 - 18
+    flags = 0
+    checksum = 0
+    output = bytearray()
+    while len(output) < expected_size:
+        flags >>= 1
+        if (flags & 0x100) == 0:
+            raw = stream.read(1)
+            if not raw:
+                raise ValueError("truncated PAC LZW flags")
+            flags = raw[0] | 0xFF00
+        if flags & 1:
+            raw = stream.read(1)
+            if not raw:
+                raise ValueError("truncated PAC LZW literal")
+            value = raw[0]
+            output.append(value)
+            checksum += value if value < 128 else value - 256
+            window[window_pos] = value
+            window_pos = (window_pos + 1) & 0xFFF
+            continue
+        pair = stream.read(2)
+        if len(pair) != 2:
+            raise ValueError("truncated PAC LZW reference")
+        offset = pair[0] | ((pair[1] & 0xF0) << 4)
+        run = (pair[1] & 0x0F) + 3
+        source = window_pos - offset
+        for _ in range(run):
+            if len(output) >= expected_size:
+                break
+            value = window[source & 0xFFF]
+            source += 1
+            output.append(value)
+            checksum += value if value < 128 else value - 256
+            window[window_pos] = value
+            window_pos = (window_pos + 1) & 0xFFF
+    checksum_raw = stream.read(4)
+    if len(checksum_raw) != 4:
+        raise ValueError("truncated PAC LZW checksum")
+    if struct.unpack("<i", checksum_raw)[0] != checksum:
+        raise ValueError("PAC LZW checksum mismatch")
+    return bytes(output)
+
+
+def _decode_paletted_pac(data: bytes) -> Image.Image:
+    """Decode the first legacy paletted PAC mip used by classic island terrain."""
+    stream = io.BytesIO(data)
+
+    # PAC files may carry TAGG metadata before the palette. Unlike modern PAA,
+    # old paletted PAC has no required format magic, so inspect without consuming
+    # the first palette-count word.
+    while True:
+        position = stream.tell()
+        if stream.read(4) != _TAG_SIGNATURE:
+            stream.seek(position)
+            break
+        if len(stream.read(4)) != 4:
+            raise ValueError("truncated PAC TAGG name")
+        raw_size = stream.read(4)
+        if len(raw_size) != 4:
+            raise ValueError("truncated PAC TAGG size")
+        size = struct.unpack("<I", raw_size)[0]
+        if size > len(data) - stream.tell():
+            raise ValueError("truncated PAC TAGG payload")
+        stream.seek(size, io.SEEK_CUR)
+
+    palette_count = _read_u16(stream, "PAC palette size")
+    if not 1 <= palette_count <= 256:
+        raise ValueError(f"invalid PAC palette size {palette_count}")
+    palette_raw = stream.read(palette_count * 3)
+    if len(palette_raw) != palette_count * 3:
+        raise ValueError("truncated PAC palette")
+    palette = np.empty((palette_count, 3), dtype=np.uint8)
+    for index in range(palette_count):
+        blue, green, red = palette_raw[index * 3 : index * 3 + 3]
+        palette[index] = (red, green, blue)
+
+    width = _read_u16(stream, "PAC width")
+    height = _read_u16(stream, "PAC height")
+    lzw = width == 1234 and height == 8765
+    if lzw:
+        width = _read_u16(stream, "PAC LZW width")
+        height = _read_u16(stream, "PAC LZW height")
+    if width <= 0 or height <= 0 or width > 8192 or height > 8192:
+        raise ValueError(f"invalid PAC dimensions {width}x{height}")
+    payload_size = _read_u24(stream, "PAC payload size")
+    payload_start = stream.tell()
+    if payload_start + payload_size > len(data):
+        raise ValueError("truncated PAC mip payload")
+
+    expected = width * height
+    if lzw:
+        indices = np.frombuffer(_decode_pac_lzw(stream, expected), dtype=np.uint8)
+    else:
+        payload_end = payload_start + payload_size
+        output = bytearray()
+        while len(output) < expected:
+            if stream.tell() >= payload_end:
+                raise ValueError("truncated PAC RLE payload")
+            control_raw = stream.read(1)
+            if not control_raw:
+                raise ValueError("truncated PAC RLE control")
+            control = control_raw[0]
+            if control & 0x80:
+                value = stream.read(1)
+                if not value:
+                    raise ValueError("truncated PAC RLE value")
+                output.extend(value * min((control & 0x7F) + 1, expected - len(output)))
+            else:
+                count = control + 1
+                chunk = stream.read(count)
+                if len(chunk) != count:
+                    raise ValueError("truncated PAC RLE literal")
+                output.extend(chunk[: expected - len(output)])
+        indices = np.frombuffer(bytes(output), dtype=np.uint8)
+    if int(indices.max(initial=0)) >= palette_count:
+        raise ValueError("PAC palette index out of range")
+    rgb = palette[indices].reshape((height, width, 3))
+    return Image.fromarray(rgb, mode="RGB")
+
+
 def _parse_dxt1_paa(data: bytes) -> tuple[_PaaMip, ...]:
     """Read legacy DXT1 PAA mip payloads without requiring external tools."""
     stream = io.BytesIO(data)
@@ -428,8 +568,14 @@ def _load_exact_texture(source_dir: Path, spec, wire_path: str) -> _ExactTexture
         return None
     data, source = located
     try:
-        mips = _parse_dxt1_paa(data)
-        top = _decode_dxt1_payload(mips[0].width, mips[0].height, mips[0].payload)
+        if canonical_path.endswith(".pac"):
+            top = _decode_paletted_pac(data)
+            mips = ()
+        else:
+            mips = _parse_dxt1_paa(data)
+            top = _decode_dxt1_payload(
+                mips[0].width, mips[0].height, mips[0].payload
+            )
     except (ValueError, struct.error):
         return None
     if top.width != top.height or top.width < 16 or top.width & (top.width - 1):
