@@ -96,7 +96,8 @@ def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
     assert paths[surface_pass.MATERIAL_INDEX["g"]] == r"abel\tt.paa"
     assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"abel\tt.paa"
     assert paths[surface_pass.MATERIAL_INDEX["e"]] == r"abel\tt.paa"
-    assert paths[surface_pass.MATERIAL_INDEX["s"]] == r"abel\sh.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["s"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["x"]] == r"abel\tt.paa"
     assert paths[surface_pass.MATERIAL_INDEX["r"]] == r"abel\tt.paa"
     assert paths[surface_pass.MATERIAL_INDEX["k"]] == r"abel\tt.paa"
     assert paths[surface_pass.MATERIAL_INDEX["d"]] == r"abel\bah.paa"
@@ -116,7 +117,7 @@ def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
     )
     assert legacy == (
         r"abel\pi.paa",
-        r"abel\sh.paa",
+        r"abel\tt.paa",
         r"abel\tt.paa",
         r"abel\tt.paa",
         r"abel\tt.paa",
@@ -441,6 +442,6 @@ def test_runway_policy_invalidates_previous_surface_representations() -> None:
         "surface-pipeline-v11-vectorized-material-pass",
         payload,
     ) == raw_cache_key(
-        "surface-pipeline-v31-eden-tn-default-grass",
+        "surface-pipeline-v32-malden-no-mountain-ground",
         payload,
     )
