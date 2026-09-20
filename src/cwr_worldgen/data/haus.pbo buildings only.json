@@ -2,7 +2,7 @@
   "schema": 5,
   "kind": "completed_model_classifications",
   "source_set": "haus.pbo",
-  "display_name": "Haus.pbo buildings only",
+  "display_name": "Haus.pbo buildings",
   "categories": [
     "Residential",
     "Commercial",
