@@ -3072,6 +3072,10 @@ def build_milestone4(
     cache_report_path = output_dir / "cache-report.json"
 
     source_dir.mkdir(parents=True, exist_ok=True)
+    # The menu-intro directory used to create the mod root as an accidental side
+    # effect. Production no longer generates missions, so create the Addons tree
+    # explicitly before writing mod-level attribution or packing the PBO.
+    pbo_path.parent.mkdir(parents=True, exist_ok=True)
     # Production builds no longer emit smoke-test or menu-intro missions. Remove
     # stale copies from incremental output folders so an old build cannot make
     # it look as though mission generation still happened.
