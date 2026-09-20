@@ -35,6 +35,23 @@ def _write_test_texture(path: Path, colour=(42, 67, 31), size=128) -> bytes:
     return path.read_bytes()
 
 
+def _write_paletted_pac(path: Path, colour=(62, 91, 48), size=16) -> bytes:
+    if size % 128:
+        raise ValueError("test PAC size must contain a whole number of 128-pixel runs")
+    red, green, blue = colour
+    payload = bytes((0xFF, 0)) * (size * size // 128)
+    data = (
+        struct.pack("<H", 1)
+        + bytes((blue, green, red))
+        + struct.pack("<HH", size, size)
+        + len(payload).to_bytes(3, "little")
+        + payload
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return data
+
+
 def _write_uncompressed_pbo(path: Path, entry_name: str, data: bytes) -> None:
     fields = struct.Struct("<IIIII")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,6 +70,25 @@ def test_dxt1_decoder_round_trips_generated_paa(tmp_path) -> None:
     assert image.size == (128, 128)
     sample = np.asarray(image)[20, 20].astype(int)
     assert np.max(np.abs(sample - np.asarray((41, 72, 33)))) <= 8
+
+
+def test_exact_loader_decodes_classic_paletted_malden_pac(tmp_path) -> None:
+    root = tmp_path / "game"
+    pac = root / "LandText" / "mo.pac"
+    _write_paletted_pac(pac, (62, 91, 48), 16)
+
+    exact = _load_exact_texture(
+        tmp_path / "unused-world",
+        _spec("malden", asset_roots=(root,)),
+        r"LandText\mo.pac",
+    )
+
+    assert exact is not None
+    assert exact.mips == ()
+    assert exact.top_image.size == (16, 16)
+    pixel = exact.top_image.getpixel((7, 7))
+    assert pixel == (62, 91, 48)
+    assert Path(exact.source) == pac
 
 
 def test_exact_loader_reads_world_local_generated_texture(tmp_path) -> None:
