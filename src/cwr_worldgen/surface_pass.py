@@ -95,14 +95,16 @@ NOGOVA_SURFACE_TEXTURES.update({
     # texture; 3D stone objects may still be placed independently.
 })
 
-# Classic Malden/Abel terrain references textures through the Abel PBO prefix.
-# These paths are taken from the stock Malden WRP. The WRP uses pi primarily for
-# sea/seabed, tt as the dominant land texture, pb for forest cells, sh around
-# shore/beach transitions, and bah for muddy/dirt-road ground.
+# Classic Malden/Abel terrain uses literal virtual paths from the stock Abel
+# OPRW texture table, just as Everon classic hard-codes Eden paths.  The source
+# WRP's direct-tile usage is dominated by pi (sea) and tt (land), followed by sh
+# (shore), pb (forest), p4 (rock), and bah (dirt).  Do not probe Abel.pbo to
+# discover or validate this palette at build time.
 _MALDEN_SEA_TEXTURE = r"abel\pi.paa"
 _MALDEN_LAND_TEXTURE = r"abel\tt.paa"
 _MALDEN_FOREST_TEXTURE = r"abel\pb.paa"
 _MALDEN_SHORE_TEXTURE = r"abel\sh.paa"
+_MALDEN_ROCK_TEXTURE = r"abel\p4.paa"
 _MALDEN_DIRT_TEXTURE = r"abel\bah.paa"
 MALDEN_SURFACE_TEXTURES: dict[str, str] = {
     "w": _MALDEN_SEA_TEXTURE,
@@ -110,8 +112,8 @@ MALDEN_SURFACE_TEXTURES: dict[str, str] = {
     "s": _MALDEN_SHORE_TEXTURE,
     "g": _MALDEN_LAND_TEXTURE,
     "h": _MALDEN_LAND_TEXTURE,
-    "r": _MALDEN_SHORE_TEXTURE,
-    "k": _MALDEN_SHORE_TEXTURE,
+    "r": _MALDEN_ROCK_TEXTURE,
+    "k": _MALDEN_ROCK_TEXTURE,
     "f": _MALDEN_FOREST_TEXTURE,
     "e": _MALDEN_FOREST_TEXTURE,
     "a": _MALDEN_LAND_TEXTURE,
