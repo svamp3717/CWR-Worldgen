@@ -506,7 +506,6 @@ class SurfacePassTests(unittest.TestCase):
             {
                 r"abel\pi.paa",
                 r"abel\tt.paa",
-                r"abel\sh.paa",
                 r"abel\bah.paa",
             },
         )
@@ -517,7 +516,8 @@ class SurfacePassTests(unittest.TestCase):
         self.assertEqual(paths[MATERIAL_INDEX["f"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["e"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["w"]], r"abel\pi.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["s"]], r"abel\sh.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["s"]], grass)
+        self.assertEqual(paths[MATERIAL_INDEX["x"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["r"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["k"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["a"]], grass)
