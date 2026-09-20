@@ -450,7 +450,7 @@ class SurfacePassTests(unittest.TestCase):
         paths = surface_texture_wire_paths(world_name, "everon")
         external = set(external_surface_texture_paths("everon"))
         stock = {
-            r"Eden\tn.paa", r"Eden\z.paa", r"Eden\zbh.paa", r"Eden\bak\bah.pac",
+            r"Eden\tn.paa", r"Eden\ps.paa", r"Eden\zbh.paa", r"Eden\bak\bah.pac",
             r"o\l1.paa", r"o\lom2.paa",
         }
         self.assertEqual(external, stock)
@@ -460,9 +460,9 @@ class SurfacePassTests(unittest.TestCase):
         self.assertEqual(paths[MATERIAL_INDEX["a"]], r"Eden\zbh.paa")
         self.assertEqual(paths[MATERIAL_INDEX["b"]], r"Eden\zbh.paa")
         self.assertEqual(paths[MATERIAL_INDEX["c"]], r"Eden\zbh.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["g"]], r"Eden\z.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["f"]], r"Eden\z.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["e"]], r"Eden\z.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["g"]], r"Eden\ps.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["f"]], r"Eden\ps.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["e"]], r"Eden\ps.paa")
         self.assertEqual(paths[MATERIAL_INDEX["r"]], r"o\l1.paa")
         self.assertEqual(paths[MATERIAL_INDEX["k"]], r"o\lom2.paa")
         self.assertEqual(paths[MATERIAL_INDEX["p"]], r"Eden\tn.paa")
@@ -2460,7 +2460,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             wrp = inspect_rvw4(result.wrp_path, height_scale=0.05)
             self.assertTrue(any(path.startswith(r"cwr_m9_clusters\f\u_") for path in wrp.object_models))
             stock_ground = {
-                r"Eden\tn.paa", r"Eden\z.paa", r"Eden\zbh.paa", r"Eden\bak\bah.pac",
+                r"Eden\tn.paa", r"Eden\ps.paa", r"Eden\zbh.paa", r"Eden\bak\bah.pac",
                 r"o\l1.paa", r"o\lom2.paa",
             }
             self.assertTrue(all(path in stock_ground for path in wrp.texture_slots[1:1 + len(MILESTONE9_MATERIALS)]))
@@ -2471,7 +2471,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             }
             self.assertTrue(entries.isdisjoint(generated_ground_entries))
             forest_slot = 1 + MATERIAL_INDEX["f"]
-            self.assertEqual(wrp.texture_slots[forest_slot], r"Eden\z.paa")
+            self.assertEqual(wrp.texture_slots[forest_slot], r"Eden\ps.paa")
             self.assertGreater(wrp.texture_index_counts[forest_slot], 0)
             manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["pbo_layout"]["mode"], "single_world_pbo")
