@@ -23,7 +23,7 @@ from typing import Iterable, Sequence
 STOCK_RUNWAY_BACKGROUND_TEXTURES: dict[str, str] = {
     "nogova": r"o\t1.paa",
     "everon": r"Eden\zbh.paa",
-    "malden": r"LandText\mo.pac",
+    "malden": r"abel\tt.paa",
     "desert": r"o\ps.paa",
 }
 _STOCK_RUNWAY_BACKGROUND_SET = {
@@ -47,8 +47,8 @@ def runway_background_texture_path(spec) -> str:
 def external_runway_texture_paths(spec) -> tuple[str, ...]:
     """Return the stock texture that validation should locate when required.
 
-    Malden Classic deliberately trusts the base-game LandText family exactly as
-    ordinary WRP references do. The runway renderer may still open mo.pac from a
+    Malden Classic deliberately trusts the base-game Abel texture family exactly
+    as ordinary WRP references do. The runway renderer may still open tt.paa from a
     configured game root for exact compositing, but absence from an asset scan is
     never a build error.
     """
