@@ -23,6 +23,10 @@ STOCK_BUILDING_VANILLA_PRESET = "stock-vanilla"
 STOCK_BUILDING_RESISTANCE_PRESET = "stock-resistance"
 STOCK_BUILDING_HAUS_ONLY_PRESET = "stock-haus-only"
 STOCK_BUILDING_AGS_ONLY_PRESET = "stock-ags-only"
+STOCK_BUILDING_BAS_O_GENERAL_PRESET = "stock-bas-o-general"
+STOCK_BUILDING_BAS_O_MIDDLEAST_PRESET = "stock-bas-o-middleast"
+STOCK_BUILDING_BAS_O_SHANTY_PRESET = "stock-bas-o-shanty"
+STOCK_BUILDING_BAS_O_AFRICAHUT_PRESET = "stock-bas-o-africahut"
 
 # Legacy combined identifiers remain accepted when loading old profiles, but no
 # combined catalogue JSONs are shipped anymore. They expand into source sets.
@@ -34,6 +38,10 @@ _STOCK_NON_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_non_re
 _STOCK_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_resistance.json"
 _STOCK_HAUS_ONLY_CATALOGUE_PATH = _DATA_DIR / "haus.pbo buildings only.json"
 _STOCK_AGS_ONLY_CATALOGUE_PATH = _DATA_DIR / "ags inds+port.json"
+_STOCK_BAS_O_GENERAL_CATALOGUE_PATH = _DATA_DIR / "BAS_O.pbo general.json"
+_STOCK_BAS_O_MIDDLEAST_CATALOGUE_PATH = _DATA_DIR / "BAS_O.pbo middleast.json"
+_STOCK_BAS_O_SHANTY_CATALOGUE_PATH = _DATA_DIR / "BAS_O.pbo shanty.json"
+_STOCK_BAS_O_AFRICAHUT_CATALOGUE_PATH = _DATA_DIR / "BAS_O.pbo africahut.json"
 
 
 def _catalogue_display_name(path: Path, fallback: str) -> str:
@@ -61,6 +69,22 @@ STOCK_BUILDING_AGS_ONLY_LABEL = _catalogue_display_name(
     _STOCK_AGS_ONLY_CATALOGUE_PATH,
     "ags_inds.pbo and ags_port.pbo buildings",
 )
+STOCK_BUILDING_BAS_O_GENERAL_LABEL = _catalogue_display_name(
+    _STOCK_BAS_O_GENERAL_CATALOGUE_PATH,
+    "BAS_O.pbo General buildings",
+)
+STOCK_BUILDING_BAS_O_MIDDLEAST_LABEL = _catalogue_display_name(
+    _STOCK_BAS_O_MIDDLEAST_CATALOGUE_PATH,
+    "BAS_O.pbo Middle East buildings",
+)
+STOCK_BUILDING_BAS_O_SHANTY_LABEL = _catalogue_display_name(
+    _STOCK_BAS_O_SHANTY_CATALOGUE_PATH,
+    "BAS_O.pbo Shanty buildings",
+)
+STOCK_BUILDING_BAS_O_AFRICAHUT_LABEL = _catalogue_display_name(
+    _STOCK_BAS_O_AFRICAHUT_CATALOGUE_PATH,
+    "BAS_O.pbo African hut buildings",
+)
 
 # Compatibility labels for code/imports that still know the old combined IDs.
 STOCK_BUILDING_COMBINED_LABEL = "Stock combined (non-Resistance + Resistance) buildings"
@@ -76,12 +100,20 @@ STOCK_BUILDING_PRESETS = (
     STOCK_BUILDING_RESISTANCE_PRESET,
     STOCK_BUILDING_HAUS_ONLY_PRESET,
     STOCK_BUILDING_AGS_ONLY_PRESET,
+    STOCK_BUILDING_BAS_O_GENERAL_PRESET,
+    STOCK_BUILDING_BAS_O_MIDDLEAST_PRESET,
+    STOCK_BUILDING_BAS_O_SHANTY_PRESET,
+    STOCK_BUILDING_BAS_O_AFRICAHUT_PRESET,
 )
 STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_VANILLA_LABEL),
     (STOCK_BUILDING_RESISTANCE_PRESET, STOCK_BUILDING_RESISTANCE_LABEL),
     (STOCK_BUILDING_HAUS_ONLY_PRESET, STOCK_BUILDING_HAUS_ONLY_LABEL),
     (STOCK_BUILDING_AGS_ONLY_PRESET, STOCK_BUILDING_AGS_ONLY_LABEL),
+    (STOCK_BUILDING_BAS_O_GENERAL_PRESET, STOCK_BUILDING_BAS_O_GENERAL_LABEL),
+    (STOCK_BUILDING_BAS_O_MIDDLEAST_PRESET, STOCK_BUILDING_BAS_O_MIDDLEAST_LABEL),
+    (STOCK_BUILDING_BAS_O_SHANTY_PRESET, STOCK_BUILDING_BAS_O_SHANTY_LABEL),
+    (STOCK_BUILDING_BAS_O_AFRICAHUT_PRESET, STOCK_BUILDING_BAS_O_AFRICAHUT_LABEL),
 )
 
 STOCK_BUILDING_MULTI_PREFIX = "stock-multi:"
@@ -110,6 +142,10 @@ _STOCK_CATALOGUE_BY_PRESET = {
     STOCK_BUILDING_RESISTANCE_PRESET: _STOCK_RESISTANCE_CATALOGUE_PATH,
     STOCK_BUILDING_HAUS_ONLY_PRESET: _STOCK_HAUS_ONLY_CATALOGUE_PATH,
     STOCK_BUILDING_AGS_ONLY_PRESET: _STOCK_AGS_ONLY_CATALOGUE_PATH,
+    STOCK_BUILDING_BAS_O_GENERAL_PRESET: _STOCK_BAS_O_GENERAL_CATALOGUE_PATH,
+    STOCK_BUILDING_BAS_O_MIDDLEAST_PRESET: _STOCK_BAS_O_MIDDLEAST_CATALOGUE_PATH,
+    STOCK_BUILDING_BAS_O_SHANTY_PRESET: _STOCK_BAS_O_SHANTY_CATALOGUE_PATH,
+    STOCK_BUILDING_BAS_O_AFRICAHUT_PRESET: _STOCK_BAS_O_AFRICAHUT_CATALOGUE_PATH,
 }
 
 
@@ -223,6 +259,8 @@ def stock_model_source(model_path: object) -> str:
         return "haus"
     if path.startswith("ags_inds\\") or path.startswith("ags_port\\"):
         return "ags"
+    if path.startswith("bas_o\\"):
+        return "bas_o"
     return "vanilla"
 
 
