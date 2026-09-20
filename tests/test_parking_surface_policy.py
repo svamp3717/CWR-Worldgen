@@ -127,7 +127,7 @@ def test_paved_and_gravel_render_over_background_without_replacing_outside() -> 
     assert float(actual_gravel[:, :, 0].mean()) > float(actual_paved[:, :, 0].mean())
 
 
-def test_malden_parking_overlay_uses_wrp_paths_without_pbo_reads(tmp_path, monkeypatch) -> None:
+def test_malden_parking_overlay_uses_shared_exact_preset_background(tmp_path, monkeypatch) -> None:
     spec = _spec(tmp_path)
     spec.ground_texture_profile = "malden"
     spec.surface_pass_enabled = True
@@ -138,10 +138,18 @@ def test_malden_parking_overlay_uses_wrp_paths_without_pbo_reads(tmp_path, monke
     source_dir = tmp_path / "parkingworld"
     source_dir.mkdir()
 
-    def fail_external_read(*_args, **_kwargs):
-        raise AssertionError("Malden parking generation must not read Abel.pbo")
+    loaded_paths = []
+    exact_background = SimpleNamespace(
+        top_image=Image.new("RGB", (128, 128), (62, 91, 48)),
+        data=b"malden-main-terrain",
+        source="Abel.pbo",
+    )
 
-    monkeypatch.setattr(exact, "_read_external_asset_cached", fail_external_read)
+    def load_exact_background(_source_dir, _spec, wire_path):
+        loaded_paths.append(wire_path)
+        return exact_background
+
+    monkeypatch.setattr(exact, "_load_exact_texture", load_exact_background)
     texture_paths = (
         r"parkingworld\data\d.paa",
         *surface_pass.surface_texture_wire_paths("parkingworld", "malden"),
@@ -155,10 +163,11 @@ def test_malden_parking_overlay_uses_wrp_paths_without_pbo_reads(tmp_path, monke
     report = json.loads((source_dir / "parking-lot-textures.json").read_text())
 
     assert texture_paths[grass_slot] == r"abel\tt.paa"
+    assert loaded_paths == [r"abel\tt.paa"]
     assert generated
     assert all(path.startswith(r"parkingworld\pk") for path in generated)
     assert report["background_path"] == r"abel\tt.paa"
-    assert report["background_source"] == "generated-fallback"
+    assert report["background_source"] == "Abel.pbo"
     assert len(revised_paths) == len(texture_paths) + len(generated)
     assert any(index >= len(texture_paths) for index in revised_indices)
 
