@@ -9030,8 +9030,8 @@ def generate_world_objects(
                 )
                 forest_sample_count = sum(raster.forest[index] for index in sample_indices)
 
-                # Everon's road-cut fallback only needs blocks with at least two
-                # forest probes. Empty/non-forest lattice cells therefore do not
+                # Classic Everon/Malden road-cut fallback only needs blocks with
+                # at least two forest probes. Empty/non-forest lattice cells do not
                 # need a road-index query at all. On a 50 km world this removes
                 # road lookups from most of the ~1,000,000 primary candidates.
                 if modern_forest_profile and forest_sample_count < 2:
