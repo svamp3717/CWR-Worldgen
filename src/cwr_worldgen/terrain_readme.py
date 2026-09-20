@@ -44,6 +44,123 @@ def _selection_details(source_manifest_path: Path) -> dict[str, Any]:
     return dict(selection) if isinstance(selection, dict) else {}
 
 
+def _read_json_object(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return dict(document) if isinstance(document, dict) else {}
+
+
+def _humanize_identifier(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "Unknown"
+    return text.replace("_", " ").replace("-", " ").title()
+
+
+def _building_preset_label(value: object) -> str:
+    identifier = str(value or "auto").strip() or "auto"
+    if identifier.casefold() == "auto":
+        return "Automatic (area / country)"
+
+    try:
+        from .stock_building_extensions import STOCK_BUILDING_OPTIONS, stock_building_preset_ids
+        stock_labels = dict(STOCK_BUILDING_OPTIONS)
+        selected_stock = stock_building_preset_ids(identifier)
+        if selected_stock:
+            return " + ".join(stock_labels.get(item, _humanize_identifier(item)) for item in selected_stock)
+    except (ImportError, RuntimeError, ValueError):
+        pass
+
+    try:
+        from .building_country_policy import building_country_options
+        country_labels = dict(building_country_options())
+        if identifier in country_labels:
+            return country_labels[identifier]
+    except (ImportError, RuntimeError):
+        pass
+
+    try:
+        from .house_style_catalogue import house_style_preset_profile
+        profile = house_style_preset_profile(identifier)
+        if profile is not None:
+            return str(profile.display_name)
+    except (ImportError, RuntimeError, ValueError):
+        pass
+
+    return _humanize_identifier(identifier)
+
+
+def _appearance_label(ground_profile: object, forest_profile: object) -> str:
+    ground = str(ground_profile or "generated").strip().casefold() or "generated"
+    forest = str(forest_profile or "everon").strip().casefold() or "everon"
+    exact = {
+        ("nogova", "everon"): "Nogova textures + Everon trees",
+        ("nogova", "malden"): "Nogova textures + Malden vegetation",
+        ("everon", "everon"): "Everon classic",
+        ("malden", "malden"): "Malden classic",
+    }
+    if (ground, forest) in exact:
+        return exact[(ground, forest)]
+    return f"{_humanize_identifier(ground)} terrain + {_humanize_identifier(forest)} vegetation"
+
+
+def _building_readme_details(result: Any, spec: Any) -> dict[str, object]:
+    catalogue_path = getattr(result, "building_catalogue_path", None)
+    if catalogue_path is None:
+        candidate = Path(getattr(result, "output_dir", ".")) / "building-asset-catalogue.json"
+        catalogue_path = candidate if candidate.is_file() else None
+    catalogue = _read_json_object(Path(catalogue_path) if catalogue_path is not None else None)
+
+    preset_identifier = str(
+        catalogue.get("house_style_preset")
+        or catalogue.get("mode")
+        or getattr(spec, "house_style_preset", "auto")
+        or "auto"
+    )
+    resolved_identifier = str(
+        catalogue.get("house_style_region")
+        or catalogue.get("detected_house_style_region")
+        or catalogue.get("region")
+        or ""
+    ).strip()
+
+    style_identifiers: set[str] = set()
+    class_names: set[str] = set()
+    for row in catalogue.get("request_mapping", ()):
+        if not isinstance(row, dict):
+            continue
+        selected = row.get("selected")
+        if not isinstance(selected, dict):
+            continue
+        value = str(selected.get("regional_style", "")).strip()
+        if value:
+            style_identifiers.add(value)
+        value = str(selected.get("building_class", "")).strip()
+        if value:
+            class_names.add(value)
+
+    if not style_identifiers:
+        for row in catalogue.get("models", ()):
+            if not isinstance(row, dict):
+                continue
+            value = str(row.get("source_set", "")).strip()
+            if value:
+                style_identifiers.add(value)
+
+    return {
+        "preset_identifier": preset_identifier,
+        "preset_label": _building_preset_label(preset_identifier),
+        "resolved_identifier": resolved_identifier,
+        "resolved_label": _building_preset_label(resolved_identifier) if resolved_identifier else "",
+        "styles": tuple(sorted(style_identifiers)),
+        "classes": tuple(sorted(class_names)),
+    }
+
+
 def terrain_readme_text(
     *,
     display_name: str,
@@ -51,6 +168,15 @@ def terrain_readme_text(
     source_manifest_path: Path,
     cells: int,
     cell_size_metres: float,
+    building_preset: str = "Unknown",
+    building_preset_identifier: str = "",
+    resolved_building_style: str = "",
+    resolved_building_style_identifier: str = "",
+    building_styles: tuple[str, ...] = (),
+    building_classes: tuple[str, ...] = (),
+    terrain_style: str = "Unknown",
+    forest_style: str = "Unknown",
+    appearance_preset: str = "Unknown",
     created_at: datetime | None = None,
 ) -> str:
     """Build the user-facing terrain reproduction ReadMe."""
@@ -93,9 +219,41 @@ def terrain_readme_text(
         f"PBO: {pbo_name}",
         f"Version: {timestamp}",
         "",
-        "Terrain Informations",
-        f"Selection method: {selection_method}",
+        "Build Presets",
+        (
+            f"Building preset: {building_preset} [{building_preset_identifier}]"
+            if building_preset_identifier
+            else f"Building preset: {building_preset}"
+        ),
     ]
+    if resolved_building_style:
+        lines.append(
+            (
+                f"Resolved building style: {resolved_building_style} [{resolved_building_style_identifier}]"
+                if resolved_building_style_identifier
+                else f"Resolved building style: {resolved_building_style}"
+            )
+        )
+    if building_styles:
+        lines.append(
+            "Building styles used: "
+            + ", ".join(_humanize_identifier(value) for value in building_styles)
+        )
+    if building_classes:
+        lines.append(
+            "Building classes used: "
+            + ", ".join(_humanize_identifier(value) for value in building_classes)
+        )
+    lines.extend(
+        [
+            f"Appearance preset: {appearance_preset}",
+            f"Terrain style: {_humanize_identifier(terrain_style)}",
+            f"Vegetation / forest preset: {_humanize_identifier(forest_style)}",
+            "",
+            "Terrain Informations",
+            f"Selection method: {selection_method}",
+        ]
+    )
     if center:
         lines.append(
             "Center coordinates (Latitude, Longitude): "
@@ -123,13 +281,16 @@ def terrain_readme_text(
 
 
 def terrain_readme_path(result: Any, spec: Any) -> Path:
-    """Return the ReadMe path in the same Addons directory as the terrain PBO."""
+    """Return the ReadMe path beside the generated terrain PBO."""
     return result.pbo_path.parent / terrain_readme_filename(spec.display_name)
 
 
 def write_terrain_readme(result: Any, spec: Any) -> Path:
-    """Write the terrain ReadMe beside the generated PBO."""
+    """Write the terrain ReadMe beside the generated terrain PBO."""
     readme_path = terrain_readme_path(result, spec)
+    building = _building_readme_details(result, spec)
+    ground_profile = str(getattr(spec, "ground_texture_profile", "generated"))
+    forest_profile = str(getattr(spec, "forest_profile", "everon"))
     readme_path.write_text(
         terrain_readme_text(
             display_name=spec.display_name,
@@ -137,6 +298,15 @@ def write_terrain_readme(result: Any, spec: Any) -> Path:
             source_manifest_path=Path(spec.source_dir) / "source.json",
             cells=int(getattr(spec, "cells", 256)),
             cell_size_metres=float(getattr(spec, "cell_size", 25.0)),
+            building_preset=str(building["preset_label"]),
+            building_preset_identifier=str(building["preset_identifier"]),
+            resolved_building_style=str(building["resolved_label"]),
+            resolved_building_style_identifier=str(building["resolved_identifier"]),
+            building_styles=tuple(building["styles"]),
+            building_classes=tuple(building["classes"]),
+            terrain_style=ground_profile,
+            forest_style=forest_profile,
+            appearance_preset=_appearance_label(ground_profile, forest_profile),
         ),
         encoding="utf-8",
         newline="\n",
@@ -152,7 +322,7 @@ def _sync_cli_build_binding(build_callable: Any) -> None:
 
 
 def install_milestone9_terrain_readme() -> None:
-    """Make the terrain ReadMe part of the normal Milestone 9 deployment pass."""
+    """Keep the terrain ReadMe beside the PBO and deploy it with the PBO."""
     from . import milestone9 as milestone9_module
 
     original_build = milestone9_module.build_milestone9
@@ -164,9 +334,8 @@ def install_milestone9_terrain_readme() -> None:
 
     @wraps(original_deploy)
     def deploy_with_terrain_readme(result: Any, target_root: Path):
-        # Milestone 9's normal deployer recursively copies and verifies every file
-        # below runtime/Addons. Create the ReadMe before that scan so it follows
-        # exactly the same path as the PBO instead of relying on a second copy.
+        # Create the human-readable terrain note before deployment so the normal
+        # deploy pass can copy it beside the PBO together with the required menu intro.
         spec = _ACTIVE_TERRAIN_SPEC.get()
         if spec is not None:
             write_terrain_readme(result, spec)
@@ -180,8 +349,7 @@ def install_milestone9_terrain_readme() -> None:
         token = _ACTIVE_TERRAIN_SPEC.set(spec)
         try:
             result = original_build(output_dir, spec, clean=clean)
-            # With deployment enabled the deploy wrapper already created the file
-            # before copying. Builds without deployment still need the local copy.
+            # Builds without deployment still keep the ReadMe beside the PBO.
             readme_path = terrain_readme_path(result, spec)
             if not readme_path.is_file():
                 write_terrain_readme(result, spec)

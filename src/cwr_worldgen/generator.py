@@ -84,6 +84,7 @@ from .osm import (
     OSM_INDIVIDUAL_TREE_MODELS,
     NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS,
     NOGOVA_PINE_INDIVIDUAL_TREE_MODELS,
+    MALDEN_INDIVIDUAL_TREE_MODELS,
     STOCK_STONE_MODELS,
     STOCK_FARMLAND_FENCE_MODELS,
     STOCK_SETTLEMENT_DETAIL_MODELS,
@@ -173,6 +174,11 @@ def _forest_proxy_profile(spec: object) -> str:
         return "nogova_pine"
     if model.startswith(r"o\tree\les_nw_"):
         return "nogova_leaf"
+    if (
+        str(getattr(spec, "forest_profile", "")).casefold() == "malden"
+        or model == r"data3d\les_su_ctver_pruhozi.p3d"
+    ):
+        return "malden"
     return "everon"
 
 
@@ -957,7 +963,7 @@ def _validate_milestone3(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "malden"}:
         checks.append((
             "Steep forest blocks use the normal/sunk triangle or reusable fallback ladder",
             (
@@ -1531,6 +1537,11 @@ def _ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
 
 def _external_ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
     profile = _ground_texture_profile(spec)
+    # Malden Classic writes stock Abel paths directly into the WRP and assumes
+    # the base game provides Abel.pbo. Do not turn those ordinary stock
+    # references into an asset-scan requirement.
+    if profile == "malden":
+        return ()
     if _surface_ground_enabled(spec):
         return external_surface_texture_paths(profile)
     return _ground_texture_paths(spec) if profile in {"everon", "nogova"} else ()
@@ -1589,6 +1600,8 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
             if proxy_profile == "nogova_pine"
             else NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS
             if proxy_profile == "nogova_leaf"
+            else MALDEN_INDIVIDUAL_TREE_MODELS
+            if proxy_profile == "malden"
             else OSM_INDIVIDUAL_TREE_MODELS
         )
         trusted.update(canonical_asset_path(path) for path in mapped_tree_models)
@@ -1880,9 +1893,9 @@ def _validate_milestone4(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "malden"}:
         checks.append((
-            "Steep forest blocks use the normal/sunk triangle or reusable fallback ladder",
+            "Steep forest blocks use the modern terrain-fit fallback ladder",
             (
                 generated.forest_hillside_fallback_blocks
                 + generated.forest_hillside_unfilled_blocks
@@ -1963,8 +1976,12 @@ def _validate_milestone4(
         ("class Names" in config) == bool(towns),
         f"{len(towns)} names",
     ))
+    checks.append((
+        "Production config references menu intro mission",
+        f'cutscenes[] = {{"{WORLD_INTRO_NAME}"}};' in config,
+        WORLD_INTRO_NAME,
+    ))
     checks.extend(_validate_world_intro(result, spec.name))
-    checks.append(("Smoke-test mission exists", result.mission_path.is_file(), result.mission_path.name))
     checks.append(("OSM attribution accompanies mod", (result.output_dir / mod_directory_name / "OSM-ATTRIBUTION.txt").is_file(), "ODbL attribution"))
 
     lines = [f"CWR World Generator - Milestone {milestone_number} validation", ""]
@@ -2633,6 +2650,44 @@ def _iterative_grounding_pass(
     return quantized, report, refined_key
 
 
+def _building_plan_fingerprint(
+    plans: Sequence[BuildingPlacementPlan],
+) -> str:
+    """Hash the selected building plans that feed the non-road placement stage.
+
+    A count alone is not a cache identity: two builds can have the same number
+    of buildings while selecting different stock models, headings or road-safe
+    positions. Serializing that stale payload is how a perfectly current road
+    network can end up running through yesterday's barn.
+    """
+    digest = hashlib.sha256()
+    for plan in plans:
+        for value in (
+            str(getattr(plan, "osm_key", "")),
+            str(int(getattr(plan, "geometry_index", 0))),
+            str(getattr(plan, "geometry_kind", "")),
+            float(getattr(plan, "x", 0.0)).hex(),
+            float(getattr(plan, "z", 0.0)).hex(),
+            float(getattr(plan, "heading_degrees", 0.0)).hex(),
+            str(getattr(plan, "model_path", "")).replace("/", "\\").casefold(),
+            str(getattr(plan, "building_family", "")).casefold(),
+            "1" if bool(getattr(plan, "synthetic_infill", False)) else "0",
+        ):
+            digest.update(value.encode("utf-8", "surrogatepass"))
+            digest.update(b"\0")
+        for point in tuple(getattr(plan, "support_polygon", ()) or ()):
+            try:
+                px, pz = point
+            except (TypeError, ValueError):
+                continue
+            digest.update(float(px).hex().encode("ascii"))
+            digest.update(b",")
+            digest.update(float(pz).hex().encode("ascii"))
+            digest.update(b";")
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
 def _load_nonroad_objects(
     dataset: OsmDataset,
     projection: BboxProjection,
@@ -2645,6 +2700,7 @@ def _load_nonroad_objects(
     terrain_key: str,
     dataset_identity: str,
     road_fingerprint: str,
+    road_report: RoadFitReport | None = None,
     building_placement_plans: Sequence[BuildingPlacementPlan] = (),
     building_plans_truncated: bool = False,
     progress_callback: Callable[[int, str], None] = report_progress,
@@ -2655,6 +2711,7 @@ def _load_nonroad_objects(
         "dataset": dataset_identity,
         "road_fingerprint": road_fingerprint,
         "building_plan_count": len(building_placement_plans),
+        "building_plan_fingerprint": _building_plan_fingerprint(building_placement_plans),
         "building_plans_truncated": building_plans_truncated,
         "starting_object_id": starting_object_id,
         "spec": _spec_fields(spec, _PLACEMENT_CACHE_FIELDS),
@@ -3019,10 +3076,11 @@ def build_milestone4(
     if _surface_ground_enabled(spec):
         generated_material_texture_paths = tuple(
             path for path, material in zip(material_texture_paths, materials)
-            if _ground_texture_profile(spec) not in {"everon", "nogova"} or getattr(material, "everon_path", None) is None
+            if _ground_texture_profile(spec) not in {"everon", "nogova", "malden"}
+            or getattr(material, "everon_path", None) is None
         )
     else:
-        generated_material_texture_paths = material_texture_paths if _ground_texture_profile(spec) in {"generated", "desert", "malden"} else ()
+        generated_material_texture_paths = material_texture_paths if _ground_texture_profile(spec) in {"generated", "desert"} else ()
     texture_paths = generated_material_texture_paths + (dummy_texture_path,)
     mod_root = output_dir / mod_directory_name
     pbo_path = mod_root / "Addons" / f"{spec.name}.pbo"
@@ -3059,7 +3117,14 @@ def build_milestone4(
     cache_report_path = output_dir / "cache-report.json"
 
     source_dir.mkdir(parents=True, exist_ok=True)
-    mission_path.parent.mkdir(parents=True, exist_ok=True)
+    pbo_path.parent.mkdir(parents=True, exist_ok=True)
+    # Keep the disposable smoke-test mission out of production output, but retain
+    # the world menu intro under Anims: CWA expects the CfgWorlds cutscene target
+    # to exist and can fail hard when it is missing.
+    if mission_path.parent.is_dir():
+        shutil.rmtree(mission_path.parent)
+    if intro_dir.is_dir():
+        shutil.rmtree(intro_dir)
     intro_dir.mkdir(parents=True, exist_ok=True)
     cache_dir, cache_enabled, cache_refresh = _cache_settings(spec)
 
@@ -3117,6 +3182,7 @@ def build_milestone4(
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
         )
+        building_library.ground_texture_profile = _ground_texture_profile(spec)
         building_library.prepare(dataset, projection, spec.point_building_footprint)
     report_progress(23, "Resolving final building footprints and entrances")
     building_placement_plans, building_plans_truncated = plan_building_placements(
@@ -3221,6 +3287,7 @@ def build_milestone4(
         terrain_key=terrain_cache_key,
         dataset_identity=dataset_identity,
         road_fingerprint=road_fingerprint,
+        road_report=road_fit,
         building_placement_plans=building_placement_plans,
         building_plans_truncated=building_plans_truncated,
     )
@@ -3256,6 +3323,10 @@ def build_milestone4(
     transitions = replace(transitions, indices=material_indices) if hasattr(transitions, "indices") else transitions
     if cached_building_library is not None:
         building_library = cached_building_library
+    if building_library is not None:
+        # Cache entries may predate terrain metadata on building libraries.
+        # Refresh it from the active build so the asset catalogue records reality.
+        building_library.ground_texture_profile = _ground_texture_profile(spec)
     report_progress(69, "Placing semantic landmarks")
     semantic = (
         generate_semantic_objects(
@@ -3530,7 +3601,7 @@ def build_milestone4(
                 int(getattr(spec, "surface_texture_size", 512)),
             )
             store_bundle(surface_texture_bundle, source_dir, surface_texture_names, enabled=cache_enabled)
-    elif _ground_texture_profile(spec) in {"generated", "desert", "malden"}:
+    elif _ground_texture_profile(spec) in {"generated", "desert"}:
         profile = _ground_texture_profile(spec)
         surface_texture_key = cache_key(
             "milestone8-ground-texture-assets-v1",
@@ -3628,7 +3699,7 @@ def build_milestone4(
                 shutil.copyfile(overview_paa_path, overview_bundle / "overview.paa")
                 shutil.copyfile(world_icon_path, overview_bundle / "icon.paa")
 
-    report_progress(89, "Writing configuration and intro mission files")
+    report_progress(89, "Writing world configuration and menu intro")
     animated_building_models = (
         tuple(
             asset.model_path for asset in building_generation.model_assets
@@ -3642,12 +3713,20 @@ def build_milestone4(
         milestone=milestone_number,
         town_names=towns,
         animated_building_models=animated_building_models,
+        include_intro=True,
     )
     validate_cwa_config(config_text)
     (source_dir / "config.cpp").write_text(config_text, encoding="ascii", newline="\n")
-    mission_path.write_text(render_mission(spec, spawn_x=spawn.x, spawn_z=spawn.z, milestone=milestone_number), encoding="ascii", newline="\n")
-    intro_mission_path.write_text(render_world_intro_mission(spec, spawn_x=spawn.x, spawn_z=spawn.z), encoding="ascii", newline="\n")
-    intro_script_path.write_text(render_world_intro_script(spawn_x=spawn.x, spawn_z=spawn.z), encoding="ascii", newline="\n")
+    intro_mission_path.write_text(
+        render_world_intro_mission(spec, spawn_x=spawn.x, spawn_z=spawn.z),
+        encoding="ascii",
+        newline="\n",
+    )
+    intro_script_path.write_text(
+        render_world_intro_script(spawn_x=spawn.x, spawn_z=spawn.z),
+        encoding="ascii",
+        newline="\n",
+    )
 
     report_progress(90, "Rendering build previews and diagnostics")
     _write_composite_preview(preview_path, spec.cells, spec.cells, elevations, slopes, material_indices, materials)
@@ -3814,6 +3893,7 @@ def build_milestone4(
                 cache_enabled=building_library.cache_enabled,
                 cache_refresh=building_library.cache_refresh,
             )
+            repeat_building_library.ground_texture_profile = _ground_texture_profile(spec)
             repeat_building_library.prepare(dataset, projection, spec.point_building_footprint)
         repeat_site_library: ProceduralSiteLibrary | None = None
         if site_library is not None:
@@ -3961,7 +4041,7 @@ def build_milestone4(
                 spec.deterministic_seed,
                 int(getattr(spec, "surface_texture_size", 512)),
             )
-        elif _ground_texture_profile(spec) in {"generated", "desert", "malden"}:
+        elif _ground_texture_profile(spec) in {"generated", "desert"}:
             profile = _ground_texture_profile(spec)
             for path, material in zip(
                 (temp_source / "data" / f"{material.code}.paa" for material in OSM_MATERIALS),
@@ -4376,7 +4456,6 @@ def build_milestone4(
                 "infrastructure-asset-catalogue.json": _sha256(infrastructure_catalogue_path),
             } if infrastructure_generation else {}),
             f"{mod_directory_name}/Addons/{spec.name}.pbo": _sha256(pbo_path),
-            f"Missions/test_mission.{spec.name}/mission.sqm": _sha256(mission_path),
             f"{mod_directory_name}/Anims/{WORLD_INTRO_NAME}.{spec.name}/mission.sqm": _sha256(intro_mission_path),
             f"{mod_directory_name}/Anims/{WORLD_INTRO_NAME}.{spec.name}/intro.sqs": _sha256(intro_script_path),
             "preview.png": _sha256(preview_path),
@@ -4489,7 +4568,7 @@ def build_milestone4(
         lines = [
             "[FAIL] Final validation checks raised an exception",
             f"Reason: {type(exc).__name__}: {exc}",
-            "Generated runtime preserved; deployment may still copy the PBO and intro files.",
+            "Generated PBO preserved; deployment may still copy the PBO.",
             f"PBO SHA-256: {_sha256(pbo_path) if pbo_path.is_file() else 'missing'}",
         ]
     else:

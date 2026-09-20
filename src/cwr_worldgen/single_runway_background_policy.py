@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Use one predictable terrain texture as the runway background for each preset.
 
-Runway compositing needs source pixels, but ordinary WRP terrain references do not.
-Keep that distinction deliberately simple: each stock ground preset has one known
-runway-background PAA, while generated/Malden profiles use the world-local grass
-PAA. Asset validation checks stock models plus that one texture and trusts texture
+Generated runway, parking and sports-field compositing needs source pixels, but
+ordinary WRP terrain references do not. Keep that distinction deliberately simple:
+each stock ground preset has one known main terrain PAA, while only the generated
+profile uses the world-local grass PAA. Asset validation checks stock models plus that one texture and trusts texture
 dependencies shipped inside those model packages instead of recursively proving
 every PAA/PAC reference.
 
@@ -22,7 +22,8 @@ from typing import Iterable, Sequence
 
 STOCK_RUNWAY_BACKGROUND_TEXTURES: dict[str, str] = {
     "nogova": r"o\t1.paa",
-    "everon": r"Eden\zbh.paa",
+    "everon": r"Eden\tn.paa",
+    "malden": r"abel\tt.paa",
     "desert": r"o\ps.paa",
 }
 _STOCK_RUNWAY_BACKGROUND_SET = {
@@ -35,16 +36,21 @@ def _profile_name(spec) -> str:
     return str(getattr(spec, "ground_texture_profile", "generated") or "generated").strip().casefold()
 
 
-def runway_background_texture_path(spec) -> str:
-    """Return the only texture whose pixels runway generation is allowed to open."""
+def preset_background_texture_path(spec) -> str:
+    """Return the one terrain texture used beneath generated surface overlays."""
     stock = STOCK_RUNWAY_BACKGROUND_TEXTURES.get(_profile_name(spec))
     if stock is not None:
         return stock
     return rf"{getattr(spec, 'name', '')}\data\g.paa"
 
 
+def runway_background_texture_path(spec) -> str:
+    """Backward-compatible name for the shared preset background resolver."""
+    return preset_background_texture_path(spec)
+
+
 def external_runway_texture_paths(spec) -> tuple[str, ...]:
-    """Return the one stock texture that asset validation should locate."""
+    """Return the one stock preset background texture that validation should locate."""
     stock = STOCK_RUNWAY_BACKGROUND_TEXTURES.get(_profile_name(spec))
     return (stock,) if stock is not None else ()
 
@@ -169,7 +175,7 @@ def install_single_runway_background_policy() -> None:
     # Every runway cell now composites against the same texture for its preset.
     # This one replacement feeds the renderer, exact-background resolver and the
     # persistent per-cell cache fingerprint because all three call this helper.
-    runway._ground_path_for_material = lambda spec, _material_index: runway_background_texture_path(spec)
+    runway._ground_path_for_material = lambda spec, _material_index: preset_background_texture_path(spec)
 
     # Only the texture whose pixels Worldgen actually opens is an external ground
     # dependency. Other stock WRP texture references are left for CWA to resolve.

@@ -32,6 +32,29 @@ def test_primary_everon_prefilter_rejects_empty_lattice_cells() -> None:
     assert bool(context.possible_primary[1, 1])
 
 
+def test_primary_malden_prefilter_uses_same_modern_lattice_as_everon() -> None:
+    cells = 8
+    forest = [False] * (cells * cells)
+    for row in (2, 3, 4):
+        for col in (2, 3, 4):
+            forest[row * cells + col] = True
+    raster = SimpleNamespace(forest=tuple(forest))
+    spec = SimpleNamespace(
+        forest_profile="malden",
+        max_forest_objects=1000,
+        forest_tree_spacing=50.0,
+        world_size=200.0,
+        cells=cells,
+        cell_size=25.0,
+    )
+
+    context = perf._primary_forest_possible(raster, spec)
+
+    assert context is not None
+    assert context.possible_primary.shape == (4, 4)
+    assert bool(context.possible_primary[1, 1])
+
+
 def test_batched_primary_road_hits_match_scalar_corridor_queries() -> None:
     context = perf._ForestVectorContext(
         spacing=50.0,

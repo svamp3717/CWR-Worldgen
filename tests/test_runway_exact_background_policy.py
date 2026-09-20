@@ -35,6 +35,23 @@ def _write_test_texture(path: Path, colour=(42, 67, 31), size=128) -> bytes:
     return path.read_bytes()
 
 
+def _write_paletted_pac(path: Path, colour=(62, 91, 48), size=16) -> bytes:
+    if (size * size) % 128:
+        raise ValueError("test PAC pixel count must contain whole 128-pixel runs")
+    red, green, blue = colour
+    payload = bytes((0xFF, 0)) * (size * size // 128)
+    data = (
+        struct.pack("<H", 1)
+        + bytes((blue, green, red))
+        + struct.pack("<HH", size, size)
+        + len(payload).to_bytes(3, "little")
+        + payload
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return data
+
+
 def _write_uncompressed_pbo(path: Path, entry_name: str, data: bytes) -> None:
     fields = struct.Struct("<IIIII")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,26 +72,44 @@ def test_dxt1_decoder_round_trips_generated_paa(tmp_path) -> None:
     assert np.max(np.abs(sample - np.asarray((41, 72, 33)))) <= 8
 
 
-def test_exact_loader_reads_world_local_generated_and_malden_textures(tmp_path) -> None:
-    for profile in ("generated", "malden"):
-        source_dir = tmp_path / profile / "wg_runway"
-        local = source_dir / "data" / "g.paa"
-        _write_test_texture(local, (51, 78, 36))
-        exact = _load_exact_texture(
-            source_dir,
-            _spec(profile),
-            r"wg_runway\data\g.paa",
-        )
-        assert exact is not None
-        assert exact.top_image.size == (128, 128)
-        assert Path(exact.source) == local
+def test_exact_loader_reads_malden_abel_texture_package(tmp_path) -> None:
+    root = tmp_path / "game"
+    source = tmp_path / "tt.paa"
+    texture = _write_test_texture(source, (62, 91, 48), 128)
+    pbo = root / "Abel.pbo"
+    _write_uncompressed_pbo(pbo, "tt.paa", texture)
+
+    exact = _load_exact_texture(
+        tmp_path / "unused-world",
+        _spec("malden", asset_roots=(root,)),
+        r"abel\tt.paa",
+    )
+
+    assert exact is not None
+    assert _canonical(exact.wire_path) == r"abel\tt.paa"
+    assert Path(exact.source) == pbo
+
+
+def test_exact_loader_reads_world_local_generated_texture(tmp_path) -> None:
+    source_dir = tmp_path / "generated" / "wg_runway"
+    local = source_dir / "data" / "g.paa"
+    _write_test_texture(local, (51, 78, 36))
+    exact = _load_exact_texture(
+        source_dir,
+        _spec("generated"),
+        r"wg_runway\data\g.paa",
+    )
+    assert exact is not None
+    assert exact.top_image.size == (128, 128)
+    assert Path(exact.source) == local
 
 
 @pytest.mark.parametrize(
     ("profile", "wire_path"),
     (
         ("nogova", r"o\t1.paa"),
-        ("everon", r"eden\zbh.paa"),
+        ("everon", r"eden\tn.paa"),
+        ("malden", r"abel\tt.paa"),
         ("desert", r"o\ps.paa"),
     ),
 )
@@ -169,4 +204,4 @@ def test_unchanged_edge_dxt1_blocks_are_copied_verbatim(tmp_path) -> None:
 
 def test_exact_policy_bumps_runway_cache_after_nogova_calibration() -> None:
     install_runway_exact_background_policy()
-    assert runway._SURFACE_CACHE_V18 == "surface-pipeline-v20-exact-runway-background-textures"
+    assert runway._SURFACE_CACHE_V18 == "surface-pipeline-v32-malden-no-mountain-ground"

@@ -1,0 +1,92 @@
+{
+  "schema": 5,
+  "kind": "completed_model_classifications",
+  "source_set": "BAS_O.pbo shanty",
+  "display_name": "BAS_O.pbo Shanty buildings",
+  "categories": [
+    "Residential",
+    "Commercial",
+    "Industrial",
+    "Agricultural",
+    "Military",
+    "Civic / Public",
+    "Religious",
+    "Infrastructure",
+    "Ruins",
+    "Prop / Misc"
+  ],
+  "placements": [
+    "Urban",
+    "Rural",
+    "Both"
+  ],
+  "complete_count": 5,
+  "reviewed_count": 5,
+  "models": [
+    {
+      "model_path": "bas_o\\_civ\\bas_shanty2.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 5.5573,
+      "length_m": 4.5368,
+      "height_m": 2.9079,
+      "aspect_ratio": 1.2249,
+      "origin_to_bottom_m": 1.4505
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_shanty3.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 5.5573,
+      "length_m": 4.5368,
+      "height_m": 2.9079,
+      "aspect_ratio": 1.2249,
+      "origin_to_bottom_m": 1.4505
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_shantye.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 5.5573,
+      "length_m": 4.5368,
+      "height_m": 2.9079,
+      "aspect_ratio": 1.2249,
+      "origin_to_bottom_m": 1.2071
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_shantye2.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 5.5573,
+      "length_m": 4.5368,
+      "height_m": 2.9079,
+      "aspect_ratio": 1.2249,
+      "origin_to_bottom_m": 1.2071
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_shantye3.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 5.5573,
+      "length_m": 4.5368,
+      "height_m": 2.9079,
+      "aspect_ratio": 1.2249,
+      "origin_to_bottom_m": 1.2071
+    }
+  ]
+}

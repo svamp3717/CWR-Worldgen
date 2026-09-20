@@ -140,6 +140,21 @@ NOGOVA_PINE_BORDER_PROXY_MODELS: tuple[str, ...] = (
 )
 NOGOVA_LEAF_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = NOGOVA_LEAF_BORDER_PROXY_MODELS
 NOGOVA_PINE_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = NOGOVA_PINE_BORDER_PROXY_MODELS
+
+# Malden/Abel equivalents. Keep the same generated cluster geometry as Everon,
+# but proxy only the original Data3D vegetation family selected by Malden classic.
+MALDEN_PROXY_MODELS: tuple[str, ...] = (
+    r"data3d\str_fikovnik.p3d",
+    r"data3d\str_fikovnik2.p3d",
+)
+MALDEN_BORDER_PROXY_MODELS: tuple[str, ...] = (
+    r"data3d\str_fikovnik_ker.p3d",
+    r"data3d\ker listnac.p3d",
+    r"data3d\ker deravej.p3d",
+    r"data3d\ker buxus.p3d",
+)
+MALDEN_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = MALDEN_BORDER_PROXY_MODELS
+
 # Compatibility aliases: generic Nogova means the ordinary/leaf family.
 NOGOVA_PROXY_MODELS = NOGOVA_LEAF_PROXY_MODELS
 NOGOVA_BORDER_PROXY_MODELS = NOGOVA_LEAF_BORDER_PROXY_MODELS
@@ -422,12 +437,17 @@ def _profiled_cluster_variant(variant: ForestClusterVariant, proxy_profile: str)
         return variant
     if profile == "nogova":
         profile = "nogova_leaf"
-    if profile not in {"nogova_leaf", "nogova_pine"}:
+    if profile not in {"nogova_leaf", "nogova_pine", "malden"}:
         raise ValueError(f"unsupported forest proxy profile: {proxy_profile!r}")
 
-    proxy_models = NOGOVA_PINE_PROXY_MODELS if profile == "nogova_pine" else NOGOVA_LEAF_PROXY_MODELS
-    border_models = NOGOVA_PINE_BORDER_PROXY_MODELS if profile == "nogova_pine" else NOGOVA_LEAF_BORDER_PROXY_MODELS
-    undergrowth_models = NOGOVA_PINE_UNDERGROWTH_PROXY_MODELS if profile == "nogova_pine" else NOGOVA_LEAF_UNDERGROWTH_PROXY_MODELS
+    if profile == "malden":
+        proxy_models = MALDEN_PROXY_MODELS
+        border_models = MALDEN_BORDER_PROXY_MODELS
+        undergrowth_models = MALDEN_UNDERGROWTH_PROXY_MODELS
+    else:
+        proxy_models = NOGOVA_PINE_PROXY_MODELS if profile == "nogova_pine" else NOGOVA_LEAF_PROXY_MODELS
+        border_models = NOGOVA_PINE_BORDER_PROXY_MODELS if profile == "nogova_pine" else NOGOVA_LEAF_BORDER_PROXY_MODELS
+        undergrowth_models = NOGOVA_PINE_UNDERGROWTH_PROXY_MODELS if profile == "nogova_pine" else NOGOVA_LEAF_UNDERGROWTH_PROXY_MODELS
     replacements = {
         **dict(zip(DEFAULT_PROXY_MODELS, proxy_models)),
         **dict(zip(DEFAULT_BORDER_PROXY_MODELS, border_models)),

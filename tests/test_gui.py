@@ -219,6 +219,64 @@ class GuiCommandTests(unittest.TestCase):
             ),
         )
 
+    def test_malden_classic_selects_malden_ground_and_forest_profiles(self) -> None:
+        class Var:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        fake = type("FakeGui", (), {})()
+        fake._preset_guard = False
+        fake.vars = {
+            "appearance_preset": Var("Malden classic"),
+            "ground_textures": Var("everon"),
+            "forest_profile": Var("everon"),
+            "forest_single_tree_model": Var(r"data3d\str smrk_medium.p3d"),
+        }
+
+        WorldgenGui._apply_appearance_preset(fake)
+
+        self.assertEqual(fake.vars["ground_textures"].get(), "malden")
+        self.assertEqual(fake.vars["forest_profile"].get(), "malden")
+        self.assertEqual(
+            fake.vars["forest_single_tree_model"].get(),
+            r"data3d\str_fikovnik.p3d",
+        )
+
+    def test_everon_classic_keeps_matching_modern_profile_pair(self) -> None:
+        class Var:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        fake = type("FakeGui", (), {})()
+        fake._preset_guard = False
+        fake.vars = {
+            "appearance_preset": Var("Everon classic"),
+            "ground_textures": Var("malden"),
+            "forest_profile": Var("malden"),
+            "forest_single_tree_model": Var(r"data3d\str_fikovnik.p3d"),
+        }
+
+        WorldgenGui._apply_appearance_preset(fake)
+
+        self.assertEqual(fake.vars["ground_textures"].get(), "everon")
+        self.assertEqual(fake.vars["forest_profile"].get(), "everon")
+        self.assertEqual(
+            fake.vars["forest_single_tree_model"].get(),
+            r"data3d\str smrk_medium.p3d",
+        )
+
     def test_debug_vegetation_presets_are_removed(self) -> None:
         labels = {preset.casefold() for preset in APPEARANCE_PRESETS}
         self.assertFalse(any("safe bushes" in preset for preset in labels))
@@ -392,6 +450,20 @@ class GuiCommandTests(unittest.TestCase):
         self.assertIn("--max-wetland-reed-objects", command)
         self.assertNotIn("--no-steep-hill-bushes", command)
         self.assertNotIn("--no-wetland-reeds", command)
+
+    def test_gui_state_restores_remembered_building_preset_selection(self) -> None:
+        defaults = defaults_with_recent_source(
+            default_gui_values(),
+            {
+                "house_style_preset": (
+                    "building-multi:stock-vanilla,se_sweden"
+                )
+            },
+        )
+        self.assertEqual(
+            defaults["house_style_preset"],
+            "building-multi:stock-vanilla,se_sweden",
+        )
 
     def test_gui_state_remembers_last_downloaded_source_after_restart(self) -> None:
         with TemporaryDirectory() as temporary:

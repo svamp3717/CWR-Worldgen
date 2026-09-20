@@ -186,8 +186,8 @@ def install_stock_desert_surface_policy() -> None:
     install_runway_nogova_calibration_policy()
 
     # Prefer the exact terrain texture for every preset, not only Nogova. Local
-    # generated/Malden PAAs are read from the world source tree; stock Nogova,
-    # Everon and Desert PAAs are resolved from asset roots, CWR_GAME_ROOT, or the
+    # generated PAAs are read from the world source tree; stock Nogova, Everon,
+    # Malden and Desert artwork is resolved from asset roots, CWR_GAME_ROOT, or the
     # parent of the deployment @mod folder. The calibrated/profile colours above
     # remain a bounded fallback when the source texture is unavailable.
     from .runway_exact_background_policy import install_runway_exact_background_policy

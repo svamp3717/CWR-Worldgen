@@ -13,13 +13,18 @@ from hashlib import blake2s, sha256
 from pathlib import Path
 import json
 import math
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
+
+from shapely.geometry import Point, Polygon
 
 from .procedural_buildings import BuildingGenerationResult, BuildingPlacement, footprint_from_polygon
 
 STOCK_BUILDING_PRESET = "stock"
-STOCK_BUILDING_PRESET_LABEL = "Stock CWA/OFP buildings only"
-_STOCK_CATALOGUE_PATH = Path(__file__).with_name("data") / "stock_building_models.json"
+STOCK_BUILDING_PRESET_LABEL = "Stock CWA/OFP buildings"
+_DATA_DIR = Path(__file__).with_name("data")
+_STOCK_NON_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_non_resistance.json"
+_STOCK_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_resistance.json"
+_STOCK_MODEL_FIT_TOLERANCE_METRES = 0.25
 
 _FAMILY_FALLBACKS: Mapping[str, tuple[str, ...]] = {
     "residential": ("residential", "townhouse"),
@@ -31,25 +36,6 @@ _FAMILY_FALLBACKS: Mapping[str, tuple[str, ...]] = {
     "industrial": ("industrial", "agricultural"),
     "agricultural": ("agricultural", "industrial", "outbuilding"),
     "outbuilding": ("outbuilding", "agricultural", "residential"),
-}
-
-_DEFAULT_HEIGHTS: Mapping[str, float] = {
-    "residential": 6.0,
-    "townhouse": 8.0,
-    "urban": 12.0,
-    "shop": 4.0,
-    "school": 8.0,
-    "church": 14.0,
-    "industrial": 8.0,
-    "agricultural": 7.0,
-    "outbuilding": 3.5,
-}
-
-_SETTLEMENT_RADIUS_M: Mapping[str, float] = {
-    "city": 1600.0,
-    "town": 900.0,
-    "village": 450.0,
-    "hamlet": 260.0,
 }
 
 _REVIEWED_CATEGORY_FAMILIES: Mapping[str, tuple[str, ...]] = {
@@ -110,7 +96,7 @@ def _reviewed_families(categories: Sequence[str], placement: str) -> tuple[str, 
     return tuple(result)
 
 
-def _load_catalogue(path: Path = _STOCK_CATALOGUE_PATH) -> tuple[StockBuildingModel, ...]:
+def _load_catalogue_file(path: Path) -> tuple[StockBuildingModel, ...]:
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -172,57 +158,142 @@ def _load_catalogue(path: Path = _STOCK_CATALOGUE_PATH) -> tuple[StockBuildingMo
     return tuple(models)
 
 
-def _parse_number(value: object) -> float | None:
-    if value is None:
-        return None
-    text = str(value).strip().casefold()
-    if not text:
-        return None
-    token = []
-    seen_digit = False
-    for char in text:
-        if char.isdigit() or char in ".-+":
-            token.append(char)
-            seen_digit = seen_digit or char.isdigit()
-        elif seen_digit:
-            break
-    try:
-        result = float("".join(token))
-    except (TypeError, ValueError):
-        return None
-    return result if math.isfinite(result) else None
+def _load_catalogue(path: Path | None = None) -> tuple[StockBuildingModel, ...]:
+    """Load one source catalogue, or the legacy vanilla+Resistance union.
+
+    The old combined JSON file was only a duplicated materialization of the two
+    source catalogues. Keep the API behaviour without keeping another catalogue
+    in sync forever.
+    """
+    if path is not None:
+        return _load_catalogue_file(path)
+
+    by_path: dict[str, StockBuildingModel] = {}
+    for source in (
+        _STOCK_NON_RESISTANCE_CATALOGUE_PATH,
+        _STOCK_RESISTANCE_CATALOGUE_PATH,
+    ):
+        for model in _load_catalogue_file(source):
+            by_path.setdefault(model.model_path.casefold(), model)
+    return tuple(by_path.values())
 
 
-def _target_height(tags: Mapping[str, str], family: str) -> float:
-    explicit = _parse_number(tags.get("height"))
-    if explicit is not None and explicit > 0.5:
-        return explicit
-    levels = _parse_number(tags.get("building:levels"))
-    if levels is not None and levels > 0.0:
-        return max(2.5, levels * 3.0)
-    return _DEFAULT_HEIGHTS.get(family, 6.0)
+def _target_height(
+    tags: Mapping[str, str],
+    family: str,
+    level_height: float,
+) -> float:
+    """Use the procedural generator's height semantics for stock model fitting."""
+    from . import procedural_buildings as buildings
+
+    return float(buildings._height(tags, family, level_height))
 
 
 def _classification(tags: Mapping[str, str], width: float, length: float, settlement: str):
-    # Use the live style classifier for subtype information because school and
-    # worship policies intentionally wrap it during package initialization.
+    # Use the same live style classifier and settlement adapter as procedural
+    # generation. School/worship policies intentionally wrap this classifier.
     from . import osm_house_modeler_styles as styles
+    from .osm_house_modeler_full_style import modeler_context
 
     return styles.classify_building(
         tags,
         width,
         length,
-        settlement=settlement,
+        settlement=modeler_context(settlement),
     )
 
 
-def _engine_family(tags: Mapping[str, str]) -> str:
-    # The style classifier deliberately maps worship buildings onto a neutral
-    # civic envelope. Stock selection instead needs the engine semantic family,
-    # so a church resolves to the stock church rather than the stock school.
-    from . import osm
+def _engine_family(
+    tags: Mapping[str, str],
+    width_m: float,
+    length_m: float,
+    settlement: str,
+) -> str:
+    """Use the live procedural family classifier for stock-model selection.
 
-    return str(osm._building_family(tags))
+    Stock and procedural buildings should interpret the same OSM footprint the
+    same way. Delegating here also means semantic policies that wrap the live
+    procedural family classifier (for example school campuses and worship
+    buildings) automatically apply to stock presets instead of drifting into a
+    second, less capable classification system.
+    """
+    from . import procedural_buildings as buildings
+
+    return str(
+        buildings._family(
+            tags,
+            width_m,
+            length_m,
+            settlement_context=settlement,
+        )
+    )
+
+
+def _engine_outbuilding_kind(
+    tags: Mapping[str, str],
+    width_m: float,
+    length_m: float,
+) -> str:
+    """Use the procedural shed/garage inference for stock metadata."""
+    from . import procedural_buildings as buildings
+
+    return str(buildings._outbuilding_kind(tags, width_m, length_m))
+
+
+def _model_orientation_dimensions(
+    model: StockBuildingModel,
+    *,
+    swapped: bool,
+) -> tuple[float, float]:
+    return (
+        (model.length_m, model.width_m)
+        if swapped
+        else (model.width_m, model.length_m)
+    )
+
+
+def _orientation_fits_target(
+    model: StockBuildingModel,
+    target_width: float,
+    target_length: float,
+    *,
+    swapped: bool,
+    tolerance: float = _STOCK_MODEL_FIT_TOLERANCE_METRES,
+) -> bool:
+    width, length = _model_orientation_dimensions(model, swapped=swapped)
+    return (
+        width <= max(0.1, float(target_width)) + max(0.0, float(tolerance))
+        and length <= max(0.1, float(target_length)) + max(0.0, float(tolerance))
+    )
+
+
+def _model_support_polygon(
+    centre_x: float,
+    centre_z: float,
+    model: StockBuildingModel,
+    heading_degrees: float,
+) -> tuple[tuple[float, float], ...]:
+    half_width = max(0.05, float(model.width_m) * 0.5)
+    half_length = max(0.05, float(model.length_m) * 0.5)
+    angle = math.radians(float(heading_degrees))
+    width_axis = (math.cos(angle), -math.sin(angle))
+    length_axis = (math.sin(angle), math.cos(angle))
+    return tuple(
+        (
+            centre_x
+            + width_sign * half_width * width_axis[0]
+            + length_sign * half_length * length_axis[0],
+            centre_z
+            + width_sign * half_width * width_axis[1]
+            + length_sign * half_length * length_axis[1],
+        )
+        for width_sign, length_sign in (
+            (-1.0, -1.0),
+            (1.0, -1.0),
+            (1.0, 1.0),
+            (-1.0, 1.0),
+        )
+    )
 
 
 def _dimension_score(
@@ -310,49 +381,154 @@ class StockBuildingLibrary:
         self.cache_refresh = cache_refresh
         self.models = _load_catalogue()
         self._usage: dict[str, int] = {}
+        # Keep the same settlement evidence used by procedural generation.
+        # _settlements remains as a tiny compatibility/debug view of place nodes.
         self._settlements: tuple[tuple[float, float, str], ...] = ()
+        self._settlement_points: tuple[tuple[float, float, float, str], ...] = ()
+        self._settlement_scale_x = 1.0
+        self._settlement_scale_z = 1.0
+        self._settlement_bucket_size = 1000.0
+        self._settlement_buckets: dict[tuple[int, int], tuple[int, ...]] = {}
+        self._isolated_dwelling_cabins: tuple[Polygon, ...] = ()
 
     def prepare(self, dataset, projection, point_building_footprint: float) -> None:
         del point_building_footprint
-        settlements: list[tuple[float, float, str]] = []
+        # Procedural generation measures settlement radii in source-ground
+        # metres, not projected world-space metres. Reuse the same scale-aware
+        # 1 km rule for city/town/village/hamlet place nodes.
+        self._settlement_scale_x = max(1.0e-9, float(projection.scale_x))
+        self._settlement_scale_z = max(1.0e-9, float(projection.scale_z))
+        settlement_points: list[tuple[float, float, float, str]] = []
         for feature in getattr(dataset, "places", ()):
             kind = str(getattr(feature, "tags", {}).get("place", "")).casefold()
-            if kind not in _SETTLEMENT_RADIUS_M:
+            if kind not in {"city", "town", "village", "hamlet"}:
                 continue
             try:
                 x, z = projection.to_world(feature.point)
             except Exception:
                 continue
-            settlements.append((float(x), float(z), kind))
-        self._settlements = tuple(settlements)
+            settlement_points.append((float(x), float(z), 1000.0, kind))
+        self._settlement_points = tuple(settlement_points)
+        self._settlements = tuple((x, z, kind) for x, z, _radius, kind in settlement_points)
+
+        self._settlement_bucket_size = max(
+            1.0,
+            1000.0 * self._settlement_scale_x,
+            1000.0 * self._settlement_scale_z,
+        )
+        mutable_buckets: dict[tuple[int, int], list[int]] = {}
+        for index, (centre_x, centre_z, _radius, _kind) in enumerate(self._settlement_points):
+            key = (
+                math.floor(centre_x / self._settlement_bucket_size),
+                math.floor(centre_z / self._settlement_bucket_size),
+            )
+            mutable_buckets.setdefault(key, []).append(index)
+        self._settlement_buckets = {
+            key: tuple(values) for key, values in mutable_buckets.items()
+        }
+
+        # Match procedural generation's exact isolated-dwelling rule: only the
+        # lone generic footprint inside a mapped place=isolated_dwelling polygon
+        # receives isolated_dwelling_single context.
+        building_geometries: list[tuple[Polygon, Mapping[str, str]]] = []
+        for building_feature in getattr(dataset, "building_polygons", ()):
+            for geo_polygon in getattr(building_feature, "polygons", ()):
+                outer = [projection.to_world(point) for point in geo_polygon.outer]
+                holes = [
+                    [projection.to_world(point) for point in hole]
+                    for hole in geo_polygon.holes
+                ]
+                if len(outer) < 4:
+                    continue
+                geometry = Polygon(outer, holes)
+                if not geometry.is_empty:
+                    building_geometries.append((geometry, building_feature.tags))
+
+        isolated_dwelling_cabins: list[Polygon] = []
+        for place_feature in getattr(dataset, "place_areas", ()):
+            if str(getattr(place_feature, "tags", {}).get("place", "")).casefold() != "isolated_dwelling":
+                continue
+            for geo_polygon in getattr(place_feature, "polygons", ()):
+                outer = [projection.to_world(point) for point in geo_polygon.outer]
+                holes = [
+                    [projection.to_world(point) for point in hole]
+                    for hole in geo_polygon.holes
+                ]
+                if len(outer) < 4:
+                    continue
+                area = Polygon(outer, holes)
+                if area.is_empty:
+                    continue
+                inside: list[tuple[Polygon, str]] = []
+                for building_geometry, building_tags in building_geometries:
+                    if not area.covers(building_geometry.representative_point()):
+                        continue
+                    inside.append((
+                        building_geometry,
+                        str(building_tags.get("building", "")).casefold(),
+                    ))
+                plausible = [
+                    geometry
+                    for geometry, building_kind in inside
+                    if building_kind in {"", "yes"}
+                ]
+                if len(plausible) == 1:
+                    isolated_dwelling_cabins.append(plausible[0])
+        self._isolated_dwelling_cabins = tuple(isolated_dwelling_cabins)
 
     def _settlement_context(self, x: float, z: float) -> str:
-        best: tuple[float, str] | None = None
-        for sx, sz, kind in self._settlements:
-            radius = _SETTLEMENT_RADIUS_M[kind]
-            distance = math.hypot(x - sx, z - sz)
-            if distance > radius:
-                continue
-            candidate = (distance / radius, kind)
-            if best is None or candidate < best:
-                best = candidate
-        if best is None:
-            return "rural"
-        return "city" if best[1] == "city" else "town" if best[1] == "town" else "village"
+        priority = {"city": 0, "town": 1, "village": 2, "hamlet": 3}
+        if self._isolated_dwelling_cabins:
+            point = Point(float(x), float(z))
+            if any(footprint.covers(point) for footprint in self._isolated_dwelling_cabins):
+                return "isolated_dwelling_single"
 
-    def _candidate_models(
+        matches: list[tuple[int, float, str]] = []
+        if self._settlement_points:
+            bucket_size = self._settlement_bucket_size
+            bucket_x = math.floor(float(x) / bucket_size)
+            bucket_z = math.floor(float(z) / bucket_size)
+            candidate_indices: list[int] = []
+            for dz in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    candidate_indices.extend(
+                        self._settlement_buckets.get((bucket_x + dx, bucket_z + dz), ())
+                    )
+            candidates = (self._settlement_points[index] for index in candidate_indices)
+        else:
+            # Backward-compatible support for tests/tools that populated the old
+            # internal place-node tuple directly.
+            candidates = (
+                (centre_x, centre_z, 1000.0, kind)
+                for centre_x, centre_z, kind in self._settlements
+            )
+
+        for centre_x, centre_z, radius, kind in candidates:
+            distance = math.hypot(
+                (float(x) - centre_x) / self._settlement_scale_x,
+                (float(z) - centre_z) / self._settlement_scale_z,
+            )
+            if distance <= radius:
+                matches.append((priority.get(kind, 99), distance, kind))
+        if not matches:
+            return "rural"
+        return min(matches)[2]
+
+    def _candidate_model_groups(
         self,
         family: str,
         settlement: str = "rural",
-    ) -> tuple[StockBuildingModel, ...]:
-        """Return stock models appropriate for both semantic family and settlement.
-
-        The old selector calculated rural/town/city context but never used it when
-        choosing a stock P3D. Keep villages in the rural-style pool, while towns
-        and cities may prefer denser townhouse/urban residential stock.
-        """
+    ) -> tuple[tuple[str, tuple[StockBuildingModel, ...]], ...]:
+        """Return semantic fallback groups inside the correct settlement pool."""
         context = str(settlement or "rural").strip().casefold()
-        wanted_placement = "Rural" if context in {"rural", "village"} else "Urban"
+        # Procedural semantics treat village, hamlet, isolated dwellings and
+        # ordinary rural space as non-urban. Only explicit town/city context may
+        # draw from stock models reviewed as Urban.
+        wanted_placement = (
+            "Urban"
+            if context in {"urban", "town", "city", "town_city"}
+            else "Rural"
+        )
         eligible = tuple(
             model
             for model in self.models
@@ -370,11 +546,24 @@ class StockBuildingLibrary:
         else:
             wanted = _FAMILY_FALLBACKS.get(family, (family, "residential"))
 
-        for wanted_family in wanted:
-            candidates = tuple(model for model in eligible if wanted_family in model.families)
-            if candidates:
-                return candidates
-        return eligible
+        groups = tuple(
+            (wanted_family, candidates)
+            for wanted_family in wanted
+            if (
+                candidates := tuple(
+                    model for model in eligible if wanted_family in model.families
+                )
+            )
+        )
+        return groups or (("fallback", eligible),)
+
+    def _candidate_models(
+        self,
+        family: str,
+        settlement: str = "rural",
+    ) -> tuple[StockBuildingModel, ...]:
+        # Retain the historical helper contract for tests/tools that inspect it.
+        return self._candidate_model_groups(family, settlement)[0][1]
 
     def _select(
         self,
@@ -387,20 +576,95 @@ class StockBuildingLibrary:
         target_height: float,
         seed: str,
         settlement: str = "rural",
+        fit_predicate: Callable[[StockBuildingModel, bool], bool] | None = None,
     ) -> tuple[StockBuildingKey, bool]:
+        groups = self._candidate_model_groups(family, settlement)
+
+        # Prefer the first semantic family that has a model physically small
+        # enough for the mapped footprint. This is the important difference from
+        # merely penalising oversize models: a 32 m hangar must not beat a 24 m
+        # barn on style score when the source footprint is only 20 m wide.
         scored: list[tuple[float, str, StockBuildingModel, bool]] = []
-        for model in self._candidate_models(family, settlement):
-            direct = _dimension_score(model, target_width, target_length, target_height, swapped=False)
-            swapped = _dimension_score(model, target_width, target_length, target_height, swapped=True)
-            use_swapped = swapped + 1.0e-9 < direct
-            score = swapped if use_swapped else direct
-            scored.append((score, model.model_path.casefold(), model, use_swapped))
-        scored.sort(key=lambda item: (item[0], item[1]))
-        best_score = scored[0][0]
-        shortlist = [item for item in scored if item[0] <= best_score + 0.12][:4]
-        digest = blake2s(seed.encode("utf-8", "ignore"), digest_size=4).digest()
-        choice = shortlist[int.from_bytes(digest, "little") % len(shortlist)]
-        model, swapped = choice[2], choice[3]
+        for _group_name, candidates in groups:
+            group_scored: list[tuple[float, str, StockBuildingModel, bool]] = []
+            for model in candidates:
+                for use_swapped in (False, True):
+                    if not _orientation_fits_target(
+                        model,
+                        target_width,
+                        target_length,
+                        swapped=use_swapped,
+                    ):
+                        continue
+                    if fit_predicate is not None and not fit_predicate(model, use_swapped):
+                        continue
+                    score = _dimension_score(
+                        model,
+                        target_width,
+                        target_length,
+                        target_height,
+                        swapped=use_swapped,
+                    )
+                    group_scored.append(
+                        (score, model.model_path.casefold(), model, use_swapped)
+                    )
+            if group_scored:
+                scored = group_scored
+                break
+
+        if not scored:
+            # No stock asset can fit entirely inside the requested envelope.
+            # Choose the least-overflowing orientation across the semantic
+            # fallback chain. Later road/building collision gates may still
+            # reject it, but we never knowingly choose a larger alternative.
+            fallback: list[
+                tuple[int, float, float, str, StockBuildingModel, bool]
+            ] = []
+            target_w = max(0.1, float(target_width))
+            target_l = max(0.1, float(target_length))
+            for group_index, (_group_name, candidates) in enumerate(groups):
+                for model in candidates:
+                    for use_swapped in (False, True):
+                        width, length = _model_orientation_dimensions(
+                            model, swapped=use_swapped
+                        )
+                        overflow = max(
+                            width / target_w,
+                            length / target_l,
+                            1.0,
+                        )
+                        score = _dimension_score(
+                            model,
+                            target_width,
+                            target_length,
+                            target_height,
+                            swapped=use_swapped,
+                        )
+                        fallback.append(
+                            (
+                                group_index,
+                                overflow,
+                                score,
+                                model.model_path.casefold(),
+                                model,
+                                use_swapped,
+                            )
+                        )
+            # Preserve semantic fallback order first, then take the smallest
+            # unavoidable physical overflow within that family.
+            fallback.sort(key=lambda item: item[:4])
+            choice = fallback[0]
+            model, swapped = choice[4], choice[5]
+        else:
+            scored.sort(key=lambda item: (item[0], item[1], item[3]))
+            best_score = scored[0][0]
+            shortlist = [
+                item for item in scored if item[0] <= best_score + 0.12
+            ][:4]
+            digest = blake2s(seed.encode("utf-8", "ignore"), digest_size=4).digest()
+            choice = shortlist[int.from_bytes(digest, "little") % len(shortlist)]
+            model, swapped = choice[2], choice[3]
+
         key = StockBuildingKey(
             family=family,
             building_class=building_class,
@@ -423,22 +687,54 @@ class StockBuildingLibrary:
         entrance_point=None,
         allow_native_polygon: bool = True,
     ) -> BuildingPlacement:
-        del holes, road_point, entrance_point, allow_native_polygon
+        del road_point, entrance_point, allow_native_polygon
+        source_shape = Polygon(
+            tuple((float(x), float(z)) for x, z in points),
+            [tuple((float(x), float(z)) for x, z in ring) for ring in holes if len(ring) >= 3],
+        )
+        if not source_shape.is_valid:
+            source_shape = source_shape.buffer(0.0)
+        if source_shape.is_empty or source_shape.area <= 0.0:
+            source_shape = Polygon(tuple((float(x), float(z)) for x, z in points))
+        fit_shape = source_shape.buffer(_STOCK_MODEL_FIT_TOLERANCE_METRES)
         footprint = footprint_from_polygon(points)
-        centre_x = sum(float(point[0]) for point in points) / max(1, len(points))
-        centre_z = sum(float(point[1]) for point in points) / max(1, len(points))
+        centre = source_shape.centroid
+        centre_x, centre_z = float(centre.x), float(centre.y)
         settlement = self._settlement_context(centre_x, centre_z)
         classification = _classification(tags, footprint.width_m, footprint.length_m, settlement)
-        family = _engine_family(tags)
+        family = _engine_family(
+            tags, footprint.width_m, footprint.length_m, settlement
+        )
+        building_class = str(getattr(classification, "building_class", family))
+        outbuilding_kind = str(getattr(classification, "outbuilding_kind", ""))
+        if family == "outbuilding":
+            outbuilding_kind = _engine_outbuilding_kind(
+                tags, footprint.width_m, footprint.length_m
+            )
+            building_class = outbuilding_kind
         key, swapped = self._select(
             family=family,
-            building_class=str(getattr(classification, "building_class", family)),
-            outbuilding_kind=str(getattr(classification, "outbuilding_kind", "")),
+            building_class=building_class,
+            outbuilding_kind=outbuilding_kind,
             target_width=footprint.width_m,
             target_length=footprint.length_m,
-            target_height=_target_height(tags, family),
+            target_height=_target_height(tags, family, self.default_level_height),
             seed=f"polygon:{centre_x:.2f}:{centre_z:.2f}:{footprint.width_m:.2f}:{footprint.length_m:.2f}:{family}",
             settlement=settlement,
+            fit_predicate=lambda model, swapped: fit_shape.covers(
+                Polygon(
+                    _model_support_polygon(
+                        centre_x,
+                        centre_z,
+                        model,
+                        (
+                            footprint.heading_degrees
+                            + (90.0 if swapped else 0.0)
+                        )
+                        % 360.0,
+                    )
+                )
+            ),
         )
         heading = (footprint.heading_degrees + (90.0 if swapped else 0.0)) % 360.0
         return BuildingPlacement(key.stock_model_path, heading, key, key)
@@ -459,14 +755,19 @@ class StockBuildingLibrary:
         del road_point
         settlement = self._settlement_context(float(x), float(z))
         classification = _classification(tags, footprint_m, footprint_m, settlement)
-        family = _engine_family(tags)
+        family = _engine_family(tags, footprint_m, footprint_m, settlement)
+        building_class = str(getattr(classification, "building_class", family))
+        outbuilding_kind = str(getattr(classification, "outbuilding_kind", ""))
+        if family == "outbuilding":
+            outbuilding_kind = _engine_outbuilding_kind(tags, footprint_m, footprint_m)
+            building_class = outbuilding_kind
         key, swapped = self._select(
             family=family,
-            building_class=str(getattr(classification, "building_class", family)),
-            outbuilding_kind=str(getattr(classification, "outbuilding_kind", "")),
+            building_class=building_class,
+            outbuilding_kind=outbuilding_kind,
             target_width=footprint_m,
             target_length=footprint_m,
-            target_height=_target_height(tags, family),
+            target_height=_target_height(tags, family, self.default_level_height),
             seed=f"point:{x:.2f}:{z:.2f}:{footprint_m:.2f}:{family}",
             settlement=settlement,
         )

@@ -2,7 +2,7 @@
 """Deterministic multicore evaluation for regular primary forest blocks.
 
 Workers evaluate the expensive read-only terrain support/grounding work for
-regular Everon forest blocks. The historical generator still owns row-major
+regular classic forest blocks. The historical generator still owns row-major
 acceptance, counters, limits, object ids and all fallback emission, so parallel
 execution cannot reorder the resulting objects.
 """
@@ -241,7 +241,7 @@ def _terrain_candidates(raster, spec, primary, road_hits: np.ndarray) -> np.ndar
 
 
 def _build_context(dataset, projection, raster, elevations, spec, progress):
-    if str(getattr(spec, "forest_profile", "malden")).casefold() != "everon":
+    if str(getattr(spec, "forest_profile", "malden")).casefold() not in {"everon", "malden"}:
         return None
     if int(getattr(spec, "max_forest_objects", 0)) == 0:
         return None

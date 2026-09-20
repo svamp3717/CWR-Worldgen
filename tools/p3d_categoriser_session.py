@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tkinter as tk
-from tkinter import ttk
+from tkinter import simpledialog, ttk
 
 import measure_p3d_models as measure
 from p3d_categoriser_app import CategoriserApp, Classification, PLACEMENTS
@@ -235,6 +235,11 @@ class SessionCategoriserApp(CategoriserApp):
             command=self.restart_from_beginning,
             accelerator="Ctrl+Home",
         )
+        session_menu.add_command(
+            label="Jump to model number...",
+            command=self.prompt_jump_to_model,
+            accelerator="Ctrl+G",
+        )
         menu.add_cascade(label="Session", menu=session_menu)
 
         view_menu = tk.Menu(menu, tearoff=False)
@@ -245,10 +250,90 @@ class SessionCategoriserApp(CategoriserApp):
 
         self.root.configure(menu=menu)
         self.root.bind("<Control-Home>", lambda _event: self.restart_from_beginning())
+        self.root.bind("<Control-g>", lambda _event: self.prompt_jump_to_model())
+        self.root.bind("<Control-G>", lambda _event: self.prompt_jump_to_model())
         self.root.bind("<Key-plus>", lambda _event: self._zoom_by(1.25))
         self.root.bind("<Key-equal>", lambda _event: self._zoom_by(1.25))
         self.root.bind("<Key-minus>", lambda _event: self._zoom_by(1 / 1.25))
         self.root.bind("<Key-0>", lambda _event: self._reset_zoom())
+
+    def prompt_jump_to_model(self) -> None:
+        """Prompt for the 1-based model counter and jump directly to it."""
+        kwargs = {
+            "parent": self.root,
+            "minvalue": 1,
+        }
+        if self.total_models is not None and self.total_models > 0:
+            kwargs["maxvalue"] = self.total_models
+            prompt = f"Model number (1-{self.total_models:,}):"
+        else:
+            prompt = "Model number:"
+
+        model_number = simpledialog.askinteger(
+            "Jump to model",
+            prompt,
+            **kwargs,
+        )
+        if model_number is not None:
+            self.jump_to_model_number(model_number)
+
+    def jump_to_model_number(self, model_number: int) -> None:
+        """Jump to a 1-based model number, streaming forward only when necessary."""
+        target = int(model_number) - 1
+        if target < 0:
+            return
+        if self.total_models is not None and target >= self.total_models:
+            self.status_var.set(
+                f"Model {model_number:,} is outside the available range "
+                f"1-{self.total_models:,}."
+            )
+            return
+
+        if self.current is not None:
+            self._commit(True)
+            self.save_state()
+
+        if not self._begin_navigation_loading(
+            f"Jumping to model {model_number:,}...",
+            "Scanning forward without rendering intermediate models.",
+        ):
+            return
+
+        reached = False
+        try:
+            while len(self.models) <= target and not self.exhausted:
+                model = self._load_next()
+                if model is None:
+                    break
+                if len(self.models) == 1 or len(self.models) % 25 == 0 or len(self.models) > target:
+                    total = (
+                        f" / {self.total_models:,}"
+                        if self.total_models is not None
+                        else ""
+                    )
+                    self._set_navigation_status(
+                        f"Jumping to model {model_number:,}...",
+                        f"Scanned {len(self.models):,}{total} model(s) • {model.model_path}",
+                    )
+
+            if target < len(self.models):
+                self.index = target
+                self._show_model(self.models[self.index])
+                if hasattr(self, "canvas"):
+                    self.canvas.draw()
+                self.save_state()
+                reached = True
+        except (OSError, ValueError) as exc:
+            print(f"[jump scan error] {exc}", file=sys.stderr, flush=True)
+            self.status_var.set(f"Could not jump to model {model_number:,}: {exc}")
+        finally:
+            self._finish_navigation_loading()
+
+        if not reached and target >= len(self.models):
+            self.status_var.set(
+                f"Model {model_number:,} is unavailable; "
+                f"the scan contains {len(self.models):,} previewable model(s)."
+            )
 
     def _zoom_by(self, factor: float) -> None:
         if self.current is None:

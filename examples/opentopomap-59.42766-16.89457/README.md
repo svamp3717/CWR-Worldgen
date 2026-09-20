@@ -55,12 +55,12 @@ north  59.456438251639190
 east   16.951150397910950
 ```
 
-Generated packages:
+Generated package:
 
 ```text
 build/malaren-example/cwr-malaren-runtime.zip
-build/malaren-example/cwr-malaren-test-mission.zip
 ```
 
-Install the complete mod folder from the runtime ZIP. The `Anims` directory and source
-attribution files are part of the package, not optional decorative foliage.
+The production build does not generate the disposable test mission. It does retain
+the world menu-intro mission under runtime/Anims because CWA expects the cutscene
+target referenced by CfgWorlds to exist. The PBO and terrain ReadMe remain in Addons.

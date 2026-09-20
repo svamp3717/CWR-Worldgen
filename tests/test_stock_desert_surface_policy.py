@@ -55,6 +55,7 @@ def test_desert_roads_and_buildings_have_sand_underlay() -> None:
 def test_desert_stock_palette_contains_no_eden_or_temperate_field_tiles() -> None:
     paths = {path.casefold() for path in DESERT_STOCK_SURFACE_TEXTURES.values()}
     forbidden = {
+        r"eden\ps.paa",
         r"eden\zbh.paa",
         r"eden\tn.paa",
         r"eden\bak\bah.pac",

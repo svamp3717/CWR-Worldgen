@@ -9,6 +9,7 @@ from PIL import Image
 from cwr_worldgen import generator
 from cwr_worldgen import runway_exact_background_policy as exact
 from cwr_worldgen import runway_surface_policy as runway
+from cwr_worldgen import surface_pass
 from cwr_worldgen.sports_pitch_surface_policy import (
     _pitch_cells,
     _pitch_geometries,
@@ -96,6 +97,56 @@ def test_pitch_render_keeps_background_outside_markings() -> None:
     assert np.array_equal(actual[0, 0], source[0, 0])
     assert np.count_nonzero(np.any(actual != source, axis=2)) > 0
     assert int(actual.max()) > 180
+
+
+def test_malden_sports_overlay_uses_shared_exact_preset_background(tmp_path, monkeypatch) -> None:
+    spec = _spec(tmp_path)
+    spec.ground_texture_profile = "malden"
+    spec.surface_pass_enabled = True
+    spec.surface_ground_mode = "milestone9"
+    spec.asset_roots = ()
+    dataset = _dataset()
+    projection = _IdentityProjection()
+    source_dir = tmp_path / "pitchworld"
+    source_dir.mkdir()
+
+    loaded_paths = []
+    exact_background = SimpleNamespace(
+        top_image=Image.new("RGB", (128, 128), (62, 91, 48)),
+        data=b"malden-main-terrain",
+        source="Abel.pbo",
+    )
+
+    def load_exact_background(_source_dir, _spec, wire_path):
+        loaded_paths.append(wire_path)
+        return exact_background
+
+    monkeypatch.setattr(exact, "_load_exact_texture", load_exact_background)
+    texture_paths = (
+        r"pitchworld\data\d.paa",
+        *surface_pass.surface_texture_wire_paths("pitchworld", "malden"),
+    )
+    grass_slot = surface_pass.MATERIAL_INDEX["g"] + 1
+    texture_indices = (grass_slot,) * (spec.cells * spec.cells)
+
+    revised_indices, revised_paths, generated = apply_sports_pitch_textures(
+        source_dir,
+        dataset,
+        projection,
+        spec,
+        texture_indices,
+        texture_paths,
+    )
+    report = json.loads((source_dir / "sports-pitch-textures.json").read_text())
+
+    assert texture_paths[grass_slot] == r"abel\tt.paa"
+    assert loaded_paths == [r"abel\tt.paa"]
+    assert generated
+    assert all(path.startswith(r"pitchworld\sp") for path in generated)
+    assert report["background_path"] == r"abel\tt.paa"
+    assert report["background_source"] == "Abel.pbo"
+    assert len(revised_paths) == len(texture_paths) + len(generated)
+    assert any(index >= len(texture_paths) for index in revised_indices)
 
 
 def test_pitch_texture_generation_reuses_persistent_cache(tmp_path, monkeypatch) -> None:

@@ -838,38 +838,39 @@ def _atomic_copy_tree(source: Path, destination: Path) -> None:
 
 
 def _deploy_runtime_to_existing_mod(result: BuildResult, target_root: Path) -> dict[str, Any]:
-    """Copy every generated Addons/Anims entry into an existing mod folder.
-
-    The build runtime is treated as the source of truth rather than copying only
-    the two paths held on BuildResult. This also deploys any future generated
-    addon or animation files without introducing another @mod wrapper.
-    """
+    """Copy the world PBO, terrain ReadMe, and required menu intro into an existing mod."""
 
     requested_root = target_root.expanduser().resolve()
     target_root = _normalise_mod_root(target_root)
     if not target_root.is_dir():
         raise ValueError(f"deployment mod folder must already exist: {target_root}")
 
-    runtime_root = result.pbo_path.parent.parent
-    source_addons = runtime_root / "Addons"
-    source_anims = runtime_root / "Anims"
-    if not source_addons.is_dir() or not source_anims.is_dir():
-        raise RuntimeError(
-            f"generated runtime is incomplete; expected Addons and Anims below {runtime_root}"
-        )
+    source_pbo = result.pbo_path
+    if not source_pbo.is_file():
+        raise RuntimeError(f"generated world PBO is missing: {source_pbo}")
+
+    source_intro = result.intro_mission_path.parent
+    if not result.intro_mission_path.is_file() or not result.intro_script_path.is_file():
+        raise RuntimeError(f"generated world menu intro is missing: {source_intro}")
 
     addons_dir = _existing_mod_child(target_root, "Addons")
     anims_dir = _existing_mod_child(target_root, "Anims")
     addons_dir.mkdir(parents=True, exist_ok=True)
     anims_dir.mkdir(parents=True, exist_ok=True)
 
+    deploy_sources = [source_pbo]
+    deploy_sources.extend(
+        path
+        for path in sorted(source_pbo.parent.iterdir())
+        if path.is_file() and path.name.casefold().endswith(" readme.txt")
+    )
+
     deployed: list[dict[str, str]] = []
-    for source in sorted(source_addons.rglob("*")):
-        if not source.is_file():
-            continue
-        relative = source.relative_to(source_addons)
-        destination = addons_dir / relative
+    for source in deploy_sources:
+        destination = addons_dir / source.name
         _atomic_copy_file(source, destination)
+        if not destination.is_file() or _sha256(source) != _sha256(destination):
+            raise RuntimeError(f"deployment verification failed for {destination}")
         deployed.append({
             "kind": "addon",
             "source": str(source),
@@ -877,43 +878,30 @@ def _deploy_runtime_to_existing_mod(result: BuildResult, target_root: Path) -> d
             "sha256": _sha256(destination),
         })
 
-    for source in sorted(source_anims.iterdir()):
-        destination = anims_dir / source.name
-        if source.is_dir():
-            _atomic_copy_tree(source, destination)
-            for copied in sorted(destination.rglob("*")):
-                if copied.is_file():
-                    deployed.append({
-                        "kind": "anim",
-                        "source": str(source / copied.relative_to(destination)),
-                        "destination": str(copied),
-                        "sha256": _sha256(copied),
-                    })
-        elif source.is_file():
-            _atomic_copy_file(source, destination)
-            deployed.append({
-                "kind": "anim",
-                "source": str(source),
-                "destination": str(destination),
-                "sha256": _sha256(destination),
-            })
-
-    if not deployed:
-        raise RuntimeError(f"generated runtime contained no deployable files below {runtime_root}")
-
-    source_by_destination = {
-        str(Path(item["destination"]).resolve()): Path(item["source"])
-        for item in deployed
-    }
-    for item in deployed:
-        destination = Path(item["destination"])
-        source = source_by_destination[str(destination.resolve())]
+    destination_intro = anims_dir / source_intro.name
+    if destination_intro.is_dir():
+        shutil.rmtree(destination_intro)
+    destination_intro.mkdir(parents=True, exist_ok=True)
+    for source in sorted(source_intro.iterdir()):
+        if not source.is_file():
+            continue
+        destination = destination_intro / source.name
+        _atomic_copy_file(source, destination)
         if not destination.is_file() or _sha256(source) != _sha256(destination):
             raise RuntimeError(f"deployment verification failed for {destination}")
+        deployed.append({
+            "kind": "menu_intro",
+            "source": str(source),
+            "destination": str(destination),
+            "sha256": _sha256(destination),
+        })
 
-    destination_pbo = addons_dir / result.pbo_path.relative_to(source_addons)
-    source_intro = result.intro_mission_path.parent
-    destination_intro = anims_dir / source_intro.relative_to(source_anims)
+    destination_pbo = addons_dir / source_pbo.name
+    readmes = [
+        item["destination"]
+        for item in deployed
+        if Path(item["destination"]).name.casefold().endswith(" readme.txt")
+    ]
     report: dict[str, Any] = {
         "requested_folder": str(requested_root),
         "mod_folder": str(target_root),
@@ -921,6 +909,7 @@ def _deploy_runtime_to_existing_mod(result: BuildResult, target_root: Path) -> d
         "anims_folder": str(anims_dir),
         "pbo": str(destination_pbo),
         "intro": str(destination_intro),
+        "readmes": readmes,
         "verified": True,
         "file_count": len(deployed),
         "files": deployed,
@@ -1344,7 +1333,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
 
     deployment: dict[str, Any] | None = None
     if spec.deploy_mod_dir is not None:
-        report_progress(99, f"Deploying Addons and Anims into {spec.deploy_mod_dir}")
+        report_progress(99, f"Deploying world PBO, terrain ReadMe, and menu intro into {spec.deploy_mod_dir}")
         deployment = _deploy_runtime_to_existing_mod(result, spec.deploy_mod_dir)
 
     try:

@@ -89,6 +89,125 @@ def _base_texture_table(profile: str = "everon") -> tuple[str, ...]:
     )
 
 
+def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
+    paths = surface_pass.surface_texture_wire_paths("wg_malden", "malden")
+
+    assert paths[surface_pass.MATERIAL_INDEX["w"]] == r"abel\pi.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["g"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["e"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["s"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["x"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["r"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["k"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["d"]] == r"abel\bah.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["a"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["b"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["c"]] == r"abel\tt.paa"
+    assert all(path.casefold().startswith("abel\\") for path in paths)
+    assert not any(path.casefold().startswith("wg_malden\\data\\") for path in paths)
+
+    legacy = generator._ground_texture_paths(
+        SimpleNamespace(
+            name="wg_malden",
+            ground_texture_profile="malden",
+            surface_pass_enabled=False,
+            surface_ground_mode="milestone8",
+        )
+    )
+    assert legacy == (
+        r"abel\pi.paa",
+        r"abel\tt.paa",
+        r"abel\tt.paa",
+        r"abel\tt.paa",
+        r"abel\tt.paa",
+        r"abel\tt.paa",
+        r"abel\tt.paa",
+        r"abel\tt.paa",
+    )
+
+
+def test_malden_runway_overlay_uses_shared_preset_background_system(tmp_path) -> None:
+    from cwr_worldgen.single_runway_background_policy import preset_background_texture_path
+
+    install_runway_exact_background_policy()
+    projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 160.0)
+    dataset = _runway_dataset(projection)
+    spec = _spec("malden")
+    base_paths = _base_texture_table("malden")
+    grass_index = surface_pass.MATERIAL_INDEX["g"] + 1
+
+    revised_indices, revised_paths, generated = apply_generated_runway_texture_table(
+        tmp_path,
+        dataset,
+        projection,
+        spec,
+        (grass_index,) * (spec.cells * spec.cells),
+        base_paths,
+    )
+
+    assert preset_background_texture_path(_spec("everon")) == r"Eden\tn.paa"
+    assert preset_background_texture_path(spec) == r"abel\tt.paa"
+    assert base_paths[grass_index] == r"abel\tt.paa"
+    assert generated
+    assert all(path.startswith(r"wg_runway\rw") for path in generated)
+    assert len(revised_paths) == len(base_paths) + len(generated)
+    assert any(index >= len(base_paths) for index in revised_indices)
+
+
+def test_malden_only_main_overlay_background_is_asset_scan_requirement() -> None:
+    spec = SimpleNamespace(
+        name="wg_malden",
+        ground_texture_profile="malden",
+        surface_pass_enabled=True,
+        surface_ground_mode="milestone9",
+    )
+
+    assert generator._external_ground_texture_paths(spec) == (r"abel\tt.paa",)
+
+
+def test_malden_surface_writer_emits_no_world_local_ground_tiles(tmp_path) -> None:
+    written = surface_pass.write_surface_textures(
+        tmp_path,
+        "wg_malden",
+        "malden",
+        "malden-stock-test",
+        128,
+    )
+
+    assert written == ()
+    assert not (tmp_path / "data").exists()
+
+
+def test_legacy_everon_uses_clean_default_and_dirty_farmland_texture() -> None:
+    paths = generator._ground_texture_paths(
+        SimpleNamespace(
+            name="wg_everon",
+            ground_texture_profile="everon",
+            surface_pass_enabled=False,
+            surface_ground_mode="milestone8",
+        )
+    )
+
+    assert paths[2] == r"Eden\tn.paa"
+    assert paths[4] == r"Eden\tn.paa"
+    assert paths[5] == r"Eden\zbh.paa"
+    assert r"o\pole1.paa" not in paths
+
+
+def test_everon_uses_clean_default_and_dirty_farmland_texture_only() -> None:
+    paths = surface_pass.surface_texture_wire_paths("wg_everon", "everon")
+
+    assert paths[surface_pass.MATERIAL_INDEX["g"]] == r"Eden\tn.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"Eden\tn.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["e"]] == r"Eden\tn.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["a"]] == r"Eden\zbh.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["b"]] == r"Eden\zbh.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["c"]] == r"Eden\zbh.paa"
+    assert r"o\pole1.paa" not in paths
+    assert r"o\pole2.paa" not in paths
+
+
 def test_stock_runway_family_names_remain_verified_for_reference_and_fallback() -> None:
     assert runway_texture_triplet("everon") == (
         r"o\runtr_z.paa",
@@ -323,6 +442,6 @@ def test_runway_policy_invalidates_previous_surface_representations() -> None:
         "surface-pipeline-v11-vectorized-material-pass",
         payload,
     ) == raw_cache_key(
-        "surface-pipeline-v20-exact-runway-background-textures",
+        "surface-pipeline-v32-malden-no-mountain-ground",
         payload,
     )

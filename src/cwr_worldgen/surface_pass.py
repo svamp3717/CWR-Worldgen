@@ -33,38 +33,47 @@ class SurfaceMaterialDefinition(MaterialDefinition):
     everon_path: str | None = None
 
 
+# The supplied generated test WRP identifies Eden\tn.paa at the exact green
+# terrain cell under the player at [2959.66, 3266.59]. Eden\ps.paa is visibly
+# sandy there, so tn.paa is the preset's ordinary/default grass background.
+# zbh.paa remains the dirtier grass variant reserved for farmland semantics.
+_EVERON_DEFAULT_GRASS_TEXTURE = r"Eden\tn.paa"
+_EVERON_FARMLAND_TEXTURE = r"Eden\zbh.paa"
+
+
 # One-character codes keep generated texture paths inside RVW4's 31-byte limit
 # even when the world name uses all twenty permitted characters.
-# The ``everon`` profile is deliberately a complete stock-texture palette.
+# The classic Everon and Malden profiles are complete stock-texture palettes.
 # OSM still supplies semantic placement masks, but no generated OSM-themed ground
-# artwork is written when this profile is selected.  Rock and farmland classes
-# use their dedicated textures from O.pbo; the remaining semantic classes reuse
-# the compact verified Eden palette.
+# artwork is written for those profiles. Everon rock classes still use the
+# verified O.pbo stone textures. Clean Eden grass is the general/default terrain,
+# while the older dirtier Eden grass is reserved for farmland semantics.
+# The remaining semantic classes reuse the compact verified Eden palette.
 MILESTONE9_MATERIALS: tuple[SurfaceMaterialDefinition, ...] = (
     SurfaceMaterialDefinition("w", "seabed/water", (48, 75, 94), r"Eden\tn.paa"),
     SurfaceMaterialDefinition("q", "wet shoreline", (116, 104, 75), r"Eden\tn.paa"),
     SurfaceMaterialDefinition("s", "dry shoreline sand", (184, 168, 111), r"Eden\bak\bah.pac"),
-    SurfaceMaterialDefinition("g", "grass", (83, 121, 67), r"Eden\zbh.paa"),
-    SurfaceMaterialDefinition("h", "dry grass", (119, 126, 73), r"Eden\zbh.paa"),
+    SurfaceMaterialDefinition("g", "grass", (83, 121, 67), _EVERON_DEFAULT_GRASS_TEXTURE),
+    SurfaceMaterialDefinition("h", "dry grass", (119, 126, 73), _EVERON_DEFAULT_GRASS_TEXTURE),
     SurfaceMaterialDefinition("r", "rock", (109, 106, 101), r"o\l1.paa"),
     SurfaceMaterialDefinition("k", "steep rock/scree", (86, 84, 82), r"o\lom2.paa"),
-    SurfaceMaterialDefinition("f", "forest interior", (47, 83, 44), r"Eden\zbh.paa"),
-    SurfaceMaterialDefinition("e", "forest edge", (67, 99, 53), r"Eden\zbh.paa"),
-    SurfaceMaterialDefinition("a", "farmland light", (154, 144, 78), r"o\pole1.paa"),
-    SurfaceMaterialDefinition("b", "farmland dark", (126, 121, 64), r"o\pole2.paa"),
-    SurfaceMaterialDefinition("c", "field boundary", (91, 92, 52), r"Eden\zbh.paa"),
+    SurfaceMaterialDefinition("f", "forest interior", (47, 83, 44), _EVERON_DEFAULT_GRASS_TEXTURE),
+    SurfaceMaterialDefinition("e", "forest edge", (67, 99, 53), _EVERON_DEFAULT_GRASS_TEXTURE),
+    SurfaceMaterialDefinition("a", "farmland light", (154, 144, 78), _EVERON_FARMLAND_TEXTURE),
+    SurfaceMaterialDefinition("b", "farmland dark", (126, 121, 64), _EVERON_FARMLAND_TEXTURE),
+    SurfaceMaterialDefinition("c", "field boundary", (91, 92, 52), _EVERON_FARMLAND_TEXTURE),
     SurfaceMaterialDefinition("u", "urban surface", (139, 136, 130), r"Eden\tn.paa"),
     SurfaceMaterialDefinition("i", "industrial surface", (112, 113, 109), r"Eden\tn.paa"),
     SurfaceMaterialDefinition("p", "paved road", (57, 57, 55), r"Eden\tn.paa"),
     SurfaceMaterialDefinition("o", "road shoulder", (112, 105, 91), r"Eden\bak\bah.pac"),
     SurfaceMaterialDefinition("d", "dirt road", (113, 86, 55), r"Eden\bak\bah.pac"),
-    SurfaceMaterialDefinition("t", "dirt-road blend", (104, 101, 64), r"Eden\zbh.paa"),
+    SurfaceMaterialDefinition("t", "dirt-road blend", (104, 101, 64), _EVERON_DEFAULT_GRASS_TEXTURE),
     # Dedicated gravel underlay uses the generated gravel artwork while the
     # artwork as the road P3D. It hides sub-cell grass cracks beneath object joins
     # instead of letting a curved road reveal green triangles between cards.
     SurfaceMaterialDefinition("v", "gravel road", (80, 76, 68), r"Eden\bak\bah.pac"),
-    SurfaceMaterialDefinition("j", "park", (96, 127, 67), r"Eden\zbh.paa"),
-    SurfaceMaterialDefinition("y", "sports field", (103, 132, 74), r"Eden\zbh.paa"),
+    SurfaceMaterialDefinition("j", "park", (96, 127, 67), _EVERON_DEFAULT_GRASS_TEXTURE),
+    SurfaceMaterialDefinition("y", "sports field", (103, 132, 74), _EVERON_DEFAULT_GRASS_TEXTURE),
     SurfaceMaterialDefinition("x", "mapped beach", (194, 174, 116), r"Eden\bak\bah.pac"),
 )
 
@@ -94,9 +103,50 @@ NOGOVA_SURFACE_TEXTURES.update({
     # texture; 3D stone objects may still be placed independently.
 })
 
+# Classic Malden/Abel terrain uses literal virtual paths from the stock Abel
+# OPRW texture table, just as Everon classic hard-codes Eden paths. The uploaded
+# stock WRP directly contains pi, tt, sh, pb, p4 and bah alongside specialised
+# s3/tv/bt/mt and rw* tiles. Worldgen keeps the shared runway/parking/sports
+# overlay systems, so only the ordinary semantic terrain palette is mapped here.
+# Those ordinary palette paths are trusted literals. The shared overlay pipeline
+# may load only the selected preset's main background texture (abel\tt.paa), just
+# as it loads Everon's selected background texture.
+_MALDEN_SEA_TEXTURE = r"abel\pi.paa"
+_MALDEN_LAND_TEXTURE = r"abel\tt.paa"
+_MALDEN_DIRT_TEXTURE = r"abel\bah.paa"
+# The stock WRP's abel\sh.paa is a steep/mountain-looking terrain tile, not a
+# safe generic shoreline texture. Generated Malden therefore keeps shoreline,
+# mapped beach, rock/scree and forest semantics on the default abel\tt.paa tile.
+# The semantic classes still drive placement; only their WRP ground tile is shared.
+MALDEN_SURFACE_TEXTURES: dict[str, str] = {
+    "w": _MALDEN_SEA_TEXTURE,
+    "q": _MALDEN_SEA_TEXTURE,
+    "s": _MALDEN_LAND_TEXTURE,
+    "g": _MALDEN_LAND_TEXTURE,
+    "h": _MALDEN_LAND_TEXTURE,
+    "r": _MALDEN_LAND_TEXTURE,
+    "k": _MALDEN_LAND_TEXTURE,
+    "f": _MALDEN_LAND_TEXTURE,
+    "e": _MALDEN_LAND_TEXTURE,
+    "a": _MALDEN_LAND_TEXTURE,
+    "b": _MALDEN_LAND_TEXTURE,
+    "c": _MALDEN_LAND_TEXTURE,
+    "u": _MALDEN_LAND_TEXTURE,
+    "i": _MALDEN_LAND_TEXTURE,
+    "p": _MALDEN_LAND_TEXTURE,
+    "o": _MALDEN_LAND_TEXTURE,
+    "d": _MALDEN_DIRT_TEXTURE,
+    "t": _MALDEN_LAND_TEXTURE,
+    "v": _MALDEN_DIRT_TEXTURE,
+    "j": _MALDEN_LAND_TEXTURE,
+    "y": _MALDEN_LAND_TEXTURE,
+    "x": _MALDEN_LAND_TEXTURE,
+}
+
 STOCK_SURFACE_TEXTURES: Mapping[str, Mapping[str, str]] = {
     "everon": EVERON_SURFACE_TEXTURES,
     "nogova": NOGOVA_SURFACE_TEXTURES,
+    "malden": MALDEN_SURFACE_TEXTURES,
 }
 
 MATERIAL_INDEX: Mapping[str, int] = {
@@ -114,8 +164,8 @@ MALDEN_SURFACE_COLOURS: Mapping[str, tuple[int, int, int]] = {
     "k": (88, 85, 80),
     "f": (64, 86, 48),
     "e": (82, 101, 57),
-    # No assumed Malden farmland artwork: all farm semantics resolve to the
-    # same basic grass terrain in the WRP texture table.
+    # Preview/fallback colour only. Runtime Malden farmland resolves to the
+    # stock LandText vegetated tile, matching the rest of its green terrain.
     "a": (109, 118, 70),
     "b": (109, 118, 70),
     "c": (109, 118, 70),
@@ -918,15 +968,16 @@ def surface_texture_wire_paths(world_name: str, profile: str) -> tuple[str, ...]
     for material in MILESTONE9_MATERIALS:
         if material.code in stock_paths:
             paths.append(stock_paths[material.code])
-        elif profile == "malden" and material.code in {"a", "b", "c"}:
-            # Malden has farming, but this preset intentionally does not invent a
-            # dedicated field texture. Reuse the basic ground tile instead.
-            paths.append(rf"{world_name}\data\g.paa")
         else:
             paths.append(rf"{world_name}\data\{material.code}.paa")
     return tuple(paths)
 
 def external_surface_texture_paths(profile: str) -> tuple[str, ...]:
+    # Malden's literal Abel paths come from the stock WRP and are intentionally
+    # trusted without asset discovery.  They belong in the generated WRP texture
+    # table, not in Worldgen's external-asset validation list.
+    if profile == "malden":
+        return ()
     stock_paths = STOCK_SURFACE_TEXTURES.get(profile)
     if stock_paths is None:
         return ()

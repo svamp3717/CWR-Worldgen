@@ -245,9 +245,12 @@ def _add_procedural_building_arguments(parser: argparse.ArgumentParser) -> None:
         "--house-style-preset",
         "--building-preset",
         dest="house_style_preset",
-        choices=(HOUSE_STYLE_PRESET_AUTO, *HOUSE_STYLE_PRESET_IDENTIFIERS),
         default=HOUSE_STYLE_PRESET_AUTO,
-        help="override the geographically detected procedural-building style; auto uses the selected area/country",
+        help=(
+            "override the geographically detected building style; auto uses the selected "
+            "area/country. Multiple sources use building-multi:<preset>,<preset>; legacy "
+            "stock-only combinations may also use stock-multi:<preset>,<preset>."
+        ),
     )
     parser.add_argument("--building-width-quantum", type=float, default=2.0, help="width reuse bucket in metres")
     parser.add_argument("--building-length-quantum", type=float, default=2.0, help="length reuse bucket in metres")
@@ -435,7 +438,7 @@ def _parser() -> argparse.ArgumentParser:
         "--ground-textures",
         choices=GROUND_TEXTURE_PROFILES,
         default="nogova",
-        help="terrain texture profile: Nogova transition palette (default), Malden-style generated CWC palette, original Everon/Eden assets, desert palette, or packaged generated colours",
+        help="terrain texture profile: Nogova transition palette (default), original Malden/Abel textures, original Everon/Eden assets, desert palette, or packaged generated colours",
     )
 
     milestone9 = subparsers.add_parser("milestone9", help="apply deterministic surface transitions, shoreline/forest/farm/road materials, overview map, and improved icon")
@@ -446,7 +449,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument(
         "--deploy-mod-dir",
         type=Path,
-        help="copy the generated PBO and intro mission into this existing mod folder without creating another @mod directory",
+        help="copy the generated world PBO, terrain ReadMe, and required menu intro into this existing mod folder without creating another @mod directory",
     )
     _add_source_feature_arguments(milestone9, include_minor_roads_default=True)
     _add_playability_arguments(milestone9)
@@ -454,7 +457,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_constraint_solver_arguments(milestone9)
     _add_procedural_building_arguments(milestone9)
     _add_surface_pass_arguments(milestone9)
-    milestone9.add_argument("--forest-profile", choices=("everon", "malden"), default="everon", help="Everon square/triangle/cluster ladder by default; malden restores the older block plus individual-tree fallback")
+    milestone9.add_argument("--forest-profile", choices=("everon", "malden"), default="everon", help="classic forest scenery profile; Everon and Malden share the same road-safe terrain-fit placement ladder while selecting their own stock vegetation families")
     milestone9.add_argument("--replace-forest-polygons-with-clusters", "--no-forest-polygons", "--forest-individual-objects-only", dest="forest_individual_objects_only", action="store_true", help="replace stock square/triangle forest polygon models with tiled generated clusters; individually grounded trees fill patches where no safe cluster fits (default: off)")
     milestone9.set_defaults(forest_ground_clearance=0.02)
     milestone9.add_argument("--forest-block-model", default=r"data3d\les ctverec pruchozi_T1.p3d", help="primary stock forest block model")
@@ -618,7 +621,7 @@ def _parser() -> argparse.ArgumentParser:
         "--ground-textures",
         choices=GROUND_TEXTURE_PROFILES,
         default="nogova",
-        help="Milestone 9 ground palette: Nogova transition preset (default), Malden-style generated CWC palette, stock Everon/Eden, desert generated textures, or fully generated colours",
+        help="Milestone 9 ground palette: Nogova transition preset (default), stock Malden/Abel textures, stock Everon/Eden, desert stock textures, or fully generated colours",
     )
     milestone9.add_argument(
         "--pbo-backend",
@@ -642,8 +645,6 @@ def _print_result(result, display_name: str, name: str) -> None:
         print(f"Texture:    {texture}")
     print(f"Mod root:   {result.pbo_path.parent.parent}")
     print(f"PBO:        {result.pbo_path}")
-    print("Mission unit: SoldierWB")
-    print(f"Mission:    {result.mission_path}")
     print(f"Menu intro: {result.intro_mission_path}")
     print(f"Preview:    {result.preview_path}")
     if result.height_preview_path:
@@ -841,7 +842,7 @@ def main(argv: list[str] | None = None) -> int:
                 forest_everon_steep_model=args.forest_steep_model,
                 forest_everon_steep_footprint=args.forest_steep_footprint,
                 forest_everon_steep_maximum_relief=args.forest_steep_max_relief,
-                forest_hillside_fallback=args.forest_profile == "malden",
+                forest_hillside_fallback=False,
                 forest_hillside_tree_model=args.forest_hillside_tree_model,
                 forest_hillside_trees_per_block=args.forest_hillside_trees_per_block,
                 forest_hillside_tree_footprint=args.forest_hillside_tree_footprint,

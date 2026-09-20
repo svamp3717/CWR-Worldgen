@@ -452,18 +452,17 @@ class SurfacePassTests(unittest.TestCase):
         stock = {
             r"Eden\tn.paa", r"Eden\zbh.paa", r"Eden\bak\bah.pac",
             r"o\l1.paa", r"o\lom2.paa",
-            r"o\pole1.paa", r"o\pole2.paa",
         }
         self.assertEqual(external, stock)
         self.assertEqual(len(paths), len(MILESTONE9_MATERIALS))
         self.assertTrue(all(path in stock for path in paths))
         self.assertTrue(all(not path.startswith(world_name + r"\data") for path in paths))
-        self.assertEqual(paths[MATERIAL_INDEX["a"]], r"o\pole1.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["b"]], r"o\pole2.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["a"]], r"Eden\zbh.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["b"]], r"Eden\zbh.paa")
         self.assertEqual(paths[MATERIAL_INDEX["c"]], r"Eden\zbh.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["g"]], r"Eden\zbh.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["f"]], r"Eden\zbh.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["e"]], r"Eden\zbh.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["g"]], r"Eden\tn.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["f"]], r"Eden\tn.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["e"]], r"Eden\tn.paa")
         self.assertEqual(paths[MATERIAL_INDEX["r"]], r"o\l1.paa")
         self.assertEqual(paths[MATERIAL_INDEX["k"]], r"o\lom2.paa")
         self.assertEqual(paths[MATERIAL_INDEX["p"]], r"Eden\tn.paa")
@@ -498,16 +497,33 @@ class SurfacePassTests(unittest.TestCase):
         )
         self.assertNotIn(r"o\b1.paa", external_surface_texture_paths("nogova"))
 
-    def test_malden_profile_reuses_basic_ground_for_farmland(self) -> None:
+    def test_malden_profile_uses_stock_abel_textures_for_all_surface_classes(self) -> None:
         world_name = "abcdefghijklmnopqrst"
         paths = surface_texture_wire_paths(world_name, "malden")
-        self.assertFalse(external_surface_texture_paths("malden"))
         self.assertEqual(len(paths), len(MILESTONE9_MATERIALS))
-        self.assertTrue(all(path.startswith(world_name + r"\data") for path in paths))
+        self.assertEqual(
+            set(paths),
+            {
+                r"abel\pi.paa",
+                r"abel\tt.paa",
+                r"abel\bah.paa",
+            },
+        )
+        # Malden WRP paths are trusted literals, not asset-scan dependencies.
+        self.assertEqual(external_surface_texture_paths("malden"), ())
         grass = paths[MATERIAL_INDEX["g"]]
+        self.assertEqual(grass, r"abel\tt.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["f"]], grass)
+        self.assertEqual(paths[MATERIAL_INDEX["e"]], grass)
+        self.assertEqual(paths[MATERIAL_INDEX["w"]], r"abel\pi.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["s"]], grass)
+        self.assertEqual(paths[MATERIAL_INDEX["x"]], grass)
+        self.assertEqual(paths[MATERIAL_INDEX["r"]], grass)
+        self.assertEqual(paths[MATERIAL_INDEX["k"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["a"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["b"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["c"]], grass)
+        self.assertFalse(any(path.startswith(world_name + r"\data") for path in paths))
 
     def test_sidewalks_are_disabled_by_default(self) -> None:
         self.assertFalse(Milestone9Spec(source_dir=Path("unused")).sidewalks_enabled)
@@ -706,6 +722,16 @@ class RoadPieceFittingTests(unittest.TestCase):
         self.assertTrue(
             parser.parse_args(base + ["--forest-individual-objects-only"]).forest_individual_objects_only
         )
+
+    def test_milestone9_cli_accepts_composite_stock_building_preset(self) -> None:
+        composite = "stock-multi:stock-vanilla,stock-ags-only"
+        args = _parser().parse_args([
+            "milestone9",
+            "--output", "build/test",
+            "--source-dir", "source-data/test",
+            "--house-style-preset", composite,
+        ])
+        self.assertEqual(args.house_style_preset, composite)
 
     def test_milestone9_cli_uses_the_same_expanded_object_budgets(self) -> None:
         args = _parser().parse_args([
@@ -2436,7 +2462,6 @@ class RoadPieceFittingTests(unittest.TestCase):
             stock_ground = {
                 r"Eden\tn.paa", r"Eden\zbh.paa", r"Eden\bak\bah.pac",
                 r"o\l1.paa", r"o\lom2.paa",
-                r"o\pole1.paa", r"o\pole2.paa",
             }
             self.assertTrue(all(path in stock_ground for path in wrp.texture_slots[1:1 + len(MILESTONE9_MATERIALS)]))
             generated_ground_entries = {
@@ -2446,7 +2471,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             }
             self.assertTrue(entries.isdisjoint(generated_ground_entries))
             forest_slot = 1 + MATERIAL_INDEX["f"]
-            self.assertEqual(wrp.texture_slots[forest_slot], r"Eden\zbh.paa")
+            self.assertEqual(wrp.texture_slots[forest_slot], r"Eden\tn.paa")
             self.assertGreater(wrp.texture_index_counts[forest_slot], 0)
             manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["pbo_layout"]["mode"], "single_world_pbo")
@@ -4452,7 +4477,7 @@ class SemanticFeatureTests(unittest.TestCase):
         self.assertIn(r"data3d\str_fikovnik.p3d", malden_trusted)
 
 class DeploymentTests(unittest.TestCase):
-    def test_deploy_copies_complete_runtime_into_existing_mod_without_new_wrapper(self) -> None:
+    def test_deploy_copies_world_pbo_readme_and_required_menu_intro(self) -> None:
         from types import SimpleNamespace
         from cwr_worldgen.milestone9 import _deploy_runtime_to_existing_mod
 
@@ -4461,36 +4486,42 @@ class DeploymentTests(unittest.TestCase):
             output = root / "build"
             source_mod = output / "@CWR-Milestone9"
             pbo = source_mod / "Addons" / "cwr_test.pbo"
-            addon_metadata = source_mod / "Addons" / "cwr_test.sha256"
-            intro = source_mod / "Anims" / "intro.cwr_test"
             pbo.parent.mkdir(parents=True)
-            intro.mkdir(parents=True)
             pbo.write_bytes(b"pbo")
-            addon_metadata.write_text("hash", encoding="utf-8")
-            (intro / "mission.sqm").write_text("mission", encoding="utf-8")
-            (intro / "intro.sqs").write_text("camera", encoding="utf-8")
+            readme = source_mod / "Addons" / "CWR Test ReadMe.txt"
+            readme.write_text("terrain metadata", encoding="utf-8")
+            (source_mod / "Addons" / "not-deployed.txt").write_text("diagnostic", encoding="utf-8")
+            intro = source_mod / "Anims" / "intro1.cwr_test"
+            intro.mkdir(parents=True)
+            intro_mission = intro / "mission.sqm"
+            intro_script = intro / "intro.sqs"
+            intro_mission.write_text("mission", encoding="utf-8")
+            intro_script.write_text("camera", encoding="utf-8")
             target = root / "@ExistingMod"
             target.mkdir()
             # Existing mods are not always consistent about directory casing.
             selected_addons = target / "addons"
-            (target / "anims").mkdir()
             selected_addons.mkdir()
             result = SimpleNamespace(
-                output_dir=output, pbo_path=pbo, intro_mission_path=intro / "mission.sqm"
+                output_dir=output,
+                pbo_path=pbo,
+                intro_mission_path=intro_mission,
+                intro_script_path=intro_script,
             )
             # Selecting Addons itself is recovered to the enclosing mod root.
             report = _deploy_runtime_to_existing_mod(result, selected_addons)
             self.assertEqual((target / "addons" / "cwr_test.pbo").read_bytes(), b"pbo")
             self.assertEqual(
-                (target / "addons" / "cwr_test.sha256").read_text(encoding="utf-8"),
-                "hash",
+                (target / "addons" / "CWR Test ReadMe.txt").read_text(encoding="utf-8"),
+                "terrain metadata",
             )
+            self.assertFalse((target / "addons" / "not-deployed.txt").exists())
             self.assertEqual(
-                (target / "anims" / "intro.cwr_test" / "mission.sqm").read_text(encoding="utf-8"),
+                (target / "Anims" / "intro1.cwr_test" / "mission.sqm").read_text(encoding="utf-8"),
                 "mission",
             )
             self.assertEqual(
-                (target / "anims" / "intro.cwr_test" / "intro.sqs").read_text(encoding="utf-8"),
+                (target / "Anims" / "intro1.cwr_test" / "intro.sqs").read_text(encoding="utf-8"),
                 "camera",
             )
             self.assertFalse((target / "@CWR-Milestone9").exists())
@@ -4499,6 +4530,10 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(report["requested_folder"], str(selected_addons.resolve()))
             self.assertTrue(report["verified"])
             self.assertEqual(report["file_count"], 4)
+            self.assertEqual(
+                {Path(item["destination"]).name for item in report["files"]},
+                {"cwr_test.pbo", "CWR Test ReadMe.txt", "mission.sqm", "intro.sqs"},
+            )
 
     def test_deploy_runs_even_when_final_validation_report_fails(self) -> None:
         from unittest.mock import patch

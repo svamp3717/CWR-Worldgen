@@ -1,0 +1,54 @@
+{
+  "schema": 5,
+  "kind": "completed_model_classifications",
+  "source_set": "BAS_O.pbo africahut",
+  "display_name": "BAS_O.pbo African hut buildings",
+  "categories": [
+    "Residential",
+    "Commercial",
+    "Industrial",
+    "Agricultural",
+    "Military",
+    "Civic / Public",
+    "Religious",
+    "Infrastructure",
+    "Ruins",
+    "Prop / Misc"
+  ],
+  "placements": [
+    "Urban",
+    "Rural",
+    "Both"
+  ],
+  "complete_count": 2,
+  "reviewed_count": 2,
+  "models": [
+    {
+      "model_path": "bas_o\\_civ\\bas_africanhut1.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 8.5622,
+      "length_m": 8.5622,
+      "height_m": 5.6027,
+      "aspect_ratio": 1,
+      "origin_to_bottom_m": 2.8829
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_africanhut2.p3d",
+      "categories": [
+        "Industrial",
+        "Agricultural"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 10.8291,
+      "length_m": 7.0764,
+      "height_m": 4.1391,
+      "aspect_ratio": 1.5303,
+      "origin_to_bottom_m": 2.0529
+    }
+  ]
+}

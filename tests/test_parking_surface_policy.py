@@ -9,6 +9,7 @@ from PIL import Image
 from cwr_worldgen import generator
 from cwr_worldgen import runway_exact_background_policy as exact
 from cwr_worldgen import runway_surface_policy as runway
+from cwr_worldgen import surface_pass
 from cwr_worldgen.parking_surface_policy import (
     _parking_cells,
     _parking_geometries,
@@ -124,6 +125,51 @@ def test_paved_and_gravel_render_over_background_without_replacing_outside() -> 
     actual_gravel = np.asarray(rendered_gravel)
     assert np.count_nonzero(np.any(actual_gravel != source, axis=2)) > 0
     assert float(actual_gravel[:, :, 0].mean()) > float(actual_paved[:, :, 0].mean())
+
+
+def test_malden_parking_overlay_uses_shared_exact_preset_background(tmp_path, monkeypatch) -> None:
+    spec = _spec(tmp_path)
+    spec.ground_texture_profile = "malden"
+    spec.surface_pass_enabled = True
+    spec.surface_ground_mode = "milestone9"
+    spec.asset_roots = ()
+    dataset = _single_dataset()
+    projection = _IdentityProjection()
+    source_dir = tmp_path / "parkingworld"
+    source_dir.mkdir()
+
+    loaded_paths = []
+    exact_background = SimpleNamespace(
+        top_image=Image.new("RGB", (128, 128), (62, 91, 48)),
+        data=b"malden-main-terrain",
+        source="Abel.pbo",
+    )
+
+    def load_exact_background(_source_dir, _spec, wire_path):
+        loaded_paths.append(wire_path)
+        return exact_background
+
+    monkeypatch.setattr(exact, "_load_exact_texture", load_exact_background)
+    texture_paths = (
+        r"parkingworld\data\d.paa",
+        *surface_pass.surface_texture_wire_paths("parkingworld", "malden"),
+    )
+    grass_slot = surface_pass.MATERIAL_INDEX["g"] + 1
+    texture_indices = (grass_slot,) * (spec.cells * spec.cells)
+
+    revised_indices, revised_paths, generated = apply_parking_textures(
+        source_dir, dataset, projection, spec, texture_indices, texture_paths
+    )
+    report = json.loads((source_dir / "parking-lot-textures.json").read_text())
+
+    assert texture_paths[grass_slot] == r"abel\tt.paa"
+    assert loaded_paths == [r"abel\tt.paa"]
+    assert generated
+    assert all(path.startswith(r"parkingworld\pk") for path in generated)
+    assert report["background_path"] == r"abel\tt.paa"
+    assert report["background_source"] == "Abel.pbo"
+    assert len(revised_paths) == len(texture_paths) + len(generated)
+    assert any(index >= len(texture_paths) for index in revised_indices)
 
 
 def test_parking_texture_generation_reuses_persistent_cache(tmp_path, monkeypatch) -> None:

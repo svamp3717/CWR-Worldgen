@@ -100,9 +100,20 @@ class TextureResolver:
                                     break
                                 properties[key.casefold()] = _read_cstring_file(handle, "PBO property value")
                             continue
-                        if any((packing, original_size, data_size)):
-                            raise measure.ModelReadError("unsupported PBO extension record")
-                        break
+                        if (
+                            packing in {0, measure._PBO_COMPRESSED}
+                            and original_size == 0
+                            and _reserved == 0
+                            and _timestamp == 0
+                            and data_size == 0
+                        ):
+                            break
+                        raise measure.ModelReadError(
+                            "unsupported PBO extension record "
+                            f"(packing={packing:#x}, original_size={original_size}, "
+                            f"reserved={_reserved}, timestamp={_timestamp}, "
+                            f"data_size={data_size})"
+                        )
                     metadata.append((name, packing, original_size, data_size))
 
                 prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or pbo_path.stem

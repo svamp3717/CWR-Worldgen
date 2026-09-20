@@ -116,14 +116,20 @@ def save_split_state(
 ) -> tuple[int, int]:
     """Save completed models separately from reviewed-but-incomplete models.
 
-    Runtime scan/parser failures are intentionally not persisted. They remain console
-    diagnostics only. Returns ``(complete_count, incomplete_count)``.
+    Runtime scan/parser failures are intentionally not persisted. Reviewed entries
+    with neither categories nor placement are also omitted, so clearing both fields
+    removes a model from the catalogue state. Returns
+    ``(complete_count, incomplete_count)``.
     """
     complete_keys = [key for key in sorted(state) if _complete(state[key])]
     incomplete_keys = [
         key
         for key in sorted(state)
-        if state[key].reviewed and not _complete(state[key])
+        if (
+            state[key].reviewed
+            and not _complete(state[key])
+            and (bool(state[key].categories) or bool(state[key].placement))
+        )
     ]
 
     companion = incomplete_state_path(path)

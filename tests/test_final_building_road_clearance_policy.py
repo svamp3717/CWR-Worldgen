@@ -55,6 +55,26 @@ def _flat(spec):
     return (0.0,) * (spec.cells * spec.cells)
 
 
+def test_residual_building_overlap_filter_rejects_clipping_model() -> None:
+    first = _plan("way/first", 50.0, 50.0, width=10.0, length=10.0)
+    second = _plan("way/second", 54.0, 50.0, width=10.0, length=10.0)
+
+    kept, rejected = policy._filter_overlapping_buildings((first, second))
+
+    assert kept == (first,)
+    assert rejected == 1
+
+
+def test_residual_building_overlap_filter_allows_shared_wall_only() -> None:
+    first = _plan("way/first", 50.0, 50.0, width=10.0, length=10.0)
+    second = _plan("way/second", 60.0, 50.0, width=10.0, length=10.0)
+
+    kept, rejected = policy._filter_overlapping_buildings((first, second))
+
+    assert kept == (first, second)
+    assert rejected == 0
+
+
 def test_small_building_on_final_straight_is_moved():
     spec = _spec()
     plan = _plan("way/1", 50.0, 50.0, width=6.0, length=8.0)

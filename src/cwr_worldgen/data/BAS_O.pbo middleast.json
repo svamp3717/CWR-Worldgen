@@ -1,0 +1,170 @@
+{
+  "schema": 5,
+  "kind": "completed_model_classifications",
+  "source_set": "BAS_O.pbo middleast",
+  "display_name": "BAS_O.pbo Middle East buildings",
+  "categories": [
+    "Residential",
+    "Commercial",
+    "Industrial",
+    "Agricultural",
+    "Military",
+    "Civic / Public",
+    "Religious",
+    "Infrastructure",
+    "Ruins",
+    "Prop / Misc"
+  ],
+  "placements": [
+    "Urban",
+    "Rural",
+    "Both"
+  ],
+  "complete_count": 11,
+  "reviewed_count": 11,
+  "models": [
+    {
+      "model_path": "bas_o\\_civ\\bas_house.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 4.7121,
+      "length_m": 4.7232,
+      "height_m": 2.8592,
+      "aspect_ratio": 1.0024,
+      "origin_to_bottom_m": 1.4296
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_house10.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 13.7034,
+      "length_m": 4.7038,
+      "height_m": 5.7011,
+      "aspect_ratio": 2.9133,
+      "origin_to_bottom_m": 2.8535
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_house2.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 4.7124,
+      "length_m": 9.6544,
+      "height_m": 2.8529,
+      "aspect_ratio": 2.0487,
+      "origin_to_bottom_m": 1.4264
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_house3.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 9.6574,
+      "length_m": 9.6614,
+      "height_m": 2.8592,
+      "aspect_ratio": 1.0004,
+      "origin_to_bottom_m": 1.4296
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_house4.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 9.4489,
+      "length_m": 9.459,
+      "height_m": 5.7011,
+      "aspect_ratio": 1.0011,
+      "origin_to_bottom_m": 2.8481
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_house5.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 9.4489,
+      "length_m": 4.7271,
+      "height_m": 5.7011,
+      "aspect_ratio": 1.9989,
+      "origin_to_bottom_m": 2.8481
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_house6.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 4.7093,
+      "length_m": 9.4621,
+      "height_m": 5.7011,
+      "aspect_ratio": 2.0092,
+      "origin_to_bottom_m": 2.846
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_house7.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 14.1799,
+      "length_m": 9.459,
+      "height_m": 5.7011,
+      "aspect_ratio": 1.4991,
+      "origin_to_bottom_m": 2.8481
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_house8.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 9.4536,
+      "length_m": 14.7324,
+      "height_m": 5.7011,
+      "aspect_ratio": 1.5584,
+      "origin_to_bottom_m": 2.8481
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_house9.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 4.7038,
+      "length_m": 13.7034,
+      "height_m": 5.7011,
+      "aspect_ratio": 2.9133,
+      "origin_to_bottom_m": 2.8535
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_mosque.p3d",
+      "categories": [
+        "Religious"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 6.0179,
+      "length_m": 16.734,
+      "height_m": 11.7855,
+      "aspect_ratio": 2.7807,
+      "origin_to_bottom_m": 5.8566
+    }
+  ]
+}

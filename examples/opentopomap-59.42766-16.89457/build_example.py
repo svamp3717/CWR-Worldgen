@@ -83,16 +83,12 @@ def main() -> int:
         ),
     )
     mod_root = result.pbo_path.parent.parent
-    mission_root = result.mission_path.parent
     runtime_zip = result.output_dir / "cwr-malaren-runtime.zip"
-    mission_zip = result.output_dir / "cwr-malaren-test-mission.zip"
     _zip_tree(mod_root, runtime_zip, mod_root.name)
-    _zip_tree(mission_root, mission_zip, mission_root.name)
     print(f"Mod folder:    {mod_root}")
     print(f"WRP:           {result.wrp_path}")
     print(f"PBO:           {result.pbo_path}")
     print(f"Runtime ZIP:   {runtime_zip}")
-    print(f"Mission ZIP:   {mission_zip}")
     return 0
 
 

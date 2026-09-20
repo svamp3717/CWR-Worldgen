@@ -224,9 +224,9 @@ def _build_milestone9_with_configured_runtime(*args, **kwargs):
 
 _milestone9_module.build_milestone4 = _build_milestone9_with_configured_runtime
 
-# Final worlds get a small human-readable reproduction note beside the PBO.
-# Install this after the runtime-folder compatibility wrapper so the ReadMe sees
-# the final generated Addons path and can mirror itself into an optional mod.
+# Final worlds keep a small human-readable reproduction note beside the PBO.
+# Addons contains the PBO plus that ReadMe; the required world menu intro lives
+# separately under Anims and is deployed with them.
 from .terrain_readme import install_milestone9_terrain_readme as _install_milestone9_terrain_readme
 
 _install_milestone9_terrain_readme()

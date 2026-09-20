@@ -34,10 +34,10 @@ OSM_MATERIALS: tuple[MaterialDefinition, ...] = DEFAULT_MATERIALS + (
 EVERON_GROUND_TEXTURES: dict[str, str] = {
     "w": r"Eden\tn.paa",
     "s": r"Eden\bak\bah.pac",
-    "g": r"Eden\zbh.paa",
+    "g": r"Eden\tn.paa",
     "r": r"o\l1.paa",
-    "f": r"Eden\zbh.paa",
-    "a": r"o\pole1.paa",
+    "f": r"Eden\tn.paa",
+    "a": r"Eden\zbh.paa",
     "u": r"Eden\tn.paa",
     "p": r"Eden\tn.paa",
 }
@@ -57,18 +57,33 @@ NOGOVA_GROUND_TEXTURES.update({
     "a": r"o\pole1.paa",
 })
 
+# Literal direct terrain tiles from the stock Abel OPRW texture table. Keep
+# these as hard-coded virtual paths, exactly like the Eden classic palette.
+# Ordinary terrain references need no package scan; the shared overlay compositor
+# may open only the selected main background tile (abel\tt.paa), as for Everon.
+MALDEN_GROUND_TEXTURES: dict[str, str] = {
+    "w": r"abel\pi.paa",
+    "s": r"abel\tt.paa",
+    "g": r"abel\tt.paa",
+    "r": r"abel\tt.paa",
+    "f": r"abel\tt.paa",
+    "a": r"abel\tt.paa",
+    "u": r"abel\tt.paa",
+    "p": r"abel\tt.paa",
+}
+
 STOCK_GROUND_TEXTURES: dict[str, dict[str, str]] = {
     "everon": EVERON_GROUND_TEXTURES,
     "nogova": NOGOVA_GROUND_TEXTURES,
+    "malden": MALDEN_GROUND_TEXTURES,
 }
 
 GROUND_TEXTURE_PROFILES = ("nogova", "malden", "everon", "generated", "desert")
 
 
 MALDEN_MATERIAL_COLOURS: dict[str, tuple[int, int, int]] = {
-    # A restrained CWC-era Mediterranean palette. Farmland deliberately shares
-    # the basic grass colour because the Malden preset does not assume a
-    # dedicated stock field texture is available.
+    # Preview/fallback colours for classic Malden. Runtime ground references
+    # use the stock Abel texture namespace directly.
     "w": (48, 73, 91),
     "s": (184, 162, 109),
     "g": (109, 118, 70),
@@ -102,7 +117,7 @@ def material_colour_for_profile(material: MaterialDefinition, profile: str) -> t
 def ground_texture_path(world_name: str, material_code: str, profile: str = "generated") -> str:
     if material_code not in {material.code for material in OSM_MATERIALS}:
         raise ValueError(f"unknown terrain material code: {material_code}")
-    if profile in {"generated", "desert", "malden"}:
+    if profile in {"generated", "desert"}:
         return rf"{world_name}\data\{material_code}.paa"
     if profile in STOCK_GROUND_TEXTURES:
         return STOCK_GROUND_TEXTURES[profile][material_code]

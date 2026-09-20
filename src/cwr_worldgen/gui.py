@@ -371,6 +371,7 @@ def defaults_with_recent_source(
     if last_display_name:
         result["display_name"] = increment_trailing_number(last_display_name)
     for key in (
+        "house_style_preset",
         "osm_asset_mapping_enabled",
         "osm_asset_mapping_inherit_defaults",
         "osm_asset_mapping_rules",
@@ -1317,13 +1318,13 @@ class WorldgenGui(tk.Tk):
         self._entry_row(world, 2, "Output folder", "output", browse="directory")
         ttk.Checkbutton(
             world,
-            text="Copy generated Addons and Anims into an existing game mod folder",
+            text="Copy generated world PBO, terrain ReadMe, and menu intro into an existing game mod folder",
             variable=self._var("deploy_to_mod_folder", False, boolean=True),
         ).grid(row=3, column=1, columnspan=2, sticky="w", pady=(8, 2))
         self._entry_row(world, 4, "Existing game mod folder", "deploy_mod_dir", browse="directory")
         ttk.Label(
             world,
-            text="Choosing a folder enables deployment automatically. The builder updates its existing Addons and Anims children and does not create another @mod wrapper.",
+            text="Choosing a folder enables deployment automatically. The builder copies the PBO and terrain ReadMe into Addons and the required world menu intro into Anims, without creating another @mod wrapper.",
             style="Hint.TLabel",
             wraplength=700,
         ).grid(row=5, column=1, columnspan=2, sticky="w", pady=(0, 8))
@@ -2385,8 +2386,8 @@ class WorldgenGui(tk.Tk):
             warnings.append(f"⚠ Source grid is invalid: {exc}")
         if str(self.vars["ground_textures"].get()) == "desert":
             warnings.append("• Desert generated ground textures are selected instead of stock Everon/Eden textures.")
-        elif str(self.vars["ground_textures"].get()) not in {"nogova", "everon"}:
-            warnings.append("• Generated ground textures are selected instead of stock Everon/Eden textures.")
+        elif str(self.vars["ground_textures"].get()) not in {"nogova", "everon", "malden"}:
+            warnings.append("• Generated ground textures are selected instead of a classic stock-island terrain profile.")
         if bool(self.vars["verify_regeneration"].get()):
             warnings.append("• Slow deterministic regeneration verification is enabled.")
         if bool(self.vars["no_cache"].get()):

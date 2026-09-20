@@ -67,6 +67,140 @@ def test_stock_special_buildings_stay_in_stock_family() -> None:
     assert "school" in catalogue[school.model_path.casefold()].families
 
 
+
+def test_stock_generic_rural_footprints_reuse_procedural_size_classification() -> None:
+    library = _library()
+    small = library.plan_polygon(
+        {"building": "yes"},
+        ((0.0, 0.0), (6.0, 0.0), (6.0, 6.0), (0.0, 6.0)),
+    )
+    large = library.plan_polygon(
+        {"building": "yes"},
+        ((0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)),
+    )
+
+    catalogue = {model.model_path.casefold(): model for model in library.models}
+    assert small.selected.family == "outbuilding"
+    assert large.selected.family == "agricultural"
+    assert large.selected.building_class == "barn"
+    assert "outbuilding" in catalogue[small.model_path.casefold()].families
+    assert "agricultural" in catalogue[large.model_path.casefold()].families
+
+
+def test_stock_generic_city_footprint_reuses_procedural_settlement_classification() -> None:
+    library = _library()
+    library._settlements = ((0.0, 0.0, "city"),)
+    placement = library.plan_polygon(
+        {"building": "yes"},
+        ((-20.0, -10.0), (20.0, -10.0), (20.0, 10.0), (-20.0, 10.0)),
+    )
+
+    catalogue = {model.model_path.casefold(): model for model in library.models}
+    selected_model = catalogue[placement.model_path.casefold()]
+    assert placement.selected.family == "urban"
+    assert selected_model.placement in {"Urban", "Both"}
+    assert "urban" in selected_model.families
+
+
+def test_stock_outbuilding_subtype_reuses_procedural_dimension_inference() -> None:
+    library = _library()
+    shed = library.plan_point(
+        {"building": "outbuilding"},
+        3.0,
+        0.0,
+        x=5000.0,
+        z=5000.0,
+    )
+    garage = library.plan_point(
+        {"building": "outbuilding"},
+        6.0,
+        0.0,
+        x=5100.0,
+        z=5000.0,
+    )
+
+    assert shed.selected.family == "outbuilding"
+    assert shed.selected.building_class == "shed"
+    assert shed.selected.outbuilding_kind == "shed"
+    assert garage.selected.family == "outbuilding"
+    assert garage.selected.building_class == "garage"
+    assert garage.selected.outbuilding_kind == "garage"
+
+
+def test_stock_settlement_boundary_matches_procedural_one_kilometre_rule() -> None:
+    library = _library()
+    library._settlements = ((0.0, 0.0, "city"),)
+
+    near = library.plan_point(
+        {"building": "yes"},
+        10.0,
+        0.0,
+        x=999.0,
+        z=0.0,
+    )
+    far = library.plan_point(
+        {"building": "yes"},
+        10.0,
+        0.0,
+        x=1001.0,
+        z=0.0,
+    )
+
+    assert near.selected.family == "townhouse"
+    assert far.selected.family == "residential"
+
+
+def test_stock_hamlet_context_stays_in_rural_model_pool() -> None:
+    library = _library()
+    library._settlements = ((0.0, 0.0, "hamlet"),)
+    placement = library.plan_point(
+        {"building": "yes"},
+        10.0,
+        0.0,
+        x=100.0,
+        z=0.0,
+    )
+
+    catalogue = {model.model_path.casefold(): model for model in library.models}
+    selected_model = catalogue[placement.model_path.casefold()]
+    assert placement.selected.family == "residential"
+    assert selected_model.placement in {"Rural", "Both"}
+    assert "urban" not in selected_model.families
+    assert "townhouse" not in selected_model.families
+
+
+def test_large_stock_barn_prefers_smaller_model_that_fits_source_footprint() -> None:
+    library = _library()
+    placement = library.plan_polygon(
+        {"building": "yes"},
+        ((0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)),
+    )
+
+    minor, major = sorted(
+        (placement.selected.width_m, placement.selected.length_m)
+    )
+    assert placement.selected.family == "agricultural"
+    assert placement.selected.building_class == "barn"
+    assert minor <= 20.25
+    assert major <= 40.25
+    assert placement.model_path.casefold() != r"o\hous\hangar_2.p3d"
+
+
+def test_stock_industrial_selection_downgrades_oversized_models() -> None:
+    library = _library()
+    placement = library.plan_polygon(
+        {"building": "industrial"},
+        ((0.0, 0.0), (20.0, 0.0), (20.0, 15.0), (0.0, 15.0)),
+    )
+
+    minor, major = sorted(
+        (placement.selected.width_m, placement.selected.length_m)
+    )
+    assert placement.selected.family == "industrial"
+    assert minor <= 15.25
+    assert major <= 20.25
+
+
 def test_stock_mode_factory_never_instantiates_procedural_library() -> None:
     library = generator.ProceduralBuildingLibrary(
         world_name="wg_stock_factory",

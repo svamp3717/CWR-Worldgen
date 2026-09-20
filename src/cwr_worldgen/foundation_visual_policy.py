@@ -226,6 +226,13 @@ def install_foundation_visual_policy() -> None:
 
     stock_extensions.install_stock_building_extensions()
 
+    # Building presets are now true multi-select sources. Keep the stock catalogue
+    # router intact, then layer heterogeneous stock/modded/procedural selection on
+    # top so old single-preset profiles and CLI values remain valid.
+    from .multi_building_presets import install_multi_building_presets
+
+    install_multi_building_presets()
+
     # Keep the generated runway/sports/parking renderers default-on, but expose
     # independent GUI/CLI opt-outs after their wrapper chain is fully installed.
     from .dynamic_surface_controls import install_dynamic_surface_controls

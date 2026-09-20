@@ -98,6 +98,15 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Start browsing at the first model instead of resuming the saved position. Classifications are kept.",
     )
+    p.add_argument(
+        "--start-model",
+        type=int,
+        metavar="N",
+        help=(
+            "Start at 1-based model number N instead of resuming the saved position. "
+            "The same jump is available in the GUI with Ctrl+G."
+        ),
+    )
     return p
 
 
@@ -105,6 +114,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.max_preview_points < 100:
         print("error: --max-preview-points must be at least 100", file=sys.stderr)
+        return 2
+    if args.start_model is not None and args.start_model < 1:
+        print("error: --start-model must be at least 1", file=sys.stderr)
+        return 2
+    if args.restart and args.start_model is not None:
+        print("error: --restart and --start-model cannot be used together", file=sys.stderr)
         return 2
 
     inputs = _resolve_inputs(args.inputs)
@@ -154,7 +169,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("error: at least one category is required", file=sys.stderr)
         return 2
 
-    resume_model_path = "" if args.restart else load_resume_path(args.output)
+    resume_model_path = (
+        ""
+        if args.restart or args.start_model is not None
+        else load_resume_path(args.output)
+    )
     if resume_model_path:
         print(f"[resume] saved position: {resume_model_path}", file=sys.stderr, flush=True)
     elif args.restart:
@@ -171,7 +190,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         total_models = measure.count_models(inputs, args.include)
     except (OSError, ValueError) as exc:
-        print(f"error: could not count models: {exc}", file=sys.stderr)
+        # Counting is only a progress-bar convenience. Do not block browsing
+        # archives whose header variant the lightweight counter cannot understand
+        # if the streaming scanner can still read models from them.
+        total_models = None
+        print(
+            f"[count warning] could not count models: {exc}; continuing without a total",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    if (
+        args.start_model is not None
+        and total_models is not None
+        and args.start_model > total_models
+    ):
+        print(
+            f"error: --start-model {args.start_model:,} exceeds "
+            f"the {total_models:,} scanned model(s)",
+            file=sys.stderr,
+        )
         return 2
 
     iterator = preview_models(inputs, args.include, args.max_preview_points)
@@ -186,6 +224,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         resume_model_path=resume_model_path,
         total_models=total_models,
     )
+    if args.start_model is not None and args.start_model != 1:
+        app.jump_to_model_number(args.start_model)
     root.mainloop()
     del app
     return 0

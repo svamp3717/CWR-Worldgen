@@ -349,9 +349,11 @@ def install_road_building_priority_policy() -> None:
         )
         cache_hit = bool(result[2]) if len(result) > 2 else False
         if cache_hit:
-            road_report = _clearance._road_context_matches(
-                dataset, projection, elevations, spec
-            )
+            road_report = kwargs.get("road_report")
+            if road_report is None:
+                road_report = _clearance._road_context_matches(
+                    dataset, projection, elevations, spec
+                )
             plans = kwargs.get("building_placement_plans")
             if road_report is not None and plans is not None:
                 # Discard the plans here. The cached non-road payload was produced

@@ -131,16 +131,12 @@ def _pitch_cells(
 
 
 def _grass_background_path(generator, spec) -> str:
-    materials = tuple(generator._material_definitions(spec))
-    paths = tuple(generator._ground_texture_paths(spec))
-    grass_index = next(
-        (index for index, material in enumerate(materials)
-         if str(getattr(material, "code", "")).casefold() == "g"),
-        0,
-    )
-    if 0 <= grass_index < len(paths):
-        return str(paths[grass_index])
-    return rf"{getattr(spec, 'name', '')}\data\g.paa"
+    # Runways, parking lots and sports fields deliberately share one preset
+    # background resolver. The selected preset's main terrain texture is the
+    # only difference between stock profiles.
+    from .single_runway_background_policy import preset_background_texture_path
+
+    return preset_background_texture_path(spec)
 
 
 def _fallback_background(generator, runway, spec, path: str, size: int) -> Image.Image:

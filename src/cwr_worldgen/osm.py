@@ -294,6 +294,21 @@ NOGOVA_PINE_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
     r"o\tree\DD_borovice.p3d",
     r"o\tree\DD_borovice02.p3d",
 )
+# Original CWC Malden/Abel individual-tree family. Use this for mapped tree
+# points too, not only forest fallbacks, so the classic preset does not leak
+# Everon spruces/broadleaf assets into otherwise Malden vegetation.
+MALDEN_BROADLEAF_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
+    r"data3d\str_fikovnik.p3d",
+    r"data3d\str_fikovnik2.p3d",
+)
+MALDEN_CONIFER_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
+    r"data3d\str_pinie.p3d",
+    r"data3d\str borovice.p3d",
+)
+MALDEN_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
+    MALDEN_BROADLEAF_INDIVIDUAL_TREE_MODELS
+    + MALDEN_CONIFER_INDIVIDUAL_TREE_MODELS
+)
 # The 256x256, 25 m world is the visual-density baseline requested for
 # synthetic individual forest trees. Larger worlds retain the same density per
 # square kilometre, so their safety limits scale with physical area.
@@ -8805,6 +8820,10 @@ def generate_world_objects(
     seed = str(getattr(spec, "deterministic_seed", "cwr-worldgen"))
     low_anchor = bool(getattr(spec, "forest_low_anchor", False))
     forest_profile = str(getattr(spec, "forest_profile", "malden")).casefold()
+    # Everon and Malden classic share the same road-safe, terrain-fit forest
+    # placement machinery. The profile now selects scenery assets, not an older
+    # placement algorithm.
+    modern_forest_profile = forest_profile in {"everon", "malden"}
     # Legacy field name from 0.9.252. In 0.9.254+ this means "replace the
     # rigid stock square/triangle forest polygon models with tiled generated
     # clusters". Individually grounded trees remain the last-resort fallback.
@@ -8874,8 +8893,16 @@ def generate_world_objects(
         block_maximum_float = max(
             0.0, float(getattr(spec, "forest_block_maximum_float", 0.5))
         )
-        everon_steep_model = str(
-            getattr(spec, "forest_everon_steep_model", r"data3d\les trojuhelnik pruchozi.p3d")
+        everon_steep_model = (
+            str(
+                getattr(
+                    spec,
+                    "forest_everon_steep_model",
+                    r"data3d\les trojuhelnik pruchozi.p3d",
+                )
+            )
+            if forest_profile == "everon"
+            else ""
         )
         everon_steep_footprint = max(
             8.0, float(getattr(spec, "forest_everon_steep_footprint", 35.0))
@@ -8946,8 +8973,8 @@ def generate_world_objects(
             getattr(spec, "steep_hill_bush_ground_clearance", 0.03)
         )
 
-        # The legacy Malden profile remains available for comparisons. Its
-        # individually grounded trees are never used by the default Everon path.
+        # Compatibility hillside controls remain available for non-classic
+        # profiles. Everon and Malden classic both use the modern fallback ladder.
         hillside_enabled = bool(getattr(spec, "forest_hillside_fallback", False))
         hillside_model = str(
             getattr(spec, "forest_hillside_tree_model", r"data3d\str_fikovnik.p3d")
@@ -9003,13 +9030,13 @@ def generate_world_objects(
                 )
                 forest_sample_count = sum(raster.forest[index] for index in sample_indices)
 
-                # Everon's road-cut fallback only needs blocks with at least two
-                # forest probes. Empty/non-forest lattice cells therefore do not
+                # Classic Everon/Malden road-cut fallback only needs blocks with
+                # at least two forest probes. Empty/non-forest lattice cells do not
                 # need a road-index query at all. On a 50 km world this removes
                 # road lookups from most of the ~1,000,000 primary candidates.
-                if forest_profile == "everon" and forest_sample_count < 2:
+                if modern_forest_profile and forest_sample_count < 2:
                     continue
-                if forest_profile != "everon" and forest_sample_count != len(samples):
+                if not modern_forest_profile and forest_sample_count != len(samples):
                     # Preserve legacy-profile accounting: it historically tests
                     # road overlap before rejecting partial forest blocks.
                     block_intersects_road = forest_block_intersects_road_corridors(
@@ -9023,7 +9050,7 @@ def generate_world_objects(
                     road_corridors, x, z, block_size=spacing
                 )
 
-                if block_intersects_road and forest_profile == "everon":
+                if block_intersects_road and modern_forest_profile:
                     geographic_column, geographic_row = _geographic_lattice_identity(
                         projection, x, z, spacing
                     )
@@ -9434,9 +9461,16 @@ def generate_world_objects(
                     continue
 
                 forest_slope_rejections += 1
-                if forest_profile == "everon":
-                    triangle_blocked_by_road = forest_block_intersects_road_corridors(
-                        road_corridors, x, z, block_size=everon_steep_footprint
+                if modern_forest_profile:
+                    triangle_blocked_by_road = (
+                        forest_block_intersects_road_corridors(
+                            road_corridors,
+                            x,
+                            z,
+                            block_size=everon_steep_footprint,
+                        )
+                        if everon_steep_model
+                        else False
                     )
                     gradient_x, gradient_z = _local_terrain_gradient(
                         elevations, spec.cells, spec.cell_size, x, z
@@ -9475,7 +9509,8 @@ def generate_world_objects(
                             maximum_float=everon_steep_maximum_float,
                         )
                         if (
-                            not triangle_blocked_by_road
+                            everon_steep_model
+                            and not triangle_blocked_by_road
                             and steep_relief <= everon_steep_maximum_relief
                         )
                         else None
@@ -9509,9 +9544,10 @@ def generate_world_objects(
                         maximum_forest_float = max(maximum_forest_float, floating)
                         continue
 
-                    forest_everon_steep_rejections += 1
-                    if triangle_blocked_by_road:
-                        forest_road_rejections += 1
+                    if everon_steep_model:
+                        forest_everon_steep_rejections += 1
+                        if triangle_blocked_by_road:
+                            forest_road_rejections += 1
                     cluster = (
                         _forest_cluster_placement(
                             elevations=elevations,
@@ -9775,7 +9811,7 @@ def generate_world_objects(
                             forest_hillside_unfilled_blocks += 1
                     continue
 
-                # Legacy Malden fallback, retained only behind an explicit profile.
+                # Compatibility fallback for any future non-classic forest profile.
                 accepted_candidates: list[tuple[float, float, float, float]] = []
                 if hillside_enabled and hillside_target > 0:
                     for tree_x, tree_z, tree_heading in _hillside_tree_candidates(
@@ -9911,9 +9947,9 @@ def generate_world_objects(
 
         # A sparse extra pass of individual trees softens the regular stock forest
         # ladder so woods do not end up looking like a regimented block pattern.
-        # This deliberately uses a Resistance/Nogova spruce from O.pbo rather
-        # than the Malden ``str_fikovnik`` model, whose texture commonly lives in
-        # a separate Data package and therefore broke strict validation.
+        # The selected classic profile supplies this tree family. Everon keeps
+        # its spruce defaults while Malden resolves the corresponding Data3D
+        # Mediterranean trees before object placement.
         progress(57, f"Placed primary forest blocks ({forest_count:,} forest objects so far)")
         extra_single_enabled = bool(getattr(spec, "forest_single_tree_enabled", True))
         extra_single_model = str(getattr(spec, "forest_single_tree_model", r"data3d\str smrk_medium.p3d"))
@@ -9941,7 +9977,7 @@ def generate_world_objects(
             float(getattr(spec, "forest_gap_infill_spacing", spec.cell_size)),
         )
         if (
-            (forest_profile == "everon" or forest_polygon_models_disabled)
+            (modern_forest_profile or forest_polygon_models_disabled)
             and gap_infill_enabled
             and not forest_truncated
             and forest_count < forest_limit
@@ -10026,7 +10062,7 @@ def generate_world_objects(
 
         progress(60, "Scattering individual forest trees")
         if (
-            forest_profile == "everon"
+            modern_forest_profile
             and extra_single_enabled
             and extra_single_limit > 0
             and not forest_truncated
@@ -11373,13 +11409,28 @@ def generate_world_objects(
         leaf_type = feature.tags.get("leaf_type", "").casefold()
         species_text = " ".join((feature.tags.get("species", ""), feature.tags.get("genus", ""))).casefold()
         active_forest_model = str(getattr(spec, "forest_tree_model", "")).casefold()
-        if active_forest_model.startswith(r"o\tree\les_nw_jehl_"):
+        needle_tree = (
+            leaf_type == "needleleaved"
+            or any(
+                word in species_text
+                for word in ("picea", "pinus", "abies", "spruce", "pine", "fir")
+            )
+        )
+        broadleaf_tree = leaf_type == "broadleaved" or bool(species_text)
+        if forest_profile == "malden" or active_forest_model == r"data3d\les_su_ctver_pruhozi.p3d":
+            if needle_tree:
+                models = MALDEN_CONIFER_INDIVIDUAL_TREE_MODELS
+            elif broadleaf_tree:
+                models = MALDEN_BROADLEAF_INDIVIDUAL_TREE_MODELS
+            else:
+                models = MALDEN_INDIVIDUAL_TREE_MODELS
+        elif active_forest_model.startswith(r"o\tree\les_nw_jehl_"):
             models = NOGOVA_PINE_INDIVIDUAL_TREE_MODELS
         elif active_forest_model.startswith(r"o\tree\les_nw_"):
             models = NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS
-        elif leaf_type == "needleleaved" or any(word in species_text for word in ("picea", "pinus", "abies", "spruce", "pine", "fir")):
+        elif needle_tree:
             models = OSM_CONIFER_TREE_MODELS
-        elif leaf_type == "broadleaved" or species_text:
+        elif broadleaf_tree:
             models = OSM_BROADLEAF_TREE_MODELS
         else:
             models = OSM_INDIVIDUAL_TREE_MODELS
