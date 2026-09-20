@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+import errno
 import json
 import shutil
+import time
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
@@ -40,6 +42,34 @@ _RESERVED_ROOT_FILES = frozenset({
     "forest-cluster-catalogue.json",
     "infrastructure-asset-catalogue.json",
 })
+
+
+_RMTREE_RETRY_DELAYS = (0.05, 0.10, 0.20, 0.40)
+
+
+def _remove_tree_with_retry(root: Path) -> None:
+    """Remove a build tree, retrying transient Windows directory races.
+
+    Windows can report ERROR_DIR_NOT_EMPTY (WinError 145 / ENOTEMPTY) when a
+    directory changes between shutil.rmtree scanning it and removing it. A
+    second pass is safe for clean builds and avoids failing the whole build on
+    that short-lived filesystem race. Other errors still propagate unchanged.
+    """
+
+    for attempt in range(len(_RMTREE_RETRY_DELAYS) + 1):
+        try:
+            shutil.rmtree(root)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            transient_not_empty = (
+                exc.errno == errno.ENOTEMPTY
+                or getattr(exc, "winerror", None) == 145
+            )
+            if not transient_not_empty or attempt >= len(_RMTREE_RETRY_DELAYS):
+                raise
+            time.sleep(_RMTREE_RETRY_DELAYS[attempt])
 
 
 def _relative_under(root: Path, path: Path) -> str | None:
@@ -208,7 +238,7 @@ def prepare_output_directory(root: Path, world_name: str, *, clean: bool) -> Non
     # Keep the historical absolute/normalized behaviour used by callers.
     root = root.resolve()
     if clean and root.exists():
-        shutil.rmtree(root)
+        _remove_tree_with_retry(root)
     root.mkdir(parents=True, exist_ok=True)
 
 
