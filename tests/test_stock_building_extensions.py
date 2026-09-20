@@ -343,4 +343,7 @@ def test_stock_fit_revision_is_final_active_placement_cache_salt() -> None:
         clearance._CACHE_REVISION
         == extensions._BUILDING_PLACEMENT_CACHE_REVISION
     )
+    assert extensions.STOCK_PLACEMENT_CACHE_NAMESPACE == (
+        "nonroad-object-placement-v100-final-stock-road-audit"
+    )
     assert "serialized-stock-audit" in clearance._CACHE_REVISION
