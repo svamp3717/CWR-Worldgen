@@ -1538,7 +1538,7 @@ def _external_ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
     profile = _ground_texture_profile(spec)
     if _surface_ground_enabled(spec):
         return external_surface_texture_paths(profile)
-    return _ground_texture_paths(spec) if profile in {"everon", "nogova"} else ()
+    return _ground_texture_paths(spec) if profile in {"everon", "nogova", "malden"} else ()
 
 
 def _world_icon_filename(spec: PlayabilitySpec) -> str:
@@ -3535,7 +3535,7 @@ def build_milestone4(
                 int(getattr(spec, "surface_texture_size", 512)),
             )
             store_bundle(surface_texture_bundle, source_dir, surface_texture_names, enabled=cache_enabled)
-    elif _ground_texture_profile(spec) in {"generated", "desert", "malden"}:
+    elif _ground_texture_profile(spec) in {"generated", "desert"}:
         profile = _ground_texture_profile(spec)
         surface_texture_key = cache_key(
             "milestone8-ground-texture-assets-v1",
