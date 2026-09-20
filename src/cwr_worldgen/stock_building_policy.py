@@ -20,7 +20,7 @@ from shapely.geometry import Point, Polygon
 from .procedural_buildings import BuildingGenerationResult, BuildingPlacement, footprint_from_polygon
 
 STOCK_BUILDING_PRESET = "stock"
-STOCK_BUILDING_PRESET_LABEL = "Stock CWA/OFP buildings only"
+STOCK_BUILDING_PRESET_LABEL = "Stock CWA/OFP buildings"
 _DATA_DIR = Path(__file__).with_name("data")
 _STOCK_NON_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_non_resistance.json"
 _STOCK_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_resistance.json"
