@@ -449,7 +449,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument(
         "--deploy-mod-dir",
         type=Path,
-        help="copy only the generated world PBO into this existing mod folder without creating another @mod directory",
+        help="copy the generated world PBO and terrain ReadMe into this existing mod folder without creating another @mod directory",
     )
     _add_source_feature_arguments(milestone9, include_minor_roads_default=True)
     _add_playability_arguments(milestone9)
