@@ -838,7 +838,7 @@ def _atomic_copy_tree(source: Path, destination: Path) -> None:
 
 
 def _deploy_runtime_to_existing_mod(result: BuildResult, target_root: Path) -> dict[str, Any]:
-    """Copy only the generated world PBO into an existing mod folder."""
+    """Copy the generated world PBO and its terrain ReadMe into an existing mod."""
 
     requested_root = target_root.expanduser().resolve()
     target_root = _normalise_mod_root(target_root)
@@ -851,29 +851,47 @@ def _deploy_runtime_to_existing_mod(result: BuildResult, target_root: Path) -> d
 
     addons_dir = _existing_mod_child(target_root, "Addons")
     addons_dir.mkdir(parents=True, exist_ok=True)
-    destination_pbo = addons_dir / source_pbo.name
-    _atomic_copy_file(source_pbo, destination_pbo)
-    if not destination_pbo.is_file() or _sha256(source_pbo) != _sha256(destination_pbo):
-        raise RuntimeError(f"deployment verification failed for {destination_pbo}")
 
-    deployed = [{
-        "kind": "addon",
-        "source": str(source_pbo),
-        "destination": str(destination_pbo),
-        "sha256": _sha256(destination_pbo),
-    }]
+    deploy_sources = [source_pbo]
+    deploy_sources.extend(
+        path
+        for path in sorted(source_pbo.parent.iterdir())
+        if path.is_file() and path.name.casefold().endswith(" readme.txt")
+    )
+
+    deployed: list[dict[str, str]] = []
+    for source in deploy_sources:
+        destination = addons_dir / source.name
+        _atomic_copy_file(source, destination)
+        if not destination.is_file() or _sha256(source) != _sha256(destination):
+            raise RuntimeError(f"deployment verification failed for {destination}")
+        deployed.append({
+            "kind": "addon",
+            "source": str(source),
+            "destination": str(destination),
+            "sha256": _sha256(destination),
+        })
+
+    destination_pbo = addons_dir / source_pbo.name
+    readmes = [
+        item["destination"]
+        for item in deployed
+        if Path(item["destination"]).name.casefold().endswith(" readme.txt")
+    ]
     report: dict[str, Any] = {
         "requested_folder": str(requested_root),
         "mod_folder": str(target_root),
         "addons_folder": str(addons_dir),
         "pbo": str(destination_pbo),
+        "readmes": readmes,
         "verified": True,
-        "file_count": 1,
+        "file_count": len(deployed),
         "files": deployed,
     }
     report_path = result.output_dir / "deployment-report.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
+
 
 def _resolve_overture_buildings_geojson(
     spec: Milestone9Spec,
