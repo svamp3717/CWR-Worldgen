@@ -449,7 +449,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument(
         "--deploy-mod-dir",
         type=Path,
-        help="copy the generated PBO and intro mission into this existing mod folder without creating another @mod directory",
+        help="copy only the generated world PBO into this existing mod folder without creating another @mod directory",
     )
     _add_source_feature_arguments(milestone9, include_minor_roads_default=True)
     _add_playability_arguments(milestone9)
@@ -645,9 +645,6 @@ def _print_result(result, display_name: str, name: str) -> None:
         print(f"Texture:    {texture}")
     print(f"Mod root:   {result.pbo_path.parent.parent}")
     print(f"PBO:        {result.pbo_path}")
-    print("Mission unit: SoldierWB")
-    print(f"Mission:    {result.mission_path}")
-    print(f"Menu intro: {result.intro_mission_path}")
     print(f"Preview:    {result.preview_path}")
     if result.height_preview_path:
         print(f"Height:     {result.height_preview_path}")
