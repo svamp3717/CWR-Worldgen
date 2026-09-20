@@ -89,17 +89,19 @@ def _base_texture_table(profile: str = "everon") -> tuple[str, ...]:
     )
 
 
-def test_malden_classic_uses_only_stock_landtext_ground_tiles() -> None:
+def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
     paths = surface_pass.surface_texture_wire_paths("wg_malden", "malden")
 
-    assert set(paths) == {r"LandText\mo.pac", r"LandText\pi.pac"}
-    assert paths[surface_pass.MATERIAL_INDEX["g"]] == r"LandText\mo.pac"
-    assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"LandText\mo.pac"
-    assert paths[surface_pass.MATERIAL_INDEX["a"]] == r"LandText\mo.pac"
-    assert paths[surface_pass.MATERIAL_INDEX["b"]] == r"LandText\mo.pac"
-    assert paths[surface_pass.MATERIAL_INDEX["c"]] == r"LandText\mo.pac"
-    assert paths[surface_pass.MATERIAL_INDEX["s"]] == r"LandText\pi.pac"
-    assert paths[surface_pass.MATERIAL_INDEX["u"]] == r"LandText\pi.pac"
+    assert paths[surface_pass.MATERIAL_INDEX["w"]] == r"abel\pi.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["g"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"abel\pb.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["s"]] == r"abel\sh.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["r"]] == r"abel\p4.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["d"]] == r"abel\bah.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["a"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["b"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["c"]] == r"abel\tt.paa"
+    assert all(path.casefold().startswith("abel\\") for path in paths)
     assert not any(path.casefold().startswith("wg_malden\\data\\") for path in paths)
 
     legacy = generator._ground_texture_paths(
@@ -110,7 +112,16 @@ def test_malden_classic_uses_only_stock_landtext_ground_tiles() -> None:
             surface_ground_mode="milestone8",
         )
     )
-    assert set(legacy) == {r"LandText\mo.pac", r"LandText\pi.pac"}
+    assert legacy == (
+        r"abel\pi.paa",
+        r"abel\sh.paa",
+        r"abel\tt.paa",
+        r"abel\p4.paa",
+        r"abel\pb.paa",
+        r"abel\tt.paa",
+        r"abel\tt.paa",
+        r"abel\tt.paa",
+    )
 
 
 def test_malden_surface_writer_emits_no_world_local_ground_tiles(tmp_path) -> None:
