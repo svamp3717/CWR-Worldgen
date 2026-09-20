@@ -126,6 +126,20 @@ def test_malden_surface_writer_emits_no_world_local_ground_tiles(tmp_path) -> No
     assert not (tmp_path / "data").exists()
 
 
+def test_legacy_everon_farmland_also_uses_eden_ground_texture() -> None:
+    paths = generator._ground_texture_paths(
+        SimpleNamespace(
+            name="wg_everon",
+            ground_texture_profile="everon",
+            surface_pass_enabled=False,
+            surface_ground_mode="milestone8",
+        )
+    )
+
+    assert paths[5] == r"Eden\zbh.paa"
+    assert r"o\pole1.paa" not in paths
+
+
 def test_everon_farmland_uses_eden_ground_texture_only() -> None:
     paths = surface_pass.surface_texture_wire_paths("wg_everon", "everon")
 
