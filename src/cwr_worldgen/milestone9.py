@@ -1307,7 +1307,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
 
     deployment: dict[str, Any] | None = None
     if spec.deploy_mod_dir is not None:
-        report_progress(99, f"Deploying world PBO into {spec.deploy_mod_dir}")
+        report_progress(99, f"Deploying world PBO and terrain ReadMe into {spec.deploy_mod_dir}")
         deployment = _deploy_runtime_to_existing_mod(result, spec.deploy_mod_dir)
 
     try:
