@@ -371,6 +371,7 @@ def defaults_with_recent_source(
     if last_display_name:
         result["display_name"] = increment_trailing_number(last_display_name)
     for key in (
+        "house_style_preset",
         "osm_asset_mapping_enabled",
         "osm_asset_mapping_inherit_defaults",
         "osm_asset_mapping_rules",
