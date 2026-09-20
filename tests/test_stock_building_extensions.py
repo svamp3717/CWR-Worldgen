@@ -178,7 +178,8 @@ def test_stock_options_are_directly_below_automatic() -> None:
     assert labels[0] == "Automatic (area / country)"
     assert labels[1:5] == tuple(label for _identifier, label in STOCK_BUILDING_OPTIONS)
     assert MIXED_STOCK_LABEL not in labels
-    assert "Stock CWA/OFP buildings only" not in labels
+    assert "Stock CWA/OFP buildings" not in labels
+    assert all(not label.casefold().endswith(" only") for label in labels)
 
 
 def test_stock_presets_disable_procedural_building_gui_options() -> None:
