@@ -96,10 +96,11 @@ NOGOVA_SURFACE_TEXTURES.update({
 })
 
 # Classic Malden/Abel terrain uses literal virtual paths from the stock Abel
-# OPRW texture table, just as Everon classic hard-codes Eden paths.  The source
-# WRP's direct-tile usage is dominated by pi (sea) and tt (land), followed by sh
-# (shore), pb (forest), p4 (rock), and bah (dirt).  Do not probe Abel.pbo to
-# discover or validate this palette at build time.
+# OPRW texture table, just as Everon classic hard-codes Eden paths. The uploaded
+# stock WRP directly contains pi, tt, sh, pb, p4 and bah alongside specialised
+# s3/tv/bt/mt and rw* tiles. Worldgen keeps the shared runway/parking/sports
+# overlay systems, so only the ordinary semantic terrain palette is mapped here.
+# Do not probe Abel.pbo to discover or validate these paths at build time.
 _MALDEN_SEA_TEXTURE = r"abel\pi.paa"
 _MALDEN_LAND_TEXTURE = r"abel\tt.paa"
 _MALDEN_FOREST_TEXTURE = r"abel\pb.paa"
