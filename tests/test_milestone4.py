@@ -60,6 +60,9 @@ class Milestone4Tests(unittest.TestCase):
             self.assertTrue(reproducibility["wrp_byte_match"])
             self.assertTrue(reproducibility["pbo_byte_match"])
             self.assertGreater(wrp.object_count, 0)
+            self.assertTrue((result.pbo_path.parent.parent / "OSM-ATTRIBUTION.txt").is_file())
+            self.assertFalse(result.mission_path.exists())
+            self.assertFalse(result.intro_mission_path.exists())
 
 
     def test_regeneration_verification_is_disabled_by_default(self) -> None:
