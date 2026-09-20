@@ -393,6 +393,20 @@ class GuiCommandTests(unittest.TestCase):
         self.assertNotIn("--no-steep-hill-bushes", command)
         self.assertNotIn("--no-wetland-reeds", command)
 
+    def test_gui_state_restores_remembered_building_preset_selection(self) -> None:
+        defaults = defaults_with_recent_source(
+            default_gui_values(),
+            {
+                "house_style_preset": (
+                    "building-multi:stock-vanilla,se_sweden"
+                )
+            },
+        )
+        self.assertEqual(
+            defaults["house_style_preset"],
+            "building-multi:stock-vanilla,se_sweden",
+        )
+
     def test_gui_state_remembers_last_downloaded_source_after_restart(self) -> None:
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
