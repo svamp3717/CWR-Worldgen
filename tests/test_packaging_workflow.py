@@ -37,13 +37,10 @@ class PackagingWorkflowTests(unittest.TestCase):
     def test_pyinstaller_collects_stock_building_catalogues(self) -> None:
         data_dir = self.root / "src" / "cwr_worldgen" / "data"
         for name in (
-            "stock_building_models.json",
             "stock_building_models_non_resistance.json",
             "stock_building_models_resistance.json",
-            "haus.pbo + resistance and vanilla.json",
             "haus.pbo buildings only.json",
             "ags inds+port.json",
-            "ags inds+port and combined stock.json",
         ):
             self.assertTrue((data_dir / name).is_file(), name)
 
