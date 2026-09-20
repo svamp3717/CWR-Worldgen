@@ -173,6 +173,11 @@ def _forest_proxy_profile(spec: object) -> str:
         return "nogova_pine"
     if model.startswith(r"o\tree\les_nw_"):
         return "nogova_leaf"
+    if (
+        str(getattr(spec, "forest_profile", "")).casefold() == "malden"
+        or model == r"data3d\les_su_ctver_pruhozi.p3d"
+    ):
+        return "malden"
     return "everon"
 
 
@@ -957,7 +962,7 @@ def _validate_milestone3(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "malden"}:
         checks.append((
             "Steep forest blocks use the normal/sunk triangle or reusable fallback ladder",
             (
