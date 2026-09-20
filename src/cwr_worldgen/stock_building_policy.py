@@ -21,7 +21,9 @@ from .procedural_buildings import BuildingGenerationResult, BuildingPlacement, f
 
 STOCK_BUILDING_PRESET = "stock"
 STOCK_BUILDING_PRESET_LABEL = "Stock CWA/OFP buildings only"
-_STOCK_CATALOGUE_PATH = Path(__file__).with_name("data") / "stock_building_models.json"
+_DATA_DIR = Path(__file__).with_name("data")
+_STOCK_NON_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_non_resistance.json"
+_STOCK_RESISTANCE_CATALOGUE_PATH = _DATA_DIR / "stock_building_models_resistance.json"
 _STOCK_MODEL_FIT_TOLERANCE_METRES = 0.25
 
 _FAMILY_FALLBACKS: Mapping[str, tuple[str, ...]] = {
@@ -94,7 +96,7 @@ def _reviewed_families(categories: Sequence[str], placement: str) -> tuple[str, 
     return tuple(result)
 
 
-def _load_catalogue(path: Path = _STOCK_CATALOGUE_PATH) -> tuple[StockBuildingModel, ...]:
+def _load_catalogue_file(path: Path) -> tuple[StockBuildingModel, ...]:
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -154,6 +156,26 @@ def _load_catalogue(path: Path = _STOCK_CATALOGUE_PATH) -> tuple[StockBuildingMo
     if not models:
         raise RuntimeError(f"Stock building catalogue contains no usable models: {path}")
     return tuple(models)
+
+
+def _load_catalogue(path: Path | None = None) -> tuple[StockBuildingModel, ...]:
+    """Load one source catalogue, or the legacy vanilla+Resistance union.
+
+    The old combined JSON file was only a duplicated materialization of the two
+    source catalogues. Keep the API behaviour without keeping another catalogue
+    in sync forever.
+    """
+    if path is not None:
+        return _load_catalogue_file(path)
+
+    by_path: dict[str, StockBuildingModel] = {}
+    for source in (
+        _STOCK_NON_RESISTANCE_CATALOGUE_PATH,
+        _STOCK_RESISTANCE_CATALOGUE_PATH,
+    ):
+        for model in _load_catalogue_file(source):
+            by_path.setdefault(model.model_path.casefold(), model)
+    return tuple(by_path.values())
 
 
 def _target_height(
