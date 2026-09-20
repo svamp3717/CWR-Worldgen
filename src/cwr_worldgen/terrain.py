@@ -61,7 +61,7 @@ MALDEN_GROUND_TEXTURES: dict[str, str] = {
     "w": r"abel\pi.paa",
     "s": r"abel\sh.paa",
     "g": r"abel\tt.paa",
-    "r": r"abel\p4.paa",
+    "r": r"abel\sh.paa",
     "f": r"abel\pb.paa",
     "a": r"abel\tt.paa",
     "u": r"abel\tt.paa",
