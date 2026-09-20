@@ -1,0 +1,971 @@
+{
+  "schema": 5,
+  "kind": "completed_model_classifications",
+  "source_set": "BAS_O.pbo general",
+  "display_name": "BAS_O.pbo General buildings",
+  "categories": [
+    "Residential",
+    "Commercial",
+    "Industrial",
+    "Agricultural",
+    "Military",
+    "Civic / Public",
+    "Religious",
+    "Infrastructure",
+    "Ruins",
+    "Prop / Misc"
+  ],
+  "placements": [
+    "Urban",
+    "Rural",
+    "Both"
+  ],
+  "complete_count": 72,
+  "reviewed_count": 72,
+  "models": [
+    {
+      "model_path": "bas_o\\_airfield\\bas_airshedbrown.p3d",
+      "categories": [
+        "Industrial",
+        "Agricultural"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 8.7536,
+      "length_m": 12.1624,
+      "height_m": 6.8377,
+      "aspect_ratio": 1.3894,
+      "origin_to_bottom_m": 3.4053
+    },
+    {
+      "model_path": "bas_o\\_airfield\\bas_airshedwhite.p3d",
+      "categories": [
+        "Industrial",
+        "Agricultural"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 11.7537,
+      "length_m": 18.5986,
+      "height_m": 6.9945,
+      "aspect_ratio": 1.5824,
+      "origin_to_bottom_m": 3.4841
+    },
+    {
+      "model_path": "bas_o\\_airfield\\bas_airterminal1.p3d",
+      "categories": [
+        "Civic / Public",
+        "Infrastructure"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 52.413,
+      "length_m": 43.3804,
+      "height_m": 15.7949,
+      "aspect_ratio": 1.2082,
+      "origin_to_bottom_m": 7.8975
+    },
+    {
+      "model_path": "bas_o\\_airfield\\bas_airterminal2.p3d",
+      "categories": [
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 50.1697,
+      "length_m": 40.0034,
+      "height_m": 30.692,
+      "aspect_ratio": 1.2541,
+      "origin_to_bottom_m": 15.346
+    },
+    {
+      "model_path": "bas_o\\_airfield\\bas_airterminal3.p3d",
+      "categories": [
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 51.0084,
+      "length_m": 40.1575,
+      "height_m": 7.8894,
+      "aspect_ratio": 1.2702,
+      "origin_to_bottom_m": 3.9447
+    },
+    {
+      "model_path": "bas_o\\_airfield\\bas_airterminal4.p3d",
+      "categories": [
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 19.2,
+      "length_m": 19.2,
+      "height_m": 24.2682,
+      "aspect_ratio": 1,
+      "origin_to_bottom_m": 12.1341
+    },
+    {
+      "model_path": "bas_o\\_civ\\bas_civfuel.p3d",
+      "categories": [
+        "Commercial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 14.0107,
+      "length_m": 17.0711,
+      "height_m": 6.7473,
+      "aspect_ratio": 1.2184,
+      "origin_to_bottom_m": 3.3735
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_apartment1.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 21.2517,
+      "length_m": 41.7732,
+      "height_m": 13.7132,
+      "aspect_ratio": 1.9656,
+      "origin_to_bottom_m": 6.8566
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_apartment2.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 21.2517,
+      "length_m": 20.8866,
+      "height_m": 13.7132,
+      "aspect_ratio": 1.0175,
+      "origin_to_bottom_m": 6.8566
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_apartment3.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 21.2517,
+      "length_m": 41.7732,
+      "height_m": 18.1574,
+      "aspect_ratio": 1.9656,
+      "origin_to_bottom_m": 9.0787
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_apartment4.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 21.2517,
+      "length_m": 41.7732,
+      "height_m": 8.7752,
+      "aspect_ratio": 1.9656,
+      "origin_to_bottom_m": 4.3876
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_apartment5.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 37.1304,
+      "length_m": 20.8866,
+      "height_m": 17.8809,
+      "aspect_ratio": 1.7777,
+      "origin_to_bottom_m": 8.9404
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_hotel1.p3d",
+      "categories": [
+        "Commercial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 52.65,
+      "length_m": 40.95,
+      "height_m": 49.4592,
+      "aspect_ratio": 1.2857,
+      "origin_to_bottom_m": 24.7047
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_shopfront1.p3d",
+      "categories": [
+        "Commercial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 24.943,
+      "length_m": 41.7732,
+      "height_m": 14.1218,
+      "aspect_ratio": 1.6747,
+      "origin_to_bottom_m": 7.0609
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_shopfront2.p3d",
+      "categories": [
+        "Commercial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 22.5576,
+      "length_m": 41.7732,
+      "height_m": 20.0699,
+      "aspect_ratio": 1.8518,
+      "origin_to_bottom_m": 10.0338
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_shopfront3.p3d",
+      "categories": [
+        "Commercial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 22.5576,
+      "length_m": 41.7732,
+      "height_m": 26.5519,
+      "aspect_ratio": 1.8518,
+      "origin_to_bottom_m": 13.2744
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_shopfront4.p3d",
+      "categories": [
+        "Commercial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 23.8054,
+      "length_m": 41.7732,
+      "height_m": 26.5516,
+      "aspect_ratio": 1.7548,
+      "origin_to_bottom_m": 13.2742
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_shopfront5.p3d",
+      "categories": [
+        "Commercial"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 22.5576,
+      "length_m": 41.7732,
+      "height_m": 26.5522,
+      "aspect_ratio": 1.8518,
+      "origin_to_bottom_m": 13.38
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_urbanslum1.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 46.8997,
+      "length_m": 45.4495,
+      "height_m": 4.0351,
+      "aspect_ratio": 1.0319,
+      "origin_to_bottom_m": 2.018
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_urbanslum2.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 47.3382,
+      "length_m": 46.1399,
+      "height_m": 3.6444,
+      "aspect_ratio": 1.026,
+      "origin_to_bottom_m": 1.8265
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_urbanslum3.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 46.9607,
+      "length_m": 42.6978,
+      "height_m": 3.7968,
+      "aspect_ratio": 1.0998,
+      "origin_to_bottom_m": 1.8984
+    },
+    {
+      "model_path": "bas_o\\_infra\\bas_urbanslumblock.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 52.4326,
+      "length_m": 51.8125,
+      "height_m": 2.9079,
+      "aspect_ratio": 1.012,
+      "origin_to_bottom_m": 1.739
+    },
+    {
+      "model_path": "bas_o\\_infra\\basfactory1.p3d",
+      "categories": [
+        "Industrial",
+        "Agricultural"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 30,
+      "length_m": 44.6063,
+      "height_m": 15.6274,
+      "aspect_ratio": 1.4869,
+      "origin_to_bottom_m": 7.8149
+    },
+    {
+      "model_path": "bas_o\\_infra\\basfactory2.p3d",
+      "categories": [
+        "Industrial",
+        "Agricultural"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 26.3661,
+      "length_m": 41.7732,
+      "height_m": 14.0959,
+      "aspect_ratio": 1.5844,
+      "origin_to_bottom_m": 7.048
+    },
+    {
+      "model_path": "bas_o\\_infra\\basflats1.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 18.9073,
+      "length_m": 29.4649,
+      "height_m": 11.0708,
+      "aspect_ratio": 1.5584,
+      "origin_to_bottom_m": 5.5315
+    },
+    {
+      "model_path": "bas_o\\_infra\\basgarage2.p3d",
+      "categories": [
+        "Industrial",
+        "Agricultural"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 33.3436,
+      "length_m": 25.4059,
+      "height_m": 9.8286,
+      "aspect_ratio": 1.3124,
+      "origin_to_bottom_m": 4.4385
+    },
+    {
+      "model_path": "bas_o\\_new\\bas_govtent.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 2.6845,
+      "length_m": 8.4669,
+      "height_m": 1.8946,
+      "aspect_ratio": 3.1541,
+      "origin_to_bottom_m": 0.9473
+    },
+    {
+      "model_path": "bas_o\\_new\\bas_govtentopen.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 2.6845,
+      "length_m": 8.4669,
+      "height_m": 1.8946,
+      "aspect_ratio": 3.1541,
+      "origin_to_bottom_m": 0.9473
+    },
+    {
+      "model_path": "bas_o\\_new\\bas_rebtent.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 2.6845,
+      "length_m": 8.4669,
+      "height_m": 1.8946,
+      "aspect_ratio": 3.1541,
+      "origin_to_bottom_m": 0.9473
+    },
+    {
+      "model_path": "bas_o\\_new\\bas_rebtentopen.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 2.6845,
+      "length_m": 8.4669,
+      "height_m": 1.8946,
+      "aspect_ratio": 3.1541,
+      "origin_to_bottom_m": 0.9473
+    },
+    {
+      "model_path": "bas_o\\_rebel\\bas_rebelbarracks.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 11.1145,
+      "length_m": 9.0735,
+      "height_m": 3.0381,
+      "aspect_ratio": 1.2249,
+      "origin_to_bottom_m": 1.3374
+    },
+    {
+      "model_path": "bas_o\\_rebel\\bas_rebelbarracks2.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 8.3795,
+      "length_m": 9.069,
+      "height_m": 4.91,
+      "aspect_ratio": 1.0823,
+      "origin_to_bottom_m": 2.4584
+    },
+    {
+      "model_path": "bas_o\\_rebel\\bas_rebelfuel.p3d",
+      "categories": [
+        "Commercial"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 10.6551,
+      "length_m": 4.315,
+      "height_m": 5.2477,
+      "aspect_ratio": 2.4693,
+      "origin_to_bottom_m": 2.633
+    },
+    {
+      "model_path": "bas_o\\_rebel\\bas_rebelgarage.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 33.3436,
+      "length_m": 12.703,
+      "height_m": 4.9143,
+      "aspect_ratio": 2.6249,
+      "origin_to_bottom_m": 2.2193
+    },
+    {
+      "model_path": "bas_o\\_rebel\\bas_rebelshackbig.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 16.6718,
+      "length_m": 13.6103,
+      "height_m": 2.9079,
+      "aspect_ratio": 1.2249,
+      "origin_to_bottom_m": 1.4614
+    },
+    {
+      "model_path": "bas_o\\_rebel\\bas_rebelshacklong.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 5.5573,
+      "length_m": 12.703,
+      "height_m": 2.9079,
+      "aspect_ratio": 2.2858,
+      "origin_to_bottom_m": 1.4614
+    },
+    {
+      "model_path": "bas_o\\_rebel\\bas_rebelshelter.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 22.2291,
+      "length_m": 13.6103,
+      "height_m": 4.2416,
+      "aspect_ratio": 1.6333,
+      "origin_to_bottom_m": 2.1208
+    },
+    {
+      "model_path": "bas_o\\_rebel\\bas_rebeltower.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 3.3917,
+      "length_m": 2.6123,
+      "height_m": 6.9523,
+      "aspect_ratio": 1.2984,
+      "origin_to_bottom_m": 3.5086
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_eshack1.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 27.7864,
+      "length_m": 13.6103,
+      "height_m": 2.9075,
+      "aspect_ratio": 2.0416,
+      "origin_to_bottom_m": 1.4853
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_eshack2.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 11.1145,
+      "length_m": 8.1662,
+      "height_m": 2.9075,
+      "aspect_ratio": 1.361,
+      "origin_to_bottom_m": 1.4853
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_hshack1.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 13.8932,
+      "length_m": 6.8052,
+      "height_m": 5.5049,
+      "aspect_ratio": 2.0416,
+      "origin_to_bottom_m": 2.7684
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_shack02.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 10.2077,
+      "length_m": 20.8398,
+      "height_m": 4.0351,
+      "aspect_ratio": 2.0416,
+      "origin_to_bottom_m": 2.0176
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_shack03.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 6.8052,
+      "length_m": 13.8932,
+      "height_m": 2.9075,
+      "aspect_ratio": 2.0416,
+      "origin_to_bottom_m": 1.5889
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_shack04.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 6.8052,
+      "length_m": 19.4505,
+      "height_m": 2.9075,
+      "aspect_ratio": 2.8582,
+      "origin_to_bottom_m": 1.5889
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_shack05.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 8.3359,
+      "length_m": 6.8052,
+      "height_m": 2.9075,
+      "aspect_ratio": 1.2249,
+      "origin_to_bottom_m": 1.5889
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_shack06.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 7.7802,
+      "length_m": 6.3515,
+      "height_m": 5.8157,
+      "aspect_ratio": 1.2249,
+      "origin_to_bottom_m": 2.9009
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_shack07.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 11.9871,
+      "length_m": 11.9871,
+      "height_m": 5.6027,
+      "aspect_ratio": 1,
+      "origin_to_bottom_m": 2.8829
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_shack08.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 13.8932,
+      "length_m": 6.8052,
+      "height_m": 2.9075,
+      "aspect_ratio": 2.0416,
+      "origin_to_bottom_m": 1.4689
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_shack09.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 10.2077,
+      "length_m": 20.8398,
+      "height_m": 4.0351,
+      "aspect_ratio": 2.0416,
+      "origin_to_bottom_m": 2.0176
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_shack10.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 6.8052,
+      "length_m": 13.8932,
+      "height_m": 2.9075,
+      "aspect_ratio": 2.0416,
+      "origin_to_bottom_m": 1.5889
+    },
+    {
+      "model_path": "bas_o\\_slum\\bas_shack11.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 6.8052,
+      "length_m": 19.4505,
+      "height_m": 2.9075,
+      "aspect_ratio": 2.8582,
+      "origin_to_bottom_m": 1.5889
+    },
+    {
+      "model_path": "bas_o\\_strategic\\bas_isleruins1.p3d",
+      "categories": [
+        "Ruins"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 14.9379,
+      "length_m": 12.2811,
+      "height_m": 9.811,
+      "aspect_ratio": 1.2163,
+      "origin_to_bottom_m": 4.8922
+    },
+    {
+      "model_path": "bas_o\\_strategic\\bas_isleruins2.p3d",
+      "categories": [
+        "Ruins"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 14.9679,
+      "length_m": 9.8268,
+      "height_m": 4.1832,
+      "aspect_ratio": 1.5232,
+      "origin_to_bottom_m": 2.2797
+    },
+    {
+      "model_path": "bas_o\\_strategic\\bas_isleruins3.p3d",
+      "categories": [
+        "Ruins"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 14.9679,
+      "length_m": 9.8268,
+      "height_m": 9.8831,
+      "aspect_ratio": 1.5232,
+      "origin_to_bottom_m": 5.0581
+    },
+    {
+      "model_path": "bas_o\\_strategic\\bas_repairshed.p3d",
+      "categories": [
+        "Commercial"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 7.0204,
+      "length_m": 13.0989,
+      "height_m": 5.1472,
+      "aspect_ratio": 1.8658,
+      "origin_to_bottom_m": 2.5736
+    },
+    {
+      "model_path": "bas_o\\_wood\\bashut1.p3d",
+      "categories": [
+        "Agricultural"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 13.7766,
+      "length_m": 18.4053,
+      "height_m": 13.3468,
+      "aspect_ratio": 1.336,
+      "origin_to_bottom_m": 6.6584
+    },
+    {
+      "model_path": "bas_o\\_wood\\bashut2.p3d",
+      "categories": [
+        "Agricultural"
+      ],
+      "placement": "Rural",
+      "reviewed": true,
+      "width_m": 15.5584,
+      "length_m": 7.6785,
+      "height_m": 10.3892,
+      "aspect_ratio": 2.0262,
+      "origin_to_bottom_m": 5.1946
+    },
+    {
+      "model_path": "bas_o\\data\\afdum_mesto2l.p3d",
+      "categories": [
+        "Ruins"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 13.2342,
+      "length_m": 13.2496,
+      "height_m": 13.1065,
+      "aspect_ratio": 1.0012,
+      "origin_to_bottom_m": 6.55
+    },
+    {
+      "model_path": "bas_o\\data\\afdum_mesto3.p3d",
+      "categories": [
+        "Ruins"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 10.1037,
+      "length_m": 18.1689,
+      "height_m": 15.7281,
+      "aspect_ratio": 1.7982,
+      "origin_to_bottom_m": 7.8607
+    },
+    {
+      "model_path": "bas_o\\data\\budova1.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 17.8676,
+      "length_m": 10.7479,
+      "height_m": 6.8795,
+      "aspect_ratio": 1.6624,
+      "origin_to_bottom_m": 3.4074
+    },
+    {
+      "model_path": "bas_o\\data\\budova2.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 18.7153,
+      "length_m": 14.3585,
+      "height_m": 5.4791,
+      "aspect_ratio": 1.3034,
+      "origin_to_bottom_m": 2.2523
+    },
+    {
+      "model_path": "bas_o\\data\\budova4_in.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 15.9098,
+      "length_m": 7.7324,
+      "height_m": 5.6584,
+      "aspect_ratio": 2.0576,
+      "origin_to_bottom_m": 2.8292
+    },
+    {
+      "model_path": "bas_o\\data\\fuelstation_army.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 16.9341,
+      "length_m": 14.4366,
+      "height_m": 5.8226,
+      "aspect_ratio": 1.173,
+      "origin_to_bottom_m": 2.9113
+    },
+    {
+      "model_path": "bas_o\\data\\garaz_bez_tanku.p3d",
+      "categories": [
+        "Military"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 18.0148,
+      "length_m": 12.4197,
+      "height_m": 9.2373,
+      "aspect_ratio": 1.4505,
+      "origin_to_bottom_m": 4.6152
+    },
+    {
+      "model_path": "bas_o\\data\\helfenburk.p3d",
+      "categories": [
+        "Ruins"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 20.7779,
+      "length_m": 16.446,
+      "height_m": 27.525,
+      "aspect_ratio": 1.2634,
+      "origin_to_bottom_m": 13.7162
+    },
+    {
+      "model_path": "bas_o\\data\\helfenburk_brana.p3d",
+      "categories": [
+        "Ruins"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 17.7442,
+      "length_m": 38.7442,
+      "height_m": 15.9076,
+      "aspect_ratio": 2.1835,
+      "origin_to_bottom_m": 8.2081
+    },
+    {
+      "model_path": "bas_o\\data\\helfenburk_budova2.p3d",
+      "categories": [
+        "Ruins"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 12.5793,
+      "length_m": 20.5464,
+      "height_m": 12.528,
+      "aspect_ratio": 1.6334,
+      "origin_to_bottom_m": 6.264
+    },
+    {
+      "model_path": "bas_o\\data\\helfenburk_cimburi.p3d",
+      "categories": [
+        "Ruins"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 12.9207,
+      "length_m": 11.329,
+      "height_m": 4.3587,
+      "aspect_ratio": 1.1405,
+      "origin_to_bottom_m": 2.0904
+    },
+    {
+      "model_path": "bas_o\\data\\helfenburk_zed.p3d",
+      "categories": [
+        "Ruins"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 10.5408,
+      "length_m": 9.4704,
+      "height_m": 4.3436,
+      "aspect_ratio": 1.113,
+      "origin_to_bottom_m": 2.1718
+    },
+    {
+      "model_path": "bas_o\\data\\kostel_trosky.p3d",
+      "categories": [
+        "Ruins"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 13.1515,
+      "length_m": 28.6642,
+      "height_m": 13.3321,
+      "aspect_ratio": 2.1795,
+      "origin_to_bottom_m": 6.6309
+    },
+    {
+      "model_path": "bas_o\\data\\strazni_vez.p3d",
+      "categories": [
+        "Military",
+        "Infrastructure"
+      ],
+      "placement": "Both",
+      "reviewed": true,
+      "width_m": 4.6814,
+      "length_m": 3.5117,
+      "height_m": 6.3295,
+      "aspect_ratio": 1.3331,
+      "origin_to_bottom_m": 3.1802
+    },
+    {
+      "model_path": "bas_o\\o_ags\\basagswhouse2.p3d",
+      "categories": [
+        "Industrial",
+        "Agricultural"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 42.03,
+      "length_m": 45.8995,
+      "height_m": 16.44,
+      "aspect_ratio": 1.0921,
+      "origin_to_bottom_m": 8.22
+    }
+  ]
+}
