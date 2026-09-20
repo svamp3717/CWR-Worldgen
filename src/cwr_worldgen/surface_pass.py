@@ -33,10 +33,11 @@ class SurfaceMaterialDefinition(MaterialDefinition):
     everon_path: str | None = None
 
 
-# The stock Eden OPRW2 texture table uses ps.paa as the overwhelmingly dominant
-# ordinary terrain tile (42,634 cells in the supplied original WRP). zbh.paa is
-# retained as the dirtier grass variant for farmland semantics.
-_EVERON_DEFAULT_GRASS_TEXTURE = r"Eden\ps.paa"
+# The supplied generated test WRP identifies Eden\tn.paa at the exact green
+# terrain cell under the player at [2959.66, 3266.59]. Eden\ps.paa is visibly
+# sandy there, so tn.paa is the preset's ordinary/default grass background.
+# zbh.paa remains the dirtier grass variant reserved for farmland semantics.
+_EVERON_DEFAULT_GRASS_TEXTURE = r"Eden\tn.paa"
 _EVERON_FARMLAND_TEXTURE = r"Eden\zbh.paa"
 
 
