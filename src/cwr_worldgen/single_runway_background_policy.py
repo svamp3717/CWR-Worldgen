@@ -3,7 +3,7 @@
 
 Runway compositing needs source pixels, but ordinary WRP terrain references do not.
 Keep that distinction deliberately simple: each stock ground preset has one known
-runway-background PAA, while generated/Malden profiles use the world-local grass
+runway-background PAA, while only the generated profile uses the world-local grass
 PAA. Asset validation checks stock models plus that one texture and trusts texture
 dependencies shipped inside those model packages instead of recursively proving
 every PAA/PAC reference.
@@ -23,6 +23,7 @@ from typing import Iterable, Sequence
 STOCK_RUNWAY_BACKGROUND_TEXTURES: dict[str, str] = {
     "nogova": r"o\t1.paa",
     "everon": r"Eden\zbh.paa",
+    "malden": r"LandText\mo.pac",
     "desert": r"o\ps.paa",
 }
 _STOCK_RUNWAY_BACKGROUND_SET = {
