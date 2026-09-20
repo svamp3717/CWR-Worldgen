@@ -62,7 +62,9 @@ class Milestone4Tests(unittest.TestCase):
             self.assertGreater(wrp.object_count, 0)
             self.assertTrue((result.pbo_path.parent.parent / "OSM-ATTRIBUTION.txt").is_file())
             self.assertFalse(result.mission_path.exists())
-            self.assertFalse(result.intro_mission_path.exists())
+            self.assertTrue(result.intro_mission_path.is_file())
+            self.assertTrue(result.intro_script_path.is_file())
+            self.assertIn('cutscenes[] = {"intro1"};', config)
 
 
     def test_regeneration_verification_is_disabled_by_default(self) -> None:
