@@ -2386,8 +2386,8 @@ class WorldgenGui(tk.Tk):
             warnings.append(f"⚠ Source grid is invalid: {exc}")
         if str(self.vars["ground_textures"].get()) == "desert":
             warnings.append("• Desert generated ground textures are selected instead of stock Everon/Eden textures.")
-        elif str(self.vars["ground_textures"].get()) not in {"nogova", "everon"}:
-            warnings.append("• Generated ground textures are selected instead of stock Everon/Eden textures.")
+        elif str(self.vars["ground_textures"].get()) not in {"nogova", "everon", "malden"}:
+            warnings.append("• Generated ground textures are selected instead of a classic stock-island terrain profile.")
         if bool(self.vars["verify_regeneration"].get()):
             warnings.append("• Slow deterministic regeneration verification is enabled.")
         if bool(self.vars["no_cache"].get()):
