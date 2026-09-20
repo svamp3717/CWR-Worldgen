@@ -438,7 +438,7 @@ def _parser() -> argparse.ArgumentParser:
         "--ground-textures",
         choices=GROUND_TEXTURE_PROFILES,
         default="nogova",
-        help="terrain texture profile: Nogova transition palette (default), original Malden/Abel terrain when installed (generated fallback), original Everon/Eden assets, desert palette, or packaged generated colours",
+        help="terrain texture profile: Nogova transition palette (default), original Malden/Abel LandText assets, original Everon/Eden assets, desert palette, or packaged generated colours",
     )
 
     milestone9 = subparsers.add_parser("milestone9", help="apply deterministic surface transitions, shoreline/forest/farm/road materials, overview map, and improved icon")
@@ -621,7 +621,7 @@ def _parser() -> argparse.ArgumentParser:
         "--ground-textures",
         choices=GROUND_TEXTURE_PROFILES,
         default="nogova",
-        help="Milestone 9 ground palette: Nogova transition preset (default), original Malden/Abel terrain when installed (generated fallback), stock Everon/Eden, desert stock textures, or fully generated colours",
+        help="Milestone 9 ground palette: Nogova transition preset (default), stock Malden/Abel LandText, stock Everon/Eden, desert stock textures, or fully generated colours",
     )
     milestone9.add_argument(
         "--pbo-backend",
