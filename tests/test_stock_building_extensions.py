@@ -291,8 +291,7 @@ def test_nonroad_cache_fingerprint_tracks_final_building_position_and_model() ->
     assert generator._building_plan_fingerprint((base,)) != generator._building_plan_fingerprint((changed_model,))
 
 
-def test_airtest10_hangar_is_rejected_if_cached_transform_still_crosses_final_road() -> None:
-    library = _library(STOCK_BUILDING_RESISTANCE_PRESET)
+def _airtest10_stock_road_fixture():
     hangar = WorldObject(
         55640,
         r"o\hous\hangar_2.p3d",
@@ -341,6 +340,25 @@ def test_airtest10_hangar_is_rejected_if_cached_transform_still_crosses_final_ro
         world_size=6400.0,
     )
     elevations = (11.4,) * (spec.cells * spec.cells)
+    plan = BuildingPlacementPlan(
+        osm_key="way/airtest",
+        geometry_index=0,
+        geometry_kind="polygon",
+        x=hangar.x,
+        z=hangar.z,
+        heading_degrees=hangar.heading_degrees,
+        model_path=hangar.model_path,
+        support_polygon=(),
+        building_family="agricultural",
+    )
+    return hangar, clear_house, result, road_report, spec, elevations, plan
+
+
+def test_airtest10_hangar_is_replaced_by_smaller_agricultural_model() -> None:
+    library = _library(STOCK_BUILDING_RESISTANCE_PRESET)
+    hangar, clear_house, result, road_report, spec, elevations, plan = (
+        _airtest10_stock_road_fixture()
+    )
 
     revised, removed = _remove_stock_buildings_overlapping_final_roads(
         result,
@@ -348,6 +366,71 @@ def test_airtest10_hangar_is_rejected_if_cached_transform_still_crosses_final_ro
         road_report,
         elevations,
         spec,
+        building_plans=(plan,),
+    )
+
+    replacement = revised.objects[0]
+    assert removed == ()
+    assert replacement.object_id == hangar.object_id
+    assert replacement.model_path == r"o\hous\stodola3.p3d"
+    assert replacement.x == hangar.x
+    assert replacement.z == hangar.z
+    assert revised.objects[1] == clear_house
+    assert revised.building_objects == 2
+    assert dict(revised.model_usage) == {
+        replacement.model_path: 1,
+        clear_house.model_path: 1,
+    }
+
+
+def test_stock_road_rescue_uses_residential_when_same_family_has_no_safe_smaller_model() -> None:
+    library = _library(STOCK_BUILDING_RESISTANCE_PRESET)
+    hangar, clear_house, result, road_report, spec, elevations, plan = (
+        _airtest10_stock_road_fixture()
+    )
+    hangar_model = next(
+        model for model in library.models
+        if model.model_path.casefold() == hangar.model_path.casefold()
+    )
+    residential = next(
+        model for model in library.models
+        if model.model_path.casefold() == r"o\hous\domek02.p3d"
+    )
+    library.models = (hangar_model, residential)
+
+    revised, removed = _remove_stock_buildings_overlapping_final_roads(
+        result,
+        library,
+        road_report,
+        elevations,
+        spec,
+        building_plans=(plan,),
+    )
+
+    assert removed == ()
+    assert revised.objects[0].model_path == residential.model_path
+    assert revised.objects[1] == clear_house
+    assert revised.building_objects == 2
+
+
+def test_stock_road_rescue_rejects_when_no_smaller_selected_model_can_clear() -> None:
+    library = _library(STOCK_BUILDING_RESISTANCE_PRESET)
+    hangar, clear_house, result, road_report, spec, elevations, plan = (
+        _airtest10_stock_road_fixture()
+    )
+    hangar_model = next(
+        model for model in library.models
+        if model.model_path.casefold() == hangar.model_path.casefold()
+    )
+    library.models = (hangar_model,)
+
+    revised, removed = _remove_stock_buildings_overlapping_final_roads(
+        result,
+        library,
+        road_report,
+        elevations,
+        spec,
+        building_plans=(plan,),
     )
 
     assert removed == (hangar,)
@@ -365,6 +448,6 @@ def test_stock_fit_revision_is_final_active_placement_cache_salt() -> None:
         == extensions._BUILDING_PLACEMENT_CACHE_REVISION
     )
     assert extensions.STOCK_PLACEMENT_CACHE_NAMESPACE == (
-        "nonroad-object-placement-v100-final-stock-road-audit"
+        "nonroad-object-placement-v101-stock-road-model-rescue"
     )
-    assert "serialized-stock-audit" in clearance._CACHE_REVISION
+    assert "stock-road-model-rescue" in clearance._CACHE_REVISION
