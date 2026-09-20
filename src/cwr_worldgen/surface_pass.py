@@ -95,9 +95,41 @@ NOGOVA_SURFACE_TEXTURES.update({
     # texture; 3D stone objects may still be placed independently.
 })
 
+# Classic Malden/Abel terrain uses the original LandText family. Keep the
+# semantic surface classes, but collapse them onto the two expected Malden tiles
+# instead of generating world-local approximations. mo is the vegetated terrain
+# tile; pi is the bare/sandy terrain tile.
+_MALDEN_GREEN_TEXTURE = r"LandText\mo.pac"
+_MALDEN_BARE_TEXTURE = r"LandText\pi.pac"
+MALDEN_SURFACE_TEXTURES: dict[str, str] = {
+    "w": _MALDEN_BARE_TEXTURE,
+    "q": _MALDEN_BARE_TEXTURE,
+    "s": _MALDEN_BARE_TEXTURE,
+    "g": _MALDEN_GREEN_TEXTURE,
+    "h": _MALDEN_GREEN_TEXTURE,
+    "r": _MALDEN_BARE_TEXTURE,
+    "k": _MALDEN_BARE_TEXTURE,
+    "f": _MALDEN_GREEN_TEXTURE,
+    "e": _MALDEN_GREEN_TEXTURE,
+    "a": _MALDEN_GREEN_TEXTURE,
+    "b": _MALDEN_GREEN_TEXTURE,
+    "c": _MALDEN_GREEN_TEXTURE,
+    "u": _MALDEN_BARE_TEXTURE,
+    "i": _MALDEN_BARE_TEXTURE,
+    "p": _MALDEN_BARE_TEXTURE,
+    "o": _MALDEN_BARE_TEXTURE,
+    "d": _MALDEN_BARE_TEXTURE,
+    "t": _MALDEN_GREEN_TEXTURE,
+    "v": _MALDEN_BARE_TEXTURE,
+    "j": _MALDEN_GREEN_TEXTURE,
+    "y": _MALDEN_GREEN_TEXTURE,
+    "x": _MALDEN_BARE_TEXTURE,
+}
+
 STOCK_SURFACE_TEXTURES: Mapping[str, Mapping[str, str]] = {
     "everon": EVERON_SURFACE_TEXTURES,
     "nogova": NOGOVA_SURFACE_TEXTURES,
+    "malden": MALDEN_SURFACE_TEXTURES,
 }
 
 MATERIAL_INDEX: Mapping[str, int] = {
@@ -919,10 +951,6 @@ def surface_texture_wire_paths(world_name: str, profile: str) -> tuple[str, ...]
     for material in MILESTONE9_MATERIALS:
         if material.code in stock_paths:
             paths.append(stock_paths[material.code])
-        elif profile == "malden" and material.code in {"a", "b", "c"}:
-            # Malden has farming, but this preset intentionally does not invent a
-            # dedicated field texture. Reuse the basic ground tile instead.
-            paths.append(rf"{world_name}\data\g.paa")
         else:
             paths.append(rf"{world_name}\data\{material.code}.paa")
     return tuple(paths)
