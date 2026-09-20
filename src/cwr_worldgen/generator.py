@@ -3182,6 +3182,7 @@ def build_milestone4(
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
         )
+        building_library.ground_texture_profile = _ground_texture_profile(spec)
         building_library.prepare(dataset, projection, spec.point_building_footprint)
     report_progress(23, "Resolving final building footprints and entrances")
     building_placement_plans, building_plans_truncated = plan_building_placements(
@@ -3322,6 +3323,10 @@ def build_milestone4(
     transitions = replace(transitions, indices=material_indices) if hasattr(transitions, "indices") else transitions
     if cached_building_library is not None:
         building_library = cached_building_library
+    if building_library is not None:
+        # Cache entries may predate terrain metadata on building libraries.
+        # Refresh it from the active build so the asset catalogue records reality.
+        building_library.ground_texture_profile = _ground_texture_profile(spec)
     report_progress(69, "Placing semantic landmarks")
     semantic = (
         generate_semantic_objects(
@@ -3888,6 +3893,7 @@ def build_milestone4(
                 cache_enabled=building_library.cache_enabled,
                 cache_refresh=building_library.cache_refresh,
             )
+            repeat_building_library.ground_texture_profile = _ground_texture_profile(spec)
             repeat_building_library.prepare(dataset, projection, spec.point_building_footprint)
         repeat_site_library: ProceduralSiteLibrary | None = None
         if site_library is not None:
