@@ -39,7 +39,7 @@ _TAG_OFFSETS = b"SFFO"
 _PBO_FIELDS = struct.Struct("<IIIII")
 _PBO_PROPERTIES = 0x56657273
 _PBO_COMPRESSED = 0x43707273
-_SURFACE_CACHE_V20 = "surface-pipeline-v25-malden-abel-textures"
+_SURFACE_CACHE_V20 = "surface-pipeline-v26-malden-wrp-paths"
 _INSTALLED = False
 _ORIGINAL_BACKGROUND_TEXTURE = None
 _ORIGINAL_RENDER_RUNWAY_CELL = None
@@ -560,6 +560,17 @@ def _load_exact_texture(source_dir: Path, spec, wire_path: str) -> _ExactTexture
         or Path(canonical_path).suffix.casefold() not in {".paa", ".pac"}
     ):
         return None
+
+    # Malden Classic deliberately mirrors Everon Classic's WRP-reference model:
+    # the stock Abel paths are authoritative and are never opened or validated by
+    # Worldgen.  Runway compositing falls back to the profile colour approximation
+    # instead of probing Abel.pbo merely to obtain pixels.
+    if (
+        str(getattr(spec, "ground_texture_profile", "")).strip().casefold() == "malden"
+        and canonical_path.startswith("abel\\")
+    ):
+        return None
+
     located = _local_asset(source_dir, str(getattr(spec, "name", "")), canonical_path)
     if located is None:
         roots = _candidate_asset_roots(spec)
