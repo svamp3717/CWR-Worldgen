@@ -2460,7 +2460,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             wrp = inspect_rvw4(result.wrp_path, height_scale=0.05)
             self.assertTrue(any(path.startswith(r"cwr_m9_clusters\f\u_") for path in wrp.object_models))
             stock_ground = {
-                r"Eden\tn.paa", r"Eden\tn.paa", r"Eden\zbh.paa", r"Eden\bak\bah.pac",
+                r"Eden\tn.paa", r"Eden\zbh.paa", r"Eden\bak\bah.pac",
                 r"o\l1.paa", r"o\lom2.paa",
             }
             self.assertTrue(all(path in stock_ground for path in wrp.texture_slots[1:1 + len(MILESTONE9_MATERIALS)]))
