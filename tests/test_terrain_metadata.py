@@ -86,19 +86,14 @@ def test_cli_readme_binding_replaces_any_stale_build_reference() -> None:
         cli.build_milestone9 = current
 
 
-def test_terrain_readme_is_copied_by_same_deployment_pass_as_pbo(tmp_path: Path) -> None:
+def test_terrain_readme_stays_in_build_output_while_deployment_is_pbo_only(tmp_path: Path) -> None:
     output_dir = tmp_path / "build"
     runtime_root = output_dir / "runtime"
     source_addons = runtime_root / "Addons"
-    source_anims = runtime_root / "Anims"
     source_addons.mkdir(parents=True)
-    intro_dir = source_anims / "intro.wg_test"
-    intro_dir.mkdir(parents=True)
 
     pbo_path = source_addons / "wg_test.pbo"
     pbo_path.write_bytes(b"pbo")
-    intro_path = intro_dir / "mission.sqm"
-    intro_path.write_text("mission", encoding="utf-8")
 
     source_dir = tmp_path / "source"
     source_dir.mkdir()
@@ -119,7 +114,6 @@ def test_terrain_readme_is_copied_by_same_deployment_pass_as_pbo(tmp_path: Path)
     result = SimpleNamespace(
         output_dir=output_dir,
         pbo_path=pbo_path,
-        intro_mission_path=intro_path,
     )
     spec = SimpleNamespace(
         display_name="Test Terrain",
@@ -137,11 +131,9 @@ def test_terrain_readme_is_copied_by_same_deployment_pass_as_pbo(tmp_path: Path)
         terrain_readme_module._ACTIVE_TERRAIN_SPEC.reset(token)
 
     deployed_addons = deploy_root / "Addons"
-    deployed_readme = deployed_addons / "Test Terrain ReadMe.txt"
+    local_readme = output_dir / "Test Terrain ReadMe.txt"
     assert (deployed_addons / "wg_test.pbo").read_bytes() == b"pbo"
-    assert deployed_readme.is_file()
-    assert "PBO: wg_test.pbo" in deployed_readme.read_text(encoding="utf-8")
-    assert {Path(item["destination"]).name for item in report["files"]} >= {
-        "wg_test.pbo",
-        "Test Terrain ReadMe.txt",
-    }
+    assert local_readme.is_file()
+    assert "PBO: wg_test.pbo" in local_readme.read_text(encoding="utf-8")
+    assert not (deployed_addons / "Test Terrain ReadMe.txt").exists()
+    assert [Path(item["destination"]).name for item in report["files"]] == ["wg_test.pbo"]
