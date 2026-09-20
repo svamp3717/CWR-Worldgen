@@ -205,4 +205,4 @@ def test_unchanged_edge_dxt1_blocks_are_copied_verbatim(tmp_path) -> None:
 
 def test_exact_policy_bumps_runway_cache_after_nogova_calibration() -> None:
     install_runway_exact_background_policy()
-    assert runway._SURFACE_CACHE_V18 == "surface-pipeline-v23-malden-stock-landtext"
+    assert runway._SURFACE_CACHE_V18 == "surface-pipeline-v24-malden-pac-background"
