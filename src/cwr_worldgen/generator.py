@@ -2653,7 +2653,7 @@ def _iterative_grounding_pass(
 def _building_plan_fingerprint(
     plans: Sequence[BuildingPlacementPlan],
 ) -> str:
-    """Hash the actual final building placements used by the non-road cache.
+    """Hash the selected building plans that feed the non-road placement stage.
 
     A count alone is not a cache identity: two builds can have the same number
     of buildings while selecting different stock models, headings or road-safe
