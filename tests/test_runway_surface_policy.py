@@ -94,10 +94,11 @@ def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
 
     assert paths[surface_pass.MATERIAL_INDEX["w"]] == r"abel\pi.paa"
     assert paths[surface_pass.MATERIAL_INDEX["g"]] == r"abel\tt.paa"
-    assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"abel\pb.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["e"]] == r"abel\tt.paa"
     assert paths[surface_pass.MATERIAL_INDEX["s"]] == r"abel\sh.paa"
-    assert paths[surface_pass.MATERIAL_INDEX["r"]] == r"abel\p4.paa"
-    assert paths[surface_pass.MATERIAL_INDEX["k"]] == r"abel\p4.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["r"]] == r"abel\tt.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["k"]] == r"abel\tt.paa"
     assert paths[surface_pass.MATERIAL_INDEX["d"]] == r"abel\bah.paa"
     assert paths[surface_pass.MATERIAL_INDEX["a"]] == r"abel\tt.paa"
     assert paths[surface_pass.MATERIAL_INDEX["b"]] == r"abel\tt.paa"
@@ -117,8 +118,8 @@ def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
         r"abel\pi.paa",
         r"abel\sh.paa",
         r"abel\tt.paa",
-        r"abel\p4.paa",
-        r"abel\pb.paa",
+        r"abel\tt.paa",
+        r"abel\tt.paa",
         r"abel\tt.paa",
         r"abel\tt.paa",
         r"abel\tt.paa",
