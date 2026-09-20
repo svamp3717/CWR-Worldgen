@@ -34,9 +34,9 @@ OSM_MATERIALS: tuple[MaterialDefinition, ...] = DEFAULT_MATERIALS + (
 EVERON_GROUND_TEXTURES: dict[str, str] = {
     "w": r"Eden\tn.paa",
     "s": r"Eden\bak\bah.pac",
-    "g": r"Eden\zbh.paa",
+    "g": r"Eden\z.paa",
     "r": r"o\l1.paa",
-    "f": r"Eden\zbh.paa",
+    "f": r"Eden\z.paa",
     "a": r"Eden\zbh.paa",
     "u": r"Eden\tn.paa",
     "p": r"Eden\tn.paa",
