@@ -838,97 +838,42 @@ def _atomic_copy_tree(source: Path, destination: Path) -> None:
 
 
 def _deploy_runtime_to_existing_mod(result: BuildResult, target_root: Path) -> dict[str, Any]:
-    """Copy every generated Addons/Anims entry into an existing mod folder.
-
-    The build runtime is treated as the source of truth rather than copying only
-    the two paths held on BuildResult. This also deploys any future generated
-    addon or animation files without introducing another @mod wrapper.
-    """
+    """Copy only the generated world PBO into an existing mod folder."""
 
     requested_root = target_root.expanduser().resolve()
     target_root = _normalise_mod_root(target_root)
     if not target_root.is_dir():
         raise ValueError(f"deployment mod folder must already exist: {target_root}")
 
-    runtime_root = result.pbo_path.parent.parent
-    source_addons = runtime_root / "Addons"
-    source_anims = runtime_root / "Anims"
-    if not source_addons.is_dir() or not source_anims.is_dir():
-        raise RuntimeError(
-            f"generated runtime is incomplete; expected Addons and Anims below {runtime_root}"
-        )
+    source_pbo = result.pbo_path
+    if not source_pbo.is_file():
+        raise RuntimeError(f"generated world PBO is missing: {source_pbo}")
 
     addons_dir = _existing_mod_child(target_root, "Addons")
-    anims_dir = _existing_mod_child(target_root, "Anims")
     addons_dir.mkdir(parents=True, exist_ok=True)
-    anims_dir.mkdir(parents=True, exist_ok=True)
+    destination_pbo = addons_dir / source_pbo.name
+    _atomic_copy_file(source_pbo, destination_pbo)
+    if not destination_pbo.is_file() or _sha256(source_pbo) != _sha256(destination_pbo):
+        raise RuntimeError(f"deployment verification failed for {destination_pbo}")
 
-    deployed: list[dict[str, str]] = []
-    for source in sorted(source_addons.rglob("*")):
-        if not source.is_file():
-            continue
-        relative = source.relative_to(source_addons)
-        destination = addons_dir / relative
-        _atomic_copy_file(source, destination)
-        deployed.append({
-            "kind": "addon",
-            "source": str(source),
-            "destination": str(destination),
-            "sha256": _sha256(destination),
-        })
-
-    for source in sorted(source_anims.iterdir()):
-        destination = anims_dir / source.name
-        if source.is_dir():
-            _atomic_copy_tree(source, destination)
-            for copied in sorted(destination.rglob("*")):
-                if copied.is_file():
-                    deployed.append({
-                        "kind": "anim",
-                        "source": str(source / copied.relative_to(destination)),
-                        "destination": str(copied),
-                        "sha256": _sha256(copied),
-                    })
-        elif source.is_file():
-            _atomic_copy_file(source, destination)
-            deployed.append({
-                "kind": "anim",
-                "source": str(source),
-                "destination": str(destination),
-                "sha256": _sha256(destination),
-            })
-
-    if not deployed:
-        raise RuntimeError(f"generated runtime contained no deployable files below {runtime_root}")
-
-    source_by_destination = {
-        str(Path(item["destination"]).resolve()): Path(item["source"])
-        for item in deployed
-    }
-    for item in deployed:
-        destination = Path(item["destination"])
-        source = source_by_destination[str(destination.resolve())]
-        if not destination.is_file() or _sha256(source) != _sha256(destination):
-            raise RuntimeError(f"deployment verification failed for {destination}")
-
-    destination_pbo = addons_dir / result.pbo_path.relative_to(source_addons)
-    source_intro = result.intro_mission_path.parent
-    destination_intro = anims_dir / source_intro.relative_to(source_anims)
+    deployed = [{
+        "kind": "addon",
+        "source": str(source_pbo),
+        "destination": str(destination_pbo),
+        "sha256": _sha256(destination_pbo),
+    }]
     report: dict[str, Any] = {
         "requested_folder": str(requested_root),
         "mod_folder": str(target_root),
         "addons_folder": str(addons_dir),
-        "anims_folder": str(anims_dir),
         "pbo": str(destination_pbo),
-        "intro": str(destination_intro),
         "verified": True,
-        "file_count": len(deployed),
+        "file_count": 1,
         "files": deployed,
     }
     report_path = result.output_dir / "deployment-report.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
-
 
 def _resolve_overture_buildings_geojson(
     spec: Milestone9Spec,
@@ -1344,7 +1289,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
 
     deployment: dict[str, Any] | None = None
     if spec.deploy_mod_dir is not None:
-        report_progress(99, f"Deploying Addons and Anims into {spec.deploy_mod_dir}")
+        report_progress(99, f"Deploying world PBO into {spec.deploy_mod_dir}")
         deployment = _deploy_runtime_to_existing_mod(result, spec.deploy_mod_dir)
 
     try:
