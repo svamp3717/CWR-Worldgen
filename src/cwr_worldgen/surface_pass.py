@@ -100,7 +100,9 @@ NOGOVA_SURFACE_TEXTURES.update({
 # stock WRP directly contains pi, tt, sh, pb, p4 and bah alongside specialised
 # s3/tv/bt/mt and rw* tiles. Worldgen keeps the shared runway/parking/sports
 # overlay systems, so only the ordinary semantic terrain palette is mapped here.
-# Do not probe Abel.pbo to discover or validate these paths at build time.
+# Those ordinary palette paths are trusted literals. The shared overlay pipeline
+# may load only the selected preset's main background texture (abel\tt.paa), just
+# as it loads Everon's selected background texture.
 _MALDEN_SEA_TEXTURE = r"abel\pi.paa"
 _MALDEN_LAND_TEXTURE = r"abel\tt.paa"
 _MALDEN_FOREST_TEXTURE = r"abel\pb.paa"
