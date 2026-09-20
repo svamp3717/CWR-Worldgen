@@ -103,7 +103,7 @@ def test_malden_stock_profile_routes_generator_like_everon_classic(tmp_path) -> 
     assert ground_paths[10] == paths[0]  # farmland dark
     assert ground_paths[2] == paths[1]  # sand
     assert ground_paths[5] == paths[2]  # rock
-    assert all(r"\data\" not in path.casefold() for path in ground_paths)
+    assert all("\\data\\" not in path.casefold() for path in ground_paths)
     assert single.runway_background_texture_path(spec) == paths[0]
     assert generator._external_ground_texture_paths(spec) == (paths[0],)
 
