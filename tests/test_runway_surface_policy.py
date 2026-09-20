@@ -436,6 +436,6 @@ def test_runway_policy_invalidates_previous_surface_representations() -> None:
         "surface-pipeline-v11-vectorized-material-pass",
         payload,
     ) == raw_cache_key(
-        "surface-pipeline-v27-unified-preset-backgrounds",
+        "surface-pipeline-v28-malden-default-rock-forest",
         payload,
     )
