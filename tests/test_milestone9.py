@@ -4477,7 +4477,7 @@ class SemanticFeatureTests(unittest.TestCase):
         self.assertIn(r"data3d\str_fikovnik.p3d", malden_trusted)
 
 class DeploymentTests(unittest.TestCase):
-    def test_deploy_copies_only_world_pbo_into_existing_mod_without_new_wrapper(self) -> None:
+    def test_deploy_copies_world_pbo_and_readme_without_missions(self) -> None:
         from types import SimpleNamespace
         from cwr_worldgen.milestone9 import _deploy_runtime_to_existing_mod
 
@@ -4488,6 +4488,8 @@ class DeploymentTests(unittest.TestCase):
             pbo = source_mod / "Addons" / "cwr_test.pbo"
             pbo.parent.mkdir(parents=True)
             pbo.write_bytes(b"pbo")
+            readme = source_mod / "Addons" / "CWR Test ReadMe.txt"
+            readme.write_text("terrain metadata", encoding="utf-8")
             (source_mod / "Addons" / "not-deployed.txt").write_text("diagnostic", encoding="utf-8")
             target = root / "@ExistingMod"
             target.mkdir()
@@ -4498,6 +4500,10 @@ class DeploymentTests(unittest.TestCase):
             # Selecting Addons itself is recovered to the enclosing mod root.
             report = _deploy_runtime_to_existing_mod(result, selected_addons)
             self.assertEqual((target / "addons" / "cwr_test.pbo").read_bytes(), b"pbo")
+            self.assertEqual(
+                (target / "addons" / "CWR Test ReadMe.txt").read_text(encoding="utf-8"),
+                "terrain metadata",
+            )
             self.assertFalse((target / "addons" / "not-deployed.txt").exists())
             self.assertFalse((target / "Anims").exists())
             self.assertFalse((target / "@CWR-Milestone9").exists())
@@ -4505,8 +4511,11 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(report["mod_folder"], str(target.resolve()))
             self.assertEqual(report["requested_folder"], str(selected_addons.resolve()))
             self.assertTrue(report["verified"])
-            self.assertEqual(report["file_count"], 1)
-            self.assertEqual(Path(report["files"][0]["destination"]).name, "cwr_test.pbo")
+            self.assertEqual(report["file_count"], 2)
+            self.assertEqual(
+                {Path(item["destination"]).name for item in report["files"]},
+                {"cwr_test.pbo", "CWR Test ReadMe.txt"},
+            )
 
     def test_deploy_runs_even_when_final_validation_report_fails(self) -> None:
         from unittest.mock import patch
