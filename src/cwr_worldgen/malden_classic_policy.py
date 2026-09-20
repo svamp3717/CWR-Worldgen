@@ -17,7 +17,6 @@ from functools import lru_cache
 from pathlib import Path
 import io
 import math
-import os
 import struct
 from typing import Mapping, Sequence
 
@@ -135,11 +134,18 @@ def _original_malden_wrp(spec) -> Path | None:
         if root.is_file():
             if root.suffix.casefold() == ".wrp" and root.stem.casefold() == "abel":
                 return root
+            if root.suffix.casefold() == ".pbo" and root.stem.casefold() == "abel":
+                for base in (root.parent.parent, root.parent):
+                    path = _casefold_relative(base, ("Worlds", "abel.wrp"))
+                    if path is not None:
+                        return path
             continue
         candidates = [
             (root, ("Worlds", "abel.wrp")),
             (root, ("worlds", "abel.wrp")),
         ]
+        if root.name.casefold() == "worlds":
+            candidates.insert(0, (root, ("abel.wrp",)))
         if root.name.casefold() in {"dta", "addons"}:
             candidates.extend(
                 (
