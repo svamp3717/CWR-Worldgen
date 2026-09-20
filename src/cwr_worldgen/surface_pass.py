@@ -37,9 +37,10 @@ class SurfaceMaterialDefinition(MaterialDefinition):
 # even when the world name uses all twenty permitted characters.
 # The ``everon`` profile is deliberately a complete stock-texture palette.
 # OSM still supplies semantic placement masks, but no generated OSM-themed ground
-# artwork is written when this profile is selected.  Rock and farmland classes
-# use their dedicated textures from O.pbo; the remaining semantic classes reuse
-# the compact verified Eden palette.
+# artwork is written when this profile is selected. Rock classes still use the
+# verified O.pbo stone textures, but farmland deliberately stays on Eden grass
+# so the Everon Classic preset does not introduce Nogova/Resistance field tiles.
+# The remaining semantic classes reuse the compact verified Eden palette.
 MILESTONE9_MATERIALS: tuple[SurfaceMaterialDefinition, ...] = (
     SurfaceMaterialDefinition("w", "seabed/water", (48, 75, 94), r"Eden\tn.paa"),
     SurfaceMaterialDefinition("q", "wet shoreline", (116, 104, 75), r"Eden\tn.paa"),
@@ -50,8 +51,8 @@ MILESTONE9_MATERIALS: tuple[SurfaceMaterialDefinition, ...] = (
     SurfaceMaterialDefinition("k", "steep rock/scree", (86, 84, 82), r"o\lom2.paa"),
     SurfaceMaterialDefinition("f", "forest interior", (47, 83, 44), r"Eden\zbh.paa"),
     SurfaceMaterialDefinition("e", "forest edge", (67, 99, 53), r"Eden\zbh.paa"),
-    SurfaceMaterialDefinition("a", "farmland light", (154, 144, 78), r"o\pole1.paa"),
-    SurfaceMaterialDefinition("b", "farmland dark", (126, 121, 64), r"o\pole2.paa"),
+    SurfaceMaterialDefinition("a", "farmland light", (154, 144, 78), r"Eden\zbh.paa"),
+    SurfaceMaterialDefinition("b", "farmland dark", (126, 121, 64), r"Eden\zbh.paa"),
     SurfaceMaterialDefinition("c", "field boundary", (91, 92, 52), r"Eden\zbh.paa"),
     SurfaceMaterialDefinition("u", "urban surface", (139, 136, 130), r"Eden\tn.paa"),
     SurfaceMaterialDefinition("i", "industrial surface", (112, 113, 109), r"Eden\tn.paa"),
