@@ -89,6 +89,16 @@ def _base_texture_table(profile: str = "everon") -> tuple[str, ...]:
     )
 
 
+def test_everon_farmland_uses_eden_ground_texture_only() -> None:
+    paths = surface_pass.surface_texture_wire_paths("wg_everon", "everon")
+
+    assert paths[surface_pass.MATERIAL_INDEX["a"]] == r"Eden\zbh.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["b"]] == r"Eden\zbh.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["c"]] == r"Eden\zbh.paa"
+    assert r"o\pole1.paa" not in paths
+    assert r"o\pole2.paa" not in paths
+
+
 def test_stock_runway_family_names_remain_verified_for_reference_and_fallback() -> None:
     assert runway_texture_triplet("everon") == (
         r"o\runtr_z.paa",
