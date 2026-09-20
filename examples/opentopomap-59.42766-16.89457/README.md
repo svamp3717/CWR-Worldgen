@@ -55,12 +55,11 @@ north  59.456438251639190
 east   16.951150397910950
 ```
 
-Generated packages:
+Generated package:
 
 ```text
 build/malaren-example/cwr-malaren-runtime.zip
-build/malaren-example/cwr-malaren-test-mission.zip
 ```
 
-Install the complete mod folder from the runtime ZIP. The `Anims` directory and source
-attribution files are part of the package, not optional decorative foliage.
+The production build no longer generates a test mission or menu-intro mission. The
+deployable world artifact is the PBO in the runtime Addons folder.
