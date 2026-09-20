@@ -153,12 +153,12 @@ def _stock_checkbox_key(identifier: str) -> str:
 
 
 _STOCK_PLACEMENT_CACHE_V96 = "nonroad-object-placement-v96-road-safe-settlement-clutter"
-_STOCK_PLACEMENT_CACHE_V98 = "nonroad-object-placement-v98-stock-fit-and-overlap"
+_STOCK_PLACEMENT_CACHE_V99 = "nonroad-object-placement-v99-malden-modern-forest"
 # Stable cross-module symbol. Mixed preset routing must not depend on a private
 # version-suffixed constant, otherwise every cache bump becomes an import-time
 # AttributeError waiting for one wrapper to miss the rename.
-STOCK_PLACEMENT_CACHE_NAMESPACE = _STOCK_PLACEMENT_CACHE_V98
-_BUILDING_PLACEMENT_CACHE_REVISION = "final-road-building-clearance-v7-stock-fit-overlap"
+STOCK_PLACEMENT_CACHE_NAMESPACE = _STOCK_PLACEMENT_CACHE_V99
+_BUILDING_PLACEMENT_CACHE_REVISION = "final-road-building-clearance-v8-malden-modern-forest"
 _INTERIOR_CHECKBOX_TEXT = "Enterable procedural-building interiors"
 _HIGH_QUALITY_TEXTURE_CHECKBOX_TEXT = "Higher-quality building textures (256 px)"
 _MATCH_TEXTURE_CHECKBOX_TEXT = "Match nearby same-shape town/city building textures"
