@@ -141,7 +141,7 @@ def test_terrain_readme_uses_actual_building_catalogue_styles(tmp_path: Path) ->
 
     assert "Building preset: Automatic (area / country) [auto]" in readme
     assert "[se_sweden]" in readme
-    assert "Building styles used: Se Sweden, Sweden Red, Sweden Yellow" in readme
+    assert "Building styles used: Sweden Red, Sweden Yellow" in readme
     assert "Building classes used: Apartments, House" in readme
     assert "Appearance preset: Malden classic" in readme
     assert "Terrain style: Malden" in readme
