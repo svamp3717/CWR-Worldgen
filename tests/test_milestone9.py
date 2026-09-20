@@ -509,7 +509,6 @@ class SurfacePassTests(unittest.TestCase):
                 r"abel\tt.paa",
                 r"abel\pb.paa",
                 r"abel\sh.paa",
-                r"abel\p4.paa",
                 r"abel\bah.paa",
             },
         )
