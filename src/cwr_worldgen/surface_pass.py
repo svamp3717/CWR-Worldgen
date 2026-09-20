@@ -35,9 +35,9 @@ class SurfaceMaterialDefinition(MaterialDefinition):
 
 # One-character codes keep generated texture paths inside RVW4's 31-byte limit
 # even when the world name uses all twenty permitted characters.
-# The ``everon`` profile is deliberately a complete stock-texture palette.
+# The classic Everon and Malden profiles are complete stock-texture palettes.
 # OSM still supplies semantic placement masks, but no generated OSM-themed ground
-# artwork is written when this profile is selected. Rock classes still use the
+# artwork is written for those profiles. Everon rock classes still use the
 # verified O.pbo stone textures, but farmland deliberately stays on Eden grass
 # so the Everon Classic preset does not introduce Nogova/Resistance field tiles.
 # The remaining semantic classes reuse the compact verified Eden palette.
