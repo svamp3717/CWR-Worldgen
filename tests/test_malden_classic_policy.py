@@ -9,6 +9,8 @@ from cwr_worldgen.malden_classic_policy import (
     resolved_malden_surface_textures,
 )
 from cwr_worldgen.paa import write_solid_dxt1_paa
+from cwr_worldgen.pbo import PboEntry, write_pbo
+from cwr_worldgen import runway_exact_background_policy as exact
 from cwr_worldgen import single_runway_background_policy as single
 from cwr_worldgen.wrp import write_rvw4
 
@@ -26,15 +28,15 @@ def _spec(game_root, *, surface=True):
 
 def _write_stock_malden_fixture(root):
     worlds = root / "Worlds"
-    landtext = root / "LandText"
+    dta = root / "Dta"
     worlds.mkdir(parents=True)
-    landtext.mkdir(parents=True)
+    dta.mkdir(parents=True)
 
     paths = (
-        r"LandText\mal_grass.paa",
-        r"LandText\mal_sand.paa",
-        r"LandText\mal_rock.paa",
-        r"LandText\mal_earth.paa",
+        r"LandText\mal_grass.pac",
+        r"LandText\mal_sand.pac",
+        r"LandText\mal_rock.pac",
+        r"LandText\mal_earth.pac",
     )
     colours = (
         (109, 118, 70),
@@ -42,11 +44,14 @@ def _write_stock_malden_fixture(root):
         (110, 105, 96),
         (120, 91, 59),
     )
+    entries = []
+    scratch = root / "_fixture_textures"
+    scratch.mkdir()
     for wire, colour in zip(paths, colours):
-        write_solid_dxt1_paa(
-            root.joinpath(*wire.split("\\")),
-            colour=colour,
-        )
+        path = scratch / wire.rsplit("\\", 1)[-1]
+        write_solid_dxt1_paa(path, colour=colour)
+        entries.append(PboEntry(path.name, path.read_bytes()))
+    write_pbo(dta / "LandText.pbo", entries)
 
     # Keep all four source archetypes common enough to survive the transition
     # candidate cutoff while making grass the ordinary dominant Malden tile.
@@ -84,6 +89,17 @@ def test_malden_resolver_uses_original_abel_wrp_texture_table(tmp_path) -> None:
     assert mapping["k"] == paths[2]
     assert mapping["d"] == paths[3]
     assert mapping["p"] == paths[3]
+
+
+def test_malden_runway_reader_opens_original_pac_from_dta_pbo(tmp_path) -> None:
+    paths = _write_stock_malden_fixture(tmp_path)
+    spec = _spec(tmp_path)
+
+    loaded = exact._load_exact_texture(tmp_path / "unused", spec, paths[0])
+
+    assert loaded is not None
+    assert loaded.wire_path == paths[0]
+    assert loaded.source.casefold().endswith("dta\\landtext.pbo")
 
 
 def test_malden_stock_profile_routes_generator_like_everon_classic(tmp_path) -> None:
