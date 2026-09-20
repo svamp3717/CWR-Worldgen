@@ -61,5 +61,6 @@ Generated package:
 build/malaren-example/cwr-malaren-runtime.zip
 ```
 
-The production build no longer generates a test mission or menu-intro mission. The
-deployable world artifact is the PBO in the runtime Addons folder.
+The production build does not generate the disposable test mission. It does retain
+the world menu-intro mission under runtime/Anims because CWA expects the cutscene
+target referenced by CfgWorlds to exist. The PBO and terrain ReadMe remain in Addons.
