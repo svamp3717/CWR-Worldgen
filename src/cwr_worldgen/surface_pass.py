@@ -105,20 +105,20 @@ NOGOVA_SURFACE_TEXTURES.update({
 # as it loads Everon's selected background texture.
 _MALDEN_SEA_TEXTURE = r"abel\pi.paa"
 _MALDEN_LAND_TEXTURE = r"abel\tt.paa"
-_MALDEN_FOREST_TEXTURE = r"abel\pb.paa"
 _MALDEN_SHORE_TEXTURE = r"abel\sh.paa"
-_MALDEN_ROCK_TEXTURE = r"abel\p4.paa"
 _MALDEN_DIRT_TEXTURE = r"abel\bah.paa"
+# Keep Malden rock/scree and forest ground on the preset's default land tile.
+# Rock and forest semantics still drive object placement; only their WRP ground tile is shared.
 MALDEN_SURFACE_TEXTURES: dict[str, str] = {
     "w": _MALDEN_SEA_TEXTURE,
     "q": _MALDEN_SEA_TEXTURE,
     "s": _MALDEN_SHORE_TEXTURE,
     "g": _MALDEN_LAND_TEXTURE,
     "h": _MALDEN_LAND_TEXTURE,
-    "r": _MALDEN_ROCK_TEXTURE,
-    "k": _MALDEN_ROCK_TEXTURE,
-    "f": _MALDEN_FOREST_TEXTURE,
-    "e": _MALDEN_FOREST_TEXTURE,
+    "r": _MALDEN_LAND_TEXTURE,
+    "k": _MALDEN_LAND_TEXTURE,
+    "f": _MALDEN_LAND_TEXTURE,
+    "e": _MALDEN_LAND_TEXTURE,
     "a": _MALDEN_LAND_TEXTURE,
     "b": _MALDEN_LAND_TEXTURE,
     "c": _MALDEN_LAND_TEXTURE,
