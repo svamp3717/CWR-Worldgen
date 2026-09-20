@@ -14,6 +14,14 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_AGS_COMBINED_PRESET,
     STOCK_BUILDING_AGS_ONLY_LABEL,
     STOCK_BUILDING_AGS_ONLY_PRESET,
+    STOCK_BUILDING_BAS_O_AFRICAHUT_LABEL,
+    STOCK_BUILDING_BAS_O_AFRICAHUT_PRESET,
+    STOCK_BUILDING_BAS_O_GENERAL_LABEL,
+    STOCK_BUILDING_BAS_O_GENERAL_PRESET,
+    STOCK_BUILDING_BAS_O_MIDDLEAST_LABEL,
+    STOCK_BUILDING_BAS_O_MIDDLEAST_PRESET,
+    STOCK_BUILDING_BAS_O_SHANTY_LABEL,
+    STOCK_BUILDING_BAS_O_SHANTY_PRESET,
     STOCK_BUILDING_HAUS_COMBINED_PRESET,
     STOCK_BUILDING_HAUS_ONLY_LABEL,
     STOCK_BUILDING_HAUS_ONLY_PRESET,
@@ -119,6 +127,61 @@ def test_source_catalogues_replace_precombined_json_files() -> None:
         assert not (data_dir / removed).exists()
 
 
+def test_bas_o_catalogues_are_separate_named_source_presets() -> None:
+    data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
+    cases = (
+        (
+            "general",
+            STOCK_BUILDING_BAS_O_GENERAL_PRESET,
+            STOCK_BUILDING_BAS_O_GENERAL_LABEL,
+            "BAS_O.pbo General buildings",
+            72,
+        ),
+        (
+            "middleast",
+            STOCK_BUILDING_BAS_O_MIDDLEAST_PRESET,
+            STOCK_BUILDING_BAS_O_MIDDLEAST_LABEL,
+            "BAS_O.pbo Middle East buildings",
+            11,
+        ),
+        (
+            "shanty",
+            STOCK_BUILDING_BAS_O_SHANTY_PRESET,
+            STOCK_BUILDING_BAS_O_SHANTY_LABEL,
+            "BAS_O.pbo Shanty buildings",
+            5,
+        ),
+        (
+            "africahut",
+            STOCK_BUILDING_BAS_O_AFRICAHUT_PRESET,
+            STOCK_BUILDING_BAS_O_AFRICAHUT_LABEL,
+            "BAS_O.pbo African hut buildings",
+            2,
+        ),
+    )
+    seen_paths: set[str] = set()
+
+    for suffix, preset, label, display_name, expected_count in cases:
+        document = json.loads(
+            (data_dir / f"BAS_O.pbo {suffix}.json").read_text(encoding="utf-8")
+        )
+        paths = {row["model_path"].casefold() for row in document["models"]}
+
+        assert document["schema"] == 5
+        assert document["source_set"] == f"BAS_O.pbo {suffix}"
+        assert document["display_name"] == display_name
+        assert label == display_name
+        assert len(paths) == expected_count
+        assert all(path.startswith("bas_o\\") for path in paths)
+        assert paths.isdisjoint(seen_paths)
+        seen_paths.update(paths)
+
+        library = _library(preset)
+        assert len(library.models) == expected_count
+        assert {stock_model_source(model.model_path) for model in library.models} == {"bas_o"}
+
+
+
 def test_legacy_combined_ids_expand_to_source_catalogues() -> None:
     mixed = _library(STOCK_BUILDING_PRESET)
     vanilla = _library(STOCK_BUILDING_VANILLA_PRESET)
@@ -179,9 +242,12 @@ def test_stock_options_are_directly_below_automatic() -> None:
         ("Automatic (area / country)", "Sweden", "Germany", MIXED_STOCK_LABEL),
         auto_label="Automatic (area / country)",
     )
-    assert options[:4] == STOCK_BUILDING_OPTIONS
+    stock_count = len(STOCK_BUILDING_OPTIONS)
+    assert options[:stock_count] == STOCK_BUILDING_OPTIONS
     assert labels[0] == "Automatic (area / country)"
-    assert labels[1:5] == tuple(label for _identifier, label in STOCK_BUILDING_OPTIONS)
+    assert labels[1:1 + stock_count] == tuple(
+        label for _identifier, label in STOCK_BUILDING_OPTIONS
+    )
     assert MIXED_STOCK_LABEL not in labels
     assert "Stock CWA/OFP buildings" not in labels
     assert all(not label.casefold().endswith(" only") for label in labels)
