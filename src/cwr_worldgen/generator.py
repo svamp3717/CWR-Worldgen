@@ -1976,7 +1976,12 @@ def _validate_milestone4(
         ("class Names" in config) == bool(towns),
         f"{len(towns)} names",
     ))
-    checks.append(("Production config disables menu intro mission", "cutscenes[] = {};" in config, "cutscenes[] = {};"))
+    checks.append((
+        "Production config references menu intro mission",
+        f'cutscenes[] = {{"{WORLD_INTRO_NAME}"}};' in config,
+        WORLD_INTRO_NAME,
+    ))
+    checks.extend(_validate_world_intro(result, spec.name))
     checks.append(("OSM attribution accompanies mod", (result.output_dir / mod_directory_name / "OSM-ATTRIBUTION.txt").is_file(), "ODbL attribution"))
 
     lines = [f"CWR World Generator - Milestone {milestone_number} validation", ""]
@@ -3072,17 +3077,15 @@ def build_milestone4(
     cache_report_path = output_dir / "cache-report.json"
 
     source_dir.mkdir(parents=True, exist_ok=True)
-    # The menu-intro directory used to create the mod root as an accidental side
-    # effect. Production no longer generates missions, so create the Addons tree
-    # explicitly before writing mod-level attribution or packing the PBO.
     pbo_path.parent.mkdir(parents=True, exist_ok=True)
-    # Production builds no longer emit smoke-test or menu-intro missions. Remove
-    # stale copies from incremental output folders so an old build cannot make
-    # it look as though mission generation still happened.
+    # Keep the disposable smoke-test mission out of production output, but retain
+    # the world menu intro under Anims: CWA expects the CfgWorlds cutscene target
+    # to exist and can fail hard when it is missing.
     if mission_path.parent.is_dir():
         shutil.rmtree(mission_path.parent)
     if intro_dir.is_dir():
         shutil.rmtree(intro_dir)
+    intro_dir.mkdir(parents=True, exist_ok=True)
     cache_dir, cache_enabled, cache_refresh = _cache_settings(spec)
 
     report_progress(0, "Starting core world generation")
@@ -3650,7 +3653,7 @@ def build_milestone4(
                 shutil.copyfile(overview_paa_path, overview_bundle / "overview.paa")
                 shutil.copyfile(world_icon_path, overview_bundle / "icon.paa")
 
-    report_progress(89, "Writing world configuration")
+    report_progress(89, "Writing world configuration and menu intro")
     animated_building_models = (
         tuple(
             asset.model_path for asset in building_generation.model_assets
@@ -3664,10 +3667,20 @@ def build_milestone4(
         milestone=milestone_number,
         town_names=towns,
         animated_building_models=animated_building_models,
-        include_intro=False,
+        include_intro=True,
     )
     validate_cwa_config(config_text)
     (source_dir / "config.cpp").write_text(config_text, encoding="ascii", newline="\n")
+    intro_mission_path.write_text(
+        render_world_intro_mission(spec, spawn_x=spawn.x, spawn_z=spawn.z),
+        encoding="ascii",
+        newline="\n",
+    )
+    intro_script_path.write_text(
+        render_world_intro_script(spawn_x=spawn.x, spawn_z=spawn.z),
+        encoding="ascii",
+        newline="\n",
+    )
 
     report_progress(90, "Rendering build previews and diagnostics")
     _write_composite_preview(preview_path, spec.cells, spec.cells, elevations, slopes, material_indices, materials)
@@ -4396,6 +4409,8 @@ def build_milestone4(
                 "infrastructure-asset-catalogue.json": _sha256(infrastructure_catalogue_path),
             } if infrastructure_generation else {}),
             f"{mod_directory_name}/Addons/{spec.name}.pbo": _sha256(pbo_path),
+            f"{mod_directory_name}/Anims/{WORLD_INTRO_NAME}.{spec.name}/mission.sqm": _sha256(intro_mission_path),
+            f"{mod_directory_name}/Anims/{WORLD_INTRO_NAME}.{spec.name}/intro.sqs": _sha256(intro_script_path),
             "preview.png": _sha256(preview_path),
             "height-preview.png": _sha256(height_preview_path),
             "material-preview.png": _sha256(material_preview_path),
