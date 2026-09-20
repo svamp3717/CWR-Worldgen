@@ -27,7 +27,7 @@ def test_one_runway_background_texture_per_preset() -> None:
     assert external_runway_texture_paths(_spec("nogova")) == (r"o\t1.paa",)
     assert external_runway_texture_paths(_spec("everon")) == (r"Eden\zbh.paa",)
     assert external_runway_texture_paths(_spec("desert")) == (r"o\ps.paa",)
-    assert external_runway_texture_paths(_spec("malden")) == (r"LandText\mo.pac",)
+    assert external_runway_texture_paths(_spec("malden")) == ()
     assert external_runway_texture_paths(_spec("generated")) == ()
 
 
