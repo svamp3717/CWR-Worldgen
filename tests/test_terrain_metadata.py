@@ -148,6 +148,13 @@ def test_terrain_readme_uses_actual_building_catalogue_styles(tmp_path: Path) ->
     assert "Vegetation / forest preset: Malden" in readme
 
 
+def test_terrain_readme_labels_kolgujev_classic() -> None:
+    assert (
+        terrain_readme_module._appearance_label("kolgujev", "kolgujev")
+        == "Kolgujev classic"
+    )
+
+
 def test_terrain_readme_labels_multiple_stock_building_presets() -> None:
     label = terrain_readme_module._building_preset_label(
         "stock-multi:stock-resistance,stock-haus-only"
