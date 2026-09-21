@@ -100,6 +100,7 @@ def _appearance_label(ground_profile: object, forest_profile: object) -> str:
     exact = {
         ("nogova", "everon"): "Nogova textures + Everon trees",
         ("nogova", "malden"): "Nogova textures + Malden vegetation",
+        ("kolgujev", "kolgujev"): "Kolgujev classic",
         ("everon", "everon"): "Everon classic",
         ("malden", "malden"): "Malden classic",
     }
