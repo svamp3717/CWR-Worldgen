@@ -89,6 +89,41 @@ def _base_texture_table(profile: str = "everon") -> tuple[str, ...]:
     )
 
 
+def test_kolgujev_uses_stock_cain_ground_tiles() -> None:
+    paths = surface_pass.surface_texture_wire_paths("wg_kolgujev", "kolgujev")
+
+    assert paths[surface_pass.MATERIAL_INDEX["w"]] == r"cain\l4.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["g"]] == r"cain\j9.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["s"]] == r"cain\t9.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"cain\u2.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["e"]] == r"cain\u2.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["r"]] == r"cain\k5.paa"
+    assert paths[surface_pass.MATERIAL_INDEX["k"]] == r"cain\k5.paa"
+    assert all(path.casefold().startswith("cain\\") for path in paths)
+    assert not any(
+        path.casefold().startswith("wg_kolgujev\\data\\") for path in paths
+    )
+
+    legacy = generator._ground_texture_paths(
+        SimpleNamespace(
+            name="wg_kolgujev",
+            ground_texture_profile="kolgujev",
+            surface_pass_enabled=False,
+            surface_ground_mode="milestone8",
+        )
+    )
+    assert legacy == (
+        r"cain\l4.paa",
+        r"cain\t9.paa",
+        r"cain\j9.paa",
+        r"cain\k5.paa",
+        r"cain\u2.paa",
+        r"cain\t9.paa",
+        r"cain\t9.paa",
+        r"cain\t9.paa",
+    )
+
+
 def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
     paths = surface_pass.surface_texture_wire_paths("wg_malden", "malden")
 
