@@ -222,6 +222,84 @@ def test_nogova_leaf_forests_use_stock_paired_sheared_blocks() -> None:
     assert result.vegetation_audit_violations == 0
 
 
+def test_kolgujev_forests_use_stock_cain_t1_t2_pairs() -> None:
+    cells = 8
+    projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+    dataset = OsmDataset(
+        source_generator="kolgujev-grounding", element_count=0, coastlines=(),
+        water=(), forests=(), farmland=(), urban=(), roads=(),
+    )
+    raster = OsmRaster(
+        cells=cells,
+        water=(False,) * (cells * cells),
+        forest=(True,) * (cells * cells),
+        farmland=(False,) * (cells * cells),
+        urban=(False,) * (cells * cells),
+        roads=(False,) * (cells * cells),
+        buildings=(False,) * (cells * cells),
+        high_resolution=cells,
+        coastline_seed_count=0,
+    )
+    t1 = r"data3d\les ctverec pruchozi_T1.p3d"
+    t2 = r"data3d\les ctverec pruchozi_T2.p3d"
+    triangle = r"data3d\les trojuhelnik pruchozi.p3d"
+    spec = _Milestone9PlayabilitySpec(
+        name="kolgujev_grounding",
+        heightmap_path=Path("unused.png"),
+        bbox=(0.0, 0.0, 1.0, 1.0),
+        cells=cells,
+        cell_size=25.0,
+        max_road_objects=0,
+        max_buildings=0,
+        max_forest_objects=200,
+        forest_profile="kolgujev",
+        forest_tree_spacing=50.0,
+        forest_tree_model=t1,
+        forest_everon_steep_model=triangle,
+        forest_individual_objects_only=False,
+        forest_single_tree_enabled=True,
+        forest_gap_infill_enabled=False,
+        forest_undergrowth_enabled=False,
+        forest_border_enabled=False,
+        steep_hill_bushes_enabled=False,
+        ditch_grass_enabled=False,
+        rocky_forest_fallback_enabled=False,
+        strict_assets=False,
+    )
+
+    result = generate_world_objects(
+        dataset, projection, raster, (10.0,) * (cells * cells), spec,
+        include_roads=False,
+    )
+
+    t1_objects = [
+        obj for obj in result.objects if obj.model_path.casefold() == t1.casefold()
+    ]
+    t2_objects = [
+        obj for obj in result.objects if obj.model_path.casefold() == t2.casefold()
+    ]
+    assert t1_objects
+    assert len(t1_objects) == len(t2_objects)
+    assert all(
+        isinstance(obj, TerrainShearedWorldObject)
+        for obj in (*t1_objects, *t2_objects)
+    )
+    assert all(
+        abs(obj.y - 21.70) < 1.0e-9 for obj in (*t1_objects, *t2_objects)
+    )
+    assert {
+        (int(obj.x // 50.0), int(obj.z // 50.0)) for obj in t1_objects
+    } == {
+        (int(obj.x // 50.0), int(obj.z // 50.0)) for obj in t2_objects
+    }
+    assert all(abs((obj.x % 50.0) - 27.1133) < 1.0e-4 for obj in t1_objects)
+    assert all(abs((obj.z % 50.0) - 27.0981) < 1.0e-4 for obj in t1_objects)
+    assert all(abs((obj.x % 50.0) - 24.5409) < 1.0e-4 for obj in t2_objects)
+    assert all(abs((obj.z % 50.0) - 23.3311) < 1.0e-4 for obj in t2_objects)
+    assert result.forest_single_tree_objects == 0
+    assert result.forest_cluster_objects == 0
+
+
 def test_nogova_leaf_stock_transform_keeps_vertical_axis_upright() -> None:
     obj = TerrainShearedWorldObject(
         1,
