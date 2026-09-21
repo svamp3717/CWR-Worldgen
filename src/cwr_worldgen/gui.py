@@ -34,7 +34,7 @@ from .map_picker import AreaSelectionPlan, OsmAreaPicker, zoom_for_bbox
 from .model import DEFAULT_MAX_BUILDINGS, DEFAULT_MAX_FOREST_OBJECTS, DEFAULT_MAX_ROAD_OBJECTS, validate_world_identity
 
 APP_TITLE = f"CWR Worldgen {__version__}"
-PROFILE_VERSION = 2
+PROFILE_VERSION = 3
 GUI_STATE_VERSION = 1
 DEFAULT_GUI_TERRAIN_CELLS = 256
 DEFAULT_GUI_CELL_SIZE_METRES = 25.0
