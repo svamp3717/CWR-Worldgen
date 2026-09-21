@@ -943,16 +943,8 @@ def _rvw4_storage_datum_offset(
     scale = float(spec.height_scale)
     minimum_storable = _RVW4_MIN_RAW_HEIGHT * scale
     maximum_storable = _RVW4_MAX_RAW_HEIGHT * scale
-    source_minimum = min(finite)
     source_maximum = max(finite)
 
-    if source_minimum < minimum_storable:
-        raise ValueError(
-            "terrain reaches "
-            f"{source_minimum:.2f} m, below RVW4's {minimum_storable:.2f} m "
-            f"minimum at {scale:.2f} m precision; automatic upward rebasing is "
-            "unsafe because CWA's water plane is fixed"
-        )
     if source_maximum <= maximum_storable:
         return 0.0
 
@@ -985,6 +977,13 @@ def _rvw4_storage_datum_offset(
         )
 
     dry_minimum = min(dry_values)
+    if dry_minimum < minimum_storable:
+        raise ValueError(
+            f"dry terrain reaches {dry_minimum:.2f} m, below RVW4's "
+            f"{minimum_storable:.2f} m minimum at {scale:.2f} m precision; "
+            "automatic datum translation cannot preserve both the terrain and "
+            "CWA's fixed water plane"
+        )
     safe_offset = dry_minimum - (float(spec.sea_level) + dry_clearance)
     available_headroom = safe_offset - required_to_fit
     if available_headroom < minimum_headroom:
