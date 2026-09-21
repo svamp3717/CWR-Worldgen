@@ -153,7 +153,7 @@ class TerrainShearedWorldObject(WorldObject):
         )
 
     def validate(self) -> None:
-        super().validate()
+        WorldObject.validate(self)
         if not math.isfinite(self.terrain_shear_x):
             raise ValueError("object terrain X shear must be finite")
         if not math.isfinite(self.terrain_shear_z):
