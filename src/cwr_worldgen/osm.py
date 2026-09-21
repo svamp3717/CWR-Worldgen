@@ -10033,7 +10033,10 @@ def generate_world_objects(
         # its spruce defaults while Malden resolves the corresponding Data3D
         # Mediterranean trees before object placement.
         progress(57, f"Placed primary forest blocks ({forest_count:,} forest objects so far)")
-        extra_single_enabled = bool(getattr(spec, "forest_single_tree_enabled", True))
+        extra_single_enabled = (
+            bool(getattr(spec, "forest_single_tree_enabled", True))
+            and not nogova_leaf_stock_forest
+        )
         extra_single_model = str(getattr(spec, "forest_single_tree_model", r"data3d\str smrk_medium.p3d"))
         extra_single_warning_threshold = _scaled_synthetic_tree_limit(
             int(getattr(spec, "maximum_forest_single_tree_objects", 1000)),
