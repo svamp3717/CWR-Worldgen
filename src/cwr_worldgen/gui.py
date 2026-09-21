@@ -296,7 +296,7 @@ class WizardStep:
 WIZARD_STEPS = (
     WizardStep("Choose map area", "Select a new OSM area or use an existing frozen source bundle."),
     WizardStep("Name the world", "Set the game-visible name, internal identifier and output folder."),
-    WizardStep("Choose appearance", "Pick a preset or reveal advanced world-generation tuning."),
+    WizardStep("Choose appearance", "Choose ground textures, vegetation and building style independently."),
     WizardStep("Build", "Fetch source data if needed, then build the world and watch progress."),
 )
 
@@ -861,7 +861,6 @@ def default_gui_values() -> dict[str, object]:
         "name": "cwr_my_world",
         "display_name": "My CWA World",
         "profile": "cwa",
-        "appearance_preset": RECOMMENDED_APPEARANCE_PRESET,
         "vegetation_style": VEGETATION_EVERON,
         "house_style_preset": HOUSE_STYLE_AUTO_LABEL,
         "ground_textures": "nogova",
