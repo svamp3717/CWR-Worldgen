@@ -45,6 +45,7 @@ from cwr_worldgen.gui import (
     main as gui_main,
     load_gui_state,
     quote_command,
+    resolve_gui_appearance_values,
     resolve_gui_path,
     save_gui_state,
     slugify_world_name,
@@ -247,6 +248,25 @@ class GuiCommandTests(unittest.TestCase):
         self.assertEqual(
             command[command.index("--forest-single-tree-model") + 1],
             r"data3d\str_fikovnik.p3d",
+        )
+
+    def test_legacy_appearance_profile_migrates_to_split_selectors(self) -> None:
+        resolved = resolve_gui_appearance_values({
+            "appearance_preset": "Malden classic",
+        })
+        self.assertEqual(resolved["ground_textures"], "malden")
+        self.assertEqual(resolved["vegetation_style"], VEGETATION_MALDEN)
+        self.assertEqual(resolved["forest_profile"], "malden")
+
+        resolved = resolve_gui_appearance_values({
+            "appearance_preset": PINE_NOGOVA_APPEARANCE_PRESET,
+        })
+        self.assertEqual(resolved["ground_textures"], "nogova")
+        self.assertEqual(resolved["vegetation_style"], VEGETATION_RESISTANCE_PINE)
+        self.assertEqual(resolved["forest_profile"], "everon")
+        self.assertEqual(
+            resolved["forest_single_tree_model"],
+            NOGOVA_PINE_SINGLE_TREE_MODEL,
         )
 
     def test_malden_classic_selects_malden_ground_and_forest_profiles(self) -> None:
