@@ -109,6 +109,60 @@ class WorldObject:
 
 
 @dataclass(frozen=True, slots=True)
+class TerrainShearedWorldObject(WorldObject):
+    """WRP object whose local X/Z axes follow a terrain height plane.
+
+    Original Nogova forest blocks use this affine transform rather than a rigid
+    pitch/roll rotation. The local Y axis stays vertical, so embedded tree
+    trunks remain upright while their roots receive the terrain slope.
+    """
+
+    terrain_shear_x: float = 0.0
+    terrain_shear_z: float = 0.0
+
+    def matrix_4x3(self) -> tuple[float, ...]:
+        if abs(self.pitch_degrees) > 1.0e-12:
+            raise ValueError("terrain-sheared objects do not support pitch")
+        heading = math.radians(self.heading_degrees)
+        cosine_heading = math.cos(heading)
+        sine_heading = math.sin(heading)
+        # Project the world-space terrain gradient onto the model's local X/Z
+        # axes after heading rotation. For heading zero this reproduces Nogova's
+        # M12=dh/dx and M32=dh/dz forest transform directly.
+        local_x_shear = (
+            self.terrain_shear_x * cosine_heading
+            - self.terrain_shear_z * sine_heading
+        )
+        local_z_shear = (
+            self.terrain_shear_x * sine_heading
+            + self.terrain_shear_z * cosine_heading
+        )
+        return (
+            cosine_heading,
+            local_x_shear,
+            -sine_heading,
+            0.0,
+            1.0,
+            0.0,
+            sine_heading,
+            local_z_shear,
+            cosine_heading,
+            self.x,
+            self.y,
+            self.z,
+        )
+
+    def validate(self) -> None:
+        super().validate()
+        if not math.isfinite(self.terrain_shear_x):
+            raise ValueError("object terrain X shear must be finite")
+        if not math.isfinite(self.terrain_shear_z):
+            raise ValueError("object terrain Z shear must be finite")
+        if abs(self.pitch_degrees) > 1.0e-12:
+            raise ValueError("terrain-sheared objects do not support pitch")
+
+
+@dataclass(frozen=True, slots=True)
 class WorldSpec:
     name: str = "cwr_milestone1"
     display_name: str = "CWR Milestone 1"
