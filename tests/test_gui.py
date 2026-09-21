@@ -519,6 +519,43 @@ class GuiCommandTests(unittest.TestCase):
         self.assertNotIn("--no-steep-hill-bushes", command)
         self.assertNotIn("--no-wetland-reeds", command)
 
+    def test_gui_state_restores_ground_and_vegetation_selections(self) -> None:
+        defaults = defaults_with_recent_source(
+            default_gui_values(),
+            {
+                "ground_textures": "malden",
+                "vegetation_style": VEGETATION_RESISTANCE_LEAF,
+            },
+        )
+        self.assertEqual(defaults["ground_textures"], "malden")
+        self.assertEqual(
+            defaults["vegetation_style"],
+            VEGETATION_RESISTANCE_LEAF,
+        )
+
+    def test_appearance_selection_persistence_writes_gui_state(self) -> None:
+        class _Value:
+            def __init__(self, value: object) -> None:
+                self.value = value
+
+            def get(self) -> object:
+                return self.value
+
+        with TemporaryDirectory() as temporary:
+            state_path = Path(temporary) / "gui-state.json"
+            gui = object.__new__(WorldgenGui)
+            gui.state_path = state_path
+            gui.vars = {
+                "ground_textures": _Value("everon"),
+                "vegetation_style": _Value(VEGETATION_MALDEN),
+            }
+
+            WorldgenGui._persist_appearance_state(gui)
+
+            state = load_gui_state(state_path)
+            self.assertEqual(state["ground_textures"], "everon")
+            self.assertEqual(state["vegetation_style"], VEGETATION_MALDEN)
+
     def test_gui_state_restores_remembered_building_preset_selection(self) -> None:
         defaults = defaults_with_recent_source(
             default_gui_values(),
