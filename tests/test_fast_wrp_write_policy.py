@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from cwr_worldgen import wrp
 from cwr_worldgen.fast_wrp_write_policy import _fast_write_rvw4, _install_writer_binding
-from cwr_worldgen.model import WorldObject
+from cwr_worldgen.model import TerrainShearedWorldObject, WorldObject
 
 
 def _objects(count: int) -> tuple[WorldObject, ...]:
@@ -68,6 +68,58 @@ def test_vectorized_generator_writer_matches_scalar_rvw4_bytes(tmp_path: Path) -
     )
 
     assert fast.read_bytes() == scalar.read_bytes()
+
+
+def test_vectorized_writer_matches_scalar_for_terrain_sheared_objects(tmp_path: Path) -> None:
+    width = height = 16
+    cells = width * height
+    objects = (
+        TerrainShearedWorldObject(
+            1,
+            r"o\tree\les_nw_ctver_pruhozi_T1.p3d",
+            70.353600907,
+            19.0,
+            67.894533926,
+            0.0,
+            0.0,
+            terrain_shear_x=0.125,
+            terrain_shear_z=-0.075,
+        ),
+        TerrainShearedWorldObject(
+            2,
+            r"o\tree\les_nw_trojuhelnik.p3d",
+            79.344323452,
+            20.5,
+            82.222971961,
+            37.0,
+            0.0,
+            terrain_shear_x=0.08,
+            terrain_shear_z=0.03,
+        ),
+    )
+    for obj in objects:
+        assert wrp._object_matrix_4x3_fast(obj) == obj.matrix_4x3()
+
+    scalar = tmp_path / "scalar-sheared.wrp"
+    fast = tmp_path / "fast-sheared.wrp"
+    args = (
+        width,
+        height,
+        (10.0,) * cells,
+        (0,) * cells,
+        (r"world\data\g.paa",),
+        objects,
+    )
+    wrp.write_rvw4(
+        scalar, *args, height_scale=0.05, renumber_object_ids=True
+    )
+    _fast_write_rvw4(
+        wrp.write_rvw4, wrp, fast, *args,
+        height_scale=0.05, renumber_object_ids=True,
+    )
+
+    assert fast.read_bytes() == scalar.read_bytes()
+
 
 
 def test_vectorized_writer_keeps_scalar_fallback_for_general_iterables(tmp_path: Path) -> None:
