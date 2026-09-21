@@ -4210,8 +4210,20 @@ def build_milestone4(
             "source_grid": loaded.source_grid,
             "runtime_grid": loaded.runtime_grid,
             "legacy_centre_to_vertex_conversion": loaded.legacy_centre_to_vertex_conversion,
+            "vertical_datum_offset_metres": float(
+                getattr(grading, "vertical_datum_offset", 0.0)
+            ),
+            "rvw4_storage_rebase": bool(
+                getattr(grading, "rvw4_storage_rebase", False)
+            ),
             "final_minimum_metres": min(elevations),
             "final_maximum_metres": max(elevations),
+            "final_source_datum_minimum_metres": (
+                min(elevations) + float(getattr(grading, "vertical_datum_offset", 0.0))
+            ),
+            "final_source_datum_maximum_metres": (
+                max(elevations) + float(getattr(grading, "vertical_datum_offset", 0.0))
+            ),
         },
         "iterative_grounding": {
             "mode": "six-stage-buildings-only",
