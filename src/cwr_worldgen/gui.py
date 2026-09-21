@@ -56,6 +56,16 @@ APPEARANCE_PRESETS = (
     "Generated ground textures",
     "Custom",
 )
+APPEARANCE_HELP_TEXT = (
+    "The recommended preset combines Nogova/Resistance ground textures with "
+    "stock Everon forests and trees. Nogova Resistance leaf forests uses the "
+    "Resistance broadleaf forest family and leaf trees, while Nogova Resistance "
+    "pine forests uses the jehl conifer forest polygons and pine/spruce trees. "
+    "Malden classic and Everon classic keep matching stock terrain and vegetation. "
+    "Desert ground textures pairs desert terrain with Malden vegetation, and "
+    "Generated ground textures uses generated terrain textures with Everon "
+    "vegetation. Choose Custom to tune the ground and forest settings manually."
+)
 HOUSE_STYLE_AUTO_LABEL = "Automatic (area / country)"
 HOUSE_STYLE_PRESET_LABELS = (
     HOUSE_STYLE_AUTO_LABEL,
@@ -1897,7 +1907,7 @@ class WorldgenGui(tk.Tk):
         ).grid(row=0, column=1, sticky="w")
         ttk.Label(
             preset,
-            text="The recommended preset mixes Nogova/Resistance ground textures with stock Everon forest and tree models. The safe-bush variant keeps that look but excludes data3d\\ker pichlavej.p3d and data3d\\ker deravej.p3d from direct bushes and generated vegetation proxies. Nogova Resistance leaf forests uses the ordinary Resistance broadleaf forest family and Resistance leaf trees. Nogova Resistance pine forests uses the separate jehl conifer polygons and Resistance pine/spruce trees.",
+            text=APPEARANCE_HELP_TEXT,
             style="Hint.TLabel",
             wraplength=700,
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 10))
