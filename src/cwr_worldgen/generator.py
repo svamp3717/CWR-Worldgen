@@ -84,6 +84,7 @@ from .osm import (
     OSM_INDIVIDUAL_TREE_MODELS,
     NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS,
     NOGOVA_PINE_INDIVIDUAL_TREE_MODELS,
+    KOLGUJEV_INDIVIDUAL_TREE_MODELS,
     MALDEN_INDIVIDUAL_TREE_MODELS,
     STOCK_STONE_MODELS,
     STOCK_FARMLAND_FENCE_MODELS,
@@ -174,6 +175,8 @@ def _forest_proxy_profile(spec: object) -> str:
         return "nogova_pine"
     if model.startswith(r"o\tree\les_nw_"):
         return "nogova_leaf"
+    if str(getattr(spec, "forest_profile", "")).casefold() == "kolgujev":
+        return "kolgujev"
     if (
         str(getattr(spec, "forest_profile", "")).casefold() == "malden"
         or model == r"data3d\les_su_ctver_pruhozi.p3d"
@@ -1576,7 +1579,7 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
         canonical_asset_path(spec.forest_tree_model),
     }
     if milestone_number >= 9:
-        if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon"}:
+        if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev"}:
             trusted.add(canonical_asset_path(str(getattr(spec, "forest_everon_steep_model", ""))))
         # Road-cut forest blocks use individually checked stock trees and bushes
         # in both the Everon and Malden profiles. Keep those original game assets
@@ -1600,6 +1603,8 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
             if proxy_profile == "nogova_pine"
             else NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS
             if proxy_profile == "nogova_leaf"
+            else KOLGUJEV_INDIVIDUAL_TREE_MODELS
+            if proxy_profile == "kolgujev"
             else MALDEN_INDIVIDUAL_TREE_MODELS
             if proxy_profile == "malden"
             else OSM_INDIVIDUAL_TREE_MODELS
