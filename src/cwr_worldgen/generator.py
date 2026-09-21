@@ -2716,7 +2716,7 @@ def _load_nonroad_objects(
         "starting_object_id": starting_object_id,
         "spec": _spec_fields(spec, _PLACEMENT_CACHE_FIELDS),
     }
-    key = cache_key("nonroad-object-placement-v97-nogova-leaf-grounding", payload)
+    key = cache_key("nonroad-object-placement-v98-stock-nogova-leaf-pairs", payload)
     path = cache_dir / "placements" / f"{key}.pickle" if cache_dir is not None else None
 
     def produce():
