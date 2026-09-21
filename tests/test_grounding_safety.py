@@ -146,6 +146,58 @@ def test_rooted_tree_fit_buries_root_instead_of_rejecting_terrain_diagonal_gap()
     assert _rooted_tree_fit((10.0, 12.0), root_sink=0.05, maximum_burial=1.0) is None
 
 
+def test_nogova_leaf_special_forest_blocks_are_replaced_with_grounded_clusters() -> None:
+    cells = 8
+    projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+    dataset = OsmDataset(
+        source_generator="nogova-leaf-grounding", element_count=0, coastlines=(),
+        water=(), forests=(), farmland=(), urban=(), roads=(),
+    )
+    raster = OsmRaster(
+        cells=cells,
+        water=(False,) * (cells * cells),
+        forest=(True,) * (cells * cells),
+        farmland=(False,) * (cells * cells),
+        urban=(False,) * (cells * cells),
+        roads=(False,) * (cells * cells),
+        buildings=(False,) * (cells * cells),
+        high_resolution=cells,
+        coastline_seed_count=0,
+    )
+    leaf_block = r"o\tree\les_nw_ctver_pruhozi_T1.p3d"
+    leaf_steep = r"o\tree\les_nw_trojuhelnik.p3d"
+    spec = _Milestone9PlayabilitySpec(
+        name="nogova_leaf_grounding",
+        heightmap_path=Path("unused.png"),
+        bbox=(0.0, 0.0, 1.0, 1.0),
+        cells=cells,
+        cell_size=25.0,
+        max_road_objects=0,
+        max_buildings=0,
+        max_forest_objects=200,
+        forest_tree_spacing=50.0,
+        forest_tree_model=leaf_block,
+        forest_everon_steep_model=leaf_steep,
+        forest_individual_objects_only=False,
+        forest_undergrowth_enabled=False,
+        forest_border_enabled=False,
+        steep_hill_bushes_enabled=False,
+        ditch_grass_enabled=False,
+        rocky_forest_fallback_enabled=False,
+        strict_assets=False,
+    )
+
+    result = generate_world_objects(
+        dataset, projection, raster, (10.0,) * (cells * cells), spec,
+        include_roads=False,
+    )
+
+    models = {obj.model_path.casefold() for obj in result.objects}
+    assert leaf_block.casefold() not in models
+    assert leaf_steep.casefold() not in models
+    assert result.forest_cluster_objects > 0 or result.forest_single_tree_objects > 0
+    assert result.vegetation_audit_violations == 0
+
 def test_uncovered_mapped_forest_gets_rooted_gap_infill_trees() -> None:
     cells = 4
     projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 100.0)
