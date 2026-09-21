@@ -56,15 +56,22 @@ APPEARANCE_PRESETS = (
     "Generated ground textures",
     "Custom",
 )
+GROUND_TEXTURE_OPTIONS = ("nogova", "malden", "everon", "desert", "generated")
+VEGETATION_EVERON = "Everon"
+VEGETATION_MALDEN = "Malden"
+VEGETATION_RESISTANCE_LEAF = "Nogova Resistance leaf"
+VEGETATION_RESISTANCE_PINE = "Nogova Resistance pine"
+VEGETATION_OPTIONS = (
+    VEGETATION_EVERON,
+    VEGETATION_MALDEN,
+    VEGETATION_RESISTANCE_LEAF,
+    VEGETATION_RESISTANCE_PINE,
+)
 APPEARANCE_HELP_TEXT = (
-    "The recommended preset combines Nogova/Resistance ground textures with "
-    "stock Everon forests and trees. Nogova Resistance leaf forests uses the "
-    "Resistance broadleaf forest family and leaf trees, while Nogova Resistance "
-    "pine forests uses the jehl conifer forest polygons and pine/spruce trees. "
-    "Malden classic and Everon classic keep matching stock terrain and vegetation. "
-    "Desert ground textures pairs desert terrain with Malden vegetation, and "
-    "Generated ground textures uses generated terrain textures with Everon "
-    "vegetation. Choose Custom to tune the ground and forest settings manually."
+    "Ground textures and vegetation are independent. For example, Nogova ground "
+    "textures can be combined with Malden vegetation. Resistance leaf and pine "
+    "vegetation use their matching Nogova forest polygons and trees without "
+    "changing the selected ground textures."
 )
 HOUSE_STYLE_AUTO_LABEL = "Automatic (area / country)"
 HOUSE_STYLE_PRESET_LABELS = (
@@ -86,6 +93,79 @@ NOGOVA_LEAF_SINGLE_TREE_MODEL = r"o\tree\Javor01.p3d"
 NOGOVA_PINE_SINGLE_TREE_MODEL = r"o\tree\smrk_maly.p3d"
 NOGOVA_SINGLE_TREE_MODEL = NOGOVA_PINE_SINGLE_TREE_MODEL  # compatibility alias
 EVERON_SINGLE_TREE_MODEL = r"data3d\str smrk_medium.p3d"
+
+
+def _legacy_appearance_selection(preset: object) -> tuple[str, str] | None:
+    value = str(preset or "").strip()
+    if value in {
+        RECOMMENDED_APPEARANCE_PRESET,
+        "Nogova textures + Everon trees (safe bushes)",
+        "Nogova textures + Everon trees (1.99 diagnostic: no generated vegetation proxies)",
+    }:
+        return "nogova", VEGETATION_EVERON
+    if value == PINE_NOGOVA_APPEARANCE_PRESET:
+        return "nogova", VEGETATION_RESISTANCE_PINE
+    if value in {
+        RESISTANCE_APPEARANCE_PRESET,
+        LEGACY_RESISTANCE_APPEARANCE_PRESET,
+        LEGACY_NOGOVA_APPEARANCE_PRESET,
+    }:
+        return "nogova", VEGETATION_RESISTANCE_LEAF
+    if value == "Malden classic":
+        return "malden", VEGETATION_MALDEN
+    if value in {"Everon classic", "Everon classic (recommended)"}:
+        return "everon", VEGETATION_EVERON
+    if value == "Desert ground textures":
+        return "desert", VEGETATION_MALDEN
+    if value == "Generated ground textures":
+        return "generated", VEGETATION_EVERON
+    return None
+
+
+def _infer_vegetation_style(values: Mapping[str, object]) -> str:
+    model = str(values.get("forest_single_tree_model", "")).casefold()
+    if model == NOGOVA_PINE_SINGLE_TREE_MODEL.casefold():
+        return VEGETATION_RESISTANCE_PINE
+    if model == NOGOVA_LEAF_SINGLE_TREE_MODEL.casefold():
+        return VEGETATION_RESISTANCE_LEAF
+    if str(values.get("forest_profile", "everon")).casefold() == "malden":
+        return VEGETATION_MALDEN
+    return VEGETATION_EVERON
+
+
+def resolve_gui_appearance_values(values: Mapping[str, object]) -> dict[str, object]:
+    """Resolve independent ground/vegetation selectors to existing CLI fields."""
+
+    resolved = dict(values)
+    vegetation = str(resolved.get("vegetation_style", "")).strip()
+    if not vegetation:
+        legacy = _legacy_appearance_selection(resolved.get("appearance_preset", ""))
+        if legacy is not None:
+            resolved["ground_textures"] = legacy[0]
+            vegetation = legacy[1]
+        else:
+            vegetation = _infer_vegetation_style(resolved)
+    resolved["vegetation_style"] = vegetation
+
+    if vegetation == VEGETATION_MALDEN:
+        resolved["forest_profile"] = "malden"
+        resolved["forest_single_tree_model"] = r"data3d\str_fikovnik.p3d"
+    elif vegetation == VEGETATION_RESISTANCE_LEAF:
+        resolved["forest_profile"] = "everon"
+        resolved["forest_single_tree_model"] = NOGOVA_LEAF_SINGLE_TREE_MODEL
+    elif vegetation == VEGETATION_RESISTANCE_PINE:
+        resolved["forest_profile"] = "everon"
+        resolved["forest_single_tree_model"] = NOGOVA_PINE_SINGLE_TREE_MODEL
+    else:
+        resolved["vegetation_style"] = VEGETATION_EVERON
+        resolved["forest_profile"] = "everon"
+        resolved["forest_single_tree_model"] = EVERON_SINGLE_TREE_MODEL
+
+    ground = str(resolved.get("ground_textures", "nogova")).casefold()
+    if ground not in GROUND_TEXTURE_OPTIONS:
+        ground = "nogova"
+    resolved["ground_textures"] = ground
+    return resolved
 
 
 def cli_command_prefix(python: str | None = None) -> list[str]:
@@ -457,6 +537,7 @@ def write_gui_osm_asset_mapping(path: Path, values: Mapping[str, object]) -> Pat
 
 def build_milestone9_command(values: dict[str, object], python: str | None = None) -> list[str]:
     """Build the CLI argv used by the GUI. Kept GUI-free for tests."""
+    values = resolve_gui_appearance_values(values)
     required = ("source_dir", "output", "name", "display_name")
     missing = [key for key in required if not str(values.get(key, "")).strip()]
     if missing:
@@ -578,7 +659,7 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     if not bool(values.get("procedural_bridges", True)):
         command.append("--stock-bridges")
 
-    preset = str(values.get("appearance_preset", "")).strip()
+    vegetation = str(values.get("vegetation_style", VEGETATION_EVERON)).strip()
     negative_flags = {
         "include_minor_roads": "--no-minor-roads",
         "forest_clusters": "--no-forest-clusters",
@@ -614,18 +695,16 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     if advanced:
         command.extend(shlex.split(advanced, posix=os.name != "nt"))
 
-    if preset == PINE_NOGOVA_APPEARANCE_PRESET:
-        # Clone of the Resistance/Nogova preset using its separate conifer
-        # (jehl = needle-tree) polygon forest pieces. The GUI fields already
-        # carry the preset's single-tree and sink settings, so append only the
-        # polygon models here to avoid duplicate command-line options.
+    if vegetation == VEGETATION_RESISTANCE_PINE:
+        # Resistance pine vegetation uses the separate jehl conifer polygons.
+        # Append these after Advanced arguments so the top-level vegetation
+        # selector remains authoritative.
         command.extend((
             "--forest-block-model", NOGOVA_PINE_FOREST_BLOCK_MODEL,
             "--forest-steep-model", NOGOVA_PINE_FOREST_STEEP_MODEL,
         ))
-    elif preset in {RESISTANCE_APPEARANCE_PRESET, LEGACY_RESISTANCE_APPEARANCE_PRESET, LEGACY_NOGOVA_APPEARANCE_PRESET}:
-        # Append only the defining polygon models after Advanced arguments.
-        # Single-tree and sink values are emitted once from the normal GUI fields.
+    elif vegetation == VEGETATION_RESISTANCE_LEAF:
+        # Resistance leaf vegetation similarly owns its polygon family.
         command.extend((
             "--forest-block-model", NOGOVA_FOREST_BLOCK_MODEL,
             "--forest-steep-model", NOGOVA_FOREST_STEEP_MODEL,
@@ -783,6 +862,7 @@ def default_gui_values() -> dict[str, object]:
         "display_name": "My CWA World",
         "profile": "cwa",
         "appearance_preset": RECOMMENDED_APPEARANCE_PRESET,
+        "vegetation_style": VEGETATION_EVERON,
         "house_style_preset": HOUSE_STYLE_AUTO_LABEL,
         "ground_textures": "nogova",
         "forest_profile": "everon",
@@ -1093,7 +1173,7 @@ class WorldgenGui(tk.Tk):
 
     def _refresh_views(self) -> None:
         self._refresh_scheduled = False
-        self._apply_appearance_preset()
+        self._apply_vegetation_style()
         self._update_source_mode_visibility()
         self._update_source_summary()
         self._update_source_preview()
@@ -1895,36 +1975,44 @@ class WorldgenGui(tk.Tk):
 
     def _build_appearance_page(self) -> None:
         _page, body = self._new_scroll_page()
-        preset = ttk.LabelFrame(body, text="Recommended preset", style="Section.TLabelframe", padding=12)
+        preset = ttk.LabelFrame(body, text="Terrain and vegetation", style="Section.TLabelframe", padding=12)
         preset.pack(fill="x")
-        ttk.Label(preset, text="Appearance").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        ttk.Label(preset, text="Ground textures").grid(row=0, column=0, sticky="w", padx=(0, 10), pady=3)
         ttk.Combobox(
             preset,
-            textvariable=self._var("appearance_preset", RECOMMENDED_APPEARANCE_PRESET),
-            values=APPEARANCE_PRESETS,
+            textvariable=self._var("ground_textures", "nogova"),
+            values=GROUND_TEXTURE_OPTIONS,
             state="readonly",
-            width=48,
-        ).grid(row=0, column=1, sticky="w")
+            width=32,
+        ).grid(row=0, column=1, sticky="w", pady=3)
+        ttk.Label(preset, text="Vegetation").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=3)
+        ttk.Combobox(
+            preset,
+            textvariable=self._var("vegetation_style", VEGETATION_EVERON),
+            values=VEGETATION_OPTIONS,
+            state="readonly",
+            width=32,
+        ).grid(row=1, column=1, sticky="w", pady=3)
         ttk.Label(
             preset,
             text=APPEARANCE_HELP_TEXT,
             style="Hint.TLabel",
             wraplength=700,
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 10))
-        ttk.Label(preset, text="Building preset").grid(row=2, column=0, sticky="w", padx=(0, 10), pady=3)
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 10))
+        ttk.Label(preset, text="Building preset").grid(row=3, column=0, sticky="w", padx=(0, 10), pady=3)
         ttk.Combobox(
             preset,
             textvariable=self._var("house_style_preset", HOUSE_STYLE_AUTO_LABEL),
             values=HOUSE_STYLE_PRESET_LABELS,
             state="readonly",
             width=48,
-        ).grid(row=2, column=1, sticky="w", pady=3)
+        ).grid(row=3, column=1, sticky="w", pady=3)
         ttk.Label(
             preset,
             text="Automatic uses the selected map area/country. Choose one of the 23 regional presets here to override procedural building façades and roof defaults for the entire world.",
             style="Hint.TLabel",
             wraplength=700,
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         common = ttk.LabelFrame(body, text="Common choices", style="Section.TLabelframe", padding=12)
         common.pack(fill="x", pady=(12, 0))
@@ -1970,21 +2058,6 @@ class WorldgenGui(tk.Tk):
 
         advanced = Disclosure(body, "Advanced generation, cache and PBO settings", self._var("show_advanced", False, boolean=True))
         advanced.pack(fill="x", pady=(14, 0))
-        custom = ttk.LabelFrame(advanced.body, text="Custom appearance", padding=10)
-        custom.pack(fill="x", pady=(0, 10))
-        ground_label = ttk.Label(custom, text="Ground textures")
-        ground_label.grid(row=0, column=0, sticky="w", padx=(0, 10), pady=3)
-        self._register_advanced_setting(
-            "ground_textures", ground_label, normal_style="TLabel", changed_style="AdvancedChanged.TLabel"
-        )
-        ttk.Combobox(custom, textvariable=self._var("ground_textures"), values=("nogova", "malden", "everon", "desert", "generated"), state="readonly", width=18).grid(row=0, column=1, sticky="w")
-        forest_profile_label = ttk.Label(custom, text="Forest profile")
-        forest_profile_label.grid(row=1, column=0, sticky="w", padx=(0, 10), pady=3)
-        self._register_advanced_setting(
-            "forest_profile", forest_profile_label, normal_style="TLabel", changed_style="AdvancedChanged.TLabel"
-        )
-        ttk.Combobox(custom, textvariable=self._var("forest_profile"), values=("everon", "malden"), state="readonly", width=18).grid(row=1, column=1, sticky="w")
-
         features = ttk.LabelFrame(advanced.body, text="Additional generated features", padding=10)
         features.pack(fill="x", pady=(0, 10))
         feature_values = (
@@ -2257,37 +2330,38 @@ class WorldgenGui(tk.Tk):
             else:
                 self._show_step(self.step_index - 1)
 
-    def _apply_appearance_preset(self) -> None:
-        if self._preset_guard or "appearance_preset" not in self.vars:
+    def _apply_vegetation_style(self) -> None:
+        if self._preset_guard or "vegetation_style" not in self.vars:
             return
-        preset = str(self.vars["appearance_preset"].get())
-        desired: tuple[str, str, str] | None
-        if preset == RECOMMENDED_APPEARANCE_PRESET:
-            desired = ("nogova", "everon", EVERON_SINGLE_TREE_MODEL)
-        elif preset == PINE_NOGOVA_APPEARANCE_PRESET:
-            desired = ("nogova", "everon", NOGOVA_PINE_SINGLE_TREE_MODEL)
-        elif preset in {RESISTANCE_APPEARANCE_PRESET, LEGACY_RESISTANCE_APPEARANCE_PRESET, LEGACY_NOGOVA_APPEARANCE_PRESET}:
-            desired = ("nogova", "everon", NOGOVA_LEAF_SINGLE_TREE_MODEL)
-        elif preset == "Malden classic":
-            desired = ("malden", "malden", r"data3d\str_fikovnik.p3d")
-        elif preset in {"Everon classic", "Everon classic (recommended)"}:
-            desired = ("everon", "everon", EVERON_SINGLE_TREE_MODEL)
-        elif preset == "Desert ground textures":
-            desired = ("desert", "malden", r"data3d\str_fikovnik.p3d")
-        elif preset == "Generated ground textures":
-            desired = ("generated", "everon", EVERON_SINGLE_TREE_MODEL)
-        else:
-            desired = None
-        if desired is None:
-            return
+        current = {
+            "vegetation_style": self.vars["vegetation_style"].get(),
+            "ground_textures": self.vars["ground_textures"].get(),
+            "forest_profile": self.vars["forest_profile"].get(),
+            "forest_single_tree_model": self.vars["forest_single_tree_model"].get(),
+        }
+        resolved = resolve_gui_appearance_values(current)
         self._preset_guard = True
         try:
-            if self.vars["ground_textures"].get() != desired[0]:
-                self.vars["ground_textures"].set(desired[0])
-            if self.vars["forest_profile"].get() != desired[1]:
-                self.vars["forest_profile"].set(desired[1])
-            if "forest_single_tree_model" in self.vars and self.vars["forest_single_tree_model"].get() != desired[2]:
-                self.vars["forest_single_tree_model"].set(desired[2])
+            for key in ("forest_profile", "forest_single_tree_model"):
+                if self.vars[key].get() != resolved[key]:
+                    self.vars[key].set(resolved[key])
+        finally:
+            self._preset_guard = False
+
+    def _apply_appearance_preset(self) -> None:
+        """Compatibility helper for tests and old integrations using legacy presets."""
+        if self._preset_guard or "appearance_preset" not in self.vars:
+            return
+        resolved = resolve_gui_appearance_values({
+            "appearance_preset": self.vars["appearance_preset"].get(),
+        })
+        self._preset_guard = True
+        try:
+            for key in ("ground_textures", "forest_profile", "forest_single_tree_model"):
+                if key in self.vars and self.vars[key].get() != resolved[key]:
+                    self.vars[key].set(resolved[key])
+            if "vegetation_style" in self.vars:
+                self.vars["vegetation_style"].set(resolved["vegetation_style"])
         finally:
             self._preset_guard = False
 
@@ -2423,7 +2497,8 @@ class WorldgenGui(tk.Tk):
             f"Output: {self.vars['output'].get()}\n"
             f"Deploy: {self.vars['deploy_mod_dir'].get() if self.vars['deploy_to_mod_folder'].get() else 'disabled'}\n"
             f"Profile: {self.vars['profile'].get()}\n"
-            f"Appearance: {self.vars['appearance_preset'].get()}\n"
+            f"Ground textures: {self.vars['ground_textures'].get()}\n"
+            f"Vegetation: {self.vars['vegetation_style'].get()}\n"
             f"Building preset: {self.vars['house_style_preset'].get()}\n"
             f"Undergrowth: half amount\n"
             f"Lake banks: {self.vars['lake_shore_smoothing_cells'].get()} cells, max {self.vars['lake_shore_max_slope'].get()}% rise\n"
@@ -3238,42 +3313,19 @@ class WorldgenGui(tk.Tk):
             loaded_house_style = values.get("house_style_preset")
             if loaded_house_style is not None:
                 self.vars["house_style_preset"].set(gui_house_style_preset_label(loaded_house_style))
-            loaded_preset = str(values.get("appearance_preset", "")).strip()
-            if loaded_preset in {
-                "Nogova textures + Everon trees (safe bushes)",
-                "Nogova textures + Everon trees (1.99 diagnostic: no generated vegetation proxies)",
-            }:
-                # Retired debugging presets now map to the normal Everon setup.
-                self.vars["appearance_preset"].set(RECOMMENDED_APPEARANCE_PRESET)
-                if "forest_profile" in self.vars:
-                    self.vars["forest_profile"].set("everon")
-            elif loaded_preset in {LEGACY_NOGOVA_APPEARANCE_PRESET, LEGACY_RESISTANCE_APPEARANCE_PRESET}:
-                # Historical generic Resistance/Nogova presets now map to the
-                # explicitly named leaf family.
-                self.vars["appearance_preset"].set(RESISTANCE_APPEARANCE_PRESET)
+            resolved_appearance = resolve_gui_appearance_values(values)
+            for key in (
+                "ground_textures",
+                "vegetation_style",
+                "forest_profile",
+                "forest_single_tree_model",
+            ):
+                if key in self.vars:
+                    self.vars[key].set(resolved_appearance[key])
             if str(values.get("forest_profile", "")).casefold() == "everon-safe":
-                # Profiles saved during the vegetation-debugging cycle migrate
-                # to the supported Everon profile.
                 self.vars["forest_profile"].set("everon")
             if "bus_stop_signs" not in values and "bus_stops" in values:
                 self.vars["bus_stop_signs"].set(values["bus_stops"])
-            if "appearance_preset" not in values:
-                ground = str(values.get("ground_textures", "nogova"))
-                forest = str(values.get("forest_profile", "everon"))
-                if ground == "nogova" and forest in {"everon", "everon-safe"}:
-                    self.vars["appearance_preset"].set(RECOMMENDED_APPEARANCE_PRESET)
-                    if forest == "everon-safe":
-                        self.vars["forest_profile"].set("everon")
-                elif ground == "malden" and forest == "malden":
-                    self.vars["appearance_preset"].set("Malden classic")
-                elif ground == "everon" and forest == "everon":
-                    self.vars["appearance_preset"].set("Everon classic")
-                elif ground == "desert" and forest == "malden":
-                    self.vars["appearance_preset"].set("Desert ground textures")
-                elif ground == "generated" and forest == "everon":
-                    self.vars["appearance_preset"].set("Generated ground textures")
-                else:
-                    self.vars["appearance_preset"].set("Custom")
             # Older profiles used fetch_source_dir as the visible source field.
             if not str(self.vars["source_dir"].get()).strip() and "fetch_source_dir" in values:
                 self.vars["source_dir"].set(values["fetch_source_dir"])
