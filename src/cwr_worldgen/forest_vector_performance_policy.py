@@ -47,7 +47,7 @@ _CONTEXT: ContextVar[_ForestVectorContext | None] = ContextVar(
 def _primary_forest_possible(raster: Any, spec: Any) -> _ForestVectorContext | None:
     """Bulk-evaluate the classic two-of-five coarse forest eligibility mask."""
 
-    if str(getattr(spec, "forest_profile", "malden")).casefold() not in {"everon", "malden"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() not in {"everon", "kolgujev", "malden"}:
         return None
     if int(getattr(spec, "max_forest_objects", 0)) == 0:
         return None
