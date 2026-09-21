@@ -98,8 +98,8 @@ class Milestone8Spec(Milestone6Spec):
             raise ValueError("building maximum foundation depth must be between the minimum and 12 metres")
         if self.building_foundation_depth_quantum > self.building_foundation_maximum_depth:
             raise ValueError("building foundation depth quantum must not exceed the maximum depth")
-        if self.ground_texture_profile not in {"nogova", "malden", "everon", "generated", "desert"}:
-            raise ValueError("ground texture profile must be nogova, malden, everon, desert or generated")
+        if self.ground_texture_profile not in {"nogova", "kolgujev", "malden", "everon", "generated", "desert"}:
+            raise ValueError("ground texture profile must be nogova, kolgujev, malden, everon, desert or generated")
 
 
 @dataclass(frozen=True, slots=True)
