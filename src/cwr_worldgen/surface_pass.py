@@ -143,10 +143,45 @@ MALDEN_SURFACE_TEXTURES: dict[str, str] = {
     "x": _MALDEN_LAND_TEXTURE,
 }
 
+# Stock Kolgujev/Cain roles measured from the supplied cain.wrp OPRW2.
+# The base texture frequencies are l4=52,209, j9=3,921, t9=1,719,
+# u2=1,156 and k5=246 cells. The WRP flags identify l4 as sea and u2 as
+# the dedicated forest tile; k5 is concentrated on the highest terrain.
+_KOLGUJEV_SEA_TEXTURE = r"cain\l4.paa"
+_KOLGUJEV_LAND_TEXTURE = r"cain\j9.paa"
+_KOLGUJEV_LOWLAND_TEXTURE = r"cain\t9.paa"
+_KOLGUJEV_FOREST_TEXTURE = r"cain\u2.paa"
+_KOLGUJEV_ROCK_TEXTURE = r"cain\k5.paa"
+KOLGUJEV_SURFACE_TEXTURES: dict[str, str] = {
+    "w": _KOLGUJEV_SEA_TEXTURE,
+    "q": _KOLGUJEV_SEA_TEXTURE,
+    "s": _KOLGUJEV_LOWLAND_TEXTURE,
+    "g": _KOLGUJEV_LAND_TEXTURE,
+    "h": _KOLGUJEV_LOWLAND_TEXTURE,
+    "r": _KOLGUJEV_ROCK_TEXTURE,
+    "k": _KOLGUJEV_ROCK_TEXTURE,
+    "f": _KOLGUJEV_FOREST_TEXTURE,
+    "e": _KOLGUJEV_FOREST_TEXTURE,
+    "a": _KOLGUJEV_LOWLAND_TEXTURE,
+    "b": _KOLGUJEV_LOWLAND_TEXTURE,
+    "c": _KOLGUJEV_LAND_TEXTURE,
+    "u": _KOLGUJEV_LOWLAND_TEXTURE,
+    "i": _KOLGUJEV_LOWLAND_TEXTURE,
+    "p": _KOLGUJEV_LOWLAND_TEXTURE,
+    "o": _KOLGUJEV_LOWLAND_TEXTURE,
+    "d": _KOLGUJEV_LOWLAND_TEXTURE,
+    "t": _KOLGUJEV_LAND_TEXTURE,
+    "v": _KOLGUJEV_LOWLAND_TEXTURE,
+    "j": _KOLGUJEV_LAND_TEXTURE,
+    "y": _KOLGUJEV_LAND_TEXTURE,
+    "x": _KOLGUJEV_LOWLAND_TEXTURE,
+}
+
 STOCK_SURFACE_TEXTURES: Mapping[str, Mapping[str, str]] = {
     "everon": EVERON_SURFACE_TEXTURES,
     "nogova": NOGOVA_SURFACE_TEXTURES,
     "malden": MALDEN_SURFACE_TEXTURES,
+    "kolgujev": KOLGUJEV_SURFACE_TEXTURES,
 }
 
 MATERIAL_INDEX: Mapping[str, int] = {
@@ -961,8 +996,8 @@ def build_surface_pass(
 
 
 def surface_texture_wire_paths(world_name: str, profile: str) -> tuple[str, ...]:
-    if profile not in {"generated", "everon", "nogova", "malden", "desert"}:
-        raise ValueError("ground texture profile must be nogova, malden, everon, desert or generated")
+    if profile not in {"generated", "everon", "nogova", "kolgujev", "malden", "desert"}:
+        raise ValueError("ground texture profile must be nogova, kolgujev, malden, everon, desert or generated")
     paths: list[str] = []
     stock_paths = STOCK_SURFACE_TEXTURES.get(profile, {})
     for material in MILESTONE9_MATERIALS:
