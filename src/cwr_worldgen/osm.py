@@ -8827,8 +8827,26 @@ def generate_world_objects(
     # Legacy field name from 0.9.252. In 0.9.254+ this means "replace the
     # rigid stock square/triangle forest polygon models with tiled generated
     # clusters". Individually grounded trees remain the last-resort fallback.
-    forest_polygon_models_disabled = bool(
-        getattr(spec, "forest_individual_objects_only", False)
+    #
+    # Resistance leaf les_nw_* P3Ds are special engine forest objects rather
+    # than ordinary rooted models. CWA applies an additional forest transform
+    # to them, which can leave the visible leaf stand far below the WRP terrain
+    # even when the object origin itself is correctly grounded. Route that
+    # family through generated clusters / direct rooted leaf trees instead.
+    # The jehl pine family is intentionally left unchanged because it does not
+    # exhibit the reported leaf-forest sinking behaviour.
+    active_forest_model = (
+        str(getattr(spec, "forest_tree_model", ""))
+        .replace("/", "\\")
+        .casefold()
+    )
+    nogova_leaf_special_forest = (
+        active_forest_model.startswith(r"o\tree\les_nw_")
+        and not active_forest_model.startswith(r"o\tree\les_nw_jehl_")
+    )
+    forest_polygon_models_disabled = (
+        bool(getattr(spec, "forest_individual_objects_only", False))
+        or nogova_leaf_special_forest
     )
     individual_tree_root_sink = max(
         0.0,
