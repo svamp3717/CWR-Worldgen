@@ -57,6 +57,7 @@ KOLGUJEV_ROADSIDE_TREE_MODEL = KOLGUJEV_SINGLE_TREE_MODEL
 KOLGUJEV_ROADSIDE_TREE_MODELS: tuple[str, ...] = (
     r"data3d\str smrk.p3d",
     r"data3d\str smrk ridky.p3d",
+    r"data3d\str_smrcicicek.p3d",
     r"data3d\str smrk_medium.p3d",
     r"data3d\str jedle.p3d",
     r"data3d\str borovice.p3d",
