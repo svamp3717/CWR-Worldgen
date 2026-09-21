@@ -10,6 +10,7 @@ from cwr_worldgen.gui import (
     WIZARD_STEPS,
     FROZEN_CLI_MARKER,
     APPEARANCE_PRESETS,
+    APPEARANCE_HELP_TEXT,
     HOUSE_STYLE_AUTO_LABEL,
     HOUSE_STYLE_PRESET_LABELS,
     RECOMMENDED_APPEARANCE_PRESET,
@@ -218,6 +219,22 @@ class GuiCommandTests(unittest.TestCase):
                 "Custom",
             ),
         )
+
+    def test_appearance_help_text_matches_current_presets(self) -> None:
+        help_text = APPEARANCE_HELP_TEXT.casefold()
+        self.assertNotIn("safe-bush", help_text)
+        self.assertNotIn("diagnostic", help_text)
+        for phrase in (
+            "recommended preset",
+            "nogova resistance leaf forests",
+            "nogova resistance pine forests",
+            "malden classic",
+            "everon classic",
+            "desert ground textures",
+            "generated ground textures",
+            "custom",
+        ):
+            self.assertIn(phrase, help_text)
 
     def test_malden_classic_selects_malden_ground_and_forest_profiles(self) -> None:
         class Var:
