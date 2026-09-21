@@ -135,13 +135,7 @@ def _workers(job_count: int) -> int:
 
 
 def _tolerance(spec) -> float:
-    return max(
-        0.20,
-        min(
-            0.40,
-            float(getattr(spec, "road_connection_tolerance", 0.35)),
-        ),
-    )
+    return _paved._merge_length_tolerance(spec)
 
 
 def _target_signature(target) -> tuple[float, float, float, float]:

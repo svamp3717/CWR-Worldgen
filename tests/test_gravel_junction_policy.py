@@ -37,7 +37,10 @@ def test_policy_is_layered_on_top_of_general_road_quality_policy() -> None:
     assert road_quality._junction_geometry is gravel_policy._junction_geometry
     assert road_quality._exit_distance is gravel_policy._exit_distance
     assert road_quality._quality_window is gravel_policy._quality_window
-    assert playability.fit_road_objects.__module__ == "cwr_worldgen.gravel_family_policy"
+    assert (
+        playability.fit_road_objects.__module__
+        == "cwr_worldgen.paved_intersection_overlap_policy"
+    )
 
 
 def test_fixed_gravel_junction_catalogue_has_fifteen_reusable_shapes() -> None:

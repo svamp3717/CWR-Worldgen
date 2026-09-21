@@ -21,6 +21,10 @@ _CLEAR_RADIUS = 30.0
 _TURN_DEGREES = 10.0
 _WIDTH = {"sil": 4.55, "kos": 4.55, "asf": 3.50}
 _STRAIGHTS = {25: 25.0, 12: 12.5, 6: 6.25}
+_MINIMUM_MERGE_LENGTH_TOLERANCE_METRES = 0.05
+_MAXIMUM_MERGE_LENGTH_TOLERANCE_METRES = 0.20
+_APPROACH_VERTICAL_OFFSET_METRES = 0.060
+_JUNCTION_VERTICAL_OFFSET_METRES = 0.058
 _T = re.compile(r"kr_new_(sil|asf|kos)_(sil|asf|kos)_t\.p3d$", re.I)
 _CURVE = re.compile(r"(?:sil|asf|kos)10 (?:25|50|75|100)\.p3d$", re.I)
 _CATALOGUE = Path(__file__).with_name("data") / "road_types.json"
@@ -103,6 +107,23 @@ def _signed_angle(first: tuple[float, float], second: tuple[float, float]) -> fl
 
 def _angle(first: tuple[float, float], second: tuple[float, float]) -> float:
     return abs(_signed_angle(first, second))
+
+
+def _merge_length_tolerance(spec) -> float:
+    """Bound rigid-model length error at a paved approach merge.
+
+    ``_road_object_on_slope`` positions a fixed-size P3D between the requested
+    endpoints; it does not scale the mesh.  A large accepted length error is
+    therefore split across both ends of the model and becomes either a visible
+    gap or a coplanar overlap.  Keep enough tolerance for coordinate rounding,
+    but never inherit the much larger general road-connection allowance.
+    """
+
+    configured = float(getattr(spec, "road_connection_tolerance", 0.20))
+    return max(
+        _MINIMUM_MERGE_LENGTH_TOLERANCE_METRES,
+        min(_MAXIMUM_MERGE_LENGTH_TOLERANCE_METRES, configured),
+    )
 
 
 @lru_cache(maxsize=1)
@@ -426,7 +447,7 @@ def _curve_object(
     finish = origin[0] + ex, origin[1] + ez
     height = _p._sample_elevation(
         elevations, spec.cells, spec.cell_size, origin[0], origin[1]
-    ) + 0.060
+    ) + _APPROACH_VERTICAL_OFFSET_METRES
     return (
         _p.WorldObject(
             object_id,
@@ -452,7 +473,7 @@ def _straight_object(
         end,
         elevations,
         spec,
-        vertical_offset=0.060,
+        vertical_offset=_APPROACH_VERTICAL_OFFSET_METRES,
     )
 
 
@@ -591,9 +612,7 @@ def _approach_choice_to_target(
 
 
 def _arm_options(report, plan, arm, spec):
-    tolerance = max(
-        0.20, min(0.40, float(getattr(spec, "road_connection_tolerance", 0.35)))
-    )
+    tolerance = _merge_length_tolerance(spec)
     result = []
     for target in _target_candidates(report, plan, arm, spec):
         match = _approach_choice_to_target(plan, arm, target, tolerance)
@@ -737,7 +756,7 @@ def _apply_plans(report, plans, elevations, spec):
         )
         objects[current_index] = _p._road_object_on_slope(
             old_id, plan.model_path, start, end, elevations, spec,
-            vertical_offset=0.060,
+            vertical_offset=_JUNCTION_VERTICAL_OFFSET_METRES,
         )
 
     next_id = max((obj.object_id for obj in objects), default=0) + 1

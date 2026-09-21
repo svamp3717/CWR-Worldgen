@@ -138,7 +138,10 @@ def _object_endpoints(obj):
 
 def test_policy_is_installed_for_playability_and_generator() -> None:
     assert playability.fit_road_objects is generator.fit_road_objects
-    assert playability.fit_road_objects.__module__ == "cwr_worldgen.gravel_family_policy"
+    assert (
+        playability.fit_road_objects.__module__
+        == "cwr_worldgen.paved_intersection_overlap_policy"
+    )
 
 
 def test_road_type_catalogue_lists_reference_families_turns_and_paved_junctions() -> None:
@@ -296,7 +299,14 @@ def test_terrain_profile_prefers_shorter_rigid_pieces_over_midspan_clipping() ->
 def test_diagonal_t_junction_uses_real_turn_pieces_and_connects_each_arm() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
-    dataset = _junction_dataset(projection, (650.0, 650.0))
+    angle = math.radians(60.0)
+    dataset = _junction_dataset(
+        projection,
+        (
+            500.0 + math.sin(angle) * 220.0,
+            500.0 + math.cos(angle) * 220.0,
+        ),
+    )
     spec = _junction_spec(bbox)
     report = playability.fit_road_objects(
         dataset, projection, [0.0] * (40 * 40), spec

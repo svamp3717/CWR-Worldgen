@@ -478,13 +478,7 @@ def _approach_choice_to_target(
 
 
 def _arm_options(state: _SpatialState, plan, arm, spec):
-    tolerance = max(
-        0.20,
-        min(
-            0.40,
-            float(getattr(spec, "road_connection_tolerance", 0.35)),
-        ),
-    )
+    tolerance = _paved._merge_length_tolerance(spec)
     result = []
     for target in _target_candidates(state, plan, arm):
         match = _approach_choice_to_target(
@@ -851,7 +845,7 @@ def apply_paved_junctions_fast(
             end,
             elevations,
             spec,
-            vertical_offset=0.060,
+            vertical_offset=_paved._JUNCTION_VERTICAL_OFFSET_METRES,
         )
 
     next_id = max(

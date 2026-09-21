@@ -190,6 +190,11 @@ from .foundation_visual_policy import (
 )
 
 _install_foundation_visual_policy()
+from .paved_intersection_overlap_policy import (
+    install_paved_intersection_overlap_policy as _install_paved_intersection_overlap_policy,
+)
+
+_install_paved_intersection_overlap_policy()
 from .normalization import (
     NormalizationSpec,
     NormalizedBundle,
