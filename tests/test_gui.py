@@ -11,6 +11,12 @@ from cwr_worldgen.gui import (
     FROZEN_CLI_MARKER,
     APPEARANCE_PRESETS,
     APPEARANCE_HELP_TEXT,
+    GROUND_TEXTURE_OPTIONS,
+    VEGETATION_OPTIONS,
+    VEGETATION_EVERON,
+    VEGETATION_MALDEN,
+    VEGETATION_RESISTANCE_LEAF,
+    VEGETATION_RESISTANCE_PINE,
     HOUSE_STYLE_AUTO_LABEL,
     HOUSE_STYLE_PRESET_LABELS,
     RECOMMENDED_APPEARANCE_PRESET,
@@ -202,39 +208,46 @@ class GuiCommandTests(unittest.TestCase):
         self.assertIn("--ground-textures", command)
         self.assertEqual(command[command.index("--ground-textures") + 1], "desert")
 
-    def test_v5_appearance_presets_are_native_and_recommended_by_default(self) -> None:
+    def test_ground_and_vegetation_selectors_are_independent_by_default(self) -> None:
         values = default_gui_values()
         self.assertEqual(values["profile"], "cwa")
-        self.assertEqual(values["appearance_preset"], RECOMMENDED_APPEARANCE_PRESET)
+        self.assertEqual(values["ground_textures"], "nogova")
+        self.assertEqual(values["vegetation_style"], VEGETATION_EVERON)
         self.assertEqual(
-            APPEARANCE_PRESETS,
+            GROUND_TEXTURE_OPTIONS,
+            ("nogova", "malden", "everon", "desert", "generated"),
+        )
+        self.assertEqual(
+            VEGETATION_OPTIONS,
             (
-                "Nogova textures + Everon trees (recommended)",
-                "Nogova Resistance leaf forests",
-                "Nogova Resistance pine forests",
-                "Malden classic",
-                "Everon classic",
-                "Desert ground textures",
-                "Generated ground textures",
-                "Custom",
+                VEGETATION_EVERON,
+                VEGETATION_MALDEN,
+                VEGETATION_RESISTANCE_LEAF,
+                VEGETATION_RESISTANCE_PINE,
             ),
         )
 
-    def test_appearance_help_text_matches_current_presets(self) -> None:
+    def test_appearance_help_text_explains_independent_selectors(self) -> None:
         help_text = APPEARANCE_HELP_TEXT.casefold()
+        self.assertIn("independent", help_text)
+        self.assertIn("nogova ground", help_text)
+        self.assertIn("malden vegetation", help_text)
         self.assertNotIn("safe-bush", help_text)
         self.assertNotIn("diagnostic", help_text)
-        for phrase in (
-            "recommended preset",
-            "nogova resistance leaf forests",
-            "nogova resistance pine forests",
-            "malden classic",
-            "everon classic",
-            "desert ground textures",
-            "generated ground textures",
-            "custom",
-        ):
-            self.assertIn(phrase, help_text)
+
+    def test_nogova_ground_can_be_combined_with_malden_vegetation(self) -> None:
+        values = default_gui_values()
+        values["ground_textures"] = "nogova"
+        values["vegetation_style"] = VEGETATION_MALDEN
+
+        command = build_milestone9_command(values, python="python")
+
+        self.assertEqual(command[command.index("--ground-textures") + 1], "nogova")
+        self.assertEqual(command[command.index("--forest-profile") + 1], "malden")
+        self.assertEqual(
+            command[command.index("--forest-single-tree-model") + 1],
+            r"data3d\str_fikovnik.p3d",
+        )
 
     def test_malden_classic_selects_malden_ground_and_forest_profiles(self) -> None:
         class Var:
@@ -311,7 +324,7 @@ class GuiCommandTests(unittest.TestCase):
 
     def test_pine_nogova_preset_uses_conifer_polygon_models(self) -> None:
         values = default_gui_values()
-        values["appearance_preset"] = PINE_NOGOVA_APPEARANCE_PRESET
+        values["vegetation_style"] = VEGETATION_RESISTANCE_PINE
         values["forest_polygon_sink_fraction"] = "0.25"
         values["advanced_args"] = "--forest-block-model custom-block.p3d"
         command = build_milestone9_command(values, python="python")
@@ -327,9 +340,27 @@ class GuiCommandTests(unittest.TestCase):
         self.assertEqual(NOGOVA_PINE_FOREST_BLOCK_MODEL, r"o\tree\les_nw_jehl_ctver_pruhozi.p3d")
         self.assertEqual(NOGOVA_PINE_FOREST_STEEP_MODEL, r"o\tree\les_nw_jehl_trojuhelnik.p3d")
 
+    def test_resistance_pine_vegetation_does_not_change_ground_texture(self) -> None:
+        values = default_gui_values()
+        values["ground_textures"] = "malden"
+        values["vegetation_style"] = VEGETATION_RESISTANCE_PINE
+
+        command = build_milestone9_command(values, python="python")
+
+        self.assertEqual(command[command.index("--ground-textures") + 1], "malden")
+        self.assertEqual(command[command.index("--forest-profile") + 1], "everon")
+        self.assertEqual(
+            command[command.index("--forest-single-tree-model") + 1],
+            NOGOVA_PINE_SINGLE_TREE_MODEL,
+        )
+        self.assertEqual(command[-4:], [
+            "--forest-block-model", NOGOVA_PINE_FOREST_BLOCK_MODEL,
+            "--forest-steep-model", NOGOVA_PINE_FOREST_STEEP_MODEL,
+        ])
+
     def test_resistance_preset_overrides_forest_geometry_after_advanced_args(self) -> None:
         values = default_gui_values()
-        values["appearance_preset"] = RESISTANCE_APPEARANCE_PRESET
+        values["vegetation_style"] = VEGETATION_RESISTANCE_LEAF
         values["forest_polygon_sink_fraction"] = "0.75"
         values["advanced_args"] = "--forest-block-model custom-block.p3d"
         command = build_milestone9_command(values, python="python")
