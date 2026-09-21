@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from cwr_worldgen.milestone9 import Milestone9Spec, _Milestone9PlayabilitySpec
-from cwr_worldgen.model import WorldObject
+from cwr_worldgen.model import TerrainShearedWorldObject, WorldObject
 from cwr_worldgen.osm import (
     BboxProjection,
     ObjectGenerationResult,
@@ -146,7 +146,7 @@ def test_rooted_tree_fit_buries_root_instead_of_rejecting_terrain_diagonal_gap()
     assert _rooted_tree_fit((10.0, 12.0), root_sink=0.05, maximum_burial=1.0) is None
 
 
-def test_nogova_leaf_special_forest_blocks_are_replaced_with_grounded_clusters() -> None:
+def test_nogova_leaf_forests_use_stock_paired_sheared_blocks() -> None:
     cells = 8
     projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
     dataset = OsmDataset(
@@ -165,7 +165,7 @@ def test_nogova_leaf_special_forest_blocks_are_replaced_with_grounded_clusters()
         coastline_seed_count=0,
     )
     leaf_block = r"o\tree\les_nw_ctver_pruhozi_T1.p3d"
-    leaf_steep = r"o\tree\les_nw_trojuhelnik.p3d"
+    leaf_triangle = r"o\tree\les_nw_trojuhelnik.p3d"
     spec = _Milestone9PlayabilitySpec(
         name="nogova_leaf_grounding",
         heightmap_path=Path("unused.png"),
@@ -177,8 +177,10 @@ def test_nogova_leaf_special_forest_blocks_are_replaced_with_grounded_clusters()
         max_forest_objects=200,
         forest_tree_spacing=50.0,
         forest_tree_model=leaf_block,
-        forest_everon_steep_model=leaf_steep,
+        forest_everon_steep_model=leaf_triangle,
         forest_individual_objects_only=False,
+        forest_single_tree_enabled=False,
+        forest_gap_infill_enabled=False,
         forest_undergrowth_enabled=False,
         forest_border_enabled=False,
         steep_hill_bushes_enabled=False,
@@ -192,11 +194,53 @@ def test_nogova_leaf_special_forest_blocks_are_replaced_with_grounded_clusters()
         include_roads=False,
     )
 
-    models = {obj.model_path.casefold() for obj in result.objects}
-    assert leaf_block.casefold() not in models
-    assert leaf_steep.casefold() not in models
-    assert result.forest_cluster_objects > 0 or result.forest_single_tree_objects > 0
+    blocks = [
+        obj for obj in result.objects
+        if obj.model_path.casefold() == leaf_block.casefold()
+    ]
+    triangles = [
+        obj for obj in result.objects
+        if obj.model_path.casefold() == leaf_triangle.casefold()
+    ]
+    assert blocks
+    assert len(blocks) == len(triangles)
+    assert all(isinstance(obj, TerrainShearedWorldObject) for obj in (*blocks, *triangles))
+    assert all(abs(obj.y - 19.0) < 1.0e-9 for obj in (*blocks, *triangles))
+    assert all(abs(obj.terrain_shear_x) < 1.0e-12 for obj in (*blocks, *triangles))
+    assert all(abs(obj.terrain_shear_z) < 1.0e-12 for obj in (*blocks, *triangles))
+    assert {
+        (int(obj.x // 50.0), int(obj.z // 50.0)) for obj in blocks
+    } == {
+        (int(obj.x // 50.0), int(obj.z // 50.0)) for obj in triangles
+    }
+    assert all(abs((obj.x % 50.0) - 20.353600907) < 1.0e-6 for obj in blocks)
+    assert all(abs((obj.z % 50.0) - 17.894533926) < 1.0e-6 for obj in blocks)
+    assert all(abs((obj.x % 50.0) - 29.344323452) < 1.0e-6 for obj in triangles)
+    assert all(abs((obj.z % 50.0) - 32.222971961) < 1.0e-6 for obj in triangles)
+    assert result.forest_cluster_objects == 0
+    assert result.forest_single_tree_objects == 0
     assert result.vegetation_audit_violations == 0
+
+
+def test_nogova_leaf_stock_transform_keeps_vertical_axis_upright() -> None:
+    obj = TerrainShearedWorldObject(
+        1,
+        r"o\tree\les_nw_ctver_pruhozi_T1.p3d",
+        100.0,
+        25.0,
+        200.0,
+        0.0,
+        0.0,
+        terrain_shear_x=0.125,
+        terrain_shear_z=-0.075,
+    )
+
+    matrix = obj.matrix_4x3()
+
+    assert matrix[1] == 0.125
+    assert matrix[3:6] == (0.0, 1.0, 0.0)
+    assert matrix[7] == -0.075
+
 
 def test_uncovered_mapped_forest_gets_rooted_gap_infill_trees() -> None:
     cells = 4
