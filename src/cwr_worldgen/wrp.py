@@ -103,6 +103,8 @@ def _object_matrix_4x3_fast(obj: WorldObject) -> tuple[float, ...]:
     sine_heading = math.sin(heading)
     shear_x = float(getattr(obj, "terrain_shear_x", 0.0))
     shear_z = float(getattr(obj, "terrain_shear_z", 0.0))
+    if not math.isfinite(shear_x) or not math.isfinite(shear_z):
+        raise ValueError("object terrain shear must be finite")
     if shear_x != 0.0 or shear_z != 0.0:
         if obj.pitch_degrees != 0.0:
             raise ValueError("terrain-sheared objects do not support pitch")
