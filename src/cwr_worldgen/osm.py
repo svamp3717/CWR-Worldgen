@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw
 from ._version import __version__
 from .cache import CACHE_SCHEMA_VERSION, atomic_write_bytes, cache_key, streaming_hash
 from .building_semantics import is_actual_church
-from .model import OsmSpec, WorldObject
+from .model import OsmSpec, TerrainShearedWorldObject, WorldObject
 from .network import (
     OVERPASS_RATE_LIMIT_BACKOFF_SECONDS,
     OVERPASS_REFERER,
@@ -87,6 +87,17 @@ FARMLAND_FENCE_DUPLICATE_MINIMUM_OVERLAP_METRES = 1.0
 FARMLAND_FENCE_DUPLICATE_HEADING_TOLERANCE_DEGREES = 12.0
 RURAL_FENCE_LANDUSES = frozenset({"farmland", "meadow"})
 RURAL_FENCE_NATURALS = frozenset({"grassland"})
+
+# Original Nogova/Resistance leaf-forest pair measured from the stock noe.wrp.
+# Each populated 50 m forest cell carries both models at fixed offsets. Their
+# object origins sit roughly 9 m above the terrain, and the transform shears
+# local X/Z into Y to follow the terrain plane while keeping tree trunks upright.
+NOGOVA_LEAF_FOREST_BLOCK_MODEL = r"o\tree\les_nw_ctver_pruhozi_T1.p3d"
+NOGOVA_LEAF_FOREST_TRIANGLE_MODEL = r"o\tree\les_nw_trojuhelnik.p3d"
+NOGOVA_LEAF_FOREST_ORIGIN_LIFT_METRES = 9.0
+NOGOVA_LEAF_FOREST_BLOCK_OFFSET = (-4.646399093000856, -7.1054660744863)
+NOGOVA_LEAF_FOREST_TRIANGLE_OFFSET = (4.344323451769405, 7.22297196061644)
+NOGOVA_LEAF_FOREST_MAXIMUM_SHEAR = 0.60
 
 # Urban-detail assets. Keep this layer vanilla-only: every model below ships
 # with OFP/Cold War Assault. The base game does not provide a modern modular
@@ -8827,26 +8838,17 @@ def generate_world_objects(
     # Legacy field name from 0.9.252. In 0.9.254+ this means "replace the
     # rigid stock square/triangle forest polygon models with tiled generated
     # clusters". Individually grounded trees remain the last-resort fallback.
-    #
-    # Resistance leaf les_nw_* P3Ds are special engine forest objects rather
-    # than ordinary rooted models. CWA applies an additional forest transform
-    # to them, which can leave the visible leaf stand far below the WRP terrain
-    # even when the object origin itself is correctly grounded. Route that
-    # family through generated clusters / direct rooted leaf trees instead.
-    # The jehl pine family is intentionally left unchanged because it does not
-    # exhibit the reported leaf-forest sinking behaviour.
+    forest_polygon_models_disabled = bool(
+        getattr(spec, "forest_individual_objects_only", False)
+    )
     active_forest_model = (
         str(getattr(spec, "forest_tree_model", ""))
         .replace("/", "\\")
         .casefold()
     )
-    nogova_leaf_special_forest = (
-        active_forest_model.startswith(r"o\tree\les_nw_")
-        and not active_forest_model.startswith(r"o\tree\les_nw_jehl_")
-    )
-    forest_polygon_models_disabled = (
-        bool(getattr(spec, "forest_individual_objects_only", False))
-        or nogova_leaf_special_forest
+    nogova_leaf_stock_forest = (
+        active_forest_model == NOGOVA_LEAF_FOREST_BLOCK_MODEL.casefold()
+        and not forest_polygon_models_disabled
     )
     individual_tree_root_sink = max(
         0.0,
@@ -8924,6 +8926,11 @@ def generate_world_objects(
         )
         everon_steep_footprint = max(
             8.0, float(getattr(spec, "forest_everon_steep_footprint", 35.0))
+        )
+        nogova_leaf_stock_pair = (
+            nogova_leaf_stock_forest
+            and everon_steep_model.replace("/", "\\").casefold()
+            == NOGOVA_LEAF_FOREST_TRIANGLE_MODEL.casefold()
         )
         everon_steep_maximum_relief = max(
             0.0, float(getattr(spec, "forest_everon_steep_maximum_relief", 18.0))
@@ -9261,6 +9268,63 @@ def generate_world_objects(
                     digest_size=2,
                 ).digest()
                 heading = float((int.from_bytes(digest, "little") % 4) * 90)
+
+                # Stock Nogova leaf forests use a square + triangle pair per
+                # 50 m forest cell. noe.wrp places both origins about 9 m above
+                # terrain and shears their transforms to the local height plane.
+                # Reproduce that compact engine-native layout instead of replacing
+                # one forest cell with many individually grounded trees.
+                if nogova_leaf_stock_pair:
+                    pair_specs = (
+                        (spec.forest_tree_model, NOGOVA_LEAF_FOREST_BLOCK_OFFSET),
+                        (everon_steep_model, NOGOVA_LEAF_FOREST_TRIANGLE_OFFSET),
+                    )
+                    if forest_count + len(pair_specs) > forest_limit:
+                        forest_truncated = True
+                        break
+                    pair_objects: list[TerrainShearedWorldObject] = []
+                    pair_safe = True
+                    for pair_index, (pair_model, (offset_x, offset_z)) in enumerate(pair_specs):
+                        pair_x = x + offset_x
+                        pair_z = z + offset_z
+                        if not forest_point_inside_edge_guard(
+                            pair_x, pair_z, max(forest_world_edge_margin, 26.0)
+                        ):
+                            pair_safe = False
+                            break
+                        gradient_x, gradient_z = _local_terrain_gradient(
+                            elevations, spec.cells, spec.cell_size, pair_x, pair_z
+                        )
+                        if math.hypot(gradient_x, gradient_z) > NOGOVA_LEAF_FOREST_MAXIMUM_SHEAR:
+                            pair_safe = False
+                            break
+                        pair_y = (
+                            _sample_elevation(
+                                elevations, spec.cells, spec.cell_size, pair_x, pair_z
+                            )
+                            + NOGOVA_LEAF_FOREST_ORIGIN_LIFT_METRES
+                        )
+                        pair_objects.append(
+                            TerrainShearedWorldObject(
+                                next_id + pair_index,
+                                pair_model,
+                                pair_x,
+                                pair_y,
+                                pair_z,
+                                0.0,
+                                0.0,
+                                terrain_shear_x=gradient_x,
+                                terrain_shear_z=gradient_z,
+                            )
+                        )
+                    if pair_safe:
+                        for pair_object in pair_objects:
+                            emit(pair_object)
+                        next_id += len(pair_objects)
+                        forest_count += len(pair_objects)
+                        forest_block_objects += len(pair_objects)
+                        mark_accepted_forest(x, z, spacing * 0.58)
+                        continue
 
                 # Optional stock-polygon replacement mode.  A single generated
                 # cluster is much smaller than the stock square/triangle model it
