@@ -56,22 +56,24 @@ APPEARANCE_PRESETS = (
     "Generated ground textures",
     "Custom",
 )
-GROUND_TEXTURE_OPTIONS = ("nogova", "malden", "everon", "desert", "generated")
+GROUND_TEXTURE_OPTIONS = ("nogova", "kolgujev", "malden", "everon", "desert", "generated")
 VEGETATION_EVERON = "Everon"
+VEGETATION_KOLGUJEV = "Kolgujev"
 VEGETATION_MALDEN = "Malden"
 VEGETATION_RESISTANCE_LEAF = "Nogova Resistance leaf"
 VEGETATION_RESISTANCE_PINE = "Nogova Resistance pine"
 VEGETATION_OPTIONS = (
     VEGETATION_EVERON,
+    VEGETATION_KOLGUJEV,
     VEGETATION_MALDEN,
     VEGETATION_RESISTANCE_LEAF,
     VEGETATION_RESISTANCE_PINE,
 )
 APPEARANCE_HELP_TEXT = (
-    "Ground textures and vegetation are independent. For example, Nogova ground "
-    "textures can be combined with Malden vegetation. Resistance leaf and pine "
-    "vegetation use their matching Nogova forest polygons and trees without "
-    "changing the selected ground textures."
+    "Ground textures and vegetation are independent. Kolgujev uses the stock "
+    "Cain terrain palette and a conifer-heavy Data3D vegetation mix measured from "
+    "the original island. Resistance leaf and pine vegetation keep their matching "
+    "Nogova forest families without changing the selected ground textures."
 )
 HOUSE_STYLE_AUTO_LABEL = "Automatic (area / country)"
 HOUSE_STYLE_PRESET_LABELS = (
@@ -93,6 +95,9 @@ NOGOVA_LEAF_SINGLE_TREE_MODEL = r"o\tree\Javor01.p3d"
 NOGOVA_PINE_SINGLE_TREE_MODEL = r"o\tree\smrk_maly.p3d"
 NOGOVA_SINGLE_TREE_MODEL = NOGOVA_PINE_SINGLE_TREE_MODEL  # compatibility alias
 EVERON_SINGLE_TREE_MODEL = r"data3d\str smrk_medium.p3d"
+KOLGUJEV_FOREST_BLOCK_MODEL = r"data3d\les ctverec pruchozi_T1.p3d"
+KOLGUJEV_FOREST_STEEP_MODEL = r"data3d\les trojuhelnik pruchozi.p3d"
+KOLGUJEV_SINGLE_TREE_MODEL = r"data3d\str smrk.p3d"
 
 
 def _legacy_appearance_selection(preset: object) -> tuple[str, str] | None:
@@ -128,7 +133,10 @@ def _infer_vegetation_style(values: Mapping[str, object]) -> str:
         return VEGETATION_RESISTANCE_PINE
     if model == NOGOVA_LEAF_SINGLE_TREE_MODEL.casefold():
         return VEGETATION_RESISTANCE_LEAF
-    if str(values.get("forest_profile", "everon")).casefold() == "malden":
+    forest_profile = str(values.get("forest_profile", "everon")).casefold()
+    if forest_profile == "kolgujev":
+        return VEGETATION_KOLGUJEV
+    if forest_profile == "malden":
         return VEGETATION_MALDEN
     return VEGETATION_EVERON
 
@@ -147,7 +155,10 @@ def resolve_gui_appearance_values(values: Mapping[str, object]) -> dict[str, obj
             vegetation = _infer_vegetation_style(resolved)
     resolved["vegetation_style"] = vegetation
 
-    if vegetation == VEGETATION_MALDEN:
+    if vegetation == VEGETATION_KOLGUJEV:
+        resolved["forest_profile"] = "kolgujev"
+        resolved["forest_single_tree_model"] = KOLGUJEV_SINGLE_TREE_MODEL
+    elif vegetation == VEGETATION_MALDEN:
         resolved["forest_profile"] = "malden"
         resolved["forest_single_tree_model"] = r"data3d\str_fikovnik.p3d"
     elif vegetation == VEGETATION_RESISTANCE_LEAF:
@@ -697,7 +708,14 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     if advanced:
         command.extend(shlex.split(advanced, posix=os.name != "nt"))
 
-    if vegetation == VEGETATION_RESISTANCE_PINE:
+    if vegetation == VEGETATION_KOLGUJEV:
+        # Cain/Kolgujev uses the shared Data3D forest family, but make the
+        # top-level selector authoritative over Advanced model overrides.
+        command.extend((
+            "--forest-block-model", KOLGUJEV_FOREST_BLOCK_MODEL,
+            "--forest-steep-model", KOLGUJEV_FOREST_STEEP_MODEL,
+        ))
+    elif vegetation == VEGETATION_RESISTANCE_PINE:
         # Resistance pine vegetation uses the separate jehl conifer polygons.
         # Append these after Advanced arguments so the top-level vegetation
         # selector remains authoritative.
