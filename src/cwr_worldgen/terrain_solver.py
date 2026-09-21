@@ -109,6 +109,8 @@ def _effective_terrain_smoothing(spec: ConstraintPlayabilitySpec) -> EffectiveTe
 @dataclass(frozen=True, slots=True)
 class ConstraintTerrainReport:
     elevations: tuple[float, ...]
+    vertical_datum_offset: float
+    rvw4_storage_rebase: bool
     changed_cells: int
     road_seed_cells: int
     building_pad_cells: int
@@ -910,6 +912,95 @@ def _enforce_downhill_watercourses(
             break
 
 
+_RVW4_MIN_RAW_HEIGHT = -32768
+_RVW4_MAX_RAW_HEIGHT = 32767
+_RVW4_REBASE_DESIRED_HEADROOM_METRES = 64.0
+_RVW4_REBASE_MINIMUM_HEADROOM_METRES = 16.0
+_RVW4_REBASE_DRY_CLEARANCE_METRES = 32.0
+
+
+def _rvw4_storage_datum_offset(
+    elevations: Sequence[float],
+    raster: OsmRaster,
+    spec: ConstraintPlayabilitySpec,
+) -> float:
+    """Return a safe downward datum shift for high-altitude RVW4 terrain.
+
+    4WVR terrain heights are signed int16 values at spec.height_scale.
+    Absolute geographic altitude is not otherwise encoded by the engine, so an
+    inland high-altitude world can be translated downward as one rigid datum
+    without changing slopes, relative object heights, or grading geometry.
+
+    The automatic shift is deliberately conservative: ordinary dry terrain must
+    remain comfortably above the configured water plane, and enough upper
+    headroom must remain for the constraint solver to raise road/building cells.
+    """
+
+    finite = tuple(float(value) for value in elevations if math.isfinite(value))
+    if not finite:
+        raise ValueError("terrain elevation grid contains no finite values")
+
+    scale = float(spec.height_scale)
+    minimum_storable = _RVW4_MIN_RAW_HEIGHT * scale
+    maximum_storable = _RVW4_MAX_RAW_HEIGHT * scale
+    source_minimum = min(finite)
+    source_maximum = max(finite)
+
+    if source_minimum < minimum_storable:
+        raise ValueError(
+            "terrain reaches "
+            f"{source_minimum:.2f} m, below RVW4's {minimum_storable:.2f} m "
+            f"minimum at {scale:.2f} m precision; automatic upward rebasing is "
+            "unsafe because CWA's water plane is fixed"
+        )
+    if source_maximum <= maximum_storable:
+        return 0.0
+
+    required_to_fit = source_maximum - maximum_storable
+    minimum_headroom = max(
+        _RVW4_REBASE_MINIMUM_HEADROOM_METRES,
+        float(spec.maximum_grade_adjustment) + 2.0,
+    )
+    desired_headroom = max(
+        _RVW4_REBASE_DESIRED_HEADROOM_METRES,
+        minimum_headroom,
+    )
+    dry_clearance = max(
+        _RVW4_REBASE_DRY_CLEARANCE_METRES,
+        float(spec.maximum_grade_adjustment) + 10.0,
+        float(spec.water_depth) * 2.0,
+    )
+
+    dry_values = [
+        float(value)
+        for index, value in enumerate(elevations)
+        if index < len(raster.water)
+        and not raster.water[index]
+        and math.isfinite(value)
+    ]
+    if not dry_values:
+        raise ValueError(
+            "terrain exceeds RVW4 height storage but contains no dry reference "
+            "cells for a safe automatic vertical rebase"
+        )
+
+    dry_minimum = min(dry_values)
+    safe_offset = dry_minimum - (float(spec.sea_level) + dry_clearance)
+    available_headroom = safe_offset - required_to_fit
+    if available_headroom < minimum_headroom:
+        span = source_maximum - dry_minimum
+        raise ValueError(
+            "terrain cannot be safely represented in RVW4 at "
+            f"{scale:.2f} m precision: source range is "
+            f"{dry_minimum:.2f}..{source_maximum:.2f} m "
+            f"({span:.2f} m dry relief), but fitting the {maximum_storable:.2f} m "
+            "height ceiling would move low dry terrain too close to CWA's fixed "
+            "water plane. Use a smaller/less vertically extreme area."
+        )
+
+    extra_headroom = min(desired_headroom, available_headroom)
+    return required_to_fit + extra_headroom
+
 def _raw_dem_sampler(path: Path | None):
     if path is None or not path.is_file():
         return None
@@ -1055,7 +1146,8 @@ def solve_terrain_constraints(
         for component, surface in edge_surfaces
         if surface <= maximum_near_sea_surface
     ]
-    vertical_datum_offset = 0.0
+    storage_datum_offset = _rvw4_storage_datum_offset(raw_original, raster, spec)
+    lake_datum_offset = 0.0
     minimum_datum_component_cells = max(64, int(round(len(raw_original) * 0.005)))
     datum_candidates = [
         (component, surface)
@@ -1089,15 +1181,21 @@ def solve_terrain_constraints(
         safe_offset = max(0.0, dry_safe_floor - spec.sea_level)
         candidate_offset = min(requested_offset, safe_offset)
         if candidate_offset >= max(10.0, spec.water_depth * 2.0):
-            vertical_datum_offset = candidate_offset
+            lake_datum_offset = candidate_offset
 
+    vertical_datum_offset = max(storage_datum_offset, lake_datum_offset)
     original = tuple(value - vertical_datum_offset for value in raw_original)
     field = _ConstraintField.create(len(original))
     if vertical_datum_offset > 0.0:
+        reasons = []
+        if storage_datum_offset > 0.0:
+            reasons.append("fit RVW4 signed-16-bit height storage")
+        if lake_datum_offset > 0.0:
+            reasons.append("fit elevated edge lakes to CWA's global water plane")
         progress(
             3,
-            f"Lowering whole-world terrain datum by {vertical_datum_offset:.1f} m "
-            "to fit elevated edge lakes to CWA's global water plane",
+            f"Lowering whole-world terrain datum by {vertical_datum_offset:.1f} m to "
+            + " and ".join(reasons),
         )
 
     # Reclassify water after the optional whole-world datum shift. Genuine sea
@@ -2036,6 +2134,8 @@ def solve_terrain_constraints(
     progress(100, "Terrain constraint solution ready")
     return ConstraintTerrainReport(
         elevations=tuple(result),
+        vertical_datum_offset=vertical_datum_offset,
+        rvw4_storage_rebase=storage_datum_offset > 0.0,
         changed_cells=changed,
         road_seed_cells=len(road_seed_cells),
         building_pad_cells=len(building_pad_cells),
