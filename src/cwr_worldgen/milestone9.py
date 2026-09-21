@@ -45,6 +45,31 @@ DEFAULT_STEEP_HILL_BUSH_MODELS: tuple[str, ...] = (
     r"data3d\ker deravej.p3d",
     r"data3d\ker buxus.p3d",
 )
+
+# Kolgujev/Cain vegetation measured from the supplied stock cain.wrp. Cain uses
+# the shared Data3D forest geometry, but its surrounding vegetation is strongly
+# conifer-weighted rather than simply reusing the Everon tree mix.
+KOLGUJEV_FOREST_BLOCK_MODEL = EVERON_FOREST_BLOCK_MODEL
+KOLGUJEV_FOREST_SECONDARY_BLOCK_MODEL = r"data3d\les ctverec pruchozi_T2.p3d"
+KOLGUJEV_FOREST_STEEP_MODEL = r"data3d\les trojuhelnik pruchozi.p3d"
+KOLGUJEV_SINGLE_TREE_MODEL = r"data3d\str smrk.p3d"
+KOLGUJEV_ROADSIDE_TREE_MODEL = KOLGUJEV_SINGLE_TREE_MODEL
+KOLGUJEV_ROADSIDE_TREE_MODELS: tuple[str, ...] = (
+    r"data3d\str smrk.p3d",
+    r"data3d\str smrk ridky.p3d",
+    r"data3d\str smrk_medium.p3d",
+    r"data3d\str jedle.p3d",
+    r"data3d\str borovice.p3d",
+    r"data3d\str borovice horska.p3d",
+    r"data3d\str smrk vysoky.p3d",
+)
+KOLGUJEV_BUSH_MODELS: tuple[str, ...] = (
+    r"data3d\krovi2.p3d",
+    r"data3d\krovi3.p3d",
+    r"data3d\krovi4.p3d",
+    r"data3d\ker trs travy.p3d",
+)
+KOLGUJEV_HILLSIDE_TREE_MODEL = r"data3d\str smrk ridky.p3d"
 # Resistance/Nogova vegetation from O.pbo. Keep the leaf and pine families
 # explicit so neither named preset silently falls back to Data3D trees.
 NOGOVA_LEAF_SINGLE_TREE_MODEL = r"o\tree\Javor01.p3d"
@@ -126,6 +151,44 @@ def _resolved_forest_profile_models(spec: "Milestone9Spec") -> dict[str, object]
         }
 
     forest_profile = str(spec.forest_profile).casefold()
+    if forest_profile == "kolgujev":
+        return {
+            "forest_tree_model": (
+                KOLGUJEV_FOREST_BLOCK_MODEL
+                if spec.forest_tree_model == EVERON_FOREST_BLOCK_MODEL
+                else spec.forest_tree_model
+            ),
+            "forest_single_tree_model": (
+                KOLGUJEV_SINGLE_TREE_MODEL
+                if spec.forest_single_tree_model == EVERON_SINGLE_TREE_MODEL
+                else spec.forest_single_tree_model
+            ),
+            "forest_roadside_tree_model": (
+                KOLGUJEV_ROADSIDE_TREE_MODEL
+                if spec.forest_roadside_tree_model == EVERON_ROADSIDE_TREE_MODEL
+                else spec.forest_roadside_tree_model
+            ),
+            "forest_roadside_tree_models": (
+                KOLGUJEV_ROADSIDE_TREE_MODELS
+                if spec.forest_roadside_tree_models == ROADSIDE_TREE_MODELS
+                else spec.forest_roadside_tree_models
+            ),
+            "forest_roadside_bush_models": (
+                KOLGUJEV_BUSH_MODELS
+                if spec.forest_roadside_bush_models == ROADSIDE_BUSH_MODELS
+                else spec.forest_roadside_bush_models
+            ),
+            "steep_hill_bush_models": (
+                KOLGUJEV_BUSH_MODELS
+                if spec.steep_hill_bush_models == DEFAULT_STEEP_HILL_BUSH_MODELS
+                else spec.steep_hill_bush_models
+            ),
+            "forest_hillside_tree_model": (
+                KOLGUJEV_HILLSIDE_TREE_MODEL
+                if spec.forest_hillside_tree_model == r"data3d\str_fikovnik.p3d"
+                else spec.forest_hillside_tree_model
+            ),
+        }
     if forest_profile != "malden":
         return {
             "forest_tree_model": forest_tree_model,
@@ -338,8 +401,8 @@ class Milestone9Spec(Milestone8Spec):
         Milestone8Spec.validate(self)
         if self.surface_ground_mode not in {"milestone8", "milestone9"}:
             raise ValueError("surface ground mode must be milestone8 or milestone9")
-        if self.forest_profile not in {"everon", "malden"}:
-            raise ValueError("forest profile must be everon or malden")
+        if self.forest_profile not in {"everon", "kolgujev", "malden"}:
+            raise ValueError("forest profile must be everon, kolgujev or malden")
         for label, value in (
             ("wet shoreline cells", self.surface_shoreline_wet_cells),
             ("sand shoreline cells", self.surface_shoreline_sand_cells),
