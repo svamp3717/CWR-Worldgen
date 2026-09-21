@@ -14,6 +14,7 @@ from cwr_worldgen.gui import (
     GROUND_TEXTURE_OPTIONS,
     VEGETATION_OPTIONS,
     VEGETATION_EVERON,
+    VEGETATION_KOLGUJEV,
     VEGETATION_MALDEN,
     VEGETATION_RESISTANCE_LEAF,
     VEGETATION_RESISTANCE_PINE,
@@ -28,6 +29,9 @@ from cwr_worldgen.gui import (
     NOGOVA_PINE_FOREST_STEEP_MODEL,
     NOGOVA_LEAF_SINGLE_TREE_MODEL,
     NOGOVA_PINE_SINGLE_TREE_MODEL,
+    KOLGUJEV_FOREST_BLOCK_MODEL,
+    KOLGUJEV_FOREST_STEEP_MODEL,
+    KOLGUJEV_SINGLE_TREE_MODEL,
     WorldgenGui,
     application_base_dir,
     build_fetch_command,
@@ -216,12 +220,13 @@ class GuiCommandTests(unittest.TestCase):
         self.assertEqual(values["vegetation_style"], VEGETATION_EVERON)
         self.assertEqual(
             GROUND_TEXTURE_OPTIONS,
-            ("nogova", "malden", "everon", "desert", "generated"),
+            ("nogova", "kolgujev", "malden", "everon", "desert", "generated"),
         )
         self.assertEqual(
             VEGETATION_OPTIONS,
             (
                 VEGETATION_EVERON,
+                VEGETATION_KOLGUJEV,
                 VEGETATION_MALDEN,
                 VEGETATION_RESISTANCE_LEAF,
                 VEGETATION_RESISTANCE_PINE,
@@ -231,10 +236,45 @@ class GuiCommandTests(unittest.TestCase):
     def test_appearance_help_text_explains_independent_selectors(self) -> None:
         help_text = APPEARANCE_HELP_TEXT.casefold()
         self.assertIn("independent", help_text)
-        self.assertIn("nogova ground", help_text)
-        self.assertIn("malden vegetation", help_text)
+        self.assertIn("kolgujev", help_text)
+        self.assertIn("cain", help_text)
+        self.assertIn("nogova", help_text)
         self.assertNotIn("safe-bush", help_text)
         self.assertNotIn("diagnostic", help_text)
+
+    def test_kolgujev_ground_and_vegetation_use_cain_profile(self) -> None:
+        values = default_gui_values()
+        values["ground_textures"] = "kolgujev"
+        values["vegetation_style"] = VEGETATION_KOLGUJEV
+
+        command = build_milestone9_command(values, python="python")
+
+        self.assertEqual(
+            command[command.index("--ground-textures") + 1],
+            "kolgujev",
+        )
+        self.assertEqual(
+            command[command.index("--forest-profile") + 1],
+            "kolgujev",
+        )
+        self.assertEqual(
+            command[command.index("--forest-single-tree-model") + 1],
+            KOLGUJEV_SINGLE_TREE_MODEL,
+        )
+        self.assertEqual(command[-4:], [
+            "--forest-block-model", KOLGUJEV_FOREST_BLOCK_MODEL,
+            "--forest-steep-model", KOLGUJEV_FOREST_STEEP_MODEL,
+        ])
+
+    def test_kolgujev_vegetation_does_not_change_selected_ground_texture(self) -> None:
+        values = default_gui_values()
+        values["ground_textures"] = "nogova"
+        values["vegetation_style"] = VEGETATION_KOLGUJEV
+
+        command = build_milestone9_command(values, python="python")
+
+        self.assertEqual(command[command.index("--ground-textures") + 1], "nogova")
+        self.assertEqual(command[command.index("--forest-profile") + 1], "kolgujev")
 
     def test_nogova_ground_can_be_combined_with_malden_vegetation(self) -> None:
         values = default_gui_values()
