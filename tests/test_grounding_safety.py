@@ -179,7 +179,7 @@ def test_nogova_leaf_forests_use_stock_paired_sheared_blocks() -> None:
         forest_tree_model=leaf_block,
         forest_everon_steep_model=leaf_triangle,
         forest_individual_objects_only=False,
-        forest_single_tree_enabled=False,
+        forest_single_tree_enabled=True,
         forest_gap_infill_enabled=False,
         forest_undergrowth_enabled=False,
         forest_border_enabled=False,
