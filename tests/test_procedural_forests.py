@@ -16,6 +16,8 @@ from cwr_worldgen.procedural_forests import (
     NOGOVA_PINE_PROXY_MODELS,
     NOGOVA_BORDER_PROXY_MODELS,
     NOGOVA_PROXY_MODELS,
+    KOLGUJEV_BORDER_PROXY_MODELS,
+    KOLGUJEV_PROXY_MODELS,
     MALDEN_BORDER_PROXY_MODELS,
     MALDEN_PROXY_MODELS,
     FOREST_CLUSTER_VARIANTS,
@@ -65,6 +67,24 @@ class ProceduralForestClusterTests(unittest.TestCase):
         self.assertTrue(set(NOGOVA_BORDER_PROXY_MODELS).intersection(models))
         self.assertFalse(any(path.casefold().startswith("data3d\\les ") for path in models))
         self.assertFalse(any(path.casefold().startswith("data3d\\ker ") for path in models))
+
+    def test_kolgujev_proxy_profile_uses_cain_data3d_mix(self) -> None:
+        library = ProceduralForestClusterLibrary(
+            "cwr_cluster", proxy_profile="kolgujev"
+        )
+        library.register_models((
+            cluster_model_path("cwr_cluster", "pine", 0.30),
+            cluster_model_path("cwr_cluster", "border_thicket", 0.15),
+        ))
+        models = library.required_proxy_models()
+        self.assertTrue(set(KOLGUJEV_PROXY_MODELS).intersection(models))
+        self.assertTrue(set(KOLGUJEV_BORDER_PROXY_MODELS).intersection(models))
+        self.assertTrue(
+            all(path.casefold().startswith("data3d" + "\\") for path in models)
+        )
+        self.assertFalse(
+            any(path.casefold().startswith("o\\tree" + "\\") for path in models)
+        )
 
     def test_nogova_pine_proxy_profile_uses_individual_resistance_pines(self) -> None:
         library = ProceduralForestClusterLibrary("cwr_cluster", proxy_profile="nogova_pine")
