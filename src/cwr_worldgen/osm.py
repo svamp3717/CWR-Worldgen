@@ -9274,6 +9274,7 @@ def generate_world_objects(
                 # terrain and shears their transforms to the local height plane.
                 # Reproduce that compact engine-native layout instead of replacing
                 # one forest cell with many individually grounded trees.
+                stock_pair_failed = False
                 if nogova_leaf_stock_pair:
                     pair_specs = (
                         (spec.forest_tree_model, NOGOVA_LEAF_FOREST_BLOCK_OFFSET),
@@ -9325,25 +9326,35 @@ def generate_world_objects(
                         forest_block_objects += len(pair_objects)
                         mark_accepted_forest(x, z, spacing * 0.58)
                         continue
+                    stock_pair_failed = True
 
                 # Optional stock-polygon replacement mode.  A single generated
                 # cluster is much smaller than the stock square/triangle model it
                 # replaces, so tile several independently fitted clusters across
                 # the former footprint.  Remaining holes are deliberately left
                 # visible to the later individual-tree gap-infill pass.
-                if forest_polygon_models_disabled:
-                    replacements = _forest_polygon_replacement_clusters(
-                        elevations=elevations,
-                        raster=raster,
-                        road_corridors=road_corridors,
-                        spec=spec,
-                        seed=seed,
-                        column=geographic_column,
-                        row=geographic_row,
-                        x=x,
-                        z=z,
-                        spacing=spacing,
-                        maximum_clusters=min(4, max(0, forest_limit - forest_count)),
+                if forest_polygon_models_disabled or stock_pair_failed:
+                    # A failed stock Nogova pair must not be replaced by a
+                    # generated cluster carrying the same special les_nw_* P3Ds;
+                    # flattened CWA proxy children would lose the stock +9 m /
+                    # terrain-shear transform again. Use the rooted-tree fallback
+                    # below for these rare unsafe cells.
+                    replacements = (
+                        ()
+                        if stock_pair_failed
+                        else _forest_polygon_replacement_clusters(
+                            elevations=elevations,
+                            raster=raster,
+                            road_corridors=road_corridors,
+                            spec=spec,
+                            seed=seed,
+                            column=geographic_column,
+                            row=geographic_row,
+                            x=x,
+                            z=z,
+                            spacing=spacing,
+                            maximum_clusters=min(4, max(0, forest_limit - forest_count)),
+                        )
                     )
                     for cluster in replacements:
                         (
