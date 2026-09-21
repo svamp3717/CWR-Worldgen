@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from cwr_worldgen.terrain_solver import _rvw4_storage_datum_offset
+from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
+from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmRaster
+from cwr_worldgen.terrain_solver import _rvw4_storage_datum_offset, solve_terrain_constraints
 from cwr_worldgen.wrp import quantize_height
 
 
@@ -62,3 +65,59 @@ def test_deep_mapped_water_does_not_block_dry_plateau_rebase() -> None:
 
     assert offset > 1700.0
     assert 2500.0 - offset > 32.0
+
+
+def test_milestone9_solver_rebases_high_plateau_before_rvw4_quantization() -> None:
+    cells = 4
+    projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 100.0)
+    dataset = OsmDataset(
+        source_generator="high-altitude-rebase",
+        element_count=0,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(),
+    )
+    raster = OsmRaster(
+        cells=cells,
+        water=(False,) * (cells * cells),
+        forest=(False,) * (cells * cells),
+        farmland=(False,) * (cells * cells),
+        urban=(False,) * (cells * cells),
+        roads=(False,) * (cells * cells),
+        buildings=(False,) * (cells * cells),
+        high_resolution=cells,
+        coastline_seed_count=0,
+    )
+    spec = _Milestone9PlayabilitySpec(
+        name="cwr_high_altitude",
+        heightmap_path=Path("unused.png"),
+        bbox=(0.0, 0.0, 1.0, 1.0),
+        cells=cells,
+        cell_size=25.0,
+        solver_iterations=1,
+        world_edge_blend_cells=0,
+        strict_assets=False,
+    )
+    elevations = tuple(
+        2500.0 + (3353.2277124847787 - 2500.0) * index / (cells * cells - 1)
+        for index in range(cells * cells)
+    )
+
+    report = solve_terrain_constraints(
+        elevations,
+        dataset,
+        projection,
+        raster,
+        spec,
+    )
+
+    assert report.rvw4_storage_rebase
+    assert report.vertical_datum_offset > 1700.0
+    assert max(report.elevations) < 32767 * spec.height_scale
+    assert tuple(
+        quantize_height(value, spec.height_scale)
+        for value in report.elevations
+    )
