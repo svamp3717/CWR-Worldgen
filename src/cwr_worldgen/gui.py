@@ -462,6 +462,8 @@ def defaults_with_recent_source(
         result["display_name"] = increment_trailing_number(last_display_name)
     for key in (
         "house_style_preset",
+        "ground_textures",
+        "vegetation_style",
         "osm_asset_mapping_enabled",
         "osm_asset_mapping_inherit_defaults",
         "osm_asset_mapping_rules",
@@ -1136,9 +1138,32 @@ class WorldgenGui(tk.Tk):
         self._configure_style()
         self._build_ui()
         self._set_defaults()
+        self._install_appearance_state_persistence()
         self._show_step(0)
         self.after(100, self._drain_output)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _install_appearance_state_persistence(self) -> None:
+        for key in ("ground_textures", "vegetation_style"):
+            variable = self.vars.get(key)
+            if variable is not None:
+                variable.trace_add(
+                    "write",
+                    lambda *_args: self._persist_appearance_state(),
+                )
+
+    def _persist_appearance_state(self) -> None:
+        values = {
+            key: self.vars[key].get()
+            for key in ("ground_textures", "vegetation_style")
+            if key in self.vars
+        }
+        if not values:
+            return
+        try:
+            update_gui_state(self.state_path, values)
+        except OSError:
+            pass
 
     def _configure_style(self) -> None:
         style = ttk.Style(self)
@@ -3344,6 +3369,7 @@ class WorldgenGui(tk.Tk):
     def _on_close(self) -> None:
         if (self.process is not None or self._pipeline_active) and not messagebox.askyesno(APP_TITLE, "A process is still running. Stop it and exit?"):
             return
+        self._persist_appearance_state()
         self._persist_osm_mapping_state()
         self._stop_process()
         self.destroy()
