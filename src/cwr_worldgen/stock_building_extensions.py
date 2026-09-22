@@ -44,9 +44,9 @@ _STOCK_BAS_O_GENERAL_CATALOGUE_PATH = _DATA_DIR / "BAS_O.pbo general.json"
 _STOCK_BAS_O_MIDDLEAST_CATALOGUE_PATH = _DATA_DIR / "BAS_O.pbo middleast.json"
 _STOCK_BAS_O_SHANTY_CATALOGUE_PATH = _DATA_DIR / "BAS_O.pbo shanty.json"
 _STOCK_BAS_O_AFRICAHUT_CATALOGUE_PATH = _DATA_DIR / "BAS_O.pbo africahut.json"
-_STOCK_ART_BD_CATALOGUE_PATH = _DATA_DIR / "stock-model-categories_art_bd.json"
+_STOCK_ART_BD_CATALOGUE_PATH = _DATA_DIR / "art_bd.json"
 _STOCK_CAF_KKK_BUILDINGS2_CATALOGUE_PATH = (
-    _DATA_DIR / "stock-model-categories_caf_kkk_buildings2.json"
+    _DATA_DIR / "caf_kkk_buildings2.json"
 )
 
 
@@ -93,11 +93,11 @@ STOCK_BUILDING_BAS_O_AFRICAHUT_LABEL = _catalogue_display_name(
 )
 STOCK_BUILDING_ART_BD_LABEL = _catalogue_display_name(
     _STOCK_ART_BD_CATALOGUE_PATH,
-    "ART_BD buildings",
+    "ART_BD.pbo buildings",
 )
 STOCK_BUILDING_CAF_KKK_BUILDINGS2_LABEL = _catalogue_display_name(
     _STOCK_CAF_KKK_BUILDINGS2_CATALOGUE_PATH,
-    "CAF KKK Buildings 2",
+    "CAF_KKK_Buildings2.pbo buildings",
 )
 
 # Compatibility labels for code/imports that still know the old combined IDs.
