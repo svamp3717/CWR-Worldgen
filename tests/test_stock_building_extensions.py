@@ -26,6 +26,8 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_BAS_O_SHANTY_PRESET,
     STOCK_BUILDING_CAF_KKK_BUILDINGS2_LABEL,
     STOCK_BUILDING_CAF_KKK_BUILDINGS2_PRESET,
+    STOCK_BUILDING_DMA_LIBYA_O_LABEL,
+    STOCK_BUILDING_DMA_LIBYA_O_PRESET,
     STOCK_BUILDING_HAUS_COMBINED_PRESET,
     STOCK_BUILDING_HAUS_ONLY_LABEL,
     STOCK_BUILDING_HAUS_ONLY_PRESET,
@@ -261,6 +263,35 @@ def test_art_bd_and_caf_kkk_catalogues_are_recorded_in_build_metadata(
         "data/art_bd.json",
         "data/caf_kkk_buildings2.json",
     ]
+
+
+def test_dma_libya_o_catalogue_is_selectable_source_preset() -> None:
+    data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
+    document = json.loads((data_dir / "DMA_libya_o.json").read_text(encoding="utf-8"))
+    paths = {row["model_path"].casefold() for row in document["models"]}
+
+    assert document["schema"] == 5
+    assert document["source_set"] == "DMA_libya_o.pbo"
+    assert document["display_name"] == "DMA_libya_o.pbo buildings"
+    assert document["complete_count"] == 14
+    assert document["reviewed_count"] == 14
+    assert STOCK_BUILDING_DMA_LIBYA_O_LABEL == "DMA_libya_o.pbo buildings"
+    assert len(paths) == 14
+    assert all(path.startswith("dma_libya_o\\") for path in paths)
+
+    library = _library(STOCK_BUILDING_DMA_LIBYA_O_PRESET)
+    assert len(library.models) == 14
+    assert {stock_model_source(model.model_path) for model in library.models} == {"dma_libya_o"}
+
+
+def test_dma_libya_o_catalogue_is_recorded_in_build_metadata(tmp_path: Path) -> None:
+    library = _library(STOCK_BUILDING_DMA_LIBYA_O_PRESET)
+    catalogue = tmp_path / "building-asset-catalogue.json"
+
+    library.write_assets(tmp_path / "source", catalogue)
+    document = json.loads(catalogue.read_text(encoding="utf-8"))
+
+    assert document["selected_building_jsons"] == ["data/DMA_libya_o.json"]
 
 
 def test_legacy_combined_ids_expand_to_source_catalogues() -> None:
