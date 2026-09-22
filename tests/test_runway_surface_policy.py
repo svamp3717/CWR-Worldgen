@@ -124,6 +124,22 @@ def test_kolgujev_uses_stock_cain_ground_tiles() -> None:
     )
 
 
+def test_kolgujev_surface_writer_emits_no_world_local_ground_tiles(tmp_path) -> None:
+    written = surface_pass.write_surface_textures(
+        tmp_path,
+        "wg_kolgujev",
+        "kolgujev",
+        "kolgujev-stock-test",
+        128,
+    )
+
+    assert written == ()
+    assert not (tmp_path / "data").exists()
+    assert set(surface_pass.KOLGUJEV_SURFACE_TEXTURES) == {
+        material.code for material in surface_pass.MILESTONE9_MATERIALS
+    }
+
+
 def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
     paths = surface_pass.surface_texture_wire_paths("wg_malden", "malden")
 
