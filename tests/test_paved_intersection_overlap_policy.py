@@ -330,6 +330,27 @@ def test_generated_paved_hub_assets_have_visual_and_roadway_surfaces(tmp_path) -
     assert layout["generated_road_textures"] == [r"i\pjs.paa"]
 
 
+@pytest.mark.parametrize(
+    "kind",
+    ("paved_junction_sil", "paved_junction_asf", "paved_junction_kos"),
+)
+def test_generated_paved_hub_texture_is_low_contrast_asphalt(kind: str) -> None:
+    image = infrastructure._texture_image(kind, 128)
+
+    assert image.mode == "RGB"
+    assert image.size == (128, 128)
+    assert max(high - low for low, high in image.getextrema()) <= 4
+
+    pixels = image.load()
+    maximum_adjacent_delta = max(
+        abs(pixels[x, y][channel] - pixels[x - 1, y][channel])
+        for y in range(128)
+        for x in range(1, 128)
+        for channel in range(3)
+    )
+    assert maximum_adjacent_delta <= 2
+
+
 def test_generated_paved_hub_participates_in_final_building_clearance() -> None:
     hub = WorldObject(
         1,

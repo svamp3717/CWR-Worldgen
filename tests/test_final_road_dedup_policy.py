@@ -92,6 +92,17 @@ def test_paved_surface_wins_over_coincident_dirt_piece():
     assert tuple(obj.object_id for obj in result.objects) == (2,)
 
 
+def test_short_paved_piece_does_not_erase_longer_dirt_road():
+    report = _report((
+        _road(1, r"o\road\ces25.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil6.p3d", 100.0, 100.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2)
+
+
 def test_curves_and_junction_models_are_not_axis_deduplicated():
     report = _report((
         _road(1, r"o\road\sil10 25.p3d", 100.0, 100.0),
@@ -114,6 +125,41 @@ def test_junction_cap_prefix_is_protected_from_deduplication():
     result = deduplicate_final_road_objects(report, _spec())
 
     assert len(result.objects) == 2
+
+
+def test_protected_paved_cap_removes_coincident_lower_surface_shadows():
+    report = _report((
+        _road(1, r"o\road\sil6.p3d", 100.0, 100.0),
+        _road(2, r"o\road\ces6.p3d", 100.0, 100.0),
+        _road(3, r"test_world\i\gravel6.p3d", 100.0, 100.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1,)
+    assert result.junction_cap_objects == 1
+
+
+def test_protected_paved_cap_preserves_perpendicular_dirt_branch():
+    report = _report((
+        _road(1, r"o\road\sil6.p3d", 100.0, 100.0),
+        _road(2, r"o\road\ces6.p3d", 100.0, 100.0, heading=90.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2)
+
+
+def test_lower_priority_protected_cap_does_not_remove_paved_piece():
+    report = _report((
+        _road(1, r"o\road\ces6.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil6.p3d", 100.0, 100.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2)
 
 
 def test_progress_reports_bounded_spatial_comparisons():

@@ -24,7 +24,7 @@ from . import road_quality_policy as _quality
 _BUCKET_METRES = 25.0
 _MAXIMUM_AXIS_ANGLE_DEGREES = 6.0
 _ALIGNMENT_COSINE = math.cos(math.radians(_MAXIMUM_AXIS_ANGLE_DEGREES))
-_MINIMUM_SHORTER_AXIS_OVERLAP = 0.70
+_MINIMUM_CANDIDATE_AXIS_OVERLAP = 0.70
 _MAXIMUM_VERTICAL_SEPARATION_METRES = 0.75
 _PROGRESS_BUCKET_PERCENT = 2
 _RAW_PROGRESS_PERCENT = 99
@@ -201,8 +201,13 @@ def _is_redundant(candidate: _RoadAxis, kept: _RoadAxis) -> bool:
         _longitudinal_overlap(candidate, kept),
         _longitudinal_overlap(kept, candidate),
     )
-    shorter = min(candidate.length, kept.length)
-    return shorter > 1.0e-6 and overlap / shorter >= _MINIMUM_SHORTER_AXIS_OVERLAP
+    # The candidate is the piece that will be deleted.  Measuring against the
+    # shorter axis could let a six-metre paved cap erase a 25-metre dirt road
+    # while covering only a quarter of it.
+    return (
+        candidate.length > 1.0e-6
+        and overlap / candidate.length >= _MINIMUM_CANDIDATE_AXIS_OVERLAP
+    )
 
 
 def deduplicate_final_road_objects(
@@ -216,27 +221,35 @@ def deduplicate_final_road_objects(
         return report
 
     protected_prefix = max(0, min(int(report.junction_cap_objects), len(report.objects)))
+    protected_axes = []
     axes = []
     for index, obj in enumerate(report.objects):
-        # Junction-cap slots are intentionally not compared.  They can overlap a
-        # short approach by design, and their prefix count also carries report
-        # semantics used by earlier road policies.
-        if index < protected_prefix:
-            continue
         axis = _road_axis(obj, index, spec)
-        if axis is not None:
+        if axis is None:
+            continue
+        if index < protected_prefix:
+            protected_axes.append(axis)
+        else:
             axes.append(axis)
 
-    if len(axes) < 2:
+    if not axes or (len(axes) < 2 and not protected_axes):
         return report
 
     ordered = sorted(axes, key=_priority, reverse=True)
     total = len(ordered)
     bucket_members: dict[tuple[int, int], list[int]] = {}
-    kept_axes: list[_RoadAxis] = []
+    # Cap slots remain protected from removal and from same-surface
+    # deduplication.  They still block a coincident lower-priority slab: without
+    # this one-way comparison, a dirt/gravel short piece can remain visible
+    # beneath the generated paved hub that replaces the cap later in the build.
+    kept_axes: list[_RoadAxis] = list(protected_axes)
     removed_ids: set[int] = set()
     comparisons = 0
     last_progress_bucket = -1
+
+    for protected_index, protected in enumerate(protected_axes):
+        for bucket in _buckets_for(protected):
+            bucket_members.setdefault(bucket, []).append(protected_index)
 
     if progress_callback is not None:
         progress_callback(
@@ -254,6 +267,11 @@ def deduplicate_final_road_objects(
         for kept_index in sorted(candidate_indices):
             kept = kept_axes[kept_index]
             comparisons += 1
+            if (
+                kept.object_index < protected_prefix
+                and _surface_priority(kept.family) <= _surface_priority(candidate.family)
+            ):
+                continue
             if _is_redundant(candidate, kept):
                 removed_ids.add(candidate.object_id)
                 redundant = True

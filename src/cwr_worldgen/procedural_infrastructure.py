@@ -169,9 +169,47 @@ _TEXTURE_FILE_STEMS = {
     "water_tower": "uw",
 }
 
+_PAVED_JUNCTION_COLOURS = {
+    "paved_junction_sil": (108, 108, 105),
+    "paved_junction_asf": (82, 83, 81),
+    "paved_junction_kos": (101, 99, 94),
+}
+_PAVED_JUNCTION_TEXTURE_CACHE_VERSION = (
+    "procedural-infrastructure-texture-v17-smooth-paved-junction"
+)
+
 
 def _texture_file_stem(kind: str) -> str:
     return _TEXTURE_FILE_STEMS.get(kind, kind)
+
+
+def _paved_junction_texture_image(kind: str, size: int) -> Image.Image:
+    """Return a smooth, edge-free surface that reads as pavement at game scale.
+
+    Per-pixel high-contrast noise survives DXT1 compression as pale aggregate and
+    makes a large junction patch look like gravel.  A softly interpolated,
+    low-amplitude luminance variation retains enough texture to avoid a featureless
+    polygon without drawing individual stones over the adjoining stock road.
+    """
+
+    base = _PAVED_JUNCTION_COLOURS[kind]
+    coarse_size = max(4, int(size) // 16)
+    luminance = Image.new("L", (coarse_size, coarse_size), 128)
+    pixels = luminance.load()
+    for y in range(coarse_size):
+        for x in range(coarse_size):
+            pixels[x, y] = 128 + (((x * 17 + y * 29 + x * y * 5) % 9) - 4)
+    luminance = luminance.resize((size, size), Image.Resampling.BICUBIC)
+    luminance = luminance.filter(ImageFilter.GaussianBlur(radius=max(0.5, size / 128.0)))
+
+    image = Image.new("RGB", (size, size), base)
+    image_pixels = image.load()
+    luminance_pixels = luminance.load()
+    for y in range(size):
+        for x in range(size):
+            delta = max(-2, min(2, round((luminance_pixels[x, y] - 128) * 0.5)))
+            image_pixels[x, y] = tuple(max(0, min(255, channel + delta)) for channel in base)
+    return image
 
 
 def _texture_image(kind: str, size: int = 128) -> Image.Image:
@@ -186,14 +224,15 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         # Opaque, edge-free hub textures cover the shoulder stripes of stock
         # road pieces where several paved arms meet.  Subtle family-specific
         # tones keep the generated patch close to its adjoining CWA road set.
-        "paved_junction_sil": (108, 108, 105),
-        "paved_junction_asf": (82, 83, 81),
-        "paved_junction_kos": (101, 99, 94),
+        **_PAVED_JUNCTION_COLOURS,
         "power_pole": (116, 102, 78),
         "power_tower": (118, 120, 119),
         "water_tower": (142, 148, 151),
     }
     base = colours[kind]
+    if kind in _PAVED_JUNCTION_COLOURS:
+        return _paved_junction_texture_image(kind, size)
+
     image = Image.new("RGB", (size, size), base)
     draw = ImageDraw.Draw(image)
     if kind == "fence":
@@ -972,6 +1011,21 @@ class ProceduralInfrastructureLibrary:
                 )
                 producer = lambda target: write_rgb_dxt1_paa(
                     target, create_gravel_junction_texture_image(512)
+                )
+            elif kind in _PAVED_JUNCTION_COLOURS:
+                texture_size = 128
+                asset_key = cache_key(
+                    _PAVED_JUNCTION_TEXTURE_CACHE_VERSION,
+                    {
+                        "kind": kind,
+                        "size": texture_size,
+                        "recipe": "low-contrast-asphalt-v1",
+                    },
+                )
+                producer = (
+                    lambda target, kind=kind, size=texture_size: write_rgb_dxt1_paa(
+                        target, _texture_image(kind, size)
+                    )
                 )
             else:
                 texture_size = 256 if kind == "bridge" else 128
