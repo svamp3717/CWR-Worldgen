@@ -3081,7 +3081,7 @@ def build_milestone4(
     if _surface_ground_enabled(spec):
         generated_material_texture_paths = tuple(
             path for path, material in zip(material_texture_paths, materials)
-            if _ground_texture_profile(spec) not in {"everon", "nogova", "malden"}
+            if _ground_texture_profile(spec) not in {"everon", "nogova", "kolgujev", "malden"}
             or getattr(material, "everon_path", None) is None
         )
     else:
