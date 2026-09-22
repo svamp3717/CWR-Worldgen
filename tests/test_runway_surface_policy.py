@@ -89,16 +89,19 @@ def _base_texture_table(profile: str = "everon") -> tuple[str, ...]:
     )
 
 
-def test_kolgujev_uses_stock_cain_ground_tiles() -> None:
+def test_kolgujev_uses_one_main_cain_land_tile() -> None:
     paths = surface_pass.surface_texture_wire_paths("wg_kolgujev", "kolgujev")
+    water_codes = {"w", "q"}
 
-    assert paths[surface_pass.MATERIAL_INDEX["w"]] == r"cain\l4.paa"
-    assert paths[surface_pass.MATERIAL_INDEX["g"]] == r"cain\j9.paa"
-    assert paths[surface_pass.MATERIAL_INDEX["s"]] == r"cain\t9.paa"
-    assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"cain\u2.paa"
-    assert paths[surface_pass.MATERIAL_INDEX["e"]] == r"cain\u2.paa"
-    assert paths[surface_pass.MATERIAL_INDEX["r"]] == r"cain\k5.paa"
-    assert paths[surface_pass.MATERIAL_INDEX["k"]] == r"cain\k5.paa"
+    for material in surface_pass.MILESTONE9_MATERIALS:
+        expected = r"cain\l4.paa" if material.code in water_codes else r"cain\j9.paa"
+        assert paths[surface_pass.MATERIAL_INDEX[material.code]] == expected
+
+    # Forest, farmland and mountain semantics must not introduce their old
+    # high-contrast Cain tiles. They remain semantic masks only.
+    assert r"cain\u2.paa" not in paths
+    assert r"cain\k5.paa" not in paths
+    assert r"cain\t9.paa" not in paths
     assert all(path.casefold().startswith("cain\\") for path in paths)
     assert not any(
         path.casefold().startswith("wg_kolgujev\\data\\") for path in paths
@@ -114,13 +117,13 @@ def test_kolgujev_uses_stock_cain_ground_tiles() -> None:
     )
     assert legacy == (
         r"cain\l4.paa",
-        r"cain\t9.paa",
         r"cain\j9.paa",
-        r"cain\k5.paa",
-        r"cain\u2.paa",
-        r"cain\t9.paa",
-        r"cain\t9.paa",
-        r"cain\t9.paa",
+        r"cain\j9.paa",
+        r"cain\j9.paa",
+        r"cain\j9.paa",
+        r"cain\j9.paa",
+        r"cain\j9.paa",
+        r"cain\j9.paa",
     )
 
 
