@@ -72,20 +72,21 @@ MALDEN_GROUND_TEXTURES: dict[str, str] = {
     "p": r"abel\tt.paa",
 }
 
-# Stock Kolgujev/Cain OPRW2 reference palette. In the supplied cain.wrp,
-# l4 is overwhelmingly the sea tile (52,209 cells), j9/t9 are the principal
-# dry-land tiles, u2 carries almost all forest-flagged cells, and k5 is used on
-# the highest/rockiest terrain. Keep those roles rather than pretending Cain is
-# merely another Eden colour scheme.
+# Kolgujev/Cain uses one main dry-land texture in generated worlds so OSM
+# semantic masks do not produce large farmland, forest or mountain colour blocks.
+# The classifications still drive object placement; only their visible ground tile
+# is unified. Water keeps the stock Cain sea tile.
+_KOLGUJEV_SEA_TEXTURE = r"cain\l4.paa"
+_KOLGUJEV_MAIN_LAND_TEXTURE = r"cain\j9.paa"
 KOLGUJEV_GROUND_TEXTURES: dict[str, str] = {
-    "w": r"cain\l4.paa",
-    "s": r"cain\t9.paa",
-    "g": r"cain\j9.paa",
-    "r": r"cain\k5.paa",
-    "f": r"cain\u2.paa",
-    "a": r"cain\t9.paa",
-    "u": r"cain\t9.paa",
-    "p": r"cain\t9.paa",
+    "w": _KOLGUJEV_SEA_TEXTURE,
+    "s": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "g": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "r": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "f": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "a": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "u": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "p": _KOLGUJEV_MAIN_LAND_TEXTURE,
 }
 
 STOCK_GROUND_TEXTURES: dict[str, dict[str, str]] = {
