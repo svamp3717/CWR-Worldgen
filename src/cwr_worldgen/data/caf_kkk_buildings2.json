@@ -1,0 +1,371 @@
+{
+  "schema": 5,
+  "kind": "completed_model_classifications",
+  "categories": [
+    "Residential",
+    "Commercial",
+    "Industrial",
+    "Agricultural",
+    "Military",
+    "Civic / Public",
+    "Religious",
+    "Infrastructure",
+    "Ruins",
+    "Prop / Misc"
+  ],
+  "placements": [
+    "Urban",
+    "Rural",
+    "Both"
+  ],
+  "resume_model_path": "caf_kkk_buildings2\\ags_kw.p3d",
+  "complete_count": 23,
+  "reviewed_count": 23,
+  "incomplete_reviewed_count": 0,
+  "incomplete_reviewed_file": "caf_kkk_buildings2.unclassified.json",
+  "models": [
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build11.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 44,
+      "length_m": 44,
+      "height_m": 49.1,
+      "aspect_ratio": 1,
+      "origin_to_bottom_m": 24.55
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build12.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 40,
+      "length_m": 40,
+      "height_m": 57.9,
+      "aspect_ratio": 1,
+      "origin_to_bottom_m": 28.95
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build12a.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 40,
+      "length_m": 40,
+      "height_m": 57.9,
+      "aspect_ratio": 1,
+      "origin_to_bottom_m": 28.95
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build2.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build2a.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3a.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3b.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3c.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3d.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3e.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3f.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3g.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3h.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3i.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3j.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3k.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build3l.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 17.9404,
+      "length_m": 14.9858,
+      "height_m": 30.1924,
+      "aspect_ratio": 1.1972,
+      "origin_to_bottom_m": 15.0969
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build4.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 29.8093,
+      "length_m": 25.4043,
+      "height_m": 76.2008,
+      "aspect_ratio": 1.1734,
+      "origin_to_bottom_m": 38.0444
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build5.p3d",
+      "categories": [
+        "Residential"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 43.2,
+      "length_m": 20.5202,
+      "height_m": 21.9677,
+      "aspect_ratio": 2.1052,
+      "origin_to_bottom_m": 10.9399
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build6.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 26,
+      "length_m": 31.5,
+      "height_m": 25,
+      "aspect_ratio": 1.2115,
+      "origin_to_bottom_m": 12.5
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build6a.p3d",
+      "categories": [
+        "Residential",
+        "Commercial",
+        "Civic / Public"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 26,
+      "length_m": 31.5,
+      "height_m": 25,
+      "aspect_ratio": 1.2115,
+      "origin_to_bottom_m": 12.5
+    },
+    {
+      "model_path": "caf_kkk_buildings2\\ags_build7.p3d",
+      "categories": [
+        "Infrastructure"
+      ],
+      "placement": "Urban",
+      "reviewed": true,
+      "width_m": 28,
+      "length_m": 26,
+      "height_m": 80,
+      "aspect_ratio": 1.0769,
+      "origin_to_bottom_m": 40.0113
+    }
+  ],
+  "source_set": "CAF_KKK_Buildings2.pbo",
+  "display_name": "CAF_KKK_Buildings2.pbo buildings"
+}
