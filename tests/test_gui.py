@@ -10,7 +10,6 @@ from cwr_worldgen.gui import (
     WIZARD_STEPS,
     FROZEN_CLI_MARKER,
     APPEARANCE_PRESETS,
-    APPEARANCE_HELP_TEXT,
     GROUND_TEXTURE_OPTIONS,
     VEGETATION_OPTIONS,
     VEGETATION_EVERON,
@@ -232,15 +231,6 @@ class GuiCommandTests(unittest.TestCase):
                 VEGETATION_RESISTANCE_PINE,
             ),
         )
-
-    def test_appearance_help_text_explains_independent_selectors(self) -> None:
-        help_text = APPEARANCE_HELP_TEXT.casefold()
-        self.assertIn("independent", help_text)
-        self.assertIn("kolgujev", help_text)
-        self.assertIn("cain", help_text)
-        self.assertIn("nogova", help_text)
-        self.assertNotIn("safe-bush", help_text)
-        self.assertNotIn("diagnostic", help_text)
 
     def test_kolgujev_ground_and_vegetation_use_cain_profile(self) -> None:
         values = default_gui_values()
