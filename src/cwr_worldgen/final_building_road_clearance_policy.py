@@ -69,6 +69,11 @@ _GRAVEL_JUNCTION = re.compile(
     r"^gravel_j(?P<degree>[34])(?:_(?P<variant>t(?:30|45|60|75)[lr]|t90|y120|x(?:30|45|60|75|90)))?\.p3d$",
     re.I,
 )
+_PAVED_JUNCTION = re.compile(
+    r"^paved_j(?P<degree>[34])_(?P<family>sil|asf|kos)_"
+    r"(?P<variant>t(?:30|45|60|75)[lr]|t90|y120|x(?:30|45|60|75|90))\.p3d$",
+    re.I,
+)
 
 _INSTALLED = False
 _ORIGINAL_FIT = None
@@ -402,6 +407,27 @@ def _road_object_primitives(obj, spec) -> tuple[_RoadPrimitive, ...]:
                     math.cos(math.radians(direction)) * radius,
                 ),
                 _WIDTHS["gravel"],
+            )
+            for direction in headings
+        )
+
+    match = _PAVED_JUNCTION.fullmatch(filename)
+    if match is not None:
+        family = match.group("family").casefold()
+        headings = _gravel_junction_headings(
+            int(match.group("degree")), match.group("variant")
+        )
+        centre = (0.0, 0.0)
+        radius = 6.25
+        return tuple(
+            _make_primitive(
+                obj,
+                centre,
+                (
+                    math.sin(math.radians(direction)) * radius,
+                    math.cos(math.radians(direction)) * radius,
+                ),
+                _WIDTHS[family],
             )
             for direction in headings
         )

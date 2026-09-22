@@ -18,6 +18,7 @@ _WIDTHS = {"sil": 4.55, "kos": 4.55, "asf": 3.50, "ces": 1.75, "gravel": 2.30}
 _CURVE_ANGLE = 10.0
 _JUNCTION_RADIUS = 6.25
 _GRAVEL_JUNCTION_RADIUS = 4.0
+_PAVED_JUNCTION_RADIUS = 6.25
 _STRAIGHT = re.compile(r"^(?:.*[\\/])(?P<family>sil|ces|asf|kos)(?P<length>25|12|6)\.p3d$", re.I)
 _CURVE = re.compile(r"^(?:.*[\\/])(?P<family>sil|ces|asf|kos)10 (?P<radius>25|50|75|100)\.p3d$", re.I)
 _T = re.compile(r"^(?:.*[\\/])kr_new_(?P<main>sil|asf|kos)_(?P<branch>sil|ces|asf|kos)_t\.p3d$", re.I)
@@ -25,6 +26,11 @@ _X = re.compile(r"^(?:.*[\\/])kr_new_silxsil\.p3d$", re.I)
 _GRAVEL = re.compile(r"^(?:.*[\\/])gravel(?P<length>25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.I)
 _GRAVEL_JUNCTION = re.compile(
     r"^(?:.*[\\/])gravel_j(?P<degree>[34])(?:_(?P<variant>t(?:30|45|60|75)[lr]|t90|y120|x(?:30|45|60|75|90)))?\.p3d$",
+    re.I,
+)
+_PAVED_JUNCTION = re.compile(
+    r"^(?:.*[\\/])paved_j(?P<degree>[34])_(?P<family>sil|asf|kos)_"
+    r"(?P<variant>t(?:30|45|60|75)[lr]|t90|y120|x(?:30|45|60|75|90))\.p3d$",
     re.I,
 )
 
@@ -251,6 +257,46 @@ def _road(values) -> RoadObject | None:
             for i, direction in enumerate(headings)
         )
         return RoadObject(object_id, model, x, y, z, yaw, pitch, "gravel", "junction_gravel", endpoints)
+
+    match = _PAVED_JUNCTION.fullmatch(path)
+    if match:
+        family = match.group("family").casefold()
+        headings = _gravel_junction_headings(
+            int(match.group("degree")), match.group("variant")
+        )
+        endpoints = tuple(
+            _endpoint(
+                object_id,
+                model,
+                family,
+                "junction",
+                index,
+                _world_point(
+                    (
+                        math.sin(math.radians(direction)) * _PAVED_JUNCTION_RADIUS,
+                        math.cos(math.radians(direction)) * _PAVED_JUNCTION_RADIUS,
+                    ),
+                    origin,
+                    yaw,
+                    pitch,
+                ),
+                _world_heading(direction, yaw, pitch),
+                _world_heading(direction, yaw, pitch),
+            )
+            for index, direction in enumerate(headings)
+        )
+        return RoadObject(
+            object_id,
+            model,
+            x,
+            y,
+            z,
+            yaw,
+            pitch,
+            family,
+            "junction_paved",
+            endpoints,
+        )
     return None
 
 
@@ -429,7 +475,11 @@ def _paved_crossing_issues(roads: Sequence[RoadObject]) -> list[RoadIssue]:
                 buckets.setdefault((bx, bz), []).append(index)
     issues: list[RoadIssue] = []
     seen: set[tuple[int, int]] = set()
-    junctions = tuple((road.x, road.z) for road in roads if road.kind in {"junction_t", "junction_x"})
+    junctions = tuple(
+        (road.x, road.z)
+        for road in roads
+        if road.kind.startswith("junction_")
+    )
     for indices in buckets.values():
         for i, first_index in enumerate(indices):
             for second_index in indices[i + 1:]:
@@ -463,10 +513,33 @@ def _heading_to(start: tuple[float, float], end: tuple[float, float]) -> float:
     return math.degrees(math.atan2(end[0] - start[0], end[1] - start[1])) % 360.0
 
 
+def _generated_paved_connection_gap(
+    connector: RoadEndpoint,
+    endpoint: RoadEndpoint,
+    center: tuple[float, float],
+    maximum_gap: float,
+) -> float | None:
+    radial = math.dist(center, endpoint.point)
+    arm_radius = math.dist(center, connector.point)
+    direction_error = _angle(
+        connector.outward,
+        _heading_to(center, endpoint.point),
+    )
+    facing = abs(180.0 - _angle(connector.outward, endpoint.outward))
+    if (
+        radial <= arm_radius + maximum_gap
+        and direction_error <= 25.0
+        and facing <= 25.0
+    ):
+        return max(0.0, radial - arm_radius)
+    return None
+
+
 def _junction_issues(roads: Sequence[RoadObject], maximum_gap: float) -> list[RoadIssue]:
     approaches = tuple(endpoint for road in roads if not road.kind.startswith("junction_") for endpoint in road.endpoints)
     issues: list[RoadIssue] = []
     for junction in (road for road in roads if road.kind.startswith("junction_")):
+        center = junction.x, junction.z
         connector_candidates: set[tuple[int, int]] = set()
         object_ids = {junction.object_id}
         models = {junction.model_path}
@@ -475,9 +548,22 @@ def _junction_issues(roads: Sequence[RoadObject], maximum_gap: float) -> list[Ro
         for connector in junction.endpoints:
             candidates = []
             for endpoint in approaches:
-                distance = math.dist(connector.point, endpoint.point)
-                facing = abs(180.0 - _angle(connector.outward, endpoint.outward))
-                if distance <= maximum_gap and facing <= 25.0:
+                if junction.kind == "junction_paved":
+                    distance = _generated_paved_connection_gap(
+                        connector,
+                        endpoint,
+                        center,
+                        maximum_gap,
+                    )
+                    connected = distance is not None
+                else:
+                    distance = math.dist(connector.point, endpoint.point)
+                    facing = abs(
+                        180.0 - _angle(connector.outward, endpoint.outward)
+                    )
+                    connected = distance <= maximum_gap and facing <= 25.0
+                if connected:
+                    assert distance is not None
                     candidates.append((distance, endpoint))
             candidates.sort(key=lambda item: item[0])
             for _distance, endpoint in candidates:
@@ -490,7 +576,6 @@ def _junction_issues(roads: Sequence[RoadObject], maximum_gap: float) -> list[Ro
             worst_gap = max(worst_gap, candidates[0][0])
             duplicates += max(0, len(candidates) - 1)
 
-        center = junction.x, junction.z
         extras = []
         for endpoint in approaches:
             key = endpoint.object_id, endpoint.index
@@ -511,7 +596,7 @@ def _junction_issues(roads: Sequence[RoadObject], maximum_gap: float) -> list[Ro
         issues.append(RoadIssue(
             "", _severity(score), score, "bad_junction", junction.x, junction.z,
             tuple(sorted(object_ids)), tuple(sorted(models)),
-            f"{junction.kind.replace('_', ' ')} has {connected}/{expected} connected stock connectors; {missing} missing, {duplicates} multiply connected, {len(extras)} extra approach(es) near the junction centre.",
+            f"{junction.kind.replace('_', ' ')} has {connected}/{expected} connected connectors; {missing} missing, {duplicates} multiply connected, {len(extras)} extra approach(es) near the junction centre.",
             {"expected_connectors": float(expected), "connected_connectors": float(connected),
              "missing_connectors": float(missing), "duplicate_connections": float(duplicates),
              "extra_approaches": float(len(extras)), "worst_connector_gap_metres": round(worst_gap, 5)},
@@ -586,6 +671,30 @@ def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAU
         issue = _intersection_issue(tuple(unique.values()))
         if issue:
             issues.append(issue)
+    generated_hubs = tuple(
+        road for road in checked_roads if road.kind == "junction_paved"
+    )
+    if generated_hubs:
+        for junction in generated_hubs:
+            center = junction.x, junction.z
+            paired.update(
+                (junction.object_id, connector.index)
+                for connector in junction.endpoints
+            )
+            for endpoint in endpoints:
+                if endpoint.kind == "junction":
+                    continue
+                if any(
+                    _generated_paved_connection_gap(
+                        connector,
+                        endpoint,
+                        center,
+                        nearby_gap,
+                    )
+                    is not None
+                    for connector in junction.endpoints
+                ):
+                    paired.add((endpoint.object_id, endpoint.index))
     issues.extend(_nearby(endpoints, paired, endpoint_tolerance, nearby_gap, minimum_edge_gap, minimum_tangent_error))
     issues.extend(_junction_issues(checked_roads, nearby_gap))
     issues.extend(_paved_crossing_issues(checked_roads))

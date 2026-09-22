@@ -141,6 +141,40 @@ def test_generated_gravel_is_mapped_but_not_seam_scored(tmp_path: Path) -> None:
     assert result.issues == ()
 
 
+def test_generated_paved_junction_is_recognized_as_one_hub(tmp_path: Path) -> None:
+    wrp = _write_wrp(tmp_path, "paved-hub.wrp", (
+        (1, r"wg_demo\i\paved_j4_sil_x45.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
+    ))
+
+    result = inspect_road_geometry(wrp)
+
+    assert result.road_object_count == 1
+    assert result.road_objects[0].kind == "junction_paved"
+    assert result.road_objects[0].road_type == "paved"
+    assert len(result.road_objects[0].endpoints) == 4
+
+
+def test_generated_paved_hub_covers_approach_overhangs(tmp_path: Path) -> None:
+    distance = 3.50
+    diagonal = distance / math.sqrt(2.0)
+    wrp = _write_wrp(tmp_path, "paved-hub-approaches.wrp", (
+        (1, r"wg_demo\i\paved_j4_sil_x45.p3d", 0.0, 0.012, 0.0, 0.0, 0.0),
+        (2, r"o\road\sil6.p3d", 0.0, 0.035, distance, 0.0, 0.0),
+        (3, r"o\road\sil6.p3d", 0.0, 0.035, -distance, 180.0, 0.0),
+        (4, r"o\road\sil6.p3d", diagonal, 0.035, diagonal, 45.0, 0.0),
+        (5, r"o\road\sil6.p3d", -diagonal, 0.035, -diagonal, 225.0, 0.0),
+    ))
+
+    result = inspect_road_geometry(wrp)
+
+    assert not [
+        issue
+        for issue in result.issues
+        if issue.category
+        in {"bad_junction", "paved_crossing_without_junction", "connector_gap"}
+    ]
+
+
 def test_pbo_input_and_reports_are_read_only(tmp_path: Path) -> None:
     world = _wrp_bytes(((1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),))
     pbo = tmp_path / "sample.pbo"

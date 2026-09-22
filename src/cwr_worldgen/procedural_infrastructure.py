@@ -161,6 +161,9 @@ _TEXTURE_FILE_STEMS = {
     "bridge": "b",
     "gravel": "g",
     "gravel_junction": "gj",
+    "paved_junction_sil": "pjs",
+    "paved_junction_asf": "pja",
+    "paved_junction_kos": "pjk",
     "power_pole": "up",
     "power_tower": "ut",
     "water_tower": "uw",
@@ -180,6 +183,12 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         "rock": (118, 116, 107),
         "gravel": (126, 119, 103),
         "gravel_junction": (126, 119, 103),
+        # Opaque, edge-free hub textures cover the shoulder stripes of stock
+        # road pieces where several paved arms meet.  Subtle family-specific
+        # tones keep the generated patch close to its adjoining CWA road set.
+        "paved_junction_sil": (108, 108, 105),
+        "paved_junction_asf": (82, 83, 81),
+        "paved_junction_kos": (101, 99, 94),
         "power_pole": (116, 102, 78),
         "power_tower": (118, 120, 119),
         "water_tower": (142, 148, 151),

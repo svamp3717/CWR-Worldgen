@@ -3034,15 +3034,19 @@ def _verify_single_world_pbo_layout(
 
     generated_road_models = tuple(
         entry for entry in canonical_expected
-        if entry.casefold().startswith("i\\gravel") and entry.casefold().endswith(".p3d")
+        if entry.casefold().startswith(("i\\gravel", "i\\paved_j"))
+        and entry.casefold().endswith(".p3d")
     )
-    gravel_texture_entries = {
+    road_texture_entries = {
         rf"i\{_texture_file_stem('gravel')}.paa".casefold(),
         rf"i\{_texture_file_stem('gravel_edge')}.paa".casefold(),
+        rf"i\{_texture_file_stem('paved_junction_sil')}.paa".casefold(),
+        rf"i\{_texture_file_stem('paved_junction_asf')}.paa".casefold(),
+        rf"i\{_texture_file_stem('paved_junction_kos')}.paa".casefold(),
     }
     generated_road_textures = tuple(
         entry for entry in canonical_expected
-        if entry.casefold() in gravel_texture_entries
+        if entry.casefold() in road_texture_entries
     )
     return {
         "mode": "single_world_pbo",

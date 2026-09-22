@@ -190,12 +190,17 @@ def gravel_junction_ray_exit_distance(
     return best
 
 
-def _arm_polygon(heading: float, half_width: float) -> ShapelyPolygon:
+def _arm_polygon(
+    heading: float,
+    half_width: float,
+    *,
+    arm_extent: float = GRAVEL_JUNCTION_ARM_EXTENT_METRES,
+) -> ShapelyPolygon:
     angle = math.radians(heading)
     direction = (math.sin(angle), math.cos(angle))
     perpendicular = (math.cos(angle), -math.sin(angle))
     inner = -0.20
-    extent = GRAVEL_JUNCTION_ARM_EXTENT_METRES
+    extent = float(arm_extent)
     return ShapelyPolygon(
         tuple(
             (
@@ -212,9 +217,18 @@ def _arm_polygon(heading: float, half_width: float) -> ShapelyPolygon:
     )
 
 
-def _junction_polygon(variant: str, half_width: float):
-    arms = tuple(_arm_polygon(heading, half_width) for heading in gravel_junction_template_headings(variant))
-    core = ShapelyPoint(0.0, 0.0).buffer(GRAVEL_JUNCTION_CORE_RADIUS_METRES, quad_segs=8)
+def _junction_polygon(
+    variant: str,
+    half_width: float,
+    *,
+    arm_extent: float = GRAVEL_JUNCTION_ARM_EXTENT_METRES,
+    core_radius: float = GRAVEL_JUNCTION_CORE_RADIUS_METRES,
+):
+    arms = tuple(
+        _arm_polygon(heading, half_width, arm_extent=arm_extent)
+        for heading in gravel_junction_template_headings(variant)
+    )
+    core = ShapelyPoint(0.0, 0.0).buffer(float(core_radius), quad_segs=8)
     polygon = unary_union((core, *arms))
     if polygon.geom_type == "MultiPolygon":
         polygon = max(polygon.geoms, key=lambda geom: geom.area)
