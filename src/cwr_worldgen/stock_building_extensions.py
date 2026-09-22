@@ -29,6 +29,7 @@ STOCK_BUILDING_BAS_O_SHANTY_PRESET = "stock-bas-o-shanty"
 STOCK_BUILDING_BAS_O_AFRICAHUT_PRESET = "stock-bas-o-africahut"
 STOCK_BUILDING_ART_BD_PRESET = "stock-art-bd"
 STOCK_BUILDING_CAF_KKK_BUILDINGS2_PRESET = "stock-caf-kkk-buildings2"
+STOCK_BUILDING_DMA_LIBYA_O_PRESET = "stock-dma-libya-o"
 
 # Legacy combined identifiers remain accepted when loading old profiles, but no
 # combined catalogue JSONs are shipped anymore. They expand into source sets.
@@ -48,6 +49,7 @@ _STOCK_ART_BD_CATALOGUE_PATH = _DATA_DIR / "art_bd.json"
 _STOCK_CAF_KKK_BUILDINGS2_CATALOGUE_PATH = (
     _DATA_DIR / "caf_kkk_buildings2.json"
 )
+_STOCK_DMA_LIBYA_O_CATALOGUE_PATH = _DATA_DIR / "DMA_libya_o.json"
 
 
 def _catalogue_display_name(path: Path, fallback: str) -> str:
@@ -99,6 +101,10 @@ STOCK_BUILDING_CAF_KKK_BUILDINGS2_LABEL = _catalogue_display_name(
     _STOCK_CAF_KKK_BUILDINGS2_CATALOGUE_PATH,
     "CAF_KKK_Buildings2.pbo buildings",
 )
+STOCK_BUILDING_DMA_LIBYA_O_LABEL = _catalogue_display_name(
+    _STOCK_DMA_LIBYA_O_CATALOGUE_PATH,
+    "DMA_libya_o.pbo buildings",
+)
 
 # Compatibility labels for code/imports that still know the old combined IDs.
 STOCK_BUILDING_COMBINED_LABEL = "Stock combined (non-Resistance + Resistance) buildings"
@@ -120,6 +126,7 @@ STOCK_BUILDING_PRESETS = (
     STOCK_BUILDING_BAS_O_AFRICAHUT_PRESET,
     STOCK_BUILDING_ART_BD_PRESET,
     STOCK_BUILDING_CAF_KKK_BUILDINGS2_PRESET,
+    STOCK_BUILDING_DMA_LIBYA_O_PRESET,
 )
 STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_VANILLA_LABEL),
@@ -132,6 +139,7 @@ STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_BAS_O_AFRICAHUT_PRESET, STOCK_BUILDING_BAS_O_AFRICAHUT_LABEL),
     (STOCK_BUILDING_ART_BD_PRESET, STOCK_BUILDING_ART_BD_LABEL),
     (STOCK_BUILDING_CAF_KKK_BUILDINGS2_PRESET, STOCK_BUILDING_CAF_KKK_BUILDINGS2_LABEL),
+    (STOCK_BUILDING_DMA_LIBYA_O_PRESET, STOCK_BUILDING_DMA_LIBYA_O_LABEL),
 )
 
 STOCK_BUILDING_MULTI_PREFIX = "stock-multi:"
@@ -166,6 +174,7 @@ _STOCK_CATALOGUE_BY_PRESET = {
     STOCK_BUILDING_BAS_O_AFRICAHUT_PRESET: _STOCK_BAS_O_AFRICAHUT_CATALOGUE_PATH,
     STOCK_BUILDING_ART_BD_PRESET: _STOCK_ART_BD_CATALOGUE_PATH,
     STOCK_BUILDING_CAF_KKK_BUILDINGS2_PRESET: _STOCK_CAF_KKK_BUILDINGS2_CATALOGUE_PATH,
+    STOCK_BUILDING_DMA_LIBYA_O_PRESET: _STOCK_DMA_LIBYA_O_CATALOGUE_PATH,
 }
 
 
@@ -285,6 +294,8 @@ def stock_model_source(model_path: object) -> str:
         return "art_bd"
     if path.startswith("caf_kkk_buildings2\\"):
         return "caf_kkk_buildings2"
+    if path.startswith("dma_libya_o\\"):
+        return "dma_libya_o"
     return "vanilla"
 
 
