@@ -14,6 +14,8 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_AGS_COMBINED_PRESET,
     STOCK_BUILDING_AGS_ONLY_LABEL,
     STOCK_BUILDING_AGS_ONLY_PRESET,
+    STOCK_BUILDING_ART_BD_LABEL,
+    STOCK_BUILDING_ART_BD_PRESET,
     STOCK_BUILDING_BAS_O_AFRICAHUT_LABEL,
     STOCK_BUILDING_BAS_O_AFRICAHUT_PRESET,
     STOCK_BUILDING_BAS_O_GENERAL_LABEL,
@@ -22,6 +24,8 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_BAS_O_MIDDLEAST_PRESET,
     STOCK_BUILDING_BAS_O_SHANTY_LABEL,
     STOCK_BUILDING_BAS_O_SHANTY_PRESET,
+    STOCK_BUILDING_CAF_KKK_BUILDINGS2_LABEL,
+    STOCK_BUILDING_CAF_KKK_BUILDINGS2_PRESET,
     STOCK_BUILDING_HAUS_COMBINED_PRESET,
     STOCK_BUILDING_HAUS_ONLY_LABEL,
     STOCK_BUILDING_HAUS_ONLY_PRESET,
@@ -195,6 +199,68 @@ def test_bas_o_catalogues_are_separate_named_source_presets() -> None:
         assert len(library.models) == expected_count
         assert {stock_model_source(model.model_path) for model in library.models} == {"bas_o"}
 
+
+
+def test_art_bd_and_caf_kkk_catalogues_are_selectable_source_presets() -> None:
+    data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
+    cases = (
+        (
+            "stock-model-categories_art_bd.json",
+            STOCK_BUILDING_ART_BD_PRESET,
+            STOCK_BUILDING_ART_BD_LABEL,
+            "ART_BD buildings",
+            "art_bd\\",
+            "art_bd",
+            37,
+        ),
+        (
+            "stock-model-categories_caf_kkk_buildings2.json",
+            STOCK_BUILDING_CAF_KKK_BUILDINGS2_PRESET,
+            STOCK_BUILDING_CAF_KKK_BUILDINGS2_LABEL,
+            "CAF KKK Buildings 2",
+            "caf_kkk_buildings2\\",
+            "caf_kkk_buildings2",
+            23,
+        ),
+    )
+
+    for filename, preset, label, expected_label, prefix, source, expected_count in cases:
+        document = json.loads((data_dir / filename).read_text(encoding="utf-8"))
+        paths = {row["model_path"].casefold() for row in document["models"]}
+
+        assert document["schema"] == 5
+        assert document["kind"] == "completed_model_classifications"
+        assert document["complete_count"] == expected_count
+        assert document["reviewed_count"] == expected_count
+        assert label == expected_label
+        assert len(paths) == expected_count
+        assert all(path.startswith(prefix) for path in paths)
+
+        library = _library(preset)
+        assert len(library.models) == expected_count
+        assert {stock_model_source(model.model_path) for model in library.models} == {source}
+
+
+def test_art_bd_and_caf_kkk_catalogues_are_recorded_in_build_metadata(
+    tmp_path: Path,
+) -> None:
+    combined = encode_stock_building_presets(
+        (
+            STOCK_BUILDING_ART_BD_PRESET,
+            STOCK_BUILDING_CAF_KKK_BUILDINGS2_PRESET,
+        )
+    )
+    library = _library(combined)
+    library.ground_texture_profile = "everon"
+    catalogue = tmp_path / "building-asset-catalogue.json"
+
+    library.write_assets(tmp_path / "source", catalogue)
+    document = json.loads(catalogue.read_text(encoding="utf-8"))
+
+    assert document["selected_building_jsons"] == [
+        "data/stock-model-categories_art_bd.json",
+        "data/stock-model-categories_caf_kkk_buildings2.json",
+    ]
 
 
 def test_legacy_combined_ids_expand_to_source_catalogues() -> None:
