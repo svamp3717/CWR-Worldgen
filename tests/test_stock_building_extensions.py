@@ -31,6 +31,7 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_RESISTANCE_PRESET,
     STOCK_BUILDING_VANILLA_PRESET,
     _PROCEDURAL_BRIDGES_CHECKBOX_TEXT,
+    _building_preset_grid_row,
     _remove_stock_buildings_overlapping_final_roads,
     _lift_stock_objects,
     _stock_options_first,
@@ -46,6 +47,20 @@ MIXED_STOCK_LABEL = "Stock combined (non-Resistance + Resistance) buildings"
 
 def _library(preset: str) -> StockBuildingLibrary:
     return StockBuildingLibrary(world_name="wg_stock_ext_test", house_style_preset=preset)
+
+
+def test_building_preset_controls_follow_current_gui_grid_row() -> None:
+    class _Label:
+        def __init__(self, row):
+            self.row = row
+
+        def grid_info(self):
+            return {"row": self.row}
+
+    assert _building_preset_grid_row(_Label(3)) == 3
+    assert _building_preset_grid_row(_Label("7")) == 7
+    assert _building_preset_grid_row(object(), default=5) == 5
+
 
 
 def test_multi_stock_preset_encoding_is_canonical_and_round_trips() -> None:

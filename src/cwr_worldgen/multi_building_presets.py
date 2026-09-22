@@ -706,8 +706,9 @@ def _install_gui() -> None:
                     ):
                         stock_ext._hide_widget(widget)
 
+                building_row = stock_ext._building_preset_grid_row(label)
                 box = gui.ttk.Frame(parent)
-                box.grid(row=2, column=1, sticky="w", pady=3)
+                box.grid(row=building_row, column=1, sticky="w", pady=3)
                 for index, (identifier, text) in enumerate(
                     stock_ext.STOCK_BUILDING_OPTIONS
                 ):
@@ -731,7 +732,7 @@ def _install_gui() -> None:
                     style="Hint.TLabel",
                     wraplength=700,
                 ).grid(
-                    row=3,
+                    row=building_row + 1,
                     column=0,
                     columnspan=2,
                     sticky="w",
@@ -788,12 +789,14 @@ def _install_gui() -> None:
                         widget.configure(text="Stock / modded building sets")
                     except Exception:
                         pass
+                building_row = stock_ext._building_preset_grid_row(labels[0])
+                procedural_row = building_row + 2
                 gui.ttk.Label(parent, text="Procedural building styles").grid(
-                    row=4, column=0, sticky="nw", padx=(0, 10), pady=(8, 3)
+                    row=procedural_row, column=0, sticky="nw", padx=(0, 10), pady=(8, 3)
                 )
 
                 holder = gui.ttk.Frame(parent)
-                holder.grid(row=4, column=1, sticky="nsew", pady=(8, 3))
+                holder.grid(row=procedural_row, column=1, sticky="nsew", pady=(8, 3))
                 canvas = gui.tk.Canvas(
                     holder,
                     height=190,
@@ -845,7 +848,13 @@ def _install_gui() -> None:
                     textvariable=self.multi_building_selection_var,
                     style="Hint.TLabel",
                     wraplength=700,
-                ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+                ).grid(
+                    row=procedural_row + 1,
+                    column=0,
+                    columnspan=2,
+                    sticky="w",
+                    pady=(4, 0),
+                )
 
             def _apply_encoded_selection(self, raw_value: object) -> None:
                 try:

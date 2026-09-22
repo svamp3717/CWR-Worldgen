@@ -19,6 +19,12 @@ from cwr_worldgen._version import GENERATOR_VERSION
 from cwr_worldgen.cli import _parser
 from cwr_worldgen.location_example import square_bbox
 from cwr_worldgen.milestone9 import (
+    KOLGUJEV_BUSH_MODELS,
+    KOLGUJEV_FOREST_BLOCK_MODEL,
+    KOLGUJEV_FOREST_SECONDARY_BLOCK_MODEL,
+    KOLGUJEV_FOREST_STEEP_MODEL,
+    KOLGUJEV_ROADSIDE_TREE_MODELS,
+    KOLGUJEV_SINGLE_TREE_MODEL,
     MALDEN_BUSH_MODELS,
     MALDEN_FOREST_BLOCK_MODEL,
     MALDEN_ROADSIDE_TREE_MODELS,
@@ -563,6 +569,52 @@ class SurfacePassTests(unittest.TestCase):
         self.assertTrue(all(path.casefold().startswith("o\\tree" + "\\") for path in tree_paths))
         self.assertFalse(any(path.casefold().startswith("data3d" + "\\") for path in tree_paths))
 
+    def test_kolgujev_profile_resolves_stock_cain_conifer_mix(self) -> None:
+        spec = Milestone9Spec(
+            source_dir=Path("unused"),
+            forest_profile="kolgujev",
+        )
+        resolved = _resolved_forest_profile_models(spec)
+
+        self.assertEqual(resolved["forest_tree_model"], KOLGUJEV_FOREST_BLOCK_MODEL)
+        self.assertEqual(resolved["forest_single_tree_model"], KOLGUJEV_SINGLE_TREE_MODEL)
+        self.assertEqual(
+            tuple(resolved["forest_roadside_tree_models"]),
+            KOLGUJEV_ROADSIDE_TREE_MODELS,
+        )
+        self.assertEqual(
+            tuple(resolved["forest_roadside_bush_models"]),
+            KOLGUJEV_BUSH_MODELS,
+        )
+        self.assertTrue(
+            all(
+                str(path).casefold().startswith("data3d" + "\\")
+                for path in (
+                    resolved["forest_single_tree_model"],
+                    *resolved["forest_roadside_tree_models"],
+                    *resolved["forest_roadside_bush_models"],
+                )
+            )
+        )
+        self.assertFalse(
+            any(
+                str(path).casefold().startswith("o\\tree" + "\\")
+                for path in (
+                    resolved["forest_single_tree_model"],
+                    *resolved["forest_roadside_tree_models"],
+                    *resolved["forest_roadside_bush_models"],
+                )
+            )
+        )
+        self.assertEqual(
+            KOLGUJEV_FOREST_SECONDARY_BLOCK_MODEL,
+            r"data3d\les ctverec pruchozi_T2.p3d",
+        )
+        self.assertEqual(
+            KOLGUJEV_FOREST_STEEP_MODEL,
+            r"data3d\les trojuhelnik pruchozi.p3d",
+        )
+
     def test_nogova_pine_blocks_resolve_only_resistance_pine_trees(self) -> None:
         spec = Milestone9Spec(
             source_dir=Path("unused"),
@@ -582,6 +634,16 @@ class SurfacePassTests(unittest.TestCase):
         )
         self.assertTrue(all(path.casefold().startswith("o\\tree" + "\\") for path in tree_paths))
         self.assertFalse(any(path.casefold().startswith("data3d" + "\\") for path in tree_paths))
+
+    def test_kolgujev_surface_profile_uses_stock_cain_roles(self) -> None:
+        paths = surface_texture_wire_paths("cwr_cain", "kolgujev")
+        self.assertEqual(paths[MATERIAL_INDEX["w"]], r"cain\l4.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["g"]], r"cain\j9.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["s"]], r"cain\t9.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["f"]], r"cain\u2.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["r"]], r"cain\k5.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["k"]], r"cain\k5.paa")
+        self.assertTrue(all(path.casefold().startswith("cain\\") for path in paths))
 
     def test_desert_profile_is_packaged_without_changing_everon_paths(self) -> None:
         world_name = "abcdefghijklmnopqrst"

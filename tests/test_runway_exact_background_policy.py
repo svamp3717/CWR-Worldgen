@@ -108,6 +108,7 @@ def test_exact_loader_reads_world_local_generated_texture(tmp_path) -> None:
     ("profile", "wire_path"),
     (
         ("nogova", r"o\t1.paa"),
+        ("kolgujev", r"cain\j9.paa"),
         ("everon", r"eden\tn.paa"),
         ("malden", r"abel\tt.paa"),
         ("desert", r"o\ps.paa"),

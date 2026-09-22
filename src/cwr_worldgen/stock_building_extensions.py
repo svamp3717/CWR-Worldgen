@@ -366,6 +366,18 @@ def _find_widgets_by_text(root, text: str):
     return result
 
 
+def _building_preset_grid_row(label, default: int = 3) -> int:
+    """Return the current Building presets row instead of assuming an old layout."""
+
+    try:
+        info = label.grid_info()
+        if info and "row" in info:
+            return int(info["row"])
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return int(default)
+
+
 def _find_combobox_for_variable(root, variable):
     try:
         children = root.winfo_children()
@@ -626,8 +638,9 @@ def _install_gui() -> None:
                 for hint in _find_widgets_by_text(self, _BUILDING_PRESET_HINT_TEXT):
                     _hide_widget(hint)
 
+                building_row = _building_preset_grid_row(label)
                 box = gui.ttk.Frame(parent)
-                box.grid(row=2, column=1, sticky="w", pady=3)
+                box.grid(row=building_row, column=1, sticky="w", pady=3)
                 for index, (identifier, text) in enumerate(STOCK_BUILDING_OPTIONS):
                     gui.ttk.Checkbutton(
                         box,
@@ -646,7 +659,13 @@ def _install_gui() -> None:
                     textvariable=self.stock_building_selection_var,
                     style="Hint.TLabel",
                     wraplength=700,
-                ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+                ).grid(
+                    row=building_row + 1,
+                    column=0,
+                    columnspan=2,
+                    sticky="w",
+                    pady=(6, 0),
+                )
 
             def _stock_building_controls_are_exclusive(self) -> bool:
                 """Whether stock selection should disable procedural-only settings."""

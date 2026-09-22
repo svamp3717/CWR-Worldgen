@@ -155,6 +155,20 @@ MALDEN_BORDER_PROXY_MODELS: tuple[str, ...] = (
 )
 MALDEN_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = MALDEN_BORDER_PROXY_MODELS
 
+# Kolgujev/Cain fallbacks use the same compact generated-cluster geometry but
+# remap its children to the conifer-heavy Data3D mix found in stock cain.wrp.
+KOLGUJEV_PROXY_MODELS: tuple[str, ...] = (
+    r"data3d\str smrk.p3d",
+    r"data3d\str smrk ridky.p3d",
+)
+KOLGUJEV_BORDER_PROXY_MODELS: tuple[str, ...] = (
+    r"data3d\krovi2.p3d",
+    r"data3d\krovi3.p3d",
+    r"data3d\str_smrcicicek.p3d",
+    r"data3d\str jedle.p3d",
+)
+KOLGUJEV_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = KOLGUJEV_BORDER_PROXY_MODELS
+
 # Compatibility aliases: generic Nogova means the ordinary/leaf family.
 NOGOVA_PROXY_MODELS = NOGOVA_LEAF_PROXY_MODELS
 NOGOVA_BORDER_PROXY_MODELS = NOGOVA_LEAF_BORDER_PROXY_MODELS
@@ -437,13 +451,17 @@ def _profiled_cluster_variant(variant: ForestClusterVariant, proxy_profile: str)
         return variant
     if profile == "nogova":
         profile = "nogova_leaf"
-    if profile not in {"nogova_leaf", "nogova_pine", "malden"}:
+    if profile not in {"nogova_leaf", "nogova_pine", "kolgujev", "malden"}:
         raise ValueError(f"unsupported forest proxy profile: {proxy_profile!r}")
 
     if profile == "malden":
         proxy_models = MALDEN_PROXY_MODELS
         border_models = MALDEN_BORDER_PROXY_MODELS
         undergrowth_models = MALDEN_UNDERGROWTH_PROXY_MODELS
+    elif profile == "kolgujev":
+        proxy_models = KOLGUJEV_PROXY_MODELS
+        border_models = KOLGUJEV_BORDER_PROXY_MODELS
+        undergrowth_models = KOLGUJEV_UNDERGROWTH_PROXY_MODELS
     else:
         proxy_models = NOGOVA_PINE_PROXY_MODELS if profile == "nogova_pine" else NOGOVA_LEAF_PROXY_MODELS
         border_models = NOGOVA_PINE_BORDER_PROXY_MODELS if profile == "nogova_pine" else NOGOVA_LEAF_BORDER_PROXY_MODELS
@@ -723,7 +741,7 @@ class ProceduralForestClusterLibrary:
         if self.proxy_profile == "nogova":
             self.proxy_profile = "nogova_leaf"
         if self.proxy_profile not in {
-            "everon", "nogova_leaf", "nogova_pine"
+            "everon", "nogova_leaf", "nogova_pine", "kolgujev", "malden"
         }:
             raise ValueError(f"unsupported forest proxy profile: {proxy_profile!r}")
         self.cache_hits = 0

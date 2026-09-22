@@ -101,6 +101,21 @@ def _object_matrix_4x3_fast(obj: WorldObject) -> tuple[float, ...]:
     heading = math.radians(obj.heading_degrees)
     cosine_heading = math.cos(heading)
     sine_heading = math.sin(heading)
+    shear_x = float(getattr(obj, "terrain_shear_x", 0.0))
+    shear_z = float(getattr(obj, "terrain_shear_z", 0.0))
+    if not math.isfinite(shear_x) or not math.isfinite(shear_z):
+        raise ValueError("object terrain shear must be finite")
+    if shear_x != 0.0 or shear_z != 0.0:
+        if obj.pitch_degrees != 0.0:
+            raise ValueError("terrain-sheared objects do not support pitch")
+        local_x_shear = shear_x * cosine_heading - shear_z * sine_heading
+        local_z_shear = shear_x * sine_heading + shear_z * cosine_heading
+        return (
+            cosine_heading, local_x_shear, -sine_heading,
+            0.0, 1.0, 0.0,
+            sine_heading, local_z_shear, cosine_heading,
+            obj.x, obj.y, obj.z,
+        )
     if obj.pitch_degrees == 0.0:
         # Preserve the exact signed-zero bytes produced by WorldObject.matrix_4x3.
         # RVW4 does not care about +/-0.0, but byte-identical regeneration does.
