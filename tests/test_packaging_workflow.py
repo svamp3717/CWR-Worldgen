@@ -41,8 +41,8 @@ class PackagingWorkflowTests(unittest.TestCase):
             "stock_building_models_resistance.json",
             "haus.pbo buildings only.json",
             "ags inds+port.json",
-            "stock-model-categories_art_bd.json",
-            "stock-model-categories_caf_kkk_buildings2.json",
+            "art_bd.json",
+            "caf_kkk_buildings2.json",
         ):
             self.assertTrue((data_dir / name).is_file(), name)
 
