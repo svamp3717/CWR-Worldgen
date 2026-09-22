@@ -241,7 +241,7 @@ def _terrain_candidates(raster, spec, primary, road_hits: np.ndarray) -> np.ndar
 
 
 def _build_context(dataset, projection, raster, elevations, spec, progress):
-    if str(getattr(spec, "forest_profile", "malden")).casefold() not in {"everon", "malden"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() not in {"everon", "kolgujev", "malden"}:
         return None
     if int(getattr(spec, "max_forest_objects", 0)) == 0:
         return None

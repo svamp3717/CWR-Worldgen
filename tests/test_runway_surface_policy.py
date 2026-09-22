@@ -89,6 +89,60 @@ def _base_texture_table(profile: str = "everon") -> tuple[str, ...]:
     )
 
 
+def test_kolgujev_uses_one_main_cain_land_tile() -> None:
+    paths = surface_pass.surface_texture_wire_paths("wg_kolgujev", "kolgujev")
+    water_codes = {"w", "q"}
+
+    for material in surface_pass.MILESTONE9_MATERIALS:
+        expected = r"cain\l4.paa" if material.code in water_codes else r"cain\j9.paa"
+        assert paths[surface_pass.MATERIAL_INDEX[material.code]] == expected
+
+    # Forest, farmland and mountain semantics must not introduce their old
+    # high-contrast Cain tiles. They remain semantic masks only.
+    assert r"cain\u2.paa" not in paths
+    assert r"cain\k5.paa" not in paths
+    assert r"cain\t9.paa" not in paths
+    assert all(path.casefold().startswith("cain\\") for path in paths)
+    assert not any(
+        path.casefold().startswith("wg_kolgujev\\data\\") for path in paths
+    )
+
+    legacy = generator._ground_texture_paths(
+        SimpleNamespace(
+            name="wg_kolgujev",
+            ground_texture_profile="kolgujev",
+            surface_pass_enabled=False,
+            surface_ground_mode="milestone8",
+        )
+    )
+    assert legacy == (
+        r"cain\l4.paa",
+        r"cain\j9.paa",
+        r"cain\j9.paa",
+        r"cain\j9.paa",
+        r"cain\j9.paa",
+        r"cain\j9.paa",
+        r"cain\j9.paa",
+        r"cain\j9.paa",
+    )
+
+
+def test_kolgujev_surface_writer_emits_no_world_local_ground_tiles(tmp_path) -> None:
+    written = surface_pass.write_surface_textures(
+        tmp_path,
+        "wg_kolgujev",
+        "kolgujev",
+        "kolgujev-stock-test",
+        128,
+    )
+
+    assert written == ()
+    assert not (tmp_path / "data").exists()
+    assert set(surface_pass.KOLGUJEV_SURFACE_TEXTURES) == {
+        material.code for material in surface_pass.MILESTONE9_MATERIALS
+    }
+
+
 def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
     paths = surface_pass.surface_texture_wire_paths("wg_malden", "malden")
 

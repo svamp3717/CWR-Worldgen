@@ -65,6 +65,7 @@ from .terrain import (
 from .wrp import inspect_rvw4, quantize_elevations, quantize_height, write_rvw4
 from .surface_pass import (
     MILESTONE9_MATERIALS,
+    STOCK_SURFACE_TEXTURES,
     SurfacePassReport,
     build_surface_pass,
     external_surface_texture_paths,
@@ -84,6 +85,7 @@ from .osm import (
     OSM_INDIVIDUAL_TREE_MODELS,
     NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS,
     NOGOVA_PINE_INDIVIDUAL_TREE_MODELS,
+    KOLGUJEV_INDIVIDUAL_TREE_MODELS,
     MALDEN_INDIVIDUAL_TREE_MODELS,
     STOCK_STONE_MODELS,
     STOCK_FARMLAND_FENCE_MODELS,
@@ -174,6 +176,8 @@ def _forest_proxy_profile(spec: object) -> str:
         return "nogova_pine"
     if model.startswith(r"o\tree\les_nw_"):
         return "nogova_leaf"
+    if str(getattr(spec, "forest_profile", "")).casefold() == "kolgujev":
+        return "kolgujev"
     if (
         str(getattr(spec, "forest_profile", "")).casefold() == "malden"
         or model == r"data3d\les_su_ctver_pruhozi.p3d"
@@ -963,7 +967,7 @@ def _validate_milestone3(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "malden"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "malden"}:
         checks.append((
             "Steep forest blocks use the normal/sunk triangle or reusable fallback ladder",
             (
@@ -1576,7 +1580,7 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
         canonical_asset_path(spec.forest_tree_model),
     }
     if milestone_number >= 9:
-        if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon"}:
+        if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev"}:
             trusted.add(canonical_asset_path(str(getattr(spec, "forest_everon_steep_model", ""))))
         # Road-cut forest blocks use individually checked stock trees and bushes
         # in both the Everon and Malden profiles. Keep those original game assets
@@ -1600,6 +1604,8 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
             if proxy_profile == "nogova_pine"
             else NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS
             if proxy_profile == "nogova_leaf"
+            else KOLGUJEV_INDIVIDUAL_TREE_MODELS
+            if proxy_profile == "kolgujev"
             else MALDEN_INDIVIDUAL_TREE_MODELS
             if proxy_profile == "malden"
             else OSM_INDIVIDUAL_TREE_MODELS
@@ -1893,7 +1899,7 @@ def _validate_milestone4(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "malden"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "malden"}:
         checks.append((
             "Steep forest blocks use the modern terrain-fit fallback ladder",
             (
@@ -2716,7 +2722,7 @@ def _load_nonroad_objects(
         "starting_object_id": starting_object_id,
         "spec": _spec_fields(spec, _PLACEMENT_CACHE_FIELDS),
     }
-    key = cache_key("nonroad-object-placement-v96-road-safe-settlement-clutter", payload)
+    key = cache_key("nonroad-object-placement-v98-stock-nogova-leaf-pairs", payload)
     path = cache_dir / "placements" / f"{key}.pickle" if cache_dir is not None else None
 
     def produce():
@@ -3078,10 +3084,12 @@ def build_milestone4(
     material_texture_paths = tuple(source_dir / "data" / f"{material.code}.paa" for material in materials)
     dummy_texture_path = source_dir / "data" / "d.paa"
     if _surface_ground_enabled(spec):
+        stock_surface_paths = STOCK_SURFACE_TEXTURES.get(
+            _ground_texture_profile(spec), {}
+        )
         generated_material_texture_paths = tuple(
             path for path, material in zip(material_texture_paths, materials)
-            if _ground_texture_profile(spec) not in {"everon", "nogova", "malden"}
-            or getattr(material, "everon_path", None) is None
+            if material.code not in stock_surface_paths
         )
     else:
         generated_material_texture_paths = material_texture_paths if _ground_texture_profile(spec) in {"generated", "desert"} else ()

@@ -22,6 +22,7 @@ from typing import Iterable, Sequence
 
 STOCK_RUNWAY_BACKGROUND_TEXTURES: dict[str, str] = {
     "nogova": r"o\t1.paa",
+    "kolgujev": r"cain\j9.paa",
     "everon": r"Eden\tn.paa",
     "malden": r"abel\tt.paa",
     "desert": r"o\ps.paa",

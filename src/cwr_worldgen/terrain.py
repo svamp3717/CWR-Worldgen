@@ -72,13 +72,31 @@ MALDEN_GROUND_TEXTURES: dict[str, str] = {
     "p": r"abel\tt.paa",
 }
 
+# Kolgujev/Cain uses one main dry-land texture in generated worlds so OSM
+# semantic masks do not produce large farmland, forest or mountain colour blocks.
+# The classifications still drive object placement; only their visible ground tile
+# is unified. Water keeps the stock Cain sea tile.
+_KOLGUJEV_SEA_TEXTURE = r"cain\l4.paa"
+_KOLGUJEV_MAIN_LAND_TEXTURE = r"cain\j9.paa"
+KOLGUJEV_GROUND_TEXTURES: dict[str, str] = {
+    "w": _KOLGUJEV_SEA_TEXTURE,
+    "s": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "g": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "r": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "f": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "a": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "u": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "p": _KOLGUJEV_MAIN_LAND_TEXTURE,
+}
+
 STOCK_GROUND_TEXTURES: dict[str, dict[str, str]] = {
     "everon": EVERON_GROUND_TEXTURES,
     "nogova": NOGOVA_GROUND_TEXTURES,
     "malden": MALDEN_GROUND_TEXTURES,
+    "kolgujev": KOLGUJEV_GROUND_TEXTURES,
 }
 
-GROUND_TEXTURE_PROFILES = ("nogova", "malden", "everon", "generated", "desert")
+GROUND_TEXTURE_PROFILES = ("nogova", "kolgujev", "malden", "everon", "generated", "desert")
 
 
 MALDEN_MATERIAL_COLOURS: dict[str, tuple[int, int, int]] = {

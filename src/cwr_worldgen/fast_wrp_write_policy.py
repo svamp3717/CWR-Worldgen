@@ -102,13 +102,17 @@ def _fast_write_rvw4(
             for start in range(0, object_count, _CHUNK_OBJECTS):
                 end = min(object_count, start + _CHUNK_OBJECTS)
                 chunk = objects[start:end]
-                rows: list[tuple[float, float, float, float, float]] = []
+                rows: list[
+                    tuple[float, float, float, float, float, float, float]
+                ] = []
                 models: list[bytes] = []
 
                 for obj in chunk:
                     rows.append((
                         float(obj.x), float(obj.y), float(obj.z),
                         float(obj.heading_degrees), float(obj.pitch_degrees),
+                        float(getattr(obj, "terrain_shear_x", 0.0)),
+                        float(getattr(obj, "terrain_shear_z", 0.0)),
                     ))
                     model = model_cache.get(obj.model_path)
                     if model is None:
@@ -123,8 +127,13 @@ def _fast_write_rvw4(
                 if numeric.size and not np.all(np.isfinite(numeric)):
                     raise ValueError("object coordinates and orientation must be finite")
                 pitches = numeric[:, 4] if numeric.size else np.empty(0, dtype=np.float64)
+                shear_x = numeric[:, 5] if numeric.size else np.empty(0, dtype=np.float64)
+                shear_z = numeric[:, 6] if numeric.size else np.empty(0, dtype=np.float64)
                 if pitches.size and np.any((pitches <= -89.0) | (pitches >= 89.0)):
                     raise ValueError("object pitch must be within -89..89 degrees")
+                sheared = (shear_x != 0.0) | (shear_z != 0.0)
+                if pitches.size and np.any(sheared & (pitches != 0.0)):
+                    raise ValueError("terrain-sheared objects do not support pitch")
 
                 records = np.empty(end - start, dtype=_RECORD_DTYPE)
                 heading = np.deg2rad(numeric[:, 3])
@@ -135,13 +144,13 @@ def _fast_write_rvw4(
                 sp = np.sin(pitch)
                 rotation = records["rotation"]
                 rotation[:, 0] = ch
-                rotation[:, 1] = 0.0
+                rotation[:, 1] = shear_x * ch - shear_z * sh
                 rotation[:, 2] = -sh
                 rotation[:, 3] = -sh * sp
                 rotation[:, 4] = cp
                 rotation[:, 5] = -ch * sp
                 rotation[:, 6] = sh * cp
-                rotation[:, 7] = sp
+                rotation[:, 7] = sp + shear_x * sh + shear_z * ch
                 rotation[:, 8] = ch * cp
                 records["position"] = numeric[:, :3]
                 records["object_id"] = np.arange(start + 1, end + 1, dtype=np.int32)

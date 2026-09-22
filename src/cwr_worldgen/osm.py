@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw
 from ._version import __version__
 from .cache import CACHE_SCHEMA_VERSION, atomic_write_bytes, cache_key, streaming_hash
 from .building_semantics import is_actual_church
-from .model import OsmSpec, WorldObject
+from .model import OsmSpec, TerrainShearedWorldObject, WorldObject
 from .network import (
     OVERPASS_RATE_LIMIT_BACKOFF_SECONDS,
     OVERPASS_REFERER,
@@ -87,6 +87,29 @@ FARMLAND_FENCE_DUPLICATE_MINIMUM_OVERLAP_METRES = 1.0
 FARMLAND_FENCE_DUPLICATE_HEADING_TOLERANCE_DEGREES = 12.0
 RURAL_FENCE_LANDUSES = frozenset({"farmland", "meadow"})
 RURAL_FENCE_NATURALS = frozenset({"grassland"})
+
+# Original Nogova/Resistance leaf-forest pair measured from the stock noe.wrp.
+# Each populated 50 m forest cell carries both models at fixed offsets. Their
+# object origins sit roughly 9 m above the terrain, and the transform shears
+# local X/Z into Y to follow the terrain plane while keeping tree trunks upright.
+NOGOVA_LEAF_FOREST_BLOCK_MODEL = r"o\tree\les_nw_ctver_pruhozi_T1.p3d"
+NOGOVA_LEAF_FOREST_TRIANGLE_MODEL = r"o\tree\les_nw_trojuhelnik.p3d"
+NOGOVA_LEAF_FOREST_ORIGIN_LIFT_METRES = 9.0
+NOGOVA_LEAF_FOREST_BLOCK_OFFSET = (-4.646399093000856, -7.1054660744863)
+NOGOVA_LEAF_FOREST_TRIANGLE_OFFSET = (4.344323451769405, 7.22297196061644)
+NOGOVA_LEAF_FOREST_MAXIMUM_SHEAR = 0.60
+
+# Stock Kolgujev/Cain forest geometry measured from the supplied cain.wrp.
+# Every full Cain forest cell pairs the T1 and T2 squares; triangle blocks occupy
+# separate edge/partial cells. The square origins sit about 11.7 m above terrain
+# and use the same upright terrain-shear transform family as the stock WRP.
+KOLGUJEV_FOREST_BLOCK_MODEL = r"data3d\les ctverec pruchozi_T1.p3d"
+KOLGUJEV_FOREST_SECONDARY_BLOCK_MODEL = r"data3d\les ctverec pruchozi_T2.p3d"
+KOLGUJEV_FOREST_TRIANGLE_MODEL = r"data3d\les trojuhelnik pruchozi.p3d"
+KOLGUJEV_FOREST_ORIGIN_LIFT_METRES = 11.70
+KOLGUJEV_FOREST_T1_OFFSET = (2.1133, 2.0981)
+KOLGUJEV_FOREST_T2_OFFSET = (-0.4591, -1.6689)
+KOLGUJEV_FOREST_MAXIMUM_SHEAR = 0.60
 
 # Urban-detail assets. Keep this layer vanilla-only: every model below ships
 # with OFP/Cold War Assault. The base game does not provide a modern modular
@@ -294,6 +317,31 @@ NOGOVA_PINE_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
     r"o\tree\DD_borovice.p3d",
     r"o\tree\DD_borovice02.p3d",
 )
+# Stock Kolgujev/Cain individual vegetation from the supplied cain.wrp.
+# Generic/unknown trees stay conifer-heavy; explicitly broadleaved OSM trees use
+# the smaller broadleaf subset that Cain itself contains.
+KOLGUJEV_CONIFER_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
+    r"data3d\str smrk.p3d",
+    r"data3d\str smrk ridky.p3d",
+    r"data3d\str_smrcicicek.p3d",
+    r"data3d\str smrk_medium.p3d",
+    r"data3d\str jedle.p3d",
+    r"data3d\str borovice.p3d",
+    r"data3d\str borovice horska.p3d",
+    r"data3d\str smrk vysoky.p3d",
+)
+KOLGUJEV_BROADLEAF_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = (
+    r"data3d\str briza.p3d",
+    r"data3d\str_briza_rovna.p3d",
+    r"data3d\str_briza_kriva.p3d",
+    r"data3d\str dub.p3d",
+    r"data3d\str dub jiny.p3d",
+    r"data3d\str kastan.p3d",
+    r"data3d\str jerabina.p3d",
+    r"data3d\str javor.p3d",
+)
+KOLGUJEV_INDIVIDUAL_TREE_MODELS: tuple[str, ...] = KOLGUJEV_CONIFER_INDIVIDUAL_TREE_MODELS
+
 # Original CWC Malden/Abel individual-tree family. Use this for mapped tree
 # points too, not only forest fallbacks, so the classic preset does not leak
 # Everon spruces/broadleaf assets into otherwise Malden vegetation.
@@ -8820,15 +8868,28 @@ def generate_world_objects(
     seed = str(getattr(spec, "deterministic_seed", "cwr-worldgen"))
     low_anchor = bool(getattr(spec, "forest_low_anchor", False))
     forest_profile = str(getattr(spec, "forest_profile", "malden")).casefold()
-    # Everon and Malden classic share the same road-safe, terrain-fit forest
-    # placement machinery. The profile now selects scenery assets, not an older
-    # placement algorithm.
-    modern_forest_profile = forest_profile in {"everon", "malden"}
+    # Everon, Kolgujev and Malden share the road-safe forest placement ladder.
+    # The selected profile controls the scenery family and stock-island quirks.
+    modern_forest_profile = forest_profile in {"everon", "kolgujev", "malden"}
     # Legacy field name from 0.9.252. In 0.9.254+ this means "replace the
     # rigid stock square/triangle forest polygon models with tiled generated
     # clusters". Individually grounded trees remain the last-resort fallback.
     forest_polygon_models_disabled = bool(
         getattr(spec, "forest_individual_objects_only", False)
+    )
+    active_forest_model = (
+        str(getattr(spec, "forest_tree_model", ""))
+        .replace("/", "\\")
+        .casefold()
+    )
+    nogova_leaf_stock_forest = (
+        active_forest_model == NOGOVA_LEAF_FOREST_BLOCK_MODEL.casefold()
+        and not forest_polygon_models_disabled
+    )
+    kolgujev_stock_forest = (
+        forest_profile == "kolgujev"
+        and active_forest_model == KOLGUJEV_FOREST_BLOCK_MODEL.casefold()
+        and not forest_polygon_models_disabled
     )
     individual_tree_root_sink = max(
         0.0,
@@ -8901,11 +8962,16 @@ def generate_world_objects(
                     r"data3d\les trojuhelnik pruchozi.p3d",
                 )
             )
-            if forest_profile == "everon"
+            if forest_profile in {"everon", "kolgujev"}
             else ""
         )
         everon_steep_footprint = max(
             8.0, float(getattr(spec, "forest_everon_steep_footprint", 35.0))
+        )
+        nogova_leaf_stock_pair = (
+            nogova_leaf_stock_forest
+            and everon_steep_model.replace("/", "\\").casefold()
+            == NOGOVA_LEAF_FOREST_TRIANGLE_MODEL.casefold()
         )
         everon_steep_maximum_relief = max(
             0.0, float(getattr(spec, "forest_everon_steep_maximum_relief", 18.0))
@@ -9228,6 +9294,58 @@ def generate_world_objects(
                     continue
 
                 if forest_sample_count != len(samples):
+                    if (
+                        kolgujev_stock_forest
+                        and forest_sample_count >= 2
+                        and everon_steep_model.replace("/", "\\").casefold()
+                        == KOLGUJEV_FOREST_TRIANGLE_MODEL.casefold()
+                        and not any(
+                            raster.water[index] or raster.roads[index] or raster.buildings[index]
+                            for index in sample_indices
+                        )
+                        and forest_count < forest_limit
+                    ):
+                        geographic_column, geographic_row = _geographic_lattice_identity(
+                            projection, x, z, spacing
+                        )
+                        digest = hashlib.blake2s(
+                            f"{seed}:cain-triangle:{geographic_column}:{geographic_row}".encode("utf-8"),
+                            digest_size=2,
+                        ).digest()
+                        triangle_heading = float((int.from_bytes(digest, "little") % 4) * 90)
+                        triangle_supports = _oriented_footprint_elevation_samples(
+                            elevations,
+                            spec.cells,
+                            spec.cell_size,
+                            x,
+                            z,
+                            everon_steep_footprint * 0.58,
+                            everon_steep_footprint,
+                            triangle_heading,
+                        )
+                        triangle_relief = max(triangle_supports) - min(triangle_supports)
+                        if triangle_relief <= everon_steep_maximum_relief:
+                            triangle_y = (
+                                _sample_elevation(
+                                    elevations, spec.cells, spec.cell_size, x, z
+                                )
+                                + KOLGUJEV_FOREST_ORIGIN_LIFT_METRES
+                            )
+                            emit(
+                                WorldObject(
+                                    next_id,
+                                    everon_steep_model,
+                                    x,
+                                    triangle_y,
+                                    z,
+                                    triangle_heading,
+                                )
+                            )
+                            next_id += 1
+                            forest_count += 1
+                            forest_everon_steep_objects += 1
+                            forest_hillside_fallback_blocks += 1
+                            mark_accepted_forest(x, z, everon_steep_footprint * 0.68)
                     continue
                 if any(
                     raster.water[index] or raster.roads[index] or raster.buildings[index]
@@ -9244,24 +9362,107 @@ def generate_world_objects(
                 ).digest()
                 heading = float((int.from_bytes(digest, "little") % 4) * 90)
 
+                # Stock Nogova leaf forests use a square + triangle pair per
+                # 50 m forest cell. noe.wrp places both origins about 9 m above
+                # terrain and shears their transforms to the local height plane.
+                # Reproduce that compact engine-native layout instead of replacing
+                # one forest cell with many individually grounded trees.
+                stock_pair_failed = False
+                stock_pair_origin_lift = 0.0
+                stock_pair_maximum_shear = 0.0
+                if nogova_leaf_stock_pair:
+                    pair_specs = (
+                        (spec.forest_tree_model, NOGOVA_LEAF_FOREST_BLOCK_OFFSET),
+                        (everon_steep_model, NOGOVA_LEAF_FOREST_TRIANGLE_OFFSET),
+                    )
+                    stock_pair_origin_lift = NOGOVA_LEAF_FOREST_ORIGIN_LIFT_METRES
+                    stock_pair_maximum_shear = NOGOVA_LEAF_FOREST_MAXIMUM_SHEAR
+                elif kolgujev_stock_forest:
+                    pair_specs = (
+                        (KOLGUJEV_FOREST_BLOCK_MODEL, KOLGUJEV_FOREST_T1_OFFSET),
+                        (KOLGUJEV_FOREST_SECONDARY_BLOCK_MODEL, KOLGUJEV_FOREST_T2_OFFSET),
+                    )
+                    stock_pair_origin_lift = KOLGUJEV_FOREST_ORIGIN_LIFT_METRES
+                    stock_pair_maximum_shear = KOLGUJEV_FOREST_MAXIMUM_SHEAR
+                else:
+                    pair_specs = ()
+
+                if pair_specs:
+                    if forest_count + len(pair_specs) > forest_limit:
+                        forest_truncated = True
+                        break
+                    pair_objects: list[TerrainShearedWorldObject] = []
+                    pair_safe = True
+                    for pair_index, (pair_model, (offset_x, offset_z)) in enumerate(pair_specs):
+                        pair_x = x + offset_x
+                        pair_z = z + offset_z
+                        if not forest_point_inside_edge_guard(
+                            pair_x, pair_z, max(forest_world_edge_margin, 26.0)
+                        ):
+                            pair_safe = False
+                            break
+                        gradient_x, gradient_z = _local_terrain_gradient(
+                            elevations, spec.cells, spec.cell_size, pair_x, pair_z
+                        )
+                        if math.hypot(gradient_x, gradient_z) > stock_pair_maximum_shear:
+                            pair_safe = False
+                            break
+                        pair_y = (
+                            _sample_elevation(
+                                elevations, spec.cells, spec.cell_size, pair_x, pair_z
+                            )
+                            + stock_pair_origin_lift
+                        )
+                        pair_objects.append(
+                            TerrainShearedWorldObject(
+                                next_id + pair_index,
+                                pair_model,
+                                pair_x,
+                                pair_y,
+                                pair_z,
+                                0.0,
+                                0.0,
+                                terrain_shear_x=gradient_x,
+                                terrain_shear_z=gradient_z,
+                            )
+                        )
+                    if pair_safe:
+                        for pair_object in pair_objects:
+                            emit(pair_object)
+                        next_id += len(pair_objects)
+                        forest_count += len(pair_objects)
+                        forest_block_objects += len(pair_objects)
+                        mark_accepted_forest(x, z, spacing * 0.58)
+                        continue
+                    stock_pair_failed = True
+
                 # Optional stock-polygon replacement mode.  A single generated
                 # cluster is much smaller than the stock square/triangle model it
                 # replaces, so tile several independently fitted clusters across
                 # the former footprint.  Remaining holes are deliberately left
                 # visible to the later individual-tree gap-infill pass.
-                if forest_polygon_models_disabled:
-                    replacements = _forest_polygon_replacement_clusters(
-                        elevations=elevations,
-                        raster=raster,
-                        road_corridors=road_corridors,
-                        spec=spec,
-                        seed=seed,
-                        column=geographic_column,
-                        row=geographic_row,
-                        x=x,
-                        z=z,
-                        spacing=spacing,
-                        maximum_clusters=min(4, max(0, forest_limit - forest_count)),
+                if forest_polygon_models_disabled or stock_pair_failed:
+                    # A failed stock Nogova pair must not be replaced by a
+                    # generated cluster carrying the same special les_nw_* P3Ds;
+                    # flattened CWA proxy children would lose the stock +9 m /
+                    # terrain-shear transform again. Use the rooted-tree fallback
+                    # below for these rare unsafe cells.
+                    replacements = (
+                        ()
+                        if stock_pair_failed
+                        else _forest_polygon_replacement_clusters(
+                            elevations=elevations,
+                            raster=raster,
+                            road_corridors=road_corridors,
+                            spec=spec,
+                            seed=seed,
+                            column=geographic_column,
+                            row=geographic_row,
+                            x=x,
+                            z=z,
+                            spacing=spacing,
+                            maximum_clusters=min(4, max(0, forest_limit - forest_count)),
+                        )
                     )
                     for cluster in replacements:
                         (
@@ -9951,7 +10152,11 @@ def generate_world_objects(
         # its spruce defaults while Malden resolves the corresponding Data3D
         # Mediterranean trees before object placement.
         progress(57, f"Placed primary forest blocks ({forest_count:,} forest objects so far)")
-        extra_single_enabled = bool(getattr(spec, "forest_single_tree_enabled", True))
+        extra_single_enabled = (
+            bool(getattr(spec, "forest_single_tree_enabled", True))
+            and not nogova_leaf_stock_forest
+            and not kolgujev_stock_forest
+        )
         extra_single_model = str(getattr(spec, "forest_single_tree_model", r"data3d\str smrk_medium.p3d"))
         extra_single_warning_threshold = _scaled_synthetic_tree_limit(
             int(getattr(spec, "maximum_forest_single_tree_objects", 1000)),
@@ -11417,7 +11622,14 @@ def generate_world_objects(
             )
         )
         broadleaf_tree = leaf_type == "broadleaved" or bool(species_text)
-        if forest_profile == "malden" or active_forest_model == r"data3d\les_su_ctver_pruhozi.p3d":
+        if forest_profile == "kolgujev":
+            if needle_tree:
+                models = KOLGUJEV_CONIFER_INDIVIDUAL_TREE_MODELS
+            elif broadleaf_tree:
+                models = KOLGUJEV_BROADLEAF_INDIVIDUAL_TREE_MODELS
+            else:
+                models = KOLGUJEV_INDIVIDUAL_TREE_MODELS
+        elif forest_profile == "malden" or active_forest_model == r"data3d\les_su_ctver_pruhozi.p3d":
             if needle_tree:
                 models = MALDEN_CONIFER_INDIVIDUAL_TREE_MODELS
             elif broadleaf_tree:

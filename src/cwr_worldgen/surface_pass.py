@@ -143,10 +143,27 @@ MALDEN_SURFACE_TEXTURES: dict[str, str] = {
     "x": _MALDEN_LAND_TEXTURE,
 }
 
+# Keep generated Kolgujev visually coherent by using the island's main Cain
+# land tile for every dry semantic class. Forest/farmland/rock classifications
+# still affect object and gameplay placement, but they do not swap in bright
+# forest, lowland or mountain tiles. This mirrors the cleaner single-background
+# treatment used by the other classic profiles.
+_KOLGUJEV_SEA_TEXTURE = r"cain\l4.paa"
+_KOLGUJEV_LAND_TEXTURE = r"cain\j9.paa"
+KOLGUJEV_SURFACE_TEXTURES: dict[str, str] = {
+    material.code: (
+        _KOLGUJEV_SEA_TEXTURE
+        if material.code in {"w", "q"}
+        else _KOLGUJEV_LAND_TEXTURE
+    )
+    for material in MILESTONE9_MATERIALS
+}
+
 STOCK_SURFACE_TEXTURES: Mapping[str, Mapping[str, str]] = {
     "everon": EVERON_SURFACE_TEXTURES,
     "nogova": NOGOVA_SURFACE_TEXTURES,
     "malden": MALDEN_SURFACE_TEXTURES,
+    "kolgujev": KOLGUJEV_SURFACE_TEXTURES,
 }
 
 MATERIAL_INDEX: Mapping[str, int] = {
@@ -961,8 +978,8 @@ def build_surface_pass(
 
 
 def surface_texture_wire_paths(world_name: str, profile: str) -> tuple[str, ...]:
-    if profile not in {"generated", "everon", "nogova", "malden", "desert"}:
-        raise ValueError("ground texture profile must be nogova, malden, everon, desert or generated")
+    if profile not in {"generated", "everon", "nogova", "kolgujev", "malden", "desert"}:
+        raise ValueError("ground texture profile must be nogova, kolgujev, malden, everon, desert or generated")
     paths: list[str] = []
     stock_paths = STOCK_SURFACE_TEXTURES.get(profile, {})
     for material in MILESTONE9_MATERIALS:

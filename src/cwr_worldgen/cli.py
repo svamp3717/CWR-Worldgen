@@ -438,7 +438,7 @@ def _parser() -> argparse.ArgumentParser:
         "--ground-textures",
         choices=GROUND_TEXTURE_PROFILES,
         default="nogova",
-        help="terrain texture profile: Nogova transition palette (default), original Malden/Abel textures, original Everon/Eden assets, desert palette, or packaged generated colours",
+        help="terrain texture profile: Nogova transition palette (default), original Kolgujev/Cain textures, original Malden/Abel textures, original Everon/Eden assets, desert palette, or packaged generated colours",
     )
 
     milestone9 = subparsers.add_parser("milestone9", help="apply deterministic surface transitions, shoreline/forest/farm/road materials, overview map, and improved icon")
@@ -457,7 +457,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_constraint_solver_arguments(milestone9)
     _add_procedural_building_arguments(milestone9)
     _add_surface_pass_arguments(milestone9)
-    milestone9.add_argument("--forest-profile", choices=("everon", "malden"), default="everon", help="classic forest scenery profile; Everon and Malden share the same road-safe terrain-fit placement ladder while selecting their own stock vegetation families")
+    milestone9.add_argument("--forest-profile", choices=("everon", "kolgujev", "malden"), default="everon", help="classic forest scenery profile; Everon, Kolgujev and Malden share the same road-safe terrain-fit placement ladder while selecting their own stock vegetation families")
     milestone9.add_argument("--replace-forest-polygons-with-clusters", "--no-forest-polygons", "--forest-individual-objects-only", dest="forest_individual_objects_only", action="store_true", help="replace stock square/triangle forest polygon models with tiled generated clusters; individually grounded trees fill patches where no safe cluster fits (default: off)")
     milestone9.set_defaults(forest_ground_clearance=0.02)
     milestone9.add_argument("--forest-block-model", default=r"data3d\les ctverec pruchozi_T1.p3d", help="primary stock forest block model")
@@ -621,7 +621,7 @@ def _parser() -> argparse.ArgumentParser:
         "--ground-textures",
         choices=GROUND_TEXTURE_PROFILES,
         default="nogova",
-        help="Milestone 9 ground palette: Nogova transition preset (default), stock Malden/Abel textures, stock Everon/Eden, desert stock textures, or fully generated colours",
+        help="Milestone 9 ground palette: Nogova transition preset (default), stock Kolgujev/Cain textures, stock Malden/Abel textures, stock Everon/Eden, desert stock textures, or fully generated colours",
     )
     milestone9.add_argument(
         "--pbo-backend",
