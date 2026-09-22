@@ -69,12 +69,6 @@ VEGETATION_OPTIONS = (
     VEGETATION_RESISTANCE_LEAF,
     VEGETATION_RESISTANCE_PINE,
 )
-APPEARANCE_HELP_TEXT = (
-    "Ground textures and vegetation are independent. Kolgujev uses the stock "
-    "Cain terrain palette and a conifer-heavy Data3D vegetation mix measured from "
-    "the original island. Resistance leaf and pine vegetation keep their matching "
-    "Nogova forest families without changing the selected ground textures."
-)
 HOUSE_STYLE_AUTO_LABEL = "Automatic (area / country)"
 HOUSE_STYLE_PRESET_LABELS = (
     HOUSE_STYLE_AUTO_LABEL,
@@ -2035,26 +2029,20 @@ class WorldgenGui(tk.Tk):
             state="readonly",
             width=32,
         ).grid(row=1, column=1, sticky="w", pady=3)
-        ttk.Label(
-            preset,
-            text=APPEARANCE_HELP_TEXT,
-            style="Hint.TLabel",
-            wraplength=700,
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 10))
-        ttk.Label(preset, text="Building preset").grid(row=3, column=0, sticky="w", padx=(0, 10), pady=3)
+        ttk.Label(preset, text="Building preset").grid(row=2, column=0, sticky="w", padx=(0, 10), pady=3)
         ttk.Combobox(
             preset,
             textvariable=self._var("house_style_preset", HOUSE_STYLE_AUTO_LABEL),
             values=HOUSE_STYLE_PRESET_LABELS,
             state="readonly",
             width=48,
-        ).grid(row=3, column=1, sticky="w", pady=3)
+        ).grid(row=2, column=1, sticky="w", pady=3)
         ttk.Label(
             preset,
             text="Automatic uses the selected map area/country. Choose one of the 23 regional presets here to override procedural building façades and roof defaults for the entire world.",
             style="Hint.TLabel",
             wraplength=700,
-        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         common = ttk.LabelFrame(body, text="Common choices", style="Section.TLabelframe", padding=12)
         common.pack(fill="x", pady=(12, 0))
