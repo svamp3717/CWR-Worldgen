@@ -205,19 +205,19 @@ def test_art_bd_and_caf_kkk_catalogues_are_selectable_source_presets() -> None:
     data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
     cases = (
         (
-            "stock-model-categories_art_bd.json",
+            "art_bd.json",
             STOCK_BUILDING_ART_BD_PRESET,
             STOCK_BUILDING_ART_BD_LABEL,
-            "ART_BD buildings",
+            "ART_BD.pbo buildings",
             "art_bd\\",
             "art_bd",
             37,
         ),
         (
-            "stock-model-categories_caf_kkk_buildings2.json",
+            "caf_kkk_buildings2.json",
             STOCK_BUILDING_CAF_KKK_BUILDINGS2_PRESET,
             STOCK_BUILDING_CAF_KKK_BUILDINGS2_LABEL,
-            "CAF KKK Buildings 2",
+            "CAF_KKK_Buildings2.pbo buildings",
             "caf_kkk_buildings2\\",
             "caf_kkk_buildings2",
             23,
@@ -258,8 +258,8 @@ def test_art_bd_and_caf_kkk_catalogues_are_recorded_in_build_metadata(
     document = json.loads(catalogue.read_text(encoding="utf-8"))
 
     assert document["selected_building_jsons"] == [
-        "data/stock-model-categories_art_bd.json",
-        "data/stock-model-categories_caf_kkk_buildings2.json",
+        "data/art_bd.json",
+        "data/caf_kkk_buildings2.json",
     ]
 
 
