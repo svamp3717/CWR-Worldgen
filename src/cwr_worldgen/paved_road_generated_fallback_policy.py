@@ -217,7 +217,6 @@ def _upgrade_stock_result(
         nonlocal previous_edge_heading
         nonlocal previous_edge_half_width
         nonlocal previous_entry_start_distance
-        nonlocal previous_entry_generated
         family = _quality._stock_paved_family(stock_piece)
         previous_edge_heading = heading
         previous_edge_half_width = (
@@ -274,7 +273,6 @@ def _upgrade_stock_result(
                     previous_edge_heading = None
                     previous_edge_half_width = None
                     previous_entry_start_distance = None
-                    previous_entry_generated = False
             break
 
         end_distance, end_x, end_z, chord_heading = endpoint
