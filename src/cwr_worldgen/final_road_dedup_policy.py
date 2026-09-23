@@ -84,7 +84,9 @@ def _family_and_length(model_path: str, configured_long_length: float) -> tuple[
     if match is not None:
         family = match.group("family").casefold()
         nominal = int(match.group("nominal"))
-        return family, float(configured_long_length) * nominal / 25.0
+        return family, _p.stock_road_piece_length_metres(
+            model_path, nominal, configured_long_length
+        )
     match = _GRAVEL_STRAIGHT.fullmatch(filename)
     if match is not None:
         nominal = int(match.group("nominal"))
