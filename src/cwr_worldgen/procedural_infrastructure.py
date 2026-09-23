@@ -44,6 +44,16 @@ GENERATED_GRAVEL_TEXTURE_REPEAT_METRES = 3.0
 GENERATED_GRAVEL_EDGE_WIDTH_METRES = 0.18
 GENERATED_GRAVEL_EDGE_JITTER_METRES = 0.06
 GENERATED_GRAVEL_EDGE_SECTION_METRES = 0.65
+
+# Generated paved models are a fallback only. The road fitter still tries the
+# stock OFP/Resistance P3D family first and references these world-local models
+# only when none of those slabs meets its existing geometric fidelity limits.
+# Five-degree curve buckets and decimetre dimensions deliberately trade a tiny
+# amount of precision for aggressive model reuse.
+GENERATED_PAVED_CURVE_BUCKETS = tuple(range(5, 50, 5))
+GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.18
+GENERATED_PAVED_HALF_WIDTH_METRES = 2.275
+
 GENERATED_BRIDGE_MAXIMUM_DEPTH_METRES = 0.8
 GENERATED_BRIDGE_RAIL_OVERHANG_METRES = 0.16
 GENERATED_BRIDGE_ROADWAY_HEIGHT_METRES = 0.20
@@ -161,6 +171,7 @@ _TEXTURE_FILE_STEMS = {
     "bridge": "b",
     "gravel": "g",
     "gravel_junction": "gj",
+    "paved": "pv",
     "power_pole": "up",
     "power_tower": "ut",
     "water_tower": "uw",
@@ -180,6 +191,7 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         "rock": (118, 116, 107),
         "gravel": (126, 119, 103),
         "gravel_junction": (126, 119, 103),
+        "paved": (69, 70, 68),
         "power_pole": (116, 102, 78),
         "power_tower": (118, 120, 119),
         "water_tower": (142, 148, 151),
@@ -215,6 +227,16 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         return create_gravel_road_texture_image(size)
     elif kind == "gravel_junction":
         return create_gravel_junction_texture_image(size)
+    elif kind == "paved":
+        # Keep fallback pavement deliberately plain. Stock road P3Ds remain the
+        # preferred visible asset; this texture only covers geometry for which
+        # no stock slab can follow the source line closely enough.
+        for y in range(size):
+            for x in range(size):
+                n = ((x * 17 + y * 31 + (x * y) % 23) % 19) - 9
+                image.putpixel((x, y), tuple(max(0, min(255, value + n)) for value in base))
+        for y in range(0, size, max(8, size // 16)):
+            draw.line((0, y, size, y), fill=(76, 77, 74), width=1)
     else:
         for y in range(size):
             for x in range(size):
@@ -408,6 +430,18 @@ def _bridge_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
 
 def _gravel_curve_degrees(subtype: str) -> int:
     match = re.fullmatch(r"gravel(?:25|12|6|3)(?:_([lr])(05|10|15|20|30|45))?", subtype, re.IGNORECASE)
+    if not match or not match.group(1):
+        return 0
+    amount = int(match.group(2))
+    return amount if match.group(1).casefold() == "r" else -amount
+
+
+def _paved_curve_degrees(subtype: str) -> int:
+    match = re.fullmatch(
+        r"paved_w\d{3}_l\d{4}(?:_([lr])(\d{2}))?",
+        subtype,
+        re.IGNORECASE,
+    )
     if not match or not match.group(1):
         return 0
     amount = int(match.group(2))
@@ -612,9 +646,40 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
     width = key.width_m
     length = key.length_m
     half_w = width * 0.5
-    curve_degrees = _gravel_curve_degrees(key.subtype)
+    paved_fallback = key.subtype.casefold().startswith("paved_")
+    curve_degrees = (
+        _paved_curve_degrees(key.subtype)
+        if paved_fallback
+        else _gravel_curve_degrees(key.subtype)
+    )
 
-    visual = _gravel_visual_lod(length, half_w, curve_degrees, texture)
+    if paved_fallback:
+        visual_sections = _road_ribbon_sections(
+            length,
+            half_w,
+            curve_degrees,
+            overhang=GENERATED_PAVED_VISUAL_OVERLAP_METRES,
+        )
+        raw_visual = _ribbon_lod(
+            visual_sections,
+            texture=texture,
+            resolution=_VISUAL_LOD,
+            height=GENERATED_GRAVEL_VISUAL_TOP_METRES,
+            lowered_overlap=True,
+            double_sided=True,
+            u_span_override=1.0,
+        )
+        visual = _Lod(
+            raw_visual.points,
+            raw_visual.normals,
+            raw_visual.faces,
+            raw_visual.resolution,
+            raw_visual.mass_per_point,
+            raw_visual.selections,
+            (("autocenter", "0"), ("class", "road"), ("map", "road")),
+        )
+    else:
+        visual = _gravel_visual_lod(length, half_w, curve_degrees, texture)
 
     # Keep road simulation on the first Resolution LOD, but also emit a face-less
     # Geometry LOD carrying map=road. OFP/CWA reliably reads the 2D map symbol
@@ -774,6 +839,35 @@ def is_generated_gravel_road_model(model_path: str) -> bool:
     return re.fullmatch(r"gravel(?:25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d", filename, re.IGNORECASE) is not None
 
 
+def paved_fallback_model_path(
+    world_name: str,
+    width_metres: float,
+    length_metres: float,
+    curve_degrees: float = 0.0,
+) -> str:
+    width_dm = max(10, min(999, int(round(float(width_metres) * 10.0))))
+    length_dm = max(5, min(9999, int(round(float(length_metres) * 10.0))))
+    magnitude = abs(float(curve_degrees))
+    suffix = ""
+    if magnitude >= 2.5:
+        amount = min(
+            GENERATED_PAVED_CURVE_BUCKETS,
+            key=lambda value: (abs(float(value) - magnitude), value),
+        )
+        side = "r" if float(curve_degrees) > 0.0 else "l"
+        suffix = f"_{side}{amount:02d}"
+    return rf"{world_name}\i\paved_w{width_dm:03d}_l{length_dm:04d}{suffix}.p3d"
+
+
+def is_generated_paved_road_model(model_path: str) -> bool:
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
+    return re.fullmatch(
+        r"paved_w\d{3}_l\d{4}(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d",
+        filename,
+        re.IGNORECASE,
+    ) is not None
+
+
 @dataclass(frozen=True, slots=True)
 class _InfrastructureAssetTask:
     key: InfrastructureModelKey
@@ -813,10 +907,13 @@ def _write_infrastructure_asset_task(task: _InfrastructureAssetTask) -> tuple[di
 def _infrastructure_texture_kind(key: InfrastructureModelKey) -> str:
     """Return the generated texture family used by one infrastructure model."""
     if key.kind == "road":
+        subtype = key.subtype.casefold()
+        if subtype.startswith("paved_"):
+            return "paved"
         # Junction polygons tile their UV coordinates in two dimensions. They
         # must not use the alpha-edged ribbon texture, otherwise each texture
         # wrap reveals a thin strip of grass through the middle of the junction.
-        return "gravel_junction" if key.subtype.casefold().startswith("gravel_j") else "gravel"
+        return "gravel_junction" if subtype.startswith("gravel_j") else "gravel"
     return key.subtype if key.kind in {"barrier", "utility"} else key.kind
 
 
@@ -824,6 +921,10 @@ class ProceduralInfrastructureLibrary:
     _PATTERN = re.compile(r"^(bar|br|rock)_([a-z0-9_]+)_w(\d+)_l(\d+)\.p3d$", re.IGNORECASE)
     _GRAVEL_PATTERN = re.compile(r"^gravel(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.IGNORECASE)
     _GRAVEL_JUNCTION_PATTERN = re.compile(r"^gravel_j([34])\.p3d$", re.IGNORECASE)
+    _PAVED_PATTERN = re.compile(
+        r"^paved_w(?P<width>\d{3})_l(?P<length>\d{4})(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+        re.IGNORECASE,
+    )
     _UTILITY_PATTERN = re.compile(r"^util_(power_pole|power_tower|water_tower)\.p3d$", re.IGNORECASE)
 
     def __init__(self, world_name: str, *, road_segment_length: float = 24.5, cache_dir: Path | None = None, cache_enabled: bool = True, cache_refresh: bool = False) -> None:
@@ -906,6 +1007,15 @@ class ProceduralInfrastructureLibrary:
                 "road", filename[:-4].casefold(), int(round(GENERATED_GRAVEL_HALF_WIDTH_METRES * 20.0)), max(10, int(round(actual_length * 10.0)))
             )] += count
             return
+        paved_match = self._PAVED_PATTERN.fullmatch(filename)
+        if paved_match:
+            self._usage[InfrastructureModelKey(
+                "road",
+                filename[:-4].casefold(),
+                int(paved_match.group("width")),
+                int(paved_match.group("length")),
+            )] += count
+            return
         utility_match = self._UTILITY_PATTERN.fullmatch(filename)
         if utility_match:
             subtype = utility_match.group(1).casefold()
@@ -965,7 +1075,7 @@ class ProceduralInfrastructureLibrary:
                     target, create_gravel_junction_texture_image(512)
                 )
             else:
-                texture_size = 256 if kind == "bridge" else 128
+                texture_size = 256 if kind in {"bridge", "paved"} else 128
                 texture_cache_version = (
                     "procedural-infrastructure-texture-v6-procedural-bridge"
                     if kind == "bridge"
