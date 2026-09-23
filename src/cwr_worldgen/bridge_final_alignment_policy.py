@@ -45,7 +45,7 @@ _STOCK_BRIDGE_FOOTPRINT_MARGIN_METRES = 0.15
 # existing road. This exposes only the missing gap and avoids coplanar z-fighting.
 _APPROACH_FILL_MIN_GAP_METRES = 0.20
 _APPROACH_FILL_MAX_GAP_METRES = 5.75
-_APPROACH_FILL_NOMINAL_LENGTH_METRES = 6.0
+_APPROACH_FILL_NOMINAL_LENGTH_METRES = 6.25
 _APPROACH_FILL_OVERLAP_BURY_METRES = 0.02
 _APPROACH_FILL_HEADING_TOLERANCE_DEGREES = 30.0
 _APPROACH_FILL_MAX_PITCH_DEGREES = 5.0
@@ -57,7 +57,7 @@ _STRAIGHT_ROAD_LENGTH_RE = re.compile(
 )
 _GENERATED_PAVED_LENGTH_RE = re.compile(
     r"^paved_w\d{3}_l(?P<length>\d{4})"
-    r"(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+    r"(?:_[lr]\d{2})?\.p3d$",
     re.IGNORECASE,
 )
 
@@ -139,7 +139,14 @@ def _straight_road_nominal_length(model_path: str) -> float | None:
     if generated is not None:
         return int(generated.group("length")) / 10.0
     match = _STRAIGHT_ROAD_LENGTH_RE.search(filename)
-    return float(match.group("length")) if match else None
+    if match is None:
+        return None
+    nominal = int(match.group("length"))
+    return _playability.stock_road_piece_length_metres(
+        model_path,
+        nominal,
+        25.0,
+    )
 
 
 def _six_metre_sibling(model_path: str) -> str | None:
