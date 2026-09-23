@@ -27,7 +27,7 @@ _INSTALLED = False
 _ORIGINAL_SERIAL_CHAIN: Any = None
 _ORIGINAL_PARALLEL_CHAIN: Any = None
 
-_PAVED_WIDTHS = {
+_PAVED_HALF_WIDTHS = {
     "sil": 4.55,
     "kos": 4.55,
     "asf": 3.50,
@@ -48,10 +48,12 @@ def _family(path: str) -> str:
 def _generated_width(pieces: Sequence[Any], spec: Any) -> float:
     for piece in pieces:
         family = _family(piece.model_path)
-        if family in _PAVED_WIDTHS:
-            return _PAVED_WIDTHS[family]
+        if family in _PAVED_HALF_WIDTHS:
+            return _PAVED_HALF_WIDTHS[family] * 2.0
     family = _family(getattr(spec, "paved_road_model", ""))
-    return _PAVED_WIDTHS.get(family, _pi.GENERATED_PAVED_HALF_WIDTH_METRES * 2.0)
+    return _PAVED_HALF_WIDTHS.get(
+        family, _pi.GENERATED_PAVED_HALF_WIDTH_METRES
+    ) * 2.0
 
 
 def _eligible_paved_chain(pieces: Sequence[Any], spec: Any) -> bool:
