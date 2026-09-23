@@ -174,6 +174,20 @@ def _upgrade_stock_result(
     if context is None or not _eligible_paved_chain(pieces, context.spec):
         return tuple(result)
 
+    (
+        start_distance,
+        preferred_end_distance,
+        minimum_end_distance,
+        maximum_end_distance,
+    ) = _quality._quality_window(
+        measure,
+        pieces,
+        start_distance,
+        preferred_end_distance,
+        minimum_end_distance,
+        maximum_end_distance,
+        context,
+    )
     current = float(start_distance)
     upgraded: list[Any] = []
     for piece, start_point, end_point in result:
