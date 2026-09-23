@@ -192,6 +192,7 @@ def _upgrade_stock_result(
     )
     current = float(start_distance)
     upgraded: list[Any] = []
+    previous_stock_heading: float | None = None
     for piece, start_point, end_point in result:
         endpoint = measure.chord_endpoint(
             current,
@@ -226,8 +227,14 @@ def _upgrade_stock_result(
                 )
                 upgraded.append((generated, start, end))
                 current = target_distance
+                previous_stock_heading = None
             else:
                 upgraded.append((piece, start_point, end_point))
+                previous_stock_heading = (
+                    _quality._piece_chord_heading(start_point, end_point)
+                    if _quality._is_stock_paved_piece(piece)
+                    else None
+                )
             break
 
         end_distance, end_x, end_z, chord_heading = endpoint
@@ -244,11 +251,26 @@ def _upgrade_stock_result(
             (end_x, end_z),
         )
         turn_limit, deviation_limit = _stock_limits(piece)
+        current_heading = _quality._piece_chord_heading(
+            (start_x, start_z), (end_x, end_z)
+        )
+        clipping_joint = bool(
+            previous_stock_heading is not None
+            and _quality._is_stock_paved_piece(piece)
+            and _p._heading_difference(
+                previous_stock_heading, current_heading
+            ) > _quality._STOCK_PAVED_JOINT_LIMIT_DEGREES
+        )
 
-        # The quality scorer puts fidelity_penalty first. If its selected stock
-        # piece still fails this test, every available stock candidate at this
-        # chain step failed the same geometric-fit class.
-        if turn > turn_limit or deviation > deviation_limit:
+        # The quality scorer now considers both per-piece fidelity and the joint
+        # against the preceding stock slab. If the winning vanilla candidate
+        # still fails either test, no equally valid stock choice avoided the
+        # clipping geometry at this step, so generate only this segment.
+        if (
+            turn > turn_limit
+            or deviation > deviation_limit
+            or clipping_joint
+        ):
             generated = _generated_piece(
                 context,
                 pieces,
@@ -260,8 +282,14 @@ def _upgrade_stock_result(
                 deviation=deviation,
             )
             upgraded.append((generated, (start_x, start_z), (end_x, end_z)))
+            previous_stock_heading = None
         else:
             upgraded.append((piece, start_point, end_point))
+            previous_stock_heading = (
+                current_heading
+                if _quality._is_stock_paved_piece(piece)
+                else None
+            )
         current = end_distance
 
     # Do not fill intentionally hub-covered tails. Only intervene when the
@@ -290,6 +318,7 @@ def _upgrade_stock_result(
                 deviation=deviation,
             )
             upgraded.append((generated, start, end))
+            previous_stock_heading = None
 
     return tuple(upgraded)
 
