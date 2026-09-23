@@ -1216,7 +1216,7 @@ def _paved_replacement_plans(
 
     world_name = _replacement_world_name(roads, wrp_entry)
     existing_models = Counter(
-        road.model_path.replace("/", "\").rsplit("\", 1)[-1].casefold()
+        road.model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
         for road in roads
         if _GENERATED_PAVED.fullmatch(_model(road.model_path))
     )
@@ -1289,7 +1289,7 @@ def _paved_replacement_plans(
             action=(
                 "reuse"
                 if existing_models[
-                    model_path.replace("/", "\").rsplit("\", 1)[-1].casefold()
+                    model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
                 ]
                 else "generate"
             ),
