@@ -55,6 +55,11 @@ _STRAIGHT_ROAD_LENGTH_RE = re.compile(
     r"(?P<length>25|12|6)(?P<suffix>\.p3d)$",
     re.IGNORECASE,
 )
+_GENERATED_PAVED_LENGTH_RE = re.compile(
+    r"^paved_w\d{3}_l(?P<length>\d{4})"
+    r"(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+    re.IGNORECASE,
+)
 
 
 def _final_road_approach_height(
@@ -130,6 +135,9 @@ def _road_object_under_bridge(obj, spans) -> bool:
 
 def _straight_road_nominal_length(model_path: str) -> float | None:
     filename = str(model_path).replace("/", "\\").rsplit("\\", 1)[-1]
+    generated = _GENERATED_PAVED_LENGTH_RE.fullmatch(filename)
+    if generated is not None:
+        return int(generated.group("length")) / 10.0
     match = _STRAIGHT_ROAD_LENGTH_RE.search(filename)
     return float(match.group("length")) if match else None
 
