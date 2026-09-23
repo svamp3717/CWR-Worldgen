@@ -325,7 +325,7 @@ def _upgrade_stock_result(
 
         end_distance, end_x, end_z, chord_heading = endpoint
         start_x, start_z, start_heading = measure.point(current)
-        end_heading = measure.point(end_distance)[2]
+        end_heading = measure.heading_before(end_distance)
         turn = max(
             _p._heading_difference(chord_heading, start_heading),
             _p._heading_difference(chord_heading, end_heading),
