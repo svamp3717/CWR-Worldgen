@@ -190,7 +190,6 @@ def _rvw4_model_counts(data: bytes) -> Counter[str] | None:
         raise ValueError("truncated RVW4 terrain/texture data")
 
     counts: Counter[str] = Counter()
-    found_terminator = False
     while cursor < len(data):
         end = cursor + _RVW4_OBJECT.size
         if end > len(data):
@@ -199,7 +198,6 @@ def _rvw4_model_counts(data: bytes) -> Counter[str] | None:
         cursor = end
         raw_model = values[13].split(b"\0", 1)[0]
         if not raw_model:
-            found_terminator = True
             break
         try:
             model = canonical_model_path(raw_model.decode("ascii"))
@@ -208,8 +206,10 @@ def _rvw4_model_counts(data: bytes) -> Counter[str] | None:
         if model.endswith(".p3d"):
             counts[model] += 1
 
-    if not found_terminator:
-        raise ValueError("RVW4 object list is missing its terminator")
+    # Some real-world RVW4 files end immediately after the final complete
+    # 128-byte object record instead of writing an all-zero terminator. Partial
+    # records are still rejected above, so aligned EOF is safe for dependency
+    # scanning and matches what tools such as WRPTool encounter in the wild.
     return counts
 
 
