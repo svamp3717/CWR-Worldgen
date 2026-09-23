@@ -33,8 +33,10 @@ _ORIGINAL_PARALLEL_CHAIN: Any = None
 
 _PAVED_HALF_WIDTHS = {
     "sil": 4.55,
+    "silnice": 4.55,
     "kos": 4.55,
     "asf": 3.50,
+    "asfaltka": 3.50,
 }
 _FAMILY = re.compile(r"^([a-z]+)", re.IGNORECASE)
 
