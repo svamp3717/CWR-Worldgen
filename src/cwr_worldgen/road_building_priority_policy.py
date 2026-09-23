@@ -132,6 +132,13 @@ def _minor_object_length(obj, spec, protected_ids: frozenset[int]) -> float | No
     if match is None:
         return None
     nominal = int(match.group("nominal"))
+    if _MINOR_CES.fullmatch(filename) is not None:
+        from . import playability as _playability
+        return _playability.stock_road_piece_length_metres(
+            getattr(obj, "model_path", ""),
+            nominal,
+            float(spec.road_segment_length),
+        )
     return float(spec.road_segment_length) * nominal / 25.0
 
 
