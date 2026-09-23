@@ -89,6 +89,13 @@ def _catalogue_hover_text(path: Path) -> str:
             categories.append(category)
 
     counts = {category: 0 for category in categories}
+    placements: list[str] = []
+    for value in document.get("placements", ("Urban", "Rural", "Both")):
+        placement = str(value).strip()
+        if placement and placement not in placements:
+            placements.append(placement)
+    placement_counts = {placement: 0 for placement in placements}
+
     for model in models:
         for value in model.get("categories", ()):
             category = str(value).strip()
@@ -99,8 +106,21 @@ def _catalogue_hover_text(path: Path) -> str:
                 categories.append(category)
             counts[category] += 1
 
+        placement = str(model.get("placement", "")).strip()
+        if placement:
+            if placement not in placement_counts:
+                placement_counts[placement] = 0
+                placements.append(placement)
+            placement_counts[placement] += 1
+
     lines = [f"Models: {len(models)}"]
     lines.extend(f"{category}: {counts.get(category, 0)}" for category in categories)
+    lines.append("")
+    lines.append("Placement:")
+    lines.extend(
+        f"{placement}: {placement_counts.get(placement, 0)}"
+        for placement in placements
+    )
     return "\n".join(lines)
 
 
