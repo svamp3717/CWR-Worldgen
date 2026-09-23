@@ -51,6 +51,11 @@ _PAVED_REPLACEMENT_CATEGORIES = frozenset({
     "connector_gap",
 })
 _PAVED_REPLACEMENT_MINIMUM_TANGENT_ERROR_DEGREES = 0.75
+_STOCK_REPAIR_POSITION_TOLERANCE_METRES = 0.08
+_STOCK_REPAIR_MAXIMUM_PATH_DEVIATION_METRES = 1.0
+_STOCK_REPAIR_RADII_METRES = (25, 50, 75, 100)
+_STOCK_REPAIR_STRAIGHT_LENGTHS = {6: 6.25, 12: 12.5, 25: 25.0}
+_STOCK_REPAIR_FAMILIES = frozenset({"sil", "asf", "kos"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +108,27 @@ class RoadIssue:
 
 
 @dataclass(frozen=True, slots=True)
+class PavedStockRepairPlan:
+    plan_id: str
+    replace_object_ids: tuple[int, ...]
+    source_models: tuple[str, ...]
+    issue_ids: tuple[str, ...]
+    stock_models: tuple[str, ...]
+    start: tuple[float, float]
+    end: tuple[float, float]
+    turn_sign: int
+    first_turns: int
+    first_radius: int
+    middle_units: int
+    counter_turns: int
+    counter_radius: int
+    merge_nominal: int
+    maximum_path_deviation_metres: float
+    final_length_error_metres: float
+    maximum_join_angle_error_degrees: float
+
+
+@dataclass(frozen=True, slots=True)
 class PavedReplacementPlan:
     plan_id: str
     action: str
@@ -125,6 +151,7 @@ class InspectionResult:
     wrp_entry: str
     road_objects: tuple[RoadObject, ...]
     issues: tuple[RoadIssue, ...]
+    paved_stock_repairs: tuple[PavedStockRepairPlan, ...] = ()
     paved_replacements: tuple[PavedReplacementPlan, ...] = ()
 
     @property
@@ -751,12 +778,388 @@ def _packed_paved_model_filenames(input_path: Path) -> frozenset[str]:
     return frozenset(result)
 
 
+
+def _point_segment_distance(
+    point: tuple[float, float],
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> float:
+    dx = end[0] - start[0]
+    dz = end[1] - start[1]
+    denominator = dx * dx + dz * dz
+    if denominator <= 1.0e-12:
+        return math.dist(point, start)
+    fraction = (
+        (point[0] - start[0]) * dx
+        + (point[1] - start[1]) * dz
+    ) / denominator
+    fraction = max(0.0, min(1.0, fraction))
+    nearest = (
+        start[0] + dx * fraction,
+        start[1] + dz * fraction,
+    )
+    return math.dist(point, nearest)
+
+
+def _point_polyline_distance(
+    point: tuple[float, float],
+    points: Sequence[tuple[float, float]],
+) -> float:
+    if len(points) < 2:
+        return math.dist(point, points[0]) if points else math.inf
+    return min(
+        _point_segment_distance(point, start, end)
+        for start, end in zip(points, points[1:])
+    )
+
+
+def _bidirectional_path_deviation(
+    first: Sequence[tuple[float, float]],
+    second: Sequence[tuple[float, float]],
+) -> float:
+    return max(
+        max((_point_polyline_distance(point, second) for point in first), default=0.0),
+        max((_point_polyline_distance(point, first) for point in second), default=0.0),
+    )
+
+
+def _stock_arc_step(
+    point: tuple[float, float],
+    heading: float,
+    turn_sign: int,
+    radius: float,
+    degrees: float = 10.0,
+) -> tuple[tuple[float, float], float]:
+    radians = math.radians(heading)
+    direction = math.sin(radians), math.cos(radians)
+    right = direction[1], -direction[0]
+    angle = math.radians(degrees)
+    side = turn_sign * radius * (1.0 - math.cos(angle))
+    forward = radius * math.sin(angle)
+    return (
+        point[0] + right[0] * side + direction[0] * forward,
+        point[1] + right[1] * side + direction[1] * forward,
+    ), (heading + turn_sign * degrees) % 360.0
+
+
+def _component_reference_path(
+    component: Sequence[RoadObject],
+    component_issues: Sequence[RoadIssue],
+) -> tuple[
+    tuple[tuple[float, float], ...],
+    tuple[RoadEndpoint, RoadEndpoint],
+] | None:
+    ids = {road.object_id for road in component}
+    adjacency: dict[int, set[int]] = {object_id: set() for object_id in ids}
+    seam_midpoints: dict[frozenset[int], tuple[float, float]] = {}
+    internal: set[tuple[int, int]] = set()
+    for issue in component_issues:
+        if len(issue.object_ids) != 2:
+            continue
+        first_id, second_id = issue.object_ids
+        if first_id not in ids or second_id not in ids:
+            continue
+        first = next(road for road in component if road.object_id == first_id)
+        second = next(road for road in component if road.object_id == second_id)
+        first_endpoint, second_endpoint = _replacement_seam_endpoints(first, second)
+        adjacency[first_id].add(second_id)
+        adjacency[second_id].add(first_id)
+        seam_midpoints[frozenset((first_id, second_id))] = (
+            (first_endpoint.point[0] + second_endpoint.point[0]) * 0.5,
+            (first_endpoint.point[1] + second_endpoint.point[1]) * 0.5,
+        )
+        internal.add((first_endpoint.object_id, first_endpoint.index))
+        internal.add((second_endpoint.object_id, second_endpoint.index))
+
+    if any(len(neighbours) > 2 for neighbours in adjacency.values()):
+        return None
+    terminal_ids = sorted(
+        object_id for object_id, neighbours in adjacency.items()
+        if len(neighbours) == 1
+    )
+    if len(terminal_ids) != 2:
+        return None
+
+    boundary_by_id = {
+        road.object_id: tuple(
+            endpoint
+            for endpoint in road.endpoints
+            if (endpoint.object_id, endpoint.index) not in internal
+        )
+        for road in component
+    }
+    if any(len(boundary_by_id[object_id]) != 1 for object_id in terminal_ids):
+        return None
+
+    order = [terminal_ids[0]]
+    previous = None
+    current = terminal_ids[0]
+    while True:
+        following = tuple(
+            value for value in adjacency[current] if value != previous
+        )
+        if not following:
+            break
+        if len(following) != 1:
+            return None
+        next_id = following[0]
+        order.append(next_id)
+        previous, current = current, next_id
+        if len(order) > len(ids):
+            return None
+    if set(order) != ids:
+        return None
+
+    start = boundary_by_id[order[0]][0]
+    end = boundary_by_id[order[-1]][0]
+    points = [start.point]
+    for first_id, second_id in zip(order, order[1:]):
+        midpoint = seam_midpoints.get(frozenset((first_id, second_id)))
+        if midpoint is None:
+            return None
+        points.append(midpoint)
+    points.append(end.point)
+    return tuple(points), (start, end)
+
+
+def _stock_repair_angle_limit(half_width: float) -> float:
+    if half_width <= 1.0e-9:
+        return 0.0
+    ratio = min(
+        1.0,
+        DEFAULT_MINIMUM_EDGE_GAP_METRES / (2.0 * half_width),
+    )
+    return math.degrees(2.0 * math.asin(ratio))
+
+
+def _stock_repair_samples(
+    start: RoadEndpoint,
+    end: RoadEndpoint,
+    choice: tuple[int, int, int, int, int, int, int],
+) -> tuple[tuple[float, float], ...]:
+    (
+        turn_sign,
+        first_turns,
+        first_radius,
+        middle_units,
+        counter_turns,
+        counter_radius,
+        _merge_nominal,
+    ) = choice
+    point = start.point
+    heading = (start.outward + 180.0) % 360.0
+    points = [point]
+
+    def sampled_turn(
+        current: tuple[float, float],
+        current_heading: float,
+        sign: int,
+        radius: int,
+    ) -> tuple[tuple[float, float], float]:
+        for _index in range(4):
+            current, current_heading = _stock_arc_step(
+                current, current_heading, sign, radius, 2.5
+            )
+            points.append(current)
+        return current, current_heading
+
+    for _index in range(first_turns):
+        point, heading = sampled_turn(
+            point, heading, turn_sign, first_radius
+        )
+    for _index in range(middle_units):
+        radians = math.radians(heading)
+        point = (
+            point[0] + math.sin(radians) * 6.25,
+            point[1] + math.cos(radians) * 6.25,
+        )
+        points.append(point)
+    for _index in range(counter_turns):
+        point, heading = sampled_turn(
+            point, heading, -turn_sign, counter_radius
+        )
+    points.append(end.point)
+    return tuple(points)
+
+
+def _stock_repair_models(
+    family: str,
+    choice: tuple[int, int, int, int, int, int, int],
+) -> tuple[str, ...]:
+    (
+        _turn_sign,
+        first_turns,
+        first_radius,
+        middle_units,
+        counter_turns,
+        counter_radius,
+        merge_nominal,
+    ) = choice
+    models = [
+        rf"o\road\{family}10 {first_radius}.p3d"
+        for _index in range(first_turns)
+    ]
+    models.extend(
+        rf"o\road\{family}6.p3d"
+        for _index in range(middle_units)
+    )
+    models.extend(
+        rf"o\road\{family}10 {counter_radius}.p3d"
+        for _index in range(counter_turns)
+    )
+    models.append(rf"o\road\{family}{merge_nominal}.p3d")
+    return tuple(models)
+
+
+def _stock_repair_choice(
+    family: str,
+    reference: Sequence[tuple[float, float]],
+    start: RoadEndpoint,
+    end: RoadEndpoint,
+) -> tuple[
+    tuple[int, int, int, int, int, int, int],
+    float,
+    float,
+    float,
+] | None:
+    if family not in _STOCK_REPAIR_FAMILIES:
+        return None
+
+    start_heading = (start.outward + 180.0) % 360.0
+    target_heading = end.outward % 360.0
+    preferred_sign = (
+        1
+        if ((target_heading - start_heading + 180.0) % 360.0 - 180.0) >= 0.0
+        else -1
+    )
+    angle_limit = _stock_repair_angle_limit(
+        max(start.half_width, end.half_width)
+    )
+    candidates = []
+
+    for turn_sign in (preferred_sign, -preferred_sign):
+        for first_turns in range(0, 7):
+            first_radii = (
+                _STOCK_REPAIR_RADII_METRES
+                if first_turns else (_STOCK_REPAIR_RADII_METRES[0],)
+            )
+            for counter_turns in range(0, 5):
+                if first_turns == 0 and counter_turns > 0:
+                    continue
+                counter_radii = (
+                    _STOCK_REPAIR_RADII_METRES
+                    if counter_turns else (_STOCK_REPAIR_RADII_METRES[0],)
+                )
+                for first_radius in first_radii:
+                    first_point = start.point
+                    first_heading = start_heading
+                    for _index in range(first_turns):
+                        first_point, first_heading = _stock_arc_step(
+                            first_point,
+                            first_heading,
+                            turn_sign,
+                            first_radius,
+                        )
+                    for counter_radius in counter_radii:
+                        for middle_units in range(0, 8):
+                            point = first_point
+                            heading = first_heading
+                            if middle_units:
+                                radians = math.radians(heading)
+                                point = (
+                                    point[0]
+                                    + math.sin(radians) * 6.25 * middle_units,
+                                    point[1]
+                                    + math.cos(radians) * 6.25 * middle_units,
+                                )
+                            for _index in range(counter_turns):
+                                point, heading = _stock_arc_step(
+                                    point,
+                                    heading,
+                                    -turn_sign,
+                                    counter_radius,
+                                )
+
+                            dx = end.point[0] - point[0]
+                            dz = end.point[1] - point[1]
+                            distance = math.hypot(dx, dz)
+                            if distance <= 0.05:
+                                continue
+                            merge_heading = math.degrees(
+                                math.atan2(dx, dz)
+                            ) % 360.0
+                            in_error = _angle(heading, merge_heading)
+                            out_error = _angle(merge_heading, target_heading)
+                            if max(in_error, out_error) > angle_limit:
+                                continue
+
+                            for nominal, length in (
+                                (6, 6.25),
+                                (12, 12.5),
+                                (25, 25.0),
+                            ):
+                                length_error = abs(distance - length)
+                                if (
+                                    length_error
+                                    > _STOCK_REPAIR_POSITION_TOLERANCE_METRES
+                                ):
+                                    continue
+                                choice = (
+                                    turn_sign,
+                                    first_turns,
+                                    first_radius,
+                                    middle_units,
+                                    counter_turns,
+                                    counter_radius,
+                                    nominal,
+                                )
+                                samples = _stock_repair_samples(
+                                    start, end, choice
+                                )
+                                deviation = _bidirectional_path_deviation(
+                                    samples, reference
+                                )
+                                if (
+                                    deviation
+                                    > _STOCK_REPAIR_MAXIMUM_PATH_DEVIATION_METRES
+                                ):
+                                    continue
+                                piece_count = (
+                                    first_turns
+                                    + middle_units
+                                    + counter_turns
+                                    + 1
+                                )
+                                score = (
+                                    deviation,
+                                    length_error,
+                                    max(in_error, out_error),
+                                    piece_count,
+                                    first_radius,
+                                    counter_radius,
+                                )
+                                candidates.append((
+                                    score,
+                                    choice,
+                                    deviation,
+                                    length_error,
+                                    max(in_error, out_error),
+                                ))
+
+    if not candidates:
+        return None
+    _score, choice, deviation, length_error, angle_error = min(
+        candidates, key=lambda value: value[0]
+    )
+    return choice, deviation, length_error, angle_error
+
+
 def _paved_replacement_plans(
     roads: Sequence[RoadObject],
     issues: Sequence[RoadIssue],
     wrp_entry: str,
     packed_paved_models: frozenset[str] = frozenset(),
-) -> tuple[PavedReplacementPlan, ...]:
+) -> tuple[tuple[PavedStockRepairPlan, ...], tuple[PavedReplacementPlan, ...]]:
     road_by_id = {road.object_id: road for road in roads}
     eligible: list[RoadIssue] = []
     for issue in issues:
@@ -786,7 +1189,7 @@ def _paved_replacement_plans(
             continue
         eligible.append(issue)
     if not eligible:
-        return ()
+        return (), ()
 
     parent: dict[int, int] = {}
     def find(value: int) -> int:
@@ -818,6 +1221,7 @@ def _paved_replacement_plans(
         if _GENERATED_PAVED.fullmatch(_model(road.model_path))
     )
     existing_models.update(packed_paved_models)
+    stock_repairs: list[PavedStockRepairPlan] = []
     plans: list[PavedReplacementPlan] = []
     for root in sorted(grouped_ids, key=lambda key: min(grouped_ids[key])):
         object_ids = tuple(sorted(grouped_ids[root]))
@@ -837,15 +1241,40 @@ def _paved_replacement_plans(
         )
         if len(boundaries) != 2:
             continue
-        start, end = sorted(
-            boundaries,
-            key=lambda endpoint: (
-                endpoint.point[0],
-                endpoint.point[1],
-                endpoint.object_id,
-                endpoint.index,
-            ),
+        reference = _component_reference_path(component, grouped_issues[root])
+        if reference is None:
+            continue
+        reference_points, (start, end) = reference
+        component_issues = tuple(grouped_issues[root])
+        family = component[0].family
+        stock_choice = _stock_repair_choice(
+            family,
+            reference_points,
+            start,
+            end,
         )
+        if stock_choice is not None:
+            choice, deviation, length_error, angle_error = stock_choice
+            stock_repairs.append(PavedStockRepairPlan(
+                plan_id=f"SR-{len(stock_repairs)+1:05d}",
+                replace_object_ids=object_ids,
+                source_models=tuple(sorted({road.model_path for road in component})),
+                issue_ids=tuple(sorted(issue.issue_id for issue in component_issues)),
+                stock_models=_stock_repair_models(family, choice),
+                start=(round(start.point[0], 5), round(start.point[1], 5)),
+                end=(round(end.point[0], 5), round(end.point[1], 5)),
+                turn_sign=choice[0],
+                first_turns=choice[1],
+                first_radius=choice[2],
+                middle_units=choice[3],
+                counter_turns=choice[4],
+                counter_radius=choice[5],
+                merge_nominal=choice[6],
+                maximum_path_deviation_metres=round(deviation, 5),
+                final_length_error_metres=round(length_error, 5),
+                maximum_join_angle_error_degrees=round(angle_error, 5),
+            ))
+            continue
         length = math.dist(start.point, end.point)
         if length <= 0.05:
             continue
@@ -855,7 +1284,6 @@ def _paved_replacement_plans(
         model_path = _replacement_model_path(
             world_name, width, length, curve
         )
-        component_issues = tuple(grouped_issues[root])
         plans.append(PavedReplacementPlan(
             plan_id=f"RP-{len(plans)+1:05d}",
             action=(
@@ -883,7 +1311,7 @@ def _paved_replacement_plans(
                 for issue in component_issues
             ),
         ))
-    return tuple(plans)
+    return tuple(stock_repairs), tuple(plans)
 
 
 def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAULT_ENDPOINT_TOLERANCE_METRES,
@@ -913,7 +1341,7 @@ def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAU
     issues.extend(_junction_issues(checked_roads, nearby_gap))
     issues.extend(_paved_crossing_issues(checked_roads))
     numbered = _number(issues)
-    replacements = _paved_replacement_plans(
+    stock_repairs, replacements = _paved_replacement_plans(
         roads,
         numbered,
         wrp_entry,
@@ -924,6 +1352,7 @@ def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAU
         wrp_entry,
         roads,
         numbered,
+        stock_repairs,
         replacements,
     )
 
@@ -934,6 +1363,7 @@ def _summary(result: InspectionResult) -> dict[str, object]:
         "road_type_counts": dict(Counter(road.road_type for road in result.road_objects)),
         "issue_count": len(result.issues), "severity_counts": dict(Counter(i.severity for i in result.issues)),
         "category_counts": dict(Counter(i.category for i in result.issues)),
+        "paved_stock_repair_count": len(result.paved_stock_repairs),
         "paved_replacement_count": len(result.paved_replacements),
         "paved_replacement_actions": dict(Counter(plan.action for plan in result.paved_replacements)),
     }
@@ -944,11 +1374,43 @@ def write_inspection_report(result: InspectionResult, output_dir: Path) -> dict[
     output.mkdir(parents=True, exist_ok=True)
     paths = {"issues_json": output / "issues.json", "issues_csv": output / "issues.csv",
              "summary_json": output / "summary.json", "coordinate_csv": output / "ingame-coordinates.csv",
+             "stock_repairs_json": output / "paved-stock-repairs.json",
+             "stock_repairs_csv": output / "paved-stock-repairs.csv",
              "replacements_json": output / "paved-replacements.json",
              "replacements_csv": output / "paved-replacements.csv",
              "html": output / "report.html"}
     paths["issues_json"].write_text(json.dumps([asdict(i) for i in result.issues], indent=2) + "\n", encoding="utf-8")
     paths["summary_json"].write_text(json.dumps(_summary(result), indent=2) + "\n", encoding="utf-8")
+
+    paths["stock_repairs_json"].write_text(
+        json.dumps(
+            [asdict(plan) for plan in result.paved_stock_repairs],
+            indent=2,
+        ) + "\n",
+        encoding="utf-8",
+    )
+    with paths["stock_repairs_csv"].open(
+        "w", newline="", encoding="utf-8"
+    ) as stream:
+        writer = csv.writer(stream)
+        writer.writerow((
+            "plan_id", "replace_object_ids", "source_models", "issue_ids",
+            "stock_models", "start_x", "start_z", "end_x", "end_z",
+            "maximum_path_deviation_metres", "final_length_error_metres",
+            "maximum_join_angle_error_degrees",
+        ))
+        for plan in result.paved_stock_repairs:
+            writer.writerow((
+                plan.plan_id,
+                ";".join(map(str, plan.replace_object_ids)),
+                ";".join(plan.source_models),
+                ";".join(plan.issue_ids),
+                ";".join(plan.stock_models),
+                plan.start[0], plan.start[1], plan.end[0], plan.end[1],
+                plan.maximum_path_deviation_metres,
+                plan.final_length_error_metres,
+                plan.maximum_join_angle_error_degrees,
+            ))
     paths["replacements_json"].write_text(
         json.dumps([asdict(plan) for plan in result.paved_replacements], indent=2) + "\n",
         encoding="utf-8",
@@ -995,6 +1457,13 @@ def write_inspection_report(result: InspectionResult, output_dir: Path) -> dict[
         f"<td>{html.escape(i.category)}</td><td>{i.x:.2f}, {i.z:.2f}</td><td>{html.escape(i.message)}</td></tr>"
         for i in result.issues
     ) or '<tr><td colspan="6">No road issues found.</td></tr>'
+    stock_rows = "".join(
+        f"<tr><td>{html.escape(plan.plan_id)}</td>"
+        f"<td>{html.escape(', '.join(plan.stock_models))}</td>"
+        f"<td>{html.escape(', '.join(map(str, plan.replace_object_ids)))}</td>"
+        f"<td>{plan.maximum_path_deviation_metres:.2f} m</td></tr>"
+        for plan in result.paved_stock_repairs
+    ) or '<tr><td colspan="4">No stock paved repair sequence found.</td></tr>'
     replacement_rows = "".join(
         f"<tr><td>{html.escape(plan.plan_id)}</td><td>{html.escape(plan.action)}</td>"
         f"<td>{html.escape(plan.model_path)}</td>"
@@ -1007,9 +1476,12 @@ def write_inspection_report(result: InspectionResult, output_dir: Path) -> dict[
         f'<!doctype html><meta charset="utf-8"><title>Road Inspector</title><style>body{{font:14px system-ui;margin:24px}}'
         f'table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #aaa;padding:6px;text-align:left}}</style>'
         f'<h1>Road Inspector</h1><p>Read-only RVW4 road audit. {result.road_object_count} road objects, '
-        f'{len(result.issues)} issues, {len(result.paved_replacements)} paved replacement plan(s).</p>'
+        f'{len(result.issues)} issues, {len(result.paved_stock_repairs)} stock repair plan(s), '
+        f'{len(result.paved_replacements)} paved replacement plan(s).</p>'
         f'<h2>Issues</h2><table><tr><th>ID</th><th>Severity</th><th>Score</th><th>Category</th>'
         f'<th>X/Z</th><th>Details</th></tr>{rows}</table>'
+        f'<h2>Stock paved repair sequences</h2><table><tr><th>ID</th><th>Stock models</th>'
+        f'<th>Replace object IDs</th><th>Max path deviation</th></tr>{stock_rows}</table>'
         f'<h2>Paved seam replacements</h2><table><tr><th>ID</th><th>Action</th><th>Model</th>'
         f'<th>Replace object IDs</th><th>Size</th><th>Curve</th></tr>{replacement_rows}</table>',
         encoding="utf-8")
@@ -1040,6 +1512,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"Road Inspector: {result.road_object_count:,} road objects, "
         f"{len(result.issues):,} issues ({counts.get('critical', 0)} critical, "
         f"{counts.get('high', 0)} high), "
+        f"{len(result.paved_stock_repairs):,} stock repair plan(s), "
         f"{len(result.paved_replacements):,} paved replacement plan(s)."
     )
     print(f"HTML report: {report['html']}")
