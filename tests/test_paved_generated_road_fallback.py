@@ -111,7 +111,7 @@ def test_multiple_straight_paved_pieces_remain_stock() -> None:
     )
     piece = next(item for item in pieces if item.nominal_length == 6)
     measure = playability._PolylineMeasure.create(
-        ((0.0, 0.0), (0.0, 12.0))
+        ((0.0, 0.0), (0.0, 12.5))
     )
 
     upgraded = _upgrade_result(
@@ -136,8 +136,11 @@ def test_clipping_stock_joint_generates_only_the_offending_piece() -> None:
     measure = playability._PolylineMeasure.create(
         (
             (0.0, 0.0),
-            (0.0, 6.0),
-            (math.sin(angle) * 6.0, 6.0 + math.cos(angle) * 6.0),
+            (0.0, 6.25),
+            (
+                math.sin(angle) * 6.25,
+                6.25 + math.cos(angle) * 6.25,
+            ),
         )
     )
 
@@ -369,10 +372,15 @@ def test_parallel_quality_wrapper_keeps_generated_paved_fallback_live() -> None:
 
 
 def test_generated_paved_length_is_available_to_road_audits() -> None:
-    model = infrastructure.paved_fallback_model_path(
-        "audit_world", 9.10, 6.20, -20.0
-    )
-    assert math.isclose(quality._piece_length(model, 25.0), 6.2, abs_tol=1.0e-9)
+    for curve in (-20.0, 2.0):
+        model = infrastructure.paved_fallback_model_path(
+            "audit_world", 9.10, 6.20, curve
+        )
+        assert math.isclose(
+            quality._piece_length(model, 24.5),
+            6.2,
+            abs_tol=1.0e-9,
+        )
 
 
 def test_generated_paved_width_maps_back_to_stock_junction_family() -> None:
