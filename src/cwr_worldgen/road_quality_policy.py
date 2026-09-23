@@ -298,7 +298,7 @@ def _quality_chain(measure, pieces, *, start_distance, preferred_end_distance, m
             if endpoint is None:
                 continue
             end_distance, end_x, end_z, chord_heading = endpoint
-            end_heading = measure.point(end_distance)[2]
+            end_heading = measure.heading_before(end_distance)
             turn = max(_p._heading_difference(chord_heading, start_heading), _p._heading_difference(chord_heading, end_heading))
             deviation = measure.maximum_chord_deviation(current, end_distance, (start_x, start_z), (end_x, end_z))
             gravel = _p.is_generated_gravel_road_model(piece.model_path)
