@@ -20,6 +20,12 @@ def _spec():
     )
 
 
+def test_bridge_helpers_use_physical_stock_connector_spans() -> None:
+    assert policy._straight_road_nominal_length(r"o\road\sil25.p3d") == 25.0
+    assert policy._straight_road_nominal_length(r"o\road\sil12.p3d") == 12.5
+    assert policy._straight_road_nominal_length(r"o\road\sil6.p3d") == 6.25
+    assert policy._APPROACH_FILL_NOMINAL_LENGTH_METRES == 6.25
+
 def test_tinybridgetest10_parallel_sil_inside_stock_width_is_underlay() -> None:
     span = cleanup._BridgeSpan(
         points=((591.407, 666.322), (928.224, 884.896)),
