@@ -249,7 +249,7 @@ def test_generated_paved_asset_is_written_once_and_has_roadway_lod(
     )
 
 
-def test_generated_paved_road_is_grounded_like_other_generated_roads() -> None:
+def test_generated_paved_road_matches_requested_stock_surface_height() -> None:
     spec = SimpleNamespace(cells=4, cell_size=10.0)
     model = infrastructure.paved_fallback_model_path(
         "grounded_world", 9.10, 6.20, 10.0
@@ -264,9 +264,42 @@ def test_generated_paved_road_is_grounded_like_other_generated_roads() -> None:
         vertical_offset=0.060,
     )
 
-    # The generated visual/Roadway skin is 0.025 m above model origin. Ground
-    # the origin by the inverse amount instead of inheriting the stock +6 cm.
-    assert abs(obj.y + infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES) < 1.0e-9
+    # The local paved skin is 0.025 m above its model origin. Keep its world-space
+    # top on the same +6 cm plane requested for the surrounding stock road.
+    expected_origin = 0.060 - infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+    assert abs(obj.y - expected_origin) < 1.0e-9
+
+
+def test_generated_paved_curve_has_square_nonoverhanging_connection_planes() -> None:
+    length = 6.2
+    half_width = 4.55
+    sections = infrastructure._road_ribbon_sections(
+        length,
+        half_width,
+        45,
+        overhang=0.0,
+        square_ends=True,
+    )
+    first = sections[0]
+    last = sections[-1]
+
+    assert math.isclose(first[1], -length * 0.5, abs_tol=1.0e-9)
+    assert math.isclose(first[3], -length * 0.5, abs_tol=1.0e-9)
+    assert math.isclose(last[1], length * 0.5, abs_tol=1.0e-9)
+    assert math.isclose(last[3], length * 0.5, abs_tol=1.0e-9)
+
+
+def test_stock_paved_joint_limit_is_based_on_visible_edge_error() -> None:
+    piece = playability._RoadPiece(r"o\road\sil6.p3d", 6.25, 6)
+    small = quality._stock_paved_joint_edge_discontinuity(
+        piece, 0.0, piece, 1.0
+    )
+    visible = quality._stock_paved_joint_edge_discontinuity(
+        piece, 0.0, piece, 3.0
+    )
+
+    assert small < quality._STOCK_PAVED_MAX_EDGE_DISCONTINUITY_METRES
+    assert visible > quality._STOCK_PAVED_MAX_EDGE_DISCONTINUITY_METRES
 
 
 def test_parallel_quality_wrapper_keeps_generated_paved_fallback_live() -> None:
