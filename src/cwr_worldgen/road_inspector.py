@@ -1284,15 +1284,13 @@ def _paved_replacement_plans(
         model_path = _replacement_model_path(
             world_name, width, length, curve
         )
+        model_filename = (
+            model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+        )
+        action = "reuse" if existing_models[model_filename] else "generate"
         plans.append(PavedReplacementPlan(
             plan_id=f"RP-{len(plans)+1:05d}",
-            action=(
-                "reuse"
-                if existing_models[
-                    model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
-                ]
-                else "generate"
-            ),
+            action=action,
             model_path=model_path,
             replace_object_ids=object_ids,
             source_models=tuple(sorted({road.model_path for road in component})),
@@ -1311,6 +1309,10 @@ def _paved_replacement_plans(
                 for issue in component_issues
             ),
         ))
+        # The procedural infrastructure library writes one canonical P3D per
+        # filename. Treat later regions requesting the same variant as reuse
+        # within this inspection plan as well as reuse of assets already packed.
+        existing_models[model_filename] += 1
     return tuple(stock_repairs), tuple(plans)
 
 
