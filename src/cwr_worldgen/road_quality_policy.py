@@ -19,12 +19,19 @@ _STOCK_BULGE_LIMIT = 0.10
 _GRAVEL_BULGE_LIMIT = 0.075
 _LOOKAHEAD_DEPTH = 2
 
-# Ordinary stock paved P3Ds are flat slabs. A piece can fit its own chord while
-# still making a visibly overlapping wedge with the preceding stock slab. Try a
-# different vanilla 25/12/6 candidate before allowing the generated fallback.
-_STOCK_PAVED_JOINT_LIMIT_DEGREES = 7.5
+# Ordinary stock paved P3Ds are wide square-ended slabs. Angle alone is a poor
+# seam test: on a 9.1 m sil/kos road even a few degrees can move an outer corner
+# far enough to make a triangular overlap tongue visible in game. Measure the
+# actual cross-road edge discontinuity instead and try another vanilla 25/12/6
+# candidate before allowing the generated fallback.
+_STOCK_PAVED_MAX_EDGE_DISCONTINUITY_METRES = 0.12
+_STOCK_PAVED_HALF_WIDTH_METRES = {
+    "sil": 4.55,
+    "kos": 4.55,
+    "asf": 3.50,
+}
 _STOCK_PAVED_PATTERN = re.compile(
-    r"^(?:sil|kos|asf)(?:25|12|6)\.p3d$",
+    r"^(?P<family>sil|kos|asf)(?:25|12|6)\.p3d$",
     re.IGNORECASE,
 )
 
@@ -60,9 +67,40 @@ _ORIGINAL_CHAIN = _p._stock_piece_chain
 _INSTALLED = False
 
 
-def _is_stock_paved_piece(piece) -> bool:
+def _stock_paved_family(piece) -> str | None:
     filename = str(piece.model_path).replace("/", "\\").rsplit("\\", 1)[-1]
-    return _STOCK_PAVED_PATTERN.fullmatch(filename) is not None
+    match = _STOCK_PAVED_PATTERN.fullmatch(filename)
+    return match.group("family").casefold() if match is not None else None
+
+
+def _is_stock_paved_piece(piece) -> bool:
+    return _stock_paved_family(piece) is not None
+
+
+def _stock_paved_joint_edge_discontinuity(
+    first_piece,
+    first_heading: float,
+    second_piece,
+    second_heading: float,
+) -> float:
+    """Return visual edge mismatch at a coincident stock-paved seam."""
+
+    first_family = _stock_paved_family(first_piece)
+    second_family = _stock_paved_family(second_piece)
+    if first_family is None or second_family is None:
+        return 0.0
+    first_width = _STOCK_PAVED_HALF_WIDTH_METRES[first_family]
+    second_width = _STOCK_PAVED_HALF_WIDTH_METRES[second_family]
+
+    def edge_vector(heading: float, half_width: float) -> tuple[float, float]:
+        angle = math.radians(float(heading))
+        return math.cos(angle) * half_width, -math.sin(angle) * half_width
+
+    first = edge_vector(first_heading, first_width)
+    second = edge_vector(second_heading, second_width)
+    direct = math.hypot(first[0] - second[0], first[1] - second[1])
+    crossed = math.hypot(first[0] + second[0], first[1] + second[1])
+    return min(direct, crossed)
 
 
 def _piece_chord_heading(
@@ -268,6 +306,7 @@ def _quality_chain(measure, pieces, *, start_distance, preferred_end_distance, m
                 turn_limit, deviation_limit = 18.0, 0.22
             fidelity_penalty = int(turn > turn_limit or deviation > deviation_limit)
             joint_turn = 0.0
+            joint_edge = 0.0
             joint_penalty = 0
             if (
                 fitted
@@ -280,8 +319,14 @@ def _quality_chain(measure, pieces, *, start_distance, preferred_end_distance, m
                 joint_turn = _p._heading_difference(
                     previous_heading, chord_heading
                 )
+                joint_edge = _stock_paved_joint_edge_discontinuity(
+                    fitted[-1][0],
+                    previous_heading,
+                    piece,
+                    chord_heading,
+                )
                 joint_penalty = int(
-                    joint_turn > _STOCK_PAVED_JOINT_LIMIT_DEGREES
+                    joint_edge > _STOCK_PAVED_MAX_EDGE_DISCONTINUITY_METRES
                 )
             bulge = _terrain_bulge(context, (start_x, start_z), (end_x, end_z), piece.nominal_length)
             terrain_limit = _GRAVEL_BULGE_LIMIT if gravel else _STOCK_BULGE_LIMIT
@@ -306,7 +351,7 @@ def _quality_chain(measure, pieces, *, start_distance, preferred_end_distance, m
                     fidelity_penalty, joint_penalty, tail_penalty, terrain_penalty,
                     max(turn / turn_limit, deviation / deviation_limit),
                     (
-                        joint_turn / _STOCK_PAVED_JOINT_LIMIT_DEGREES
+                        joint_edge / _STOCK_PAVED_MAX_EDGE_DISCONTINUITY_METRES
                         if joint_penalty else 0.0
                     ),
                     terrain_ratio, tail_error,
