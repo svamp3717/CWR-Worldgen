@@ -255,13 +255,22 @@ def _upgrade_stock_result(
         current_heading = _quality._piece_chord_heading(
             (start_x, start_z), (end_x, end_z)
         )
-        clipping_joint = bool(
+        clipping_joint = False
+        if (
             previous_stock_heading is not None
+            and upgraded
             and _quality._is_stock_paved_piece(piece)
-            and _p._heading_difference(
-                previous_stock_heading, current_heading
-            ) > _quality._STOCK_PAVED_JOINT_LIMIT_DEGREES
-        )
+            and _quality._is_stock_paved_piece(upgraded[-1][0])
+        ):
+            clipping_joint = (
+                _quality._stock_paved_joint_edge_discontinuity(
+                    upgraded[-1][0],
+                    previous_stock_heading,
+                    piece,
+                    current_heading,
+                )
+                > _quality._STOCK_PAVED_MAX_EDGE_DISCONTINUITY_METRES
+            )
 
         # The quality scorer now considers both per-piece fidelity and the joint
         # against the preceding stock slab. If the winning vanilla candidate
