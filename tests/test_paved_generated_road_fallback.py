@@ -130,7 +130,7 @@ def test_generated_paved_model_names_quantize_for_reuse() -> None:
     )
 
     assert first == second
-    assert first.endswith(r"paved_w046_l0062_r20.p3d")
+    assert first.endswith(r"paved_w091_l0062_r20.p3d")
 
 
 def test_generated_paved_asset_is_written_once_and_has_roadway_lod(
