@@ -100,12 +100,8 @@ class TextureResolver:
                                     break
                                 properties[key.casefold()] = _read_cstring_file(handle, "PBO property value")
                             continue
-                        if (
-                            packing in {0, measure._PBO_COMPRESSED}
-                            and original_size == 0
-                            and _reserved == 0
-                            and _timestamp == 0
-                            and data_size == 0
+                        if measure._is_pbo_header_terminator(
+                            packing, original_size, _reserved, _timestamp, data_size
                         ):
                             break
                         raise measure.ModelReadError(

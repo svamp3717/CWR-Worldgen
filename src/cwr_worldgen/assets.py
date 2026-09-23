@@ -11,6 +11,7 @@ import struct
 from typing import Iterable, Mapping, Sequence
 
 from .cache import CACHE_SCHEMA_VERSION, atomic_write_json, cache_key
+from .pbo import _is_pbo_header_terminator
 
 _ENTRY_FIELDS = struct.Struct("<IIIII")
 _PBO_PROPERTIES = 0x56657273  # 'Vers' in the legacy little-endian PBO header
@@ -260,7 +261,9 @@ def _pbo_records(path: Path) -> tuple[list[AssetRecord], str | None]:
                             break
                         properties[key.casefold()] = _read_cstring(stream)
                     continue
-                if any((packing, original_size, reserved, timestamp, data_size)):
+                if not _is_pbo_header_terminator(
+                    packing, original_size, reserved, timestamp, data_size
+                ):
                     raise ValueError("unsupported PBO extension record")
                 break
             metadata.append((name, packing, data_size))

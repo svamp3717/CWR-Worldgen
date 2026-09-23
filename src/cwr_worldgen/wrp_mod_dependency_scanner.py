@@ -22,6 +22,7 @@ import threading
 from typing import Iterable, Sequence
 
 from .assets import _decompress_lzss_stream
+from .pbo import _is_pbo_header_terminator
 
 _PBO_ENTRY = struct.Struct("<IIIII")
 _PBO_PROPERTIES = 0x56657273  # 'Vers'
@@ -132,12 +133,8 @@ def _pbo_wrp_entries(path: Path) -> tuple[tuple[str, bytes], ...]:
                         break
                     _read_cstring(stream)
                 continue
-            if (
-                packing in {0, _PBO_COMPRESSED}
-                and original_size == 0
-                and reserved == 0
-                and timestamp == 0
-                and data_size == 0
+            if _is_pbo_header_terminator(
+                packing, original_size, reserved, timestamp, data_size
             ):
                 break
             raise ValueError(

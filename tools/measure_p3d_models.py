@@ -36,6 +36,7 @@ _VEC3 = struct.Struct("<fff")
 _PBO_ENTRY = struct.Struct("<IIIII")
 _PBO_PROPERTIES = 0x56657273  # 'Vers'
 _PBO_COMPRESSED = 0x43707273  # 'Cprs'
+_PBO_HEADER_TERMINATOR_TIMESTAMPS = frozenset((0, 0xFFFFFFFF))
 
 _MAX_VERTEX_COUNT = 10_000_000
 _MAX_PBO_ENTRY_SIZE = 2_000_000_000
@@ -93,6 +94,22 @@ def _read_exact(stream: io.BytesIO, size: int, label: str) -> bytes:
 
 def _read_u32(stream: io.BytesIO, label: str) -> int:
     return _U32.unpack(_read_exact(stream, _U32.size, label))[0]
+
+
+def _is_pbo_header_terminator(
+    packing: int,
+    original_size: int,
+    reserved: int,
+    timestamp: int,
+    data_size: int,
+) -> bool:
+    return (
+        packing in {0, _PBO_COMPRESSED}
+        and original_size == 0
+        and reserved == 0
+        and timestamp in _PBO_HEADER_TERMINATOR_TIMESTAMPS
+        and data_size == 0
+    )
 
 
 def _read_cstring(stream: io.BytesIO, label: str) -> str:
@@ -380,16 +397,12 @@ def _pbo_entries(path: Path) -> Iterator[tuple[str, bytes]]:
                     properties[key.casefold()] = _read_cstring(stream, "PBO property value")
                 continue
             # Some legacy/addon PBOs terminate their header with an empty-name
-            # Cprs record whose remaining fields are all zero. It does not
+            # Cprs/blank record whose timestamp is 0 or UINT32_MAX. It does not
             # describe another payload; the real member data begins immediately
             # afterwards. Accept it as a terminator while keeping genuinely
             # non-empty/unknown extension records strict.
-            if (
-                packing in {0, _PBO_COMPRESSED}
-                and original_size == 0
-                and reserved == 0
-                and timestamp == 0
-                and data_size == 0
+            if _is_pbo_header_terminator(
+                packing, original_size, reserved, timestamp, data_size
             ):
                 break
             raise ModelReadError(
@@ -456,12 +469,8 @@ def _pbo_model_paths(path: Path) -> Iterator[str]:
                             break
                         properties[key.casefold()] = _read_cstring(stream, "PBO property value")
                     continue
-                if (
-                    packing in {0, _PBO_COMPRESSED}
-                    and original_size == 0
-                    and reserved == 0
-                    and timestamp == 0
-                    and data_size == 0
+                if _is_pbo_header_terminator(
+                    packing, original_size, reserved, timestamp, data_size
                 ):
                     break
                 raise ModelReadError(
