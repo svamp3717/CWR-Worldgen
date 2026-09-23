@@ -14,11 +14,18 @@ _HEADER = struct.Struct("<4sii")
 _OBJECT = struct.Struct("<12fi76s")
 _TEXTURE_BYTES = 512 * 32
 _LENGTHS = {25: 25.0, 12: 12.5, 6: 6.25}
-_WIDTHS = {"sil": 4.55, "kos": 4.55, "asf": 3.50, "ces": 1.75, "gravel": 2.30}
+_WIDTHS = {
+    "sil": 4.55, "silnice": 4.55, "kos": 4.55,
+    "asf": 3.50, "asfaltka": 3.50, "ces": 1.75, "gravel": 2.30,
+}
 _CURVE_ANGLE = 10.0
 _JUNCTION_RADIUS = 6.25
 _GRAVEL_JUNCTION_RADIUS = 4.0
-_STRAIGHT = re.compile(r"^(?:.*[\\/])(?P<family>sil|ces|asf|kos)(?P<length>25|12|6)\.p3d$", re.I)
+_STRAIGHT = re.compile(
+    r"^(?:.*[\\/])(?P<family>silnice|asfaltka|sil|ces|asf|kos)"
+    r"(?P<length>25|12|6)\.p3d$",
+    re.I,
+)
 _CURVE = re.compile(r"^(?:.*[\\/])(?P<family>sil|ces|asf|kos)10 (?P<radius>25|50|75|100)\.p3d$", re.I)
 _T = re.compile(r"^(?:.*[\\/])kr_new_(?P<main>sil|asf|kos)_(?P<branch>sil|ces|asf|kos)_t\.p3d$", re.I)
 _X = re.compile(r"^(?:.*[\\/])kr_new_silxsil\.p3d$", re.I)
