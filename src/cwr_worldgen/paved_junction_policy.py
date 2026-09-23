@@ -14,6 +14,7 @@ import re
 from . import generator as _generator
 from . import playability as _p
 from . import road_quality_policy as _rq
+from . import procedural_infrastructure as _pi
 
 _JUNCTION_RADIUS = 6.25
 _APPROACH_RESERVE = 32.0
@@ -121,6 +122,12 @@ def _family_info() -> dict[str, dict]:
 def _family(path: str) -> str | None:
     if _p.is_generated_gravel_road_model(path):
         return "gravel"
+    if _pi.is_generated_paved_road_model(path):
+        filename = path.replace("/", "\\").rsplit("\\", 1)[-1]
+        match = _pi.ProceduralInfrastructureLibrary._PAVED_PATTERN.fullmatch(filename)
+        if match is not None and int(match.group("width")) <= 75:
+            return "asf"
+        return "sil"
     value = path.replace("/", "\\").casefold()
     for entry in _catalogue()["families"]:
         root = str(entry.get("root", "")).casefold()
