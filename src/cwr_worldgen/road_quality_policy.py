@@ -27,11 +27,13 @@ _LOOKAHEAD_DEPTH = 2
 _STOCK_PAVED_MAX_EDGE_DISCONTINUITY_METRES = 0.12
 _STOCK_PAVED_HALF_WIDTH_METRES = {
     "sil": 4.55,
+    "silnice": 4.55,
     "kos": 4.55,
     "asf": 3.50,
+    "asfaltka": 3.50,
 }
 _STOCK_PAVED_PATTERN = re.compile(
-    r"^(?P<family>sil|kos|asf)(?:25|12|6)\.p3d$",
+    r"^(?P<family>silnice|asfaltka|sil|kos|asf)(?:25|12|6)\.p3d$",
     re.IGNORECASE,
 )
 
