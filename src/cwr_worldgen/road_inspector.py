@@ -25,7 +25,7 @@ _X = re.compile(r"^(?:.*[\\/])kr_new_silxsil\.p3d$", re.I)
 _GRAVEL = re.compile(r"^(?:.*[\\/])gravel(?P<length>25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.I)
 _GENERATED_PAVED = re.compile(
     r"^(?:.*[\\/])paved_w(?P<width>\d{3})_l(?P<length>\d{4})"
-    r"(?:_(?P<side>[lr])(?P<degrees>05|10|15|20|25|30|35|40|45))?\.p3d$",
+    r"(?:_(?P<side>[lr])(?P<degrees>\d{2}))?\.p3d$",
     re.I,
 )
 _GRAVEL_JUNCTION = re.compile(
