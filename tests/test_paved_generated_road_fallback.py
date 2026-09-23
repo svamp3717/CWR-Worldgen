@@ -123,10 +123,10 @@ def test_disabled_fallback_never_replaces_stock_piece() -> None:
 
 def test_generated_paved_model_names_quantize_for_reuse() -> None:
     first = infrastructure.paved_fallback_model_path(
-        "reuse_world", 4.55, 6.24, 19.0
+        "reuse_world", 9.10, 6.24, 19.0
     )
     second = infrastructure.paved_fallback_model_path(
-        "reuse_world", 4.56, 6.23, 21.0
+        "reuse_world", 9.06, 6.23, 21.0
     )
 
     assert first == second
@@ -137,7 +137,7 @@ def test_generated_paved_asset_is_written_once_and_has_roadway_lod(
     tmp_path: Path,
 ) -> None:
     model = infrastructure.paved_fallback_model_path(
-        "reuse_world", 4.55, 6.24, -19.0
+        "reuse_world", 9.10, 6.24, -19.0
     )
     library = infrastructure.ProceduralInfrastructureLibrary(
         "reuse_world",
@@ -162,3 +162,30 @@ def test_generated_paved_asset_is_written_once_and_has_roadway_lod(
         abs(value - infrastructure._ROADWAY_LOD) < 1.0
         for value in document["models"][0]["lod_resolutions"]
     )
+
+
+def test_generated_paved_road_is_grounded_like_other_generated_roads() -> None:
+    spec = SimpleNamespace(cells=4, cell_size=10.0)
+    model = infrastructure.paved_fallback_model_path(
+        "grounded_world", 9.10, 6.20, 10.0
+    )
+    obj = playability._road_object_on_slope(
+        1,
+        model,
+        (10.0, 10.0),
+        (10.0, 16.2),
+        [0.0] * 16,
+        spec,
+        vertical_offset=0.060,
+    )
+
+    # The generated visual/Roadway skin is 0.025 m above model origin. Ground
+    # the origin by the inverse amount instead of inheriting the stock +6 cm.
+    assert abs(obj.y + infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES) < 1.0e-9
+
+
+def test_parallel_quality_wrapper_keeps_generated_paved_fallback_live() -> None:
+    from cwr_worldgen import road_quality_parallel_compat_policy as parallel_quality
+
+    assert parallel_quality._batched_quality_chain is fallback._parallel_chain
+    assert playability._stock_piece_chain is fallback._parallel_chain
