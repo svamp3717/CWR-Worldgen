@@ -32,6 +32,8 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_CATINTRO_PRESET,
     STOCK_BUILDING_FDF_LABEL,
     STOCK_BUILDING_FDF_PRESET,
+    STOCK_BUILDING_SFP4_LABEL,
+    STOCK_BUILDING_SFP4_PRESET,
     STOCK_BUILDING_HAUS_COMBINED_PRESET,
     STOCK_BUILDING_HAUS_ONLY_LABEL,
     STOCK_BUILDING_HAUS_ONLY_PRESET,
@@ -327,6 +329,28 @@ def test_catintro_and_finmod_catalogues_are_selectable_source_presets() -> None:
         library = _library(preset)
         assert len(library.models) == expected_count
         assert {stock_model_source(model.model_path) for model in library.models} == {source}
+
+
+def test_sfp4_catalogue_is_selectable_source_preset() -> None:
+    data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
+    document = json.loads((data_dir / "sfp4.json").read_text(encoding="utf-8"))
+    paths = {row["model_path"].casefold() for row in document["models"]}
+
+    assert document["schema"] == 5
+    assert document["kind"] == "completed_model_classifications"
+    assert document["complete_count"] == 20
+    assert document["reviewed_count"] == 20
+    assert document["display_name"] == "sfp4 buildings"
+    assert STOCK_BUILDING_SFP4_LABEL == "sfp4 buildings"
+    assert len(paths) == 20
+    assert all(
+        path.startswith(("sfp_objects\\", "sfp_skaro\\"))
+        for path in paths
+    )
+
+    library = _library(STOCK_BUILDING_SFP4_PRESET)
+    assert len(library.models) == 20
+    assert {stock_model_source(model.model_path) for model in library.models} == {"sfp4"}
 
 
 def test_catintro_and_finmod_catalogues_are_recorded_in_build_metadata(

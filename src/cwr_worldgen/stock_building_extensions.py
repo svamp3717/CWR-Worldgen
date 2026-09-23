@@ -32,6 +32,7 @@ STOCK_BUILDING_CAF_KKK_BUILDINGS2_PRESET = "stock-caf-kkk-buildings2"
 STOCK_BUILDING_DMA_LIBYA_O_PRESET = "stock-dma-libya-o"
 STOCK_BUILDING_CATINTRO_PRESET = "stock-catintro"
 STOCK_BUILDING_FDF_PRESET = "stock-fdf"
+STOCK_BUILDING_SFP4_PRESET = "stock-sfp4"
 
 # Legacy combined identifiers remain accepted when loading old profiles, but no
 # combined catalogue JSONs are shipped anymore. They expand into source sets.
@@ -54,6 +55,7 @@ _STOCK_CAF_KKK_BUILDINGS2_CATALOGUE_PATH = (
 _STOCK_DMA_LIBYA_O_CATALOGUE_PATH = _DATA_DIR / "DMA_libya_o.json"
 _STOCK_CATINTRO_CATALOGUE_PATH = _DATA_DIR / "catintro.json"
 _STOCK_FDF_CATALOGUE_PATH = _DATA_DIR / "fdf.json"
+_STOCK_SFP4_CATALOGUE_PATH = _DATA_DIR / "sfp4.json"
 
 
 def _catalogue_display_name(path: Path, fallback: str) -> str:
@@ -117,6 +119,10 @@ STOCK_BUILDING_FDF_LABEL = _catalogue_display_name(
     _STOCK_FDF_CATALOGUE_PATH,
     "finmod buildings",
 )
+STOCK_BUILDING_SFP4_LABEL = _catalogue_display_name(
+    _STOCK_SFP4_CATALOGUE_PATH,
+    "sfp4 buildings",
+)
 
 # Compatibility labels for code/imports that still know the old combined IDs.
 STOCK_BUILDING_COMBINED_LABEL = "Stock combined (non-Resistance + Resistance) buildings"
@@ -141,6 +147,7 @@ STOCK_BUILDING_PRESETS = (
     STOCK_BUILDING_DMA_LIBYA_O_PRESET,
     STOCK_BUILDING_CATINTRO_PRESET,
     STOCK_BUILDING_FDF_PRESET,
+    STOCK_BUILDING_SFP4_PRESET,
 )
 STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_VANILLA_LABEL),
@@ -156,6 +163,7 @@ STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_DMA_LIBYA_O_PRESET, STOCK_BUILDING_DMA_LIBYA_O_LABEL),
     (STOCK_BUILDING_CATINTRO_PRESET, STOCK_BUILDING_CATINTRO_LABEL),
     (STOCK_BUILDING_FDF_PRESET, STOCK_BUILDING_FDF_LABEL),
+    (STOCK_BUILDING_SFP4_PRESET, STOCK_BUILDING_SFP4_LABEL),
 )
 
 STOCK_BUILDING_MULTI_PREFIX = "stock-multi:"
@@ -193,6 +201,7 @@ _STOCK_CATALOGUE_BY_PRESET = {
     STOCK_BUILDING_DMA_LIBYA_O_PRESET: _STOCK_DMA_LIBYA_O_CATALOGUE_PATH,
     STOCK_BUILDING_CATINTRO_PRESET: _STOCK_CATINTRO_CATALOGUE_PATH,
     STOCK_BUILDING_FDF_PRESET: _STOCK_FDF_CATALOGUE_PATH,
+    STOCK_BUILDING_SFP4_PRESET: _STOCK_SFP4_CATALOGUE_PATH,
 }
 
 
@@ -318,6 +327,8 @@ def stock_model_source(model_path: object) -> str:
         return "catintro"
     if path.startswith("fdf_s\\"):
         return "fdf"
+    if path.startswith("sfp_objects\\") or path.startswith("sfp_skaro\\"):
+        return "sfp4"
     return "vanilla"
 
 
