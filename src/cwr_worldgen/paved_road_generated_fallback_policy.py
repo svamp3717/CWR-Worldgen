@@ -365,7 +365,6 @@ def _upgrade_stock_result(
                 previous_edge_heading = None
                 previous_edge_half_width = None
                 previous_entry_start_distance = None
-                previous_entry_generated = False
         current = end_distance
 
     # Do not fill intentionally hub-covered tails. Only intervene when the
