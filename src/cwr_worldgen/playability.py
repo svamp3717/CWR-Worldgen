@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections import deque
 from dataclasses import dataclass
 import hashlib
@@ -342,6 +342,28 @@ class _PolylineMeasure:
             start[1] + dz * fraction,
             math.degrees(math.atan2(dx, dz)) % 360.0,
         )
+
+    def heading_before(self, distance: float) -> float:
+        """Return the source-segment heading immediately before a measure."""
+        if distance <= 0.0:
+            start, end = self.points[0], self.points[1]
+        elif distance >= self.total:
+            start, end = self.points[-2], self.points[-1]
+        else:
+            # bisect_left keeps an exact vertex on the segment that arrives at
+            # it. This is the tangent a road piece ending at that vertex should
+            # be compared against; point() intentionally uses the outgoing one.
+            segment = max(
+                0,
+                min(
+                    len(self.points) - 2,
+                    bisect_left(self.cumulative, distance) - 1,
+                ),
+            )
+            start, end = self.points[segment], self.points[segment + 1]
+        return math.degrees(
+            math.atan2(end[0] - start[0], end[1] - start[1])
+        ) % 360.0
 
     def chord_endpoint(
         self,
