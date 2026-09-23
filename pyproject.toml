@@ -24,9 +24,11 @@ sources = [
 [project.scripts]
 cwr-worldgen = "cwr_worldgen.cli:main"
 cwr-road-inspector = "cwr_worldgen.road_inspector:main"
+cwr-wrp-mod-scan = "cwr_worldgen.wrp_mod_dependency_scanner:main"
 
 [project.gui-scripts]
 cwr-worldgen-gui = "cwr_worldgen.gui_entry:main"
+cwr-wrp-mod-scan-gui = "cwr_worldgen.wrp_mod_dependency_scanner:gui_main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
