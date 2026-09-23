@@ -206,6 +206,63 @@ def test_disabled_fallback_never_replaces_stock_piece() -> None:
     assert upgraded[0][0].model_path == piece.model_path
 
 
+def test_vanilla_stock_variants_use_physical_lengths_at_default_24_5_setting() -> None:
+    pieces = playability.road_model_variants(r"o\road\sil25.p3d", 24.5)
+    lengths = {
+        piece.nominal_length: piece.length_metres
+        for piece in pieces
+    }
+
+    assert lengths == {25: 25.0, 12: 12.5, 6: 6.25}
+    assert math.isclose(
+        quality._piece_length(r"o\road\sil25.p3d", 24.5),
+        25.0,
+        abs_tol=1.0e-9,
+    )
+
+
+def test_two_stock_25m_pieces_meet_without_axial_overlap_at_default_setting() -> None:
+    pieces = playability.road_model_variants(r"o\road\sil25.p3d", 24.5)
+    piece = next(value for value in pieces if value.nominal_length == 25)
+    measure = playability._PolylineMeasure.create(((0.0, 0.0), (0.0, 50.0)))
+    token = quality._CONTEXT.set(
+        quality._Context(
+            (),
+            SimpleNamespace(
+                cells=4,
+                cell_size=25.0,
+                road_connection_tolerance=0.35,
+            ),
+            {},
+        )
+    )
+    try:
+        fitted = quality._quality_chain(
+            measure,
+            pieces,
+            start_distance=0.0,
+            preferred_end_distance=50.0,
+            minimum_end_distance=50.0,
+            maximum_end_distance=50.0,
+        )
+    finally:
+        quality._CONTEXT.reset(token)
+
+    assert [item[0].nominal_length for item in fitted] == [25, 25]
+    first_axis = fitted[0][1], fitted[0][2]
+    second_axis = fitted[1][1], fitted[1][2]
+    assert first_axis[1] == second_axis[0] == (0.0, 25.0)
+    assert math.isclose(piece.length_metres, 25.0, abs_tol=1.0e-9)
+
+
+def test_two_degree_generated_curve_is_supported_for_wide_paved_seams() -> None:
+    model = infrastructure.paved_fallback_model_path(
+        "fine_curve_world", 9.10, 6.25, 2.0
+    )
+    assert model.endswith(r"paved_w091_l0062_r02.p3d")
+    assert infrastructure.is_generated_paved_road_model(model)
+
+
 def test_generated_paved_model_names_quantize_for_reuse() -> None:
     first = infrastructure.paved_fallback_model_path(
         "reuse_world", 9.10, 6.24, 19.0
@@ -270,23 +327,25 @@ def test_generated_paved_road_matches_requested_stock_surface_height() -> None:
     assert abs(obj.y - expected_origin) < 1.0e-9
 
 
-def test_generated_paved_curve_has_square_nonoverhanging_connection_planes() -> None:
+def test_generated_paved_curve_keeps_endpoint_centres_without_overhang() -> None:
     length = 6.2
     half_width = 4.55
     sections = infrastructure._road_ribbon_sections(
         length,
         half_width,
-        45,
+        20,
         overhang=0.0,
-        square_ends=True,
+        square_ends=False,
     )
     first = sections[0]
     last = sections[-1]
 
-    assert math.isclose(first[1], -length * 0.5, abs_tol=1.0e-9)
-    assert math.isclose(first[3], -length * 0.5, abs_tol=1.0e-9)
-    assert math.isclose(last[1], length * 0.5, abs_tol=1.0e-9)
-    assert math.isclose(last[3], length * 0.5, abs_tol=1.0e-9)
+    # The edge rotates to the curve tangent, but its midpoint remains exactly on
+    # the nominal connector. No extra mesh is pushed beyond the centreline ends.
+    assert math.isclose((first[1] + first[3]) * 0.5, -length * 0.5, abs_tol=1.0e-9)
+    assert math.isclose((last[1] + last[3]) * 0.5, length * 0.5, abs_tol=1.0e-9)
+    assert not math.isclose(first[1], first[3], abs_tol=1.0e-6)
+    assert not math.isclose(last[1], last[3], abs_tol=1.0e-6)
 
 
 def test_stock_paved_joint_limit_is_based_on_visible_edge_error() -> None:
