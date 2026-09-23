@@ -126,8 +126,9 @@ def _potential_audit_buckets(
 ) -> set[tuple[int, int]]:
     """Return every midpoint bucket that could matter to any junction.
 
-    ``_piece_length`` never exceeds ``spec.road_segment_length``. Using that
-    configured maximum lets the index skip axis/trigonometry work for road pieces
+    Vanilla stock 25 m P3Ds can be slightly longer than the historical
+    ``spec.road_segment_length`` setting. Using the larger physical/configured
+    maximum lets the index skip axis/trigonometry work for road pieces
     that are nowhere near an audited junction, while later per-arm bounds still
     use the exact maximum length observed in the report.
     """
@@ -180,7 +181,9 @@ def audit_road_junctions(
 
     objects = report.objects[report.junction_cap_objects :]
     object_total = len(objects)
-    configured_half_length = max(0.0, float(spec.road_segment_length)) * 0.5
+    configured_half_length = max(
+        25.0, max(0.0, float(spec.road_segment_length))
+    ) * 0.5
     potential_buckets = _potential_audit_buckets(
         context,
         bucket_size=bucket_size,
