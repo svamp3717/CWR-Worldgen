@@ -15,8 +15,32 @@ from typing import Iterable
 from .cache import atomic_write_json, cache_key
 
 _ENTRY_FIELDS = struct.Struct("<IIIII")
+_PBO_COMPRESSED = 0x43707273  # 'Cprs' legacy BIS LZSS marker
+_PBO_HEADER_TERMINATOR_TIMESTAMPS = frozenset((0, 0xFFFFFFFF))
 _FIXED_POSEIDON_TIMESTAMP = 946684800  # 2000-01-01 UTC, safely representable by legacy tools.
 _VALID_BACKENDS = {"auto", "python", "poseidon"}
+
+
+def _is_pbo_header_terminator(
+    packing: int,
+    original_size: int,
+    reserved: int,
+    timestamp: int,
+    data_size: int,
+) -> bool:
+    """Return whether an empty-name PBO record terminates the header.
+
+    Legacy BIS/addon archives are found with both 0 and UINT32_MAX in the
+    timestamp field. The other fields still have to match the known empty
+    terminator shape so unrelated extension records remain errors.
+    """
+    return (
+        packing in {0, _PBO_COMPRESSED}
+        and original_size == 0
+        and reserved == 0
+        and timestamp in _PBO_HEADER_TERMINATOR_TIMESTAMPS
+        and data_size == 0
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,7 +333,9 @@ def read_pbo(path: Path) -> tuple[PboEntry, ...]:
             raise ValueError("truncated PBO entry fields")
         packing, original_size, reserved, timestamp, data_size = _ENTRY_FIELDS.unpack(fields)
         if not name_bytes:
-            if any((packing, original_size, reserved, timestamp, data_size)):
+            if not _is_pbo_header_terminator(
+                packing, original_size, reserved, timestamp, data_size
+            ):
                 raise ValueError("unsupported PBO properties entry")
             break
         if packing != 0:
