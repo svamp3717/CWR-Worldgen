@@ -350,6 +350,22 @@ def _batched_quality_chain(
             fidelity_penalty = int(
                 turn > turn_limit or deviation > deviation_limit
             )
+            joint_turn = 0.0
+            joint_penalty = 0
+            if (
+                fitted
+                and _quality._is_stock_paved_piece(piece)
+                and _quality._is_stock_paved_piece(fitted[-1][0])
+            ):
+                previous_heading = _quality._piece_chord_heading(
+                    fitted[-1][1], fitted[-1][2]
+                )
+                joint_turn = _playability._heading_difference(
+                    previous_heading, chord_heading
+                )
+                joint_penalty = int(
+                    joint_turn > _quality._STOCK_PAVED_JOINT_LIMIT_DEGREES
+                )
             prepared.append((
                 piece,
                 endpoint,
@@ -359,6 +375,8 @@ def _batched_quality_chain(
                 fidelity_penalty,
                 turn,
                 deviation,
+                joint_penalty,
+                joint_turn,
             ))
 
         bulges = _batched_terrain_bulges(
@@ -381,6 +399,8 @@ def _batched_quality_chain(
                 fidelity_penalty,
                 turn,
                 deviation,
+                joint_penalty,
+                joint_turn,
             ) = row
             end_distance, _end_x, _end_z, _chord_heading = endpoint
             terrain_limit = (
@@ -422,9 +442,14 @@ def _batched_quality_chain(
             else:
                 score = (
                     fidelity_penalty,
+                    joint_penalty,
                     tail_penalty,
                     terrain_penalty,
                     max(turn / turn_limit, deviation / deviation_limit),
+                    (
+                        joint_turn / _quality._STOCK_PAVED_JOINT_LIMIT_DEGREES
+                        if joint_penalty else 0.0
+                    ),
                     terrain_ratio,
                     tail_error,
                     0 if piece == preferred_piece else 1,
