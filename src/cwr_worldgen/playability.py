@@ -1510,8 +1510,13 @@ def _fit_stock_piece_road_objects(
 
     # Nodes with more than four branches cannot receive a stock hub object, but
     # their road lines still split at the shared centre.
+    virtual_short_length = max(
+        6.25,
+        float(spec.road_segment_length) * 6.0 / 25.0,
+    )
     virtual_cover_lengths = {
-        key: spec.road_segment_length * 6.0 / 25.0 * 0.5 + 0.15 for key in complex_keys
+        key: virtual_short_length * 0.5 + 0.15
+        for key in complex_keys
     }
     virtual_trim_lengths = {
         key: max(0.40, cover - 0.85) for key, cover in virtual_cover_lengths.items()
