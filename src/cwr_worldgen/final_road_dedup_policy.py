@@ -42,6 +42,10 @@ _HALF_WIDTH_METRES = {
 
 _STOCK_STRAIGHT = re.compile(r"^(?P<family>sil|kos|asf|ces)(?P<nominal>25|12|6)\.p3d$", re.I)
 _GRAVEL_STRAIGHT = re.compile(r"^gravel(?P<nominal>25|12|6|3)\.p3d$", re.I)
+_GENERATED_PAVED_STRAIGHT = re.compile(
+    r"^paved_w(?P<width>\d{3})_l(?P<length>\d{4})\.p3d$",
+    re.I,
+)
 
 _INSTALLED = False
 _ORIGINAL_FIT = None
@@ -89,10 +93,19 @@ def _family_and_length(model_path: str, configured_long_length: float) -> tuple[
 
 
 def _road_axis(obj, object_index: int, spec) -> _RoadAxis | None:
-    dimensions = _family_and_length(obj.model_path, float(spec.road_segment_length))
-    if dimensions is None:
-        return None
-    family, expected_length = dimensions
+    generated = _GENERATED_PAVED_STRAIGHT.fullmatch(_filename(obj.model_path))
+    if generated is not None:
+        family = "paved"
+        expected_length = int(generated.group("length")) / 10.0
+        half_width = int(generated.group("width")) / 20.0
+    else:
+        dimensions = _family_and_length(
+            obj.model_path, float(spec.road_segment_length)
+        )
+        if dimensions is None:
+            return None
+        family, expected_length = dimensions
+        half_width = float(_HALF_WIDTH_METRES[family])
     if expected_length <= 1.0e-6:
         return None
     start, end = _p._model_axis(obj, expected_length)
@@ -110,7 +123,7 @@ def _road_axis(obj, object_index: int, spec) -> _RoadAxis | None:
         ux=dx / length,
         uz=dz / length,
         length=length,
-        half_width=float(_HALF_WIDTH_METRES[family]),
+        half_width=half_width,
         elevation=float(obj.y),
     )
 
@@ -119,7 +132,7 @@ def _surface_priority(family: str) -> int:
     # Final WorldObjects do not retain OSM highway class provenance.  Preserve
     # the strongest information still available: paved beats generated gravel,
     # which beats the stock dirt/earth family.
-    if family in {"sil", "kos", "asf"}:
+    if family in {"sil", "kos", "asf", "paved"}:
         return 3
     if family == "gravel":
         return 2
