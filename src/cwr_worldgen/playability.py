@@ -720,6 +720,38 @@ class _ProjectedRoadSegment:
         return math.dist(self.start, self.end)
 
 
+_STOCK_STRAIGHT_LENGTH_METRES = {
+    25: 25.0,
+    12: 12.5,
+    6: 6.25,
+}
+_STOCK_STRAIGHT_MODEL = re.compile(
+    r"^(?:sil|asf|kos|ces|silnice|asfaltka|cesta)(25|12|6)\.p3d$",
+    re.IGNORECASE,
+)
+
+
+def stock_road_piece_length_metres(
+    model_path: str,
+    nominal_length: int,
+    configured_long_length: float,
+) -> float:
+    """Return the physical connector span of one road model.
+
+    The vanilla OFP/Resistance straight-road filenames are nominal family names,
+    not a scale instruction. Their memory/roadway connectors are 25.0, 12.5 and
+    6.25 m apart. Scaling those models from the historical 24.5 m configuration
+    makes consecutive stock slabs overlap even on a perfectly straight chain.
+    Unknown/custom families retain the legacy configurable scaling behavior.
+    """
+
+    filename = str(model_path).replace("/", "\\").rsplit("\\", 1)[-1]
+    match = _STOCK_STRAIGHT_MODEL.fullmatch(filename)
+    if match is not None and int(match.group(1)) == int(nominal_length):
+        return _STOCK_STRAIGHT_LENGTH_METRES[int(nominal_length)]
+    return float(configured_long_length) * float(nominal_length) / 25.0
+
+
 def _road_model_with_length(model_path: str, nominal_length: int) -> str | None:
     """Return the sibling stock road model for a nominal straight length.
 
@@ -755,7 +787,11 @@ def road_model_variants(model_path: str, configured_long_length: float) -> tuple
             path = _road_model_with_length(model_path, nominal)
         if path is None:
             continue
-        pieces.append(_RoadPiece(path, configured_long_length * nominal / 25.0, nominal))
+        pieces.append(_RoadPiece(
+            path,
+            stock_road_piece_length_metres(path, nominal, configured_long_length),
+            nominal,
+        ))
     return tuple(pieces)
 
 
