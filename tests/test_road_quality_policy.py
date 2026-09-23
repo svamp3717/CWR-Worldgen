@@ -239,6 +239,20 @@ def test_diagonal_junction_trim_uses_oriented_hub_edge() -> None:
     assert math.isclose(exit_distance - adjusted[0], 0.22, abs_tol=1e-6)
 
 
+def test_exact_vertex_end_heading_uses_arriving_segment() -> None:
+    turn = math.radians(30.0)
+    measure = playability._PolylineMeasure.create((
+        (0.0, 0.0),
+        (0.0, 25.0),
+        (math.sin(turn) * 25.0, 25.0 + math.cos(turn) * 25.0),
+    ))
+
+    # point() intentionally uses the outgoing segment at an exact vertex so a
+    # piece starting there follows the road ahead. A piece ending there must be
+    # judged against the segment that actually arrived at the vertex.
+    assert math.isclose(measure.point(25.0)[2], 30.0, abs_tol=1.0e-9)
+    assert math.isclose(measure.heading_before(25.0), 0.0, abs_tol=1.0e-9)
+
 def test_chain_lookahead_avoids_awkward_final_overshoot() -> None:
     measure = playability._PolylineMeasure.create(((0.0, 0.0), (0.0, 30.0)))
     pieces = (
