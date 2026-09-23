@@ -42,7 +42,7 @@ _MAXIMUM_CORRECTION_VECTORS = 4
 _MAXIMUM_VERTICAL_TERRAIN_GAP_METRES = 2.0
 _PROGRESS_BUCKET_PERCENT = 2
 _RAW_PROGRESS_PERCENT = 52
-_CACHE_REVISION = "final-road-building-clearance-v3-stock-fit-overlap"
+_CACHE_REVISION = "final-road-building-clearance-v4-generated-paved"
 
 _WIDTHS = {
     "sil": 4.55,
@@ -67,6 +67,11 @@ _GRAVEL = re.compile(
 )
 _GRAVEL_JUNCTION = re.compile(
     r"^gravel_j(?P<degree>[34])(?:_(?P<variant>t(?:30|45|60|75)[lr]|t90|y120|x(?:30|45|60|75|90)))?\.p3d$",
+    re.I,
+)
+_GENERATED_PAVED = re.compile(
+    r"^paved_w(?P<width>\d{3})_l(?P<length>\d{4})"
+    r"(?:_(?P<side>[lr])(?P<degrees>05|10|15|20|25|30|35|40|45))?\.p3d$",
     re.I,
 )
 
@@ -301,6 +306,35 @@ def _gravel_curve_points(
     return tuple(values)
 
 
+def _generated_paved_curve_points(
+    length: float, side: str | None, degrees: float
+) -> tuple[PointXZ, ...]:
+    """Mirror the generated paved quadratic centreline for clearance tests."""
+
+    half_length = length * 0.5
+    signed = degrees if (side or "").casefold() == "r" else -degrees
+    if not side or abs(signed) <= 1.0e-9:
+        return ((0.0, -half_length), (0.0, half_length))
+
+    theta = math.radians(abs(signed))
+    radius = length / max(1.0e-9, 2.0 * math.sin(theta * 0.5))
+    sagitta = math.copysign(
+        radius * (1.0 - math.cos(theta * 0.5)),
+        signed,
+    )
+    control_x = sagitta * 2.0
+    sections = 6
+    values = []
+    for index in range(sections + 1):
+        t = index / sections
+        one_minus = 1.0 - t
+        values.append((
+            2.0 * one_minus * t * control_x,
+            -half_length * one_minus * one_minus + half_length * t * t,
+        ))
+    return tuple(values)
+
+
 def _gravel_junction_headings(
     degree: int, variant: str | None
 ) -> tuple[float, ...]:
@@ -371,6 +405,25 @@ def _road_object_primitives(obj, spec) -> tuple[_RoadPrimitive, ...]:
         return tuple(
             _make_primitive(obj, centre, endpoint, _WIDTHS["sil"])
             for endpoint in endpoints
+        )
+
+    match = _GENERATED_PAVED.fullmatch(filename)
+    if match is not None:
+        length = int(match.group("length")) / 10.0
+        half_width = int(match.group("width")) / 20.0
+        side = match.group("side")
+        degrees = float(match.group("degrees") or 0.0)
+        points = _generated_paved_curve_points(length, side, degrees)
+        # Segmenting the same quadratic centreline used by the generated MLOD
+        # keeps the building clearance pass aligned with the visible asphalt.
+        return tuple(
+            _make_primitive(
+                obj,
+                start,
+                end,
+                half_width + (0.10 if side else 0.0),
+            )
+            for start, end in zip(points, points[1:])
         )
 
     match = _GRAVEL.fullmatch(filename)
