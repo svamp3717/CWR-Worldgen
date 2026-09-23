@@ -48,10 +48,11 @@ GENERATED_GRAVEL_EDGE_SECTION_METRES = 0.65
 # Generated paved models are a fallback only. The road fitter still tries the
 # stock OFP/Resistance P3D family first and references these world-local models
 # only when none of those slabs meets its existing geometric fidelity limits.
-# Five-degree curve buckets and decimetre dimensions deliberately trade a tiny
-# amount of precision for aggressive model reuse.
-GENERATED_PAVED_CURVE_BUCKETS = tuple(range(5, 50, 5))
-GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.18
+# Low-angle paved seams are visually sensitive because the stock road is wide.
+# Keep 2-5 degree buckets fine, then widen the spacing on larger bends. Generated
+# paved ribbons do not extend beyond their nominal centreline endpoints.
+GENERATED_PAVED_CURVE_BUCKETS = (2, 3, 4, 5, 7, 10, 15, 20, 25, 30, 35, 40, 45)
+GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.0
 # Matches the stock sil/kos effective half-width used throughout the fitter.
 GENERATED_PAVED_HALF_WIDTH_METRES = 4.55
 
@@ -672,11 +673,12 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
             length,
             half_w,
             curve_degrees,
-            # Stock road P3Ds already meet at their nominal connection plane.
-            # Extending a generated paved ribbon beyond that plane creates the
-            # large triangular tongues seen on curved city roads.
+            # Keep the centreline endpoint fixed with no longitudinal overhang,
+            # but let the cross-section follow the curve tangent. That makes the
+            # generated edge meet the adjacent stock slab on its tangent plane
+            # instead of recreating a square-ended wedge.
             overhang=0.0,
-            square_ends=True,
+            square_ends=False,
         )
         raw_visual = _ribbon_lod(
             visual_sections,
@@ -713,7 +715,7 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
         half_w,
         curve_degrees,
         overhang=0.0,
-        square_ends=paved_fallback,
+        square_ends=False,
     )
     roadway = _ribbon_lod(
         roadway_sections, texture=texture, resolution=_ROADWAY_LOD,
@@ -873,7 +875,7 @@ def paved_fallback_model_path(
     length_dm = max(5, min(9999, int(round(float(length_metres) * 10.0))))
     magnitude = abs(float(curve_degrees))
     suffix = ""
-    if magnitude >= 2.5:
+    if magnitude >= 1.5:
         amount = min(
             GENERATED_PAVED_CURVE_BUCKETS,
             key=lambda value: (abs(float(value) - magnitude), value),
@@ -886,7 +888,7 @@ def paved_fallback_model_path(
 def is_generated_paved_road_model(model_path: str) -> bool:
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
     return re.fullmatch(
-        r"paved_w\d{3}_l\d{4}(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d",
+        r"paved_w\d{3}_l\d{4}(?:_[lr]\d{2})?\.p3d",
         filename,
         re.IGNORECASE,
     ) is not None
@@ -946,7 +948,7 @@ class ProceduralInfrastructureLibrary:
     _GRAVEL_PATTERN = re.compile(r"^gravel(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.IGNORECASE)
     _GRAVEL_JUNCTION_PATTERN = re.compile(r"^gravel_j([34])\.p3d$", re.IGNORECASE)
     _PAVED_PATTERN = re.compile(
-        r"^paved_w(?P<width>\d{3})_l(?P<length>\d{4})(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+        r"^paved_w(?P<width>\d{3})_l(?P<length>\d{4})(?:_[lr]\d{2})?\.p3d$",
         re.IGNORECASE,
     )
     _UTILITY_PATTERN = re.compile(r"^util_(power_pole|power_tower|water_tower)\.p3d$", re.IGNORECASE)
