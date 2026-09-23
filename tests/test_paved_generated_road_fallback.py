@@ -126,7 +126,7 @@ def test_multiple_straight_paved_pieces_remain_stock() -> None:
     )
 
 
-def test_clipping_stock_joint_generates_only_the_offending_piece() -> None:
+def test_clipping_stock_joint_collapses_pair_into_one_generated_bend() -> None:
     spec = _spec()
     pieces = playability.road_model_variants(
         spec.paved_road_model, spec.road_segment_length
@@ -148,15 +148,15 @@ def test_clipping_stock_joint_generates_only_the_offending_piece() -> None:
         measure, pieces, _two_piece_result(measure, piece), spec
     )
 
-    assert upgraded[0][0].model_path == piece.model_path
-    assert infrastructure.is_generated_paved_road_model(
-        upgraded[1][0].model_path
+    # Remove the bad seam itself rather than painting over one side of it.
+    assert len(upgraded) == 1
+    generated, start_point, end_point = upgraded[0]
+    assert infrastructure.is_generated_paved_road_model(generated.model_path)
+    assert start_point == (0.0, 0.0)
+    assert math.isclose(end_point[0], math.sin(angle) * 6.25, abs_tol=1.0e-9)
+    assert math.isclose(
+        end_point[1], 6.25 + math.cos(angle) * 6.25, abs_tol=1.0e-9
     )
-    assert sum(
-        infrastructure.is_generated_paved_road_model(item[0].model_path)
-        for item in upgraded
-    ) == 1
-
 
 def test_tight_paved_bend_uses_generated_fallback_when_stock_piece_fails() -> None:
     spec = _spec()
