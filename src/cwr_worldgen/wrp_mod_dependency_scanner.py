@@ -306,7 +306,10 @@ def rows_for_display(result: ScanResult, *, include_stock: bool = False) -> tupl
     return tuple(row for row in result.rows if not row.is_stock)
 
 
-def result_document(result: ScanResult) -> dict[str, object]:
+def result_document(
+    result: ScanResult, *, include_stock: bool = False
+) -> dict[str, object]:
+    rows = rows_for_display(result, include_stock=include_stock)
     return {
         "schema": 1,
         "input_path": result.input_path,
@@ -320,24 +323,36 @@ def result_document(result: ScanResult) -> dict[str, object]:
             {row.model_path for row in result.rows if not row.is_stock}
         ),
         "warnings": list(result.warnings),
-        "dependencies": [asdict(row) for row in result.rows],
+        "dependencies": [asdict(row) for row in rows],
     }
 
 
-def write_json_report(result: ScanResult, output: Path | str) -> Path:
+def write_json_report(
+    result: ScanResult, output: Path | str, *, include_stock: bool = False
+) -> Path:
     path = Path(output)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(result_document(result), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            result_document(result, include_stock=include_stock),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     return path
 
 
-def write_csv_report(result: ScanResult, output: Path | str) -> Path:
+def write_csv_report(
+    result: ScanResult, output: Path | str, *, include_stock: bool = False
+) -> Path:
     path = Path(output)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(("wrp", "namespace", "model_path", "references", "type", "parser"))
-        for row in result.rows:
+        for row in rows_for_display(result, include_stock=include_stock):
             writer.writerow((
                 row.wrp_name,
                 row.namespace,
@@ -547,7 +562,11 @@ class ScannerGui:
             filetypes=(("CSV", "*.csv"),),
         )
         if selected:
-            write_csv_report(self._result, selected)
+            write_csv_report(
+                self._result,
+                selected,
+                include_stock=bool(self.include_stock_var.get()),
+            )
             self.status_var.set(f"Saved {Path(selected).name}")
 
     def _export_json(self) -> None:
@@ -561,7 +580,11 @@ class ScannerGui:
             filetypes=(("JSON", "*.json"),),
         )
         if selected:
-            write_json_report(self._result, selected)
+            write_json_report(
+                self._result,
+                selected,
+                include_stock=bool(self.include_stock_var.get()),
+            )
             self.status_var.set(f"Saved {Path(selected).name}")
 
     def run(self) -> int:
@@ -599,9 +622,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     result = scan_dependencies(args.input, stock_roots=normalize_stock_roots(args.stock_root))
     if args.json:
-        write_json_report(result, args.json)
+        write_json_report(result, args.json, include_stock=args.include_stock)
     if args.csv:
-        write_csv_report(result, args.csv)
+        write_csv_report(result, args.csv, include_stock=args.include_stock)
     print(_format_text(result, include_stock=args.include_stock))
     return 0
 
