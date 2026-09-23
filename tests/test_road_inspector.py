@@ -57,6 +57,7 @@ def test_clean_straights_have_no_findings(tmp_path: Path) -> None:
     result = inspect_road_geometry(wrp)
     assert result.road_object_count == 2
     assert result.issues == ()
+    assert result.paved_replacements == ()
 
 
 def test_misaligned_straights_are_reported(tmp_path: Path) -> None:
@@ -67,6 +68,14 @@ def test_misaligned_straights_are_reported(tmp_path: Path) -> None:
     result = inspect_road_geometry(wrp)
     assert len(result.issues) == 1
     assert result.issues[0].category in {"connector_gap", "straight_miter"}
+    assert len(result.paved_replacements) == 1
+    plan = result.paved_replacements[0]
+    assert plan.action == "generate"
+    assert plan.replace_object_ids == (1, 2)
+    assert plan.issue_ids == (result.issues[0].issue_id,)
+    assert plan.model_path.startswith(r"bad\i\paved_w091_")
+    assert plan.width_metres == 9.1
+    assert 49.0 < plan.length_metres < 51.0
 
 
 def test_pitch_uses_rvw4_horizontal_projection(tmp_path: Path) -> None:
@@ -96,8 +105,10 @@ def test_t_junction_missing_arm_is_reported(tmp_path: Path) -> None:
         (2, r"o\road\sil25.p3d", 0.85, 0.0, 18.75, 0.0, 0.0),
         (3, r"o\road\sil25.p3d", 0.85, 0.0, -18.75, 0.0, 0.0),
     ))
-    issue = next(issue for issue in inspect_road_geometry(wrp).issues if issue.category == "bad_junction")
+    result = inspect_road_geometry(wrp)
+    issue = next(issue for issue in result.issues if issue.category == "bad_junction")
     assert issue.metrics["missing_connectors"] == 1.0
+    assert result.paved_replacements == ()
 
 
 def test_t_junction_extra_arm_is_reported(tmp_path: Path) -> None:
@@ -129,6 +140,34 @@ def test_paved_interior_crossing_is_reported(tmp_path: Path) -> None:
     ))
     issue = next(issue for issue in inspect_road_geometry(wrp).issues if issue.category == "paved_crossing_without_junction")
     assert issue.object_ids == (1, 2)
+
+
+
+def test_existing_generated_paved_model_is_reused_by_replacement_plan(
+    tmp_path: Path,
+) -> None:
+    base_objects = (
+        (1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
+        (2, r"o\road\sil25.p3d", 0.0, 0.0, 25.0, 5.0, 0.0),
+    )
+    first = inspect_road_geometry(
+        _write_wrp(tmp_path, "reuse.wrp", base_objects)
+    )
+    assert len(first.paved_replacements) == 1
+    model = first.paved_replacements[0].model_path
+
+    wrp = _write_wrp(
+        tmp_path,
+        "reuse.wrp",
+        base_objects + (
+            (99, model, 500.0, 0.0, 500.0, 0.0, 0.0),
+        ),
+    )
+    second = inspect_road_geometry(wrp)
+
+    assert len(second.paved_replacements) == 1
+    assert second.paved_replacements[0].model_path == model
+    assert second.paved_replacements[0].action == "reuse"
 
 
 def test_generated_gravel_is_mapped_but_not_seam_scored(tmp_path: Path) -> None:
@@ -188,8 +227,10 @@ def test_pbo_input_and_reports_are_read_only(tmp_path: Path) -> None:
     assert pbo.read_bytes() == before
     assert result.wrp_entry == "sample.wrp"
     assert {path.name for path in paths.values()} == {
-        "issues.json", "issues.csv", "summary.json", "ingame-coordinates.csv", "report.html"
+        "issues.json", "issues.csv", "summary.json", "ingame-coordinates.csv",
+        "paved-replacements.json", "paved-replacements.csv", "report.html",
     }
+    assert paths["replacements_json"].read_text(encoding="utf-8").startswith("[")
 
 
 def test_inspector_has_no_generator_or_policy_hooks() -> None:
