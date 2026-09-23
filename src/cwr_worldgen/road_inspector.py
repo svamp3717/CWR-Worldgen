@@ -23,6 +23,11 @@ _CURVE = re.compile(r"^(?:.*[\\/])(?P<family>sil|ces|asf|kos)10 (?P<radius>25|50
 _T = re.compile(r"^(?:.*[\\/])kr_new_(?P<main>sil|asf|kos)_(?P<branch>sil|ces|asf|kos)_t\.p3d$", re.I)
 _X = re.compile(r"^(?:.*[\\/])kr_new_silxsil\.p3d$", re.I)
 _GRAVEL = re.compile(r"^(?:.*[\\/])gravel(?P<length>25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.I)
+_GENERATED_PAVED = re.compile(
+    r"^(?:.*[\\/])paved_w(?P<width>\d{3})_l(?P<length>\d{4})"
+    r"(?:_(?P<side>[lr])(?P<degrees>05|10|15|20|25|30|35|40|45))?\.p3d$",
+    re.I,
+)
 _GRAVEL_JUNCTION = re.compile(
     r"^(?:.*[\\/])gravel_j(?P<degree>[34])(?:_(?P<variant>t(?:30|45|60|75)[lr]|t90|y120|x(?:30|45|60|75|90)))?\.p3d$",
     re.I,
@@ -141,6 +146,27 @@ def _endpoint(road_id: int, model: str, family: str, kind: str, index: int,
     return RoadEndpoint(road_id, model, family, kind, index, point, tangent % 180.0, outward % 360.0, _WIDTHS[family])
 
 
+def _generated_paved_local_headings(
+    length: float,
+    side: str | None,
+    degrees: float,
+) -> tuple[float, float]:
+    """Return the endpoint tangents of the generated quadratic road centreline."""
+    if not side or degrees <= 1.0e-9:
+        return 0.0, 0.0
+    signed = degrees if side.casefold() == "r" else -degrees
+    theta = math.radians(abs(signed))
+    radius = length / max(1.0e-9, 2.0 * math.sin(theta * 0.5))
+    sagitta = math.copysign(
+        radius * (1.0 - math.cos(theta * 0.5)),
+        signed,
+    )
+    control_x = sagitta * 2.0
+    start = math.degrees(math.atan2(2.0 * control_x, length))
+    end = math.degrees(math.atan2(-2.0 * control_x, length))
+    return start, end
+
+
 def _gravel_junction_headings(degree: int, variant: str | None) -> tuple[float, ...]:
     value = (variant or ("t90" if degree == 3 else "x90")).casefold()
     if value == "y120":
@@ -227,6 +253,36 @@ def _road(values) -> RoadObject | None:
             for i, (local, direction) in enumerate(definitions)
         )
         return RoadObject(object_id, model, x, y, z, yaw, pitch, "sil", "junction_x", endpoints)
+
+    match = _GENERATED_PAVED.fullmatch(path)
+    if match:
+        width = int(match.group("width")) / 10.0
+        length = int(match.group("length")) / 10.0
+        family = "asf" if width <= 7.5 else "sil"
+        side = match.group("side")
+        degrees = float(match.group("degrees") or 0.0)
+        begin_local = (0.0, -length * 0.5)
+        end_local = (0.0, length * 0.5)
+        begin = _world_point(begin_local, origin, yaw, pitch)
+        end = _world_point(end_local, origin, yaw, pitch)
+        begin_local_heading, end_local_heading = _generated_paved_local_headings(
+            length, side, degrees
+        )
+        begin_heading = _world_heading(begin_local_heading, yaw, pitch)
+        end_heading = _world_heading(end_local_heading, yaw, pitch)
+        kind = "curve" if side else "straight"
+        endpoints = (
+            _endpoint(
+                object_id, model, family, kind, 0, begin, begin_heading,
+                _world_heading(begin_local_heading + 180.0, yaw, pitch),
+            ),
+            _endpoint(
+                object_id, model, family, kind, 1, end, end_heading, end_heading,
+            ),
+        )
+        return RoadObject(
+            object_id, model, x, y, z, yaw, pitch, family, kind, endpoints
+        )
 
     match = _GRAVEL.fullmatch(path)
     if match:
