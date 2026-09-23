@@ -147,6 +147,11 @@ _install_gravel_family_policy()
 from .raceway_policy import install_raceway_policy as _install_raceway_policy
 
 _install_raceway_policy()
+from .paved_road_generated_fallback_policy import (
+    install_paved_road_generated_fallback_policy as _install_paved_road_generated_fallback_policy,
+)
+
+_install_paved_road_generated_fallback_policy()
 
 # Public Overpass servers sometimes all return transient 5xx/timeout errors at
 # once. Install the bounded retry wrapper before milestone modules import the
