@@ -28,6 +28,12 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_CAF_KKK_BUILDINGS2_PRESET,
     STOCK_BUILDING_DMA_LIBYA_O_LABEL,
     STOCK_BUILDING_DMA_LIBYA_O_PRESET,
+    STOCK_BUILDING_CATINTRO_LABEL,
+    STOCK_BUILDING_CATINTRO_PRESET,
+    STOCK_BUILDING_FDF_LABEL,
+    STOCK_BUILDING_FDF_PRESET,
+    STOCK_BUILDING_SFP4_LABEL,
+    STOCK_BUILDING_SFP4_PRESET,
     STOCK_BUILDING_HAUS_COMBINED_PRESET,
     STOCK_BUILDING_HAUS_ONLY_LABEL,
     STOCK_BUILDING_HAUS_ONLY_PRESET,
@@ -282,6 +288,87 @@ def test_dma_libya_o_catalogue_is_selectable_source_preset() -> None:
     library = _library(STOCK_BUILDING_DMA_LIBYA_O_PRESET)
     assert len(library.models) == 14
     assert {stock_model_source(model.model_path) for model in library.models} == {"dma_libya_o"}
+
+
+def test_catintro_and_finmod_catalogues_are_selectable_source_presets() -> None:
+    data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
+    cases = (
+        (
+            "catintro.json",
+            STOCK_BUILDING_CATINTRO_PRESET,
+            STOCK_BUILDING_CATINTRO_LABEL,
+            "catintro.pbo buildings",
+            "catintro\\",
+            "catintro",
+            33,
+        ),
+        (
+            "fdf.json",
+            STOCK_BUILDING_FDF_PRESET,
+            STOCK_BUILDING_FDF_LABEL,
+            "finmod buildings",
+            "fdf_s\\",
+            "fdf",
+            18,
+        ),
+    )
+
+    for filename, preset, label, expected_label, prefix, source, expected_count in cases:
+        document = json.loads((data_dir / filename).read_text(encoding="utf-8"))
+        paths = {row["model_path"].casefold() for row in document["models"]}
+
+        assert document["schema"] == 5
+        assert document["kind"] == "completed_model_classifications"
+        assert document["complete_count"] == expected_count
+        assert document["reviewed_count"] == expected_count
+        assert document["display_name"] == expected_label
+        assert label == expected_label
+        assert len(paths) == expected_count
+        assert all(path.startswith(prefix) for path in paths)
+
+        library = _library(preset)
+        assert len(library.models) == expected_count
+        assert {stock_model_source(model.model_path) for model in library.models} == {source}
+
+
+def test_sfp4_catalogue_is_selectable_source_preset() -> None:
+    data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
+    document = json.loads((data_dir / "sfp4.json").read_text(encoding="utf-8"))
+    paths = {row["model_path"].casefold() for row in document["models"]}
+
+    assert document["schema"] == 5
+    assert document["kind"] == "completed_model_classifications"
+    assert document["complete_count"] == 20
+    assert document["reviewed_count"] == 20
+    assert document["display_name"] == "sfp4 buildings"
+    assert STOCK_BUILDING_SFP4_LABEL == "sfp4 buildings"
+    assert len(paths) == 20
+    assert all(
+        path.startswith(("sfp_objects\\", "sfp_skaro\\"))
+        for path in paths
+    )
+
+    library = _library(STOCK_BUILDING_SFP4_PRESET)
+    assert len(library.models) == 20
+    assert {stock_model_source(model.model_path) for model in library.models} == {"sfp4"}
+
+
+def test_catintro_and_finmod_catalogues_are_recorded_in_build_metadata(
+    tmp_path: Path,
+) -> None:
+    combined = encode_stock_building_presets(
+        (STOCK_BUILDING_CATINTRO_PRESET, STOCK_BUILDING_FDF_PRESET)
+    )
+    library = _library(combined)
+    catalogue = tmp_path / "building-asset-catalogue.json"
+
+    library.write_assets(tmp_path / "source", catalogue)
+    document = json.loads(catalogue.read_text(encoding="utf-8"))
+
+    assert document["selected_building_jsons"] == [
+        "data/catintro.json",
+        "data/fdf.json",
+    ]
 
 
 def test_dma_libya_o_catalogue_is_recorded_in_build_metadata(tmp_path: Path) -> None:
