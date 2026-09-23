@@ -414,6 +414,11 @@ def test_mod_catalogue_hover_text_reports_each_category_count() -> None:
         "Infrastructure: 0",
         "Ruins: 0",
         "Prop / Misc: 0",
+        "",
+        "Placement:",
+        "Urban: 1",
+        "Rural: 45",
+        "Both: 4",
     ]
     assert _catalogue_hover_text(data_dir / "ags_build.json").splitlines() == [
         "Models: 9",
@@ -427,6 +432,11 @@ def test_mod_catalogue_hover_text_reports_each_category_count() -> None:
         "Infrastructure: 0",
         "Ruins: 0",
         "Prop / Misc: 0",
+        "",
+        "Placement:",
+        "Urban: 9",
+        "Rural: 0",
+        "Both: 0",
     ]
 
 
