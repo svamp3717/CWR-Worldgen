@@ -47,6 +47,7 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_RESISTANCE_PRESET,
     STOCK_BUILDING_VANILLA_PRESET,
     _PROCEDURAL_BRIDGES_CHECKBOX_TEXT,
+    _catalogue_hover_text,
     _building_preset_grid_row,
     _remove_stock_buildings_overlapping_final_roads,
     _lift_stock_objects,
@@ -364,7 +365,7 @@ def test_afgano_and_ags_build_catalogues_are_selectable_source_presets() -> None
             "afgano.json",
             STOCK_BUILDING_AFGANO_PRESET,
             STOCK_BUILDING_AFGANO_LABEL,
-            "afgano buildings",
+            "afgano.pbo buildings",
             "afgano\\",
             "afgano",
             50,
@@ -373,7 +374,7 @@ def test_afgano_and_ags_build_catalogues_are_selectable_source_presets() -> None
             "ags_build.json",
             STOCK_BUILDING_AGS_BUILD_PRESET,
             STOCK_BUILDING_AGS_BUILD_LABEL,
-            "ags_build buildings",
+            "ags_build.pbo buildings",
             "ags_build\\",
             "ags_build",
             9,
@@ -396,6 +397,37 @@ def test_afgano_and_ags_build_catalogues_are_selectable_source_presets() -> None
         library = _library(preset)
         assert len(library.models) == expected_count
         assert {stock_model_source(model.model_path) for model in library.models} == {source}
+
+
+def test_mod_catalogue_hover_text_reports_each_category_count() -> None:
+    data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
+
+    assert _catalogue_hover_text(data_dir / "afgano.json").splitlines() == [
+        "Models: 50",
+        "Residential: 39",
+        "Commercial: 1",
+        "Industrial: 7",
+        "Agricultural: 7",
+        "Military: 0",
+        "Civic / Public: 0",
+        "Religious: 3",
+        "Infrastructure: 0",
+        "Ruins: 0",
+        "Prop / Misc: 0",
+    ]
+    assert _catalogue_hover_text(data_dir / "ags_build.json").splitlines() == [
+        "Models: 9",
+        "Residential: 7",
+        "Commercial: 7",
+        "Industrial: 0",
+        "Agricultural: 0",
+        "Military: 0",
+        "Civic / Public: 7",
+        "Religious: 0",
+        "Infrastructure: 0",
+        "Ruins: 0",
+        "Prop / Misc: 0",
+    ]
 
 
 def test_afgano_and_ags_build_catalogues_are_recorded_in_build_metadata(

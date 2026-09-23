@@ -712,16 +712,24 @@ def _install_gui() -> None:
                 for index, (identifier, text) in enumerate(
                     stock_ext.STOCK_BUILDING_OPTIONS
                 ):
-                    gui.ttk.Checkbutton(
+                    checkbutton = gui.ttk.Checkbutton(
                         box,
                         text=text,
                         variable=self.vars[stock_ext._stock_checkbox_key(identifier)],
-                    ).grid(
+                    )
+                    checkbutton.grid(
                         row=index // 2,
                         column=index % 2,
                         sticky="w",
                         padx=(0, 18),
                         pady=2,
+                    )
+                    stock_ext._attach_hover_description(
+                        gui,
+                        checkbutton,
+                        stock_ext._catalogue_hover_text(
+                            stock_ext._STOCK_CATALOGUE_BY_PRESET[identifier]
+                        ),
                     )
                 self.stock_building_selection_var = gui.tk.StringVar(
                     master=self, value=""
