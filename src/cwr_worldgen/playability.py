@@ -19,6 +19,7 @@ from .procedural_infrastructure import (
     gravel_road_model_path,
     is_generated_gravel_junction_model,
     is_generated_gravel_road_model,
+    is_generated_paved_road_model,
 )
 from .osm import (
     BboxProjection,
@@ -1090,11 +1091,14 @@ def _road_object_on_slope(
     pitch = max(-35.0, min(35.0, pitch))
     terrain_raise = 0.0
     placement_offset = vertical_offset
-    if is_generated_gravel_road_model(model_path) or is_generated_gravel_junction_model(model_path):
-        # Gravel is a normal terrain-following road, not a raised slab. Place
-        # its rendered surface and Roadway LOD exactly on the fitted terrain
-        # plane and never lift the whole piece to clear a local terrain bump.
-        # Terrain grading already owns the road surface underneath.
+    if (
+        is_generated_gravel_road_model(model_path)
+        or is_generated_gravel_junction_model(model_path)
+        or is_generated_paved_road_model(model_path)
+    ):
+        # Generated road ribbons are normal terrain-following surfaces, not
+        # raised stock slabs. Place their rendered skin and Roadway LOD on the
+        # fitted terrain plane instead of inheriting the stock +6 cm offset.
         placement_offset = -GENERATED_GRAVEL_VISUAL_TOP_METRES * math.cos(
             math.radians(pitch)
         )
