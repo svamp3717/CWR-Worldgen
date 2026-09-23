@@ -193,7 +193,44 @@ def _upgrade_stock_result(
     )
     current = float(start_distance)
     upgraded: list[Any] = []
-    previous_stock_heading: float | None = None
+    paved_half_width = _generated_width(pieces, context.spec) * 0.5
+    previous_edge_heading: float | None = None
+    previous_edge_half_width: float | None = None
+    previous_entry_start_distance: float | None = None
+    previous_entry_generated = False
+
+    def set_generated_boundary(
+        generated_start_distance: float,
+        generated_end_distance: float,
+    ) -> None:
+        nonlocal previous_edge_heading
+        nonlocal previous_edge_half_width
+        nonlocal previous_entry_start_distance
+        nonlocal previous_entry_generated
+        previous_edge_heading = measure.point(generated_end_distance)[2]
+        previous_edge_half_width = paved_half_width
+        previous_entry_start_distance = generated_start_distance
+        previous_entry_generated = True
+
+    def set_stock_boundary(
+        stock_piece: Any,
+        heading: float,
+        entry_start_distance: float,
+    ) -> None:
+        nonlocal previous_edge_heading
+        nonlocal previous_edge_half_width
+        nonlocal previous_entry_start_distance
+        nonlocal previous_entry_generated
+        family = _quality._stock_paved_family(stock_piece)
+        previous_edge_heading = heading
+        previous_edge_half_width = (
+            _quality._STOCK_PAVED_HALF_WIDTH_METRES[family]
+            if family is not None
+            else None
+        )
+        previous_entry_start_distance = entry_start_distance
+        previous_entry_generated = False
+
     for piece, start_point, end_point in result:
         endpoint = measure.chord_endpoint(
             current,
@@ -227,15 +264,21 @@ def _upgrade_stock_result(
                     deviation=deviation,
                 )
                 upgraded.append((generated, start, end))
+                set_generated_boundary(current, target_distance)
                 current = target_distance
-                previous_stock_heading = None
             else:
                 upgraded.append((piece, start_point, end_point))
-                previous_stock_heading = (
-                    _quality._piece_chord_heading(start_point, end_point)
-                    if _quality._is_stock_paved_piece(piece)
-                    else None
-                )
+                if _quality._is_stock_paved_piece(piece):
+                    set_stock_boundary(
+                        piece,
+                        _quality._piece_chord_heading(start_point, end_point),
+                        current,
+                    )
+                else:
+                    previous_edge_heading = None
+                    previous_edge_half_width = None
+                    previous_entry_start_distance = None
+                    previous_entry_generated = False
             break
 
         end_distance, end_x, end_z, chord_heading = endpoint
@@ -255,32 +298,59 @@ def _upgrade_stock_result(
         current_heading = _quality._piece_chord_heading(
             (start_x, start_z), (end_x, end_z)
         )
-        clipping_joint = False
-        if (
-            previous_stock_heading is not None
-            and upgraded
-            and _quality._is_stock_paved_piece(piece)
-            and _quality._is_stock_paved_piece(upgraded[-1][0])
-        ):
-            clipping_joint = (
-                _quality._stock_paved_joint_edge_discontinuity(
-                    upgraded[-1][0],
-                    previous_stock_heading,
-                    piece,
-                    current_heading,
-                )
-                > _quality._STOCK_PAVED_MAX_EDGE_DISCONTINUITY_METRES
+        current_family = _quality._stock_paved_family(piece)
+        current_half_width = (
+            _quality._STOCK_PAVED_HALF_WIDTH_METRES[current_family]
+            if current_family is not None
+            else paved_half_width
+        )
+        clipping_joint = bool(
+            previous_edge_heading is not None
+            and previous_edge_half_width is not None
+            and current_family is not None
+            and _quality._paved_edge_discontinuity(
+                previous_edge_heading,
+                previous_edge_half_width,
+                current_heading,
+                current_half_width,
             )
+            > _quality._STOCK_PAVED_MAX_EDGE_DISCONTINUITY_METRES
+        )
 
-        # The quality scorer now considers both per-piece fidelity and the joint
-        # against the preceding stock slab. If the winning vanilla candidate
-        # still fails either test, no equally valid stock choice avoided the
-        # clipping geometry at this step, so generate only this segment.
-        if (
+        fidelity_failed = (
             turn > turn_limit
             or deviation > deviation_limit
-            or clipping_joint
-        ):
+        )
+
+        if clipping_joint and upgraded and previous_entry_start_distance is not None:
+            # A bad seam is a property of the pair, not merely the second slab.
+            # Remove the preceding stock/generated entry and replace the minimal
+            # contiguous bend region with one ribbon, eliminating the seam rather
+            # than drawing another surface over it.
+            merged_start_distance = previous_entry_start_distance
+            merged_start_x, merged_start_z, _ = measure.point(merged_start_distance)
+            merged_start = (merged_start_x, merged_start_z)
+            merged_end = (end_x, end_z)
+            merged_deviation = measure.maximum_chord_deviation(
+                merged_start_distance,
+                end_distance,
+                merged_start,
+                merged_end,
+            )
+            upgraded.pop()
+            generated = _generated_piece(
+                context,
+                pieces,
+                measure,
+                start_distance=merged_start_distance,
+                end_distance=end_distance,
+                start=merged_start,
+                end=merged_end,
+                deviation=merged_deviation,
+            )
+            upgraded.append((generated, merged_start, merged_end))
+            set_generated_boundary(merged_start_distance, end_distance)
+        elif fidelity_failed:
             generated = _generated_piece(
                 context,
                 pieces,
@@ -292,14 +362,16 @@ def _upgrade_stock_result(
                 deviation=deviation,
             )
             upgraded.append((generated, (start_x, start_z), (end_x, end_z)))
-            previous_stock_heading = None
+            set_generated_boundary(current, end_distance)
         else:
             upgraded.append((piece, start_point, end_point))
-            previous_stock_heading = (
-                current_heading
-                if _quality._is_stock_paved_piece(piece)
-                else None
-            )
+            if current_family is not None:
+                set_stock_boundary(piece, current_heading, current)
+            else:
+                previous_edge_heading = None
+                previous_edge_half_width = None
+                previous_entry_start_distance = None
+                previous_entry_generated = False
         current = end_distance
 
     # Do not fill intentionally hub-covered tails. Only intervene when the
@@ -328,7 +400,7 @@ def _upgrade_stock_result(
                 deviation=deviation,
             )
             upgraded.append((generated, start, end))
-            previous_stock_heading = None
+            set_generated_boundary(current, target_distance)
 
     return tuple(upgraded)
 
