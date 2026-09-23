@@ -456,6 +456,7 @@ def _road_ribbon_sections(
     *,
     overhang: float,
     section_count: int | None = None,
+    square_ends: bool = False,
 ) -> tuple[tuple[float, float, float, float], ...]:
     """Return left/right cross-section coordinates for a smooth road ribbon.
 
@@ -486,6 +487,18 @@ def _road_ribbon_sections(
         dz = length
         tangent_length = max(1e-9, math.hypot(dx, dz))
         tx, tz = dx / tangent_length, dz / tangent_length
+        if square_ends:
+            # A curved ribbon normally rotates its end cross-sections to the
+            # centreline tangent. On a wide paved road those rotated corners
+            # extend well past the nominal connection plane and visibly overlap
+            # the adjacent square-ended stock P3D. Bring the section normal back
+            # to the model chord at each end, blending over the next two spans.
+            end_fraction = min(t, 1.0 - t)
+            weight = min(1.0, end_fraction * section_count * 0.5)
+            tx *= weight
+            tz = (1.0 - weight) + tz * weight
+            blended_length = max(1e-9, math.hypot(tx, tz))
+            tx, tz = tx / blended_length, tz / blended_length
         centres.append((x, z, tx, tz))
 
     if overhang > 0.0:
@@ -659,14 +672,18 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
             length,
             half_w,
             curve_degrees,
-            overhang=GENERATED_PAVED_VISUAL_OVERLAP_METRES,
+            # Stock road P3Ds already meet at their nominal connection plane.
+            # Extending a generated paved ribbon beyond that plane creates the
+            # large triangular tongues seen on curved city roads.
+            overhang=0.0,
+            square_ends=True,
         )
         raw_visual = _ribbon_lod(
             visual_sections,
             texture=texture,
             resolution=_VISUAL_LOD,
             height=GENERATED_GRAVEL_VISUAL_TOP_METRES,
-            lowered_overlap=True,
+            lowered_overlap=False,
             double_sided=True,
             u_span_override=1.0,
         )
@@ -691,7 +708,13 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
          (half_w, 0.0, half_l), (-half_w, 0.0, half_l)),
         (), (), _GEOMETRY_LOD, properties=(("map", "road"),),
     )
-    roadway_sections = _road_ribbon_sections(length, half_w, curve_degrees, overhang=0.0)
+    roadway_sections = _road_ribbon_sections(
+        length,
+        half_w,
+        curve_degrees,
+        overhang=0.0,
+        square_ends=paved_fallback,
+    )
     roadway = _ribbon_lod(
         roadway_sections, texture=texture, resolution=_ROADWAY_LOD,
         height=GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES, lowered_overlap=False,
