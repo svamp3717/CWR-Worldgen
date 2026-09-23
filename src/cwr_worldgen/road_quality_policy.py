@@ -21,6 +21,11 @@ _LOOKAHEAD_DEPTH = 2
 _AUDIT_BUCKET_METRES = 32.0
 _AUDIT_ALIGNMENT_COSINE = math.cos(math.radians(28.0))
 _PIECE_LENGTH_PATTERN = re.compile(r"(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$")
+_GENERATED_PAVED_LENGTH_PATTERN = re.compile(
+    r"^paved_w\d{3}_l(?P<length>\d{4})"
+    r"(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,6 +297,9 @@ def _quality_chain(measure, pieces, *, start_distance, preferred_end_distance, m
 
 def _piece_length(model_path: str, configured_long_length: float) -> float:
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+    generated = _GENERATED_PAVED_LENGTH_PATTERN.fullmatch(filename)
+    if generated is not None:
+        return int(generated.group("length")) / 10.0
     match = _PIECE_LENGTH_PATTERN.search(filename)
     return configured_long_length if match is None else configured_long_length * int(match.group(1)) / 25.0
 
