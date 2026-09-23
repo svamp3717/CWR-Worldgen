@@ -1094,13 +1094,18 @@ def _road_object_on_slope(
     if (
         is_generated_gravel_road_model(model_path)
         or is_generated_gravel_junction_model(model_path)
-        or is_generated_paved_road_model(model_path)
     ):
-        # Generated road ribbons are normal terrain-following surfaces, not
-        # raised stock slabs. Place their rendered skin and Roadway LOD on the
-        # fitted terrain plane instead of inheriting the stock +6 cm offset.
+        # Gravel is deliberately terrain-hugging.
         placement_offset = -GENERATED_GRAVEL_VISUAL_TOP_METRES * math.cos(
             math.radians(pitch)
+        )
+    elif is_generated_paved_road_model(model_path):
+        # Paved fallback sits between stock paved P3Ds, so its visible/Roadway
+        # skin must meet the same raised road plane rather than dropping back to
+        # bare terrain at every fallback segment.
+        placement_offset = (
+            float(vertical_offset)
+            - GENERATED_GRAVEL_VISUAL_TOP_METRES * math.cos(math.radians(pitch))
         )
     return WorldObject(
         object_id,
