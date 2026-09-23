@@ -197,7 +197,6 @@ def _upgrade_stock_result(
     previous_edge_heading: float | None = None
     previous_edge_half_width: float | None = None
     previous_entry_start_distance: float | None = None
-    previous_entry_generated = False
 
     def set_generated_boundary(
         generated_start_distance: float,
@@ -206,11 +205,9 @@ def _upgrade_stock_result(
         nonlocal previous_edge_heading
         nonlocal previous_edge_half_width
         nonlocal previous_entry_start_distance
-        nonlocal previous_entry_generated
         previous_edge_heading = measure.point(generated_end_distance)[2]
         previous_edge_half_width = paved_half_width
         previous_entry_start_distance = generated_start_distance
-        previous_entry_generated = True
 
     def set_stock_boundary(
         stock_piece: Any,
@@ -229,7 +226,6 @@ def _upgrade_stock_result(
             else None
         )
         previous_entry_start_distance = entry_start_distance
-        previous_entry_generated = False
 
     for piece, start_point, end_point in result:
         endpoint = measure.chord_endpoint(
