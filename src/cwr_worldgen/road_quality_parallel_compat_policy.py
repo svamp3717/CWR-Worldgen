@@ -351,6 +351,7 @@ def _batched_quality_chain(
                 turn > turn_limit or deviation > deviation_limit
             )
             joint_turn = 0.0
+            joint_edge = 0.0
             joint_penalty = 0
             if (
                 fitted
@@ -363,8 +364,15 @@ def _batched_quality_chain(
                 joint_turn = _playability._heading_difference(
                     previous_heading, chord_heading
                 )
+                joint_edge = _quality._stock_paved_joint_edge_discontinuity(
+                    fitted[-1][0],
+                    previous_heading,
+                    piece,
+                    chord_heading,
+                )
                 joint_penalty = int(
-                    joint_turn > _quality._STOCK_PAVED_JOINT_LIMIT_DEGREES
+                    joint_edge
+                    > _quality._STOCK_PAVED_MAX_EDGE_DISCONTINUITY_METRES
                 )
             prepared.append((
                 piece,
@@ -377,6 +385,7 @@ def _batched_quality_chain(
                 deviation,
                 joint_penalty,
                 joint_turn,
+                joint_edge,
             ))
 
         bulges = _batched_terrain_bulges(
@@ -401,6 +410,7 @@ def _batched_quality_chain(
                 deviation,
                 joint_penalty,
                 joint_turn,
+                joint_edge,
             ) = row
             end_distance, _end_x, _end_z, _chord_heading = endpoint
             terrain_limit = (
@@ -447,7 +457,8 @@ def _batched_quality_chain(
                     terrain_penalty,
                     max(turn / turn_limit, deviation / deviation_limit),
                     (
-                        joint_turn / _quality._STOCK_PAVED_JOINT_LIMIT_DEGREES
+                        joint_edge
+                        / _quality._STOCK_PAVED_MAX_EDGE_DISCONTINUITY_METRES
                         if joint_penalty else 0.0
                     ),
                     terrain_ratio,
