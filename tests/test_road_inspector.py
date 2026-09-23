@@ -4,6 +4,7 @@ from pathlib import Path
 import math
 import struct
 
+from cwr_worldgen import road_inspector as inspector
 from cwr_worldgen.pbo import PboEntry, write_pbo
 from cwr_worldgen.road_inspector import inspect_road_geometry, write_inspection_report
 
@@ -57,8 +58,60 @@ def test_clean_straights_have_no_findings(tmp_path: Path) -> None:
     result = inspect_road_geometry(wrp)
     assert result.road_object_count == 2
     assert result.issues == ()
+    assert result.paved_stock_repairs == ()
     assert result.paved_replacements == ()
 
+
+
+
+def test_stock_repair_search_prefers_clean_vanilla_curve_sequence() -> None:
+    start = inspector.RoadEndpoint(
+        1,
+        r"o\road\sil25.p3d",
+        "sil",
+        "straight",
+        0,
+        (0.0, 0.0),
+        0.0,
+        180.0,
+        4.55,
+    )
+    curve_end, curve_heading = inspector._stock_arc_step(
+        start.point, 0.0, 1, 25
+    )
+    radians = math.radians(curve_heading)
+    end_point = (
+        curve_end[0] + math.sin(radians) * 25.0,
+        curve_end[1] + math.cos(radians) * 25.0,
+    )
+    end = inspector.RoadEndpoint(
+        2,
+        r"o\road\sil25.p3d",
+        "sil",
+        "straight",
+        1,
+        end_point,
+        curve_heading,
+        curve_heading,
+        4.55,
+    )
+    expected = (1, 1, 25, 0, 0, 25, 25)
+    reference = inspector._stock_repair_samples(start, end, expected)
+
+    result = inspector._stock_repair_choice(
+        "sil", reference, start, end
+    )
+
+    assert result is not None
+    choice, deviation, length_error, angle_error = result
+    assert choice == expected
+    assert deviation <= inspector._STOCK_REPAIR_MAXIMUM_PATH_DEVIATION_METRES
+    assert length_error <= inspector._STOCK_REPAIR_POSITION_TOLERANCE_METRES
+    assert angle_error <= inspector._stock_repair_angle_limit(4.55)
+    assert inspector._stock_repair_models("sil", choice) == (
+        r"o\road\sil10 25.p3d",
+        r"o\road\sil25.p3d",
+    )
 
 
 def test_aligned_axial_overlap_is_reported_but_does_not_request_generated_pavement(
@@ -73,6 +126,7 @@ def test_aligned_axial_overlap_is_reported_but_does_not_request_generated_paveme
     result = inspect_road_geometry(wrp)
 
     assert any(issue.category == "connector_gap" for issue in result.issues)
+    assert result.paved_stock_repairs == ()
     assert result.paved_replacements == ()
 
 
@@ -84,6 +138,7 @@ def test_misaligned_straights_are_reported(tmp_path: Path) -> None:
     result = inspect_road_geometry(wrp)
     assert len(result.issues) == 1
     assert result.issues[0].category in {"connector_gap", "straight_miter"}
+    assert result.paved_stock_repairs == ()
     assert len(result.paved_replacements) == 1
     plan = result.paved_replacements[0]
     assert plan.action == "generate"
