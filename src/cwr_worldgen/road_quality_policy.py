@@ -390,7 +390,12 @@ def _piece_length(model_path: str, configured_long_length: float) -> float:
     if generated is not None:
         return int(generated.group("length")) / 10.0
     match = _PIECE_LENGTH_PATTERN.search(filename)
-    return configured_long_length if match is None else configured_long_length * int(match.group(1)) / 25.0
+    if match is None:
+        return configured_long_length
+    nominal = int(match.group(1))
+    return _p.stock_road_piece_length_metres(
+        model_path, nominal, configured_long_length
+    )
 
 
 def _audit(report, context: _Context):
