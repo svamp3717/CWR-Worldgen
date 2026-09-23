@@ -46,7 +46,9 @@ def _upgrade(measure, pieces, piece, spec):
 
 
 def test_milestone9_enables_only_the_new_paved_fallback_by_default() -> None:
-    assert Milestone9Spec().procedural_paved_road_fallback is True
+    assert Milestone9Spec(
+        source_dir=Path(".")
+    ).procedural_paved_road_fallback is True
     assert _Milestone9PlayabilitySpec(
         heightmap_path=Path("unused.png")
     ).procedural_paved_road_fallback is True
