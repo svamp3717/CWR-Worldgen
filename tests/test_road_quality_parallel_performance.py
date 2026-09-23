@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import math
 
 from cwr_worldgen import playability
 from cwr_worldgen import road_chain_parallel_policy as parallel
@@ -130,3 +131,43 @@ def test_run_plan_cache_reuses_unchanged_pass_and_invalidates_changed_endpoint(
         quality_perf._clear_run_plan_cache()
 
     assert calls == 2
+
+
+def test_parallel_quality_chain_matches_serial_stock_joint_selection() -> None:
+    cells = 8
+    context = quality._Context(
+        tuple(0.0 for _ in range(cells * cells)),
+        SimpleNamespace(
+            cells=cells,
+            cell_size=25.0,
+            road_connection_tolerance=0.35,
+        ),
+        {},
+    )
+    angle = math.radians(18.0)
+    measure = playability._PolylineMeasure.create((
+        (0.0, 0.0),
+        (0.0, 12.0),
+        (math.sin(angle) * 12.0, 12.0 + math.cos(angle) * 12.0),
+        (math.sin(angle) * 24.0, 12.0 + math.cos(angle) * 24.0),
+    ))
+    pieces = playability.road_model_variants(r"data3d\sil25.p3d", 25.0)
+    kwargs = dict(
+        start_distance=0.0,
+        preferred_end_distance=measure.total,
+        minimum_end_distance=0.0,
+        maximum_end_distance=measure.total,
+    )
+
+    token = quality._CONTEXT.set(context)
+    try:
+        serial = quality._quality_chain(measure, pieces, **kwargs)
+        batched = quality_perf._batched_quality_chain(measure, pieces, **kwargs)
+    finally:
+        quality._CONTEXT.reset(token)
+
+    assert batched == serial
+    assert all(
+        quality._is_stock_paved_piece(piece)
+        for piece, _start, _end in batched
+    )
