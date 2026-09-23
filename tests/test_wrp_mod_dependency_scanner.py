@@ -76,9 +76,9 @@ def test_rvw4_scanner_accepts_eof_terminated_object_list(tmp_path: Path) -> None
     data = _write_wrp(
         wrp,
         (
-            r"o\\tree\\stock_tree.p3d",
-            r"ceeb_signs\\sign.p3d",
-            r"ceeb_signs\\sign.p3d",
+            r"o\tree\stock_tree.p3d",
+            r"ceeb_signs\sign.p3d",
+            r"ceeb_signs\sign.p3d",
         ),
     )
 
@@ -86,9 +86,9 @@ def test_rvw4_scanner_accepts_eof_terminated_object_list(tmp_path: Path) -> None
     rows = scan_wrp_bytes(data[:-128], wrp_name=wrp.name)
     by_path = {row.model_path: row for row in rows}
 
-    assert by_path[r"o\\tree\\stock_tree.p3d"].references == 1
-    assert by_path[r"ceeb_signs\\sign.p3d"].references == 2
-    assert by_path[r"ceeb_signs\\sign.p3d"].parser == "RVW4 object records"
+    assert by_path[r"o\tree\stock_tree.p3d"].references == 1
+    assert by_path[r"ceeb_signs\sign.p3d"].references == 2
+    assert by_path[r"ceeb_signs\sign.p3d"].parser == "RVW4 object records"
 
 
 def test_pbo_scanner_finds_every_wrp_member(tmp_path: Path) -> None:
