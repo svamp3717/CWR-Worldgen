@@ -293,6 +293,7 @@ class Milestone9Spec(Milestone8Spec):
     forest_roadside_bushes_per_cut_block: int = 16
     forest_roadside_bush_footprint: float = 1.5
     maximum_forest_single_tree_objects: int = 1000
+    maximum_mapped_tree_objects: int = 5000
     forest_single_tree_spacing: float = 45.0
     forest_single_tree_footprint: float = 2.0
     forest_single_tree_maximum_relief: float = 8.0
@@ -534,6 +535,7 @@ class Milestone9Spec(Milestone8Spec):
             ("maximum steep hill bush objects", self.maximum_steep_hill_bush_objects),
             ("forest border maximum objects", self.forest_border_maximum_objects),
             ("maximum forest single-tree objects", self.maximum_forest_single_tree_objects),
+            ("maximum mapped tree objects", self.maximum_mapped_tree_objects),
             ("maximum ditch grass objects", self.maximum_ditch_grass_objects),
             ("maximum barrier objects", self.maximum_barrier_objects),
             ("maximum sidewalk objects", self.maximum_sidewalk_objects),

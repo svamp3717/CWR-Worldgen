@@ -3080,13 +3080,15 @@ def build_milestone4(
     material_texture_paths = tuple(source_dir / "data" / f"{material.code}.paa" for material in materials)
     dummy_texture_path = source_dir / "data" / "d.paa"
     if _surface_ground_enabled(spec):
-        stock_surface_paths = STOCK_SURFACE_TEXTURES.get(
-            _ground_texture_profile(spec), {}
-        )
-        generated_material_texture_paths = tuple(
-            path for path, material in zip(material_texture_paths, materials)
-            if material.code not in stock_surface_paths
-        )
+        profile = _ground_texture_profile(spec)
+        if profile == "none":
+            generated_material_texture_paths = ()
+        else:
+            stock_surface_paths = STOCK_SURFACE_TEXTURES.get(profile, {})
+            generated_material_texture_paths = tuple(
+                path for path, material in zip(material_texture_paths, materials)
+                if material.code not in stock_surface_paths
+            )
     else:
         generated_material_texture_paths = material_texture_paths if _ground_texture_profile(spec) in {"generated", "desert"} else ()
     texture_paths = generated_material_texture_paths + (dummy_texture_path,)
@@ -3583,7 +3585,7 @@ def build_milestone4(
     wrp_texture_indices = [index + 1 for index in material_indices]
     surface_texture_cache_hit = False
     surface_texture_cache_path: str | None = None
-    if _surface_ground_enabled(spec):
+    if _surface_ground_enabled(spec) and _ground_texture_profile(spec) != "none":
         surface_texture_key = cache_key(
             "surface-texture-assets-v2-hq",
             {
@@ -4041,7 +4043,7 @@ def build_milestone4(
             repeat_infrastructure_library.write_assets(
                 temp_source, repeat_infrastructure_catalogue
             )
-        if _surface_ground_enabled(spec):
+        if _surface_ground_enabled(spec) and _ground_texture_profile(spec) != "none":
             write_surface_textures(
                 temp_source,
                 spec.name,

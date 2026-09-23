@@ -438,7 +438,7 @@ def _parser() -> argparse.ArgumentParser:
         "--ground-textures",
         choices=GROUND_TEXTURE_PROFILES,
         default="nogova",
-        help="terrain texture profile: Nogova transition palette (default), original Kolgujev/Cain textures, original Malden/Abel textures, original Everon/Eden assets, desert palette, or packaged generated colours",
+        help="terrain texture profile: Nogova transition palette (default), original Kolgujev/Cain textures, original Malden/Abel textures, original Everon/Eden assets, desert palette, packaged generated colours, or none (blank WRP terrain texture slots)",
     )
 
     milestone9 = subparsers.add_parser("milestone9", help="apply deterministic surface transitions, shoreline/forest/farm/road materials, overview map, and improved icon")
@@ -513,6 +513,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.set_defaults(forest_single_tree_enabled=True)
     milestone9.add_argument("--forest-single-tree-model", default=r"data3d\str smrk_medium.p3d", help="stock individual tree model used by the Everon forest scatter pass")
     milestone9.add_argument("--max-forest-single-tree-objects", type=int, default=1000, help="extra single-tree warning threshold for a 6.4 km world; scales by physical world area; exceeded values are logged and generation continues; 0 disables this category")
+    milestone9.add_argument("--max-mapped-tree-objects", type=int, default=5000, help="mapped OSM tree warning threshold; exceeded values are logged and generation continues; 0 disables mapped tree objects")
     milestone9.add_argument("--forest-single-tree-spacing", type=float, default=45.0, help="geographically anchored individual-tree spacing in metres at every world size")
     milestone9.add_argument("--forest-single-tree-footprint", type=float, default=2.0)
     milestone9.add_argument("--forest-single-tree-max-relief", type=float, default=8.0)
@@ -1170,6 +1171,7 @@ def main(argv: list[str] | None = None) -> int:
                 forest_single_tree_enabled=args.forest_single_tree_enabled,
                 forest_single_tree_model=args.forest_single_tree_model,
                 maximum_forest_single_tree_objects=args.max_forest_single_tree_objects,
+                maximum_mapped_tree_objects=args.max_mapped_tree_objects,
                 forest_single_tree_spacing=args.forest_single_tree_spacing,
                 forest_single_tree_footprint=args.forest_single_tree_footprint,
                 forest_single_tree_maximum_relief=args.forest_single_tree_max_relief,

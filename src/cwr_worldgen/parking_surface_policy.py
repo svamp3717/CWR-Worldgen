@@ -319,6 +319,9 @@ def apply_parking_textures(
     texture_indices: Sequence[int],
     texture_paths: Sequence[str],
 ) -> tuple[tuple[int, ...], tuple[str, ...], tuple[str, ...]]:
+    if str(getattr(spec, "ground_texture_profile", "")).strip().casefold() == "none":
+        return tuple(map(int, texture_indices)), tuple(map(str, texture_paths)), ()
+
     from . import generator
     from . import runway_exact_background_policy as exact
     from . import runway_surface_policy as runway

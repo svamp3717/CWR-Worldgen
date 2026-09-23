@@ -190,6 +190,9 @@ def _runway_geometries(dataset, projection, profile: object) -> tuple[_RunwayGeo
 
 def runway_texture_cell_indices(dataset, projection, spec) -> tuple[int, ...]:
     """Return every WRP cell touched by a line runway at its mapped width."""
+    if str(getattr(spec, "ground_texture_profile", "")).strip().casefold() == "none":
+        return ()
+
     from . import surface_pass as surface
 
     cells = int(spec.cells)
