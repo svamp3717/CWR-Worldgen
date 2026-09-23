@@ -275,8 +275,10 @@ def test_pbo_input_and_reports_are_read_only(tmp_path: Path) -> None:
     assert result.wrp_entry == "sample.wrp"
     assert {path.name for path in paths.values()} == {
         "issues.json", "issues.csv", "summary.json", "ingame-coordinates.csv",
+        "paved-stock-repairs.json", "paved-stock-repairs.csv",
         "paved-replacements.json", "paved-replacements.csv", "report.html",
     }
+    assert paths["stock_repairs_json"].read_text(encoding="utf-8").startswith("[")
     assert paths["replacements_json"].read_text(encoding="utf-8").startswith("[")
 
 
