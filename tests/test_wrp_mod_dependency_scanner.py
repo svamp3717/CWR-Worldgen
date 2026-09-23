@@ -170,12 +170,21 @@ def test_reports_include_mod_summary_and_full_dependency_rows(tmp_path: Path) ->
 
     document = result_document(result)
     assert document["unique_mod_dependencies"] == [r"art_bd\store1.p3d"]
-    assert len(document["dependencies"]) == 2
+    assert len(document["dependencies"]) == 1
+
+    full_document = result_document(result, include_stock=True)
+    assert len(full_document["dependencies"]) == 2
 
     json_path = write_json_report(result, tmp_path / "report.json")
     csv_path = write_csv_report(result, tmp_path / "report.csv")
+    full_csv_path = write_csv_report(
+        result,
+        tmp_path / "report-all.csv",
+        include_stock=True,
+    )
 
     assert '"unique_mod_models": 1' in json_path.read_text(encoding="utf-8")
     csv_text = csv_path.read_text(encoding="utf-8")
     assert "art_bd\\store1.p3d" in csv_text
-    assert "data3d\\stock.p3d" in csv_text
+    assert "data3d\\stock.p3d" not in csv_text
+    assert "data3d\\stock.p3d" in full_csv_path.read_text(encoding="utf-8")
