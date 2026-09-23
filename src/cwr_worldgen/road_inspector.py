@@ -44,6 +44,12 @@ DEFAULT_ENDPOINT_TOLERANCE_METRES = 0.20
 DEFAULT_NEARBY_GAP_METRES = 1.50
 DEFAULT_MINIMUM_EDGE_GAP_METRES = 0.08
 DEFAULT_MINIMUM_TANGENT_ERROR_DEGREES = 0.75
+_PAVED_REPLACEMENT_CURVE_BUCKETS = (2, 3, 4, 5, 7, 10, 15, 20, 25, 30, 35, 40, 45)
+_PAVED_REPLACEMENT_CATEGORIES = frozenset({
+    "straight_miter",
+    "curve_transition",
+    "connector_gap",
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,11 +102,29 @@ class RoadIssue:
 
 
 @dataclass(frozen=True, slots=True)
+class PavedReplacementPlan:
+    plan_id: str
+    action: str
+    model_path: str
+    replace_object_ids: tuple[int, ...]
+    source_models: tuple[str, ...]
+    issue_ids: tuple[str, ...]
+    start: tuple[float, float]
+    end: tuple[float, float]
+    width_metres: float
+    length_metres: float
+    curve_degrees: float
+    maximum_edge_gap_metres: float
+    maximum_tangent_error_degrees: float
+
+
+@dataclass(frozen=True, slots=True)
 class InspectionResult:
     input_path: str
     wrp_entry: str
     road_objects: tuple[RoadObject, ...]
     issues: tuple[RoadIssue, ...]
+    paved_replacements: tuple[PavedReplacementPlan, ...] = ()
 
     @property
     def road_object_count(self) -> int:
@@ -626,6 +650,209 @@ def _number(issues: Iterable[RoadIssue]) -> tuple[RoadIssue, ...]:
     return tuple(result)
 
 
+
+def _replacement_seam_endpoints(
+    first: RoadObject,
+    second: RoadObject,
+) -> tuple[RoadEndpoint, RoadEndpoint]:
+    return min(
+        (
+            (a, b)
+            for a in first.endpoints
+            for b in second.endpoints
+        ),
+        key=lambda pair: (
+            math.dist(pair[0].point, pair[1].point),
+            pair[0].index,
+            pair[1].index,
+        ),
+    )
+
+
+def _replacement_curve_choice(
+    start: RoadEndpoint,
+    end: RoadEndpoint,
+) -> float:
+    chord_heading = _heading_to(start.point, end.point)
+    length = max(0.01, math.dist(start.point, end.point))
+    choices = (0.0,) + tuple(
+        value
+        for amount in _PAVED_REPLACEMENT_CURVE_BUCKETS
+        for value in (float(amount), -float(amount))
+    )
+    best: tuple[tuple[float, float, float], float] | None = None
+    for value in choices:
+        side = "r" if value > 0.0 else "l" if value < 0.0 else None
+        first_local, last_local = _generated_paved_local_headings(
+            length, side, abs(value)
+        )
+        first_error = _axis_angle(
+            chord_heading + first_local,
+            start.tangent,
+        )
+        last_error = _axis_angle(
+            chord_heading + last_local,
+            end.tangent,
+        )
+        score = (
+            max(first_error, last_error),
+            first_error + last_error,
+            abs(value),
+        )
+        if best is None or score < best[0]:
+            best = score, value
+    return 0.0 if best is None else best[1]
+
+
+def _replacement_model_path(
+    world_name: str,
+    width_metres: float,
+    length_metres: float,
+    curve_degrees: float,
+) -> str:
+    width_dm = max(10, min(999, int(round(width_metres * 10.0))))
+    length_dm = max(5, min(9999, int(round(length_metres * 10.0))))
+    suffix = ""
+    if abs(curve_degrees) >= 1.5:
+        side = "r" if curve_degrees > 0.0 else "l"
+        suffix = f"_{side}{int(round(abs(curve_degrees))):02d}"
+    return rf"{world_name}\i\paved_w{width_dm:03d}_l{length_dm:04d}{suffix}.p3d"
+
+
+def _replacement_world_name(
+    roads: Sequence[RoadObject],
+    wrp_entry: str,
+) -> str:
+    for road in roads:
+        if not _GENERATED_PAVED.fullmatch(_model(road.model_path)):
+            continue
+        normalized = road.model_path.replace("/", "\\")
+        lower = normalized.casefold()
+        marker = lower.rfind("\\i\\paved_")
+        if marker > 0:
+            return normalized[:marker]
+    return Path(wrp_entry.replace("\\", "/")).stem
+
+
+def _paved_replacement_plans(
+    roads: Sequence[RoadObject],
+    issues: Sequence[RoadIssue],
+    wrp_entry: str,
+) -> tuple[PavedReplacementPlan, ...]:
+    road_by_id = {road.object_id: road for road in roads}
+    eligible: list[RoadIssue] = []
+    for issue in issues:
+        if issue.category not in _PAVED_REPLACEMENT_CATEGORIES:
+            continue
+        if len(issue.object_ids) != 2:
+            continue
+        pair = tuple(road_by_id.get(value) for value in issue.object_ids)
+        if any(road is None for road in pair):
+            continue
+        first, second = pair
+        if (
+            first.road_type != "paved"
+            or second.road_type != "paved"
+            or first.kind.startswith("junction_")
+            or second.kind.startswith("junction_")
+            or first.family != second.family
+        ):
+            continue
+        eligible.append(issue)
+    if not eligible:
+        return ()
+
+    parent: dict[int, int] = {}
+    def find(value: int) -> int:
+        parent.setdefault(value, value)
+        while parent[value] != value:
+            parent[value] = parent[parent[value]]
+            value = parent[value]
+        return value
+    def merge(first: int, second: int) -> None:
+        first_root, second_root = find(first), find(second)
+        if first_root != second_root:
+            parent[second_root] = first_root
+
+    for issue in eligible:
+        first, second = issue.object_ids
+        merge(first, second)
+
+    grouped_ids: dict[int, set[int]] = {}
+    grouped_issues: dict[int, list[RoadIssue]] = {}
+    for issue in eligible:
+        root = find(issue.object_ids[0])
+        grouped_ids.setdefault(root, set()).update(issue.object_ids)
+        grouped_issues.setdefault(root, []).append(issue)
+
+    world_name = _replacement_world_name(roads, wrp_entry)
+    existing_models = Counter(
+        road.model_path.casefold()
+        for road in roads
+        if _GENERATED_PAVED.fullmatch(_model(road.model_path))
+    )
+    plans: list[PavedReplacementPlan] = []
+    for root in sorted(grouped_ids, key=lambda key: min(grouped_ids[key])):
+        object_ids = tuple(sorted(grouped_ids[root]))
+        component = tuple(road_by_id[value] for value in object_ids)
+        internal: set[tuple[int, int]] = set()
+        for issue in grouped_issues[root]:
+            first = road_by_id[issue.object_ids[0]]
+            second = road_by_id[issue.object_ids[1]]
+            a, b = _replacement_seam_endpoints(first, second)
+            internal.add((a.object_id, a.index))
+            internal.add((b.object_id, b.index))
+        boundaries = tuple(
+            endpoint
+            for road in component
+            for endpoint in road.endpoints
+            if (endpoint.object_id, endpoint.index) not in internal
+        )
+        if len(boundaries) != 2:
+            continue
+        start, end = sorted(
+            boundaries,
+            key=lambda endpoint: (
+                endpoint.point[0],
+                endpoint.point[1],
+                endpoint.object_id,
+                endpoint.index,
+            ),
+        )
+        length = math.dist(start.point, end.point)
+        if length <= 0.05:
+            continue
+        half_widths = tuple(endpoint.half_width for endpoint in boundaries)
+        width = 2.0 * max(half_widths)
+        curve = _replacement_curve_choice(start, end)
+        model_path = _replacement_model_path(
+            world_name, width, length, curve
+        )
+        component_issues = tuple(grouped_issues[root])
+        plans.append(PavedReplacementPlan(
+            plan_id=f"RP-{len(plans)+1:05d}",
+            action="reuse" if existing_models[model_path.casefold()] else "generate",
+            model_path=model_path,
+            replace_object_ids=object_ids,
+            source_models=tuple(sorted({road.model_path for road in component})),
+            issue_ids=tuple(sorted(issue.issue_id for issue in component_issues)),
+            start=(round(start.point[0], 5), round(start.point[1], 5)),
+            end=(round(end.point[0], 5), round(end.point[1], 5)),
+            width_metres=round(width, 3),
+            length_metres=round(length, 3),
+            curve_degrees=curve,
+            maximum_edge_gap_metres=max(
+                float(issue.metrics.get("edge_gap_metres", 0.0))
+                for issue in component_issues
+            ),
+            maximum_tangent_error_degrees=max(
+                float(issue.metrics.get("tangent_error_degrees", 0.0))
+                for issue in component_issues
+            ),
+        ))
+    return tuple(plans)
+
+
 def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAULT_ENDPOINT_TOLERANCE_METRES,
                           nearby_gap: float = DEFAULT_NEARBY_GAP_METRES,
                           minimum_edge_gap: float = DEFAULT_MINIMUM_EDGE_GAP_METRES,
@@ -652,7 +879,15 @@ def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAU
     issues.extend(_nearby(endpoints, paired, endpoint_tolerance, nearby_gap, minimum_edge_gap, minimum_tangent_error))
     issues.extend(_junction_issues(checked_roads, nearby_gap))
     issues.extend(_paved_crossing_issues(checked_roads))
-    return InspectionResult(str(Path(input_path)), wrp_entry, roads, _number(issues))
+    numbered = _number(issues)
+    replacements = _paved_replacement_plans(roads, numbered, wrp_entry)
+    return InspectionResult(
+        str(Path(input_path)),
+        wrp_entry,
+        roads,
+        numbered,
+        replacements,
+    )
 
 
 def _summary(result: InspectionResult) -> dict[str, object]:
@@ -661,6 +896,8 @@ def _summary(result: InspectionResult) -> dict[str, object]:
         "road_type_counts": dict(Counter(road.road_type for road in result.road_objects)),
         "issue_count": len(result.issues), "severity_counts": dict(Counter(i.severity for i in result.issues)),
         "category_counts": dict(Counter(i.category for i in result.issues)),
+        "paved_replacement_count": len(result.paved_replacements),
+        "paved_replacement_actions": dict(Counter(plan.action for plan in result.paved_replacements)),
     }
 
 
@@ -669,9 +906,33 @@ def write_inspection_report(result: InspectionResult, output_dir: Path) -> dict[
     output.mkdir(parents=True, exist_ok=True)
     paths = {"issues_json": output / "issues.json", "issues_csv": output / "issues.csv",
              "summary_json": output / "summary.json", "coordinate_csv": output / "ingame-coordinates.csv",
+             "replacements_json": output / "paved-replacements.json",
+             "replacements_csv": output / "paved-replacements.csv",
              "html": output / "report.html"}
     paths["issues_json"].write_text(json.dumps([asdict(i) for i in result.issues], indent=2) + "\n", encoding="utf-8")
     paths["summary_json"].write_text(json.dumps(_summary(result), indent=2) + "\n", encoding="utf-8")
+    paths["replacements_json"].write_text(
+        json.dumps([asdict(plan) for plan in result.paved_replacements], indent=2) + "\n",
+        encoding="utf-8",
+    )
+    with paths["replacements_csv"].open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow((
+            "plan_id", "action", "model_path", "replace_object_ids",
+            "source_models", "issue_ids", "start_x", "start_z", "end_x", "end_z",
+            "width_metres", "length_metres", "curve_degrees",
+            "maximum_edge_gap_metres", "maximum_tangent_error_degrees",
+        ))
+        for plan in result.paved_replacements:
+            writer.writerow((
+                plan.plan_id, plan.action, plan.model_path,
+                ";".join(map(str, plan.replace_object_ids)),
+                ";".join(plan.source_models), ";".join(plan.issue_ids),
+                plan.start[0], plan.start[1], plan.end[0], plan.end[1],
+                plan.width_metres, plan.length_metres, plan.curve_degrees,
+                plan.maximum_edge_gap_metres,
+                plan.maximum_tangent_error_degrees,
+            ))
     with paths["issues_csv"].open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(("issue_id", "severity", "score", "category", "x", "z", "object_ids", "models", "message"))
@@ -696,12 +957,24 @@ def write_inspection_report(result: InspectionResult, output_dir: Path) -> dict[
         f"<td>{html.escape(i.category)}</td><td>{i.x:.2f}, {i.z:.2f}</td><td>{html.escape(i.message)}</td></tr>"
         for i in result.issues
     ) or '<tr><td colspan="6">No road issues found.</td></tr>'
+    replacement_rows = "".join(
+        f"<tr><td>{html.escape(plan.plan_id)}</td><td>{html.escape(plan.action)}</td>"
+        f"<td>{html.escape(plan.model_path)}</td>"
+        f"<td>{html.escape(', '.join(map(str, plan.replace_object_ids)))}</td>"
+        f"<td>{plan.width_metres:.2f} × {plan.length_metres:.2f} m</td>"
+        f"<td>{plan.curve_degrees:+.0f}°</td></tr>"
+        for plan in result.paved_replacements
+    ) or '<tr><td colspan="6">No paved seam replacements required.</td></tr>'
     paths["html"].write_text(
         f'<!doctype html><meta charset="utf-8"><title>Road Inspector</title><style>body{{font:14px system-ui;margin:24px}}'
         f'table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #aaa;padding:6px;text-align:left}}</style>'
         f'<h1>Road Inspector</h1><p>Read-only RVW4 road audit. {result.road_object_count} road objects, '
-        f'{len(result.issues)} issues.</p><table><tr><th>ID</th><th>Severity</th><th>Score</th><th>Category</th>'
-        f'<th>X/Z</th><th>Details</th></tr>{rows}</table>', encoding="utf-8")
+        f'{len(result.issues)} issues, {len(result.paved_replacements)} paved replacement plan(s).</p>'
+        f'<h2>Issues</h2><table><tr><th>ID</th><th>Severity</th><th>Score</th><th>Category</th>'
+        f'<th>X/Z</th><th>Details</th></tr>{rows}</table>'
+        f'<h2>Paved seam replacements</h2><table><tr><th>ID</th><th>Action</th><th>Model</th>'
+        f'<th>Replace object IDs</th><th>Size</th><th>Curve</th></tr>{replacement_rows}</table>',
+        encoding="utf-8")
     return paths
 
 
@@ -725,7 +998,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                                    minimum_edge_gap=args.minimum_edge_gap, minimum_tangent_error=args.minimum_tangent_error)
     report = write_inspection_report(result, args.output)
     counts = Counter(issue.severity for issue in result.issues)
-    print(f"Road Inspector: {result.road_object_count:,} road objects, {len(result.issues):,} issues ({counts.get('critical', 0)} critical, {counts.get('high', 0)} high).")
+    print(
+        f"Road Inspector: {result.road_object_count:,} road objects, "
+        f"{len(result.issues):,} issues ({counts.get('critical', 0)} critical, "
+        f"{counts.get('high', 0)} high), "
+        f"{len(result.paved_replacements):,} paved replacement plan(s)."
+    )
     print(f"HTML report: {report['html']}")
     return 0
 
