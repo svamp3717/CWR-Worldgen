@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import struct
 
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.pbo import PboEntry, write_pbo
@@ -93,6 +94,38 @@ def test_pbo_scanner_finds_every_wrp_member(tmp_path: Path) -> None:
     assert {row.model_path for row in rows_for_display(result)} == {
         r"caf_kkk_buildings2\tower.p3d",
         r"dma_libya_o\house.p3d",
+    }
+
+
+def _literal_lzss(data: bytes) -> bytes:
+    encoded = bytearray()
+    for offset in range(0, len(data), 8):
+        chunk = data[offset : offset + 8]
+        encoded.append((1 << len(chunk)) - 1)
+        encoded.extend(chunk)
+    encoded.extend(struct.pack("<I", sum(data) & 0xFFFFFFFF))
+    return bytes(encoded)
+
+
+def test_pbo_scanner_reads_cprs_compressed_wrp_members(tmp_path: Path) -> None:
+    wrp_path = tmp_path / "compressed-source.wrp"
+    world = _write_wrp(wrp_path, (r"bas_o\\compressed_house.p3d",))
+    stored = _literal_lzss(world)
+    fields = struct.Struct("<IIIII")
+    pbo = tmp_path / "compressed.pbo"
+    pbo.write_bytes(
+        b"world.wrp\0"
+        + fields.pack(0x43707273, len(world), 0, 0, len(stored))
+        + b"\0"
+        + fields.pack(0, 0, 0, 0, 0)
+        + stored
+    )
+
+    result = scan_dependencies(pbo)
+
+    assert result.wrp_names == ("world.wrp",)
+    assert {row.model_path for row in rows_for_display(result)} == {
+        r"bas_o\compressed_house.p3d"
     }
 
 
