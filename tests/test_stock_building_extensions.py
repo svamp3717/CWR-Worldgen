@@ -12,6 +12,10 @@ from cwr_worldgen.osm import BuildingPlacementPlan, ObjectGenerationResult
 from cwr_worldgen.stock_building_policy import STOCK_BUILDING_PRESET, StockBuildingLibrary
 from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_AGS_COMBINED_PRESET,
+    STOCK_BUILDING_AFGANO_LABEL,
+    STOCK_BUILDING_AFGANO_PRESET,
+    STOCK_BUILDING_AGS_BUILD_LABEL,
+    STOCK_BUILDING_AGS_BUILD_PRESET,
     STOCK_BUILDING_AGS_ONLY_LABEL,
     STOCK_BUILDING_AGS_ONLY_PRESET,
     STOCK_BUILDING_ART_BD_LABEL,
@@ -43,6 +47,7 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_RESISTANCE_PRESET,
     STOCK_BUILDING_VANILLA_PRESET,
     _PROCEDURAL_BRIDGES_CHECKBOX_TEXT,
+    _catalogue_hover_text,
     _building_preset_grid_row,
     _remove_stock_buildings_overlapping_final_roads,
     _lift_stock_objects,
@@ -351,6 +356,106 @@ def test_sfp4_catalogue_is_selectable_source_preset() -> None:
     library = _library(STOCK_BUILDING_SFP4_PRESET)
     assert len(library.models) == 20
     assert {stock_model_source(model.model_path) for model in library.models} == {"sfp4"}
+
+
+def test_afgano_and_ags_build_catalogues_are_selectable_source_presets() -> None:
+    data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
+    cases = (
+        (
+            "afgano.json",
+            STOCK_BUILDING_AFGANO_PRESET,
+            STOCK_BUILDING_AFGANO_LABEL,
+            "afgano.pbo buildings",
+            "afgano\\",
+            "afgano",
+            50,
+        ),
+        (
+            "ags_build.json",
+            STOCK_BUILDING_AGS_BUILD_PRESET,
+            STOCK_BUILDING_AGS_BUILD_LABEL,
+            "ags_build.pbo buildings",
+            "ags_build\\",
+            "ags_build",
+            9,
+        ),
+    )
+
+    for filename, preset, label, expected_label, prefix, source, expected_count in cases:
+        document = json.loads((data_dir / filename).read_text(encoding="utf-8"))
+        paths = {row["model_path"].casefold() for row in document["models"]}
+
+        assert document["schema"] == 5
+        assert document["kind"] == "completed_model_classifications"
+        assert document["complete_count"] == expected_count
+        assert document["reviewed_count"] == expected_count
+        assert document["display_name"] == expected_label
+        assert label == expected_label
+        assert len(paths) == expected_count
+        assert all(path.startswith(prefix) for path in paths)
+
+        library = _library(preset)
+        assert len(library.models) == expected_count
+        assert {stock_model_source(model.model_path) for model in library.models} == {source}
+
+
+def test_mod_catalogue_hover_text_reports_each_category_count() -> None:
+    data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
+
+    assert _catalogue_hover_text(data_dir / "afgano.json").splitlines() == [
+        "Models: 50",
+        "Residential: 39",
+        "Commercial: 1",
+        "Industrial: 7",
+        "Agricultural: 7",
+        "Military: 0",
+        "Civic / Public: 0",
+        "Religious: 3",
+        "Infrastructure: 0",
+        "Ruins: 0",
+        "Prop / Misc: 0",
+        "",
+        "Placement:",
+        "Urban: 1",
+        "Rural: 45",
+        "Both: 4",
+    ]
+    assert _catalogue_hover_text(data_dir / "ags_build.json").splitlines() == [
+        "Models: 9",
+        "Residential: 7",
+        "Commercial: 7",
+        "Industrial: 0",
+        "Agricultural: 0",
+        "Military: 0",
+        "Civic / Public: 7",
+        "Religious: 0",
+        "Infrastructure: 0",
+        "Ruins: 0",
+        "Prop / Misc: 0",
+        "",
+        "Placement:",
+        "Urban: 9",
+        "Rural: 0",
+        "Both: 0",
+    ]
+
+
+def test_afgano_and_ags_build_catalogues_are_recorded_in_build_metadata(
+    tmp_path: Path,
+) -> None:
+    combined = encode_stock_building_presets(
+        (STOCK_BUILDING_AFGANO_PRESET, STOCK_BUILDING_AGS_BUILD_PRESET)
+    )
+    library = _library(combined)
+    catalogue = tmp_path / "building-asset-catalogue.json"
+
+    library.write_assets(tmp_path / "source", catalogue)
+    document = json.loads(catalogue.read_text(encoding="utf-8"))
+
+    assert document["selected_building_jsons"] == [
+        "data/afgano.json",
+        "data/ags_build.json",
+    ]
 
 
 def test_catintro_and_finmod_catalogues_are_recorded_in_build_metadata(

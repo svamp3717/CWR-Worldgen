@@ -33,6 +33,8 @@ STOCK_BUILDING_DMA_LIBYA_O_PRESET = "stock-dma-libya-o"
 STOCK_BUILDING_CATINTRO_PRESET = "stock-catintro"
 STOCK_BUILDING_FDF_PRESET = "stock-fdf"
 STOCK_BUILDING_SFP4_PRESET = "stock-sfp4"
+STOCK_BUILDING_AFGANO_PRESET = "stock-afgano"
+STOCK_BUILDING_AGS_BUILD_PRESET = "stock-ags-build"
 
 # Legacy combined identifiers remain accepted when loading old profiles, but no
 # combined catalogue JSONs are shipped anymore. They expand into source sets.
@@ -56,6 +58,8 @@ _STOCK_DMA_LIBYA_O_CATALOGUE_PATH = _DATA_DIR / "DMA_libya_o.json"
 _STOCK_CATINTRO_CATALOGUE_PATH = _DATA_DIR / "catintro.json"
 _STOCK_FDF_CATALOGUE_PATH = _DATA_DIR / "fdf.json"
 _STOCK_SFP4_CATALOGUE_PATH = _DATA_DIR / "sfp4.json"
+_STOCK_AFGANO_CATALOGUE_PATH = _DATA_DIR / "afgano.json"
+_STOCK_AGS_BUILD_CATALOGUE_PATH = _DATA_DIR / "ags_build.json"
 
 
 def _catalogue_display_name(path: Path, fallback: str) -> str:
@@ -65,6 +69,109 @@ def _catalogue_display_name(path: Path, fallback: str) -> str:
     except (OSError, json.JSONDecodeError):
         return fallback
     return str(document.get("display_name", "")).strip() or fallback
+
+
+def _catalogue_hover_text(path: Path) -> str:
+    """Describe model totals and per-category counts for one preset catalogue."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(document, Mapping):
+        return ""
+
+    raw_models = document.get("models", ())
+    models = tuple(item for item in raw_models if isinstance(item, Mapping))
+    categories: list[str] = []
+    for value in document.get("categories", ()):
+        category = str(value).strip()
+        if category and category not in categories:
+            categories.append(category)
+
+    counts = {category: 0 for category in categories}
+    placements: list[str] = []
+    for value in document.get("placements", ("Urban", "Rural", "Both")):
+        placement = str(value).strip()
+        if placement and placement not in placements:
+            placements.append(placement)
+    placement_counts = {placement: 0 for placement in placements}
+
+    for model in models:
+        for value in model.get("categories", ()):
+            category = str(value).strip()
+            if not category:
+                continue
+            if category not in counts:
+                counts[category] = 0
+                categories.append(category)
+            counts[category] += 1
+
+        placement = str(model.get("placement", "")).strip()
+        if placement:
+            if placement not in placement_counts:
+                placement_counts[placement] = 0
+                placements.append(placement)
+            placement_counts[placement] += 1
+
+    lines = [f"Models: {len(models)}"]
+    lines.extend(f"{category}: {counts.get(category, 0)}" for category in categories)
+    lines.append("")
+    lines.append("Placement:")
+    lines.extend(
+        f"{placement}: {placement_counts.get(placement, 0)}"
+        for placement in placements
+    )
+    return "\n".join(lines)
+
+
+def _attach_hover_description(gui, widget, text: str) -> None:
+    """Show a small catalogue summary while the pointer is over a preset."""
+    description = str(text or "").strip()
+    if not description:
+        return
+    state = {"window": None}
+
+    def hide(_event=None) -> None:
+        window = state.get("window")
+        state["window"] = None
+        if window is not None:
+            try:
+                window.destroy()
+            except Exception:
+                pass
+
+    def show(_event=None) -> None:
+        if state.get("window") is not None:
+            return
+        try:
+            window = gui.tk.Toplevel(widget)
+            window.wm_overrideredirect(True)
+            try:
+                window.attributes("-topmost", True)
+            except Exception:
+                pass
+            label = gui.ttk.Label(
+                window,
+                text=description,
+                justify="left",
+                relief="solid",
+                padding=(8, 6),
+            )
+            label.pack()
+            x = int(widget.winfo_rootx()) + 16
+            y = int(widget.winfo_rooty()) + int(widget.winfo_height()) + 4
+            window.wm_geometry(f"+{x}+{y}")
+            state["window"] = window
+        except Exception:
+            state["window"] = None
+
+    try:
+        widget.bind("<Enter>", show, add="+")
+        widget.bind("<Leave>", hide, add="+")
+        widget.bind("<Destroy>", hide, add="+")
+        widget._cwr_building_hover = state
+    except Exception:
+        hide()
 
 
 STOCK_BUILDING_VANILLA_LABEL = _catalogue_display_name(
@@ -123,6 +230,14 @@ STOCK_BUILDING_SFP4_LABEL = _catalogue_display_name(
     _STOCK_SFP4_CATALOGUE_PATH,
     "sfp4 buildings",
 )
+STOCK_BUILDING_AFGANO_LABEL = _catalogue_display_name(
+    _STOCK_AFGANO_CATALOGUE_PATH,
+    "afgano.pbo buildings",
+)
+STOCK_BUILDING_AGS_BUILD_LABEL = _catalogue_display_name(
+    _STOCK_AGS_BUILD_CATALOGUE_PATH,
+    "ags_build.pbo buildings",
+)
 
 # Compatibility labels for code/imports that still know the old combined IDs.
 STOCK_BUILDING_COMBINED_LABEL = "Stock combined (non-Resistance + Resistance) buildings"
@@ -148,6 +263,8 @@ STOCK_BUILDING_PRESETS = (
     STOCK_BUILDING_CATINTRO_PRESET,
     STOCK_BUILDING_FDF_PRESET,
     STOCK_BUILDING_SFP4_PRESET,
+    STOCK_BUILDING_AFGANO_PRESET,
+    STOCK_BUILDING_AGS_BUILD_PRESET,
 )
 STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_VANILLA_LABEL),
@@ -164,6 +281,8 @@ STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_CATINTRO_PRESET, STOCK_BUILDING_CATINTRO_LABEL),
     (STOCK_BUILDING_FDF_PRESET, STOCK_BUILDING_FDF_LABEL),
     (STOCK_BUILDING_SFP4_PRESET, STOCK_BUILDING_SFP4_LABEL),
+    (STOCK_BUILDING_AFGANO_PRESET, STOCK_BUILDING_AFGANO_LABEL),
+    (STOCK_BUILDING_AGS_BUILD_PRESET, STOCK_BUILDING_AGS_BUILD_LABEL),
 )
 
 STOCK_BUILDING_MULTI_PREFIX = "stock-multi:"
@@ -202,6 +321,8 @@ _STOCK_CATALOGUE_BY_PRESET = {
     STOCK_BUILDING_CATINTRO_PRESET: _STOCK_CATINTRO_CATALOGUE_PATH,
     STOCK_BUILDING_FDF_PRESET: _STOCK_FDF_CATALOGUE_PATH,
     STOCK_BUILDING_SFP4_PRESET: _STOCK_SFP4_CATALOGUE_PATH,
+    STOCK_BUILDING_AFGANO_PRESET: _STOCK_AFGANO_CATALOGUE_PATH,
+    STOCK_BUILDING_AGS_BUILD_PRESET: _STOCK_AGS_BUILD_CATALOGUE_PATH,
 }
 
 
@@ -329,6 +450,10 @@ def stock_model_source(model_path: object) -> str:
         return "fdf"
     if path.startswith("sfp_objects\\") or path.startswith("sfp_skaro\\"):
         return "sfp4"
+    if path.startswith("afgano\\"):
+        return "afgano"
+    if path.startswith("ags_build\\"):
+        return "ags_build"
     return "vanilla"
 
 
@@ -710,16 +835,22 @@ def _install_gui() -> None:
                 box = gui.ttk.Frame(parent)
                 box.grid(row=building_row, column=1, sticky="w", pady=3)
                 for index, (identifier, text) in enumerate(STOCK_BUILDING_OPTIONS):
-                    gui.ttk.Checkbutton(
+                    checkbutton = gui.ttk.Checkbutton(
                         box,
                         text=text,
                         variable=self.vars[_stock_checkbox_key(identifier)],
-                    ).grid(
+                    )
+                    checkbutton.grid(
                         row=index // 2,
                         column=index % 2,
                         sticky="w",
                         padx=(0, 18),
                         pady=2,
+                    )
+                    _attach_hover_description(
+                        gui,
+                        checkbutton,
+                        _catalogue_hover_text(_STOCK_CATALOGUE_BY_PRESET[identifier]),
                     )
                 self.stock_building_selection_var = gui.tk.StringVar(master=self, value="")
                 gui.ttk.Label(
