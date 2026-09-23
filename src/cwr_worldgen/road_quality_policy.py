@@ -77,6 +77,25 @@ def _is_stock_paved_piece(piece) -> bool:
     return _stock_paved_family(piece) is not None
 
 
+def _paved_edge_discontinuity(
+    first_heading: float,
+    first_half_width: float,
+    second_heading: float,
+    second_half_width: float,
+) -> float:
+    """Return edge mismatch between two coincident paved cross-sections."""
+
+    def edge_vector(heading: float, half_width: float) -> tuple[float, float]:
+        angle = math.radians(float(heading))
+        return math.cos(angle) * half_width, -math.sin(angle) * half_width
+
+    first = edge_vector(first_heading, first_half_width)
+    second = edge_vector(second_heading, second_half_width)
+    direct = math.hypot(first[0] - second[0], first[1] - second[1])
+    crossed = math.hypot(first[0] + second[0], first[1] + second[1])
+    return min(direct, crossed)
+
+
 def _stock_paved_joint_edge_discontinuity(
     first_piece,
     first_heading: float,
@@ -89,18 +108,12 @@ def _stock_paved_joint_edge_discontinuity(
     second_family = _stock_paved_family(second_piece)
     if first_family is None or second_family is None:
         return 0.0
-    first_width = _STOCK_PAVED_HALF_WIDTH_METRES[first_family]
-    second_width = _STOCK_PAVED_HALF_WIDTH_METRES[second_family]
-
-    def edge_vector(heading: float, half_width: float) -> tuple[float, float]:
-        angle = math.radians(float(heading))
-        return math.cos(angle) * half_width, -math.sin(angle) * half_width
-
-    first = edge_vector(first_heading, first_width)
-    second = edge_vector(second_heading, second_width)
-    direct = math.hypot(first[0] - second[0], first[1] - second[1])
-    crossed = math.hypot(first[0] + second[0], first[1] + second[1])
-    return min(direct, crossed)
+    return _paved_edge_discontinuity(
+        first_heading,
+        _STOCK_PAVED_HALF_WIDTH_METRES[first_family],
+        second_heading,
+        _STOCK_PAVED_HALF_WIDTH_METRES[second_family],
+    )
 
 
 def _piece_chord_heading(
