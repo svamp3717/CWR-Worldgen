@@ -141,6 +141,41 @@ def test_generated_gravel_is_mapped_but_not_seam_scored(tmp_path: Path) -> None:
     assert result.issues == ()
 
 
+def test_generated_paved_straight_is_inspected_as_paved(tmp_path: Path) -> None:
+    wrp = _write_wrp(tmp_path, "generated-paved-straight.wrp", (
+        (1, r"wg_demo\i\paved_w091_l0062.p3d", 0.0, -0.025, 0.0, 0.0, 0.0),
+    ))
+    result = inspect_road_geometry(wrp)
+
+    assert result.road_object_count == 1
+    road = result.road_objects[0]
+    assert road.road_type == "paved"
+    assert road.family == "sil"
+    assert road.kind == "straight"
+    assert math.isclose(road.endpoints[0].point[1], -3.1, abs_tol=1.0e-9)
+    assert math.isclose(road.endpoints[1].point[1], 3.1, abs_tol=1.0e-9)
+    assert result.issues == ()
+
+
+def test_generated_paved_curve_keeps_curved_endpoint_tangents(tmp_path: Path) -> None:
+    wrp = _write_wrp(tmp_path, "generated-paved-curve.wrp", (
+        (1, r"wg_demo\i\paved_w070_l0062_r20.p3d", 0.0, -0.025, 0.0, 0.0, 0.0),
+    ))
+    result = inspect_road_geometry(wrp)
+
+    assert result.road_object_count == 1
+    road = result.road_objects[0]
+    assert road.road_type == "paved"
+    assert road.family == "asf"
+    assert road.kind == "curve"
+    assert not math.isclose(
+        road.endpoints[0].tangent,
+        road.endpoints[1].tangent,
+        abs_tol=1.0e-6,
+    )
+    assert result.issues == ()
+
+
 def test_pbo_input_and_reports_are_read_only(tmp_path: Path) -> None:
     world = _wrp_bytes(((1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),))
     pbo = tmp_path / "sample.pbo"
