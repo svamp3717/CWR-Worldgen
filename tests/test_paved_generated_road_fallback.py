@@ -209,6 +209,20 @@ def test_disabled_fallback_never_replaces_stock_piece() -> None:
     assert upgraded[0][0].model_path == piece.model_path
 
 
+def test_legacy_paved_stock_families_share_stock_first_geometry_rules() -> None:
+    silnice = playability.road_model_variants(r"data3d\silnice25.p3d", 24.5)
+    asfaltka = playability.road_model_variants(r"data3d\asfaltka25.p3d", 24.5)
+
+    assert [piece.length_metres for piece in silnice] == [25.0, 12.5, 6.25]
+    assert [piece.length_metres for piece in asfaltka] == [25.0, 12.5, 6.25]
+    assert quality._stock_paved_family(silnice[0]) == "silnice"
+    assert quality._stock_paved_family(asfaltka[0]) == "asfaltka"
+    assert math.isclose(
+        fallback._generated_width(asfaltka, SimpleNamespace(paved_road_model=r"data3d\asfaltka25.p3d")),
+        7.0,
+        abs_tol=1.0e-9,
+    )
+
 def test_vanilla_stock_variants_use_physical_lengths_at_default_24_5_setting() -> None:
     pieces = playability.road_model_variants(r"o\road\sil25.p3d", 24.5)
     lengths = {
