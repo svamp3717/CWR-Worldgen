@@ -13,6 +13,7 @@ from cwr_worldgen.gui import (
     GROUND_TEXTURE_OPTIONS,
     VEGETATION_OPTIONS,
     VEGETATION_EVERON,
+    VEGETATION_NONE,
     VEGETATION_KOLGUJEV,
     VEGETATION_MALDEN,
     VEGETATION_RESISTANCE_LEAF,
@@ -141,6 +142,59 @@ class DeployControlStateTests(unittest.TestCase):
         self.assertEqual(button.state, "normal")
 
 
+class NoneAppearancePresetTests(unittest.TestCase):
+    @staticmethod
+    def _last_option_value(command: list[str], option: str) -> str | None:
+        indices = [index for index, value in enumerate(command) if value == option]
+        if not indices:
+            return None
+        index = indices[-1]
+        return command[index + 1] if index + 1 < len(command) else None
+
+    def test_terrain_none_is_exposed_and_passed_to_cli(self) -> None:
+        values = default_gui_values()
+        values["ground_textures"] = "none"
+        resolved = resolve_gui_appearance_values(values)
+        self.assertEqual(resolved["ground_textures"], "none")
+        command = build_milestone9_command(values, python="python")
+        self.assertEqual(self._last_option_value(command, "--ground-textures"), "none")
+
+    def test_vegetation_none_overrides_advanced_reenable_attempts(self) -> None:
+        values = default_gui_values()
+        values["vegetation_style"] = VEGETATION_NONE
+        values["advanced_args"] = (
+            "--max-forest-objects 123 --max-mapped-tree-objects 456 "
+            "--max-rural-vegetation-objects 789"
+        )
+        resolved = resolve_gui_appearance_values(values)
+        self.assertEqual(resolved["vegetation_style"], VEGETATION_NONE)
+
+        command = build_milestone9_command(values, python="python")
+        for option in (
+            "--max-forest-objects",
+            "--max-mapped-tree-objects",
+            "--max-rural-vegetation-objects",
+            "--max-meadow-grass-objects",
+            "--max-wetland-reed-objects",
+            "--max-rocky-forest-objects",
+        ):
+            self.assertEqual(self._last_option_value(command, option), "0")
+        for flag in (
+            "--no-forest-clusters",
+            "--no-severe-hill-forest-fallback",
+            "--no-forest-undergrowth",
+            "--no-steep-hill-bushes",
+            "--no-forest-borders",
+            "--no-forest-single-trees",
+            "--no-ditch-grass",
+            "--no-rural-vegetation",
+            "--no-meadow-grass",
+            "--no-wetland-reeds",
+            "--no-rocky-forest-fallback",
+        ):
+            self.assertIn(flag, command)
+
+
 class GuiCommandTests(unittest.TestCase):
     def test_build_command_contains_repeatable_asset_roots_and_flags(self) -> None:
         command = build_milestone9_command({
@@ -219,7 +273,7 @@ class GuiCommandTests(unittest.TestCase):
         self.assertEqual(values["vegetation_style"], VEGETATION_EVERON)
         self.assertEqual(
             GROUND_TEXTURE_OPTIONS,
-            ("nogova", "kolgujev", "malden", "everon", "desert", "generated"),
+            ("nogova", "kolgujev", "malden", "everon", "desert", "generated", "none"),
         )
         self.assertEqual(
             VEGETATION_OPTIONS,
@@ -229,6 +283,7 @@ class GuiCommandTests(unittest.TestCase):
                 VEGETATION_MALDEN,
                 VEGETATION_RESISTANCE_LEAF,
                 VEGETATION_RESISTANCE_PINE,
+                VEGETATION_NONE,
             ),
         )
 

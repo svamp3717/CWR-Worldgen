@@ -16,6 +16,8 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_AFGANO_PRESET,
     STOCK_BUILDING_AGS_BUILD_LABEL,
     STOCK_BUILDING_AGS_BUILD_PRESET,
+    STOCK_BUILDING_SEB_ILO_LABEL,
+    STOCK_BUILDING_SEB_ILO_PRESET,
     STOCK_BUILDING_AGS_ONLY_LABEL,
     STOCK_BUILDING_AGS_ONLY_PRESET,
     STOCK_BUILDING_ART_BD_LABEL,
@@ -397,6 +399,42 @@ def test_afgano_and_ags_build_catalogues_are_selectable_source_presets() -> None
         library = _library(preset)
         assert len(library.models) == expected_count
         assert {stock_model_source(model.model_path) for model in library.models} == {source}
+
+
+
+def test_seb_ilo_catalogue_is_selectable_source_preset_and_recorded_in_metadata(
+    tmp_path: Path,
+) -> None:
+    data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
+    document = json.loads((data_dir / "seb_ilo.json").read_text(encoding="utf-8"))
+    paths = {row["model_path"].casefold() for row in document["models"]}
+
+    assert document["schema"] == 5
+    assert document["kind"] == "completed_model_classifications"
+    assert document["source_set"] == "seb_ilo.pbo"
+    assert document["display_name"] == "seb_ilo.pbo buildings"
+    assert document["complete_count"] == 4
+    assert document["reviewed_count"] == 4
+    assert STOCK_BUILDING_SEB_ILO_LABEL == "seb_ilo.pbo buildings"
+    assert len(paths) == 4
+    assert all(path.startswith("seb_ilo\\") for path in paths)
+    assert all(row["placement"] == "Rural" for row in document["models"])
+
+    library = _library(STOCK_BUILDING_SEB_ILO_PRESET)
+    assert len(library.models) == 4
+    assert {stock_model_source(model.model_path) for model in library.models} == {"seb_ilo"}
+
+    catalogue = tmp_path / "building-asset-catalogue.json"
+    library.write_assets(tmp_path / "source", catalogue)
+    metadata = json.loads(catalogue.read_text(encoding="utf-8"))
+    assert metadata["selected_building_jsons"] == ["data/seb_ilo.json"]
+
+    hover = _catalogue_hover_text(data_dir / "seb_ilo.json").splitlines()
+    assert hover[0] == "Models: 4"
+    assert "Residential: 4" in hover
+    assert "Industrial: 4" in hover
+    assert "Agricultural: 4" in hover
+    assert "Rural: 4" in hover
 
 
 def test_mod_catalogue_hover_text_reports_each_category_count() -> None:

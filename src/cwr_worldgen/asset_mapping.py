@@ -364,9 +364,10 @@ def default_osm_asset_mapping(spec: Any, milestone_number: int, *, global_textur
         "road-dirt-by-surface", ("roads",), {"surface": dirt_surfaces},
         models=(getattr(spec, "dirt_road_model", r"o\road\ces25.p3d"),), geometry="line",
     ))
-    rules.append(_rule(
-        "primary-forest", ("forests",), {}, models=(getattr(spec, "forest_tree_model", r"data3d\les_su_ctver_pruhozi.p3d"),), geometry="polygon",
-    ))
+    if int(getattr(spec, "max_forest_objects", 1)) != 0:
+        rules.append(_rule(
+            "primary-forest", ("forests",), {}, models=(getattr(spec, "forest_tree_model", r"data3d\les_su_ctver_pruhozi.p3d"),), geometry="polygon",
+        ))
     if bool(getattr(spec, "barriers_enabled", milestone_number >= 9)):
         rules.append(_rule("hedges", ("barriers",), {"barrier": "hedge"}, models=tuple(getattr(spec, "stock_hedge_models", ())), geometry="line"))
         rules.append(_rule("stone-walls", ("barriers",), {"barrier": ("wall", "retaining_wall")}, models=tuple(getattr(spec, "stock_wall_models", ())), geometry="line"))
@@ -380,14 +381,15 @@ def default_osm_asset_mapping(spec: Any, milestone_number: int, *, global_textur
     if bool(getattr(spec, "wetland_reeds_enabled", False)):
         rules.append(_rule("wetland-reeds", ("rural_vegetation",), {"natural": "wetland"}, models=tuple(getattr(spec, "wetland_reed_models", ())), geometry="polygon"))
     if milestone_number >= 9:
-        rules.append(_rule(
-            "mapped-individual-trees", ("individual_trees",), {"natural": "tree"},
-            models=(
-                r"data3d\str briza.p3d", r"data3d\str dub.p3d", r"data3d\str javor.p3d",
-                r"data3d\str lipa.p3d", r"data3d\str vrba.p3d", r"data3d\str smrk.p3d",
-                r"data3d\str borovice.p3d", r"data3d\str jedle.p3d",
-            ), geometry="point", description="Stock CWA models used for individually mapped OSM trees",
-        ))
+        if int(getattr(spec, "maximum_mapped_tree_objects", 5000)) != 0:
+            rules.append(_rule(
+                "mapped-individual-trees", ("individual_trees",), {"natural": "tree"},
+                models=(
+                    r"data3d\str briza.p3d", r"data3d\str dub.p3d", r"data3d\str javor.p3d",
+                    r"data3d\str lipa.p3d", r"data3d\str vrba.p3d", r"data3d\str smrk.p3d",
+                    r"data3d\str borovice.p3d", r"data3d\str jedle.p3d",
+                ), geometry="point", description="Stock CWA models used for individually mapped OSM trees",
+            ))
         world_name = getattr(spec, "name", "cwr_world")
         rules.append(_rule(
             "osm-power-utilities", ("utility_points",), {"utility": ("power_pole", "power_tower")},

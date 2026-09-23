@@ -68,7 +68,9 @@ def _fast_write_rvw4(
         raise ValueError("RVW4 object count exceeds signed 32-bit object IDs")
 
     encoded_textures = [
-        wrp.encode_wire_path(value, wrp._TEXTURE_PATH_BYTES - 1, "terrain texture path")
+        b"" if value == "" else wrp.encode_wire_path(
+            value, wrp._TEXTURE_PATH_BYTES - 1, "terrain texture path"
+        )
         for value in texture_paths
     ]
     height_bytes = wrp._height_grid_bytes(elevations, height_scale)

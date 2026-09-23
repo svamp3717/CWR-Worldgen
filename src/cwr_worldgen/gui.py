@@ -56,8 +56,9 @@ APPEARANCE_PRESETS = (
     "Generated ground textures",
     "Custom",
 )
-GROUND_TEXTURE_OPTIONS = ("nogova", "kolgujev", "malden", "everon", "desert", "generated")
+GROUND_TEXTURE_OPTIONS = ("nogova", "kolgujev", "malden", "everon", "desert", "generated", "none")
 VEGETATION_EVERON = "Everon"
+VEGETATION_NONE = "None"
 VEGETATION_KOLGUJEV = "Kolgujev"
 VEGETATION_MALDEN = "Malden"
 VEGETATION_RESISTANCE_LEAF = "Nogova Resistance leaf"
@@ -68,6 +69,7 @@ VEGETATION_OPTIONS = (
     VEGETATION_MALDEN,
     VEGETATION_RESISTANCE_LEAF,
     VEGETATION_RESISTANCE_PINE,
+    VEGETATION_NONE,
 )
 HOUSE_STYLE_AUTO_LABEL = "Automatic (area / country)"
 HOUSE_STYLE_PRESET_LABELS = (
@@ -161,6 +163,11 @@ def resolve_gui_appearance_values(values: Mapping[str, object]) -> dict[str, obj
     elif vegetation == VEGETATION_RESISTANCE_PINE:
         resolved["forest_profile"] = "everon"
         resolved["forest_single_tree_model"] = NOGOVA_PINE_SINGLE_TREE_MODEL
+    elif vegetation == VEGETATION_NONE:
+        # Keep these fields valid for CLI/spec validation. The command builder
+        # applies the actual no-vegetation switches after Advanced arguments.
+        resolved["forest_profile"] = "everon"
+        resolved["forest_single_tree_model"] = EVERON_SINGLE_TREE_MODEL
     else:
         resolved["vegetation_style"] = VEGETATION_EVERON
         resolved["forest_profile"] = "everon"
@@ -722,6 +729,33 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         command.extend((
             "--forest-block-model", NOGOVA_FOREST_BLOCK_MODEL,
             "--forest-steep-model", NOGOVA_FOREST_STEEP_MODEL,
+        ))
+    elif vegetation == VEGETATION_NONE:
+        # Apply these last so Advanced arguments cannot quietly re-enable a
+        # vegetation subsystem behind a top-level "None" selection.
+        command.extend((
+            "--max-forest-objects", "0",
+            "--no-forest-clusters",
+            "--no-severe-hill-forest-fallback",
+            "--no-forest-undergrowth",
+            "--forest-undergrowth-max-objects", "0",
+            "--no-steep-hill-bushes",
+            "--max-steep-hill-bush-objects", "0",
+            "--no-forest-borders",
+            "--forest-border-max-objects", "0",
+            "--no-forest-single-trees",
+            "--max-forest-single-tree-objects", "0",
+            "--no-ditch-grass",
+            "--max-ditch-grass-objects", "0",
+            "--no-rural-vegetation",
+            "--max-rural-vegetation-objects", "0",
+            "--no-meadow-grass",
+            "--max-meadow-grass-objects", "0",
+            "--no-wetland-reeds",
+            "--max-wetland-reed-objects", "0",
+            "--no-rocky-forest-fallback",
+            "--max-rocky-forest-objects", "0",
+            "--max-mapped-tree-objects", "0",
         ))
     return command
 

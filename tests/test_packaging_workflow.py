@@ -49,6 +49,7 @@ class PackagingWorkflowTests(unittest.TestCase):
             "sfp4.json",
             "afgano.json",
             "ags_build.json",
+            "seb_ilo.json",
         ):
             self.assertTrue((data_dir / name).is_file(), name)
 

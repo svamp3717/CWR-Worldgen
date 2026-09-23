@@ -978,8 +978,10 @@ def build_surface_pass(
 
 
 def surface_texture_wire_paths(world_name: str, profile: str) -> tuple[str, ...]:
-    if profile not in {"generated", "everon", "nogova", "kolgujev", "malden", "desert"}:
-        raise ValueError("ground texture profile must be nogova, kolgujev, malden, everon, desert or generated")
+    if profile not in {"generated", "everon", "nogova", "kolgujev", "malden", "desert", "none"}:
+        raise ValueError("ground texture profile must be nogova, kolgujev, malden, everon, desert, generated or none")
+    if profile == "none":
+        return ("",) * len(MILESTONE9_MATERIALS)
     paths: list[str] = []
     stock_paths = STOCK_SURFACE_TEXTURES.get(profile, {})
     for material in MILESTONE9_MATERIALS:
@@ -1105,6 +1107,8 @@ def write_surface_textures(
     seed: str,
     size: int,
 ) -> tuple[Path, ...]:
+    if profile == "none":
+        return ()
     paths: list[Path] = []
     stock_paths = STOCK_SURFACE_TEXTURES.get(profile, {})
     for material in MILESTONE9_MATERIALS:

@@ -96,7 +96,7 @@ STOCK_GROUND_TEXTURES: dict[str, dict[str, str]] = {
     "kolgujev": KOLGUJEV_GROUND_TEXTURES,
 }
 
-GROUND_TEXTURE_PROFILES = ("nogova", "kolgujev", "malden", "everon", "generated", "desert")
+GROUND_TEXTURE_PROFILES = ("nogova", "kolgujev", "malden", "everon", "generated", "desert", "none")
 
 
 MALDEN_MATERIAL_COLOURS: dict[str, tuple[int, int, int]] = {
@@ -135,6 +135,10 @@ def material_colour_for_profile(material: MaterialDefinition, profile: str) -> t
 def ground_texture_path(world_name: str, material_code: str, profile: str = "generated") -> str:
     if material_code not in {material.code for material in OSM_MATERIALS}:
         raise ValueError(f"unknown terrain material code: {material_code}")
+    if profile == "none":
+        # Keep a blank RVW4 texture-table slot for each semantic material so the
+        # terrain remains unpainted while material classification still works.
+        return ""
     if profile in {"generated", "desert"}:
         return rf"{world_name}\data\{material_code}.paa"
     if profile in STOCK_GROUND_TEXTURES:

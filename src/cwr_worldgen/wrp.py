@@ -168,7 +168,9 @@ def write_rvw4(
         raise ValueError("RVW4 requires between 1 and 512 texture table entries")
 
     encoded_textures = [
-        encode_wire_path(value, _TEXTURE_PATH_BYTES - 1, "terrain texture path")
+        b"" if value == "" else encode_wire_path(
+            value, _TEXTURE_PATH_BYTES - 1, "terrain texture path"
+        )
         for value in texture_paths
     ]
     maximum_index = len(texture_paths) - 1
