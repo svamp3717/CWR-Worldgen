@@ -3,13 +3,16 @@
 
 The stock road fitter remains authoritative. The quality scorer first tries the
 vanilla 25/12/6 P3D family, including a visible edge-discontinuity check against
-the preceding stock slab. This policy substitutes a generated world-local paved ribbon only
-when the winning stock piece still exceeds its turn/deviation limits, still makes
+the preceding stock slab. This policy substitutes a generated world-local paved
+ribbon only when the winning stock piece still exceeds its turn/deviation limits,
+still makes
 a clipping stock-to-stock joint, or cannot cover a required short tail.
 
 Generated names are canonicalized by width, decimetre chord length and a
-five-degree curve bucket, so identical failures reuse one P3D and the existing
-procedural infrastructure cache reuses it across builds.
+quantized curve bucket. Low-angle bends use one-degree buckets where wide paved
+edges are most sensitive, while larger bends use coarser reusable buckets. The
+existing procedural infrastructure cache therefore reuses equivalent failures
+across builds.
 
 Dirt and gravel chains are deliberately excluded from this first implementation.
 """
