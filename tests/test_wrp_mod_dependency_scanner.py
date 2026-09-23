@@ -129,6 +129,17 @@ def test_pbo_scanner_reads_cprs_compressed_wrp_members(tmp_path: Path) -> None:
     }
 
 
+def test_pbo_without_wrp_reports_warning_instead_of_crashing(tmp_path: Path) -> None:
+    pbo = tmp_path / "models-only.pbo"
+    write_pbo(pbo, (PboEntry("thing.p3d", b"ODOL"),))
+
+    result = scan_dependencies(pbo)
+
+    assert result.wrp_count == 0
+    assert result.rows == ()
+    assert result.warnings == ("PBO contains no .wrp entries",)
+
+
 def test_legacy_wrp_fallback_extracts_namespaced_p3d_paths() -> None:
     data = (
         b"OPRW\x00"
@@ -188,3 +199,12 @@ def test_reports_include_mod_summary_and_full_dependency_rows(tmp_path: Path) ->
     assert "art_bd\\store1.p3d" in csv_text
     assert "data3d\\stock.p3d" not in csv_text
     assert "data3d\\stock.p3d" in full_csv_path.read_text(encoding="utf-8")
+
+
+def test_cli_and_gui_entrypoints_and_source_launcher_are_registered() -> None:
+    root = Path(__file__).resolve().parents[1]
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert 'cwr-wrp-mod-scan = "cwr_worldgen.wrp_mod_dependency_scanner:main"' in pyproject
+    assert 'cwr-wrp-mod-scan-gui = "cwr_worldgen.wrp_mod_dependency_scanner:gui_main"' in pyproject
+    assert (root / "tools" / "wrp_mod_dependency_scanner.py").is_file()
