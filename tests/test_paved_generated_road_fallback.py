@@ -72,6 +72,89 @@ def test_straight_paved_piece_keeps_stock_p3d() -> None:
     )
 
 
+def _two_piece_result(measure, piece):
+    first = measure.chord_endpoint(0.0, piece.length_metres, measure.total)
+    assert first is not None
+    first_distance, first_x, first_z, _heading = first
+    second = measure.chord_endpoint(
+        first_distance, piece.length_metres, measure.total
+    )
+    assert second is not None
+    _second_distance, second_x, second_z, _heading = second
+    start_x, start_z, _heading = measure.point(0.0)
+    return (
+        (piece, (start_x, start_z), (first_x, first_z)),
+        (piece, (first_x, first_z), (second_x, second_z)),
+    )
+
+
+def _upgrade_result(measure, pieces, result, spec):
+    token = quality._CONTEXT.set(quality._Context((), spec, {}))
+    try:
+        return fallback._upgrade_stock_result(
+            result,
+            measure,
+            pieces,
+            start_distance=0.0,
+            preferred_end_distance=measure.total,
+            minimum_end_distance=0.0,
+            maximum_end_distance=measure.total,
+        )
+    finally:
+        quality._CONTEXT.reset(token)
+
+
+def test_multiple_straight_paved_pieces_remain_stock() -> None:
+    spec = _spec()
+    pieces = playability.road_model_variants(
+        spec.paved_road_model, spec.road_segment_length
+    )
+    piece = next(item for item in pieces if item.nominal_length == 6)
+    measure = playability._PolylineMeasure.create(
+        ((0.0, 0.0), (0.0, 12.0))
+    )
+
+    upgraded = _upgrade_result(
+        measure, pieces, _two_piece_result(measure, piece), spec
+    )
+
+    assert len(upgraded) == 2
+    assert all(item[0].model_path == piece.model_path for item in upgraded)
+    assert not any(
+        infrastructure.is_generated_paved_road_model(item[0].model_path)
+        for item in upgraded
+    )
+
+
+def test_clipping_stock_joint_generates_only_the_offending_piece() -> None:
+    spec = _spec()
+    pieces = playability.road_model_variants(
+        spec.paved_road_model, spec.road_segment_length
+    )
+    piece = next(item for item in pieces if item.nominal_length == 6)
+    angle = math.radians(20.0)
+    measure = playability._PolylineMeasure.create(
+        (
+            (0.0, 0.0),
+            (0.0, 6.0),
+            (math.sin(angle) * 6.0, 6.0 + math.cos(angle) * 6.0),
+        )
+    )
+
+    upgraded = _upgrade_result(
+        measure, pieces, _two_piece_result(measure, piece), spec
+    )
+
+    assert upgraded[0][0].model_path == piece.model_path
+    assert infrastructure.is_generated_paved_road_model(
+        upgraded[1][0].model_path
+    )
+    assert sum(
+        infrastructure.is_generated_paved_road_model(item[0].model_path)
+        for item in upgraded
+    ) == 1
+
+
 def test_tight_paved_bend_uses_generated_fallback_when_stock_piece_fails() -> None:
     spec = _spec()
     pieces = playability.road_model_variants(
