@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from cwr_worldgen import playability
 from cwr_worldgen import procedural_infrastructure as infrastructure
 from cwr_worldgen import paved_road_generated_fallback_policy as fallback
+from cwr_worldgen import paved_junction_policy as paved_junctions
 from cwr_worldgen import road_quality_policy as quality
 from cwr_worldgen.milestone9 import Milestone9Spec, _Milestone9PlayabilitySpec
 
@@ -189,3 +190,21 @@ def test_parallel_quality_wrapper_keeps_generated_paved_fallback_live() -> None:
 
     assert parallel_quality._batched_quality_chain is fallback._parallel_chain
     assert playability._stock_piece_chain is fallback._parallel_chain
+
+
+def test_generated_paved_length_is_available_to_road_audits() -> None:
+    model = infrastructure.paved_fallback_model_path(
+        "audit_world", 9.10, 6.20, -20.0
+    )
+    assert math.isclose(quality._piece_length(model, 25.0), 6.2, abs_tol=1.0e-9)
+
+
+def test_generated_paved_width_maps_back_to_stock_junction_family() -> None:
+    wide = infrastructure.paved_fallback_model_path(
+        "junction_world", 9.10, 6.20, 0.0
+    )
+    narrow = infrastructure.paved_fallback_model_path(
+        "junction_world", 7.00, 6.20, 0.0
+    )
+    assert paved_junctions._family(wide) == "sil"
+    assert paved_junctions._family(narrow) == "asf"
