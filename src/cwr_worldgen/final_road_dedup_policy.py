@@ -34,13 +34,18 @@ _RAW_PROGRESS_PERCENT = 99
 # surface overlap itself is not approximated by polygon clipping here.
 _HALF_WIDTH_METRES = {
     "sil": 4.55,
+    "silnice": 4.55,
     "kos": 4.55,
     "asf": 3.50,
+    "asfaltka": 3.50,
     "ces": 1.75,
     "gravel": 2.30,
 }
 
-_STOCK_STRAIGHT = re.compile(r"^(?P<family>sil|kos|asf|ces)(?P<nominal>25|12|6)\.p3d$", re.I)
+_STOCK_STRAIGHT = re.compile(
+    r"^(?P<family>silnice|asfaltka|sil|kos|asf|ces)(?P<nominal>25|12|6)\.p3d$",
+    re.I,
+)
 _GRAVEL_STRAIGHT = re.compile(r"^gravel(?P<nominal>25|12|6|3)\.p3d$", re.I)
 _GENERATED_PAVED_STRAIGHT = re.compile(
     r"^paved_w(?P<width>\d{3})_l(?P<length>\d{4})\.p3d$",
