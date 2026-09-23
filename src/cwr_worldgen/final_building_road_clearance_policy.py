@@ -46,13 +46,16 @@ _CACHE_REVISION = "final-road-building-clearance-v4-generated-paved"
 
 _WIDTHS = {
     "sil": 4.55,
+    "silnice": 4.55,
     "kos": 4.55,
     "asf": 3.50,
+    "asfaltka": 3.50,
     "ces": 1.75,
     "gravel": 2.30,
 }
 _STOCK_STRAIGHT = re.compile(
-    r"^(?P<family>sil|kos|asf|ces)(?P<nominal>25|12|6)\.p3d$", re.I
+    r"^(?P<family>silnice|asfaltka|sil|kos|asf|ces)(?P<nominal>25|12|6)\.p3d$",
+    re.I,
 )
 _STOCK_CURVE = re.compile(
     r"^(?P<family>sil|kos|asf|ces)10 (?P<radius>25|50|75|100)\.p3d$", re.I
