@@ -258,8 +258,10 @@ def _make_primitive(
     )
 
 
-def _scaled_piece_length(nominal: int, spec) -> float:
-    return float(spec.road_segment_length) * float(nominal) / 25.0
+def _scaled_piece_length(model_path: str, nominal: int, spec) -> float:
+    return _p.stock_road_piece_length_metres(
+        model_path, nominal, float(spec.road_segment_length)
+    )
 
 
 def _stock_curve_points(family: str, radius: float) -> tuple[PointXZ, PointXZ]:
@@ -360,7 +362,9 @@ def _road_object_primitives(obj, spec) -> tuple[_RoadPrimitive, ...]:
     match = _STOCK_STRAIGHT.fullmatch(filename)
     if match is not None:
         family = match.group("family").casefold()
-        length = _scaled_piece_length(int(match.group("nominal")), spec)
+        length = _scaled_piece_length(
+            obj.model_path, int(match.group("nominal")), spec
+        )
         return (
             _make_primitive(
                 obj, (0.0, -length * 0.5), (0.0, length * 0.5), _WIDTHS[family]
