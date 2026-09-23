@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Generate paved road pieces only when the stock P3D family cannot fit.
 
-The stock road fitter remains authoritative. This policy looks at the piece it
-selected and only substitutes a generated world-local paved ribbon when that
-piece exceeds the same turn/deviation limits used by the quality scorer. It also
-replaces the historical oversized-stock-piece fallback for a required short tail.
+The stock road fitter remains authoritative. The quality scorer first tries the
+vanilla 25/12/6 P3D family, including a joint-angle check against the preceding
+stock slab. This policy substitutes a generated world-local paved ribbon only
+when the winning stock piece still exceeds its turn/deviation limits, still makes
+a clipping stock-to-stock joint, or cannot cover a required short tail.
 
 Generated names are canonicalized by width, decimetre chord length and a
 five-degree curve bucket, so identical failures reuse one P3D and the existing
