@@ -583,8 +583,12 @@ def _fit_stock_piece_road_objects_parallel(
         cap_trim_lengths[key] = max(0.40, half - 0.70)
         cap_cover_lengths[key] = half + 0.15
 
+    virtual_short_length = max(
+        6.25,
+        float(spec.road_segment_length) * 6.0 / 25.0,
+    )
     virtual_cover_lengths = {
-        key: spec.road_segment_length * 6.0 / 25.0 * 0.5 + 0.15
+        key: virtual_short_length * 0.5 + 0.15
         for key in complex_keys
     }
     virtual_trim_lengths = {
