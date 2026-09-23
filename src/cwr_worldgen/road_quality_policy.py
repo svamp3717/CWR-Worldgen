@@ -40,7 +40,7 @@ _AUDIT_ALIGNMENT_COSINE = math.cos(math.radians(28.0))
 _PIECE_LENGTH_PATTERN = re.compile(r"(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$")
 _GENERATED_PAVED_LENGTH_PATTERN = re.compile(
     r"^paved_w\d{3}_l(?P<length>\d{4})"
-    r"(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+    r"(?:_[lr]\d{2})?\.p3d$",
     re.IGNORECASE,
 )
 
