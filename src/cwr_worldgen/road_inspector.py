@@ -50,6 +50,7 @@ _PAVED_REPLACEMENT_CATEGORIES = frozenset({
     "curve_transition",
     "connector_gap",
 })
+_PAVED_REPLACEMENT_MINIMUM_TANGENT_ERROR_DEGREES = 0.75
 
 
 @dataclass(frozen=True, slots=True)
@@ -734,15 +735,40 @@ def _replacement_world_name(
     return Path(wrp_entry.replace("\\", "/")).stem
 
 
+
+def _packed_paved_model_filenames(input_path: Path) -> frozenset[str]:
+    if input_path.suffix.casefold() != ".pbo":
+        return frozenset()
+    result = set()
+    for entry in read_pbo(input_path):
+        filename = entry.name.replace("/", "\\").rsplit("\\", 1)[-1]
+        if re.fullmatch(
+            r"paved_w\d{3}_l\d{4}(?:_[lr]\d{2})?\.p3d",
+            filename,
+            re.IGNORECASE,
+        ):
+            result.add(filename.casefold())
+    return frozenset(result)
+
+
 def _paved_replacement_plans(
     roads: Sequence[RoadObject],
     issues: Sequence[RoadIssue],
     wrp_entry: str,
+    packed_paved_models: frozenset[str] = frozenset(),
 ) -> tuple[PavedReplacementPlan, ...]:
     road_by_id = {road.object_id: road for road in roads}
     eligible: list[RoadIssue] = []
     for issue in issues:
         if issue.category not in _PAVED_REPLACEMENT_CATEGORIES:
+            continue
+        # Purely axial straight-road spacing failures should be fixed by stock
+        # refitting. Procedural pavement is reserved for seams whose road-edge
+        # orientation cannot be made continuous with the current stock pair.
+        if (
+            float(issue.metrics.get("tangent_error_degrees", 0.0))
+            <= _PAVED_REPLACEMENT_MINIMUM_TANGENT_ERROR_DEGREES
+        ):
             continue
         if len(issue.object_ids) != 2:
             continue
@@ -787,10 +813,11 @@ def _paved_replacement_plans(
 
     world_name = _replacement_world_name(roads, wrp_entry)
     existing_models = Counter(
-        road.model_path.casefold()
+        road.model_path.replace("/", "\").rsplit("\", 1)[-1].casefold()
         for road in roads
         if _GENERATED_PAVED.fullmatch(_model(road.model_path))
     )
+    existing_models.update(packed_paved_models)
     plans: list[PavedReplacementPlan] = []
     for root in sorted(grouped_ids, key=lambda key: min(grouped_ids[key])):
         object_ids = tuple(sorted(grouped_ids[root]))
@@ -831,7 +858,13 @@ def _paved_replacement_plans(
         component_issues = tuple(grouped_issues[root])
         plans.append(PavedReplacementPlan(
             plan_id=f"RP-{len(plans)+1:05d}",
-            action="reuse" if existing_models[model_path.casefold()] else "generate",
+            action=(
+                "reuse"
+                if existing_models[
+                    model_path.replace("/", "\").rsplit("\", 1)[-1].casefold()
+                ]
+                else "generate"
+            ),
             model_path=model_path,
             replace_object_ids=object_ids,
             source_models=tuple(sorted({road.model_path for road in component})),
@@ -880,7 +913,12 @@ def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAU
     issues.extend(_junction_issues(checked_roads, nearby_gap))
     issues.extend(_paved_crossing_issues(checked_roads))
     numbered = _number(issues)
-    replacements = _paved_replacement_plans(roads, numbered, wrp_entry)
+    replacements = _paved_replacement_plans(
+        roads,
+        numbered,
+        wrp_entry,
+        _packed_paved_model_filenames(Path(input_path)),
+    )
     return InspectionResult(
         str(Path(input_path)),
         wrp_entry,
