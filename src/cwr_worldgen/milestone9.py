@@ -217,6 +217,7 @@ class Milestone9Spec(Milestone8Spec):
     display_name: str = "CWR Milestone 9"
     include_minor_roads: bool = True
     procedural_gravel_roads: bool = True
+    procedural_paved_road_fallback: bool = True
     surface_shoreline_wet_cells: int = 1
     surface_shoreline_sand_cells: int = 2
     surface_transition_cells: int = 2
@@ -652,6 +653,7 @@ class Milestone9Spec(Milestone8Spec):
 class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     include_minor_roads: bool = True
     procedural_gravel_roads: bool = True
+    procedural_paved_road_fallback: bool = True
     surface_pass_enabled: bool = True
     stock_road_piece_fitting: bool = True
     forest_low_anchor: bool = True
@@ -1308,6 +1310,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         poseidon_tools_path=spec.poseidon_tools_path,
         include_minor_roads=spec.include_minor_roads,
         procedural_gravel_roads=spec.procedural_gravel_roads,
+        procedural_paved_road_fallback=spec.procedural_paved_road_fallback,
         road_connection_tolerance=spec.road_connection_tolerance,
         maximum_road_grade_percent=spec.maximum_road_grade_percent,
         road_grade_radius=spec.road_grade_radius,
