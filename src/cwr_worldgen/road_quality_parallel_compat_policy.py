@@ -319,7 +319,7 @@ def _batched_quality_chain(
             if endpoint is None:
                 continue
             end_distance, end_x, end_z, chord_heading = endpoint
-            end_heading = measure.point(end_distance)[2]
+            end_heading = measure.heading_before(end_distance)
             turn = max(
                 _playability._heading_difference(chord_heading, start_heading),
                 _playability._heading_difference(chord_heading, end_heading),
