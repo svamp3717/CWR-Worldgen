@@ -35,6 +35,7 @@ STOCK_BUILDING_FDF_PRESET = "stock-fdf"
 STOCK_BUILDING_SFP4_PRESET = "stock-sfp4"
 STOCK_BUILDING_AFGANO_PRESET = "stock-afgano"
 STOCK_BUILDING_AGS_BUILD_PRESET = "stock-ags-build"
+STOCK_BUILDING_SEB_ILO_PRESET = "stock-seb-ilo"
 
 # Legacy combined identifiers remain accepted when loading old profiles, but no
 # combined catalogue JSONs are shipped anymore. They expand into source sets.
@@ -60,6 +61,7 @@ _STOCK_FDF_CATALOGUE_PATH = _DATA_DIR / "fdf.json"
 _STOCK_SFP4_CATALOGUE_PATH = _DATA_DIR / "sfp4.json"
 _STOCK_AFGANO_CATALOGUE_PATH = _DATA_DIR / "afgano.json"
 _STOCK_AGS_BUILD_CATALOGUE_PATH = _DATA_DIR / "ags_build.json"
+_STOCK_SEB_ILO_CATALOGUE_PATH = _DATA_DIR / "seb_ilo.json"
 
 
 def _catalogue_display_name(path: Path, fallback: str) -> str:
@@ -238,6 +240,10 @@ STOCK_BUILDING_AGS_BUILD_LABEL = _catalogue_display_name(
     _STOCK_AGS_BUILD_CATALOGUE_PATH,
     "ags_build.pbo buildings",
 )
+STOCK_BUILDING_SEB_ILO_LABEL = _catalogue_display_name(
+    _STOCK_SEB_ILO_CATALOGUE_PATH,
+    "seb_ilo.pbo buildings",
+)
 
 # Compatibility labels for code/imports that still know the old combined IDs.
 STOCK_BUILDING_COMBINED_LABEL = "Stock combined (non-Resistance + Resistance) buildings"
@@ -265,6 +271,7 @@ STOCK_BUILDING_PRESETS = (
     STOCK_BUILDING_SFP4_PRESET,
     STOCK_BUILDING_AFGANO_PRESET,
     STOCK_BUILDING_AGS_BUILD_PRESET,
+    STOCK_BUILDING_SEB_ILO_PRESET,
 )
 STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_VANILLA_LABEL),
@@ -283,6 +290,7 @@ STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_SFP4_PRESET, STOCK_BUILDING_SFP4_LABEL),
     (STOCK_BUILDING_AFGANO_PRESET, STOCK_BUILDING_AFGANO_LABEL),
     (STOCK_BUILDING_AGS_BUILD_PRESET, STOCK_BUILDING_AGS_BUILD_LABEL),
+    (STOCK_BUILDING_SEB_ILO_PRESET, STOCK_BUILDING_SEB_ILO_LABEL),
 )
 
 STOCK_BUILDING_MULTI_PREFIX = "stock-multi:"
@@ -323,6 +331,7 @@ _STOCK_CATALOGUE_BY_PRESET = {
     STOCK_BUILDING_SFP4_PRESET: _STOCK_SFP4_CATALOGUE_PATH,
     STOCK_BUILDING_AFGANO_PRESET: _STOCK_AFGANO_CATALOGUE_PATH,
     STOCK_BUILDING_AGS_BUILD_PRESET: _STOCK_AGS_BUILD_CATALOGUE_PATH,
+    STOCK_BUILDING_SEB_ILO_PRESET: _STOCK_SEB_ILO_CATALOGUE_PATH,
 }
 
 
@@ -454,6 +463,8 @@ def stock_model_source(model_path: object) -> str:
         return "afgano"
     if path.startswith("ags_build\\"):
         return "ags_build"
+    if path.startswith("seb_ilo\\"):
+        return "seb_ilo"
     return "vanilla"
 
 
