@@ -33,7 +33,9 @@ DEFAULT_STOCK_ROOTS = ("data3d", "o")
 
 _ASCII_RUN = re.compile(rb"[ -~]{5,}")
 _P3D_PATH = re.compile(
-    r"(?i)(?:(?:[a-z0-9_.$@()+\- ]+)[\\/])+(?:[a-z0-9_.$@()+\- ]+)\.p3d"
+    r"(?i)(?:[a-z0-9_.$@()+\-]+[\\/])"
+    r"(?:(?:[a-z0-9_.$@()+\- ]+)[\\/])*"
+    r"(?:[a-z0-9_.$@()+\- ]+)\.p3d"
 )
 
 
@@ -52,12 +54,13 @@ class ScanResult:
     input_path: str
     input_kind: str
     stock_roots: tuple[str, ...]
+    wrp_names: tuple[str, ...]
     rows: tuple[DependencyRow, ...]
     warnings: tuple[str, ...] = ()
 
     @property
     def wrp_count(self) -> int:
-        return len({row.wrp_name for row in self.rows})
+        return len(self.wrp_names)
 
     @property
     def unique_models(self) -> int:
@@ -270,10 +273,12 @@ def scan_dependencies(
     rows: list[DependencyRow] = []
 
     if suffix == ".wrp":
+        wrp_names = (path.name,)
         rows.extend(scan_wrp_bytes(path.read_bytes(), wrp_name=path.name, stock_roots=roots))
         kind = "wrp"
     elif suffix == ".pbo":
         worlds = _pbo_wrp_entries(path)
+        wrp_names = tuple(name for name, _data in worlds)
         if not worlds:
             warnings.append("PBO contains no .wrp entries")
         for name, data in worlds:
@@ -289,6 +294,7 @@ def scan_dependencies(
         input_path=str(path),
         input_kind=kind,
         stock_roots=roots,
+        wrp_names=wrp_names,
         rows=tuple(rows),
         warnings=tuple(warnings),
     )
@@ -306,9 +312,13 @@ def result_document(result: ScanResult) -> dict[str, object]:
         "input_path": result.input_path,
         "input_kind": result.input_kind,
         "stock_roots": list(result.stock_roots),
+        "wrp_names": list(result.wrp_names),
         "wrp_count": result.wrp_count,
         "unique_models": result.unique_models,
         "unique_mod_models": result.unique_mod_models,
+        "unique_mod_dependencies": sorted(
+            {row.model_path for row in result.rows if not row.is_stock}
+        ),
         "warnings": list(result.warnings),
         "dependencies": [asdict(row) for row in result.rows],
     }
@@ -456,10 +466,11 @@ class ScannerGui:
             self.input_var.set(selected)
 
     def _scan(self) -> None:
-        path = Path(self.input_var.get().strip())
-        roots = normalize_stock_roots((self.stock_var.get(),))
-        if not str(path):
+        raw_path = self.input_var.get().strip()
+        if not raw_path:
             return
+        path = Path(raw_path)
+        roots = normalize_stock_roots((self.stock_var.get(),))
         self.status_var.set("Scanning…")
         worker = threading.Thread(target=self._scan_worker, args=(path, roots), daemon=True)
         worker.start()
