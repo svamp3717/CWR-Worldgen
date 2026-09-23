@@ -60,6 +60,22 @@ def test_clean_straights_have_no_findings(tmp_path: Path) -> None:
     assert result.paved_replacements == ()
 
 
+
+def test_aligned_axial_overlap_is_reported_but_does_not_request_generated_pavement(
+    tmp_path: Path,
+) -> None:
+    wrp = _write_wrp(tmp_path, "overlap.wrp", (
+        (1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
+        # Physical 25 m slabs placed 24.5 m apart overlap by 0.5 m.
+        (2, r"o\road\sil25.p3d", 0.0, 0.0, 24.5, 0.0, 0.0),
+    ))
+
+    result = inspect_road_geometry(wrp)
+
+    assert any(issue.category == "connector_gap" for issue in result.issues)
+    assert result.paved_replacements == ()
+
+
 def test_misaligned_straights_are_reported(tmp_path: Path) -> None:
     wrp = _write_wrp(tmp_path, "bad.wrp", (
         (1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
@@ -164,6 +180,37 @@ def test_existing_generated_paved_model_is_reused_by_replacement_plan(
         ),
     )
     second = inspect_road_geometry(wrp)
+
+    assert len(second.paved_replacements) == 1
+    assert second.paved_replacements[0].model_path == model
+    assert second.paved_replacements[0].action == "reuse"
+
+
+
+def test_unused_generated_paved_asset_in_pbo_is_reused(
+    tmp_path: Path,
+) -> None:
+    base_objects = (
+        (1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
+        (2, r"o\road\sil25.p3d", 0.0, 0.0, 25.0, 5.0, 0.0),
+    )
+    wrp_bytes = _wrp_bytes(base_objects)
+    probe = tmp_path / "packed-reuse.wrp"
+    probe.write_bytes(wrp_bytes)
+    first = inspect_road_geometry(probe)
+    assert len(first.paved_replacements) == 1
+    model = first.paved_replacements[0].model_path
+    filename = model.rsplit("\\", 1)[-1]
+
+    pbo = tmp_path / "packed-reuse.pbo"
+    write_pbo(
+        pbo,
+        (
+            PboEntry("packed-reuse.wrp", wrp_bytes),
+            PboEntry(rf"i\{filename}", b"already-packed"),
+        ),
+    )
+    second = inspect_road_geometry(pbo)
 
     assert len(second.paved_replacements) == 1
     assert second.paved_replacements[0].model_path == model
