@@ -343,6 +343,7 @@ def _cached_road_object(
             if (
                 _playability.is_generated_gravel_road_model(model_path)
                 or _playability.is_generated_gravel_junction_model(model_path)
+                or _playability.is_generated_paved_road_model(model_path)
             ):
                 placement_offset = -float(
                     _playability.GENERATED_GRAVEL_VISUAL_TOP_METRES
