@@ -18,6 +18,16 @@ _HUB_HALF_WIDTH = 3.0
 _STOCK_BULGE_LIMIT = 0.10
 _GRAVEL_BULGE_LIMIT = 0.075
 _LOOKAHEAD_DEPTH = 2
+
+# Ordinary stock paved P3Ds are flat slabs. A piece can fit its own chord while
+# still making a visibly overlapping wedge with the preceding stock slab. Try a
+# different vanilla 25/12/6 candidate before allowing the generated fallback.
+_STOCK_PAVED_JOINT_LIMIT_DEGREES = 7.5
+_STOCK_PAVED_PATTERN = re.compile(
+    r"^(?:sil|kos|asf)(?:25|12|6)\.p3d$",
+    re.IGNORECASE,
+)
+
 _AUDIT_BUCKET_METRES = 32.0
 _AUDIT_ALIGNMENT_COSINE = math.cos(math.radians(28.0))
 _PIECE_LENGTH_PATTERN = re.compile(r"(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$")
@@ -48,6 +58,20 @@ _CONTEXT: ContextVar[_Context | None] = ContextVar("cwr_road_quality", default=N
 _ORIGINAL_FIT = _p.fit_road_objects
 _ORIGINAL_CHAIN = _p._stock_piece_chain
 _INSTALLED = False
+
+
+def _is_stock_paved_piece(piece) -> bool:
+    filename = str(piece.model_path).replace("/", "\\").rsplit("\\", 1)[-1]
+    return _STOCK_PAVED_PATTERN.fullmatch(filename) is not None
+
+
+def _piece_chord_heading(
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> float:
+    return math.degrees(
+        math.atan2(end[0] - start[0], end[1] - start[1])
+    ) % 360.0
 
 
 def _unit(start, end) -> tuple[float, float]:
@@ -243,6 +267,22 @@ def _quality_chain(measure, pieces, *, start_distance, preferred_end_distance, m
             else:
                 turn_limit, deviation_limit = 18.0, 0.22
             fidelity_penalty = int(turn > turn_limit or deviation > deviation_limit)
+            joint_turn = 0.0
+            joint_penalty = 0
+            if (
+                fitted
+                and _is_stock_paved_piece(piece)
+                and _is_stock_paved_piece(fitted[-1][0])
+            ):
+                previous_heading = _piece_chord_heading(
+                    fitted[-1][1], fitted[-1][2]
+                )
+                joint_turn = _p._heading_difference(
+                    previous_heading, chord_heading
+                )
+                joint_penalty = int(
+                    joint_turn > _STOCK_PAVED_JOINT_LIMIT_DEGREES
+                )
             bulge = _terrain_bulge(context, (start_x, start_z), (end_x, end_z), piece.nominal_length)
             terrain_limit = _GRAVEL_BULGE_LIMIT if gravel else _STOCK_BULGE_LIMIT
             terrain_penalty = int(bulge > terrain_limit)
@@ -263,8 +303,12 @@ def _quality_chain(measure, pieces, *, start_distance, preferred_end_distance, m
                 )
             else:
                 score = (
-                    fidelity_penalty, tail_penalty, terrain_penalty,
+                    fidelity_penalty, joint_penalty, tail_penalty, terrain_penalty,
                     max(turn / turn_limit, deviation / deviation_limit),
+                    (
+                        joint_turn / _STOCK_PAVED_JOINT_LIMIT_DEGREES
+                        if joint_penalty else 0.0
+                    ),
                     terrain_ratio, tail_error,
                     0 if piece == preferred_piece else 1,
                     abs(preferred_end_distance - end_distance), -piece.length_metres,
