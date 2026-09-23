@@ -2,8 +2,8 @@
 """Generate paved road pieces only when the stock P3D family cannot fit.
 
 The stock road fitter remains authoritative. The quality scorer first tries the
-vanilla 25/12/6 P3D family, including a joint-angle check against the preceding
-stock slab. This policy substitutes a generated world-local paved ribbon only
+vanilla 25/12/6 P3D family, including a visible edge-discontinuity check against
+the preceding stock slab. This policy substitutes a generated world-local paved ribbon only
 when the winning stock piece still exceeds its turn/deviation limits, still makes
 a clipping stock-to-stock joint, or cannot cover a required short tail.
 
