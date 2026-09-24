@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Restore ordinary road geometry when a stock paved junction cannot be fitted."""
+"""Use generated paved hubs when a stock paved junction cannot be fitted."""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -32,9 +32,9 @@ def _junction_geometry(dataset, projection, spec):
 
     ``paved_junction_policy`` normally exposes only stock-paved junction geometry.
     During a fallback refit, ``_PLANS`` contains the subset that actually fitted in
-    the previous pass. Failed stock-paved plans are restored to the ordinary road
-    quality geometry so their arms are no longer trimmed back by the 32 m stock
-    approach reserve. Non-stock junctions remain excluded exactly as before.
+    the previous pass. Failed stock-paved plans return to the road-quality geometry,
+    which now reserves the generated paved hub and its actual arm extent instead of
+    the 32 m stock-approach envelope. Non-stock junctions remain unchanged.
     """
 
     base = dict(_paved._ORIGINAL_GEOMETRY(dataset, projection, spec))
@@ -292,7 +292,7 @@ def _fit(
             progress_callback(
                 99,
                 "Refitting paved junction fallbacks: "
-                f"{len(plans) - len(active):,} stock junction(s) use ordinary connected roads"
+                f"{len(plans) - len(active):,} stock junction(s) use generated paved hubs"
                 + suffix,
             )
 
@@ -342,9 +342,9 @@ def _fit(
             snapshot = next_snapshot
             affected = _affected_plan_keys(plans, active, newly_failed)
 
-        # Geometry remained coupled after the bounded stabilization attempts. An
-        # ordinary junction is visually less fancy but, unlike a 30 m grass gap,
-        # remains a road.
+        # Geometry remained coupled after the bounded stabilization attempts.
+        # Refit without stock plans so every paved junction uses its generated
+        # angle-matched hub instead of leaving a grass gap or overlapping slabs.
         return _base_refit(
             dataset,
             projection,
