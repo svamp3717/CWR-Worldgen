@@ -340,15 +340,15 @@ def test_generated_paved_and_gravel_roads_use_native_onsurface_vertex_lighting()
             infrastructure.InfrastructureModelKey(
                 "road", "paved_w091_l0062_r20", 91, 62
             ),
-            r"o\\road\\silnice.pac",
+            r"o\road\silnice.pac",
         ),
         (
             infrastructure.InfrastructureModelKey("road", "gravel6", 46, 62),
-            r"lighting_world\\i\\g.paa",
+            r"lighting_world\i\g.paa",
         ),
         (
             infrastructure.InfrastructureModelKey("road", "gravel_j3", 46, 54),
-            r"lighting_world\\i\\gj.paa",
+            r"lighting_world\i\gj.paa",
         ),
     )
 
