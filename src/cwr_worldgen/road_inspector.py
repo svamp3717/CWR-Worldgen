@@ -1157,6 +1157,33 @@ def _stock_repair_choice(
     return choice, deviation, length_error, angle_error
 
 
+def _is_generated_paved_road(road: RoadObject) -> bool:
+    return _GENERATED_PAVED.fullmatch(_model(road.model_path)) is not None
+
+
+def _compatible_paved_pair(first: RoadObject, second: RoadObject) -> bool:
+    if first.road_type != "paved" or second.road_type != "paved":
+        return False
+    if first.kind.startswith("junction_") or second.kind.startswith("junction_"):
+        return False
+    first_width = max((endpoint.half_width for endpoint in first.endpoints), default=0.0)
+    second_width = max((endpoint.half_width for endpoint in second.endpoints), default=0.0)
+    if abs(first_width - second_width) > 0.05:
+        return False
+    first_stock = None if _is_generated_paved_road(first) else first.family
+    second_stock = None if _is_generated_paved_road(second) else second.family
+    return first_stock is None or second_stock is None or first_stock == second_stock
+
+
+def _component_stock_family(component: Sequence[RoadObject]) -> str | None:
+    families = {
+        road.family
+        for road in component
+        if not _is_generated_paved_road(road)
+    }
+    return next(iter(families)) if len(families) == 1 else None
+
+
 def _paved_replacement_plans(
     roads: Sequence[RoadObject],
     issues: Sequence[RoadIssue],
@@ -1182,13 +1209,7 @@ def _paved_replacement_plans(
         if any(road is None for road in pair):
             continue
         first, second = pair
-        if (
-            first.road_type != "paved"
-            or second.road_type != "paved"
-            or first.kind.startswith("junction_")
-            or second.kind.startswith("junction_")
-            or first.family != second.family
-        ):
+        if not _compatible_paved_pair(first, second):
             continue
         eligible.append(issue)
     if not eligible:
@@ -1249,12 +1270,16 @@ def _paved_replacement_plans(
             continue
         reference_points, (start, end) = reference
         component_issues = tuple(grouped_issues[root])
-        family = component[0].family
-        stock_choice = _stock_repair_choice(
-            family,
-            reference_points,
-            start,
-            end,
+        family = _component_stock_family(component)
+        stock_choice = (
+            _stock_repair_choice(
+                family,
+                reference_points,
+                start,
+                end,
+            )
+            if family is not None
+            else None
         )
         if stock_choice is not None:
             choice, deviation, length_error, angle_error = stock_choice
