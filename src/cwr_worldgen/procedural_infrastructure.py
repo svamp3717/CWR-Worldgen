@@ -889,10 +889,9 @@ def _triangulated_paved_junction_lod(
         if polygon.covers(triangle.representative_point())
     )
     # Use one continuous planar UV field for the entire hub. The previous
-    # nearest-arm projection changed UV orientation per triangle, so the stock
-    # road texture made a single P3D look like several overlapping wedges.
-    # Sampling only the middle of sil_new also keeps its bright shoulder strips
-    # out of the intersection core.
+    # nearest-arm projection changed UV orientation per triangle, so a single
+    # P3D looked like several overlapping wedges. Generated junctions now use
+    # the full in-game stock junction tile resolved from kr_new_* models.
     min_x, min_z, max_x, max_z = polygon.bounds
     span_x = max(0.01, float(max_x) - float(min_x))
     span_z = max(0.01, float(max_z) - float(min_z))
