@@ -5,6 +5,7 @@ import math
 import struct
 
 from cwr_worldgen import road_inspector as inspector
+from cwr_worldgen.model import WorldObject
 from cwr_worldgen.pbo import PboEntry, write_pbo
 from cwr_worldgen.road_inspector import inspect_road_geometry, write_inspection_report
 
@@ -111,6 +112,26 @@ def test_stock_repair_search_prefers_clean_vanilla_curve_sequence() -> None:
     assert inspector._stock_repair_models("sil", choice) == (
         r"o\road\sil10 25.p3d",
         r"o\road\sil25.p3d",
+    )
+
+
+def test_in_memory_inspection_matches_final_world_object_geometry() -> None:
+    result = inspector.inspect_road_objects(
+        (
+            WorldObject(1, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
+            WorldObject(2, r"o\road\sil25.p3d", 0.0, 0.0, 25.0, 5.0, 0.0),
+        ),
+        world_name="memory_world",
+    )
+
+    assert result.input_path == "<memory>"
+    assert result.wrp_entry == "memory_world.wrp"
+    assert len(result.issues) == 1
+    assert result.issues[0].category in {"connector_gap", "straight_miter"}
+    assert result.paved_stock_repairs == ()
+    assert len(result.paved_replacements) == 1
+    assert result.paved_replacements[0].model_path.startswith(
+        r"memory_world\i\paved_w091_"
     )
 
 
