@@ -1117,7 +1117,10 @@ def write_surface_textures(
         texture_material = _texture_material_for_profile(material, profile)
         path = source_dir / "data" / f"{material.code}.paa"
         if material.code == "v":
-            write_rgb_dxt1_paa(path, create_gravel_road_texture_image(size))
+            write_rgb_dxt1_paa(
+                path,
+                create_gravel_road_texture_image(size, object_finish=False),
+            )
         else:
             write_rgb_dxt1_paa(path, create_surface_texture(texture_material, seed, size))
         paths.append(path)
