@@ -366,8 +366,23 @@ def test_generated_paved_and_gravel_roads_use_native_onsurface_vertex_lighting()
         expected_roadway = (infrastructure._ROAD_SURFACE_POINT_FLAG,) * len(
             roadway.points
         )
+        assert infrastructure._ROAD_SURFACE_POINT_FLAG == 0x0000013F
+        assert infrastructure._ROAD_SURFACE_FACE_FLAG == 0x0002C102
+        assert infrastructure._ROAD_SURFACE_NORMAL == (0.0, -1.0, 0.0)
         assert visual.point_flags == expected_visual
         assert roadway.point_flags == expected_roadway
+        assert visual.normals == (infrastructure._ROAD_SURFACE_NORMAL,)
+        assert roadway.normals == (infrastructure._ROAD_SURFACE_NORMAL,)
+        assert visual.faces
+        assert roadway.faces
+        assert all(
+            face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
+            for face in visual.faces
+        )
+        assert all(
+            face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
+            for face in roadway.faces
+        )
 
 
 def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
