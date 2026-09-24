@@ -220,6 +220,21 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
 
 
 def _exit_distance(junction: _Junction, direction: tuple[float, float]) -> float:
+    # Generated paved hubs have explicit arms extending 6.25 m along every
+    # incident road direction. Treat that arm extent as authoritative instead
+    # of intersecting the direction with the hub's axis-aligned envelope, which
+    # would trim side roads too close to the centre and leave coplanar overlap.
+    if (
+        math.isclose(
+            float(junction.half_length),
+            float(_p.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES),
+            rel_tol=0.0,
+            abs_tol=1.0e-7,
+        )
+        and float(junction.half_width) >= 3.40
+    ):
+        return float(_p.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES)
+
     dx, dz = direction
     ax, az = junction.axis
     along = abs(dx * ax + dz * az)
