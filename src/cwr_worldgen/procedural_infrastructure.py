@@ -94,20 +94,21 @@ def _finish_gravel_object_texture(
     *,
     wheel_tracks: bool,
 ) -> Image.Image:
-    """Give generated gravel a darker, earthier and less uniform road finish.
+    """Give generated gravel a dark neutral tone close to stock paved roads.
 
-    The reference photograph is intentionally neutral because it is also reused
-    by the terrain surface pass. Generated road objects now inherit the brighter
-    stock-road render metadata, so finish only the object texture here rather
-    than darkening the shared terrain artwork. Periodic low-frequency variation
-    survives DXT1 compression without introducing visible tile seams.
+    Preserve the real gravel aggregate and wheel wear, but remove most of the
+    warm beige cast so generated gravel sits in the same grey tonal family as
+    the stock paved-road artwork. The terrain surface pass still reuses the
+    untouched reference photograph, so this grading is object-only.
     """
 
     alpha = image.getchannel("A") if "A" in image.getbands() else None
     rgb = image.convert("RGB")
     rgb = ImageEnhance.Brightness(rgb).enhance(0.76)
     rgb = ImageEnhance.Contrast(rgb).enhance(1.10)
-    rgb = ImageEnhance.Color(rgb).enhance(0.88)
+    # Stock sil/kos pavement is nearly neutral grey. Retain a little source
+    # colour so this still reads as aggregate rather than painted asphalt.
+    rgb = ImageEnhance.Color(rgb).enhance(0.25)
 
     width, height = rgb.size
     pixels = rgb.load()
@@ -133,12 +134,12 @@ def _finish_gravel_object_texture(
 
             factor = max(0.80, min(1.00, 1.0 + mottle + shoulder + tracks))
             r, g, b = pixels[x, y]
-            # A tiny warm bias removes the pale grey cast without turning the
-            # road orange. Keep this restrained; CWA lighting does the rest.
+            # Keep the finished gravel very slightly cool/neutral, matching
+            # paved-road tonality rather than the old sandy/brown presentation.
             pixels[x, y] = (
-                max(0, min(255, int(round(r * factor * 1.015)))),
-                max(0, min(255, int(round(g * factor)))),
-                max(0, min(255, int(round(b * factor * 0.95)))),
+                max(0, min(255, int(round(r * factor * 0.985)))),
+                max(0, min(255, int(round(g * factor * 0.990)))),
+                max(0, min(255, int(round(b * factor)))),
             )
 
     # DXT1 tends to blur the small stones. Recover a little local definition,
@@ -1592,16 +1593,16 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             if kind == "gravel":
                 asset_key = cache_key(
-                    "procedural-infrastructure-texture-v19-reference-gravel-earthy-road-darker",
-                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-earthy-object-v2-darker"},
+                    "procedural-infrastructure-texture-v21-reference-gravel-paved-tone",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-paved-neutral-v3"},
                 )
                 producer = lambda target: write_rgba_dxt1_paa(
                     target, create_gravel_road_texture_image(512)
                 )
             elif kind == "gravel_junction":
                 asset_key = cache_key(
-                    "procedural-infrastructure-texture-v20-reference-gravel-junction-earthy-darker",
-                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-earthy-junction-v2-darker"},
+                    "procedural-infrastructure-texture-v22-reference-gravel-junction-paved-tone",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-paved-neutral-junction-v3"},
                 )
                 producer = lambda target: write_rgb_dxt1_paa(
                     target, create_gravel_junction_texture_image(512)
@@ -1652,14 +1653,17 @@ class ProceduralInfrastructureLibrary:
             gravel_source = {
                 "type": "bundled-reference",
                 "texture": f"i/{_texture_file_stem('gravel')}.paa",
-                "texture_recipe": "reference-gravel-photo-earthy-object-v2-darker",
+                "texture_recipe": "reference-gravel-photo-paved-neutral-v3",
                 "texture_size": 512,
                 "tone": {
                     "brightness": 0.76,
                     "contrast": 1.10,
-                    "saturation": 0.88,
-                    "blue_gain": 0.95,
+                    "saturation": 0.25,
+                    "red_gain": 0.985,
+                    "green_gain": 0.990,
+                    "blue_gain": 1.0,
                     "wheel_track_darkening": 0.060,
+                    "target_family": "stock-paved-neutral-grey",
                 },
                 "edge_blend": "clean DXT1 cutout plus smoothly irregular model edge",
                 "map_symbol": "road",
@@ -1672,7 +1676,7 @@ class ProceduralInfrastructureLibrary:
             if "gravel_junction" in used_texture_kinds:
                 gravel_source.update({
                     "junction_texture": f"i/{_texture_file_stem('gravel_junction')}.paa",
-                    "junction_texture_recipe": "reference-gravel-photo-earthy-junction-v2-darker",
+                    "junction_texture_recipe": "reference-gravel-photo-paved-neutral-junction-v3",
                     "junction_texture_alpha": "opaque",
                 })
 
