@@ -334,6 +334,42 @@ def test_stock_paved_texture_chooser_prefers_configured_road_family() -> None:
     ) == r"landtext\silnice.pac"
 
 
+def test_generated_paved_and_gravel_roads_use_native_onsurface_vertex_lighting() -> None:
+    cases = (
+        (
+            infrastructure.InfrastructureModelKey(
+                "road", "paved_w091_l0062_r20", 91, 62
+            ),
+            r"o\\road\\silnice.pac",
+        ),
+        (
+            infrastructure.InfrastructureModelKey("road", "gravel6", 46, 62),
+            r"lighting_world\\i\\g.paa",
+        ),
+        (
+            infrastructure.InfrastructureModelKey("road", "gravel_j3", 46, 54),
+            r"lighting_world\\i\\gj.paa",
+        ),
+    )
+
+    for key, texture in cases:
+        lods = infrastructure._road_lods(key, texture)
+        visual = lods[0]
+        roadway = next(
+            lod
+            for lod in lods
+            if abs(lod.resolution - infrastructure._ROADWAY_LOD) < 1.0
+        )
+        expected_visual = (infrastructure._ROAD_SURFACE_POINT_FLAG,) * len(
+            visual.points
+        )
+        expected_roadway = (infrastructure._ROAD_SURFACE_POINT_FLAG,) * len(
+            roadway.points
+        )
+        assert visual.point_flags == expected_visual
+        assert roadway.point_flags == expected_roadway
+
+
 def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
     tmp_path: Path,
 ) -> None:
