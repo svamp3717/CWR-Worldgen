@@ -609,8 +609,12 @@ def _fit_stock_piece_road_objects_parallel(
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
         cap_plans[key] = (cap_piece, start_point, end_point)
-        cap_trim_lengths[key] = max(0.40, half - 0.70)
-        cap_cover_lengths[key] = half + 0.15
+        if all_paved:
+            cap_trim_lengths[key] = half
+            cap_cover_lengths[key] = half + 0.05
+        else:
+            cap_trim_lengths[key] = max(0.40, half - 0.70)
+            cap_cover_lengths[key] = half + 0.15
 
     virtual_short_length = max(
         6.25,
