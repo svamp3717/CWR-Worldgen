@@ -77,6 +77,8 @@ def _exit_distance(junction, direction: tuple[float, float]) -> float:
 def _overlap_for(junction) -> float:
     if junction is not None and _is_gravel_junction(junction):
         return _GRAVEL_JUNCTION_OVERLAP
+    if junction is not None and _RQ._is_generated_paved_junction(junction):
+        return float(_RQ._p.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES)
     return float(_RQ._JUNCTION_OVERLAP)
 
 
