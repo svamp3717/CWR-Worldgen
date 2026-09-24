@@ -195,10 +195,11 @@ def _stock_repair_objects(
         next_id += 1
 
     direction = _direction(heading)
+    middle_length = float(_inspector._STOCK_REPAIR_STRAIGHT_LENGTHS[6])
     for _index in range(plan.middle_units):
         end = (
-            point[0] + direction[0] * 6.25,
-            point[1] + direction[1] * 6.25,
+            point[0] + direction[0] * middle_length,
+            point[1] + direction[1] * middle_length,
         )
         objects.append(
             _stock_straight_object(
