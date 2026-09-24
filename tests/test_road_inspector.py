@@ -293,6 +293,37 @@ def test_unused_generated_paved_asset_in_pbo_is_reused(
     assert second.paved_replacements[0].action == "reuse"
 
 
+def test_generated_wide_paved_piece_is_compatible_with_stock_kos_by_width() -> None:
+    generated = WorldObject(
+        1,
+        r"compat_world\i\paved_w091_l0250_r05.p3d",
+        100.0,
+        0.0,
+        100.0,
+        0.0,
+        0.0,
+    )
+    stock = WorldObject(
+        2,
+        r"o\road\kos25.p3d",
+        100.0,
+        0.0,
+        125.0,
+        0.0,
+        0.0,
+    )
+    roads = inspector.inspect_road_objects(
+        (generated, stock),
+        world_name="compat_world",
+        topology_checks=False,
+    ).road_objects
+
+    assert len(roads) == 2
+    assert roads[0].family == "sil"
+    assert roads[1].family == "kos"
+    assert inspector._compatible_paved_pair(roads[0], roads[1])
+
+
 def test_generated_gravel_is_mapped_but_not_seam_scored(tmp_path: Path) -> None:
     wrp = _write_wrp(tmp_path, "gravel.wrp", (
         (1, r"wg_demo\i\gravel12.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
