@@ -19,6 +19,7 @@ import math
 from statistics import median
 from typing import Callable, Sequence
 
+from . import bridge_underlay_cleanup_policy as _bridge_underlay
 from . import final_road_dedup_policy as _dedup
 from . import generator as _generator
 from . import playability as _p
@@ -268,6 +269,8 @@ def _apply_inspection_plans(
     inspection: _inspector.InspectionResult,
     elevations: Sequence[float],
     spec,
+    *,
+    protected_object_ids: Sequence[int] = (),
 ):
     protected_count = max(
         0,
@@ -276,6 +279,7 @@ def _apply_inspection_plans(
     protected_ids = {
         int(obj.object_id) for obj in report.objects[:protected_count]
     }
+    protected_ids.update(int(value) for value in protected_object_ids)
     objects_by_id = {int(obj.object_id): obj for obj in report.objects}
 
     selected: list[tuple[int, str, object]] = []
@@ -354,11 +358,55 @@ def _apply_inspection_plans(
     )
 
 
+def _bridge_terminal_underlay_ids(
+    report,
+    dataset,
+    projection,
+    elevations: Sequence[float],
+    spec,
+) -> frozenset[int]:
+    """Return paved approach-mask IDs deliberately retained by bridge cleanup."""
+    spans = _bridge_underlay._bridge_spans(
+        dataset,
+        projection,
+        elevations,
+        spec,
+    )
+    if not spans:
+        return frozenset()
+
+    protected: set[int] = set()
+    for obj in report.objects:
+        for span in spans:
+            if _bridge_underlay._road_matches_terminal_underlay(
+                obj,
+                span.points,
+                span.road_width,
+            ):
+                protected.add(int(obj.object_id))
+                break
+            if (
+                span.source_points
+                and span.source_end_measure > span.source_start_measure
+                and _bridge_underlay._road_matches_terminal_underlay(
+                    obj,
+                    span.source_points,
+                    span.road_width,
+                    span.source_start_measure,
+                    span.source_end_measure,
+                )
+            ):
+                protected.add(int(obj.object_id))
+                break
+    return frozenset(protected)
+
+
 def repair_final_road_geometry(
     report,
     elevations: Sequence[float],
     spec,
     *,
+    protected_object_ids: Sequence[int] = (),
     progress_callback: Callable[[int, str], None] | None = None,
 ):
     """Return the final road report after bounded inspector-driven paved repairs."""
@@ -386,7 +434,13 @@ def repair_final_road_geometry(
             break
 
         repaired, stock_regions, generated_regions, removed, added = (
-            _apply_inspection_plans(current, inspection, elevations, spec)
+            _apply_inspection_plans(
+                current,
+                inspection,
+                elevations,
+                spec,
+                protected_object_ids=protected_object_ids,
+            )
         )
         if repaired is current:
             break
@@ -456,10 +510,18 @@ def _fit(
         starting_id=starting_id,
         progress_callback=progress_callback,
     )
+    protected = _bridge_terminal_underlay_ids(
+        report,
+        dataset,
+        projection,
+        elevations,
+        spec,
+    )
     return repair_final_road_geometry(
         report,
         elevations,
         spec,
+        protected_object_ids=protected,
         progress_callback=progress_callback,
     )
 
