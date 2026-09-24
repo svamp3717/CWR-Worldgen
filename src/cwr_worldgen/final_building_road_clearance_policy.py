@@ -435,7 +435,9 @@ def _road_object_primitives(obj, spec) -> tuple[_RoadPrimitive, ...]:
 
     match = _GRAVEL.fullmatch(filename)
     if match is not None:
-        length = _scaled_piece_length(int(match.group("nominal")), spec)
+        length = _scaled_piece_length(
+            obj.model_path, int(match.group("nominal")), spec
+        )
         side = match.group("side")
         degrees = float(match.group("degrees") or 0.0)
         if side is None or degrees <= 0.0:
