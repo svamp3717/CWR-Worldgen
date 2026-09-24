@@ -110,6 +110,7 @@ class RoadIssue:
 @dataclass(frozen=True, slots=True)
 class PavedStockRepairPlan:
     plan_id: str
+    family: str
     replace_object_ids: tuple[int, ...]
     source_models: tuple[str, ...]
     issue_ids: tuple[str, ...]
@@ -1259,6 +1260,7 @@ def _paved_replacement_plans(
             choice, deviation, length_error, angle_error = stock_choice
             stock_repairs.append(PavedStockRepairPlan(
                 plan_id=f"SR-{len(stock_repairs)+1:05d}",
+                family=family,
                 replace_object_ids=object_ids,
                 source_models=tuple(sorted({road.model_path for road in component})),
                 issue_ids=tuple(sorted(issue.issue_id for issue in component_issues)),
@@ -1459,7 +1461,7 @@ def write_inspection_report(result: InspectionResult, output_dir: Path) -> dict[
     ) as stream:
         writer = csv.writer(stream)
         writer.writerow((
-            "plan_id", "replace_object_ids", "source_models", "issue_ids",
+            "plan_id", "family", "replace_object_ids", "source_models", "issue_ids",
             "stock_models", "start_x", "start_z", "end_x", "end_z",
             "start_heading_degrees", "end_heading_degrees",
             "maximum_path_deviation_metres", "final_length_error_metres",
@@ -1467,7 +1469,7 @@ def write_inspection_report(result: InspectionResult, output_dir: Path) -> dict[
         ))
         for plan in result.paved_stock_repairs:
             writer.writerow((
-                plan.plan_id,
+                plan.plan_id, plan.family,
                 ";".join(map(str, plan.replace_object_ids)),
                 ";".join(plan.source_models),
                 ";".join(plan.issue_ids),
