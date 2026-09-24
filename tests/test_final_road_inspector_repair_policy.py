@@ -90,6 +90,26 @@ def test_axial_stock_overlap_remains_a_stock_refit_diagnostic() -> None:
     assert repair._LAST_REPAIR_REPORT.generated_regions == 0
 
 
+def test_explicitly_protected_bridge_terminal_region_is_never_replaced() -> None:
+    spec = _spec()
+    report = _report(
+        WorldObject(1, r"o\road\sil25.p3d", 100.0, 0.035, 100.0, 0.0, 0.0),
+        WorldObject(2, r"o\road\sil25.p3d", 100.0, 0.035, 125.0, 5.0, 0.0),
+    )
+
+    result = repair.repair_final_road_geometry(
+        report,
+        [0.0] * (spec.cells * spec.cells),
+        spec,
+        protected_object_ids=(1,),
+    )
+
+    assert result is report
+    assert repair._LAST_REPAIR_REPORT is not None
+    assert repair._LAST_REPAIR_REPORT.generated_regions == 0
+    assert repair._LAST_REPAIR_REPORT.unresolved_generated_regions == 1
+
+
 def test_protected_junction_prefix_is_never_replaced() -> None:
     spec = _spec()
     report = _report(
