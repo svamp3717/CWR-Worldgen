@@ -10,7 +10,7 @@ import math
 import re
 from typing import Iterable
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 from .cache import cache_key, restore_or_create_file
 from .paa import inspect_paa, write_rgb_dxt1_paa, write_rgba_dxt1_paa
@@ -74,13 +74,79 @@ _EDEN_GRAVEL_SURFACES = Path(__file__).resolve().parent / "data" / "eden_gravel"
 _GRAVEL_REFERENCE_TEXTURE = Path(__file__).resolve().parent / "data" / "gravel_reference.png"
 
 
-def create_gravel_road_texture_image(size: int = 512) -> Image.Image:
+def _finish_gravel_object_texture(
+    image: Image.Image,
+    *,
+    wheel_tracks: bool,
+) -> Image.Image:
+    """Give generated gravel a darker, earthier and less uniform road finish.
+
+    The reference photograph is intentionally neutral because it is also reused
+    by the terrain surface pass. Generated road objects now inherit the brighter
+    stock-road render metadata, so finish only the object texture here rather
+    than darkening the shared terrain artwork. Periodic low-frequency variation
+    survives DXT1 compression without introducing visible tile seams.
+    """
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    rgb = ImageEnhance.Brightness(rgb).enhance(0.84)
+    rgb = ImageEnhance.Contrast(rgb).enhance(1.06)
+    rgb = ImageEnhance.Color(rgb).enhance(0.92)
+
+    width, height = rgb.size
+    pixels = rgb.load()
+    for y in range(height):
+        yf = (y + 0.5) / height
+        for x in range(width):
+            xf = (x + 0.5) / width
+
+            # Two seamless octaves break up the broad chalky appearance without
+            # fighting the real aggregate detail already present in the photo.
+            mottle = (
+                0.020 * math.sin(math.tau * (2.0 * xf + yf))
+                + 0.012 * math.sin(math.tau * (5.0 * xf - 3.0 * yf + 0.23))
+            )
+            shoulder = -0.010 * (abs(xf - 0.5) * 2.0) ** 1.8
+            tracks = 0.0
+            if wheel_tracks:
+                # Broad, subtle tyre-worn bands. They are longitudinal, so they
+                # remain coherent when the texture repeats along a road ribbon.
+                for centre in (0.28, 0.72):
+                    distance = (xf - centre) / 0.085
+                    tracks -= 0.045 * math.exp(-(distance * distance))
+
+            factor = max(0.88, min(1.04, 1.0 + mottle + shoulder + tracks))
+            r, g, b = pixels[x, y]
+            # A tiny warm bias removes the pale grey cast without turning the
+            # road orange. Keep this restrained; CWA lighting does the rest.
+            pixels[x, y] = (
+                max(0, min(255, int(round(r * factor * 1.015)))),
+                max(0, min(255, int(round(g * factor)))),
+                max(0, min(255, int(round(b * factor * 0.95)))),
+            )
+
+    # DXT1 tends to blur the small stones. Recover a little local definition,
+    # but not enough to create the sparkling/noisy look of older recipes.
+    rgb = rgb.filter(ImageFilter.UnsharpMask(radius=0.45, percent=30, threshold=3))
+    if alpha is not None:
+        rgb.putalpha(alpha)
+    return rgb
+
+
+def create_gravel_road_texture_image(
+    size: int = 512,
+    *,
+    object_finish: bool = True,
+) -> Image.Image:
     """Build the photo-based gravel texture with a clean terrain-visible edge.
 
     OFP/CWA DXT1 only supports one-bit alpha. The old wide ordered-dither verge
     therefore rendered as rows of obvious dots. Keep transparency only in a
     very narrow outer strip and let the model's smoothly irregular physical edge
     provide the terrain transition instead.
+
+    Set object_finish=False when reusing the neutral photograph for terrain.
     """
 
     size = int(size)
@@ -89,6 +155,8 @@ def create_gravel_road_texture_image(size: int = 512) -> Image.Image:
 
     source = Image.open(_GRAVEL_REFERENCE_TEXTURE).convert("RGBA")
     image = source.resize((size, size), Image.Resampling.LANCZOS)
+    if object_finish:
+        image = _finish_gravel_object_texture(image, wheel_tracks=True)
     pixels = image.load()
     # One clean binary edge avoids the coarse halftone/dotted pattern produced
     # by DXT1 alpha dithering and its mipmaps. At 512 px this is only a few
@@ -104,20 +172,22 @@ def create_gravel_road_texture_image(size: int = 512) -> Image.Image:
 
 
 def create_gravel_junction_texture_image(size: int = 512) -> Image.Image:
-    """Build an opaque gravel texture for generated junction polygons.
+    """Build an opaque, earth-toned gravel texture for generated junctions.
 
     Straight/curved gravel ribbons intentionally use transparent texture edges so
     the world terrain can blend into their outside verges. Junction meshes tile
     UVs over a two-dimensional polygon, however, so those repeating alpha edges
-    become narrow strips of visible terrain *inside* the road surface. Reuse the
-    exact same gravel photograph for junctions, but keep every texel opaque.
+    become narrow strips of visible terrain inside the road surface. Reuse the
+    same gravel finish but omit directional wheel tracks at junctions.
     """
 
     size = int(size)
     if size < 32:
         raise ValueError("gravel junction texture size must be at least 32 pixels")
     source = Image.open(_GRAVEL_REFERENCE_TEXTURE).convert("RGB")
-    return source.resize((size, size), Image.Resampling.LANCZOS)
+    image = source.resize((size, size), Image.Resampling.LANCZOS)
+    return _finish_gravel_object_texture(image, wheel_tracks=False)
+
 
 def _eden_gravel_surface_rules() -> dict[str, float]:
     rules: dict[str, float] = {}
@@ -1171,16 +1241,16 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             if kind == "gravel":
                 asset_key = cache_key(
-                    "procedural-infrastructure-texture-v15-reference-gravel-clean-edge",
-                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-clean-edge-v3"},
+                    "procedural-infrastructure-texture-v17-reference-gravel-earthy-road",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-earthy-object-v1"},
                 )
                 producer = lambda target: write_rgba_dxt1_paa(
                     target, create_gravel_road_texture_image(512)
                 )
             elif kind == "gravel_junction":
                 asset_key = cache_key(
-                    "procedural-infrastructure-texture-v16-reference-gravel-junction-opaque",
-                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-opaque-junction-v1"},
+                    "procedural-infrastructure-texture-v18-reference-gravel-junction-earthy",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-earthy-junction-v1"},
                 )
                 producer = lambda target: write_rgb_dxt1_paa(
                     target, create_gravel_junction_texture_image(512)
@@ -1231,8 +1301,15 @@ class ProceduralInfrastructureLibrary:
             gravel_source = {
                 "type": "bundled-reference",
                 "texture": f"i/{_texture_file_stem('gravel')}.paa",
-                "texture_recipe": "reference-gravel-photo-clean-edge-v3",
+                "texture_recipe": "reference-gravel-photo-earthy-object-v1",
                 "texture_size": 512,
+                "tone": {
+                    "brightness": 0.84,
+                    "contrast": 1.06,
+                    "saturation": 0.92,
+                    "blue_gain": 0.95,
+                    "wheel_track_darkening": 0.045,
+                },
                 "edge_blend": "clean DXT1 cutout plus smoothly irregular model edge",
                 "map_symbol": "road",
                 "map_symbol_lod": "face-less Geometry",
@@ -1244,7 +1321,7 @@ class ProceduralInfrastructureLibrary:
             if "gravel_junction" in used_texture_kinds:
                 gravel_source.update({
                     "junction_texture": f"i/{_texture_file_stem('gravel_junction')}.paa",
-                    "junction_texture_recipe": "reference-gravel-photo-opaque-junction-v1",
+                    "junction_texture_recipe": "reference-gravel-photo-earthy-junction-v1",
                     "junction_texture_alpha": "opaque",
                 })
 
