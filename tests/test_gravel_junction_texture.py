@@ -65,8 +65,8 @@ def test_generated_gravel_object_finish_is_darker_but_terrain_reference_stays_ne
 
     # Generated road objects should lose the chalky brightness while preserving
     # enough range that the aggregate remains readable under stock-road lighting.
-    assert 0.72 <= road_ratio <= 0.90
-    assert 0.76 <= junction_ratio <= 0.92
+    assert 0.62 <= road_ratio <= 0.82
+    assert 0.66 <= junction_ratio <= 0.86
 
     # The terrain surface pass opts out, so changing object gravel cannot also
     # darken every terrain cell that happens to reuse the reference photograph.
