@@ -1558,10 +1558,16 @@ def _fit_stock_piece_road_objects(
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
         cap_plans[key] = (cap_piece, start_point, end_point)
-        # Branches extend 0.70 m beneath the cap. This hides interpolation and
-        # pitch rounding seams without creating an extra road-link object.
-        cap_trim_lengths[key] = max(0.40, half - 0.70)
-        cap_cover_lengths[key] = half + 0.15
+        if all_paved:
+            # A generated paved hub is already one continuous P3D. Stop each
+            # approach at its connector plane instead of pushing another paved
+            # object underneath it, which CWA renders as obvious clipping.
+            cap_trim_lengths[key] = half
+            cap_cover_lengths[key] = half + 0.05
+        else:
+            # Gravel/legacy caps retain their small buried overlap.
+            cap_trim_lengths[key] = max(0.40, half - 0.70)
+            cap_cover_lengths[key] = half + 0.15
 
     # Nodes with more than four branches cannot receive a stock hub object, but
     # their road lines still split at the shared centre.
