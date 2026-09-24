@@ -14,12 +14,16 @@ from .model import OsmSpec, PlayabilitySpec, WorldObject
 from .procedural_infrastructure import (
     GENERATED_GRAVEL_SURFACE_CLEARANCE_METRES,
     GENERATED_GRAVEL_VISUAL_TOP_METRES,
+    GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
     gravel_curve_model_path,
     gravel_junction_model_path,
     gravel_road_model_path,
     is_generated_gravel_junction_model,
     is_generated_gravel_road_model,
     is_generated_paved_road_model,
+    paved_junction_model_path,
+    paved_junction_signature_for_directions,
+    paved_junction_width_for_models,
 )
 from .osm import (
     BboxProjection,
@@ -1504,22 +1508,51 @@ def _fit_stock_piece_road_objects(
     for key in sorted(cap_keys):
         values = effective_incidents[key]
         use_dirt = all(value[1] for value in values)
-        all_gravel = all(is_generated_gravel_road_model(value[2]) for value in values)
+        all_gravel = all(
+            is_generated_gravel_road_model(value[2]) for value in values
+        )
+        all_paved = all(not value[1] for value in values) and not all_gravel
         incident_models = {value[2].casefold(): value[2] for value in values}
+        axis_override = None
         if all_gravel:
             degree = len(values)
             base_model = gravel_junction_model_path(spec.name, degree)
             hub_length = 5.4 if degree == 3 else 6.0
             cap_piece = _RoadPiece(base_model, hub_length, 6)
+        elif all_paved:
+            headings, axis_override = paved_junction_signature_for_directions(
+                tuple(value[0] for value in values)
+            )
+            width = paved_junction_width_for_models(
+                tuple(value[2] for value in values)
+            )
+            base_model = paved_junction_model_path(
+                spec.name,
+                width,
+                headings,
+            )
+            hub_length = GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 2.0
+            cap_piece = _RoadPiece(base_model, hub_length, 6)
         else:
             if len(incident_models) == 1:
                 base_model = next(iter(incident_models.values()))
             else:
-                base_model = spec.dirt_road_model if use_dirt else spec.paved_road_model
+                base_model = (
+                    spec.dirt_road_model if use_dirt else spec.paved_road_model
+                )
             variants = variants_for(base_model)
-            cap_piece = next((piece for piece in variants if piece.nominal_length == 6), variants[-1])
-        dominant_values = tuple((value[0], value[1], value[2], value[3]) for value in values)
-        axis = _dominant_node_axis(dominant_values)
+            cap_piece = next(
+                (piece for piece in variants if piece.nominal_length == 6),
+                variants[-1],
+            )
+        dominant_values = tuple(
+            (value[0], value[1], value[2], value[3]) for value in values
+        )
+        axis = (
+            axis_override
+            if axis_override is not None
+            else _dominant_node_axis(dominant_values)
+        )
         node = node_positions[key]
         half = cap_piece.length_metres * 0.5
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
