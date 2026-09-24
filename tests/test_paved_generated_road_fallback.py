@@ -5,11 +5,13 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
+from cwr_worldgen import generator
 from cwr_worldgen import playability
 from cwr_worldgen import procedural_infrastructure as infrastructure
 from cwr_worldgen import paved_road_generated_fallback_policy as fallback
 from cwr_worldgen import paved_junction_policy as paved_junctions
 from cwr_worldgen import road_quality_policy as quality
+from cwr_worldgen.assets import AssetRecord, model_texture_dependencies
 from cwr_worldgen.milestone9 import Milestone9Spec, _Milestone9PlayabilitySpec
 
 
@@ -290,6 +292,46 @@ def test_generated_paved_model_names_quantize_for_reuse() -> None:
 
     assert first == second
     assert first.endswith(r"paved_w091_l0062_r20.p3d")
+
+
+def test_stock_paved_texture_dependency_resolves_relative_to_model_directory() -> None:
+    records = (
+        AssetRecord(
+            path=r"o\road\sil25.p3d",
+            source="unused.pbo",
+            size=1,
+            sha256=None,
+            dependencies=("silnice.pac",),
+        ),
+        AssetRecord(
+            path=r"o\road\silnice.pac",
+            source="unused.pbo",
+            size=1,
+            sha256=None,
+        ),
+    )
+
+    assert model_texture_dependencies(
+        records,
+        r"o\road\sil25.p3d",
+    ) == (r"o\road\silnice.pac",)
+
+
+def test_stock_paved_texture_chooser_prefers_configured_road_family() -> None:
+    selected = generator._preferred_stock_paved_texture(
+        r"o\road\sil25.p3d",
+        (
+            r"o\road\detail.paa",
+            r"o\road\silnice.pac",
+            r"o\road\asfaltka.pac",
+        ),
+    )
+
+    assert selected == r"o\road\silnice.pac"
+    assert generator._preferred_stock_paved_texture(
+        r"o\road\sil25.p3d",
+        (),
+    ) == r"landtext\silnice.pac"
 
 
 def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
