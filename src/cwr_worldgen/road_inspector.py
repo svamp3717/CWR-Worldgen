@@ -116,6 +116,8 @@ class PavedStockRepairPlan:
     stock_models: tuple[str, ...]
     start: tuple[float, float]
     end: tuple[float, float]
+    start_heading_degrees: float
+    end_heading_degrees: float
     turn_sign: int
     first_turns: int
     first_radius: int
@@ -1263,6 +1265,8 @@ def _paved_replacement_plans(
                 stock_models=_stock_repair_models(family, choice),
                 start=(round(start.point[0], 5), round(start.point[1], 5)),
                 end=(round(end.point[0], 5), round(end.point[1], 5)),
+                start_heading_degrees=round((start.outward + 180.0) % 360.0, 5),
+                end_heading_degrees=round(end.outward % 360.0, 5),
                 turn_sign=choice[0],
                 first_turns=choice[1],
                 first_radius=choice[2],
@@ -1316,12 +1320,17 @@ def _paved_replacement_plans(
     return tuple(stock_repairs), tuple(plans)
 
 
-def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAULT_ENDPOINT_TOLERANCE_METRES,
-                          nearby_gap: float = DEFAULT_NEARBY_GAP_METRES,
-                          minimum_edge_gap: float = DEFAULT_MINIMUM_EDGE_GAP_METRES,
-                          minimum_tangent_error: float = DEFAULT_MINIMUM_TANGENT_ERROR_DEGREES) -> InspectionResult:
-    data, wrp_entry = _wrp(Path(input_path))
-    roads = _roads(data)
+def _inspect_roads(
+    roads: Sequence[RoadObject],
+    *,
+    input_path: str,
+    wrp_entry: str,
+    packed_paved_models: frozenset[str] = frozenset(),
+    endpoint_tolerance: float = DEFAULT_ENDPOINT_TOLERANCE_METRES,
+    nearby_gap: float = DEFAULT_NEARBY_GAP_METRES,
+    minimum_edge_gap: float = DEFAULT_MINIMUM_EDGE_GAP_METRES,
+    minimum_tangent_error: float = DEFAULT_MINIMUM_TANGENT_ERROR_DEGREES,
+) -> InspectionResult:
     checked_roads = tuple(road for road in roads if road.family != "gravel")
     endpoints = tuple(endpoint for road in checked_roads for endpoint in road.endpoints)
     issues: list[RoadIssue] = []
@@ -1339,25 +1348,79 @@ def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAU
         issue = _intersection_issue(tuple(unique.values()))
         if issue:
             issues.append(issue)
-    issues.extend(_nearby(endpoints, paired, endpoint_tolerance, nearby_gap, minimum_edge_gap, minimum_tangent_error))
+    issues.extend(_nearby(
+        endpoints, paired, endpoint_tolerance, nearby_gap,
+        minimum_edge_gap, minimum_tangent_error,
+    ))
     issues.extend(_junction_issues(checked_roads, nearby_gap))
     issues.extend(_paved_crossing_issues(checked_roads))
     numbered = _number(issues)
     stock_repairs, replacements = _paved_replacement_plans(
-        roads,
-        numbered,
-        wrp_entry,
-        _packed_paved_model_filenames(Path(input_path)),
+        roads, numbered, wrp_entry, packed_paved_models,
     )
     return InspectionResult(
-        str(Path(input_path)),
-        wrp_entry,
-        roads,
-        numbered,
-        stock_repairs,
-        replacements,
+        input_path, wrp_entry, tuple(roads), numbered, stock_repairs, replacements,
     )
 
+
+def inspect_road_objects(
+    objects: Sequence[object],
+    *,
+    world_name: str = "world",
+    endpoint_tolerance: float = DEFAULT_ENDPOINT_TOLERANCE_METRES,
+    nearby_gap: float = DEFAULT_NEARBY_GAP_METRES,
+    minimum_edge_gap: float = DEFAULT_MINIMUM_EDGE_GAP_METRES,
+    minimum_tangent_error: float = DEFAULT_MINIMUM_TANGENT_ERROR_DEGREES,
+) -> InspectionResult:
+    """Inspect final in-memory WorldObject-style transforms without a WRP round-trip.
+
+    Values need object_id, model_path and matrix_4x3(). Unknown model families are
+    ignored exactly as they are when the inspector reads a built RVW4.
+    """
+    roads: list[RoadObject] = []
+    for obj in objects:
+        model = str(getattr(obj, "model_path", ""))
+        if not model:
+            continue
+        matrix = tuple(float(value) for value in obj.matrix_4x3())
+        if len(matrix) != 12:
+            raise ValueError("road inspector object matrix must contain 12 floats")
+        try:
+            encoded = model.encode("ascii")
+        except UnicodeEncodeError:
+            continue
+        values = (*matrix, int(getattr(obj, "object_id")), encoded + b"\0")
+        road = _road(values)
+        if road is not None:
+            roads.append(road)
+    safe_name = str(world_name).strip() or "world"
+    return _inspect_roads(
+        tuple(roads),
+        input_path="<memory>",
+        wrp_entry=f"{safe_name}.wrp",
+        endpoint_tolerance=endpoint_tolerance,
+        nearby_gap=nearby_gap,
+        minimum_edge_gap=minimum_edge_gap,
+        minimum_tangent_error=minimum_tangent_error,
+    )
+
+
+def inspect_road_geometry(input_path: Path, *, endpoint_tolerance: float = DEFAULT_ENDPOINT_TOLERANCE_METRES,
+                          nearby_gap: float = DEFAULT_NEARBY_GAP_METRES,
+                          minimum_edge_gap: float = DEFAULT_MINIMUM_EDGE_GAP_METRES,
+                          minimum_tangent_error: float = DEFAULT_MINIMUM_TANGENT_ERROR_DEGREES) -> InspectionResult:
+    data, wrp_entry = _wrp(Path(input_path))
+    roads = _roads(data)
+    return _inspect_roads(
+        roads,
+        input_path=str(Path(input_path)),
+        wrp_entry=wrp_entry,
+        packed_paved_models=_packed_paved_model_filenames(Path(input_path)),
+        endpoint_tolerance=endpoint_tolerance,
+        nearby_gap=nearby_gap,
+        minimum_edge_gap=minimum_edge_gap,
+        minimum_tangent_error=minimum_tangent_error,
+    )
 
 def _summary(result: InspectionResult) -> dict[str, object]:
     return {
@@ -1398,6 +1461,7 @@ def write_inspection_report(result: InspectionResult, output_dir: Path) -> dict[
         writer.writerow((
             "plan_id", "replace_object_ids", "source_models", "issue_ids",
             "stock_models", "start_x", "start_z", "end_x", "end_z",
+            "start_heading_degrees", "end_heading_degrees",
             "maximum_path_deviation_metres", "final_length_error_metres",
             "maximum_join_angle_error_degrees",
         ))
@@ -1409,6 +1473,7 @@ def write_inspection_report(result: InspectionResult, output_dir: Path) -> dict[
                 ";".join(plan.issue_ids),
                 ";".join(plan.stock_models),
                 plan.start[0], plan.start[1], plan.end[0], plan.end[1],
+                plan.start_heading_degrees, plan.end_heading_degrees,
                 plan.maximum_path_deviation_metres,
                 plan.final_length_error_metres,
                 plan.maximum_join_angle_error_degrees,
