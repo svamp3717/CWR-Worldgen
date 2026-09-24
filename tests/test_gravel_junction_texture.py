@@ -3,10 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from PIL import Image, ImageStat
+
 from cwr_worldgen.procedural_buildings import inspect_mlod
 from cwr_worldgen.procedural_infrastructure import (
     ProceduralInfrastructureLibrary,
+    _GRAVEL_REFERENCE_TEXTURE,
     create_gravel_junction_texture_image,
+    create_gravel_road_texture_image,
 )
 
 
@@ -35,3 +39,40 @@ def test_generated_gravel_junction_uses_opaque_texture_without_internal_grass_se
     source = catalogue["gravel_texture_source"]
     assert source["junction_texture"] == "i/gj.paa"
     assert source["junction_texture_alpha"] == "opaque"
+
+def test_generated_gravel_object_finish_is_darker_but_terrain_reference_stays_neutral() -> None:
+    size = 128
+    road = create_gravel_road_texture_image(size)
+    terrain = create_gravel_road_texture_image(size, object_finish=False)
+    junction = create_gravel_junction_texture_image(size)
+
+    with Image.open(_GRAVEL_REFERENCE_TEXTURE) as source:
+        reference = source.convert("RGB").resize(
+            (size, size), Image.Resampling.LANCZOS
+        )
+
+    margin = size // 10
+    box = (margin, margin, size - margin, size - margin)
+
+    def mean_luma(image: Image.Image) -> float:
+        return float(
+            ImageStat.Stat(image.convert("RGB").crop(box).convert("L")).mean[0]
+        )
+
+    reference_luma = mean_luma(reference)
+    road_ratio = mean_luma(road) / reference_luma
+    junction_ratio = mean_luma(junction) / reference_luma
+
+    # Generated road objects should lose the chalky brightness while preserving
+    # enough range that the aggregate remains readable under stock-road lighting.
+    assert 0.72 <= road_ratio <= 0.90
+    assert 0.76 <= junction_ratio <= 0.92
+
+    # The terrain surface pass opts out, so changing object gravel cannot also
+    # darken every terrain cell that happens to reuse the reference photograph.
+    assert terrain.convert("RGB").tobytes() == reference.tobytes()
+
+    alpha = road.getchannel("A")
+    assert alpha.getpixel((0, size // 2)) == 0
+    assert alpha.getpixel((size // 2, size // 2)) == 255
+
