@@ -20,7 +20,6 @@ from statistics import median
 from typing import Callable, Sequence
 
 from . import bridge_underlay_cleanup_policy as _bridge_underlay
-from . import final_road_dedup_policy as _dedup
 from . import generator as _generator
 from . import playability as _p
 from . import procedural_infrastructure as _pi
@@ -451,7 +450,7 @@ def repair_final_road_geometry(
         total_generated += generated_regions
         total_removed += removed
         total_added += added
-        current = _dedup.deduplicate_final_road_objects(repaired, spec)
+        current = repaired
 
         if progress_callback is not None:
             progress_callback(
