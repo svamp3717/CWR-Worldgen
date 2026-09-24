@@ -29,6 +29,12 @@ _GEOMETRY_LOD = 1.0e13
 _LAND_CONTACT_LOD = 2.0e15
 _ROADWAY_LOD = 3.0e15
 
+# Classic OFP/CWA road P3Ds mark their surface vertices "On Surface". Besides
+# terrain fitting, the legacy renderer treats those vertices like native road /
+# terrain surfaces instead of applying ordinary object lighting, which otherwise
+# darkens the exact same stock texture on generated road meshes.
+_ROAD_SURFACE_POINT_FLAG = 0x00000001
+
 # Generated gravel is a terrain-hugging surface ribbon, not a raised slab.
 # Its visible skin and Roadway LOD are coplanar and are placed directly on the
 # graded terrain; the Geometry LOD carries map metadata only and has no faces.
@@ -551,7 +557,24 @@ def _ribbon_lod(
         faces.append(top)
         if double_sided:
             faces.append(_Face(texture, ((rs, 0, u_span, v0), (re, 0, u_span, v1), (le, 0, 0.0, v1), (ls, 0, 0.0, v0))))
-    return _Lod(tuple(points), ((0.0, 1.0, 0.0),), tuple(faces), resolution, properties=((('autocenter', '0'), ('class', 'road'), ('map', 'road')) if resolution == _VISUAL_LOD else ()))
+    properties = (
+        (("autocenter", "0"), ("class", "road"), ("map", "road"))
+        if resolution == _VISUAL_LOD
+        else ()
+    )
+    point_flags = (
+        (_ROAD_SURFACE_POINT_FLAG,) * len(points)
+        if resolution in {_VISUAL_LOD, _ROADWAY_LOD}
+        else ()
+    )
+    return _Lod(
+        tuple(points),
+        ((0.0, 1.0, 0.0),),
+        tuple(faces),
+        resolution,
+        properties=properties,
+        point_flags=point_flags,
+    )
 
 
 def _gravel_visual_lod(length: float, half_width: float, curve_degrees: int, texture: str) -> _Lod:
@@ -603,9 +626,14 @@ def _gravel_visual_lod(length: float, half_width: float, curve_degrees: int, tex
         double_sided=True, u_span_override=1.0,
     )
     return _Lod(
-        visual.points, visual.normals, visual.faces, visual.resolution,
-        visual.mass_per_point, visual.selections,
+        visual.points,
+        visual.normals,
+        visual.faces,
+        visual.resolution,
+        visual.mass_per_point,
+        visual.selections,
         (("autocenter", "0"), ("class", "road"), ("map", "road")),
+        visual.point_flags,
     )
 
 def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
@@ -641,8 +669,12 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
     quad(-extent, -half_w, -core, half_w, ((0.20, 0.00), (0.20, 1.00), (0.55, 1.00), (0.55, 0.00)))
 
     visual = _Lod(
-        tuple(points), ((0.0, 1.0, 0.0),), tuple(faces), _VISUAL_LOD,
+        tuple(points),
+        ((0.0, 1.0, 0.0),),
+        tuple(faces),
+        _VISUAL_LOD,
         properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
+        point_flags=(_ROAD_SURFACE_POINT_FLAG,) * len(points),
     )
     map_geometry = _Lod(
         ((-extent, 0.0, -extent), (extent, 0.0, -extent), (extent, 0.0, extent), (-extent, 0.0, extent)),
@@ -650,7 +682,13 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
     )
     roadway_y = GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES
     roadway_points = ((-extent, roadway_y, -extent), (extent, roadway_y, -extent), (extent, roadway_y, extent), (-extent, roadway_y, extent))
-    roadway = _Lod(roadway_points, ((0.0, 1.0, 0.0),), (_quad("", 0, 3, 2, 1),), _ROADWAY_LOD)
+    roadway = _Lod(
+        roadway_points,
+        ((0.0, 1.0, 0.0),),
+        (_quad("", 0, 3, 2, 1),),
+        _ROADWAY_LOD,
+        point_flags=(_ROAD_SURFACE_POINT_FLAG,) * len(roadway_points),
+    )
     land = _Lod(roadway_points, (), (), _LAND_CONTACT_LOD)
     return visual, map_geometry, roadway, land
 
@@ -697,6 +735,7 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
             raw_visual.mass_per_point,
             raw_visual.selections,
             (("autocenter", "0"), ("class", "road"), ("map", "road")),
+            raw_visual.point_flags,
         )
     else:
         visual = _gravel_visual_lod(length, half_w, curve_degrees, texture)
@@ -1193,7 +1232,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v15-safe-junction-uvs"
+                "procedural-infrastructure-model-v16-road-onsurface-lighting"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
