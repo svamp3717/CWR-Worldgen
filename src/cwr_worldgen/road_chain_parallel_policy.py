@@ -553,19 +553,44 @@ def _fit_stock_piece_road_objects_parallel(
         values = effective_incidents[key]
         use_dirt = all(value[1] for value in values)
         all_gravel = all(
-            _playability.is_generated_gravel_road_model(value[2]) for value in values
+            _playability.is_generated_gravel_road_model(value[2])
+            for value in values
         )
+        all_paved = all(not value[1] for value in values) and not all_gravel
         incident_models = {value[2].casefold(): value[2] for value in values}
+        axis_override = None
         if all_gravel:
             degree = len(values)
-            base_model = _playability.gravel_junction_model_path(spec.name, degree)
+            base_model = _playability.gravel_junction_model_path(
+                spec.name, degree
+            )
             hub_length = 5.4 if degree == 3 else 6.0
+            cap_piece = _playability._RoadPiece(base_model, hub_length, 6)
+        elif all_paved:
+            headings, axis_override = (
+                _playability.paved_junction_signature_for_directions(
+                    tuple(value[0] for value in values)
+                )
+            )
+            width = _playability.paved_junction_width_for_models(
+                tuple(value[2] for value in values)
+            )
+            base_model = _playability.paved_junction_model_path(
+                spec.name,
+                width,
+                headings,
+            )
+            hub_length = (
+                _playability.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 2.0
+            )
             cap_piece = _playability._RoadPiece(base_model, hub_length, 6)
         else:
             if len(incident_models) == 1:
                 base_model = next(iter(incident_models.values()))
             else:
-                base_model = spec.dirt_road_model if use_dirt else spec.paved_road_model
+                base_model = (
+                    spec.dirt_road_model if use_dirt else spec.paved_road_model
+                )
             variants = variants_for(base_model)
             cap_piece = next(
                 (piece for piece in variants if piece.nominal_length == 6),
@@ -574,7 +599,11 @@ def _fit_stock_piece_road_objects_parallel(
         dominant_values = tuple(
             (value[0], value[1], value[2], value[3]) for value in values
         )
-        axis = _playability._dominant_node_axis(dominant_values)
+        axis = (
+            axis_override
+            if axis_override is not None
+            else _playability._dominant_node_axis(dominant_values)
+        )
         node = node_positions[key]
         half = cap_piece.length_metres * 0.5
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
