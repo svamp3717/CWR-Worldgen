@@ -657,3 +657,69 @@ def test_generated_paved_junction_exit_distance_uses_full_arm_extent() -> None:
             abs_tol=1.0e-9,
         )
 
+def test_generated_paved_junction_visual_has_continuous_uvs() -> None:
+    key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_j3_w091_h000_090_180",
+        91,
+        int(
+            round(
+                infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+                * 20.0
+            )
+        ),
+    )
+    visual = infrastructure._road_lods(
+        key,
+        r"o\road\sil_new.paa",
+    )[0]
+
+    uvs_by_point: dict[int, set[tuple[float, float]]] = {}
+    for face in visual.faces:
+        for point_index, _normal_index, u, v in face.vertices:
+            uvs_by_point.setdefault(point_index, set()).add(
+                (round(float(u), 7), round(float(v), 7))
+            )
+
+    # A single generated hub may be triangulated internally, but shared points
+    # must keep one UV coordinate. Otherwise triangle boundaries become visible
+    # as wedge-shaped "overlapping P3Ds" in CWA.
+    assert uvs_by_point
+    assert all(len(values) == 1 for values in uvs_by_point.values())
+
+
+def test_generated_paved_junction_quality_window_has_no_coplanar_overlap() -> None:
+    junction = quality._Junction(
+        point=(0.0, 0.0),
+        axis=(0.0, 1.0),
+        half_length=infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+        half_width=4.55,
+        directions=((0.0, 1.0), (0.0, -1.0), (1.0, 0.0)),
+    )
+    measure = playability._PolylineMeasure.create(
+        ((0.0, 0.0), (0.0, 40.0))
+    )
+    piece = playability._RoadPiece(r"o\road\sil6.p3d", 6.25, 6)
+    context = quality._Context(
+        (),
+        SimpleNamespace(cells=4, cell_size=10.0),
+        {playability._road_node_key((0.0, 0.0)): junction},
+    )
+
+    start, _preferred, _minimum, _maximum = quality._quality_window(
+        measure,
+        (piece,),
+        0.0,
+        measure.total,
+        measure.total,
+        measure.total,
+        context,
+    )
+
+    assert infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES == 0.0
+    assert math.isclose(
+        start,
+        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+        abs_tol=1.0e-9,
+    )
+
