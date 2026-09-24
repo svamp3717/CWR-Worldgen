@@ -1332,6 +1332,7 @@ def _inspect_roads(
     nearby_gap: float = DEFAULT_NEARBY_GAP_METRES,
     minimum_edge_gap: float = DEFAULT_MINIMUM_EDGE_GAP_METRES,
     minimum_tangent_error: float = DEFAULT_MINIMUM_TANGENT_ERROR_DEGREES,
+    topology_checks: bool = True,
 ) -> InspectionResult:
     checked_roads = tuple(road for road in roads if road.family != "gravel")
     endpoints = tuple(endpoint for road in checked_roads for endpoint in road.endpoints)
@@ -1354,8 +1355,9 @@ def _inspect_roads(
         endpoints, paired, endpoint_tolerance, nearby_gap,
         minimum_edge_gap, minimum_tangent_error,
     ))
-    issues.extend(_junction_issues(checked_roads, nearby_gap))
-    issues.extend(_paved_crossing_issues(checked_roads))
+    if topology_checks:
+        issues.extend(_junction_issues(checked_roads, nearby_gap))
+        issues.extend(_paved_crossing_issues(checked_roads))
     numbered = _number(issues)
     stock_repairs, replacements = _paved_replacement_plans(
         roads, numbered, wrp_entry, packed_paved_models,
@@ -1373,6 +1375,7 @@ def inspect_road_objects(
     nearby_gap: float = DEFAULT_NEARBY_GAP_METRES,
     minimum_edge_gap: float = DEFAULT_MINIMUM_EDGE_GAP_METRES,
     minimum_tangent_error: float = DEFAULT_MINIMUM_TANGENT_ERROR_DEGREES,
+    topology_checks: bool = True,
 ) -> InspectionResult:
     """Inspect final in-memory WorldObject-style transforms without a WRP round-trip.
 
@@ -1404,6 +1407,7 @@ def inspect_road_objects(
         nearby_gap=nearby_gap,
         minimum_edge_gap=minimum_edge_gap,
         minimum_tangent_error=minimum_tangent_error,
+        topology_checks=topology_checks,
     )
 
 
