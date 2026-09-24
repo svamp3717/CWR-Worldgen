@@ -139,7 +139,7 @@ def _surface_priority(family: str) -> int:
     # Final WorldObjects do not retain OSM highway class provenance.  Preserve
     # the strongest information still available: paved beats generated gravel,
     # which beats the stock dirt/earth family.
-    if family in {"sil", "kos", "asf", "paved"}:
+    if family in {"sil", "silnice", "kos", "asf", "asfaltka", "paved"}:
         return 3
     if family == "gravel":
         return 2
