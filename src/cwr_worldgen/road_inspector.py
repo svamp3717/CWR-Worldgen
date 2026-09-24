@@ -54,7 +54,7 @@ _PAVED_REPLACEMENT_MINIMUM_TANGENT_ERROR_DEGREES = 0.75
 _STOCK_REPAIR_POSITION_TOLERANCE_METRES = 0.08
 _STOCK_REPAIR_MAXIMUM_PATH_DEVIATION_METRES = 1.0
 _STOCK_REPAIR_RADII_METRES = (25, 50, 75, 100)
-_STOCK_REPAIR_STRAIGHT_LENGTHS = {6: 6.25, 12: 12.5, 25: 25.0}
+_STOCK_REPAIR_STRAIGHT_LENGTHS = _LENGTHS
 _STOCK_REPAIR_FAMILIES = frozenset({"sil", "asf", "kos"})
 
 
@@ -1096,11 +1096,7 @@ def _stock_repair_choice(
                             if max(in_error, out_error) > angle_limit:
                                 continue
 
-                            for nominal, length in (
-                                (6, 6.25),
-                                (12, 12.5),
-                                (25, 25.0),
-                            ):
+                            for nominal, length in _STOCK_REPAIR_STRAIGHT_LENGTHS.items():
                                 length_error = abs(distance - length)
                                 if (
                                     length_error
