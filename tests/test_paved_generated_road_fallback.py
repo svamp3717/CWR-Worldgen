@@ -292,14 +292,19 @@ def test_generated_paved_model_names_quantize_for_reuse() -> None:
     assert first.endswith(r"paved_w091_l0062_r20.p3d")
 
 
-def test_generated_paved_asset_is_written_once_and_has_roadway_lod(
+def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
     tmp_path: Path,
 ) -> None:
     model = infrastructure.paved_fallback_model_path(
         "reuse_world", 9.10, 6.24, -19.0
     )
+    stale = tmp_path / "i" / "pv.paa"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_bytes(b"obsolete-generated-asphalt")
+    stock_texture = r"landtext\silnice.pac"
     library = infrastructure.ProceduralInfrastructureLibrary(
         "reuse_world",
+        paved_texture_path=stock_texture,
         cache_enabled=False,
     )
     library.register_model_usage(model, 3)
@@ -310,13 +315,24 @@ def test_generated_paved_asset_is_written_once_and_has_roadway_lod(
 
     assert result.placements == 3
     assert result.generated_variants == 1
-    assert "i/pv.paa" in result.texture_files
+    assert result.texture_files == ()
+    assert not stale.exists()
     assert len(result.model_files) == 1
+
+    model_summary = infrastructure.inspect_mlod(
+        tmp_path / result.model_files[0]
+    )
+    assert stock_texture in model_summary.textures
 
     document = json.loads(
         (tmp_path / "infrastructure.json").read_text(encoding="utf-8")
     )
     assert document["models"][0]["usage_count"] == 3
+    assert document["paved_texture_source"] == {
+        "type": "external-stock-texture",
+        "texture": stock_texture,
+        "generated_texture": False,
+    }
     assert any(
         abs(value - infrastructure._ROADWAY_LOD) < 1.0
         for value in document["models"][0]["lod_resolutions"]
