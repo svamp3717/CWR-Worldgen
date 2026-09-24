@@ -65,8 +65,8 @@ def test_generated_gravel_object_finish_is_darker_but_terrain_reference_stays_ne
 
     # Generated road objects should stay dark enough to sit beside stock paved
     # slabs while preserving enough range that the aggregate remains readable.
-    assert 0.62 <= road_ratio <= 0.82
-    assert 0.66 <= junction_ratio <= 0.86
+    assert 0.52 <= road_ratio <= 0.74
+    assert 0.56 <= junction_ratio <= 0.78
 
     def mean_saturation(image: Image.Image) -> float:
         return float(
@@ -80,8 +80,8 @@ def test_generated_gravel_object_finish_is_darker_but_terrain_reference_stays_ne
     junction_saturation = mean_saturation(junction)
     # The object texture deliberately moves into the neutral grey family used
     # by paved roads instead of retaining the reference photograph's beige cast.
-    assert road_saturation <= reference_saturation * 0.55 + 2.0
-    assert junction_saturation <= reference_saturation * 0.55 + 2.0
+    assert road_saturation <= reference_saturation * 0.45 + 2.0
+    assert junction_saturation <= reference_saturation * 0.45 + 2.0
 
     # The terrain surface pass opts out, so changing object gravel cannot also
     # darken every terrain cell that happens to reuse the reference photograph.
