@@ -245,9 +245,18 @@ def _triangulated_lod(polygon, *, y: float, texture: str, resolution: float):
     properties = ()
     if resolution == _pi._VISUAL_LOD:
         properties = (("autocenter", "0"), ("class", "road"), ("map", "road"))
+    point_flags = (
+        (_pi._ROAD_SURFACE_POINT_FLAG,) * len(points)
+        if resolution in {_pi._VISUAL_LOD, _pi._ROADWAY_LOD}
+        else ()
+    )
     return _pi._Lod(
-        tuple(points), ((0.0, 1.0, 0.0),), tuple(faces), resolution,
+        tuple(points),
+        ((0.0, 1.0, 0.0),),
+        tuple(faces),
+        resolution,
         properties=properties,
+        point_flags=point_flags,
     )
 
 
