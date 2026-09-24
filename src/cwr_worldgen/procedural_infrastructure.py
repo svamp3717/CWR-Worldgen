@@ -953,9 +953,21 @@ class ProceduralInfrastructureLibrary:
     )
     _UTILITY_PATTERN = re.compile(r"^util_(power_pole|power_tower|water_tower)\.p3d$", re.IGNORECASE)
 
-    def __init__(self, world_name: str, *, road_segment_length: float = 24.5, cache_dir: Path | None = None, cache_enabled: bool = True, cache_refresh: bool = False) -> None:
+    def __init__(
+        self,
+        world_name: str,
+        *,
+        road_segment_length: float = 24.5,
+        paved_texture_path: str = r"landtext\silnice.pac",
+        cache_dir: Path | None = None,
+        cache_enabled: bool = True,
+        cache_refresh: bool = False,
+    ) -> None:
         self.world_name = world_name
         self.road_segment_length = float(road_segment_length)
+        self.paved_texture_path = str(paved_texture_path).replace("/", "\\").strip("\\")
+        if not self.paved_texture_path:
+            raise ValueError("paved texture path must not be empty")
         if not math.isfinite(self.road_segment_length) or self.road_segment_length <= 0.0:
             raise ValueError("road segment length must be positive and finite")
         self.cache_dir = cache_dir
@@ -1070,6 +1082,8 @@ class ProceduralInfrastructureLibrary:
             # verified rock tiles across deterministic rock-group variants.
             return r"o\lom2.paa" if key.subtype.casefold().endswith("_1") else r"o\l1.paa"
         kind = _infrastructure_texture_kind(key)
+        if kind == "paved":
+            return self.paved_texture_path
         return rf"{self.world_name}\i\{_texture_file_stem(kind)}.paa"
 
     def write_assets(self, source_dir: Path, catalogue_path: Path) -> InfrastructureAssetResult:
@@ -1079,8 +1093,17 @@ class ProceduralInfrastructureLibrary:
             if key.kind != "rock"
         }
         used_texture_kinds = sorted(used_texture_kind_set)
+        generated_texture_kinds = tuple(
+            kind for kind in used_texture_kinds if kind != "paved"
+        )
         texture_files: list[str] = []
-        for kind in used_texture_kinds:
+        # Paved fallback P3Ds now point at the configured stock road texture.
+        # Remove the old generated asphalt file so incremental builds cannot
+        # accidentally keep packing an obsolete visual.
+        stale_paved = source_dir / "i" / f"{_texture_file_stem('paved')}.paa"
+        if stale_paved.exists():
+            stale_paved.unlink()
+        for kind in generated_texture_kinds:
             wire = rf"{self.world_name}\i\{_texture_file_stem(kind)}.paa"
             relative = wire.split("\\", 1)[1].replace("\\", "/")
             destination = source_dir / relative
@@ -1124,6 +1147,14 @@ class ProceduralInfrastructureLibrary:
             self.cache_misses += int(not hit)
             inspect_paa(destination)
             texture_files.append(relative)
+
+        paved_source: dict[str, object] | None = None
+        if "paved" in used_texture_kind_set:
+            paved_source = {
+                "type": "external-stock-texture",
+                "texture": self.paved_texture_path,
+                "generated_texture": False,
+            }
 
         gravel_source: dict[str, object] | None = None
         if {"gravel", "gravel_junction"} & set(used_texture_kinds):
@@ -1196,6 +1227,8 @@ class ProceduralInfrastructureLibrary:
             "textures": texture_files,
             "models": models,
         }
+        if paved_source is not None:
+            document["paved_texture_source"] = paved_source
         if gravel_source is not None:
             document["gravel_texture_source"] = gravel_source
         canonical = json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
