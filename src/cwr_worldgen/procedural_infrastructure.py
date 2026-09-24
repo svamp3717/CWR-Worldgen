@@ -72,6 +72,8 @@ GENERATED_PAVED_HALF_WIDTH_METRES = 4.55
 # generated hub without changing the reserved approach envelope.
 GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES = 6.25
 GENERATED_PAVED_JUNCTION_HEADING_STEP_DEGREES = 5
+GENERATED_PAVED_JUNCTION_TIP_FADE_METRES = 0.35
+GENERATED_PAVED_JUNCTION_TIP_DROP_METRES = 0.015
 
 _PAVED_JUNCTION_SUBTYPE_PATTERN = re.compile(
     r"^paved_j(?P<degree>[34])_w(?P<width>\d{3})_h"
@@ -895,7 +897,27 @@ def _triangulated_paved_junction_lod(
             if index is None:
                 index = len(points)
                 point_indices[key] = index
-                points.append((float(x), y, float(z)))
+                point_y = float(y)
+                if resolution == _VISUAL_LOD:
+                    maximum_along = max(
+                        float(x) * math.sin(math.radians(float(candidate)))
+                        + float(z) * math.cos(math.radians(float(candidate)))
+                        for candidate in headings
+                    )
+                    fade_start = (
+                        GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+                        - GENERATED_PAVED_JUNCTION_TIP_FADE_METRES
+                    )
+                    if maximum_along > fade_start:
+                        fade = min(
+                            1.0,
+                            (maximum_along - fade_start)
+                            / GENERATED_PAVED_JUNCTION_TIP_FADE_METRES,
+                        )
+                        point_y -= (
+                            GENERATED_PAVED_JUNCTION_TIP_DROP_METRES * fade
+                        )
+                points.append((float(x), point_y, float(z)))
             across = float(x) * perpendicular[0] + float(z) * perpendicular[1]
             along = float(x) * direction[0] + float(z) * direction[1]
             u = max(
