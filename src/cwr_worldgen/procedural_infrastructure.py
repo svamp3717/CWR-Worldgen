@@ -29,11 +29,15 @@ _GEOMETRY_LOD = 1.0e13
 _LAND_CONTACT_LOD = 2.0e15
 _ROADWAY_LOD = 3.0e15
 
-# Classic OFP/CWA road P3Ds mark their surface vertices "On Surface". Besides
-# terrain fitting, the legacy renderer treats those vertices like native road /
-# terrain surfaces instead of applying ordinary object lighting, which otherwise
-# darkens the exact same stock texture on generated road meshes.
-_ROAD_SURFACE_POINT_FLAG = 0x00000001
+# Render metadata copied from the stock CWA o\\road\\sil6.p3d visual surface.
+# The native road does not use just the low "On Surface" bit: its visual points
+# carry 0x13f, its faces carry 0x2c102, and its stored face normal is -Y. MLOD
+# face normals are intentionally inverted for the stock clockwise road winding.
+# Matching the complete stock tuple is important: using +Y normals and zero face
+# flags makes the exact same sil_new.paa texture render substantially darker.
+_ROAD_SURFACE_POINT_FLAG = 0x0000013F
+_ROAD_SURFACE_FACE_FLAG = 0x0002C102
+_ROAD_SURFACE_NORMAL = (0.0, -1.0, 0.0)
 
 # Generated gravel is a terrain-hugging surface ribbon, not a raised slab.
 # Its visible skin and Roadway LOD are coplanar and are placed directly on the
@@ -553,10 +557,20 @@ def _ribbon_lod(
         le, re = (index + 1) * 2, (index + 1) * 2 + 1
         v0 = cumulative[index] / texture_scale
         v1 = cumulative[index + 1] / texture_scale
-        top = _Face(texture, ((ls, 0, 0.0, v0), (le, 0, 0.0, v1), (re, 0, u_span, v1), (rs, 0, u_span, v0)))
+        top = _Face(
+            texture,
+            ((ls, 0, 0.0, v0), (le, 0, 0.0, v1),
+             (re, 0, u_span, v1), (rs, 0, u_span, v0)),
+            _ROAD_SURFACE_FACE_FLAG,
+        )
         faces.append(top)
         if double_sided:
-            faces.append(_Face(texture, ((rs, 0, u_span, v0), (re, 0, u_span, v1), (le, 0, 0.0, v1), (ls, 0, 0.0, v0))))
+            faces.append(_Face(
+                texture,
+                ((rs, 0, u_span, v0), (re, 0, u_span, v1),
+                 (le, 0, 0.0, v1), (ls, 0, 0.0, v0)),
+                _ROAD_SURFACE_FACE_FLAG,
+            ))
     properties = (
         (("autocenter", "0"), ("class", "road"), ("map", "road"))
         if resolution == _VISUAL_LOD
@@ -569,7 +583,7 @@ def _ribbon_lod(
     )
     return _Lod(
         tuple(points),
-        ((0.0, 1.0, 0.0),),
+        (_ROAD_SURFACE_NORMAL,),
         tuple(faces),
         resolution,
         properties=properties,
@@ -655,7 +669,11 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
     def quad(x0: float, z0: float, x1: float, z1: float, uv: tuple[tuple[float, float], ...]) -> None:
         start = len(points)
         points.extend(((x0, y, z0), (x0, y, z1), (x1, y, z1), (x1, y, z0)))
-        faces.append(_Face(texture, tuple((start + index, 0, u, v) for index, (u, v) in enumerate(uv))))
+        faces.append(_Face(
+            texture,
+            tuple((start + index, 0, u, v) for index, (u, v) in enumerate(uv)),
+            _ROAD_SURFACE_FACE_FLAG,
+        ))
 
     # Centre samples only the fully opaque portion of the gravel artwork.
     quad(-core, -core, core, core, ((0.20, 0.20), (0.20, 0.80), (0.80, 0.80), (0.80, 0.20)))
@@ -670,7 +688,7 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
 
     visual = _Lod(
         tuple(points),
-        ((0.0, 1.0, 0.0),),
+        (_ROAD_SURFACE_NORMAL,),
         tuple(faces),
         _VISUAL_LOD,
         properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
@@ -684,8 +702,13 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
     roadway_points = ((-extent, roadway_y, -extent), (extent, roadway_y, -extent), (extent, roadway_y, extent), (-extent, roadway_y, extent))
     roadway = _Lod(
         roadway_points,
-        ((0.0, 1.0, 0.0),),
-        (_quad("", 0, 3, 2, 1),),
+        (_ROAD_SURFACE_NORMAL,),
+        (_Face(
+            "",
+            ((0, 0, 0.0, 1.0), (3, 0, 0.0, 0.0),
+             (2, 0, 1.0, 0.0), (1, 0, 1.0, 1.0)),
+            _ROAD_SURFACE_FACE_FLAG,
+        ),),
         _ROADWAY_LOD,
         point_flags=(_ROAD_SURFACE_POINT_FLAG,) * len(roadway_points),
     )
@@ -1232,7 +1255,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v16-road-onsurface-lighting"
+                "procedural-infrastructure-model-v17-stock-road-render-metadata"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
