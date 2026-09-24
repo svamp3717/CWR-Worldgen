@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from cwr_worldgen import generator
+from cwr_worldgen import gravel_junction_policy as gravel_junctions
 from cwr_worldgen import playability
 from cwr_worldgen import procedural_infrastructure as infrastructure
 from cwr_worldgen import paved_road_generated_fallback_policy as fallback
@@ -722,4 +723,21 @@ def test_generated_paved_junction_quality_window_has_no_coplanar_overlap() -> No
         infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
         abs_tol=1.0e-9,
     )
+
+def test_gravel_quality_wrapper_uses_generated_paved_overlap_constant() -> None:
+    junction = quality._Junction(
+        point=(0.0, 0.0),
+        axis=(0.0, 1.0),
+        half_length=infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+        half_width=4.55,
+        directions=((0.0, 1.0), (0.0, -1.0), (1.0, 0.0)),
+    )
+    previous = gravel_junctions._RQ
+    gravel_junctions._RQ = quality
+    try:
+        assert gravel_junctions._overlap_for(junction) == (
+            infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES
+        )
+    finally:
+        gravel_junctions._RQ = previous
 
