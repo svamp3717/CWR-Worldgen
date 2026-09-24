@@ -642,3 +642,18 @@ def test_generated_paved_junction_width_tracks_stock_family() -> None:
         )
     ) == 8.3
 
+def test_generated_paved_junction_exit_distance_uses_full_arm_extent() -> None:
+    junction = quality._Junction(
+        point=(0.0, 0.0),
+        axis=(0.0, 1.0),
+        half_length=infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+        half_width=4.55,
+        directions=((0.0, 1.0), (0.0, -1.0), (1.0, 0.0)),
+    )
+    for direction in junction.directions:
+        assert math.isclose(
+            quality._exit_distance(junction, direction),
+            infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+            abs_tol=1.0e-9,
+        )
+
