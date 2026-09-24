@@ -81,6 +81,17 @@ def test_grade_separated_roads_are_preserved():
     assert len(result.objects) == 2
 
 
+def test_legacy_paved_surface_wins_over_coincident_gravel_piece():
+    report = _report((
+        _road(1, r"cwr_test\i\gravel25.p3d", 100.0, 100.0),
+        _road(2, r"data3d\silnice25.p3d", 100.0, 100.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (2,)
+
+
 def test_paved_surface_wins_over_coincident_dirt_piece():
     report = _report((
         _road(1, r"o\road\ces25.p3d", 100.0, 100.0),
