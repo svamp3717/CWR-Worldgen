@@ -90,9 +90,9 @@ def _finish_gravel_object_texture(
 
     alpha = image.getchannel("A") if "A" in image.getbands() else None
     rgb = image.convert("RGB")
-    rgb = ImageEnhance.Brightness(rgb).enhance(0.84)
-    rgb = ImageEnhance.Contrast(rgb).enhance(1.06)
-    rgb = ImageEnhance.Color(rgb).enhance(0.92)
+    rgb = ImageEnhance.Brightness(rgb).enhance(0.76)
+    rgb = ImageEnhance.Contrast(rgb).enhance(1.10)
+    rgb = ImageEnhance.Color(rgb).enhance(0.88)
 
     width, height = rgb.size
     pixels = rgb.load()
@@ -107,16 +107,16 @@ def _finish_gravel_object_texture(
                 0.020 * math.sin(math.tau * (2.0 * xf + yf))
                 + 0.012 * math.sin(math.tau * (5.0 * xf - 3.0 * yf + 0.23))
             )
-            shoulder = -0.010 * (abs(xf - 0.5) * 2.0) ** 1.8
+            shoulder = -0.018 * (abs(xf - 0.5) * 2.0) ** 1.8
             tracks = 0.0
             if wheel_tracks:
                 # Broad, subtle tyre-worn bands. They are longitudinal, so they
                 # remain coherent when the texture repeats along a road ribbon.
                 for centre in (0.28, 0.72):
                     distance = (xf - centre) / 0.085
-                    tracks -= 0.045 * math.exp(-(distance * distance))
+                    tracks -= 0.060 * math.exp(-(distance * distance))
 
-            factor = max(0.88, min(1.04, 1.0 + mottle + shoulder + tracks))
+            factor = max(0.80, min(1.00, 1.0 + mottle + shoulder + tracks))
             r, g, b = pixels[x, y]
             # A tiny warm bias removes the pale grey cast without turning the
             # road orange. Keep this restrained; CWA lighting does the rest.
@@ -1241,16 +1241,16 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             if kind == "gravel":
                 asset_key = cache_key(
-                    "procedural-infrastructure-texture-v17-reference-gravel-earthy-road",
-                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-earthy-object-v1"},
+                    "procedural-infrastructure-texture-v19-reference-gravel-earthy-road-darker",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-earthy-object-v2-darker"},
                 )
                 producer = lambda target: write_rgba_dxt1_paa(
                     target, create_gravel_road_texture_image(512)
                 )
             elif kind == "gravel_junction":
                 asset_key = cache_key(
-                    "procedural-infrastructure-texture-v18-reference-gravel-junction-earthy",
-                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-earthy-junction-v1"},
+                    "procedural-infrastructure-texture-v20-reference-gravel-junction-earthy-darker",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-earthy-junction-v2-darker"},
                 )
                 producer = lambda target: write_rgb_dxt1_paa(
                     target, create_gravel_junction_texture_image(512)
@@ -1301,14 +1301,14 @@ class ProceduralInfrastructureLibrary:
             gravel_source = {
                 "type": "bundled-reference",
                 "texture": f"i/{_texture_file_stem('gravel')}.paa",
-                "texture_recipe": "reference-gravel-photo-earthy-object-v1",
+                "texture_recipe": "reference-gravel-photo-earthy-object-v2-darker",
                 "texture_size": 512,
                 "tone": {
-                    "brightness": 0.84,
-                    "contrast": 1.06,
-                    "saturation": 0.92,
+                    "brightness": 0.76,
+                    "contrast": 1.10,
+                    "saturation": 0.88,
                     "blue_gain": 0.95,
-                    "wheel_track_darkening": 0.045,
+                    "wheel_track_darkening": 0.060,
                 },
                 "edge_blend": "clean DXT1 cutout plus smoothly irregular model edge",
                 "map_symbol": "road",
@@ -1321,7 +1321,7 @@ class ProceduralInfrastructureLibrary:
             if "gravel_junction" in used_texture_kinds:
                 gravel_source.update({
                     "junction_texture": f"i/{_texture_file_stem('gravel_junction')}.paa",
-                    "junction_texture_recipe": "reference-gravel-photo-earthy-junction-v1",
+                    "junction_texture_recipe": "reference-gravel-photo-earthy-junction-v2-darker",
                     "junction_texture_alpha": "opaque",
                 })
 
