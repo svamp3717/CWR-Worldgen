@@ -158,6 +158,23 @@ def test_grade_separated_road_does_not_move_ground_building():
     assert report.conflicted == 0
 
 
+def test_generated_gravel_road_uses_model_aware_scaled_length():
+    spec = _spec()
+    gravel = WorldObject(
+        1,
+        r"wg_test\i\gravel25_r10.p3d",
+        50.0,
+        0.018,
+        50.0,
+        0.0,
+    )
+
+    primitives = policy._road_object_primitives(gravel, spec)
+
+    assert primitives
+    assert all(primitive.object_id == gravel.object_id for primitive in primitives)
+
+
 def test_stock_curve_and_junction_generate_clearance_primitives():
     spec = _spec()
     curve = WorldObject(1, r"O\Road\sil10 25.p3d", 50.0, 0.035, 50.0, 0.0)
