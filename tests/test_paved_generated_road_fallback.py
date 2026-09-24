@@ -515,3 +515,130 @@ def test_generated_paved_width_maps_back_to_stock_junction_family() -> None:
     )
     assert paved_junctions._family(wide) == "sil"
     assert paved_junctions._family(narrow) == "asf"
+
+def test_generated_paved_junction_signature_reuses_rotation_invariant_shape() -> None:
+    first_signature, first_axis = (
+        infrastructure.paved_junction_signature_for_directions(
+            ((0.0, 1.0), (1.0, 0.0), (0.0, -1.0))
+        )
+    )
+    angle = math.radians(27.0)
+
+    def rotate(direction: tuple[float, float]) -> tuple[float, float]:
+        x, z = direction
+        return (
+            x * math.cos(angle) + z * math.sin(angle),
+            -x * math.sin(angle) + z * math.cos(angle),
+        )
+
+    second_signature, second_axis = (
+        infrastructure.paved_junction_signature_for_directions(
+            tuple(
+                rotate(direction)
+                for direction in ((0.0, 1.0), (1.0, 0.0), (0.0, -1.0))
+            )
+        )
+    )
+
+    assert first_signature == (0, 90, 180)
+    assert second_signature == first_signature
+    assert abs(math.hypot(*first_axis) - 1.0) < 1.0e-9
+    assert abs(math.hypot(*second_axis) - 1.0) < 1.0e-9
+
+
+def test_generated_paved_junction_asset_uses_stock_texture_and_road_metadata(
+    tmp_path: Path,
+) -> None:
+    signature, _axis = infrastructure.paved_junction_signature_for_directions(
+        ((0.0, 1.0), (1.0, 0.0), (0.0, -1.0))
+    )
+    model = infrastructure.paved_junction_model_path(
+        "junction_world",
+        9.10,
+        signature,
+    )
+    assert model.endswith(r"\paved_j3_w091_h000_090_180.p3d")
+    assert infrastructure.is_generated_paved_road_model(model)
+
+    stock_texture = r"o\road\sil_new.paa"
+    library = infrastructure.ProceduralInfrastructureLibrary(
+        "junction_world",
+        paved_texture_path=stock_texture,
+        cache_enabled=False,
+    )
+    library.register_model_usage(model, 2)
+    result = library.write_assets(
+        tmp_path,
+        tmp_path / "infrastructure.json",
+    )
+
+    assert result.placements == 2
+    assert result.generated_variants == 1
+    assert result.texture_files == ()
+
+    model_summary = infrastructure.inspect_mlod(
+        tmp_path / result.model_files[0]
+    )
+    assert stock_texture in model_summary.textures
+
+    document = json.loads(
+        (tmp_path / "infrastructure.json").read_text(encoding="utf-8")
+    )
+    entry = document["models"][0]
+    assert entry["key"]["subtype"] == "paved_j3_w091_h000_090_180"
+    assert entry["key"]["width_dm"] == 91
+    assert entry["usage_count"] == 2
+    assert any(
+        abs(value - infrastructure._ROADWAY_LOD) < 1.0
+        for value in entry["lod_resolutions"]
+    )
+
+    key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_j3_w091_h000_090_180",
+        91,
+        int(
+            round(
+                infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+                * 20.0
+            )
+        ),
+    )
+    visual, _map_geometry, roadway, _land = infrastructure._road_lods(
+        key,
+        stock_texture,
+    )
+    assert visual.normals == (infrastructure._ROAD_SURFACE_NORMAL,)
+    assert roadway.normals == (infrastructure._ROAD_SURFACE_NORMAL,)
+    assert visual.point_flags == (
+        infrastructure._ROAD_SURFACE_POINT_FLAG,
+    ) * len(visual.points)
+    assert roadway.point_flags == (
+        infrastructure._ROAD_SURFACE_POINT_FLAG,
+    ) * len(roadway.points)
+    assert visual.faces
+    assert roadway.faces
+    assert all(
+        face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
+        for face in visual.faces
+    )
+    assert all(
+        face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
+        for face in roadway.faces
+    )
+
+
+def test_generated_paved_junction_width_tracks_stock_family() -> None:
+    assert infrastructure.paved_junction_width_for_models(
+        (r"o\road\sil6.p3d", r"o\road\sil12.p3d")
+    ) == 9.1
+    assert infrastructure.paved_junction_width_for_models(
+        (r"o\road\asf6.p3d", r"o\road\asf12.p3d")
+    ) == 7.0
+    assert infrastructure.paved_junction_width_for_models(
+        (
+            r"junction_world\i\paved_w083_l0060.p3d",
+            r"o\road\asf6.p3d",
+        )
+    ) == 8.3
+
