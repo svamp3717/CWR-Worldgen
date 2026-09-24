@@ -896,8 +896,8 @@ def _triangulated_paved_junction_lod(
     min_x, min_z, max_x, max_z = polygon.bounds
     span_x = max(0.01, float(max_x) - float(min_x))
     span_z = max(0.01, float(max_z) - float(min_z))
-    uv_min = 0.28
-    uv_span = 0.44
+    uv_min = 0.0
+    uv_span = 1.0
 
     for triangle in triangles:
         vertices = []
@@ -1376,9 +1376,11 @@ def _write_infrastructure_asset_task(task: _InfrastructureAssetTask) -> tuple[di
 
 
 def _infrastructure_texture_kind(key: InfrastructureModelKey) -> str:
-    """Return the generated texture family used by one infrastructure model."""
+    """Return the texture family used by one infrastructure model."""
     if key.kind == "road":
         subtype = key.subtype.casefold()
+        if subtype.startswith("paved_j"):
+            return "paved_junction"
         if subtype.startswith("paved_"):
             return "paved"
         # Junction polygons tile their UV coordinates in two dimensions. They
@@ -1409,6 +1411,9 @@ class ProceduralInfrastructureLibrary:
         *,
         road_segment_length: float = 24.5,
         paved_texture_path: str = r"landtext\silnice.pac",
+        paved_t_junction_texture_path: str | None = None,
+        paved_asf_t_junction_texture_path: str | None = None,
+        paved_x_junction_texture_path: str | None = None,
         cache_dir: Path | None = None,
         cache_enabled: bool = True,
         cache_refresh: bool = False,
@@ -1418,6 +1423,17 @@ class ProceduralInfrastructureLibrary:
         self.paved_texture_path = str(paved_texture_path).replace("/", "\\").strip("\\")
         if not self.paved_texture_path:
             raise ValueError("paved texture path must not be empty")
+        self.paved_t_junction_texture_path = str(
+            paved_t_junction_texture_path or self.paved_texture_path
+        ).replace("/", "\\").strip("\\")
+        self.paved_asf_t_junction_texture_path = str(
+            paved_asf_t_junction_texture_path
+            or self.paved_t_junction_texture_path
+        ).replace("/", "\\").strip("\\")
+        self.paved_x_junction_texture_path = str(
+            paved_x_junction_texture_path
+            or self.paved_t_junction_texture_path
+        ).replace("/", "\\").strip("\\")
         if not math.isfinite(self.road_segment_length) or self.road_segment_length <= 0.0:
             raise ValueError("road segment length must be positive and finite")
         self.cache_dir = cache_dir
@@ -1552,6 +1568,18 @@ class ProceduralInfrastructureLibrary:
         kind = _infrastructure_texture_kind(key)
         if kind == "paved":
             return self.paved_texture_path
+        if kind == "paved_junction":
+            parsed = _parse_paved_junction_subtype(key.subtype)
+            if parsed is None:
+                raise ValueError(
+                    f"invalid generated paved junction subtype: {key.subtype}"
+                )
+            degree, _headings = parsed
+            if degree == 4:
+                return self.paved_x_junction_texture_path
+            if key.width_dm <= 75:
+                return self.paved_asf_t_junction_texture_path
+            return self.paved_t_junction_texture_path
         return rf"{self.world_name}\i\{_texture_file_stem(kind)}.paa"
 
     def write_assets(self, source_dir: Path, catalogue_path: Path) -> InfrastructureAssetResult:
@@ -1562,7 +1590,9 @@ class ProceduralInfrastructureLibrary:
         }
         used_texture_kinds = sorted(used_texture_kind_set)
         generated_texture_kinds = tuple(
-            kind for kind in used_texture_kinds if kind != "paved"
+            kind
+            for kind in used_texture_kinds
+            if kind not in {"paved", "paved_junction"}
         )
         texture_files: list[str] = []
         # Paved fallback P3Ds now point at the configured stock road texture.
@@ -1617,12 +1647,18 @@ class ProceduralInfrastructureLibrary:
             texture_files.append(relative)
 
         paved_source: dict[str, object] | None = None
-        if "paved" in used_texture_kind_set:
+        if {"paved", "paved_junction"} & used_texture_kind_set:
             paved_source = {
                 "type": "external-stock-texture",
                 "texture": self.paved_texture_path,
                 "generated_texture": False,
             }
+            if "paved_junction" in used_texture_kind_set:
+                paved_source["junction_textures"] = {
+                    "t_sil": self.paved_t_junction_texture_path,
+                    "t_asf": self.paved_asf_t_junction_texture_path,
+                    "x_sil": self.paved_x_junction_texture_path,
+                }
 
         gravel_source: dict[str, object] | None = None
         if {"gravel", "gravel_junction"} & set(used_texture_kinds):
@@ -1671,7 +1707,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v19-continuous-paved-junction-surface"
+                "procedural-infrastructure-model-v20-stock-junction-textures"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
