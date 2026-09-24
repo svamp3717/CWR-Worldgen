@@ -219,12 +219,10 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
     return result
 
 
-def _exit_distance(junction: _Junction, direction: tuple[float, float]) -> float:
-    # Generated paved hubs have explicit arms extending 6.25 m along every
-    # incident road direction. Treat that arm extent as authoritative instead
-    # of intersecting the direction with the hub's axis-aligned envelope, which
-    # would trim side roads too close to the centre and leave coplanar overlap.
-    if (
+def _is_generated_paved_junction(junction: _Junction | None) -> bool:
+    if junction is None:
+        return False
+    return (
         math.isclose(
             float(junction.half_length),
             float(_p.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES),
@@ -232,7 +230,14 @@ def _exit_distance(junction: _Junction, direction: tuple[float, float]) -> float
             abs_tol=1.0e-7,
         )
         and float(junction.half_width) >= 3.40
-    ):
+    )
+
+
+def _exit_distance(junction: _Junction, direction: tuple[float, float]) -> float:
+    # Generated paved hubs have explicit arms extending 6.25 m along every
+    # incident road direction. Treat that arm extent as authoritative instead
+    # of intersecting the direction with the hub's axis-aligned envelope.
+    if _is_generated_paved_junction(junction):
         return float(_p.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES)
 
     dx, dz = direction
@@ -268,15 +273,30 @@ def _quality_window(measure, pieces, start_distance, preferred_end, minimum_end,
     desired_end_cover = max(0.0, measure.total - minimum_end)
     adjusted_maximum = maximum_end
     if start_junction is not None:
+        start_overlap = (
+            _p.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES
+            if _is_generated_paved_junction(start_junction)
+            else _JUNCTION_OVERLAP
+        )
         desired_start = max(
             _JUNCTION_MIN_TRIM,
-            _exit_distance(start_junction, _end_direction(measure, start=True)) - _JUNCTION_OVERLAP,
+            _exit_distance(start_junction, _end_direction(measure, start=True))
+            - start_overlap,
         )
     if end_junction is not None:
-        exit_distance = _exit_distance(end_junction, _end_direction(measure, start=False))
-        desired_end_trim = max(_JUNCTION_MIN_TRIM, exit_distance - _JUNCTION_OVERLAP)
+        exit_distance = _exit_distance(
+            end_junction, _end_direction(measure, start=False)
+        )
+        end_overlap = (
+            _p.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES
+            if _is_generated_paved_junction(end_junction)
+            else _JUNCTION_OVERLAP
+        )
+        desired_end_trim = max(
+            _JUNCTION_MIN_TRIM, exit_distance - end_overlap
+        )
         desired_end_cover = exit_distance + _JUNCTION_MARGIN
-        adjusted_maximum = min(maximum_end, measure.total + _JUNCTION_OVERLAP)
+        adjusted_maximum = min(maximum_end, measure.total + end_overlap)
     # Leave extremely short hub-to-hub runs to the fitter's existing short-run fallback.
     if (start_junction is not None or end_junction is not None) and measure.total >= (
         desired_start + desired_end_trim + shortest * 0.60
