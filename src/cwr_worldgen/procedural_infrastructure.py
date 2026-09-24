@@ -72,8 +72,10 @@ GENERATED_PAVED_HALF_WIDTH_METRES = 4.55
 # generated hub without changing the reserved approach envelope.
 GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES = 6.25
 GENERATED_PAVED_JUNCTION_HEADING_STEP_DEGREES = 5
-GENERATED_PAVED_JUNCTION_TIP_FADE_METRES = 0.35
-GENERATED_PAVED_JUNCTION_TIP_DROP_METRES = 0.015
+# Generated paved hubs now meet approach pieces exactly at the connector plane.
+# Do not overlap/bury separate road objects here: CWA exposes coplanar overlap
+# brutally, especially on the wide sil/kos family.
+GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES = 0.0
 
 _PAVED_JUNCTION_SUBTYPE_PATTERN = re.compile(
     r"^paved_j(?P<degree>[34])_w(?P<width>\d{3})_h"
@@ -104,11 +106,11 @@ def _finish_gravel_object_texture(
 
     alpha = image.getchannel("A") if "A" in image.getbands() else None
     rgb = image.convert("RGB")
-    rgb = ImageEnhance.Brightness(rgb).enhance(0.76)
-    rgb = ImageEnhance.Contrast(rgb).enhance(1.10)
-    # Stock sil/kos pavement is nearly neutral grey. Retain a little source
-    # colour so this still reads as aggregate rather than painted asphalt.
-    rgb = ImageEnhance.Color(rgb).enhance(0.25)
+    rgb = ImageEnhance.Brightness(rgb).enhance(0.68)
+    rgb = ImageEnhance.Contrast(rgb).enhance(1.12)
+    # Stock sil/kos pavement is nearly neutral grey. Retain just enough source
+    # colour for the aggregate to read as gravel rather than painted asphalt.
+    rgb = ImageEnhance.Color(rgb).enhance(0.20)
 
     width, height = rgb.size
     pixels = rgb.load()
@@ -886,11 +888,18 @@ def _triangulated_paved_junction_lod(
         for triangle in shapely_triangulate(polygon)
         if polygon.covers(triangle.representative_point())
     )
+    # Use one continuous planar UV field for the entire hub. The previous
+    # nearest-arm projection changed UV orientation per triangle, so the stock
+    # road texture made a single P3D look like several overlapping wedges.
+    # Sampling only the middle of sil_new also keeps its bright shoulder strips
+    # out of the intersection core.
+    min_x, min_z, max_x, max_z = polygon.bounds
+    span_x = max(0.01, float(max_x) - float(min_x))
+    span_z = max(0.01, float(max_z) - float(min_z))
+    uv_min = 0.28
+    uv_span = 0.44
+
     for triangle in triangles:
-        selected_heading = _paved_junction_triangle_heading(triangle, headings)
-        angle = math.radians(float(selected_heading))
-        direction = (math.sin(angle), math.cos(angle))
-        perpendicular = (math.cos(angle), -math.sin(angle))
         vertices = []
         for x, z in tuple(triangle.exterior.coords)[:-1]:
             key = (round(float(x), 6), round(float(z), 6))
@@ -898,34 +907,9 @@ def _triangulated_paved_junction_lod(
             if index is None:
                 index = len(points)
                 point_indices[key] = index
-                point_y = float(y)
-                if resolution == _VISUAL_LOD:
-                    maximum_along = max(
-                        float(x) * math.sin(math.radians(float(candidate)))
-                        + float(z) * math.cos(math.radians(float(candidate)))
-                        for candidate in headings
-                    )
-                    fade_start = (
-                        GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
-                        - GENERATED_PAVED_JUNCTION_TIP_FADE_METRES
-                    )
-                    if maximum_along > fade_start:
-                        fade = min(
-                            1.0,
-                            (maximum_along - fade_start)
-                            / GENERATED_PAVED_JUNCTION_TIP_FADE_METRES,
-                        )
-                        point_y -= (
-                            GENERATED_PAVED_JUNCTION_TIP_DROP_METRES * fade
-                        )
-                points.append((float(x), point_y, float(z)))
-            across = float(x) * perpendicular[0] + float(z) * perpendicular[1]
-            along = float(x) * direction[0] + float(z) * direction[1]
-            u = max(
-                0.0,
-                min(1.0, 0.5 + across / max(0.01, half_width * 2.0)),
-            )
-            v = along / GENERATED_GRAVEL_TEXTURE_REPEAT_METRES
+                points.append((float(x), float(y), float(z)))
+            u = uv_min + uv_span * ((float(x) - float(min_x)) / span_x)
+            v = uv_min + uv_span * ((float(z) - float(min_z)) / span_z)
             vertices.append((index, 0, u, v))
         if len(vertices) == 3:
             faces.append(
@@ -1593,16 +1577,16 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             if kind == "gravel":
                 asset_key = cache_key(
-                    "procedural-infrastructure-texture-v21-reference-gravel-paved-tone",
-                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-paved-neutral-v3"},
+                    "procedural-infrastructure-texture-v23-reference-gravel-paved-tone-darker",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-paved-neutral-v4-darker"},
                 )
                 producer = lambda target: write_rgba_dxt1_paa(
                     target, create_gravel_road_texture_image(512)
                 )
             elif kind == "gravel_junction":
                 asset_key = cache_key(
-                    "procedural-infrastructure-texture-v22-reference-gravel-junction-paved-tone",
-                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-paved-neutral-junction-v3"},
+                    "procedural-infrastructure-texture-v24-reference-gravel-junction-paved-tone-darker",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-paved-neutral-junction-v4-darker"},
                 )
                 producer = lambda target: write_rgb_dxt1_paa(
                     target, create_gravel_junction_texture_image(512)
@@ -1653,17 +1637,17 @@ class ProceduralInfrastructureLibrary:
             gravel_source = {
                 "type": "bundled-reference",
                 "texture": f"i/{_texture_file_stem('gravel')}.paa",
-                "texture_recipe": "reference-gravel-photo-paved-neutral-v3",
+                "texture_recipe": "reference-gravel-photo-paved-neutral-v4-darker",
                 "texture_size": 512,
                 "tone": {
-                    "brightness": 0.76,
-                    "contrast": 1.10,
-                    "saturation": 0.25,
+                    "brightness": 0.68,
+                    "contrast": 1.12,
+                    "saturation": 0.20,
                     "red_gain": 0.985,
                     "green_gain": 0.990,
                     "blue_gain": 1.0,
                     "wheel_track_darkening": 0.060,
-                    "target_family": "stock-paved-neutral-grey",
+                    "target_family": "stock-paved-neutral-grey-dark",
                 },
                 "edge_blend": "clean DXT1 cutout plus smoothly irregular model edge",
                 "map_symbol": "road",
@@ -1676,7 +1660,7 @@ class ProceduralInfrastructureLibrary:
             if "gravel_junction" in used_texture_kinds:
                 gravel_source.update({
                     "junction_texture": f"i/{_texture_file_stem('gravel_junction')}.paa",
-                    "junction_texture_recipe": "reference-gravel-photo-paved-neutral-junction-v3",
+                    "junction_texture_recipe": "reference-gravel-photo-paved-neutral-junction-v4-darker",
                     "junction_texture_alpha": "opaque",
                 })
 
@@ -1687,7 +1671,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v18-generated-paved-junctions"
+                "procedural-infrastructure-model-v19-continuous-paved-junction-surface"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
