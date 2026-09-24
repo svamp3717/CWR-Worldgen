@@ -13,6 +13,7 @@ from .gravel_family_policy import (
 from .procedural_infrastructure import (
     GENERATED_GRAVEL_HALF_WIDTH_METRES,
     GENERATED_GRAVEL_VISUAL_OVERLAP_METRES,
+    GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES,
 )
 
 _GRAVEL_JUNCTION_OVERLAP = min(0.70, GENERATED_GRAVEL_VISUAL_OVERLAP_METRES)
@@ -78,7 +79,7 @@ def _overlap_for(junction) -> float:
     if junction is not None and _is_gravel_junction(junction):
         return _GRAVEL_JUNCTION_OVERLAP
     if junction is not None and _RQ._is_generated_paved_junction(junction):
-        return float(_RQ._p.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES)
+        return float(GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES)
     return float(_RQ._JUNCTION_OVERLAP)
 
 
