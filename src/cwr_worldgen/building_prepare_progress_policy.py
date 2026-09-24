@@ -208,6 +208,16 @@ def install_building_prepare_progress_policy() -> None:
 
     install_bridge_underlay_cleanup_policy()
 
+    # Dedupe and bridge cleanup have now produced the road object list that will
+    # actually survive to final placement. Let the read-only road inspector turn
+    # any remaining ordinary paved seam defects into stock-first repair plans
+    # before building clearance records the road footprint.
+    from .final_road_inspector_repair_policy import (
+        install_final_road_inspector_repair_policy,
+    )
+
+    install_final_road_inspector_repair_policy()
+
     # A single several-hundred-metre procedural bridge P3D can exceed legacy
     # OFP/CWA Geometry/Roadway extents and disappear even though the WRP and PBO
     # references are valid. Split those generated spans into <=30 m modules
