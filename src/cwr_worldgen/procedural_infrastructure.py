@@ -53,6 +53,9 @@ GENERATED_GRAVEL_OVERLAP_DROP_METRES = 0.040
 GENERATED_GRAVEL_CURVE_BUCKETS = (5, 10, 15, 20, 30, 45)
 GENERATED_GRAVEL_RIBBON_SECTIONS = 6
 GENERATED_GRAVEL_TEXTURE_REPEAT_METRES = 3.0
+# Stock sil6/sil12/sil25 use one full sil_new repeat per 6.25 m:
+# sil6 V=0..1, sil12 V=0..2 and sil25 V=-2..2.
+GENERATED_PAVED_TEXTURE_REPEAT_METRES = 6.25
 GENERATED_GRAVEL_EDGE_WIDTH_METRES = 0.18
 GENERATED_GRAVEL_EDGE_JITTER_METRES = 0.06
 GENERATED_GRAVEL_EDGE_SECTION_METRES = 0.65
@@ -623,13 +626,18 @@ def _ribbon_lod(
     lowered_overlap: bool,
     double_sided: bool,
     u_span_override: float | None = None,
+    texture_scale_override: float | None = None,
 ) -> _Lod:
     points: list[tuple[float, float, float]] = []
     cumulative = [0.0]
     centres = [((section[0] + section[2]) * 0.5, (section[1] + section[3]) * 0.5) for section in sections]
     for first, second in zip(centres, centres[1:]):
         cumulative.append(cumulative[-1] + math.dist(first, second))
-    texture_scale = GENERATED_GRAVEL_TEXTURE_REPEAT_METRES
+    texture_scale = (
+        GENERATED_GRAVEL_TEXTURE_REPEAT_METRES
+        if texture_scale_override is None
+        else float(texture_scale_override)
+    )
     section_width = math.dist((sections[0][0], sections[0][1]), (sections[0][2], sections[0][3]))
     u_span = section_width / texture_scale if u_span_override is None else float(u_span_override)
     last_index = len(sections) - 1
@@ -924,7 +932,7 @@ def _paved_junction_arm_uv(
     u = max(0.0, min(1.0, 0.5 + across / max(0.01, half_width * 2.0)))
     # Stock sil road artwork repeats every 6.25 m along the road. Its local +Z
     # direction decreases V, so preserve that orientation at every connector.
-    v = 0.5 - along / GENERATED_GRAVEL_TEXTURE_REPEAT_METRES
+    v = -along / GENERATED_PAVED_TEXTURE_REPEAT_METRES
     return u, v
 
 
@@ -941,7 +949,7 @@ def _paved_junction_core_uv(
     # across the hub. V keeps the native 6.25 m longitudinal repeat scale.
     u = 0.5 + 0.22 * float(x) / max(0.01, core_radius)
     u = max(0.28, min(0.72, u))
-    v = 0.5 - float(z) / GENERATED_GRAVEL_TEXTURE_REPEAT_METRES
+    v = -float(z) / GENERATED_PAVED_TEXTURE_REPEAT_METRES
     return u, v
 
 
@@ -1142,6 +1150,7 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
             lowered_overlap=False,
             double_sided=True,
             u_span_override=1.0,
+            texture_scale_override=GENERATED_PAVED_TEXTURE_REPEAT_METRES,
         )
         visual = _Lod(
             raw_visual.points,
@@ -1823,7 +1832,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v22-stock-scale-paved-junction-uvs"
+                "procedural-infrastructure-model-v23-stock-sil-uv-scale"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
