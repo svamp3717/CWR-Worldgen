@@ -536,3 +536,98 @@ def test_stock_and_generated_paved_surfaces_render_above_dirt() -> None:
     )
     assert math.isclose(generated_visible_y, paved.y, abs_tol=1.0e-9)
 
+def test_mixed_dirt_paved_node_is_not_a_junction_surface() -> None:
+    incidents = (
+        ((0.0, 1.0), False, r"o\road\sil25.p3d", "paved/0", "way/paved"),
+        ((0.0, -1.0), False, r"o\road\sil25.p3d", "paved/1", "way/paved"),
+        ((1.0, 0.0), True, r"o\road\ces25.p3d", "dirt/0", "way/dirt"),
+    )
+    assert playability._is_mixed_dirt_paved_node(incidents)
+    assert math.isclose(
+        playability._mixed_dirt_paved_trim_metres(incidents),
+        4.65,
+        abs_tol=1.0e-9,
+    )
+
+
+def test_dirt_track_terminates_at_paved_edge_without_mixed_junction_cap() -> None:
+    bbox = (0.0, 0.0, 0.01, 0.01)
+    projection = BboxProjection.create(bbox, 1000.0)
+    centre = (500.0, 500.0)
+    dataset = OsmDataset(
+        source_generator="mixed-dirt-paved-termination",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/paved",
+                {"highway": "residential", "surface": "asphalt"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in ((500.0, 300.0), centre, (500.0, 700.0))
+                ),
+            ),
+            OsmLineFeature(
+                "way/dirt",
+                {"highway": "track", "surface": "dirt"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in (centre, (700.0, 500.0))
+                ),
+            ),
+        ),
+    )
+    spec = _junction_spec(bbox)
+    report = playability.fit_road_objects(
+        dataset, projection, [0.0] * (40 * 40), spec
+    )
+
+    assert report.junction_cap_objects == 0
+    assert not any(
+        "kr_new_" in obj.model_path.casefold()
+        or "\\paved_j" in obj.model_path.casefold()
+        for obj in report.objects
+    )
+
+    dirt_axes = []
+    paved_axes = []
+    for obj in report.objects:
+        path = obj.model_path.casefold()
+        dirt_match = re.search(r"\\(?:ces|cesta)(25|12|6)\.p3d$", path)
+        paved_match = re.search(r"\\(?:sil|silnice|kos|asf|asfaltka)(25|12|6)\.p3d$", path)
+        if dirt_match:
+            length = playability.stock_road_piece_length_metres(
+                obj.model_path,
+                int(dirt_match.group(1)),
+                spec.road_segment_length,
+            )
+            dirt_axes.append(playability._model_axis(obj, length))
+        elif paved_match:
+            length = playability.stock_road_piece_length_metres(
+                obj.model_path,
+                int(paved_match.group(1)),
+                spec.road_segment_length,
+            )
+            paved_axes.append(playability._model_axis(obj, length))
+
+    assert dirt_axes
+    assert paved_axes
+
+    # Dirt must terminate outside the 9.1 m paved carriageway, with the 10 cm
+    # safety margin used by the planner. It must never paint across the asphalt.
+    assert min(
+        min(math.dist(centre, endpoint) for endpoint in axis)
+        for axis in dirt_axes
+    ) >= 4.60
+
+    # The paved road is not split/trimmed for the dirt join, so at least one
+    # paved slab still covers the shared OSM node continuously.
+    assert min(
+        playability._point_segment_distance(centre, axis[0], axis[1])
+        for axis in paved_axes
+    ) <= 0.05
+
