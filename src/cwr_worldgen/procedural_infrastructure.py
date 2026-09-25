@@ -871,6 +871,115 @@ def _paved_junction_triangle_heading(
     )
 
 
+def _iter_polygon_parts(geometry):
+    if geometry.is_empty:
+        return
+    if geometry.geom_type == "Polygon":
+        yield geometry
+        return
+    for part in getattr(geometry, "geoms", ()):
+        if part.geom_type == "Polygon":
+            yield part
+        elif part.geom_type in {"MultiPolygon", "GeometryCollection"}:
+            yield from _iter_polygon_parts(part)
+
+
+def _paved_junction_visual_regions(
+    headings: tuple[int, ...],
+    half_width: float,
+):
+    """Partition a generated hub into one asphalt core and stock-mapped arms."""
+
+    core = ShapelyPoint(0.0, 0.0).buffer(
+        max(1.0, half_width * 0.98),
+        quad_segs=8,
+    )
+    covered = core
+    arms: list[tuple[int, object]] = []
+    for heading in headings:
+        arm = _paved_junction_arm_polygon(heading, half_width)
+        # Remove anything already owned by the core/earlier arms. This keeps the
+        # final MLOD strictly non-overlapping even for skewed OSM junctions.
+        region = arm.difference(covered)
+        if not region.is_empty:
+            arms.append((heading, region))
+        covered = unary_union((covered, arm))
+    return covered, core, tuple(arms)
+
+
+def _paved_junction_arm_uv(
+    x: float,
+    z: float,
+    *,
+    heading: float,
+    half_width: float,
+) -> tuple[float, float]:
+    """Map one junction arm exactly like stock sil6/sil12/sil25 road pieces."""
+
+    angle = math.radians(float(heading))
+    direction = (math.sin(angle), math.cos(angle))
+    perpendicular = (math.cos(angle), -math.sin(angle))
+    across = float(x) * perpendicular[0] + float(z) * perpendicular[1]
+    along = float(x) * direction[0] + float(z) * direction[1]
+    u = max(0.0, min(1.0, 0.5 + across / max(0.01, half_width * 2.0)))
+    # Stock sil road artwork repeats every 6.25 m along the road. Its local +Z
+    # direction decreases V, so preserve that orientation at every connector.
+    v = 0.5 - along / GENERATED_GRAVEL_TEXTURE_REPEAT_METRES
+    return u, v
+
+
+def _paved_junction_core_uv(
+    x: float,
+    z: float,
+    *,
+    core_radius: float,
+) -> tuple[float, float]:
+    """Sample only the asphalt centre of sil_new for the intersection core."""
+
+    # U is the across-road axis in the stock road texture. Restrict it to the
+    # middle 44% so the bright shoulder/edge markings never get stretched
+    # across the hub. V keeps the native 6.25 m longitudinal repeat scale.
+    u = 0.5 + 0.22 * float(x) / max(0.01, core_radius)
+    u = max(0.28, min(0.72, u))
+    v = 0.5 - float(z) / GENERATED_GRAVEL_TEXTURE_REPEAT_METRES
+    return u, v
+
+
+def _append_triangulated_paved_region(
+    *,
+    geometry,
+    y: float,
+    texture: str,
+    uv_for_point,
+    points: list[tuple[float, float, float]],
+    faces: list[_Face],
+) -> None:
+    """Append a non-overlapping region with one stable UV per emitted point."""
+
+    for polygon in _iter_polygon_parts(geometry):
+        point_indices: dict[tuple[float, float], int] = {}
+        triangles = (
+            triangle
+            for triangle in shapely_triangulate(polygon)
+            if polygon.covers(triangle.representative_point())
+        )
+        for triangle in triangles:
+            vertices = []
+            for x, z in tuple(triangle.exterior.coords)[:-1]:
+                key = (round(float(x), 6), round(float(z), 6))
+                index = point_indices.get(key)
+                if index is None:
+                    index = len(points)
+                    point_indices[key] = index
+                    points.append((float(x), float(y), float(z)))
+                u, v = uv_for_point(float(x), float(z))
+                vertices.append((index, 0, float(u), float(v)))
+            if len(vertices) == 3:
+                faces.append(
+                    _Face(texture, tuple(vertices), _ROAD_SURFACE_FACE_FLAG)
+                )
+
+
 def _triangulated_paved_junction_lod(
     polygon,
     *,
@@ -880,43 +989,69 @@ def _triangulated_paved_junction_lod(
     headings: tuple[int, ...],
     half_width: float,
 ) -> _Lod:
-    point_indices: dict[tuple[float, float], int] = {}
     points: list[tuple[float, float, float]] = []
     faces: list[_Face] = []
-    triangles = (
-        triangle
-        for triangle in shapely_triangulate(polygon)
-        if polygon.covers(triangle.representative_point())
-    )
-    # Use one continuous planar UV field for the entire hub. The previous
-    # nearest-arm projection changed UV orientation per triangle, so a single
-    # P3D looked like several overlapping wedges. Generated junctions reuse the
-    # same verified in-game paved-road texture as their approach pieces.
-    min_x, min_z, max_x, max_z = polygon.bounds
-    span_x = max(0.01, float(max_x) - float(min_x))
-    span_z = max(0.01, float(max_z) - float(min_z))
-    # Sample the centre of the stock road texture so the junction core gets
-    # asphalt only, without stretching the bright roadside shoulder strips
-    # across the intersection.
-    uv_min = 0.22
-    uv_span = 0.56
 
-    for triangle in triangles:
-        vertices = []
-        for x, z in tuple(triangle.exterior.coords)[:-1]:
-            key = (round(float(x), 6), round(float(z), 6))
-            index = point_indices.get(key)
-            if index is None:
-                index = len(points)
-                point_indices[key] = index
-                points.append((float(x), float(y), float(z)))
-            u = uv_min + uv_span * ((float(x) - float(min_x)) / span_x)
-            v = uv_min + uv_span * ((float(z) - float(min_z)) / span_z)
-            vertices.append((index, 0, u, v))
-        if len(vertices) == 3:
-            faces.append(
-                _Face(texture, tuple(vertices), _ROAD_SURFACE_FACE_FLAG)
+    if resolution == _VISUAL_LOD and texture:
+        # sil_new.paa is a directional road texture, not a square junction
+        # atlas. Mapping the whole irregular polygon into one UV rectangle
+        # compresses its edge markings through the centre. Keep a neutral
+        # asphalt-only core, then map each connector arm with the exact stock
+        # road U/V convention and 6.25 m repeat scale.
+        _whole, core, arm_regions = _paved_junction_visual_regions(
+            headings,
+            half_width,
+        )
+        core_radius = max(1.0, half_width * 0.98)
+        _append_triangulated_paved_region(
+            geometry=core,
+            y=y,
+            texture=texture,
+            uv_for_point=lambda x, z: _paved_junction_core_uv(
+                x,
+                z,
+                core_radius=core_radius,
+            ),
+            points=points,
+            faces=faces,
+        )
+        for heading, region in arm_regions:
+            _append_triangulated_paved_region(
+                geometry=region,
+                y=y,
+                texture=texture,
+                uv_for_point=lambda x, z, heading=heading: _paved_junction_arm_uv(
+                    x,
+                    z,
+                    heading=heading,
+                    half_width=half_width,
+                ),
+                points=points,
+                faces=faces,
             )
+    else:
+        # Roadway/collision LODs have no visible texture, so one ordinary
+        # triangulation is sufficient and avoids unnecessary duplicate points.
+        point_indices: dict[tuple[float, float], int] = {}
+        triangles = (
+            triangle
+            for triangle in shapely_triangulate(polygon)
+            if polygon.covers(triangle.representative_point())
+        )
+        for triangle in triangles:
+            vertices = []
+            for x, z in tuple(triangle.exterior.coords)[:-1]:
+                key = (round(float(x), 6), round(float(z), 6))
+                index = point_indices.get(key)
+                if index is None:
+                    index = len(points)
+                    point_indices[key] = index
+                    points.append((float(x), float(y), float(z)))
+                vertices.append((index, 0, float(x), float(z)))
+            if len(vertices) == 3:
+                faces.append(
+                    _Face(texture, tuple(vertices), _ROAD_SURFACE_FACE_FLAG)
+                )
 
     properties = ()
     if resolution == _VISUAL_LOD:
@@ -1688,7 +1823,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v21-paved-junction-road-texture"
+                "procedural-infrastructure-model-v22-stock-scale-paved-junction-uvs"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
