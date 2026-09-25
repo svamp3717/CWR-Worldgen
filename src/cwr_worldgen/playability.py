@@ -147,12 +147,41 @@ def _is_mixed_dirt_paved_node(
 
 def _mixed_dirt_paved_trim_metres(
     incidents: Sequence[tuple[tuple[float, float], bool, str, str, str]],
+    dirt_direction: tuple[float, float] | None = None,
 ) -> float:
-    """Stop dirt at the outside edge of the widest paved road at a mixed node."""
+    """Stop dirt outside every paved carriageway strip at a mixed node.
 
-    paved_models = tuple(value[2] for value in incidents if not value[1])
+    A fixed half-width only works for a perpendicular crossing. At a shallow
+    angle the dirt centreline stays inside the paved strip for much longer, so
+    compute the distance along the dirt approach required to clear the widest
+    paved strip. This makes the "paved always wins" rule geometric rather than
+    dependent on object draw order.
+    """
+
+    paved = tuple(value for value in incidents if not value[1])
+    paved_models = tuple(value[2] for value in paved)
     paved_width = paved_junction_width_for_models(paved_models)
-    return max(1.75, paved_width * 0.5 + 0.10)
+    half_width = max(1.75, paved_width * 0.5 + 0.10)
+    if dirt_direction is None:
+        return half_width
+
+    dx, dz = _normalised_direction((0.0, 0.0), dirt_direction)
+    required = half_width
+    for value in paved:
+        px, pz = value[0]
+        plen = math.hypot(px, pz)
+        if plen <= 1.0e-9:
+            continue
+        px, pz = px / plen, pz / plen
+        crossing_sine = abs(dx * pz - dz * px)
+        if crossing_sine <= 1.0e-4:
+            # Near-parallel joins are effectively merges, not crossings. Keep
+            # the dirt well clear of the paved slab rather than letting a huge
+            # mathematical intersection distance leak into the road fitter.
+            required = max(required, half_width * 4.0)
+        else:
+            required = max(required, half_width / crossing_sine)
+    return required
 
 
 def _junction_cap_vertical_offset(model_path: str) -> float:
@@ -1525,10 +1554,6 @@ def _fit_stock_piece_road_objects(
         true_junction_keys - complex_keys - mixed_dirt_paved_keys
     )
     complex_cap_keys = complex_keys - mixed_dirt_paved_keys
-    mixed_dirt_trim_lengths = {
-        key: _mixed_dirt_paved_trim_metres(effective_incidents[key])
-        for key in mixed_dirt_paved_keys
-    }
 
     if progress_callback is not None:
         progress_callback(
@@ -1726,11 +1751,17 @@ def _fit_stock_piece_road_objects(
             mixed_start = plain_dirt and start_key in mixed_dirt_paved_keys
             mixed_end = plain_dirt and end_key in mixed_dirt_paved_keys
             if mixed_start:
-                stop = mixed_dirt_trim_lengths[start_key]
+                stop = _mixed_dirt_paved_trim_metres(
+                    effective_incidents[start_key],
+                    _normalised_direction(run[0], run[1]),
+                )
                 start_trim = max(start_trim, stop)
                 start_cover = max(start_cover, stop)
             if mixed_end:
-                stop = mixed_dirt_trim_lengths[end_key]
+                stop = _mixed_dirt_paved_trim_metres(
+                    effective_incidents[end_key],
+                    _normalised_direction(run[-1], run[-2]),
+                )
                 end_trim = max(end_trim, stop)
                 end_cover = max(end_cover, stop)
             start_distance = min(total_length, start_trim)
