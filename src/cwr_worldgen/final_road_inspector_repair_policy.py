@@ -565,6 +565,48 @@ def _expected_paved_junctions(dataset, projection, spec):
     return tuple(result)
 
 
+
+def _mixed_dirt_paved_points(dataset, projection, spec) -> tuple[tuple[float, float], ...]:
+    """Return OSM nodes where plain dirt meets an at-grade paved road.
+
+    These are deliberate underlay joins, never paved junction candidates. The
+    late road-inspector guard must not reinterpret the paved slabs around them as
+    a missing T/X hub after the dirt terminal piece has been placed underneath.
+    """
+
+    kinds: dict[tuple[int, int], set[str]] = {}
+    positions: dict[tuple[int, int], tuple[float, float]] = {}
+    projected = _p.projected_road_polylines(dataset, projection)
+    for feature, raw_points in zip(dataset.roads, projected):
+        if not _p.road_is_supported(
+            feature.tags,
+            include_minor=spec.include_minor_roads,
+        ):
+            continue
+        if _p._is_plain_dirt_tags(feature.tags):
+            kind = "dirt"
+        elif _at_grade_paved(feature.tags):
+            kind = "paved"
+        else:
+            continue
+        points = tuple(_p._clean_road_points(raw_points))
+        if len(points) < 2:
+            continue
+        for start, end in zip(points, points[1:]):
+            if math.dist(start, end) <= 0.05:
+                continue
+            for point in (start, end):
+                key = _p._road_node_key(point)
+                kinds.setdefault(key, set()).add(kind)
+                positions.setdefault(key, point)
+
+    return tuple(
+        positions[key]
+        for key, values in kinds.items()
+        if {"dirt", "paved"}.issubset(values)
+    )
+
+
 def _unit_from(
     centre: tuple[float, float],
     point: tuple[float, float],
@@ -682,12 +724,22 @@ def ensure_final_paved_junction_hubs(
     ]
 
     candidates = list(_expected_paved_junctions(dataset, projection, spec))
+    mixed_dirt_paved_points = _mixed_dirt_paved_points(
+        dataset,
+        projection,
+        spec,
+    )
     road_by_id = {road.object_id: road for road in inspection.road_objects}
     for issue in inspection.issues:
         candidate = _issue_paved_junction_candidate(issue, road_by_id)
         if candidate is None:
             continue
         point = candidate[0]
+        if any(
+            math.dist(point, mixed_point) <= 2.0
+            for mixed_point in mixed_dirt_paved_points
+        ):
+            continue
         if any(math.dist(point, current[0]) <= 2.0 for current in candidates):
             continue
         candidates.append(candidate)
@@ -699,6 +751,11 @@ def ensure_final_paved_junction_hubs(
     next_id = max((int(obj.object_id) for obj in objects), default=0) + 1
     added = 0
     for point, directions, models in candidates:
+        if any(
+            math.dist(point, mixed_point) <= 2.0
+            for mixed_point in mixed_dirt_paved_points
+        ):
+            continue
         if any(
             math.dist(point, centre)
             <= _pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES + 1.0
