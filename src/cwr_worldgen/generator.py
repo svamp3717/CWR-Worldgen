@@ -3608,15 +3608,7 @@ def build_milestone4(
         for model_path, count in generated_infrastructure_usage
         if is_generated_paved_road_model(model_path)
     )
-    generated_paved_junction_usage = tuple(
-        (model_path, count)
-        for model_path, count in generated_paved_usage
-        if "\\paved_j" in model_path.replace("/", "\\").casefold()
-    )
     paved_texture_path = r"landtext\silnice.pac"
-    paved_t_junction_texture_path = paved_texture_path
-    paved_asf_t_junction_texture_path = paved_texture_path
-    paved_x_junction_texture_path = paved_texture_path
     if generated_paved_usage:
         report_progress(79, "Resolving stock paved-road texture for generated fallback")
         paved_model_scan = scan_assets(
@@ -3633,60 +3625,11 @@ def build_milestone4(
                 spec.paved_road_model,
             ),
         )
-        paved_t_junction_texture_path = paved_texture_path
-        paved_asf_t_junction_texture_path = paved_texture_path
-        paved_x_junction_texture_path = paved_texture_path
-
-    if generated_paved_junction_usage:
-        report_progress(
-            79,
-            "Resolving stock in-game paved-junction textures",
-        )
-        junction_reference_models = (
-            r"o\road\kr_new_sil_sil_t.p3d",
-            r"o\road\kr_new_asf_asf_t.p3d",
-            r"o\road\kr_new_silxsil.p3d",
-        )
-        junction_scan = scan_assets(
-            spec.asset_roots,
-            junction_reference_models,
-            cache_dir=getattr(spec, "cache_dir", None),
-            use_cache=bool(getattr(spec, "cache_enabled", True)),
-            refresh=bool(getattr(spec, "cache_refresh", False)),
-        )
-        paved_t_junction_texture_path = _preferred_stock_junction_texture(
-            junction_reference_models[0],
-            model_texture_dependencies(
-                junction_scan.records,
-                junction_reference_models[0],
-            ),
-            paved_fallback=paved_texture_path,
-        )
-        paved_asf_t_junction_texture_path = _preferred_stock_junction_texture(
-            junction_reference_models[1],
-            model_texture_dependencies(
-                junction_scan.records,
-                junction_reference_models[1],
-            ),
-            paved_fallback=paved_texture_path,
-        )
-        paved_x_junction_texture_path = _preferred_stock_junction_texture(
-            junction_reference_models[2],
-            model_texture_dependencies(
-                junction_scan.records,
-                junction_reference_models[2],
-            ),
-            paved_fallback=paved_t_junction_texture_path,
-        )
-
     if generated_infrastructure_usage:
         infrastructure_library = ProceduralInfrastructureLibrary(
             spec.name,
             road_segment_length=spec.road_segment_length,
             paved_texture_path=paved_texture_path,
-            paved_t_junction_texture_path=paved_t_junction_texture_path,
-            paved_asf_t_junction_texture_path=paved_asf_t_junction_texture_path,
-            paved_x_junction_texture_path=paved_x_junction_texture_path,
             cache_dir=getattr(spec, "cache_dir", None),
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
@@ -3728,15 +3671,6 @@ def build_milestone4(
         + tuple(osm_asset_mapping_report.selected_models)
         + tuple(osm_asset_mapping_report.selected_textures)
         + ((paved_texture_path,) if generated_paved_usage else ())
-        + (
-            (
-                paved_t_junction_texture_path,
-                paved_asf_t_junction_texture_path,
-                paved_x_junction_texture_path,
-            )
-            if generated_paved_junction_usage
-            else ()
-        )
     ))
     report_progress(82, "Scanning configured CWA asset roots and OSM asset mapping")
     asset_scan = scan_assets(
