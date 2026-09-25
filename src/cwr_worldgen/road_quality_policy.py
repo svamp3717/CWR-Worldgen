@@ -161,6 +161,11 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
         values = _p._unique_incidents(raw)
         if not 3 <= len(values) <= 4:
             continue
+        if _p._is_mixed_dirt_paved_node(values):
+            # Mixed dirt/paved nodes are terminations, not hub geometry. The
+            # paved road remains continuous while the dirt approach stops at
+            # the asphalt edge in the stock-road planner.
+            continue
         all_gravel = all(
             _p.is_generated_gravel_road_model(v[2]) for v in values
         )
