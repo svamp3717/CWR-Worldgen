@@ -946,25 +946,34 @@ def _append_paved_junction_quad(
     points.extend((start_left, start_right, end_left, end_right))
     # Match stock sil road UV convention: U spans the road width, V follows
     # longitudinal distance. Triangles use identical shared-edge coordinates.
+    first = _Face(
+        texture,
+        (
+            (start + 0, 0, 0.0, v_start),
+            (start + 2, 0, 0.0, v_end),
+            (start + 1, 0, 1.0, v_start),
+        ),
+        face_flags,
+    )
+    second = _Face(
+        texture,
+        (
+            (start + 1, 0, 1.0, v_start),
+            (start + 2, 0, 0.0, v_end),
+            (start + 3, 0, 1.0, v_end),
+        ),
+        face_flags,
+    )
+    # Generated paved ribbons are deliberately double-sided because CWA/MLOD
+    # face-winding conventions are unforgiving after arbitrary object rotation
+    # and pitch. Do the same for junction quads. This prevents a valid generated
+    # hub from disappearing entirely from one viewing side while keeping the
+    # stock texture/UV topology unchanged.
     faces.extend((
-        _Face(
-            texture,
-            (
-                (start + 0, 0, 0.0, v_start),
-                (start + 2, 0, 0.0, v_end),
-                (start + 1, 0, 1.0, v_start),
-            ),
-            face_flags,
-        ),
-        _Face(
-            texture,
-            (
-                (start + 1, 0, 1.0, v_start),
-                (start + 2, 0, 0.0, v_end),
-                (start + 3, 0, 1.0, v_end),
-            ),
-            face_flags,
-        ),
+        first,
+        second,
+        _Face(texture, tuple(reversed(first.vertices)), face_flags),
+        _Face(texture, tuple(reversed(second.vertices)), face_flags),
     ))
 
 
@@ -1886,7 +1895,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v26-stock-sil-junction-textures"
+                "procedural-infrastructure-model-v27-double-sided-paved-junctions"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
