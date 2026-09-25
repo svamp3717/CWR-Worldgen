@@ -635,8 +635,14 @@ def _fit_stock_piece_road_objects_parallel(
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
         cap_plans[key] = (cap_piece, start_point, end_point)
         if all_paved:
-            cap_trim_lengths[key] = half
-            cap_cover_lengths[key] = half + 0.05
+            cap_trim_lengths[key] = (
+                half
+                + _playability.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+            )
+            cap_cover_lengths[key] = (
+                half
+                + _playability.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+            )
         else:
             cap_trim_lengths[key] = max(0.40, half - 0.70)
             cap_cover_lengths[key] = half + 0.15
@@ -846,10 +852,31 @@ def _fit_stock_piece_road_objects_parallel(
                 continue
             chain_count += 1
             chain: list[tuple[Any, float]] = []
-            for piece, start_point, end_point in fitted_pieces:
+            plain_dirt = _playability._is_plain_dirt_tags(feature.tags)
+            mixed_start = (
+                plain_dirt and start_key in mixed_dirt_paved_keys
+            )
+            mixed_end = (
+                plain_dirt and end_key in mixed_dirt_paved_keys
+            )
+            last_piece_index = len(fitted_pieces) - 1
+            for piece_index, (piece, start_point, end_point) in enumerate(
+                fitted_pieces
+            ):
                 placed_model = _playability._curved_gravel_model_for_run(
                     piece.model_path, run, start_point, end_point
                 )
+                vertical_offset = _playability._road_vertical_offset(
+                    feature.tags
+                )
+                if (
+                    (mixed_start and piece_index == 0)
+                    or (mixed_end and piece_index == last_piece_index)
+                ):
+                    vertical_offset = min(
+                        vertical_offset,
+                        _playability._MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES,
+                    )
                 obj = _playability._road_object_on_slope(
                     next_id,
                     placed_model,
@@ -857,7 +884,7 @@ def _fit_stock_piece_road_objects_parallel(
                     end_point,
                     elevations,
                     spec,
-                    vertical_offset=_playability._road_vertical_offset(feature.tags),
+                    vertical_offset=vertical_offset,
                 )
                 next_id += 1
                 objects.append(obj)
