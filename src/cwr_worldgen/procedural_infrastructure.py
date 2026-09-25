@@ -1128,10 +1128,22 @@ def _paved_junction_lods(
     _degree, headings = parsed
     half_width = max(1.75, key.width_m * 0.5)
     polygon = _paved_junction_polygon(headings, half_width)
+
+    # The uploaded stock kr_new_sil_sil_t / kr_new_silxsil models do not use
+    # the terrain-road PAC. Their visual faces explicitly reference the road
+    # artwork in o\road: sil_new for the through carriageway and sil_konec for
+    # terminating arms. Asset scans can legitimately miss ODOL texture strings,
+    # so make the wide sil-family generated hub deterministic instead of falling
+    # back to landtext\silnice.pac and producing the visibly wrong centre patch.
+    junction_texture = (
+        r"o\road\sil_new.paa"
+        if key.width_m >= 8.5
+        else texture
+    )
     visual = _stock_style_paved_junction_visual_lod(
         headings=headings,
         half_width=half_width,
-        texture=texture,
+        texture=junction_texture,
         y=GENERATED_GRAVEL_VISUAL_TOP_METRES,
     )
     boundary = tuple(
@@ -1874,7 +1886,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v25-exact-stock-junction-uvs"
+                "procedural-infrastructure-model-v26-stock-sil-junction-textures"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
