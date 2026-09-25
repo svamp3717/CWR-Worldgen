@@ -550,6 +550,22 @@ def test_mixed_dirt_paved_node_is_not_a_junction_surface() -> None:
     )
 
 
+
+def test_mixed_dirt_paved_trim_accounts_for_shallow_crossing_angle() -> None:
+    incidents = (
+        ((0.0, 1.0), False, r"o\road\sil25.p3d", "paved/0", "way/paved"),
+        ((0.0, -1.0), False, r"o\road\sil25.p3d", "paved/1", "way/paved"),
+        ((0.5, math.sqrt(0.75)), True, r"o\road\ces25.p3d", "dirt/0", "way/dirt"),
+    )
+    perpendicular = playability._mixed_dirt_paved_trim_metres(incidents)
+    shallow = playability._mixed_dirt_paved_trim_metres(
+        incidents,
+        (0.5, math.sqrt(0.75)),
+    )
+
+    assert math.isclose(perpendicular, 4.65, abs_tol=1.0e-9)
+    assert math.isclose(shallow, 9.30, abs_tol=1.0e-8)
+
 def test_dirt_track_terminates_at_paved_edge_without_mixed_junction_cap() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
