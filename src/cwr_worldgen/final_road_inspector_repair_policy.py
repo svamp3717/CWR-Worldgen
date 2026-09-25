@@ -493,6 +493,268 @@ def repair_final_road_geometry(
     return current
 
 
+
+def _at_grade_paved(tags) -> bool:
+    if _p.road_is_dirt(tags):
+        return False
+    if _p._road_is_explicit_bridge(tags):
+        return False
+    tunnel = str(tags.get("tunnel", "")).strip().casefold()
+    if tunnel not in {"", "no", "false", "0", "none"}:
+        return False
+    try:
+        layer = float(str(tags.get("layer", "0")).replace(",", "."))
+    except ValueError:
+        layer = 0.0
+    return abs(layer) <= 1.0e-9
+
+
+def _expected_paved_junctions(dataset, projection, spec):
+    """Return all-paved three/four-way nodes from normalized road topology."""
+
+    incidents: dict[
+        tuple[int, int],
+        list[tuple[tuple[float, float], bool, str, str, str]],
+    ] = {}
+    positions: dict[tuple[int, int], tuple[float, float]] = {}
+    projected = _p.projected_road_polylines(dataset, projection)
+    for feature, raw_points in zip(dataset.roads, projected):
+        if not _p.road_is_supported(
+            feature.tags,
+            include_minor=spec.include_minor_roads,
+        ):
+            continue
+        points = tuple(_p._clean_road_points(raw_points))
+        if len(points) < 2:
+            continue
+        dirt = _p.road_is_dirt(feature.tags)
+        model = _p.road_model_for_tags(spec, feature.tags)
+        at_grade = _at_grade_paved(feature.tags) if not dirt else True
+        for index, (start, end) in enumerate(zip(points, points[1:])):
+            if math.dist(start, end) <= 0.05:
+                continue
+            forward = _p._normalised_direction(start, end)
+            reverse = (-forward[0], -forward[1])
+            segment = f"{feature.osm_key}/{index:06d}"
+            for point, direction in ((start, forward), (end, reverse)):
+                key = _p._road_node_key(point)
+                # Mark bridge/tunnel paved incidents as dirt-like for the sole
+                # purpose of excluding the node from at-grade hub synthesis.
+                synthetic_dirt = dirt or not at_grade
+                incidents.setdefault(key, []).append(
+                    (
+                        direction,
+                        synthetic_dirt,
+                        model,
+                        segment,
+                        feature.osm_key,
+                    )
+                )
+                positions.setdefault(key, point)
+
+    result = []
+    for key, raw_values in incidents.items():
+        values = _p._unique_incidents(raw_values)
+        if not (3 <= len(values) <= 4):
+            continue
+        if any(value[1] for value in values):
+            continue
+        directions = tuple(value[0] for value in values)
+        models = tuple(value[2] for value in values)
+        result.append((positions[key], directions, models))
+    return tuple(result)
+
+
+def _unit_from(
+    centre: tuple[float, float],
+    point: tuple[float, float],
+) -> tuple[float, float] | None:
+    dx = float(point[0]) - float(centre[0])
+    dz = float(point[1]) - float(centre[1])
+    length = math.hypot(dx, dz)
+    if length <= 0.20:
+        return None
+    return dx / length, dz / length
+
+
+def _unique_directions(
+    directions: Sequence[tuple[float, float]],
+    *,
+    tolerance_degrees: float = 15.0,
+) -> tuple[tuple[float, float], ...]:
+    cosine = math.cos(math.radians(tolerance_degrees))
+    result: list[tuple[float, float]] = []
+    for direction in directions:
+        length = math.hypot(*direction)
+        if length <= 1.0e-9:
+            continue
+        value = direction[0] / length, direction[1] / length
+        if any(
+            value[0] * existing[0] + value[1] * existing[1] >= cosine
+            for existing in result
+        ):
+            continue
+        result.append(value)
+    return tuple(result)
+
+
+def _issue_paved_junction_candidate(issue, road_by_id):
+    if issue.category not in {
+        "paved_crossing_without_junction",
+        "paved_t_without_junction",
+        "intersection_without_junction",
+    }:
+        return None
+
+    roads = tuple(
+        road_by_id.get(int(object_id))
+        for object_id in issue.object_ids
+    )
+    if not roads or any(road is None or road.road_type != "paved" for road in roads):
+        return None
+
+    centre = float(issue.x), float(issue.z)
+    directions: list[tuple[float, float]] = []
+    for road in roads:
+        endpoints = tuple(road.endpoints)
+        if len(endpoints) < 2:
+            continue
+        first = _unit_from(centre, endpoints[0].point)
+        second = _unit_from(centre, endpoints[-1].point)
+        first_distance = math.dist(centre, endpoints[0].point)
+        second_distance = math.dist(centre, endpoints[-1].point)
+        if first is not None and second is not None:
+            dot = first[0] * second[0] + first[1] * second[1]
+            # The crossing lies inside this road piece: both directions are
+            # real arms. If both endpoints sit on the same side, it is a T stem
+            # and only the farther outward direction belongs to the junction.
+            if dot <= -0.35:
+                directions.extend((first, second))
+            elif first_distance >= second_distance:
+                directions.append(first)
+            else:
+                directions.append(second)
+        elif first is not None:
+            directions.append(first)
+        elif second is not None:
+            directions.append(second)
+
+    unique = _unique_directions(directions)
+    if len(unique) not in {3, 4}:
+        return None
+    models = tuple(road.model_path for road in roads if road is not None)
+    return centre, unique, models
+
+
+def ensure_final_paved_junction_hubs(
+    report,
+    dataset,
+    projection,
+    elevations: Sequence[float],
+    spec,
+    *,
+    progress_callback: Callable[[int, str], None] | None = None,
+):
+    """Guarantee one visible generated hub at every surviving paved T/X node.
+
+    This is deliberately a final visual guard. Earlier stock fitting may reserve
+    a junction and later lose its cap during fallback/cleanup, while separately
+    normalized paved slabs can also intersect without a shared OSM node. In both
+    cases a raised generated hub is safer than leaving grass or raw crossing
+    rectangles in the final WRP.
+    """
+
+    if (
+        not report.objects
+        or not bool(getattr(spec, "procedural_paved_road_fallback", False))
+    ):
+        return report
+
+    inspection = _inspector.inspect_road_objects(
+        report.objects,
+        world_name=str(getattr(spec, "name", "world")),
+        topology_checks=True,
+    )
+    existing_centres = [
+        (road.x, road.z)
+        for road in inspection.road_objects
+        if road.kind.startswith("junction_")
+    ]
+
+    candidates = list(_expected_paved_junctions(dataset, projection, spec))
+    road_by_id = {road.object_id: road for road in inspection.road_objects}
+    for issue in inspection.issues:
+        candidate = _issue_paved_junction_candidate(issue, road_by_id)
+        if candidate is None:
+            continue
+        point = candidate[0]
+        if any(math.dist(point, current[0]) <= 2.0 for current in candidates):
+            continue
+        candidates.append(candidate)
+
+    if not candidates:
+        return report
+
+    objects = list(report.objects)
+    next_id = max((int(obj.object_id) for obj in objects), default=0) + 1
+    added = 0
+    for point, directions, models in candidates:
+        if any(
+            math.dist(point, centre)
+            <= _pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES + 1.0
+            for centre in existing_centres
+        ):
+            continue
+        try:
+            signature, axis = _pi.paved_junction_signature_for_directions(
+                directions
+            )
+        except ValueError:
+            continue
+        width = _pi.paved_junction_width_for_models(models)
+        model_path = _pi.paved_junction_model_path(
+            str(getattr(spec, "name", "world")),
+            width,
+            signature,
+        )
+        extent = _pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        start = (
+            point[0] - axis[0] * extent,
+            point[1] - axis[1] * extent,
+        )
+        end = (
+            point[0] + axis[0] * extent,
+            point[1] + axis[1] * extent,
+        )
+        objects.append(
+            _p._road_object_on_slope(
+                next_id,
+                model_path,
+                start,
+                end,
+                elevations,
+                spec,
+                vertical_offset=_p._junction_cap_vertical_offset(model_path),
+            )
+        )
+        next_id += 1
+        added += 1
+        existing_centres.append(point)
+
+    if not added:
+        return report
+    if progress_callback is not None:
+        progress_callback(
+            _RAW_PROGRESS_PERCENT,
+            f"Final paved-junction guard added {added:,} missing generated hub(s)",
+        )
+    return replace(
+        report,
+        objects=tuple(objects),
+        chain_count=report.chain_count + added,
+    )
+
+
 def _fit(
     dataset,
     projection,
@@ -517,11 +779,19 @@ def _fit(
         elevations,
         spec,
     )
-    return repair_final_road_geometry(
+    repaired = repair_final_road_geometry(
         report,
         elevations,
         spec,
         protected_object_ids=protected,
+        progress_callback=progress_callback,
+    )
+    return ensure_final_paved_junction_hubs(
+        repaired,
+        dataset,
+        projection,
+        elevations,
+        spec,
         progress_callback=progress_callback,
     )
 
