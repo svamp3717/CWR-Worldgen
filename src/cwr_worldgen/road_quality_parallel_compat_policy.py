@@ -221,6 +221,8 @@ def _run_plan_key(job: Any, context: Any) -> tuple[Any, ...]:
         float(job.start_cover),
         float(job.end_cover),
         bool(job.cap_surface_mismatch),
+        bool(getattr(job, "suppress_short_fallback", False)),
+        bool(getattr(job, "hard_stop_at_preferred_end", False)),
         float(job.world_size),
         _junction_signature(context, start_key),
         _junction_signature(context, end_key),
@@ -517,8 +519,12 @@ def _quality_aware_plan_run(job: Any):
     preferred_end = max(start_distance, total_length - job.end_trim)
     minimum_end = max(start_distance, total_length - job.end_cover)
     shortest = min(piece.length_metres for piece in job.variants)
-    maximum_end = total_length + (
-        0.70 if job.end_cover > 0.0 else shortest * 0.5
+    maximum_end = (
+        preferred_end
+        if getattr(job, "hard_stop_at_preferred_end", False)
+        else total_length + (
+            0.70 if job.end_cover > 0.0 else shortest * 0.5
+        )
     )
     fitted_pieces = _batched_quality_chain(
         measure,
@@ -532,10 +538,17 @@ def _quality_aware_plan_run(job: Any):
     covered_by_hubs = False
     skipped = 0
     if not fitted_pieces:
-        covered_by_hubs = (
-            total_length <= job.start_cover + job.end_cover + 1.0e-6
+        suppress_short_fallback = bool(
+            getattr(job, "suppress_short_fallback", False)
         )
-        if not covered_by_hubs or job.cap_surface_mismatch:
+        covered_by_hubs = (
+            not suppress_short_fallback
+            and total_length <= job.start_cover + job.end_cover + 1.0e-6
+        )
+        if (
+            not suppress_short_fallback
+            and (not covered_by_hubs or job.cap_surface_mismatch)
+        ):
             fitted_pieces = _playability._short_run_fallback_piece(
                 measure,
                 job.variants,
