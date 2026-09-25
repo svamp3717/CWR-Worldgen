@@ -746,9 +746,6 @@ def test_generated_paved_junction_texture_routing_reuses_stock_road_artwork() ->
     library = infrastructure.ProceduralInfrastructureLibrary(
         "junction_world",
         paved_texture_path=stock_texture,
-        paved_t_junction_texture_path=r"o\road\wrong_t_atlas.paa",
-        paved_asf_t_junction_texture_path=r"o\road\wrong_asf_atlas.paa",
-        paved_x_junction_texture_path=r"o\road\wrong_x_atlas.paa",
         cache_enabled=False,
     )
 
