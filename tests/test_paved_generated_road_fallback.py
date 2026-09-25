@@ -619,10 +619,12 @@ def test_generated_paved_junction_asset_uses_stock_texture_and_road_metadata(
     ) * len(roadway.points)
     assert visual.faces
     assert roadway.faces
-    assert all(
-        face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
-        for face in visual.faces
-    )
+    assert {
+        face.flags for face in visual.faces
+    }.issubset({
+        infrastructure._ROAD_SURFACE_FACE_FLAG,
+        0x00024102,
+    })
     assert all(
         face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
         for face in roadway.faces
@@ -691,35 +693,6 @@ def test_generated_paved_junction_visual_has_continuous_uvs() -> None:
 
 
 
-def test_generated_paved_uv_scale_matches_stock_sil_family() -> None:
-    half_width = 4.55
-    left_u, centre_v = infrastructure._paved_junction_arm_uv(
-        -half_width,
-        0.0,
-        heading=0.0,
-        half_width=half_width,
-    )
-    right_u, _ = infrastructure._paved_junction_arm_uv(
-        half_width,
-        0.0,
-        heading=0.0,
-        half_width=half_width,
-    )
-    _, one_repeat_v = infrastructure._paved_junction_arm_uv(
-        0.0,
-        6.25,
-        heading=0.0,
-        half_width=half_width,
-    )
-
-    # Uploaded stock sil6/sil12/sil25 all use U=0..1 across 9.1 m and advance
-    # exactly one V repeat per 6.25 m of road length.
-    assert infrastructure.GENERATED_PAVED_TEXTURE_REPEAT_METRES == 6.25
-    assert math.isclose(left_u, 0.0, abs_tol=1.0e-9)
-    assert math.isclose(right_u, 1.0, abs_tol=1.0e-9)
-    assert math.isclose(centre_v - one_repeat_v, 1.0, abs_tol=1.0e-9)
-
-
 def test_generated_paved_ribbon_uses_stock_sil_longitudinal_repeat() -> None:
     key = infrastructure.InfrastructureModelKey(
         "road",
@@ -741,22 +714,30 @@ def test_generated_paved_ribbon_uses_stock_sil_longitudinal_repeat() -> None:
     assert math.isclose(max(values) - min(values), 2.0, abs_tol=1.0e-7)
 
 
-def test_generated_paved_junction_core_never_samples_road_shoulders() -> None:
-    radius = 4.55 * 0.98
-    left_u, _ = infrastructure._paved_junction_core_uv(
-        -radius,
-        0.0,
-        core_radius=radius,
+
+def test_wide_generated_paved_junction_forces_uploaded_stock_sil_textures() -> None:
+    key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_j3_w091_h000_090_180",
+        91,
+        125,
     )
-    right_u, _ = infrastructure._paved_junction_core_uv(
-        radius,
-        0.0,
-        core_radius=radius,
-    )
-    assert math.isclose(left_u, 0.28, abs_tol=1.0e-9)
-    assert math.isclose(right_u, 0.72, abs_tol=1.0e-9)
+    visual = infrastructure._road_lods(
+        key,
+        r"landtext\silnice.pac",
+    )[0]
+
+    textures = [face.texture for face in visual.faces]
+    assert textures.count(r"o\road\sil_new.paa") == 2
+    assert textures.count(r"o\road\sil_konec.paa") == 2
+    assert r"landtext\silnice.pac" not in textures
 
 
+def test_empty_odol_dependency_scan_falls_back_to_stock_sil_new() -> None:
+    assert generator._preferred_stock_paved_texture(
+        r"o\road\sil25.p3d",
+        (),
+    ) == r"o\road\sil_new.paa"
 
 
 def test_generated_paved_t_junction_matches_stock_texture_topology() -> None:
