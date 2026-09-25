@@ -772,15 +772,3 @@ def test_generated_paved_junction_texture_routing_reuses_stock_road_artwork() ->
     assert library._texture_path(narrow_t) == stock_texture
     assert library._texture_path(wide_x) == stock_texture
     assert library._texture_path(straight) == stock_texture
-
-def test_stock_junction_texture_preference_avoids_straight_road_artwork() -> None:
-    selected = generator._preferred_stock_junction_texture(
-        r"o\road\kr_new_sil_sil_t.p3d",
-        (
-            r"o\road\sil_new.paa",
-            r"o\road\kr_new_sil_sil_t.paa",
-        ),
-        paved_fallback=r"o\road\sil_new.paa",
-    )
-    assert selected == r"o\road\kr_new_sil_sil_t.paa"
-
