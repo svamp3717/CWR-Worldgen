@@ -593,6 +593,8 @@ def test_dirt_track_underlays_paved_road_without_mixed_junction_cap() -> None:
     paved_axes = []
     dirt_heights = []
     paved_heights = []
+    dirt_objects = []
+    dirt_lengths = []
     for obj in report.objects:
         path = obj.model_path.casefold()
         dirt_match = re.search(r"\\(?:ces|cesta)(25|12|6)\.p3d$", path)
@@ -605,6 +607,8 @@ def test_dirt_track_underlays_paved_road_without_mixed_junction_cap() -> None:
             )
             dirt_axes.append(playability._model_axis(obj, length))
             dirt_heights.append(obj.y)
+            dirt_objects.append(obj)
+            dirt_lengths.append(length)
         elif paved_match:
             length = playability.stock_road_piece_length_metres(
                 obj.model_path,
@@ -635,12 +639,29 @@ def test_dirt_track_underlays_paved_road_without_mixed_junction_cap() -> None:
             for endpoint in dirt_axes[index]
         ),
     )
-    assert dirt_heights[closest_dirt_index] <= (
-        playability._MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES + 1.0e-9
+    dirt_obj = dirt_objects[closest_dirt_index]
+    dirt_length = dirt_lengths[closest_dirt_index]
+    dirt_axis = dirt_axes[closest_dirt_index]
+    start_is_node = (
+        math.dist(centre, dirt_axis[0])
+        <= math.dist(centre, dirt_axis[1])
     )
-    assert (
-        min(paved_heights) - dirt_heights[closest_dirt_index]
-    ) >= 0.12
+    endpoint_delta = (
+        math.sin(math.radians(dirt_obj.pitch_degrees))
+        * dirt_length
+        * 0.5
+    )
+    dirt_node_height = (
+        dirt_obj.y - endpoint_delta
+        if start_is_node
+        else dirt_obj.y + endpoint_delta
+    )
+    assert math.isclose(
+        dirt_node_height,
+        playability._MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES,
+        abs_tol=1.0e-6,
+    )
+    assert min(paved_heights) - dirt_node_height >= 0.12
 
     # The paved road is not split/trimmed for the dirt join, so at least one
     # paved slab still covers the shared OSM node continuously.
