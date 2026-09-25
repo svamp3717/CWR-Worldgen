@@ -869,23 +869,37 @@ def _fit_stock_piece_road_objects_parallel(
                 vertical_offset = _playability._road_vertical_offset(
                     feature.tags
                 )
-                if (
-                    (mixed_start and piece_index == 0)
-                    or (mixed_end and piece_index == last_piece_index)
-                ):
-                    vertical_offset = min(
-                        vertical_offset,
-                        _playability._MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES,
+                bury_start = mixed_start and piece_index == 0
+                bury_end = mixed_end and piece_index == last_piece_index
+                if bury_start or bury_end:
+                    obj = _playability._road_object_on_slope_endpoint_offsets(
+                        next_id,
+                        placed_model,
+                        start_point,
+                        end_point,
+                        elevations,
+                        spec,
+                        start_vertical_offset=(
+                            _playability._MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES
+                            if bury_start
+                            else vertical_offset
+                        ),
+                        end_vertical_offset=(
+                            _playability._MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES
+                            if bury_end
+                            else vertical_offset
+                        ),
                     )
-                obj = _playability._road_object_on_slope(
-                    next_id,
-                    placed_model,
-                    start_point,
-                    end_point,
-                    elevations,
-                    spec,
-                    vertical_offset=vertical_offset,
-                )
+                else:
+                    obj = _playability._road_object_on_slope(
+                        next_id,
+                        placed_model,
+                        start_point,
+                        end_point,
+                        elevations,
+                        spec,
+                        vertical_offset=vertical_offset,
+                    )
                 next_id += 1
                 objects.append(obj)
                 chain.append((obj, piece.length_metres))
