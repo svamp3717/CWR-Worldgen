@@ -35,6 +35,11 @@ _GENERATED_PAVED = re.compile(
     r"(?:_(?P<side>[lr])(?P<degrees>\d{2}))?\.p3d$",
     re.I,
 )
+_GENERATED_PAVED_JUNCTION = re.compile(
+    r"^(?:.*[\\/])paved_j(?P<degree>[34])_w(?P<width>\d{3})_h"
+    r"(?P<headings>\d{3}(?:_\d{3}){2,3})\.p3d$",
+    re.I,
+)
 _GRAVEL_JUNCTION = re.compile(
     r"^(?:.*[\\/])gravel_j(?P<degree>[34])(?:_(?P<variant>t(?:30|45|60|75)[lr]|t90|y120|x(?:30|45|60|75|90)))?\.p3d$",
     re.I,
@@ -346,6 +351,51 @@ def _road(values) -> RoadObject | None:
             object_id, model, x, y, z, yaw, pitch, family, kind, endpoints
         )
 
+    match = _GENERATED_PAVED_JUNCTION.fullmatch(path)
+    if match:
+        degree = int(match.group("degree"))
+        width = int(match.group("width")) / 10.0
+        family = "asf" if width <= 7.5 else "sil"
+        headings = tuple(
+            float(value) % 360.0
+            for value in match.group("headings").split("_")
+        )
+        if len(headings) != degree or len(set(headings)) != degree:
+            return None
+        endpoints = tuple(
+            _endpoint(
+                object_id,
+                model,
+                family,
+                "junction",
+                index,
+                _world_point(
+                    (
+                        math.sin(math.radians(direction)) * _JUNCTION_RADIUS,
+                        math.cos(math.radians(direction)) * _JUNCTION_RADIUS,
+                    ),
+                    origin,
+                    yaw,
+                    pitch,
+                ),
+                _world_heading(direction, yaw, pitch),
+                _world_heading(direction, yaw, pitch),
+            )
+            for index, direction in enumerate(headings)
+        )
+        return RoadObject(
+            object_id,
+            model,
+            x,
+            y,
+            z,
+            yaw,
+            pitch,
+            family,
+            f"junction_generated_{degree}",
+            endpoints,
+        )
+
     match = _GRAVEL.fullmatch(path)
     if match:
         length = float(match.group("length"))
@@ -547,7 +597,11 @@ def _paved_crossing_issues(roads: Sequence[RoadObject]) -> list[RoadIssue]:
                 buckets.setdefault((bx, bz), []).append(index)
     issues: list[RoadIssue] = []
     seen: set[tuple[int, int]] = set()
-    junctions = tuple((road.x, road.z) for road in roads if road.kind in {"junction_t", "junction_x"})
+    junctions = tuple(
+        (road.x, road.z)
+        for road in roads
+        if road.kind.startswith("junction_")
+    )
     for indices in buckets.values():
         for i, first_index in enumerate(indices):
             for second_index in indices[i + 1:]:
