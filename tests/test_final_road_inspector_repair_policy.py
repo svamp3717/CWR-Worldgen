@@ -9,6 +9,7 @@ from cwr_worldgen import procedural_infrastructure as infrastructure
 from cwr_worldgen import road_inspector as inspector
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.playability import RoadFitReport
+from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
 
 
 def _spec():
@@ -20,6 +21,10 @@ def _spec():
         road_segment_length=25.0,
         max_road_objects=10000,
         advisory_object_limits=True,
+        include_minor_roads=False,
+        paved_road_model=r"o\road\sil25.p3d",
+        dirt_road_model=r"o\road\ces25.p3d",
+        procedural_gravel_roads=True,
     )
 
 
@@ -183,6 +188,69 @@ def test_stock_repair_plan_reconstructs_clean_vanilla_curve_sequence() -> None:
         topology_checks=False,
     )
     assert result.issues == ()
+
+
+
+
+def test_final_guard_restores_missing_generated_paved_t_hub() -> None:
+    spec = _spec()
+    bbox = (0.0, 0.0, 0.01, 0.01)
+    projection = BboxProjection.create(bbox, spec.cells * spec.cell_size)
+    centre = (320.0, 320.0)
+
+    def ll(point):
+        return projection.to_latlon(point)
+
+    dataset = OsmDataset(
+        source_generator="final-paved-hub-guard",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/main",
+                {"highway": "residential"},
+                (ll((320.0, 180.0)), ll(centre), ll((320.0, 460.0))),
+            ),
+            OsmLineFeature(
+                "way/branch",
+                {"highway": "residential"},
+                (ll(centre), ll((470.0, 320.0))),
+            ),
+        ),
+    )
+    # Simulate the exact failure visible in-game: the approach chains were
+    # trimmed to the 6.25 m hub connector radius, but the cap itself vanished.
+    report = _report(
+        WorldObject(1, r"o\road\sil6.p3d", 320.0, 0.035, 329.375, 0.0, 0.0),
+        WorldObject(2, r"o\road\sil6.p3d", 320.0, 0.035, 310.625, 0.0, 0.0),
+        WorldObject(3, r"o\road\sil6.p3d", 329.375, 0.035, 320.0, 90.0, 0.0),
+    )
+
+    result = repair.ensure_final_paved_junction_hubs(
+        report,
+        dataset,
+        projection,
+        [0.0] * (spec.cells * spec.cells),
+        spec,
+    )
+
+    assert len(result.objects) == len(report.objects) + 1
+    hub = result.objects[-1]
+    assert hub.model_path.startswith(r"repair_test\i\paved_j3_w091_h")
+    parsed = inspector.inspect_road_objects(
+        result.objects,
+        world_name=spec.name,
+    )
+    generated = [
+        road for road in parsed.road_objects
+        if road.kind == "junction_generated_3"
+    ]
+    assert len(generated) == 1
+    assert math.dist((generated[0].x, generated[0].z), centre) <= 0.05
 
 
 def test_inspector_repair_is_captured_by_final_building_clearance() -> None:
