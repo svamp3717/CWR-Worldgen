@@ -1021,9 +1021,12 @@ def _stock_style_paved_junction_visual_lod(
         if len(headings) == 3
         else through_length / (GENERATED_PAVED_TEXTURE_REPEAT_METRES * 2.0)
     )
-    through_flags = (
-        0x00024102 if len(headings) == 3 else _ROAD_SURFACE_FACE_FLAG
-    )
+    # Use the same proven MLOD road-surface flags as generated paved ribbons.
+    # The uploaded ODOL stock T carries a slightly different compiled face flag,
+    # but copying that binary flag into an authored MLOD made visibility depend
+    # on engine-side interpretation. Geometry/texture topology is stock-like;
+    # generated MLOD surface semantics stay on the known-good road flag.
+    through_flags = _ROAD_SURFACE_FACE_FLAG
     _append_paved_junction_quad(
         points,
         faces,
@@ -1895,7 +1898,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v27-double-sided-paved-junctions"
+                "procedural-infrastructure-model-v28-stable-paved-junction-flags"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
