@@ -313,5 +313,55 @@ def test_final_guard_never_adds_paved_hub_at_mixed_dirt_join() -> None:
     )
 
 
+
+
+def test_generated_hub_realigns_to_final_fitted_approach_tangents() -> None:
+    spec = _spec()
+    centre = (320.0, 320.0)
+    radius = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+
+    def approach(object_id: int, heading: float) -> WorldObject:
+        angle = math.radians(heading)
+        # A sil6 centre 3.125 m beyond the connector puts its inner endpoint
+        # exactly at the logical hub radius.
+        distance = radius + 3.125
+        return WorldObject(
+            object_id,
+            r"o\road\sil6.p3d",
+            centre[0] + math.sin(angle) * distance,
+            0.035,
+            centre[1] + math.cos(angle) * distance,
+            heading,
+            0.0,
+        )
+
+    report = _report(
+        WorldObject(
+            1,
+            r"repair_test\i\paved_j3_w091_h000_095_190.p3d",
+            centre[0],
+            0.035,
+            centre[1],
+            0.0,
+            0.0,
+        ),
+        approach(2, 0.0),
+        approach(3, 80.0),
+        approach(4, 190.0),
+        caps=1,
+    )
+
+    result = repair.realign_generated_paved_junction_hubs(
+        report,
+        [0.0] * (spec.cells * spec.cells),
+        spec,
+    )
+    hub = next(obj for obj in result.objects if obj.object_id == 1)
+    assert hub.model_path.endswith(
+        r"\paved_j3_w091_h000_080_190.p3d"
+    )
+    assert math.isclose(hub.heading_degrees, 0.0, abs_tol=0.1)
+
+
 def test_inspector_repair_is_captured_by_final_building_clearance() -> None:
     assert clearance._ORIGINAL_FIT is repair._fit
