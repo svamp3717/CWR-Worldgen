@@ -541,12 +541,6 @@ def _fit_stock_piece_road_objects_parallel(
         true_junction_keys - complex_keys - mixed_dirt_paved_keys
     )
     complex_cap_keys = complex_keys - mixed_dirt_paved_keys
-    mixed_dirt_trim_lengths = {
-        key: _playability._mixed_dirt_paved_trim_metres(
-            effective_incidents[key]
-        )
-        for key in mixed_dirt_paved_keys
-    }
     if progress_callback is not None:
         progress_callback(
             24,
@@ -700,11 +694,17 @@ def _fit_stock_piece_road_objects_parallel(
             )
             mixed_end = plain_dirt and end_key in mixed_dirt_paved_keys
             if mixed_start:
-                stop = mixed_dirt_trim_lengths[start_key]
+                stop = _playability._mixed_dirt_paved_trim_metres(
+                    effective_incidents[start_key],
+                    _playability._normalised_direction(run[0], run[1]),
+                )
                 start_trim = max(start_trim, stop)
                 start_cover = max(start_cover, stop)
             if mixed_end:
-                stop = mixed_dirt_trim_lengths[end_key]
+                stop = _playability._mixed_dirt_paved_trim_metres(
+                    effective_incidents[end_key],
+                    _playability._normalised_direction(run[-1], run[-2]),
+                )
                 end_trim = max(end_trim, stop)
                 end_cover = max(end_cover, stop)
             cap_surface_mismatch = any(
