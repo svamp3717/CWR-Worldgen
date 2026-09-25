@@ -416,8 +416,7 @@ def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
     model_summary = infrastructure.inspect_mlod(
         tmp_path / result.model_files[0]
     )
-    assert stock_junction_texture in model_summary.textures
-    assert stock_texture not in model_summary.textures
+    assert stock_texture in model_summary.textures
 
     document = json.loads(
         (tmp_path / "infrastructure.json").read_text(encoding="utf-8")
@@ -563,11 +562,9 @@ def test_generated_paved_junction_asset_uses_stock_texture_and_road_metadata(
     assert infrastructure.is_generated_paved_road_model(model)
 
     stock_texture = r"o\road\sil_new.paa"
-    stock_junction_texture = r"o\road\kr_new_sil_sil_t.paa"
     library = infrastructure.ProceduralInfrastructureLibrary(
         "junction_world",
         paved_texture_path=stock_texture,
-        paved_t_junction_texture_path=stock_junction_texture,
         cache_enabled=False,
     )
     library.register_model_usage(model, 2)
@@ -745,13 +742,14 @@ def test_gravel_quality_wrapper_uses_generated_paved_overlap_constant() -> None:
     finally:
         gravel_junctions._RQ = previous
 
-def test_generated_paved_junction_texture_routing_uses_game_junction_artwork() -> None:
+def test_generated_paved_junction_texture_routing_reuses_stock_road_artwork() -> None:
+    stock_texture = r"o\road\sil_new.paa"
     library = infrastructure.ProceduralInfrastructureLibrary(
         "junction_world",
-        paved_texture_path=r"o\road\sil_new.paa",
-        paved_t_junction_texture_path=r"o\road\kr_new_sil_sil_t.paa",
-        paved_asf_t_junction_texture_path=r"o\road\kr_new_asf_asf_t.paa",
-        paved_x_junction_texture_path=r"o\road\kr_new_silxsil.paa",
+        paved_texture_path=stock_texture,
+        paved_t_junction_texture_path=r"o\road\wrong_t_atlas.paa",
+        paved_asf_t_junction_texture_path=r"o\road\wrong_asf_atlas.paa",
+        paved_x_junction_texture_path=r"o\road\wrong_x_atlas.paa",
         cache_enabled=False,
     )
 
@@ -768,11 +766,13 @@ def test_generated_paved_junction_texture_routing_uses_game_junction_artwork() -
         "road", "paved_w091_l0062", 91, 62
     )
 
-    assert library._texture_path(wide_t) == r"o\road\kr_new_sil_sil_t.paa"
-    assert library._texture_path(narrow_t) == r"o\road\kr_new_asf_asf_t.paa"
-    assert library._texture_path(wide_x) == r"o\road\kr_new_silxsil.paa"
-    assert library._texture_path(straight) == r"o\road\sil_new.paa"
-
+    # Generated hub geometry has its own UV layout. It must therefore use the
+    # same verified in-game road surface as the approaches, not a kr_new model's
+    # texture dependency/atlas.
+    assert library._texture_path(wide_t) == stock_texture
+    assert library._texture_path(narrow_t) == stock_texture
+    assert library._texture_path(wide_x) == stock_texture
+    assert library._texture_path(straight) == stock_texture
 
 def test_stock_junction_texture_preference_avoids_straight_road_artwork() -> None:
     selected = generator._preferred_stock_junction_texture(
