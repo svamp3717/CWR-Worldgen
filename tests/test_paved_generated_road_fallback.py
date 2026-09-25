@@ -728,8 +728,8 @@ def test_wide_generated_paved_junction_forces_uploaded_stock_sil_textures() -> N
     )[0]
 
     textures = [face.texture for face in visual.faces]
-    assert textures.count(r"o\road\sil_new.paa") == 2
-    assert textures.count(r"o\road\sil_konec.paa") == 2
+    assert textures.count(r"o\road\sil_new.paa") == 4
+    assert textures.count(r"o\road\sil_konec.paa") == 4
     assert r"landtext\silnice.pac" not in textures
 
 
@@ -758,11 +758,11 @@ def test_generated_paved_t_junction_matches_stock_texture_topology() -> None:
     )[0]
 
     textures = [face.texture for face in visual.faces]
-    # Uploaded kr_new_sil_sil_t.p3d has two sil_new triangles for the through
-    # carriageway and two sil_konec triangles for the terminating arm.
-    assert len(visual.faces) == 4
-    assert textures.count(r"o\road\sil_new.paa") == 2
-    assert textures.count(r"o\road\sil_konec.paa") == 2
+    # Keep the stock front-face topology, then duplicate each triangle with
+    # reversed winding so the generated MLOD remains visible from above in CWA.
+    assert len(visual.faces) == 8
+    assert textures.count(r"o\road\sil_new.paa") == 4
+    assert textures.count(r"o\road\sil_konec.paa") == 4
 
     through_vs = [
         float(v)
@@ -797,11 +797,11 @@ def test_generated_paved_x_junction_matches_stock_texture_topology() -> None:
     )[0]
 
     textures = [face.texture for face in visual.faces]
-    # Uploaded kr_new_silxsil.p3d has one through rectangle (2 triangles) plus
-    # two terminating-arm rectangles (4 triangles).
-    assert len(visual.faces) == 6
-    assert textures.count(r"o\road\sil_new.paa") == 2
-    assert textures.count(r"o\road\sil_konec.paa") == 4
+    # One stock-style through rectangle plus two terminating rectangles, with
+    # every generated triangle mirrored for two-sided visibility.
+    assert len(visual.faces) == 12
+    assert textures.count(r"o\road\sil_new.paa") == 4
+    assert textures.count(r"o\road\sil_konec.paa") == 8
 
     through_vs = [
         float(v)
