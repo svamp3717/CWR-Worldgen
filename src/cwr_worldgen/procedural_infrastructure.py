@@ -1413,9 +1413,6 @@ class ProceduralInfrastructureLibrary:
         *,
         road_segment_length: float = 24.5,
         paved_texture_path: str = r"landtext\silnice.pac",
-        paved_t_junction_texture_path: str | None = None,
-        paved_asf_t_junction_texture_path: str | None = None,
-        paved_x_junction_texture_path: str | None = None,
         cache_dir: Path | None = None,
         cache_enabled: bool = True,
         cache_refresh: bool = False,
@@ -1425,17 +1422,6 @@ class ProceduralInfrastructureLibrary:
         self.paved_texture_path = str(paved_texture_path).replace("/", "\\").strip("\\")
         if not self.paved_texture_path:
             raise ValueError("paved texture path must not be empty")
-        self.paved_t_junction_texture_path = str(
-            paved_t_junction_texture_path or self.paved_texture_path
-        ).replace("/", "\\").strip("\\")
-        self.paved_asf_t_junction_texture_path = str(
-            paved_asf_t_junction_texture_path
-            or self.paved_t_junction_texture_path
-        ).replace("/", "\\").strip("\\")
-        self.paved_x_junction_texture_path = str(
-            paved_x_junction_texture_path
-            or self.paved_t_junction_texture_path
-        ).replace("/", "\\").strip("\\")
         if not math.isfinite(self.road_segment_length) or self.road_segment_length <= 0.0:
             raise ValueError("road segment length must be positive and finite")
         self.cache_dir = cache_dir
