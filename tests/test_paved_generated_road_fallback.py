@@ -817,6 +817,45 @@ def test_generated_paved_x_junction_matches_stock_texture_topology() -> None:
     assert max(abs(value) for value in xs + zs) >= extent - 0.01
 
 
+
+def test_generated_paved_junction_visual_overhang_exceeds_logical_connector() -> None:
+    key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_j3_w091_h000_090_180",
+        91,
+        int(
+            round(
+                infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+                * 20.0
+            )
+        ),
+    )
+    visual, _map_geometry, roadway, _land = infrastructure._road_lods(
+        key,
+        r"o\road\sil_new.paa",
+    )
+    visual_radius = max(
+        math.hypot(point[0], point[2])
+        for point in visual.points
+    )
+    roadway_radius = max(
+        math.hypot(point[0], point[2])
+        for point in roadway.points
+    )
+
+    assert visual_radius >= (
+        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        + infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+        - 0.01
+    )
+    # Collision/topology stays on the stock logical connector radius.
+    assert roadway_radius < visual_radius
+    assert (
+        infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+        < infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+    )
+
+
 def test_generated_paved_junction_uses_stock_sil_konec_for_stub_arms() -> None:
     assert infrastructure._paved_junction_end_texture(
         r"o\road\sil_new.paa"
@@ -867,7 +906,10 @@ def test_generated_paved_junction_quality_window_has_no_coplanar_overlap() -> No
     assert infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES == 0.0
     assert math.isclose(
         start,
-        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+        (
+            infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+            + infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+        ),
         abs_tol=1.0e-9,
     )
 
