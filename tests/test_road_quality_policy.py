@@ -489,3 +489,50 @@ def test_dirt_junction_caps_stay_below_paved_surface_plane() -> None:
     assert paved_cap > playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
     assert mixed_cap > playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
 
+def test_stock_and_generated_paved_surfaces_render_above_dirt() -> None:
+    spec = SimpleNamespace(cells=4, cell_size=10.0)
+    elevations = (0.0,) * 16
+    start = (5.0, 5.0)
+    end = (5.0, 15.0)
+
+    dirt = playability._road_object_on_slope(
+        1,
+        r"o\road\ces6.p3d",
+        start,
+        end,
+        elevations,
+        spec,
+        vertical_offset=playability._STOCK_DIRT_VERTICAL_OFFSET_METRES,
+    )
+    paved = playability._road_object_on_slope(
+        2,
+        r"o\road\sil6.p3d",
+        start,
+        end,
+        elevations,
+        spec,
+        vertical_offset=playability._STOCK_ROAD_VERTICAL_OFFSET_METRES,
+    )
+    generated = playability._road_object_on_slope(
+        3,
+        r"precedence_world\i\paved_w091_l0060.p3d",
+        start,
+        end,
+        elevations,
+        spec,
+        vertical_offset=playability._STOCK_ROAD_VERTICAL_OFFSET_METRES,
+    )
+
+    generated_visible_y = (
+        generated.y + playability.GENERATED_GRAVEL_VISUAL_TOP_METRES
+    )
+    assert paved.y > dirt.y
+    assert generated_visible_y > dirt.y
+    assert math.isclose(
+        paved.y - dirt.y,
+        playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
+        - playability._STOCK_DIRT_VERTICAL_OFFSET_METRES,
+        abs_tol=1.0e-9,
+    )
+    assert math.isclose(generated_visible_y, paved.y, abs_tol=1.0e-9)
+
