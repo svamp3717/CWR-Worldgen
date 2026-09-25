@@ -235,6 +235,74 @@ def test_paved_interior_crossing_is_reported(tmp_path: Path) -> None:
 
 
 
+
+
+def test_generated_paved_t_hub_is_inspected_as_a_real_junction() -> None:
+    result = inspector.inspect_road_objects(
+        (
+            WorldObject(
+                1,
+                r"junction_world\i\paved_j3_w091_h000_090_180.p3d",
+                100.0,
+                0.035,
+                100.0,
+                0.0,
+                0.0,
+            ),
+            WorldObject(2, r"o\road\sil6.p3d", 100.0, 0.035, 109.375, 0.0, 0.0),
+            WorldObject(3, r"o\road\sil6.p3d", 100.0, 0.035, 90.625, 0.0, 0.0),
+            WorldObject(4, r"o\road\sil6.p3d", 109.375, 0.035, 100.0, 90.0, 0.0),
+        ),
+        world_name="junction_world",
+    )
+
+    hub = next(
+        road
+        for road in result.road_objects
+        if road.object_id == 1
+    )
+    assert hub.kind == "junction_generated_3"
+    assert len(hub.endpoints) == 3
+    assert not [
+        issue
+        for issue in result.issues
+        if issue.category in {
+            "bad_junction",
+            "intersection_without_junction",
+            "paved_crossing_without_junction",
+            "paved_t_without_junction",
+        }
+    ]
+
+
+def test_generated_paved_x_hub_suppresses_raw_crossing_diagnostic() -> None:
+    result = inspector.inspect_road_objects(
+        (
+            WorldObject(
+                1,
+                r"junction_world\i\paved_j4_w091_h000_090_180_270.p3d",
+                0.0,
+                0.035,
+                0.0,
+                0.0,
+                0.0,
+            ),
+            # The late guard may overlay a hub on already-fitted approach slabs.
+            # Once the hub exists this is a junction, not another naked crossing
+            # that should recursively request yet another generated replacement.
+            WorldObject(2, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
+            WorldObject(3, r"o\road\sil25.p3d", 0.0, 0.0, 0.0, 90.0, 0.0),
+        ),
+        world_name="junction_world",
+    )
+
+    assert not [
+        issue
+        for issue in result.issues
+        if issue.category == "paved_crossing_without_junction"
+    ]
+
+
 def test_existing_generated_paved_model_is_reused_by_replacement_plan(
     tmp_path: Path,
 ) -> None:
