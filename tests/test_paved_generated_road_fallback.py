@@ -757,6 +757,86 @@ def test_generated_paved_junction_core_never_samples_road_shoulders() -> None:
     assert math.isclose(right_u, 0.72, abs_tol=1.0e-9)
 
 
+
+
+def test_generated_paved_t_junction_matches_stock_texture_topology() -> None:
+    key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_j3_w091_h000_095_190",
+        91,
+        int(
+            round(
+                infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+                * 20.0
+            )
+        ),
+    )
+    visual = infrastructure._road_lods(
+        key,
+        r"o\road\sil_new.paa",
+    )[0]
+
+    textures = [face.texture for face in visual.faces]
+    # Uploaded kr_new_sil_sil_t.p3d has two sil_new triangles for the through
+    # carriageway and two sil_konec triangles for the terminating arm.
+    assert len(visual.faces) == 4
+    assert textures.count(r"o\road\sil_new.paa") == 2
+    assert textures.count(r"o\road\sil_konec.paa") == 2
+    assert all(
+        flag == infrastructure._ROAD_SURFACE_POINT_FLAG
+        for flag in visual.point_flags
+    )
+
+
+def test_generated_paved_x_junction_matches_stock_texture_topology() -> None:
+    key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_j4_w091_h000_085_180_265",
+        91,
+        int(
+            round(
+                infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+                * 20.0
+            )
+        ),
+    )
+    visual = infrastructure._road_lods(
+        key,
+        r"o\road\sil_new.paa",
+    )[0]
+
+    textures = [face.texture for face in visual.faces]
+    # Uploaded kr_new_silxsil.p3d has one through rectangle (2 triangles) plus
+    # two terminating-arm rectangles (4 triangles).
+    assert len(visual.faces) == 6
+    assert textures.count(r"o\road\sil_new.paa") == 2
+    assert textures.count(r"o\road\sil_konec.paa") == 4
+
+    xs = [point[0] for point in visual.points]
+    zs = [point[2] for point in visual.points]
+    extent = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+    assert max(abs(value) for value in xs + zs) >= extent - 0.01
+
+
+def test_generated_paved_junction_uses_stock_sil_konec_for_stub_arms() -> None:
+    assert infrastructure._paved_junction_end_texture(
+        r"o\road\sil_new.paa"
+    ) == r"o\road\sil_konec.paa"
+    # Unknown paved families stay safe rather than guessing an asset name.
+    assert infrastructure._paved_junction_end_texture(
+        r"custom\road\surface.paa"
+    ) == r"custom\road\surface.paa"
+
+
+def test_generated_paved_junction_chooses_most_opposed_through_pair() -> None:
+    assert set(
+        infrastructure._paved_junction_through_pair((0, 95, 190))
+    ) == {0, 190}
+    assert set(
+        infrastructure._paved_junction_through_pair((0, 85, 180, 265))
+    ) in ({0, 180}, {85, 265})
+
+
 def test_generated_paved_junction_quality_window_has_no_coplanar_overlap() -> None:
     junction = quality._Junction(
         point=(0.0, 0.0),
