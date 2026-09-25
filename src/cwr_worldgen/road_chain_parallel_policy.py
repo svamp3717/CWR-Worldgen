@@ -760,7 +760,9 @@ def _fit_stock_piece_road_objects_parallel(
             end_point,
             elevations,
             spec,
-            vertical_offset=0.060,
+            vertical_offset=_playability._junction_cap_vertical_offset(
+                cap_piece.model_path
+            ),
         )
         next_id += 1
         objects.append(obj)
