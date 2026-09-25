@@ -253,5 +253,65 @@ def test_final_guard_restores_missing_generated_paved_t_hub() -> None:
     assert math.dist((generated[0].x, generated[0].z), centre) <= 0.05
 
 
+
+
+def test_final_guard_never_adds_paved_hub_at_mixed_dirt_join() -> None:
+    spec = _spec()
+    bbox = (0.0, 0.0, 0.01, 0.01)
+    projection = BboxProjection.create(bbox, spec.cells * spec.cell_size)
+    centre = (320.0, 320.0)
+
+    def ll(point):
+        return projection.to_latlon(point)
+
+    dataset = OsmDataset(
+        source_generator="mixed-final-hub-guard",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/paved",
+                {"highway": "residential", "surface": "asphalt"},
+                (ll((320.0, 180.0)), ll(centre), ll((320.0, 460.0))),
+            ),
+            OsmLineFeature(
+                "way/dirt",
+                {"highway": "track", "surface": "dirt"},
+                (ll(centre), ll((470.0, 320.0))),
+            ),
+        ),
+    )
+    mixed_points = repair._mixed_dirt_paved_points(
+        dataset,
+        projection,
+        spec,
+    )
+    assert any(math.dist(point, centre) <= 0.05 for point in mixed_points)
+
+    # Even if the final object stream accidentally contains a paved-looking
+    # branch at this location, OSM topology says this is a dirt-under-asphalt
+    # join. The late guard must not synthesize a paved T hub over it.
+    report = _report(
+        WorldObject(1, r"o\road\sil25.p3d", 320.0, 0.035, 320.0, 0.0, 0.0),
+        WorldObject(2, r"o\road\sil12.p3d", 326.25, 0.035, 320.0, 90.0, 0.0),
+    )
+    result = repair.ensure_final_paved_junction_hubs(
+        report,
+        dataset,
+        projection,
+        [0.0] * (spec.cells * spec.cells),
+        spec,
+    )
+    assert result.objects == report.objects
+    assert not any(
+        r"\paved_j" in obj.model_path.casefold()
+        for obj in result.objects
+    )
+
+
 def test_inspector_repair_is_captured_by_final_building_clearance() -> None:
     assert clearance._ORIGINAL_FIT is repair._fit
