@@ -1566,56 +1566,6 @@ def _preferred_stock_paved_texture(
 
 
 
-def _preferred_stock_junction_texture(
-    model_path: str,
-    dependencies: Sequence[str],
-    *,
-    paved_fallback: str,
-) -> str:
-    """Choose the in-game artwork used by a stock junction P3D.
-
-    Stock junction models can reference both ordinary road artwork and a
-    junction-specific tile. Prefer the latter when present; if an asset scan
-    cannot expose one, fall back to the already verified paved-road texture.
-    """
-
-    values = tuple(
-        str(value).replace("/", "\\").strip("\\")
-        for value in dependencies
-        if str(value).casefold().endswith((".paa", ".pac"))
-    )
-    if not values:
-        return paved_fallback
-
-    fallback_key = paved_fallback.replace("/", "\\").strip("\\").casefold()
-    filename = (
-        str(model_path).replace("/", "\\").rsplit("\\", 1)[-1].casefold()
-    )
-    family_tokens = tuple(
-        token
-        for token in ("sil", "asf", "kos", "ces")
-        if token in filename
-    )
-
-    def rank(value: str) -> tuple[int, int, str]:
-        lowered = value.casefold()
-        basename = lowered.rsplit("\\", 1)[-1]
-        score = 0
-        if lowered != fallback_key:
-            score += 150
-        if any(token in basename for token in ("kr", "cross", "junction")):
-            score += 120
-        if "new" in basename:
-            score += 30
-        if any(token in basename for token in family_tokens):
-            score += 25
-        if "road" in lowered:
-            score += 10
-        return (-score, len(value), lowered)
-
-    return min(values, key=rank)
-
-
 def _ground_texture_profile(spec: PlayabilitySpec) -> str:
     return str(getattr(spec, "ground_texture_profile", "generated"))
 
