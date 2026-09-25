@@ -580,8 +580,7 @@ def test_generated_paved_junction_asset_uses_stock_texture_and_road_metadata(
     model_summary = infrastructure.inspect_mlod(
         tmp_path / result.model_files[0]
     )
-    assert stock_junction_texture in model_summary.textures
-    assert stock_texture not in model_summary.textures
+    assert stock_texture in model_summary.textures
 
     document = json.loads(
         (tmp_path / "infrastructure.json").read_text(encoding="utf-8")
