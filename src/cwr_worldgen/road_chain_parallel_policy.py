@@ -545,7 +545,7 @@ def _fit_stock_piece_road_objects_parallel(
         progress_callback(
             24,
             f"Classified {len(candidate_cap_keys):,} real road junctions; "
-            f"{len(mixed_dirt_paved_keys):,} dirt/paved joins terminate dirt at asphalt; "
+            f"{len(mixed_dirt_paved_keys):,} dirt/paved joins underlay dirt beneath asphalt; "
             f"{len(degree_two_turn_keys | bend_keys):,} ordinary bends use rounded piece chains",
         )
 
