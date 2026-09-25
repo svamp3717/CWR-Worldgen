@@ -688,6 +688,174 @@ def _issue_paved_junction_candidate(issue, road_by_id):
     return centre, unique, models
 
 
+
+def _direction_vector(heading_degrees: float) -> tuple[float, float]:
+    angle = math.radians(float(heading_degrees))
+    return math.sin(angle), math.cos(angle)
+
+
+def _fitted_paved_directions_at_hub(
+    centre: tuple[float, float],
+    hub_id: int,
+    degree: int,
+    inspection: _inspector.InspectionResult,
+) -> tuple[tuple[float, float], ...]:
+    """Recover actual final approach tangents around one generated paved hub.
+
+    Source OSM headings are not always the same as the tangent of the final
+    fitted curve at the connector. The terrtest32 PBO exposed an 11-degree
+    mismatch on one generated approach. Rebuild the hub signature from the
+    fitted endpoint tangents so its visual arms follow what CWA actually draws.
+    """
+
+    reach = (
+        _pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        + _pi.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+        + 2.5
+    )
+    candidates: list[tuple[float, tuple[float, float]]] = []
+    for road in inspection.road_objects:
+        if (
+            road.object_id == hub_id
+            or road.road_type != "paved"
+            or road.kind.startswith("junction_")
+            or not road.endpoints
+        ):
+            continue
+        endpoint = min(
+            road.endpoints,
+            key=lambda value: math.dist(centre, value.point),
+        )
+        distance = math.dist(centre, endpoint.point)
+        if distance > reach:
+            continue
+
+        rx = endpoint.point[0] - centre[0]
+        rz = endpoint.point[1] - centre[1]
+        radial_length = math.hypot(rx, rz)
+        if radial_length <= 0.20:
+            rx = road.x - centre[0]
+            rz = road.z - centre[1]
+            radial_length = math.hypot(rx, rz)
+        if radial_length <= 0.20:
+            continue
+        radial = rx / radial_length, rz / radial_length
+
+        # RoadEndpoint.tangent is an undirected 0..180 axis. Choose the sign
+        # that points away from the hub centre along the actual approach.
+        first = _direction_vector(endpoint.tangent)
+        second = -first[0], -first[1]
+        direction = max(
+            (first, second),
+            key=lambda value: value[0] * radial[0] + value[1] * radial[1],
+        )
+        candidates.append((distance, direction))
+
+    candidates.sort(key=lambda value: value[0])
+    unique: list[tuple[float, float]] = []
+    cosine = math.cos(math.radians(15.0))
+    for _distance, direction in candidates:
+        if any(
+            direction[0] * existing[0] + direction[1] * existing[1] >= cosine
+            for existing in unique
+        ):
+            continue
+        unique.append(direction)
+        if len(unique) == degree:
+            break
+    return tuple(unique)
+
+
+def realign_generated_paved_junction_hubs(
+    report,
+    elevations: Sequence[float],
+    spec,
+    *,
+    progress_callback: Callable[[int, str], None] | None = None,
+):
+    """Rotate/regenerate paved hubs from final fitted approach tangents."""
+
+    if not report.objects:
+        return report
+    inspection = _inspector.inspect_road_objects(
+        report.objects,
+        world_name=str(getattr(spec, "name", "world")),
+        topology_checks=False,
+    )
+    objects_by_id = {int(obj.object_id): obj for obj in report.objects}
+    replacements: dict[int, WorldObject] = {}
+
+    for hub in inspection.road_objects:
+        if not hub.kind.startswith("junction_generated_"):
+            continue
+        degree = len(hub.endpoints)
+        if degree not in {3, 4}:
+            continue
+        centre = float(hub.x), float(hub.z)
+        directions = _fitted_paved_directions_at_hub(
+            centre,
+            int(hub.object_id),
+            degree,
+            inspection,
+        )
+        if len(directions) != degree:
+            continue
+        try:
+            signature, axis = _pi.paved_junction_signature_for_directions(
+                directions
+            )
+        except ValueError:
+            continue
+
+        width = _pi.paved_junction_width_for_models((hub.model_path,))
+        model_path = _pi.paved_junction_model_path(
+            str(getattr(spec, "name", "world")),
+            width,
+            signature,
+        )
+        old = objects_by_id.get(int(hub.object_id))
+        if old is None:
+            continue
+        extent = _pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        start = (
+            centre[0] - axis[0] * extent,
+            centre[1] - axis[1] * extent,
+        )
+        end = (
+            centre[0] + axis[0] * extent,
+            centre[1] + axis[1] * extent,
+        )
+        replacement = _p._road_object_on_slope(
+            int(old.object_id),
+            model_path,
+            start,
+            end,
+            elevations,
+            spec,
+            vertical_offset=_p._junction_cap_vertical_offset(model_path),
+        )
+        # Leave already-correct hubs byte-stable.
+        if (
+            replacement.model_path.casefold() == old.model_path.casefold()
+            and abs(replacement.heading_degrees - old.heading_degrees) <= 0.05
+        ):
+            continue
+        replacements[int(old.object_id)] = replacement
+
+    if not replacements:
+        return report
+    objects = tuple(
+        replacements.get(int(obj.object_id), obj)
+        for obj in report.objects
+    )
+    if progress_callback is not None:
+        progress_callback(
+            _RAW_PROGRESS_PERCENT,
+            f"Realigned {len(replacements):,} generated paved hub(s) to final approach tangents",
+        )
+    return replace(report, objects=objects)
+
+
 def ensure_final_paved_junction_hubs(
     report,
     dataset,
@@ -843,10 +1011,16 @@ def _fit(
         protected_object_ids=protected,
         progress_callback=progress_callback,
     )
-    return ensure_final_paved_junction_hubs(
+    guarded = ensure_final_paved_junction_hubs(
         repaired,
         dataset,
         projection,
+        elevations,
+        spec,
+        progress_callback=progress_callback,
+    )
+    return realign_generated_paved_junction_hubs(
+        guarded,
         elevations,
         spec,
         progress_callback=progress_callback,
