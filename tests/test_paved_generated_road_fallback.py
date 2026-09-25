@@ -689,6 +689,74 @@ def test_generated_paved_junction_visual_has_continuous_uvs() -> None:
     assert all(len(values) == 1 for values in uvs_by_point.values())
 
 
+
+
+def test_generated_paved_uv_scale_matches_stock_sil_family() -> None:
+    half_width = 4.55
+    left_u, centre_v = infrastructure._paved_junction_arm_uv(
+        -half_width,
+        0.0,
+        heading=0.0,
+        half_width=half_width,
+    )
+    right_u, _ = infrastructure._paved_junction_arm_uv(
+        half_width,
+        0.0,
+        heading=0.0,
+        half_width=half_width,
+    )
+    _, one_repeat_v = infrastructure._paved_junction_arm_uv(
+        0.0,
+        6.25,
+        heading=0.0,
+        half_width=half_width,
+    )
+
+    # Uploaded stock sil6/sil12/sil25 all use U=0..1 across 9.1 m and advance
+    # exactly one V repeat per 6.25 m of road length.
+    assert infrastructure.GENERATED_PAVED_TEXTURE_REPEAT_METRES == 6.25
+    assert math.isclose(left_u, 0.0, abs_tol=1.0e-9)
+    assert math.isclose(right_u, 1.0, abs_tol=1.0e-9)
+    assert math.isclose(centre_v - one_repeat_v, 1.0, abs_tol=1.0e-9)
+
+
+def test_generated_paved_ribbon_uses_stock_sil_longitudinal_repeat() -> None:
+    key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_w091_l0125",
+        91,
+        125,
+    )
+    visual = infrastructure._road_lods(
+        key,
+        r"o\road\sil_new.paa",
+    )[0]
+    values = [
+        float(v)
+        for face in visual.faces
+        for _point_index, _normal_index, _u, v in face.vertices
+    ]
+
+    # A 12.5 m generated segment must span two sil_new repeats, matching sil12.
+    assert math.isclose(max(values) - min(values), 2.0, abs_tol=1.0e-7)
+
+
+def test_generated_paved_junction_core_never_samples_road_shoulders() -> None:
+    radius = 4.55 * 0.98
+    left_u, _ = infrastructure._paved_junction_core_uv(
+        -radius,
+        0.0,
+        core_radius=radius,
+    )
+    right_u, _ = infrastructure._paved_junction_core_uv(
+        radius,
+        0.0,
+        core_radius=radius,
+    )
+    assert math.isclose(left_u, 0.28, abs_tol=1.0e-9)
+    assert math.isclose(right_u, 0.72, abs_tol=1.0e-9)
+
+
 def test_generated_paved_junction_quality_window_has_no_coplanar_overlap() -> None:
     junction = quality._Junction(
         point=(0.0, 0.0),
