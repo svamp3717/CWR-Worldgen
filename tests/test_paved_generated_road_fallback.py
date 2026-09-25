@@ -762,7 +762,7 @@ def test_generated_paved_junction_core_never_samples_road_shoulders() -> None:
 def test_generated_paved_t_junction_matches_stock_texture_topology() -> None:
     key = infrastructure.InfrastructureModelKey(
         "road",
-        "paved_j3_w091_h000_095_190",
+        "paved_j3_w091_h000_090_180",
         91,
         int(
             round(
@@ -782,6 +782,16 @@ def test_generated_paved_t_junction_matches_stock_texture_topology() -> None:
     assert len(visual.faces) == 4
     assert textures.count(r"o\road\sil_new.paa") == 2
     assert textures.count(r"o\road\sil_konec.paa") == 2
+
+    through_vs = [
+        float(v)
+        for face in visual.faces
+        if face.texture == r"o\road\sil_new.paa"
+        for _point, _normal, _u, v in face.vertices
+    ]
+    assert math.isclose(max(through_vs) - min(through_vs), 2.0, abs_tol=1.0e-7)
+    ys = [point[1] for point in visual.points]
+    assert math.isclose(max(ys) - min(ys), 0.0666, abs_tol=1.0e-7)
     assert all(
         flag == infrastructure._ROAD_SURFACE_POINT_FLAG
         for flag in visual.point_flags
@@ -811,6 +821,16 @@ def test_generated_paved_x_junction_matches_stock_texture_topology() -> None:
     assert len(visual.faces) == 6
     assert textures.count(r"o\road\sil_new.paa") == 2
     assert textures.count(r"o\road\sil_konec.paa") == 4
+
+    through_vs = [
+        float(v)
+        for face in visual.faces
+        if face.texture == r"o\road\sil_new.paa"
+        for _point, _normal, _u, v in face.vertices
+    ]
+    assert math.isclose(max(through_vs) - min(through_vs), 1.0, abs_tol=1.0e-7)
+    ys = [point[1] for point in visual.points]
+    assert math.isclose(max(ys) - min(ys), 0.0118, abs_tol=1.0e-7)
 
     xs = [point[0] for point in visual.points]
     zs = [point[2] for point in visual.points]
