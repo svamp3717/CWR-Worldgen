@@ -1510,7 +1510,8 @@ def _fit_stock_piece_road_objects(
         if _is_mixed_dirt_paved_node(values)
     }
     # A dirt track meeting asphalt is not a junction surface. Preserve the
-    # paved carriageway and terminate only the dirt approach at its outside edge.
+    # paved carriageway, keep the dirt terminal piece on its lower plane, and
+    # let the higher paved road visually cover it through the crossing.
     candidate_cap_keys = (
         true_junction_keys - complex_keys - mixed_dirt_paved_keys
     )
@@ -1520,7 +1521,7 @@ def _fit_stock_piece_road_objects(
         progress_callback(
             24,
             f"Classified {len(candidate_cap_keys):,} real road junctions; "
-            f"{len(mixed_dirt_paved_keys):,} dirt/paved joins terminate dirt at asphalt; "
+            f"{len(mixed_dirt_paved_keys):,} dirt/paved joins underlay dirt beneath asphalt; "
             f"{len(degree_two_turn_keys | bend_keys):,} ordinary bends use rounded piece chains",
         )
 
