@@ -102,10 +102,12 @@ class TownLocation:
 
 # Stock road meshes sit extremely close to the terrain. At mixed crossings the
 # engine can therefore z-fight when two road families share the same height.
-# Keep gravel slightly below ordinary asphalt and emit paved chains
-# after unpaved chains so asphalt consistently wins both geometry and draw order.
-_STOCK_ROAD_VERTICAL_OFFSET_METRES = 0.035
+# Give the surface families distinct planes as well as deterministic object
+# order. Dirt is kept lowest, gravel remains in the middle, and paved roads sit
+# highest so asphalt always paints over an unsealed road at a crossing.
+_STOCK_DIRT_VERTICAL_OFFSET_METRES = 0.010
 _STOCK_GRAVEL_VERTICAL_OFFSET_METRES = 0.018
+_STOCK_ROAD_VERTICAL_OFFSET_METRES = 0.035
 
 
 def _road_surface_priority(tags: Mapping[str, str]) -> int:
@@ -117,11 +119,25 @@ def _road_surface_priority(tags: Mapping[str, str]) -> int:
 
 
 def _road_vertical_offset(tags: Mapping[str, str]) -> float:
-    return (
-        _STOCK_GRAVEL_VERTICAL_OFFSET_METRES
-        if road_is_gravel(tags)
-        else _STOCK_ROAD_VERTICAL_OFFSET_METRES
-    )
+    if road_is_gravel(tags):
+        return _STOCK_GRAVEL_VERTICAL_OFFSET_METRES
+    if road_is_dirt(tags):
+        return _STOCK_DIRT_VERTICAL_OFFSET_METRES
+    return _STOCK_ROAD_VERTICAL_OFFSET_METRES
+
+
+def _junction_cap_vertical_offset(model_path: str) -> float:
+    """Return a cap height that preserves paved-over-dirt precedence.
+
+    Ordinary all-dirt junction caps are short stock ces/cesta pieces. Keep
+    those on the dirt plane. Paved and mixed-family caps retain the raised
+    junction plane used to cover their approach seams.
+    """
+
+    filename = str(model_path).replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+    if re.match(r"^(?:ces|cesta)(?:25|12|6)\.p3d$", filename):
+        return _STOCK_DIRT_VERTICAL_OFFSET_METRES
+    return 0.060
 
 
 def _road_is_explicit_bridge(tags: Mapping[str, str]) -> bool:
@@ -1762,7 +1778,9 @@ def _fit_stock_piece_road_objects(
             end_point,
             elevations,
             spec,
-            vertical_offset=0.060,
+            vertical_offset=_junction_cap_vertical_offset(
+                cap_piece.model_path
+            ),
         )
         next_id += 1
         objects.append(obj)
