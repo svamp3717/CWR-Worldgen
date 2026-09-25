@@ -619,12 +619,10 @@ def test_generated_paved_junction_asset_uses_stock_texture_and_road_metadata(
     ) * len(roadway.points)
     assert visual.faces
     assert roadway.faces
-    assert {
-        face.flags for face in visual.faces
-    }.issubset({
-        infrastructure._ROAD_SURFACE_FACE_FLAG,
-        0x00024102,
-    })
+    assert all(
+        face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
+        for face in visual.faces
+    )
     assert all(
         face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
         for face in roadway.faces
