@@ -41,6 +41,8 @@ class _RunJob:
     start_cover: float
     end_cover: float
     cap_surface_mismatch: bool
+    suppress_short_fallback: bool
+    hard_stop_at_preferred_end: bool
     world_size: float
 
 
@@ -288,7 +290,13 @@ def _plan_run(job: _RunJob) -> _RunPlan:
     preferred_end = max(start_distance, total_length - job.end_trim)
     minimum_end = max(start_distance, total_length - job.end_cover)
     shortest = min(piece.length_metres for piece in job.variants)
-    maximum_end = total_length + (0.70 if job.end_cover > 0.0 else shortest * 0.5)
+    maximum_end = (
+        preferred_end
+        if job.hard_stop_at_preferred_end
+        else total_length + (
+            0.70 if job.end_cover > 0.0 else shortest * 0.5
+        )
+    )
     fitted_pieces = _batched_stock_piece_chain(
         measure,
         job.variants,
@@ -301,8 +309,14 @@ def _plan_run(job: _RunJob) -> _RunPlan:
     covered_by_hubs = False
     skipped = 0
     if not fitted_pieces:
-        covered_by_hubs = total_length <= job.start_cover + job.end_cover + 1.0e-6
-        if not covered_by_hubs or job.cap_surface_mismatch:
+        covered_by_hubs = (
+            not job.suppress_short_fallback
+            and total_length <= job.start_cover + job.end_cover + 1.0e-6
+        )
+        if (
+            not job.suppress_short_fallback
+            and (not covered_by_hubs or job.cap_surface_mismatch)
+        ):
             fitted_pieces = _playability._short_run_fallback_piece(
                 measure,
                 job.variants,
@@ -516,11 +530,26 @@ def _fit_stock_piece_road_objects_parallel(
     complex_keys = {
         key for key, values in effective_incidents.items() if len(values) > 4
     }
-    candidate_cap_keys = true_junction_keys - complex_keys
+    mixed_dirt_paved_keys = {
+        key
+        for key, values in effective_incidents.items()
+        if _playability._is_mixed_dirt_paved_node(values)
+    }
+    candidate_cap_keys = (
+        true_junction_keys - complex_keys - mixed_dirt_paved_keys
+    )
+    complex_cap_keys = complex_keys - mixed_dirt_paved_keys
+    mixed_dirt_trim_lengths = {
+        key: _playability._mixed_dirt_paved_trim_metres(
+            effective_incidents[key]
+        )
+        for key in mixed_dirt_paved_keys
+    }
     if progress_callback is not None:
         progress_callback(
             24,
             f"Classified {len(candidate_cap_keys):,} real road junctions; "
+            f"{len(mixed_dirt_paved_keys):,} dirt/paved joins terminate dirt at asphalt; "
             f"{len(degree_two_turn_keys | bend_keys):,} ordinary bends use rounded piece chains",
         )
 
@@ -622,13 +651,13 @@ def _fit_stock_piece_road_objects_parallel(
     )
     virtual_cover_lengths = {
         key: virtual_short_length * 0.5 + 0.15
-        for key in complex_keys
+        for key in complex_cap_keys
     }
     virtual_trim_lengths = {
         key: max(0.40, cover - 0.85)
         for key, cover in virtual_cover_lengths.items()
     }
-    split_keys = cap_keys | complex_keys
+    split_keys = cap_keys | complex_cap_keys
 
     jobs: list[_RunJob] = []
     feature_job_counts = [0] * len(projected_features)
@@ -636,10 +665,16 @@ def _fit_stock_piece_road_objects_parallel(
     for feature_index, (feature, model, _dirt, _width, points) in enumerate(
         projected_features
     ):
+        plain_dirt = _playability._is_plain_dirt_tags(feature.tags)
+        feature_split_keys = (
+            split_keys | mixed_dirt_paved_keys
+            if plain_dirt
+            else split_keys
+        )
         variants = variants_for(model)
         variant_paths = {piece.model_path.casefold() for piece in variants}
         for run_index, raw_run in enumerate(
-            _playability._split_polyline_at_keys(points, split_keys)
+            _playability._split_polyline_at_keys(points, feature_split_keys)
         ):
             run = tuple(_playability._rounded_road_run(raw_run))
             if len(run) < 2:
@@ -658,6 +693,18 @@ def _fit_stock_piece_road_objects_parallel(
             end_cover = cap_cover_lengths.get(
                 end_key, virtual_cover_lengths.get(end_key, 0.0)
             )
+            mixed_start = (
+                plain_dirt and start_key in mixed_dirt_paved_keys
+            )
+            mixed_end = plain_dirt and end_key in mixed_dirt_paved_keys
+            if mixed_start:
+                stop = mixed_dirt_trim_lengths[start_key]
+                start_trim = max(start_trim, stop)
+                start_cover = max(start_cover, stop)
+            if mixed_end:
+                stop = mixed_dirt_trim_lengths[end_key]
+                end_trim = max(end_trim, stop)
+                end_cover = max(end_cover, stop)
             cap_surface_mismatch = any(
                 key in cap_plans
                 and cap_plans[key][0].model_path.casefold() not in variant_paths
@@ -674,6 +721,8 @@ def _fit_stock_piece_road_objects_parallel(
                 start_cover=start_cover,
                 end_cover=end_cover,
                 cap_surface_mismatch=cap_surface_mismatch,
+                suppress_short_fallback=(mixed_start or mixed_end),
+                hard_stop_at_preferred_end=mixed_end,
                 world_size=float(spec.world_size),
             ))
             feature_job_counts[feature_index] += 1
