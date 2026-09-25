@@ -453,3 +453,39 @@ def test_milestone9_trusts_paved_junction_turn_and_approach_assets() -> None:
         r"o\road\kos6.p3d",
     ):
         assert generator.canonical_asset_path(path) in trusted
+
+def test_surface_vertical_offsets_put_paved_above_dirt() -> None:
+    dirt = {"highway": "track", "surface": "dirt"}
+    gravel = {"highway": "track", "surface": "gravel"}
+    paved = {"highway": "residential", "surface": "asphalt"}
+
+    dirt_offset = playability._road_vertical_offset(dirt)
+    gravel_offset = playability._road_vertical_offset(gravel)
+    paved_offset = playability._road_vertical_offset(paved)
+
+    assert dirt_offset == playability._STOCK_DIRT_VERTICAL_OFFSET_METRES
+    assert gravel_offset == playability._STOCK_GRAVEL_VERTICAL_OFFSET_METRES
+    assert paved_offset == playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
+    assert dirt_offset < gravel_offset < paved_offset
+
+    assert playability._road_surface_priority(dirt) == 0
+    assert playability._road_surface_priority(gravel) == 1
+    assert playability._road_surface_priority(paved) == 2
+
+
+def test_dirt_junction_caps_stay_below_paved_surface_plane() -> None:
+    dirt_cap = playability._junction_cap_vertical_offset(
+        r"o\road\ces6.p3d"
+    )
+    paved_cap = playability._junction_cap_vertical_offset(
+        r"o\road\sil6.p3d"
+    )
+    mixed_cap = playability._junction_cap_vertical_offset(
+        r"o\road\kr_new_sil_ces_t.p3d"
+    )
+
+    assert dirt_cap == playability._STOCK_DIRT_VERTICAL_OFFSET_METRES
+    assert dirt_cap < playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
+    assert paved_cap > playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
+    assert mixed_cap > playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
+
