@@ -115,7 +115,11 @@ _STOCK_ROAD_VERTICAL_OFFSET_METRES = 0.035
 # above the object origin, so a 25 mm origin difference was not enough to keep
 # them below sil/kos in CWA. This applies only to the terminal piece touching
 # asphalt, not to the rest of the dirt road.
-_MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES = -0.045
+# PBO inspection of a real ces12/sil6 T join showed that -45 mm still left
+# the stock dirt surface visible over asphalt. The ces mesh rides noticeably
+# above its object origin, so give only the terminal underlay piece a full
+# 100 mm negative placement offset. The rest of the dirt chain is unchanged.
+_MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES = -0.100
 
 
 def _road_surface_priority(tags: Mapping[str, str]) -> int:
