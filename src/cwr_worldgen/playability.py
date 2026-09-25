@@ -1227,6 +1227,51 @@ def _road_object_on_slope(
     )
 
 
+
+def _road_object_on_slope_endpoint_offsets(
+    object_id: int,
+    model_path: str,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    elevations: Sequence[float],
+    spec: PlayabilitySpec,
+    *,
+    start_vertical_offset: float,
+    end_vertical_offset: float,
+) -> WorldObject:
+    """Place one stock road while independently burying either endpoint.
+
+    Mixed dirt/paved joins need the dirt surface below asphalt only at the
+    shared node. Tilting the terminal dirt slab from its normal outer height
+    down to the underlay height avoids both the asphalt overprint and an ugly
+    vertical step where that dirt piece meets the rest of its chain.
+    """
+
+    dx = end[0] - start[0]
+    dz = end[1] - start[1]
+    horizontal_length = max(0.01, math.hypot(dx, dz))
+    start_height = _sample_elevation(
+        elevations, spec.cells, spec.cell_size, start[0], start[1]
+    ) + float(start_vertical_offset)
+    end_height = _sample_elevation(
+        elevations, spec.cells, spec.cell_size, end[0], end[1]
+    ) + float(end_vertical_offset)
+    heading = math.degrees(math.atan2(dx, dz)) % 360.0
+    pitch = math.degrees(
+        math.atan2(end_height - start_height, horizontal_length)
+    )
+    pitch = max(-35.0, min(35.0, pitch))
+    return WorldObject(
+        object_id,
+        model_path,
+        (start[0] + end[0]) * 0.5,
+        (start_height + end_height) * 0.5,
+        (start[1] + end[1]) * 0.5,
+        heading,
+        pitch,
+    )
+
+
 def _stock_piece_chain(
     measure: _PolylineMeasure,
     pieces: Sequence[_RoadPiece],
@@ -1911,23 +1956,37 @@ def _fit_stock_piece_road_objects(
                     piece.model_path, run, start_point, end_point
                 )
                 vertical_offset = _road_vertical_offset(feature.tags)
-                if (
-                    (mixed_start and piece_index == 0)
-                    or (mixed_end and piece_index == last_piece_index)
-                ):
-                    vertical_offset = min(
-                        vertical_offset,
-                        _MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES,
+                bury_start = mixed_start and piece_index == 0
+                bury_end = mixed_end and piece_index == last_piece_index
+                if bury_start or bury_end:
+                    obj = _road_object_on_slope_endpoint_offsets(
+                        next_id,
+                        placed_model,
+                        start_point,
+                        end_point,
+                        elevations,
+                        spec,
+                        start_vertical_offset=(
+                            _MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES
+                            if bury_start
+                            else vertical_offset
+                        ),
+                        end_vertical_offset=(
+                            _MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES
+                            if bury_end
+                            else vertical_offset
+                        ),
                     )
-                obj = _road_object_on_slope(
-                    next_id,
-                    placed_model,
-                    start_point,
-                    end_point,
-                    elevations,
-                    spec,
-                    vertical_offset=vertical_offset,
-                )
+                else:
+                    obj = _road_object_on_slope(
+                        next_id,
+                        placed_model,
+                        start_point,
+                        end_point,
+                        elevations,
+                        spec,
+                        vertical_offset=vertical_offset,
+                    )
                 next_id += 1
                 objects.append(obj)
                 chain.append((obj, piece.length_metres))
