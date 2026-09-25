@@ -640,7 +640,7 @@ def test_dirt_track_underlays_paved_road_without_mixed_junction_cap() -> None:
     )
     assert (
         min(paved_heights) - dirt_heights[closest_dirt_index]
-    ) >= 0.07
+    ) >= 0.12
 
     # The paved road is not split/trimmed for the dirt join, so at least one
     # paved slab still covers the shared OSM node continuously.
