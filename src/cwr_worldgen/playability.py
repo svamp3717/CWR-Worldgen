@@ -14,7 +14,9 @@ from .model import OsmSpec, PlayabilitySpec, WorldObject
 from .procedural_infrastructure import (
     GENERATED_GRAVEL_SURFACE_CLEARANCE_METRES,
     GENERATED_GRAVEL_VISUAL_TOP_METRES,
+    GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES,
     GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+    GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES,
     gravel_curve_model_path,
     gravel_junction_model_path,
     gravel_road_model_path,
@@ -108,6 +110,12 @@ class TownLocation:
 _STOCK_DIRT_VERTICAL_OFFSET_METRES = 0.010
 _STOCK_GRAVEL_VERTICAL_OFFSET_METRES = 0.018
 _STOCK_ROAD_VERTICAL_OFFSET_METRES = 0.035
+# The final dirt piece at a mixed dirt/paved join is deliberately sunk farther
+# than ordinary dirt. Stock ces/cesta meshes can carry their visible surface
+# above the object origin, so a 25 mm origin difference was not enough to keep
+# them below sil/kos in CWA. This applies only to the terminal piece touching
+# asphalt, not to the rest of the dirt road.
+_MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES = -0.045
 
 
 def _road_surface_priority(tags: Mapping[str, str]) -> int:
@@ -1612,11 +1620,16 @@ def _fit_stock_piece_road_objects(
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
         cap_plans[key] = (cap_piece, start_point, end_point)
         if all_paved:
-            # A generated paved hub is already one continuous P3D. Stop each
-            # approach at its connector plane instead of pushing another paved
-            # object underneath it, which CWA renders as obvious clipping.
-            cap_trim_lengths[key] = half
-            cap_cover_lengths[key] = half + 0.05
+            # Keep the logical hub radius unchanged, but stop wide approach
+            # slabs slightly early. The visual hub extends beyond the connector
+            # and covers this clearance, hiding square-corner clipping at skewed
+            # T/X intersections without changing junction topology.
+            cap_trim_lengths[key] = (
+                half + GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+            )
+            cap_cover_lengths[key] = (
+                half + GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+            )
         else:
             # Gravel/legacy caps retain their small buried overlap.
             cap_trim_lengths[key] = max(0.40, half - 0.70)
@@ -1883,10 +1896,25 @@ def _fit_stock_piece_road_objects(
                 continue
             chain_count += 1
             chain: list[tuple[WorldObject, float]] = []
-            for piece, start_point, end_point in fitted_pieces:
+            plain_dirt = _is_plain_dirt_tags(feature.tags)
+            mixed_start = plain_dirt and start_key in mixed_dirt_paved_keys
+            mixed_end = plain_dirt and end_key in mixed_dirt_paved_keys
+            last_piece_index = len(fitted_pieces) - 1
+            for piece_index, (piece, start_point, end_point) in enumerate(
+                fitted_pieces
+            ):
                 placed_model = _curved_gravel_model_for_run(
                     piece.model_path, run, start_point, end_point
                 )
+                vertical_offset = _road_vertical_offset(feature.tags)
+                if (
+                    (mixed_start and piece_index == 0)
+                    or (mixed_end and piece_index == last_piece_index)
+                ):
+                    vertical_offset = min(
+                        vertical_offset,
+                        _MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES,
+                    )
                 obj = _road_object_on_slope(
                     next_id,
                     placed_model,
@@ -1894,7 +1922,7 @@ def _fit_stock_piece_road_objects(
                     end_point,
                     elevations,
                     spec,
-                    vertical_offset=_road_vertical_offset(feature.tags),
+                    vertical_offset=vertical_offset,
                 )
                 next_id += 1
                 objects.append(obj)
