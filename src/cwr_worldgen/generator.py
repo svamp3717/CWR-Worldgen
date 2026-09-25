@@ -1530,8 +1530,13 @@ def _preferred_stock_paved_texture(
         if str(value).casefold().endswith((".paa", ".pac"))
     )
     if not values:
-        # Classic OFP paved network artwork. Builds with a readable stock P3D
-        # should resolve that model's exact embedded dependency before this.
+        # Uploaded stock sil6/sil12/sil25 and kr_new sil junctions all use the
+        # dedicated road artwork. ODOL dependency scans are not guaranteed to
+        # expose texture strings, so keep the wide sil family on its real stock
+        # texture even when the dependency list is empty.
+        filename = str(model_path).replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+        if filename.startswith(("sil", "silnice")):
+            return r"o\road\sil_new.paa"
         return r"landtext\silnice.pac"
     if len(values) == 1:
         return values[0]
