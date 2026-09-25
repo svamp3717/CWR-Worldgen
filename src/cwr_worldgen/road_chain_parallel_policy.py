@@ -41,9 +41,9 @@ class _RunJob:
     start_cover: float
     end_cover: float
     cap_surface_mismatch: bool
-    suppress_short_fallback: bool
-    hard_stop_at_preferred_end: bool
     world_size: float
+    suppress_short_fallback: bool = False
+    hard_stop_at_preferred_end: bool = False
 
 
 @dataclass(frozen=True, slots=True)
