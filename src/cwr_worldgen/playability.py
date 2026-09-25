@@ -145,45 +145,6 @@ def _is_mixed_dirt_paved_node(
     return has_paved and has_plain_dirt
 
 
-def _mixed_dirt_paved_trim_metres(
-    incidents: Sequence[tuple[tuple[float, float], bool, str, str, str]],
-    dirt_direction: tuple[float, float] | None = None,
-) -> float:
-    """Stop dirt outside every paved carriageway strip at a mixed node.
-
-    A fixed half-width only works for a perpendicular crossing. At a shallow
-    angle the dirt centreline stays inside the paved strip for much longer, so
-    compute the distance along the dirt approach required to clear the widest
-    paved strip. This makes the "paved always wins" rule geometric rather than
-    dependent on object draw order.
-    """
-
-    paved = tuple(value for value in incidents if not value[1])
-    paved_models = tuple(value[2] for value in paved)
-    paved_width = paved_junction_width_for_models(paved_models)
-    half_width = max(1.75, paved_width * 0.5 + 0.10)
-    if dirt_direction is None:
-        return half_width
-
-    dx, dz = _normalised_direction((0.0, 0.0), dirt_direction)
-    required = half_width
-    for value in paved:
-        px, pz = value[0]
-        plen = math.hypot(px, pz)
-        if plen <= 1.0e-9:
-            continue
-        px, pz = px / plen, pz / plen
-        crossing_sine = abs(dx * pz - dz * px)
-        if crossing_sine <= 1.0e-4:
-            # Near-parallel joins are effectively merges, not crossings. Keep
-            # the dirt well clear of the paved slab rather than letting a huge
-            # mathematical intersection distance leak into the road fitter.
-            required = max(required, half_width * 4.0)
-        else:
-            required = max(required, half_width / crossing_sine)
-    return required
-
-
 def _junction_cap_vertical_offset(model_path: str) -> float:
     """Return a cap height that preserves paved-over-dirt precedence.
 
@@ -1750,31 +1711,17 @@ def _fit_stock_piece_road_objects(
             )
             mixed_start = plain_dirt and start_key in mixed_dirt_paved_keys
             mixed_end = plain_dirt and end_key in mixed_dirt_paved_keys
-            if mixed_start:
-                stop = _mixed_dirt_paved_trim_metres(
-                    effective_incidents[start_key],
-                    _normalised_direction(run[0], run[1]),
-                )
-                start_trim = max(start_trim, stop)
-                start_cover = max(start_cover, stop)
-            if mixed_end:
-                stop = _mixed_dirt_paved_trim_metres(
-                    effective_incidents[end_key],
-                    _normalised_direction(run[-1], run[-2]),
-                )
-                end_trim = max(end_trim, stop)
-                end_cover = max(end_cover, stop)
+            # Mixed dirt/paved nodes deliberately get no hub and no dirt trim.
+            # The final dirt piece reaches the shared node on the lower dirt
+            # plane; the continuous paved road is emitted later and 25 mm
+            # higher, so it visually covers the dirt inside the carriageway.
             start_distance = min(total_length, start_trim)
             preferred_end = max(start_distance, total_length - end_trim)
             minimum_end = max(start_distance, total_length - end_cover)
             variants = variants_for(model)
             shortest = min(piece.length_metres for piece in variants)
-            maximum_end = (
-                preferred_end
-                if mixed_end
-                else total_length + (
-                    0.70 if end_cover > 0.0 else shortest * 0.5
-                )
+            maximum_end = total_length + (
+                0.70 if end_cover > 0.0 else shortest * 0.5
             )
             fitted_pieces = _stock_piece_chain(
                 measure,
@@ -1784,12 +1731,10 @@ def _fit_stock_piece_road_objects(
                 minimum_end_distance=minimum_end,
                 maximum_end_distance=maximum_end,
             )
-            mixed_terminal = mixed_start or mixed_end
             covered_by_hubs = False
             if not fitted_pieces:
                 covered_by_hubs = (
-                    not mixed_terminal
-                    and total_length <= start_cover + end_cover + 1e-6
+                    total_length <= start_cover + end_cover + 1e-6
                 )
                 variant_paths = {piece.model_path.casefold() for piece in variants}
                 cap_surface_mismatch = any(
@@ -1797,10 +1742,7 @@ def _fit_stock_piece_road_objects(
                     and cap_plans[key][0].model_path.casefold() not in variant_paths
                     for key in (start_key, end_key)
                 )
-                if (
-                    not mixed_terminal
-                    and (not covered_by_hubs or cap_surface_mismatch)
-                ):
+                if not covered_by_hubs or cap_surface_mismatch:
                     fitted_pieces = _short_run_fallback_piece(
                         measure,
                         variants,
