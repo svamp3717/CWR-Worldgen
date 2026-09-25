@@ -543,30 +543,10 @@ def test_mixed_dirt_paved_node_is_not_a_junction_surface() -> None:
         ((1.0, 0.0), True, r"o\road\ces25.p3d", "dirt/0", "way/dirt"),
     )
     assert playability._is_mixed_dirt_paved_node(incidents)
-    assert math.isclose(
-        playability._mixed_dirt_paved_trim_metres(incidents),
-        4.65,
-        abs_tol=1.0e-9,
-    )
 
 
 
-def test_mixed_dirt_paved_trim_accounts_for_shallow_crossing_angle() -> None:
-    incidents = (
-        ((0.0, 1.0), False, r"o\road\sil25.p3d", "paved/0", "way/paved"),
-        ((0.0, -1.0), False, r"o\road\sil25.p3d", "paved/1", "way/paved"),
-        ((0.5, math.sqrt(0.75)), True, r"o\road\ces25.p3d", "dirt/0", "way/dirt"),
-    )
-    perpendicular = playability._mixed_dirt_paved_trim_metres(incidents)
-    shallow = playability._mixed_dirt_paved_trim_metres(
-        incidents,
-        (0.5, math.sqrt(0.75)),
-    )
-
-    assert math.isclose(perpendicular, 4.65, abs_tol=1.0e-9)
-    assert math.isclose(shallow, 9.30, abs_tol=1.0e-8)
-
-def test_dirt_track_terminates_at_paved_edge_without_mixed_junction_cap() -> None:
+def test_dirt_track_underlays_paved_road_without_mixed_junction_cap() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     centre = (500.0, 500.0)
@@ -611,6 +591,8 @@ def test_dirt_track_terminates_at_paved_edge_without_mixed_junction_cap() -> Non
 
     dirt_axes = []
     paved_axes = []
+    dirt_heights = []
+    paved_heights = []
     for obj in report.objects:
         path = obj.model_path.casefold()
         dirt_match = re.search(r"\\(?:ces|cesta)(25|12|6)\.p3d$", path)
@@ -622,6 +604,7 @@ def test_dirt_track_terminates_at_paved_edge_without_mixed_junction_cap() -> Non
                 spec.road_segment_length,
             )
             dirt_axes.append(playability._model_axis(obj, length))
+            dirt_heights.append(obj.y)
         elif paved_match:
             length = playability.stock_road_piece_length_metres(
                 obj.model_path,
@@ -629,16 +612,21 @@ def test_dirt_track_terminates_at_paved_edge_without_mixed_junction_cap() -> Non
                 spec.road_segment_length,
             )
             paved_axes.append(playability._model_axis(obj, length))
+            paved_heights.append(obj.y)
 
     assert dirt_axes
     assert paved_axes
 
-    # Dirt must terminate outside the 9.1 m paved carriageway, with the 10 cm
-    # safety margin used by the planner. It must never paint across the asphalt.
+    # The terminal dirt piece now reaches the shared road node. It is intentionally
+    # left beneath the asphalt instead of being cut off before the carriageway.
     assert min(
         min(math.dist(centre, endpoint) for endpoint in axis)
         for axis in dirt_axes
-    ) >= 4.60
+    ) <= 0.10
+
+    # Paved remains the upper visual surface, so the dirt underlay cannot print
+    # over the asphalt even though the final dirt piece reaches the node.
+    assert max(dirt_heights) < min(paved_heights)
 
     # The paved road is not split/trimmed for the dirt join, so at least one
     # paved slab still covers the shared OSM node continuously.
