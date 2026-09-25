@@ -624,9 +624,23 @@ def test_dirt_track_underlays_paved_road_without_mixed_junction_cap() -> None:
         for axis in dirt_axes
     ) <= 0.10
 
-    # Paved remains the upper visual surface, so the dirt underlay cannot print
-    # over the asphalt even though the final dirt piece reaches the node.
+    # Paved remains the upper visual surface, and the terminal dirt piece is
+    # sunk substantially farther than ordinary dirt so stock ces/cesta mesh
+    # height cannot reappear over the asphalt.
     assert max(dirt_heights) < min(paved_heights)
+    closest_dirt_index = min(
+        range(len(dirt_axes)),
+        key=lambda index: min(
+            math.dist(centre, endpoint)
+            for endpoint in dirt_axes[index]
+        ),
+    )
+    assert dirt_heights[closest_dirt_index] <= (
+        playability._MIXED_DIRT_UNDERLAY_VERTICAL_OFFSET_METRES + 1.0e-9
+    )
+    assert (
+        min(paved_heights) - dirt_heights[closest_dirt_index]
+    ) >= 0.07
 
     # The paved road is not split/trimmed for the dirt join, so at least one
     # paved slab still covers the shared OSM node continuously.
