@@ -838,10 +838,9 @@ def _paved_junction_arm_polygon(
     direction = (math.sin(angle), math.cos(angle))
     perpendicular = (math.cos(angle), -math.sin(angle))
     inner = -0.75
-    extent = (
-        GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
-        + GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
-    )
+    # Logical junction geometry (Roadway/map/clearance) stays on the stock
+    # 6.25 m connector radius. Only the visible mesh is allowed to overhang.
+    extent = GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
     return ShapelyPolygon(tuple(
         (
             direction[0] * along + perpendicular[0] * across,
@@ -1006,7 +1005,13 @@ def _stock_style_paved_junction_visual_lod(
         heading for heading in headings
         if heading not in {through_a, through_b}
     )
-    extent = GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+    # The PBO audit showed approach endpoints at about 6.44-6.46 m while the
+    # visible hub stopped at 6.25 m, leaving a ~0.2 m grass slit. Extend only
+    # the visual arm so it overlaps the already-trimmed approach slightly.
+    extent = (
+        GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        + GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+    )
     points: list[tuple[float, float, float]] = []
     faces: list[_Face] = []
 
@@ -1907,7 +1912,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v29-paved-junction-visual-overhang"
+                "procedural-infrastructure-model-v30-visual-only-junction-overhang"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
