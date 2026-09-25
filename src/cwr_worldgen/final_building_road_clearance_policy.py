@@ -77,6 +77,11 @@ _GENERATED_PAVED = re.compile(
     r"(?:_(?P<side>[lr])(?P<degrees>\d{2}))?\.p3d$",
     re.I,
 )
+_GENERATED_PAVED_JUNCTION = re.compile(
+    r"^paved_j(?P<degree>[34])_w(?P<width>\d{3})_h"
+    r"(?P<headings>\d{3}(?:_\d{3}){2,3})\.p3d$",
+    re.I,
+)
 
 _INSTALLED = False
 _ORIGINAL_FIT = None
@@ -431,6 +436,31 @@ def _road_object_primitives(obj, spec) -> tuple[_RoadPrimitive, ...]:
                 half_width + (0.10 if side else 0.0),
             )
             for start, end in zip(points, points[1:])
+        )
+
+    match = _GENERATED_PAVED_JUNCTION.fullmatch(filename)
+    if match is not None:
+        degree = int(match.group("degree"))
+        half_width = int(match.group("width")) / 20.0
+        headings = tuple(
+            float(value) % 360.0
+            for value in match.group("headings").split("_")
+        )
+        if len(headings) != degree or len(set(headings)) != degree:
+            return ()
+        centre = (0.0, 0.0)
+        radius = 6.25
+        return tuple(
+            _make_primitive(
+                obj,
+                centre,
+                (
+                    math.sin(math.radians(direction)) * radius,
+                    math.cos(math.radians(direction)) * radius,
+                ),
+                half_width,
+            )
+            for direction in headings
         )
 
     match = _GRAVEL.fullmatch(filename)
