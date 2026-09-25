@@ -1004,7 +1004,14 @@ def _stock_style_paved_junction_visual_lod(
         ((a_left[0] + a_right[0]) * 0.5, (a_left[2] + a_right[2]) * 0.5),
         ((b_left[0] + b_right[0]) * 0.5, (b_left[2] + b_right[2]) * 0.5),
     )
-    through_v_span = through_length / GENERATED_PAVED_TEXTURE_REPEAT_METRES
+    # Match the uploaded ODOL7 stock models exactly: the T through-road spans
+    # two sil_new V repeats over 12.5 m, while the X junction intentionally
+    # stretches one repeat across the same distance.
+    through_v_span = (
+        through_length / GENERATED_PAVED_TEXTURE_REPEAT_METRES
+        if len(headings) == 3
+        else through_length / (GENERATED_PAVED_TEXTURE_REPEAT_METRES * 2.0)
+    )
     through_flags = (
         0x00024102 if len(headings) == 3 else _ROAD_SURFACE_FACE_FLAG
     )
@@ -1022,8 +1029,11 @@ def _stock_style_paved_junction_visual_lod(
     )
 
     end_texture = _paved_junction_end_texture(texture)
-    stub_inner = 0.12
-    stub_rise = 0.012
+    # kr_new_sil_sil_t lifts its terminating arm by ~66.6 mm at the road
+    # centreline; kr_new_silxsil uses two opposing stubs ending about 0.14 m
+    # apart and raised ~11.8 mm. Preserve those stock anti-z-fighting offsets.
+    stub_inner = 0.0 if len(headings) == 3 else 0.14
+    stub_rise = 0.0666 if len(headings) == 3 else 0.0118
     for heading in side_headings:
         inner_left, inner_right = _paved_junction_cross_section(
             heading,
@@ -1864,7 +1874,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v24-stock-junction-topology"
+                "procedural-infrastructure-model-v25-exact-stock-junction-uvs"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
