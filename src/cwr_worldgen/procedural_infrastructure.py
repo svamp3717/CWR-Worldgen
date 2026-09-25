@@ -75,9 +75,15 @@ GENERATED_PAVED_HALF_WIDTH_METRES = 4.55
 # generated hub without changing the reserved approach envelope.
 GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES = 6.25
 GENERATED_PAVED_JUNCTION_HEADING_STEP_DEGREES = 5
-# Generated paved hubs now meet approach pieces exactly at the connector plane.
-# Do not overlap/bury separate road objects here: CWA exposes coplanar overlap
-# brutally, especially on the wide sil/kos family.
+# Keep topology/connector math on the stock 6.25 m radius, but let the visible
+# hub extend farther over its approaches. The hub itself is raised above paved
+# approach slabs, so this extra coverage hides square slab corners without
+# changing the logical road graph.
+GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES = 0.55
+# Stop approach slabs slightly before the logical connector. The larger visual
+# hub covers this clearance and prevents wide sil/kos corners from protruding
+# through skewed generated T/X junctions.
+GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES = 0.20
 GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES = 0.0
 
 _PAVED_JUNCTION_SUBTYPE_PATTERN = re.compile(
@@ -832,7 +838,10 @@ def _paved_junction_arm_polygon(
     direction = (math.sin(angle), math.cos(angle))
     perpendicular = (math.cos(angle), -math.sin(angle))
     inner = -0.75
-    extent = GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+    extent = (
+        GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        + GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+    )
     return ShapelyPolygon(tuple(
         (
             direction[0] * along + perpendicular[0] * across,
@@ -1898,7 +1907,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v28-stable-paved-junction-flags"
+                "procedural-infrastructure-model-v29-paved-junction-visual-overhang"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
