@@ -1322,6 +1322,10 @@ def _stock_piece_chain(
         if not candidates:
             if current >= minimum_end_distance - 0.05:
                 break
+            if maximum_end_distance <= preferred_end_distance + 1.0e-7:
+                # Hard terminal boundaries, notably dirt meeting a paved edge,
+                # must never grow a short stock slab through the stop plane.
+                break
             # A very short final remainder cannot contain even the shortest
             # stock model. Extend that model along the final local direction so
             # its first endpoint remains exactly connected to the chain.
