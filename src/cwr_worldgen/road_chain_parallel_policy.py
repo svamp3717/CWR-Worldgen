@@ -693,20 +693,8 @@ def _fit_stock_piece_road_objects_parallel(
                 plain_dirt and start_key in mixed_dirt_paved_keys
             )
             mixed_end = plain_dirt and end_key in mixed_dirt_paved_keys
-            if mixed_start:
-                stop = _playability._mixed_dirt_paved_trim_metres(
-                    effective_incidents[start_key],
-                    _playability._normalised_direction(run[0], run[1]),
-                )
-                start_trim = max(start_trim, stop)
-                start_cover = max(start_cover, stop)
-            if mixed_end:
-                stop = _playability._mixed_dirt_paved_trim_metres(
-                    effective_incidents[end_key],
-                    _playability._normalised_direction(run[-1], run[-2]),
-                )
-                end_trim = max(end_trim, stop)
-                end_cover = max(end_cover, stop)
+            # Do not trim dirt away from the asphalt. Its terminal piece reaches
+            # the shared node underneath the higher paved surface.
             cap_surface_mismatch = any(
                 key in cap_plans
                 and cap_plans[key][0].model_path.casefold() not in variant_paths
@@ -723,8 +711,8 @@ def _fit_stock_piece_road_objects_parallel(
                 start_cover=start_cover,
                 end_cover=end_cover,
                 cap_surface_mismatch=cap_surface_mismatch,
-                suppress_short_fallback=(mixed_start or mixed_end),
-                hard_stop_at_preferred_end=mixed_end,
+                suppress_short_fallback=False,
+                hard_stop_at_preferred_end=False,
                 world_size=float(spec.world_size),
             ))
             feature_job_counts[feature_index] += 1
