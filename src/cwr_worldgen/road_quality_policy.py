@@ -243,7 +243,10 @@ def _exit_distance(junction: _Junction, direction: tuple[float, float]) -> float
     # incident road direction. Treat that arm extent as authoritative instead
     # of intersecting the direction with the hub's axis-aligned envelope.
     if _is_generated_paved_junction(junction):
-        return float(_p.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES)
+        return float(
+            _p.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+            + _p.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+        )
 
     dx, dz = direction
     ax, az = junction.axis
