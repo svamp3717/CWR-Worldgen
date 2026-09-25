@@ -249,6 +249,8 @@ def _batched_stock_piece_chain(
         if not candidates:
             if current >= minimum_end_distance - 0.05:
                 break
+            if maximum_end_distance <= preferred_end_distance + 1.0e-7:
+                break
             piece = ordered[-1]
             target_distance = min(preferred_end_distance, measure.total)
             target_x, target_z, target_heading = measure.point(target_distance)
