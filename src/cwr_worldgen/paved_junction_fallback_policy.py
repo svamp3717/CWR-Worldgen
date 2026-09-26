@@ -8,6 +8,7 @@ import math
 from . import generator as _generator
 from . import paved_junction_policy as _paved
 from . import playability as _p
+from . import procedural_infrastructure as _pi
 from . import road_quality_policy as _rq
 
 _SUCCESS_DISTANCE_METRES = 0.75
@@ -221,6 +222,224 @@ def _affected_plan_keys(
     return frozenset(result)
 
 
+
+def _generated_local_headings(
+    length: float,
+    signed_curve_degrees: float,
+) -> tuple[float, float]:
+    if abs(signed_curve_degrees) <= 1.0e-9:
+        return 0.0, 0.0
+    theta = math.radians(abs(signed_curve_degrees))
+    radius = length / max(1.0e-9, 2.0 * math.sin(theta * 0.5))
+    sagitta = math.copysign(
+        radius * (1.0 - math.cos(theta * 0.5)),
+        signed_curve_degrees,
+    )
+    control_x = sagitta * 2.0
+    return (
+        math.degrees(math.atan2(2.0 * control_x, length)),
+        math.degrees(math.atan2(-2.0 * control_x, length)),
+    )
+
+
+def _generated_curve_choice(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    start_direction: tuple[float, float],
+    end_direction: tuple[float, float],
+) -> float:
+    """Choose the generated curve bucket that best matches both approach tangents."""
+
+    length = max(0.01, math.dist(start, end))
+    chord = _paved._heading(_paved._unit((
+        end[0] - start[0],
+        end[1] - start[1],
+    )))
+    start_heading = _paved._heading(start_direction)
+    end_heading = _paved._heading(end_direction)
+    choices = (0.0,) + tuple(
+        value
+        for amount in _pi.GENERATED_PAVED_CURVE_BUCKETS
+        for value in (float(amount), -float(amount))
+    )
+    best = None
+    for value in choices:
+        first_local, last_local = _generated_local_headings(length, value)
+        first_error = _paved._angle(
+            _paved._direction(chord + first_local),
+            _paved._direction(start_heading),
+        )
+        last_error = _paved._angle(
+            _paved._direction(chord + last_local),
+            _paved._direction(end_heading),
+        )
+        score = (
+            max(first_error, last_error),
+            first_error + last_error,
+            abs(value),
+        )
+        if best is None or score < best[0]:
+            best = score, value
+    return 0.0 if best is None else float(best[1])
+
+
+def _stitch_generated_fallback_approaches(
+    report,
+    fallback_plans,
+    elevations,
+    spec,
+):
+    """Make failed-stock fallback hubs own their approach seams in the base fit.
+
+    This runs inside paved-junction generation, before WRP serialization and
+    before the road inspector.  The old fallback path inserted a generated hub
+    but could leave the stock chain that had been fitted for the failed prefab.
+    That produced both a short slab inside the hub and 0.3-1.3 m connector gaps.
+    Rebuild only the terminal paved piece of each fallback arm from the exact
+    generated connector to its existing outward endpoint.
+    """
+
+    if not fallback_plans or not report.objects:
+        return report
+
+    objects_by_id = {int(obj.object_id): obj for obj in report.objects}
+    remove_ids: set[int] = set()
+    replacements: dict[int, object] = {}
+    used_ids: set[int] = set()
+    radius = float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES)
+    tolerance = 0.12
+
+    for plan in fallback_plans.values():
+        arms = tuple(plan.arms)
+        candidates = []
+        for obj in report.objects[report.junction_cap_objects:]:
+            family = _paved._family(obj.model_path)
+            if family is None or _paved._kind(family) != "paved":
+                continue
+            filename = obj.model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+            if filename.startswith("paved_j"):
+                continue
+            axis = _paved._object_axis(obj, spec)
+            if axis is None:
+                continue
+            distances = tuple(math.dist(plan.point, point) for point in axis)
+            radial_directions = tuple(
+                _paved._unit((
+                    point[0] - plan.point[0],
+                    point[1] - plan.point[1],
+                ))
+                for point in axis
+            )
+            nearest_arm_error = min(
+                _paved._angle(direction, arm.source_direction)
+                for direction in radial_directions
+                for arm in arms
+            )
+            if nearest_arm_error > 35.0:
+                continue
+
+            # A short slab with one endpoint deep inside the hub is stale stock
+            # approach geometry. Remove it before selecting the real terminal
+            # piece, otherwise it becomes the inspector's "extra approach".
+            if (
+                min(distances) < radius - 1.0
+                and max(distances) <= radius + 3.0
+            ):
+                remove_ids.add(int(obj.object_id))
+                continue
+            candidates.append((obj, axis, distances))
+
+        for arm in arms:
+            direction = _paved._unit(arm.source_direction)
+            connector = (
+                plan.point[0] + direction[0] * radius,
+                plan.point[1] + direction[1] * radius,
+            )
+            choices = []
+            for obj, axis, distances in candidates:
+                object_id = int(obj.object_id)
+                if object_id in remove_ids or object_id in used_ids:
+                    continue
+                for near_index in (0, 1):
+                    near = axis[near_index]
+                    far = axis[1 - near_index]
+                    near_radius = distances[near_index]
+                    far_radius = distances[1 - near_index]
+                    if far_radius <= near_radius + 0.10:
+                        continue
+                    radial = _paved._unit((
+                        near[0] - plan.point[0],
+                        near[1] - plan.point[1],
+                    ))
+                    radial_error = _paved._angle(radial, direction)
+                    if radial_error > 30.0:
+                        continue
+                    gap = math.dist(connector, near)
+                    if gap > 3.0:
+                        continue
+                    choices.append((
+                        gap,
+                        radial_error,
+                        object_id,
+                        obj,
+                        near,
+                        far,
+                    ))
+
+            if not choices:
+                continue
+            gap, _radial_error, object_id, old, near, far = min(
+                choices,
+                key=lambda value: (value[0], value[1], value[2]),
+            )
+            used_ids.add(object_id)
+            if gap <= tolerance:
+                continue
+
+            family = _paved._family(old.model_path) or "sil"
+            width = 2.0 * float(_paved._WIDTH.get(family, 4.55))
+            length = math.dist(connector, far)
+            if length <= 0.05:
+                remove_ids.add(object_id)
+                continue
+            continuation = _paved._unit((
+                far[0] - near[0],
+                far[1] - near[1],
+            ))
+            curve = _generated_curve_choice(
+                connector,
+                far,
+                direction,
+                continuation,
+            )
+            model_path = _pi.paved_fallback_model_path(
+                str(getattr(spec, "name", "world")),
+                width,
+                length,
+                curve,
+            )
+            replacements[object_id] = _p._road_object_on_slope(
+                object_id,
+                model_path,
+                connector,
+                far,
+                elevations,
+                spec,
+                vertical_offset=_p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
+            )
+
+    if not remove_ids and not replacements:
+        return report
+    return replace(
+        report,
+        objects=tuple(
+            replacements.get(int(obj.object_id), obj)
+            for obj in report.objects
+            if int(obj.object_id) not in remove_ids
+        ),
+    )
+
+
 def _fit(
     dataset,
     projection,
@@ -312,6 +531,17 @@ def _fit(
                 starting_id=starting_id,
                 progress_callback=progress_callback,
             )
+            fallback_plans = {
+                key: plans[key]
+                for key in plans
+                if key not in active
+            }
+            base_report = _stitch_generated_fallback_approaches(
+                base_report,
+                fallback_plans,
+                elevations,
+                spec,
+            )
             if not active:
                 return base_report
 
@@ -345,7 +575,7 @@ def _fit(
         # Geometry remained coupled after the bounded stabilization attempts.
         # Refit without stock plans so every paved junction uses its generated
         # angle-matched hub instead of leaving a grass gap or overlapping slabs.
-        return _base_refit(
+        final_report = _base_refit(
             dataset,
             projection,
             elevations,
@@ -353,6 +583,12 @@ def _fit(
             {},
             starting_id=starting_id,
             progress_callback=progress_callback,
+        )
+        return _stitch_generated_fallback_approaches(
+            final_report,
+            plans,
+            elevations,
+            spec,
         )
     finally:
         if planning is not None and session_token is not None:
