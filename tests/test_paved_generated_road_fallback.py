@@ -191,6 +191,63 @@ def test_generated_paved_junction_quantizes_heading_and_reuses_stock_texture(
     assert roadway.faces
 
 
+def test_generated_paved_junction_signature_writes_exact_heading_asset(
+    tmp_path: Path,
+) -> None:
+    directions = tuple(
+        (
+            math.sin(math.radians(heading)),
+            math.cos(math.radians(heading)),
+        )
+        for heading in (5.0, 190.0, 270.0)
+    )
+    headings, axis = infrastructure.paved_junction_signature_for_directions(
+        directions
+    )
+    assert headings == (0, 80, 175)
+    assert math.isclose(math.hypot(*axis), 1.0, abs_tol=1.0e-9)
+
+    model = infrastructure.paved_junction_signature_model_path(
+        "reuse_world",
+        9.10,
+        headings,
+    )
+    assert model.endswith(
+        r"\paved_j3_w091_h000_080_175.p3d"
+    )
+    assert infrastructure.is_generated_paved_junction_model(model)
+
+    library = infrastructure.ProceduralInfrastructureLibrary(
+        "reuse_world",
+        paved_texture_path=r"o\road\sil_new.paa",
+        cache_enabled=False,
+    )
+    library.register_model_usage(model)
+    result = library.write_assets(
+        tmp_path,
+        tmp_path / "infrastructure.json",
+    )
+    assert result.generated_variants == 1
+
+    key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_j3_w091_h000_080_175",
+        91,
+        int(round(
+            infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 20.0
+        )),
+    )
+    visual, _map_geometry, roadway, _land = infrastructure._road_lods(
+        key,
+        r"o\road\sil_new.paa",
+    )
+    textures = [face.texture for face in visual.faces]
+    assert textures.count(r"o\road\sil_new.paa") == 4
+    assert textures.count(r"o\road\sil_konec.paa") == 4
+    assert visual.faces
+    assert roadway.faces
+
+
 def test_generated_paved_hub_and_ribbon_match_stock_surface_height() -> None:
     spec = SimpleNamespace(cells=4, cell_size=10.0)
     elevations = (0.0,) * 16
