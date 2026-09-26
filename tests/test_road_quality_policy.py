@@ -247,6 +247,87 @@ def test_stock_junction_plans_reject_dirt_gravel_and_mixed_nodes() -> None:
     assert "ces" not in all_paved.model_path.casefold()
 
 
+def test_stock_t_first_curve_drops_only_inner_overlap_edge() -> None:
+    spec = SimpleNamespace(cells=8, cell_size=25.0)
+    elevations = (0.0,) * 64
+    connector = paved_junctions._Connector(
+        "sil",
+        (0.0, paved_junctions._JUNCTION_RADIUS),
+        (0.0, 1.0),
+    )
+    arm = paved_junctions._Arm("sil", (0.0, 1.0), connector)
+    stock_plan = paved_junctions._Plan(
+        r"o\road\kr_new_sil_sil_t.p3d",
+        (0.0, 0.0),
+        (0.0, 1.0),
+        (arm,),
+    )
+    point, heading = paved_junctions._arc_step(
+        connector.point,
+        0.0,
+        1,
+        25,
+    )
+    direction = paved_junctions._direction(heading)
+    merge_target = (
+        point[0] + direction[0] * paved_junctions._STRAIGHTS[6],
+        point[1] + direction[1] * paved_junctions._STRAIGHTS[6],
+    )
+    choice = paved_junctions._ApproachChoice(
+        1,
+        1,
+        25,
+        0,
+        0,
+        25,
+        6,
+        merge_target,
+    )
+
+    stock_objects, _next_id = paved_junctions._approach_objects(
+        stock_plan,
+        arm,
+        choice,
+        1,
+        elevations,
+        spec,
+    )
+    curve = stock_objects[0]
+    local_start, local_end = paved_junctions._curve_points("sil", 25.0)
+    sine_pitch = math.sin(math.radians(curve.pitch_degrees))
+    rendered_start_y = curve.y + local_start[1] * sine_pitch
+    rendered_end_y = curve.y + local_end[1] * sine_pitch
+
+    assert math.isclose(
+        rendered_start_y,
+        0.060 - paved_junctions._STOCK_T_CURVE_SEAM_DROP_METRES,
+        abs_tol=1.0e-7,
+    )
+    assert math.isclose(rendered_end_y, 0.060, abs_tol=1.0e-7)
+
+    generated_plan = paved_junctions._Plan(
+        r"test_world\i\paved_j3_w091_h000_090_180.p3d",
+        stock_plan.point,
+        stock_plan.axis,
+        stock_plan.arms,
+    )
+    generated_objects, _next_id = paved_junctions._approach_objects(
+        generated_plan,
+        arm,
+        choice,
+        10,
+        elevations,
+        spec,
+    )
+    generated_curve = generated_objects[0]
+    generated_start_y = (
+        generated_curve.y
+        + local_start[1]
+        * math.sin(math.radians(generated_curve.pitch_degrees))
+    )
+    assert math.isclose(generated_start_y, 0.060, abs_tol=1.0e-7)
+
+
 def test_stock_junction_curve_anchors_both_seams_to_terrain_plane() -> None:
     spec = SimpleNamespace(cells=16, cell_size=10.0)
     elevations = [0.0] * (spec.cells * spec.cells)
