@@ -20,11 +20,6 @@ _JUNCTION_RADIUS = 6.25
 _APPROACH_RESERVE = 32.0
 _CLEAR_RADIUS = 30.0
 _TURN_DEGREES = 10.0
-# The first stock 10-degree approach can overlap the stock T at its outer corner
-# even when both centerline connectors are exact. Keep that inner curve edge a
-# few millimetres below the junction so the T owns the overlap visually, then
-# return to the normal road plane by the far edge.
-_STOCK_T_CURVE_SEAM_DROP_METRES = 0.005
 _WIDTH = {"sil": 4.55, "kos": 4.55, "asf": 3.50}
 _STRAIGHTS = {25: 25.0, 12: 12.5, 6: 6.25}
 _T = re.compile(r"kr_new_(sil|asf|kos)_(sil|asf|kos)_t\.p3d$", re.I)
@@ -523,8 +518,6 @@ def _curve_object(
     turn_sign,
     elevations,
     spec,
-    *,
-    seam_start_drop: float = 0.0,
 ):
     begin, end = _curve_points(family, float(radius))
     if turn_sign > 0:
@@ -547,13 +540,9 @@ def _curve_object(
     # exactly where the curve meets the stock T. Anchor both authored curve
     # endpoints to the terrain plane instead, using the model's local-Z span to
     # derive the rigid pitch without changing any X/Z fitting geometry.
-    start_height = (
-        _p._sample_elevation(
-            elevations, spec.cells, spec.cell_size, start[0], start[1]
-        )
-        + 0.060
-        - max(0.0, float(seam_start_drop))
-    )
+    start_height = _p._sample_elevation(
+        elevations, spec.cells, spec.cell_size, start[0], start[1]
+    ) + 0.060
     end_height = _p._sample_elevation(
         elevations, spec.cells, spec.cell_size, finish[0], finish[1]
     ) + 0.060
@@ -794,21 +783,41 @@ def _approach_objects(plan, arm, choice, next_id, elevations, spec):
         plan.model_path
     )
     for curve_index in range(choice.first_turns):
-        obj, point, heading = _curve_object(
-            next_id,
-            family,
-            choice.first_radius,
-            point,
-            heading,
-            choice.turn_sign,
-            elevations,
-            spec,
-            seam_start_drop=(
-                _STOCK_T_CURVE_SEAM_DROP_METRES
-                if stock_junction and curve_index == 0
-                else 0.0
-            ),
-        )
+        if stock_junction and curve_index == 0:
+            finish, next_heading = _arc_step(
+                point,
+                heading,
+                choice.turn_sign,
+                choice.first_radius,
+            )
+            model_path = _pi.paved_fallback_model_path(
+                str(getattr(spec, "name", "world")),
+                _WIDTH[family] * 2.0,
+                math.dist(point, finish),
+                choice.turn_sign * _TURN_DEGREES,
+            )
+            obj = _p._road_object_on_slope(
+                next_id,
+                model_path,
+                point,
+                finish,
+                elevations,
+                spec,
+                vertical_offset=0.060,
+            )
+            point = finish
+            heading = next_heading
+        else:
+            obj, point, heading = _curve_object(
+                next_id,
+                family,
+                choice.first_radius,
+                point,
+                heading,
+                choice.turn_sign,
+                elevations,
+                spec,
+            )
         objects.append(obj)
         next_id += 1
 
