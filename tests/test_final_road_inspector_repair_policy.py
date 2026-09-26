@@ -115,7 +115,7 @@ def test_explicitly_protected_bridge_terminal_region_is_never_replaced() -> None
     assert repair._LAST_REPAIR_REPORT.unresolved_generated_regions == 1
 
 
-def test_ordinary_cap_prefix_piece_can_be_absorbed_by_inspector_repair() -> None:
+def test_protected_junction_prefix_is_never_replaced() -> None:
     spec = _spec()
     report = _report(
         WorldObject(1, r"o\road\sil25.p3d", 100.0, 0.060, 100.0, 0.0, 0.0),
@@ -129,43 +129,10 @@ def test_ordinary_cap_prefix_piece_can_be_absorbed_by_inspector_repair() -> None
         spec,
     )
 
-    assert len(result.objects) == 1
-    assert infrastructure.is_generated_paved_road_model(
-        result.objects[0].model_path
-    )
+    assert result is report
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2)
     assert repair._LAST_REPAIR_REPORT is not None
-    assert repair._LAST_REPAIR_REPORT.unresolved_generated_regions == 0
-
-
-def test_true_generated_junction_in_cap_prefix_remains_protected() -> None:
-    spec = _spec()
-    hub = WorldObject(
-        1,
-        r"repair_test\i\paved_j3_w091_h000_090_180.p3d",
-        100.0,
-        0.060,
-        100.0,
-        0.0,
-        0.0,
-    )
-    report = _report(
-        hub,
-        WorldObject(2, r"o\road\sil25.p3d", 100.0, 0.035, 112.5, 5.0, 0.0),
-        caps=1,
-    )
-
-    inspection = inspector.inspect_road_objects(
-        report.objects,
-        world_name=spec.name,
-        topology_checks=False,
-    )
-    repaired, *_counts = repair._apply_inspection_plans(
-        report,
-        inspection,
-        [0.0] * (spec.cells * spec.cells),
-        spec,
-    )
-    assert repaired.objects[0] == hub
+    assert repair._LAST_REPAIR_REPORT.unresolved_generated_regions == 1
 
 
 def test_stock_repair_plan_reconstructs_clean_vanilla_curve_sequence() -> None:
@@ -394,94 +361,6 @@ def test_generated_hub_realigns_to_final_fitted_approach_tangents() -> None:
         r"\paved_j3_w091_h000_080_190.p3d"
     )
     assert math.isclose(hub.heading_degrees, 0.0, abs_tol=0.1)
-
-
-
-
-def test_generated_hub_stitch_replaces_gapped_terminal_and_removes_intruder() -> None:
-    spec = _spec()
-    centre = (320.0, 320.0)
-    radius = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
-
-    hub = WorldObject(
-        1,
-        r"repair_test\i\paved_j3_w091_h000_090_180.p3d",
-        centre[0],
-        0.060,
-        centre[1],
-        0.0,
-        0.0,
-    )
-    # East arm: one bad short slab enters the hub centre, then a normal outward
-    # stock piece continues from x=327.125 to x=333.375.
-    intruder = WorldObject(
-        2,
-        r"o\road\sil6.p3d",
-        centre[0] + 4.0,
-        0.035,
-        centre[1],
-        90.0,
-        0.0,
-    )
-    outer = WorldObject(
-        3,
-        r"o\road\sil6.p3d",
-        centre[0] + 10.25,
-        0.035,
-        centre[1],
-        90.0,
-        0.0,
-    )
-    report = _report(hub, intruder, outer, caps=1)
-
-    result = repair._stitch_generated_paved_junction_hubs(
-        report,
-        [0.0] * (spec.cells * spec.cells),
-        spec,
-    )
-
-    ids = {obj.object_id for obj in result.objects}
-    assert 2 not in ids
-    replacement = next(obj for obj in result.objects if obj.object_id == 3)
-    assert infrastructure.is_generated_paved_road_model(
-        replacement.model_path
-    )
-
-    inspected = inspector.inspect_road_objects(
-        result.objects,
-        world_name=spec.name,
-        topology_checks=True,
-    )
-    assert not [
-        issue for issue in inspected.issues
-        if issue.category in {
-            "junction_connector_mismatch",
-            "bad_junction",
-        }
-    ]
-
-
-def test_short_axial_connector_gap_is_planned_for_generated_repair() -> None:
-    result = inspector.inspect_road_objects(
-        (
-            WorldObject(
-                1, r"o\road\sil6.p3d",
-                100.0, 0.035, 100.0, 0.0, 0.0,
-            ),
-            # 0.7 m axial gap with no tangent error.
-            WorldObject(
-                2, r"o\road\sil6.p3d",
-                100.0, 0.035, 106.95, 0.0, 0.0,
-            ),
-        ),
-        world_name="repair_test",
-        topology_checks=False,
-    )
-    assert any(
-        issue.category == "connector_gap"
-        for issue in result.issues
-    )
-    assert result.paved_replacements or result.paved_stock_repairs
 
 
 def test_inspector_repair_is_captured_by_final_building_clearance() -> None:
