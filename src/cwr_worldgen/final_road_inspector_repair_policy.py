@@ -26,7 +26,7 @@ from . import procedural_infrastructure as _pi
 from . import road_inspector as _inspector
 from .model import WorldObject
 
-_MAXIMUM_REPAIR_PASSES = 5
+_MAXIMUM_REPAIR_PASSES = 3
 _RAW_PROGRESS_PERCENT = 99
 _INSTALLED = False
 _ORIGINAL_FIT = None
@@ -276,20 +276,9 @@ def _apply_inspection_plans(
         0,
         min(int(getattr(report, "junction_cap_objects", 0)), len(report.objects)),
     )
-    # The cap prefix also contains ordinary sil6/ces6 cover pieces. Treating
-    # every one of those as untouchable is why the inspector left the repeated
-    # ~0.7 m paved connector gaps in terrtest33 unresolved: every failing pair
-    # included one low-ID cap-prefix straight. Protect only actual T/X hub
-    # models; ordinary paved cap pieces are safe to absorb into a repair plan.
-    inspected_by_id = {
-        int(road.object_id): road
-        for road in inspection.road_objects
+    protected_ids = {
+        int(obj.object_id) for obj in report.objects[:protected_count]
     }
-    protected_ids = set()
-    for obj in report.objects[:protected_count]:
-        road = inspected_by_id.get(int(obj.object_id))
-        if road is not None and road.kind.startswith("junction_"):
-            protected_ids.add(int(obj.object_id))
     protected_ids.update(int(value) for value in protected_object_ids)
     objects_by_id = {int(obj.object_id): obj for obj in report.objects}
 
@@ -1190,34 +1179,12 @@ def _fit(
         protected_object_ids=protected,
         progress_callback=progress_callback,
     )
-    guarded = ensure_final_paved_junction_hubs(
+    return ensure_final_paved_junction_hubs(
         repaired,
         dataset,
         projection,
         elevations,
         spec,
-        progress_callback=progress_callback,
-    )
-    aligned = realign_generated_paved_junction_hubs(
-        guarded,
-        elevations,
-        spec,
-        progress_callback=progress_callback,
-    )
-    stitched = _stitch_generated_paved_junction_hubs(
-        aligned,
-        elevations,
-        spec,
-        progress_callback=progress_callback,
-    )
-    # Re-run the ordinary bounded seam repair once the junction terminal pieces
-    # have been rewritten. This catches any far-end seam introduced by replacing
-    # the first approach slab, while true junction hubs remain protected.
-    return repair_final_road_geometry(
-        stitched,
-        elevations,
-        spec,
-        protected_object_ids=protected,
         progress_callback=progress_callback,
     )
 
