@@ -88,11 +88,11 @@ def _finish_gravel_object_texture(
 
     alpha = image.getchannel("A") if "A" in image.getbands() else None
     rgb = image.convert("RGB")
-    rgb = ImageEnhance.Brightness(rgb).enhance(0.76)
-    rgb = ImageEnhance.Contrast(rgb).enhance(1.10)
-    # Stock sil/kos pavement is nearly neutral grey. Retain a little source
-    # colour so this still reads as aggregate rather than painted asphalt.
-    rgb = ImageEnhance.Color(rgb).enhance(0.25)
+    rgb = ImageEnhance.Brightness(rgb).enhance(0.68)
+    rgb = ImageEnhance.Contrast(rgb).enhance(1.12)
+    # Stock sil/kos pavement is nearly neutral grey. Retain just enough source
+    # colour for the aggregate to read as gravel rather than painted asphalt.
+    rgb = ImageEnhance.Color(rgb).enhance(0.20)
 
     width, height = rgb.size
     pixels = rgb.load()
@@ -1217,16 +1217,16 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             if kind == "gravel":
                 asset_key = cache_key(
-                    "procedural-infrastructure-texture-v21-reference-gravel-paved-tone",
-                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-paved-neutral-v3"},
+                    "procedural-infrastructure-texture-v23-reference-gravel-paved-tone-darker",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-paved-neutral-v4-darker"},
                 )
                 producer = lambda target: write_rgba_dxt1_paa(
                     target, create_gravel_road_texture_image(512)
                 )
             elif kind == "gravel_junction":
                 asset_key = cache_key(
-                    "procedural-infrastructure-texture-v22-reference-gravel-junction-paved-tone",
-                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-paved-neutral-junction-v3"},
+                    "procedural-infrastructure-texture-v24-reference-gravel-junction-paved-tone-darker",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-paved-neutral-junction-v4-darker"},
                 )
                 producer = lambda target: write_rgb_dxt1_paa(
                     target, create_gravel_junction_texture_image(512)
@@ -1277,17 +1277,17 @@ class ProceduralInfrastructureLibrary:
             gravel_source = {
                 "type": "bundled-reference",
                 "texture": f"i/{_texture_file_stem('gravel')}.paa",
-                "texture_recipe": "reference-gravel-photo-paved-neutral-v3",
+                "texture_recipe": "reference-gravel-photo-paved-neutral-v4-darker",
                 "texture_size": 512,
                 "tone": {
-                    "brightness": 0.76,
-                    "contrast": 1.10,
-                    "saturation": 0.25,
+                    "brightness": 0.68,
+                    "contrast": 1.12,
+                    "saturation": 0.20,
                     "red_gain": 0.985,
                     "green_gain": 0.990,
                     "blue_gain": 1.0,
                     "wheel_track_darkening": 0.060,
-                    "target_family": "stock-paved-neutral-grey",
+                    "target_family": "stock-paved-neutral-grey-dark",
                 },
                 "edge_blend": "clean DXT1 cutout plus smoothly irregular model edge",
                 "map_symbol": "road",
@@ -1300,7 +1300,7 @@ class ProceduralInfrastructureLibrary:
             if "gravel_junction" in used_texture_kinds:
                 gravel_source.update({
                     "junction_texture": f"i/{_texture_file_stem('gravel_junction')}.paa",
-                    "junction_texture_recipe": "reference-gravel-photo-paved-neutral-junction-v3",
+                    "junction_texture_recipe": "reference-gravel-photo-paved-neutral-junction-v4-darker",
                     "junction_texture_alpha": "opaque",
                 })
 
