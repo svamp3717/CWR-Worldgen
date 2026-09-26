@@ -278,29 +278,63 @@ def test_generated_paved_hub_and_ribbon_match_stock_surface_height() -> None:
         )
 
 
-def test_generated_curved_paved_piece_has_square_nominal_seam_ends() -> None:
-    key = infrastructure.InfrastructureModelKey(
+def test_generated_curved_paved_turn_restores_terrtest39_seam_geometry() -> None:
+    curved_key = infrastructure.InfrastructureModelKey(
         "road",
-        "paved_w091_l0062_r20",
+        "paved_w091_l0059_r45",
         91,
-        62,
+        59,
     )
     visual, _map_geometry, roadway, _land = infrastructure._road_lods(
-        key,
+        curved_key,
         r"o\road\sil_new.paa",
     )
 
-    half_length = key.length_m * 0.5
-    for lod in (visual, roadway):
-        first_left, first_right = lod.points[0], lod.points[1]
-        last_left, last_right = lod.points[-2], lod.points[-1]
-        assert math.isclose(first_left[2], first_right[2], abs_tol=1.0e-9)
-        assert math.isclose(last_left[2], last_right[2], abs_tol=1.0e-9)
-        assert min(point[2] for point in lod.points) >= -half_length - 1.0e-9
-        assert max(point[2] for point in lod.points) <= half_length + 1.0e-9
+    # terrtest39 used tangent-aligned turn mouths. terrtest44's square ends made
+    # both edge points share the same Z plane and exposed large triangular grass
+    # wedges between consecutive turn pieces.
+    first_left, first_right = roadway.points[0], roadway.points[1]
+    last_left, last_right = roadway.points[-2], roadway.points[-1]
+    assert not math.isclose(first_left[2], first_right[2], abs_tol=0.10)
+    assert not math.isclose(last_left[2], last_right[2], abs_tol=0.10)
 
-    assert infrastructure.GENERATED_PAVED_VISUAL_OVERLAP_METRES == 0.0
-    assert infrastructure.GENERATED_PAVED_TEXTURE_REPEAT_METRES == 6.25
+    # The visual LOD extends 0.18 m beyond the nominal tangent mouth and drops
+    # only that overlap below the paved surface, matching the seam treatment in
+    # terrtest39 without changing the Roadway extent.
+    assert infrastructure.GENERATED_PAVED_TURN_VISUAL_OVERLAP_METRES == 0.18
+    assert min(point[1] for point in visual.points) < (
+        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES - 0.03
+    )
+    assert all(
+        math.isclose(point[1], infrastructure.GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES, abs_tol=1.0e-9)
+        for point in roadway.points
+    )
+
+    # Straight generated paved pieces keep square mouths for junction approach
+    # alignment. This fix is deliberately turn-only.
+    straight_key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_w091_l0059",
+        91,
+        59,
+    )
+    straight_visual, _geometry, straight_roadway, _land = infrastructure._road_lods(
+        straight_key,
+        r"o\road\sil_new.paa",
+    )
+    assert math.isclose(
+        straight_roadway.points[0][2],
+        straight_roadway.points[1][2],
+        abs_tol=1.0e-9,
+    )
+    assert math.isclose(
+        straight_roadway.points[-2][2],
+        straight_roadway.points[-1][2],
+        abs_tol=1.0e-9,
+    )
+    assert min(point[1] for point in straight_visual.points) >= (
+        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES - 1.0e-9
+    )
 
 
 def test_generated_paved_junction_visual_overhang_covers_logical_seam() -> None:
