@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 import math
 import re
 
@@ -244,6 +245,44 @@ def test_stock_junction_plans_reject_dirt_gravel_and_mixed_nodes() -> None:
     assert mixed_gravel is None
     assert all_paved is not None
     assert "ces" not in all_paved.model_path.casefold()
+
+
+def test_stock_junction_curve_anchors_both_seams_to_terrain_plane() -> None:
+    spec = SimpleNamespace(cells=16, cell_size=10.0)
+    elevations = [0.0] * (spec.cells * spec.cells)
+    start = (60.0, 60.0)
+
+    def plane(_values, _cells, _cell_size, x, z):
+        return 0.010 * float(x) + 0.020 * float(z)
+
+    with patch.object(playability, "_sample_elevation", side_effect=plane):
+        obj, finish, _heading = paved_junctions._curve_object(
+            1,
+            "sil",
+            25,
+            start,
+            0.0,
+            1,
+            elevations,
+            spec,
+        )
+
+    local_start, local_end = paved_junctions._curve_points("sil", 25.0)
+    sine_pitch = math.sin(math.radians(obj.pitch_degrees))
+    rendered_start_y = obj.y + local_start[1] * sine_pitch
+    rendered_end_y = obj.y + local_end[1] * sine_pitch
+
+    assert not math.isclose(obj.pitch_degrees, 0.0, abs_tol=1.0e-9)
+    assert math.isclose(
+        rendered_start_y,
+        plane(None, None, None, *start) + 0.060,
+        abs_tol=1.0e-7,
+    )
+    assert math.isclose(
+        rendered_end_y,
+        plane(None, None, None, *finish) + 0.060,
+        abs_tol=1.0e-7,
+    )
 
 
 def test_terrtest46_stock_compatible_t_stays_stock_first() -> None:
