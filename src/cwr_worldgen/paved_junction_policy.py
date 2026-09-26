@@ -298,44 +298,36 @@ def _plan(
         branch_family = incidents[branch][1]
 
         if world_name:
-            # The screenshot failure this policy targets is a skewed paved T:
-            # a stock 90-degree cap leaves a rectangular seam even though the
-            # mapped branch reaches the through-road cleanly. Generate the hub
-            # itself to the mapped branch heading, while leaving the existing
-            # stock/curve approach solver in charge outside the 6.25 m core.
-            raw_heading = _local_heading(directions[branch], axis)
-            branch_heading = _pi._paved_junction_angle_bucket(raw_heading)
-            main_half_width = max(
-                _paved_half_width(main_families[0]),
-                _paved_half_width(main_families[1]),
+            # Encode all three real road tangents in the generated P3D. The old
+            # angle-only hub forced the two main arms to 000/180 and created new
+            # triangular grass wedges whenever the through-road bent at the
+            # junction.
+            headings, axis = _pi.paved_junction_signature_for_directions(
+                directions
             )
-            branch_half_width = _paved_half_width(branch_family)
-            model_path = _pi.paved_junction_model_path(
+            width = max(
+                _paved_half_width(family) * 2.0
+                for _direction_value, family in incidents
+            )
+            model_path = _pi.paved_junction_signature_model_path(
                 world_name,
-                main_half_width * 2.0,
-                branch_half_width * 2.0,
-                branch_heading,
+                width,
+                headings,
             )
-            branch_radians = math.radians(branch_heading)
             connector_radius = (
                 _JUNCTION_RADIUS
                 + _pi.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
             )
-            definitions = (
+            definitions = tuple(
                 (
-                    (0.0, connector_radius),
-                    0.0,
-                    _junction_family(main_families[0]),
-                ),
-                (
-                    (0.0, -connector_radius),
-                    180.0,
-                    _junction_family(main_families[1]),
-                ),
-                ((
-                    math.sin(branch_radians) * connector_radius,
-                    math.cos(branch_radians) * connector_radius,
-                ), float(branch_heading), _junction_family(branch_family)),
+                    (
+                        math.sin(math.radians(heading)) * connector_radius,
+                        math.cos(math.radians(heading)) * connector_radius,
+                    ),
+                    float(heading),
+                    "sil",
+                )
+                for heading in headings
             )
         else:
             # Keep the stock-only low-level planner available for tests and
