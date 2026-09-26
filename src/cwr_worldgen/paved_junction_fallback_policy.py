@@ -34,9 +34,10 @@ def _junction_geometry(dataset, projection, spec):
 
     ``paved_junction_policy`` normally exposes only stock-paved junction geometry.
     During a fallback refit, ``_PLANS`` contains the subset that actually fitted in
-    the previous pass. Failed stock-paved plans are restored to the ordinary road
-    quality geometry so their arms are no longer trimmed back by the 32 m stock
-    approach reserve. Non-stock junctions remain excluded exactly as before.
+    the previous pass. Failed stock-paved plans are restored to ordinary road
+    quality geometry. Generated paved T hubs never need the 32 m prefab approach
+    reserve at all, so they use a compact seam envelope matching their real arm
+    extent. Non-stock junctions remain excluded exactly as before.
     """
 
     base = dict(_paved._ORIGINAL_GEOMETRY(dataset, projection, spec))
@@ -56,13 +57,37 @@ def _junction_geometry(dataset, projection, spec):
     for key, plan in active_plans.items():
         if key not in base:
             continue
-        result[key] = replace(
-            base[key],
-            axis=plan.axis,
-            half_length=_paved._APPROACH_RESERVE,
-            half_width=_paved._APPROACH_RESERVE,
-            directions=tuple(connector.direction for connector in plan.connectors),
+        directions = tuple(
+            connector.direction for connector in plan.connectors
         )
+        if _pi.is_generated_paved_junction_model(plan.model_path):
+            # Generated hubs are already present in the base fitter and own
+            # their seam at the real 6.25 m arm radius. Do not apply the old
+            # ~32 m stock-junction approach reserve here: doing so can strand
+            # the nearest road slab tens of metres from a perfectly valid hub,
+            # after which hub-presence validation incorrectly calls the plan
+            # successful. A compact square quality envelope keeps every arm
+            # within the 3 m seam-stitch search even at a 45-degree heading.
+            seam_extent = (
+                float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES)
+                + float(_pi.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES)
+                + float(_rq._JUNCTION_OVERLAP)
+            )
+            result[key] = replace(
+                base[key],
+                axis=plan.axis,
+                half_length=seam_extent,
+                half_width=seam_extent,
+                directions=directions,
+            )
+        else:
+            result[key] = replace(
+                base[key],
+                axis=plan.axis,
+                half_length=_paved._APPROACH_RESERVE,
+                half_width=_paved._APPROACH_RESERVE,
+                directions=directions,
+            )
     return result
 
 
