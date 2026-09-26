@@ -178,3 +178,44 @@ def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
         abs(value - infrastructure._ROADWAY_LOD) < 1.0
         for value in document["models"][0]["lod_resolutions"]
     )
+
+
+def test_generated_paved_and_gravel_roads_use_native_render_metadata() -> None:
+    keys = (
+        infrastructure.InfrastructureModelKey(
+            "road", "paved_w091_l0062", 91, 62
+        ),
+        infrastructure.InfrastructureModelKey(
+            "road",
+            "gravel6",
+            int(round(infrastructure.GENERATED_GRAVEL_HALF_WIDTH_METRES * 20.0)),
+            60,
+        ),
+    )
+    assert infrastructure._ROAD_SURFACE_POINT_FLAG == 0x0000013F
+    assert infrastructure._ROAD_SURFACE_FACE_FLAG == 0x0002C102
+    assert infrastructure._ROAD_SURFACE_NORMAL == (0.0, -1.0, 0.0)
+
+    for key in keys:
+        visual, _map_geometry, roadway, _land = infrastructure._road_lods(
+            key,
+            r"o\road\sil_new.paa",
+        )
+        assert visual.point_flags == (
+            infrastructure._ROAD_SURFACE_POINT_FLAG,
+        ) * len(visual.points)
+        assert roadway.point_flags == (
+            infrastructure._ROAD_SURFACE_POINT_FLAG,
+        ) * len(roadway.points)
+        assert visual.normals == (infrastructure._ROAD_SURFACE_NORMAL,)
+        assert roadway.normals == (infrastructure._ROAD_SURFACE_NORMAL,)
+        assert visual.faces
+        assert roadway.faces
+        assert all(
+            face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
+            for face in visual.faces
+        )
+        assert all(
+            face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
+            for face in roadway.faces
+        )
