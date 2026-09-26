@@ -14,6 +14,10 @@ from .model import OsmSpec, PlayabilitySpec, WorldObject
 from .procedural_infrastructure import (
     GENERATED_GRAVEL_SURFACE_CLEARANCE_METRES,
     GENERATED_GRAVEL_VISUAL_TOP_METRES,
+    GENERATED_PAVED_HALF_WIDTH_METRES,
+    GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES,
+    GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+    GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES,
     gravel_curve_model_path,
     gravel_junction_model_path,
     gravel_road_model_path,
@@ -21,6 +25,7 @@ from .procedural_infrastructure import (
     is_generated_gravel_road_model,
     is_generated_paved_junction_model,
     is_generated_paved_road_model,
+    paved_junction_model_path,
 )
 from .osm import (
     BboxProjection,
@@ -829,6 +834,90 @@ def _junction_cap_incidents(
     return non_gravel or values
 
 
+def _generated_paved_half_width(model_path: str) -> float:
+    """Return the visible half-width used by a paved road family."""
+
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+    generated = re.fullmatch(r"paved_w(?P<width>\d{3})_l\d{4}(?:_[lr]\d{2})?\.p3d", filename)
+    if generated is not None:
+        return int(generated.group("width")) / 20.0
+    if filename.startswith("asf"):
+        return 3.50
+    if filename.startswith(("sil", "kos")):
+        return 4.55
+    return GENERATED_PAVED_HALF_WIDTH_METRES
+
+
+def _generated_paved_t_cap_plan(
+    values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
+    spec: PlayabilitySpec,
+) -> tuple[str, tuple[float, float]] | None:
+    """Return an angle-matched generated hub and through-road axis for a paved T.
+
+    This deliberately lives in the base road fitter. A generated T must not
+    depend on the later stock-junction approach-template solver succeeding:
+    that solver can reject a perfectly valid skewed OSM T and the fallback
+    would otherwise restore the old sil6 cap that the generated hub is meant
+    to replace.
+    """
+
+    values = tuple(values)
+    if (
+        len(values) != 3
+        or not bool(getattr(spec, "procedural_paved_road_fallback", False))
+        or any(value[1] for value in values)
+    ):
+        return None
+
+    directions = tuple(value[0] for value in values)
+    first, second = min(
+        (
+            (a, b)
+            for a in range(3)
+            for b in range(a + 1, 3)
+        ),
+        key=lambda pair: (
+            directions[pair[0]][0] * directions[pair[1]][0]
+            + directions[pair[0]][1] * directions[pair[1]][1]
+        ),
+    )
+    axis = _normalised_direction(
+        (-directions[second][0], -directions[second][1]),
+        directions[first],
+    )
+    branch = next(index for index in range(3) if index not in {first, second})
+    right = axis[1], -axis[0]
+
+    # Keep the side branch on local -X, matching paved_junction_policy._plan.
+    if (
+        directions[branch][0] * right[0]
+        + directions[branch][1] * right[1]
+        > 0.0
+    ):
+        axis = -axis[0], -axis[1]
+        first, second = second, first
+        right = axis[1], -axis[0]
+
+    branch_heading = math.degrees(math.atan2(
+        directions[branch][0] * right[0] + directions[branch][1] * right[1],
+        directions[branch][0] * axis[0] + directions[branch][1] * axis[1],
+    )) % 360.0
+    main_half_width = max(
+        _generated_paved_half_width(values[first][2]),
+        _generated_paved_half_width(values[second][2]),
+    )
+    branch_half_width = _generated_paved_half_width(values[branch][2])
+    return (
+        paved_junction_model_path(
+            spec.name,
+            main_half_width * 2.0,
+            branch_half_width * 2.0,
+            branch_heading,
+        ),
+        axis,
+    )
+
+
 def _rounded_road_run(
     points: Sequence[tuple[float, float]],
     *,
@@ -1476,10 +1565,16 @@ def _fit_stock_piece_road_objects(
         use_dirt = all(value[1] for value in values)
         all_gravel = all(is_generated_gravel_road_model(value[2]) for value in values)
         incident_models = {value[2].casefold(): value[2] for value in values}
+        generated_paved_t = _generated_paved_t_cap_plan(values, spec)
+        axis_override = None
         if all_gravel:
             degree = len(values)
             base_model = gravel_junction_model_path(spec.name, degree)
             hub_length = 5.4 if degree == 3 else 6.0
+            cap_piece = _RoadPiece(base_model, hub_length, 6)
+        elif generated_paved_t is not None:
+            base_model, axis_override = generated_paved_t
+            hub_length = GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 2.0
             cap_piece = _RoadPiece(base_model, hub_length, 6)
         else:
             if len(incident_models) == 1:
@@ -1489,16 +1584,30 @@ def _fit_stock_piece_road_objects(
             variants = variants_for(base_model)
             cap_piece = next((piece for piece in variants if piece.nominal_length == 6), variants[-1])
         dominant_values = tuple((value[0], value[1], value[2], value[3]) for value in values)
-        axis = _dominant_node_axis(dominant_values)
+        axis = (
+            axis_override
+            if axis_override is not None
+            else _dominant_node_axis(dominant_values)
+        )
         node = node_positions[key]
         half = cap_piece.length_metres * 0.5
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
         cap_plans[key] = (cap_piece, start_point, end_point)
-        # Branches extend 0.70 m beneath the cap. This hides interpolation and
-        # pitch rounding seams without creating an extra road-link object.
-        cap_trim_lengths[key] = max(0.40, half - 0.70)
-        cap_cover_lengths[key] = half + 0.15
+        if generated_paved_t is not None:
+            # The generated hub owns the seam. Keep logical/collision geometry
+            # at 6.25 m, stop approach slabs at 6.45 m, and let only the visible
+            # hub reach 6.80 m over them.
+            cap_trim_lengths[key] = (
+                half + GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+            )
+            cap_cover_lengths[key] = (
+                half + GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+            )
+        else:
+            # Gravel/legacy caps retain their buried overlap.
+            cap_trim_lengths[key] = max(0.40, half - 0.70)
+            cap_cover_lengths[key] = half + 0.15
 
     # Nodes with more than four branches cannot receive a stock hub object, but
     # their road lines still split at the shared centre.
