@@ -161,6 +161,110 @@ def test_terrtest48_generated_fallback_replaces_plain_sil6_cap() -> None:
     assert installed.objects[1] is untouched
 
 
+def test_terrtest48_fallback_hub_stitches_real_nearby_approaches() -> None:
+    point = (1035.75, 900.0)
+    axis = paved._direction(274.764)
+    right = (axis[1], -axis[0])
+    radius = (
+        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        + infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+    )
+    local_headings = (0.0, 95.0, 190.0)
+    arms = []
+    for heading in local_headings:
+        local = paved._direction(heading)
+        world_direction = paved._unit((
+            right[0] * local[0] + axis[0] * local[1],
+            right[1] * local[0] + axis[1] * local[1],
+        ))
+        connector = paved._Connector(
+            "sil",
+            (
+                point[0] + world_direction[0] * radius,
+                point[1] + world_direction[1] * radius,
+            ),
+            world_direction,
+        )
+        arms.append(paved._Arm("sil", world_direction, connector))
+
+    plan = paved._Plan(
+        r"terrtest48\i\paved_j3_w091_h000_095_190.p3d",
+        point,
+        axis,
+        tuple(arms),
+    )
+    objects = (
+        SimpleNamespace(
+            object_id=14,
+            model_path=r"o\road\sil6.p3d",
+            x=1035.75,
+            y=0.0,
+            z=900.0,
+            heading_degrees=100.732,
+            pitch_degrees=0.0,
+        ),
+        SimpleNamespace(
+            object_id=1054,
+            model_path=r"o\road\sil6.p3d",
+            x=1024.23,
+            y=0.0,
+            z=900.96,
+            heading_degrees=274.76,
+            pitch_degrees=0.0,
+        ),
+        SimpleNamespace(
+            object_id=852,
+            model_path=r"o\road\sil6.p3d",
+            x=1037.38,
+            y=0.0,
+            z=911.49,
+            heading_degrees=7.93,
+            pitch_degrees=0.0,
+        ),
+        SimpleNamespace(
+            object_id=1050,
+            model_path=r"o\road\sil12.p3d",
+            x=1050.34,
+            y=0.0,
+            z=895.62,
+            heading_degrees=286.70,
+            pitch_degrees=0.0,
+        ),
+    )
+    report = SimpleNamespace(
+        objects=objects,
+        junction_cap_objects=1,
+    )
+    spec = SimpleNamespace(
+        name="terrtest48",
+        cells=64,
+        cell_size=25.0,
+        road_segment_length=25.0,
+    )
+    elevations = (0.0,) * (64 * 64)
+    plans = {(104, 90): plan}
+
+    installed = fallback._install_generated_hub_caps(
+        report,
+        plans,
+        elevations,
+        spec,
+    )
+    stitched = fallback._stitch_generated_hub_approaches(
+        installed,
+        plans,
+        elevations,
+        spec,
+    )
+
+    assert stitched.objects[0].model_path == plan.model_path
+    assert fallback._successful_plan_keys(
+        stitched,
+        plans,
+        spec=spec,
+    ) == frozenset(plans)
+
+
 def test_generated_hub_presence_does_not_hide_disconnected_approaches() -> None:
     key = (1, 2)
     plan = _generated_plan()
