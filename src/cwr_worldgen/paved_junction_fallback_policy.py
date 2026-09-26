@@ -623,6 +623,7 @@ def _fit(
         )
         if len(successful_keys) == len(plans):
             return report
+        stock_snapshot = session.latest if session is not None else None
 
         active = {
             key: plans[key]
@@ -649,12 +650,20 @@ def _fit(
                 starting_id=starting_id,
                 progress_callback=progress_callback,
             )
+            if planning is not None and session is not None:
+                planning.configure_planning_session(
+                    session,
+                    reuse=stock_snapshot,
+                    replan_keys=failed_stock_keys,
+                    label="Retrying failed stock paved junctions on connected roads",
+                )
             recovery_fit = _paved._apply_plans(
                 recovery_base,
                 plans,
                 elevations,
                 spec,
             )
+            stock_snapshot = session.latest if session is not None else stock_snapshot
             recovery_success = _successful_plan_keys(
                 recovery_fit,
                 plans,
@@ -708,12 +717,20 @@ def _fit(
                 starting_id=starting_id,
                 progress_callback=progress_callback,
             )
+            if planning is not None and session is not None:
+                planning.configure_planning_session(
+                    session,
+                    reuse=stock_snapshot,
+                    replan_keys=tuple(generated_fallbacks),
+                    label="Planning generated paved-junction fallbacks",
+                )
             generated_fit = _paved._apply_plans(
                 generated_base,
                 generated_active,
                 elevations,
                 spec,
             )
+            stock_snapshot = session.latest if session is not None else stock_snapshot
             generated_fit = _stitch_generated_hub_approaches(
                 generated_fit,
                 generated_fallbacks,
@@ -736,7 +753,11 @@ def _fit(
         changed_keys = frozenset(
             set(plans).difference(active)
         )
-        snapshot = session.latest if session is not None else None
+        snapshot = (
+            session.latest
+            if session is not None
+            else stock_snapshot
+        )
         affected = _affected_plan_keys(plans, active, changed_keys)
         if progress_callback is not None:
             suffix = (
