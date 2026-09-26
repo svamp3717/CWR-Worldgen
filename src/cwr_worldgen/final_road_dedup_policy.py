@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Conservatively remove redundant overlapping straight road slabs.
+"""Conservatively remove redundant overlapping road slabs.
 
-This pass runs after the complete road fitting/junction policy chain.  It only
-considers ordinary straight road pieces whose model dimensions are known.  Curves,
-junctions, bridges and unknown road models are deliberately left alone: reducing
-those safely requires richer geometry/provenance than a final WorldObject carries.
+This pass runs after the complete road fitting/junction policy chain. It handles
+ordinary stock straights, stock 10-degree curves, generated paved fallback
+ribbons, and generated gravel straights whose dimensions are encoded or known.
+Junction hubs, bridges and unknown road models remain deliberately excluded.
 
 The implementation is spatially indexed.  A candidate is compared only with kept
 pieces whose expanded axis bounds share a 25 m bucket, avoiding the O(N^2) scan
@@ -40,7 +40,17 @@ _HALF_WIDTH_METRES = {
     "gravel": 2.30,
 }
 
-_STOCK_STRAIGHT = re.compile(r"^(?P<family>sil|kos|asf|ces)(?P<nominal>25|12|6)\.p3d$", re.I)
+_STOCK_STRAIGHT = re.compile(
+    r"^(?P<family>sil|kos|asf|ces)(?P<nominal>25|12|6)\.p3d$", re.I
+)
+_STOCK_CURVE = re.compile(
+    r"^(?P<family>sil|kos|asf|ces)10 (?P<radius>25|50|75|100)\.p3d$", re.I
+)
+_GENERATED_PAVED = re.compile(
+    r"^paved_w(?P<width>\d{3})_l(?P<length>\d{4})"
+    r"(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+    re.I,
+)
 _GRAVEL_STRAIGHT = re.compile(r"^gravel(?P<nominal>25|12|6|3)\.p3d$", re.I)
 
 _INSTALLED = False
@@ -59,6 +69,7 @@ class _RoadAxis:
     length: float
     half_width: float
     elevation: float
+    stock_model: bool
 
     @property
     def bounds(self) -> tuple[float, float, float, float]:
@@ -74,28 +85,87 @@ def _filename(path: str) -> str:
     return path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
 
 
-def _family_and_length(model_path: str, configured_long_length: float) -> tuple[str, float] | None:
-    filename = _filename(model_path)
+def _world_point(
+    local: tuple[float, float],
+    obj,
+) -> tuple[float, float]:
+    angle = math.radians(float(obj.heading_degrees))
+    return (
+        float(obj.x) + local[0] * math.cos(angle) + local[1] * math.sin(angle),
+        float(obj.z) - local[0] * math.sin(angle) + local[1] * math.cos(angle),
+    )
+
+
+def _stock_curve_axis(
+    obj,
+    family: str,
+    radius: float,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    # Match the stock 10-degree connector geometry used by paved-junction
+    # fitting. The stock curve origin is not the chord midpoint.
+    angle = math.radians(10.0)
+    half = angle * 0.5
+    chord = 2.0 * float(radius) * math.sin(half)
+    half_width = float(_HALF_WIDTH_METRES[family])
+    midpoint = (
+        half_width * (1.0 - math.cos(angle)) * 0.5,
+        -half_width * math.sin(angle) * 0.5,
+    )
+    unit = (math.sin(half), math.cos(half))
+    start_local = (
+        midpoint[0] - unit[0] * chord * 0.5,
+        midpoint[1] - unit[1] * chord * 0.5,
+    )
+    end_local = (
+        midpoint[0] + unit[0] * chord * 0.5,
+        midpoint[1] + unit[1] * chord * 0.5,
+    )
+    return _world_point(start_local, obj), _world_point(end_local, obj)
+
+
+def _road_axis(obj, object_index: int, spec) -> _RoadAxis | None:
+    filename = _filename(obj.model_path)
+    stock_model = True
+
     match = _STOCK_STRAIGHT.fullmatch(filename)
     if match is not None:
         family = match.group("family").casefold()
         nominal = int(match.group("nominal"))
-        return family, float(configured_long_length) * nominal / 25.0
-    match = _GRAVEL_STRAIGHT.fullmatch(filename)
-    if match is not None:
-        nominal = int(match.group("nominal"))
-        return "gravel", float(configured_long_length) * nominal / 25.0
-    return None
-
-
-def _road_axis(obj, object_index: int, spec) -> _RoadAxis | None:
-    dimensions = _family_and_length(obj.model_path, float(spec.road_segment_length))
-    if dimensions is None:
-        return None
-    family, expected_length = dimensions
-    if expected_length <= 1.0e-6:
-        return None
-    start, end = _p._model_axis(obj, expected_length)
+        expected_length = (
+            float(spec.road_segment_length) * nominal / 25.0
+        )
+        half_width = float(_HALF_WIDTH_METRES[family])
+        start, end = _p._model_axis(obj, expected_length)
+    else:
+        match = _STOCK_CURVE.fullmatch(filename)
+        if match is not None:
+            family = match.group("family").casefold()
+            half_width = float(_HALF_WIDTH_METRES[family])
+            start, end = _stock_curve_axis(
+                obj,
+                family,
+                float(match.group("radius")),
+            )
+        else:
+            match = _GENERATED_PAVED.fullmatch(filename)
+            if match is not None:
+                family = "paved"
+                half_width = int(match.group("width")) / 20.0
+                expected_length = int(match.group("length")) / 10.0
+                start, end = _p._model_axis(obj, expected_length)
+                stock_model = False
+            else:
+                match = _GRAVEL_STRAIGHT.fullmatch(filename)
+                if match is None:
+                    return None
+                family = "gravel"
+                nominal = int(match.group("nominal"))
+                expected_length = (
+                    float(spec.road_segment_length) * nominal / 25.0
+                )
+                half_width = float(_HALF_WIDTH_METRES[family])
+                start, end = _p._model_axis(obj, expected_length)
+                stock_model = False
     dx = end[0] - start[0]
     dz = end[1] - start[1]
     length = math.hypot(dx, dz)
@@ -110,8 +180,9 @@ def _road_axis(obj, object_index: int, spec) -> _RoadAxis | None:
         ux=dx / length,
         uz=dz / length,
         length=length,
-        half_width=float(_HALF_WIDTH_METRES[family]),
+        half_width=half_width,
         elevation=float(obj.y),
+        stock_model=stock_model,
     )
 
 
@@ -119,20 +190,21 @@ def _surface_priority(family: str) -> int:
     # Final WorldObjects do not retain OSM highway class provenance.  Preserve
     # the strongest information still available: paved beats generated gravel,
     # which beats the stock dirt/earth family.
-    if family in {"sil", "kos", "asf"}:
+    if family in {"sil", "kos", "asf", "paved"}:
         return 3
     if family == "gravel":
         return 2
     return 1
 
 
-def _priority(axis: _RoadAxis) -> tuple[int, float, float, int]:
+def _priority(axis: _RoadAxis) -> tuple[int, float, float, int, int]:
     # Higher surface/width/length wins.  Lower object id is the deterministic
     # tie-break, hence the negation while sorting in reverse.
     return (
         _surface_priority(axis.family),
         axis.half_width,
         axis.length,
+        1 if axis.stock_model else 0,
         -axis.object_id,
     )
 
@@ -211,7 +283,7 @@ def deduplicate_final_road_objects(
     *,
     progress_callback: Callable[[int, str], None] | None = None,
 ):
-    """Return ``report`` with redundant ordinary straight road pieces removed."""
+    """Return ``report`` with redundant overlapping road pieces removed."""
     if not report.objects:
         return report
 
