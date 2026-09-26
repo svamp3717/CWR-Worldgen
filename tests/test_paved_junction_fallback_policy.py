@@ -171,6 +171,83 @@ def test_generated_hub_presence_does_not_hide_disconnected_approaches() -> None:
     ) == frozenset({key})
 
 
+def test_stitcher_replaces_stock_sil6_that_straddles_generated_connector() -> None:
+    connector_radius = (
+        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        + infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+    )
+    source_heading = 6.0
+    source_direction = paved._direction(source_heading)
+    connector = paved._Connector(
+        "sil",
+        (0.0, connector_radius),
+        (0.0, 1.0),
+    )
+    plan = paved._Plan(
+        r"seam_world\i\paved_j3_m091_b091_a265.p3d",
+        (0.0, 0.0),
+        (0.0, 1.0),
+        (paved._Arm("sil", source_direction, connector),),
+    )
+
+    # This mirrors terrtest41 object 1050: a 6.25 m stock slab whose inner
+    # endpoint is well inside the hub and whose outer endpoint is outside it.
+    # Neither endpoint is close enough to the connector for the old 3 m search,
+    # although the slab itself crosses the seam.
+    centre_radius = 6.407942
+    straddler = SimpleNamespace(
+        object_id=2,
+        model_path=r"o\road\sil6.p3d",
+        x=math.sin(math.radians(source_heading)) * centre_radius,
+        y=0.035,
+        z=math.cos(math.radians(source_heading)) * centre_radius,
+        heading_degrees=source_heading,
+        pitch_degrees=0.0,
+    )
+    hub = SimpleNamespace(
+        object_id=1,
+        model_path=plan.model_path,
+        x=0.0,
+        y=0.010,
+        z=0.0,
+        heading_degrees=0.0,
+        pitch_degrees=0.0,
+    )
+    report = SimpleNamespace(
+        objects=(hub, straddler),
+        junction_cap_objects=1,
+    )
+    spec = SimpleNamespace(
+        name="seam_world",
+        road_segment_length=25.0,
+        cells=8,
+        cell_size=25.0,
+    )
+
+    stitched = fallback._stitch_generated_hub_approaches(
+        report,
+        {(0, 0): plan},
+        (0.0,) * 64,
+        spec,
+    )
+
+    assert len(stitched.objects) == 2
+    repaired = stitched.objects[1]
+    assert repaired.object_id == straddler.object_id
+    assert infrastructure.is_generated_paved_road_model(repaired.model_path)
+    axis = fallback._generated_paved_axis(repaired, spec)
+    assert axis is not None
+    assert min(
+        math.dist(connector.point, endpoint)
+        for endpoint in axis
+    ) <= 0.02
+    assert all(
+        math.dist(plan.point, endpoint)
+        >= connector_radius - 0.05
+        for endpoint in axis
+    )
+
+
 def test_successful_plan_keys_preserves_boundary_match_across_buckets() -> None:
     model = r"o\road\kr_new_sil_sil_t.p3d"
     key = (1, 2)
