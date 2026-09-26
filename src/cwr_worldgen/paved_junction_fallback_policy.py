@@ -628,7 +628,71 @@ def _fit(
             key: plans[key]
             for key in successful_keys
         }
-        changed_keys = frozenset(set(plans).difference(successful_keys))
+        failed_stock_keys = frozenset(
+            set(plans).difference(successful_keys)
+        )
+
+        # Stock is authoritative. Only junctions that actually failed the stock
+        # model/approach validation may be promoted to a generated exact-heading
+        # T. This keeps ordinary vanilla-compatible intersections vanilla while
+        # retaining the custom hub for genuinely skewed/problematic nodes.
+        generated_fallbacks = {}
+        if bool(
+            getattr(spec, "procedural_paved_road_fallback", False)
+        ):
+            for key in failed_stock_keys:
+                stock_plan = plans[key]
+                generated = _paved._generated_plan(
+                    stock_plan.point,
+                    tuple(
+                        (arm.source_direction, arm.family)
+                        for arm in stock_plan.arms
+                    ),
+                    world_name=str(getattr(spec, "name", "world")),
+                )
+                if generated is not None:
+                    generated_fallbacks[key] = generated
+
+        if generated_fallbacks:
+            generated_active = dict(active)
+            generated_active.update(generated_fallbacks)
+            generated_base = _base_refit(
+                dataset,
+                projection,
+                elevations,
+                spec,
+                generated_active,
+                starting_id=starting_id,
+                progress_callback=progress_callback,
+            )
+            generated_fit = _paved._apply_plans(
+                generated_base,
+                generated_active,
+                elevations,
+                spec,
+            )
+            generated_fit = _stitch_generated_hub_approaches(
+                generated_fit,
+                generated_fallbacks,
+                elevations,
+                spec,
+            )
+            generated_success = _successful_plan_keys(
+                generated_fit,
+                generated_active,
+                spec=spec,
+                progress_callback=progress_callback,
+            )
+            if len(generated_success) == len(generated_active):
+                return generated_fit
+            active = {
+                key: generated_active[key]
+                for key in generated_success
+            }
+
+        changed_keys = frozenset(
+            set(plans).difference(active)
+        )
         snapshot = session.latest if session is not None else None
         affected = _affected_plan_keys(plans, active, changed_keys)
         if progress_callback is not None:
