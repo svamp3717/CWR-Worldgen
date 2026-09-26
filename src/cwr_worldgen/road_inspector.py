@@ -796,7 +796,7 @@ def _replacement_model_path(
     curve_degrees: float,
 ) -> str:
     width_dm = max(10, min(999, int(round(width_metres * 10.0))))
-    length_dm = max(5, min(9999, int(round(length_metres * 10.0))))
+    length_dm = max(1, min(9999, int(round(length_metres * 10.0))))
     suffix = ""
     if abs(curve_degrees) >= 1.5:
         side = "r" if curve_degrees > 0.0 else "l"
@@ -1249,7 +1249,8 @@ def _paved_replacement_plans(
         # refitting. Procedural pavement is reserved for seams whose road-edge
         # orientation cannot be made continuous with the current stock pair.
         if (
-            float(issue.metrics.get("tangent_error_degrees", 0.0))
+            issue.category != "connector_gap"
+            and float(issue.metrics.get("tangent_error_degrees", 0.0))
             <= _PAVED_REPLACEMENT_MINIMUM_TANGENT_ERROR_DEGREES
         ):
             continue
