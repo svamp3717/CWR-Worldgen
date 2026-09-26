@@ -80,7 +80,7 @@ GENERATED_PAVED_JUNCTION_ANGLE_STEP_DEGREES = 5
 # approach corner roughly 0.88 m beyond the connector centreline. Give the
 # visual hub 1.0 m of coverage beyond the 6.45 m approach start so those skewed
 # corners remain covered without enlarging Roadway/collision geometry.
-GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES = 1.20
+GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES = 0.55
 # Start approach objects slightly outside the logical connector plane. The
 # 1.20 m visual overhang now leaves 1.00 m of rendered seam coverage.
 GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES = 0.20
@@ -827,7 +827,7 @@ def _paved_junction_arm_polygon(
     angle = math.radians(float(heading_degrees))
     direction = (math.sin(angle), math.cos(angle))
     perpendicular = (math.cos(angle), -math.sin(angle))
-    inner = -0.35
+    inner = -0.75
     extent = max(0.05, float(extent))
     return ShapelyPolygon(tuple(
         (
@@ -849,26 +849,31 @@ def _paved_junction_polygon(
     *,
     extent: float = GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
 ):
-    main_half_width = max(0.5, float(main_half_width))
-    branch_half_width = max(0.5, float(branch_half_width))
+    # Borrowed from feature/paved-road-generated-fallback: generated junctions
+    # use one stock-family width across the complete hub instead of independently
+    # unioning differently sized arm ribbons.
+    half_width = max(
+        0.5,
+        float(main_half_width),
+        float(branch_half_width),
+    )
     arms = (
+        _paved_junction_arm_polygon(0.0, half_width, extent=extent),
+        _paved_junction_arm_polygon(180.0, half_width, extent=extent),
         _paved_junction_arm_polygon(
-            0.0, main_half_width, extent=extent
-        ),
-        _paved_junction_arm_polygon(
-            180.0, main_half_width, extent=extent
-        ),
-        _paved_junction_arm_polygon(
-            branch_heading_degrees, branch_half_width, extent=extent
+            branch_heading_degrees,
+            half_width,
+            extent=extent,
         ),
     )
-    core_radius = max(1.25, min(main_half_width, branch_half_width) * 0.92)
-    core = ShapelyPoint(0.0, 0.0).buffer(core_radius, quad_segs=8)
+    core = ShapelyPoint(0.0, 0.0).buffer(
+        max(1.0, half_width * 0.98),
+        quad_segs=8,
+    )
     polygon = unary_union((core, *arms))
     if polygon.geom_type == "MultiPolygon":
         polygon = max(polygon.geoms, key=lambda geom: geom.area)
     return polygon
-
 
 def _iter_paved_junction_polygon_parts(geometry):
     if geometry.is_empty:
@@ -954,6 +959,109 @@ def _paved_junction_core_uv(
     return u, v
 
 
+def _paved_junction_end_texture(texture: str) -> str:
+    """Return the stock road-end artwork used by CWA paved junction arms."""
+
+    normalized = str(texture).replace("/", "\\").strip("\\")
+    if normalized.casefold().endswith(r"\sil_new.paa"):
+        return normalized[:-len("sil_new.paa")] + "sil_konec.paa"
+    return normalized
+
+
+def _paved_junction_through_pair(
+    headings: tuple[int, ...],
+) -> tuple[int, int]:
+    """Choose the two arms that form the most nearly straight carriageway."""
+
+    if len(headings) < 2:
+        raise ValueError("paved junction requires at least two headings")
+    best: tuple[float, int, int] | None = None
+    for first_index, first in enumerate(headings[:-1]):
+        for second in headings[first_index + 1:]:
+            separation = abs(
+                (float(second) - float(first) + 180.0) % 360.0 - 180.0
+            )
+            candidate = (
+                abs(180.0 - separation),
+                int(first),
+                int(second),
+            )
+            if best is None or candidate < best:
+                best = candidate
+    assert best is not None
+    return best[1], best[2]
+
+
+def _paved_junction_cross_section(
+    heading: float,
+    distance: float,
+    half_width: float,
+    y: float,
+) -> tuple[
+    tuple[float, float, float],
+    tuple[float, float, float],
+]:
+    angle = math.radians(float(heading))
+    dx, dz = math.sin(angle), math.cos(angle)
+    rx, rz = dz, -dx
+    cx, cz = dx * float(distance), dz * float(distance)
+    return (
+        (
+            cx - rx * half_width,
+            float(y),
+            cz - rz * half_width,
+        ),
+        (
+            cx + rx * half_width,
+            float(y),
+            cz + rz * half_width,
+        ),
+    )
+
+
+def _append_paved_junction_quad(
+    points: list[tuple[float, float, float]],
+    faces: list[_Face],
+    *,
+    texture: str,
+    start_left: tuple[float, float, float],
+    start_right: tuple[float, float, float],
+    end_left: tuple[float, float, float],
+    end_right: tuple[float, float, float],
+    v_start: float,
+    v_end: float,
+    face_flags: int,
+) -> None:
+    """Append one donor stock-road-style rectangle as two double-sided triangles."""
+
+    start = len(points)
+    points.extend((start_left, start_right, end_left, end_right))
+    first = _Face(
+        texture,
+        (
+            (start + 0, 0, 0.0, v_start),
+            (start + 2, 0, 0.0, v_end),
+            (start + 1, 0, 1.0, v_start),
+        ),
+        face_flags,
+    )
+    second = _Face(
+        texture,
+        (
+            (start + 1, 0, 1.0, v_start),
+            (start + 2, 0, 0.0, v_end),
+            (start + 3, 0, 1.0, v_end),
+        ),
+        face_flags,
+    )
+    faces.extend((
+        first,
+        second,
+        _Face(texture, tuple(reversed(first.vertices)), face_flags),
+        _Face(texture, tuple(reversed(second.vertices)), face_flags),
+    ))
+
+
 def _paved_junction_visual_lod(
     *,
     main_half_width: float,
@@ -961,62 +1069,86 @@ def _paved_junction_visual_lod(
     branch_heading_degrees: float,
     texture: str,
 ) -> _Lod:
-    points: list[tuple[float, float, float]] = []
-    faces: list[_Face] = []
-    visual_extent = (
+    """Build the T hub using the donor branch's stock CWA junction topology."""
+
+    headings = (0, int(branch_heading_degrees) % 360, 180)
+    half_width = max(
+        1.75,
+        float(main_half_width),
+        float(branch_half_width),
+    )
+    through_a, through_b = _paved_junction_through_pair(headings)
+    side_headings = tuple(
+        heading
+        for heading in headings
+        if heading not in {through_a, through_b}
+    )
+    extent = (
         GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
         + GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
     )
-    core_radius = max(
-        1.25,
-        min(main_half_width, branch_half_width) * 0.92,
-    )
-    core = ShapelyPoint(0.0, 0.0).buffer(core_radius, quad_segs=8)
-    covered = core
+    y = GENERATED_GRAVEL_VISUAL_TOP_METRES
+    points: list[tuple[float, float, float]] = []
+    faces: list[_Face] = []
 
-    _append_paved_junction_region(
-        core,
-        y=GENERATED_GRAVEL_VISUAL_TOP_METRES,
-        texture=texture,
-        uv_for_point=lambda x, z: _paved_junction_core_uv(
-            x, z, core_radius=core_radius
+    # Donor branch: uninterrupted sil_new through carriageway.
+    a_left, a_right = _paved_junction_cross_section(
+        through_a, extent, half_width, y
+    )
+    b_left, b_right = _paved_junction_cross_section(
+        through_b, extent, half_width, y
+    )
+    through_length = math.dist(
+        (
+            (a_left[0] + a_right[0]) * 0.5,
+            (a_left[2] + a_right[2]) * 0.5,
         ),
-        points=points,
-        faces=faces,
+        (
+            (b_left[0] + b_right[0]) * 0.5,
+            (b_left[2] + b_right[2]) * 0.5,
+        ),
+    )
+    _append_paved_junction_quad(
+        points,
+        faces,
+        texture=texture,
+        start_left=b_right,
+        start_right=b_left,
+        end_left=a_left,
+        end_right=a_right,
+        v_start=0.0,
+        v_end=through_length / GENERATED_PAVED_TEXTURE_REPEAT_METRES,
+        face_flags=_ROAD_SURFACE_FACE_FLAG,
     )
 
-    # Main road first, then branch. Each visible region owns its pixels exactly
-    # once, so there is no coplanar triangle overlap or random per-triangle UV
-    # rotation inside one generated P3D.
-    arm_specs = (
-        (0.0, main_half_width),
-        (180.0, main_half_width),
-        (float(branch_heading_degrees), branch_half_width),
-    )
-    for heading, half_width in arm_specs:
-        arm = _paved_junction_arm_polygon(
+    # Donor branch: terminating T arm uses sil_konec and is raised at its inner
+    # edge by the measured stock kr_new_sil_sil_t anti-z-fighting offset.
+    end_texture = _paved_junction_end_texture(texture)
+    for heading in side_headings:
+        inner_left, inner_right = _paved_junction_cross_section(
             heading,
+            0.0,
             half_width,
-            extent=visual_extent,
+            y + 0.0666,
         )
-        region = arm.difference(covered)
-        if not region.is_empty:
-            _append_paved_junction_region(
-                region,
-                y=GENERATED_GRAVEL_VISUAL_TOP_METRES,
-                texture=texture,
-                uv_for_point=lambda x, z, heading=heading, half_width=half_width: (
-                    _paved_junction_arm_uv(
-                        x,
-                        z,
-                        heading_degrees=heading,
-                        half_width=half_width,
-                    )
-                ),
-                points=points,
-                faces=faces,
-            )
-        covered = unary_union((covered, arm))
+        outer_left, outer_right = _paved_junction_cross_section(
+            heading,
+            extent,
+            half_width,
+            y,
+        )
+        _append_paved_junction_quad(
+            points,
+            faces,
+            texture=end_texture,
+            start_left=inner_left,
+            start_right=inner_right,
+            end_left=outer_left,
+            end_right=outer_right,
+            v_start=0.0,
+            v_end=extent / GENERATED_PAVED_TEXTURE_REPEAT_METRES,
+            face_flags=_ROAD_SURFACE_FACE_FLAG,
+        )
 
     return _Lod(
         tuple(points),
@@ -1088,11 +1220,17 @@ def _paved_junction_lods(
         branch_heading,
         extent=GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
     )
+    half_width = max(main_half_width, branch_half_width)
+    junction_texture = (
+        r"o\road\sil_new.paa"
+        if half_width * 2.0 >= 8.5
+        else texture
+    )
     visual = _paved_junction_visual_lod(
         main_half_width=main_half_width,
         branch_half_width=branch_half_width,
         branch_heading_degrees=branch_heading,
-        texture=texture,
+        texture=junction_texture,
     )
     boundary = tuple(
         (float(x), 0.0, float(z))
@@ -1704,7 +1842,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v21-skew-paved-junction-seams"
+                "procedural-infrastructure-model-v22-donor-stock-junction-topology"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
