@@ -67,7 +67,7 @@ GENERATED_GRAVEL_EDGE_SECTION_METRES = 0.65
 # Five-degree curve buckets and decimetre dimensions deliberately trade a tiny
 # amount of precision for aggressive model reuse.
 GENERATED_PAVED_CURVE_BUCKETS = tuple(range(5, 50, 5))
-GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.18
+GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.0
 # Generated T junctions use the same 6.25 m arm reach as the stock short-road
 # footprint, but rotate the branch arm to the mapped road heading instead of
 # forcing every junction into a square 90-degree stock cap.
@@ -556,6 +556,7 @@ def _road_ribbon_sections(
     *,
     overhang: float,
     section_count: int | None = None,
+    square_ends: bool = False,
 ) -> tuple[tuple[float, float, float, float], ...]:
     """Return left/right cross-section coordinates for a smooth road ribbon.
 
@@ -586,6 +587,17 @@ def _road_ribbon_sections(
         dz = length
         tangent_length = max(1e-9, math.hypot(dx, dz))
         tx, tz = dx / tangent_length, dz / tangent_length
+        if square_ends:
+            # Curved paved ribbons normally rotate their end cross-sections to
+            # the centreline tangent. On a wide road those corners protrude past
+            # the connection plane. Blend the first/last two spans back toward
+            # a chord-normal cross-section so adjacent road mouths stay square.
+            end_fraction = min(t, 1.0 - t)
+            weight = min(1.0, end_fraction * section_count * 0.5)
+            tx *= weight
+            tz = (1.0 - weight) + tz * weight
+            blended_length = max(1e-9, math.hypot(tx, tz))
+            tx, tz = tx / blended_length, tz / blended_length
         centres.append((x, z, tx, tz))
 
     if overhang > 0.0:
@@ -611,13 +623,18 @@ def _ribbon_lod(
     lowered_overlap: bool,
     double_sided: bool,
     u_span_override: float | None = None,
+    texture_scale_override: float | None = None,
 ) -> _Lod:
     points: list[tuple[float, float, float]] = []
     cumulative = [0.0]
     centres = [((section[0] + section[2]) * 0.5, (section[1] + section[3]) * 0.5) for section in sections]
     for first, second in zip(centres, centres[1:]):
         cumulative.append(cumulative[-1] + math.dist(first, second))
-    texture_scale = GENERATED_GRAVEL_TEXTURE_REPEAT_METRES
+    texture_scale = (
+        GENERATED_GRAVEL_TEXTURE_REPEAT_METRES
+        if texture_scale_override is None
+        else float(texture_scale_override)
+    )
     section_width = math.dist((sections[0][0], sections[0][1]), (sections[0][2], sections[0][3]))
     u_span = section_width / texture_scale if u_span_override is None else float(u_span_override)
     last_index = len(sections) - 1
@@ -1115,16 +1132,18 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
             length,
             half_w,
             curve_degrees,
-            overhang=GENERATED_PAVED_VISUAL_OVERLAP_METRES,
+            overhang=0.0,
+            square_ends=True,
         )
         raw_visual = _ribbon_lod(
             visual_sections,
             texture=texture,
             resolution=_VISUAL_LOD,
             height=GENERATED_GRAVEL_VISUAL_TOP_METRES,
-            lowered_overlap=True,
+            lowered_overlap=False,
             double_sided=True,
             u_span_override=1.0,
+            texture_scale_override=GENERATED_PAVED_TEXTURE_REPEAT_METRES,
         )
         visual = _Lod(
             raw_visual.points,
@@ -1148,7 +1167,13 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
          (half_w, 0.0, half_l), (-half_w, 0.0, half_l)),
         (), (), _GEOMETRY_LOD, properties=(("map", "road"),),
     )
-    roadway_sections = _road_ribbon_sections(length, half_w, curve_degrees, overhang=0.0)
+    roadway_sections = _road_ribbon_sections(
+        length,
+        half_w,
+        curve_degrees,
+        overhang=0.0,
+        square_ends=paved_fallback,
+    )
     roadway = _ribbon_lod(
         roadway_sections, texture=texture, resolution=_ROADWAY_LOD,
         height=GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES, lowered_overlap=False,
@@ -1676,7 +1701,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v19-paved-junction-seam-fit"
+                "procedural-infrastructure-model-v20-square-paved-seams"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
