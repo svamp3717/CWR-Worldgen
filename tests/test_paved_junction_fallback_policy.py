@@ -415,12 +415,36 @@ def test_failed_stock_junction_retries_stock_before_generated_fallback() -> None
         stock_road_piece_fitting=True,
         procedural_paved_road_fallback=True,
     )
+    replan_calls = []
+
+    class FakePlanning:
+        @staticmethod
+        def begin_planning_session(_label):
+            return SimpleNamespace(latest="initial-snapshot"), object()
+
+        @staticmethod
+        def configure_planning_session(
+            session,
+            *,
+            reuse,
+            replan_keys,
+            label,
+        ):
+            replan_calls.append((reuse, frozenset(replan_keys), label))
+            session.latest = "recovery-snapshot"
+
+        @staticmethod
+        def end_planning_session(_token):
+            return None
+
     with patch.object(paved, "_plans", lambda *_args: plans), patch.object(
         fallback, "_ORIGINAL_FIT", lambda *_args, **_kwargs: trimmed_report
     ), patch.object(
         paved, "_ORIGINAL_FIT", lambda *_args, **_kwargs: ordinary_report
     ), patch.object(
         paved, "_apply_plans", lambda report, *_args: recovered_report
+    ), patch.object(
+        fallback, "_planning_runtime", lambda: FakePlanning
     ), patch.object(
         paved,
         "_generated_plan",
@@ -438,6 +462,13 @@ def test_failed_stock_junction_retries_stock_before_generated_fallback() -> None
         )
 
     assert result is recovered_report
+    assert replan_calls == [
+        (
+            "initial-snapshot",
+            frozenset({key}),
+            "Retrying failed stock paved junctions on connected roads",
+        )
+    ]
 
 
 def test_failed_stock_junction_still_returns_ordinary_roads_when_recovery_fails() -> None:
