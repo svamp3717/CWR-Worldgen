@@ -246,56 +246,37 @@ def test_stock_junction_plans_reject_dirt_gravel_and_mixed_nodes() -> None:
     assert "ces" not in all_paved.model_path.casefold()
 
 
-def test_generated_paved_t_hub_tracks_skew_branch_heading() -> None:
-    branch_heading = 258.0
-    branch = paved_junctions._direction(branch_heading)
+def test_terrtest46_stock_compatible_t_stays_stock_first() -> None:
+    # terrtest46 map-centre regression: local headings 000/090/200 were being
+    # promoted to a generated paved_j3 even though the vanilla T path had
+    # historically handled this node.
+    incidents = tuple(
+        (paved_junctions._direction(heading), "sil")
+        for heading in (0.0, 90.0, 200.0)
+    )
     plan = paved_junctions._plan(
         (0.0, 0.0),
-        (
-            ((0.0, 1.0), "sil"),
-            ((0.0, -1.0), "sil"),
-            (branch, "sil"),
-        ),
-        world_name="junction_fit",
+        incidents,
+        world_name="terrtest46",
     )
     assert plan is not None
-    assert plan.model_path.endswith(
-        r"\paved_j3_w091_h000_080_180.p3d"
+    assert not infrastructure.is_generated_paved_junction_model(
+        plan.model_path
     )
-    assert infrastructure.is_generated_paved_junction_model(plan.model_path)
+    assert "kr_new_" in plan.model_path.casefold()
+    assert plan.model_path.casefold().endswith("_t.p3d")
 
-    connector = min(
-        plan.connectors,
-        key=lambda value: _angle(value.direction, branch),
-    )
-    assert _angle(connector.direction, branch) <= 2.5
-    assert math.isclose(
-        math.dist(plan.point, connector.point),
-        (
-            paved_junctions._JUNCTION_RADIUS
-            + infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
-        ),
-        abs_tol=1.0e-6,
-    )
-    assert math.dist(plan.point, connector.point) < (
-        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
-        + infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
-    )
-
-
-def test_generated_paved_t_preserves_bent_through_road_headings() -> None:
+def test_generated_fallback_preserves_bent_through_road_headings() -> None:
     incidents = tuple(
         (paved_junctions._direction(heading), "sil")
         for heading in (5.0, 190.0, 270.0)
     )
-    plan = paved_junctions._plan(
+    plan = paved_junctions._generated_plan(
         (0.0, 0.0),
         incidents,
         world_name="junction_fit",
     )
     assert plan is not None
-    # The old angle-only format would force the through pair to 000/180.
-    # Exact-heading generation retains the measured five-degree bend instead.
     assert plan.model_path.endswith(
         r"\paved_j3_w091_h000_080_175.p3d"
     )
@@ -306,13 +287,12 @@ def test_generated_paved_t_preserves_bent_through_road_headings() -> None:
             for connector in plan.connectors
         ) <= 2.5
 
-
-def test_exact_heading_junction_preserves_asphalt_approach_family() -> None:
+def test_generated_fallback_preserves_asphalt_approach_family() -> None:
     incidents = tuple(
         (paved_junctions._direction(heading), "asf")
         for heading in (5.0, 190.0, 270.0)
     )
-    plan = paved_junctions._plan(
+    plan = paved_junctions._generated_plan(
         (0.0, 0.0),
         incidents,
         world_name="junction_fit",
@@ -322,7 +302,6 @@ def test_exact_heading_junction_preserves_asphalt_approach_family() -> None:
         connector.family == "asf"
         for connector in plan.connectors
     )
-
 
 def test_diagonal_junction_trim_uses_oriented_hub_edge() -> None:
     diagonal = (math.sqrt(0.5), math.sqrt(0.5))
@@ -415,7 +394,7 @@ def test_terrain_profile_prefers_shorter_rigid_pieces_over_midspan_clipping() ->
     assert fitted[-1][2] == (0.0, 50.0)
 
 
-def test_base_fitter_keeps_generated_hub_when_stock_approach_solver_is_bypassed() -> None:
+def test_base_fitter_does_not_preempt_stock_paved_junction_policy() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     centre = (500.0, 500.0)
@@ -427,12 +406,8 @@ def test_base_fitter_keeps_generated_hub_when_stock_approach_solver_is_bypassed(
             centre[1] + math.cos(radians) * distance,
         )
 
-    # Mirrors the uploaded terrtest40 failure: a nearly east/west paved
-    # through-road with a slightly skewed paved side branch. The generated hub
-    # must exist in the base fit itself, before paved_junction_policy gets a
-    # chance to run its stock approach-template search.
     dataset = OsmDataset(
-        source_generator="terrtest40-paved-t-regression",
+        source_generator="stock-first-paved-t-regression",
         element_count=2,
         coastlines=(),
         water=(),
@@ -467,14 +442,17 @@ def test_base_fitter_keeps_generated_hub_when_stock_approach_solver_is_bypassed(
     )
 
     assert report.junction_cap_objects == 1
-    hub = report.objects[0]
-    assert infrastructure.is_generated_paved_junction_model(hub.model_path)
-    plan = paved_junctions._plans(dataset, projection, spec)[
+    assert not infrastructure.is_generated_paved_junction_model(
+        report.objects[0].model_path
+    )
+
+    stock_plan = paved_junctions._plans(dataset, projection, spec)[
         playability._road_node_key(centre)
     ]
-    assert hub.model_path.casefold() == plan.model_path.casefold()
-    assert math.dist((hub.x, hub.z), centre) <= 0.01
-
+    assert not infrastructure.is_generated_paved_junction_model(
+        stock_plan.model_path
+    )
+    assert "kr_new_" in stock_plan.model_path.casefold()
 
 def test_diagonal_t_junction_uses_angle_matched_hub_and_connects_each_arm(
     tmp_path: Path,
