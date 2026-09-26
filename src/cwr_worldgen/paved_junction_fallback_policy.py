@@ -98,7 +98,12 @@ def _success_bucket(point: tuple[float, float]) -> tuple[int, int]:
     )
 
 
-def _successful_plan_keys(report, plans, progress_callback=None) -> frozenset[tuple[int, int]]:
+def _successful_plan_keys(
+    report,
+    plans,
+    spec=None,
+    progress_callback=None,
+) -> frozenset[tuple[int, int]]:
     """Identify plans that actually emitted their stock T/X junction model.
 
     Junction models are heavily reused.  Grouping only by model path and then
@@ -115,6 +120,17 @@ def _successful_plan_keys(report, plans, progress_callback=None) -> frozenset[tu
     emitted_by_model: dict[
         str, dict[tuple[int, int], list[tuple[float, float]]]
     ] = {}
+    generated_connector_buckets: dict[
+        tuple[int, int],
+        list[tuple[tuple[float, float], tuple[float, float]]],
+    ] = {}
+    generated_connector_plans = (
+        spec is not None
+        and any(
+            _pi.is_generated_paved_junction_model(plan.model_path)
+            for plan in plans.values()
+        )
+    )
     objects = tuple(getattr(report, "objects", ()))
     total_objects = len(objects)
     progress_interval = max(1, total_objects // 50) if total_objects else 1
@@ -131,6 +147,22 @@ def _successful_plan_keys(report, plans, progress_callback=None) -> frozenset[tu
             position = (float(obj.x), float(obj.z))
             buckets = emitted_by_model.setdefault(model, {})
             buckets.setdefault(_success_bucket(position), []).append(position)
+        if (
+            generated_connector_plans
+            and object_index > int(getattr(report, "junction_cap_objects", 0))
+        ):
+            axis = _generated_paved_axis(obj, spec)
+            if axis is not None:
+                for endpoint_index in (0, 1):
+                    endpoint = axis[endpoint_index]
+                    other = axis[1 - endpoint_index]
+                    continuation = _paved._unit((
+                        other[0] - endpoint[0],
+                        other[1] - endpoint[1],
+                    ))
+                    generated_connector_buckets.setdefault(
+                        _success_bucket(endpoint), []
+                    ).append((endpoint, continuation))
         if (
             progress_callback is not None
             and (
@@ -161,6 +193,39 @@ def _successful_plan_keys(report, plans, progress_callback=None) -> frozenset[tu
                     for position in buckets.get((nx, nz), ())
                 ):
                     matched = True
+                    break
+        if (
+            matched
+            and generated_connector_plans
+            and _pi.is_generated_paved_junction_model(plan.model_path)
+        ):
+            # A generated hub sitting at the node is not sufficient. Every arm
+            # must actually meet an emitted paved approach near the connector;
+            # otherwise the old 32 m reserve can masquerade as a successful
+            # junction while leaving a large visible gap.
+            for connector in plan.connectors:
+                cbx, cbz = _success_bucket(connector.point)
+                connected = False
+                for nx in range(cbx - 1, cbx + 2):
+                    if connected:
+                        break
+                    for nz in range(cbz - 1, cbz + 2):
+                        for endpoint, continuation in generated_connector_buckets.get(
+                            (nx, nz), ()
+                        ):
+                            if (
+                                math.dist(endpoint, connector.point)
+                                <= _SUCCESS_DISTANCE_METRES
+                                and _paved._angle(
+                                    continuation, connector.direction
+                                ) <= 30.0
+                            ):
+                                connected = True
+                                break
+                        if connected:
+                            break
+                if not connected:
+                    matched = False
                     break
         if matched:
             successful.append(key)
@@ -523,7 +588,7 @@ def _fit(
             spec,
         )
         successful_keys = _successful_plan_keys(
-            report, plans, progress_callback=progress_callback
+            report, plans, spec=spec, progress_callback=progress_callback
         )
         if len(successful_keys) == len(plans):
             return report
@@ -587,7 +652,7 @@ def _fit(
             fitted = _paved._apply_plans(base_report, active, elevations, spec)
             next_snapshot = session.latest if session is not None else None
             stable_keys = _successful_plan_keys(
-                fitted, active, progress_callback=progress_callback
+                fitted, active, spec=spec, progress_callback=progress_callback
             )
             if len(stable_keys) == len(active):
                 return fitted
