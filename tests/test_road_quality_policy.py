@@ -307,6 +307,23 @@ def test_generated_paved_t_preserves_bent_through_road_headings() -> None:
         ) <= 2.5
 
 
+def test_exact_heading_junction_preserves_asphalt_approach_family() -> None:
+    incidents = tuple(
+        (paved_junctions._direction(heading), "asf")
+        for heading in (5.0, 190.0, 270.0)
+    )
+    plan = paved_junctions._plan(
+        (0.0, 0.0),
+        incidents,
+        world_name="junction_fit",
+    )
+    assert plan is not None
+    assert all(
+        connector.family == "asf"
+        for connector in plan.connectors
+    )
+
+
 def test_diagonal_junction_trim_uses_oriented_hub_edge() -> None:
     diagonal = (math.sqrt(0.5), math.sqrt(0.5))
     junction = _Junction(
