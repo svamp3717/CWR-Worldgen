@@ -353,7 +353,7 @@ def test_terrain_profile_prefers_shorter_rigid_pieces_over_midspan_clipping() ->
     assert fitted[-1][2] == (0.0, 50.0)
 
 
-def test_diagonal_t_junction_uses_real_turn_pieces_and_connects_each_arm() -> None:
+def test_diagonal_t_junction_uses_angle_matched_hub_and_connects_each_arm() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     dataset = _junction_dataset(projection, (650.0, 650.0))
@@ -371,8 +371,12 @@ def test_diagonal_t_junction_uses_real_turn_pieces_and_connects_each_arm() -> No
     assert infrastructure.is_generated_paved_junction_model(plan.model_path)
 
     approaches = report.objects[report.junction_cap_objects :]
-    assert any(
-        re.search(r"\\(?:sil|asf|kos)10 (?:25|50|75|100)\.p3d$", obj.model_path.casefold())
+    assert approaches
+    assert all(
+        (
+            re.search(r"\\(?:sil|asf|kos)(?:25|12|6)\.p3d$", obj.model_path.casefold())
+            or re.search(r"\\(?:sil|asf|kos)10 (?:25|50|75|100)\.p3d$", obj.model_path.casefold())
+        )
         for obj in approaches
     )
     endpoints = tuple(
