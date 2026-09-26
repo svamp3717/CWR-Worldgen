@@ -68,6 +68,10 @@ GENERATED_GRAVEL_EDGE_SECTION_METRES = 0.65
 # amount of precision for aggressive model reuse.
 GENERATED_PAVED_CURVE_BUCKETS = tuple(range(5, 50, 5))
 GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.0
+# Curved generated paved turns retain the pre-junction-regression seam treatment
+# from terrtest39: tangent-aligned mouths plus a short lowered visual tongue.
+# Straight generated pieces remain square-ended for clean junction approaches.
+GENERATED_PAVED_TURN_VISUAL_OVERLAP_METRES = 0.18
 # Generated T junctions use the same 6.25 m arm reach as the stock short-road
 # footprint, but rotate the branch arm to the mapped road heading instead of
 # forcing every junction into a square 90-degree stock cap.
@@ -1447,20 +1451,25 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
         else _gravel_curve_degrees(key.subtype)
     )
 
+    paved_turn = paved_fallback and abs(curve_degrees) > 0
     if paved_fallback:
         visual_sections = _road_ribbon_sections(
             length,
             half_w,
             curve_degrees,
-            overhang=0.0,
-            square_ends=True,
+            overhang=(
+                GENERATED_PAVED_TURN_VISUAL_OVERLAP_METRES
+                if paved_turn
+                else 0.0
+            ),
+            square_ends=not paved_turn,
         )
         raw_visual = _ribbon_lod(
             visual_sections,
             texture=texture,
             resolution=_VISUAL_LOD,
             height=GENERATED_GRAVEL_VISUAL_TOP_METRES,
-            lowered_overlap=False,
+            lowered_overlap=paved_turn,
             double_sided=True,
             u_span_override=1.0,
             texture_scale_override=GENERATED_PAVED_TEXTURE_REPEAT_METRES,
@@ -1492,7 +1501,7 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
         half_w,
         curve_degrees,
         overhang=0.0,
-        square_ends=paved_fallback,
+        square_ends=(paved_fallback and not paved_turn),
     )
     roadway = _ribbon_lod(
         roadway_sections, texture=texture, resolution=_ROADWAY_LOD,
@@ -2060,6 +2069,14 @@ class ProceduralInfrastructureLibrary:
             ):
                 model_cache_version = (
                     "procedural-infrastructure-model-v22-donor-stock-junction-topology"
+                )
+            elif (
+                key.kind == "road"
+                and key.subtype.casefold().startswith("paved_w")
+                and _paved_curve_degrees(key.subtype) != 0
+            ):
+                model_cache_version = (
+                    "procedural-infrastructure-model-v23-tangent-paved-turn-seams"
                 )
             elif key.kind == "road":
                 model_cache_version = (
