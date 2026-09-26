@@ -632,6 +632,49 @@ def _fit(
             set(plans).difference(successful_keys)
         )
 
+        # Give failed vanilla T/X plans one recovery pass against ordinary road
+        # geometry before considering a generated hub. The initial stock search
+        # reserves roughly 32 m around every candidate junction. On some dense or
+        # curved layouts that reservation can hide the very target slab the stock
+        # approach solver needs. Refit failed nodes without that reserve, then let
+        # the same stock planner clear/rebuild its approaches from the connected
+        # road chain. terrtest46's map-centre T is the concrete regression.
+        if failed_stock_keys:
+            recovery_base = _base_refit(
+                dataset,
+                projection,
+                elevations,
+                spec,
+                active,
+                starting_id=starting_id,
+                progress_callback=progress_callback,
+            )
+            recovery_fit = _paved._apply_plans(
+                recovery_base,
+                plans,
+                elevations,
+                spec,
+            )
+            recovery_success = _successful_plan_keys(
+                recovery_fit,
+                plans,
+                spec=spec,
+                progress_callback=progress_callback,
+            )
+            if len(recovery_success) == len(plans):
+                return recovery_fit
+            if recovery_success:
+                successful_keys = frozenset(
+                    set(successful_keys) | set(recovery_success)
+                )
+                active = {
+                    key: plans[key]
+                    for key in successful_keys
+                }
+                failed_stock_keys = frozenset(
+                    set(plans).difference(successful_keys)
+                )
+
         # Stock is authoritative. Only junctions that actually failed the stock
         # model/approach validation may be promoted to a generated exact-heading
         # T. This keeps ordinary vanilla-compatible intersections vanilla while
