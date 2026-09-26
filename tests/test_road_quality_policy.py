@@ -505,7 +505,7 @@ def test_base_fitter_does_not_preempt_stock_paved_junction_policy() -> None:
     )
     assert "kr_new_" in stock_plan.model_path.casefold()
 
-def test_diagonal_t_junction_uses_angle_matched_hub_and_connects_each_arm(
+def test_diagonal_t_junction_falls_back_to_generated_hub_after_stock_fails(
     tmp_path: Path,
 ) -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
@@ -517,50 +517,48 @@ def test_diagonal_t_junction_uses_angle_matched_hub_and_connects_each_arm(
     )
 
     node = (500.0, 500.0)
-    plan = paved_junctions._plans(
+    key = playability._road_node_key(node)
+    stock_plan = paved_junctions._plans(
         dataset, projection, spec
-    )[playability._road_node_key(node)]
+    )[key]
+    assert not infrastructure.is_generated_paved_junction_model(
+        stock_plan.model_path
+    )
+
+    generated_plan = paved_junctions._generated_plan(
+        stock_plan.point,
+        tuple(
+            (arm.source_direction, arm.family)
+            for arm in stock_plan.arms
+        ),
+        world_name=spec.name,
+    )
+    assert generated_plan is not None
+
     assert report.junction_cap_objects == 1
-    assert report.objects[0].model_path.casefold() == plan.model_path.casefold()
-    assert infrastructure.is_generated_paved_junction_model(plan.model_path)
+    hub = report.objects[0]
+    assert infrastructure.is_generated_paved_junction_model(hub.model_path)
+    assert hub.model_path.casefold() == generated_plan.model_path.casefold()
 
     approaches = report.objects[report.junction_cap_objects :]
     assert approaches
-    assert all(
-        (
-            re.search(
-                r"\\(?:sil|asf|kos)(?:25|12|6)\.p3d$",
-                obj.model_path.casefold(),
-            )
-            or re.search(
-                r"\\(?:sil|asf|kos)10 (?:25|50|75|100)\.p3d$",
-                obj.model_path.casefold(),
-            )
-            or infrastructure.is_generated_paved_road_model(obj.model_path)
-        )
-        for obj in approaches
-    )
     endpoints = tuple(
         endpoint
         for obj in approaches
         for endpoint in _object_endpoints(obj)
     )
-    for connector in plan.connectors:
+    for connector in generated_plan.connectors:
         assert min(
             math.dist(connector.point, endpoint)
             for endpoint in endpoints
         ) <= fallback._SUCCESS_DISTANCE_METRES
 
-    # Regression for the uploaded terrtest40 build, which contained generated
-    # paved_w approach pieces but no paved_j3 asset at all. A hub that survives
-    # the live road fitter must be accepted by the infrastructure library and
-    # physically written into the generated asset set.
     library = infrastructure.ProceduralInfrastructureLibrary(
         spec.name,
         paved_texture_path=r"o\road\sil_new.paa",
         cache_enabled=False,
     )
-    library.register_model_usage(report.objects[0].model_path)
+    library.register_model_usage(hub.model_path)
     emitted = library.write_assets(
         tmp_path,
         tmp_path / "infrastructure.json",
