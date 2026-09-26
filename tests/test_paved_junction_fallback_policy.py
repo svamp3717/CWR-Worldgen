@@ -248,6 +248,75 @@ def test_stitcher_replaces_stock_sil6_that_straddles_generated_connector() -> No
     )
 
 
+def test_stitcher_rebuilds_endpoint_matched_but_angle_mismatched_approach() -> None:
+    connector_radius = (
+        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        + infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+    )
+    connector = paved._Connector(
+        "sil",
+        (0.0, connector_radius),
+        (0.0, 1.0),
+    )
+    source_heading = 10.7
+    source_direction = paved._direction(source_heading)
+    plan = paved._Plan(
+        r"seam_world\i\paved_j3_m091_b091_a265.p3d",
+        (0.0, 0.0),
+        (0.0, 1.0),
+        (paved._Arm("sil", source_direction, connector),),
+    )
+
+    length = 8.1
+    direction = source_direction
+    old = SimpleNamespace(
+        object_id=2,
+        model_path=r"seam_world\i\paved_w091_l0081.p3d",
+        x=connector.point[0] + direction[0] * length * 0.5,
+        y=0.010,
+        z=connector.point[1] + direction[1] * length * 0.5,
+        heading_degrees=source_heading,
+        pitch_degrees=0.0,
+    )
+    hub = SimpleNamespace(
+        object_id=1,
+        model_path=plan.model_path,
+        x=0.0,
+        y=0.010,
+        z=0.0,
+        heading_degrees=0.0,
+        pitch_degrees=0.0,
+    )
+    report = SimpleNamespace(
+        objects=(hub, old),
+        junction_cap_objects=1,
+    )
+    spec = SimpleNamespace(
+        name="seam_world",
+        road_segment_length=25.0,
+        cells=8,
+        cell_size=25.0,
+    )
+
+    old_axis = fallback._generated_paved_axis(old, spec)
+    assert old_axis is not None
+    assert min(
+        math.dist(connector.point, endpoint)
+        for endpoint in old_axis
+    ) <= 1.0e-9
+
+    stitched = fallback._stitch_generated_hub_approaches(
+        report,
+        {(0, 0): plan},
+        (0.0,) * 64,
+        spec,
+    )
+    repaired = stitched.objects[1]
+    assert repaired.object_id == old.object_id
+    assert repaired.model_path != old.model_path
+    assert infrastructure.is_generated_paved_road_model(repaired.model_path)
+
+
 def test_successful_plan_keys_preserves_boundary_match_across_buckets() -> None:
     model = r"o\road\kr_new_sil_sil_t.p3d"
     key = (1, 2)
