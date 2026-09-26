@@ -330,7 +330,7 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
 
     result = {}
     for key, raw in incidents.items():
-        values = _p._unique_incidents(raw)
+        values = _p._junction_cap_incidents(_p._unique_incidents(raw))
         if len(values) not in {3, 4}:
             continue
         typed = tuple((value[0], _family(value[2])) for value in values)
