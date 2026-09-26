@@ -19,6 +19,8 @@ from .procedural_infrastructure import (
     gravel_road_model_path,
     is_generated_gravel_junction_model,
     is_generated_gravel_road_model,
+    is_generated_paved_junction_model,
+    is_generated_paved_road_model,
 )
 from .osm import (
     BboxProjection,
@@ -1117,6 +1119,17 @@ def _road_object_on_slope(
         # Terrain grading already owns the road surface underneath.
         placement_offset = -GENERATED_GRAVEL_VISUAL_TOP_METRES * math.cos(
             math.radians(pitch)
+        )
+    elif (
+        is_generated_paved_road_model(model_path)
+        or is_generated_paved_junction_model(model_path)
+    ):
+        # Generated paved P3Ds author their visible/Roadway skin 25 mm above
+        # model origin. Cancel that local rise so the world-space paved surface
+        # lands on the same requested plane as adjacent stock road P3Ds.
+        placement_offset = (
+            float(vertical_offset)
+            - GENERATED_GRAVEL_VISUAL_TOP_METRES * math.cos(math.radians(pitch))
         )
     return WorldObject(
         object_id,
