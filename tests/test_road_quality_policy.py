@@ -304,6 +304,88 @@ def test_stock_t_approach_chain_stays_original_stock_pieces() -> None:
         for obj in objects
     )
 
+def test_terrtest53_generated_microsegment_is_visible_to_stock_junction_cleanup() -> None:
+    spec = SimpleNamespace(road_segment_length=25.0)
+    obj = playability.WorldObject(
+        8723,
+        r"wg_terrtest53\i\paved_w091_l0018.p3d",
+        3222.460,
+        11.602,
+        3184.471,
+        160.710,
+        0.321,
+    )
+    axis = paved_junctions._object_axis(obj, spec)
+    assert axis is not None
+    assert math.isclose(math.dist(*axis), 1.8, abs_tol=1.0e-6)
+    assert paved_junctions._segment_distance(
+        (3223.500, 3181.500488),
+        axis,
+    ) < paved_junctions._CLEAR_RADIUS
+
+
+def test_stock_junction_never_uses_generated_paved_microsegment_as_merge_target() -> None:
+    connector = paved_junctions._Connector(
+        "sil",
+        (0.0, paved_junctions._JUNCTION_RADIUS),
+        (0.0, 1.0),
+    )
+    arm = paved_junctions._Arm("sil", (0.0, 1.0), connector)
+    plan = paved_junctions._Plan(
+        r"o\road\kr_new_sil_sil_t.p3d",
+        (0.0, 0.0),
+        (0.0, 1.0),
+        (arm,),
+    )
+    report = playability.RoadFitReport(
+        objects=(
+            playability.WorldObject(
+                1,
+                plan.model_path,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ),
+            playability.WorldObject(
+                2,
+                r"test_world\i\paved_w091_l0018.p3d",
+                0.0,
+                0.0,
+                35.0,
+                0.0,
+                0.0,
+            ),
+            playability.WorldObject(
+                3,
+                r"o\road\sil6.p3d",
+                0.0,
+                0.0,
+                35.0,
+                0.0,
+                0.0,
+            ),
+        ),
+        chain_count=0,
+        connection_count=0,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+        junction_cap_objects=1,
+    )
+    targets = paved_junctions._target_candidates(
+        report,
+        plan,
+        arm,
+        SimpleNamespace(road_segment_length=25.0),
+    )
+    assert targets
+    assert all(target.object_id != 2 for target in targets)
+    assert any(target.object_id == 3 for target in targets)
+
+
 def test_stock_junction_curve_matches_original_main_placement() -> None:
     spec = SimpleNamespace(cells=16, cell_size=10.0)
     elevations = [0.0] * (spec.cells * spec.cells)
