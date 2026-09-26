@@ -114,11 +114,32 @@ def object_index(objects: Sequence[Any]) -> _ObjectIndex:
     return value
 
 
-def _indexed_filter_vegetation_objects(objects, dataset, projection, spec):
+def _indexed_filter_vegetation_objects(
+    objects,
+    dataset,
+    projection,
+    spec,
+    *,
+    elevations=None,
+    road_objects=None,
+):
     from shapely.ops import unary_union
     from .procedural_forests import is_generated_cluster_model
 
     owner = objects if isinstance(objects, tuple) else tuple(objects)
+    # Final fitted-road clearance needs the exact road-object primitives and
+    # barrier footprints implemented by the authoritative policy. Keep the
+    # vectorized runway/sports fast path for ordinary calls, but delegate when
+    # the WRP writer supplies final road geometry.
+    if elevations is not None and _ORIGINAL_VEGETATION_FILTER is not None:
+        return _ORIGINAL_VEGETATION_FILTER(
+            owner,
+            dataset,
+            projection,
+            spec,
+            elevations=elevations,
+            road_objects=road_objects,
+        )
     runway_shapes = _vegetation._runway_clear_shapes(dataset, projection, spec)
     sports_shapes = _vegetation._sports_clear_shapes(dataset, projection)
     if not runway_shapes and not sports_shapes:
