@@ -35,3 +35,17 @@ def test_generated_gravel_junction_uses_opaque_texture_without_internal_grass_se
     source = catalogue["gravel_texture_source"]
     assert source["junction_texture"] == "i/gj.paa"
     assert source["junction_texture_alpha"] == "opaque"
+    assert source["texture_recipe"] == "reference-gravel-photo-paved-neutral-v4-darker"
+    assert source["junction_texture_recipe"] == (
+        "reference-gravel-photo-paved-neutral-junction-v4-darker"
+    )
+    assert source["tone"] == {
+        "brightness": 0.68,
+        "contrast": 1.12,
+        "saturation": 0.20,
+        "red_gain": 0.985,
+        "green_gain": 0.990,
+        "blue_gain": 1.0,
+        "wheel_track_darkening": 0.060,
+        "target_family": "stock-paved-neutral-grey-dark",
+    }

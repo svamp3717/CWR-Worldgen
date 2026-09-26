@@ -10,7 +10,7 @@ import math
 import re
 from typing import Iterable
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 from .cache import cache_key, restore_or_create_file
 from .paa import inspect_paa, write_rgb_dxt1_paa, write_rgba_dxt1_paa
@@ -29,6 +29,16 @@ _GEOMETRY_LOD = 1.0e13
 _LAND_CONTACT_LOD = 2.0e15
 _ROADWAY_LOD = 3.0e15
 
+# Render metadata copied from the stock CWA o\\road\\sil6.p3d visual surface.
+# The native road does not use just the low "On Surface" bit: its visual points
+# carry 0x13f, its faces carry 0x2c102, and its stored face normal is -Y. MLOD
+# face normals are intentionally inverted for the stock clockwise road winding.
+# Matching the complete stock tuple is important: using +Y normals and zero face
+# flags makes the exact same sil_new.paa texture render substantially darker.
+_ROAD_SURFACE_POINT_FLAG = 0x0000013F
+_ROAD_SURFACE_FACE_FLAG = 0x0002C102
+_ROAD_SURFACE_NORMAL = (0.0, -1.0, 0.0)
+
 # Generated gravel is a terrain-hugging surface ribbon, not a raised slab.
 # Its visible skin and Roadway LOD are coplanar and are placed directly on the
 # graded terrain; the Geometry LOD carries map metadata only and has no faces.
@@ -44,6 +54,17 @@ GENERATED_GRAVEL_TEXTURE_REPEAT_METRES = 3.0
 GENERATED_GRAVEL_EDGE_WIDTH_METRES = 0.18
 GENERATED_GRAVEL_EDGE_JITTER_METRES = 0.06
 GENERATED_GRAVEL_EDGE_SECTION_METRES = 0.65
+
+# Generated paved models are a fallback only. The road fitter still tries the
+# stock OFP/Resistance P3D family first and references these world-local models
+# only when none of those slabs meets its existing geometric fidelity limits.
+# Five-degree curve buckets and decimetre dimensions deliberately trade a tiny
+# amount of precision for aggressive model reuse.
+GENERATED_PAVED_CURVE_BUCKETS = tuple(range(5, 50, 5))
+GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.18
+# Matches the stock sil/kos effective half-width used throughout the fitter.
+GENERATED_PAVED_HALF_WIDTH_METRES = 4.55
+
 GENERATED_BRIDGE_MAXIMUM_DEPTH_METRES = 0.8
 GENERATED_BRIDGE_RAIL_OVERHANG_METRES = 0.16
 GENERATED_BRIDGE_ROADWAY_HEIGHT_METRES = 0.20
@@ -52,13 +73,80 @@ _EDEN_GRAVEL_SURFACES = Path(__file__).resolve().parent / "data" / "eden_gravel"
 _GRAVEL_REFERENCE_TEXTURE = Path(__file__).resolve().parent / "data" / "gravel_reference.png"
 
 
-def create_gravel_road_texture_image(size: int = 512) -> Image.Image:
+def _finish_gravel_object_texture(
+    image: Image.Image,
+    *,
+    wheel_tracks: bool,
+) -> Image.Image:
+    """Give generated gravel a dark neutral tone close to stock paved roads.
+
+    Preserve the real gravel aggregate and wheel wear, but remove most of the
+    warm beige cast so generated gravel sits in the same grey tonal family as
+    the stock paved-road artwork. The terrain surface pass still reuses the
+    untouched reference photograph, so this grading is object-only.
+    """
+
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    rgb = image.convert("RGB")
+    rgb = ImageEnhance.Brightness(rgb).enhance(0.68)
+    rgb = ImageEnhance.Contrast(rgb).enhance(1.12)
+    # Stock sil/kos pavement is nearly neutral grey. Retain just enough source
+    # colour for the aggregate to read as gravel rather than painted asphalt.
+    rgb = ImageEnhance.Color(rgb).enhance(0.20)
+
+    width, height = rgb.size
+    pixels = rgb.load()
+    for y in range(height):
+        yf = (y + 0.5) / height
+        for x in range(width):
+            xf = (x + 0.5) / width
+
+            # Two seamless octaves break up the broad chalky appearance without
+            # fighting the real aggregate detail already present in the photo.
+            mottle = (
+                0.020 * math.sin(math.tau * (2.0 * xf + yf))
+                + 0.012 * math.sin(math.tau * (5.0 * xf - 3.0 * yf + 0.23))
+            )
+            shoulder = -0.018 * (abs(xf - 0.5) * 2.0) ** 1.8
+            tracks = 0.0
+            if wheel_tracks:
+                # Broad, subtle tyre-worn bands. They are longitudinal, so they
+                # remain coherent when the texture repeats along a road ribbon.
+                for centre in (0.28, 0.72):
+                    distance = (xf - centre) / 0.085
+                    tracks -= 0.060 * math.exp(-(distance * distance))
+
+            factor = max(0.80, min(1.00, 1.0 + mottle + shoulder + tracks))
+            r, g, b = pixels[x, y]
+            # Keep the finished gravel very slightly cool/neutral, matching
+            # paved-road tonality rather than the old sandy/brown presentation.
+            pixels[x, y] = (
+                max(0, min(255, int(round(r * factor * 0.985)))),
+                max(0, min(255, int(round(g * factor * 0.990)))),
+                max(0, min(255, int(round(b * factor)))),
+            )
+
+    # DXT1 tends to blur the small stones. Recover a little local definition,
+    # but not enough to create the sparkling/noisy look of older recipes.
+    rgb = rgb.filter(ImageFilter.UnsharpMask(radius=0.45, percent=30, threshold=3))
+    if alpha is not None:
+        rgb.putalpha(alpha)
+    return rgb
+
+
+def create_gravel_road_texture_image(
+    size: int = 512,
+    *,
+    object_finish: bool = True,
+) -> Image.Image:
     """Build the photo-based gravel texture with a clean terrain-visible edge.
 
     OFP/CWA DXT1 only supports one-bit alpha. The old wide ordered-dither verge
     therefore rendered as rows of obvious dots. Keep transparency only in a
     very narrow outer strip and let the model's smoothly irregular physical edge
     provide the terrain transition instead.
+
+    Set object_finish=False when reusing the neutral photograph for terrain.
     """
 
     size = int(size)
@@ -67,6 +155,8 @@ def create_gravel_road_texture_image(size: int = 512) -> Image.Image:
 
     source = Image.open(_GRAVEL_REFERENCE_TEXTURE).convert("RGBA")
     image = source.resize((size, size), Image.Resampling.LANCZOS)
+    if object_finish:
+        image = _finish_gravel_object_texture(image, wheel_tracks=True)
     pixels = image.load()
     # One clean binary edge avoids the coarse halftone/dotted pattern produced
     # by DXT1 alpha dithering and its mipmaps. At 512 px this is only a few
@@ -82,20 +172,22 @@ def create_gravel_road_texture_image(size: int = 512) -> Image.Image:
 
 
 def create_gravel_junction_texture_image(size: int = 512) -> Image.Image:
-    """Build an opaque gravel texture for generated junction polygons.
+    """Build an opaque, earth-toned gravel texture for generated junctions.
 
     Straight/curved gravel ribbons intentionally use transparent texture edges so
     the world terrain can blend into their outside verges. Junction meshes tile
     UVs over a two-dimensional polygon, however, so those repeating alpha edges
-    become narrow strips of visible terrain *inside* the road surface. Reuse the
-    exact same gravel photograph for junctions, but keep every texel opaque.
+    become narrow strips of visible terrain inside the road surface. Reuse the
+    same gravel finish but omit directional wheel tracks at junctions.
     """
 
     size = int(size)
     if size < 32:
         raise ValueError("gravel junction texture size must be at least 32 pixels")
     source = Image.open(_GRAVEL_REFERENCE_TEXTURE).convert("RGB")
-    return source.resize((size, size), Image.Resampling.LANCZOS)
+    image = source.resize((size, size), Image.Resampling.LANCZOS)
+    return _finish_gravel_object_texture(image, wheel_tracks=False)
+
 
 def _eden_gravel_surface_rules() -> dict[str, float]:
     rules: dict[str, float] = {}
@@ -161,6 +253,7 @@ _TEXTURE_FILE_STEMS = {
     "bridge": "b",
     "gravel": "g",
     "gravel_junction": "gj",
+    "paved": "pv",
     "power_pole": "up",
     "power_tower": "ut",
     "water_tower": "uw",
@@ -180,6 +273,7 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         "rock": (118, 116, 107),
         "gravel": (126, 119, 103),
         "gravel_junction": (126, 119, 103),
+        "paved": (69, 70, 68),
         "power_pole": (116, 102, 78),
         "power_tower": (118, 120, 119),
         "water_tower": (142, 148, 151),
@@ -215,6 +309,16 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         return create_gravel_road_texture_image(size)
     elif kind == "gravel_junction":
         return create_gravel_junction_texture_image(size)
+    elif kind == "paved":
+        # Keep fallback pavement deliberately plain. Stock road P3Ds remain the
+        # preferred visible asset; this texture only covers geometry for which
+        # no stock slab can follow the source line closely enough.
+        for y in range(size):
+            for x in range(size):
+                n = ((x * 17 + y * 31 + (x * y) % 23) % 19) - 9
+                image.putpixel((x, y), tuple(max(0, min(255, value + n)) for value in base))
+        for y in range(0, size, max(8, size // 16)):
+            draw.line((0, y, size, y), fill=(76, 77, 74), width=1)
     else:
         for y in range(size):
             for x in range(size):
@@ -414,6 +518,18 @@ def _gravel_curve_degrees(subtype: str) -> int:
     return amount if match.group(1).casefold() == "r" else -amount
 
 
+def _paved_curve_degrees(subtype: str) -> int:
+    match = re.fullmatch(
+        r"paved_w\d{3}_l\d{4}(?:_([lr])(\d{2}))?",
+        subtype,
+        re.IGNORECASE,
+    )
+    if not match or not match.group(1):
+        return 0
+    amount = int(match.group(2))
+    return amount if match.group(1).casefold() == "r" else -amount
+
+
 def _road_ribbon_sections(
     length: float,
     half_width: float,
@@ -498,11 +614,38 @@ def _ribbon_lod(
         le, re = (index + 1) * 2, (index + 1) * 2 + 1
         v0 = cumulative[index] / texture_scale
         v1 = cumulative[index + 1] / texture_scale
-        top = _Face(texture, ((ls, 0, 0.0, v0), (le, 0, 0.0, v1), (re, 0, u_span, v1), (rs, 0, u_span, v0)))
+        top = _Face(
+            texture,
+            ((ls, 0, 0.0, v0), (le, 0, 0.0, v1),
+             (re, 0, u_span, v1), (rs, 0, u_span, v0)),
+            _ROAD_SURFACE_FACE_FLAG,
+        )
         faces.append(top)
         if double_sided:
-            faces.append(_Face(texture, ((rs, 0, u_span, v0), (re, 0, u_span, v1), (le, 0, 0.0, v1), (ls, 0, 0.0, v0))))
-    return _Lod(tuple(points), ((0.0, 1.0, 0.0),), tuple(faces), resolution, properties=((('autocenter', '0'), ('class', 'road'), ('map', 'road')) if resolution == _VISUAL_LOD else ()))
+            faces.append(_Face(
+                texture,
+                ((rs, 0, u_span, v0), (re, 0, u_span, v1),
+                 (le, 0, 0.0, v1), (ls, 0, 0.0, v0)),
+                _ROAD_SURFACE_FACE_FLAG,
+            ))
+    properties = (
+        (("autocenter", "0"), ("class", "road"), ("map", "road"))
+        if resolution == _VISUAL_LOD
+        else ()
+    )
+    point_flags = (
+        (_ROAD_SURFACE_POINT_FLAG,) * len(points)
+        if resolution in {_VISUAL_LOD, _ROADWAY_LOD}
+        else ()
+    )
+    return _Lod(
+        tuple(points),
+        (_ROAD_SURFACE_NORMAL,),
+        tuple(faces),
+        resolution,
+        properties=properties,
+        point_flags=point_flags,
+    )
 
 
 def _gravel_visual_lod(length: float, half_width: float, curve_degrees: int, texture: str) -> _Lod:
@@ -554,9 +697,14 @@ def _gravel_visual_lod(length: float, half_width: float, curve_degrees: int, tex
         double_sided=True, u_span_override=1.0,
     )
     return _Lod(
-        visual.points, visual.normals, visual.faces, visual.resolution,
-        visual.mass_per_point, visual.selections,
+        visual.points,
+        visual.normals,
+        visual.faces,
+        visual.resolution,
+        visual.mass_per_point,
+        visual.selections,
         (("autocenter", "0"), ("class", "road"), ("map", "road")),
+        visual.point_flags,
     )
 
 def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
@@ -578,7 +726,11 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
     def quad(x0: float, z0: float, x1: float, z1: float, uv: tuple[tuple[float, float], ...]) -> None:
         start = len(points)
         points.extend(((x0, y, z0), (x0, y, z1), (x1, y, z1), (x1, y, z0)))
-        faces.append(_Face(texture, tuple((start + index, 0, u, v) for index, (u, v) in enumerate(uv))))
+        faces.append(_Face(
+            texture,
+            tuple((start + index, 0, u, v) for index, (u, v) in enumerate(uv)),
+            _ROAD_SURFACE_FACE_FLAG,
+        ))
 
     # Centre samples only the fully opaque portion of the gravel artwork.
     quad(-core, -core, core, core, ((0.20, 0.20), (0.20, 0.80), (0.80, 0.80), (0.80, 0.20)))
@@ -592,8 +744,12 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
     quad(-extent, -half_w, -core, half_w, ((0.20, 0.00), (0.20, 1.00), (0.55, 1.00), (0.55, 0.00)))
 
     visual = _Lod(
-        tuple(points), ((0.0, 1.0, 0.0),), tuple(faces), _VISUAL_LOD,
+        tuple(points),
+        (_ROAD_SURFACE_NORMAL,),
+        tuple(faces),
+        _VISUAL_LOD,
         properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
+        point_flags=(_ROAD_SURFACE_POINT_FLAG,) * len(points),
     )
     map_geometry = _Lod(
         ((-extent, 0.0, -extent), (extent, 0.0, -extent), (extent, 0.0, extent), (-extent, 0.0, extent)),
@@ -601,7 +757,18 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
     )
     roadway_y = GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES
     roadway_points = ((-extent, roadway_y, -extent), (extent, roadway_y, -extent), (extent, roadway_y, extent), (-extent, roadway_y, extent))
-    roadway = _Lod(roadway_points, ((0.0, 1.0, 0.0),), (_quad("", 0, 3, 2, 1),), _ROADWAY_LOD)
+    roadway = _Lod(
+        roadway_points,
+        (_ROAD_SURFACE_NORMAL,),
+        (_Face(
+            "",
+            ((0, 0, 0.0, 1.0), (3, 0, 0.0, 0.0),
+             (2, 0, 1.0, 0.0), (1, 0, 1.0, 1.0)),
+            _ROAD_SURFACE_FACE_FLAG,
+        ),),
+        _ROADWAY_LOD,
+        point_flags=(_ROAD_SURFACE_POINT_FLAG,) * len(roadway_points),
+    )
     land = _Lod(roadway_points, (), (), _LAND_CONTACT_LOD)
     return visual, map_geometry, roadway, land
 
@@ -612,9 +779,41 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
     width = key.width_m
     length = key.length_m
     half_w = width * 0.5
-    curve_degrees = _gravel_curve_degrees(key.subtype)
+    paved_fallback = key.subtype.casefold().startswith("paved_")
+    curve_degrees = (
+        _paved_curve_degrees(key.subtype)
+        if paved_fallback
+        else _gravel_curve_degrees(key.subtype)
+    )
 
-    visual = _gravel_visual_lod(length, half_w, curve_degrees, texture)
+    if paved_fallback:
+        visual_sections = _road_ribbon_sections(
+            length,
+            half_w,
+            curve_degrees,
+            overhang=GENERATED_PAVED_VISUAL_OVERLAP_METRES,
+        )
+        raw_visual = _ribbon_lod(
+            visual_sections,
+            texture=texture,
+            resolution=_VISUAL_LOD,
+            height=GENERATED_GRAVEL_VISUAL_TOP_METRES,
+            lowered_overlap=True,
+            double_sided=True,
+            u_span_override=1.0,
+        )
+        visual = _Lod(
+            raw_visual.points,
+            raw_visual.normals,
+            raw_visual.faces,
+            raw_visual.resolution,
+            raw_visual.mass_per_point,
+            raw_visual.selections,
+            (("autocenter", "0"), ("class", "road"), ("map", "road")),
+            raw_visual.point_flags,
+        )
+    else:
+        visual = _gravel_visual_lod(length, half_w, curve_degrees, texture)
 
     # Keep road simulation on the first Resolution LOD, but also emit a face-less
     # Geometry LOD carrying map=road. OFP/CWA reliably reads the 2D map symbol
@@ -774,6 +973,35 @@ def is_generated_gravel_road_model(model_path: str) -> bool:
     return re.fullmatch(r"gravel(?:25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d", filename, re.IGNORECASE) is not None
 
 
+def paved_fallback_model_path(
+    world_name: str,
+    width_metres: float,
+    length_metres: float,
+    curve_degrees: float = 0.0,
+) -> str:
+    width_dm = max(10, min(999, int(round(float(width_metres) * 10.0))))
+    length_dm = max(5, min(9999, int(round(float(length_metres) * 10.0))))
+    magnitude = abs(float(curve_degrees))
+    suffix = ""
+    if magnitude >= 2.5:
+        amount = min(
+            GENERATED_PAVED_CURVE_BUCKETS,
+            key=lambda value: (abs(float(value) - magnitude), value),
+        )
+        side = "r" if float(curve_degrees) > 0.0 else "l"
+        suffix = f"_{side}{amount:02d}"
+    return rf"{world_name}\i\paved_w{width_dm:03d}_l{length_dm:04d}{suffix}.p3d"
+
+
+def is_generated_paved_road_model(model_path: str) -> bool:
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
+    return re.fullmatch(
+        r"paved_w\d{3}_l\d{4}(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d",
+        filename,
+        re.IGNORECASE,
+    ) is not None
+
+
 @dataclass(frozen=True, slots=True)
 class _InfrastructureAssetTask:
     key: InfrastructureModelKey
@@ -813,10 +1041,13 @@ def _write_infrastructure_asset_task(task: _InfrastructureAssetTask) -> tuple[di
 def _infrastructure_texture_kind(key: InfrastructureModelKey) -> str:
     """Return the generated texture family used by one infrastructure model."""
     if key.kind == "road":
+        subtype = key.subtype.casefold()
+        if subtype.startswith("paved_"):
+            return "paved"
         # Junction polygons tile their UV coordinates in two dimensions. They
         # must not use the alpha-edged ribbon texture, otherwise each texture
         # wrap reveals a thin strip of grass through the middle of the junction.
-        return "gravel_junction" if key.subtype.casefold().startswith("gravel_j") else "gravel"
+        return "gravel_junction" if subtype.startswith("gravel_j") else "gravel"
     return key.subtype if key.kind in {"barrier", "utility"} else key.kind
 
 
@@ -824,11 +1055,27 @@ class ProceduralInfrastructureLibrary:
     _PATTERN = re.compile(r"^(bar|br|rock)_([a-z0-9_]+)_w(\d+)_l(\d+)\.p3d$", re.IGNORECASE)
     _GRAVEL_PATTERN = re.compile(r"^gravel(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.IGNORECASE)
     _GRAVEL_JUNCTION_PATTERN = re.compile(r"^gravel_j([34])\.p3d$", re.IGNORECASE)
+    _PAVED_PATTERN = re.compile(
+        r"^paved_w(?P<width>\d{3})_l(?P<length>\d{4})(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+        re.IGNORECASE,
+    )
     _UTILITY_PATTERN = re.compile(r"^util_(power_pole|power_tower|water_tower)\.p3d$", re.IGNORECASE)
 
-    def __init__(self, world_name: str, *, road_segment_length: float = 24.5, cache_dir: Path | None = None, cache_enabled: bool = True, cache_refresh: bool = False) -> None:
+    def __init__(
+        self,
+        world_name: str,
+        *,
+        road_segment_length: float = 24.5,
+        paved_texture_path: str = r"landtext\silnice.pac",
+        cache_dir: Path | None = None,
+        cache_enabled: bool = True,
+        cache_refresh: bool = False,
+    ) -> None:
         self.world_name = world_name
         self.road_segment_length = float(road_segment_length)
+        self.paved_texture_path = str(paved_texture_path).replace("/", "\\").strip("\\")
+        if not self.paved_texture_path:
+            raise ValueError("paved texture path must not be empty")
         if not math.isfinite(self.road_segment_length) or self.road_segment_length <= 0.0:
             raise ValueError("road segment length must be positive and finite")
         self.cache_dir = cache_dir
@@ -906,6 +1153,15 @@ class ProceduralInfrastructureLibrary:
                 "road", filename[:-4].casefold(), int(round(GENERATED_GRAVEL_HALF_WIDTH_METRES * 20.0)), max(10, int(round(actual_length * 10.0)))
             )] += count
             return
+        paved_match = self._PAVED_PATTERN.fullmatch(filename)
+        if paved_match:
+            self._usage[InfrastructureModelKey(
+                "road",
+                filename[:-4].casefold(),
+                int(paved_match.group("width")),
+                int(paved_match.group("length")),
+            )] += count
+            return
         utility_match = self._UTILITY_PATTERN.fullmatch(filename)
         if utility_match:
             subtype = utility_match.group(1).casefold()
@@ -934,6 +1190,8 @@ class ProceduralInfrastructureLibrary:
             # verified rock tiles across deterministic rock-group variants.
             return r"o\lom2.paa" if key.subtype.casefold().endswith("_1") else r"o\l1.paa"
         kind = _infrastructure_texture_kind(key)
+        if kind == "paved":
+            return self.paved_texture_path
         return rf"{self.world_name}\i\{_texture_file_stem(kind)}.paa"
 
     def write_assets(self, source_dir: Path, catalogue_path: Path) -> InfrastructureAssetResult:
@@ -943,29 +1201,38 @@ class ProceduralInfrastructureLibrary:
             if key.kind != "rock"
         }
         used_texture_kinds = sorted(used_texture_kind_set)
+        generated_texture_kinds = tuple(
+            kind for kind in used_texture_kinds if kind != "paved"
+        )
         texture_files: list[str] = []
-        for kind in used_texture_kinds:
+        # Paved fallback P3Ds now point at the configured stock road texture.
+        # Remove the old generated asphalt file so incremental builds cannot
+        # accidentally keep packing an obsolete visual.
+        stale_paved = source_dir / "i" / f"{_texture_file_stem('paved')}.paa"
+        if stale_paved.exists():
+            stale_paved.unlink()
+        for kind in generated_texture_kinds:
             wire = rf"{self.world_name}\i\{_texture_file_stem(kind)}.paa"
             relative = wire.split("\\", 1)[1].replace("\\", "/")
             destination = source_dir / relative
             if kind == "gravel":
                 asset_key = cache_key(
-                    "procedural-infrastructure-texture-v15-reference-gravel-clean-edge",
-                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-clean-edge-v3"},
+                    "procedural-infrastructure-texture-v23-reference-gravel-paved-tone-darker",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-paved-neutral-v4-darker"},
                 )
                 producer = lambda target: write_rgba_dxt1_paa(
                     target, create_gravel_road_texture_image(512)
                 )
             elif kind == "gravel_junction":
                 asset_key = cache_key(
-                    "procedural-infrastructure-texture-v16-reference-gravel-junction-opaque",
-                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-opaque-junction-v1"},
+                    "procedural-infrastructure-texture-v24-reference-gravel-junction-paved-tone-darker",
+                    {"kind": kind, "size": 512, "recipe": "reference-gravel-photo-paved-neutral-junction-v4-darker"},
                 )
                 producer = lambda target: write_rgb_dxt1_paa(
                     target, create_gravel_junction_texture_image(512)
                 )
             else:
-                texture_size = 256 if kind == "bridge" else 128
+                texture_size = 256 if kind in {"bridge", "paved"} else 128
                 texture_cache_version = (
                     "procedural-infrastructure-texture-v6-procedural-bridge"
                     if kind == "bridge"
@@ -989,6 +1256,14 @@ class ProceduralInfrastructureLibrary:
             inspect_paa(destination)
             texture_files.append(relative)
 
+        paved_source: dict[str, object] | None = None
+        if "paved" in used_texture_kind_set:
+            paved_source = {
+                "type": "external-stock-texture",
+                "texture": self.paved_texture_path,
+                "generated_texture": False,
+            }
+
         gravel_source: dict[str, object] | None = None
         if {"gravel", "gravel_junction"} & set(used_texture_kinds):
             stale_edge = source_dir / "i" / "ge.paa"
@@ -1002,8 +1277,18 @@ class ProceduralInfrastructureLibrary:
             gravel_source = {
                 "type": "bundled-reference",
                 "texture": f"i/{_texture_file_stem('gravel')}.paa",
-                "texture_recipe": "reference-gravel-photo-clean-edge-v3",
+                "texture_recipe": "reference-gravel-photo-paved-neutral-v4-darker",
                 "texture_size": 512,
+                "tone": {
+                    "brightness": 0.68,
+                    "contrast": 1.12,
+                    "saturation": 0.20,
+                    "red_gain": 0.985,
+                    "green_gain": 0.990,
+                    "blue_gain": 1.0,
+                    "wheel_track_darkening": 0.060,
+                    "target_family": "stock-paved-neutral-grey-dark",
+                },
                 "edge_blend": "clean DXT1 cutout plus smoothly irregular model edge",
                 "map_symbol": "road",
                 "map_symbol_lod": "face-less Geometry",
@@ -1015,7 +1300,7 @@ class ProceduralInfrastructureLibrary:
             if "gravel_junction" in used_texture_kinds:
                 gravel_source.update({
                     "junction_texture": f"i/{_texture_file_stem('gravel_junction')}.paa",
-                    "junction_texture_recipe": "reference-gravel-photo-opaque-junction-v1",
+                    "junction_texture_recipe": "reference-gravel-photo-paved-neutral-junction-v4-darker",
                     "junction_texture_alpha": "opaque",
                 })
 
@@ -1026,7 +1311,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v15-safe-junction-uvs"
+                "procedural-infrastructure-model-v17-stock-road-render-metadata"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
@@ -1060,6 +1345,8 @@ class ProceduralInfrastructureLibrary:
             "textures": texture_files,
             "models": models,
         }
+        if paved_source is not None:
+            document["paved_texture_source"] = paved_source
         if gravel_source is not None:
             document["gravel_texture_source"] = gravel_source
         canonical = json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"

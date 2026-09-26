@@ -52,6 +52,7 @@ _CODE_FILES = (
     "gravel_junction_policy.py",
     "gravel_gap_policy.py",
     "gravel_family_policy.py",
+    "paved_road_generated_fallback_policy.py",
     "road_chain_parallel_policy.py",
     "road_quality_parallel_compat_policy.py",
     "bridge_runtime_policy.py",

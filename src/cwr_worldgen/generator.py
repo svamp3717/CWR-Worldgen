@@ -23,7 +23,12 @@ from .paa import inspect_paa, write_rgb_dxt1_paa, write_solid_dxt1_paa
 from .pbo import PboPackResult, pack_directory, pack_directory_cached, read_pbo
 from ._version import GENERATOR_VERSION
 from .output_ownership import prepare_output_directory, record_build_ownership
-from .assets import canonical_asset_path, scan_assets, write_asset_catalogue
+from .assets import (
+    canonical_asset_path,
+    model_texture_dependencies,
+    scan_assets,
+    write_asset_catalogue,
+)
 from .asset_mapping import (
     collect_osm_asset_requirements,
     default_osm_asset_mapping,
@@ -31,7 +36,12 @@ from .asset_mapping import (
 )
 from .progress import report_progress
 from .procedural_buildings import BuildingGenerationResult, ProceduralBuildingLibrary
-from .procedural_infrastructure import InfrastructureAssetResult, ProceduralInfrastructureLibrary, _texture_file_stem
+from .procedural_infrastructure import (
+    InfrastructureAssetResult,
+    ProceduralInfrastructureLibrary,
+    _texture_file_stem,
+    is_generated_paved_road_model,
+)
 from .procedural_forests import (
     ForestClusterAssetResult,
     ProceduralForestClusterLibrary,
@@ -1507,6 +1517,52 @@ def _generation_fingerprint(
         objects,
         towns,
     )
+
+
+def _preferred_stock_paved_texture(
+    model_path: str,
+    dependencies: Sequence[str],
+) -> str:
+    """Choose the stock paved texture that best matches the configured road family."""
+    values = tuple(
+        str(value).replace("/", "\\").strip("\\")
+        for value in dependencies
+        if str(value).casefold().endswith((".paa", ".pac"))
+    )
+    if not values:
+        # Classic OFP paved network artwork. Builds with a readable stock P3D
+        # should resolve that model's exact embedded dependency before this.
+        return r"landtext\silnice.pac"
+    if len(values) == 1:
+        return values[0]
+
+    filename = str(model_path).replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+    family = filename
+    for suffix in ("25.p3d", "12.p3d", "6.p3d"):
+        if family.endswith(suffix):
+            family = family[: -len(suffix)]
+            break
+    aliases = {
+        "sil": ("sil", "silnice"),
+        "silnice": ("silnice", "sil"),
+        "asf": ("asf", "asfalt"),
+        "asfaltka": ("asfalt", "asf"),
+        "kos": ("kos",),
+    }.get(family, (family,))
+
+    def rank(value: str) -> tuple[int, int, str]:
+        lowered = value.casefold()
+        basename = lowered.rsplit("\\", 1)[-1]
+        score = 0
+        if any(token and token in basename for token in aliases):
+            score += 100
+        if "road" in lowered:
+            score += 20
+        if "landtext" in lowered:
+            score += 10
+        return (-score, len(value), lowered)
+
+    return min(values, key=rank)
 
 
 def _ground_texture_profile(spec: PlayabilitySpec) -> str:
@@ -3496,10 +3552,33 @@ def build_milestone4(
         for model_path, count in combined_model_usage.items()
         if milestone_number >= 9 and model_path.casefold().startswith(infrastructure_prefix)
     )
+    generated_paved_usage = tuple(
+        (model_path, count)
+        for model_path, count in generated_infrastructure_usage
+        if is_generated_paved_road_model(model_path)
+    )
+    paved_texture_path = r"landtext\silnice.pac"
+    if generated_paved_usage:
+        report_progress(79, "Resolving stock paved-road texture for generated fallback")
+        paved_model_scan = scan_assets(
+            spec.asset_roots,
+            (spec.paved_road_model,),
+            cache_dir=getattr(spec, "cache_dir", None),
+            use_cache=bool(getattr(spec, "cache_enabled", True)),
+            refresh=bool(getattr(spec, "cache_refresh", False)),
+        )
+        paved_texture_path = _preferred_stock_paved_texture(
+            spec.paved_road_model,
+            model_texture_dependencies(
+                paved_model_scan.records,
+                spec.paved_road_model,
+            ),
+        )
     if generated_infrastructure_usage:
         infrastructure_library = ProceduralInfrastructureLibrary(
             spec.name,
             road_segment_length=spec.road_segment_length,
+            paved_texture_path=paved_texture_path,
             cache_dir=getattr(spec, "cache_dir", None),
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
@@ -3540,6 +3619,7 @@ def build_milestone4(
         + tuple(external_ground_textures)
         + tuple(osm_asset_mapping_report.selected_models)
         + tuple(osm_asset_mapping_report.selected_textures)
+        + ((paved_texture_path,) if generated_paved_usage else ())
     ))
     report_progress(82, "Scanning configured CWA asset roots and OSM asset mapping")
     asset_scan = scan_assets(
@@ -3960,6 +4040,7 @@ def build_milestone4(
             repeat_infrastructure_library = ProceduralInfrastructureLibrary(
                 spec.name,
                 road_segment_length=spec.road_segment_length,
+                paved_texture_path=paved_texture_path,
                 cache_dir=getattr(spec, "cache_dir", None),
                 cache_enabled=bool(getattr(spec, "cache_enabled", True)),
                 cache_refresh=bool(getattr(spec, "cache_refresh", False)),

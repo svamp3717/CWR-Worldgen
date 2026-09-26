@@ -445,6 +445,68 @@ def _load_or_scan_catalogue(
     return names, records, errors, False, str(cache_path) if cache_path else None
 
 
+def model_texture_dependencies(
+    records: Sequence[AssetRecord],
+    model_path: str,
+) -> tuple[str, ...]:
+    """Return resolvable texture paths embedded in one scanned P3D.
+
+    Asset catalogues keep raw P3D dependency strings. Older stock models may
+    store only a basename, while compressed PBO entries may have no dependency
+    list until their selected model bytes are decoded. Resolve those cases here
+    so generated models can safely reuse the exact stock texture reference.
+    """
+
+    target = canonical_asset_path(model_path)
+    by_path = {record.path: record for record in records}
+    record = by_path.get(target)
+    if record is None:
+        return ()
+
+    dependencies = tuple(record.dependencies)
+    if not dependencies:
+        try:
+            dependencies = _p3d_dependencies(read_asset_record_bytes(record))
+        except (OSError, ValueError, FileNotFoundError):
+            return ()
+
+    available = set(by_path)
+    by_basename: dict[str, set[str]] = {}
+    for asset_path in available:
+        by_basename.setdefault(asset_path.rsplit("\\", 1)[-1], set()).add(asset_path)
+
+    result: list[str] = []
+    model_parts = target.split("\\")
+    for dependency in dependencies:
+        candidates = [dependency]
+        suffix = Path(dependency).suffix.casefold()
+        if suffix == ".paa":
+            candidates.append(dependency[:-4] + ".pac")
+        elif suffix == ".pac":
+            candidates.append(dependency[:-4] + ".paa")
+
+        resolved = next((value for value in candidates if value in available), None)
+        if resolved is None and "\\" not in dependency:
+            for value in candidates:
+                if len(model_parts) > 1:
+                    same_directory = "\\".join((*model_parts[:-1], value))
+                    if same_directory in available:
+                        resolved = same_directory
+                        break
+                    if model_parts[0] == "data3d":
+                        data_path = "data\\" + value
+                        if data_path in available:
+                            resolved = data_path
+                            break
+                matches = by_basename.get(value, set())
+                if len(matches) == 1:
+                    resolved = next(iter(matches))
+                    break
+        result.append(resolved or dependency)
+
+    return tuple(dict.fromkeys(result))
+
+
 def scan_assets(
     roots: Sequence[Path],
     selected_models: Iterable[str],
