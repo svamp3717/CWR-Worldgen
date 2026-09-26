@@ -48,6 +48,17 @@ def test_short_intentional_chain_seam_overlap_is_preserved():
     assert len(result.objects) == 2
 
 
+def test_adjacent_curves_with_only_a_small_end_overlap_are_preserved():
+    report = _report((
+        _road(1, r"o\road\sil10 100.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil10 100.p3d", 100.0, 117.2),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert len(result.objects) == 2
+
+
 def test_perpendicular_crossing_is_preserved():
     report = _report((
         _road(1, r"o\road\sil25.p3d", 100.0, 100.0, heading=0.0),
@@ -92,17 +103,69 @@ def test_paved_surface_wins_over_coincident_dirt_piece():
     assert tuple(obj.object_id for obj in result.objects) == (2,)
 
 
-def test_curves_and_junction_models_are_not_axis_deduplicated():
+def test_exact_duplicate_stock_curves_keep_one_deterministically():
     report = _report((
-        _road(1, r"o\road\sil10 25.p3d", 100.0, 100.0),
-        _road(2, r"o\road\sil10 25.p3d", 100.0, 100.0),
+        _road(20, r"o\road\sil10 25.p3d", 100.0, 100.0),
+        _road(10, r"o\road\sil10 25.p3d", 100.0, 100.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (10,)
+
+
+def test_curve_fully_covered_by_long_stock_slab_is_removed():
+    report = _report((
+        _road(1, r"o\road\sil25.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil10 50.p3d", 100.0, 100.0, heading=180.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1,)
+
+
+def test_generated_paved_micro_ribbon_covered_by_stock_road_is_removed():
+    report = _report((
+        _road(1, r"o\road\sil25.p3d", 100.0, 100.0),
+        _road(
+            2,
+            r"wg_test\i\paved_w091_l0018.p3d",
+            100.0,
+            100.0,
+        ),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1,)
+
+
+def test_generated_paved_curve_covered_by_stock_road_is_removed():
+    report = _report((
+        _road(1, r"o\road\sil25.p3d", 100.0, 100.0),
+        _road(
+            2,
+            r"wg_test\i\paved_w091_l0059_l25.p3d",
+            100.0,
+            100.0,
+        ),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1,)
+
+
+def test_junction_models_are_still_not_axis_deduplicated():
+    report = _report((
         _road(3, r"o\road\kr_new_sil_sil_t.p3d", 120.0, 120.0),
         _road(4, r"o\road\kr_new_sil_sil_t.p3d", 120.0, 120.0),
     ))
 
     result = deduplicate_final_road_objects(report, _spec())
 
-    assert len(result.objects) == 4
+    assert len(result.objects) == 2
 
 
 def test_junction_cap_prefix_is_protected_from_deduplication():
