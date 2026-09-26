@@ -157,6 +157,39 @@ def test_generated_paved_curve_covered_by_stock_road_is_removed():
     assert tuple(obj.object_id for obj in result.objects) == (1,)
 
 
+def test_shallow_angle_paved_piece_buried_by_longer_paved_piece_is_removed():
+    report = _report((
+        _road(1, r"o\road\sil25.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil6.p3d", 100.0, 100.0, heading=9.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1,)
+
+
+def test_shallow_angle_paved_partial_overlap_is_preserved():
+    report = _report((
+        _road(1, r"o\road\sil25.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil12.p3d", 100.0, 111.0, heading=9.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert len(result.objects) == 2
+
+
+def test_paved_second_pass_does_not_delete_longer_candidate_under_short_wide_piece():
+    report = _report((
+        _road(1, r"o\road\sil6.p3d", 100.0, 100.0),
+        _road(2, r"o\road\asf25.p3d", 100.0, 100.0, heading=9.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert len(result.objects) == 2
+
+
 def test_dirt_curves_remain_out_of_scope_for_paved_second_pass():
     report = _report((
         _road(1, r"o\road\ces10 25.p3d", 100.0, 100.0),
