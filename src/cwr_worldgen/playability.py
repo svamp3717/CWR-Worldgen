@@ -881,10 +881,12 @@ def _generated_paved_t_cap_plan(
             + directions[pair[0]][1] * directions[pair[1]][1]
         ),
     )
-    axis = _normalised_direction(
-        (-directions[second][0], -directions[second][1]),
-        directions[first],
+    axis_delta = (
+        directions[first][0] - directions[second][0],
+        directions[first][1] - directions[second][1],
     )
+    axis_length = max(1.0e-9, math.hypot(*axis_delta))
+    axis = axis_delta[0] / axis_length, axis_delta[1] / axis_length
     branch = next(index for index in range(3) if index not in {first, second})
     right = axis[1], -axis[0]
 
