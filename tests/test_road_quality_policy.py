@@ -546,6 +546,75 @@ def test_mixed_dirt_paved_node_is_not_a_junction_surface() -> None:
 
 
 
+
+def test_gravel_branch_underlays_continuous_paved_road_without_cap() -> None:
+    bbox = (0.0, 0.0, 0.01, 0.01)
+    projection = BboxProjection.create(bbox, 1000.0)
+    centre = (500.0, 500.0)
+    dataset = OsmDataset(
+        source_generator="mixed-gravel-paved-underlay",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/paved",
+                {"highway": "residential", "surface": "asphalt"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in ((500.0, 300.0), centre, (500.0, 700.0))
+                ),
+            ),
+            OsmLineFeature(
+                "way/gravel",
+                {"highway": "track", "surface": "gravel"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in (centre, (700.0, 500.0))
+                ),
+            ),
+        ),
+    )
+    spec = _junction_spec(bbox, procedural_gravel_roads=True)
+    report = playability.fit_road_objects(
+        dataset, projection, [0.0] * (40 * 40), spec
+    )
+
+    # Paved+gravel behaves like paved+dirt: no generic six-metre junction cap
+    # is allowed to split the asphalt. The gravel terminates underneath while
+    # at least one paved slab crosses the shared node continuously.
+    assert report.junction_cap_objects == 0
+    assert not any(
+        "\\paved_j" in obj.model_path.casefold()
+        or "kr_new_" in obj.model_path.casefold()
+        for obj in report.objects
+    )
+
+    paved_axes = []
+    for obj in report.objects:
+        match = re.search(
+            r"\\(?:sil|silnice|kos|asf|asfaltka)(25|12|6)\.p3d$",
+            obj.model_path.casefold(),
+        )
+        if not match:
+            continue
+        length = playability.stock_road_piece_length_metres(
+            obj.model_path,
+            int(match.group(1)),
+            spec.road_segment_length,
+        )
+        paved_axes.append(playability._model_axis(obj, length))
+
+    assert paved_axes
+    assert min(
+        playability._point_segment_distance(centre, axis[0], axis[1])
+        for axis in paved_axes
+    ) <= 0.05
+
+
 def test_dirt_track_underlays_paved_road_without_mixed_junction_cap() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
