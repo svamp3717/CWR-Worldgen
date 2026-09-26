@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -187,6 +188,47 @@ def test_generated_paved_junction_quantizes_heading_and_reuses_stock_texture(
     assert min(point[2] for point in visual.points) < -6.0
     assert visual.faces
     assert roadway.faces
+
+
+def test_generated_paved_junction_visual_overhang_covers_logical_seam() -> None:
+    key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_j3_m091_b091_a260",
+        91,
+        int(round(
+            infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 20.0
+        )),
+    )
+    visual, _map_geometry, roadway, _land = infrastructure._road_lods(
+        key,
+        r"o\road\sil_new.paa",
+    )
+
+    branch_heading = math.radians(260.0)
+    branch_direction = (math.sin(branch_heading), math.cos(branch_heading))
+    visual_reach = max(
+        point[0] * branch_direction[0] + point[2] * branch_direction[1]
+        for point in visual.points
+    )
+    roadway_reach = max(
+        point[0] * branch_direction[0] + point[2] * branch_direction[1]
+        for point in roadway.points
+    )
+
+    assert math.isclose(
+        roadway_reach,
+        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+        abs_tol=0.01,
+    )
+    assert visual_reach >= (
+        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        + infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+        - 0.01
+    )
+    assert (
+        infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+        < infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+    )
 
 
 def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
