@@ -347,6 +347,15 @@ def _cached_road_object(
                 placement_offset = -float(
                     _playability.GENERATED_GRAVEL_VISUAL_TOP_METRES
                 ) * math.cos(math.radians(pitch))
+            elif (
+                _playability.is_generated_paved_road_model(model_path)
+                or _playability.is_generated_paved_junction_model(model_path)
+            ):
+                placement_offset = (
+                    float(vertical_offset)
+                    - float(_playability.GENERATED_GRAVEL_VISUAL_TOP_METRES)
+                    * math.cos(math.radians(pitch))
+                )
             return _playability.WorldObject(
                 int(object_id),
                 str(model_path),

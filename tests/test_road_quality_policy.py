@@ -4,8 +4,11 @@ import math
 import re
 
 import cwr_worldgen.generator as generator
+import cwr_worldgen.paved_junction_fallback_policy as fallback
 import cwr_worldgen.paved_junction_policy as paved_junctions
 import cwr_worldgen.playability as playability
+import cwr_worldgen.procedural_infrastructure as infrastructure
+import cwr_worldgen.road_chain_parallel_policy as road_chain_parallel
 import cwr_worldgen.road_quality_policy as road_quality
 from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
 from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
@@ -164,6 +167,16 @@ def _object_endpoints(obj):
     if straight:
         length = {25: 25.0, 12: 12.5, 6: 6.25}[int(straight.group(1))]
         return playability._model_axis(obj, length)
+
+    generated = re.search(
+        r"\\paved_w\d{3}_l(?P<length>\d{4})(?:_[lr]\d{2})?\.p3d$",
+        path,
+    )
+    if generated:
+        return playability._model_axis(
+            obj,
+            int(generated.group("length")) / 10.0,
+        )
     return ()
 
 
@@ -232,6 +245,273 @@ def test_stock_junction_plans_reject_dirt_gravel_and_mixed_nodes() -> None:
     assert all_paved is not None
     assert "ces" not in all_paved.model_path.casefold()
 
+
+def test_stock_t_approach_chain_stays_original_stock_pieces() -> None:
+    spec = SimpleNamespace(cells=8, cell_size=25.0)
+    elevations = (0.0,) * 64
+    connector = paved_junctions._Connector(
+        "sil",
+        (0.0, paved_junctions._JUNCTION_RADIUS),
+        (0.0, 1.0),
+    )
+    arm = paved_junctions._Arm("sil", (0.0, 1.0), connector)
+    stock_plan = paved_junctions._Plan(
+        r"o\road\kr_new_sil_sil_t.p3d",
+        (0.0, 0.0),
+        (0.0, 1.0),
+        (arm,),
+    )
+
+    point = connector.point
+    heading = 0.0
+    for _ in range(2):
+        point, heading = paved_junctions._arc_step(
+            point,
+            heading,
+            1,
+            25,
+        )
+    direction = paved_junctions._direction(heading)
+    merge_target = (
+        point[0] + direction[0] * paved_junctions._STRAIGHTS[6],
+        point[1] + direction[1] * paved_junctions._STRAIGHTS[6],
+    )
+    choice = paved_junctions._ApproachChoice(
+        1,
+        2,
+        25,
+        0,
+        0,
+        25,
+        6,
+        merge_target,
+    )
+
+    objects, _next_id = paved_junctions._approach_objects(
+        stock_plan,
+        arm,
+        choice,
+        1,
+        elevations,
+        spec,
+    )
+
+    assert objects[0].model_path.casefold().endswith(r"\sil10 25.p3d")
+    assert objects[1].model_path.casefold().endswith(r"\sil10 25.p3d")
+    assert objects[2].model_path.casefold().endswith(r"\sil6.p3d")
+    assert all(
+        not infrastructure.is_generated_paved_road_model(obj.model_path)
+        for obj in objects
+    )
+
+def test_terrtest53_generated_microsegment_is_visible_to_stock_junction_cleanup() -> None:
+    spec = SimpleNamespace(road_segment_length=25.0)
+    obj = playability.WorldObject(
+        8723,
+        r"wg_terrtest53\i\paved_w091_l0018.p3d",
+        3222.460,
+        11.602,
+        3184.471,
+        160.710,
+        0.321,
+    )
+    axis = paved_junctions._object_axis(obj, spec)
+    assert axis is not None
+    assert math.isclose(math.dist(*axis), 1.8, abs_tol=1.0e-6)
+    assert paved_junctions._segment_distance(
+        (3223.500, 3181.500488),
+        axis,
+    ) < paved_junctions._CLEAR_RADIUS
+
+
+def test_stock_junction_never_uses_generated_paved_microsegment_as_merge_target() -> None:
+    connector = paved_junctions._Connector(
+        "sil",
+        (0.0, paved_junctions._JUNCTION_RADIUS),
+        (0.0, 1.0),
+    )
+    arm = paved_junctions._Arm("sil", (0.0, 1.0), connector)
+    plan = paved_junctions._Plan(
+        r"o\road\kr_new_sil_sil_t.p3d",
+        (0.0, 0.0),
+        (0.0, 1.0),
+        (arm,),
+    )
+    report = playability.RoadFitReport(
+        objects=(
+            playability.WorldObject(
+                1,
+                plan.model_path,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ),
+            playability.WorldObject(
+                2,
+                r"test_world\i\paved_w091_l0018.p3d",
+                0.0,
+                0.0,
+                35.0,
+                0.0,
+                0.0,
+            ),
+            playability.WorldObject(
+                3,
+                r"o\road\sil6.p3d",
+                0.0,
+                0.0,
+                35.0,
+                0.0,
+                0.0,
+            ),
+        ),
+        chain_count=0,
+        connection_count=0,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+        junction_cap_objects=1,
+    )
+    targets = paved_junctions._target_candidates(
+        report,
+        plan,
+        arm,
+        SimpleNamespace(road_segment_length=25.0),
+    )
+    assert targets
+    assert all(target.object_id != 2 for target in targets)
+    assert any(target.object_id == 3 for target in targets)
+
+
+def test_stock_junction_curve_matches_original_main_placement() -> None:
+    spec = SimpleNamespace(cells=16, cell_size=10.0)
+    elevations = [0.0] * (spec.cells * spec.cells)
+    start = (60.0, 60.0)
+
+    obj, _finish, _heading = paved_junctions._curve_object(
+        1,
+        "sil",
+        25,
+        start,
+        0.0,
+        1,
+        elevations,
+        spec,
+    )
+
+    assert obj.model_path == r"o\road\sil10 25.p3d"
+    assert obj.pitch_degrees == 0.0
+
+def test_terrtest46_stock_compatible_t_stays_stock_first() -> None:
+    # terrtest46 map-centre regression: local headings 000/090/200 were being
+    # promoted to a generated paved_j3 even though the vanilla T path had
+    # historically handled this node.
+    incidents = tuple(
+        (paved_junctions._direction(heading), "sil")
+        for heading in (0.0, 90.0, 200.0)
+    )
+    plan = paved_junctions._plan(
+        (0.0, 0.0),
+        incidents,
+        world_name="terrtest46",
+    )
+    assert plan is not None
+    assert not infrastructure.is_generated_paved_junction_model(
+        plan.model_path
+    )
+    assert "kr_new_" in plan.model_path.casefold()
+    assert plan.model_path.casefold().endswith("_t.p3d")
+
+def test_terrtest46_stock_t_angles_have_stock_approach_solutions() -> None:
+    incidents = tuple(
+        (paved_junctions._direction(heading), "sil")
+        for heading in (0.0, 90.0, 200.0)
+    )
+    plan = paved_junctions._plan(
+        (0.0, 0.0),
+        incidents,
+        world_name="terrtest46",
+    )
+    assert plan is not None
+    assert plan.model_path.casefold().endswith(
+        r"\kr_new_sil_sil_t.p3d"
+    )
+
+    for index, arm in enumerate(plan.arms):
+        connector = arm.connector
+        delta = paved_junctions._signed_angle(
+            connector.direction,
+            arm.source_direction,
+        )
+        turn_sign = 1 if delta >= 0.0 else -1
+        point, heading = paved_junctions._arc_step(
+            connector.point,
+            paved_junctions._heading(connector.direction),
+            turn_sign,
+            25,
+        )
+        direction = paved_junctions._direction(heading)
+        point = (
+            point[0] + direction[0] * paved_junctions._STRAIGHTS[6] * 3,
+            point[1] + direction[1] * paved_junctions._STRAIGHTS[6] * 3,
+        )
+        target_point = (
+            point[0] + direction[0] * paved_junctions._STRAIGHTS[6],
+            point[1] + direction[1] * paved_junctions._STRAIGHTS[6],
+        )
+        target = paved_junctions._Target(
+            100 + index,
+            target_point,
+            arm.source_direction,
+        )
+        choice = paved_junctions._approach_choice_to_target(
+            plan,
+            arm,
+            target,
+            0.35,
+        )
+        assert choice is not None
+
+
+def test_generated_fallback_preserves_bent_through_road_headings() -> None:
+    incidents = tuple(
+        (paved_junctions._direction(heading), "sil")
+        for heading in (5.0, 190.0, 270.0)
+    )
+    plan = paved_junctions._generated_plan(
+        (0.0, 0.0),
+        incidents,
+        world_name="junction_fit",
+    )
+    assert plan is not None
+    assert plan.model_path.endswith(
+        r"\paved_j3_w091_h000_080_175.p3d"
+    )
+
+    for source_direction, _family in incidents:
+        assert min(
+            _angle(connector.direction, source_direction)
+            for connector in plan.connectors
+        ) <= 2.5
+
+def test_generated_fallback_preserves_asphalt_approach_family() -> None:
+    incidents = tuple(
+        (paved_junctions._direction(heading), "asf")
+        for heading in (5.0, 190.0, 270.0)
+    )
+    plan = paved_junctions._generated_plan(
+        (0.0, 0.0),
+        incidents,
+        world_name="junction_fit",
+    )
+    assert plan is not None
+    assert all(
+        connector.family == "asf"
+        for connector in plan.connectors
+    )
 
 def test_diagonal_junction_trim_uses_oriented_hub_edge() -> None:
     diagonal = (math.sqrt(0.5), math.sqrt(0.5))
@@ -324,7 +604,69 @@ def test_terrain_profile_prefers_shorter_rigid_pieces_over_midspan_clipping() ->
     assert fitted[-1][2] == (0.0, 50.0)
 
 
-def test_diagonal_t_junction_uses_real_turn_pieces_and_connects_each_arm() -> None:
+def test_base_fitter_does_not_preempt_stock_paved_junction_policy() -> None:
+    bbox = (0.0, 0.0, 0.01, 0.01)
+    projection = BboxProjection.create(bbox, 1000.0)
+    centre = (500.0, 500.0)
+
+    def point(heading: float, distance: float = 220.0) -> tuple[float, float]:
+        radians = math.radians(heading)
+        return (
+            centre[0] + math.sin(radians) * distance,
+            centre[1] + math.cos(radians) * distance,
+        )
+
+    dataset = OsmDataset(
+        source_generator="stock-first-paved-t-regression",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/main",
+                {"highway": "tertiary", "surface": "asphalt"},
+                tuple(
+                    projection.to_latlon(value)
+                    for value in (point(280.0), centre, point(100.0))
+                ),
+            ),
+            OsmLineFeature(
+                "way/branch",
+                {"highway": "unclassified", "surface": "paved"},
+                tuple(
+                    projection.to_latlon(value)
+                    for value in (centre, point(10.0))
+                ),
+            ),
+        ),
+    )
+    spec = _junction_spec(bbox)
+    report = road_chain_parallel._fit_stock_piece_road_objects_parallel(
+        dataset,
+        projection,
+        [0.0] * (40 * 40),
+        spec,
+    )
+
+    assert report.junction_cap_objects == 1
+    assert not infrastructure.is_generated_paved_junction_model(
+        report.objects[0].model_path
+    )
+
+    stock_plan = paved_junctions._plans(dataset, projection, spec)[
+        playability._road_node_key(centre)
+    ]
+    assert not infrastructure.is_generated_paved_junction_model(
+        stock_plan.model_path
+    )
+    assert "kr_new_" in stock_plan.model_path.casefold()
+
+def test_diagonal_t_junction_falls_back_to_generated_hub_after_stock_fails(
+    tmp_path: Path,
+) -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     dataset = _junction_dataset(projection, (650.0, 650.0))
@@ -334,27 +676,56 @@ def test_diagonal_t_junction_uses_real_turn_pieces_and_connects_each_arm() -> No
     )
 
     node = (500.0, 500.0)
-    plan = paved_junctions._plans(
+    key = playability._road_node_key(node)
+    stock_plan = paved_junctions._plans(
         dataset, projection, spec
-    )[playability._road_node_key(node)]
-    assert report.junction_cap_objects == 1
-    assert report.objects[0].model_path.casefold() == plan.model_path.casefold()
-    assert report.objects[0].model_path.casefold().endswith(
-        r"\kr_new_sil_sil_t.p3d"
+    )[key]
+    assert not infrastructure.is_generated_paved_junction_model(
+        stock_plan.model_path
     )
 
-    approaches = report.objects[report.junction_cap_objects :]
-    assert any(
-        re.search(r"\\(?:sil|asf|kos)10 (?:25|50|75|100)\.p3d$", obj.model_path.casefold())
-        for obj in approaches
+    generated_plan = paved_junctions._generated_plan(
+        stock_plan.point,
+        tuple(
+            (arm.source_direction, arm.family)
+            for arm in stock_plan.arms
+        ),
+        world_name=spec.name,
     )
+    assert generated_plan is not None
+
+    assert report.junction_cap_objects == 1
+    hub = report.objects[0]
+    assert infrastructure.is_generated_paved_junction_model(hub.model_path)
+    assert hub.model_path.casefold() == generated_plan.model_path.casefold()
+
+    approaches = report.objects[report.junction_cap_objects :]
+    assert approaches
     endpoints = tuple(
         endpoint
         for obj in approaches
         for endpoint in _object_endpoints(obj)
     )
-    for connector in plan.connectors:
-        assert min(math.dist(connector.point, endpoint) for endpoint in endpoints) <= 0.05
+    for connector in generated_plan.connectors:
+        assert min(
+            math.dist(connector.point, endpoint)
+            for endpoint in endpoints
+        ) <= fallback._SUCCESS_DISTANCE_METRES
+
+    library = infrastructure.ProceduralInfrastructureLibrary(
+        spec.name,
+        paved_texture_path=r"o\road\sil_new.paa",
+        cache_enabled=False,
+    )
+    library.register_model_usage(hub.model_path)
+    emitted = library.write_assets(
+        tmp_path,
+        tmp_path / "infrastructure.json",
+    )
+    assert emitted.generated_variants == 1
+    assert len(emitted.model_files) == 1
+    assert "paved_j3_" in emitted.model_files[0].casefold()
+    assert (tmp_path / emitted.model_files[0]).is_file()
 
 
 def test_skew_four_way_intersection_uses_stock_x_and_turn_approaches() -> None:

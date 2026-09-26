@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from cwr_worldgen import playability
+from cwr_worldgen import procedural_infrastructure as infrastructure
 from cwr_worldgen import road_chain_parallel_policy
 from cwr_worldgen import road_finish_parallel_policy as perf
 
@@ -90,6 +91,51 @@ def test_vector_prepare_preserves_stock_object_transform_and_axis() -> None:
     assert np.isclose(actual.heading_degrees, expected.heading_degrees, rtol=0.0, atol=1.0e-12)
     assert np.isclose(actual.pitch_degrees, expected.pitch_degrees, rtol=0.0, atol=1.0e-12)
     assert np.allclose(actual_axis, expected_axis, rtol=0.0, atol=1.0e-12)
+
+
+def test_cached_generated_paved_transform_matches_stock_surface_plane() -> None:
+    elevations = (0.0,) * 4
+    spec = SimpleNamespace(cells=2, cell_size=25.0)
+    start = (0.0, 0.0)
+    end = (0.0, 6.25)
+    requested_surface_height = 0.035
+    models = (
+        infrastructure.paved_fallback_model_path(
+            "height_world", 9.10, 6.25, 0.0
+        ),
+        infrastructure.paved_junction_model_path(
+            "height_world", 9.10, 9.10, 260.0
+        ),
+    )
+
+    context = perf._Context(elevations, 2, 25.0)
+    context.geometry[perf._geometry_key(start, end)] = (
+        0.0,
+        0.0,
+        3.125,
+        0.0,
+        0.0,
+    )
+    token = perf._CONTEXT.set(context)
+    try:
+        for index, model in enumerate(models, start=1):
+            obj = perf._cached_road_object(
+                index,
+                model,
+                start,
+                end,
+                elevations,
+                spec,
+                vertical_offset=requested_surface_height,
+            )
+            assert np.isclose(
+                obj.y + infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES,
+                requested_surface_height,
+                rtol=0.0,
+                atol=1.0e-12,
+            )
+    finally:
+        perf._CONTEXT.reset(token)
 
 
 def test_vector_chain_diagnostics_match_scalar_axis_formula() -> None:

@@ -13,6 +13,7 @@ import re
 
 from . import generator as _generator
 from . import playability as _p
+from . import procedural_infrastructure as _pi
 from . import road_quality_policy as _rq
 
 _JUNCTION_RADIUS = 6.25
@@ -23,6 +24,11 @@ _WIDTH = {"sil": 4.55, "kos": 4.55, "asf": 3.50}
 _STRAIGHTS = {25: 25.0, 12: 12.5, 6: 6.25}
 _T = re.compile(r"kr_new_(sil|asf|kos)_(sil|asf|kos)_t\.p3d$", re.I)
 _CURVE = re.compile(r"(?:sil|asf|kos)10 (?:25|50|75|100)\.p3d$", re.I)
+_GENERATED_PAVED_ROAD = re.compile(
+    r"paved_w\d{3}_l(?P<length>\d{4})"
+    r"(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+    re.I,
+)
 _CATALOGUE = Path(__file__).with_name("data") / "road_types.json"
 
 
@@ -95,6 +101,24 @@ def _heading(direction: tuple[float, float]) -> float:
 def _direction(heading: float) -> tuple[float, float]:
     radians = math.radians(heading)
     return math.sin(radians), math.cos(radians)
+
+
+def _local_heading(
+    direction: tuple[float, float],
+    axis: tuple[float, float],
+) -> float:
+    right = axis[1], -axis[0]
+    return math.degrees(math.atan2(
+        direction[0] * right[0] + direction[1] * right[1],
+        direction[0] * axis[0] + direction[1] * axis[1],
+    )) % 360.0
+
+
+def _paved_half_width(family: str) -> float:
+    return _WIDTH.get(
+        _junction_family(family),
+        _pi.GENERATED_PAVED_HALF_WIDTH_METRES,
+    )
 
 
 def _signed_angle(first: tuple[float, float], second: tuple[float, float]) -> float:
@@ -235,7 +259,84 @@ def _assign_arms(incidents, connectors) -> tuple[_Arm, ...]:
     )
 
 
-def _plan(point, incidents) -> _Plan | None:
+def _generated_plan(
+    point,
+    incidents,
+    *,
+    world_name: str,
+) -> _Plan | None:
+    """Build an exact-heading generated T only for stock-plan fallback."""
+
+    if len(incidents) != 3 or not all(
+        _kind(family) == "paved" for _direction_value, family in incidents
+    ):
+        return None
+
+    directions = tuple(value[0] for value in incidents)
+    headings, axis = _pi.paved_junction_signature_for_directions(directions)
+    width = max(
+        _paved_half_width(family) * 2.0
+        for _direction_value, family in incidents
+    )
+    model_path = _pi.paved_junction_signature_model_path(
+        world_name,
+        width,
+        headings,
+    )
+    connector_radius = (
+        _JUNCTION_RADIUS
+        + _pi.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+    )
+    right = axis[1], -axis[0]
+    definitions = []
+    for heading in headings:
+        radians = math.radians(heading)
+        local_direction = (
+            math.sin(radians),
+            math.cos(radians),
+        )
+        world_direction = _unit((
+            right[0] * local_direction[0]
+            + axis[0] * local_direction[1],
+            right[1] * local_direction[0]
+            + axis[1] * local_direction[1],
+        ))
+        nearest = min(
+            incidents,
+            key=lambda value: _angle(
+                value[0],
+                world_direction,
+            ),
+        )
+        definitions.append((
+            (
+                local_direction[0] * connector_radius,
+                local_direction[1] * connector_radius,
+            ),
+            float(heading),
+            _junction_family(nearest[1]),
+        ))
+
+    connectors = tuple(
+        _connector(local, heading, family, point, axis)
+        for local, heading, family in tuple(definitions)
+    )
+    return _Plan(
+        model_path,
+        point,
+        axis,
+        _assign_arms(incidents, connectors),
+    )
+
+
+def _plan(
+    point,
+    incidents,
+    *,
+    world_name: str | None = None,
+) -> _Plan | None:
+    """Prefer stock CWA paved junctions; generated hubs remain fallback assets."""
+
     if len(incidents) not in {3, 4} or not all(
         _kind(family) == "paved" for _direction_value, family in incidents
     ):
@@ -268,6 +369,8 @@ def _plan(point, incidents) -> _Plan | None:
             > 0.0
         ):
             axis = -axis[0], -axis[1]
+            first, second = second, first
+
         main_families = incidents[first][1], incidents[second][1]
         branch_family = incidents[branch][1]
         candidates = [
@@ -297,7 +400,6 @@ def _plan(point, incidents) -> _Plan | None:
         for local, heading, family in definitions
     )
     return _Plan(model_path, point, axis, _assign_arms(incidents, connectors))
-
 
 def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
     incidents = {}
@@ -342,6 +444,11 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
                 (direction, family)
                 for direction, family in typed
                 if family is not None
+            ),
+            world_name=(
+                spec.name
+                if bool(getattr(spec, "procedural_paved_road_fallback", False))
+                else None
             ),
         )
         if plan is not None:
@@ -457,10 +564,23 @@ def _straight_object(
 
 
 def _object_axis(obj, spec):
+    filename = (
+        obj.model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+    )
+
+    # World-local paved fallback ribbons are ordinary road slabs for junction
+    # cleanup purposes. terrtest53 exposed two 1.8 m generated ribbons sitting
+    # inside an otherwise-correct stock T because _family() only recognizes
+    # catalogue roots such as o\road\sil*. Give generated ribbons their real
+    # chord axis so the existing 30 m stock-junction clear zone can remove them.
+    generated = _GENERATED_PAVED_ROAD.fullmatch(filename)
+    if generated is not None:
+        length = int(generated.group("length")) / 10.0
+        return _p._model_axis(obj, length)
+
     family = _family(obj.model_path)
     if family is None or _kind(family) != "paved":
         return None
-    filename = obj.model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
     if _CURVE.fullmatch(filename) or filename.startswith("kr_"):
         return None
     length = _rq._piece_length(obj.model_path, spec.road_segment_length)
@@ -469,7 +589,18 @@ def _object_axis(obj, spec):
 
 def _target_candidates(report, plan: _Plan, arm: _Arm, spec):
     result = []
+    stock_junction = not _pi.is_generated_paved_junction_model(
+        plan.model_path
+    )
     for obj in report.objects[report.junction_cap_objects:]:
+        # A successful vanilla junction must merge back into a vanilla road
+        # target. Do not let a generated fallback micro-slab become the protected
+        # merge target and thereby survive the stock-junction cleanup pass.
+        if (
+            stock_junction
+            and _pi.is_generated_paved_road_model(obj.model_path)
+        ):
+            continue
         axis = _object_axis(obj, spec)
         if axis is None:
             continue

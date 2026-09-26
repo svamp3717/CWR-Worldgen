@@ -560,10 +560,18 @@ def _fit_stock_piece_road_objects_parallel(
             _playability.is_generated_gravel_road_model(value[2]) for value in values
         )
         incident_models = {value[2].casefold(): value[2] for value in values}
+        generated_paved_t = _playability._generated_paved_t_cap_plan(values, spec)
+        axis_override = None
         if all_gravel:
             degree = len(values)
             base_model = _playability.gravel_junction_model_path(spec.name, degree)
             hub_length = 5.4 if degree == 3 else 6.0
+            cap_piece = _playability._RoadPiece(base_model, hub_length, 6)
+        elif generated_paved_t is not None:
+            base_model, axis_override = generated_paved_t
+            hub_length = (
+                _playability.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 2.0
+            )
             cap_piece = _playability._RoadPiece(base_model, hub_length, 6)
         else:
             if len(incident_models) == 1:
@@ -578,14 +586,28 @@ def _fit_stock_piece_road_objects_parallel(
         dominant_values = tuple(
             (value[0], value[1], value[2], value[3]) for value in values
         )
-        axis = _playability._dominant_node_axis(dominant_values)
+        axis = (
+            axis_override
+            if axis_override is not None
+            else _playability._dominant_node_axis(dominant_values)
+        )
         node = node_positions[key]
         half = cap_piece.length_metres * 0.5
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
         cap_plans[key] = (cap_piece, start_point, end_point)
-        cap_trim_lengths[key] = max(0.40, half - 0.70)
-        cap_cover_lengths[key] = half + 0.15
+        if generated_paved_t is not None:
+            cap_trim_lengths[key] = (
+                half
+                + _playability.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+            )
+            cap_cover_lengths[key] = (
+                half
+                + _playability.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+            )
+        else:
+            cap_trim_lengths[key] = max(0.40, half - 0.70)
+            cap_cover_lengths[key] = half + 0.15
 
     virtual_cover_lengths = {
         key: spec.road_segment_length * 6.0 / 25.0 * 0.5 + 0.15

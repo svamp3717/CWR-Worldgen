@@ -19,6 +19,7 @@ import re
 from typing import Any, Sequence
 
 from . import playability as _p
+from . import paved_junction_policy as _junctions
 from . import procedural_infrastructure as _pi
 from . import road_quality_policy as _quality
 from . import road_quality_parallel_compat_policy as _quality_parallel
@@ -81,6 +82,38 @@ def _eligible_paved_chain(pieces: Sequence[Any], spec: Any) -> bool:
         for piece in _p.road_model_variants(paved_model, configured_length)
     } if paved_model else set()
     return any(_canonical(piece.model_path) in paved_variants for piece in pieces)
+
+
+def _stock_junction_protects_interval(
+    measure: Any,
+    start_distance: float,
+    end_distance: float,
+) -> bool:
+    """Keep the stock-junction approach reserve free of generated micro-slabs."""
+
+    plans = _junctions._PLANS.get() or {}
+    if not plans:
+        return False
+
+    reserve = float(_junctions._APPROACH_RESERVE)
+    start_plan = plans.get(_p._road_node_key(measure.points[0]))
+    end_plan = plans.get(_p._road_node_key(measure.points[-1]))
+    start_stock = (
+        start_plan is not None
+        and not _pi.is_generated_paved_junction_model(start_plan.model_path)
+    )
+    end_stock = (
+        end_plan is not None
+        and not _pi.is_generated_paved_junction_model(end_plan.model_path)
+    )
+
+    if start_stock and float(start_distance) < reserve + 0.05:
+        return True
+    if end_stock and (
+        float(measure.total) - float(end_distance)
+    ) < reserve + 0.05:
+        return True
+    return False
 
 
 def _stock_limits(piece: Any) -> tuple[float, float]:
@@ -200,9 +233,17 @@ def _upgrade_stock_result(
         )
         if endpoint is None:
             # The stock fitter's last-resort behavior extends the shortest P3D
-            # beyond a remainder that cannot contain it. Generate only the
-            # required paved tail instead.
+            # beyond a remainder that cannot contain it. Around a successful
+            # vanilla junction, preserve that stock behavior inside the 32 m
+            # approach reserve instead of inserting a tiny generated slab.
             target_distance = min(float(preferred_end_distance), float(measure.total))
+            if _stock_junction_protects_interval(
+                measure,
+                current,
+                target_distance,
+            ):
+                upgraded.append((piece, start_point, end_point))
+                break
             if target_distance > current + 0.05:
                 sx, sz, _ = measure.point(current)
                 ex, ez, _ = measure.point(target_distance)
@@ -248,7 +289,14 @@ def _upgrade_stock_result(
         # The quality scorer puts fidelity_penalty first. If its selected stock
         # piece still fails this test, every available stock candidate at this
         # chain step failed the same geometric-fit class.
-        if turn > turn_limit or deviation > deviation_limit:
+        if (
+            (turn > turn_limit or deviation > deviation_limit)
+            and not _stock_junction_protects_interval(
+                measure,
+                current,
+                end_distance,
+            )
+        ):
             generated = _generated_piece(
                 context,
                 pieces,
@@ -268,7 +316,14 @@ def _upgrade_stock_result(
     # original chain still failed its required minimum coverage.
     if current < float(minimum_end_distance) - 0.05:
         target_distance = min(float(preferred_end_distance), float(measure.total))
-        if target_distance > current + 0.05:
+        if (
+            target_distance > current + 0.05
+            and not _stock_junction_protects_interval(
+                measure,
+                current,
+                target_distance,
+            )
+        ):
             sx, sz, _ = measure.point(current)
             ex, ez, _ = measure.point(target_distance)
             start = (sx, sz)
