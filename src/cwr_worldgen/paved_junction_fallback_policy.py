@@ -389,6 +389,80 @@ def _generated_paved_axis(obj, spec):
     return _paved._object_axis(obj, spec)
 
 
+def _install_generated_hub_caps(
+    report,
+    plans,
+    elevations,
+    spec,
+):
+    """Replace base short-road caps with generated hubs only after stock failure.
+
+    The base fitter normally emits a stock short road at every candidate node.
+    Before the stock-first correction, generated paved T models were selected in
+    that base-cap phase. Once global generated preemption was disabled, the
+    fallback path could carry an exact-heading generated plan while leaving the
+    physical sil6 cap untouched. terrtest48 exposed that mismatch.
+
+    Keep normal fitting stock-first, but when fallback has explicitly promoted a
+    node to a generated plan, replace only that node's existing cap with the
+    generated P3D before approach stitching and success validation.
+    """
+
+    generated = {
+        key: plan
+        for key, plan in plans.items()
+        if _pi.is_generated_paved_junction_model(plan.model_path)
+    }
+    if not generated or int(getattr(report, "junction_cap_objects", 0)) <= 0:
+        return report
+
+    objects = list(report.objects)
+    caps = tuple(objects[: int(report.junction_cap_objects)])
+    used: set[int] = set()
+    replacements = 0
+
+    for key in sorted(generated):
+        plan = generated[key]
+        best = None
+        for index, obj in enumerate(caps):
+            if index in used:
+                continue
+            distance = math.dist((float(obj.x), float(obj.z)), plan.point)
+            candidate = (distance, int(obj.object_id), index)
+            if best is None or candidate < best:
+                best = candidate
+
+        if best is None or best[0] > _SUCCESS_DISTANCE_METRES:
+            continue
+
+        _distance, _object_id, index = best
+        used.add(index)
+        old = caps[index]
+        radius = float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES)
+        start = (
+            plan.point[0] - plan.axis[0] * radius,
+            plan.point[1] - plan.axis[1] * radius,
+        )
+        end = (
+            plan.point[0] + plan.axis[0] * radius,
+            plan.point[1] + plan.axis[1] * radius,
+        )
+        objects[index] = _p._road_object_on_slope(
+            int(old.object_id),
+            plan.model_path,
+            start,
+            end,
+            elevations,
+            spec,
+            vertical_offset=_p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
+        )
+        replacements += 1
+
+    if not replacements:
+        return report
+    return replace(report, objects=tuple(objects))
+
+
 def _stitch_generated_hub_approaches(
     report,
     plans,
@@ -716,6 +790,12 @@ def _fit(
                 generated_active,
                 starting_id=starting_id,
                 progress_callback=progress_callback,
+            )
+            generated_base = _install_generated_hub_caps(
+                generated_base,
+                generated_fallbacks,
+                elevations,
+                spec,
             )
             if planning is not None and session is not None:
                 planning.configure_planning_session(
