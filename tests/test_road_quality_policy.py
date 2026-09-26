@@ -266,6 +266,57 @@ def test_terrtest46_stock_compatible_t_stays_stock_first() -> None:
     assert "kr_new_" in plan.model_path.casefold()
     assert plan.model_path.casefold().endswith("_t.p3d")
 
+def test_terrtest46_stock_t_angles_have_stock_approach_solutions() -> None:
+    incidents = tuple(
+        (paved_junctions._direction(heading), "sil")
+        for heading in (0.0, 90.0, 200.0)
+    )
+    plan = paved_junctions._plan(
+        (0.0, 0.0),
+        incidents,
+        world_name="terrtest46",
+    )
+    assert plan is not None
+    assert plan.model_path.casefold().endswith(
+        r"\kr_new_sil_sil_t.p3d"
+    )
+
+    for index, arm in enumerate(plan.arms):
+        connector = arm.connector
+        delta = paved_junctions._signed_angle(
+            connector.direction,
+            arm.source_direction,
+        )
+        turn_sign = 1 if delta >= 0.0 else -1
+        point, heading = paved_junctions._arc_step(
+            connector.point,
+            paved_junctions._heading(connector.direction),
+            turn_sign,
+            25,
+        )
+        direction = paved_junctions._direction(heading)
+        point = (
+            point[0] + direction[0] * paved_junctions._STRAIGHTS[6] * 3,
+            point[1] + direction[1] * paved_junctions._STRAIGHTS[6] * 3,
+        )
+        target_point = (
+            point[0] + direction[0] * paved_junctions._STRAIGHTS[6],
+            point[1] + direction[1] * paved_junctions._STRAIGHTS[6],
+        )
+        target = paved_junctions._Target(
+            100 + index,
+            target_point,
+            arm.source_direction,
+        )
+        choice = paved_junctions._approach_choice_to_target(
+            plan,
+            arm,
+            target,
+            0.35,
+        )
+        assert choice is not None
+
+
 def test_generated_fallback_preserves_bent_through_road_headings() -> None:
     incidents = tuple(
         (paved_junctions._direction(heading), "sil")
