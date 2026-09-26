@@ -318,12 +318,12 @@ def _plan(
             )
             branch_radians = math.radians(branch_heading)
             definitions = (
-                ((0.0, _JUNCTION_RADIUS), 0.0, main_families[0]),
-                ((0.0, -_JUNCTION_RADIUS), 180.0, main_families[1]),
+                ((0.0, _JUNCTION_RADIUS), 0.0, _junction_family(main_families[0])),
+                ((0.0, -_JUNCTION_RADIUS), 180.0, _junction_family(main_families[1])),
                 ((
                     math.sin(branch_radians) * _JUNCTION_RADIUS,
                     math.cos(branch_radians) * _JUNCTION_RADIUS,
-                ), float(branch_heading), branch_family),
+                ), float(branch_heading), _junction_family(branch_family)),
             )
         else:
             # Keep the stock-only low-level planner available for tests and
