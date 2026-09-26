@@ -4,6 +4,7 @@ import math
 import re
 
 import cwr_worldgen.generator as generator
+import cwr_worldgen.paved_junction_fallback_policy as fallback
 import cwr_worldgen.paved_junction_policy as paved_junctions
 import cwr_worldgen.playability as playability
 import cwr_worldgen.procedural_infrastructure as infrastructure
@@ -166,6 +167,16 @@ def _object_endpoints(obj):
     if straight:
         length = {25: 25.0, 12: 12.5, 6: 6.25}[int(straight.group(1))]
         return playability._model_axis(obj, length)
+
+    generated = re.search(
+        r"\\paved_w\d{3}_l(?P<length>\d{4})(?:_[lr]\d{2})?\.p3d$",
+        path,
+    )
+    if generated:
+        return playability._model_axis(
+            obj,
+            int(generated.group("length")) / 10.0,
+        )
     return ()
 
 
@@ -422,7 +433,9 @@ def test_base_fitter_keeps_generated_hub_when_stock_approach_solver_is_bypassed(
     assert math.dist((hub.x, hub.z), centre) <= 0.01
 
 
-def test_diagonal_t_junction_uses_angle_matched_hub_and_connects_each_arm() -> None:
+def test_diagonal_t_junction_uses_angle_matched_hub_and_connects_each_arm(
+    tmp_path: Path,
+) -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     dataset = _junction_dataset(projection, (650.0, 650.0))
@@ -443,8 +456,15 @@ def test_diagonal_t_junction_uses_angle_matched_hub_and_connects_each_arm() -> N
     assert approaches
     assert all(
         (
-            re.search(r"\\(?:sil|asf|kos)(?:25|12|6)\.p3d$", obj.model_path.casefold())
-            or re.search(r"\\(?:sil|asf|kos)10 (?:25|50|75|100)\.p3d$", obj.model_path.casefold())
+            re.search(
+                r"\\(?:sil|asf|kos)(?:25|12|6)\.p3d$",
+                obj.model_path.casefold(),
+            )
+            or re.search(
+                r"\\(?:sil|asf|kos)10 (?:25|50|75|100)\.p3d$",
+                obj.model_path.casefold(),
+            )
+            or infrastructure.is_generated_paved_road_model(obj.model_path)
         )
         for obj in approaches
     )
@@ -454,7 +474,29 @@ def test_diagonal_t_junction_uses_angle_matched_hub_and_connects_each_arm() -> N
         for endpoint in _object_endpoints(obj)
     )
     for connector in plan.connectors:
-        assert min(math.dist(connector.point, endpoint) for endpoint in endpoints) <= 0.05
+        assert min(
+            math.dist(connector.point, endpoint)
+            for endpoint in endpoints
+        ) <= fallback._SUCCESS_DISTANCE_METRES
+
+    # Regression for the uploaded terrtest40 build, which contained generated
+    # paved_w approach pieces but no paved_j3 asset at all. A hub that survives
+    # the live road fitter must be accepted by the infrastructure library and
+    # physically written into the generated asset set.
+    library = infrastructure.ProceduralInfrastructureLibrary(
+        spec.name,
+        paved_texture_path=r"o\road\sil_new.paa",
+        cache_enabled=False,
+    )
+    library.register_model_usage(report.objects[0].model_path)
+    emitted = library.write_assets(
+        tmp_path,
+        tmp_path / "infrastructure.json",
+    )
+    assert emitted.generated_variants == 1
+    assert len(emitted.model_files) == 1
+    assert "paved_j3_" in emitted.model_files[0].casefold()
+    assert (tmp_path / emitted.model_files[0]).is_file()
 
 
 def test_skew_four_way_intersection_uses_stock_x_and_turn_approaches() -> None:
