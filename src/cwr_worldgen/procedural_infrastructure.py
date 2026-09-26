@@ -1536,7 +1536,7 @@ def paved_fallback_model_path(
     curve_degrees: float = 0.0,
 ) -> str:
     width_dm = max(10, min(999, int(round(float(width_metres) * 10.0))))
-    length_dm = max(5, min(9999, int(round(float(length_metres) * 10.0))))
+    length_dm = max(1, min(9999, int(round(float(length_metres) * 10.0))))
     magnitude = abs(float(curve_degrees))
     suffix = ""
     if magnitude >= 1.5:
@@ -1912,7 +1912,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v30-visual-only-junction-overhang"
+                "procedural-infrastructure-model-v31-short-paved-seam-connectors"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
