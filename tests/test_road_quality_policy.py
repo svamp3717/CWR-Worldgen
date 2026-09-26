@@ -63,6 +63,37 @@ def _junction_dataset(
     )
 
 
+def _mixed_paved_gravel_dataset(projection: BboxProjection) -> OsmDataset:
+    centre = (500.0, 500.0)
+    return OsmDataset(
+        source_generator="mixed-paved-gravel-junction",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/paved-main",
+                {"highway": "residential"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in ((500.0, 300.0), centre, (500.0, 700.0))
+                ),
+            ),
+            OsmLineFeature(
+                "way/gravel-spur",
+                {"highway": "track", "surface": "gravel"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in (centre, (700.0, 500.0))
+                ),
+            ),
+        ),
+    )
+
+
 def _surface_junction_dataset(
     projection: BboxProjection,
     *,
@@ -376,6 +407,28 @@ def test_skew_four_way_intersection_uses_stock_x_and_turn_approaches() -> None:
     assert any(
         "10 " in obj.model_path.casefold()
         for obj in report.objects[report.junction_cap_objects :]
+    )
+
+
+def test_gravel_spur_does_not_promote_paved_through_road_to_junction_cap() -> None:
+    bbox = (0.0, 0.0, 0.01, 0.01)
+    projection = BboxProjection.create(bbox, 1000.0)
+    dataset = _mixed_paved_gravel_dataset(projection)
+    spec = _junction_spec(bbox, procedural_gravel_roads=True)
+    centre_key = playability._road_node_key((500.0, 500.0))
+
+    # Gravel is an underlay at a mixed node. It must not turn the two paved
+    # through-road incidents into a synthetic three-way paved junction.
+    assert centre_key not in road_quality._junction_geometry(dataset, projection, spec)
+    assert centre_key not in paved_junctions._plans(dataset, projection, spec)
+
+    report = playability.fit_road_objects(
+        dataset, projection, [0.0] * (40 * 40), spec
+    )
+    assert report.junction_cap_objects == 0
+    assert any(
+        playability.is_generated_gravel_road_model(obj.model_path)
+        for obj in report.objects
     )
 
 
