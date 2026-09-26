@@ -24,6 +24,11 @@ _WIDTH = {"sil": 4.55, "kos": 4.55, "asf": 3.50}
 _STRAIGHTS = {25: 25.0, 12: 12.5, 6: 6.25}
 _T = re.compile(r"kr_new_(sil|asf|kos)_(sil|asf|kos)_t\.p3d$", re.I)
 _CURVE = re.compile(r"(?:sil|asf|kos)10 (?:25|50|75|100)\.p3d$", re.I)
+_GENERATED_PAVED_ROAD = re.compile(
+    r"paved_w\d{3}_l(?P<length>\d{4})"
+    r"(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+    re.I,
+)
 _CATALOGUE = Path(__file__).with_name("data") / "road_types.json"
 
 
@@ -559,10 +564,23 @@ def _straight_object(
 
 
 def _object_axis(obj, spec):
+    filename = (
+        obj.model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+    )
+
+    # World-local paved fallback ribbons are ordinary road slabs for junction
+    # cleanup purposes. terrtest53 exposed two 1.8 m generated ribbons sitting
+    # inside an otherwise-correct stock T because _family() only recognizes
+    # catalogue roots such as o\road\sil*. Give generated ribbons their real
+    # chord axis so the existing 30 m stock-junction clear zone can remove them.
+    generated = _GENERATED_PAVED_ROAD.fullmatch(filename)
+    if generated is not None:
+        length = int(generated.group("length")) / 10.0
+        return _p._model_axis(obj, length)
+
     family = _family(obj.model_path)
     if family is None or _kind(family) != "paved":
         return None
-    filename = obj.model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
     if _CURVE.fullmatch(filename) or filename.startswith("kr_"):
         return None
     length = _rq._piece_length(obj.model_path, spec.road_segment_length)
@@ -571,7 +589,18 @@ def _object_axis(obj, spec):
 
 def _target_candidates(report, plan: _Plan, arm: _Arm, spec):
     result = []
+    stock_junction = not _pi.is_generated_paved_junction_model(
+        plan.model_path
+    )
     for obj in report.objects[report.junction_cap_objects:]:
+        # A successful vanilla junction must merge back into a vanilla road
+        # target. Do not let a generated fallback micro-slab become the protected
+        # merge target and thereby survive the stock-junction cleanup pass.
+        if (
+            stock_junction
+            and _pi.is_generated_paved_road_model(obj.model_path)
+        ):
+            continue
         axis = _object_axis(obj, spec)
         if axis is None:
             continue
