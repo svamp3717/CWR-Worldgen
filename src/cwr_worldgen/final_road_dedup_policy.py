@@ -44,7 +44,7 @@ _STOCK_STRAIGHT = re.compile(
     r"^(?P<family>sil|kos|asf|ces)(?P<nominal>25|12|6)\.p3d$", re.I
 )
 _STOCK_CURVE = re.compile(
-    r"^(?P<family>sil|kos|asf|ces)10 (?P<radius>25|50|75|100)\.p3d$", re.I
+    r"^(?P<family>sil|kos|asf)10 (?P<radius>25|50|75|100)\.p3d$", re.I
 )
 _GENERATED_PAVED = re.compile(
     r"^paved_w(?P<width>\d{3})_l(?P<length>\d{4})"
