@@ -1415,6 +1415,22 @@ def road_width_metres(tags: Mapping[str, str]) -> float:
     return 2.5
 
 
+def road_rendered_width_metres(tags: Mapping[str, str]) -> float:
+    """Return the physical width occupied by the emitted road family.
+
+    OSM widths can be narrower than the stock OFP/CWA road meshes. Clearance
+    code must reserve the rendered carriageway, otherwise a 6 m residential
+    width can still place trees/fences inside the 9.1 m stock sil surface.
+    """
+
+    width = road_width_metres(tags)
+    if road_is_gravel(tags):
+        return max(width, 4.60)
+    if road_is_dirt(tags):
+        return max(width, 3.50)
+    return max(width, 9.10)
+
+
 def _urban_detail_road_eligible(tags: Mapping[str, str]) -> bool:
     highway = tags.get("highway", "").casefold()
     if tags.get("tunnel") not in {None, "", "no"}:
@@ -2343,7 +2359,7 @@ def _project_vehicle_road_corridors(
             continue
         if highway in PEDESTRIAN_ONLY_HIGHWAYS or highway not in _MAJOR_HIGHWAYS:
             continue
-        radius = max(0.0, road_width_metres(tags) * 0.5)
+        radius = max(0.0, road_rendered_width_metres(tags) * 0.5)
         corridor_index = len(corridors)
         corridors.append((segment.start, segment.end, radius))
         minimum_x, minimum_z, maximum_x, maximum_z = segment.bounds
@@ -2381,7 +2397,7 @@ def project_road_corridors(
         tags = dict(segment.tags)
         if not road_is_supported(tags, include_minor=spec.include_minor_roads):
             continue
-        radius = road_width_metres(tags) * 0.5 + spec.forest_road_clearance
+        radius = road_rendered_width_metres(tags) * 0.5 + spec.forest_road_clearance
         corridor_index = len(corridors)
         corridors.append((segment.start, segment.end, radius))
         minimum_x, minimum_z, maximum_x, maximum_z = segment.bounds
@@ -2620,7 +2636,7 @@ def rasterize_osm(
     road_interval = max(1, total_roads // 12)
     for road_index, feature in enumerate(supported_roads, start=1):
         pixels = [projection.to_pixel(point, resolution) for point in feature.points]
-        width = max(1, int(round(road_width_metres(feature.tags) / projection.world_size * resolution)))
+        width = max(1, int(round(road_rendered_width_metres(feature.tags) / projection.world_size * resolution)))
         road_draw.line(pixels, fill=255, width=width)
         if road_index == total_roads or road_index % road_interval == 0:
             value = 78 + round(12 * road_index / max(1, total_roads))
@@ -8079,7 +8095,7 @@ def generate_world_objects(
             # says they exist. This avoids paving rural tracks merely because a
             # coarse residential landuse polygon happens to cover them.
             surface_allows_inference = not road_is_dirt(feature.tags) and not road_is_gravel(feature.tags)
-            road_half_width = max(2.0, road_width_metres(feature.tags) * 0.5)
+            road_half_width = max(2.0, road_rendered_width_metres(feature.tags) * 0.5)
 
             if sidewalks_enabled and sidewalk_objects < maximum_sidewalk_objects:
                 for chunk_index, (x, z, heading, length, x0, z0, x1, z1) in enumerate(
@@ -8478,7 +8494,7 @@ def generate_world_objects(
                 right_x, right_z = uz, -ux
                 identity = f"{settlement_seed}:settlement-pole:{feature.osm_key}:{pole_index}"
                 side = -1 if stable_roll(identity, 2) == 0 else 1
-                offset = road_width_metres(feature.tags) * 0.5 + 2.0
+                offset = road_rendered_width_metres(feature.tags) * 0.5 + 2.0
                 px = x + right_x * offset * side
                 pz = z + right_z * offset * side
                 model = STOCK_SETTLEMENT_UTILITY_POLE_MODELS[
