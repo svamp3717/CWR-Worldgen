@@ -190,6 +190,36 @@ def test_generated_paved_junction_quantizes_heading_and_reuses_stock_texture(
     assert roadway.faces
 
 
+def test_generated_paved_hub_and_ribbon_match_stock_surface_height() -> None:
+    spec = SimpleNamespace(cells=4, cell_size=10.0)
+    elevations = (0.0,) * 16
+    models = (
+        infrastructure.paved_fallback_model_path(
+            "height_world", 9.10, 6.20, 10.0
+        ),
+        infrastructure.paved_junction_model_path(
+            "height_world", 9.10, 9.10, 260.0
+        ),
+    )
+    requested_surface_height = 0.035
+
+    for index, model in enumerate(models, start=1):
+        obj = playability._road_object_on_slope(
+            index,
+            model,
+            (0.0, 0.0),
+            (0.0, 6.25),
+            elevations,
+            spec,
+            vertical_offset=requested_surface_height,
+        )
+        assert math.isclose(
+            obj.y + infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES,
+            requested_surface_height,
+            abs_tol=1.0e-9,
+        )
+
+
 def test_generated_curved_paved_piece_has_square_nominal_seam_ends() -> None:
     key = infrastructure.InfrastructureModelKey(
         "road",
