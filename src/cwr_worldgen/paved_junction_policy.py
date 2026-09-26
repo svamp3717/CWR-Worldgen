@@ -526,18 +526,46 @@ def _curve_object(
     origin = start[0] - sx, start[1] - sz
     ex, ez = _rotate(local_end, yaw)
     finish = origin[0] + ex, origin[1] + ez
-    height = _p._sample_elevation(
-        elevations, spec.cells, spec.cell_size, origin[0], origin[1]
+
+    # Stock junction approaches often begin with a 10-degree curve. Historically
+    # these were forced flat and their Y was sampled at the model origin, which
+    # is offset from the actual seam. On graded terrain that creates a tiny step
+    # exactly where the curve meets the stock T. Anchor both authored curve
+    # endpoints to the terrain plane instead, using the model's local-Z span to
+    # derive the rigid pitch without changing any X/Z fitting geometry.
+    start_height = _p._sample_elevation(
+        elevations, spec.cells, spec.cell_size, start[0], start[1]
     ) + 0.060
+    end_height = _p._sample_elevation(
+        elevations, spec.cells, spec.cell_size, finish[0], finish[1]
+    ) + 0.060
+    local_z_span = float(local_end[1]) - float(local_start[1])
+    if abs(local_z_span) <= 1.0e-9:
+        pitch = 0.0
+        origin_height = start_height
+    else:
+        sine_pitch = max(
+            -math.sin(math.radians(35.0)),
+            min(
+                math.sin(math.radians(35.0)),
+                (end_height - start_height) / local_z_span,
+            ),
+        )
+        pitch = math.degrees(math.asin(sine_pitch))
+        origin_height = (
+            start_height
+            - float(local_start[1]) * math.sin(math.radians(pitch))
+        )
+
     return (
         _p.WorldObject(
             object_id,
             rf"o\road\{family}10 {radius}.p3d",
             origin[0],
-            height,
+            origin_height,
             origin[1],
             yaw % 360.0,
-            0.0,
+            pitch,
         ),
         finish,
         next_heading % 360.0,
