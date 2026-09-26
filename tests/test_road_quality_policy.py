@@ -7,6 +7,7 @@ import cwr_worldgen.generator as generator
 import cwr_worldgen.paved_junction_policy as paved_junctions
 import cwr_worldgen.playability as playability
 import cwr_worldgen.procedural_infrastructure as infrastructure
+import cwr_worldgen.road_chain_parallel_policy as road_chain_parallel
 import cwr_worldgen.road_quality_policy as road_quality
 from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
 from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
@@ -358,6 +359,67 @@ def test_terrain_profile_prefers_shorter_rigid_pieces_over_midspan_clipping() ->
         _CONTEXT.reset(token)
     assert [piece.length_metres for piece, _start, _end in fitted] == [25.0, 25.0]
     assert fitted[-1][2] == (0.0, 50.0)
+
+
+def test_base_fitter_keeps_generated_hub_when_stock_approach_solver_is_bypassed() -> None:
+    bbox = (0.0, 0.0, 0.01, 0.01)
+    projection = BboxProjection.create(bbox, 1000.0)
+    centre = (500.0, 500.0)
+
+    def point(heading: float, distance: float = 220.0) -> tuple[float, float]:
+        radians = math.radians(heading)
+        return (
+            centre[0] + math.sin(radians) * distance,
+            centre[1] + math.cos(radians) * distance,
+        )
+
+    # Mirrors the uploaded terrtest40 failure: a nearly east/west paved
+    # through-road with a slightly skewed paved side branch. The generated hub
+    # must exist in the base fit itself, before paved_junction_policy gets a
+    # chance to run its stock approach-template search.
+    dataset = OsmDataset(
+        source_generator="terrtest40-paved-t-regression",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/main",
+                {"highway": "tertiary", "surface": "asphalt"},
+                tuple(
+                    projection.to_latlon(value)
+                    for value in (point(280.0), centre, point(100.0))
+                ),
+            ),
+            OsmLineFeature(
+                "way/branch",
+                {"highway": "unclassified", "surface": "paved"},
+                tuple(
+                    projection.to_latlon(value)
+                    for value in (centre, point(10.0))
+                ),
+            ),
+        ),
+    )
+    spec = _junction_spec(bbox)
+    report = road_chain_parallel._fit_stock_piece_road_objects_parallel(
+        dataset,
+        projection,
+        [0.0] * (40 * 40),
+        spec,
+    )
+
+    assert report.junction_cap_objects == 1
+    hub = report.objects[0]
+    assert infrastructure.is_generated_paved_junction_model(hub.model_path)
+    plan = paved_junctions._plans(dataset, projection, spec)[
+        playability._road_node_key(centre)
+    ]
+    assert hub.model_path.casefold() == plan.model_path.casefold()
+    assert math.dist((hub.x, hub.z), centre) <= 0.01
 
 
 def test_diagonal_t_junction_uses_angle_matched_hub_and_connects_each_arm() -> None:
