@@ -26,6 +26,8 @@ from .procedural_infrastructure import (
     is_generated_paved_junction_model,
     is_generated_paved_road_model,
     paved_junction_model_path,
+    paved_junction_signature_for_directions,
+    paved_junction_signature_model_path,
 )
 from .osm import (
     BboxProjection,
@@ -852,14 +854,7 @@ def _generated_paved_t_cap_plan(
     values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
     spec: PlayabilitySpec,
 ) -> tuple[str, tuple[float, float]] | None:
-    """Return an angle-matched generated hub and through-road axis for a paved T.
-
-    This deliberately lives in the base road fitter. A generated T must not
-    depend on the later stock-junction approach-template solver succeeding:
-    that solver can reject a perfectly valid skewed OSM T and the fallback
-    would otherwise restore the old sil6 cap that the generated hub is meant
-    to replace.
-    """
+    """Return a generated T whose P3D encodes every real incident heading."""
 
     values = tuple(values)
     if (
@@ -870,55 +865,19 @@ def _generated_paved_t_cap_plan(
         return None
 
     directions = tuple(value[0] for value in values)
-    first, second = min(
-        (
-            (a, b)
-            for a in range(3)
-            for b in range(a + 1, 3)
-        ),
-        key=lambda pair: (
-            directions[pair[0]][0] * directions[pair[1]][0]
-            + directions[pair[0]][1] * directions[pair[1]][1]
-        ),
+    headings, axis = paved_junction_signature_for_directions(directions)
+    width = max(
+        _generated_paved_half_width(value[2]) * 2.0
+        for value in values
     )
-    axis_delta = (
-        directions[first][0] - directions[second][0],
-        directions[first][1] - directions[second][1],
-    )
-    axis_length = max(1.0e-9, math.hypot(*axis_delta))
-    axis = axis_delta[0] / axis_length, axis_delta[1] / axis_length
-    branch = next(index for index in range(3) if index not in {first, second})
-    right = axis[1], -axis[0]
-
-    # Keep the side branch on local -X, matching paved_junction_policy._plan.
-    if (
-        directions[branch][0] * right[0]
-        + directions[branch][1] * right[1]
-        > 0.0
-    ):
-        axis = -axis[0], -axis[1]
-        first, second = second, first
-        right = axis[1], -axis[0]
-
-    branch_heading = math.degrees(math.atan2(
-        directions[branch][0] * right[0] + directions[branch][1] * right[1],
-        directions[branch][0] * axis[0] + directions[branch][1] * axis[1],
-    )) % 360.0
-    main_half_width = max(
-        _generated_paved_half_width(values[first][2]),
-        _generated_paved_half_width(values[second][2]),
-    )
-    branch_half_width = _generated_paved_half_width(values[branch][2])
     return (
-        paved_junction_model_path(
+        paved_junction_signature_model_path(
             spec.name,
-            main_half_width * 2.0,
-            branch_half_width * 2.0,
-            branch_heading,
+            width,
+            headings,
         ),
         axis,
     )
-
 
 def _rounded_road_run(
     points: Sequence[tuple[float, float]],
