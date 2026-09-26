@@ -374,6 +374,25 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
     )
 
 
+def test_exact_heading_quantization_fits_inside_donor_visual_overlap() -> None:
+    maximum_heading_error = (
+        infrastructure.GENERATED_PAVED_JUNCTION_HEADING_STEP_DEGREES * 0.5
+    )
+    corner_sweep = (
+        infrastructure.GENERATED_PAVED_HALF_WIDTH_METRES
+        * math.sin(math.radians(maximum_heading_error))
+    )
+    visible_overlap = (
+        infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+        - infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+    )
+
+    assert maximum_heading_error == 2.5
+    assert corner_sweep < 0.20
+    assert visible_overlap == 0.35
+    assert visible_overlap > corner_sweep + 0.10
+
+
 def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
     tmp_path: Path,
 ) -> None:
