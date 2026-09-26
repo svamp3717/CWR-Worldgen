@@ -110,6 +110,57 @@ def test_generated_plan_uses_compact_quality_reserve_not_stock_approach_reserve(
     assert geometry[key].half_length < paved._APPROACH_RESERVE
 
 
+def test_terrtest48_generated_fallback_replaces_plain_sil6_cap() -> None:
+    point = (1035.75, 900.0)
+    plan = SimpleNamespace(
+        model_path=r"test_world\i\paved_j3_w091_h000_095_190.p3d",
+        point=point,
+        axis=paved._direction(274.764),
+        connectors=(),
+    )
+    cap = SimpleNamespace(
+        object_id=14,
+        model_path=r"o\road\sil6.p3d",
+        x=point[0],
+        y=0.0,
+        z=point[1],
+        heading_degrees=100.732,
+        pitch_degrees=0.0,
+    )
+    untouched = SimpleNamespace(
+        object_id=15,
+        model_path=r"o\road\sil12.p3d",
+        x=1050.0,
+        y=0.0,
+        z=895.0,
+        heading_degrees=286.0,
+        pitch_degrees=0.0,
+    )
+    report = SimpleNamespace(
+        objects=(cap, untouched),
+        junction_cap_objects=1,
+    )
+    spec = SimpleNamespace(
+        cells=8,
+        cell_size=25.0,
+    )
+
+    installed = fallback._install_generated_hub_caps(
+        report,
+        {(104, 90): plan},
+        (0.0,) * 64,
+        spec,
+    )
+
+    assert installed.objects[0].object_id == 14
+    assert installed.objects[0].model_path == plan.model_path
+    assert math.dist(
+        (installed.objects[0].x, installed.objects[0].z),
+        point,
+    ) <= 1.0e-6
+    assert installed.objects[1] is untouched
+
+
 def test_generated_hub_presence_does_not_hide_disconnected_approaches() -> None:
     key = (1, 2)
     plan = _generated_plan()
