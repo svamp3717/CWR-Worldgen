@@ -6,6 +6,7 @@ import re
 import cwr_worldgen.generator as generator
 import cwr_worldgen.paved_junction_policy as paved_junctions
 import cwr_worldgen.playability as playability
+import cwr_worldgen.procedural_infrastructure as infrastructure
 import cwr_worldgen.road_quality_policy as road_quality
 from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
 from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
@@ -233,6 +234,34 @@ def test_stock_junction_plans_reject_dirt_gravel_and_mixed_nodes() -> None:
     assert "ces" not in all_paved.model_path.casefold()
 
 
+def test_generated_paved_t_hub_tracks_skew_branch_heading() -> None:
+    branch_heading = 258.0
+    branch = paved_junctions._direction(branch_heading)
+    plan = paved_junctions._plan(
+        (0.0, 0.0),
+        (
+            ((0.0, 1.0), "sil"),
+            ((0.0, -1.0), "sil"),
+            (branch, "sil"),
+        ),
+        world_name="junction_fit",
+    )
+    assert plan is not None
+    assert plan.model_path.endswith(r"\paved_j3_m091_b091_a260.p3d")
+    assert infrastructure.is_generated_paved_junction_model(plan.model_path)
+
+    connector = min(
+        plan.connectors,
+        key=lambda value: _angle(value.direction, branch),
+    )
+    assert _angle(connector.direction, branch) <= 2.5
+    assert math.isclose(
+        math.dist(plan.point, connector.point),
+        paved_junctions._JUNCTION_RADIUS,
+        abs_tol=1.0e-6,
+    )
+
+
 def test_diagonal_junction_trim_uses_oriented_hub_edge() -> None:
     diagonal = (math.sqrt(0.5), math.sqrt(0.5))
     junction = _Junction(
@@ -339,9 +368,7 @@ def test_diagonal_t_junction_uses_real_turn_pieces_and_connects_each_arm() -> No
     )[playability._road_node_key(node)]
     assert report.junction_cap_objects == 1
     assert report.objects[0].model_path.casefold() == plan.model_path.casefold()
-    assert report.objects[0].model_path.casefold().endswith(
-        r"\kr_new_sil_sil_t.p3d"
-    )
+    assert infrastructure.is_generated_paved_junction_model(plan.model_path)
 
     approaches = report.objects[report.junction_cap_objects :]
     assert any(
