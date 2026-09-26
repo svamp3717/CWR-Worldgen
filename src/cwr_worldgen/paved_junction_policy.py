@@ -20,11 +20,6 @@ _JUNCTION_RADIUS = 6.25
 _APPROACH_RESERVE = 32.0
 _CLEAR_RADIUS = 30.0
 _TURN_DEGREES = 10.0
-# The first stock 10-degree approach can overlap the stock T at its outer corner
-# even when both centerline connectors are exact. Keep that inner curve edge a
-# few millimetres below the junction so the T owns the overlap visually, then
-# return to the normal road plane by the far edge.
-_STOCK_T_CURVE_SEAM_DROP_METRES = 0.005
 _WIDTH = {"sil": 4.55, "kos": 4.55, "asf": 3.50}
 _STRAIGHTS = {25: 25.0, 12: 12.5, 6: 6.25}
 _T = re.compile(r"kr_new_(sil|asf|kos)_(sil|asf|kos)_t\.p3d$", re.I)
@@ -515,16 +510,7 @@ def _rotate(local, yaw):
 
 
 def _curve_object(
-    object_id,
-    family,
-    radius,
-    start,
-    heading,
-    turn_sign,
-    elevations,
-    spec,
-    *,
-    seam_start_drop: float = 0.0,
+    object_id, family, radius, start, heading, turn_sign, elevations, spec
 ):
     begin, end = _curve_points(family, float(radius))
     if turn_sign > 0:
@@ -540,50 +526,18 @@ def _curve_object(
     origin = start[0] - sx, start[1] - sz
     ex, ez = _rotate(local_end, yaw)
     finish = origin[0] + ex, origin[1] + ez
-
-    # Stock junction approaches often begin with a 10-degree curve. Historically
-    # these were forced flat and their Y was sampled at the model origin, which
-    # is offset from the actual seam. On graded terrain that creates a tiny step
-    # exactly where the curve meets the stock T. Anchor both authored curve
-    # endpoints to the terrain plane instead, using the model's local-Z span to
-    # derive the rigid pitch without changing any X/Z fitting geometry.
-    start_height = (
-        _p._sample_elevation(
-            elevations, spec.cells, spec.cell_size, start[0], start[1]
-        )
-        + 0.060
-        - max(0.0, float(seam_start_drop))
-    )
-    end_height = _p._sample_elevation(
-        elevations, spec.cells, spec.cell_size, finish[0], finish[1]
+    height = _p._sample_elevation(
+        elevations, spec.cells, spec.cell_size, origin[0], origin[1]
     ) + 0.060
-    local_z_span = float(local_end[1]) - float(local_start[1])
-    if abs(local_z_span) <= 1.0e-9:
-        pitch = 0.0
-        origin_height = start_height
-    else:
-        sine_pitch = max(
-            -math.sin(math.radians(35.0)),
-            min(
-                math.sin(math.radians(35.0)),
-                (end_height - start_height) / local_z_span,
-            ),
-        )
-        pitch = math.degrees(math.asin(sine_pitch))
-        origin_height = (
-            start_height
-            - float(local_start[1]) * math.sin(math.radians(pitch))
-        )
-
     return (
         _p.WorldObject(
             object_id,
             rf"o\road\{family}10 {radius}.p3d",
             origin[0],
-            origin_height,
+            height,
             origin[1],
             yaw % 360.0,
-            pitch,
+            0.0,
         ),
         finish,
         next_heading % 360.0,
@@ -790,24 +744,10 @@ def _approach_objects(plan, arm, choice, next_id, elevations, spec):
     heading = _heading(arm.connector.direction)
     objects = []
 
-    stock_junction = not _pi.is_generated_paved_junction_model(
-        plan.model_path
-    )
-    for curve_index in range(choice.first_turns):
+    for _index in range(choice.first_turns):
         obj, point, heading = _curve_object(
-            next_id,
-            family,
-            choice.first_radius,
-            point,
-            heading,
-            choice.turn_sign,
-            elevations,
-            spec,
-            seam_start_drop=(
-                _STOCK_T_CURVE_SEAM_DROP_METRES
-                if stock_junction and curve_index == 0
-                else 0.0
-            ),
+            next_id, family, choice.first_radius, point, heading,
+            choice.turn_sign, elevations, spec
         )
         objects.append(obj)
         next_id += 1
