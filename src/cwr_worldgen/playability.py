@@ -807,6 +807,26 @@ def _unique_incidents(
     return tuple(unique)
 
 
+def _junction_cap_incidents(
+    values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
+) -> tuple[tuple[tuple[float, float], bool, str, str, str], ...]:
+    """Ignore gravel arms when deciding whether a non-gravel road needs a hub.
+
+    Gravel is deliberately drawn below paved roads. A gravel spur or crossing
+    must therefore not promote an otherwise ordinary paved/dirt continuation to
+    a three/four-way cap and insert an extra road P3D. Pure-gravel nodes retain
+    their existing cap behavior.
+    """
+
+    values = tuple(values)
+    non_gravel = tuple(
+        value
+        for value in values
+        if not is_generated_gravel_road_model(value[2])
+    )
+    return non_gravel or values
+
+
 def _rounded_road_run(
     points: Sequence[tuple[float, float]],
     *,
@@ -1377,8 +1397,12 @@ def _fit_stock_piece_road_objects(
                 bend_keys.add(_road_node_key(points[index]))
 
     effective_incidents = {key: _unique_incidents(values) for key, values in incidents.items()}
+    cap_incidents = {
+        key: _junction_cap_incidents(values)
+        for key, values in effective_incidents.items()
+    }
     degree_two_turn_keys: set[tuple[int, int]] = set()
-    for key, values in effective_incidents.items():
+    for key, values in cap_incidents.items():
         if len(values) != 2:
             continue
         first, second = values[0][0], values[1][0]
@@ -1389,9 +1413,9 @@ def _fit_stock_piece_road_objects(
             degree_two_turn_keys.add(key)
 
     true_junction_keys = {
-        key for key, values in effective_incidents.items() if 3 <= len(values) <= 4
+        key for key, values in cap_incidents.items() if 3 <= len(values) <= 4
     }
-    complex_keys = {key for key, values in effective_incidents.items() if len(values) > 4}
+    complex_keys = {key for key, values in cap_incidents.items() if len(values) > 4}
     candidate_cap_keys = true_junction_keys - complex_keys
 
     if progress_callback is not None:
@@ -1407,7 +1431,7 @@ def _fit_stock_piece_road_objects(
     # main source of pinched/diamond-shaped turns in dense street networks.
     cap_keys = set(candidate_cap_keys)
     suppressed_nearby_hubs = 0
-    degree_two_keys = {key for key, values in effective_incidents.items() if len(values) == 2}
+    degree_two_keys = {key for key, values in cap_incidents.items() if len(values) == 2}
     suppressed_degree_two_caps = len(degree_two_keys)
 
     variant_cache: dict[str, tuple[_RoadPiece, ...]] = {}
@@ -1435,7 +1459,7 @@ def _fit_stock_piece_road_objects(
     cap_trim_lengths: dict[tuple[int, int], float] = {}
     cap_cover_lengths: dict[tuple[int, int], float] = {}
     for key in sorted(cap_keys):
-        values = effective_incidents[key]
+        values = cap_incidents[key]
         use_dirt = all(value[1] for value in values)
         all_gravel = all(is_generated_gravel_road_model(value[2]) for value in values)
         incident_models = {value[2].casefold(): value[2] for value in values}
