@@ -13,6 +13,7 @@ import re
 
 from . import generator as _generator
 from . import playability as _p
+from . import procedural_infrastructure as _pi
 from . import road_quality_policy as _rq
 
 _JUNCTION_RADIUS = 6.25
@@ -95,6 +96,24 @@ def _heading(direction: tuple[float, float]) -> float:
 def _direction(heading: float) -> tuple[float, float]:
     radians = math.radians(heading)
     return math.sin(radians), math.cos(radians)
+
+
+def _local_heading(
+    direction: tuple[float, float],
+    axis: tuple[float, float],
+) -> float:
+    right = axis[1], -axis[0]
+    return math.degrees(math.atan2(
+        direction[0] * right[0] + direction[1] * right[1],
+        direction[0] * axis[0] + direction[1] * axis[1],
+    )) % 360.0
+
+
+def _paved_half_width(family: str) -> float:
+    return _WIDTH.get(
+        _junction_family(family),
+        _pi.GENERATED_PAVED_HALF_WIDTH_METRES,
+    )
 
 
 def _signed_angle(first: tuple[float, float], second: tuple[float, float]) -> float:
@@ -235,7 +254,12 @@ def _assign_arms(incidents, connectors) -> tuple[_Arm, ...]:
     )
 
 
-def _plan(point, incidents) -> _Plan | None:
+def _plan(
+    point,
+    incidents,
+    *,
+    world_name: str | None = None,
+) -> _Plan | None:
     if len(incidents) not in {3, 4} or not all(
         _kind(family) == "paved" for _direction_value, family in incidents
     ):
@@ -268,36 +292,69 @@ def _plan(point, incidents) -> _Plan | None:
             > 0.0
         ):
             axis = -axis[0], -axis[1]
+            first, second = second, first
+
         main_families = incidents[first][1], incidents[second][1]
         branch_family = incidents[branch][1]
-        candidates = [
-            (
-                _cost(main_families[0], main)
-                + _cost(main_families[1], main)
-                + _cost(branch_family, side),
-                path.casefold(),
-                path,
-                main,
-                side,
+
+        if world_name:
+            # The screenshot failure this policy targets is a skewed paved T:
+            # a stock 90-degree cap leaves a rectangular seam even though the
+            # mapped branch reaches the through-road cleanly. Generate the hub
+            # itself to the mapped branch heading, while leaving the existing
+            # stock/curve approach solver in charge outside the 6.25 m core.
+            raw_heading = _local_heading(directions[branch], axis)
+            branch_heading = _pi._paved_junction_angle_bucket(raw_heading)
+            main_half_width = max(
+                _paved_half_width(main_families[0]),
+                _paved_half_width(main_families[1]),
             )
-            for path, main, side in _t_models()
-        ]
-        if not candidates:
-            return None
-        _score, _name, model_path, main, side = min(candidates)
-        cx = (_JUNCTION_RADIUS - _WIDTH[main]) * 0.5
-        definitions = (
-            ((cx, _JUNCTION_RADIUS), 0.0, main),
-            ((cx, -_JUNCTION_RADIUS), 180.0, main),
-            ((cx - _JUNCTION_RADIUS, 0.0), 270.0, side),
-        )
+            branch_half_width = _paved_half_width(branch_family)
+            model_path = _pi.paved_junction_model_path(
+                world_name,
+                main_half_width * 2.0,
+                branch_half_width * 2.0,
+                branch_heading,
+            )
+            branch_radians = math.radians(branch_heading)
+            definitions = (
+                ((0.0, _JUNCTION_RADIUS), 0.0, main_families[0]),
+                ((0.0, -_JUNCTION_RADIUS), 180.0, main_families[1]),
+                ((
+                    math.sin(branch_radians) * _JUNCTION_RADIUS,
+                    math.cos(branch_radians) * _JUNCTION_RADIUS,
+                ), float(branch_heading), branch_family),
+            )
+        else:
+            # Keep the stock-only low-level planner available for tests and
+            # callers that do not supply a world-local asset namespace.
+            candidates = [
+                (
+                    _cost(main_families[0], main)
+                    + _cost(main_families[1], main)
+                    + _cost(branch_family, side),
+                    path.casefold(),
+                    path,
+                    main,
+                    side,
+                )
+                for path, main, side in _t_models()
+            ]
+            if not candidates:
+                return None
+            _score, _name, model_path, main, side = min(candidates)
+            cx = (_JUNCTION_RADIUS - _WIDTH[main]) * 0.5
+            definitions = (
+                ((cx, _JUNCTION_RADIUS), 0.0, main),
+                ((cx, -_JUNCTION_RADIUS), 180.0, main),
+                ((cx - _JUNCTION_RADIUS, 0.0), 270.0, side),
+            )
 
     connectors = tuple(
         _connector(local, heading, family, point, axis)
         for local, heading, family in definitions
     )
     return _Plan(model_path, point, axis, _assign_arms(incidents, connectors))
-
 
 def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
     incidents = {}
@@ -343,6 +400,7 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
                 for direction, family in typed
                 if family is not None
             ),
+            world_name=spec.name,
         )
         if plan is not None:
             result[key] = plan
