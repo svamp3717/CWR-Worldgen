@@ -856,174 +856,6 @@ def realign_generated_paved_junction_hubs(
     return replace(report, objects=objects)
 
 
-
-def _stitch_generated_paved_junction_hubs(
-    report,
-    elevations: Sequence[float],
-    spec,
-    *,
-    progress_callback: Callable[[int, str], None] | None = None,
-):
-    """Replace terminal approach slabs so they land exactly on generated hubs.
-
-    A generated hub can be correctly placed yet still inherit a 0.3-1.3 m
-    connector gap from the stock approach chain.  Adding a tiny bridge object
-    beside the old endpoint creates duplicate junction candidates, so instead
-    replace the first outward approach piece itself.  Any short slab that dives
-    into the hub centre is removed first, then the next outward piece is rebuilt
-    from the exact hub connector to its original far endpoint.
-    """
-
-    if not report.objects:
-        return report
-
-    inspection = _inspector.inspect_road_objects(
-        report.objects,
-        world_name=str(getattr(spec, "name", "world")),
-        topology_checks=False,
-    )
-    objects_by_id = {int(obj.object_id): obj for obj in report.objects}
-    road_by_id = {int(road.object_id): road for road in inspection.road_objects}
-    remove_ids: set[int] = set()
-    replacements: dict[int, WorldObject] = {}
-    stitched = 0
-
-    for hub in inspection.road_objects:
-        if not hub.kind.startswith("junction_generated_"):
-            continue
-        centre = float(hub.x), float(hub.z)
-        radius = float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES)
-        paved_roads = tuple(
-            road
-            for road in inspection.road_objects
-            if (
-                road.object_id != hub.object_id
-                and road.road_type == "paved"
-                and not road.kind.startswith("junction_")
-            )
-        )
-
-        # Remove short approach slabs that actually enter the hub interior.
-        # terrtest33 object 875 was the concrete example: one endpoint sat only
-        # 1.4 m from the hub centre and produced the inspector's extra approach.
-        for road in paved_roads:
-            distances = tuple(
-                math.dist(centre, endpoint.point)
-                for endpoint in road.endpoints
-            )
-            if len(distances) != 2:
-                continue
-            if (
-                min(distances) < radius - 1.0
-                and max(distances) <= radius + 3.0
-            ):
-                remove_ids.add(int(road.object_id))
-
-        used_roads: set[int] = set()
-        for connector in hub.endpoints:
-            candidates = []
-            for road in paved_roads:
-                road_id = int(road.object_id)
-                if road_id in remove_ids or road_id in used_roads:
-                    continue
-                if len(road.endpoints) != 2:
-                    continue
-                for endpoint_index, endpoint in enumerate(road.endpoints):
-                    gap = math.dist(connector.point, endpoint.point)
-                    if gap > 3.0:
-                        continue
-                    facing = abs(
-                        180.0
-                        - _inspector._angle(
-                            connector.outward,
-                            endpoint.outward,
-                        )
-                    )
-                    if facing > 30.0:
-                        continue
-                    other = road.endpoints[1 - endpoint_index]
-                    endpoint_radius = math.dist(centre, endpoint.point)
-                    other_radius = math.dist(centre, other.point)
-                    # Only rewrite a piece that leads away from the junction.
-                    if other_radius <= endpoint_radius + 0.10:
-                        continue
-                    candidates.append(
-                        (
-                            gap,
-                            facing,
-                            road_id,
-                            endpoint,
-                            other,
-                        )
-                    )
-
-            if not candidates:
-                continue
-            gap, _facing, road_id, near, far = min(
-                candidates,
-                key=lambda value: (value[0], value[1], value[2]),
-            )
-            used_roads.add(road_id)
-            if gap <= _inspector.DEFAULT_ENDPOINT_TOLERANCE_METRES:
-                continue
-
-            old = objects_by_id.get(road_id)
-            if old is None:
-                continue
-            length = math.dist(connector.point, far.point)
-            if length <= 0.05:
-                remove_ids.add(road_id)
-                continue
-            width = 2.0 * max(
-                float(connector.half_width),
-                float(near.half_width),
-                float(far.half_width),
-            )
-            curve = _inspector._replacement_curve_choice(
-                connector,
-                far,
-            )
-            model_path = _pi.paved_fallback_model_path(
-                str(getattr(spec, "name", "world")),
-                width,
-                length,
-                curve,
-            )
-            vertical_offset = _component_vertical_offset(
-                (road_id,),
-                objects_by_id,
-                elevations,
-                spec,
-            )
-            replacements[road_id] = _p._road_object_on_slope(
-                road_id,
-                model_path,
-                tuple(connector.point),
-                tuple(far.point),
-                elevations,
-                spec,
-                vertical_offset=vertical_offset,
-            )
-            stitched += 1
-
-    if not remove_ids and not replacements:
-        return report
-
-    objects = tuple(
-        replacements.get(int(obj.object_id), obj)
-        for obj in report.objects
-        if int(obj.object_id) not in remove_ids
-    )
-    if progress_callback is not None:
-        progress_callback(
-            _RAW_PROGRESS_PERCENT,
-            "Stitched generated paved hubs: "
-            f"{stitched:,} terminal approach piece(s) rebuilt, "
-            f"{len(remove_ids):,} intruding slab(s) removed",
-        )
-    return replace(report, objects=objects)
-
-
 def ensure_final_paved_junction_hubs(
     report,
     dataset,
@@ -1179,10 +1011,16 @@ def _fit(
         protected_object_ids=protected,
         progress_callback=progress_callback,
     )
-    return ensure_final_paved_junction_hubs(
+    guarded = ensure_final_paved_junction_hubs(
         repaired,
         dataset,
         projection,
+        elevations,
+        spec,
+        progress_callback=progress_callback,
+    )
+    return realign_generated_paved_junction_hubs(
+        guarded,
         elevations,
         spec,
         progress_callback=progress_callback,
