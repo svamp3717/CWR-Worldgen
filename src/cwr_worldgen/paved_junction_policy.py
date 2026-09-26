@@ -260,6 +260,8 @@ def _plan(
     *,
     world_name: str | None = None,
 ) -> _Plan | None:
+    """Prefer stock CWA paved junctions; generated hubs remain fallback assets."""
+
     if len(incidents) not in {3, 4} or not all(
         _kind(family) == "paved" for _direction_value, family in incidents
     ):
@@ -296,82 +298,27 @@ def _plan(
 
         main_families = incidents[first][1], incidents[second][1]
         branch_family = incidents[branch][1]
-
-        if world_name:
-            # Encode all three real road tangents in the generated P3D. The old
-            # angle-only hub forced the two main arms to 000/180 and created new
-            # triangular grass wedges whenever the through-road bent at the
-            # junction.
-            headings, axis = _pi.paved_junction_signature_for_directions(
-                directions
+        candidates = [
+            (
+                _cost(main_families[0], main)
+                + _cost(main_families[1], main)
+                + _cost(branch_family, side),
+                path.casefold(),
+                path,
+                main,
+                side,
             )
-            width = max(
-                _paved_half_width(family) * 2.0
-                for _direction_value, family in incidents
-            )
-            model_path = _pi.paved_junction_signature_model_path(
-                world_name,
-                width,
-                headings,
-            )
-            connector_radius = (
-                _JUNCTION_RADIUS
-                + _pi.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
-            )
-            right = axis[1], -axis[0]
-            definitions = []
-            for heading in headings:
-                radians = math.radians(heading)
-                local_direction = (
-                    math.sin(radians),
-                    math.cos(radians),
-                )
-                world_direction = _unit((
-                    right[0] * local_direction[0]
-                    + axis[0] * local_direction[1],
-                    right[1] * local_direction[0]
-                    + axis[1] * local_direction[1],
-                ))
-                nearest = min(
-                    incidents,
-                    key=lambda value: _angle(
-                        value[0],
-                        world_direction,
-                    ),
-                )
-                definitions.append((
-                    (
-                        local_direction[0] * connector_radius,
-                        local_direction[1] * connector_radius,
-                    ),
-                    float(heading),
-                    _junction_family(nearest[1]),
-                ))
-            definitions = tuple(definitions)
-        else:
-            # Keep the stock-only low-level planner available for tests and
-            # callers that do not supply a world-local asset namespace.
-            candidates = [
-                (
-                    _cost(main_families[0], main)
-                    + _cost(main_families[1], main)
-                    + _cost(branch_family, side),
-                    path.casefold(),
-                    path,
-                    main,
-                    side,
-                )
-                for path, main, side in _t_models()
-            ]
-            if not candidates:
-                return None
-            _score, _name, model_path, main, side = min(candidates)
-            cx = (_JUNCTION_RADIUS - _WIDTH[main]) * 0.5
-            definitions = (
-                ((cx, _JUNCTION_RADIUS), 0.0, main),
-                ((cx, -_JUNCTION_RADIUS), 180.0, main),
-                ((cx - _JUNCTION_RADIUS, 0.0), 270.0, side),
-            )
+            for path, main, side in _t_models()
+        ]
+        if not candidates:
+            return None
+        _score, _name, model_path, main, side = min(candidates)
+        cx = (_JUNCTION_RADIUS - _WIDTH[main]) * 0.5
+        definitions = (
+            ((cx, _JUNCTION_RADIUS), 0.0, main),
+            ((cx, -_JUNCTION_RADIUS), 180.0, main),
+            ((cx - _JUNCTION_RADIUS, 0.0), 270.0, side),
+        )
 
     connectors = tuple(
         _connector(local, heading, family, point, axis)
