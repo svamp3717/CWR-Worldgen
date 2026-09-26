@@ -218,6 +218,16 @@ def install_building_prepare_progress_policy() -> None:
 
     install_final_road_inspector_repair_policy()
 
+    # Inspector repair may be the last stage to introduce or replace paved road
+    # objects. Enforce surface precedence from the resulting final road geometry,
+    # so dirt endpoints can never render above asphalt even when a late generated
+    # junction moved away from the original OSM node.
+    from .final_road_surface_precedence_policy import (
+        install_final_road_surface_precedence_policy,
+    )
+
+    install_final_road_surface_precedence_policy()
+
     # A single several-hundred-metre procedural bridge P3D can exceed legacy
     # OFP/CWA Geometry/Roadway extents and disappear even though the WRP and PBO
     # references are valid. Split those generated spans into <=30 m modules
