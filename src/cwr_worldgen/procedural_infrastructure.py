@@ -1836,13 +1836,25 @@ class ProceduralInfrastructureLibrary:
             relative = wire.split("\\", 1)[1].replace("\\", "/")
             destination = source_dir / relative
             texture = self._texture_path(key)
-            model_cache_version = (
-                "procedural-infrastructure-model-v22-donor-stock-junction-topology"
-                if key.kind == "road"
-                else "procedural-infrastructure-model-v17-single-span-segmented-collision"
-                if key.kind == "bridge"
-                else "procedural-infrastructure-model-v5-osm-utilities"
-            )
+            if (
+                key.kind == "road"
+                and key.subtype.casefold().startswith("paved_j3_")
+            ):
+                model_cache_version = (
+                    "procedural-infrastructure-model-v22-donor-stock-junction-topology"
+                )
+            elif key.kind == "road":
+                model_cache_version = (
+                    "procedural-infrastructure-model-v21-skew-paved-junction-seams"
+                )
+            elif key.kind == "bridge":
+                model_cache_version = (
+                    "procedural-infrastructure-model-v17-single-span-segmented-collision"
+                )
+            else:
+                model_cache_version = (
+                    "procedural-infrastructure-model-v5-osm-utilities"
+                )
             asset_key = cache_key(
                 model_cache_version,
                 {"world": self.world_name, "key": asdict(key), "texture": texture},
