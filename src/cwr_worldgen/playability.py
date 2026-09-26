@@ -147,14 +147,17 @@ def _is_plain_dirt_tags(tags: Mapping[str, str]) -> bool:
 def _is_mixed_dirt_paved_node(
     incidents: Sequence[tuple[tuple[float, float], bool, str, str, str]],
 ) -> bool:
-    """Return whether a node contains both paved and plain-dirt approaches."""
+    """Return whether paved meets any lower-priority unpaved approach.
+
+    Gravel and plain dirt both terminate underneath asphalt.  Treating
+    paved+gravel nodes as ordinary junction-cap sites created the repeated
+    sil6 cap seams seen in terrtest33: the paved through-road was split around
+    a generic cap and the inspector measured ~0.7 m gaps at every such node.
+    """
 
     has_paved = any(not value[1] for value in incidents)
-    has_plain_dirt = any(
-        value[1] and not is_generated_gravel_road_model(value[2])
-        for value in incidents
-    )
-    return has_paved and has_plain_dirt
+    has_unpaved = any(value[1] for value in incidents)
+    return has_paved and has_unpaved
 
 
 def _junction_cap_vertical_offset(model_path: str) -> float:
@@ -1566,9 +1569,10 @@ def _fit_stock_piece_road_objects(
         for key, values in effective_incidents.items()
         if _is_mixed_dirt_paved_node(values)
     }
-    # A dirt track meeting asphalt is not a junction surface. Preserve the
-    # paved carriageway, keep the dirt terminal piece on its lower plane, and
-    # let the higher paved road visually cover it through the crossing.
+    # Any unpaved road meeting asphalt is an underlay, not a junction surface.
+    # Preserve the paved carriageway continuously through the node. Plain dirt
+    # gets its terminal piece buried below asphalt; generated gravel already
+    # rides on the lower terrain-hugging plane.
     candidate_cap_keys = (
         true_junction_keys - complex_keys - mixed_dirt_paved_keys
     )
