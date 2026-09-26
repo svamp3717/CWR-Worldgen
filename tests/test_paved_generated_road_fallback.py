@@ -286,6 +286,26 @@ def test_generated_paved_junction_visual_overhang_covers_logical_seam() -> None:
     )
 
 
+def test_generated_paved_junction_visual_overhang_covers_terrtest41_skew() -> None:
+    # terrtest41 places a generated T correctly, but one real paved approach
+    # reaches the averaged main axis about 10.7 degrees off the hub heading.
+    # A square 9.10 m road end rotates its outer corner by roughly 0.86 m.
+    # Keep enough visual-only hub coverage beyond the 6.45 m approach start
+    # to hide that corner while Roadway remains on the stock 6.25 m radius.
+    measured_skew_degrees = 10.7
+    required_corner_sweep = (
+        infrastructure.GENERATED_PAVED_HALF_WIDTH_METRES
+        * math.tan(math.radians(measured_skew_degrees))
+    )
+    visible_overlap = (
+        infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+        - infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+    )
+
+    assert required_corner_sweep > 0.85
+    assert visible_overlap >= required_corner_sweep + 0.10
+
+
 def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
     tmp_path: Path,
 ) -> None:
