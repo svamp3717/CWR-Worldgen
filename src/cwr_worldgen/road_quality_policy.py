@@ -76,7 +76,7 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
 
     result: dict[tuple[int, int], _Junction] = {}
     for key, raw in incidents.items():
-        values = _p._unique_incidents(raw)
+        values = _p._junction_cap_incidents(_p._unique_incidents(raw))
         if not 3 <= len(values) <= 4:
             continue
         all_gravel = all(_p.is_generated_gravel_road_model(v[2]) for v in values)
