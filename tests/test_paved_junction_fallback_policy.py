@@ -387,35 +387,75 @@ def test_failed_stock_plan_uses_ordinary_junction_geometry_on_refit() -> None:
     assert geometry[failed_key] == base[failed_key]
 
 
-def test_failed_stock_junction_is_refit_as_ordinary_connected_roads() -> None:
+def test_failed_stock_junction_retries_stock_before_generated_fallback() -> None:
+    key = (100, 100)
+    model = r"o\road\kr_new_sil_sil_t.p3d"
+    plan = _plan(model, (100.0, 100.0))
+    plans = {key: plan}
+    trimmed_report = SimpleNamespace(
+        objects=(
+            _object(1, r"o\road\sil6.p3d", 100.0, 100.0),
+        ),
+        junction_cap_objects=1,
+    )
+    ordinary_report = SimpleNamespace(
+        objects=(
+            _object(10, r"o\road\sil6.p3d", 100.0, 100.0),
+        ),
+        junction_cap_objects=1,
+    )
+    recovered_report = SimpleNamespace(
+        objects=(
+            _object(10, model, 100.0, 100.0),
+        ),
+        junction_cap_objects=1,
+    )
+
+    spec = SimpleNamespace(
+        stock_road_piece_fitting=True,
+        procedural_paved_road_fallback=True,
+    )
+    with patch.object(paved, "_plans", lambda *_args: plans), patch.object(
+        fallback, "_ORIGINAL_FIT", lambda *_args, **_kwargs: trimmed_report
+    ), patch.object(
+        paved, "_ORIGINAL_FIT", lambda *_args, **_kwargs: ordinary_report
+    ), patch.object(
+        paved, "_apply_plans", lambda report, *_args: recovered_report
+    ), patch.object(
+        paved,
+        "_generated_plan",
+        side_effect=AssertionError(
+            "generated fallback must not run after stock recovery succeeds"
+        ),
+    ):
+        result = fallback._fit(
+            None,
+            None,
+            (),
+            spec,
+            starting_id=1,
+            progress_callback=None,
+        )
+
+    assert result is recovered_report
+
+
+def test_failed_stock_junction_still_returns_ordinary_roads_when_recovery_fails() -> None:
     key = (100, 100)
     plan = _plan(r"o\road\kr_new_sil_sil_t.p3d", (100.0, 100.0))
     plans = {key: plan}
     trimmed_report = SimpleNamespace(
         objects=(
-            SimpleNamespace(
-                object_id=1,
-                model_path=r"o\road\sil6.p3d",
-                x=100.0,
-                z=100.0,
-            ),
-        )
+            _object(1, r"o\road\sil6.p3d", 100.0, 100.0),
+        ),
+        junction_cap_objects=1,
     )
     ordinary_report = SimpleNamespace(
         objects=(
-            SimpleNamespace(
-                object_id=10,
-                model_path=r"o\road\sil12.p3d",
-                x=100.0,
-                z=95.0,
-            ),
-            SimpleNamespace(
-                object_id=11,
-                model_path=r"o\road\sil12.p3d",
-                x=100.0,
-                z=105.0,
-            ),
-        )
+            _object(10, r"o\road\sil12.p3d", 100.0, 95.0),
+            _object(11, r"o\road\sil12.p3d", 100.0, 105.0),
+        ),
+        junction_cap_objects=1,
     )
     active_plan_sets = []
 
@@ -423,13 +463,14 @@ def test_failed_stock_junction_is_refit_as_ordinary_connected_roads() -> None:
         active_plan_sets.append(dict(paved._PLANS.get() or {}))
         return ordinary_report
 
-    spec = SimpleNamespace(stock_road_piece_fitting=True)
+    spec = SimpleNamespace(
+        stock_road_piece_fitting=True,
+        procedural_paved_road_fallback=False,
+    )
     with patch.object(paved, "_plans", lambda *_args: plans), patch.object(
         fallback, "_ORIGINAL_FIT", lambda *_args, **_kwargs: trimmed_report
     ), patch.object(paved, "_ORIGINAL_FIT", ordinary_fit), patch.object(
-        paved,
-        "_apply_plans",
-        side_effect=AssertionError("no stock junction should be re-applied after all plans fail"),
+        paved, "_apply_plans", lambda report, *_args: report
     ):
         result = fallback._fit(
             None,
@@ -441,4 +482,5 @@ def test_failed_stock_junction_is_refit_as_ordinary_connected_roads() -> None:
         )
 
     assert result is ordinary_report
-    assert active_plan_sets == [{}]
+    assert active_plan_sets
+    assert all(value == {} for value in active_plan_sets)
