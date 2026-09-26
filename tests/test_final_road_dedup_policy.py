@@ -157,6 +157,17 @@ def test_generated_paved_curve_covered_by_stock_road_is_removed():
     assert tuple(obj.object_id for obj in result.objects) == (1,)
 
 
+def test_dirt_curves_remain_out_of_scope_for_paved_second_pass():
+    report = _report((
+        _road(1, r"o\road\ces10 25.p3d", 100.0, 100.0),
+        _road(2, r"o\road\ces10 25.p3d", 100.0, 100.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert len(result.objects) == 2
+
+
 def test_junction_models_are_still_not_axis_deduplicated():
     report = _report((
         _road(3, r"o\road\kr_new_sil_sil_t.p3d", 120.0, 120.0),
