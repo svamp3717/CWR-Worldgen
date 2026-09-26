@@ -302,6 +302,15 @@ def test_generated_curved_paved_turn_restores_terrtest39_seam_geometry() -> None
     # only that overlap below the paved surface, matching the seam treatment in
     # terrtest39 without changing the Roadway extent.
     assert infrastructure.GENERATED_PAVED_TURN_VISUAL_OVERLAP_METRES == 0.18
+    expected_first_visual = (
+        (-4.2943, -0.0150, -1.4354),
+        (4.1612, -0.0150, -4.7991),
+    )
+    for actual, expected in zip(visual.points[:2], expected_first_visual):
+        assert math.isclose(actual[0], expected[0], abs_tol=5.0e-4)
+        assert math.isclose(actual[1], expected[1], abs_tol=5.0e-4)
+        assert math.isclose(actual[2], expected[2], abs_tol=5.0e-4)
+
     assert min(point[1] for point in visual.points) < (
         infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES - 0.03
     )
