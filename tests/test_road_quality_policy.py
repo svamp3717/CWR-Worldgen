@@ -259,7 +259,9 @@ def test_generated_paved_t_hub_tracks_skew_branch_heading() -> None:
         world_name="junction_fit",
     )
     assert plan is not None
-    assert plan.model_path.endswith(r"\paved_j3_m091_b091_a260.p3d")
+    assert plan.model_path.endswith(
+        r"\paved_j3_w091_h000_080_180.p3d"
+    )
     assert infrastructure.is_generated_paved_junction_model(plan.model_path)
 
     connector = min(
@@ -279,6 +281,30 @@ def test_generated_paved_t_hub_tracks_skew_branch_heading() -> None:
         infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
         + infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
     )
+
+
+def test_generated_paved_t_preserves_bent_through_road_headings() -> None:
+    incidents = tuple(
+        (paved_junctions._direction(heading), "sil")
+        for heading in (5.0, 190.0, 270.0)
+    )
+    plan = paved_junctions._plan(
+        (0.0, 0.0),
+        incidents,
+        world_name="junction_fit",
+    )
+    assert plan is not None
+    # The old angle-only format would force the through pair to 000/180.
+    # Exact-heading generation retains the measured five-degree bend instead.
+    assert plan.model_path.endswith(
+        r"\paved_j3_w091_h000_080_175.p3d"
+    )
+
+    for source_direction, _family in incidents:
+        assert min(
+            _angle(connector.direction, source_direction)
+            for connector in plan.connectors
+        ) <= 2.5
 
 
 def test_diagonal_junction_trim_uses_oriented_hub_edge() -> None:
