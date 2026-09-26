@@ -39,6 +39,10 @@ def _spec():
         forest_tree_model=r"data3d\str smrk.p3d",
         forest_single_tree_model=r"data3d\str dub.p3d",
         steep_hill_bush_models=(r"data3d\Krovi2.p3d",),
+        cells=20,
+        cell_size=10.0,
+        road_segment_length=25.0,
+        barrier_segment_length=6.0,
     )
 
 
@@ -70,3 +74,27 @@ def test_nonvegetation_on_clear_zone_is_not_removed() -> None:
     )
     assert filtered == objects
     assert report["removed"] == 0
+
+
+def test_final_fitted_road_clears_tree_and_fence_from_actual_surface() -> None:
+    spec = _spec()
+    elevations = (0.0,) * (spec.cells * spec.cells)
+    road = WorldObject(10, r"O\Road\sil6.p3d", 175.0, 0.035, 175.0, 90.0)
+    tree = WorldObject(11, r"data3d\str smrk.p3d", 175.0, 0.0, 175.0)
+    fence = WorldObject(12, r"data3d\ohrada_sama.p3d", 175.0, 0.0, 175.0, 90.0)
+    safe_tree = WorldObject(13, r"data3d\str dub.p3d", 195.0, 0.0, 195.0)
+    objects = (road, tree, fence, safe_tree)
+
+    filtered, report = filter_vegetation_objects(
+        objects,
+        _dataset(),
+        _IdentityProjection(),
+        spec,
+        elevations=elevations,
+        road_objects=(road,),
+    )
+
+    assert tuple(obj.object_id for obj in filtered) == (10, 13)
+    assert report["final_road"] == 2
+    assert report["final_road_vegetation"] == 1
+    assert report["final_road_barrier"] == 1
