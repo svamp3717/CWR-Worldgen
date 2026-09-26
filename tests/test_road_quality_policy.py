@@ -247,8 +247,8 @@ def test_stock_junction_plans_reject_dirt_gravel_and_mixed_nodes() -> None:
     assert "ces" not in all_paved.model_path.casefold()
 
 
-def test_stock_t_first_curve_drops_only_inner_overlap_edge() -> None:
-    spec = SimpleNamespace(cells=8, cell_size=25.0)
+def test_stock_t_first_curve_uses_generated_paved_seam_turn_only() -> None:
+    spec = SimpleNamespace(name="stock_t_seam", cells=8, cell_size=25.0)
     elevations = (0.0,) * 64
     connector = paved_junctions._Connector(
         "sil",
@@ -262,12 +262,16 @@ def test_stock_t_first_curve_drops_only_inner_overlap_edge() -> None:
         (0.0, 1.0),
         (arm,),
     )
-    point, heading = paved_junctions._arc_step(
-        connector.point,
-        0.0,
-        1,
-        25,
-    )
+
+    point = connector.point
+    heading = 0.0
+    for _ in range(2):
+        point, heading = paved_junctions._arc_step(
+            point,
+            heading,
+            1,
+            25,
+        )
     direction = paved_junctions._direction(heading)
     merge_target = (
         point[0] + direction[0] * paved_junctions._STRAIGHTS[6],
@@ -275,7 +279,7 @@ def test_stock_t_first_curve_drops_only_inner_overlap_edge() -> None:
     )
     choice = paved_junctions._ApproachChoice(
         1,
-        1,
+        2,
         25,
         0,
         0,
@@ -284,7 +288,7 @@ def test_stock_t_first_curve_drops_only_inner_overlap_edge() -> None:
         merge_target,
     )
 
-    stock_objects, _next_id = paved_junctions._approach_objects(
+    objects, _next_id = paved_junctions._approach_objects(
         stock_plan,
         arm,
         choice,
@@ -292,21 +296,18 @@ def test_stock_t_first_curve_drops_only_inner_overlap_edge() -> None:
         elevations,
         spec,
     )
-    curve = stock_objects[0]
-    local_start, local_end = paved_junctions._curve_points("sil", 25.0)
-    sine_pitch = math.sin(math.radians(curve.pitch_degrees))
-    rendered_start_y = curve.y + local_start[1] * sine_pitch
-    rendered_end_y = curve.y + local_end[1] * sine_pitch
 
-    assert math.isclose(
-        rendered_start_y,
-        0.060 - paved_junctions._STOCK_T_CURVE_SEAM_DROP_METRES,
-        abs_tol=1.0e-7,
+    assert infrastructure.is_generated_paved_road_model(
+        objects[0].model_path
     )
-    assert math.isclose(rendered_end_y, 0.060, abs_tol=1.0e-7)
+    assert objects[0].model_path.casefold().endswith("_r10.p3d")
+    assert objects[1].model_path.casefold().endswith(
+        r"\sil10 25.p3d"
+    )
+    assert objects[2].model_path.casefold().endswith(r"\sil6.p3d")
 
     generated_plan = paved_junctions._Plan(
-        r"test_world\i\paved_j3_w091_h000_090_180.p3d",
+        r"stock_t_seam\i\paved_j3_w091_h000_090_180.p3d",
         stock_plan.point,
         stock_plan.axis,
         stock_plan.arms,
@@ -319,13 +320,9 @@ def test_stock_t_first_curve_drops_only_inner_overlap_edge() -> None:
         elevations,
         spec,
     )
-    generated_curve = generated_objects[0]
-    generated_start_y = (
-        generated_curve.y
-        + local_start[1]
-        * math.sin(math.radians(generated_curve.pitch_degrees))
+    assert generated_objects[0].model_path.casefold().endswith(
+        r"\sil10 25.p3d"
     )
-    assert math.isclose(generated_start_y, 0.060, abs_tol=1.0e-7)
 
 
 def test_stock_junction_curve_anchors_both_seams_to_terrain_plane() -> None:
