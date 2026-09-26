@@ -25,6 +25,11 @@ _BUCKET_METRES = 25.0
 _MAXIMUM_AXIS_ANGLE_DEGREES = 6.0
 _ALIGNMENT_COSINE = math.cos(math.radians(_MAXIMUM_AXIS_ANGLE_DEGREES))
 _MINIMUM_SHORTER_AXIS_OVERLAP = 0.70
+_MAXIMUM_PAVED_COVERAGE_ANGLE_DEGREES = 12.0
+_PAVED_COVERAGE_ALIGNMENT_COSINE = math.cos(
+    math.radians(_MAXIMUM_PAVED_COVERAGE_ANGLE_DEGREES)
+)
+_MINIMUM_PAVED_CANDIDATE_COVERAGE = 0.90
 _MAXIMUM_VERTICAL_SEPARATION_METRES = 0.75
 _PROGRESS_BUCKET_PERCENT = 2
 _RAW_PROGRESS_PERCENT = 99
@@ -186,11 +191,15 @@ def _road_axis(obj, object_index: int, spec) -> _RoadAxis | None:
     )
 
 
+def _is_paved_family(family: str) -> bool:
+    return family in {"sil", "kos", "asf", "paved"}
+
+
 def _surface_priority(family: str) -> int:
     # Final WorldObjects do not retain OSM highway class provenance.  Preserve
     # the strongest information still available: paved beats generated gravel,
     # which beats the stock dirt/earth family.
-    if family in {"sil", "kos", "asf", "paved"}:
+    if _is_paved_family(family):
         return 3
     if family == "gravel":
         return 2
@@ -240,6 +249,20 @@ def _mean_lateral_offset(reference: _RoadAxis, other: _RoadAxis) -> float:
     return (first + second) * 0.5
 
 
+def _maximum_lateral_offset(reference: _RoadAxis, other: _RoadAxis) -> float:
+    # The paved-only second pass is intentionally stricter laterally than the
+    # ordinary overlap rule: every endpoint of the candidate axis must stay
+    # inside the same narrow centre-line envelope of the kept piece.
+    nx, nz = -reference.uz, reference.ux
+    return max(
+        abs(
+            (point[0] - reference.start[0]) * nx
+            + (point[1] - reference.start[1]) * nz
+        )
+        for point in (other.start, other.end)
+    )
+
+
 def _longitudinal_overlap(reference: _RoadAxis, other: _RoadAxis) -> float:
     first = (
         (other.start[0] - reference.start[0]) * reference.ux
@@ -256,25 +279,50 @@ def _longitudinal_overlap(reference: _RoadAxis, other: _RoadAxis) -> float:
 def _is_redundant(candidate: _RoadAxis, kept: _RoadAxis) -> bool:
     if abs(candidate.elevation - kept.elevation) > _MAXIMUM_VERTICAL_SEPARATION_METRES:
         return False
-    if not _axis_angle_is_close(candidate, kept):
-        return False
 
     lateral_limit = min(2.0, min(candidate.half_width, kept.half_width) * 0.55)
-    # Use the smaller of the two line-reference measurements so small heading
-    # noise does not turn a coincident 25 m slab into a false negative.
-    lateral = min(
-        _mean_lateral_offset(candidate, kept),
-        _mean_lateral_offset(kept, candidate),
-    )
-    if lateral > lateral_limit:
-        return False
+    if _axis_angle_is_close(candidate, kept):
+        # Use the smaller of the two line-reference measurements so small heading
+        # noise does not turn a coincident 25 m slab into a false negative.
+        lateral = min(
+            _mean_lateral_offset(candidate, kept),
+            _mean_lateral_offset(kept, candidate),
+        )
+        if lateral <= lateral_limit:
+            overlap = max(
+                _longitudinal_overlap(candidate, kept),
+                _longitudinal_overlap(kept, candidate),
+            )
+            shorter = min(candidate.length, kept.length)
+            if (
+                shorter > 1.0e-6
+                and overlap / shorter >= _MINIMUM_SHORTER_AXIS_OVERLAP
+            ):
+                return True
 
-    overlap = max(
-        _longitudinal_overlap(candidate, kept),
-        _longitudinal_overlap(kept, candidate),
+    # The PBO audit found a second, distinct paved failure mode: short pieces can
+    # be almost completely painted under a stronger paved piece while differing
+    # by slightly more than the conservative 6-degree alignment gate.  Do not
+    # widen the ordinary rule.  Instead remove only the lower-priority candidate
+    # when *its own* axis is nearly fully covered and remains tightly inside the
+    # kept centre-line envelope.  This leaves partial seams, divided roads, dirt,
+    # and longer through-pieces outside the aggressive second pass.
+    if not (
+        _is_paved_family(candidate.family)
+        and _is_paved_family(kept.family)
+    ):
+        return False
+    alignment = abs(candidate.ux * kept.ux + candidate.uz * kept.uz)
+    if alignment < _PAVED_COVERAGE_ALIGNMENT_COSINE:
+        return False
+    if _maximum_lateral_offset(kept, candidate) > lateral_limit:
+        return False
+    candidate_overlap = _longitudinal_overlap(candidate, kept)
+    return (
+        candidate.length > 1.0e-6
+        and candidate_overlap / candidate.length
+        >= _MINIMUM_PAVED_CANDIDATE_COVERAGE
     )
-    shorter = min(candidate.length, kept.length)
-    return shorter > 1.0e-6 and overlap / shorter >= _MINIMUM_SHORTER_AXIS_OVERLAP
 
 
 def deduplicate_final_road_objects(
