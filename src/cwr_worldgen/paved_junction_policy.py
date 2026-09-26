@@ -254,6 +254,76 @@ def _assign_arms(incidents, connectors) -> tuple[_Arm, ...]:
     )
 
 
+def _generated_plan(
+    point,
+    incidents,
+    *,
+    world_name: str,
+) -> _Plan | None:
+    """Build an exact-heading generated T only for stock-plan fallback."""
+
+    if len(incidents) != 3 or not all(
+        _kind(family) == "paved" for _direction_value, family in incidents
+    ):
+        return None
+
+    directions = tuple(value[0] for value in incidents)
+    headings, axis = _pi.paved_junction_signature_for_directions(directions)
+    width = max(
+        _paved_half_width(family) * 2.0
+        for _direction_value, family in incidents
+    )
+    model_path = _pi.paved_junction_signature_model_path(
+        world_name,
+        width,
+        headings,
+    )
+    connector_radius = (
+        _JUNCTION_RADIUS
+        + _pi.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+    )
+    right = axis[1], -axis[0]
+    definitions = []
+    for heading in headings:
+        radians = math.radians(heading)
+        local_direction = (
+            math.sin(radians),
+            math.cos(radians),
+        )
+        world_direction = _unit((
+            right[0] * local_direction[0]
+            + axis[0] * local_direction[1],
+            right[1] * local_direction[0]
+            + axis[1] * local_direction[1],
+        ))
+        nearest = min(
+            incidents,
+            key=lambda value: _angle(
+                value[0],
+                world_direction,
+            ),
+        )
+        definitions.append((
+            (
+                local_direction[0] * connector_radius,
+                local_direction[1] * connector_radius,
+            ),
+            float(heading),
+            _junction_family(nearest[1]),
+        ))
+
+    connectors = tuple(
+        _connector(local, heading, family, point, axis)
+        for local, heading, family in tuple(definitions)
+    )
+    return _Plan(
+        model_path,
+        point,
+        axis,
+        _assign_arms(incidents, connectors),
+    )
+
+
 def _plan(
     point,
     incidents,
