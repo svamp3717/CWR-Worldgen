@@ -190,6 +190,31 @@ def test_generated_paved_junction_quantizes_heading_and_reuses_stock_texture(
     assert roadway.faces
 
 
+def test_generated_curved_paved_piece_has_square_nominal_seam_ends() -> None:
+    key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_w091_l0062_r20",
+        91,
+        62,
+    )
+    visual, _map_geometry, roadway, _land = infrastructure._road_lods(
+        key,
+        r"o\road\sil_new.paa",
+    )
+
+    half_length = key.length_m * 0.5
+    for lod in (visual, roadway):
+        first_left, first_right = lod.points[0], lod.points[1]
+        last_left, last_right = lod.points[-2], lod.points[-1]
+        assert math.isclose(first_left[2], first_right[2], abs_tol=1.0e-9)
+        assert math.isclose(last_left[2], last_right[2], abs_tol=1.0e-9)
+        assert min(point[2] for point in lod.points) >= -half_length - 1.0e-9
+        assert max(point[2] for point in lod.points) <= half_length + 1.0e-9
+
+    assert infrastructure.GENERATED_PAVED_VISUAL_OVERLAP_METRES == 0.0
+    assert infrastructure.GENERATED_PAVED_TEXTURE_REPEAT_METRES == 6.25
+
+
 def test_generated_paved_junction_visual_overhang_covers_logical_seam() -> None:
     key = infrastructure.InfrastructureModelKey(
         "road",
