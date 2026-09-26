@@ -447,7 +447,9 @@ def _stitch_generated_hub_approaches(
 
         for arm in plan.arms:
             connector = tuple(arm.connector.point)
-            direction = _paved._unit(arm.source_direction)
+            source_direction = _paved._unit(arm.source_direction)
+            connector_direction = _paved._unit(arm.connector.direction)
+            connector_radius = math.dist(plan.point, connector)
             choices = []
             for obj, axis, distances in candidates:
                 object_id = int(obj.object_id)
@@ -464,14 +466,26 @@ def _stitch_generated_hub_approaches(
                         near[0] - plan.point[0],
                         near[1] - plan.point[1],
                     ))
-                    radial_error = _paved._angle(radial, direction)
+                    radial_error = _paved._angle(radial, source_direction)
                     if radial_error > 30.0:
                         continue
-                    gap = math.dist(connector, near)
-                    if gap > 3.0:
+
+                    endpoint_gap = math.dist(connector, near)
+                    segment_gap = _p._point_segment_distance(
+                        connector,
+                        near,
+                        far,
+                    )
+                    straddles_connector = (
+                        near_radius < connector_radius < far_radius
+                        and segment_gap <= 1.50
+                    )
+                    if endpoint_gap > 3.0 and not straddles_connector:
                         continue
+                    gap = segment_gap if straddles_connector else endpoint_gap
                     choices.append((
                         gap,
+                        0 if straddles_connector else 1,
                         radial_error,
                         object_id,
                         obj,
@@ -481,12 +495,33 @@ def _stitch_generated_hub_approaches(
 
             if not choices:
                 continue
-            gap, _radial_error, object_id, old, near, far = min(
+            (
+                gap,
+                _straddle_priority,
+                _radial_error,
+                object_id,
+                old,
+                near,
+                far,
+            ) = min(
                 choices,
-                key=lambda value: (value[0], value[1], value[2]),
+                key=lambda value: (value[0], value[1], value[2], value[3]),
             )
             used_ids.add(object_id)
-            if gap <= 0.12:
+
+            continuation = _paved._unit((
+                far[0] - near[0],
+                far[1] - near[1],
+            ))
+            tangent_error = _paved._angle(
+                continuation,
+                connector_direction,
+            )
+            # Endpoint coincidence alone is not a clean seam. terrtest41 had
+            # two generated approaches within millimetres of their connectors
+            # but one arrived about 11 degrees off-axis, exposing a triangular
+            # corner. Rebuild whenever the inner tangent is visibly different.
+            if gap <= 0.12 and tangent_error <= 2.0:
                 continue
 
             width = _p._generated_paved_half_width(old.model_path) * 2.0
@@ -494,14 +529,10 @@ def _stitch_generated_hub_approaches(
             if length <= 0.05:
                 remove_ids.add(object_id)
                 continue
-            continuation = _paved._unit((
-                far[0] - near[0],
-                far[1] - near[1],
-            ))
             curve = _generated_curve_choice(
                 connector,
                 far,
-                direction,
+                connector_direction,
                 continuation,
             )
             model_path = _pi.paved_fallback_model_path(
