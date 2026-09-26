@@ -317,12 +317,24 @@ def _plan(
                 branch_heading,
             )
             branch_radians = math.radians(branch_heading)
+            connector_radius = (
+                _JUNCTION_RADIUS
+                + _pi.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+            )
             definitions = (
-                ((0.0, _JUNCTION_RADIUS), 0.0, _junction_family(main_families[0])),
-                ((0.0, -_JUNCTION_RADIUS), 180.0, _junction_family(main_families[1])),
+                (
+                    (0.0, connector_radius),
+                    0.0,
+                    _junction_family(main_families[0]),
+                ),
+                (
+                    (0.0, -connector_radius),
+                    180.0,
+                    _junction_family(main_families[1]),
+                ),
                 ((
-                    math.sin(branch_radians) * _JUNCTION_RADIUS,
-                    math.cos(branch_radians) * _JUNCTION_RADIUS,
+                    math.sin(branch_radians) * connector_radius,
+                    math.cos(branch_radians) * connector_radius,
                 ), float(branch_heading), _junction_family(branch_family)),
             )
         else:
