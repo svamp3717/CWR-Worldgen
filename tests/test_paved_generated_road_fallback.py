@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from cwr_worldgen import playability
+from cwr_worldgen import paved_junction_policy as junctions
 from cwr_worldgen import procedural_infrastructure as infrastructure
 from cwr_worldgen import paved_road_generated_fallback_policy as fallback
 from cwr_worldgen import road_quality_policy as quality
@@ -87,6 +88,62 @@ def test_tight_paved_bend_uses_generated_fallback_when_stock_piece_fails() -> No
     assert infrastructure.is_generated_paved_road_model(model_path)
     assert model_path.casefold().startswith(r"paved_fallback_test\i\paved_")
     assert r"\road\sil6.p3d" not in model_path.casefold()
+
+
+def test_stock_junction_approach_reserve_never_uses_generated_paved_microsegment() -> None:
+    spec = _spec()
+    pieces = playability.road_model_variants(
+        spec.paved_road_model,
+        spec.road_segment_length,
+    )
+    piece = next(item for item in pieces if item.nominal_length == 6)
+    measure = playability._PolylineMeasure.create(
+        ((0.0, 0.0), (2.0, 3.0), (5.0, 4.0), (7.0, 1.0))
+    )
+    key = playability._road_node_key(measure.points[0])
+    plan_token = junctions._PLANS.set({
+        key: SimpleNamespace(
+            model_path=r"o\road\kr_new_sil_sil_t.p3d"
+        )
+    })
+    try:
+        upgraded = _upgrade(measure, pieces, piece, spec)
+    finally:
+        junctions._PLANS.reset(plan_token)
+
+    assert upgraded[0][0].model_path == piece.model_path
+    assert not infrastructure.is_generated_paved_road_model(
+        upgraded[0][0].model_path
+    )
+
+
+def test_generated_junction_approach_still_allows_generated_paved_fallback() -> None:
+    spec = _spec()
+    pieces = playability.road_model_variants(
+        spec.paved_road_model,
+        spec.road_segment_length,
+    )
+    piece = next(item for item in pieces if item.nominal_length == 6)
+    measure = playability._PolylineMeasure.create(
+        ((0.0, 0.0), (2.0, 3.0), (5.0, 4.0), (7.0, 1.0))
+    )
+    key = playability._road_node_key(measure.points[0])
+    plan_token = junctions._PLANS.set({
+        key: SimpleNamespace(
+            model_path=(
+                r"paved_fallback_test\i\"
+                r"paved_j3_w091_h000_095_190.p3d"
+            )
+        )
+    })
+    try:
+        upgraded = _upgrade(measure, pieces, piece, spec)
+    finally:
+        junctions._PLANS.reset(plan_token)
+
+    assert infrastructure.is_generated_paved_road_model(
+        upgraded[0][0].model_path
+    )
 
 
 def test_tight_dirt_bend_never_uses_generated_paved_fallback() -> None:
