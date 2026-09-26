@@ -133,6 +133,62 @@ def test_generated_paved_model_names_quantize_for_reuse() -> None:
     assert first.endswith(r"paved_w091_l0062_r20.p3d")
 
 
+def test_generated_paved_junction_quantizes_heading_and_reuses_stock_texture(
+    tmp_path: Path,
+) -> None:
+    first = infrastructure.paved_junction_model_path(
+        "reuse_world", 9.10, 9.10, 258.0
+    )
+    second = infrastructure.paved_junction_model_path(
+        "reuse_world", 9.08, 9.12, 261.0
+    )
+    assert first == second
+    assert first.endswith(r"\paved_j3_m091_b091_a260.p3d")
+    assert infrastructure.is_generated_paved_junction_model(first)
+
+    stock_texture = r"landtext\silnice.pac"
+    library = infrastructure.ProceduralInfrastructureLibrary(
+        "reuse_world",
+        paved_texture_path=stock_texture,
+        cache_enabled=False,
+    )
+    library.register_model_usage(first, 2)
+    result = library.write_assets(
+        tmp_path,
+        tmp_path / "infrastructure.json",
+    )
+
+    assert result.placements == 2
+    assert result.generated_variants == 1
+    assert result.texture_files == ()
+    summary = infrastructure.inspect_mlod(
+        tmp_path / result.model_files[0]
+    )
+    assert stock_texture in summary.textures
+    assert any(
+        abs(value - infrastructure._ROADWAY_LOD) < 1.0
+        for value in summary.resolutions
+    )
+
+    key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_j3_m091_b091_a260",
+        91,
+        int(round(
+            infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 20.0
+        )),
+    )
+    visual, _map_geometry, roadway, _land = infrastructure._road_lods(
+        key,
+        stock_texture,
+    )
+    assert min(point[0] for point in visual.points) < -5.5
+    assert max(point[2] for point in visual.points) > 6.0
+    assert min(point[2] for point in visual.points) < -6.0
+    assert visual.faces
+    assert roadway.faces
+
+
 def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
     tmp_path: Path,
 ) -> None:
@@ -184,6 +240,14 @@ def test_generated_paved_and_gravel_roads_use_native_render_metadata() -> None:
     keys = (
         infrastructure.InfrastructureModelKey(
             "road", "paved_w091_l0062", 91, 62
+        ),
+        infrastructure.InfrastructureModelKey(
+            "road",
+            "paved_j3_m091_b091_a260",
+            91,
+            int(round(
+                infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 20.0
+            )),
         ),
         infrastructure.InfrastructureModelKey(
             "road",
