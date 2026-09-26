@@ -854,30 +854,14 @@ def _generated_paved_t_cap_plan(
     values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
     spec: PlayabilitySpec,
 ) -> tuple[str, tuple[float, float]] | None:
-    """Return a generated T whose P3D encodes every real incident heading."""
+    """Do not preempt the stock paved-junction planner in the base road fit.
 
-    values = tuple(values)
-    if (
-        len(values) != 3
-        or not bool(getattr(spec, "procedural_paved_road_fallback", False))
-        or any(value[1] for value in values)
-    ):
-        return None
+    Generated paved T models are fallback assets. Returning None here preserves
+    the vanilla stock cap/approach path first, which is important for ordinary
+    T intersections such as the map-centre terrtest46 regression.
+    """
 
-    directions = tuple(value[0] for value in values)
-    headings, axis = paved_junction_signature_for_directions(directions)
-    width = max(
-        _generated_paved_half_width(value[2]) * 2.0
-        for value in values
-    )
-    return (
-        paved_junction_signature_model_path(
-            spec.name,
-            width,
-            headings,
-        ),
-        axis,
-    )
+    return None
 
 def _rounded_road_run(
     points: Sequence[tuple[float, float]],
