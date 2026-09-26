@@ -257,8 +257,15 @@ def test_generated_paved_t_hub_tracks_skew_branch_heading() -> None:
     assert _angle(connector.direction, branch) <= 2.5
     assert math.isclose(
         math.dist(plan.point, connector.point),
-        paved_junctions._JUNCTION_RADIUS,
+        (
+            paved_junctions._JUNCTION_RADIUS
+            + infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+        ),
         abs_tol=1.0e-6,
+    )
+    assert math.dist(plan.point, connector.point) < (
+        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        + infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
     )
 
 
