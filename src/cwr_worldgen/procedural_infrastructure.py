@@ -73,6 +73,12 @@ GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.0
 # forcing every junction into a square 90-degree stock cap.
 GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES = 6.25
 GENERATED_PAVED_JUNCTION_ANGLE_STEP_DEGREES = 5
+GENERATED_PAVED_JUNCTION_HEADING_STEP_DEGREES = 5
+_PAVED_JUNCTION_SIGNATURE_SUBTYPE_PATTERN = re.compile(
+    r"^paved_j(?P<degree>[34])_w(?P<width>\d{3})_h"
+    r"(?P<headings>\d{3}(?:_\d{3}){2,3})$",
+    re.IGNORECASE,
+)
 # Donor branch stock-style junction mesh: logical connector/Roadway geometry
 # stays at 6.25 m while only the visual road artwork extends over the approach.
 GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES = 0.55
@@ -813,6 +819,116 @@ def _paved_junction_angle_bucket(angle_degrees: float) -> int:
     return int(round(normalized / step) * step) % 360
 
 
+def _paved_junction_unit(
+    direction: tuple[float, float],
+) -> tuple[float, float]:
+    length = math.hypot(float(direction[0]), float(direction[1]))
+    if length <= 1.0e-9:
+        return (0.0, 1.0)
+    return (
+        float(direction[0]) / length,
+        float(direction[1]) / length,
+    )
+
+
+def _paved_junction_heading(direction: tuple[float, float]) -> float:
+    x, z = _paved_junction_unit(direction)
+    return math.degrees(math.atan2(x, z)) % 360.0
+
+
+def paved_junction_signature_for_directions(
+    directions: Iterable[tuple[float, float]],
+) -> tuple[tuple[int, ...], tuple[float, float]]:
+    """Encode every incident paved arm in one reusable local heading signature."""
+
+    cleaned = tuple(_paved_junction_unit(direction) for direction in directions)
+    degree = len(cleaned)
+    if degree not in {3, 4}:
+        raise ValueError(
+            "generated paved junction requires three or four directions"
+        )
+
+    candidates: list[
+        tuple[tuple[int, ...], float, tuple[float, float]]
+    ] = []
+    for axis in cleaned:
+        axis_heading = _paved_junction_heading(axis)
+        values = []
+        for direction in cleaned:
+            relative = (
+                _paved_junction_heading(direction) - axis_heading
+            ) % 360.0
+            bucket = (
+                int(
+                    round(
+                        relative
+                        / GENERATED_PAVED_JUNCTION_HEADING_STEP_DEGREES
+                    )
+                )
+                * GENERATED_PAVED_JUNCTION_HEADING_STEP_DEGREES
+            ) % 360
+            values.append(bucket)
+        signature = tuple(sorted(values))
+        if len(set(signature)) != degree:
+            continue
+        candidates.append((signature, axis_heading, axis))
+
+    if not candidates:
+        raise ValueError(
+            "generated paved junction directions collapse after heading bucketing"
+        )
+    signature, _axis_heading, axis = min(
+        candidates,
+        key=lambda value: (value[0], value[1]),
+    )
+    return signature, axis
+
+
+def paved_junction_signature_model_path(
+    world_name: str,
+    width_metres: float,
+    headings: Iterable[int],
+) -> str:
+    normalized = tuple(int(value) % 360 for value in headings)
+    degree = len(normalized)
+    if degree not in {3, 4} or len(set(normalized)) != degree:
+        raise ValueError(
+            "generated paved junction requires three or four unique headings"
+        )
+    if 0 not in normalized:
+        raise ValueError(
+            "generated paved junction signature must include local heading 000"
+        )
+    width_dm = max(
+        35,
+        min(999, int(round(float(width_metres) * 10.0))),
+    )
+    encoded = "_".join(f"{value:03d}" for value in normalized)
+    return (
+        rf"{world_name}\i\paved_j{degree}_w{width_dm:03d}_h{encoded}.p3d"
+    )
+
+
+def _parse_paved_junction_signature_subtype(
+    subtype: str,
+) -> tuple[int, tuple[int, ...]] | None:
+    match = _PAVED_JUNCTION_SIGNATURE_SUBTYPE_PATTERN.fullmatch(
+        subtype.casefold()
+    )
+    if match is None:
+        return None
+    degree = int(match.group("degree"))
+    headings = tuple(
+        int(value) % 360
+        for value in match.group("headings").split("_")
+    )
+    if len(headings) != degree or len(set(headings)) != degree:
+        raise ValueError(
+            "generated paved junction has invalid heading signature"
+        )
+    return degree, headings
+
+
 def _paved_junction_arm_polygon(
     heading_degrees: float,
     half_width: float,
@@ -869,6 +985,31 @@ def _paved_junction_polygon(
     if polygon.geom_type == "MultiPolygon":
         polygon = max(polygon.geoms, key=lambda geom: geom.area)
     return polygon
+
+def _paved_junction_polygon_for_headings(
+    headings: tuple[int, ...],
+    half_width: float,
+    *,
+    extent: float = GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+):
+    half_width = max(0.5, float(half_width))
+    arms = tuple(
+        _paved_junction_arm_polygon(
+            heading,
+            half_width,
+            extent=extent,
+        )
+        for heading in headings
+    )
+    core = ShapelyPoint(0.0, 0.0).buffer(
+        max(1.0, half_width * 0.98),
+        quad_segs=8,
+    )
+    polygon = unary_union((core, *arms))
+    if polygon.geom_type == "MultiPolygon":
+        polygon = max(polygon.geoms, key=lambda geom: geom.area)
+    return polygon
+
 
 def _iter_paved_junction_polygon_parts(geometry):
     if geometry.is_empty:
@@ -1057,21 +1198,14 @@ def _append_paved_junction_quad(
     ))
 
 
-def _paved_junction_visual_lod(
+def _stock_style_paved_junction_visual_lod(
     *,
-    main_half_width: float,
-    branch_half_width: float,
-    branch_heading_degrees: float,
+    headings: tuple[int, ...],
+    half_width: float,
     texture: str,
 ) -> _Lod:
-    """Build the T hub using the donor branch's stock CWA junction topology."""
+    """Build a donor-style paved hub that follows every encoded road heading."""
 
-    headings = (0, int(branch_heading_degrees) % 360, 180)
-    half_width = max(
-        1.75,
-        float(main_half_width),
-        float(branch_half_width),
-    )
     through_a, through_b = _paved_junction_through_pair(headings)
     side_headings = tuple(
         heading
@@ -1086,7 +1220,6 @@ def _paved_junction_visual_lod(
     points: list[tuple[float, float, float]] = []
     faces: list[_Face] = []
 
-    # Donor branch: uninterrupted sil_new through carriageway.
     a_left, a_right = _paved_junction_cross_section(
         through_a, extent, half_width, y
     )
@@ -1103,6 +1236,11 @@ def _paved_junction_visual_lod(
             (b_left[2] + b_right[2]) * 0.5,
         ),
     )
+    through_v_span = (
+        through_length / GENERATED_PAVED_TEXTURE_REPEAT_METRES
+        if len(headings) == 3
+        else through_length / (GENERATED_PAVED_TEXTURE_REPEAT_METRES * 2.0)
+    )
     _append_paved_junction_quad(
         points,
         faces,
@@ -1112,19 +1250,19 @@ def _paved_junction_visual_lod(
         end_left=a_left,
         end_right=a_right,
         v_start=0.0,
-        v_end=through_length / GENERATED_PAVED_TEXTURE_REPEAT_METRES,
+        v_end=through_v_span,
         face_flags=_ROAD_SURFACE_FACE_FLAG,
     )
 
-    # Donor branch: terminating T arm uses sil_konec and is raised at its inner
-    # edge by the measured stock kr_new_sil_sil_t anti-z-fighting offset.
     end_texture = _paved_junction_end_texture(texture)
+    stub_inner = 0.0 if len(headings) == 3 else 0.14
+    stub_rise = 0.0666 if len(headings) == 3 else 0.0118
     for heading in side_headings:
         inner_left, inner_right = _paved_junction_cross_section(
             heading,
-            0.0,
+            stub_inner,
             half_width,
-            y + 0.0666,
+            y + stub_rise,
         )
         outer_left, outer_right = _paved_junction_cross_section(
             heading,
@@ -1132,6 +1270,7 @@ def _paved_junction_visual_lod(
             half_width,
             y,
         )
+        stub_length = max(0.01, extent - stub_inner)
         _append_paved_junction_quad(
             points,
             faces,
@@ -1141,7 +1280,7 @@ def _paved_junction_visual_lod(
             end_left=outer_left,
             end_right=outer_right,
             v_start=0.0,
-            v_end=extent / GENERATED_PAVED_TEXTURE_REPEAT_METRES,
+            v_end=stub_length / GENERATED_PAVED_TEXTURE_REPEAT_METRES,
             face_flags=_ROAD_SURFACE_FACE_FLAG,
         )
 
@@ -1152,6 +1291,26 @@ def _paved_junction_visual_lod(
         _VISUAL_LOD,
         properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
         point_flags=(_ROAD_SURFACE_POINT_FLAG,) * len(points),
+    )
+
+
+def _paved_junction_visual_lod(
+    *,
+    main_half_width: float,
+    branch_half_width: float,
+    branch_heading_degrees: float,
+    texture: str,
+) -> _Lod:
+    """Legacy angle-only wrapper retained for existing cached/model references."""
+
+    return _stock_style_paved_junction_visual_lod(
+        headings=(0, int(branch_heading_degrees) % 360, 180),
+        half_width=max(
+            1.75,
+            float(main_half_width),
+            float(branch_half_width),
+        ),
+        texture=texture,
     )
 
 def _paved_junction_triangulated_lod(
@@ -1198,35 +1357,57 @@ def _paved_junction_lods(
     key: InfrastructureModelKey,
     texture: str,
 ) -> tuple[_Lod, ...]:
-    match = re.fullmatch(
-        r"paved_j3_m(?P<main>\d{3})_b(?P<branch>\d{3})_a(?P<angle>\d{3})",
-        key.subtype,
-        re.IGNORECASE,
-    )
-    if match is None:
-        raise ValueError(f"invalid generated paved junction subtype: {key.subtype}")
-    main_half_width = int(match.group("main")) / 20.0
-    branch_half_width = int(match.group("branch")) / 20.0
-    branch_heading = int(match.group("angle")) % 360
+    signature = _parse_paved_junction_signature_subtype(key.subtype)
+    if signature is not None:
+        _degree, headings = signature
+        half_width = max(1.75, key.width_m * 0.5)
+        logical_polygon = _paved_junction_polygon_for_headings(
+            headings,
+            half_width,
+            extent=GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+        )
+        junction_texture = (
+            r"o\road\sil_new.paa"
+            if key.width_m >= 8.5
+            else texture
+        )
+        visual = _stock_style_paved_junction_visual_lod(
+            headings=headings,
+            half_width=half_width,
+            texture=junction_texture,
+        )
+    else:
+        match = re.fullmatch(
+            r"paved_j3_m(?P<main>\d{3})_b(?P<branch>\d{3})_a(?P<angle>\d{3})",
+            key.subtype,
+            re.IGNORECASE,
+        )
+        if match is None:
+            raise ValueError(
+                f"invalid generated paved junction subtype: {key.subtype}"
+            )
+        main_half_width = int(match.group("main")) / 20.0
+        branch_half_width = int(match.group("branch")) / 20.0
+        branch_heading = int(match.group("angle")) % 360
+        logical_polygon = _paved_junction_polygon(
+            main_half_width,
+            branch_half_width,
+            branch_heading,
+            extent=GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+        )
+        half_width = max(main_half_width, branch_half_width)
+        junction_texture = (
+            r"o\road\sil_new.paa"
+            if half_width * 2.0 >= 8.5
+            else texture
+        )
+        visual = _paved_junction_visual_lod(
+            main_half_width=main_half_width,
+            branch_half_width=branch_half_width,
+            branch_heading_degrees=branch_heading,
+            texture=junction_texture,
+        )
 
-    logical_polygon = _paved_junction_polygon(
-        main_half_width,
-        branch_half_width,
-        branch_heading,
-        extent=GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
-    )
-    half_width = max(main_half_width, branch_half_width)
-    junction_texture = (
-        r"o\road\sil_new.paa"
-        if half_width * 2.0 >= 8.5
-        else texture
-    )
-    visual = _paved_junction_visual_lod(
-        main_half_width=main_half_width,
-        branch_half_width=branch_half_width,
-        branch_heading_degrees=branch_heading,
-        texture=junction_texture,
-    )
     boundary = tuple(
         (float(x), 0.0, float(z))
         for x, z in tuple(logical_polygon.exterior.coords)[:-1]
@@ -1249,7 +1430,10 @@ def _paved_junction_lods(
 
 def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
     subtype = key.subtype.casefold()
-    if subtype.startswith("paved_j3_"):
+    if (
+        subtype.startswith("paved_j3_")
+        or subtype.startswith("paved_j4_")
+    ):
         return _paved_junction_lods(key, texture)
     if subtype in {"gravel_j3", "gravel_j4"}:
         return _gravel_junction_lods(key, texture)
@@ -1475,12 +1659,19 @@ def paved_junction_model_path(
 
 def is_generated_paved_junction_model(model_path: str) -> bool:
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
-    match = re.fullmatch(
+    legacy = re.fullmatch(
         r"paved_j3_m\d{3}_b\d{3}_a(?P<angle>\d{3})\.p3d",
         filename,
         re.IGNORECASE,
     )
-    return match is not None and int(match.group("angle")) < 360
+    if legacy is not None:
+        return int(legacy.group("angle")) < 360
+    signature = re.fullmatch(
+        r"paved_j[34]_w\d{3}_h\d{3}(?:_\d{3}){2,3}\.p3d",
+        filename,
+        re.IGNORECASE,
+    )
+    return signature is not None
 
 
 def paved_fallback_model_path(
@@ -1571,6 +1762,11 @@ class ProceduralInfrastructureLibrary:
     )
     _PAVED_JUNCTION_PATTERN = re.compile(
         r"^paved_j3_m(?P<main>\d{3})_b(?P<branch>\d{3})_a(?P<angle>\d{3})\.p3d$",
+        re.IGNORECASE,
+    )
+    _PAVED_JUNCTION_SIGNATURE_PATTERN = re.compile(
+        r"^paved_j(?P<degree>[34])_w(?P<width>\d{3})_h"
+        r"(?P<headings>\d{3}(?:_\d{3}){2,3})\.p3d$",
         re.IGNORECASE,
     )
     _UTILITY_PATTERN = re.compile(r"^util_(power_pole|power_tower|water_tower)\.p3d$", re.IGNORECASE)
@@ -1665,6 +1861,28 @@ class ProceduralInfrastructureLibrary:
             actual_length = self.road_segment_length * nominal / 25.0
             self._usage[InfrastructureModelKey(
                 "road", filename[:-4].casefold(), int(round(GENERATED_GRAVEL_HALF_WIDTH_METRES * 20.0)), max(10, int(round(actual_length * 10.0)))
+            )] += count
+            return
+        signature_junction_match = (
+            self._PAVED_JUNCTION_SIGNATURE_PATTERN.fullmatch(filename)
+        )
+        if signature_junction_match:
+            degree = int(signature_junction_match.group("degree"))
+            headings = tuple(
+                int(value) % 360
+                for value in signature_junction_match.group("headings").split("_")
+            )
+            if len(headings) != degree or len(set(headings)) != degree:
+                raise ValueError(
+                    "generated paved junction model heading mismatch"
+                )
+            self._usage[InfrastructureModelKey(
+                "road",
+                filename[:-4].casefold(),
+                int(signature_junction_match.group("width")),
+                int(round(
+                    GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 20.0
+                )),
             )] += count
             return
         paved_junction_match = self._PAVED_JUNCTION_PATTERN.fullmatch(filename)
@@ -1838,7 +2056,7 @@ class ProceduralInfrastructureLibrary:
             texture = self._texture_path(key)
             if (
                 key.kind == "road"
-                and key.subtype.casefold().startswith("paved_j3_")
+                and key.subtype.casefold().startswith(("paved_j3_", "paved_j4_"))
             ):
                 model_cache_version = (
                     "procedural-infrastructure-model-v22-donor-stock-junction-topology"
