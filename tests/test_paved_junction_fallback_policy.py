@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import cwr_worldgen.paved_junction_fallback_policy as fallback
 import cwr_worldgen.paved_junction_policy as paved
+import cwr_worldgen.playability as playability
 import cwr_worldgen.road_quality_policy as road_quality
 
 
@@ -97,6 +98,94 @@ def test_failed_stock_plan_uses_ordinary_junction_geometry_on_refit() -> None:
     assert geometry[active_key].half_length == paved._APPROACH_RESERVE
     assert geometry[active_key].half_width == paved._APPROACH_RESERVE
     assert geometry[failed_key] == base[failed_key]
+
+
+
+def test_generated_fallback_stitches_terminal_piece_and_removes_intruder() -> None:
+    centre = (100.0, 100.0)
+    connector = paved._Connector("sil", (100.0, 106.25), (0.0, 1.0))
+    plan = paved._Plan(
+        r"o\road\kr_new_sil_sil_t.p3d",
+        centre,
+        (0.0, 1.0),
+        (
+            paved._Arm("sil", (0.0, 1.0), connector),
+            paved._Arm("sil", (0.0, -1.0), paved._Connector(
+                "sil", (100.0, 93.75), (0.0, -1.0)
+            )),
+            paved._Arm("sil", (1.0, 0.0), paved._Connector(
+                "sil", (106.25, 100.0), (1.0, 0.0)
+            )),
+        ),
+    )
+    spec = SimpleNamespace(
+        name="fallback_world",
+        cells=64,
+        cell_size=10.0,
+        road_segment_length=25.0,
+    )
+    elevations = [0.0] * (spec.cells * spec.cells)
+
+    hub = playability.WorldObject(
+        1,
+        r"fallback_world\i\paved_j3_w091_h000_090_180.p3d",
+        centre[0],
+        0.035,
+        centre[1],
+        0.0,
+        0.0,
+    )
+    # Stale piece penetrates deep into the generated hub.
+    intruder = playability._road_object_on_slope(
+        2,
+        r"o\road\sil6.p3d",
+        (100.0, 101.0),
+        (100.0, 107.25),
+        elevations,
+        spec,
+        vertical_offset=playability._STOCK_ROAD_VERTICAL_OFFSET_METRES,
+    )
+    # The next outward piece starts a metre beyond the true 6.25 m connector.
+    terminal = playability._road_object_on_slope(
+        3,
+        r"o\road\sil6.p3d",
+        (100.0, 107.25),
+        (100.0, 113.50),
+        elevations,
+        spec,
+        vertical_offset=playability._STOCK_ROAD_VERTICAL_OFFSET_METRES,
+    )
+    report = playability.RoadFitReport(
+        objects=(hub, intruder, terminal),
+        chain_count=1,
+        connection_count=0,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+        junction_cap_objects=1,
+    )
+
+    result = fallback._stitch_generated_fallback_approaches(
+        report,
+        {(1, 1): plan},
+        elevations,
+        spec,
+    )
+
+    ids = {obj.object_id for obj in result.objects}
+    assert 2 not in ids
+    rebuilt = next(obj for obj in result.objects if obj.object_id == 3)
+    assert r"\i\paved_w091_" in rebuilt.model_path.casefold()
+    length = road_quality._piece_length(
+        rebuilt.model_path,
+        spec.road_segment_length,
+    )
+    axis = playability._model_axis(rebuilt, length)
+    assert min(
+        math.dist(connector.point, endpoint)
+        for endpoint in axis
+    ) <= 0.06
 
 
 def test_failed_stock_junction_is_refit_as_ordinary_connected_roads() -> None:
