@@ -73,16 +73,11 @@ GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.0
 # forcing every junction into a square 90-degree stock cap.
 GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES = 6.25
 GENERATED_PAVED_JUNCTION_ANGLE_STEP_DEGREES = 5
-# Keep connector/collision geometry on the stock radius, but extend only the
-# rendered hub over the road approaches. terrtest41 proved that a generated T
-# can be correctly placed while its real through-road arms meet the averaged
-# hub axis at about 11 degrees. With a 4.55 m half-width, that rotates a square
-# approach corner roughly 0.88 m beyond the connector centreline. Give the
-# visual hub 1.0 m of coverage beyond the 6.45 m approach start so those skewed
-# corners remain covered without enlarging Roadway/collision geometry.
+# Donor branch stock-style junction mesh: logical connector/Roadway geometry
+# stays at 6.25 m while only the visual road artwork extends over the approach.
 GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES = 0.55
-# Start approach objects slightly outside the logical connector plane. The
-# 1.20 m visual overhang now leaves 1.00 m of rendered seam coverage.
+# Keep the existing planner's approach clearance. The donor visual hub covers
+# the resulting 0.35 m seam without changing road-fitting behavior.
 GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES = 0.20
 # Matches the stock sil/kos effective half-width used throughout the fitter.
 GENERATED_PAVED_HALF_WIDTH_METRES = 4.55
