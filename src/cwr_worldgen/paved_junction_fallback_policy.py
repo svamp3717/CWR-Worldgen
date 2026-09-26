@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import math
+import re
 
 from . import generator as _generator
 from . import paved_junction_policy as _paved
@@ -289,7 +290,7 @@ def _generated_paved_axis(obj, spec):
         filename = (
             obj.model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
         )
-        match = __import__("re").fullmatch(
+        match = re.fullmatch(
             r"paved_w\d{3}_l(?P<length>\d{4})(?:_[lr]\d{2})?\.p3d",
             filename,
         )
