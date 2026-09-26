@@ -318,17 +318,36 @@ def _plan(
                 _JUNCTION_RADIUS
                 + _pi.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
             )
-            definitions = tuple(
-                (
+            right = axis[1], -axis[0]
+            definitions = []
+            for heading in headings:
+                radians = math.radians(heading)
+                local_direction = (
+                    math.sin(radians),
+                    math.cos(radians),
+                )
+                world_direction = _unit((
+                    right[0] * local_direction[0]
+                    + axis[0] * local_direction[1],
+                    right[1] * local_direction[0]
+                    + axis[1] * local_direction[1],
+                ))
+                nearest = min(
+                    incidents,
+                    key=lambda value: _angle(
+                        value[0],
+                        world_direction,
+                    ),
+                )
+                definitions.append((
                     (
-                        math.sin(math.radians(heading)) * connector_radius,
-                        math.cos(math.radians(heading)) * connector_radius,
+                        local_direction[0] * connector_radius,
+                        local_direction[1] * connector_radius,
                     ),
                     float(heading),
-                    "sil",
-                )
-                for heading in headings
-            )
+                    _junction_family(nearest[1]),
+                ))
+            definitions = tuple(definitions)
         else:
             # Keep the stock-only low-level planner available for tests and
             # callers that do not supply a world-local asset namespace.
