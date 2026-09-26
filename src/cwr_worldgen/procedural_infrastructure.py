@@ -11,6 +11,8 @@ import re
 from typing import Iterable
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+from shapely.geometry import Point as ShapelyPoint, Polygon as ShapelyPolygon
+from shapely.ops import triangulate as shapely_triangulate, unary_union
 
 from .cache import cache_key, restore_or_create_file
 from .paa import inspect_paa, write_rgb_dxt1_paa, write_rgba_dxt1_paa
@@ -62,6 +64,11 @@ GENERATED_GRAVEL_EDGE_SECTION_METRES = 0.65
 # amount of precision for aggressive model reuse.
 GENERATED_PAVED_CURVE_BUCKETS = tuple(range(5, 50, 5))
 GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.18
+# Generated T junctions use the same 6.25 m arm reach as the stock short-road
+# footprint, but rotate the branch arm to the mapped road heading instead of
+# forcing every junction into a square 90-degree stock cap.
+GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES = 6.25
+GENERATED_PAVED_JUNCTION_ANGLE_STEP_DEGREES = 5
 # Matches the stock sil/kos effective half-width used throughout the fitter.
 GENERATED_PAVED_HALF_WIDTH_METRES = 4.55
 
@@ -773,8 +780,194 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
     return visual, map_geometry, roadway, land
 
 
+def _paved_junction_angle_bucket(angle_degrees: float) -> int:
+    normalized = float(angle_degrees) % 360.0
+    step = float(GENERATED_PAVED_JUNCTION_ANGLE_STEP_DEGREES)
+    return int(round(normalized / step) * step) % 360
+
+
+def _paved_junction_arm_polygon(
+    heading_degrees: float,
+    half_width: float,
+    *,
+    extent: float = GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+) -> ShapelyPolygon:
+    angle = math.radians(float(heading_degrees))
+    direction = (math.sin(angle), math.cos(angle))
+    perpendicular = (math.cos(angle), -math.sin(angle))
+    inner = -0.35
+    return ShapelyPolygon(tuple(
+        (
+            direction[0] * along + perpendicular[0] * across,
+            direction[1] * along + perpendicular[1] * across,
+        )
+        for along, across in (
+            (inner, half_width),
+            (extent, half_width),
+            (extent, -half_width),
+            (inner, -half_width),
+        )
+    ))
+
+
+def _paved_junction_polygon(
+    main_half_width: float,
+    branch_half_width: float,
+    branch_heading_degrees: float,
+):
+    main_half_width = max(0.5, float(main_half_width))
+    branch_half_width = max(0.5, float(branch_half_width))
+    arms = (
+        _paved_junction_arm_polygon(0.0, main_half_width),
+        _paved_junction_arm_polygon(180.0, main_half_width),
+        _paved_junction_arm_polygon(branch_heading_degrees, branch_half_width),
+    )
+    # A modest round core fills the triangular inside corner visible when a
+    # skewed branch meets a straight road, without ballooning the road footprint.
+    core_radius = max(1.25, min(main_half_width, branch_half_width) * 0.92)
+    core = ShapelyPoint(0.0, 0.0).buffer(core_radius, quad_segs=8)
+    polygon = unary_union((core, *arms))
+    if polygon.geom_type == "MultiPolygon":
+        polygon = max(polygon.geoms, key=lambda geom: geom.area)
+    return polygon
+
+
+def _paved_junction_triangulated_lod(
+    polygon,
+    *,
+    y: float,
+    texture: str,
+    resolution: float,
+    main_half_width: float,
+    branch_half_width: float,
+    branch_heading_degrees: float,
+) -> _Lod:
+    point_indices: dict[tuple[float, float], int] = {}
+    points: list[tuple[float, float, float]] = []
+    faces: list[_Face] = []
+    angle = math.radians(float(branch_heading_degrees))
+    branch_direction = (math.sin(angle), math.cos(angle))
+    branch_right = (branch_direction[1], -branch_direction[0])
+
+    triangles = (
+        triangle
+        for triangle in shapely_triangulate(polygon)
+        if polygon.covers(triangle.representative_point())
+    )
+    for triangle in triangles:
+        coords = tuple(triangle.exterior.coords)[:-1]
+        if len(coords) != 3:
+            continue
+        centroid_x = sum(float(x) for x, _z in coords) / 3.0
+        centroid_z = sum(float(z) for _x, z in coords) / 3.0
+        branch_along = (
+            centroid_x * branch_direction[0]
+            + centroid_z * branch_direction[1]
+        )
+        branch_across = (
+            centroid_x * branch_right[0]
+            + centroid_z * branch_right[1]
+        )
+        # Give the branch its own across/along UV frame once a triangle is
+        # clearly inside that arm. The centre remains main-road mapped, which
+        # avoids a hard texture rotation line across the through-road.
+        use_branch_uv = (
+            branch_along > 0.25
+            and abs(branch_across) <= branch_half_width * 1.15
+            and branch_along > abs(centroid_z) * 0.45
+        )
+
+        vertices = []
+        for x, z in coords:
+            px, pz = float(x), float(z)
+            key = (round(px, 6), round(pz, 6))
+            index = point_indices.get(key)
+            if index is None:
+                index = len(points)
+                point_indices[key] = index
+                points.append((px, y, pz))
+            if use_branch_uv:
+                across = px * branch_right[0] + pz * branch_right[1]
+                along = px * branch_direction[0] + pz * branch_direction[1]
+                u = 0.5 + across / max(1.0e-6, branch_half_width * 2.0)
+                v = along / GENERATED_GRAVEL_TEXTURE_REPEAT_METRES
+            else:
+                u = 0.5 + px / max(1.0e-6, main_half_width * 2.0)
+                v = pz / GENERATED_GRAVEL_TEXTURE_REPEAT_METRES
+            vertices.append((index, 0, u, v))
+        faces.append(_Face(
+            texture,
+            tuple(vertices),
+            _ROAD_SURFACE_FACE_FLAG,
+        ))
+
+    properties = ()
+    if resolution == _VISUAL_LOD:
+        properties = (("autocenter", "0"), ("class", "road"), ("map", "road"))
+    return _Lod(
+        tuple(points),
+        (_ROAD_SURFACE_NORMAL,),
+        tuple(faces),
+        resolution,
+        properties=properties,
+        point_flags=(_ROAD_SURFACE_POINT_FLAG,) * len(points),
+    )
+
+
+def _paved_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
+    match = re.fullmatch(
+        r"paved_j3_m(?P<main>\d{3})_b(?P<branch>\d{3})_a(?P<angle>\d{3})",
+        key.subtype,
+        re.IGNORECASE,
+    )
+    if match is None:
+        raise ValueError(f"invalid generated paved junction subtype: {key.subtype}")
+    main_half_width = int(match.group("main")) / 20.0
+    branch_half_width = int(match.group("branch")) / 20.0
+    branch_heading = int(match.group("angle")) % 360
+    polygon = _paved_junction_polygon(
+        main_half_width,
+        branch_half_width,
+        branch_heading,
+    )
+    visual = _paved_junction_triangulated_lod(
+        polygon,
+        y=GENERATED_GRAVEL_VISUAL_TOP_METRES,
+        texture=texture,
+        resolution=_VISUAL_LOD,
+        main_half_width=main_half_width,
+        branch_half_width=branch_half_width,
+        branch_heading_degrees=branch_heading,
+    )
+    boundary = tuple(
+        (float(x), 0.0, float(z))
+        for x, z in tuple(polygon.exterior.coords)[:-1]
+    )
+    map_geometry = _Lod(
+        boundary,
+        (),
+        (),
+        _GEOMETRY_LOD,
+        properties=(("map", "road"),),
+    )
+    roadway = _paved_junction_triangulated_lod(
+        polygon,
+        y=GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES,
+        texture="",
+        resolution=_ROADWAY_LOD,
+        main_half_width=main_half_width,
+        branch_half_width=branch_half_width,
+        branch_heading_degrees=branch_heading,
+    )
+    land = _Lod(boundary, (), (), _LAND_CONTACT_LOD)
+    return visual, map_geometry, roadway, land
+
+
 def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
-    if key.subtype.casefold() in {"gravel_j3", "gravel_j4"}:
+    subtype = key.subtype.casefold()
+    if subtype.startswith("paved_j3_"):
+        return _paved_junction_lods(key, texture)
+    if subtype in {"gravel_j3", "gravel_j4"}:
         return _gravel_junction_lods(key, texture)
     width = key.width_m
     length = key.length_m
@@ -973,6 +1166,31 @@ def is_generated_gravel_road_model(model_path: str) -> bool:
     return re.fullmatch(r"gravel(?:25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d", filename, re.IGNORECASE) is not None
 
 
+def paved_junction_model_path(
+    world_name: str,
+    main_width_metres: float,
+    branch_width_metres: float,
+    branch_heading_degrees: float,
+) -> str:
+    main_dm = max(10, min(999, int(round(float(main_width_metres) * 10.0))))
+    branch_dm = max(10, min(999, int(round(float(branch_width_metres) * 10.0))))
+    heading = _paved_junction_angle_bucket(branch_heading_degrees)
+    return (
+        rf"{world_name}\i\paved_j3_m{main_dm:03d}_b{branch_dm:03d}"
+        rf"_a{heading:03d}.p3d"
+    )
+
+
+def is_generated_paved_junction_model(model_path: str) -> bool:
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
+    match = re.fullmatch(
+        r"paved_j3_m\d{3}_b\d{3}_a(?P<angle>\d{3})\.p3d",
+        filename,
+        re.IGNORECASE,
+    )
+    return match is not None and int(match.group("angle")) < 360
+
+
 def paved_fallback_model_path(
     world_name: str,
     width_metres: float,
@@ -1057,6 +1275,10 @@ class ProceduralInfrastructureLibrary:
     _GRAVEL_JUNCTION_PATTERN = re.compile(r"^gravel_j([34])\.p3d$", re.IGNORECASE)
     _PAVED_PATTERN = re.compile(
         r"^paved_w(?P<width>\d{3})_l(?P<length>\d{4})(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+        re.IGNORECASE,
+    )
+    _PAVED_JUNCTION_PATTERN = re.compile(
+        r"^paved_j3_m(?P<main>\d{3})_b(?P<branch>\d{3})_a(?P<angle>\d{3})\.p3d$",
         re.IGNORECASE,
     )
     _UTILITY_PATTERN = re.compile(r"^util_(power_pole|power_tower|water_tower)\.p3d$", re.IGNORECASE)
@@ -1151,6 +1373,18 @@ class ProceduralInfrastructureLibrary:
             actual_length = self.road_segment_length * nominal / 25.0
             self._usage[InfrastructureModelKey(
                 "road", filename[:-4].casefold(), int(round(GENERATED_GRAVEL_HALF_WIDTH_METRES * 20.0)), max(10, int(round(actual_length * 10.0)))
+            )] += count
+            return
+        paved_junction_match = self._PAVED_JUNCTION_PATTERN.fullmatch(filename)
+        if paved_junction_match:
+            angle = int(paved_junction_match.group("angle"))
+            if angle >= 360:
+                raise ValueError(f"invalid generated paved junction angle: {angle}")
+            self._usage[InfrastructureModelKey(
+                "road",
+                filename[:-4].casefold(),
+                int(paved_junction_match.group("main")),
+                int(round(GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 20.0)),
             )] += count
             return
         paved_match = self._PAVED_PATTERN.fullmatch(filename)
@@ -1311,7 +1545,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v17-stock-road-render-metadata"
+                "procedural-infrastructure-model-v18-paved-skew-junctions"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
