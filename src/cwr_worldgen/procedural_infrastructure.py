@@ -74,12 +74,15 @@ GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.0
 GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES = 6.25
 GENERATED_PAVED_JUNCTION_ANGLE_STEP_DEGREES = 5
 # Keep connector/collision geometry on the stock radius, but extend only the
-# rendered hub over the stock approach. CWA shows exact edge-to-edge joins as
-# hairlines, while a small raised visual overhang hides the seam cleanly.
-GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES = 0.55
+# rendered hub over the road approaches. terrtest41 proved that a generated T
+# can be correctly placed while its real through-road arms meet the averaged
+# hub axis at about 11 degrees. With a 4.55 m half-width, that rotates a square
+# approach corner roughly 0.88 m beyond the connector centreline. Give the
+# visual hub 1.0 m of coverage beyond the 6.45 m approach start so those skewed
+# corners remain covered without enlarging Roadway/collision geometry.
+GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES = 1.20
 # Start approach objects slightly outside the logical connector plane. The
-# visual overhang still covers them by 0.35 m, while their square corners no
-# longer intrude through a skewed hub.
+# 1.20 m visual overhang now leaves 1.00 m of rendered seam coverage.
 GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES = 0.20
 # Matches the stock sil/kos effective half-width used throughout the fitter.
 GENERATED_PAVED_HALF_WIDTH_METRES = 4.55
@@ -1701,7 +1704,7 @@ class ProceduralInfrastructureLibrary:
             destination = source_dir / relative
             texture = self._texture_path(key)
             model_cache_version = (
-                "procedural-infrastructure-model-v20-square-paved-seams"
+                "procedural-infrastructure-model-v21-skew-paved-junction-seams"
                 if key.kind == "road"
                 else "procedural-infrastructure-model-v17-single-span-segmented-collision"
                 if key.kind == "bridge"
