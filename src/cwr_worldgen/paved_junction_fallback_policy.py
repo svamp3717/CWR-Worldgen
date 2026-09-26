@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import math
+from types import SimpleNamespace
 
 from . import generator as _generator
 from . import paved_junction_policy as _paved
@@ -299,7 +300,11 @@ def _stitch_generated_fallback_approaches(
     generated connector to its existing outward endpoint.
     """
 
-    if not fallback_plans or not report.objects:
+    if (
+        not fallback_plans
+        or not report.objects
+        or not hasattr(report, "junction_cap_objects")
+    ):
         return report
 
     objects_by_id = {int(obj.object_id): obj for obj in report.objects}
@@ -310,7 +315,16 @@ def _stitch_generated_fallback_approaches(
     tolerance = 0.12
 
     for plan in fallback_plans.values():
-        arms = tuple(plan.arms)
+        arms = tuple(getattr(plan, "arms", ()))
+        if not arms:
+            # Compatibility for low-level callers/tests that only carry
+            # connector directions. Production paved plans always have arms.
+            arms = tuple(
+                SimpleNamespace(source_direction=connector.direction)
+                for connector in getattr(plan, "connectors", ())
+            )
+        if not arms:
+            continue
         candidates = []
         for obj in report.objects[report.junction_cap_objects:]:
             family = _paved._family(obj.model_path)
