@@ -400,7 +400,11 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
                 for direction, family in typed
                 if family is not None
             ),
-            world_name=spec.name,
+            world_name=(
+                spec.name
+                if bool(getattr(spec, "procedural_paved_road_fallback", False))
+                else None
+            ),
         )
         if plan is not None:
             result[key] = plan
