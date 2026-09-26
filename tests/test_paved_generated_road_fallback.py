@@ -147,7 +147,7 @@ def test_generated_paved_junction_quantizes_heading_and_reuses_stock_texture(
     assert first.endswith(r"\paved_j3_m091_b091_a260.p3d")
     assert infrastructure.is_generated_paved_junction_model(first)
 
-    stock_texture = r"landtext\silnice.pac"
+    stock_texture = r"o\road\sil_new.paa"
     library = infrastructure.ProceduralInfrastructureLibrary(
         "reuse_world",
         paved_texture_path=stock_texture,
@@ -166,6 +166,7 @@ def test_generated_paved_junction_quantizes_heading_and_reuses_stock_texture(
         tmp_path / result.model_files[0]
     )
     assert stock_texture in summary.textures
+    assert r"o\road\sil_konec.paa" in summary.textures
     assert any(
         abs(value - infrastructure._ROADWAY_LOD) < 1.0
         for value in summary.resolutions
@@ -286,24 +287,34 @@ def test_generated_paved_junction_visual_overhang_covers_logical_seam() -> None:
     )
 
 
-def test_generated_paved_junction_visual_overhang_covers_terrtest41_skew() -> None:
-    # terrtest41 places a generated T correctly, but one real paved approach
-    # reaches the averaged main axis about 10.7 degrees off the hub heading.
-    # A square 9.10 m road end rotates its outer corner by roughly 0.86 m.
-    # Keep enough visual-only hub coverage beyond the 6.45 m approach start
-    # to hide that corner while Roadway remains on the stock 6.25 m radius.
-    measured_skew_degrees = 10.7
-    required_corner_sweep = (
-        infrastructure.GENERATED_PAVED_HALF_WIDTH_METRES
-        * math.tan(math.radians(measured_skew_degrees))
+def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
+    key = infrastructure.InfrastructureModelKey(
+        "road",
+        "paved_j3_m091_b091_a265",
+        91,
+        int(round(
+            infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 20.0
+        )),
     )
-    visible_overlap = (
-        infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
-        - infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
-    )
+    # Wide generated T hubs deliberately ignore the terrain-road PAC and borrow
+    # the donor branch's stock kr_new texture topology instead.
+    visual = infrastructure._road_lods(
+        key,
+        r"landtext\silnice.pac",
+    )[0]
 
-    assert required_corner_sweep > 0.85
-    assert visible_overlap >= required_corner_sweep + 0.10
+    textures = [face.texture for face in visual.faces]
+    assert len(visual.faces) == 8
+    assert textures.count(r"o\road\sil_new.paa") == 4
+    assert textures.count(r"o\road\sil_konec.paa") == 4
+    assert r"landtext\silnice.pac" not in textures
+
+    ys = [point[1] for point in visual.points]
+    assert math.isclose(max(ys) - min(ys), 0.0666, abs_tol=1.0e-7)
+    assert all(
+        flag == infrastructure._ROAD_SURFACE_POINT_FLAG
+        for flag in visual.point_flags
+    )
 
 
 def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
