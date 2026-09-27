@@ -554,9 +554,9 @@ def _junction_blocker(obj) -> _PavedBlocker:
     return _PavedBlocker(
         (
             (float(obj.x) - extent, float(obj.z) - extent),
-            (float(obj.x) - extent, float(obj.z) + extent),
-            (float(obj.x) + extent, float(obj.z) + extent),
             (float(obj.x) + extent, float(obj.z) - extent),
+            (float(obj.x) + extent, float(obj.z) + extent),
+            (float(obj.x) - extent, float(obj.z) + extent),
         ),
         float(obj.y),
     )
