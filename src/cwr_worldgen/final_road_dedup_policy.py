@@ -664,12 +664,11 @@ def _clear_intervals(
 
 
 def _dirt_variant_path(model_path: str, nominal: int) -> str:
-    normalized = str(model_path).replace("/", "\")
-    if "\" not in normalized:
+    normalized = str(model_path).replace("/", "\\")
+    if "\\" not in normalized:
         return f"ces{nominal}.p3d"
-    parent = normalized.rsplit("\", 1)[0]
+    parent = normalized.rsplit("\\", 1)[0]
     return f"{parent}\\ces{nominal}.p3d"
-
 
 def _dirt_variant_lengths(spec) -> tuple[tuple[int, float], ...]:
     scale = float(spec.road_segment_length) / 25.0
