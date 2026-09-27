@@ -2432,8 +2432,22 @@ def _fit_stock_piece_road_objects(
                 bool,
             ]
         ] = []
+        variants = variants_for(model)
         for raw_run in _split_polyline_at_keys(points, split_keys):
-            run = _rounded_road_run(raw_run)
+            raw_start_key = _road_node_key(raw_run[0])
+            raw_end_key = _road_node_key(raw_run[-1])
+            run = _representable_road_run(
+                raw_run,
+                variants,
+                preserve_start_metres=(
+                    _PAVED_RUN_REPAIR_JUNCTION_GUARD_METRES
+                    if raw_start_key in split_keys else 0.0
+                ),
+                preserve_end_metres=(
+                    _PAVED_RUN_REPAIR_JUNCTION_GUARD_METRES
+                    if raw_end_key in split_keys else 0.0
+                ),
+            )
             measure = _PolylineMeasure.create(run)
             total_length = measure.total
             if total_length <= 0.05:
@@ -2452,7 +2466,6 @@ def _fit_stock_piece_road_objects(
             start_distance = min(total_length, start_trim)
             preferred_end = max(start_distance, total_length - end_trim)
             minimum_end = max(start_distance, total_length - end_cover)
-            variants = variants_for(model)
             shortest = min(piece.length_metres for piece in variants)
             maximum_end = total_length + (0.70 if end_cover > 0.0 else shortest * 0.5)
             fitted_pieces = _stock_piece_chain(
