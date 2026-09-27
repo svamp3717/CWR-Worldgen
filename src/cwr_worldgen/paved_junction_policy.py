@@ -405,7 +405,8 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
     incidents = {}
     positions = {}
     for feature, projected in zip(
-        dataset.roads, _p.projected_road_polylines(dataset, projection)
+        dataset.roads,
+        _p._paved_junction_augmented_polylines(dataset, projection, spec),
     ):
         if not _p.road_is_supported(
             feature.tags, include_minor=spec.include_minor_roads
