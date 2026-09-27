@@ -288,6 +288,66 @@ def test_partial_short_paved_duplicate_at_junction_is_removed():
     assert result.junction_cap_objects == 1
 
 
+def test_offset_paved_surface_overlap_is_removed_near_junction():
+    report = _report((
+        _road(1, r"o\road\kr_new_sil_sil_t.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil25.p3d", 120.0, 100.0),
+        _road(3, r"o\road\sil12.p3d", 122.0, 100.0, heading=7.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2)
+
+
+def test_same_offset_surface_overlap_away_from_junction_is_preserved():
+    report = _report((
+        _road(1, r"o\road\kr_new_sil_sil_t.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil25.p3d", 200.0, 200.0),
+        _road(3, r"o\road\sil12.p3d", 202.0, 200.0, heading=7.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2, 3)
+
+
+def test_heavily_covered_paved_surface_is_removed_away_from_junction():
+    report = _report((
+        _road(1, r"o\road\kr_new_sil_sil_t.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil25.p3d", 200.0, 200.0),
+        _road(3, r"o\road\sil6.p3d", 200.0, 200.0, heading=15.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2)
+
+
+def test_surface_overlap_rule_does_not_remove_perpendicular_paved_crossing():
+    report = _report((
+        _road(1, r"o\road\kr_new_sil_sil_t.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil25.p3d", 120.0, 100.0),
+        _road(3, r"o\road\sil6.p3d", 120.0, 100.0, heading=90.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2, 3)
+
+
+def test_surface_overlap_rule_stays_paved_only():
+    report = _report((
+        _road(1, r"o\road\kr_new_sil_sil_t.p3d", 100.0, 100.0),
+        _road(2, r"o\road\ces25.p3d", 120.0, 100.0),
+        _road(3, r"o\road\ces12.p3d", 122.0, 100.0, heading=7.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2, 3)
+
+
 def test_progress_reports_bounded_spatial_comparisons():
     events = []
     roads = tuple(
