@@ -122,6 +122,13 @@ _SYNTHETIC_PAVED_JUNCTION_MINIMUM_ANGLE_DEGREES = 18.0
 _SYNTHETIC_PAVED_JUNCTION_MAXIMUM_DOT = math.cos(
     math.radians(_SYNTHETIC_PAVED_JUNCTION_MINIMUM_ANGLE_DEGREES)
 )
+_SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET = None
+_SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION = None
+_SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR: bool | None = None
+_SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE: tuple[
+    tuple[tuple[float, float], ...],
+    ...,
+] | None = None
 
 
 def _road_surface_priority(tags: Mapping[str, str]) -> int:
@@ -960,11 +967,29 @@ def _paved_junction_augmented_polylines(
     crossings and near-parallel encounters are deliberately left untouched.
     """
 
+    global _SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET
+    global _SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION
+    global _SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR
+    global _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE
+
+    include_minor = bool(spec.include_minor_roads)
+    if (
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET is dataset
+        and _SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION is projection
+        and _SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR == include_minor
+        and _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE is not None
+    ):
+        return _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE
+
     projected = tuple(
         tuple(_clean_road_points(points))
         for points in projected_road_polylines(dataset, projection)
     )
     if len(projected) < 2:
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET = dataset
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION = projection
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR = include_minor
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE = projected
         return projected
 
     eligible = tuple(
@@ -1291,6 +1316,10 @@ def _paved_junction_augmented_polylines(
                 bucket_members.setdefault(bucket, []).append(segment_id)
 
     if not insertions and not replacements:
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET = dataset
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION = projection
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR = include_minor
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE = projected
         return projected
 
     augmented: list[tuple[tuple[float, float], ...]] = []
@@ -1320,7 +1349,13 @@ def _paved_junction_augmented_polylines(
             elif rebuilt:
                 rebuilt[-1] = end
         augmented.append(tuple(_clean_road_points(rebuilt)))
-    return tuple(augmented)
+
+    result = tuple(augmented)
+    _SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET = dataset
+    _SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION = projection
+    _SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR = include_minor
+    _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE = result
+    return result
 
 
 def _generated_paved_half_width(model_path: str) -> float:
