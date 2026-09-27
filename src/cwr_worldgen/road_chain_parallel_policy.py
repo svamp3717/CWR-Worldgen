@@ -644,7 +644,20 @@ def _fit_stock_piece_road_objects_parallel(
         for run_index, raw_run in enumerate(
             _playability._split_polyline_at_keys(points, split_keys)
         ):
-            run = tuple(_playability._rounded_road_run(raw_run))
+            raw_start_key = _playability._road_node_key(raw_run[0])
+            raw_end_key = _playability._road_node_key(raw_run[-1])
+            run = _playability._representable_road_run(
+                raw_run,
+                variants,
+                preserve_start_metres=(
+                    _playability._PAVED_RUN_REPAIR_JUNCTION_GUARD_METRES
+                    if raw_start_key in split_keys else 0.0
+                ),
+                preserve_end_metres=(
+                    _playability._PAVED_RUN_REPAIR_JUNCTION_GUARD_METRES
+                    if raw_end_key in split_keys else 0.0
+                ),
+            )
             if len(run) < 2:
                 continue
             start_key = _playability._road_node_key(run[0])
