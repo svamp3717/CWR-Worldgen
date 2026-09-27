@@ -124,6 +124,17 @@ _SYNTHETIC_PAVED_JUNCTION_MINIMUM_ANGLE_DEGREES = 18.0
 _SYNTHETIC_PAVED_JUNCTION_MAXIMUM_DOT = math.cos(
     math.radians(_SYNTHETIC_PAVED_JUNCTION_MINIMUM_ANGLE_DEGREES)
 )
+
+# A stock paved run is repaired only after topology has already been fixed and
+# split at real/synthetic junctions. These limits describe what a 7-9 m wide
+# rigid road surface can bend through without its inside edges folding through
+# each other. Junction approach geometry is left untouched over the full stock
+# target-search range so this pass cannot move a previously working T/X merge.
+_PAVED_RUN_REPAIR_JUNCTION_GUARD_METRES = 87.0
+_PAVED_RUN_REPAIR_RADIUS_MARGIN_METRES = 0.75
+_PAVED_RUN_REPAIR_MAXIMUM_TANGENT_METRES = 24.0
+_PAVED_RUN_REPAIR_TANGENT_FRACTION = 0.48
+_PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES = 30.0
 _SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET = None
 _SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION = None
 _SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR: bool | None = None
@@ -1461,6 +1472,280 @@ def _rounded_road_run(
     if math.dist(rounded[-1], cleaned[-1]) > 0.05:
         rounded.append(cleaned[-1])
     return tuple(rounded)
+
+
+def _stock_paved_half_width(
+    pieces: Sequence[_RoadPiece],
+) -> float | None:
+    """Return the visible half-width when a chain is a stock paved family."""
+
+    widths: list[float] = []
+    for piece in pieces:
+        filename = (
+            str(piece.model_path)
+            .replace("/", "\\")
+            .rsplit("\\", 1)[-1]
+            .casefold()
+        )
+        if filename.startswith(("sil", "kos")):
+            widths.append(4.55)
+        elif filename.startswith("asf"):
+            widths.append(3.50)
+    return max(widths) if widths else None
+
+
+def _run_vertex_distances(
+    points: Sequence[tuple[float, float]],
+) -> tuple[float, ...]:
+    values = [0.0]
+    for start, end in zip(points, points[1:]):
+        values.append(values[-1] + math.dist(start, end))
+    return tuple(values)
+
+
+def _paved_run_vertex_is_guarded(
+    distance: float,
+    total: float,
+    *,
+    preserve_start_metres: float,
+    preserve_end_metres: float,
+) -> bool:
+    return (
+        distance <= max(0.0, preserve_start_metres) + 1.0e-6
+        or total - distance <= max(0.0, preserve_end_metres) + 1.0e-6
+    )
+
+
+def _paved_run_required_tangent(
+    turn_degrees: float,
+    minimum_radius: float,
+) -> float:
+    half_angle = math.radians(min(179.0, max(0.0, turn_degrees))) * 0.5
+    return minimum_radius * math.tan(half_angle)
+
+
+def _append_rounded_corner(
+    rounded: list[tuple[float, float]],
+    previous: tuple[float, float],
+    corner: tuple[float, float],
+    following: tuple[float, float],
+    *,
+    tangent: float,
+    samples: int,
+) -> None:
+    incoming = (corner[0] - previous[0], corner[1] - previous[1])
+    outgoing = (following[0] - corner[0], following[1] - corner[1])
+    incoming_length = max(1.0e-9, math.hypot(*incoming))
+    outgoing_length = max(1.0e-9, math.hypot(*outgoing))
+    in_unit = (
+        incoming[0] / incoming_length,
+        incoming[1] / incoming_length,
+    )
+    out_unit = (
+        outgoing[0] / outgoing_length,
+        outgoing[1] / outgoing_length,
+    )
+    entry = (
+        corner[0] - in_unit[0] * tangent,
+        corner[1] - in_unit[1] * tangent,
+    )
+    exit = (
+        corner[0] + out_unit[0] * tangent,
+        corner[1] + out_unit[1] * tangent,
+    )
+    if math.dist(rounded[-1], entry) > 0.05:
+        rounded.append(entry)
+    samples = max(2, int(samples))
+    for sample in range(1, samples):
+        t = sample / samples
+        one_minus = 1.0 - t
+        point = (
+            one_minus * one_minus * entry[0]
+            + 2.0 * one_minus * t * corner[0]
+            + t * t * exit[0],
+            one_minus * one_minus * entry[1]
+            + 2.0 * one_minus * t * corner[1]
+            + t * t * exit[1],
+        )
+        if math.dist(rounded[-1], point) > 0.05:
+            rounded.append(point)
+    if math.dist(rounded[-1], exit) > 0.05:
+        rounded.append(exit)
+
+
+def _representable_road_run(
+    points: Sequence[tuple[float, float]],
+    pieces: Sequence[_RoadPiece],
+    *,
+    preserve_start_metres: float = 0.0,
+    preserve_end_metres: float = 0.0,
+) -> tuple[tuple[float, float], ...]:
+    """Repair only paved run geometry that a rigid in-game road cannot follow.
+
+    The run endpoints are immutable because topology/junction discovery has
+    already happened. Dirt and gravel retain the historical rounded-run path.
+
+    For stock paved families, an interior corner must have enough tangent length
+    to keep the road's inside edge from folding through itself. If it does not,
+    the offending source vertex is removed and the test repeats against the
+    larger neighbouring span. Representable corners keep the historical fillet
+    unless that fillet would still be tighter than the road width; only then is
+    its radius enlarged. The generated-paved fallback can subsequently replace
+    any remaining stock span that fails the normal turn/deviation limits.
+    """
+
+    cleaned = list(_clean_road_points(points))
+    if len(cleaned) < 3:
+        return tuple(cleaned)
+
+    half_width = _stock_paved_half_width(pieces)
+    if half_width is None:
+        return _rounded_road_run(cleaned)
+
+    minimum_radius = half_width + _PAVED_RUN_REPAIR_RADIUS_MARGIN_METRES
+
+    # First remove only geometrically impossible interior corners. The protected
+    # junction ranges use the untouched source geometry so the stock junction
+    # target search sees exactly the same approaches it saw before this policy.
+    maximum_passes = max(1, len(cleaned) * 2)
+    for _pass in range(maximum_passes):
+        if len(cleaned) < 3:
+            break
+        distances = _run_vertex_distances(cleaned)
+        total = distances[-1]
+        removed = False
+        for index in range(1, len(cleaned) - 1):
+            if _paved_run_vertex_is_guarded(
+                distances[index],
+                total,
+                preserve_start_metres=preserve_start_metres,
+                preserve_end_metres=preserve_end_metres,
+            ):
+                continue
+            previous, corner, following = (
+                cleaned[index - 1],
+                cleaned[index],
+                cleaned[index + 1],
+            )
+            incoming_length = math.dist(previous, corner)
+            outgoing_length = math.dist(corner, following)
+            if incoming_length <= 0.10 or outgoing_length <= 0.10:
+                del cleaned[index]
+                removed = True
+                break
+            turn = _turn_degrees(previous, corner, following)
+            if turn < 7.5:
+                continue
+            required = _paved_run_required_tangent(turn, minimum_radius)
+            available = min(
+                _PAVED_RUN_REPAIR_MAXIMUM_TANGENT_METRES,
+                incoming_length * _PAVED_RUN_REPAIR_TANGENT_FRACTION,
+                outgoing_length * _PAVED_RUN_REPAIR_TANGENT_FRACTION,
+            )
+            if required <= available + 1.0e-6:
+                continue
+            if math.dist(previous, following) <= 0.50:
+                # A literal hairpin cannot be shortcut without collapsing the
+                # run to one point. Leave it for generated fallback/late cleanup.
+                continue
+            del cleaned[index]
+            removed = True
+            break
+        if not removed:
+            break
+
+    if len(cleaned) < 3:
+        return tuple(cleaned)
+
+    distances = _run_vertex_distances(cleaned)
+    total = distances[-1]
+    rounded: list[tuple[float, float]] = [cleaned[0]]
+    for index in range(1, len(cleaned) - 1):
+        previous, corner, following = (
+            cleaned[index - 1],
+            cleaned[index],
+            cleaned[index + 1],
+        )
+        incoming_length = math.dist(previous, corner)
+        outgoing_length = math.dist(corner, following)
+        turn = _turn_degrees(previous, corner, following)
+        guarded = _paved_run_vertex_is_guarded(
+            distances[index],
+            total,
+            preserve_start_metres=preserve_start_metres,
+            preserve_end_metres=preserve_end_metres,
+        )
+
+        # Inside a junction approach reproduce the pre-repair rounding exactly.
+        if guarded:
+            if (
+                incoming_length <= 0.10
+                or outgoing_length <= 0.10
+                or turn < 7.5
+                or turn > 135.0
+            ):
+                if math.dist(rounded[-1], corner) > 0.05:
+                    rounded.append(corner)
+                continue
+            tangent = min(
+                9.0,
+                incoming_length * 0.30,
+                outgoing_length * 0.30,
+            )
+            if tangent <= 0.20:
+                if math.dist(rounded[-1], corner) > 0.05:
+                    rounded.append(corner)
+                continue
+            _append_rounded_corner(
+                rounded,
+                previous,
+                corner,
+                following,
+                tangent=tangent,
+                samples=4,
+            )
+            continue
+
+        if incoming_length <= 0.10 or outgoing_length <= 0.10 or turn < 7.5:
+            if math.dist(rounded[-1], corner) > 0.05:
+                rounded.append(corner)
+            continue
+
+        required = _paved_run_required_tangent(turn, minimum_radius)
+        historical = min(
+            9.0,
+            incoming_length * 0.30,
+            outgoing_length * 0.30,
+        )
+        available = min(
+            _PAVED_RUN_REPAIR_MAXIMUM_TANGENT_METRES,
+            incoming_length * _PAVED_RUN_REPAIR_TANGENT_FRACTION,
+            outgoing_length * _PAVED_RUN_REPAIR_TANGENT_FRACTION,
+        )
+        tangent = min(available, max(required, historical))
+        if tangent <= 0.20:
+            if math.dist(rounded[-1], corner) > 0.05:
+                rounded.append(corner)
+            continue
+
+        samples = max(
+            4,
+            int(math.ceil(
+                turn / _PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES
+            )),
+        )
+        _append_rounded_corner(
+            rounded,
+            previous,
+            corner,
+            following,
+            tangent=tangent,
+            samples=samples,
+        )
+
+    if math.dist(rounded[-1], cleaned[-1]) > 0.05:
+        rounded.append(cleaned[-1])
+    return tuple(_clean_road_points(rounded))
 
 
 def _split_polyline_at_keys(
