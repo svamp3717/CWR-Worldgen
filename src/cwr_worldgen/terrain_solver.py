@@ -1299,7 +1299,7 @@ def solve_terrain_constraints(
         if storage_datum_offset > 0.0:
             reasons.append("fit RVW4 signed-16-bit height storage")
         if lake_datum_offset > 0.0:
-            reasons.append("fit elevated edge lakes to CWA's global water plane")
+            reasons.append("fit elevated lakes to CWA's global water plane")
         progress(
             3,
             f"Lowering whole-world terrain datum by {vertical_datum_offset:.1f} m to "
