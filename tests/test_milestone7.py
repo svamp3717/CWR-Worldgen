@@ -184,6 +184,131 @@ class ConstraintSolverTests(unittest.TestCase):
         )
         self.assertLessEqual(result.building_roughness_after, result.building_roughness_before + 1e-6)
 
+    def test_tiny_low_water_component_below_high_bank_is_removed_not_excavated(self) -> None:
+        # terrtest72 contained two tiny mapped-water components whose DEM water
+        # samples were near sea level while their one-cell dry banks were roughly
+        # 87 m and 228 m high. CWA's single global water plane turns that input
+        # into a near-vertical crater unless the lake is rejected.
+        cells = 32
+        cell_size = 50.0
+        bbox = (0.0, 0.0, 0.01, 0.01)
+        original = [90.0] * (cells * cells)
+        water_mask = [False] * (cells * cells)
+        lake_cells = (15 * cells + 15, 15 * cells + 16)
+        for index in lake_cells:
+            water_mask[index] = True
+            original[index] = 0.0
+        empty = (False,) * (cells * cells)
+        raster = OsmRaster(
+            cells=cells,
+            water=tuple(water_mask),
+            forest=empty,
+            farmland=empty,
+            urban=empty,
+            roads=empty,
+            buildings=empty,
+            high_resolution=128,
+            coastline_seed_count=0,
+        )
+        dataset = OsmDataset(
+            source_generator="terrtest72-lake-crater",
+            element_count=0,
+            coastlines=(),
+            water=(),
+            forests=(),
+            farmland=(),
+            urban=(),
+            roads=(),
+        )
+        spec = ConstraintPlayabilitySpec(
+            heightmap_path=Path("unused.tif"),
+            bbox=bbox,
+            cells=cells,
+            cell_size=cell_size,
+            water_depth=3.0,
+            solver_iterations=0,
+            world_edge_blend_cells=0,
+        )
+
+        result = solve_terrain_constraints(
+            original,
+            dataset,
+            BboxProjection.create(bbox, cells * cell_size),
+            raster,
+            spec,
+        )
+
+        self.assertEqual(result.vertical_datum_offset, 0.0)
+        self.assertEqual(result.inland_water_components, 0)
+        self.assertEqual(result.water_cells, 0)
+        self.assertEqual(result.uncertain_water_cells_preserved, len(lake_cells))
+        for index in lake_cells:
+            self.assertEqual(result.elevations[index], 90.0)
+
+    def test_large_inland_lake_rebases_whole_high_world_when_safe(self) -> None:
+        cells = 32
+        cell_size = 50.0
+        bbox = (0.0, 0.0, 0.01, 0.01)
+        original = [120.0] * (cells * cells)
+        water_mask = [False] * (cells * cells)
+        for z in range(11, 21):
+            for x in range(11, 21):
+                index = z * cells + x
+                water_mask[index] = True
+                original[index] = 100.0
+        empty = (False,) * (cells * cells)
+        raster = OsmRaster(
+            cells=cells,
+            water=tuple(water_mask),
+            forest=empty,
+            farmland=empty,
+            urban=empty,
+            roads=empty,
+            buildings=empty,
+            high_resolution=128,
+            coastline_seed_count=0,
+        )
+        dataset = OsmDataset(
+            source_generator="inland-lake-rebase",
+            element_count=0,
+            coastlines=(),
+            water=(),
+            forests=(),
+            farmland=(),
+            urban=(),
+            roads=(),
+        )
+        spec = ConstraintPlayabilitySpec(
+            heightmap_path=Path("unused.tif"),
+            bbox=bbox,
+            cells=cells,
+            cell_size=cell_size,
+            water_depth=3.0,
+            lake_shore_maximum_slope_percent=8.0,
+            solver_iterations=0,
+            world_edge_blend_cells=0,
+        )
+
+        result = solve_terrain_constraints(
+            original,
+            dataset,
+            BboxProjection.create(bbox, cells * cell_size),
+            raster,
+            spec,
+        )
+
+        # 113 m puts the 120 m dry bank at the 7 m one-cell bank limit while
+        # moving the lake below CWA's global zero-metre water plane.
+        self.assertAlmostEqual(result.vertical_datum_offset, 113.0, places=6)
+        self.assertEqual(result.inland_water_components, 1)
+        self.assertEqual(result.water_cells, 100)
+        self.assertLessEqual(max(
+            result.elevations[z * cells + x]
+            for z in range(11, 21)
+            for x in range(11, 21)
+        ), 0.0)
+        self.assertAlmostEqual(result.elevations[10 * cells + 10], 7.0, places=6)
+
     def test_inland_lake_bank_is_widened_and_grade_limited(self) -> None:
         cells = 32
         cell_size = 50.0
