@@ -133,6 +133,52 @@ def test_short_paved_endpoint_miss_is_snapped_to_t_junction() -> None:
     assert len(plans[key].arms) == 3
 
 
+def test_nearby_paved_endpoints_snap_to_one_shared_node() -> None:
+    projection = _projection()
+    shared = (500.0, 500.0)
+    dataset = _dataset(
+        _road(
+            projection,
+            "way/west",
+            ((200.0, 500.0), (499.0, 500.0)),
+        ),
+        _road(
+            projection,
+            "way/north",
+            ((501.0, 500.0), (501.0, 800.0)),
+        ),
+    )
+
+    projected = playability._paved_junction_augmented_polylines(
+        dataset,
+        projection,
+        _light_spec(),
+    )
+
+    assert _has_point(projected[0], shared)
+    assert _has_point(projected[1], shared)
+    assert playability._road_node_key(projected[0][-1]) == (
+        playability._road_node_key(projected[1][0])
+    )
+
+
+def test_generated_fallback_supports_four_way_paved_junctions() -> None:
+    plan = paved._generated_plan(
+        (100.0, 100.0),
+        (
+            ((0.0, 1.0), "sil"),
+            ((1.0, 0.0), "sil"),
+            ((0.0, -1.0), "sil"),
+            ((-1.0, 0.0), "sil"),
+        ),
+        world_name="synthetic_junction",
+    )
+
+    assert plan is not None
+    assert len(plan.arms) == 4
+    assert playability.is_generated_paved_junction_model(plan.model_path)
+
+
 def test_bridge_crossing_is_not_promoted_to_at_grade_junction() -> None:
     projection = _projection()
     centre = (500.0, 500.0)
