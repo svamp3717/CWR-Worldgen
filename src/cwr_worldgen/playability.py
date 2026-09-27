@@ -2022,7 +2022,13 @@ def _fit_stock_piece_road_objects(
 
     # Plan cap geometry and trim distances before constructing WorldObjects.
     cap_plans: dict[
-        tuple[int, int], tuple[_RoadPiece, tuple[float, float], tuple[float, float]]
+        tuple[int, int],
+        tuple[
+            _RoadPiece,
+            tuple[float, float],
+            tuple[float, float],
+            float,
+        ],
     ] = {}
     cap_trim_lengths: dict[tuple[int, int], float] = {}
     cap_cover_lengths: dict[tuple[int, int], float] = {}
