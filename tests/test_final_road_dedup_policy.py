@@ -1,5 +1,7 @@
+import math
 from types import SimpleNamespace
 
+from cwr_worldgen import playability
 from cwr_worldgen.final_road_dedup_policy import deduplicate_final_road_objects
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.playability import RoadFitReport
@@ -435,12 +437,9 @@ def test_dirt_t_approach_finishes_with_piece_diving_under_paved():
     assert dirt
     assert len(underlays) == 1
     terminal = underlays[0]
-    axis = __import__("cwr_worldgen.playability", fromlist=["_model_axis"])._model_axis(
-        terminal,
-        6.25,
-    )
-    forward_y = terminal.y + 3.125 * __import__("math").sin(
-        __import__("math").radians(terminal.pitch_degrees)
+    axis = playability._model_axis(terminal, 6.25)
+    forward_y = terminal.y + 3.125 * math.sin(
+        math.radians(terminal.pitch_degrees)
     )
     assert axis[1][1] > 95.0
     assert forward_y <= -0.079
@@ -468,7 +467,7 @@ def test_dirt_curve_touching_paved_surface_is_removed_wholesale():
     assert tuple(obj.object_id for obj in result.objects) == (2,)
 
 
-def test_paved_junction_footprint_clears_dirt_piece_under_hub():
+def test_paved_junction_footprint_keeps_dirt_terminals_below_hub():
     report = _report((
         _road(1, r"o\road\kr_new_sil_sil_t.p3d", 100.0, 100.0),
         _road(2, r"o\road\ces25.p3d", 100.0, 100.0, heading=90.0),
@@ -476,7 +475,14 @@ def test_paved_junction_footprint_clears_dirt_piece_under_hub():
 
     result = deduplicate_final_road_objects(report, _spec())
 
-    assert tuple(obj.object_id for obj in result.objects) == (1,)
+    assert result.objects[0].object_id == 1
+    dirt = tuple(
+        obj for obj in result.objects
+        if obj.model_path.casefold().endswith(r"\ces6.p3d")
+    )
+    assert len(dirt) == 2
+    assert all(abs(obj.pitch_degrees) > 0.01 for obj in dirt)
+    assert all(obj.y < 0.0 for obj in dirt)
     assert result.junction_cap_objects == 1
 
 
