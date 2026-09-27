@@ -1163,9 +1163,6 @@ def solve_terrain_constraints(
     if len(raw_original) != spec.cells * spec.cells:
         raise ValueError("constraint solver elevation grid has the wrong size")
     smoothing = _effective_terrain_smoothing(spec)
-    renderable_source_water = renderable_water_mask(
-        raw_original, raster, sea_level=spec.sea_level, water_depth=spec.water_depth
-    )
     conservative_interior = conservative_water_interior_mask(raster)
     water_components = _components(raster.water, spec.cells)
     edge_water_components = [
@@ -1287,6 +1284,15 @@ def solve_terrain_constraints(
 
     vertical_datum_offset = max(storage_datum_offset, lake_datum_offset)
     original = tuple(value - vertical_datum_offset for value in raw_original)
+    # Water eligibility must be evaluated in the same vertical datum that will
+    # be written to RVW4. Otherwise a lake that becomes valid after a safe
+    # whole-world rebase is still rejected using its obsolete source altitude.
+    renderable_source_water = renderable_water_mask(
+        original,
+        raster,
+        sea_level=spec.sea_level,
+        water_depth=spec.water_depth,
+    )
     field = _ConstraintField.create(len(original))
     if vertical_datum_offset > 0.0:
         reasons = []
