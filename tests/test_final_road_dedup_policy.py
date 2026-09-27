@@ -348,6 +348,51 @@ def test_surface_overlap_rule_stays_paved_only():
     assert tuple(obj.object_id for obj in result.objects) == (1, 2, 3)
 
 
+def test_near_collinear_paved_piece_just_over_two_metres_offset_is_removed():
+    report = _report((
+        _road(1, r"o\road\sil25.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil6.p3d", 102.15, 100.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1,)
+
+
+def test_generated_paved_curve_can_replace_substantially_covered_stock_cap():
+    report = _report((
+        _road(1, r"o\road\sil6.p3d", 100.0, 100.0),
+        _road(
+            2,
+            r"wg_test\i\paved_w091_l0059_r25.p3d",
+            100.0,
+            102.35,
+        ),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (2,)
+    assert result.junction_cap_objects == 0
+
+
+def test_generated_paved_straight_does_not_use_curve_cap_exception():
+    report = _report((
+        _road(1, r"o\road\sil6.p3d", 100.0, 100.0),
+        _road(
+            2,
+            r"wg_test\i\paved_w091_l0059.p3d",
+            100.0,
+            102.35,
+        ),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2)
+    assert result.junction_cap_objects == 1
+
+
 def test_progress_reports_bounded_spatial_comparisons():
     events = []
     roads = tuple(
