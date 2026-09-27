@@ -375,6 +375,7 @@ def _candidate_templates(
     radius = max(float(value) for value in _paved._STRAIGHTS.values()) + tolerance
     index = _path_template_index(turn_sign)
     candidates = []
+    legal_lengths = tuple(float(value) for value in _paved._STRAIGHTS.values())
     for key in _bucket_keys_for_bbox(
         local[0] - radius,
         local[0] + radius,
@@ -382,7 +383,17 @@ def _candidate_templates(
         local[1] + radius,
         size=_PATH_BUCKET_METRES,
     ):
-        candidates.extend(index.buckets.get(key, ()))
+        for template in index.buckets.get(key, ()):
+            # Rotation/translation from connector-local to world space preserves
+            # Euclidean distance. Reject templates that cannot possibly finish
+            # with one legal 6/12/25 m merge slab before doing world transforms
+            # and tangent comparisons.
+            merge_distance = math.dist(local, template.point)
+            if any(
+                abs(merge_distance - length) <= tolerance
+                for length in legal_lengths
+            ):
+                candidates.append(template)
     candidates.sort(key=lambda template: template.order)
     return candidates
 
