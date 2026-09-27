@@ -438,11 +438,39 @@ def test_dirt_t_approach_finishes_with_piece_diving_under_paved():
     assert len(underlays) == 1
     terminal = underlays[0]
     axis = playability._model_axis(terminal, 6.25)
-    forward_y = terminal.y + 3.125 * math.sin(
-        math.radians(terminal.pitch_degrees)
-    )
+    sine_pitch = math.sin(math.radians(terminal.pitch_degrees))
+    backward_y = terminal.y - 3.125 * sine_pitch
+    forward_y = terminal.y + 3.125 * sine_pitch
+    assert axis[0][1] < 95.0
     assert axis[1][1] > 95.0
+    assert math.isclose(backward_y, 0.0, abs_tol=1.0e-6)
     assert forward_y <= -0.079
+
+
+def test_short_dirt_edge_piece_can_extend_under_paved_beyond_old_axis():
+    report = _report((
+        _road(1, r"o\road\ces6.p3d", 100.0, 102.0, heading=0.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=90.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    dirt = tuple(
+        obj for obj in result.objects
+        if obj.model_path.casefold().endswith(r"\ces6.p3d")
+    )
+    assert len(dirt) == 1
+    terminal = dirt[0]
+    assert abs(terminal.pitch_degrees) > 0.01
+    terminal_axis = playability._model_axis(terminal, 6.25)
+    original_axis = playability._model_axis(
+        _road(99, r"o\road\ces6.p3d", 100.0, 102.0, heading=0.0),
+        6.25,
+    )
+    assert (
+        terminal_axis[0][1] < original_axis[0][1]
+        or terminal_axis[1][1] > original_axis[1][1]
+    )
 
 
 def test_short_dirt_piece_fully_consumed_by_paved_crossing_is_removed():
