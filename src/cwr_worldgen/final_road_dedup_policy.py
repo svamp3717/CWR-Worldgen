@@ -3,11 +3,11 @@
 
 The first pass conservatively removes redundant overlapping road slabs. The
 second enforces a simpler mixed-surface invariant: at-grade paved geometry owns
-its complete footprint. Stock dirt pieces crossing that footprint are retiled
-into shorter dirt pieces on the clear sides, or removed when no stock piece can
-fit safely. Dirt curves and dirt caps are removed wholesale on conflict. A
-substantially higher paved surface is treated as an overpass and leaves the dirt
-road beneath it intact.
+its complete footprint. Stock dirt approaches are retiled on the clear sides and
+finish with a short terminal slab pitched underneath the paved road, so dirt
+visually reaches the asphalt edge without ever painting over it. Dirt curves and
+dirt caps are removed wholesale on conflict. A substantially higher paved surface
+is treated as an overpass and leaves the dirt road beneath it intact.
 
 Both passes are spatially indexed so dense worlds avoid an O(N^2) road scan.
 """
@@ -806,28 +806,6 @@ def _axis_point(
     )
 
 
-def _blocker_height_for_distance(
-    axis: _RoadAxis,
-    distance: float,
-    blocker_intervals: tuple[
-        tuple[int, tuple[float, float]],
-        ...,
-    ],
-    blockers: tuple[_PavedBlocker, ...],
-) -> float | None:
-    point = _axis_point(axis, distance)
-    values = [
-        _blocker_height_at(blockers[blocker_index], point)
-        for blocker_index, (start, end) in blocker_intervals
-        if (
-            start - _DIRT_PAVED_UNDERLAY_EDGE_EPSILON_METRES
-            <= distance
-            <= end + _DIRT_PAVED_UNDERLAY_EDGE_EPSILON_METRES
-        )
-    ]
-    return min(values) if values else None
-
-
 def _replacement_dirt_underlay_object(
     obj,
     axis: _RoadAxis,
@@ -845,30 +823,66 @@ def _replacement_dirt_underlay_object(
 ):
     start_point = _axis_point(axis, start)
     end_point = _axis_point(axis, end)
-    start_y = _object_plane_height(obj, start_point)
-    end_y = _object_plane_height(obj, end_point)
+    original_start_y = _object_plane_height(obj, start_point)
+    original_end_y = _object_plane_height(obj, end_point)
+    length = max(1.0e-6, end - start)
 
-    inner_distance = start if inner_at_start else end
-    inner_height = _blocker_height_for_distance(
-        axis,
-        inner_distance,
-        blocker_intervals,
-        blockers,
-    )
-    if inner_height is None:
+    # Preserve the visible outer endpoint exactly on the original dirt grade.
+    # Solve only the hidden endpoint height. Because both the dirt slab and each
+    # paved blocker are planar, checking both ends of every overlap interval is
+    # sufficient to keep the entire overlapping dirt segment below asphalt.
+    outer_y = original_end_y if inner_at_start else original_start_y
+    inner_y = original_start_y if inner_at_start else original_end_y
+    constrained = False
+
+    for blocker_index, (blocked_start, blocked_end) in blocker_intervals:
+        overlap_start = max(start, blocked_start)
+        overlap_end = min(end, blocked_end)
+        if overlap_end <= overlap_start + 1.0e-6:
+            continue
+        blocker = blockers[blocker_index]
+        for distance in (overlap_start, overlap_end):
+            point = _axis_point(axis, distance)
+            target = (
+                _blocker_height_at(blocker, point)
+                - _DIRT_PAVED_UNDERLAY_DROP_METRES
+            )
+            t = (distance - start) / length
+            if inner_at_start:
+                # y(t) = (1-t)*inner + t*outer
+                weight = 1.0 - t
+                if weight <= 1.0e-6:
+                    continue
+                allowed_inner = (target - t * outer_y) / weight
+            else:
+                # y(t) = (1-t)*outer + t*inner
+                weight = t
+                if weight <= 1.0e-6:
+                    continue
+                allowed_inner = (target - (1.0 - t) * outer_y) / weight
+            inner_y = min(inner_y, allowed_inner)
+            constrained = True
+
+    if not constrained:
         return None
 
-    target_inner_y = min(
-        start_y if inner_at_start else end_y,
-        inner_height - _DIRT_PAVED_UNDERLAY_DROP_METRES,
-    )
     if inner_at_start:
-        start_y = target_inner_y
+        start_y, end_y = inner_y, outer_y
     else:
-        end_y = target_inner_y
+        start_y, end_y = outer_y, inner_y
 
-    length = max(1.0e-6, end - start)
-    rise = max(-0.999999, min(0.999999, (end_y - start_y) / length))
+    rise = (end_y - start_y) / length
+    if abs(rise) >= 0.999999:
+        # Pathological terrain can demand more vertical change than a stock slab
+        # can represent. Paved still wins: lower the whole hidden terminal enough
+        # to satisfy the endpoint constraint instead of letting dirt poke through.
+        rise = max(-0.999999, min(0.999999, rise))
+        represented_delta = rise * length
+        if inner_at_start:
+            start_y = end_y - represented_delta
+        else:
+            end_y = start_y + represented_delta
+
     pitch = math.degrees(math.asin(rise))
     centre = (start + end) * 0.5
     point = _axis_point(axis, centre)
