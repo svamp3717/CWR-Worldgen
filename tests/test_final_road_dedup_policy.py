@@ -447,10 +447,24 @@ def test_dirt_t_approach_finishes_with_piece_diving_under_paved():
     assert forward_y <= -0.079
 
 
-def test_short_dirt_edge_piece_can_extend_under_paved_beyond_old_axis():
+def test_short_dirt_piece_between_two_paved_strips_can_extend_under_them():
+    original = _road(1, r"o\road\ces6.p3d", 100.0, 100.0, heading=0.0)
     report = _report((
-        _road(1, r"o\road\ces6.p3d", 100.0, 102.0, heading=0.0),
-        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=90.0),
+        original,
+        _road(
+            2,
+            r"wg_test\i\paved_w020_l0250.p3d",
+            100.0,
+            98.0,
+            heading=90.0,
+        ),
+        _road(
+            3,
+            r"wg_test\i\paved_w020_l0250.p3d",
+            100.0,
+            102.0,
+            heading=90.0,
+        ),
     ))
 
     result = deduplicate_final_road_objects(report, _spec())
@@ -459,18 +473,16 @@ def test_short_dirt_edge_piece_can_extend_under_paved_beyond_old_axis():
         obj for obj in result.objects
         if obj.model_path.casefold().endswith(r"\ces6.p3d")
     )
-    assert len(dirt) == 1
-    terminal = dirt[0]
-    assert abs(terminal.pitch_degrees) > 0.01
-    terminal_axis = playability._model_axis(terminal, 6.25)
-    original_axis = playability._model_axis(
-        _road(99, r"o\road\ces6.p3d", 100.0, 102.0, heading=0.0),
-        6.25,
+    assert len(dirt) == 2
+    assert all(abs(obj.pitch_degrees) > 0.01 for obj in dirt)
+
+    original_axis = playability._model_axis(original, 6.25)
+    terminal_axes = tuple(
+        playability._model_axis(obj, 6.25)
+        for obj in dirt
     )
-    assert (
-        terminal_axis[0][1] < original_axis[0][1]
-        or terminal_axis[1][1] > original_axis[1][1]
-    )
+    assert any(axis[0][1] < original_axis[0][1] for axis in terminal_axes)
+    assert any(axis[1][1] > original_axis[1][1] for axis in terminal_axes)
 
 
 def test_short_dirt_piece_fully_consumed_by_paved_crossing_is_removed():
