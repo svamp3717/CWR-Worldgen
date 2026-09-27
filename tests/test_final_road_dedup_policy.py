@@ -223,15 +223,54 @@ def test_junction_models_are_still_not_axis_deduplicated():
     assert len(result.objects) == 2
 
 
-def test_junction_cap_prefix_is_protected_from_deduplication():
+def test_redundant_paved_junction_cap_can_be_removed_and_prefix_shrinks():
     report = _report((
         _road(1, r"o\road\sil6.p3d", 100.0, 100.0),
-        _road(2, r"o\road\sil6.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0),
     ), caps=1)
 
     result = deduplicate_final_road_objects(report, _spec())
 
-    assert len(result.objects) == 2
+    assert tuple(obj.object_id for obj in result.objects) == (2,)
+    assert result.junction_cap_objects == 0
+
+
+def test_dirt_junction_cap_prefix_remains_protected():
+    report = _report((
+        _road(1, r"o\road\ces6.p3d", 100.0, 100.0),
+        _road(2, r"o\road\ces6.p3d", 100.0, 100.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2)
+    assert result.junction_cap_objects == 1
+
+
+def test_short_paved_overlap_is_tightened_only_near_a_paved_junction():
+    report = _report((
+        _road(1, r"o\road\kr_new_sil_sil_t.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil25.p3d", 120.0, 100.0),
+        _road(3, r"o\road\sil6.p3d", 120.0, 100.0, heading=20.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2)
+    assert result.junction_cap_objects == 1
+
+
+def test_same_short_paved_overlap_away_from_junction_is_preserved():
+    report = _report((
+        _road(1, r"o\road\kr_new_sil_sil_t.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil25.p3d", 200.0, 200.0),
+        _road(3, r"o\road\sil6.p3d", 200.0, 200.0, heading=20.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2, 3)
+    assert result.junction_cap_objects == 1
 
 
 def test_progress_reports_bounded_spatial_comparisons():
