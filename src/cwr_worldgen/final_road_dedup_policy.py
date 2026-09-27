@@ -30,6 +30,14 @@ _PAVED_COVERAGE_ALIGNMENT_COSINE = math.cos(
     math.radians(_MAXIMUM_PAVED_COVERAGE_ANGLE_DEGREES)
 )
 _MINIMUM_PAVED_CANDIDATE_COVERAGE = 0.90
+_MAXIMUM_JUNCTION_SHORT_ANGLE_DEGREES = 30.0
+_JUNCTION_SHORT_ALIGNMENT_COSINE = math.cos(
+    math.radians(_MAXIMUM_JUNCTION_SHORT_ANGLE_DEGREES)
+)
+_MINIMUM_JUNCTION_SHORT_CANDIDATE_COVERAGE = 0.60
+_MAXIMUM_JUNCTION_SHORT_LATERAL_METRES = 2.75
+_MAXIMUM_JUNCTION_SHORT_LENGTH_METRES = 6.50
+_PAVED_JUNCTION_NEIGHBOURHOOD_METRES = 30.0
 _MAXIMUM_VERTICAL_SEPARATION_METRES = 0.75
 _PROGRESS_BUCKET_PERCENT = 2
 _RAW_PROGRESS_PERCENT = 99
@@ -53,7 +61,7 @@ _STOCK_CURVE = re.compile(
 )
 _GENERATED_PAVED = re.compile(
     r"^paved_w(?P<width>\d{3})_l(?P<length>\d{4})"
-    r"(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+    r"(?P<curve>_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
     re.I,
 )
 _GRAVEL_STRAIGHT = re.compile(r"^gravel(?P<nominal>25|12|6|3)\.p3d$", re.I)
@@ -75,6 +83,8 @@ class _RoadAxis:
     half_width: float
     elevation: float
     stock_model: bool
+    curved_model: bool
+    junction_cap: bool
 
     @property
     def bounds(self) -> tuple[float, float, float, float]:
@@ -128,9 +138,16 @@ def _stock_curve_axis(
     return _world_point(start_local, obj), _world_point(end_local, obj)
 
 
-def _road_axis(obj, object_index: int, spec) -> _RoadAxis | None:
+def _road_axis(
+    obj,
+    object_index: int,
+    spec,
+    *,
+    junction_cap: bool = False,
+) -> _RoadAxis | None:
     filename = _filename(obj.model_path)
     stock_model = True
+    curved_model = False
 
     match = _STOCK_STRAIGHT.fullmatch(filename)
     if match is not None:
@@ -146,6 +163,7 @@ def _road_axis(obj, object_index: int, spec) -> _RoadAxis | None:
         if match is not None:
             family = match.group("family").casefold()
             half_width = float(_HALF_WIDTH_METRES[family])
+            curved_model = True
             start, end = _stock_curve_axis(
                 obj,
                 family,
@@ -159,6 +177,7 @@ def _road_axis(obj, object_index: int, spec) -> _RoadAxis | None:
                 expected_length = int(match.group("length")) / 10.0
                 start, end = _p._model_axis(obj, expected_length)
                 stock_model = False
+                curved_model = match.group("curve") is not None
             else:
                 match = _GRAVEL_STRAIGHT.fullmatch(filename)
                 if match is None:
@@ -188,11 +207,21 @@ def _road_axis(obj, object_index: int, spec) -> _RoadAxis | None:
         half_width=half_width,
         elevation=float(obj.y),
         stock_model=stock_model,
+        curved_model=curved_model,
+        junction_cap=bool(junction_cap),
     )
 
 
 def _is_paved_family(family: str) -> bool:
     return family in {"sil", "kos", "asf", "paved"}
+
+
+def _is_paved_junction_cap_model(model_path: str) -> bool:
+    filename = _filename(model_path)
+    return (
+        filename.startswith("kr_new_")
+        or _p.is_generated_paved_junction_model(model_path)
+    )
 
 
 def _surface_priority(family: str) -> int:
@@ -227,13 +256,53 @@ def _bucket_range(minimum: float, maximum: float) -> range:
 
 def _buckets_for(axis: _RoadAxis) -> tuple[tuple[int, int], ...]:
     min_x, min_z, max_x, max_z = axis.bounds
-    # No candidate can be accepted beyond this conservative centre-line offset.
-    padding = min(2.0, axis.half_width * 0.55)
+    # The junction-local short-piece pass can accept a slightly wider lateral
+    # envelope than the ordinary overlap rule. Index to that maximum so a valid
+    # comparison cannot disappear merely because it straddles a bucket edge.
+    padding = min(
+        _MAXIMUM_JUNCTION_SHORT_LATERAL_METRES,
+        axis.half_width * 0.60,
+    )
     return tuple(
         (bx, bz)
         for bz in _bucket_range(min_z - padding, max_z + padding)
         for bx in _bucket_range(min_x - padding, max_x + padding)
     )
+
+
+def _cap_point_buckets(
+    points: tuple[tuple[float, float], ...],
+) -> dict[tuple[int, int], tuple[tuple[float, float], ...]]:
+    mutable: dict[tuple[int, int], list[tuple[float, float]]] = {}
+    for point in points:
+        bucket = (
+            math.floor(point[0] / _BUCKET_METRES),
+            math.floor(point[1] / _BUCKET_METRES),
+        )
+        mutable.setdefault(bucket, []).append(point)
+    return {key: tuple(values) for key, values in mutable.items()}
+
+
+def _near_paved_junction(
+    axis: _RoadAxis,
+    cap_buckets: dict[tuple[int, int], tuple[tuple[float, float], ...]],
+) -> bool:
+    if not cap_buckets:
+        return False
+    midpoint = (
+        (axis.start[0] + axis.end[0]) * 0.5,
+        (axis.start[1] + axis.end[1]) * 0.5,
+    )
+    radius = _PAVED_JUNCTION_NEIGHBOURHOOD_METRES
+    radius2 = radius * radius
+    for bz in _bucket_range(midpoint[1] - radius, midpoint[1] + radius):
+        for bx in _bucket_range(midpoint[0] - radius, midpoint[0] + radius):
+            for point in cap_buckets.get((bx, bz), ()):
+                dx = midpoint[0] - point[0]
+                dz = midpoint[1] - point[1]
+                if dx * dx + dz * dz <= radius2:
+                    return True
+    return False
 
 
 def _axis_angle_is_close(first: _RoadAxis, second: _RoadAxis) -> bool:
@@ -276,7 +345,12 @@ def _longitudinal_overlap(reference: _RoadAxis, other: _RoadAxis) -> float:
     return max(0.0, min(reference.length, other_max) - max(0.0, other_min))
 
 
-def _is_redundant(candidate: _RoadAxis, kept: _RoadAxis) -> bool:
+def _is_redundant(
+    candidate: _RoadAxis,
+    kept: _RoadAxis,
+    *,
+    near_paved_junction: bool = False,
+) -> bool:
     if abs(candidate.elevation - kept.elevation) > _MAXIMUM_VERTICAL_SEPARATION_METRES:
         return False
 
@@ -305,23 +379,48 @@ def _is_redundant(candidate: _RoadAxis, kept: _RoadAxis) -> bool:
     # by slightly more than the conservative 6-degree alignment gate.  Do not
     # widen the ordinary rule.  Instead remove only the lower-priority candidate
     # when *its own* axis is nearly fully covered and remains tightly inside the
-    # kept centre-line envelope.  This leaves partial seams, divided roads, dirt,
-    # and longer through-pieces outside the aggressive second pass.
+    # kept centre-line envelope.
     if not (
         _is_paved_family(candidate.family)
         and _is_paved_family(kept.family)
     ):
         return False
     alignment = abs(candidate.ux * kept.ux + candidate.uz * kept.uz)
-    if alignment < _PAVED_COVERAGE_ALIGNMENT_COSINE:
+    if alignment >= _PAVED_COVERAGE_ALIGNMENT_COSINE:
+        if _maximum_lateral_offset(kept, candidate) <= lateral_limit:
+            candidate_overlap = _longitudinal_overlap(candidate, kept)
+            if (
+                candidate.length > 1.0e-6
+                and candidate_overlap / candidate.length
+                >= _MINIMUM_PAVED_CANDIDATE_COVERAGE
+            ):
+                return True
+
+    # terrtest58 exposed a third case clustered around junctions: ordinary sil6
+    # approach slabs can be mostly painted underneath a curve/approach while the
+    # centre-lines differ by 15-30 degrees.  Applying that tolerance globally
+    # would be reckless, so keep it paved-only, straight-only, short-only, and
+    # within 30 m of an actual paved junction cap.  Cap slabs themselves remain
+    # subject only to the stricter rules above.
+    if (
+        candidate.junction_cap
+        or not near_paved_junction
+        or candidate.curved_model
+        or candidate.length > _MAXIMUM_JUNCTION_SHORT_LENGTH_METRES
+        or alignment < _JUNCTION_SHORT_ALIGNMENT_COSINE
+    ):
         return False
-    if _maximum_lateral_offset(kept, candidate) > lateral_limit:
+    short_lateral_limit = min(
+        _MAXIMUM_JUNCTION_SHORT_LATERAL_METRES,
+        min(candidate.half_width, kept.half_width) * 0.60,
+    )
+    if _maximum_lateral_offset(kept, candidate) > short_lateral_limit:
         return False
     candidate_overlap = _longitudinal_overlap(candidate, kept)
     return (
         candidate.length > 1.0e-6
         and candidate_overlap / candidate.length
-        >= _MINIMUM_PAVED_CANDIDATE_COVERAGE
+        >= _MINIMUM_JUNCTION_SHORT_CANDIDATE_COVERAGE
     )
 
 
@@ -337,19 +436,35 @@ def deduplicate_final_road_objects(
 
     protected_prefix = max(0, min(int(report.junction_cap_objects), len(report.objects)))
     axes = []
+    paved_cap_points: list[tuple[float, float]] = []
+    protected_cap_ids: set[int] = set()
     for index, obj in enumerate(report.objects):
-        # Junction-cap slots are intentionally not compared.  They can overlap a
-        # short approach by design, and their prefix count also carries report
-        # semantics used by earlier road policies.
-        if index < protected_prefix:
+        junction_cap = index < protected_prefix
+        axis = _road_axis(
+            obj,
+            index,
+            spec,
+            junction_cap=junction_cap,
+        )
+        if junction_cap:
+            protected_cap_ids.add(int(obj.object_id))
+            # Dirt caps remain out of scope. Paved straight caps, however, are
+            # allowed to lose to a stronger overlapping paved slab; terrtest58
+            # showed that unconditional cap protection leaves visible duplicate
+            # rectangles at otherwise-correct paved junctions.
+            if axis is not None and _is_paved_family(axis.family):
+                axes.append(axis)
+                paved_cap_points.append((float(obj.x), float(obj.z)))
+            elif _is_paved_junction_cap_model(obj.model_path):
+                paved_cap_points.append((float(obj.x), float(obj.z)))
             continue
-        axis = _road_axis(obj, index, spec)
         if axis is not None:
             axes.append(axis)
 
     if len(axes) < 2:
         return report
 
+    paved_cap_buckets = _cap_point_buckets(tuple(paved_cap_points))
     ordered = sorted(axes, key=_priority, reverse=True)
     total = len(ordered)
     bucket_members: dict[tuple[int, int], list[int]] = {}
@@ -367,6 +482,10 @@ def deduplicate_final_road_objects(
     for completed, candidate in enumerate(ordered, start=1):
         candidate_buckets = _buckets_for(candidate)
         candidate_indices: set[int] = set()
+        near_paved_junction = _near_paved_junction(
+            candidate,
+            paved_cap_buckets,
+        )
         for bucket in candidate_buckets:
             candidate_indices.update(bucket_members.get(bucket, ()))
 
@@ -374,7 +493,11 @@ def deduplicate_final_road_objects(
         for kept_index in sorted(candidate_indices):
             kept = kept_axes[kept_index]
             comparisons += 1
-            if _is_redundant(candidate, kept):
+            if _is_redundant(
+                candidate,
+                kept,
+                near_paved_junction=near_paved_junction,
+            ):
                 removed_ids.add(candidate.object_id)
                 redundant = True
                 break
@@ -400,7 +523,12 @@ def deduplicate_final_road_objects(
         return report
 
     objects = tuple(obj for obj in report.objects if int(obj.object_id) not in removed_ids)
-    return replace(report, objects=objects)
+    removed_caps = len(removed_ids.intersection(protected_cap_ids))
+    return replace(
+        report,
+        objects=objects,
+        junction_cap_objects=protected_prefix - removed_caps,
+    )
 
 
 def install_final_road_dedup_policy() -> None:
