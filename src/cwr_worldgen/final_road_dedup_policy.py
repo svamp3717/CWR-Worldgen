@@ -30,6 +30,8 @@ _PAVED_COVERAGE_ALIGNMENT_COSINE = math.cos(
     math.radians(_MAXIMUM_PAVED_COVERAGE_ANGLE_DEGREES)
 )
 _MINIMUM_PAVED_CANDIDATE_COVERAGE = 0.90
+_MAXIMUM_PAVED_NEAR_COLLINEAR_LATERAL_METRES = 2.20
+_MINIMUM_PAVED_CAP_GENERATED_CURVE_SURFACE_COVERAGE = 0.59
 _MAXIMUM_JUNCTION_SHORT_ANGLE_DEGREES = 30.0
 _JUNCTION_SHORT_ALIGNMENT_COSINE = math.cos(
     math.radians(_MAXIMUM_JUNCTION_SHORT_ANGLE_DEGREES)
@@ -526,6 +528,34 @@ def _is_redundant(
     ):
         return False
     alignment = abs(candidate.ux * kept.ux + candidate.uz * kept.uz)
+
+    # terrtest60 left one almost-collinear sil6 under a stock curve because its
+    # centre-line offset was 2.15 m: just outside the ordinary 2.0 m gate even
+    # though 76% of the short axis was covered. Give paved-vs-paved pieces only
+    # a tiny extra lateral allowance while retaining the original 6-degree and
+    # 70%-axis-coverage requirements. Dirt/gravel keep the old stricter gate.
+    if alignment >= _ALIGNMENT_COSINE:
+        paved_lateral_limit = min(
+            _MAXIMUM_PAVED_NEAR_COLLINEAR_LATERAL_METRES,
+            min(candidate.half_width, kept.half_width) * 0.55,
+        )
+        paved_lateral = min(
+            _mean_lateral_offset(candidate, kept),
+            _mean_lateral_offset(kept, candidate),
+        )
+        if paved_lateral <= paved_lateral_limit:
+            paved_overlap = max(
+                _longitudinal_overlap(candidate, kept),
+                _longitudinal_overlap(kept, candidate),
+            )
+            paved_shorter = min(candidate.length, kept.length)
+            if (
+                paved_shorter > 1.0e-6
+                and paved_overlap / paved_shorter
+                >= _MINIMUM_SHORTER_AXIS_OVERLAP
+            ):
+                return True
+
     if alignment >= _PAVED_COVERAGE_ALIGNMENT_COSINE:
         if _maximum_lateral_offset(kept, candidate) <= lateral_limit:
             candidate_overlap = _longitudinal_overlap(candidate, kept)
@@ -535,6 +565,22 @@ def _is_redundant(
                 >= _MINIMUM_PAVED_CANDIDATE_COVERAGE
             ):
                 return True
+
+    # A generated paved curve can also substantially repaint a stock sil6 cap.
+    # terrtest60 has a 59.9%-covered cap at 1099.57,974.09. Keep ordinary cap
+    # protection intact, but allow this narrow stock-cap/generated-curve pairing
+    # to collapse when the pieces are nearly collinear. This deliberately does
+    # not apply to generated straight ribbons or to dirt caps.
+    if (
+        candidate.junction_cap
+        and kept.family == "paved"
+        and not kept.stock_model
+        and kept.curved_model
+        and alignment >= _ALIGNMENT_COSINE
+        and _candidate_surface_coverage(candidate, kept)
+        >= _MINIMUM_PAVED_CAP_GENERATED_CURVE_SURFACE_COVERAGE
+    ):
+        return True
 
     # Axis overlap is deliberately conservative, but terrtest59 showed why it
     # cannot be the whole story: wide paved P3Ds can paint most of the same road
