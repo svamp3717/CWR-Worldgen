@@ -265,9 +265,9 @@ def _generated_plan(
     *,
     world_name: str,
 ) -> _Plan | None:
-    """Build an exact-heading generated T only for stock-plan fallback."""
+    """Build an exact-heading generated T/X only for stock-plan fallback."""
 
-    if len(incidents) != 3 or not all(
+    if len(incidents) not in {3, 4} or not all(
         _kind(family) == "paved" for _direction_value, family in incidents
     ):
         return None
