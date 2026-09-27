@@ -599,7 +599,17 @@ def _fit_stock_piece_road_objects_parallel(
         half = cap_piece.length_metres * 0.5
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
-        cap_plans[key] = (cap_piece, start_point, end_point)
+        cap_vertical_offset = (
+            _playability._STOCK_DIRT_VERTICAL_OFFSET_METRES
+            if use_dirt
+            else _playability._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+        )
+        cap_plans[key] = (
+            cap_piece,
+            start_point,
+            end_point,
+            cap_vertical_offset,
+        )
         if generated_paved_t is not None:
             cap_trim_lengths[key] = (
                 half
@@ -745,7 +755,7 @@ def _fit_stock_piece_road_objects_parallel(
     if progress_callback is not None:
         progress_callback(61, f"Placing {len(cap_plans):,} junction caps")
     for key in sorted(cap_plans):
-        cap_piece, start_point, end_point = cap_plans[key]
+        cap_piece, start_point, end_point, cap_vertical_offset = cap_plans[key]
         obj = _playability._road_object_on_slope(
             next_id,
             cap_piece.model_path,
@@ -753,7 +763,7 @@ def _fit_stock_piece_road_objects_parallel(
             end_point,
             elevations,
             spec,
-            vertical_offset=0.060,
+            vertical_offset=cap_vertical_offset,
         )
         next_id += 1
         objects.append(obj)
