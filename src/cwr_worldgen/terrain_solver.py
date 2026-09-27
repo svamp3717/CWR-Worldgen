@@ -1223,17 +1223,20 @@ def solve_terrain_constraints(
     for component, surface in inland_surfaces:
         if len(component) < minimum_datum_component_cells:
             continue
-        if surface > maximum_near_sea_surface:
-            inland_datum_requests.append(max(0.0, surface - spec.sea_level))
-            continue
         bank = _component_bank_reference_height(
             component,
             raster.water,
             raw_original,
             spec.cells,
         )
-        if bank is not None and bank > first_bank_limit:
-            inland_datum_requests.append(bank - first_bank_limit)
+        requested = max(0.0, surface - spec.sea_level)
+        if bank is not None:
+            requested = max(
+                requested,
+                max(0.0, bank - first_bank_limit),
+            )
+        if requested > 0.0:
+            inland_datum_requests.append(requested)
 
     if (datum_candidates or inland_datum_requests) and not near_sea_edge_components:
         # Do not blindly lower the map through unrelated dry valleys. Use dry
