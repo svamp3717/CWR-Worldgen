@@ -853,13 +853,11 @@ def _replacement_dirt_underlay_object(
         )
         if _polygon_area(intersection) <= 1.0e-5:
             continue
-        projections = tuple(
-            (point[0] - axis.start[0]) * axis.ux
-            + (point[1] - axis.start[1]) * axis.uz
-            for point in intersection
-        )
-        for distance in (min(projections), max(projections)):
-            point = _axis_point(axis, distance)
+        for point in intersection:
+            distance = (
+                (point[0] - axis.start[0]) * axis.ux
+                + (point[1] - axis.start[1]) * axis.uz
+            )
             target = (
                 _blocker_height_at(blocker, point)
                 - _DIRT_PAVED_UNDERLAY_DROP_METRES
