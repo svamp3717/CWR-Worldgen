@@ -123,7 +123,7 @@ def test_long_sharp_paved_turn_gets_wider_representable_fillet() -> None:
         r"o\road\sil25.p3d",
         24.5,
     )
-    source = ((0.0, 0.0), (40.0, 0.0), (11.7157, 28.2843))
+    source = ((0.0, 0.0), (50.0, 0.0), (25.0, 43.3013))
 
     repaired = playability._representable_road_run(
         source,
