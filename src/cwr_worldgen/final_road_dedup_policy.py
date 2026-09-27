@@ -37,14 +37,25 @@ _JUNCTION_SHORT_ALIGNMENT_COSINE = math.cos(
 _MINIMUM_JUNCTION_SHORT_CANDIDATE_COVERAGE = 0.55
 _MAXIMUM_JUNCTION_SHORT_LATERAL_METRES = 2.75
 _MAXIMUM_JUNCTION_SHORT_LENGTH_METRES = 6.50
+_MAXIMUM_PAVED_SURFACE_ANGLE_DEGREES = 20.0
+_PAVED_SURFACE_ALIGNMENT_COSINE = math.cos(
+    math.radians(_MAXIMUM_PAVED_SURFACE_ANGLE_DEGREES)
+)
+_MINIMUM_PAVED_SURFACE_COVERAGE = 0.80
+_MAXIMUM_JUNCTION_PAVED_SURFACE_ANGLE_DEGREES = 35.0
+_JUNCTION_PAVED_SURFACE_ALIGNMENT_COSINE = math.cos(
+    math.radians(_MAXIMUM_JUNCTION_PAVED_SURFACE_ANGLE_DEGREES)
+)
+_MINIMUM_JUNCTION_PAVED_SURFACE_COVERAGE = 0.55
+_MINIMUM_PAVED_CAP_SURFACE_COVERAGE = 0.85
 _PAVED_JUNCTION_NEIGHBOURHOOD_METRES = 30.0
 _MAXIMUM_VERTICAL_SEPARATION_METRES = 0.75
 _PROGRESS_BUCKET_PERCENT = 2
 _RAW_PROGRESS_PERCENT = 99
 
 # These values match the effective half-widths used by the post-build road
-# inspector.  They are used only to bound the conservative centre-line offset;
-# surface overlap itself is not approximated by polygon clipping here.
+# inspector. They bound both the conservative centre-line tests and the paved
+# footprint-overlap pass below.
 _HALF_WIDTH_METRES = {
     "sil": 4.55,
     "kos": 4.55,
@@ -349,6 +360,131 @@ def _longitudinal_overlap(reference: _RoadAxis, other: _RoadAxis) -> float:
     return max(0.0, min(reference.length, other_max) - max(0.0, other_min))
 
 
+def _surface_polygon(axis: _RoadAxis) -> tuple[tuple[float, float], ...]:
+    nx, nz = -axis.uz, axis.ux
+    width = axis.half_width
+    return (
+        (axis.start[0] + nx * width, axis.start[1] + nz * width),
+        (axis.start[0] - nx * width, axis.start[1] - nz * width),
+        (axis.end[0] - nx * width, axis.end[1] - nz * width),
+        (axis.end[0] + nx * width, axis.end[1] + nz * width),
+    )
+
+
+def _edge_cross(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    point: tuple[float, float],
+) -> float:
+    return (
+        (end[0] - start[0]) * (point[1] - start[1])
+        - (end[1] - start[1]) * (point[0] - start[0])
+    )
+
+
+def _clip_convex_polygon(
+    subject: tuple[tuple[float, float], ...],
+    clip: tuple[tuple[float, float], ...],
+) -> tuple[tuple[float, float], ...]:
+    # Sutherland-Hodgman clipping. Both road footprints are convex quads in
+    # counter-clockwise order, so this stays tiny and avoids another dependency
+    # in the generator just to intersect two rectangles.
+    output = list(subject)
+    epsilon = 1.0e-9
+    for clip_start, clip_end in zip(clip, clip[1:] + clip[:1]):
+        values = output
+        output = []
+        if not values:
+            break
+        segment_start = values[-1]
+        start_side = _edge_cross(clip_start, clip_end, segment_start)
+        for segment_end in values:
+            end_side = _edge_cross(clip_start, clip_end, segment_end)
+            start_inside = start_side >= -epsilon
+            end_inside = end_side >= -epsilon
+            if end_inside:
+                if not start_inside:
+                    denominator = start_side - end_side
+                    fraction = (
+                        0.0
+                        if abs(denominator) <= 1.0e-12
+                        else start_side / denominator
+                    )
+                    output.append((
+                        segment_start[0]
+                        + (segment_end[0] - segment_start[0]) * fraction,
+                        segment_start[1]
+                        + (segment_end[1] - segment_start[1]) * fraction,
+                    ))
+                output.append(segment_end)
+            elif start_inside:
+                denominator = start_side - end_side
+                fraction = (
+                    0.0
+                    if abs(denominator) <= 1.0e-12
+                    else start_side / denominator
+                )
+                output.append((
+                    segment_start[0]
+                    + (segment_end[0] - segment_start[0]) * fraction,
+                    segment_start[1]
+                    + (segment_end[1] - segment_start[1]) * fraction,
+                ))
+            segment_start = segment_end
+            start_side = end_side
+    return tuple(output)
+
+
+def _polygon_area(points: tuple[tuple[float, float], ...]) -> float:
+    if len(points) < 3:
+        return 0.0
+    return abs(sum(
+        first[0] * second[1] - second[0] * first[1]
+        for first, second in zip(points, points[1:] + points[:1])
+    )) * 0.5
+
+
+def _candidate_surface_coverage(
+    candidate: _RoadAxis,
+    kept: _RoadAxis,
+) -> float:
+    candidate_polygon = _surface_polygon(candidate)
+    kept_polygon = _surface_polygon(kept)
+    intersection = _clip_convex_polygon(candidate_polygon, kept_polygon)
+    candidate_area = candidate.length * candidate.half_width * 2.0
+    if candidate_area <= 1.0e-9:
+        return 0.0
+    return min(1.0, _polygon_area(intersection) / candidate_area)
+
+
+def _paved_surface_is_redundant(
+    candidate: _RoadAxis,
+    kept: _RoadAxis,
+    *,
+    near_paved_junction: bool,
+) -> bool:
+    if not (
+        _is_paved_family(candidate.family)
+        and _is_paved_family(kept.family)
+    ):
+        return False
+
+    alignment = abs(candidate.ux * kept.ux + candidate.uz * kept.uz)
+    if candidate.junction_cap:
+        alignment_limit = _PAVED_SURFACE_ALIGNMENT_COSINE
+        coverage_limit = _MINIMUM_PAVED_CAP_SURFACE_COVERAGE
+    elif near_paved_junction:
+        alignment_limit = _JUNCTION_PAVED_SURFACE_ALIGNMENT_COSINE
+        coverage_limit = _MINIMUM_JUNCTION_PAVED_SURFACE_COVERAGE
+    else:
+        alignment_limit = _PAVED_SURFACE_ALIGNMENT_COSINE
+        coverage_limit = _MINIMUM_PAVED_SURFACE_COVERAGE
+
+    if alignment < alignment_limit:
+        return False
+    return _candidate_surface_coverage(candidate, kept) >= coverage_limit
+
+
 def _is_redundant(
     candidate: _RoadAxis,
     kept: _RoadAxis,
@@ -399,6 +535,19 @@ def _is_redundant(
                 >= _MINIMUM_PAVED_CANDIDATE_COVERAGE
             ):
                 return True
+
+    # Axis overlap is deliberately conservative, but terrtest59 showed why it
+    # cannot be the whole story: wide paved P3Ds can paint most of the same road
+    # surface while their centre-lines are offset by 2-4 metres. Compare their
+    # oriented slab footprints directly. Near a real paved junction the threshold
+    # is lower because these duplicate approach/curve stacks are common; elsewhere
+    # require 80% coverage. A paved cap needs 85% coverage before it can disappear.
+    if _paved_surface_is_redundant(
+        candidate,
+        kept,
+        near_paved_junction=near_paved_junction,
+    ):
+        return True
 
     # terrtest58 exposed a third case clustered around junctions: ordinary sil6
     # approach slabs can be mostly painted underneath a curve/approach while the
