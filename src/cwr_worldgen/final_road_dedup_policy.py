@@ -57,6 +57,10 @@ _DIRT_PAVED_TRIM_CLEARANCE_METRES = 0.0
 _DIRT_PAVED_UNDERLAY_DROP_METRES = 0.080
 _DIRT_PAVED_UNDERLAY_EDGE_EPSILON_METRES = 0.10
 _DIRT_PAVED_UNDERLAY_APPROACH_OVERLAP_METRES = 2.0
+_MAXIMUM_DIRT_PAVED_UNDERLAY_PITCH_DEGREES = 88.0
+_MAXIMUM_DIRT_PAVED_UNDERLAY_RISE = math.sin(
+    math.radians(_MAXIMUM_DIRT_PAVED_UNDERLAY_PITCH_DEGREES)
+)
 _MINIMUM_VISIBLE_DIRT_APPROACH_METRES = 0.50
 _DIRT_PAVED_OVERPASS_CLEARANCE_METRES = 1.50
 _PAVED_JUNCTION_BLOCKER_HALF_EXTENT_METRES = 7.00
@@ -900,11 +904,15 @@ def _replacement_dirt_underlay_object(
         start_y, end_y = outer_y, inner_y
 
     rise = (end_y - start_y) / length
-    if abs(rise) >= 0.999999:
-        # Pathological terrain can demand more vertical change than a stock slab
-        # can represent. Keep the outer seam connected and use the steepest legal
-        # pitch; the remainder is hidden underneath the authoritative paved road.
-        rise = max(-0.999999, min(0.999999, rise))
+    if abs(rise) > _MAXIMUM_DIRT_PAVED_UNDERLAY_RISE:
+        # RVW4 serialization requires pitch to be strictly inside -89..89
+        # degrees. Keep a full degree of safety margin instead of driving asin()
+        # toward 90 degrees for pathological grounding differences. Any remaining
+        # clearance deficit is handled below by lowering the whole hidden terminal.
+        rise = max(
+            -_MAXIMUM_DIRT_PAVED_UNDERLAY_RISE,
+            min(_MAXIMUM_DIRT_PAVED_UNDERLAY_RISE, rise),
+        )
         represented_delta = rise * length
         if inner_at_start:
             start_y = end_y - represented_delta
