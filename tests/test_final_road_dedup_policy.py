@@ -393,7 +393,7 @@ def test_generated_paved_straight_does_not_use_curve_cap_exception():
     assert result.junction_cap_objects == 1
 
 
-def test_perpendicular_dirt_crossing_is_trimmed_to_clear_stock_fragments():
+def test_perpendicular_dirt_crossing_keeps_lowered_terminal_pieces():
     report = _report((
         _road(1, r"o\road\ces25.p3d", 100.0, 100.0, heading=90.0),
         _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=0.0),
@@ -405,14 +405,45 @@ def test_perpendicular_dirt_crossing_is_trimmed_to_clear_stock_fragments():
         obj for obj in result.objects
         if obj.model_path.casefold().endswith(r"\ces6.p3d")
     )
-    assert len(dirt) == 2
+    underlays = tuple(obj for obj in dirt if abs(obj.pitch_degrees) > 0.01)
+    assert len(dirt) == 4
+    assert len(underlays) == 2
     assert any(obj.object_id == 1 for obj in dirt)
     assert tuple(
         obj.object_id for obj in result.objects
         if obj.model_path.casefold().endswith(r"\sil25.p3d")
     ) == (2,)
-    assert max(obj.x for obj in dirt if obj.x < 100.0) <= 96.875
-    assert min(obj.x for obj in dirt if obj.x > 100.0) >= 103.125
+    assert all(obj.y < 0.0 for obj in underlays)
+
+
+def test_dirt_t_approach_finishes_with_piece_diving_under_paved():
+    report = _report((
+        _road(1, r"o\road\ces25.p3d", 100.0, 89.0, heading=0.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=90.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    dirt = tuple(
+        obj for obj in result.objects
+        if obj.model_path.casefold().endswith(
+            (r"\ces25.p3d", r"\ces12.p3d", r"\ces6.p3d")
+        )
+    )
+    underlays = tuple(obj for obj in dirt if abs(obj.pitch_degrees) > 0.01)
+
+    assert dirt
+    assert len(underlays) == 1
+    terminal = underlays[0]
+    axis = __import__("cwr_worldgen.playability", fromlist=["_model_axis"])._model_axis(
+        terminal,
+        6.25,
+    )
+    forward_y = terminal.y + 3.125 * __import__("math").sin(
+        __import__("math").radians(terminal.pitch_degrees)
+    )
+    assert axis[1][1] > 95.0
+    assert forward_y <= -0.079
 
 
 def test_short_dirt_piece_fully_consumed_by_paved_crossing_is_removed():
