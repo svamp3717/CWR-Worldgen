@@ -393,6 +393,84 @@ def test_generated_paved_straight_does_not_use_curve_cap_exception():
     assert result.junction_cap_objects == 1
 
 
+def test_perpendicular_dirt_crossing_is_trimmed_to_clear_stock_fragments():
+    report = _report((
+        _road(1, r"o\road\ces25.p3d", 100.0, 100.0, heading=90.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=0.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    dirt = tuple(
+        obj for obj in result.objects
+        if obj.model_path.casefold().endswith(r"\ces6.p3d")
+    )
+    assert len(dirt) == 2
+    assert any(obj.object_id == 1 for obj in dirt)
+    assert tuple(
+        obj.object_id for obj in result.objects
+        if obj.model_path.casefold().endswith(r"\sil25.p3d")
+    ) == (2,)
+    assert max(obj.x for obj in dirt if obj.x < 100.0) <= 96.875
+    assert min(obj.x for obj in dirt if obj.x > 100.0) >= 103.125
+
+
+def test_short_dirt_piece_fully_consumed_by_paved_crossing_is_removed():
+    report = _report((
+        _road(1, r"o\road\ces6.p3d", 100.0, 100.0, heading=90.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=0.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (2,)
+
+
+def test_dirt_curve_touching_paved_surface_is_removed_wholesale():
+    report = _report((
+        _road(1, r"o\road\ces10 50.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (2,)
+
+
+def test_paved_junction_footprint_clears_dirt_piece_under_hub():
+    report = _report((
+        _road(1, r"o\road\kr_new_sil_sil_t.p3d", 100.0, 100.0),
+        _road(2, r"o\road\ces25.p3d", 100.0, 100.0, heading=90.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1,)
+    assert result.junction_cap_objects == 1
+
+
+def test_dirt_under_high_paved_overpass_is_preserved():
+    report = _report((
+        _road(1, r"o\road\ces25.p3d", 100.0, 100.0, heading=90.0, y=0.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=0.0, y=4.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2)
+
+
+def test_badly_grounded_dirt_above_paved_is_still_trimmed():
+    report = _report((
+        _road(1, r"o\road\ces6.p3d", 100.0, 100.0, heading=90.0, y=2.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=0.0, y=0.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (2,)
+
+
 def test_progress_reports_bounded_spatial_comparisons():
     events = []
     roads = tuple(
