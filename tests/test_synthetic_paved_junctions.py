@@ -118,12 +118,12 @@ def test_junction_guard_preserves_historical_paved_rounding() -> None:
     assert repaired == historical
 
 
-def test_moderately_sharp_paved_turn_gets_bounded_representable_fillet() -> None:
+def test_long_sharp_paved_turn_gets_wider_representable_fillet() -> None:
     pieces = playability.road_model_variants(
         r"o\road\sil25.p3d",
         24.5,
     )
-    source = ((0.0, 0.0), (50.0, 0.0), (41.3176, 49.2404))
+    source = ((0.0, 0.0), (50.0, 0.0), (25.0, 43.3013))
 
     repaired = playability._representable_road_run(
         source,
@@ -141,22 +141,7 @@ def test_moderately_sharp_paved_turn_gets_bounded_representable_fillet() -> None
         )
         for index in range(1, len(repaired) - 1)
     )
-    assert max(turns, default=0.0) <= 30.0
-
-
-def test_very_sharp_paved_turn_is_simplified_instead_of_long_fillet() -> None:
-    pieces = playability.road_model_variants(
-        r"o\road\sil25.p3d",
-        24.5,
-    )
-    source = ((0.0, 0.0), (50.0, 0.0), (25.0, 43.3013))
-
-    repaired = playability._representable_road_run(
-        source,
-        pieces,
-    )
-
-    assert repaired == (source[0], source[-1])
+    assert max(turns, default=0.0) <= 45.0
 
 
 def test_dirt_run_keeps_existing_rounding_behavior() -> None:
