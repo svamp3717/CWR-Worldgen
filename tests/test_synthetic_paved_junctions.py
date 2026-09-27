@@ -86,6 +86,21 @@ def test_unrepresentable_short_paved_corner_is_collapsed() -> None:
     assert repaired == (source[0], source[-1])
 
 
+def test_impossible_paved_hairpin_collapses_instead_of_self_intersecting() -> None:
+    pieces = playability.road_model_variants(
+        r"o\road\sil25.p3d",
+        24.5,
+    )
+    source = ((0.0, 0.0), (4.0, 0.0), (0.10, 0.0))
+
+    repaired = playability._representable_road_run(
+        source,
+        pieces,
+    )
+
+    assert repaired == (source[0], source[-1])
+
+
 def test_junction_guard_preserves_historical_paved_rounding() -> None:
     pieces = playability.road_model_variants(
         r"o\road\sil25.p3d",
