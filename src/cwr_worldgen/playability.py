@@ -1224,6 +1224,55 @@ def _paved_junction_augmented_polylines(
                     )
                     if distance > _SYNTHETIC_PAVED_JUNCTION_SNAP_METRES:
                         continue
+
+                    endpoint_epsilon = (
+                        _SYNTHETIC_PAVED_JUNCTION_ENDPOINT_EPSILON_METRES
+                    )
+                    target_is_start = (
+                        target_fraction * target_length <= endpoint_epsilon
+                    )
+                    target_is_end = (
+                        (1.0 - target_fraction) * target_length
+                        <= endpoint_epsilon
+                    )
+                    target_vertex = None
+                    if target_is_start:
+                        target_vertex = feature_endpoint_vertex(
+                            target_feature,
+                            target_segment,
+                            start=True,
+                        )
+                    elif target_is_end:
+                        target_vertex = feature_endpoint_vertex(
+                            target_feature,
+                            target_segment,
+                            start=False,
+                        )
+
+                    if target_vertex is not None:
+                        # Two whole-feature endpoints can stop just short of each
+                        # other. Snap both to one deterministic midpoint instead
+                        # of swapping their endpoints and still leaving two nodes.
+                        target_point = projected[target_feature][target_vertex]
+                        shared = (
+                            (endpoint[0] + target_point[0]) * 0.5,
+                            (endpoint[1] + target_point[1]) * 0.5,
+                        )
+                        movement = math.dist(endpoint, shared)
+                        record_vertex_replacement(
+                            source_feature,
+                            vertex_index,
+                            shared,
+                            movement,
+                        )
+                        record_vertex_replacement(
+                            target_feature,
+                            target_vertex,
+                            shared,
+                            math.dist(target_point, shared),
+                        )
+                        continue
+
                     record_vertex_replacement(
                         source_feature,
                         vertex_index,
