@@ -814,7 +814,7 @@ def _replacement_dirt_underlay_object(
     end: float,
     *,
     inner_at_start: bool,
-    blocker_indices: tuple[int, ...],
+    blocker_buckets: dict[tuple[int, int], list[int]],
     blockers: tuple[_PavedBlocker, ...],
     object_id: int,
 ):
@@ -846,8 +846,17 @@ def _replacement_dirt_underlay_object(
     constrained = False
     constraints: list[tuple[float, float]] = []
 
-    for blocker_index in blocker_indices:
+    terminal_blockers: set[int] = set()
+    for bucket in _polygon_buckets(terminal_polygon):
+        terminal_blockers.update(blocker_buckets.get(bucket, ()))
+
+    for blocker_index in sorted(terminal_blockers):
         blocker = blockers[blocker_index]
+        if (
+            blocker.elevation - axis.elevation
+            > _DIRT_PAVED_OVERPASS_CLEARANCE_METRES
+        ):
+            continue
         intersection = _clip_convex_polygon(
             terminal_polygon,
             blocker.polygon,
@@ -863,6 +872,8 @@ def _replacement_dirt_underlay_object(
                 _blocker_height_at(blocker, point)
                 - _DIRT_PAVED_UNDERLAY_DROP_METRES
             )
+            constraints.append((distance, target))
+            constrained = True
             t = (distance - start) / length
             if inner_at_start:
                 # y(t) = (1-t)*inner + t*outer
@@ -877,8 +888,6 @@ def _replacement_dirt_underlay_object(
                     continue
                 allowed_inner = (target - (1.0 - t) * outer_y) / weight
             inner_y = min(inner_y, allowed_inner)
-            constraints.append((distance, target))
-            constrained = True
 
     if not constrained:
         return None
@@ -1113,10 +1122,7 @@ def _trim_dirt_under_paved(report, spec):
                         span[0],
                         span[1],
                         inner_at_start=True,
-                        blocker_indices=tuple(sorted({
-                            blocker_index
-                            for blocker_index, _interval in blocker_intervals
-                        })),
+                        blocker_buckets=blocker_buckets,
                         blockers=blockers,
                         object_id=allocate_id(),
                     )
@@ -1149,10 +1155,7 @@ def _trim_dirt_under_paved(report, spec):
                         span[0],
                         span[1],
                         inner_at_start=False,
-                        blocker_indices=tuple(sorted({
-                            blocker_index
-                            for blocker_index, _interval in blocker_intervals
-                        })),
+                        blocker_buckets=blocker_buckets,
                         blockers=blockers,
                         object_id=allocate_id(),
                     )
