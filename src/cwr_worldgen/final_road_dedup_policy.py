@@ -56,6 +56,7 @@ _MAXIMUM_VERTICAL_SEPARATION_METRES = 0.75
 _DIRT_PAVED_TRIM_CLEARANCE_METRES = 0.0
 _DIRT_PAVED_UNDERLAY_DROP_METRES = 0.080
 _DIRT_PAVED_UNDERLAY_EDGE_EPSILON_METRES = 0.10
+_DIRT_PAVED_UNDERLAY_APPROACH_OVERLAP_METRES = 2.0
 _DIRT_PAVED_OVERPASS_CLEARANCE_METRES = 1.50
 _PAVED_JUNCTION_BLOCKER_HALF_EXTENT_METRES = 7.00
 _PROGRESS_BUCKET_PERCENT = 2
@@ -949,11 +950,14 @@ def _terminal_underlay_span(
     epsilon = _DIRT_PAVED_UNDERLAY_EDGE_EPSILON_METRES
 
     if before_block:
-        outer = (
-            max(span[2] for span in regular_spans)
-            if regular_spans
-            else clear_start
-        )
+        if regular_spans:
+            outer = max(
+                clear_start,
+                max(span[2] for span in regular_spans)
+                - _DIRT_PAVED_UNDERLAY_APPROACH_OVERLAP_METRES,
+            )
+        else:
+            outer = clear_start
         inner = outer + terminal_length
         if blocked_end < total_length - epsilon:
             inner = min(inner, blocked_end - epsilon)
@@ -964,11 +968,14 @@ def _terminal_underlay_span(
         start = inner - terminal_length
         end = inner
     else:
-        outer = (
-            min(span[1] for span in regular_spans)
-            if regular_spans
-            else clear_end
-        )
+        if regular_spans:
+            outer = min(
+                clear_end,
+                min(span[1] for span in regular_spans)
+                + _DIRT_PAVED_UNDERLAY_APPROACH_OVERLAP_METRES,
+            )
+        else:
+            outer = clear_end
         inner = outer - terminal_length
         if blocked_start > epsilon:
             inner = max(inner, blocked_start + epsilon)
