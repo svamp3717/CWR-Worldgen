@@ -52,6 +52,9 @@ _MINIMUM_JUNCTION_PAVED_SURFACE_COVERAGE = 0.55
 _MINIMUM_PAVED_CAP_SURFACE_COVERAGE = 0.85
 _PAVED_JUNCTION_NEIGHBOURHOOD_METRES = 30.0
 _MAXIMUM_VERTICAL_SEPARATION_METRES = 0.75
+_DIRT_PAVED_TRIM_CLEARANCE_METRES = 0.25
+_DIRT_PAVED_OVERPASS_CLEARANCE_METRES = 1.50
+_PAVED_JUNCTION_BLOCKER_HALF_EXTENT_METRES = 7.00
 _PROGRESS_BUCKET_PERCENT = 2
 _RAW_PROGRESS_PERCENT = 99
 
@@ -78,6 +81,10 @@ _GENERATED_PAVED = re.compile(
     re.I,
 )
 _GRAVEL_STRAIGHT = re.compile(r"^gravel(?P<nominal>25|12|6|3)\.p3d$", re.I)
+_DIRT_CURVE = re.compile(
+    r"^ces10 (?P<radius>25|50|75|100)\.p3d$",
+    re.I,
+)
 
 _INSTALLED = False
 _ORIGINAL_FIT = None
@@ -106,6 +113,21 @@ class _RoadAxis:
             min(self.start[1], self.end[1]),
             max(self.start[0], self.end[0]),
             max(self.start[1], self.end[1]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _PavedBlocker:
+    polygon: tuple[tuple[float, float], ...]
+    elevation: float
+
+    @property
+    def bounds(self) -> tuple[float, float, float, float]:
+        return (
+            min(point[0] for point in self.polygon),
+            min(point[1] for point in self.polygon),
+            max(point[0] for point in self.polygon),
+            max(point[1] for point in self.polygon),
         )
 
 
@@ -221,6 +243,52 @@ def _road_axis(
         elevation=float(obj.y),
         stock_model=stock_model,
         curved_model=curved_model,
+        junction_cap=bool(junction_cap),
+    )
+
+
+def _dirt_axis(
+    obj,
+    object_index: int,
+    spec,
+    *,
+    junction_cap: bool = False,
+) -> _RoadAxis | None:
+    axis = _road_axis(
+        obj,
+        object_index,
+        spec,
+        junction_cap=junction_cap,
+    )
+    if axis is not None:
+        return axis if axis.family == "ces" else None
+
+    match = _DIRT_CURVE.fullmatch(_filename(obj.model_path))
+    if match is None:
+        return None
+    start, end = _stock_curve_axis(
+        obj,
+        "ces",
+        float(match.group("radius")),
+    )
+    dx = end[0] - start[0]
+    dz = end[1] - start[1]
+    length = math.hypot(dx, dz)
+    if length <= 1.0e-6:
+        return None
+    return _RoadAxis(
+        object_id=int(obj.object_id),
+        object_index=int(object_index),
+        family="ces",
+        start=start,
+        end=end,
+        ux=dx / length,
+        uz=dz / length,
+        length=length,
+        half_width=float(_HALF_WIDTH_METRES["ces"]),
+        elevation=float(obj.y),
+        stock_model=True,
+        curved_model=True,
         junction_cap=bool(junction_cap),
     )
 
@@ -362,9 +430,13 @@ def _longitudinal_overlap(reference: _RoadAxis, other: _RoadAxis) -> float:
     return max(0.0, min(reference.length, other_max) - max(0.0, other_min))
 
 
-def _surface_polygon(axis: _RoadAxis) -> tuple[tuple[float, float], ...]:
+def _surface_polygon(
+    axis: _RoadAxis,
+    *,
+    padding: float = 0.0,
+) -> tuple[tuple[float, float], ...]:
     nx, nz = -axis.uz, axis.ux
-    width = axis.half_width
+    width = axis.half_width + max(0.0, float(padding))
     return (
         (axis.start[0] + nx * width, axis.start[1] + nz * width),
         (axis.start[0] - nx * width, axis.start[1] - nz * width),
@@ -457,6 +529,336 @@ def _candidate_surface_coverage(
     if candidate_area <= 1.0e-9:
         return 0.0
     return min(1.0, _polygon_area(intersection) / candidate_area)
+
+
+def _generated_curve_padding(model_path: str, axis: _RoadAxis) -> float:
+    if not axis.curved_model:
+        return 0.0
+    filename = _filename(model_path)
+    match = _GENERATED_PAVED.fullmatch(filename)
+    if match is None:
+        return 0.50
+    curve = match.group("curve")
+    if not curve:
+        return 0.0
+    degrees = float(curve[-2:])
+    theta = math.radians(degrees)
+    if theta <= 1.0e-9:
+        return 0.0
+    radius = axis.length / max(1.0e-9, 2.0 * math.sin(theta * 0.5))
+    return radius * (1.0 - math.cos(theta * 0.5)) + 0.15
+
+
+def _junction_blocker(obj) -> _PavedBlocker:
+    extent = _PAVED_JUNCTION_BLOCKER_HALF_EXTENT_METRES
+    return _PavedBlocker(
+        (
+            (float(obj.x) - extent, float(obj.z) - extent),
+            (float(obj.x) - extent, float(obj.z) + extent),
+            (float(obj.x) + extent, float(obj.z) + extent),
+            (float(obj.x) + extent, float(obj.z) - extent),
+        ),
+        float(obj.y),
+    )
+
+
+def _paved_blockers(report, spec) -> tuple[_PavedBlocker, ...]:
+    blockers: list[_PavedBlocker] = []
+    for index, obj in enumerate(report.objects):
+        axis = _road_axis(obj, index, spec)
+        if axis is not None and _is_paved_family(axis.family):
+            blockers.append(_PavedBlocker(
+                _surface_polygon(
+                    axis,
+                    padding=_generated_curve_padding(obj.model_path, axis),
+                ),
+                float(obj.y),
+            ))
+            continue
+        if _is_paved_junction_cap_model(obj.model_path):
+            blockers.append(_junction_blocker(obj))
+    return tuple(blockers)
+
+
+def _polygon_buckets(
+    polygon: tuple[tuple[float, float], ...],
+) -> tuple[tuple[int, int], ...]:
+    min_x = min(point[0] for point in polygon)
+    min_z = min(point[1] for point in polygon)
+    max_x = max(point[0] for point in polygon)
+    max_z = max(point[1] for point in polygon)
+    return tuple(
+        (bx, bz)
+        for bz in _bucket_range(min_z, max_z)
+        for bx in _bucket_range(min_x, max_x)
+    )
+
+
+def _blocked_interval(
+    dirt: _RoadAxis,
+    dirt_polygon: tuple[tuple[float, float], ...],
+    blocker: _PavedBlocker,
+) -> tuple[float, float] | None:
+    # A substantially higher paved surface is an overpass, not an at-grade
+    # ownership conflict. The asymmetric test is intentional: a dirt piece that
+    # was grounded *above* asphalt is precisely the bad case this pass must fix.
+    if (
+        blocker.elevation - dirt.elevation
+        > _DIRT_PAVED_OVERPASS_CLEARANCE_METRES
+    ):
+        return None
+
+    intersection = _clip_convex_polygon(dirt_polygon, blocker.polygon)
+    if _polygon_area(intersection) <= 1.0e-5:
+        return None
+
+    projections = tuple(
+        (point[0] - dirt.start[0]) * dirt.ux
+        + (point[1] - dirt.start[1]) * dirt.uz
+        for point in intersection
+    )
+    if not projections:
+        return None
+    start = max(
+        0.0,
+        min(projections) - _DIRT_PAVED_TRIM_CLEARANCE_METRES,
+    )
+    end = min(
+        dirt.length,
+        max(projections) + _DIRT_PAVED_TRIM_CLEARANCE_METRES,
+    )
+    if end <= start + 0.02:
+        return None
+    return start, end
+
+
+def _merge_intervals(
+    values: list[tuple[float, float]],
+) -> tuple[tuple[float, float], ...]:
+    if not values:
+        return ()
+    ordered = sorted(values)
+    result = [ordered[0]]
+    for start, end in ordered[1:]:
+        previous_start, previous_end = result[-1]
+        if start <= previous_end + 1.0e-6:
+            result[-1] = (previous_start, max(previous_end, end))
+        else:
+            result.append((start, end))
+    return tuple(result)
+
+
+def _clear_intervals(
+    length: float,
+    blocked: tuple[tuple[float, float], ...],
+) -> tuple[tuple[float, float], ...]:
+    cursor = 0.0
+    result: list[tuple[float, float]] = []
+    for start, end in blocked:
+        if start > cursor + 0.02:
+            result.append((cursor, start))
+        cursor = max(cursor, end)
+    if cursor < length - 0.02:
+        result.append((cursor, length))
+    return tuple(result)
+
+
+def _dirt_variant_path(model_path: str, nominal: int) -> str:
+    normalized = str(model_path).replace("/", "\")
+    if "\" not in normalized:
+        return f"ces{nominal}.p3d"
+    parent = normalized.rsplit("\", 1)[0]
+    return f"{parent}\\ces{nominal}.p3d"
+
+
+def _dirt_variant_lengths(spec) -> tuple[tuple[int, float], ...]:
+    scale = float(spec.road_segment_length) / 25.0
+    return (
+        (25, 25.0 * scale),
+        (12, 12.5 * scale),
+        (6, 6.25 * scale),
+    )
+
+
+def _pack_dirt_interval(
+    start: float,
+    end: float,
+    total_length: float,
+    variants: tuple[tuple[int, float], ...],
+) -> tuple[tuple[int, float, float], ...]:
+    available = end - start
+    if available <= 0.02:
+        return ()
+    chosen: list[tuple[int, float]] = []
+    remaining = available
+    for nominal, length in variants:
+        while remaining + 1.0e-6 >= length:
+            chosen.append((nominal, length))
+            remaining -= length
+    if not chosen:
+        return ()
+
+    used = sum(length for _nominal, length in chosen)
+    if start <= 0.02:
+        cursor = start
+    elif end >= total_length - 0.02:
+        cursor = end - used
+    else:
+        cursor = start + (available - used) * 0.5
+
+    result = []
+    for nominal, length in chosen:
+        result.append((nominal, cursor, cursor + length))
+        cursor += length
+    return tuple(result)
+
+
+def _replacement_dirt_object(
+    obj,
+    axis: _RoadAxis,
+    nominal: int,
+    start: float,
+    end: float,
+    *,
+    object_id: int,
+):
+    centre = (start + end) * 0.5
+    x = axis.start[0] + axis.ux * centre
+    z = axis.start[1] + axis.uz * centre
+    # Stock straight road pitch rotates local +Z into vertical. Preserve the
+    # original fitted plane while moving the replacement slab along that axis.
+    local_shift = centre - axis.length * 0.5
+    y = float(obj.y) + math.sin(
+        math.radians(float(obj.pitch_degrees))
+    ) * local_shift
+    return replace(
+        obj,
+        object_id=int(object_id),
+        model_path=_dirt_variant_path(obj.model_path, nominal),
+        x=x,
+        y=y,
+        z=z,
+    )
+
+
+def _trim_dirt_under_paved(report, spec):
+    """Cut stock dirt slabs out of every at-grade paved footprint.
+
+    Paved roads are authoritative. A straight dirt slab is retiled only into
+    stock 25/12/6 pieces that fit wholly in the remaining clear portions of its
+    original axis. Dirt curves and dirt junction caps are removed wholesale when
+    they intersect paved surface because there is no safe stock sub-piece that
+    preserves their geometry.
+    """
+
+    if not report.objects:
+        return report
+    blockers = _paved_blockers(report, spec)
+    if not blockers:
+        return report
+
+    blocker_buckets: dict[tuple[int, int], list[int]] = {}
+    for blocker_index, blocker in enumerate(blockers):
+        for bucket in _polygon_buckets(blocker.polygon):
+            blocker_buckets.setdefault(bucket, []).append(blocker_index)
+
+    protected_prefix = max(
+        0,
+        min(int(report.junction_cap_objects), len(report.objects)),
+    )
+    next_object_id = max(
+        (int(obj.object_id) for obj in report.objects),
+        default=0,
+    ) + 1
+    replacements: dict[int, tuple[object, ...]] = {}
+    removed_cap_ids: set[int] = set()
+    variants = _dirt_variant_lengths(spec)
+
+    for index, obj in enumerate(report.objects):
+        dirt = _dirt_axis(
+            obj,
+            index,
+            spec,
+            junction_cap=index < protected_prefix,
+        )
+        if dirt is None:
+            continue
+
+        dirt_polygon = _surface_polygon(dirt)
+        candidate_blockers: set[int] = set()
+        for bucket in _polygon_buckets(dirt_polygon):
+            candidate_blockers.update(blocker_buckets.get(bucket, ()))
+        blocked = _merge_intervals([
+            interval
+            for blocker_index in sorted(candidate_blockers)
+            for interval in (
+                _blocked_interval(
+                    dirt,
+                    dirt_polygon,
+                    blockers[blocker_index],
+                ),
+            )
+            if interval is not None
+        ])
+        if not blocked:
+            continue
+
+        object_id = int(obj.object_id)
+        filename = _filename(obj.model_path)
+        straight = _STOCK_STRAIGHT.fullmatch(filename)
+        if (
+            index < protected_prefix
+            or dirt.curved_model
+            or straight is None
+            or straight.group("family").casefold() != "ces"
+        ):
+            replacements[object_id] = ()
+            if index < protected_prefix:
+                removed_cap_ids.add(object_id)
+            continue
+
+        pieces: list[object] = []
+        for clear_start, clear_end in _clear_intervals(dirt.length, blocked):
+            for nominal, start, end in _pack_dirt_interval(
+                clear_start,
+                clear_end,
+                dirt.length,
+                variants,
+            ):
+                replacement_id = (
+                    object_id if not pieces else next_object_id
+                )
+                if pieces:
+                    next_object_id += 1
+                pieces.append(_replacement_dirt_object(
+                    obj,
+                    dirt,
+                    nominal,
+                    start,
+                    end,
+                    object_id=replacement_id,
+                ))
+        replacements[object_id] = tuple(pieces)
+
+    if not replacements:
+        return report
+
+    objects: list[object] = []
+    for obj in report.objects:
+        replacement = replacements.get(int(obj.object_id))
+        if replacement is None:
+            objects.append(obj)
+        else:
+            objects.extend(replacement)
+
+    return replace(
+        report,
+        objects=tuple(objects),
+        junction_cap_objects=max(
+            0,
+            protected_prefix - len(removed_cap_ids),
+        ),
+    )
 
 
 def _paved_surface_is_redundant(
@@ -661,7 +1063,7 @@ def deduplicate_final_road_objects(
             axes.append(axis)
 
     if len(axes) < 2:
-        return report
+        return _trim_dirt_under_paved(report, spec)
 
     paved_cap_buckets = _cap_point_buckets(tuple(paved_cap_points))
     ordered = sorted(axes, key=_priority, reverse=True)
@@ -719,15 +1121,16 @@ def deduplicate_final_road_objects(
                 )
 
     if not removed_ids:
-        return report
+        return _trim_dirt_under_paved(report, spec)
 
     objects = tuple(obj for obj in report.objects if int(obj.object_id) not in removed_ids)
     removed_caps = len(removed_ids.intersection(protected_cap_ids))
-    return replace(
+    deduplicated = replace(
         report,
         objects=objects,
         junction_cap_objects=protected_prefix - removed_caps,
     )
+    return _trim_dirt_under_paved(deduplicated, spec)
 
 
 def install_final_road_dedup_policy() -> None:
