@@ -71,6 +71,79 @@ def _has_point(
     )
 
 
+def test_unrepresentable_short_paved_corner_is_collapsed() -> None:
+    pieces = playability.road_model_variants(
+        r"o\road\sil25.p3d",
+        24.5,
+    )
+    source = ((0.0, 0.0), (4.0, 0.0), (4.0, 4.0))
+
+    repaired = playability._representable_road_run(
+        source,
+        pieces,
+    )
+
+    assert repaired == (source[0], source[-1])
+
+
+def test_junction_guard_preserves_historical_paved_rounding() -> None:
+    pieces = playability.road_model_variants(
+        r"o\road\sil25.p3d",
+        24.5,
+    )
+    source = ((0.0, 0.0), (4.0, 0.0), (4.0, 4.0))
+
+    historical = playability._rounded_road_run(source)
+    repaired = playability._representable_road_run(
+        source,
+        pieces,
+        preserve_start_metres=87.0,
+    )
+
+    assert repaired == historical
+
+
+def test_long_sharp_paved_turn_gets_wider_representable_fillet() -> None:
+    pieces = playability.road_model_variants(
+        r"o\road\sil25.p3d",
+        24.5,
+    )
+    source = ((0.0, 0.0), (40.0, 0.0), (11.7157, 28.2843))
+
+    repaired = playability._representable_road_run(
+        source,
+        pieces,
+    )
+
+    assert repaired[0] == source[0]
+    assert repaired[-1] == source[-1]
+    assert len(repaired) > 5
+    turns = tuple(
+        playability._turn_degrees(
+            repaired[index - 1],
+            repaired[index],
+            repaired[index + 1],
+        )
+        for index in range(1, len(repaired) - 1)
+    )
+    assert max(turns, default=0.0) <= 45.0
+
+
+def test_dirt_run_keeps_existing_rounding_behavior() -> None:
+    pieces = playability.road_model_variants(
+        r"o\road\ces25.p3d",
+        24.5,
+    )
+    source = ((0.0, 0.0), (20.0, 0.0), (20.0, 20.0))
+
+    repaired = playability._representable_road_run(
+        source,
+        pieces,
+    )
+
+    assert repaired == playability._rounded_road_run(source)
+
+
 def test_mixed_paved_dirt_node_keeps_only_paved_cap_incidents() -> None:
     values = (
         ((0.0, 1.0), False, r"o\road\sil25.p3d", "paved/north", "paved"),
