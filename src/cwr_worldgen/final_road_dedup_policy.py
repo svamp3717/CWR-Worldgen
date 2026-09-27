@@ -34,7 +34,7 @@ _MAXIMUM_JUNCTION_SHORT_ANGLE_DEGREES = 30.0
 _JUNCTION_SHORT_ALIGNMENT_COSINE = math.cos(
     math.radians(_MAXIMUM_JUNCTION_SHORT_ANGLE_DEGREES)
 )
-_MINIMUM_JUNCTION_SHORT_CANDIDATE_COVERAGE = 0.60
+_MINIMUM_JUNCTION_SHORT_CANDIDATE_COVERAGE = 0.55
 _MAXIMUM_JUNCTION_SHORT_LATERAL_METRES = 2.75
 _MAXIMUM_JUNCTION_SHORT_LENGTH_METRES = 6.50
 _PAVED_JUNCTION_NEIGHBOURHOOD_METRES = 30.0
@@ -241,7 +241,11 @@ def _priority(axis: _RoadAxis) -> tuple[int, float, float, int, int]:
     return (
         _surface_priority(axis.family),
         axis.half_width,
-        axis.length,
+        # Nominally identical stock pieces can differ by ~1e-13 after their
+        # transformed endpoints are reconstructed from WRP floats. Quantize the
+        # sort-only length so that noise cannot make a chain duplicate outrank
+        # its lower-id junction cap.
+        round(axis.length, 6),
         1 if axis.stock_model else 0,
         -axis.object_id,
     )
