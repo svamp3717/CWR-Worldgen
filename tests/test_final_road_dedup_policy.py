@@ -548,6 +548,27 @@ def test_badly_grounded_dirt_above_paved_is_still_trimmed():
     assert tuple(obj.object_id for obj in result.objects) == (2,)
 
 
+def test_extreme_dirt_underlay_never_exceeds_rvw4_pitch_limit():
+    report = _report((
+        _road(1, r"o\road\ces25.p3d", 100.0, 89.0, heading=0.0, y=10.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=90.0, y=0.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    dirt = tuple(
+        obj for obj in result.objects
+        if obj.model_path.casefold().endswith(
+            (r"\ces25.p3d", r"\ces12.p3d", r"\ces6.p3d")
+        )
+    )
+    underlays = tuple(obj for obj in dirt if abs(obj.pitch_degrees) > 0.01)
+
+    assert underlays
+    assert all(abs(obj.pitch_degrees) <= 88.0 for obj in underlays)
+    assert all(-89.0 < obj.pitch_degrees < 89.0 for obj in underlays)
+
+
 def test_progress_reports_bounded_spatial_comparisons():
     events = []
     roads = tuple(
