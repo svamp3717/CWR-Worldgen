@@ -1644,11 +1644,11 @@ def _representable_road_run(
             )
             if required <= available + 1.0e-6:
                 continue
-            if math.dist(previous, following) <= 0.50:
-                # A literal hairpin cannot be shortcut without collapsing the
-                # run to one point. Leave it for generated fallback/late cleanup.
-                continue
+            # This corner cannot physically fit the visible paved width. Remove
+            # it even for a near-returning hairpin; a zero-length remnant is safer
+            # to skip than manufacturing a self-intersecting knot of road slabs.
             del cleaned[index]
+            cleaned = list(_clean_road_points(cleaned))
             removed = True
             break
         if not removed:
@@ -2448,6 +2448,9 @@ def _fit_stock_piece_road_objects(
                     if raw_end_key in split_keys else 0.0
                 ),
             )
+            if len(run) < 2:
+                skipped_short_runs += 1
+                continue
             measure = _PolylineMeasure.create(run)
             total_length = measure.total
             if total_length <= 0.05:
