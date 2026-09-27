@@ -57,6 +57,7 @@ _DIRT_PAVED_TRIM_CLEARANCE_METRES = 0.0
 _DIRT_PAVED_UNDERLAY_DROP_METRES = 0.080
 _DIRT_PAVED_UNDERLAY_EDGE_EPSILON_METRES = 0.10
 _DIRT_PAVED_UNDERLAY_APPROACH_OVERLAP_METRES = 2.0
+_MINIMUM_VISIBLE_DIRT_APPROACH_METRES = 0.50
 _DIRT_PAVED_OVERPASS_CLEARANCE_METRES = 1.50
 _PAVED_JUNCTION_BLOCKER_HALF_EXTENT_METRES = 7.00
 _PROGRESS_BUCKET_PERCENT = 2
@@ -1087,6 +1088,11 @@ def _trim_dirt_under_paved(report, spec):
         terminal_nominal, terminal_length = variants[-1]
         clear_intervals = _clear_intervals(dirt.length, blocked)
         for clear_start, clear_end in clear_intervals:
+            if (
+                clear_end - clear_start
+                < _MINIMUM_VISIBLE_DIRT_APPROACH_METRES
+            ):
+                continue
             regular_spans = _pack_dirt_interval(
                 clear_start,
                 clear_end,
