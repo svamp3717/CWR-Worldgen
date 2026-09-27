@@ -814,10 +814,7 @@ def _replacement_dirt_underlay_object(
     end: float,
     *,
     inner_at_start: bool,
-    blocker_intervals: tuple[
-        tuple[int, tuple[float, float]],
-        ...,
-    ],
+    blocker_indices: tuple[int, ...],
     blockers: tuple[_PavedBlocker, ...],
     object_id: int,
 ):
@@ -827,21 +824,41 @@ def _replacement_dirt_underlay_object(
     original_end_y = _object_plane_height(obj, end_point)
     length = max(1.0e-6, end - start)
 
+    dx = end_point[0] - start_point[0]
+    dz = end_point[1] - start_point[1]
+    terminal_length = max(1.0e-9, math.hypot(dx, dz))
+    terminal_ux, terminal_uz = dx / terminal_length, dz / terminal_length
+    nx, nz = -terminal_uz, terminal_ux
+    width = axis.half_width
+    terminal_polygon = (
+        (start_point[0] + nx * width, start_point[1] + nz * width),
+        (start_point[0] - nx * width, start_point[1] - nz * width),
+        (end_point[0] - nx * width, end_point[1] - nz * width),
+        (end_point[0] + nx * width, end_point[1] + nz * width),
+    )
+
     # Preserve the visible outer endpoint exactly on the original dirt grade.
-    # Solve only the hidden endpoint height. Because both the dirt slab and each
-    # paved blocker are planar, checking both ends of every overlap interval is
-    # sufficient to keep the entire overlapping dirt segment below asphalt.
+    # Solve only the hidden endpoint height. Intersect the *new* terminal slab
+    # with paved footprints rather than relying on the old source-object bounds;
+    # this lets a short ces6 extend beyond its former endpoint underneath asphalt.
     outer_y = original_end_y if inner_at_start else original_start_y
     inner_y = original_start_y if inner_at_start else original_end_y
     constrained = False
 
-    for blocker_index, (blocked_start, blocked_end) in blocker_intervals:
-        overlap_start = max(start, blocked_start)
-        overlap_end = min(end, blocked_end)
-        if overlap_end <= overlap_start + 1.0e-6:
-            continue
+    for blocker_index in blocker_indices:
         blocker = blockers[blocker_index]
-        for distance in (overlap_start, overlap_end):
+        intersection = _clip_convex_polygon(
+            terminal_polygon,
+            blocker.polygon,
+        )
+        if _polygon_area(intersection) <= 1.0e-5:
+            continue
+        projections = tuple(
+            (point[0] - axis.start[0]) * axis.ux
+            + (point[1] - axis.start[1]) * axis.uz
+            for point in intersection
+        )
+        for distance in (min(projections), max(projections)):
             point = _axis_point(axis, distance)
             target = (
                 _blocker_height_at(blocker, point)
@@ -874,8 +891,8 @@ def _replacement_dirt_underlay_object(
     rise = (end_y - start_y) / length
     if abs(rise) >= 0.999999:
         # Pathological terrain can demand more vertical change than a stock slab
-        # can represent. Paved still wins: lower the whole hidden terminal enough
-        # to satisfy the endpoint constraint instead of letting dirt poke through.
+        # can represent. Keep the outer seam connected and use the steepest legal
+        # pitch; the remainder is hidden underneath the authoritative paved road.
         rise = max(-0.999999, min(0.999999, rise))
         represented_delta = rise * length
         if inner_at_start:
@@ -917,8 +934,12 @@ def _terminal_underlay_span(
             else clear_start
         )
         inner = outer + terminal_length
-        inner = min(inner, blocked_end - epsilon)
-        inner = max(inner, clear_end + epsilon)
+        if blocked_end < total_length - epsilon:
+            inner = min(inner, blocked_end - epsilon)
+        inner = max(inner, clear_end + min(
+            epsilon,
+            max(1.0e-3, (blocked_end - clear_end) * 0.25),
+        ))
         start = inner - terminal_length
         end = inner
     else:
@@ -928,15 +949,18 @@ def _terminal_underlay_span(
             else clear_end
         )
         inner = outer - terminal_length
-        inner = max(inner, blocked_start + epsilon)
-        inner = min(inner, clear_start - epsilon)
+        if blocked_start > epsilon:
+            inner = max(inner, blocked_start + epsilon)
+        inner = min(inner, clear_start - min(
+            epsilon,
+            max(1.0e-3, (clear_start - blocked_start) * 0.25),
+        ))
         start = inner
         end = inner + terminal_length
 
-    if start < -1.0e-6 or end > total_length + 1.0e-6:
-        return None
-    start = max(0.0, start)
-    end = min(total_length, end)
+    # The hidden end may extend beyond the source P3D's original axis. That is
+    # intentional for short final ces6 pieces: the outer endpoint stays attached
+    # to the mapped dirt chain while the extra length exists only under asphalt.
     if end - start < terminal_length - 1.0e-4:
         return None
     return start, end
@@ -1077,7 +1101,10 @@ def _trim_dirt_under_paved(report, spec):
                         span[0],
                         span[1],
                         inner_at_start=True,
-                        blocker_intervals=blocker_intervals,
+                        blocker_indices=tuple(sorted({
+                            blocker_index
+                            for blocker_index, _interval in blocker_intervals
+                        })),
                         blockers=blockers,
                         object_id=allocate_id(),
                     )
@@ -1110,7 +1137,10 @@ def _trim_dirt_under_paved(report, spec):
                         span[0],
                         span[1],
                         inner_at_start=False,
-                        blocker_intervals=blocker_intervals,
+                        blocker_indices=tuple(sorted({
+                            blocker_index
+                            for blocker_index, _interval in blocker_intervals
+                        })),
                         blockers=blockers,
                         object_id=allocate_id(),
                     )
