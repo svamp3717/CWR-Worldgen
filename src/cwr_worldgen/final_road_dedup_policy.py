@@ -54,6 +54,8 @@ _MINIMUM_PAVED_CAP_SURFACE_COVERAGE = 0.85
 _PAVED_JUNCTION_NEIGHBOURHOOD_METRES = 30.0
 _MAXIMUM_VERTICAL_SEPARATION_METRES = 0.75
 _DIRT_PAVED_TRIM_CLEARANCE_METRES = 0.25
+_DIRT_PAVED_UNDERLAY_DROP_METRES = 0.080
+_DIRT_PAVED_UNDERLAY_EDGE_EPSILON_METRES = 0.10
 _DIRT_PAVED_OVERPASS_CLEARANCE_METRES = 1.50
 _PAVED_JUNCTION_BLOCKER_HALF_EXTENT_METRES = 7.00
 _PROGRESS_BUCKET_PERCENT = 2
@@ -121,6 +123,9 @@ class _RoadAxis:
 class _PavedBlocker:
     polygon: tuple[tuple[float, float], ...]
     elevation: float
+    origin: tuple[float, float]
+    forward: tuple[float, float]
+    pitch_sine: float
 
     @property
     def bounds(self) -> tuple[float, float, float, float]:
@@ -550,16 +555,66 @@ def _generated_curve_padding(model_path: str, axis: _RoadAxis) -> float:
     return radius * (1.0 - math.cos(theta * 0.5)) + 0.15
 
 
+def _object_plane_terms(obj) -> tuple[
+    tuple[float, float],
+    tuple[float, float],
+    float,
+]:
+    heading = math.radians(float(obj.heading_degrees))
+    return (
+        (float(obj.x), float(obj.z)),
+        (math.sin(heading), math.cos(heading)),
+        math.sin(math.radians(float(obj.pitch_degrees))),
+    )
+
+
+def _object_plane_height(
+    obj,
+    point: tuple[float, float],
+) -> float:
+    origin, forward, pitch_sine = _object_plane_terms(obj)
+    longitudinal = (
+        (point[0] - origin[0]) * forward[0]
+        + (point[1] - origin[1]) * forward[1]
+    )
+    return float(obj.y) + longitudinal * pitch_sine
+
+
+def _blocker_height_at(
+    blocker: _PavedBlocker,
+    point: tuple[float, float],
+) -> float:
+    longitudinal = (
+        (point[0] - blocker.origin[0]) * blocker.forward[0]
+        + (point[1] - blocker.origin[1]) * blocker.forward[1]
+    )
+    return blocker.elevation + longitudinal * blocker.pitch_sine
+
+
+def _blocker_from_polygon(
+    obj,
+    polygon: tuple[tuple[float, float], ...],
+) -> _PavedBlocker:
+    origin, forward, pitch_sine = _object_plane_terms(obj)
+    return _PavedBlocker(
+        polygon,
+        float(obj.y),
+        origin,
+        forward,
+        pitch_sine,
+    )
+
+
 def _junction_blocker(obj) -> _PavedBlocker:
     extent = _PAVED_JUNCTION_BLOCKER_HALF_EXTENT_METRES
-    return _PavedBlocker(
+    return _blocker_from_polygon(
+        obj,
         (
             (float(obj.x) - extent, float(obj.z) - extent),
             (float(obj.x) + extent, float(obj.z) - extent),
             (float(obj.x) + extent, float(obj.z) + extent),
             (float(obj.x) - extent, float(obj.z) + extent),
         ),
-        float(obj.y),
     )
 
 
@@ -568,12 +623,12 @@ def _paved_blockers(report, spec) -> tuple[_PavedBlocker, ...]:
     for index, obj in enumerate(report.objects):
         axis = _road_axis(obj, index, spec)
         if axis is not None and _is_paved_family(axis.family):
-            blockers.append(_PavedBlocker(
+            blockers.append(_blocker_from_polygon(
+                obj,
                 _surface_polygon(
                     axis,
                     padding=_generated_curve_padding(obj.model_path, axis),
                 ),
-                float(obj.y),
             ))
             continue
         if _is_paved_junction_cap_model(obj.model_path):
@@ -741,14 +796,147 @@ def _replacement_dirt_object(
     )
 
 
-def _trim_dirt_under_paved(report, spec):
-    """Cut stock dirt slabs out of every at-grade paved footprint.
+def _axis_point(
+    axis: _RoadAxis,
+    distance: float,
+) -> tuple[float, float]:
+    return (
+        axis.start[0] + axis.ux * distance,
+        axis.start[1] + axis.uz * distance,
+    )
 
-    Paved roads are authoritative. A straight dirt slab is retiled only into
-    stock 25/12/6 pieces that fit wholly in the remaining clear portions of its
-    original axis. Dirt curves and dirt junction caps are removed wholesale when
-    they intersect paved surface because there is no safe stock sub-piece that
-    preserves their geometry.
+
+def _blocker_height_for_distance(
+    axis: _RoadAxis,
+    distance: float,
+    blocker_intervals: tuple[
+        tuple[int, tuple[float, float]],
+        ...,
+    ],
+    blockers: tuple[_PavedBlocker, ...],
+) -> float | None:
+    point = _axis_point(axis, distance)
+    values = [
+        _blocker_height_at(blockers[blocker_index], point)
+        for blocker_index, (start, end) in blocker_intervals
+        if (
+            start - _DIRT_PAVED_UNDERLAY_EDGE_EPSILON_METRES
+            <= distance
+            <= end + _DIRT_PAVED_UNDERLAY_EDGE_EPSILON_METRES
+        )
+    ]
+    return min(values) if values else None
+
+
+def _replacement_dirt_underlay_object(
+    obj,
+    axis: _RoadAxis,
+    nominal: int,
+    start: float,
+    end: float,
+    *,
+    inner_at_start: bool,
+    blocker_intervals: tuple[
+        tuple[int, tuple[float, float]],
+        ...,
+    ],
+    blockers: tuple[_PavedBlocker, ...],
+    object_id: int,
+):
+    start_point = _axis_point(axis, start)
+    end_point = _axis_point(axis, end)
+    start_y = _object_plane_height(obj, start_point)
+    end_y = _object_plane_height(obj, end_point)
+
+    inner_distance = start if inner_at_start else end
+    inner_height = _blocker_height_for_distance(
+        axis,
+        inner_distance,
+        blocker_intervals,
+        blockers,
+    )
+    if inner_height is None:
+        return None
+
+    target_inner_y = min(
+        start_y if inner_at_start else end_y,
+        inner_height - _DIRT_PAVED_UNDERLAY_DROP_METRES,
+    )
+    if inner_at_start:
+        start_y = target_inner_y
+    else:
+        end_y = target_inner_y
+
+    length = max(1.0e-6, end - start)
+    rise = max(-0.999999, min(0.999999, (end_y - start_y) / length))
+    pitch = math.degrees(math.asin(rise))
+    centre = (start + end) * 0.5
+    point = _axis_point(axis, centre)
+    return replace(
+        obj,
+        object_id=int(object_id),
+        model_path=_dirt_variant_path(obj.model_path, nominal),
+        x=point[0],
+        y=(start_y + end_y) * 0.5,
+        z=point[1],
+        pitch_degrees=pitch,
+    )
+
+
+def _terminal_underlay_span(
+    clear_start: float,
+    clear_end: float,
+    blocked_interval: tuple[float, float],
+    *,
+    before_block: bool,
+    regular_spans: tuple[tuple[int, float, float], ...],
+    terminal_length: float,
+    total_length: float,
+) -> tuple[float, float] | None:
+    blocked_start, blocked_end = blocked_interval
+    epsilon = _DIRT_PAVED_UNDERLAY_EDGE_EPSILON_METRES
+
+    if before_block:
+        outer = (
+            max(span[2] for span in regular_spans)
+            if regular_spans
+            else clear_start
+        )
+        inner = outer + terminal_length
+        inner = min(inner, blocked_end - epsilon)
+        inner = max(inner, clear_end + epsilon)
+        start = inner - terminal_length
+        end = inner
+    else:
+        outer = (
+            min(span[1] for span in regular_spans)
+            if regular_spans
+            else clear_end
+        )
+        inner = outer - terminal_length
+        inner = max(inner, blocked_start + epsilon)
+        inner = min(inner, clear_start - epsilon)
+        start = inner
+        end = inner + terminal_length
+
+    if start < -1.0e-6 or end > total_length + 1.0e-6:
+        return None
+    start = max(0.0, start)
+    end = min(total_length, end)
+    if end - start < terminal_length - 1.0e-4:
+        return None
+    return start, end
+
+
+def _trim_dirt_under_paved(report, spec):
+    """Keep dirt visible to the asphalt edge, then dive its final slab underneath.
+
+    Paved roads are authoritative. Straight dirt slabs are retiled into stock
+    25/12/6 pieces on each clear approach. A final ces6 continues underneath the
+    paved footprint, with its outer endpoint left on the original dirt grade and
+    its hidden endpoint pitched below the paved surface. Dirt curves and dirt
+    junction caps are still removed wholesale on conflict because there is no
+    safe stock sub-piece that preserves their geometry.
     """
 
     if not report.objects:
@@ -788,8 +976,8 @@ def _trim_dirt_under_paved(report, spec):
         candidate_blockers: set[int] = set()
         for bucket in _polygon_buckets(dirt_polygon):
             candidate_blockers.update(blocker_buckets.get(bucket, ()))
-        blocked = _merge_intervals([
-            interval
+        blocker_intervals = tuple(
+            (blocker_index, interval)
             for blocker_index in sorted(candidate_blockers)
             for interval in (
                 _blocked_interval(
@@ -799,6 +987,9 @@ def _trim_dirt_under_paved(report, spec):
                 ),
             )
             if interval is not None
+        )
+        blocked = _merge_intervals([
+            interval for _blocker_index, interval in blocker_intervals
         ])
         if not blocked:
             continue
@@ -818,26 +1009,100 @@ def _trim_dirt_under_paved(report, spec):
             continue
 
         pieces: list[object] = []
-        for clear_start, clear_end in _clear_intervals(dirt.length, blocked):
-            for nominal, start, end in _pack_dirt_interval(
+
+        def allocate_id() -> int:
+            nonlocal next_object_id
+            if not pieces:
+                return object_id
+            value = next_object_id
+            next_object_id += 1
+            return value
+
+        terminal_nominal, terminal_length = variants[-1]
+        clear_intervals = _clear_intervals(dirt.length, blocked)
+        for clear_start, clear_end in clear_intervals:
+            regular_spans = _pack_dirt_interval(
                 clear_start,
                 clear_end,
                 dirt.length,
                 variants,
-            ):
-                replacement_id = (
-                    object_id if not pieces else next_object_id
-                )
-                if pieces:
-                    next_object_id += 1
+            )
+            for nominal, start, end in regular_spans:
                 pieces.append(_replacement_dirt_object(
                     obj,
                     dirt,
                     nominal,
                     start,
                     end,
-                    object_id=replacement_id,
+                    object_id=allocate_id(),
                 ))
+
+            left_block = next(
+                (
+                    interval
+                    for interval in blocked
+                    if abs(interval[1] - clear_start) <= 1.0e-6
+                ),
+                None,
+            )
+            if left_block is not None:
+                span = _terminal_underlay_span(
+                    clear_start,
+                    clear_end,
+                    left_block,
+                    before_block=False,
+                    regular_spans=regular_spans,
+                    terminal_length=terminal_length,
+                    total_length=dirt.length,
+                )
+                if span is not None:
+                    terminal = _replacement_dirt_underlay_object(
+                        obj,
+                        dirt,
+                        terminal_nominal,
+                        span[0],
+                        span[1],
+                        inner_at_start=True,
+                        blocker_intervals=blocker_intervals,
+                        blockers=blockers,
+                        object_id=allocate_id(),
+                    )
+                    if terminal is not None:
+                        pieces.append(terminal)
+
+            right_block = next(
+                (
+                    interval
+                    for interval in blocked
+                    if abs(interval[0] - clear_end) <= 1.0e-6
+                ),
+                None,
+            )
+            if right_block is not None:
+                span = _terminal_underlay_span(
+                    clear_start,
+                    clear_end,
+                    right_block,
+                    before_block=True,
+                    regular_spans=regular_spans,
+                    terminal_length=terminal_length,
+                    total_length=dirt.length,
+                )
+                if span is not None:
+                    terminal = _replacement_dirt_underlay_object(
+                        obj,
+                        dirt,
+                        terminal_nominal,
+                        span[0],
+                        span[1],
+                        inner_at_start=False,
+                        blocker_intervals=blocker_intervals,
+                        blockers=blockers,
+                        object_id=allocate_id(),
+                    )
+                    if terminal is not None:
+                        pieces.append(terminal)
+
         replacements[object_id] = tuple(pieces)
 
     if not replacements:
