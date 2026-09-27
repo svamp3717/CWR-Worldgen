@@ -1520,8 +1520,21 @@ def _paved_run_required_tangent(
     turn_degrees: float,
     minimum_radius: float,
 ) -> float:
-    half_angle = math.radians(min(179.0, max(0.0, turn_degrees))) * 0.5
-    return minimum_radius * math.tan(half_angle)
+    # The run fillet is a symmetric quadratic Bezier with the original corner
+    # as its control point. Its tightest curvature is at the midpoint:
+    #
+    #   radius = tangent * cos(half_angle)^2 / sin(half_angle)
+    #
+    # Solve for tangent rather than using the circular-arc relation. The latter
+    # badly underestimates the space needed by 90+ degree road turns.
+    half_angle = math.radians(
+        min(179.0, max(0.0, turn_degrees))
+    ) * 0.5
+    sine = math.sin(half_angle)
+    cosine = max(1.0e-6, math.cos(half_angle))
+    if sine <= 1.0e-9:
+        return 0.0
+    return minimum_radius * sine / (cosine * cosine)
 
 
 def _append_rounded_corner(
