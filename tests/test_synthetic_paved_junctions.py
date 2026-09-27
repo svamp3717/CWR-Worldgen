@@ -71,6 +71,46 @@ def _has_point(
     )
 
 
+def test_mixed_paved_dirt_node_keeps_only_paved_cap_incidents() -> None:
+    values = (
+        ((0.0, 1.0), False, r"o\road\sil25.p3d", "paved/north", "paved"),
+        ((0.0, -1.0), False, r"o\road\sil25.p3d", "paved/south", "paved"),
+        ((1.0, 0.0), True, r"o\road\ces25.p3d", "dirt/east", "dirt"),
+    )
+
+    actual = playability._junction_cap_incidents(values)
+
+    assert actual == values[:2]
+
+
+def test_pure_dirt_node_keeps_dirt_junction_topology() -> None:
+    values = (
+        ((0.0, 1.0), True, r"o\road\ces25.p3d", "dirt/north", "dirt-a"),
+        ((0.0, -1.0), True, r"o\road\ces25.p3d", "dirt/south", "dirt-a"),
+        ((1.0, 0.0), True, r"o\road\ces25.p3d", "dirt/east", "dirt-b"),
+    )
+
+    assert playability._junction_cap_incidents(values) == values
+
+
+def test_dirt_road_surface_is_always_below_paved_surface() -> None:
+    paved_offset = playability._road_vertical_offset(
+        {"highway": "residential", "surface": "asphalt"}
+    )
+    dirt_offset = playability._road_vertical_offset(
+        {"highway": "track", "surface": "dirt"}
+    )
+    gravel_offset = playability._road_vertical_offset(
+        {"highway": "track", "surface": "gravel"}
+    )
+
+    assert dirt_offset < paved_offset
+    assert gravel_offset < paved_offset
+    assert playability._STOCK_DIRT_VERTICAL_OFFSET_METRES < (
+        playability._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+    )
+
+
 def test_geometric_paved_crossing_is_promoted_to_x_junction() -> None:
     projection = _projection()
     centre = (500.0, 500.0)
