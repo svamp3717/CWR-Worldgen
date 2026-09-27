@@ -435,7 +435,11 @@ def _fit_stock_piece_road_objects_parallel(
     if progress_callback is not None:
         progress_callback(0, f"Projecting {total_roads:,} normalized road lines")
     projection_step = max(1, total_roads // 20)
-    road_polylines = _playability.projected_road_polylines(dataset, projection)
+    road_polylines = _playability._paved_junction_augmented_polylines(
+        dataset,
+        projection,
+        spec,
+    )
     for feature_index, (feature, projected_points) in enumerate(
         zip(dataset.roads, road_polylines), start=1
     ):
@@ -524,7 +528,7 @@ def _fit_stock_piece_road_objects_parallel(
     if progress_callback is not None:
         progress_callback(
             24,
-            f"Classified {len(candidate_cap_keys):,} real road junctions; "
+            f"Classified {len(candidate_cap_keys):,} road junctions (including geometric paved crossings); "
             f"{len(degree_two_turn_keys | bend_keys):,} ordinary bends use rounded piece chains",
         )
 
