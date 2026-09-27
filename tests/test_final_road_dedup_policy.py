@@ -273,6 +273,21 @@ def test_same_short_paved_overlap_away_from_junction_is_preserved():
     assert result.junction_cap_objects == 1
 
 
+def test_partial_short_paved_duplicate_at_junction_is_removed():
+    # terrtest58 has this shape near 1100,1379: two nominally equal sil6 slabs
+    # share about 56% of their length. The second is a chain piece laid over the
+    # cap, so the junction-local pass should remove it while preserving the cap.
+    report = _report((
+        _road(1, r"o\road\sil6.p3d", 100.0, 100.0, heading=90.0),
+        _road(2, r"o\road\sil6.p3d", 102.64, 100.0, heading=270.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1,)
+    assert result.junction_cap_objects == 1
+
+
 def test_progress_reports_bounded_spatial_comparisons():
     events = []
     roads = tuple(
