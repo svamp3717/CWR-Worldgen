@@ -109,6 +109,8 @@ class TownLocation:
 # Keep gravel slightly below ordinary asphalt and emit paved chains
 # after unpaved chains so asphalt consistently wins both geometry and draw order.
 _STOCK_ROAD_VERTICAL_OFFSET_METRES = 0.035
+_STOCK_DIRT_VERTICAL_OFFSET_METRES = 0.010
+_STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES = 0.060
 _STOCK_GRAVEL_VERTICAL_OFFSET_METRES = 0.018
 
 # OSM extracts are not always topologically noded where two paved ways visibly
@@ -140,11 +142,11 @@ def _road_surface_priority(tags: Mapping[str, str]) -> int:
 
 
 def _road_vertical_offset(tags: Mapping[str, str]) -> float:
-    return (
-        _STOCK_GRAVEL_VERTICAL_OFFSET_METRES
-        if road_is_gravel(tags)
-        else _STOCK_ROAD_VERTICAL_OFFSET_METRES
-    )
+    if road_is_gravel(tags):
+        return _STOCK_GRAVEL_VERTICAL_OFFSET_METRES
+    if road_is_dirt(tags):
+        return _STOCK_DIRT_VERTICAL_OFFSET_METRES
+    return _STOCK_ROAD_VERTICAL_OFFSET_METRES
 
 
 def _road_is_explicit_bridge(tags: Mapping[str, str]) -> bool:
@@ -842,21 +844,18 @@ def _unique_incidents(
 def _junction_cap_incidents(
     values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
 ) -> tuple[tuple[tuple[float, float], bool, str, str, str], ...]:
-    """Ignore gravel arms when deciding whether a non-gravel road needs a hub.
+    """Let paved roads own mixed-surface junction topology.
 
-    Gravel is deliberately drawn below paved roads. A gravel spur or crossing
-    must therefore not promote an otherwise ordinary paved/dirt continuation to
-    a three/four-way cap and insert an extra road P3D. Pure-gravel nodes retain
-    their existing cap behavior.
+    Dirt and gravel are deliberately rendered below paved roads. When a node
+    contains any paved incidents, ignore every unpaved arm while deciding
+    whether to create a cap. This keeps a paved through-road continuous at a
+    dirt T/crossing instead of inserting a dirt/mixed short road slab on top of
+    the asphalt. Pure dirt/gravel nodes retain their normal junction behavior.
     """
 
     values = tuple(values)
-    non_gravel = tuple(
-        value
-        for value in values
-        if not is_generated_gravel_road_model(value[2])
-    )
-    return non_gravel or values
+    paved = tuple(value for value in values if not value[1])
+    return paved or values
 
 
 def _truthy_road_tag(value: object) -> bool:
@@ -2060,7 +2059,17 @@ def _fit_stock_piece_road_objects(
         half = cap_piece.length_metres * 0.5
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
-        cap_plans[key] = (cap_piece, start_point, end_point)
+        cap_vertical_offset = (
+            _STOCK_DIRT_VERTICAL_OFFSET_METRES
+            if use_dirt
+            else _STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+        )
+        cap_plans[key] = (
+            cap_piece,
+            start_point,
+            end_point,
+            cap_vertical_offset,
+        )
         if generated_paved_t is not None:
             # The generated hub owns the seam. Keep logical/collision geometry
             # at 6.25 m, stop approach slabs at 6.45 m, and let only the visible
@@ -2256,7 +2265,7 @@ def _fit_stock_piece_road_objects(
     if progress_callback is not None:
         progress_callback(61, f"Placing {len(cap_plans):,} junction caps")
     for key in sorted(cap_plans):
-        cap_piece, start_point, end_point = cap_plans[key]
+        cap_piece, start_point, end_point, cap_vertical_offset = cap_plans[key]
         obj = _road_object_on_slope(
             next_id,
             cap_piece.model_path,
@@ -2264,7 +2273,7 @@ def _fit_stock_piece_road_objects(
             end_point,
             elevations,
             spec,
-            vertical_offset=0.060,
+            vertical_offset=cap_vertical_offset,
         )
         next_id += 1
         objects.append(obj)
