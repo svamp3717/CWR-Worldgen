@@ -844,6 +844,7 @@ def _replacement_dirt_underlay_object(
     outer_y = original_end_y if inner_at_start else original_start_y
     inner_y = original_start_y if inner_at_start else original_end_y
     constrained = False
+    constraints: list[tuple[float, float]] = []
 
     for blocker_index in blocker_indices:
         blocker = blockers[blocker_index]
@@ -876,6 +877,7 @@ def _replacement_dirt_underlay_object(
                     continue
                 allowed_inner = (target - (1.0 - t) * outer_y) / weight
             inner_y = min(inner_y, allowed_inner)
+            constraints.append((distance, target))
             constrained = True
 
     if not constrained:
@@ -897,6 +899,18 @@ def _replacement_dirt_underlay_object(
             start_y = end_y - represented_delta
         else:
             end_y = start_y + represented_delta
+
+    # If the required dive exceeded the representable pitch, preserve paved
+    # ownership by lowering the whole terminal just enough to clear every overlap
+    # constraint. Ordinary cases have zero deficit and keep their outer seam.
+    maximum_deficit = 0.0
+    for distance, target in constraints:
+        t = (distance - start) / length
+        road_y = start_y + (end_y - start_y) * t
+        maximum_deficit = max(maximum_deficit, road_y - target)
+    if maximum_deficit > 1.0e-6:
+        start_y -= maximum_deficit + 1.0e-6
+        end_y -= maximum_deficit + 1.0e-6
 
     pitch = math.degrees(math.asin(rise))
     centre = (start + end) * 0.5
