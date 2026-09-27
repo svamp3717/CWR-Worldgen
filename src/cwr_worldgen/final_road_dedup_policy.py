@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Conservatively remove redundant overlapping road slabs.
+"""Resolve final road-surface conflicts after the full road fitting chain.
 
-This pass runs after the complete road fitting/junction policy chain. It handles
-ordinary stock straights, stock 10-degree curves, generated paved fallback
-ribbons, and generated gravel straights whose dimensions are encoded or known.
-Junction hubs, bridges and unknown road models remain deliberately excluded.
+The first pass conservatively removes redundant overlapping road slabs. The
+second enforces a simpler mixed-surface invariant: at-grade paved geometry owns
+its complete footprint. Stock dirt pieces crossing that footprint are retiled
+into shorter dirt pieces on the clear sides, or removed when no stock piece can
+fit safely. Dirt curves and dirt caps are removed wholesale on conflict. A
+substantially higher paved surface is treated as an overpass and leaves the dirt
+road beneath it intact.
 
-The implementation is spatially indexed.  A candidate is compared only with kept
-pieces whose expanded axis bounds share a 25 m bucket, avoiding the O(N^2) scan
-that would be rather unkind on worlds with tens of thousands of road objects.
+Both passes are spatially indexed so dense worlds avoid an O(N^2) road scan.
 """
 from __future__ import annotations
 
