@@ -120,9 +120,9 @@ def test_bridge_water_reopen_overrides_causeway_fill_only_under_mapped_water() -
 
 def test_bridge_does_not_reopen_isolated_high_bank_lake_crater() -> None:
     spec = _spec()
-    wet_start = (6475.0, 5998.0)
-    wet_end = (6505.0, 6002.0)
-    axis = (1.0, 0.0)
+    wet_start = (1575.0, 1451.0)
+    wet_end = (1575.0, 1461.0)
+    axis = (0.0, 1.0)
 
     # terrtest74-style input: mapped water itself was a low DEM artefact, while
     # the surrounding bank is hundreds of metres above CWA's global water plane.
