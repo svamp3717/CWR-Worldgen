@@ -78,6 +78,7 @@ class TextureResolver:
         self.indexed_pbos: set[Path] = set()
         self.indexed_direct_pbos: set[Path] = set()
         self.indexed_nested_sources: set[str] = set()
+        self.attempted_nested_namespaces: set[tuple[Path, str]] = set()
         self.indexed_all = False
         self.bytes_cache: dict[str, bytes | None] = {}
         self.image_cache: dict[str, np.ndarray | None] = {}
@@ -309,6 +310,65 @@ class TextureResolver:
                 flush=True,
             )
 
+    def _index_nested_namespace(self, outer: Path, texture_path: str) -> None:
+        """Target one nested addon PBO whose filename matches the texture namespace."""
+        canonical = _canonical(texture_path)
+        if "\\" not in canonical or not outer.is_file():
+            return
+        namespace = canonical.split("\\", 1)[0].strip()
+        if not namespace or namespace in {".", ".."}:
+            return
+
+        try:
+            resolved = outer.resolve()
+        except OSError:
+            resolved = outer
+        attempt = (resolved, namespace.casefold())
+        if attempt in self.attempted_nested_namespaces:
+            return
+        self.attempted_nested_namespaces.add(attempt)
+
+        try:
+            with open_pbo_stream(outer) as handle:
+                metadata, _properties = world_assets._read_pbo_header(handle)
+                for name, packing, original_size, data_size in metadata:
+                    is_match = (
+                        world_assets._member_suffix(name) == ".pbo"
+                        and pbo_stem(world_assets._member_basename(name)).casefold()
+                        == namespace.casefold()
+                    )
+                    if not is_match:
+                        _skip_pbo_exact(handle, data_size, f"PBO entry {name!r}")
+                        continue
+
+                    nested = world_assets._read_stored_member(
+                        handle,
+                        name=name,
+                        packing=packing,
+                        original_size=original_size,
+                        data_size=data_size,
+                    )
+                    nested_source = str(outer) + "!" + name.replace("/", "\\")
+                    self._cache_nested_pbo(nested_source, nested)
+                    self.indexed_nested_sources.add(nested_source)
+                    fallback = pbo_stem(world_assets._member_basename(name))
+                    with io.BytesIO(nested) as nested_handle:
+                        self._index_stream(
+                            nested_handle,
+                            pbo_path=outer,
+                            source=nested_source,
+                            fallback_prefix=fallback,
+                            depth=1,
+                            recursive=False,
+                        )
+                    return
+        except (OSError, RuntimeError, ValueError, struct.error) as exc:
+            print(
+                f"[texture namespace warning] {outer}!{namespace}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+
     def _index_all(self) -> None:
         if self.indexed_all:
             return
@@ -342,6 +402,12 @@ class TextureResolver:
         canonical = _canonical(texture_path)
         if "!" in source:
             self._index_model_source(source)
+            ref = self.assets.get(canonical)
+            if ref is not None:
+                return ref
+            outer = Path(source.split("!", 1)[0]).expanduser()
+            if is_pbo_path(outer):
+                self._index_nested_namespace(outer, canonical)
         ref = self.assets.get(canonical)
         if ref is not None:
             return ref
