@@ -211,6 +211,9 @@ def test_gui_entry_contains_inspector_checkbox_pipeline_map_and_road_type_filter
     source = (Path(__file__).resolve().parents[1] / "src" / "cwr_worldgen" / "gui_entry.py").read_text(encoding="utf-8")
     assert "Run Road Inspector after a successful build" in source
     assert '"run_road_inspector_after_build"' in source
+    assert "_install_postbuild_setting_persistence" in source
+    assert "_persist_postbuild_setting" in source
+    assert "_clear_remembered_deploy_default" not in source
     assert '"Running Road Inspector"' in source
     assert "road_inspector_postbuild_command(" in source
     assert '<svg id="map"></svg>' in source
