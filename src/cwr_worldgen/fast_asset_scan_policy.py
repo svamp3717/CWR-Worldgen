@@ -26,10 +26,18 @@ from typing import Iterable, Sequence
 
 from . import assets as _assets
 from .cache import CACHE_SCHEMA_VERSION, atomic_write_json, cache_key
+from .pbo import (
+    _read_exact,
+    _skip_exact,
+    is_pbo_path,
+    is_zstd_wrapped_pbo,
+    open_pbo_stream,
+    pbo_stem,
+)
 
 
 FAST_ASSET_INDEX_DIRNAME = ".cwr-worldgen-asset-index-cache"
-_PBO_INDEX_SCHEMA = 1
+_PBO_INDEX_SCHEMA = 2
 _INSTALLED = False
 _FULL_SCAN = _assets.scan_assets
 _PBO_INDEX_MEMORY: dict[tuple[str, int, int], "_PboIndex"] = {}
@@ -103,12 +111,10 @@ def _parse_pbo_index(path: Path) -> _PboIndex:
     stat = path.stat()
     metadata: list[tuple[str, int, int, int]] = []
     properties: dict[str, str] = {}
-    with path.open("rb") as stream:
+    with open_pbo_stream(path) as stream:
         while True:
             name = _read_cstring(stream)
-            fields = stream.read(_assets._ENTRY_FIELDS.size)
-            if len(fields) != _assets._ENTRY_FIELDS.size:
-                raise ValueError("truncated PBO header")
+            fields = _read_exact(stream, _assets._ENTRY_FIELDS.size, "PBO entry fields")
             packing, original_size, reserved, _timestamp, data_size = _assets._ENTRY_FIELDS.unpack(fields)
             if not name:
                 if packing == _assets._PBO_PROPERTIES:
@@ -128,7 +134,7 @@ def _parse_pbo_index(path: Path) -> _PboIndex:
 
     prefix = properties.get("prefix", "").replace("/", "\\").strip("\\")
     if not prefix:
-        prefix = path.stem
+        prefix = pbo_stem(path)
     entries: list[_PboEntry] = []
     for name, packing, original_size, data_size in metadata:
         combined = name.replace("/", "\\").lstrip("\\")
@@ -144,7 +150,6 @@ def _parse_pbo_index(path: Path) -> _PboIndex:
         ))
         data_cursor += int(data_size)
     return _PboIndex(str(path), prefix, int(stat.st_size), int(stat.st_mtime_ns), tuple(entries))
-
 
 def _index_cache_path(index_root: Path | None, path: Path, stat) -> Path | None:
     if index_root is None:
@@ -188,7 +193,7 @@ def _load_pbo_index(
             ):
                 index = _PboIndex(
                     path=str(resolved),
-                    prefix=str(document.get("prefix", resolved.stem)),
+                    prefix=str(document.get("prefix", pbo_stem(resolved))),
                     size=int(stat.st_size),
                     mtime_ns=int(stat.st_mtime_ns),
                     entries=tuple(
@@ -266,14 +271,18 @@ def _relative_candidate(root: Path, parts: Sequence[str]) -> Path | None:
 
 def _likely_pbos(root: Path, prefix: str) -> tuple[Path, ...]:
     if root.is_file():
-        return (root,) if root.suffix.casefold() == ".pbo" else ()
-    filename = f"{prefix}.pbo"
-    layouts = (
-        (filename,),
-        ("Dta", filename),
-        ("Res", "Dta", filename),
-        ("AddOns", filename),
-        ("Res", "AddOns", filename),
+        return (root,) if is_pbo_path(root) else ()
+    filenames = (f"{prefix}.pbo", f"{prefix}.pbo.zst")
+    layouts = tuple(
+        parts
+        for filename in filenames
+        for parts in (
+            (filename,),
+            ("Dta", filename),
+            ("Res", "Dta", filename),
+            ("AddOns", filename),
+            ("Res", "AddOns", filename),
+        )
     )
     result: list[Path] = []
     seen: set[str] = set()
@@ -287,39 +296,35 @@ def _likely_pbos(root: Path, prefix: str) -> tuple[Path, ...]:
             result.append(candidate)
     return tuple(result)
 
-
 def _fallback_named_pbos(root: Path, prefix: str) -> tuple[Path, ...]:
     """Rare compatibility path for unusual mod layouts; never used for stock paths."""
     if not root.is_dir():
         return ()
-    wanted = f"{prefix}.pbo".casefold()
+    wanted = {f"{prefix}.pbo".casefold(), f"{prefix}.pbo.zst".casefold()}
     matches: list[Path] = []
     try:
         for directory, dirnames, filenames in os.walk(root):
-            # Do not recurse into generated/cache trees that cannot be game assets.
             dirnames[:] = [
                 name for name in dirnames
                 if not name.casefold().startswith(".cwr-worldgen-")
                 and name.casefold() not in {"source-data", "builds", "output", "outputs"}
             ]
             for name in filenames:
-                if name.casefold() == wanted:
+                if name.casefold() in wanted:
                     matches.append(Path(directory) / name)
     except OSError:
         return ()
     return tuple(matches)
 
-
 def _read_indexed_entry(path: Path, entry: _PboEntry) -> bytes | None:
     if entry.packing != 0:
         return None
-    with path.open("rb") as stream:
-        stream.seek(entry.data_offset)
-        data = stream.read(entry.data_size)
-    if len(data) != entry.data_size:
-        raise ValueError(f"truncated PBO entry {entry.canonical_path}")
-    return data
-
+    with open_pbo_stream(path) as stream:
+        if is_zstd_wrapped_pbo(path):
+            _skip_exact(stream, entry.data_offset, "PBO data before selected entry")
+        else:
+            stream.seek(entry.data_offset)
+        return _read_exact(stream, entry.data_size, f"PBO entry {entry.canonical_path}")
 
 def _record_from_loose(path: Path, canonical_path: str) -> _assets.AssetRecord:
     data = path.read_bytes()
