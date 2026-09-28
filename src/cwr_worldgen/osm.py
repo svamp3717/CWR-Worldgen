@@ -8868,9 +8868,11 @@ def generate_world_objects(
     seed = str(getattr(spec, "deterministic_seed", "cwr-worldgen"))
     low_anchor = bool(getattr(spec, "forest_low_anchor", False))
     forest_profile = str(getattr(spec, "forest_profile", "malden")).casefold()
-    # Everon, Kolgujev and Malden share the road-safe forest placement ladder.
-    # The selected profile controls the scenery family and stock-island quirks.
-    modern_forest_profile = forest_profile in {"everon", "kolgujev", "malden"}
+    # Classic profiles and the measured SEB Vietnam preset share the road-safe
+    # forest placement ladder. The selected profile controls the scenery family.
+    modern_forest_profile = forest_profile in {
+        "everon", "kolgujev", "malden", "vietnam"
+    }
     # Legacy field name from 0.9.252. In 0.9.254+ this means "replace the
     # rigid stock square/triangle forest polygon models with tiled generated
     # clusters". Individually grounded trees remain the last-resort fallback.
@@ -8962,7 +8964,7 @@ def generate_world_objects(
                     r"data3d\les trojuhelnik pruchozi.p3d",
                 )
             )
-            if forest_profile in {"everon", "kolgujev"}
+            if forest_profile in {"everon", "kolgujev", "vietnam"}
             else ""
         )
         everon_steep_footprint = max(
@@ -11622,7 +11624,16 @@ def generate_world_objects(
             )
         )
         broadleaf_tree = leaf_type == "broadleaved" or bool(species_text)
-        if forest_profile == "kolgujev":
+        if forest_profile == "vietnam":
+            models = tuple(
+                str(model)
+                for model in getattr(
+                    spec,
+                    "forest_roadside_tree_models",
+                    (r"sebnam_obj\sebstr borovice horska.p3d",),
+                )
+            )
+        elif forest_profile == "kolgujev":
             if needle_tree:
                 models = KOLGUJEV_CONIFER_INDIVIDUAL_TREE_MODELS
             elif broadleaf_tree:
