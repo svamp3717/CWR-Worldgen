@@ -255,6 +255,14 @@ def terrain_readme_text(
             f"Appearance preset: {appearance_preset}",
             f"Terrain style: {_humanize_identifier(terrain_style)}",
             f"Vegetation / forest preset: {_humanize_identifier(forest_style)}",
+        ]
+    )
+    if str(forest_style).strip().casefold() == "vietnam":
+        lines.append(
+            "Vegetation dependency: sebnam_obj.pbo (SEB Ia Drang jungle assets)"
+        )
+    lines.extend(
+        [
             "",
             "Terrain Informations",
             f"Selection method: {selection_method}",
