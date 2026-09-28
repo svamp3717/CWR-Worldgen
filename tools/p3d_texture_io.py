@@ -11,6 +11,14 @@ from typing import Sequence
 import numpy as np
 
 import measure_p3d_models as measure
+from cwr_worldgen.pbo import (
+    _read_exact as _read_pbo_exact,
+    _skip_exact as _skip_pbo_exact,
+    is_pbo_path,
+    is_zstd_wrapped_pbo,
+    open_pbo_stream,
+    pbo_stem,
+)
 
 _PAA_FORMATS = {
     0x8080: "AI88", 0x4444: "ARGB4444", 0x1555: "ARGB1555", 0x8888: "ARGB8888",
@@ -81,14 +89,12 @@ class TextureResolver:
             return
         self.indexed_pbos.add(resolved)
         try:
-            with pbo_path.open("rb") as handle:
+            with open_pbo_stream(pbo_path) as handle:
                 metadata: list[tuple[str, int, int, int]] = []
                 properties: dict[str, str] = {}
                 while True:
                     name = _read_cstring_file(handle, "PBO entry name")
-                    fields = handle.read(measure._PBO_ENTRY.size)
-                    if len(fields) != measure._PBO_ENTRY.size:
-                        raise measure.ModelReadError("truncated PBO entry header")
+                    fields = _read_pbo_exact(handle, measure._PBO_ENTRY.size, "PBO entry header")
                     packing, original_size, _reserved, _timestamp, data_size = measure._PBO_ENTRY.unpack(fields)
                     if data_size > measure._MAX_PBO_ENTRY_SIZE or original_size > measure._MAX_PBO_ENTRY_SIZE:
                         raise measure.ModelReadError(f"implausible PBO entry size in {pbo_path}")
@@ -112,7 +118,7 @@ class TextureResolver:
                         )
                     metadata.append((name, packing, original_size, data_size))
 
-                prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or pbo_path.stem
+                prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or pbo_stem(pbo_path)
                 canonical_prefix = _canonical(prefix)
                 cursor = handle.tell()
                 for name, packing, original_size, data_size in metadata:
@@ -136,7 +142,7 @@ class TextureResolver:
             if not path.exists():
                 continue
             if path.is_file():
-                if path.suffix.casefold() == ".pbo":
+                if is_pbo_path(path):
                     self._index_pbo(path)
                 elif path.suffix.casefold() in {".paa", ".pac"}:
                     self._remember(path.name, LooseAssetRef(path))
@@ -145,7 +151,7 @@ class TextureResolver:
                 if not child.is_file():
                     continue
                 suffix = child.suffix.casefold()
-                if suffix == ".pbo":
+                if is_pbo_path(child):
                     self._index_pbo(child)
                 elif suffix in {".paa", ".pac"}:
                     try:
@@ -159,7 +165,7 @@ class TextureResolver:
         canonical = _canonical(texture_path)
         if "!" in source:
             source_pbo = Path(source.split("!", 1)[0])
-            if source_pbo.suffix.casefold() == ".pbo":
+            if is_pbo_path(source_pbo):
                 self._index_pbo(source_pbo)
         ref = self.assets.get(canonical)
         if ref is not None:
@@ -182,11 +188,14 @@ class TextureResolver:
             if isinstance(ref, LooseAssetRef):
                 data = ref.path.read_bytes()
             else:
-                with ref.pbo_path.open("rb") as handle:
-                    handle.seek(ref.offset)
-                    stored = handle.read(ref.data_size)
-                if len(stored) != ref.data_size:
-                    raise measure.ModelReadError("truncated texture PBO entry")
+                with open_pbo_stream(ref.pbo_path) as handle:
+                    if is_zstd_wrapped_pbo(ref.pbo_path):
+                        _skip_pbo_exact(handle, ref.offset, "PBO data before texture")
+                    else:
+                        handle.seek(ref.offset)
+                    stored = _read_pbo_exact(
+                        handle, ref.data_size, "texture PBO entry"
+                    )
                 if ref.packing == 0:
                     data = stored
                 elif ref.packing == measure._PBO_COMPRESSED:
