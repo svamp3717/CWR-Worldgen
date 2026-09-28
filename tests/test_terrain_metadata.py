@@ -148,6 +148,27 @@ def test_terrain_readme_uses_actual_building_catalogue_styles(tmp_path: Path) ->
     assert "Vegetation / forest preset: Malden" in readme
 
 
+def test_terrain_readme_names_vietnam_dependency(tmp_path: Path) -> None:
+    source_manifest = tmp_path / "source.json"
+    source_manifest.write_text(
+        json.dumps({"selection": {"kind": "center"}}),
+        encoding="utf-8",
+    )
+    text = terrain_readme_text(
+        display_name="Vietnam Test",
+        pbo_name="vietnam_test.pbo",
+        source_manifest_path=source_manifest,
+        cells=256,
+        cell_size_metres=25.0,
+        terrain_style="generated",
+        forest_style="vietnam",
+        appearance_preset="Generated terrain + SEB Ia Drang Vietnam vegetation",
+    )
+
+    assert "Vegetation / forest preset: Vietnam" in text
+    assert "Vegetation dependency: sebnam_obj.pbo (SEB Ia Drang jungle assets)" in text
+
+
 def test_terrain_readme_labels_kolgujev_classic() -> None:
     assert (
         terrain_readme_module._appearance_label("kolgujev", "kolgujev")
