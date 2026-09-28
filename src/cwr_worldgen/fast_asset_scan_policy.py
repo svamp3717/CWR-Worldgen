@@ -321,11 +321,16 @@ def _fallback_named_pbos(root: Path, prefix: str) -> tuple[Path, ...]:
 def _read_indexed_entry(path: Path, entry: _PboEntry) -> bytes | None:
     if entry.packing != 0:
         return None
-    with open_pbo_stream(path) as stream:
-        if is_zstd_wrapped_pbo(path):
-            _skip_exact(stream, entry.data_offset, "PBO data before selected entry")
-        else:
+    if not is_zstd_wrapped_pbo(path):
+        with path.open("rb") as stream:
             stream.seek(entry.data_offset)
+            data = stream.read(entry.data_size)
+        if len(data) != entry.data_size:
+            raise ValueError(f"truncated PBO entry {entry.canonical_path}")
+        return data
+
+    with open_pbo_stream(path) as stream:
+        _skip_exact(stream, entry.data_offset, "PBO data before selected entry")
         return _read_exact(stream, entry.data_size, f"PBO entry {entry.canonical_path}")
 
 def _record_from_loose(path: Path, canonical_path: str) -> _assets.AssetRecord:
