@@ -138,18 +138,21 @@ VIETNAM_FOREST_BLOCK_MODEL = r"sebnam_obj\sebles_su_ctver_pruhozi.p3d"
 VIETNAM_FOREST_STEEP_MODEL = VIETNAM_FOREST_BLOCK_MODEL
 VIETNAM_SINGLE_TREE_MODEL = r"sebnam_obj\sebstr borovice horska.p3d"
 VIETNAM_ROADSIDE_TREE_MODEL = VIETNAM_SINGLE_TREE_MODEL
+# Weighted pools reproduce the free vegetation mix inside the WRP's formal
+# forest cells. Repeated paths are intentional. The five tree families account
+# for about 2,053 source objects; the shrub families account for about 9,100.
 VIETNAM_ROADSIDE_TREE_MODELS: tuple[str, ...] = (
-    r"sebnam_obj\sebstr borovice horska.p3d",
-    r"sebnam_obj\sebstr_liskac.p3d",
-    r"sebnam_obj\sebstr_fikovnik.p3d",
-    r"sebnam_obj\sebstr osika.p3d",
-    r"sebnam_obj\sebstr_fikovnik2.p3d",
-    r"sebnam_obj\sebstr krovisko vysoke.p3d",
+    *(r"sebnam_obj\sebstr borovice horska.p3d",) * 6,
+    *(r"sebnam_obj\sebstr_liskac.p3d",) * 5,
+    *(r"sebnam_obj\sebstr_fikovnik.p3d",) * 4,
+    *(r"sebnam_obj\sebstr osika.p3d",) * 3,
+    *(r"sebnam_obj\sebstr_fikovnik2.p3d",) * 2,
 )
 VIETNAM_BUSH_MODELS: tuple[str, ...] = (
-    r"sebnam_obj\sebelekrovi2.p3d",
-    r"sebnam_obj\sebkrovi_long.p3d",
-    r"sebnam_obj\sebstr_fikovnik_ker.p3d",
+    *(r"sebnam_obj\sebelekrovi2.p3d",) * 12,
+    *(r"sebnam_obj\sebstr krovisko vysoke.p3d",) * 3,
+    *(r"sebnam_obj\sebkrovi_long.p3d",) * 2,
+    *(r"sebnam_obj\sebstr_fikovnik_ker.p3d",) * 2,
     r"sebnam_obj\sebkrovi4.p3d",
 )
 VIETNAM_HILLSIDE_TREE_MODEL = VIETNAM_SINGLE_TREE_MODEL
