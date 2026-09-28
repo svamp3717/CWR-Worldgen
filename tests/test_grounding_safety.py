@@ -27,6 +27,7 @@ from cwr_worldgen.osm import (
     OsmDataset,
     OsmRaster,
     _audit_vegetation_grounding,
+    _forest_scatter_tree_model,
     _rooted_tree_fit,
     apply_water_elevations,
     conservative_water_interior_mask,
@@ -167,6 +168,58 @@ def test_vietnam_profile_keeps_explicit_density_overrides() -> None:
     assert models["steep_hill_bush_spacing"] == 47.0
     assert models["steep_hill_bush_minimum_slope_degrees"] == 22.0
     assert models["wetland_reed_spacing"] == 13.0
+
+
+def test_vietnam_density_constants_reproduce_ia_drang_free_vegetation() -> None:
+    source_area_km2 = 19.38
+    source_tree_density = 2053.0 / source_area_km2
+    source_bush_density = 9100.0 / source_area_km2
+
+    generated_tree_density = (
+        1_000_000.0 / (VIETNAM_FOREST_SINGLE_TREE_SPACING ** 2)
+    )
+    # The undergrowth pass keeps every second valid carrier. The three carrier
+    # variants contain 6, 5 and 4 visible proxies, averaging five.
+    generated_bush_density = (
+        0.5
+        * 1_000_000.0
+        / (VIETNAM_FOREST_UNDERGROWTH_SPACING ** 2)
+        * 5.0
+    )
+
+    assert abs(generated_tree_density - source_tree_density) < 1.0
+    assert abs(generated_bush_density - source_bush_density) < 2.0
+
+
+def test_vietnam_free_tree_scatter_uses_measured_weighted_model_pool() -> None:
+    selected = [
+        _forest_scatter_tree_model(
+            seed="ia-drang-regression",
+            forest_profile="vietnam",
+            fallback_model=VIETNAM_SINGLE_TREE_MODEL,
+            model_pool=VIETNAM_ROADSIDE_TREE_MODELS,
+            column=column,
+            row=row,
+        )
+        for row in range(40)
+        for column in range(40)
+    ]
+
+    assert set(selected) == set(VIETNAM_ROADSIDE_TREE_MODELS)
+    assert selected.count(r"sebnam_obj\sebstr borovice horska.p3d") > selected.count(
+        r"sebnam_obj\sebstr_fikovnik2.p3d"
+    )
+    assert (
+        _forest_scatter_tree_model(
+            seed="ia-drang-regression",
+            forest_profile="everon",
+            fallback_model=r"data3d\str smrk_medium.p3d",
+            model_pool=VIETNAM_ROADSIDE_TREE_MODELS,
+            column=1,
+            row=1,
+        )
+        == r"data3d\str smrk_medium.p3d"
+    )
 
 
 def test_vietnam_weighted_model_pools_favour_ia_drang_understory() -> None:
