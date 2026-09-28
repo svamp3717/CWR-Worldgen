@@ -446,18 +446,25 @@ def defaults_with_recent_source(
 ) -> dict[str, object]:
     """Prefer recent source/deployment paths and remembered GUI mapping settings."""
     result = dict(defaults)
-    source_text = str(state.get("last_downloaded_source", "")).strip()
-    source_path = Path(source_text).expanduser() if source_text else None
-    if source_path is not None and (source_path / "source.json").is_file():
-        source_text = str(source_path.resolve())
+    source_text = ""
+    source_path: Path | None = None
+    for state_key in ("last_used_source", "last_downloaded_source"):
+        candidate_text = str(state.get(state_key, "")).strip()
+        candidate = Path(candidate_text).expanduser() if candidate_text else None
+        if candidate is not None and (candidate / "source.json").is_file():
+            source_path = candidate.resolve()
+            source_text = str(source_path)
+            break
+    if source_path is not None:
         result["source_mode"] = "existing"
         result["source_dir"] = source_text
         result["fetch_source_dir"] = source_text
+    if "deploy_to_mod_folder" in state:
+        result["deploy_to_mod_folder"] = bool(state["deploy_to_mod_folder"])
     deploy_text = str(state.get("last_deploy_mod_dir", "")).strip()
     deploy_path = Path(deploy_text).expanduser() if deploy_text else None
     if deploy_path is not None and deploy_path.is_dir():
         result["deploy_mod_dir"] = str(deploy_path.resolve())
-        result["deploy_to_mod_folder"] = bool(state.get("deploy_to_mod_folder", True))
     last_name = str(state.get("last_world_name", "")).strip()
     if last_name:
         next_name = increment_trailing_number(last_name)
@@ -481,6 +488,7 @@ def defaults_with_recent_source(
         "osm_asset_mapping_rules",
         "osm_asset_mapping_global_models",
         "osm_asset_mapping_global_textures",
+        "run_road_inspector_after_build",
     ):
         if key in state:
             result[key] = state[key]
@@ -3123,6 +3131,7 @@ class WorldgenGui(tk.Tk):
                         if "fetch-sources" in command:
                             self._remember_downloaded_source(command)
                         if "milestone9" in command:
+                            self._remember_used_source(command)
                             self._remember_world_name(command)
                             self._remember_deploy_mod_folder(command)
                     if code == 0 and self._pipeline_position + 1 < len(self._pipeline_jobs):
@@ -3202,6 +3211,23 @@ class WorldgenGui(tk.Tk):
         self.vars["source_mode"].set("existing")
         self._sync_source_paths()
         self.footer_status_var.set(f"Remembered downloaded source: {source_dir}")
+
+    def _remember_used_source(self, command: list[str]) -> None:
+        """Remember the source bundle that actually completed a world build."""
+        source_dir = (
+            command_option_value(command, "--source-dir")
+            or str(self.vars["source_dir"].get()).strip()
+        )
+        source_path = Path(source_dir).expanduser() if source_dir else None
+        if source_path is None or not (source_path / "source.json").is_file():
+            return
+        try:
+            update_gui_state(
+                self.state_path,
+                {"last_used_source": str(source_path.resolve())},
+            )
+        except OSError as exc:
+            self._append_log(f"\nCould not remember used source: {exc}\n")
 
     def _remember_deploy_mod_folder(self, command: list[str]) -> None:
         deploy_dir = command_option_value(command, "--deploy-mod-dir")

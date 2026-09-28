@@ -272,26 +272,30 @@ def _install_gui_mod_folder_memory() -> None:
             try:
                 state = gui.load_gui_state(gui.gui_state_path())
                 remembered = str(state.get("last_deploy_mod_dir", "")).strip()
+                remembered_enabled = bool(state.get("deploy_to_mod_folder", False))
             except OSError:
                 remembered = ""
+                remembered_enabled = False
             self._cwr_remembered_mod_folder = remembered
+            self._cwr_remembered_mod_enabled = remembered_enabled
             super().__init__(*args, **kwargs)
-            # gui_entry deliberately starts deployment disabled. Restore only
-            # the remembered path after that startup reset has finished.
             self.after_idle(self._restore_remembered_mod_folder)
 
         def _restore_remembered_mod_folder(self) -> None:
             remembered = str(getattr(self, "_cwr_remembered_mod_folder", "")).strip()
             if not remembered or "deploy_mod_dir" not in self.vars:
                 return
+            enabled = bool(
+                getattr(self, "_cwr_remembered_mod_enabled", False)
+            )
             self.vars["deploy_mod_dir"].set(remembered)
-            self.vars["deploy_to_mod_folder"].set(False)
+            self.vars["deploy_to_mod_folder"].set(enabled)
             try:
                 gui.update_gui_state(
                     self.state_path,
                     {
                         "last_deploy_mod_dir": remembered,
-                        "deploy_to_mod_folder": False,
+                        "deploy_to_mod_folder": enabled,
                     },
                 )
             except OSError:

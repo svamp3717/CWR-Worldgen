@@ -191,12 +191,11 @@ def _install_tk_exception_hook() -> None:
 
 
 def _install_auto_enable_existing_mod_folder() -> None:
-    """Enable deployment automatically whenever a remembered mod folder is set.
+    """Compatibility wrapper that preserves the saved deployment checkbox.
 
-    The existing map-picker extension deliberately restored the remembered path
-    while forcing deploy_to_mod_folder back to False. This wrapper keeps the
-    remembered-path behavior but makes the checkbox follow the presence of a
-    folder, which is what the GUI label implies to a normal human being.
+    Older frozen launchers inferred the checkbox from whether a deployment path
+    existed. The GUI now persists the checkbox explicitly, so startup and folder
+    browsing must leave that boolean alone.
     """
     from . import gui
 
@@ -204,57 +203,23 @@ def _install_auto_enable_existing_mod_folder() -> None:
     if bool(getattr(original_class, "_cwr_auto_enable_existing_mod_folder", False)):
         return
 
-    class AutoEnableExistingModFolderGui(original_class):
+    class PreserveExistingModFolderChoiceGui(original_class):
         _cwr_auto_enable_existing_mod_folder = True
 
-        def _enable_existing_mod_folder_if_set(self) -> None:
-            vars_map = getattr(self, "vars", {})
-            folder_var = vars_map.get("deploy_mod_dir")
-            enabled_var = vars_map.get("deploy_to_mod_folder")
-            if folder_var is None or enabled_var is None:
+        def _restore_remembered_mod_folder(self) -> None:
+            restore = getattr(super(), "_restore_remembered_mod_folder", None)
+            if callable(restore):
+                restore()
+
+        def _browse(self, key: str, kind: str) -> None:
+            super()._browse(key, kind)
+            if key != "deploy_mod_dir":
                 return
-
-            folder = str(folder_var.get()).strip()
-            enabled = bool(folder)
-            enabled_var.set(enabled)
-
-            state_path = getattr(self, "state_path", None)
-            if state_path is not None:
-                try:
-                    gui.update_gui_state(
-                        state_path,
-                        {
-                            "last_deploy_mod_dir": folder,
-                            "deploy_to_mod_folder": enabled,
-                        },
-                    )
-                except OSError:
-                    pass
-
             update_controls = getattr(self, "_update_deploy_controls", None)
             if callable(update_controls):
                 update_controls()
 
-        def _restore_remembered_mod_folder(self) -> None:
-            # Preserve the existing remembered-folder restoration first.
-            restore = getattr(super(), "_restore_remembered_mod_folder", None)
-            if callable(restore):
-                restore()
-            self._enable_existing_mod_folder_if_set()
-
-        def _browse(self, key: str, kind: str) -> None:
-            super()._browse(key, kind)
-            if key == "deploy_mod_dir":
-                self._enable_existing_mod_folder_if_set()
-
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            super().__init__(*args, **kwargs)
-            # gui_entry performs its own startup safety reset after constructing
-            # the wrapped class. Running once at idle makes the final checkbox
-            # state follow the final restored folder value.
-            self.after_idle(self._enable_existing_mod_folder_if_set)
-
-    gui.WorldgenGui = AutoEnableExistingModFolderGui
+    gui.WorldgenGui = PreserveExistingModFolderChoiceGui
 
 
 def _run_frozen_startup_smoke() -> int:
