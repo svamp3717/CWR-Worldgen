@@ -429,7 +429,7 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
                 "source_dir": None,
             }
             super().__init__(*args, **kwargs)
-            self._clear_remembered_deploy_default()
+            self._install_postbuild_setting_persistence()
             self._auto_display_name = str(self.vars["display_name"].get())
             self._arm_auto_world_values()
             self._auto_world_guard = False
@@ -469,19 +469,29 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
                 wraplength=700,
             ).pack(anchor="w", pady=(5, 0))
 
-        def _clear_remembered_deploy_default(self) -> None:
-            """Start deployment disabled and migrate away any remembered machine path."""
-            self.vars["deploy_to_mod_folder"].set(False)
-            self.vars["deploy_mod_dir"].set("")
+        def _install_postbuild_setting_persistence(self) -> None:
+            """Persist post-build checkbox choices as soon as the user changes them."""
+            for key in (
+                "deploy_to_mod_folder",
+                "run_road_inspector_after_build",
+            ):
+                variable = self.vars.get(key)
+                if variable is None:
+                    continue
+                variable.trace_add(
+                    "write",
+                    lambda *_args, key=key: self._persist_postbuild_setting(key),
+                )
+
+        def _persist_postbuild_setting(self, key: str) -> None:
+            variable = self.vars.get(key)
+            if variable is None:
+                return
             try:
-                state = gui.load_gui_state(self.state_path)
-                had_deploy_path = bool(str(state.get("last_deploy_mod_dir", "")).strip())
-                deploy_was_enabled = bool(state.get("deploy_to_mod_folder", False))
-                if had_deploy_path or deploy_was_enabled:
-                    state.pop("state_version", None)
-                    state.pop("last_deploy_mod_dir", None)
-                    state["deploy_to_mod_folder"] = False
-                    gui.save_gui_state(self.state_path, state)
+                gui.update_gui_state(
+                    self.state_path,
+                    {key: bool(variable.get())},
+                )
             except OSError:
                 pass
 
