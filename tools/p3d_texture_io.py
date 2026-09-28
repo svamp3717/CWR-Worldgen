@@ -1,6 +1,7 @@
 """Resolve OFP/CWA model textures and decode PAA first mip levels."""
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 import io
 from pathlib import Path
@@ -75,9 +76,14 @@ class TextureResolver:
         self.assets: dict[str, AssetRef] = {}
         self.basename_assets: dict[str, AssetRef | None] = {}
         self.indexed_pbos: set[Path] = set()
+        self.indexed_direct_pbos: set[Path] = set()
+        self.indexed_nested_sources: set[str] = set()
         self.indexed_all = False
         self.bytes_cache: dict[str, bytes | None] = {}
         self.image_cache: dict[str, np.ndarray | None] = {}
+        self._nested_pbo_cache: OrderedDict[str, bytes] = OrderedDict()
+        self._nested_pbo_cache_bytes = 0
+        self._nested_pbo_cache_limit = 256 * 1024 * 1024
 
     def _remember(self, canonical: str, ref: AssetRef) -> None:
         canonical = _canonical(canonical)
@@ -90,119 +96,218 @@ class TextureResolver:
         elif self.basename_assets[basename] != ref:
             self.basename_assets[basename] = None
 
-    def _index_pbo(self, pbo_path: Path) -> None:
-        resolved = pbo_path.resolve()
-        if resolved in self.indexed_pbos or not pbo_path.is_file():
+    def _cache_nested_pbo(self, source: str, data: bytes) -> None:
+        existing = self._nested_pbo_cache.pop(source, None)
+        if existing is not None:
+            self._nested_pbo_cache_bytes -= len(existing)
+        if len(data) > self._nested_pbo_cache_limit:
             return
-        self.indexed_pbos.add(resolved)
+        while (
+            self._nested_pbo_cache
+            and self._nested_pbo_cache_bytes + len(data) > self._nested_pbo_cache_limit
+        ):
+            _old_source, old = self._nested_pbo_cache.popitem(last=False)
+            self._nested_pbo_cache_bytes -= len(old)
+        self._nested_pbo_cache[source] = data
+        self._nested_pbo_cache_bytes += len(data)
 
-        def index_stream(
-            handle,
-            *,
-            source: str,
-            fallback_prefix: str,
-            depth: int,
-        ) -> None:
-            metadata: list[tuple[str, int, int, int]] = []
-            properties: dict[str, str] = {}
-            while True:
-                name = _read_cstring_file(handle, "PBO entry name")
-                fields = _read_pbo_exact(handle, measure._PBO_ENTRY.size, "PBO entry header")
-                packing, original_size, reserved, timestamp, data_size = measure._PBO_ENTRY.unpack(fields)
-                if data_size > measure._MAX_PBO_ENTRY_SIZE or original_size > measure._MAX_PBO_ENTRY_SIZE:
-                    raise measure.ModelReadError(f"implausible PBO entry size in {source}")
-                if not name:
-                    if packing == measure._PBO_PROPERTIES:
-                        while True:
-                            key = _read_cstring_file(handle, "PBO property key")
-                            if not key:
-                                break
-                            properties[key.casefold()] = _read_cstring_file(
-                                handle, "PBO property value"
-                            )
-                        continue
-                    if measure._is_pbo_header_terminator(
-                        packing, original_size, reserved, timestamp, data_size
-                    ):
-                        break
-                    raise measure.ModelReadError(
-                        "unsupported PBO extension record "
-                        f"(packing={packing:#x}, original_size={original_size}, "
-                        f"reserved={reserved}, timestamp={timestamp}, data_size={data_size})"
-                    )
-                metadata.append((name, packing, original_size, data_size))
+    def _cached_nested_pbo(self, source: str) -> bytes | None:
+        data = self._nested_pbo_cache.pop(source, None)
+        if data is None:
+            return None
+        self._nested_pbo_cache[source] = data
+        return data
 
-            prefix = world_assets._effective_pbo_prefix(
-                properties,
-                metadata,
-                fallback_prefix,
-            )
-            canonical_prefix = _canonical(prefix)
-            cursor = handle.tell()
-
-            for name, packing, original_size, data_size in metadata:
-                combined = name.replace("/", "\\").lstrip("\\")
-                if canonical_prefix and not _canonical(combined).startswith(
-                    canonical_prefix + "\\"
+    def _index_stream(
+        self,
+        handle,
+        *,
+        pbo_path: Path,
+        source: str,
+        fallback_prefix: str,
+        depth: int,
+        recursive: bool,
+    ) -> None:
+        metadata: list[tuple[str, int, int, int]] = []
+        properties: dict[str, str] = {}
+        while True:
+            name = _read_cstring_file(handle, "PBO entry name")
+            fields = _read_pbo_exact(handle, measure._PBO_ENTRY.size, "PBO entry header")
+            packing, original_size, reserved, timestamp, data_size = measure._PBO_ENTRY.unpack(fields)
+            if data_size > measure._MAX_PBO_ENTRY_SIZE or original_size > measure._MAX_PBO_ENTRY_SIZE:
+                raise measure.ModelReadError(f"implausible PBO entry size in {source}")
+            if not name:
+                if packing == measure._PBO_PROPERTIES:
+                    while True:
+                        key = _read_cstring_file(handle, "PBO property key")
+                        if not key:
+                            break
+                        properties[key.casefold()] = _read_cstring_file(
+                            handle, "PBO property value"
+                        )
+                    continue
+                if measure._is_pbo_header_terminator(
+                    packing, original_size, reserved, timestamp, data_size
                 ):
-                    combined = prefix + "\\" + combined
-                canonical = _canonical(combined)
-                suffix = Path(name.replace("\\", "/")).suffix.casefold()
+                    break
+                raise measure.ModelReadError(
+                    "unsupported PBO extension record "
+                    f"(packing={packing:#x}, original_size={original_size}, "
+                    f"reserved={reserved}, timestamp={timestamp}, data_size={data_size})"
+                )
+            metadata.append((name, packing, original_size, data_size))
 
-                if canonical.endswith((".paa", ".pac")):
-                    if depth == 0:
-                        self._remember(
-                            canonical,
-                            PBOAssetRef(
-                                pbo_path,
-                                cursor,
-                                packing,
-                                original_size,
-                                data_size,
-                            ),
-                        )
-                    else:
-                        self._remember(
-                            canonical,
-                            NestedPBOAssetRef(source, canonical),
-                        )
-                    _skip_pbo_exact(handle, data_size, f"PBO entry {name!r}")
-                    cursor += data_size
-                    continue
+        prefix = world_assets._effective_pbo_prefix(
+            properties,
+            metadata,
+            fallback_prefix,
+        )
+        canonical_prefix = _canonical(prefix)
+        cursor = handle.tell()
 
-                if suffix == ".pbo" and depth < 4:
-                    stored = _read_pbo_exact(handle, data_size, f"PBO entry {name!r}")
-                    cursor += data_size
-                    if packing == 0:
-                        nested = stored
-                    elif packing == measure._PBO_COMPRESSED:
-                        nested = measure._decompress_lzss_pbo(stored, original_size)
-                    else:
-                        continue
-                    nested_source = source + "!" + name.replace("/", "\\")
-                    nested_fallback = pbo_stem(Path(name.replace("\\", "/")).name)
-                    with io.BytesIO(nested) as nested_handle:
-                        index_stream(
-                            nested_handle,
-                            source=nested_source,
-                            fallback_prefix=nested_fallback,
-                            depth=depth + 1,
-                        )
-                    continue
+        for name, packing, original_size, data_size in metadata:
+            combined = name.replace("/", "\\").lstrip("\\")
+            if canonical_prefix and not _canonical(combined).startswith(
+                canonical_prefix + "\\"
+            ):
+                combined = prefix + "\\" + combined
+            canonical = _canonical(combined)
+            suffix = Path(name.replace("\\", "/")).suffix.casefold()
 
+            if canonical.endswith((".paa", ".pac")):
+                if depth == 0:
+                    self._remember(
+                        canonical,
+                        PBOAssetRef(
+                            pbo_path,
+                            cursor,
+                            packing,
+                            original_size,
+                            data_size,
+                        ),
+                    )
+                else:
+                    self._remember(
+                        canonical,
+                        NestedPBOAssetRef(source, canonical),
+                    )
                 _skip_pbo_exact(handle, data_size, f"PBO entry {name!r}")
                 cursor += data_size
+                continue
+
+            if recursive and suffix == ".pbo" and depth < 4:
+                stored = _read_pbo_exact(handle, data_size, f"PBO entry {name!r}")
+                cursor += data_size
+                if packing == 0:
+                    nested = stored
+                elif packing == measure._PBO_COMPRESSED:
+                    nested = measure._decompress_lzss_pbo(stored, original_size)
+                else:
+                    continue
+                nested_source = source + "!" + name.replace("/", "\\")
+                nested_fallback = pbo_stem(Path(name.replace("\\", "/")).name)
+                self._cache_nested_pbo(nested_source, nested)
+                self.indexed_nested_sources.add(nested_source)
+                with io.BytesIO(nested) as nested_handle:
+                    self._index_stream(
+                        nested_handle,
+                        pbo_path=pbo_path,
+                        source=nested_source,
+                        fallback_prefix=nested_fallback,
+                        depth=depth + 1,
+                        recursive=True,
+                    )
+                continue
+
+            _skip_pbo_exact(handle, data_size, f"PBO entry {name!r}")
+            cursor += data_size
+
+    def _index_pbo(self, pbo_path: Path, *, recursive: bool = True) -> None:
+        resolved = pbo_path.resolve()
+        if not pbo_path.is_file():
+            return
+        if recursive:
+            if resolved in self.indexed_pbos:
+                return
+            self.indexed_pbos.add(resolved)
+            self.indexed_direct_pbos.add(resolved)
+        else:
+            if resolved in self.indexed_direct_pbos or resolved in self.indexed_pbos:
+                return
+            self.indexed_direct_pbos.add(resolved)
 
         try:
             with open_pbo_stream(pbo_path) as handle:
-                index_stream(
+                self._index_stream(
                     handle,
+                    pbo_path=pbo_path,
                     source=str(pbo_path),
                     fallback_prefix=pbo_stem(pbo_path),
                     depth=0,
+                    recursive=recursive,
                 )
         except (OSError, RuntimeError, ValueError, struct.error) as exc:
             print(f"[texture index warning] {pbo_path}: {exc}", file=sys.stderr, flush=True)
+
+    def _index_model_source(self, source: str) -> None:
+        """Index the PBO that contains this model before considering a full scan."""
+        parts = source.split("!")
+        if len(parts) < 2:
+            return
+        outer = Path(parts[0]).expanduser()
+        if not is_pbo_path(outer) or not outer.is_file():
+            return
+
+        nested_members = tuple(part for part in parts[1:-1] if part)
+        if not nested_members:
+            self._index_pbo(outer, recursive=False)
+            return
+
+        containing_source = str(outer) + "".join("!" + member for member in nested_members)
+        if containing_source in self.indexed_nested_sources:
+            self._cached_nested_pbo(containing_source)
+            return
+
+        try:
+            with open_pbo_stream(outer) as outer_handle:
+                current = outer_handle
+                owned_streams: list[io.BytesIO] = []
+                try:
+                    nested = b""
+                    source_prefix = str(outer)
+                    for member in nested_members:
+                        next_source = source_prefix + "!" + member
+                        cached = self._cached_nested_pbo(next_source)
+                        if cached is None:
+                            nested = world_assets._read_named_pbo_member(current, member)
+                            self._cache_nested_pbo(next_source, nested)
+                        else:
+                            nested = cached
+                        nested_handle = io.BytesIO(nested)
+                        owned_streams.append(nested_handle)
+                        current = nested_handle
+                        source_prefix = next_source
+
+                    fallback = pbo_stem(Path(nested_members[-1].replace("\\", "/")).name)
+                    self.indexed_nested_sources.add(containing_source)
+                    with io.BytesIO(nested) as nested_handle:
+                        self._index_stream(
+                            nested_handle,
+                            pbo_path=outer,
+                            source=containing_source,
+                            fallback_prefix=fallback,
+                            depth=len(nested_members),
+                            recursive=False,
+                        )
+                finally:
+                    for nested_handle in owned_streams:
+                        nested_handle.close()
+        except (OSError, RuntimeError, ValueError, struct.error) as exc:
+            print(
+                f"[texture source warning] {containing_source}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     def _index_all(self) -> None:
         if self.indexed_all:
@@ -236,9 +341,7 @@ class TextureResolver:
     def _find_ref(self, texture_path: str, source: str) -> AssetRef | None:
         canonical = _canonical(texture_path)
         if "!" in source:
-            source_pbo = Path(source.split("!", 1)[0])
-            if is_pbo_path(source_pbo):
-                self._index_pbo(source_pbo)
+            self._index_model_source(source)
         ref = self.assets.get(canonical)
         if ref is not None:
             return ref
@@ -260,14 +363,26 @@ class TextureResolver:
             if isinstance(ref, LooseAssetRef):
                 data = ref.path.read_bytes()
             elif isinstance(ref, NestedPBOAssetRef):
-                data = world_assets.read_asset_record_bytes(
-                    world_assets.AssetRecord(
-                        path=ref.canonical_path,
-                        source=ref.source,
-                        size=0,
-                        sha256=None,
+                cached_pbo = self._cached_nested_pbo(ref.source)
+                if cached_pbo is not None:
+                    fallback = pbo_stem(
+                        Path(ref.source.rsplit("!", 1)[-1].replace("\\", "/")).name
                     )
-                )
+                    with io.BytesIO(cached_pbo) as nested_handle:
+                        data = world_assets._read_asset_from_pbo_stream(
+                            nested_handle,
+                            target=ref.canonical_path,
+                            fallback_prefix=fallback,
+                        )
+                else:
+                    data = world_assets.read_asset_record_bytes(
+                        world_assets.AssetRecord(
+                            path=ref.canonical_path,
+                            source=ref.source,
+                            size=0,
+                            sha256=None,
+                        )
+                    )
             else:
                 with open_pbo_stream(ref.pbo_path) as handle:
                     if is_zstd_wrapped_pbo(ref.pbo_path):
