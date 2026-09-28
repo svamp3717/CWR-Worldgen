@@ -19,6 +19,8 @@ import os
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from .pbo import is_pbo_path, pbo_stem
+
 
 STOCK_RUNWAY_BACKGROUND_TEXTURES: dict[str, str] = {
     "nogova": r"o\t1.paa",
@@ -86,16 +88,20 @@ def _standard_pbos(module, root: Path, prefix: str) -> tuple[Path, ...]:
     if root.is_file():
         return (
             (root,)
-            if root.suffix.casefold() == ".pbo" and root.stem.casefold() == prefix.casefold()
+            if is_pbo_path(root) and pbo_stem(root).casefold() == prefix.casefold()
             else ()
         )
-    filename = f"{prefix}.pbo"
-    layouts = (
-        (filename,),
-        ("Dta", filename),
-        ("Res", "Dta", filename),
-        ("AddOns", filename),
-        ("Res", "AddOns", filename),
+    filenames = (f"{prefix}.pbo", f"{prefix}.pbo.zst")
+    layouts = tuple(
+        parts
+        for filename in filenames
+        for parts in (
+            (filename,),
+            ("Dta", filename),
+            ("Res", "Dta", filename),
+            ("AddOns", filename),
+            ("Res", "AddOns", filename),
+        )
     )
     result: list[Path] = []
     seen: set[str] = set()
@@ -116,7 +122,6 @@ def _standard_pbos(module, root: Path, prefix: str) -> tuple[Path, ...]:
             result.append(current)
     return tuple(result)
 
-
 def _standard_model_candidate(fast, roots: Sequence[Path], canonical_path: str) -> bool:
     """Return whether a selected P3D has a cheap standard-layout lookup target."""
     prefix = canonical_path.split("\\", 1)[0]
@@ -127,7 +132,7 @@ def _standard_model_candidate(fast, roots: Sequence[Path], canonical_path: str) 
         except OSError:
             pass
         if root.is_file():
-            if root.suffix.casefold() == ".pbo" and root.stem.casefold() == prefix.casefold():
+            if is_pbo_path(root) and pbo_stem(root).casefold() == prefix.casefold():
                 return True
             continue
         if root.is_dir():
