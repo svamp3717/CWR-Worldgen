@@ -303,6 +303,82 @@ def _water_target(spec) -> float:
     return float(spec.sea_level) - min(3.0, depth)
 
 
+def _bridge_channel_can_reopen(
+    crossing_indices,
+    solved_elevations,
+    source_elevations,
+    spec,
+) -> bool:
+    """Reject isolated bridge-water cuts that would recreate a lake crater.
+
+    A stock bridge may reopen a causeway only when it connects to already-wet
+    solved terrain, or when the source terrain around that mapped water is itself
+    close enough to CWA's global water plane to form a one-cell shoreline.
+
+    This deliberately makes the terrain solver authoritative for impossible
+    inland lakes. A later bridge pass must not resurrect water that the solver
+    removed because its surrounding bank was tens or hundreds of metres higher.
+    """
+
+    indices = tuple(sorted(set(int(index) for index in crossing_indices)))
+    if not indices:
+        return False
+    cells = int(spec.cells)
+    count = cells * cells
+    crossing = set(indices)
+    ring: set[int] = set()
+    for index in indices:
+        if not 0 <= index < count:
+            continue
+        x, z = index % cells, index // cells
+        for dz in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dx == 0 and dz == 0:
+                    continue
+                nx, nz = x + dx, z + dz
+                if not (0 <= nx < cells and 0 <= nz < cells):
+                    continue
+                neighbour = nz * cells + nx
+                if neighbour not in crossing:
+                    ring.add(neighbour)
+
+    sea_level = float(spec.sea_level)
+    wet_ceiling = sea_level + max(
+        0.10,
+        float(getattr(spec, "height_scale", 0.05)) * 2.0,
+    )
+    if any(
+        float(solved_elevations[index]) <= wet_ceiling
+        for index in ring
+    ):
+        return True
+
+    source_bank = sorted(
+        float(source_elevations[index])
+        for index in ring
+        if math.isfinite(float(source_elevations[index]))
+    )
+    if not source_bank:
+        return False
+    bank_reference = source_bank[
+        max(0, min(
+            len(source_bank) - 1,
+            int(round((len(source_bank) - 1) * 0.75)),
+        ))
+    ]
+    rise_per_cell = (
+        float(spec.cell_size)
+        * float(getattr(spec, "lake_shore_maximum_slope_percent", 8.0))
+        / 100.0
+    )
+    shoreline_cut_budget = max(
+        0.5,
+        float(getattr(spec, "beach_height", 3.0)),
+    )
+    immediate_bank_limit = sea_level + rise_per_cell + shoreline_cut_budget
+    return bank_reference <= immediate_bank_limit + 1.0e-7
+
+
 def _reopen_bridge_water(report, elevations, dataset, projection, spec):
     # Plan against the solved pre-reopen terrain, the same surface the road
     # fitter and later bridge renderer will see. Using raw DEM elevations here
@@ -320,9 +396,17 @@ def _reopen_bridge_water(report, elevations, dataset, projection, spec):
     dry_floor = float(spec.sea_level) - epsilon
     touched: set[int] = set()
     for wet_start, wet_end, axis in channels:
-        for index in _wet_interval_crossing_vertices(
+        crossing_indices = _wet_interval_crossing_vertices(
             wet_start, wet_end, axis, spec
+        )
+        if not _bridge_channel_can_reopen(
+            crossing_indices,
+            report.elevations,
+            elevations,
+            spec,
         ):
+            continue
+        for index in crossing_indices:
             # Preserve terrain that is already genuinely underwater.  The repair
             # exists to remove causeway fill, not to deepen valid source water.
             if values[index] >= dry_floor:
