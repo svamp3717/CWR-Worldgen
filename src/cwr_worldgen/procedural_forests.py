@@ -177,10 +177,13 @@ VIETNAM_PROXY_MODELS: tuple[str, ...] = (
     r"sebnam_obj\sebstr_liskac.p3d",
 )
 VIETNAM_BORDER_PROXY_MODELS: tuple[str, ...] = (
+    # Ia Drang's free shrub layer is strongly dominated by sebelekrovi2, with
+    # tall krovisko second. Duplicate the dominant family in the fixed four-slot
+    # carrier palette instead of giving every shrub family equal visual weight.
     r"sebnam_obj\sebelekrovi2.p3d",
-    r"sebnam_obj\sebkrovi_long.p3d",
-    r"sebnam_obj\sebstr_fikovnik_ker.p3d",
+    r"sebnam_obj\sebelekrovi2.p3d",
     r"sebnam_obj\sebstr krovisko vysoke.p3d",
+    r"sebnam_obj\sebkrovi_long.p3d",
 )
 VIETNAM_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = VIETNAM_BORDER_PROXY_MODELS
 VIETNAM_DITCH_PROXY_MODELS: tuple[str, ...] = (
