@@ -18,6 +18,7 @@ from cwr_worldgen.gui import (
     VEGETATION_MALDEN,
     VEGETATION_RESISTANCE_LEAF,
     VEGETATION_RESISTANCE_PINE,
+    VEGETATION_VIETNAM,
     HOUSE_STYLE_AUTO_LABEL,
     HOUSE_STYLE_PRESET_LABELS,
     RECOMMENDED_APPEARANCE_PRESET,
@@ -32,6 +33,9 @@ from cwr_worldgen.gui import (
     KOLGUJEV_FOREST_BLOCK_MODEL,
     KOLGUJEV_FOREST_STEEP_MODEL,
     KOLGUJEV_SINGLE_TREE_MODEL,
+    VIETNAM_FOREST_BLOCK_MODEL,
+    VIETNAM_FOREST_STEEP_MODEL,
+    VIETNAM_SINGLE_TREE_MODEL,
     WorldgenGui,
     application_base_dir,
     build_fetch_command,
@@ -283,6 +287,7 @@ class GuiCommandTests(unittest.TestCase):
                 VEGETATION_MALDEN,
                 VEGETATION_RESISTANCE_LEAF,
                 VEGETATION_RESISTANCE_PINE,
+                VEGETATION_VIETNAM,
                 VEGETATION_NONE,
             ),
         )
@@ -320,6 +325,32 @@ class GuiCommandTests(unittest.TestCase):
 
         self.assertEqual(command[command.index("--ground-textures") + 1], "nogova")
         self.assertEqual(command[command.index("--forest-profile") + 1], "kolgujev")
+
+    def test_vietnam_ia_drang_vegetation_uses_seb_jungle_family(self) -> None:
+        values = default_gui_values()
+        values["ground_textures"] = "generated"
+        values["vegetation_style"] = VEGETATION_VIETNAM
+        values["advanced_args"] = "--forest-block-model custom-block.p3d"
+
+        command = build_milestone9_command(values, python="python")
+
+        self.assertEqual(
+            command[command.index("--ground-textures") + 1],
+            "generated",
+        )
+        self.assertEqual(
+            command[command.index("--forest-profile") + 1],
+            "vietnam",
+        )
+        self.assertEqual(
+            command[command.index("--forest-single-tree-model") + 1],
+            VIETNAM_SINGLE_TREE_MODEL,
+        )
+        self.assertEqual(command[-4:], [
+            "--forest-block-model", VIETNAM_FOREST_BLOCK_MODEL,
+            "--forest-steep-model", VIETNAM_FOREST_STEEP_MODEL,
+        ])
+        self.assertIn("sebnam_obj.pbo", VEGETATION_VIETNAM)
 
     def test_nogova_ground_can_be_combined_with_malden_vegetation(self) -> None:
         values = default_gui_values()

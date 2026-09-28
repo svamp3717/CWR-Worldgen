@@ -8,6 +8,7 @@ from cwr_worldgen.cache import streaming_hash
 from cwr_worldgen.generator import (
     _assemble_world_objects,
     _expand_cwa_generated_vegetation,
+    _trusted_legacy_asset_paths,
 )
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.osm import (
@@ -19,9 +20,13 @@ from cwr_worldgen.procedural_buildings import (
     _simple_rectangle_footprint,
 )
 from cwr_worldgen.procedural_forests import (
+    ProceduralForestClusterLibrary,
     cluster_model_path,
     generated_cluster_variant,
     is_generated_cluster_model,
+    VIETNAM_PROXY_MODELS,
+    VIETNAM_BORDER_PROXY_MODELS,
+    VIETNAM_DITCH_PROXY_MODELS,
 )
 from cwr_worldgen.wrp import _height_grid_bytes, inspect_rvw4, quantize_height, write_rvw4
 
@@ -91,6 +96,77 @@ def test_large_world_ordering_can_skip_clone_and_writer_renumbers(tmp_path: Path
     summary = inspect_rvw4(wrp, height_scale=0.05)
     assert summary.object_ids == (1, 2, 3, 4, 5, 6)
     assert summary.object_models == tuple(obj.model_path for obj in ordered)
+
+
+def test_vietnam_generated_forest_carriers_use_sebnam_obj_vegetation() -> None:
+    interior = generated_cluster_variant(
+        "testworld",
+        cluster_model_path("testworld", "pine", 0.0),
+        proxy_profile="vietnam",
+    )
+    border = generated_cluster_variant(
+        "testworld",
+        cluster_model_path("testworld", "border_thicket", 0.0),
+        proxy_profile="vietnam",
+    )
+    ditch = generated_cluster_variant(
+        "testworld",
+        cluster_model_path("testworld", "ditch_reeds", 0.0),
+        proxy_profile="vietnam",
+    )
+
+    assert interior is not None
+    assert border is not None
+    assert ditch is not None
+    assert {item[0] for item in interior[0].proxy_layout} <= set(VIETNAM_PROXY_MODELS)
+    assert {item[0] for item in border[0].proxy_layout} <= set(VIETNAM_BORDER_PROXY_MODELS)
+    assert {item[0] for item in ditch[0].proxy_layout} <= set(VIETNAM_DITCH_PROXY_MODELS)
+    assert all(
+        item[0].casefold().startswith("sebnam_obj\\")
+        for variant, _grade in (interior, border, ditch)
+        for item in variant.proxy_layout
+    )
+
+
+def test_vietnam_procedural_forest_library_accepts_profile() -> None:
+    library = ProceduralForestClusterLibrary(
+        "testworld",
+        proxy_profile="vietnam",
+    )
+    model = cluster_model_path("testworld", "border_thicket", 0.0)
+    library.register_model_usage(model, 2)
+
+    required = set(library.required_proxy_models())
+    assert required
+    assert required <= set(VIETNAM_BORDER_PROXY_MODELS)
+    assert all(path.casefold().startswith("sebnam_obj\\") for path in required)
+
+
+def test_vietnam_runtime_dependency_trust_includes_reeds() -> None:
+    spec = SimpleNamespace(
+        paved_road_model=r"o\road\sil25.p3d",
+        dirt_road_model=r"o\road\ces25.p3d",
+        road_segment_length=25.0,
+        stock_road_piece_fitting=False,
+        forest_tree_model=r"sebnam_obj\sebles_su_ctver_pruhozi.p3d",
+        forest_profile="vietnam",
+        forest_everon_steep_model=r"sebnam_obj\sebles_su_ctver_pruhozi.p3d",
+        forest_single_tree_model=r"sebnam_obj\sebstr borovice horska.p3d",
+        forest_roadside_tree_model=r"sebnam_obj\sebstr borovice horska.p3d",
+        forest_roadside_tree_models=VIETNAM_PROXY_MODELS,
+        forest_roadside_bush_models=VIETNAM_BORDER_PROXY_MODELS,
+        steep_hill_bush_models=VIETNAM_BORDER_PROXY_MODELS,
+        forest_hillside_fallback=False,
+        wetland_reed_models=VIETNAM_DITCH_PROXY_MODELS,
+        semantic_landmarks=False,
+        barriers_enabled=False,
+        street_furniture_enabled=False,
+    )
+
+    trusted = set(_trusted_legacy_asset_paths(spec, 9))
+    assert {
+        path.casefold() for path in VIETNAM_DITCH_PROXY_MODELS
+    } <= trusted
 
 
 def test_cwa_flattens_generated_vegetation_carrier_into_direct_wrp_objects() -> None:

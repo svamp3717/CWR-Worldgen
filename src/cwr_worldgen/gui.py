@@ -63,12 +63,14 @@ VEGETATION_KOLGUJEV = "Kolgujev"
 VEGETATION_MALDEN = "Malden"
 VEGETATION_RESISTANCE_LEAF = "Nogova Resistance leaf"
 VEGETATION_RESISTANCE_PINE = "Nogova Resistance pine"
+VEGETATION_VIETNAM = "Vietnam / SEB Ia Drang (requires sebnam_obj.pbo)"
 VEGETATION_OPTIONS = (
     VEGETATION_EVERON,
     VEGETATION_KOLGUJEV,
     VEGETATION_MALDEN,
     VEGETATION_RESISTANCE_LEAF,
     VEGETATION_RESISTANCE_PINE,
+    VEGETATION_VIETNAM,
     VEGETATION_NONE,
 )
 HOUSE_STYLE_AUTO_LABEL = "Automatic (area / country)"
@@ -94,6 +96,9 @@ EVERON_SINGLE_TREE_MODEL = r"data3d\str smrk_medium.p3d"
 KOLGUJEV_FOREST_BLOCK_MODEL = r"data3d\les ctverec pruchozi_T1.p3d"
 KOLGUJEV_FOREST_STEEP_MODEL = r"data3d\les trojuhelnik pruchozi.p3d"
 KOLGUJEV_SINGLE_TREE_MODEL = r"data3d\str smrk.p3d"
+VIETNAM_FOREST_BLOCK_MODEL = r"sebnam_obj\sebles_su_ctver_pruhozi.p3d"
+VIETNAM_FOREST_STEEP_MODEL = VIETNAM_FOREST_BLOCK_MODEL
+VIETNAM_SINGLE_TREE_MODEL = r"sebnam_obj\sebstr borovice horska.p3d"
 
 
 def _legacy_appearance_selection(preset: object) -> tuple[str, str] | None:
@@ -134,6 +139,8 @@ def _infer_vegetation_style(values: Mapping[str, object]) -> str:
         return VEGETATION_KOLGUJEV
     if forest_profile == "malden":
         return VEGETATION_MALDEN
+    if forest_profile == "vietnam":
+        return VEGETATION_VIETNAM
     return VEGETATION_EVERON
 
 
@@ -163,6 +170,9 @@ def resolve_gui_appearance_values(values: Mapping[str, object]) -> dict[str, obj
     elif vegetation == VEGETATION_RESISTANCE_PINE:
         resolved["forest_profile"] = "everon"
         resolved["forest_single_tree_model"] = NOGOVA_PINE_SINGLE_TREE_MODEL
+    elif vegetation == VEGETATION_VIETNAM:
+        resolved["forest_profile"] = "vietnam"
+        resolved["forest_single_tree_model"] = VIETNAM_SINGLE_TREE_MODEL
     elif vegetation == VEGETATION_NONE:
         # Keep these fields valid for CLI/spec validation. The command builder
         # applies the actual no-vegetation switches after Advanced arguments.
@@ -737,6 +747,14 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         command.extend((
             "--forest-block-model", NOGOVA_FOREST_BLOCK_MODEL,
             "--forest-steep-model", NOGOVA_FOREST_STEEP_MODEL,
+        ))
+    elif vegetation == VEGETATION_VIETNAM:
+        # The supplied Ia Drang WRP uses one 50 m SEB jungle square on every
+        # forest cell, including steep cells. Keep that source behavior
+        # authoritative over Advanced model overrides.
+        command.extend((
+            "--forest-block-model", VIETNAM_FOREST_BLOCK_MODEL,
+            "--forest-steep-model", VIETNAM_FOREST_STEEP_MODEL,
         ))
     elif vegetation == VEGETATION_NONE:
         # Apply these last so Advanced arguments cannot quietly re-enable a

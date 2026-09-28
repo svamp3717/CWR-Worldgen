@@ -423,6 +423,30 @@ def _scaled_synthetic_tree_limit(limit: int, world_size: float) -> int:
     return max(1, int(round(limit * linear_scale * linear_scale)))
 
 
+def _forest_scatter_tree_model(
+    *,
+    seed: str,
+    forest_profile: str,
+    fallback_model: str,
+    model_pool: Sequence[str],
+    column: int,
+    row: int,
+) -> str:
+    """Choose the free-tree model for one deterministic forest scatter cell.
+
+    Classic profiles retain their historical single-model scatter. The measured
+    Vietnam preset uses its weighted Ia Drang tree pool so the free trees around
+    and inside jungle blocks reproduce the source WRP's species/model mix.
+    """
+    if str(forest_profile).casefold() != "vietnam" or not model_pool:
+        return str(fallback_model)
+    digest = hashlib.blake2s(
+        f"{seed}:forest-single-tree-model:{column}:{row}".encode("utf-8"),
+        digest_size=2,
+    ).digest()
+    return str(model_pool[int.from_bytes(digest, "little") % len(model_pool)])
+
+
 def stock_hedge_model(
     length_m: float,
     identity: str,
@@ -8868,9 +8892,11 @@ def generate_world_objects(
     seed = str(getattr(spec, "deterministic_seed", "cwr-worldgen"))
     low_anchor = bool(getattr(spec, "forest_low_anchor", False))
     forest_profile = str(getattr(spec, "forest_profile", "malden")).casefold()
-    # Everon, Kolgujev and Malden share the road-safe forest placement ladder.
-    # The selected profile controls the scenery family and stock-island quirks.
-    modern_forest_profile = forest_profile in {"everon", "kolgujev", "malden"}
+    # Classic profiles and the measured SEB Vietnam preset share the road-safe
+    # forest placement ladder. The selected profile controls the scenery family.
+    modern_forest_profile = forest_profile in {
+        "everon", "kolgujev", "malden", "vietnam"
+    }
     # Legacy field name from 0.9.252. In 0.9.254+ this means "replace the
     # rigid stock square/triangle forest polygon models with tiled generated
     # clusters". Individually grounded trees remain the last-resort fallback.
@@ -8962,7 +8988,7 @@ def generate_world_objects(
                     r"data3d\les trojuhelnik pruchozi.p3d",
                 )
             )
-            if forest_profile in {"everon", "kolgujev"}
+            if forest_profile in {"everon", "kolgujev", "vietnam"}
             else ""
         )
         everon_steep_footprint = max(
@@ -10357,9 +10383,17 @@ def generate_world_objects(
                 tree_z,
                 tree_heading,
             ) in eligible_extra_single_trees[:extra_single_available]:
+                scatter_model = _forest_scatter_tree_model(
+                    seed=seed,
+                    forest_profile=forest_profile,
+                    fallback_model=extra_single_model,
+                    model_pool=roadside_tree_models,
+                    column=_single_column,
+                    row=_single_row,
+                )
                 emit(WorldObject(
                     next_id,
-                    extra_single_model,
+                    scatter_model,
                     tree_x,
                     tree_y,
                     tree_z,
@@ -11622,7 +11656,16 @@ def generate_world_objects(
             )
         )
         broadleaf_tree = leaf_type == "broadleaved" or bool(species_text)
-        if forest_profile == "kolgujev":
+        if forest_profile == "vietnam":
+            models = tuple(
+                str(model)
+                for model in getattr(
+                    spec,
+                    "forest_roadside_tree_models",
+                    (r"sebnam_obj\sebstr borovice horska.p3d",),
+                )
+            )
+        elif forest_profile == "kolgujev":
             if needle_tree:
                 models = KOLGUJEV_CONIFER_INDIVIDUAL_TREE_MODELS
             elif broadleaf_tree:

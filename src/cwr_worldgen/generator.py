@@ -183,14 +183,20 @@ def _sha256(path: Path) -> str:
 
 def _forest_proxy_profile(spec: object) -> str:
     model = str(getattr(spec, "forest_tree_model", "")).casefold()
+    profile = str(getattr(spec, "forest_profile", "")).casefold()
     if model.startswith(r"o\tree\les_nw_jehl_"):
         return "nogova_pine"
     if model.startswith(r"o\tree\les_nw_"):
         return "nogova_leaf"
-    if str(getattr(spec, "forest_profile", "")).casefold() == "kolgujev":
+    if (
+        profile == "vietnam"
+        or model == r"sebnam_obj\sebles_su_ctver_pruhozi.p3d"
+    ):
+        return "vietnam"
+    if profile == "kolgujev":
         return "kolgujev"
     if (
-        str(getattr(spec, "forest_profile", "")).casefold() == "malden"
+        profile == "malden"
         or model == r"data3d\les_su_ctver_pruhozi.p3d"
     ):
         return "malden"
@@ -978,7 +984,7 @@ def _validate_milestone3(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "malden"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "malden", "vietnam"}:
         checks.append((
             "Steep forest blocks use the normal/sunk triangle or reusable fallback ladder",
             (
@@ -1637,7 +1643,7 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
         canonical_asset_path(spec.forest_tree_model),
     }
     if milestone_number >= 9:
-        if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev"}:
+        if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "vietnam"}:
             trusted.add(canonical_asset_path(str(getattr(spec, "forest_everon_steep_model", ""))))
         # Road-cut forest blocks use individually checked stock trees and bushes
         # in both the Everon and Malden profiles. Keep those original game assets
@@ -1665,9 +1671,24 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
             if proxy_profile == "kolgujev"
             else MALDEN_INDIVIDUAL_TREE_MODELS
             if proxy_profile == "malden"
+            else tuple(
+                str(path)
+                for path in getattr(spec, "forest_roadside_tree_models", ())
+            )
+            if proxy_profile == "vietnam"
             else OSM_INDIVIDUAL_TREE_MODELS
         )
         trusted.update(canonical_asset_path(path) for path in mapped_tree_models)
+        if proxy_profile == "vietnam":
+            # The SEB jungle preset deliberately references sebnam_obj.pbo at
+            # runtime rather than redistributing those third-party P3Ds. Treat
+            # every configured Vietnam reed/ditch child like the other known
+            # external vegetation families so strict validation does not reject
+            # a build merely because the dependency lives in the loaded mod.
+            trusted.update(
+                canonical_asset_path(str(path))
+                for path in getattr(spec, "wetland_reed_models", ())
+            )
         trusted.update(canonical_asset_path(path) for path in STOCK_STONE_MODELS)
     if (milestone_number >= 9
             and bool(getattr(spec, "semantic_landmarks", False))
@@ -1956,7 +1977,7 @@ def _validate_milestone4(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "malden"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "malden", "vietnam"}:
         checks.append((
             "Steep forest blocks use the modern terrain-fit fallback ladder",
             (

@@ -103,6 +103,11 @@ def _appearance_label(ground_profile: object, forest_profile: object) -> str:
         ("kolgujev", "kolgujev"): "Kolgujev classic",
         ("everon", "everon"): "Everon classic",
         ("malden", "malden"): "Malden classic",
+        ("generated", "vietnam"): "Generated terrain + SEB Ia Drang Vietnam vegetation",
+        ("nogova", "vietnam"): "Nogova textures + SEB Ia Drang Vietnam vegetation",
+        ("everon", "vietnam"): "Everon textures + SEB Ia Drang Vietnam vegetation",
+        ("malden", "vietnam"): "Malden textures + SEB Ia Drang Vietnam vegetation",
+        ("kolgujev", "vietnam"): "Kolgujev textures + SEB Ia Drang Vietnam vegetation",
     }
     if (ground, forest) in exact:
         return exact[(ground, forest)]
@@ -250,6 +255,14 @@ def terrain_readme_text(
             f"Appearance preset: {appearance_preset}",
             f"Terrain style: {_humanize_identifier(terrain_style)}",
             f"Vegetation / forest preset: {_humanize_identifier(forest_style)}",
+        ]
+    )
+    if str(forest_style).strip().casefold() == "vietnam":
+        lines.append(
+            "Vegetation dependency: sebnam_obj.pbo (SEB Ia Drang jungle assets)"
+        )
+    lines.extend(
+        [
             "",
             "Terrain Informations",
             f"Selection method: {selection_method}",

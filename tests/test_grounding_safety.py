@@ -3,7 +3,23 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from cwr_worldgen.milestone9 import Milestone9Spec, _Milestone9PlayabilitySpec
+from cwr_worldgen.milestone9 import (
+    Milestone9Spec,
+    _Milestone9PlayabilitySpec,
+    _resolved_forest_profile_models,
+    VIETNAM_FOREST_BLOCK_MODEL,
+    VIETNAM_FOREST_STEEP_MODEL,
+    VIETNAM_SINGLE_TREE_MODEL,
+    VIETNAM_ROADSIDE_TREE_MODELS,
+    VIETNAM_BUSH_MODELS,
+    VIETNAM_WETLAND_REED_MODELS,
+    VIETNAM_FOREST_SINGLE_TREE_SPACING,
+    VIETNAM_FOREST_UNDERGROWTH_SPACING,
+    VIETNAM_FOREST_BORDER_SPACING,
+    VIETNAM_STEEP_HILL_BUSH_SPACING,
+    VIETNAM_STEEP_HILL_BUSH_MINIMUM_SLOPE_DEGREES,
+    VIETNAM_WETLAND_REED_SPACING,
+)
 from cwr_worldgen.model import TerrainShearedWorldObject, WorldObject
 from cwr_worldgen.osm import (
     BboxProjection,
@@ -11,6 +27,7 @@ from cwr_worldgen.osm import (
     OsmDataset,
     OsmRaster,
     _audit_vegetation_grounding,
+    _forest_scatter_tree_model,
     _rooted_tree_fit,
     apply_water_elevations,
     conservative_water_interior_mask,
@@ -107,6 +124,117 @@ def test_milestone9_forest_defaults_prefer_ground_contact_and_small_models() -> 
     assert spec.forest_gap_infill_spacing == 25.0
     assert spec.forest_cluster_tree_maximum_float == 0.20
     assert spec.forest_cluster_bush_maximum_float == 0.60
+
+
+def test_vietnam_profile_maps_defaults_to_measured_seb_ia_drang_assets() -> None:
+    spec = Milestone9Spec(source_dir=Path("unused"), forest_profile="vietnam")
+    models = _resolved_forest_profile_models(spec)
+
+    assert models["forest_tree_model"] == VIETNAM_FOREST_BLOCK_MODEL
+    assert models["forest_everon_steep_model"] == VIETNAM_FOREST_STEEP_MODEL
+    assert models["forest_everon_steep_footprint"] == 50.0
+    assert models["forest_single_tree_model"] == VIETNAM_SINGLE_TREE_MODEL
+    assert models["forest_roadside_tree_models"] == VIETNAM_ROADSIDE_TREE_MODELS
+    assert models["forest_roadside_bush_models"] == VIETNAM_BUSH_MODELS
+    assert models["steep_hill_bush_models"] == VIETNAM_BUSH_MODELS
+    assert models["wetland_reed_models"] == VIETNAM_WETLAND_REED_MODELS
+    assert models["forest_single_tree_spacing"] == VIETNAM_FOREST_SINGLE_TREE_SPACING
+    assert models["forest_undergrowth_spacing"] == VIETNAM_FOREST_UNDERGROWTH_SPACING
+    assert models["forest_border_spacing"] == VIETNAM_FOREST_BORDER_SPACING
+    assert models["steep_hill_bush_spacing"] == VIETNAM_STEEP_HILL_BUSH_SPACING
+    assert (
+        models["steep_hill_bush_minimum_slope_degrees"]
+        == VIETNAM_STEEP_HILL_BUSH_MINIMUM_SLOPE_DEGREES
+    )
+    assert models["wetland_reed_spacing"] == VIETNAM_WETLAND_REED_SPACING
+
+
+def test_vietnam_profile_keeps_explicit_density_overrides() -> None:
+    spec = Milestone9Spec(
+        source_dir=Path("unused"),
+        forest_profile="vietnam",
+        forest_single_tree_spacing=81.0,
+        forest_undergrowth_spacing=88.0,
+        forest_border_spacing=42.0,
+        steep_hill_bush_spacing=47.0,
+        steep_hill_bush_minimum_slope_degrees=22.0,
+        wetland_reed_spacing=13.0,
+    )
+    models = _resolved_forest_profile_models(spec)
+
+    assert models["forest_single_tree_spacing"] == 81.0
+    assert models["forest_undergrowth_spacing"] == 88.0
+    assert models["forest_border_spacing"] == 42.0
+    assert models["steep_hill_bush_spacing"] == 47.0
+    assert models["steep_hill_bush_minimum_slope_degrees"] == 22.0
+    assert models["wetland_reed_spacing"] == 13.0
+
+
+def test_vietnam_density_constants_reproduce_ia_drang_free_vegetation() -> None:
+    source_area_km2 = 19.38
+    source_tree_density = 2053.0 / source_area_km2
+    source_bush_density = 9100.0 / source_area_km2
+
+    generated_tree_density = (
+        1_000_000.0 / (VIETNAM_FOREST_SINGLE_TREE_SPACING ** 2)
+    )
+    # The undergrowth pass keeps every second valid carrier. The three carrier
+    # variants contain 6, 5 and 4 visible proxies, averaging five.
+    generated_bush_density = (
+        0.5
+        * 1_000_000.0
+        / (VIETNAM_FOREST_UNDERGROWTH_SPACING ** 2)
+        * 5.0
+    )
+
+    assert abs(generated_tree_density - source_tree_density) < 1.0
+    assert abs(generated_bush_density - source_bush_density) < 2.0
+
+
+def test_vietnam_free_tree_scatter_uses_measured_weighted_model_pool() -> None:
+    selected = [
+        _forest_scatter_tree_model(
+            seed="ia-drang-regression",
+            forest_profile="vietnam",
+            fallback_model=VIETNAM_SINGLE_TREE_MODEL,
+            model_pool=VIETNAM_ROADSIDE_TREE_MODELS,
+            column=column,
+            row=row,
+        )
+        for row in range(40)
+        for column in range(40)
+    ]
+
+    assert set(selected) == set(VIETNAM_ROADSIDE_TREE_MODELS)
+    assert selected.count(r"sebnam_obj\sebstr borovice horska.p3d") > selected.count(
+        r"sebnam_obj\sebstr_fikovnik2.p3d"
+    )
+    assert (
+        _forest_scatter_tree_model(
+            seed="ia-drang-regression",
+            forest_profile="everon",
+            fallback_model=r"data3d\str smrk_medium.p3d",
+            model_pool=VIETNAM_ROADSIDE_TREE_MODELS,
+            column=1,
+            row=1,
+        )
+        == r"data3d\str smrk_medium.p3d"
+    )
+
+
+def test_vietnam_weighted_model_pools_favour_ia_drang_understory() -> None:
+    assert VIETNAM_ROADSIDE_TREE_MODELS.count(
+        r"sebnam_obj\sebstr borovice horska.p3d"
+    ) > VIETNAM_ROADSIDE_TREE_MODELS.count(
+        r"sebnam_obj\sebstr_fikovnik2.p3d"
+    )
+    assert VIETNAM_BUSH_MODELS.count(
+        r"sebnam_obj\sebelekrovi2.p3d"
+    ) > VIETNAM_BUSH_MODELS.count(
+        r"sebnam_obj\sebstr_fikovnik_ker.p3d"
+    )
+    assert r"sebnam_obj\sebstr krovisko vysoke.p3d" in VIETNAM_BUSH_MODELS
+    assert r"sebnam_obj\sebstr krovisko vysoke.p3d" not in VIETNAM_ROADSIDE_TREE_MODELS
 
 
 def test_final_vegetation_audit_detects_floating_individual_tree() -> None:
