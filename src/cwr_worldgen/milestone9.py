@@ -162,13 +162,14 @@ VIETNAM_WETLAND_REED_MODELS: tuple[str, ...] = (
 
 # Density measurements from seb_iatrang.wrp. Its 7,752 unique 50 m jungle
 # cells cover 19.38 km2 and contain 2,053 extra tree objects plus 9,100 extra
-# bush objects in addition to the jungle square itself. The generated Worldgen
-# undergrowth carriers average five visible proxies, so their spacing is widened
-# to reproduce the source's visual-object density rather than the generic
-# Everon carrier density. The steep-hill pass starts only where the source WRP's
-# bush density rises again on the most severe slopes.
+# bush objects in addition to the jungle square itself. That is about 106 free
+# trees/km2 and 470 free shrubs/km2. Worldgen's undergrowth pass deliberately
+# keeps every second valid carrier, and the three reusable carriers average five
+# visible shrub proxies. A 73 m lattice therefore reproduces the source shrub
+# density: 0.5 * 1,000,000 / 73^2 * 5 ~= 469 shrubs/km2. The steep-hill pass
+# starts only where the source WRP's bush density rises again on severe slopes.
 VIETNAM_FOREST_SINGLE_TREE_SPACING = 97.0
-VIETNAM_FOREST_UNDERGROWTH_SPACING = 103.0
+VIETNAM_FOREST_UNDERGROWTH_SPACING = 73.0
 VIETNAM_FOREST_BORDER_SPACING = 56.0
 VIETNAM_STEEP_HILL_BUSH_SPACING = 55.0
 VIETNAM_STEEP_HILL_BUSH_MINIMUM_SLOPE_DEGREES = 30.0
