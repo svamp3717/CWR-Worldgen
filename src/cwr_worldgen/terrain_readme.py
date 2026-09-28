@@ -103,6 +103,11 @@ def _appearance_label(ground_profile: object, forest_profile: object) -> str:
         ("kolgujev", "kolgujev"): "Kolgujev classic",
         ("everon", "everon"): "Everon classic",
         ("malden", "malden"): "Malden classic",
+        ("generated", "vietnam"): "Generated terrain + SEB Ia Drang Vietnam vegetation",
+        ("nogova", "vietnam"): "Nogova textures + SEB Ia Drang Vietnam vegetation",
+        ("everon", "vietnam"): "Everon textures + SEB Ia Drang Vietnam vegetation",
+        ("malden", "vietnam"): "Malden textures + SEB Ia Drang Vietnam vegetation",
+        ("kolgujev", "vietnam"): "Kolgujev textures + SEB Ia Drang Vietnam vegetation",
     }
     if (ground, forest) in exact:
         return exact[(ground, forest)]
