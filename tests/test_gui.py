@@ -828,6 +828,21 @@ class GuiCommandTests(unittest.TestCase):
             self.assertTrue(defaults["deploy_to_mod_folder"])
             self.assertEqual(defaults["deploy_mod_dir"], str(mod_folder.resolve()))
 
+    def test_gui_state_preserves_disabled_deploy_checkbox_with_remembered_folder(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            mod_folder = root / "@MyMod"
+            mod_folder.mkdir()
+            defaults = defaults_with_recent_source(
+                default_gui_values(),
+                {
+                    "last_deploy_mod_dir": str(mod_folder),
+                    "deploy_to_mod_folder": False,
+                },
+            )
+            self.assertFalse(defaults["deploy_to_mod_folder"])
+            self.assertEqual(defaults["deploy_mod_dir"], str(mod_folder.resolve()))
+
     def test_build_command_deploys_to_existing_mod_folder(self) -> None:
         with TemporaryDirectory() as temporary:
             mod_folder = Path(temporary) / "@MyMod"
