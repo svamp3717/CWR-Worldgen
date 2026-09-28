@@ -459,11 +459,12 @@ def defaults_with_recent_source(
         result["source_mode"] = "existing"
         result["source_dir"] = source_text
         result["fetch_source_dir"] = source_text
+    if "deploy_to_mod_folder" in state:
+        result["deploy_to_mod_folder"] = bool(state["deploy_to_mod_folder"])
     deploy_text = str(state.get("last_deploy_mod_dir", "")).strip()
     deploy_path = Path(deploy_text).expanduser() if deploy_text else None
     if deploy_path is not None and deploy_path.is_dir():
         result["deploy_mod_dir"] = str(deploy_path.resolve())
-        result["deploy_to_mod_folder"] = bool(state.get("deploy_to_mod_folder", True))
     last_name = str(state.get("last_world_name", "")).strip()
     if last_name:
         next_name = increment_trailing_number(last_name)
