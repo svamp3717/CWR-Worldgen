@@ -778,7 +778,12 @@ class ProceduralForestClusterLibrary:
         if self.proxy_profile == "nogova":
             self.proxy_profile = "nogova_leaf"
         if self.proxy_profile not in {
-            "everon", "nogova_leaf", "nogova_pine", "kolgujev", "malden"
+            "everon",
+            "nogova_leaf",
+            "nogova_pine",
+            "kolgujev",
+            "malden",
+            "vietnam",
         }:
             raise ValueError(f"unsupported forest proxy profile: {proxy_profile!r}")
         self.cache_hits = 0
