@@ -530,7 +530,7 @@ def count_models(inputs: Sequence[Path], patterns: Sequence[str] = ()) -> int:
             suffix = child.suffix.casefold()
             if suffix == ".p3d":
                 count += count_loose(child, path)
-            elif is_pbo_path(path):
+            elif is_pbo_path(child):
                 count += count_pbo(child)
 
     return count
@@ -585,7 +585,7 @@ def _iter_models(inputs: Sequence[Path], patterns: Sequence[str]) -> Iterator[tu
             suffix = child.suffix.casefold()
             if suffix == ".p3d":
                 yield from loose(child, path)
-            elif is_pbo_path(path):
+            elif is_pbo_path(child):
                 yield from pbo(child)
 
 
