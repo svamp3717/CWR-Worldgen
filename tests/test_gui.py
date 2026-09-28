@@ -669,6 +669,85 @@ class GuiCommandTests(unittest.TestCase):
             self.assertEqual(defaults["source_dir"], str(source.resolve()))
             self.assertEqual(defaults["fetch_source_dir"], str(source.resolve()))
 
+    def test_gui_state_prefers_last_used_source_over_last_downloaded_source(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            downloaded = root / "downloaded-source"
+            used = root / "used-source"
+            downloaded.mkdir()
+            used.mkdir()
+            (downloaded / "source.json").write_text("{}", encoding="utf-8")
+            (used / "source.json").write_text("{}", encoding="utf-8")
+
+            defaults = defaults_with_recent_source(
+                default_gui_values(),
+                {
+                    "last_downloaded_source": str(downloaded),
+                    "last_used_source": str(used),
+                },
+            )
+
+            self.assertEqual(defaults["source_mode"], "existing")
+            self.assertEqual(defaults["source_dir"], str(used.resolve()))
+            self.assertEqual(defaults["fetch_source_dir"], str(used.resolve()))
+
+    def test_gui_state_falls_back_to_downloaded_source_when_used_source_is_missing(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            downloaded = root / "downloaded-source"
+            downloaded.mkdir()
+            (downloaded / "source.json").write_text("{}", encoding="utf-8")
+
+            defaults = defaults_with_recent_source(
+                default_gui_values(),
+                {
+                    "last_used_source": str(root / "missing-used-source"),
+                    "last_downloaded_source": str(downloaded),
+                },
+            )
+
+            self.assertEqual(defaults["source_dir"], str(downloaded.resolve()))
+
+    def test_successful_build_remembers_source_that_was_used(self) -> None:
+        class _Value:
+            def __init__(self, value: object) -> None:
+                self.value = value
+
+            def get(self) -> object:
+                return self.value
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "used-source"
+            source.mkdir()
+            (source / "source.json").write_text("{}", encoding="utf-8")
+            state_path = root / "gui-state.json"
+
+            gui = object.__new__(WorldgenGui)
+            gui.state_path = state_path
+            gui.vars = {"source_dir": _Value(str(root / "other-source"))}
+            gui._append_log = lambda _text: None
+
+            WorldgenGui._remember_used_source(
+                gui,
+                ["python", "milestone9", "--source-dir", str(source)],
+            )
+
+            state = load_gui_state(state_path)
+            self.assertEqual(state["last_used_source"], str(source.resolve()))
+
+    def test_gui_state_restores_postbuild_checkbox_values(self) -> None:
+        defaults = defaults_with_recent_source(
+            default_gui_values(),
+            {
+                "deploy_to_mod_folder": True,
+                "run_road_inspector_after_build": True,
+            },
+        )
+
+        self.assertTrue(defaults["deploy_to_mod_folder"])
+        self.assertTrue(defaults["run_road_inspector_after_build"])
+
     def test_existing_source_preview_prefers_manifest_reference_image(self) -> None:
         with TemporaryDirectory() as temporary:
             source = Path(temporary) / "source"
