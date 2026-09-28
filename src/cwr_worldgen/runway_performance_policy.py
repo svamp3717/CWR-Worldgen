@@ -8,6 +8,7 @@ import json
 import struct
 
 import numpy as np
+from .pbo import _read_exact, _skip_exact, open_pbo_stream, pbo_stem
 from PIL import Image
 
 
@@ -21,16 +22,14 @@ assert _DXT1_RECORD.itemsize == 8
 
 
 def _extract_pbo_asset_streaming(exact, path: Path, target: str) -> bytes | None:
-    """Read only the selected PBO entry instead of loading the whole package."""
+    """Read only the selected PBO entry, including whole-file Zstd wrappers."""
     target = exact._canonical(target)
-    with Path(path).open("rb") as stream:
+    with open_pbo_stream(path) as stream:
         entries: list[tuple[str, int, int, int]] = []
         properties: dict[str, str] = {}
         while True:
             name = exact._read_cstring(stream)
-            fields = stream.read(exact._PBO_FIELDS.size)
-            if len(fields) != exact._PBO_FIELDS.size:
-                raise ValueError("truncated PBO header")
+            fields = _read_exact(stream, exact._PBO_FIELDS.size, "PBO entry fields")
             packing, original_size, _reserved, _timestamp, data_size = (
                 exact._PBO_FIELDS.unpack(fields)
             )
@@ -45,11 +44,7 @@ def _extract_pbo_asset_streaming(exact, path: Path, target: str) -> bytes | None
                 break
             entries.append((name, packing, original_size, data_size))
 
-        prefix = properties.get("prefix", "").replace("/", "\\").strip("\\")
-        if not prefix:
-            prefix = Path(path).stem
-        data_cursor = stream.tell()
-
+        prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or pbo_stem(path)
         for name, packing, original_size, data_size in entries:
             combined = name.replace("/", "\\").lstrip("\\")
             if prefix and not exact._canonical(combined).startswith(
@@ -58,13 +53,10 @@ def _extract_pbo_asset_streaming(exact, path: Path, target: str) -> bytes | None
                 combined = prefix + "\\" + combined
 
             if exact._canonical(combined) != target:
-                data_cursor += data_size
+                _skip_exact(stream, data_size, f"PBO entry {name!r}")
                 continue
 
-            stream.seek(data_cursor)
-            stored = stream.read(data_size)
-            if len(stored) != data_size:
-                raise ValueError(f"truncated PBO entry {name}")
+            stored = _read_exact(stream, data_size, f"PBO entry {name!r}")
             if packing == 0:
                 return stored
             if packing == exact._PBO_COMPRESSED and original_size > 0:
@@ -72,7 +64,6 @@ def _extract_pbo_asset_streaming(exact, path: Path, target: str) -> bytes | None
             return None
 
     return None
-
 
 def _rgb565_array(rgb: np.ndarray) -> np.ndarray:
     values = np.asarray(rgb, dtype=np.uint16)
