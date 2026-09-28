@@ -183,14 +183,20 @@ def _sha256(path: Path) -> str:
 
 def _forest_proxy_profile(spec: object) -> str:
     model = str(getattr(spec, "forest_tree_model", "")).casefold()
+    profile = str(getattr(spec, "forest_profile", "")).casefold()
     if model.startswith(r"o\tree\les_nw_jehl_"):
         return "nogova_pine"
     if model.startswith(r"o\tree\les_nw_"):
         return "nogova_leaf"
-    if str(getattr(spec, "forest_profile", "")).casefold() == "kolgujev":
+    if (
+        profile == "vietnam"
+        or model == r"sebnam_obj\sebles_su_ctver_pruhozi.p3d"
+    ):
+        return "vietnam"
+    if profile == "kolgujev":
         return "kolgujev"
     if (
-        str(getattr(spec, "forest_profile", "")).casefold() == "malden"
+        profile == "malden"
         or model == r"data3d\les_su_ctver_pruhozi.p3d"
     ):
         return "malden"
@@ -978,7 +984,7 @@ def _validate_milestone3(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "malden"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "malden", "vietnam"}:
         checks.append((
             "Steep forest blocks use the normal/sunk triangle or reusable fallback ladder",
             (
@@ -1956,7 +1962,7 @@ def _validate_milestone4(
                 f"max local relief={generated.maximum_hillside_tree_relief:.3f}m"
             ),
         ))
-    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "malden"}:
+    if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "malden", "vietnam"}:
         checks.append((
             "Steep forest blocks use the modern terrain-fit fallback ladder",
             (
