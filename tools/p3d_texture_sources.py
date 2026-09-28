@@ -12,6 +12,7 @@ import sys
 from typing import Sequence
 
 from p3d_texture_io import AssetRef, TextureResolver as BaseTextureResolver, _canonical
+from cwr_worldgen.pbo import is_pbo_path, pbo_stem
 
 
 def sibling_namespace_pbo(source_pbo: Path, texture_path: str) -> Path | None:
@@ -23,9 +24,10 @@ def sibling_namespace_pbo(source_pbo: Path, texture_path: str) -> Path | None:
     if not namespace or namespace in {".", ".."}:
         return None
 
-    direct = source_pbo.with_name(f"{namespace}.pbo")
-    if direct.is_file():
-        return direct
+    for filename in (f"{namespace}.pbo", f"{namespace}.pbo.zst"):
+        direct = source_pbo.with_name(filename)
+        if direct.is_file():
+            return direct
 
     # Windows is case-insensitive, but keeping this lookup explicit also makes tests
     # and non-Windows tooling behave consistently for Data.pbo vs data.pbo.
@@ -33,8 +35,8 @@ def sibling_namespace_pbo(source_pbo: Path, texture_path: str) -> Path | None:
         for child in source_pbo.parent.iterdir():
             if (
                 child.is_file()
-                and child.suffix.casefold() == ".pbo"
-                and child.stem.casefold() == namespace.casefold()
+                and is_pbo_path(child)
+                and pbo_stem(child).casefold() == namespace.casefold()
             ):
                 return child
     except OSError:
@@ -54,7 +56,7 @@ class TextureResolver(BaseTextureResolver):
 
         if "!" in source:
             source_pbo = Path(source.split("!", 1)[0]).expanduser()
-            if source_pbo.suffix.casefold() == ".pbo":
+            if is_pbo_path(source_pbo):
                 self._index_pbo(source_pbo)
                 ref = self.assets.get(canonical)
                 if ref is not None:
