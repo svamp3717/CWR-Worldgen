@@ -36,6 +36,9 @@ STOCK_BUILDING_SFP4_PRESET = "stock-sfp4"
 STOCK_BUILDING_AFGANO_PRESET = "stock-afgano"
 STOCK_BUILDING_AGS_BUILD_PRESET = "stock-ags-build"
 STOCK_BUILDING_SEB_ILO_PRESET = "stock-seb-ilo"
+STOCK_BUILDING_JPBUILD_PRESET = "stock-jpbuild"
+STOCK_BUILDING_IMMEUBLE_PRESET = "stock-immeuble"
+STOCK_BUILDING_AWMSTAT2_PRESET = "stock-awmstat2"
 
 # Legacy combined identifiers remain accepted when loading old profiles, but no
 # combined catalogue JSONs are shipped anymore. They expand into source sets.
@@ -62,6 +65,9 @@ _STOCK_SFP4_CATALOGUE_PATH = _DATA_DIR / "sfp4.json"
 _STOCK_AFGANO_CATALOGUE_PATH = _DATA_DIR / "afgano.json"
 _STOCK_AGS_BUILD_CATALOGUE_PATH = _DATA_DIR / "ags_build.json"
 _STOCK_SEB_ILO_CATALOGUE_PATH = _DATA_DIR / "seb_ilo.json"
+_STOCK_JPBUILD_CATALOGUE_PATH = _DATA_DIR / "jpbuild.json"
+_STOCK_IMMEUBLE_CATALOGUE_PATH = _DATA_DIR / "immeuble.json"
+_STOCK_AWMSTAT2_CATALOGUE_PATH = _DATA_DIR / "awmstat2.json"
 
 
 def _catalogue_display_name(path: Path, fallback: str) -> str:
@@ -244,6 +250,18 @@ STOCK_BUILDING_SEB_ILO_LABEL = _catalogue_display_name(
     _STOCK_SEB_ILO_CATALOGUE_PATH,
     "seb_ilo.pbo buildings",
 )
+STOCK_BUILDING_JPBUILD_LABEL = _catalogue_display_name(
+    _STOCK_JPBUILD_CATALOGUE_PATH,
+    "jpbuild.pbo buildings",
+)
+STOCK_BUILDING_IMMEUBLE_LABEL = _catalogue_display_name(
+    _STOCK_IMMEUBLE_CATALOGUE_PATH,
+    "immeuble.pbo + immeuble2.pbo buildings",
+)
+STOCK_BUILDING_AWMSTAT2_LABEL = _catalogue_display_name(
+    _STOCK_AWMSTAT2_CATALOGUE_PATH,
+    "awmstat2.pbo buildings",
+)
 
 # Compatibility labels for code/imports that still know the old combined IDs.
 STOCK_BUILDING_COMBINED_LABEL = "Stock combined (non-Resistance + Resistance) buildings"
@@ -272,6 +290,9 @@ STOCK_BUILDING_PRESETS = (
     STOCK_BUILDING_AFGANO_PRESET,
     STOCK_BUILDING_AGS_BUILD_PRESET,
     STOCK_BUILDING_SEB_ILO_PRESET,
+    STOCK_BUILDING_JPBUILD_PRESET,
+    STOCK_BUILDING_IMMEUBLE_PRESET,
+    STOCK_BUILDING_AWMSTAT2_PRESET,
 )
 STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_VANILLA_PRESET, STOCK_BUILDING_VANILLA_LABEL),
@@ -291,6 +312,9 @@ STOCK_BUILDING_OPTIONS = (
     (STOCK_BUILDING_AFGANO_PRESET, STOCK_BUILDING_AFGANO_LABEL),
     (STOCK_BUILDING_AGS_BUILD_PRESET, STOCK_BUILDING_AGS_BUILD_LABEL),
     (STOCK_BUILDING_SEB_ILO_PRESET, STOCK_BUILDING_SEB_ILO_LABEL),
+    (STOCK_BUILDING_JPBUILD_PRESET, STOCK_BUILDING_JPBUILD_LABEL),
+    (STOCK_BUILDING_IMMEUBLE_PRESET, STOCK_BUILDING_IMMEUBLE_LABEL),
+    (STOCK_BUILDING_AWMSTAT2_PRESET, STOCK_BUILDING_AWMSTAT2_LABEL),
 )
 
 STOCK_BUILDING_MULTI_PREFIX = "stock-multi:"
@@ -332,6 +356,9 @@ _STOCK_CATALOGUE_BY_PRESET = {
     STOCK_BUILDING_AFGANO_PRESET: _STOCK_AFGANO_CATALOGUE_PATH,
     STOCK_BUILDING_AGS_BUILD_PRESET: _STOCK_AGS_BUILD_CATALOGUE_PATH,
     STOCK_BUILDING_SEB_ILO_PRESET: _STOCK_SEB_ILO_CATALOGUE_PATH,
+    STOCK_BUILDING_JPBUILD_PRESET: _STOCK_JPBUILD_CATALOGUE_PATH,
+    STOCK_BUILDING_IMMEUBLE_PRESET: _STOCK_IMMEUBLE_CATALOGUE_PATH,
+    STOCK_BUILDING_AWMSTAT2_PRESET: _STOCK_AWMSTAT2_CATALOGUE_PATH,
 }
 
 
@@ -465,6 +492,12 @@ def stock_model_source(model_path: object) -> str:
         return "ags_build"
     if path.startswith("seb_ilo\\"):
         return "seb_ilo"
+    if path.startswith("jpbuild\\"):
+        return "jpbuild"
+    if path.startswith("immeuble\\") or path.startswith("immeuble2\\"):
+        return "immeuble"
+    if path.startswith("awmstat2\\"):
+        return "awmstat2"
     return "vanilla"
 
 

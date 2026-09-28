@@ -18,6 +18,12 @@ from cwr_worldgen.stock_building_extensions import (
     STOCK_BUILDING_AGS_BUILD_PRESET,
     STOCK_BUILDING_SEB_ILO_LABEL,
     STOCK_BUILDING_SEB_ILO_PRESET,
+    STOCK_BUILDING_JPBUILD_LABEL,
+    STOCK_BUILDING_JPBUILD_PRESET,
+    STOCK_BUILDING_IMMEUBLE_LABEL,
+    STOCK_BUILDING_IMMEUBLE_PRESET,
+    STOCK_BUILDING_AWMSTAT2_LABEL,
+    STOCK_BUILDING_AWMSTAT2_PRESET,
     STOCK_BUILDING_AGS_ONLY_LABEL,
     STOCK_BUILDING_AGS_ONLY_PRESET,
     STOCK_BUILDING_ART_BD_LABEL,
@@ -435,6 +441,88 @@ def test_seb_ilo_catalogue_is_selectable_source_preset_and_recorded_in_metadata(
     assert "Industrial: 4" in hover
     assert "Agricultural: 4" in hover
     assert "Rural: 4" in hover
+
+
+def test_jpbuild_immeuble_and_awmstat2_catalogues_are_selectable_source_presets(
+    tmp_path: Path,
+) -> None:
+    data_dir = Path(__file__).parents[1] / "src" / "cwr_worldgen" / "data"
+    cases = (
+        (
+            "jpbuild.json",
+            STOCK_BUILDING_JPBUILD_PRESET,
+            STOCK_BUILDING_JPBUILD_LABEL,
+            "jpbuild.pbo",
+            "jpbuild.pbo buildings",
+            ("jpbuild\\",),
+            {"jpbuild"},
+            17,
+        ),
+        (
+            "immeuble.json",
+            STOCK_BUILDING_IMMEUBLE_PRESET,
+            STOCK_BUILDING_IMMEUBLE_LABEL,
+            "immeuble.pbo + immeuble2.pbo",
+            "immeuble.pbo + immeuble2.pbo buildings",
+            ("immeuble\\", "immeuble2\\"),
+            {"immeuble"},
+            36,
+        ),
+        (
+            "awmstat2.json",
+            STOCK_BUILDING_AWMSTAT2_PRESET,
+            STOCK_BUILDING_AWMSTAT2_LABEL,
+            "awmstat2.pbo",
+            "awmstat2.pbo buildings",
+            ("awmstat2\\",),
+            {"awmstat2"},
+            14,
+        ),
+    )
+
+    for (
+        filename,
+        preset,
+        label,
+        source_set,
+        display_name,
+        prefixes,
+        expected_sources,
+        expected_count,
+    ) in cases:
+        document = json.loads((data_dir / filename).read_text(encoding="utf-8"))
+        paths = {row["model_path"].casefold() for row in document["models"]}
+
+        assert document["schema"] == 5
+        assert document["kind"] == "completed_model_classifications"
+        assert document["source_set"] == source_set
+        assert document["display_name"] == display_name
+        assert document["complete_count"] == expected_count
+        assert document["reviewed_count"] == expected_count
+        assert label == display_name
+        assert len(paths) == expected_count
+        assert all(path.startswith(prefixes) for path in paths)
+
+        library = _library(preset)
+        assert len(library.models) == expected_count
+        assert {
+            stock_model_source(model.model_path) for model in library.models
+        } == expected_sources
+
+        catalogue = tmp_path / f"{preset}-building-asset-catalogue.json"
+        library.write_assets(tmp_path / preset, catalogue)
+        metadata = json.loads(catalogue.read_text(encoding="utf-8"))
+        assert metadata["selected_building_jsons"] == [f"data/{filename}"]
+
+
+def test_new_addon_pbo_names_are_visible_in_building_preset_ui_labels() -> None:
+    option_labels = dict(STOCK_BUILDING_OPTIONS)
+
+    assert option_labels[STOCK_BUILDING_JPBUILD_PRESET] == "jpbuild.pbo buildings"
+    assert option_labels[STOCK_BUILDING_IMMEUBLE_PRESET] == (
+        "immeuble.pbo + immeuble2.pbo buildings"
+    )
+    assert option_labels[STOCK_BUILDING_AWMSTAT2_PRESET] == "awmstat2.pbo buildings"
 
 
 def test_mod_catalogue_hover_text_reports_each_category_count() -> None:
