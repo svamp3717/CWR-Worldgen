@@ -470,9 +470,10 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
             ).pack(anchor="w", pady=(5, 0))
 
         def _install_postbuild_setting_persistence(self) -> None:
-            """Persist post-build checkbox choices as soon as the user changes them."""
+            """Persist post-build choices as soon as the user changes them."""
             for key in (
                 "deploy_to_mod_folder",
+                "deploy_mod_dir",
                 "run_road_inspector_after_build",
             ):
                 variable = self.vars.get(key)
@@ -487,11 +488,12 @@ def _configure_gui(gui: Any, base_dir: Path) -> None:
             variable = self.vars.get(key)
             if variable is None:
                 return
+            if key == "deploy_mod_dir":
+                values = {"last_deploy_mod_dir": str(variable.get()).strip()}
+            else:
+                values = {key: bool(variable.get())}
             try:
-                gui.update_gui_state(
-                    self.state_path,
-                    {key: bool(variable.get())},
-                )
+                gui.update_gui_state(self.state_path, values)
             except OSError:
                 pass
 
