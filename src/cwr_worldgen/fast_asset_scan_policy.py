@@ -132,9 +132,11 @@ def _parse_pbo_index(path: Path) -> _PboIndex:
             metadata.append((name, packing, original_size, data_size))
         data_cursor = stream.tell()
 
-    prefix = properties.get("prefix", "").replace("/", "\\").strip("\\")
-    if not prefix:
-        prefix = pbo_stem(path)
+    prefix = _assets._effective_pbo_prefix(
+        properties,
+        metadata,
+        pbo_stem(path),
+    )
     entries: list[_PboEntry] = []
     for name, packing, original_size, data_size in metadata:
         combined = name.replace("/", "\\").lstrip("\\")
