@@ -125,6 +125,7 @@ def test_vietnam_profile_maps_defaults_to_measured_seb_ia_drang_assets() -> None
 
     assert models["forest_tree_model"] == VIETNAM_FOREST_BLOCK_MODEL
     assert models["forest_everon_steep_model"] == VIETNAM_FOREST_STEEP_MODEL
+    assert models["forest_everon_steep_footprint"] == 50.0
     assert models["forest_single_tree_model"] == VIETNAM_SINGLE_TREE_MODEL
     assert models["forest_roadside_tree_models"] == VIETNAM_ROADSIDE_TREE_MODELS
     assert models["forest_roadside_bush_models"] == VIETNAM_BUSH_MODELS
