@@ -1,0 +1,25 @@
+name: P3D live skip textures verification
+
+on:
+  push:
+    branches:
+      - feature/zstd-wrapped-pbo-support
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest matplotlib
+      - run: python -m compileall -q tools/p3d_categoriser_app.py tools/p3d_categoriser_session.py tools/p3d_texture_render.py
+      - run: python -m pytest -q tests/test_p3d_categoriser_session.py tests/test_p3d_texture_render.py tests/test_p3d_texture_sources.py
