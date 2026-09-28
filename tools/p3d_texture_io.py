@@ -11,6 +11,7 @@ from typing import Sequence
 import numpy as np
 
 import measure_p3d_models as measure
+from cwr_worldgen import assets as world_assets
 from cwr_worldgen.pbo import (
     _read_exact as _read_pbo_exact,
     _skip_exact as _skip_pbo_exact,
@@ -36,11 +37,17 @@ class PBOAssetRef:
 
 
 @dataclass(frozen=True, slots=True)
+class NestedPBOAssetRef:
+    source: str
+    canonical_path: str
+
+
+@dataclass(frozen=True, slots=True)
 class LooseAssetRef:
     path: Path
 
 
-AssetRef = PBOAssetRef | LooseAssetRef
+AssetRef = PBOAssetRef | NestedPBOAssetRef | LooseAssetRef
 
 
 def _canonical(value: str) -> str:
@@ -88,48 +95,113 @@ class TextureResolver:
         if resolved in self.indexed_pbos or not pbo_path.is_file():
             return
         self.indexed_pbos.add(resolved)
+
+        def index_stream(
+            handle,
+            *,
+            source: str,
+            fallback_prefix: str,
+            depth: int,
+        ) -> None:
+            metadata: list[tuple[str, int, int, int]] = []
+            properties: dict[str, str] = {}
+            while True:
+                name = _read_cstring_file(handle, "PBO entry name")
+                fields = _read_pbo_exact(handle, measure._PBO_ENTRY.size, "PBO entry header")
+                packing, original_size, reserved, timestamp, data_size = measure._PBO_ENTRY.unpack(fields)
+                if data_size > measure._MAX_PBO_ENTRY_SIZE or original_size > measure._MAX_PBO_ENTRY_SIZE:
+                    raise measure.ModelReadError(f"implausible PBO entry size in {source}")
+                if not name:
+                    if packing == measure._PBO_PROPERTIES:
+                        while True:
+                            key = _read_cstring_file(handle, "PBO property key")
+                            if not key:
+                                break
+                            properties[key.casefold()] = _read_cstring_file(
+                                handle, "PBO property value"
+                            )
+                        continue
+                    if measure._is_pbo_header_terminator(
+                        packing, original_size, reserved, timestamp, data_size
+                    ):
+                        break
+                    raise measure.ModelReadError(
+                        "unsupported PBO extension record "
+                        f"(packing={packing:#x}, original_size={original_size}, "
+                        f"reserved={reserved}, timestamp={timestamp}, data_size={data_size})"
+                    )
+                metadata.append((name, packing, original_size, data_size))
+
+            prefix = world_assets._effective_pbo_prefix(
+                properties,
+                metadata,
+                fallback_prefix,
+            )
+            canonical_prefix = _canonical(prefix)
+            cursor = handle.tell()
+
+            for name, packing, original_size, data_size in metadata:
+                combined = name.replace("/", "\\").lstrip("\\")
+                if canonical_prefix and not _canonical(combined).startswith(
+                    canonical_prefix + "\\"
+                ):
+                    combined = prefix + "\\" + combined
+                canonical = _canonical(combined)
+                suffix = Path(name.replace("\\", "/")).suffix.casefold()
+
+                if canonical.endswith((".paa", ".pac")):
+                    if depth == 0:
+                        self._remember(
+                            canonical,
+                            PBOAssetRef(
+                                pbo_path,
+                                cursor,
+                                packing,
+                                original_size,
+                                data_size,
+                            ),
+                        )
+                    else:
+                        self._remember(
+                            canonical,
+                            NestedPBOAssetRef(source, canonical),
+                        )
+                    _skip_pbo_exact(handle, data_size, f"PBO entry {name!r}")
+                    cursor += data_size
+                    continue
+
+                if suffix == ".pbo" and depth < 4:
+                    stored = _read_pbo_exact(handle, data_size, f"PBO entry {name!r}")
+                    cursor += data_size
+                    if packing == 0:
+                        nested = stored
+                    elif packing == measure._PBO_COMPRESSED:
+                        nested = measure._decompress_lzss_pbo(stored, original_size)
+                    else:
+                        continue
+                    nested_source = source + "!" + name.replace("/", "\\")
+                    nested_fallback = pbo_stem(Path(name.replace("\\", "/")).name)
+                    with io.BytesIO(nested) as nested_handle:
+                        index_stream(
+                            nested_handle,
+                            source=nested_source,
+                            fallback_prefix=nested_fallback,
+                            depth=depth + 1,
+                        )
+                    continue
+
+                _skip_pbo_exact(handle, data_size, f"PBO entry {name!r}")
+                cursor += data_size
+
         try:
             with open_pbo_stream(pbo_path) as handle:
-                metadata: list[tuple[str, int, int, int]] = []
-                properties: dict[str, str] = {}
-                while True:
-                    name = _read_cstring_file(handle, "PBO entry name")
-                    fields = _read_pbo_exact(handle, measure._PBO_ENTRY.size, "PBO entry header")
-                    packing, original_size, _reserved, _timestamp, data_size = measure._PBO_ENTRY.unpack(fields)
-                    if data_size > measure._MAX_PBO_ENTRY_SIZE or original_size > measure._MAX_PBO_ENTRY_SIZE:
-                        raise measure.ModelReadError(f"implausible PBO entry size in {pbo_path}")
-                    if not name:
-                        if packing == measure._PBO_PROPERTIES:
-                            while True:
-                                key = _read_cstring_file(handle, "PBO property key")
-                                if not key:
-                                    break
-                                properties[key.casefold()] = _read_cstring_file(handle, "PBO property value")
-                            continue
-                        if measure._is_pbo_header_terminator(
-                            packing, original_size, _reserved, _timestamp, data_size
-                        ):
-                            break
-                        raise measure.ModelReadError(
-                            "unsupported PBO extension record "
-                            f"(packing={packing:#x}, original_size={original_size}, "
-                            f"reserved={_reserved}, timestamp={_timestamp}, "
-                            f"data_size={data_size})"
-                        )
-                    metadata.append((name, packing, original_size, data_size))
-
-                prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or pbo_stem(pbo_path)
-                canonical_prefix = _canonical(prefix)
-                cursor = handle.tell()
-                for name, packing, original_size, data_size in metadata:
-                    combined = name.replace("/", "\\").lstrip("\\")
-                    if canonical_prefix and not _canonical(combined).startswith(canonical_prefix + "\\"):
-                        combined = prefix + "\\" + combined
-                    canonical = _canonical(combined)
-                    if canonical.endswith((".paa", ".pac")):
-                        self._remember(canonical, PBOAssetRef(pbo_path, cursor, packing, original_size, data_size))
-                    cursor += data_size
-        except (OSError, ValueError, struct.error) as exc:
+                index_stream(
+                    handle,
+                    source=str(pbo_path),
+                    fallback_prefix=pbo_stem(pbo_path),
+                    depth=0,
+                )
+        except (OSError, RuntimeError, ValueError, struct.error) as exc:
             print(f"[texture index warning] {pbo_path}: {exc}", file=sys.stderr, flush=True)
 
     def _index_all(self) -> None:
@@ -187,6 +259,15 @@ class TextureResolver:
         try:
             if isinstance(ref, LooseAssetRef):
                 data = ref.path.read_bytes()
+            elif isinstance(ref, NestedPBOAssetRef):
+                data = world_assets.read_asset_record_bytes(
+                    world_assets.AssetRecord(
+                        path=ref.canonical_path,
+                        source=ref.source,
+                        size=0,
+                        sha256=None,
+                    )
+                )
             else:
                 with open_pbo_stream(ref.pbo_path) as handle:
                     if is_zstd_wrapped_pbo(ref.pbo_path):
