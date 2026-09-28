@@ -157,6 +157,20 @@ VIETNAM_WETLAND_REED_MODELS: tuple[str, ...] = (
     r"sebnam_obj\sebker rakosi.p3d",
 )
 
+# Density measurements from seb_iatrang.wrp. Its 7,752 unique 50 m jungle
+# cells cover 19.38 km2 and contain 2,053 extra tree objects plus 9,100 extra
+# bush objects in addition to the jungle square itself. The generated Worldgen
+# undergrowth carriers average five visible proxies, so their spacing is widened
+# to reproduce the source's visual-object density rather than the generic
+# Everon carrier density. The steep-hill pass starts only where the source WRP's
+# bush density rises again on the most severe slopes.
+VIETNAM_FOREST_SINGLE_TREE_SPACING = 97.0
+VIETNAM_FOREST_UNDERGROWTH_SPACING = 103.0
+VIETNAM_FOREST_BORDER_SPACING = 56.0
+VIETNAM_STEEP_HILL_BUSH_SPACING = 55.0
+VIETNAM_STEEP_HILL_BUSH_MINIMUM_SLOPE_DEGREES = 30.0
+VIETNAM_WETLAND_REED_SPACING = 10.0
+
 
 def _resolved_forest_profile_models(spec: "Milestone9Spec") -> dict[str, object]:
     """Resolve profile defaults without clobbering explicit custom model paths."""
@@ -233,6 +247,36 @@ def _resolved_forest_profile_models(spec: "Milestone9Spec") -> dict[str, object]
                 if spec.wetland_reed_models
                 == (r"o\tree\dd_rakosi.p3d", r"o\tree\dd_rakosi02.p3d")
                 else spec.wetland_reed_models
+            ),
+            "forest_single_tree_spacing": (
+                VIETNAM_FOREST_SINGLE_TREE_SPACING
+                if spec.forest_single_tree_spacing == 45.0
+                else spec.forest_single_tree_spacing
+            ),
+            "forest_undergrowth_spacing": (
+                VIETNAM_FOREST_UNDERGROWTH_SPACING
+                if spec.forest_undergrowth_spacing == 30.0
+                else spec.forest_undergrowth_spacing
+            ),
+            "forest_border_spacing": (
+                VIETNAM_FOREST_BORDER_SPACING
+                if spec.forest_border_spacing == 34.0
+                else spec.forest_border_spacing
+            ),
+            "steep_hill_bush_spacing": (
+                VIETNAM_STEEP_HILL_BUSH_SPACING
+                if spec.steep_hill_bush_spacing == 24.0
+                else spec.steep_hill_bush_spacing
+            ),
+            "steep_hill_bush_minimum_slope_degrees": (
+                VIETNAM_STEEP_HILL_BUSH_MINIMUM_SLOPE_DEGREES
+                if spec.steep_hill_bush_minimum_slope_degrees == 16.0
+                else spec.steep_hill_bush_minimum_slope_degrees
+            ),
+            "wetland_reed_spacing": (
+                VIETNAM_WETLAND_REED_SPACING
+                if spec.wetland_reed_spacing == 18.0
+                else spec.wetland_reed_spacing
             ),
         }
     if forest_profile == "kolgujev":
@@ -1277,15 +1321,26 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         forest_cluster_footprint_margin=spec.forest_cluster_footprint_margin,
         forest_undergrowth_enabled=spec.forest_undergrowth_enabled,
         forest_undergrowth_maximum_objects=spec.forest_undergrowth_maximum_objects,
-        forest_undergrowth_spacing=spec.forest_undergrowth_spacing,
+        forest_undergrowth_spacing=float(
+            forest_models.get(
+                "forest_undergrowth_spacing", spec.forest_undergrowth_spacing
+            )
+        ),
         forest_undergrowth_maximum_relief=spec.forest_undergrowth_maximum_relief,
         forest_undergrowth_maximum_burial=spec.forest_undergrowth_maximum_burial,
         forest_undergrowth_maximum_float=spec.forest_undergrowth_maximum_float,
         forest_undergrowth_ground_clearance=spec.forest_undergrowth_ground_clearance,
         steep_hill_bushes_enabled=spec.steep_hill_bushes_enabled,
         maximum_steep_hill_bush_objects=spec.maximum_steep_hill_bush_objects,
-        steep_hill_bush_spacing=spec.steep_hill_bush_spacing,
-        steep_hill_bush_minimum_slope_degrees=spec.steep_hill_bush_minimum_slope_degrees,
+        steep_hill_bush_spacing=float(
+            forest_models.get("steep_hill_bush_spacing", spec.steep_hill_bush_spacing)
+        ),
+        steep_hill_bush_minimum_slope_degrees=float(
+            forest_models.get(
+                "steep_hill_bush_minimum_slope_degrees",
+                spec.steep_hill_bush_minimum_slope_degrees,
+            )
+        ),
         steep_hill_bush_maximum_relief=spec.steep_hill_bush_maximum_relief,
         steep_hill_bush_maximum_burial=spec.steep_hill_bush_maximum_burial,
         steep_hill_bush_maximum_float=spec.steep_hill_bush_maximum_float,
@@ -1293,7 +1348,9 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         steep_hill_bush_models=tuple(forest_models["steep_hill_bush_models"]),
         forest_border_enabled=spec.forest_border_enabled,
         forest_border_maximum_objects=spec.forest_border_maximum_objects,
-        forest_border_spacing=spec.forest_border_spacing,
+        forest_border_spacing=float(
+            forest_models.get("forest_border_spacing", spec.forest_border_spacing)
+        ),
         forest_border_inset=spec.forest_border_inset,
         forest_border_maximum_relief=spec.forest_border_maximum_relief,
         forest_border_maximum_burial=spec.forest_border_maximum_burial,
@@ -1307,7 +1364,11 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         forest_roadside_bushes_per_cut_block=spec.forest_roadside_bushes_per_cut_block,
         forest_roadside_bush_footprint=spec.forest_roadside_bush_footprint,
         maximum_forest_single_tree_objects=spec.maximum_forest_single_tree_objects,
-        forest_single_tree_spacing=spec.forest_single_tree_spacing,
+        forest_single_tree_spacing=float(
+            forest_models.get(
+                "forest_single_tree_spacing", spec.forest_single_tree_spacing
+            )
+        ),
         forest_single_tree_footprint=spec.forest_single_tree_footprint,
         forest_single_tree_maximum_relief=spec.forest_single_tree_maximum_relief,
         forest_single_tree_root_sink=spec.forest_single_tree_root_sink,
@@ -1369,7 +1430,9 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         haybale_field_percent=spec.haybale_field_percent,
         wetland_reeds_enabled=spec.wetland_reeds_enabled,
         maximum_wetland_reed_objects=spec.maximum_wetland_reed_objects,
-        wetland_reed_spacing=spec.wetland_reed_spacing,
+        wetland_reed_spacing=float(
+            forest_models.get("wetland_reed_spacing", spec.wetland_reed_spacing)
+        ),
         wetland_reed_maximum_relief=spec.wetland_reed_maximum_relief,
         wetland_reed_maximum_burial=spec.wetland_reed_maximum_burial,
         wetland_reed_maximum_float=spec.wetland_reed_maximum_float,
