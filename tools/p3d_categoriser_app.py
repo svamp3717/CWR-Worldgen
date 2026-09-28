@@ -200,6 +200,13 @@ class CategoriserApp:
 
         ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
         ttk.Label(side, text="View", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
+        self.skip_textures_var = tk.BooleanVar(master=self.root, value=False)
+        ttk.Checkbutton(
+            side,
+            text="Skip textures (faster)",
+            variable=self.skip_textures_var,
+            command=self._redraw,
+        ).pack(anchor="w", fill="x", pady=(4, 2))
         row = ttk.Frame(side)
         row.pack(fill="x", pady=4)
         ttk.Button(row, text="↶ 15°", command=lambda: self._rotate(-15)).pack(side=tk.LEFT)
@@ -340,7 +347,8 @@ class CategoriserApp:
     def _redraw(self) -> None:
         if self.current is None:
             return
-        self._busy("Rendering textured model...")
+        skip_textures = bool(self.skip_textures_var.get())
+        self._busy("Rendering geometry..." if skip_textures else "Rendering textured model...")
         try:
             self._draw_model(self.current)
         finally:
@@ -446,19 +454,28 @@ class CategoriserApp:
             height=760,
             azim_deg=self.azim,
             elev_deg=self.elev,
+            load_textures=not self.skip_textures_var.get(),
         )
         self.ax_preview.imshow(image)
-        self.ax_preview.set_title(
-            f"Textured model • az {self.azim:.0f}° / el {self.elev:.0f}°"
-        )
-        self.ax_preview.axis("off")
-        if misses:
+        if self.skip_textures_var.get():
+            self.ax_preview.set_title(
+                f"Geometry preview • textures skipped • az {self.azim:.0f}° / el {self.elev:.0f}°"
+            )
             self.status_var.set(
-                f"Texture sampling: {hits} textured face hit(s), "
-                f"{misses} missing/unreadable face texture(s). See console."
+                "Texture lookup skipped for faster model browsing."
             )
         else:
-            self.status_var.set(f"Texture sampling: {hits} textured face hit(s).")
+            self.ax_preview.set_title(
+                f"Textured model • az {self.azim:.0f}° / el {self.elev:.0f}°"
+            )
+            if misses:
+                self.status_var.set(
+                    f"Texture sampling: {hits} textured face hit(s), "
+                    f"{misses} missing/unreadable face texture(s). See console."
+                )
+            else:
+                self.status_var.set(f"Texture sampling: {hits} textured face hit(s).")
+        self.ax_preview.axis("off")
         self.figure.tight_layout(pad=1.2)
         self.canvas.draw_idle()
 
