@@ -347,25 +347,13 @@ def _bridge_channel_can_reopen(
         0.10,
         float(getattr(spec, "height_scale", 0.05)) * 2.0,
     )
+    nearby = crossing | ring
     if any(
         float(solved_elevations[index]) <= wet_ceiling
-        for index in ring
+        for index in nearby
     ):
         return True
 
-    source_bank = sorted(
-        float(source_elevations[index])
-        for index in ring
-        if math.isfinite(float(source_elevations[index]))
-    )
-    if not source_bank:
-        return False
-    bank_reference = source_bank[
-        max(0, min(
-            len(source_bank) - 1,
-            int(round((len(source_bank) - 1) * 0.75)),
-        ))
-    ]
     rise_per_cell = (
         float(spec.cell_size)
         * float(getattr(spec, "lake_shore_maximum_slope_percent", 8.0))
@@ -376,7 +364,27 @@ def _bridge_channel_can_reopen(
         float(getattr(spec, "beach_height", 3.0)),
     )
     immediate_bank_limit = sea_level + rise_per_cell + shoreline_cut_budget
-    return bank_reference <= immediate_bank_limit + 1.0e-7
+
+    def bank_reference(values):
+        ordered = sorted(
+            float(values[index])
+            for index in ring
+            if math.isfinite(float(values[index]))
+        )
+        if not ordered:
+            return math.inf
+        return ordered[
+            max(0, min(
+                len(ordered) - 1,
+                int(round((len(ordered) - 1) * 0.75)),
+            ))
+        ]
+
+    # Prefer the post-solver bank because a safe whole-world lake rebase may
+    # legitimately move a high source plateau down to CWA's water datum.
+    if bank_reference(solved_elevations) <= immediate_bank_limit + 1.0e-7:
+        return True
+    return bank_reference(source_elevations) <= immediate_bank_limit + 1.0e-7
 
 
 def _reopen_bridge_water(report, elevations, dataset, projection, spec):
