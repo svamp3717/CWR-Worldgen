@@ -62,6 +62,11 @@ class TextureResolver(BaseTextureResolver):
                 if ref is not None:
                     return ref
 
+                self._index_nested_namespace(source_pbo, canonical)
+                ref = self.assets.get(canonical)
+                if ref is not None:
+                    return ref
+
                 sibling = sibling_namespace_pbo(source_pbo, canonical)
                 if sibling is not None:
                     try:
