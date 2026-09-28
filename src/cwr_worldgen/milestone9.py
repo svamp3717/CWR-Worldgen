@@ -193,6 +193,11 @@ def _resolved_forest_profile_models(spec: "Milestone9Spec") -> dict[str, object]
                 if spec.forest_everon_steep_model == r"data3d\les trojuhelnik pruchozi.p3d"
                 else spec.forest_everon_steep_model
             ),
+            "forest_everon_steep_footprint": (
+                50.0
+                if spec.forest_everon_steep_footprint == 35.0
+                else spec.forest_everon_steep_footprint
+            ),
             "forest_single_tree_model": (
                 VIETNAM_SINGLE_TREE_MODEL
                 if spec.forest_single_tree_model == EVERON_SINGLE_TREE_MODEL
@@ -1249,7 +1254,11 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
                 "forest_everon_steep_model", spec.forest_everon_steep_model
             )
         ),
-        forest_everon_steep_footprint=spec.forest_everon_steep_footprint,
+        forest_everon_steep_footprint=float(
+            forest_models.get(
+                "forest_everon_steep_footprint", spec.forest_everon_steep_footprint
+            )
+        ),
         forest_everon_steep_maximum_relief=spec.forest_everon_steep_maximum_relief,
         forest_everon_steep_maximum_burial=spec.forest_everon_steep_maximum_burial,
         forest_everon_steep_maximum_float=spec.forest_everon_steep_maximum_float,
