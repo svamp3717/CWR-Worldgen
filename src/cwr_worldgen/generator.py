@@ -1679,6 +1679,16 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
             else OSM_INDIVIDUAL_TREE_MODELS
         )
         trusted.update(canonical_asset_path(path) for path in mapped_tree_models)
+        if proxy_profile == "vietnam":
+            # The SEB jungle preset deliberately references sebnam_obj.pbo at
+            # runtime rather than redistributing those third-party P3Ds. Treat
+            # every configured Vietnam reed/ditch child like the other known
+            # external vegetation families so strict validation does not reject
+            # a build merely because the dependency lives in the loaded mod.
+            trusted.update(
+                canonical_asset_path(str(path))
+                for path in getattr(spec, "wetland_reed_models", ())
+            )
         trusted.update(canonical_asset_path(path) for path in STOCK_STONE_MODELS)
     if (milestone_number >= 9
             and bool(getattr(spec, "semantic_landmarks", False))
