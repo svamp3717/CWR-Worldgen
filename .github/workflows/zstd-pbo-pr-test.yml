@@ -24,5 +24,15 @@ jobs:
           python -m pip install -e . pytest
       - name: Compile Python sources
         run: python -m compileall -q src tools tests/test_zstd_wrapped_pbo.py
-      - name: Run wrapped-PBO regression tests
-        run: python -m pytest -q tests/test_zstd_wrapped_pbo.py
+      - name: Run PBO and asset compatibility tests
+        run: |
+          python -m pytest -q \
+            tests/test_pbo_backends.py \
+            tests/test_pbo_terminator_compatibility.py \
+            tests/test_fast_asset_scan_policy.py \
+            tests/test_road_inspector.py \
+            tests/test_runway_exact_background_policy.py \
+            tests/test_runway_performance_policy.py \
+            tests/test_single_runway_background_policy.py \
+            tests/test_wrp_mod_dependency_scanner.py \
+            tests/test_zstd_wrapped_pbo.py
