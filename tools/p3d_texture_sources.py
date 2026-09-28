@@ -57,7 +57,7 @@ class TextureResolver(BaseTextureResolver):
         if "!" in source:
             source_pbo = Path(source.split("!", 1)[0]).expanduser()
             if is_pbo_path(source_pbo):
-                self._index_pbo(source_pbo)
+                self._index_model_source(source)
                 ref = self.assets.get(canonical)
                 if ref is not None:
                     return ref
