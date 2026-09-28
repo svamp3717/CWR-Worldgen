@@ -118,6 +118,85 @@ def test_bridge_water_reopen_overrides_causeway_fill_only_under_mapped_water() -
     assert corrected.elevations[30 * 64 + 32] == 5.5
 
 
+def test_bridge_does_not_reopen_isolated_high_bank_lake_crater() -> None:
+    spec = _spec()
+    wet_start = (6475.0, 5998.0)
+    wet_end = (6505.0, 6002.0)
+    axis = (1.0, 0.0)
+
+    # terrtest74-style input: mapped water itself was a low DEM artefact, while
+    # the surrounding bank is hundreds of metres above CWA's global water plane.
+    source = [228.0] * (spec.cells * spec.cells)
+    solved = [228.0] * (spec.cells * spec.cells)
+    report = _Report(tuple(solved), changed_cells=0)
+
+    crossing = policy._wet_interval_crossing_vertices(
+        wet_start,
+        wet_end,
+        axis,
+        spec,
+    )
+    for index in crossing:
+        source[index] = 0.0
+
+    with patch.object(
+        policy,
+        "_coarse_source_bridge_channels",
+        return_value=((wet_start, wet_end, axis),),
+    ):
+        corrected = policy._reopen_bridge_water(
+            report,
+            tuple(source),
+            None,
+            None,
+            spec,
+        )
+
+    assert corrected.elevations == report.elevations
+    assert all(corrected.elevations[index] == 228.0 for index in crossing)
+
+
+def test_bridge_can_reopen_high_bank_channel_when_it_connects_to_existing_water() -> None:
+    spec = _spec()
+    wet_start = (1575.0, 1451.0)
+    wet_end = (1575.0, 1461.0)
+    axis = (0.0, 1.0)
+    source = [90.0] * (spec.cells * spec.cells)
+    solved = [5.5] * (spec.cells * spec.cells)
+    report = _Report(tuple(solved), changed_cells=0)
+
+    crossing = set(policy._wet_interval_crossing_vertices(
+        wet_start,
+        wet_end,
+        axis,
+        spec,
+    ))
+    # One neighbouring solved cell remains genuine water, proving this bridge
+    # channel belongs to an active water body rather than a rejected lake.
+    seed = next(iter(crossing))
+    x, z = seed % spec.cells, seed // spec.cells
+    neighbour = z * spec.cells + max(0, x - 1)
+    if neighbour in crossing:
+        neighbour = z * spec.cells + min(spec.cells - 1, x + 1)
+    solved[neighbour] = -1.0
+    report = _Report(tuple(solved), changed_cells=0)
+
+    with patch.object(
+        policy,
+        "_coarse_source_bridge_channels",
+        return_value=((wet_start, wet_end, axis),),
+    ):
+        corrected = policy._reopen_bridge_water(
+            report,
+            tuple(source),
+            None,
+            None,
+            spec,
+        )
+
+    assert any(corrected.elevations[index] == -3.0 for index in crossing)
+
+
 def test_long_bridge_reopens_full_mapped_water_even_when_some_cells_are_already_wet() -> None:
     spec = _spec()
     wet_start = (1575.0, 1200.0)
