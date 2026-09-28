@@ -169,6 +169,27 @@ KOLGUJEV_BORDER_PROXY_MODELS: tuple[str, ...] = (
 )
 KOLGUJEV_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = KOLGUJEV_BORDER_PROXY_MODELS
 
+# SEB Ia Drang jungle family measured from seb_iatrang.wrp. Generated fallback
+# carriers use the same external sebnam_obj.pbo vegetation as the source island
+# instead of quietly introducing European Data3D trees on difficult terrain.
+VIETNAM_PROXY_MODELS: tuple[str, ...] = (
+    r"sebnam_obj\sebstr borovice horska.p3d",
+    r"sebnam_obj\sebstr_liskac.p3d",
+)
+VIETNAM_BORDER_PROXY_MODELS: tuple[str, ...] = (
+    r"sebnam_obj\sebelekrovi2.p3d",
+    r"sebnam_obj\sebkrovi_long.p3d",
+    r"sebnam_obj\sebstr_fikovnik_ker.p3d",
+    r"sebnam_obj\sebstr krovisko vysoke.p3d",
+)
+VIETNAM_UNDERGROWTH_PROXY_MODELS: tuple[str, ...] = VIETNAM_BORDER_PROXY_MODELS
+VIETNAM_DITCH_PROXY_MODELS: tuple[str, ...] = (
+    r"sebnam_obj\sebker rakosi.p3d",
+    r"sebnam_obj\sebker rakosi.p3d",
+    r"sebnam_obj\sebker rakosi.p3d",
+    r"sebnam_obj\sebker rakosi.p3d",
+)
+
 # Compatibility aliases: generic Nogova means the ordinary/leaf family.
 NOGOVA_PROXY_MODELS = NOGOVA_LEAF_PROXY_MODELS
 NOGOVA_BORDER_PROXY_MODELS = NOGOVA_LEAF_BORDER_PROXY_MODELS
@@ -451,10 +472,22 @@ def _profiled_cluster_variant(variant: ForestClusterVariant, proxy_profile: str)
         return variant
     if profile == "nogova":
         profile = "nogova_leaf"
-    if profile not in {"nogova_leaf", "nogova_pine", "kolgujev", "malden"}:
+    if profile not in {
+        "nogova_leaf",
+        "nogova_pine",
+        "kolgujev",
+        "malden",
+        "vietnam",
+    }:
         raise ValueError(f"unsupported forest proxy profile: {proxy_profile!r}")
 
-    if profile == "malden":
+    ditch_models = DEFAULT_DITCH_PROXY_MODELS
+    if profile == "vietnam":
+        proxy_models = VIETNAM_PROXY_MODELS
+        border_models = VIETNAM_BORDER_PROXY_MODELS
+        undergrowth_models = VIETNAM_UNDERGROWTH_PROXY_MODELS
+        ditch_models = VIETNAM_DITCH_PROXY_MODELS
+    elif profile == "malden":
         proxy_models = MALDEN_PROXY_MODELS
         border_models = MALDEN_BORDER_PROXY_MODELS
         undergrowth_models = MALDEN_UNDERGROWTH_PROXY_MODELS
@@ -470,6 +503,7 @@ def _profiled_cluster_variant(variant: ForestClusterVariant, proxy_profile: str)
         **dict(zip(DEFAULT_PROXY_MODELS, proxy_models)),
         **dict(zip(DEFAULT_BORDER_PROXY_MODELS, border_models)),
         **dict(zip(DEFAULT_UNDERGROWTH_PROXY_MODELS, undergrowth_models)),
+        **dict(zip(DEFAULT_DITCH_PROXY_MODELS, ditch_models)),
     }
     remapped = tuple(
         (replacements.get(model_path, model_path), x, z, scale, heading)
