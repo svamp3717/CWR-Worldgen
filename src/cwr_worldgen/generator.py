@@ -2345,7 +2345,7 @@ def _load_terrain_solution(
             "terrain-building-plans-v2", building_placement_plans
         ),
     }
-    key = cache_key("terrain-solution-v27-rvw4-high-altitude-rebase", payload)
+    key = cache_key("terrain-solution-v29-bridge-lake-representability", payload)
     path = cache_dir / "terrain" / f"{key}.pickle" if cache_dir is not None else None
 
     def produce():

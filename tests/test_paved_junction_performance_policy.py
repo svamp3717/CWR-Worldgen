@@ -1,3 +1,4 @@
+import math
 from types import SimpleNamespace
 
 from cwr_worldgen.model import WorldObject
@@ -116,6 +117,36 @@ def test_spatial_target_lookup_does_not_rescan_road_geometry(monkeypatch) -> Non
     for _index in range(5):
         performance._target_candidates(state, plan, arm)
     assert calls == build_calls
+
+
+def test_approach_template_lookup_prunes_impossible_merge_lengths() -> None:
+    plan, arm = _north_plan()
+    target = paved._Target(
+        9,
+        (0.0, 31.25),
+        (0.0, 1.0),
+    )
+    tolerance = 0.35
+
+    candidates = performance._candidate_templates(
+        arm,
+        target,
+        tolerance,
+        1,
+    )
+    full = performance._path_template_index(1).templates
+    local = performance._target_local_point(arm, target)
+    legal_lengths = tuple(float(value) for value in paved._STRAIGHTS.values())
+
+    assert candidates
+    assert len(candidates) < len(full)
+    assert all(
+        any(
+            abs(math.dist(local, template.point) - length) <= tolerance
+            for length in legal_lengths
+        )
+        for template in candidates
+    )
 
 
 def test_precomputed_approach_templates_match_reference_search() -> None:

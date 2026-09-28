@@ -1,5 +1,7 @@
+import math
 from types import SimpleNamespace
 
+from cwr_worldgen import playability
 from cwr_worldgen.final_road_dedup_policy import deduplicate_final_road_objects
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.playability import RoadFitReport
@@ -391,6 +393,180 @@ def test_generated_paved_straight_does_not_use_curve_cap_exception():
 
     assert tuple(obj.object_id for obj in result.objects) == (1, 2)
     assert result.junction_cap_objects == 1
+
+
+def test_perpendicular_dirt_crossing_keeps_lowered_terminal_pieces():
+    report = _report((
+        _road(1, r"o\road\ces25.p3d", 100.0, 100.0, heading=90.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=0.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    dirt = tuple(
+        obj for obj in result.objects
+        if obj.model_path.casefold().endswith(r"\ces6.p3d")
+    )
+    underlays = tuple(obj for obj in dirt if abs(obj.pitch_degrees) > 0.01)
+    assert len(dirt) == 4
+    assert len(underlays) == 2
+    assert any(obj.object_id == 1 for obj in dirt)
+    assert tuple(
+        obj.object_id for obj in result.objects
+        if obj.model_path.casefold().endswith(r"\sil25.p3d")
+    ) == (2,)
+    assert all(obj.y < 0.0 for obj in underlays)
+
+
+def test_dirt_t_approach_finishes_with_piece_diving_under_paved():
+    report = _report((
+        _road(1, r"o\road\ces25.p3d", 100.0, 89.0, heading=0.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=90.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    dirt = tuple(
+        obj for obj in result.objects
+        if obj.model_path.casefold().endswith(
+            (r"\ces25.p3d", r"\ces12.p3d", r"\ces6.p3d")
+        )
+    )
+    underlays = tuple(obj for obj in dirt if abs(obj.pitch_degrees) > 0.01)
+
+    assert dirt
+    assert len(underlays) == 1
+    terminal = underlays[0]
+    axis = playability._model_axis(terminal, 6.25)
+    sine_pitch = math.sin(math.radians(terminal.pitch_degrees))
+    backward_y = terminal.y - 3.125 * sine_pitch
+    forward_y = terminal.y + 3.125 * sine_pitch
+    assert axis[0][1] < 95.0
+    assert axis[1][1] > 95.0
+    assert math.isclose(backward_y, 0.0, abs_tol=1.0e-6)
+    assert forward_y <= -0.079
+
+
+def test_short_dirt_piece_between_two_paved_strips_can_extend_under_them():
+    original = _road(1, r"o\road\ces6.p3d", 100.0, 100.0, heading=0.0)
+    report = _report((
+        original,
+        _road(
+            2,
+            r"wg_test\i\paved_w020_l0250.p3d",
+            100.0,
+            98.0,
+            heading=90.0,
+        ),
+        _road(
+            3,
+            r"wg_test\i\paved_w020_l0250.p3d",
+            100.0,
+            102.0,
+            heading=90.0,
+        ),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    dirt = tuple(
+        obj for obj in result.objects
+        if obj.model_path.casefold().endswith(r"\ces6.p3d")
+    )
+    assert len(dirt) == 2
+    assert all(abs(obj.pitch_degrees) > 0.01 for obj in dirt)
+
+    original_axis = playability._model_axis(original, 6.25)
+    terminal_axes = tuple(
+        playability._model_axis(obj, 6.25)
+        for obj in dirt
+    )
+    assert any(axis[0][1] < original_axis[0][1] for axis in terminal_axes)
+    assert any(axis[1][1] > original_axis[1][1] for axis in terminal_axes)
+
+
+def test_short_dirt_piece_fully_consumed_by_paved_crossing_is_removed():
+    report = _report((
+        _road(1, r"o\road\ces6.p3d", 100.0, 100.0, heading=90.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=0.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (2,)
+
+
+def test_dirt_curve_touching_paved_surface_is_removed_wholesale():
+    report = _report((
+        _road(1, r"o\road\ces10 50.p3d", 100.0, 100.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (2,)
+
+
+def test_paved_junction_footprint_keeps_dirt_terminals_below_hub():
+    report = _report((
+        _road(1, r"o\road\kr_new_sil_sil_t.p3d", 100.0, 100.0),
+        _road(2, r"o\road\ces25.p3d", 100.0, 100.0, heading=90.0),
+    ), caps=1)
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert result.objects[0].object_id == 1
+    dirt = tuple(
+        obj for obj in result.objects
+        if obj.model_path.casefold().endswith(r"\ces6.p3d")
+    )
+    assert len(dirt) == 2
+    assert all(abs(obj.pitch_degrees) > 0.01 for obj in dirt)
+    assert all(obj.y < 0.0 for obj in dirt)
+    assert result.junction_cap_objects == 1
+
+
+def test_dirt_under_high_paved_overpass_is_preserved():
+    report = _report((
+        _road(1, r"o\road\ces25.p3d", 100.0, 100.0, heading=90.0, y=0.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=0.0, y=4.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (1, 2)
+
+
+def test_badly_grounded_dirt_above_paved_is_still_trimmed():
+    report = _report((
+        _road(1, r"o\road\ces6.p3d", 100.0, 100.0, heading=90.0, y=2.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=0.0, y=0.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (2,)
+
+
+def test_extreme_dirt_underlay_never_exceeds_rvw4_pitch_limit():
+    report = _report((
+        _road(1, r"o\road\ces25.p3d", 100.0, 89.0, heading=0.0, y=10.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=90.0, y=0.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    dirt = tuple(
+        obj for obj in result.objects
+        if obj.model_path.casefold().endswith(
+            (r"\ces25.p3d", r"\ces12.p3d", r"\ces6.p3d")
+        )
+    )
+    underlays = tuple(obj for obj in dirt if abs(obj.pitch_degrees) > 0.01)
+
+    assert underlays
+    assert all(abs(obj.pitch_degrees) <= 88.0 for obj in underlays)
+    assert all(-89.0 < obj.pitch_degrees < 89.0 for obj in underlays)
 
 
 def test_progress_reports_bounded_spatial_comparisons():

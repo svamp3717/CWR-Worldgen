@@ -109,7 +109,39 @@ class TownLocation:
 # Keep gravel slightly below ordinary asphalt and emit paved chains
 # after unpaved chains so asphalt consistently wins both geometry and draw order.
 _STOCK_ROAD_VERTICAL_OFFSET_METRES = 0.035
+_STOCK_DIRT_VERTICAL_OFFSET_METRES = 0.010
+_STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES = 0.060
 _STOCK_GRAVEL_VERTICAL_OFFSET_METRES = 0.018
+
+# OSM extracts are not always topologically noded where two paved ways visibly
+# cross. Before stock-piece fitting, promote safe planar crossings and tiny
+# endpoint misses to shared road nodes so the existing T/X junction machinery
+# owns the intersection instead of two independent slabs painting each other.
+_SYNTHETIC_PAVED_JUNCTION_BUCKET_METRES = 32.0
+_SYNTHETIC_PAVED_JUNCTION_SNAP_METRES = 2.0
+_SYNTHETIC_PAVED_JUNCTION_ENDPOINT_EPSILON_METRES = 0.10
+_SYNTHETIC_PAVED_JUNCTION_MINIMUM_ANGLE_DEGREES = 18.0
+_SYNTHETIC_PAVED_JUNCTION_MAXIMUM_DOT = math.cos(
+    math.radians(_SYNTHETIC_PAVED_JUNCTION_MINIMUM_ANGLE_DEGREES)
+)
+
+# A stock paved run is repaired only after topology has already been fixed and
+# split at real/synthetic junctions. These limits describe what a 7-9 m wide
+# rigid road surface can bend through without its inside edges folding through
+# each other. Junction approach geometry is left untouched over the full stock
+# target-search range so this pass cannot move a previously working T/X merge.
+_PAVED_RUN_REPAIR_JUNCTION_GUARD_METRES = 87.0
+_PAVED_RUN_REPAIR_RADIUS_MARGIN_METRES = 0.75
+_PAVED_RUN_REPAIR_MAXIMUM_TANGENT_METRES = 24.0
+_PAVED_RUN_REPAIR_TANGENT_FRACTION = 0.48
+_PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES = 15.0
+_SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET = None
+_SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION = None
+_SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR: bool | None = None
+_SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE: tuple[
+    tuple[tuple[float, float], ...],
+    ...,
+] | None = None
 
 
 def _road_surface_priority(tags: Mapping[str, str]) -> int:
@@ -121,11 +153,11 @@ def _road_surface_priority(tags: Mapping[str, str]) -> int:
 
 
 def _road_vertical_offset(tags: Mapping[str, str]) -> float:
-    return (
-        _STOCK_GRAVEL_VERTICAL_OFFSET_METRES
-        if road_is_gravel(tags)
-        else _STOCK_ROAD_VERTICAL_OFFSET_METRES
-    )
+    if road_is_gravel(tags):
+        return _STOCK_GRAVEL_VERTICAL_OFFSET_METRES
+    if road_is_dirt(tags):
+        return _STOCK_DIRT_VERTICAL_OFFSET_METRES
+    return _STOCK_ROAD_VERTICAL_OFFSET_METRES
 
 
 def _road_is_explicit_bridge(tags: Mapping[str, str]) -> bool:
@@ -522,7 +554,11 @@ def _fit_terrain_patch_road_objects(
     if progress_callback is not None:
         progress_callback(0, f"Projecting {total_roads:,} normalized road lines")
     progress_step = max(1, total_roads // 20)
-    road_polylines = projected_road_polylines(dataset, projection)
+    road_polylines = _paved_junction_augmented_polylines(
+        dataset,
+        projection,
+        spec,
+    )
     for feature_index, (feature, projected_points) in enumerate(
         zip(dataset.roads, road_polylines), start=1
     ):
@@ -819,21 +855,517 @@ def _unique_incidents(
 def _junction_cap_incidents(
     values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
 ) -> tuple[tuple[tuple[float, float], bool, str, str, str], ...]:
-    """Ignore gravel arms when deciding whether a non-gravel road needs a hub.
+    """Let paved roads own mixed-surface junction topology.
 
-    Gravel is deliberately drawn below paved roads. A gravel spur or crossing
-    must therefore not promote an otherwise ordinary paved/dirt continuation to
-    a three/four-way cap and insert an extra road P3D. Pure-gravel nodes retain
-    their existing cap behavior.
+    Dirt and gravel are deliberately rendered below paved roads. When a node
+    contains any paved incidents, ignore every unpaved arm while deciding
+    whether to create a cap. This keeps a paved through-road continuous at a
+    dirt T/crossing instead of inserting a dirt/mixed short road slab on top of
+    the asphalt. Pure dirt/gravel nodes retain their normal junction behavior.
     """
 
     values = tuple(values)
-    non_gravel = tuple(
-        value
-        for value in values
-        if not is_generated_gravel_road_model(value[2])
+    paved = tuple(value for value in values if not value[1])
+    return paved or values
+
+
+def _truthy_road_tag(value: object) -> bool:
+    return str(value or "").strip().casefold() not in {
+        "", "0", "false", "no", "none",
+    }
+
+
+def _numeric_road_layer(tags: Mapping[str, str]) -> float:
+    try:
+        return float(str(tags.get("layer", "0")).strip() or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _road_is_grade_separated_for_synthetic_junction(
+    tags: Mapping[str, str],
+) -> bool:
+    # Do not invent at-grade topology for explicit bridges/tunnels or roads that
+    # OSM intentionally places on a non-zero layer.
+    return (
+        _truthy_road_tag(tags.get("bridge"))
+        or _truthy_road_tag(tags.get("tunnel"))
+        or abs(_numeric_road_layer(tags)) > 0.10
     )
-    return non_gravel or values
+
+
+def _synthetic_junction_segment_intersection(
+    first_start: tuple[float, float],
+    first_end: tuple[float, float],
+    second_start: tuple[float, float],
+    second_end: tuple[float, float],
+) -> tuple[float, float, tuple[float, float]] | None:
+    ax = first_end[0] - first_start[0]
+    az = first_end[1] - first_start[1]
+    bx = second_end[0] - second_start[0]
+    bz = second_end[1] - second_start[1]
+    denominator = ax * bz - az * bx
+    if abs(denominator) <= 1.0e-9:
+        return None
+    qx = second_start[0] - first_start[0]
+    qz = second_start[1] - first_start[1]
+    first_fraction = (qx * bz - qz * bx) / denominator
+    second_fraction = (qx * az - qz * ax) / denominator
+    epsilon = 1.0e-7
+    if not (
+        -epsilon <= first_fraction <= 1.0 + epsilon
+        and -epsilon <= second_fraction <= 1.0 + epsilon
+    ):
+        return None
+    first_fraction = max(0.0, min(1.0, first_fraction))
+    second_fraction = max(0.0, min(1.0, second_fraction))
+    point = (
+        first_start[0] + ax * first_fraction,
+        first_start[1] + az * first_fraction,
+    )
+    return first_fraction, second_fraction, point
+
+
+def _synthetic_junction_nearest_on_segment(
+    point: tuple[float, float],
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> tuple[float, tuple[float, float], float]:
+    dx = end[0] - start[0]
+    dz = end[1] - start[1]
+    length2 = dx * dx + dz * dz
+    if length2 <= 1.0e-12:
+        return 0.0, start, math.dist(point, start)
+    fraction = (
+        (point[0] - start[0]) * dx
+        + (point[1] - start[1]) * dz
+    ) / length2
+    fraction = max(0.0, min(1.0, fraction))
+    nearest = (
+        start[0] + dx * fraction,
+        start[1] + dz * fraction,
+    )
+    return fraction, nearest, math.dist(point, nearest)
+
+
+def _synthetic_junction_bucket_range(
+    minimum: float,
+    maximum: float,
+) -> range:
+    size = _SYNTHETIC_PAVED_JUNCTION_BUCKET_METRES
+    return range(
+        math.floor(minimum / size),
+        math.floor(maximum / size) + 1,
+    )
+
+
+def _paved_junction_augmented_polylines(
+    dataset: OsmDataset,
+    projection: BboxProjection,
+    spec: PlayabilitySpec,
+) -> tuple[tuple[tuple[float, float], ...], ...]:
+    """Return projected roads with safe geometric paved junctions inserted.
+
+    The OSM graph can contain two paved ways that cross geometrically without
+    sharing a node, or a side-road endpoint that stops a metre or two short of
+    the main road. Stock fitting otherwise treats those as unrelated chains and
+    paints road P3Ds across each other. Promote those cases to shared nodes before
+    fitting so the ordinary cap/junction planners can trim approaches and emit a
+    proper T/X intersection.
+
+    Only paved, supported, at-grade roads participate. Exact bridge/tunnel/layer
+    crossings and near-parallel encounters are deliberately left untouched.
+    """
+
+    global _SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET
+    global _SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION
+    global _SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR
+    global _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE
+
+    include_minor = bool(spec.include_minor_roads)
+    if (
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET is dataset
+        and _SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION is projection
+        and _SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR == include_minor
+        and _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE is not None
+    ):
+        return _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE
+
+    projected = tuple(
+        tuple(_clean_road_points(points))
+        for points in projected_road_polylines(dataset, projection)
+    )
+    if len(projected) < 2:
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET = dataset
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION = projection
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR = include_minor
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE = projected
+        return projected
+
+    eligible = tuple(
+        bool(
+            len(projected[index]) >= 2
+            and road_is_supported(
+                feature.tags,
+                include_minor=spec.include_minor_roads,
+            )
+            and not road_is_dirt(feature.tags)
+            and str(feature.tags.get("highway", "")).casefold() != "raceway"
+            and not _road_is_grade_separated_for_synthetic_junction(feature.tags)
+        )
+        for index, feature in enumerate(dataset.roads)
+    )
+
+    # Entries are (feature index, source segment index, start, end, unit x, unit z).
+    segments: list[
+        tuple[
+            int,
+            int,
+            tuple[float, float],
+            tuple[float, float],
+            float,
+            float,
+        ]
+    ] = []
+    bucket_members: dict[tuple[int, int], list[int]] = {}
+    insertions: dict[
+        tuple[int, int],
+        list[tuple[float, tuple[float, float]]],
+    ] = {}
+    replacements: dict[
+        tuple[int, int],
+        tuple[float, tuple[float, float]],
+    ] = {}
+
+    def record_vertex_replacement(
+        feature_index: int,
+        vertex_index: int,
+        point: tuple[float, float],
+        movement: float,
+    ) -> None:
+        key = (feature_index, vertex_index)
+        previous = replacements.get(key)
+        candidate = (float(movement), point)
+        if previous is None or candidate[0] < previous[0] - 1.0e-9:
+            replacements[key] = candidate
+
+    def record_split(
+        feature_index: int,
+        segment_index: int,
+        fraction: float,
+        point: tuple[float, float],
+        segment_length: float,
+    ) -> None:
+        endpoint_epsilon = _SYNTHETIC_PAVED_JUNCTION_ENDPOINT_EPSILON_METRES
+        if fraction * segment_length <= endpoint_epsilon:
+            record_vertex_replacement(
+                feature_index,
+                segment_index,
+                point,
+                math.dist(projected[feature_index][segment_index], point),
+            )
+            return
+        if (1.0 - fraction) * segment_length <= endpoint_epsilon:
+            record_vertex_replacement(
+                feature_index,
+                segment_index + 1,
+                point,
+                math.dist(projected[feature_index][segment_index + 1], point),
+            )
+            return
+        insertions.setdefault((feature_index, segment_index), []).append(
+            (fraction, point)
+        )
+
+    def feature_endpoint_vertex(
+        feature_index: int,
+        segment_index: int,
+        *,
+        start: bool,
+    ) -> int | None:
+        points = projected[feature_index]
+        if start and segment_index == 0:
+            return 0
+        if not start and segment_index == len(points) - 2:
+            return len(points) - 1
+        return None
+
+    for feature_index, points in enumerate(projected):
+        if not eligible[feature_index]:
+            continue
+        for segment_index, (start, end) in enumerate(zip(points, points[1:])):
+            dx = end[0] - start[0]
+            dz = end[1] - start[1]
+            length = math.hypot(dx, dz)
+            if length <= 0.05:
+                continue
+            ux, uz = dx / length, dz / length
+            segment_id = len(segments)
+            segments.append(
+                (feature_index, segment_index, start, end, ux, uz)
+            )
+            padding = _SYNTHETIC_PAVED_JUNCTION_SNAP_METRES
+            buckets = tuple(
+                (bx, bz)
+                for bz in _synthetic_junction_bucket_range(
+                    min(start[1], end[1]) - padding,
+                    max(start[1], end[1]) + padding,
+                )
+                for bx in _synthetic_junction_bucket_range(
+                    min(start[0], end[0]) - padding,
+                    max(start[0], end[0]) + padding,
+                )
+            )
+            nearby_ids: set[int] = set()
+            for bucket in buckets:
+                nearby_ids.update(bucket_members.get(bucket, ()))
+
+            for other_id in sorted(nearby_ids):
+                (
+                    other_feature,
+                    other_segment,
+                    other_start,
+                    other_end,
+                    other_ux,
+                    other_uz,
+                ) = segments[other_id]
+                if other_feature == feature_index:
+                    continue
+                dot = abs(ux * other_ux + uz * other_uz)
+                if dot > _SYNTHETIC_PAVED_JUNCTION_MAXIMUM_DOT:
+                    continue
+
+                intersection = _synthetic_junction_segment_intersection(
+                    start,
+                    end,
+                    other_start,
+                    other_end,
+                )
+                if intersection is not None:
+                    fraction, other_fraction, point = intersection
+                    first_endpoint = (
+                        fraction * length
+                        <= _SYNTHETIC_PAVED_JUNCTION_ENDPOINT_EPSILON_METRES
+                        or (1.0 - fraction) * length
+                        <= _SYNTHETIC_PAVED_JUNCTION_ENDPOINT_EPSILON_METRES
+                    )
+                    other_length = math.dist(other_start, other_end)
+                    second_endpoint = (
+                        other_fraction * other_length
+                        <= _SYNTHETIC_PAVED_JUNCTION_ENDPOINT_EPSILON_METRES
+                        or (1.0 - other_fraction) * other_length
+                        <= _SYNTHETIC_PAVED_JUNCTION_ENDPOINT_EPSILON_METRES
+                    )
+                    if first_endpoint and second_endpoint:
+                        first_key = _road_node_key(
+                            start if fraction <= 0.5 else end
+                        )
+                        second_key = _road_node_key(
+                            other_start if other_fraction <= 0.5 else other_end
+                        )
+                        if first_key == second_key:
+                            continue
+                    record_split(
+                        feature_index,
+                        segment_index,
+                        fraction,
+                        point,
+                        length,
+                    )
+                    record_split(
+                        other_feature,
+                        other_segment,
+                        other_fraction,
+                        point,
+                        other_length,
+                    )
+                    continue
+
+                # Also repair a small OSM topology miss where an actual feature
+                # endpoint stops just short of another paved segment. Restrict
+                # snapping to whole-feature endpoints so ordinary bend vertices
+                # are never dragged sideways toward a nearby street.
+                other_length = math.dist(other_start, other_end)
+                endpoint_specs = (
+                    (
+                        feature_index,
+                        segment_index,
+                        True,
+                        start,
+                        other_feature,
+                        other_segment,
+                        other_start,
+                        other_end,
+                        other_length,
+                    ),
+                    (
+                        feature_index,
+                        segment_index,
+                        False,
+                        end,
+                        other_feature,
+                        other_segment,
+                        other_start,
+                        other_end,
+                        other_length,
+                    ),
+                    (
+                        other_feature,
+                        other_segment,
+                        True,
+                        other_start,
+                        feature_index,
+                        segment_index,
+                        start,
+                        end,
+                        length,
+                    ),
+                    (
+                        other_feature,
+                        other_segment,
+                        False,
+                        other_end,
+                        feature_index,
+                        segment_index,
+                        start,
+                        end,
+                        length,
+                    ),
+                )
+                for (
+                    source_feature,
+                    source_segment,
+                    source_is_start,
+                    endpoint,
+                    target_feature,
+                    target_segment,
+                    target_start,
+                    target_end,
+                    target_length,
+                ) in endpoint_specs:
+                    vertex_index = feature_endpoint_vertex(
+                        source_feature,
+                        source_segment,
+                        start=source_is_start,
+                    )
+                    if vertex_index is None:
+                        continue
+                    target_fraction, nearest, distance = (
+                        _synthetic_junction_nearest_on_segment(
+                            endpoint,
+                            target_start,
+                            target_end,
+                        )
+                    )
+                    if distance > _SYNTHETIC_PAVED_JUNCTION_SNAP_METRES:
+                        continue
+
+                    endpoint_epsilon = (
+                        _SYNTHETIC_PAVED_JUNCTION_ENDPOINT_EPSILON_METRES
+                    )
+                    target_is_start = (
+                        target_fraction * target_length <= endpoint_epsilon
+                    )
+                    target_is_end = (
+                        (1.0 - target_fraction) * target_length
+                        <= endpoint_epsilon
+                    )
+                    target_vertex = None
+                    if target_is_start:
+                        target_vertex = feature_endpoint_vertex(
+                            target_feature,
+                            target_segment,
+                            start=True,
+                        )
+                    elif target_is_end:
+                        target_vertex = feature_endpoint_vertex(
+                            target_feature,
+                            target_segment,
+                            start=False,
+                        )
+
+                    if target_vertex is not None:
+                        # Two whole-feature endpoints can stop just short of each
+                        # other. Snap both to one deterministic midpoint instead
+                        # of swapping their endpoints and still leaving two nodes.
+                        target_point = projected[target_feature][target_vertex]
+                        shared = (
+                            (endpoint[0] + target_point[0]) * 0.5,
+                            (endpoint[1] + target_point[1]) * 0.5,
+                        )
+                        movement = math.dist(endpoint, shared)
+                        record_vertex_replacement(
+                            source_feature,
+                            vertex_index,
+                            shared,
+                            movement,
+                        )
+                        record_vertex_replacement(
+                            target_feature,
+                            target_vertex,
+                            shared,
+                            math.dist(target_point, shared),
+                        )
+                        continue
+
+                    record_vertex_replacement(
+                        source_feature,
+                        vertex_index,
+                        nearest,
+                        distance,
+                    )
+                    record_split(
+                        target_feature,
+                        target_segment,
+                        target_fraction,
+                        nearest,
+                        target_length,
+                    )
+
+            for bucket in buckets:
+                bucket_members.setdefault(bucket, []).append(segment_id)
+
+    if not insertions and not replacements:
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET = dataset
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION = projection
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR = include_minor
+        _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE = projected
+        return projected
+
+    augmented: list[tuple[tuple[float, float], ...]] = []
+    for feature_index, original_points in enumerate(projected):
+        points = list(original_points)
+        for vertex_index in range(len(points)):
+            replacement = replacements.get((feature_index, vertex_index))
+            if replacement is not None:
+                points[vertex_index] = replacement[1]
+
+        rebuilt: list[tuple[float, float]] = [points[0]] if points else []
+        for segment_index in range(max(0, len(points) - 1)):
+            values = sorted(
+                insertions.get((feature_index, segment_index), ()),
+                key=lambda value: (
+                    value[0],
+                    round(value[1][0], 6),
+                    round(value[1][1], 6),
+                ),
+            )
+            for _fraction, point in values:
+                if not rebuilt or math.dist(rebuilt[-1], point) > 0.05:
+                    rebuilt.append(point)
+            end = points[segment_index + 1]
+            if not rebuilt or math.dist(rebuilt[-1], end) > 0.05:
+                rebuilt.append(end)
+            elif rebuilt:
+                rebuilt[-1] = end
+        augmented.append(tuple(_clean_road_points(rebuilt)))
+
+    result = tuple(augmented)
+    _SYNTHETIC_PAVED_JUNCTION_CACHE_DATASET = dataset
+    _SYNTHETIC_PAVED_JUNCTION_CACHE_PROJECTION = projection
+    _SYNTHETIC_PAVED_JUNCTION_CACHE_INCLUDE_MINOR = include_minor
+    _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE = result
+    return result
 
 
 def _generated_paved_half_width(model_path: str) -> float:
@@ -940,6 +1472,293 @@ def _rounded_road_run(
     if math.dist(rounded[-1], cleaned[-1]) > 0.05:
         rounded.append(cleaned[-1])
     return tuple(rounded)
+
+
+def _stock_paved_half_width(
+    pieces: Sequence[_RoadPiece],
+) -> float | None:
+    """Return the visible half-width when a chain is a stock paved family."""
+
+    widths: list[float] = []
+    for piece in pieces:
+        filename = (
+            str(piece.model_path)
+            .replace("/", "\\")
+            .rsplit("\\", 1)[-1]
+            .casefold()
+        )
+        if filename.startswith(("sil", "kos")):
+            widths.append(4.55)
+        elif filename.startswith("asf"):
+            widths.append(3.50)
+    return max(widths) if widths else None
+
+
+def _run_vertex_distances(
+    points: Sequence[tuple[float, float]],
+) -> tuple[float, ...]:
+    values = [0.0]
+    for start, end in zip(points, points[1:]):
+        values.append(values[-1] + math.dist(start, end))
+    return tuple(values)
+
+
+def _paved_run_vertex_is_guarded(
+    distance: float,
+    total: float,
+    *,
+    preserve_start_metres: float,
+    preserve_end_metres: float,
+) -> bool:
+    return (
+        distance <= max(0.0, preserve_start_metres) + 1.0e-6
+        or total - distance <= max(0.0, preserve_end_metres) + 1.0e-6
+    )
+
+
+def _paved_run_required_tangent(
+    turn_degrees: float,
+    minimum_radius: float,
+) -> float:
+    # The run fillet is a symmetric quadratic Bezier with the original corner
+    # as its control point. Its tightest curvature is at the midpoint:
+    #
+    #   radius = tangent * cos(half_angle)^2 / sin(half_angle)
+    #
+    # Solve for tangent rather than using the circular-arc relation. The latter
+    # badly underestimates the space needed by 90+ degree road turns.
+    half_angle = math.radians(
+        min(179.0, max(0.0, turn_degrees))
+    ) * 0.5
+    sine = math.sin(half_angle)
+    cosine = max(1.0e-6, math.cos(half_angle))
+    if sine <= 1.0e-9:
+        return 0.0
+    return minimum_radius * sine / (cosine * cosine)
+
+
+def _append_rounded_corner(
+    rounded: list[tuple[float, float]],
+    previous: tuple[float, float],
+    corner: tuple[float, float],
+    following: tuple[float, float],
+    *,
+    tangent: float,
+    samples: int,
+) -> None:
+    incoming = (corner[0] - previous[0], corner[1] - previous[1])
+    outgoing = (following[0] - corner[0], following[1] - corner[1])
+    incoming_length = max(1.0e-9, math.hypot(*incoming))
+    outgoing_length = max(1.0e-9, math.hypot(*outgoing))
+    in_unit = (
+        incoming[0] / incoming_length,
+        incoming[1] / incoming_length,
+    )
+    out_unit = (
+        outgoing[0] / outgoing_length,
+        outgoing[1] / outgoing_length,
+    )
+    entry = (
+        corner[0] - in_unit[0] * tangent,
+        corner[1] - in_unit[1] * tangent,
+    )
+    exit = (
+        corner[0] + out_unit[0] * tangent,
+        corner[1] + out_unit[1] * tangent,
+    )
+    if math.dist(rounded[-1], entry) > 0.05:
+        rounded.append(entry)
+    samples = max(2, int(samples))
+    for sample in range(1, samples):
+        t = sample / samples
+        one_minus = 1.0 - t
+        point = (
+            one_minus * one_minus * entry[0]
+            + 2.0 * one_minus * t * corner[0]
+            + t * t * exit[0],
+            one_minus * one_minus * entry[1]
+            + 2.0 * one_minus * t * corner[1]
+            + t * t * exit[1],
+        )
+        if math.dist(rounded[-1], point) > 0.05:
+            rounded.append(point)
+    if math.dist(rounded[-1], exit) > 0.05:
+        rounded.append(exit)
+
+
+def _representable_road_run(
+    points: Sequence[tuple[float, float]],
+    pieces: Sequence[_RoadPiece],
+    *,
+    preserve_start_metres: float = 0.0,
+    preserve_end_metres: float = 0.0,
+) -> tuple[tuple[float, float], ...]:
+    """Repair only paved run geometry that a rigid in-game road cannot follow.
+
+    The run endpoints are immutable because topology/junction discovery has
+    already happened. Dirt and gravel retain the historical rounded-run path.
+
+    For stock paved families, an interior corner must have enough tangent length
+    to keep the road's inside edge from folding through itself. If it does not,
+    the offending source vertex is removed and the test repeats against the
+    larger neighbouring span. Representable corners keep the historical fillet
+    unless that fillet would still be tighter than the road width; only then is
+    its radius enlarged. The generated-paved fallback can subsequently replace
+    any remaining stock span that fails the normal turn/deviation limits.
+    """
+
+    cleaned = list(_clean_road_points(points))
+    if len(cleaned) < 3:
+        return tuple(cleaned)
+
+    half_width = _stock_paved_half_width(pieces)
+    if half_width is None:
+        return _rounded_road_run(cleaned)
+
+    minimum_radius = half_width + _PAVED_RUN_REPAIR_RADIUS_MARGIN_METRES
+
+    # First remove only geometrically impossible interior corners. The protected
+    # junction ranges use the untouched source geometry so the stock junction
+    # target search sees exactly the same approaches it saw before this policy.
+    maximum_passes = max(1, len(cleaned) * 2)
+    for _pass in range(maximum_passes):
+        if len(cleaned) < 3:
+            break
+        distances = _run_vertex_distances(cleaned)
+        total = distances[-1]
+        removed = False
+        for index in range(1, len(cleaned) - 1):
+            if _paved_run_vertex_is_guarded(
+                distances[index],
+                total,
+                preserve_start_metres=preserve_start_metres,
+                preserve_end_metres=preserve_end_metres,
+            ):
+                continue
+            previous, corner, following = (
+                cleaned[index - 1],
+                cleaned[index],
+                cleaned[index + 1],
+            )
+            incoming_length = math.dist(previous, corner)
+            outgoing_length = math.dist(corner, following)
+            if incoming_length <= 0.10 or outgoing_length <= 0.10:
+                del cleaned[index]
+                removed = True
+                break
+            turn = _turn_degrees(previous, corner, following)
+            if turn < 7.5:
+                continue
+            required = _paved_run_required_tangent(turn, minimum_radius)
+            available = min(
+                _PAVED_RUN_REPAIR_MAXIMUM_TANGENT_METRES,
+                incoming_length * _PAVED_RUN_REPAIR_TANGENT_FRACTION,
+                outgoing_length * _PAVED_RUN_REPAIR_TANGENT_FRACTION,
+            )
+            if required <= available + 1.0e-6:
+                continue
+            # This corner cannot physically fit the visible paved width. Remove
+            # it even for a near-returning hairpin; a zero-length remnant is safer
+            # to skip than manufacturing a self-intersecting knot of road slabs.
+            del cleaned[index]
+            cleaned = list(_clean_road_points(cleaned))
+            removed = True
+            break
+        if not removed:
+            break
+
+    if len(cleaned) < 3:
+        return tuple(cleaned)
+
+    distances = _run_vertex_distances(cleaned)
+    total = distances[-1]
+    rounded: list[tuple[float, float]] = [cleaned[0]]
+    for index in range(1, len(cleaned) - 1):
+        previous, corner, following = (
+            cleaned[index - 1],
+            cleaned[index],
+            cleaned[index + 1],
+        )
+        incoming_length = math.dist(previous, corner)
+        outgoing_length = math.dist(corner, following)
+        turn = _turn_degrees(previous, corner, following)
+        guarded = _paved_run_vertex_is_guarded(
+            distances[index],
+            total,
+            preserve_start_metres=preserve_start_metres,
+            preserve_end_metres=preserve_end_metres,
+        )
+
+        # Inside a junction approach reproduce the pre-repair rounding exactly.
+        if guarded:
+            if (
+                incoming_length <= 0.10
+                or outgoing_length <= 0.10
+                or turn < 7.5
+                or turn > 135.0
+            ):
+                if math.dist(rounded[-1], corner) > 0.05:
+                    rounded.append(corner)
+                continue
+            tangent = min(
+                9.0,
+                incoming_length * 0.30,
+                outgoing_length * 0.30,
+            )
+            if tangent <= 0.20:
+                if math.dist(rounded[-1], corner) > 0.05:
+                    rounded.append(corner)
+                continue
+            _append_rounded_corner(
+                rounded,
+                previous,
+                corner,
+                following,
+                tangent=tangent,
+                samples=4,
+            )
+            continue
+
+        if incoming_length <= 0.10 or outgoing_length <= 0.10 or turn < 7.5:
+            if math.dist(rounded[-1], corner) > 0.05:
+                rounded.append(corner)
+            continue
+
+        required = _paved_run_required_tangent(turn, minimum_radius)
+        historical = min(
+            9.0,
+            incoming_length * 0.30,
+            outgoing_length * 0.30,
+        )
+        available = min(
+            _PAVED_RUN_REPAIR_MAXIMUM_TANGENT_METRES,
+            incoming_length * _PAVED_RUN_REPAIR_TANGENT_FRACTION,
+            outgoing_length * _PAVED_RUN_REPAIR_TANGENT_FRACTION,
+        )
+        tangent = min(available, max(required, historical))
+        if tangent <= 0.20:
+            if math.dist(rounded[-1], corner) > 0.05:
+                rounded.append(corner)
+            continue
+
+        samples = max(
+            4,
+            int(math.ceil(
+                turn / _PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES
+            )),
+        )
+        _append_rounded_corner(
+            rounded,
+            previous,
+            corner,
+            following,
+            tangent=tangent,
+            samples=samples,
+        )
+
+    if math.dist(rounded[-1], cleaned[-1]) > 0.05:
+        rounded.append(cleaned[-1])
+    return tuple(_clean_road_points(rounded))
 
 
 def _split_polyline_at_keys(
@@ -1501,7 +2320,13 @@ def _fit_stock_piece_road_objects(
 
     # Plan cap geometry and trim distances before constructing WorldObjects.
     cap_plans: dict[
-        tuple[int, int], tuple[_RoadPiece, tuple[float, float], tuple[float, float]]
+        tuple[int, int],
+        tuple[
+            _RoadPiece,
+            tuple[float, float],
+            tuple[float, float],
+            float,
+        ],
     ] = {}
     cap_trim_lengths: dict[tuple[int, int], float] = {}
     cap_cover_lengths: dict[tuple[int, int], float] = {}
@@ -1538,7 +2363,17 @@ def _fit_stock_piece_road_objects(
         half = cap_piece.length_metres * 0.5
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
-        cap_plans[key] = (cap_piece, start_point, end_point)
+        cap_vertical_offset = (
+            _STOCK_DIRT_VERTICAL_OFFSET_METRES
+            if use_dirt
+            else _STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+        )
+        cap_plans[key] = (
+            cap_piece,
+            start_point,
+            end_point,
+            cap_vertical_offset,
+        )
         if generated_paved_t is not None:
             # The generated hub owns the seam. Keep logical/collision geometry
             # at 6.25 m, stop approach slabs at 6.45 m, and let only the visible
@@ -1610,8 +2445,25 @@ def _fit_stock_piece_road_objects(
                 bool,
             ]
         ] = []
+        variants = variants_for(model)
         for raw_run in _split_polyline_at_keys(points, split_keys):
-            run = _rounded_road_run(raw_run)
+            raw_start_key = _road_node_key(raw_run[0])
+            raw_end_key = _road_node_key(raw_run[-1])
+            run = _representable_road_run(
+                raw_run,
+                variants,
+                preserve_start_metres=(
+                    _PAVED_RUN_REPAIR_JUNCTION_GUARD_METRES
+                    if raw_start_key in split_keys else 0.0
+                ),
+                preserve_end_metres=(
+                    _PAVED_RUN_REPAIR_JUNCTION_GUARD_METRES
+                    if raw_end_key in split_keys else 0.0
+                ),
+            )
+            if len(run) < 2:
+                skipped_short_runs += 1
+                continue
             measure = _PolylineMeasure.create(run)
             total_length = measure.total
             if total_length <= 0.05:
@@ -1630,7 +2482,6 @@ def _fit_stock_piece_road_objects(
             start_distance = min(total_length, start_trim)
             preferred_end = max(start_distance, total_length - end_trim)
             minimum_end = max(start_distance, total_length - end_cover)
-            variants = variants_for(model)
             shortest = min(piece.length_metres for piece in variants)
             maximum_end = total_length + (0.70 if end_cover > 0.0 else shortest * 0.5)
             fitted_pieces = _stock_piece_chain(
@@ -1734,7 +2585,7 @@ def _fit_stock_piece_road_objects(
     if progress_callback is not None:
         progress_callback(61, f"Placing {len(cap_plans):,} junction caps")
     for key in sorted(cap_plans):
-        cap_piece, start_point, end_point = cap_plans[key]
+        cap_piece, start_point, end_point, cap_vertical_offset = cap_plans[key]
         obj = _road_object_on_slope(
             next_id,
             cap_piece.model_path,
@@ -1742,7 +2593,7 @@ def _fit_stock_piece_road_objects(
             end_point,
             elevations,
             spec,
-            vertical_offset=0.060,
+            vertical_offset=cap_vertical_offset,
         )
         next_id += 1
         objects.append(obj)

@@ -95,6 +95,30 @@ def test_mapped_water_fills_coarse_terrain_bridge_blind_spot() -> None:
         source_water._CONTEXT.reset(token)
 
 
+def test_high_final_terrain_disables_mapped_water_bridge_fallback() -> None:
+    dataset, projection, points, _elevations, spec = _fixture()
+    elevations = (90.0,) * (spec.cells * spec.cells)
+    context = source_water._make_context(dataset, projection)
+
+    token = source_water._CONTEXT.set(context)
+    try:
+        assert not source_water._source_aware_water_test(
+            points,
+            elevations,
+            cells=spec.cells,
+            cell_size=spec.cell_size,
+            sea_level=spec.sea_level,
+            width=7.0,
+        )
+        assert source_water._mapped_water_stock_plan(
+            points,
+            elevations,
+            spec,
+        ) is None
+    finally:
+        source_water._CONTEXT.reset(token)
+
+
 def test_mapped_water_fallback_emits_one_stock_module_not_full_dry_way() -> None:
     dataset, projection, points, elevations, spec = _fixture()
     context = source_water._make_context(dataset, projection)

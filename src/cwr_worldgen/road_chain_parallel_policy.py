@@ -435,7 +435,11 @@ def _fit_stock_piece_road_objects_parallel(
     if progress_callback is not None:
         progress_callback(0, f"Projecting {total_roads:,} normalized road lines")
     projection_step = max(1, total_roads // 20)
-    road_polylines = _playability.projected_road_polylines(dataset, projection)
+    road_polylines = _playability._paved_junction_augmented_polylines(
+        dataset,
+        projection,
+        spec,
+    )
     for feature_index, (feature, projected_points) in enumerate(
         zip(dataset.roads, road_polylines), start=1
     ):
@@ -524,7 +528,7 @@ def _fit_stock_piece_road_objects_parallel(
     if progress_callback is not None:
         progress_callback(
             24,
-            f"Classified {len(candidate_cap_keys):,} real road junctions; "
+            f"Classified {len(candidate_cap_keys):,} road junctions (including geometric paved crossings); "
             f"{len(degree_two_turn_keys | bend_keys):,} ordinary bends use rounded piece chains",
         )
 
@@ -595,7 +599,17 @@ def _fit_stock_piece_road_objects_parallel(
         half = cap_piece.length_metres * 0.5
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
-        cap_plans[key] = (cap_piece, start_point, end_point)
+        cap_vertical_offset = (
+            _playability._STOCK_DIRT_VERTICAL_OFFSET_METRES
+            if use_dirt
+            else _playability._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+        )
+        cap_plans[key] = (
+            cap_piece,
+            start_point,
+            end_point,
+            cap_vertical_offset,
+        )
         if generated_paved_t is not None:
             cap_trim_lengths[key] = (
                 half
@@ -630,7 +644,20 @@ def _fit_stock_piece_road_objects_parallel(
         for run_index, raw_run in enumerate(
             _playability._split_polyline_at_keys(points, split_keys)
         ):
-            run = tuple(_playability._rounded_road_run(raw_run))
+            raw_start_key = _playability._road_node_key(raw_run[0])
+            raw_end_key = _playability._road_node_key(raw_run[-1])
+            run = _playability._representable_road_run(
+                raw_run,
+                variants,
+                preserve_start_metres=(
+                    _playability._PAVED_RUN_REPAIR_JUNCTION_GUARD_METRES
+                    if raw_start_key in split_keys else 0.0
+                ),
+                preserve_end_metres=(
+                    _playability._PAVED_RUN_REPAIR_JUNCTION_GUARD_METRES
+                    if raw_end_key in split_keys else 0.0
+                ),
+            )
             if len(run) < 2:
                 continue
             start_key = _playability._road_node_key(run[0])
@@ -741,7 +768,7 @@ def _fit_stock_piece_road_objects_parallel(
     if progress_callback is not None:
         progress_callback(61, f"Placing {len(cap_plans):,} junction caps")
     for key in sorted(cap_plans):
-        cap_piece, start_point, end_point = cap_plans[key]
+        cap_piece, start_point, end_point, cap_vertical_offset = cap_plans[key]
         obj = _playability._road_object_on_slope(
             next_id,
             cap_piece.model_path,
@@ -749,7 +776,7 @@ def _fit_stock_piece_road_objects_parallel(
             end_point,
             elevations,
             spec,
-            vertical_offset=0.060,
+            vertical_offset=cap_vertical_offset,
         )
         next_id += 1
         objects.append(obj)

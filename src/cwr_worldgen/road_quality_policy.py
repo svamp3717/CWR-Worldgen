@@ -54,7 +54,10 @@ def _unit(start, end) -> tuple[float, float]:
 def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junction]:
     incidents: dict[tuple[int, int], list[tuple[tuple[float, float], bool, str, str, str]]] = {}
     positions: dict[tuple[int, int], tuple[float, float]] = {}
-    for feature, projected in zip(dataset.roads, _p.projected_road_polylines(dataset, projection)):
+    for feature, projected in zip(
+        dataset.roads,
+        _p._paved_junction_augmented_polylines(dataset, projection, spec),
+    ):
         if not _p.road_is_supported(feature.tags, include_minor=spec.include_minor_roads):
             continue
         points = tuple(_p._clean_road_points(projected))

@@ -269,6 +269,103 @@ def _source_mapped_water_interval(
     return (start, end) if end > start + 1.0e-4 else None
 
 
+def _mapped_water_is_representable(
+    points,
+    elevations,
+    *,
+    cells: int,
+    cell_size: float,
+    sea_level: float,
+    width: float = 6.0,
+    shoreline_slope_percent: float = 8.0,
+    beach_height: float = 3.0,
+) -> bool:
+    """Return whether mapped water can still exist in the final terrain datum.
+
+    Source polygons are only a fallback for coarse-grid blind spots. If the
+    terrain solver has deliberately filled that water back to a high dry bank,
+    source OSM must not resurrect either a stock bridge or a -3 m channel later.
+    """
+
+    interval = _source_mapped_water_interval(points)
+    if interval is None:
+        return False
+    cleaned, cumulative = _polyline_measure(points)
+    if len(cleaned) < 2:
+        return False
+
+    start, end = interval
+    length = max(0.0, end - start)
+    spacing = max(1.0, min(float(cell_size) * 0.25, 10.0))
+    count = max(1, int(math.ceil(length / spacing)))
+    samples: list[float] = []
+    half_width = max(0.0, float(width) * 0.5)
+    lateral = max(half_width, min(float(cell_size) * 0.35, half_width + 6.0))
+
+    for step in range(count + 1):
+        distance = start + length * step / count
+        point = _point_at(cleaned, cumulative, distance)
+        # Use the local road tangent for centre/shoulder samples. The shoulders
+        # keep one raised road vertex from disguising a filled high-altitude lake.
+        before = _point_at(cleaned, cumulative, max(0.0, distance - 0.5))
+        after = _point_at(
+            cleaned,
+            cumulative,
+            min(float(cumulative[-1]), distance + 0.5),
+        )
+        dx = after[0] - before[0]
+        dz = after[1] - before[1]
+        magnitude = math.hypot(dx, dz)
+        if magnitude <= 1.0e-9:
+            offsets = ((0.0, 0.0),)
+        else:
+            nx, nz = -dz / magnitude, dx / magnitude
+            offsets = (
+                (0.0, 0.0),
+                (nx * lateral, nz * lateral),
+                (-nx * lateral, -nz * lateral),
+            )
+        for offset_x, offset_z in offsets:
+            x = max(
+                0.0,
+                min((cells - 1) * float(cell_size), point[0] + offset_x),
+            )
+            z = max(
+                0.0,
+                min((cells - 1) * float(cell_size), point[1] + offset_z),
+            )
+            samples.append(
+                float(
+                    _osm._sample_elevation(
+                        elevations,
+                        cells,
+                        cell_size,
+                        x,
+                        z,
+                    )
+                )
+            )
+
+    if not samples:
+        return False
+    samples.sort()
+    bank_reference = samples[
+        max(0, min(
+            len(samples) - 1,
+            int(round((len(samples) - 1) * 0.75)),
+        ))
+    ]
+    one_cell_rise = (
+        float(cell_size) * max(0.0, float(shoreline_slope_percent)) / 100.0
+    )
+    maximum_bank = (
+        float(sea_level)
+        + one_cell_rise
+        + max(0.5, float(beach_height))
+    )
+    return bank_reference <= maximum_bank + 1.0e-7
+
+
 def _source_aware_water_test(
     points,
     elevations,
@@ -287,7 +384,14 @@ def _source_aware_water_test(
         width=width,
     ):
         return True
-    return _source_mapped_water_interval(points) is not None
+    return _mapped_water_is_representable(
+        points,
+        elevations,
+        cells=cells,
+        cell_size=cell_size,
+        sea_level=sea_level,
+        width=width,
+    )
 
 
 def _mapped_water_stock_plan(points, elevations, spec):
@@ -298,6 +402,19 @@ def _mapped_water_stock_plan(points, elevations, spec):
         return plan
     interval = _source_mapped_water_interval(points)
     if interval is None:
+        return None
+    if not _mapped_water_is_representable(
+        points,
+        elevations,
+        cells=int(spec.cells),
+        cell_size=float(spec.cell_size),
+        sea_level=float(spec.sea_level),
+        width=max(6.0, float(getattr(spec, "road_width", 6.0) or 6.0)),
+        shoreline_slope_percent=float(
+            getattr(spec, "lake_shore_maximum_slope_percent", 8.0)
+        ),
+        beach_height=float(getattr(spec, "beach_height", 3.0)),
+    ):
         return None
 
     cleaned, cumulative = _polyline_measure(points)

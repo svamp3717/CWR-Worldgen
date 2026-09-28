@@ -462,6 +462,54 @@ def _mask_from_components(components: Sequence[Sequence[int]], size: int) -> lis
     return mask
 
 
+def _component_dry_ring_indices(
+    component: Sequence[int],
+    water_mask: Sequence[bool],
+    cells: int,
+) -> tuple[int, ...]:
+    """Return the one-cell dry ring around one mapped water component."""
+
+    ring: set[int] = set()
+    for index in component:
+        x, z = index % cells, index // cells
+        for dz in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dx == 0 and dz == 0:
+                    continue
+                nx, nz = x + dx, z + dz
+                if not (0 <= nx < cells and 0 <= nz < cells):
+                    continue
+                neighbour = nz * cells + nx
+                if not water_mask[neighbour]:
+                    ring.add(neighbour)
+    return tuple(sorted(ring))
+
+
+def _component_bank_reference_height(
+    component: Sequence[int],
+    water_mask: Sequence[bool],
+    elevations: Sequence[float],
+    cells: int,
+) -> float | None:
+    """Return a robust high-bank reference for lake representability.
+
+    The 75th percentile ignores one anomalous dry cell while still rejecting
+    components whose surrounding terrain is broadly far above CWA's one global
+    water plane. Tiny DEM/OSM water holes are especially prone to this failure.
+    """
+
+    ring = _component_dry_ring_indices(component, water_mask, cells)
+    values = sorted(
+        float(elevations[index])
+        for index in ring
+        if math.isfinite(float(elevations[index]))
+    )
+    if not values:
+        return None
+    position = int(round((len(values) - 1) * 0.75))
+    return values[max(0, min(len(values) - 1, position))]
+
+
 def _euclidean_distance_from_mask(mask: Sequence[bool], cells: int, maximum: int) -> list[float]:
     """Return an eight-neighbour distance field measured in terrain cells."""
     distances = [math.inf] * len(mask)
@@ -1115,9 +1163,6 @@ def solve_terrain_constraints(
     if len(raw_original) != spec.cells * spec.cells:
         raise ValueError("constraint solver elevation grid has the wrong size")
     smoothing = _effective_terrain_smoothing(spec)
-    renderable_source_water = renderable_water_mask(
-        raw_original, raster, sea_level=spec.sea_level, water_depth=spec.water_depth
-    )
     conservative_interior = conservative_water_interior_mask(raster)
     water_components = _components(raster.water, spec.cells)
     edge_water_components = [
@@ -1140,6 +1185,10 @@ def solve_terrain_constraints(
         (component, median(raw_original[index] for index in component))
         for component in edge_water_components
     ]
+    inland_surfaces = [
+        (component, median(raw_original[index] for index in component))
+        for component in mapped_inland_water_components
+    ]
     near_sea_edge_components = [
         component
         for component, surface in edge_surfaces
@@ -1154,9 +1203,39 @@ def solve_terrain_constraints(
         if surface > maximum_near_sea_surface
         and len(component) >= minimum_datum_component_cells
     ]
-    if datum_candidates and not near_sea_edge_components:
-        lowest_edge_lake_surface = min(surface for _component, surface in datum_candidates)
 
+    # CWA has one global water plane. On a wholly inland high plateau, a large
+    # inland lake can be made representable by translating the *whole world*
+    # downward instead of excavating a local crater. Small ponds never justify
+    # moving the complete datum; they are validated separately below.
+    inland_datum_requests: list[float] = []
+    first_bank_rise = (
+        spec.cell_size * spec.lake_shore_maximum_slope_percent / 100.0
+    )
+    first_bank_limit = (
+        spec.sea_level
+        + first_bank_rise
+        + max(0.5, float(getattr(spec, "beach_height", 3.0)))
+    )
+    for component, surface in inland_surfaces:
+        if len(component) < minimum_datum_component_cells:
+            continue
+        bank = _component_bank_reference_height(
+            component,
+            raster.water,
+            raw_original,
+            spec.cells,
+        )
+        requested = max(0.0, surface - spec.sea_level)
+        if bank is not None:
+            requested = max(
+                requested,
+                max(0.0, bank - first_bank_limit),
+            )
+        if requested > 0.0:
+            inland_datum_requests.append(requested)
+
+    if (datum_candidates or inland_datum_requests) and not near_sea_edge_components:
         # Do not blindly lower the map through unrelated dry valleys. Use dry
         # terrain at least three cells away from mapped water as a safety floor,
         # while allowing a tiny low-tail fraction to be outliers.
@@ -1176,21 +1255,51 @@ def solve_terrain_constraints(
             )
             dry_safe_floor = dry_reference[safe_index] - max(1.0, spec.height_scale * 2.0)
 
-        requested_offset = max(0.0, lowest_edge_lake_surface - spec.sea_level)
+        requested_offsets = [
+            max(0.0, surface - spec.sea_level)
+            for _component, surface in datum_candidates
+        ]
+        requested_offsets.extend(inland_datum_requests)
+        requested_offset = min(requested_offsets) if requested_offsets else 0.0
         safe_offset = max(0.0, dry_safe_floor - spec.sea_level)
         candidate_offset = min(requested_offset, safe_offset)
-        if candidate_offset >= max(10.0, spec.water_depth * 2.0):
-            lake_datum_offset = candidate_offset
+        minimum_useful_offset = max(10.0, spec.water_depth * 2.0)
+        if candidate_offset >= minimum_useful_offset:
+            # Preserve the historical partial edge-lake rebase behaviour, but
+            # only count an inland request as feasible when its full shift fits
+            # above the dry-terrain safety floor.
+            edge_requested = min(
+                (
+                    max(0.0, surface - spec.sea_level)
+                    for _component, surface in datum_candidates
+                ),
+                default=math.inf,
+            )
+            inland_requested = min(inland_datum_requests, default=math.inf)
+            if (
+                candidate_offset + 1.0e-7 >= inland_requested
+                or edge_requested <= inland_requested
+            ):
+                lake_datum_offset = candidate_offset
 
     vertical_datum_offset = max(storage_datum_offset, lake_datum_offset)
     original = tuple(value - vertical_datum_offset for value in raw_original)
+    # Water eligibility must be evaluated in the same vertical datum that will
+    # be written to RVW4. Otherwise a lake that becomes valid after a safe
+    # whole-world rebase is still rejected using its obsolete source altitude.
+    renderable_source_water = renderable_water_mask(
+        original,
+        raster,
+        sea_level=spec.sea_level,
+        water_depth=spec.water_depth,
+    )
     field = _ConstraintField.create(len(original))
     if vertical_datum_offset > 0.0:
         reasons = []
         if storage_datum_offset > 0.0:
             reasons.append("fit RVW4 signed-16-bit height storage")
         if lake_datum_offset > 0.0:
-            reasons.append("fit elevated edge lakes to CWA's global water plane")
+            reasons.append("fit elevated lakes to CWA's global water plane")
         progress(
             3,
             f"Lowering whole-world terrain datum by {vertical_datum_offset:.1f} m to "
@@ -1230,12 +1339,42 @@ def solve_terrain_constraints(
     maximum_inland_water_surface = spec.sea_level + spec.water_depth
     inland_water_components: list[list[int]] = []
     elevated_inland_water_components: list[list[int]] = []
+    unrepresentable_inland_water_components: list[tuple[list[int], float]] = []
+    shoreline_cut_budget = max(
+        0.5,
+        float(getattr(spec, "beach_height", 3.0)),
+    )
+    immediate_bank_limit = (
+        spec.sea_level
+        + lake_rise_per_cell
+        + shoreline_cut_budget
+    )
     for component in mapped_inland_water_components:
         component_surface = median(original[index] for index in component)
-        if component_surface <= maximum_inland_water_surface:
-            inland_water_components.append(component)
-        else:
+        if component_surface > maximum_inland_water_surface:
             elevated_inland_water_components.append(component)
+            continue
+
+        bank_reference = _component_bank_reference_height(
+            component,
+            raster.water,
+            original,
+            spec.cells,
+        )
+        if (
+            bank_reference is not None
+            and bank_reference > immediate_bank_limit + 1.0e-7
+        ):
+            # A near-sea DEM value inside a tiny mapped pond is often a DEM
+            # void/water artefact, not evidence that a 90-230 m crater should be
+            # dug through the surrounding landscape. If the whole-world datum
+            # could not safely make the bank meet CWA's water plane, remove this
+            # lake and fill its cells from the surrounding dry terrain instead.
+            unrepresentable_inland_water_components.append(
+                (component, bank_reference)
+            )
+            continue
+        inland_water_components.append(component)
 
     selected_coastal_water_mask = _mask_from_components(coastal_water_components, len(original))
     selected_recentered_edge_lake_mask = _mask_from_components(
@@ -1277,8 +1416,26 @@ def solve_terrain_constraints(
         f"{len(recentered_edge_lake_components):,} recentered edge-lake, "
         f"{len(inland_water_components):,} renderable inland, "
         f"{len(elevated_edge_water_components) + len(elevated_inland_water_components):,} "
-        "elevated water component(s) preserved at DEM height"
+        "elevated water component(s) preserved at DEM height, "
+        f"{len(unrepresentable_inland_water_components):,} unrepresentable inland "
+        "lake component(s) removed"
     ))
+
+    # Remove impossible inland lakes by restoring their water-labelled DEM cells
+    # to the surrounding dry-land bank. This is intentionally lower priority than
+    # roads/buildings, so real infrastructure can still shape the filled terrain.
+    # Without this fill, merely disabling the water constraint would preserve a
+    # source DEM void and leave nearly the same crater without visible water.
+    for component, bank_reference in unrepresentable_inland_water_components:
+        for index in component:
+            field.apply(
+                index,
+                bank_reference,
+                priority=PRIORITY_NATURAL,
+                strength=1.0,
+                hard=True,
+                category="removed-unrepresentable-lake",
+            )
 
     # 1. Water bodies. Only conservative interior cells get the full depth.
     # Low-confidence shoreline cells that are already near sea level are held

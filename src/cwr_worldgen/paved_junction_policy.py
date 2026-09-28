@@ -265,9 +265,9 @@ def _generated_plan(
     *,
     world_name: str,
 ) -> _Plan | None:
-    """Build an exact-heading generated T only for stock-plan fallback."""
+    """Build an exact-heading generated T/X only for stock-plan fallback."""
 
-    if len(incidents) != 3 or not all(
+    if len(incidents) not in {3, 4} or not all(
         _kind(family) == "paved" for _direction_value, family in incidents
     ):
         return None
@@ -405,7 +405,8 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
     incidents = {}
     positions = {}
     for feature, projected in zip(
-        dataset.roads, _p.projected_road_polylines(dataset, projection)
+        dataset.roads,
+        _p._paved_junction_augmented_polylines(dataset, projection, spec),
     ):
         if not _p.road_is_supported(
             feature.tags, include_minor=spec.include_minor_roads
