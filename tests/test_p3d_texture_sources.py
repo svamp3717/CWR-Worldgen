@@ -10,6 +10,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
+import p3d_texture_io as texture_io
 from p3d_texture_io import NestedPBOAssetRef, PBOAssetRef
 from p3d_texture_sources import TextureResolver, sibling_namespace_pbo
 
@@ -117,4 +118,54 @@ def test_nested_texture_lookup_works_from_nested_model_source(tmp_path: Path) ->
     model_source = f"{wrapped}!addons\\inner.pbo!inner\\house.p3d"
 
     assert resolver.load_bytes(r"inner\wall.paa", model_source) == payload
+
+def test_nested_model_texture_lookup_targets_current_addon_and_reuses_cache(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    target = tmp_path / "target.pbo"
+    _write_pbo(
+        target,
+        {
+            "house.p3d": b"synthetic-model",
+            "wall1.paa": b"texture-one",
+            "wall2.paa": b"texture-two",
+        },
+    )
+
+    outer = tmp_path / "outer.pbo"
+    _write_pbo(
+        outer,
+        {
+            r"addons\target.pbo": target.read_bytes(),
+            r"addons\broken.pbo": b"this is deliberately not a PBO",
+        },
+    )
+    wrapped = tmp_path / "fast-textures.pbo.zst"
+    wrapped.write_bytes(zstandard.ZstdCompressor(level=1).compress(outer.read_bytes()))
+
+    real_open = texture_io.open_pbo_stream
+    opens = 0
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def counted_open(path):
+        nonlocal opens
+        opens += 1
+        with real_open(path) as handle:
+            yield handle
+
+    monkeypatch.setattr(texture_io, "open_pbo_stream", counted_open)
+
+    resolver = TextureResolver([wrapped])
+    source = f"{wrapped}!addons\\target.pbo!target\\house.p3d"
+
+    assert resolver.load_bytes(r"target\wall1.paa", source) == b"texture-one"
+    assert resolver.load_bytes(r"target\wall2.paa", source) == b"texture-two"
+
+    assert opens == 1
+    assert resolver.indexed_all is False
+    assert f"{wrapped}!addons\\target.pbo" in resolver.indexed_nested_sources
+    assert f"{wrapped}!addons\\broken.pbo" not in resolver.indexed_nested_sources
 
