@@ -22,6 +22,9 @@ from cwr_worldgen.procedural_forests import (
     cluster_model_path,
     generated_cluster_variant,
     is_generated_cluster_model,
+    VIETNAM_PROXY_MODELS,
+    VIETNAM_BORDER_PROXY_MODELS,
+    VIETNAM_DITCH_PROXY_MODELS,
 )
 from cwr_worldgen.wrp import _height_grid_bytes, inspect_rvw4, quantize_height, write_rvw4
 
@@ -91,6 +94,36 @@ def test_large_world_ordering_can_skip_clone_and_writer_renumbers(tmp_path: Path
     summary = inspect_rvw4(wrp, height_scale=0.05)
     assert summary.object_ids == (1, 2, 3, 4, 5, 6)
     assert summary.object_models == tuple(obj.model_path for obj in ordered)
+
+
+def test_vietnam_generated_forest_carriers_use_sebnam_obj_vegetation() -> None:
+    interior = generated_cluster_variant(
+        "testworld",
+        cluster_model_path("testworld", "pine", 0.0),
+        proxy_profile="vietnam",
+    )
+    border = generated_cluster_variant(
+        "testworld",
+        cluster_model_path("testworld", "border_thicket", 0.0),
+        proxy_profile="vietnam",
+    )
+    ditch = generated_cluster_variant(
+        "testworld",
+        cluster_model_path("testworld", "ditch_reeds", 0.0),
+        proxy_profile="vietnam",
+    )
+
+    assert interior is not None
+    assert border is not None
+    assert ditch is not None
+    assert {item[0] for item in interior[0].proxy_layout} <= set(VIETNAM_PROXY_MODELS)
+    assert {item[0] for item in border[0].proxy_layout} <= set(VIETNAM_BORDER_PROXY_MODELS)
+    assert {item[0] for item in ditch[0].proxy_layout} <= set(VIETNAM_DITCH_PROXY_MODELS)
+    assert all(
+        item[0].casefold().startswith("sebnam_obj\\")
+        for variant, _grade in (interior, border, ditch)
+        for item in variant.proxy_layout
+    )
 
 
 def test_cwa_flattens_generated_vegetation_carrier_into_direct_wrp_objects() -> None:
