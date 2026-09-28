@@ -382,13 +382,19 @@ def default_osm_asset_mapping(spec: Any, milestone_number: int, *, global_textur
         rules.append(_rule("wetland-reeds", ("rural_vegetation",), {"natural": "wetland"}, models=tuple(getattr(spec, "wetland_reed_models", ())), geometry="polygon"))
     if milestone_number >= 9:
         if int(getattr(spec, "maximum_mapped_tree_objects", 5000)) != 0:
-            rules.append(_rule(
-                "mapped-individual-trees", ("individual_trees",), {"natural": "tree"},
-                models=(
+            mapped_tree_models = (
+                tuple(getattr(spec, "forest_roadside_tree_models", ()))
+                if str(getattr(spec, "forest_profile", "")).casefold() == "vietnam"
+                else (
                     r"data3d\str briza.p3d", r"data3d\str dub.p3d", r"data3d\str javor.p3d",
                     r"data3d\str lipa.p3d", r"data3d\str vrba.p3d", r"data3d\str smrk.p3d",
                     r"data3d\str borovice.p3d", r"data3d\str jedle.p3d",
-                ), geometry="point", description="Stock CWA models used for individually mapped OSM trees",
+                )
+            )
+            rules.append(_rule(
+                "mapped-individual-trees", ("individual_trees",), {"natural": "tree"},
+                models=mapped_tree_models, geometry="point",
+                description="Selected forest-profile models used for individually mapped OSM trees",
             ))
         world_name = getattr(spec, "name", "cwr_world")
         rules.append(_rule(
