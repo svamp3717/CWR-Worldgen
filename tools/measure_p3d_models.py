@@ -30,6 +30,7 @@ import struct
 import sys
 from typing import Iterator, Sequence
 
+from cwr_worldgen import assets as world_assets
 from cwr_worldgen.pbo import _skip_exact as _skip_pbo_bytes
 from cwr_worldgen.pbo import is_pbo_path, open_pbo_stream, pbo_stem
 
@@ -379,59 +380,137 @@ def measure_p3d(data: bytes, *, model_path: str, source: str) -> ModelMeasuremen
     raise ModelReadError(f"unsupported P3D signature {signature!r}")
 
 
-def _pbo_entries(path: Path) -> Iterator[tuple[str, bytes]]:
+def _pbo_header(stream) -> tuple[list[tuple[str, int, int, int]], dict[str, str]]:
     metadata: list[tuple[str, int, int, int]] = []
     properties: dict[str, str] = {}
-
-    with open_pbo_stream(path) as stream:
-        while True:
-            name = _read_cstring(stream, "PBO entry name")
-            fields = _read_exact(stream, _PBO_ENTRY.size, "PBO entry header")
-            packing, original_size, reserved, timestamp, data_size = _PBO_ENTRY.unpack(fields)
-            if data_size > _MAX_PBO_ENTRY_SIZE or original_size > _MAX_PBO_ENTRY_SIZE:
-                raise ModelReadError(f"implausible PBO entry size for {name!r}")
-            if not name:
-                if packing == _PBO_PROPERTIES:
-                    while True:
-                        key = _read_cstring(stream, "PBO property key")
-                        if not key:
-                            break
-                        properties[key.casefold()] = _read_cstring(stream, "PBO property value")
-                    continue
-                if _is_pbo_header_terminator(
-                    packing, original_size, reserved, timestamp, data_size
-                ):
-                    break
-                raise ModelReadError(
-                    "unsupported PBO extension record "
-                    f"(packing={packing:#x}, original_size={original_size}, "
-                    f"reserved={reserved}, timestamp={timestamp}, data_size={data_size})"
-                )
-            metadata.append((name, packing, original_size, data_size))
-
-        prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or pbo_stem(path)
-        canonical_prefix = _canonical_model_path(prefix)
-        for name, packing, original_size, data_size in metadata:
-            combined = name.replace("/", "\\").lstrip("\\")
-            if canonical_prefix and not _canonical_model_path(combined).startswith(
-                canonical_prefix + "\\"
-            ):
-                combined = prefix + "\\" + combined
-            model_path = _canonical_model_path(combined)
-            if not model_path.endswith(".p3d"):
-                _skip_pbo_bytes(stream, data_size, f"PBO entry {name!r}")
+    while True:
+        name = _read_cstring(stream, "PBO entry name")
+        fields = _read_exact(stream, _PBO_ENTRY.size, "PBO entry header")
+        packing, original_size, reserved, timestamp, data_size = _PBO_ENTRY.unpack(fields)
+        if data_size > _MAX_PBO_ENTRY_SIZE or original_size > _MAX_PBO_ENTRY_SIZE:
+            raise ModelReadError(f"implausible PBO entry size for {name!r}")
+        if not name:
+            if packing == _PBO_PROPERTIES:
+                while True:
+                    key = _read_cstring(stream, "PBO property key")
+                    if not key:
+                        break
+                    properties[key.casefold()] = _read_cstring(stream, "PBO property value")
                 continue
+            if _is_pbo_header_terminator(
+                packing, original_size, reserved, timestamp, data_size
+            ):
+                break
+            raise ModelReadError(
+                "unsupported PBO extension record "
+                f"(packing={packing:#x}, original_size={original_size}, "
+                f"reserved={reserved}, timestamp={timestamp}, data_size={data_size})"
+            )
+        metadata.append((name, packing, original_size, data_size))
+    return metadata, properties
 
-            stored = _read_exact(stream, data_size, f"PBO entry {name!r}")
-            if packing == 0:
-                data = stored
-            elif packing == _PBO_COMPRESSED:
-                data = _decompress_lzss_pbo(stored, original_size)
-            else:
-                raise ModelReadError(
-                    f"unsupported PBO packing method {packing:#x} for {model_path}"
+
+def _pbo_prefix(
+    properties: dict[str, str],
+    metadata: Sequence[tuple[str, int, int, int]],
+    fallback: str,
+) -> str:
+    return world_assets._effective_pbo_prefix(properties, metadata, fallback)
+
+
+def _read_pbo_member(
+    stream,
+    *,
+    name: str,
+    packing: int,
+    original_size: int,
+    data_size: int,
+) -> bytes:
+    stored = _read_exact(stream, data_size, f"PBO entry {name!r}")
+    if packing == 0:
+        return stored
+    if packing == _PBO_COMPRESSED:
+        return _decompress_lzss_pbo(stored, original_size)
+    raise ModelReadError(
+        f"unsupported PBO packing method {packing:#x} for {name!r}"
+    )
+
+
+def _pbo_entries_from_stream(
+    stream,
+    *,
+    source: str,
+    fallback_prefix: str,
+    depth: int = 0,
+) -> Iterator[tuple[str, str, bytes]]:
+    """Yield P3Ds from one PBO stream and nested addon PBO members."""
+    metadata, properties = _pbo_header(stream)
+    prefix = _pbo_prefix(properties, metadata, fallback_prefix)
+    canonical_prefix = _canonical_model_path(prefix)
+
+    for name, packing, original_size, data_size in metadata:
+        combined = name.replace("/", "\\").lstrip("\\")
+        if canonical_prefix and not _canonical_model_path(combined).startswith(
+            canonical_prefix + "\\"
+        ):
+            combined = prefix + "\\" + combined
+        model_path = _canonical_model_path(combined)
+        suffix = Path(name.replace("\\", "/")).suffix.casefold()
+
+        if model_path.endswith(".p3d"):
+            data = _read_pbo_member(
+                stream,
+                name=name,
+                packing=packing,
+                original_size=original_size,
+                data_size=data_size,
+            )
+            yield model_path, source + "!" + model_path, data
+            continue
+
+        if suffix == ".pbo" and depth < 4:
+            try:
+                nested = _read_pbo_member(
+                    stream,
+                    name=name,
+                    packing=packing,
+                    original_size=original_size,
+                    data_size=data_size,
                 )
-            yield model_path, data
+                member = name.replace("/", "\\")
+                nested_source = source + "!" + member
+                nested_fallback = pbo_stem(Path(name.replace("\\", "/")).name)
+                with io.BytesIO(nested) as nested_stream:
+                    yield from _pbo_entries_from_stream(
+                        nested_stream,
+                        source=nested_source,
+                        fallback_prefix=nested_fallback,
+                        depth=depth + 1,
+                    )
+            except (ModelReadError, UnicodeDecodeError) as exc:
+                print(
+                    f"[nested PBO warning] {source}!{name}: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            continue
+
+        _skip_pbo_bytes(stream, data_size, f"PBO entry {name!r}")
+
+
+def _pbo_entries(path: Path) -> Iterator[tuple[str, bytes]]:
+    """Yield canonical model paths and bytes, including nested addon PBOs."""
+    for model_path, _source, data in _pbo_entries_with_sources(path):
+        yield model_path, data
+
+
+def _pbo_entries_with_sources(path: Path) -> Iterator[tuple[str, str, bytes]]:
+    with open_pbo_stream(path) as stream:
+        yield from _pbo_entries_from_stream(
+            stream,
+            source=str(path),
+            fallback_prefix=pbo_stem(path),
+        )
 
 def _matches(model_path: str, patterns: Sequence[str]) -> bool:
     if not patterns:
@@ -440,48 +519,65 @@ def _matches(model_path: str, patterns: Sequence[str]) -> bool:
     return any(fnmatch.fnmatchcase(folded, _canonical_model_path(pattern)) for pattern in patterns)
 
 
-def _pbo_model_paths(path: Path) -> Iterator[str]:
-    """Yield canonical P3D paths from a raw or Zstd-wrapped PBO header."""
-    with open_pbo_stream(path) as stream:
-        metadata: list[tuple[str, int]] = []
-        properties: dict[str, str] = {}
+def _pbo_model_paths_from_stream(
+    stream,
+    *,
+    fallback_prefix: str,
+    depth: int = 0,
+) -> Iterator[str]:
+    """Yield model paths while only reading nested containers and PBO headers."""
+    metadata, properties = _pbo_header(stream)
+    prefix = _pbo_prefix(properties, metadata, fallback_prefix)
+    canonical_prefix = _canonical_model_path(prefix)
 
-        while True:
-            name = _read_cstring(stream, "PBO entry name")
-            fields = _read_exact(stream, _PBO_ENTRY.size, "PBO entry header")
-            packing, original_size, reserved, timestamp, data_size = _PBO_ENTRY.unpack(fields)
-            if data_size > _MAX_PBO_ENTRY_SIZE or original_size > _MAX_PBO_ENTRY_SIZE:
-                raise ModelReadError(f"implausible PBO entry size for {name!r}")
-            if not name:
-                if packing == _PBO_PROPERTIES:
-                    while True:
-                        key = _read_cstring(stream, "PBO property key")
-                        if not key:
-                            break
-                        properties[key.casefold()] = _read_cstring(stream, "PBO property value")
-                    continue
-                if _is_pbo_header_terminator(
-                    packing, original_size, reserved, timestamp, data_size
-                ):
-                    break
-                raise ModelReadError(
-                    "unsupported PBO extension record "
-                    f"(packing={packing:#x}, original_size={original_size}, "
-                    f"reserved={reserved}, timestamp={timestamp}, data_size={data_size})"
+    for name, packing, original_size, data_size in metadata:
+        combined = name.replace("/", "\\").lstrip("\\")
+        if canonical_prefix and not _canonical_model_path(combined).startswith(
+            canonical_prefix + "\\"
+        ):
+            combined = prefix + "\\" + combined
+        canonical = _canonical_model_path(combined)
+        suffix = Path(name.replace("\\", "/")).suffix.casefold()
+
+        if canonical.endswith(".p3d"):
+            yield canonical
+            _skip_pbo_bytes(stream, data_size, f"PBO entry {name!r}")
+            continue
+
+        if suffix == ".pbo" and depth < 4:
+            try:
+                nested = _read_pbo_member(
+                    stream,
+                    name=name,
+                    packing=packing,
+                    original_size=original_size,
+                    data_size=data_size,
                 )
-            metadata.append((name, data_size))
+                nested_fallback = pbo_stem(Path(name.replace("\\", "/")).name)
+                with io.BytesIO(nested) as nested_stream:
+                    yield from _pbo_model_paths_from_stream(
+                        nested_stream,
+                        fallback_prefix=nested_fallback,
+                        depth=depth + 1,
+                    )
+            except (ModelReadError, UnicodeDecodeError) as exc:
+                print(
+                    f"[nested PBO count warning] {name}: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            continue
 
-        prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or pbo_stem(path)
-        canonical_prefix = _canonical_model_path(prefix)
-        for name, _data_size in metadata:
-            combined = name.replace("/", "\\").lstrip("\\")
-            if canonical_prefix and not _canonical_model_path(combined).startswith(
-                canonical_prefix + "\\"
-            ):
-                combined = prefix + "\\" + combined
-            canonical = _canonical_model_path(combined)
-            if canonical.endswith(".p3d"):
-                yield canonical
+        _skip_pbo_bytes(stream, data_size, f"PBO entry {name!r}")
+
+
+def _pbo_model_paths(path: Path) -> Iterator[str]:
+    """Yield canonical P3D paths from raw/wrapped PBOs and nested addon PBOs."""
+    with open_pbo_stream(path) as stream:
+        yield from _pbo_model_paths_from_stream(
+            stream,
+            fallback_prefix=pbo_stem(path),
+        )
 
 def count_models(inputs: Sequence[Path], patterns: Sequence[str] = ()) -> int:
     """Count models the scanner will browse without parsing/decompressing their P3Ds."""
@@ -561,9 +657,9 @@ def _iter_models(inputs: Sequence[Path], patterns: Sequence[str]) -> Iterator[tu
         if resolved in seen_pbos:
             return
         seen_pbos.add(resolved)
-        for model_path, data in _pbo_entries(path):
+        for model_path, source, data in _pbo_entries_with_sources(path):
             if _matches(model_path, patterns):
-                yield model_path, f"{path}!{model_path}", data
+                yield model_path, source, data
 
     for raw_input in inputs:
         path = raw_input.expanduser()
