@@ -13,6 +13,8 @@ import struct
 import subprocess
 from typing import BinaryIO, Iterable, Iterator
 
+import zstandard as zstd
+
 from .cache import atomic_write_json, cache_key
 
 _ENTRY_FIELDS = struct.Struct("<IIIII")
@@ -61,13 +63,6 @@ def open_pbo_stream(path: Path | str) -> Iterator[BinaryIO]:
         if magic != _ZSTD_MAGIC:
             yield raw
             return
-
-        try:
-            import zstandard as zstd
-        except ImportError as exc:
-            raise RuntimeError(
-                "Zstandard-wrapped PBO support requires the zstandard package"
-            ) from exc
 
         decoder = zstd.ZstdDecompressor()
         try:
