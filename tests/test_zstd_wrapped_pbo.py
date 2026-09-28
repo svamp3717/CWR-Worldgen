@@ -88,3 +88,42 @@ def test_pbo_zst_extension_is_supported(tmp_path: Path) -> None:
 def test_zstd_magic_is_detected_even_when_file_is_named_pbo(tmp_path: Path) -> None:
     wrapped, payloads = _wrapped_fixture(tmp_path, "misnamed.pbo")
     _assert_wrapped_archive_works(wrapped, payloads)
+
+def test_wrapped_mod_package_indexes_nested_addon_pbos(tmp_path: Path) -> None:
+    inner = tmp_path / "inner.pbo"
+    inner_payloads = {
+        "thing.p3d": b"ODOL nested synthetic model bytes",
+        "thing.paa": b"nested synthetic texture bytes",
+    }
+    write_pbo(inner, (PboEntry(name, data) for name, data in inner_payloads.items()))
+
+    outer = tmp_path / "outer.pbo"
+    write_pbo(
+        outer,
+        (
+            PboEntry(r"addons\inner.pbo", inner.read_bytes()),
+            PboEntry(r"lib_models\direct.p3d", b"ODOL direct synthetic model bytes"),
+            PboEntry(r"lib_models\direct.paa", b"direct synthetic texture bytes"),
+        ),
+    )
+    wrapped = tmp_path / "package.pbo.zst"
+    wrapped.write_bytes(zstandard.ZstdCompressor(level=1).compress(outer.read_bytes()))
+
+    records, error = assets._pbo_records(wrapped)
+    assert error is None
+    by_path = {record.path: record for record in records}
+    assert {
+        r"inner\thing.p3d",
+        r"inner\thing.paa",
+        r"lib_models\direct.p3d",
+        r"lib_models\direct.paa",
+    }.issubset(by_path)
+
+    nested_record = by_path[r"inner\thing.paa"]
+    assert nested_record.source.endswith(r"!addons\inner.pbo")
+    assert assets.read_asset_record_bytes(nested_record) == inner_payloads["thing.paa"]
+
+    direct_record = by_path[r"lib_models\direct.paa"]
+    assert direct_record.source == str(wrapped)
+    assert assets.read_asset_record_bytes(direct_record) == b"direct synthetic texture bytes"
+
