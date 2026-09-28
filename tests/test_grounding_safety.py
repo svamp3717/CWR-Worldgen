@@ -3,7 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from cwr_worldgen.milestone9 import Milestone9Spec, _Milestone9PlayabilitySpec
+from cwr_worldgen.milestone9 import (
+    Milestone9Spec,
+    _Milestone9PlayabilitySpec,
+    _resolved_forest_profile_models,
+    VIETNAM_FOREST_BLOCK_MODEL,
+    VIETNAM_FOREST_STEEP_MODEL,
+    VIETNAM_SINGLE_TREE_MODEL,
+    VIETNAM_ROADSIDE_TREE_MODELS,
+    VIETNAM_BUSH_MODELS,
+    VIETNAM_WETLAND_REED_MODELS,
+)
 from cwr_worldgen.model import TerrainShearedWorldObject, WorldObject
 from cwr_worldgen.osm import (
     BboxProjection,
@@ -107,6 +117,19 @@ def test_milestone9_forest_defaults_prefer_ground_contact_and_small_models() -> 
     assert spec.forest_gap_infill_spacing == 25.0
     assert spec.forest_cluster_tree_maximum_float == 0.20
     assert spec.forest_cluster_bush_maximum_float == 0.60
+
+
+def test_vietnam_profile_maps_defaults_to_measured_seb_ia_drang_assets() -> None:
+    spec = Milestone9Spec(source_dir=Path("unused"), forest_profile="vietnam")
+    models = _resolved_forest_profile_models(spec)
+
+    assert models["forest_tree_model"] == VIETNAM_FOREST_BLOCK_MODEL
+    assert models["forest_everon_steep_model"] == VIETNAM_FOREST_STEEP_MODEL
+    assert models["forest_single_tree_model"] == VIETNAM_SINGLE_TREE_MODEL
+    assert models["forest_roadside_tree_models"] == VIETNAM_ROADSIDE_TREE_MODELS
+    assert models["forest_roadside_bush_models"] == VIETNAM_BUSH_MODELS
+    assert models["steep_hill_bush_models"] == VIETNAM_BUSH_MODELS
+    assert models["wetland_reed_models"] == VIETNAM_WETLAND_REED_MODELS
 
 
 def test_final_vegetation_audit_detects_floating_individual_tree() -> None:
