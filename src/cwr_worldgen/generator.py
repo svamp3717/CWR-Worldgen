@@ -1822,7 +1822,7 @@ def _modded_road_variant_availability(
         candidates_by_donor[_road_model_key(donor)] = candidates
         requested.extend(candidates)
 
-    scan = _asset_catalogue.scan_assets(
+    scan = locate_assets_fast(
         spec.asset_roots,
         tuple(dict.fromkeys(requested)),
         cache_dir=getattr(spec, "cache_dir", None),
