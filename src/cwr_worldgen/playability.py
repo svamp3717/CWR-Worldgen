@@ -56,6 +56,17 @@ _ACTIVE_ROAD_TAGS: ContextVar[Mapping[str, str] | None] = ContextVar(
     default=None,
 )
 
+_ROAD_MODEL_VARIANTS_AVAILABLE: ContextVar[
+    Mapping[str, frozenset[str]] | None
+] = ContextVar(
+    "cwr_road_model_variants_available",
+    default=None,
+)
+
+
+def _road_model_key(value: str) -> str:
+    return str(value).replace("/", "\\").strip().lstrip("\\").casefold()
+
 
 @dataclass(frozen=True, slots=True)
 class RoadFitReport:
@@ -800,6 +811,9 @@ def road_model_variants(model_path: str, configured_long_length: float) -> tuple
     gravel = is_generated_gravel_road_model(model_path)
     nominals = (25, 12, 6, 3) if gravel else (25, 12, 6)
     pieces: list[_RoadPiece] = []
+    availability = _ROAD_MODEL_VARIANTS_AVAILABLE.get()
+    base_key = _road_model_key(model_path)
+    available = availability.get(base_key) if availability is not None else None
     for nominal in nominals:
         if nominal == 3 and gravel:
             world_name = model_path.split("\\", 1)[0]
@@ -807,6 +821,16 @@ def road_model_variants(model_path: str, configured_long_length: float) -> tuple
         else:
             path = _road_model_with_length(model_path, nominal)
         if path is None:
+            continue
+        # Stock families retain their historical deterministic sibling catalogue.
+        # For configured mod families, the generator installs an availability map
+        # from the actual asset roots so we never reference a sibling P3D that the
+        # mod does not contain.
+        if (
+            available is not None
+            and _road_model_key(path) != base_key
+            and _road_model_key(path) not in available
+        ):
             continue
         pieces.append(_RoadPiece(path, configured_long_length * nominal / 25.0, nominal))
     return tuple(pieces)
