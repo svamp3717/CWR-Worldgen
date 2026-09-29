@@ -10,6 +10,7 @@ from typing import Mapping, Sequence
 
 from . import generator as _generator
 from . import playability as _p
+from . import procedural_infrastructure as _pi
 
 _JUNCTION_OVERLAP = 0.22
 _JUNCTION_MARGIN = 0.14
@@ -294,6 +295,9 @@ def _quality_chain(measure, pieces, *, start_distance, preferred_end_distance, m
 
 
 def _piece_length(model_path: str, configured_long_length: float) -> float:
+    custom = _pi.custom_road_model_signature(model_path)
+    if custom is not None:
+        return custom[2]
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
     match = _PIECE_LENGTH_PATTERN.search(filename)
     return configured_long_length if match is None else configured_long_length * int(match.group(1)) / 25.0
