@@ -1871,7 +1871,7 @@ def _modded_road_model_dimensions(
     spec: PlayabilitySpec,
     effective_donors: dict[str, str] | None = None,
 ) -> dict[str, tuple[float, float]]:
-    """Measure configured mod road donors so generated shapes meet them cleanly."""
+    """Measure configured mod straight donors and every real length sibling."""
 
     stock_defaults = {
         _road_model_key(r"o\road\sil25.p3d"),
@@ -1894,9 +1894,16 @@ def _modded_road_model_dimensions(
     if not donors or not tuple(getattr(spec, "asset_roots", ()) or ()):
         return {}
 
-    scan = _asset_catalogue.scan_assets(
+    requested = tuple(dict.fromkeys(
+        candidate
+        for donor in donors
+        for candidate in road_model_variant_paths(
+            donor, float(getattr(spec, "road_segment_length", 25.0))
+        )
+    ))
+    scan = scan_assets(
         spec.asset_roots,
-        donors,
+        requested,
         cache_dir=getattr(spec, "cache_dir", None),
         use_cache=bool(getattr(spec, "cache_enabled", True)),
         refresh=bool(getattr(spec, "cache_refresh", False)),
@@ -1904,15 +1911,8 @@ def _modded_road_model_dimensions(
     by_path = {record.path: record for record in scan.records}
     result: dict[str, tuple[float, float]] = {}
 
-    candidate_paths: list[str] = []
-    for donor in donors:
-        candidate_paths.append(donor)
-        candidate_paths.extend(
-            road_model_variant_paths(donor, spec.road_segment_length)
-        )
-
-    for model_path in dict.fromkeys(candidate_paths):
-        key = _road_model_key(model_path)
+    for candidate in requested:
+        key = _road_model_key(candidate)
         record = by_path.get(key)
         if record is None:
             continue
@@ -1957,6 +1957,15 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
         str(getattr(spec, "gravel_road_model", "") or ""),
         spec.dirt_road_model,
     ]
+    configured_curve_roads = tuple(
+        value
+        for value in (
+            str(getattr(spec, "paved_road_curve_model", "") or "").strip(),
+            str(getattr(spec, "gravel_road_curve_model", "") or "").strip(),
+            str(getattr(spec, "dirt_road_curve_model", "") or "").strip(),
+        )
+        if value
+    )
     road_models = {
         canonical_asset_path(path)
         for configured in configured_roads
@@ -1968,6 +1977,7 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
     }
     trusted = {
         *road_models,
+        *(canonical_asset_path(path) for path in configured_curve_roads),
         canonical_asset_path(spec.forest_tree_model),
     }
     if milestone_number >= 9:
@@ -3955,13 +3965,16 @@ def build_milestone4(
     dirt_texture_path: str | None = None
 
     road_texture_donors: dict[str, str] = {}
+    paved_curve = str(getattr(spec, "paved_road_curve_model", "") or "").strip()
+    gravel_curve = str(getattr(spec, "gravel_road_curve_model", "") or "").strip()
+    dirt_curve = str(getattr(spec, "dirt_road_curve_model", "") or "").strip()
     if generated_paved_usage:
-        road_texture_donors["paved"] = spec.paved_road_model
+        road_texture_donors["paved"] = paved_curve or spec.paved_road_model
     configured_gravel = str(getattr(spec, "gravel_road_model", "") or "").strip()
-    if generated_gravel_usage and configured_gravel:
-        road_texture_donors["gravel"] = configured_gravel
+    if generated_gravel_usage and (gravel_curve or configured_gravel):
+        road_texture_donors["gravel"] = gravel_curve or configured_gravel
     if generated_dirt_usage:
-        road_texture_donors["dirt"] = spec.dirt_road_model
+        road_texture_donors["dirt"] = dirt_curve or spec.dirt_road_model
 
     if road_texture_donors:
         report_progress(79, "Resolving road textures from configured stock/modded donor models")
