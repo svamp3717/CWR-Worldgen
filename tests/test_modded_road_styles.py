@@ -497,16 +497,25 @@ def test_milestone9_cli_accepts_modded_road_donor_flags() -> None:
             "build",
             "--paved-road-model",
             r"myroads\paved25.p3d",
+            "--paved-road-curve-model",
+            r"myroads\paved_curve.p3d",
             "--gravel-road-model",
             r"myroads\gravel25.p3d",
+            "--gravel-road-curve-model",
+            r"myroads\gravel_curve.p3d",
             "--dirt-road-model",
             r"myroads\track25.p3d",
+            "--dirt-road-curve-model",
+            r"myroads\track_curve.p3d",
         ]
     )
 
     assert args.paved_road_model == r"myroads\paved25.p3d"
+    assert args.paved_road_curve_model == r"myroads\paved_curve.p3d"
     assert args.gravel_road_model == r"myroads\gravel25.p3d"
+    assert args.gravel_road_curve_model == r"myroads\gravel_curve.p3d"
     assert args.dirt_road_model == r"myroads\track25.p3d"
+    assert args.dirt_road_curve_model == r"myroads\track_curve.p3d"
 
 
 @pytest.mark.parametrize("command", ("milestone5", "milestone6", "milestone7", "milestone8", "milestone9"))
