@@ -613,8 +613,11 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         ("--cache-dir", "cache_dir"),
         ("--max-road-objects", "max_road_objects"),
         ("--paved-road-model", "paved_road_model"),
+        ("--paved-road-curve-model", "paved_road_curve_model"),
         ("--gravel-road-model", "gravel_road_model"),
+        ("--gravel-road-curve-model", "gravel_road_curve_model"),
         ("--dirt-road-model", "dirt_road_model"),
+        ("--dirt-road-curve-model", "dirt_road_curve_model"),
         ("--max-buildings", "max_buildings"),
         ("--building-ground-clearance", "building_ground_clearance"),
         ("--church-ground-clearance", "church_ground_clearance"),
@@ -952,8 +955,11 @@ def default_gui_values() -> dict[str, object]:
         "keep_output": False,
         "include_minor_roads": True,
         "paved_road_model": r"o\road\sil25.p3d",
+        "paved_road_curve_model": "",
         "gravel_road_model": "",
+        "gravel_road_curve_model": "",
         "dirt_road_model": r"o\road\ces25.p3d",
+        "dirt_road_curve_model": "",
         "cache_refresh": False,
         "no_cache": False,
         "normalization_refresh": False,
@@ -2181,21 +2187,31 @@ class WorldgenGui(tk.Tk):
         ttk.Label(
             road_models,
             text=(
-                "Choose stock or modded straight road P3Ds. When a required bend/length "
-                "does not exist, Worldgen generates the missing shape using the donor "
-                "road's embedded texture. Add the containing mod/PBO under Asset roots."
+                "Set a straight donor for placement and an optional curve donor for style. "
+                "Worldgen reuses real straight siblings where available and generates missing "
+                "bends/lengths using the selected road family's texture. Add the containing "
+                "mod/PBO under Asset roots."
             ),
             style="Hint.TLabel",
             wraplength=760,
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
         self._entry_row(
-            road_models, 1, "Paved donor P3D", "paved_road_model", advanced=True
+            road_models, 1, "Paved straight P3D", "paved_road_model", advanced=True
         )
         self._entry_row(
-            road_models, 2, "Gravel donor P3D (optional)", "gravel_road_model", advanced=True
+            road_models, 2, "Paved curve P3D (optional)", "paved_road_curve_model", advanced=True
         )
         self._entry_row(
-            road_models, 3, "Dirt-track donor P3D", "dirt_road_model", advanced=True
+            road_models, 3, "Gravel straight P3D (optional)", "gravel_road_model", advanced=True
+        )
+        self._entry_row(
+            road_models, 4, "Gravel curve P3D (optional)", "gravel_road_curve_model", advanced=True
+        )
+        self._entry_row(
+            road_models, 5, "Dirt-track straight P3D", "dirt_road_model", advanced=True
+        )
+        self._entry_row(
+            road_models, 6, "Dirt-track curve P3D (optional)", "dirt_road_curve_model", advanced=True
         )
 
         tuning = ttk.LabelFrame(advanced.body, text="Limits and solver", padding=10)
