@@ -881,7 +881,13 @@ def road_model_variants(model_path: str, configured_long_length: float) -> tuple
             and _road_model_key(path) not in available
         ):
             continue
-        pieces.append(_RoadPiece(path, long_length * nominal / 25.0, nominal))
+        measured_piece = road_model_dimensions(path)
+        piece_length = (
+            float(measured_piece[1])
+            if measured_piece is not None
+            else long_length * nominal / 25.0
+        )
+        pieces.append(_RoadPiece(path, piece_length, nominal))
     return tuple(pieces)
 
 
