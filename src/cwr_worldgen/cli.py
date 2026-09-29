@@ -115,26 +115,32 @@ def _add_road_model_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--paved-road-model",
         default=r"o\road\sil25.p3d",
-        help=(
-            "stock or modded paved donor P3D; existing sibling pieces are reused "
-            "and its texture/style is reused by generated missing shapes"
-        ),
+        help="straight paved donor P3D used for placement and sibling discovery",
+    )
+    parser.add_argument(
+        "--paved-road-curve-model",
+        default="",
+        help="optional paved curve donor P3D used as the generated-bend style reference",
     )
     parser.add_argument(
         "--gravel-road-model",
         default="",
-        help=(
-            "optional stock/modded gravel donor P3D; blank keeps Worldgen's "
-            "generated gravel family"
-        ),
+        help="optional straight gravel donor P3D; blank keeps Worldgen's generated gravel family",
+    )
+    parser.add_argument(
+        "--gravel-road-curve-model",
+        default="",
+        help="optional gravel curve donor P3D used as the generated-bend style reference",
     )
     parser.add_argument(
         "--dirt-road-model",
         default=r"o\road\ces25.p3d",
-        help=(
-            "stock or modded dirt-track donor P3D; existing sibling pieces are "
-            "reused and its texture/style is reused by generated missing shapes"
-        ),
+        help="straight dirt-track donor P3D used for placement and sibling discovery",
+    )
+    parser.add_argument(
+        "--dirt-road-curve-model",
+        default="",
+        help="optional dirt-track curve donor P3D used as the generated-bend style reference",
     )
 
 
@@ -170,8 +176,11 @@ def _osm_kwargs(args: argparse.Namespace) -> dict[str, object]:
         "coastline_blend_cells": args.coast_blend_cells,
         "road_segment_length": args.road_segment_length,
         "paved_road_model": args.paved_road_model,
+        "paved_road_curve_model": args.paved_road_curve_model,
         "gravel_road_model": args.gravel_road_model,
+        "gravel_road_curve_model": args.gravel_road_curve_model,
         "dirt_road_model": args.dirt_road_model,
+        "dirt_road_curve_model": args.dirt_road_curve_model,
         "max_road_objects": args.max_road_objects,
         "max_buildings": args.max_buildings,
         "building_minimum_area": args.building_min_area,
@@ -874,8 +883,11 @@ def main(argv: list[str] | None = None) -> int:
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
                 paved_road_model=args.paved_road_model,
+                paved_road_curve_model=args.paved_road_curve_model,
                 gravel_road_model=args.gravel_road_model,
+                gravel_road_curve_model=args.gravel_road_curve_model,
                 dirt_road_model=args.dirt_road_model,
+                dirt_road_curve_model=args.dirt_road_curve_model,
                 max_road_objects=args.max_road_objects,
                 max_buildings=args.max_buildings,
                 building_minimum_area=args.building_min_area,
@@ -924,8 +936,11 @@ def main(argv: list[str] | None = None) -> int:
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
                 paved_road_model=args.paved_road_model,
+                paved_road_curve_model=args.paved_road_curve_model,
                 gravel_road_model=args.gravel_road_model,
+                gravel_road_curve_model=args.gravel_road_curve_model,
                 dirt_road_model=args.dirt_road_model,
+                dirt_road_curve_model=args.dirt_road_curve_model,
                 max_road_objects=args.max_road_objects,
                 max_buildings=args.max_buildings,
                 building_minimum_area=args.building_min_area,
@@ -974,8 +989,11 @@ def main(argv: list[str] | None = None) -> int:
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
                 paved_road_model=args.paved_road_model,
+                paved_road_curve_model=args.paved_road_curve_model,
                 gravel_road_model=args.gravel_road_model,
+                gravel_road_curve_model=args.gravel_road_curve_model,
                 dirt_road_model=args.dirt_road_model,
+                dirt_road_curve_model=args.dirt_road_curve_model,
                 max_road_objects=args.max_road_objects,
                 max_buildings=args.max_buildings,
                 building_minimum_area=args.building_min_area,
@@ -1034,8 +1052,11 @@ def main(argv: list[str] | None = None) -> int:
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
                 paved_road_model=args.paved_road_model,
+                paved_road_curve_model=args.paved_road_curve_model,
                 gravel_road_model=args.gravel_road_model,
+                gravel_road_curve_model=args.gravel_road_curve_model,
                 dirt_road_model=args.dirt_road_model,
+                dirt_road_curve_model=args.dirt_road_curve_model,
                 max_road_objects=args.max_road_objects,
                 max_buildings=args.max_buildings,
                 building_minimum_area=args.building_min_area,
@@ -1116,8 +1137,11 @@ def main(argv: list[str] | None = None) -> int:
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
                 paved_road_model=args.paved_road_model,
+                paved_road_curve_model=args.paved_road_curve_model,
                 gravel_road_model=args.gravel_road_model,
+                gravel_road_curve_model=args.gravel_road_curve_model,
                 dirt_road_model=args.dirt_road_model,
+                dirt_road_curve_model=args.dirt_road_curve_model,
                 max_road_objects=args.max_road_objects,
                 max_buildings=args.max_buildings,
                 building_minimum_area=args.building_min_area,
