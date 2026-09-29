@@ -1931,6 +1931,8 @@ class ProceduralInfrastructureLibrary:
         *,
         road_segment_length: float = 24.5,
         paved_texture_path: str = r"landtext\silnice.pac",
+        gravel_texture_path: str | None = None,
+        dirt_texture_path: str | None = None,
         cache_dir: Path | None = None,
         cache_enabled: bool = True,
         cache_refresh: bool = False,
@@ -1938,6 +1940,16 @@ class ProceduralInfrastructureLibrary:
         self.world_name = world_name
         self.road_segment_length = float(road_segment_length)
         self.paved_texture_path = str(paved_texture_path).replace("/", "\\").strip("\\")
+        self.gravel_texture_path = (
+            str(gravel_texture_path).replace("/", "\\").strip("\\")
+            if gravel_texture_path
+            else None
+        )
+        self.dirt_texture_path = (
+            str(dirt_texture_path).replace("/", "\\").strip("\\")
+            if dirt_texture_path
+            else None
+        )
         if not self.paved_texture_path:
             raise ValueError("paved texture path must not be empty")
         if not math.isfinite(self.road_segment_length) or self.road_segment_length <= 0.0:
@@ -2099,6 +2111,10 @@ class ProceduralInfrastructureLibrary:
         kind = _infrastructure_texture_kind(key)
         if kind == "paved":
             return self.paved_texture_path
+        if kind in {"gravel", "gravel_junction"} and self.gravel_texture_path:
+            return self.gravel_texture_path
+        if kind == "dirt" and self.dirt_texture_path:
+            return self.dirt_texture_path
         return rf"{self.world_name}\i\{_texture_file_stem(kind)}.paa"
 
     def write_assets(self, source_dir: Path, catalogue_path: Path) -> InfrastructureAssetResult:
@@ -2109,7 +2125,14 @@ class ProceduralInfrastructureLibrary:
         }
         used_texture_kinds = sorted(used_texture_kind_set)
         generated_texture_kinds = tuple(
-            kind for kind in used_texture_kinds if kind != "paved"
+            kind
+            for kind in used_texture_kinds
+            if kind != "paved"
+            and not (
+                kind in {"gravel", "gravel_junction"}
+                and self.gravel_texture_path
+            )
+            and not (kind == "dirt" and self.dirt_texture_path)
         )
         texture_files: list[str] = []
         # Paved fallback P3Ds now point at the configured stock road texture.
@@ -2174,13 +2197,31 @@ class ProceduralInfrastructureLibrary:
         paved_source: dict[str, object] | None = None
         if "paved" in used_texture_kind_set:
             paved_source = {
-                "type": "external-stock-texture",
+                "type": "external-road-texture",
                 "texture": self.paved_texture_path,
                 "generated_texture": False,
             }
 
+        dirt_source: dict[str, object] | None = None
+        if "dirt" in used_texture_kind_set and self.dirt_texture_path:
+            dirt_source = {
+                "type": "external-road-texture",
+                "texture": self.dirt_texture_path,
+                "generated_texture": False,
+            }
+
         gravel_source: dict[str, object] | None = None
-        if {"gravel", "gravel_junction"} & set(used_texture_kinds):
+        if (
+            {"gravel", "gravel_junction"} & set(used_texture_kinds)
+            and self.gravel_texture_path
+        ):
+            gravel_source = {
+                "type": "external-road-texture",
+                "texture": self.gravel_texture_path,
+                "generated_texture": False,
+                "junction_texture": self.gravel_texture_path,
+            }
+        elif {"gravel", "gravel_junction"} & set(used_texture_kinds):
             stale_edge = source_dir / "i" / "ge.paa"
             if stale_edge.exists():
                 stale_edge.unlink()
@@ -2291,6 +2332,8 @@ class ProceduralInfrastructureLibrary:
             document["paved_texture_source"] = paved_source
         if gravel_source is not None:
             document["gravel_texture_source"] = gravel_source
+        if dirt_source is not None:
+            document["dirt_texture_source"] = dirt_source
         canonical = json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
         digest = sha256(canonical.encode("utf-8")).hexdigest()
         document["catalogue_sha256"] = digest
