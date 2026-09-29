@@ -89,6 +89,11 @@ _GENERATED_PAVED = re.compile(
     r"(?P<curve>_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
     re.I,
 )
+_CUSTOM_ROAD = re.compile(
+    r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
+    r"(?P<length>\d{4})(?P<curve>_[lr]\d{3})?\.p3d$",
+    re.I,
+)
 _GRAVEL_STRAIGHT = re.compile(r"^gravel(?P<nominal>25|12|6|3)\.p3d$", re.I)
 _DIRT_CURVE = re.compile(
     r"^ces10 (?P<radius>25|50|75|100)\.p3d$",
@@ -196,47 +201,58 @@ def _road_axis(
     stock_model = True
     curved_model = False
 
-    match = _STOCK_STRAIGHT.fullmatch(filename)
+    match = _CUSTOM_ROAD.fullmatch(filename)
     if match is not None:
-        family = match.group("family").casefold()
-        nominal = int(match.group("nominal"))
-        expected_length = (
-            float(spec.road_segment_length) * nominal / 25.0
-        )
-        half_width = float(_HALF_WIDTH_METRES[family])
+        surface = match.group("surface").casefold()
+        family = {"paved": "paved", "gravel": "gravel", "dirt": "ces"}[surface]
+        half_width = int(match.group("width")) / 20.0
+        expected_length = int(match.group("length")) / 10.0
         start, end = _p._model_axis(obj, expected_length)
+        stock_model = False
+        curved_model = match.group("curve") is not None
     else:
-        match = _STOCK_CURVE.fullmatch(filename)
+        match = _STOCK_STRAIGHT.fullmatch(filename)
         if match is not None:
             family = match.group("family").casefold()
-            half_width = float(_HALF_WIDTH_METRES[family])
-            curved_model = True
-            start, end = _stock_curve_axis(
-                obj,
-                family,
-                float(match.group("radius")),
+            nominal = int(match.group("nominal"))
+            expected_length = (
+                float(spec.road_segment_length) * nominal / 25.0
             )
+            half_width = float(_HALF_WIDTH_METRES[family])
+            start, end = _p._model_axis(obj, expected_length)
         else:
-            match = _GENERATED_PAVED.fullmatch(filename)
+            match = _STOCK_CURVE.fullmatch(filename)
             if match is not None:
-                family = "paved"
-                half_width = int(match.group("width")) / 20.0
-                expected_length = int(match.group("length")) / 10.0
-                start, end = _p._model_axis(obj, expected_length)
-                stock_model = False
-                curved_model = match.group("curve") is not None
-            else:
-                match = _GRAVEL_STRAIGHT.fullmatch(filename)
-                if match is None:
-                    return None
-                family = "gravel"
-                nominal = int(match.group("nominal"))
-                expected_length = (
-                    float(spec.road_segment_length) * nominal / 25.0
-                )
+                family = match.group("family").casefold()
                 half_width = float(_HALF_WIDTH_METRES[family])
-                start, end = _p._model_axis(obj, expected_length)
-                stock_model = False
+                curved_model = True
+                start, end = _stock_curve_axis(
+                    obj,
+                    family,
+                    float(match.group("radius")),
+                )
+            else:
+                match = _GENERATED_PAVED.fullmatch(filename)
+                if match is not None:
+                    family = "paved"
+                    half_width = int(match.group("width")) / 20.0
+                    expected_length = int(match.group("length")) / 10.0
+                    start, end = _p._model_axis(obj, expected_length)
+                    stock_model = False
+                    curved_model = match.group("curve") is not None
+                else:
+                    match = _GRAVEL_STRAIGHT.fullmatch(filename)
+                    if match is None:
+                        return None
+                    family = "gravel"
+                    nominal = int(match.group("nominal"))
+                    expected_length = (
+                        float(spec.road_segment_length) * nominal / 25.0
+                    )
+                    half_width = float(_HALF_WIDTH_METRES[family])
+                    start, end = _p._model_axis(obj, expected_length)
+                    stock_model = False
+
     dx = end[0] - start[0]
     dz = end[1] - start[1]
     length = math.hypot(dx, dz)
@@ -257,7 +273,6 @@ def _road_axis(
         curved_model=curved_model,
         junction_cap=bool(junction_cap),
     )
-
 
 def _dirt_axis(
     obj,
