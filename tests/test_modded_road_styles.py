@@ -18,6 +18,11 @@ from cwr_worldgen.osm import road_model_for_tags
 from cwr_worldgen.pbo import PboEntry, write_pbo
 from cwr_worldgen.procedural_buildings import _Face, _Lod, _MLOD_HEADER, _write_lod
 from cwr_worldgen.gui import build_milestone9_command, default_gui_values
+from cwr_worldgen.source_pipeline import Milestone5Spec
+from cwr_worldgen.milestone6 import Milestone6Spec
+from cwr_worldgen.milestone7 import Milestone7Spec
+from cwr_worldgen.milestone8 import Milestone8Spec
+from cwr_worldgen.milestone9 import Milestone9Spec
 
 
 def _write_fake_mod_asset(root: Path, relative: str, payload: bytes) -> Path:
@@ -430,3 +435,55 @@ def test_source_bundle_cli_exposes_road_donor_flags(command: str) -> None:
         ]
     )
     assert args.paved_road_model == r"myroads\paved25.p3d"
+
+
+@pytest.mark.parametrize(
+    "spec_type",
+    (Milestone5Spec, Milestone6Spec, Milestone7Spec, Milestone8Spec, Milestone9Spec),
+)
+def test_source_bundle_specs_accept_road_donor_models(spec_type) -> None:
+    spec = spec_type(
+        source_dir=Path("source"),
+        paved_road_model=r"myroads\paved25.p3d",
+        gravel_road_model=r"myroads\gravel25.p3d",
+        dirt_road_model=r"myroads\track25.p3d",
+    )
+
+    assert spec.paved_road_model == r"myroads\paved25.p3d"
+    assert spec.gravel_road_model == r"myroads\gravel25.p3d"
+    assert spec.dirt_road_model == r"myroads\track25.p3d"
+
+
+def test_milestone9_spec_accepts_gui_road_arguments_exactly() -> None:
+    args = cli._parser().parse_args(
+        [
+            "milestone9",
+            "--source-dir",
+            r"G:\cwa_worldgen\source-data\tiny_bjorsund",
+            "--output",
+            r"G:\cwa_worldgen\build\terrtest82",
+            "--name",
+            "wg_terrtest82",
+            "--display-name",
+            "terrtest82",
+            "--paved-road-model",
+            r"o\road\sil25.p3d",
+            "--gravel-road-model",
+            r"o\road\sil25.p3d",
+            "--dirt-road-model",
+            r"o\road\ces25.p3d",
+        ]
+    )
+
+    spec = Milestone9Spec(
+        source_dir=args.source_dir,
+        name=args.name,
+        display_name=args.display_name,
+        paved_road_model=args.paved_road_model,
+        gravel_road_model=args.gravel_road_model,
+        dirt_road_model=args.dirt_road_model,
+    )
+
+    assert spec.paved_road_model == r"o\road\sil25.p3d"
+    assert spec.gravel_road_model == r"o\road\sil25.p3d"
+    assert spec.dirt_road_model == r"o\road\ces25.p3d"
