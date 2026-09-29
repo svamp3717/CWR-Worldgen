@@ -72,6 +72,10 @@ def _chain_surface(pieces: Sequence[Any], spec: Any) -> str | None:
     if all(_pi.is_generated_paved_road_model(piece.model_path) for piece in pieces):
         return "paved"
 
+    gravel_variants = _configured_variants(spec, "gravel_road_model")
+    if gravel_variants and all(path in gravel_variants for path in paths):
+        return "gravel"
+
     dirt_variants = _configured_variants(spec, "dirt_road_model")
     if dirt_variants and all(path in dirt_variants for path in paths):
         return "dirt"
