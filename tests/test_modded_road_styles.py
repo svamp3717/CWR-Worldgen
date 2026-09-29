@@ -28,6 +28,14 @@ from cwr_worldgen.milestone9 import Milestone9Spec
 from cwr_worldgen.legacy_proxy_models import inspect_visual_model_dimensions
 
 
+def test_missing_asset_pbo_is_rejected_before_world_generation(tmp_path: Path) -> None:
+    missing = tmp_path / "missing-roads.pbo"
+    spec = SimpleNamespace(asset_roots=(missing,))
+
+    with pytest.raises(ValueError, match="asset root does not exist"):
+        generator._validate_asset_roots_exist(spec)
+
+
 def _write_fake_mod_asset(root: Path, relative: str, payload: bytes) -> Path:
     path = root / relative.replace("\\", "/")
     path.parent.mkdir(parents=True, exist_ok=True)
