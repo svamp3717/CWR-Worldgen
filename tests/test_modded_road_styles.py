@@ -6,7 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import zstandard
 
+from cwr_worldgen import assets as asset_module
 from cwr_worldgen import cli
 from cwr_worldgen import generator
 from cwr_worldgen import paved_junction_policy
@@ -487,3 +489,81 @@ def test_milestone9_spec_accepts_gui_road_arguments_exactly() -> None:
     assert spec.paved_road_model == r"o\road\sil25.p3d"
     assert spec.gravel_road_model == r"o\road\sil25.p3d"
     assert spec.dirt_road_model == r"o\road\ces25.p3d"
+
+
+def test_pre_zstd_asset_cache_is_invalidated_for_nested_mod_donor(
+    tmp_path: Path,
+) -> None:
+    inner = tmp_path / "sebnam_obj.pbo"
+    texture = r"sebnam_obj\trail.paa"
+    donor = r"sebnam_obj\sebtrailpath10 25.p3d"
+    write_pbo(
+        inner,
+        (
+            PboEntry("sebtrailpath10 25.p3d", _mlod_road(4.8, 24.5, texture)),
+            PboEntry("trail.paa", b"synthetic-paa"),
+        ),
+    )
+    outer = tmp_path / "mod-package.pbo"
+    write_pbo(
+        outer,
+        (PboEntry(r"addons\sebnam_obj.pbo", inner.read_bytes()),),
+    )
+    wrapped = tmp_path / "mod-package.pbo.zst"
+    wrapped.write_bytes(
+        zstandard.ZstdCompressor(level=1).compress(outer.read_bytes())
+    )
+    cache_dir = tmp_path / "cache"
+
+    first = scan_assets(
+        (wrapped,),
+        (donor,),
+        cache_dir=cache_dir,
+        use_cache=True,
+        refresh=False,
+    )
+    assert donor in {record.path for record in first.records}
+    assert first.cache_path is not None
+
+    cache_path = Path(first.cache_path)
+    document = json.loads(cache_path.read_text(encoding="utf-8"))
+    document["asset_schema"] = 1
+    document["records"] = []
+    cache_path.write_text(json.dumps(document), encoding="utf-8")
+    asset_module._CATALOGUE_MEMORY.clear()
+
+    second = scan_assets(
+        (wrapped,),
+        (donor,),
+        cache_dir=cache_dir,
+        use_cache=True,
+        refresh=False,
+    )
+
+    assert donor in {record.path for record in second.records}
+    assert second.cache_hit is False
+    deps = model_texture_dependencies(second.records, donor)
+    assert deps == (texture,)
+
+
+def test_unresolved_mod_gravel_donor_never_silently_uses_generic_texture() -> None:
+    donor = r"sebnam_obj\sebtrailpath10 25.p3d"
+    with pytest.raises(ValueError, match="could not resolve the gravel road donor"):
+        generator._resolved_road_donor_texture(
+            (),
+            surface="gravel",
+            donor_model=donor,
+        )
+
+
+def test_stock_road_donors_keep_known_texture_fallbacks() -> None:
+    assert generator._resolved_road_donor_texture(
+        (),
+        surface="paved",
+        donor_model=r"o\road\sil25.p3d",
+    ) == r"landtext\silnice.pac"
+    assert generator._resolved_road_donor_texture(
+        (),
+        surface="dirt",
+        donor_model=r"o\road\ces25.p3d",
+    ) == r"o\road\ces_hned.paa"
