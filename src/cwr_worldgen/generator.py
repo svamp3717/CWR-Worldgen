@@ -1748,33 +1748,14 @@ def _modded_road_effective_donors(
                 f"{donor_dir}\\{preferred_name}" if donor_dir else preferred_name
             )
 
-        if preferred_straight is not None:
-            preferred_record = by_path.get(preferred_straight)
-            if preferred_record is not None:
-                try:
-                    preferred_shape = inspect_visual_model_dimensions(
-                        read_asset_record_bytes(preferred_record)
-                    )
-                except (OSError, ValueError, ProxyCloneError):
-                    preferred_shape = None
-                if preferred_shape is not None and preferred_shape.is_straight_road_candidate:
-                    preferred_width = float(preferred_shape.width_metres)
-                    preferred_textures = set(
-                        model_texture_dependencies(
-                            scan.records, preferred_straight
-                        )
-                    )
-                    if (
-                        abs(preferred_width - donor_width)
-                        <= max(0.75, donor_width * 0.30)
-                        and (
-                            not donor_textures
-                            or not preferred_textures
-                            or donor_textures & preferred_textures
-                        )
-                    ):
-                        result[donor_key] = preferred_straight
-                        continue
+        if preferred_straight is not None and preferred_straight in by_path:
+            # Angle/radius families such as SEBNAM use names like
+            # sebtrailpath10 25.p3d for a 10-degree, 25-m-radius curve and
+            # sebtrailpath25.p3d for the long straight. Once the selected donor
+            # has already been proven curved, that explicit sibling is more
+            # authoritative than bounding-box heuristics.
+            result[donor_key] = preferred_straight
+            continue
 
         candidates: list[tuple[tuple[float, float, float, str], str]] = []
         for candidate in p3d_records:
