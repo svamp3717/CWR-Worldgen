@@ -87,6 +87,10 @@ def _generated_width(
     spec: Any,
     surface: str,
 ) -> float:
+    if bool(getattr(spec, "custom_road_shapes", False)):
+        active_tags = _p._ACTIVE_ROAD_TAGS.get()
+        if active_tags is not None:
+            return max(1.5, float(_p.road_width_metres(active_tags)))
     if surface == "gravel":
         return _pi.GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
     if surface == "dirt":
@@ -366,8 +370,12 @@ def _upgrade_stock_result(
         # The quality scorer puts fidelity_penalty first. If its selected stock
         # piece still fails this test, every available stock candidate at this
         # chain step failed the same geometric-fit class.
+        custom_shape_needed = (
+            bool(getattr(context.spec, "custom_road_shapes", False))
+            and (turn >= 2.0 or deviation >= 0.05)
+        )
         if (
-            (turn > turn_limit or deviation > deviation_limit)
+            (custom_shape_needed or turn > turn_limit or deviation > deviation_limit)
             and not (
                 surface == "paved"
                 and _stock_junction_protects_interval(
