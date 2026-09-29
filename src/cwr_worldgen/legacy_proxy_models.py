@@ -51,6 +51,17 @@ class ProxyCloneInfo:
     texture_paths: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class VisualModelDimensions:
+    """Plan-view dimensions of the first drawable visual LOD."""
+
+    source_format: str
+    width_metres: float
+    length_metres: float
+    height_metres: float
+    texture_paths: tuple[str, ...]
+
+
 def proxy_safe_model_path(world_name: str, source_model: str) -> str:
     canonical = canonical_asset_path(source_model)
     digest = sha256(canonical.encode("utf-8")).hexdigest()[:12]
@@ -333,6 +344,47 @@ def _read_mlod_visual(data: bytes) -> tuple[_Lod, int, tuple[str, ...]]:
     )
     return lod, land_count, tuple(
         sorted({face.texture for face in faces if face.texture})
+    )
+
+
+def inspect_visual_model_dimensions(data: bytes) -> VisualModelDimensions:
+    """Measure a conventional +Z road/object visual from ODOL or MLOD bytes.
+
+    CWA modular roads are authored with width on local X and travel direction on
+    local Z.  Keeping those axes explicit is useful: accepting a sideways donor
+    would make the fitter place the original mod model incorrectly even before
+    generated fallback geometry entered the picture.
+    """
+
+    if data.startswith(b"ODOL"):
+        lod, _land_count, textures = _read_odol_visual(data)
+        source_format = "ODOL"
+    elif data.startswith(b"MLOD"):
+        lod, _land_count, textures = _read_mlod_visual(data)
+        source_format = "MLOD"
+    else:
+        raise ProxyCloneError(
+            f"unsupported P3D signature {data[:4]!r}"
+        )
+
+    if not lod.points:
+        raise ProxyCloneError("visual LOD contains no points")
+    xs = tuple(float(point[0]) for point in lod.points)
+    ys = tuple(float(point[1]) for point in lod.points)
+    zs = tuple(float(point[2]) for point in lod.points)
+    width = max(xs) - min(xs)
+    length = max(zs) - min(zs)
+    height = max(ys) - min(ys)
+    if width <= 1.0e-4 or length <= 1.0e-4:
+        raise ProxyCloneError(
+            f"visual LOD has degenerate plan dimensions {width:g} x {length:g}"
+        )
+    return VisualModelDimensions(
+        source_format=source_format,
+        width_metres=width,
+        length_metres=length,
+        height_metres=height,
+        texture_paths=textures,
     )
 
 
