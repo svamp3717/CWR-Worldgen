@@ -458,10 +458,12 @@ class SessionCategoriserApp(CategoriserApp):
     def _show_model(self, model) -> None:
         self._resume_model_path = model.model_path
         self.zoom = 1.0
+        skip_textures = bool(self.skip_textures_var.get())
+        render_text = "Rendering geometry..." if skip_textures else "Rendering textured model..."
         if self._startup_active:
-            self._set_loading_status("Rendering textured model...", model.model_path)
+            self._set_loading_status(render_text, model.model_path)
         elif self._navigation_window is not None:
-            self._set_navigation_status("Rendering textured model...", model.model_path)
+            self._set_navigation_status(render_text, model.model_path)
         super()._show_model(model)
 
     def _draw_model(self, model) -> None:
@@ -494,22 +496,34 @@ class SessionCategoriserApp(CategoriserApp):
             azim_deg=self.azim,
             elev_deg=self.elev,
             zoom=self.zoom,
+            load_textures=not self.skip_textures_var.get(),
         )
         self.ax_preview.imshow(image, interpolation="nearest")
-        self.ax_preview.set_title(
-            f"Textured model • az {self.azim:.0f}° / el {self.elev:.0f}° • zoom {self.zoom:.2f}×"
-        )
-        self.ax_preview.axis("off")
-        if misses:
+        if self.skip_textures_var.get():
+            self.ax_preview.set_title(
+                f"Geometry preview • textures skipped • az {self.azim:.0f}° / "
+                f"el {self.elev:.0f}° • zoom {self.zoom:.2f}×"
+            )
             self.status_var.set(
-                f"Texture sampling: {hits} textured face hit(s), "
-                f"{misses} missing/unreadable face texture(s). See console."
+                "Texture lookup skipped for faster model browsing. "
+                "Mouse wheel still zooms the geometry preview."
             )
         else:
-            self.status_var.set(
-                f"Texture sampling: {hits} textured face hit(s). "
-                "Mouse wheel zooms for signs and small details."
+            self.ax_preview.set_title(
+                f"Textured model • az {self.azim:.0f}° / el {self.elev:.0f}° • "
+                f"zoom {self.zoom:.2f}×"
             )
+            if misses:
+                self.status_var.set(
+                    f"Texture sampling: {hits} textured face hit(s), "
+                    f"{misses} missing/unreadable face texture(s). See console."
+                )
+            else:
+                self.status_var.set(
+                    f"Texture sampling: {hits} textured face hit(s). "
+                    "Mouse wheel zooms for signs and small details."
+                )
+        self.ax_preview.axis("off")
         self.figure.tight_layout(pad=1.0)
         self.canvas.draw_idle()
 

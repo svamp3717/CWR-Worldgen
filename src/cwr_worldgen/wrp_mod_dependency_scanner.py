@@ -22,7 +22,13 @@ import threading
 from typing import Iterable, Sequence
 
 from .assets import _decompress_lzss_stream
-from .pbo import _is_pbo_header_terminator
+from .pbo import (
+    _is_pbo_header_terminator,
+    _read_exact,
+    _skip_exact,
+    is_pbo_path,
+    open_pbo_stream,
+)
 
 _PBO_ENTRY = struct.Struct("<IIIII")
 _PBO_PROPERTIES = 0x56657273  # 'Vers'
@@ -114,65 +120,57 @@ def _read_cstring(stream: io.BytesIO) -> str:
 
 
 def _pbo_wrp_entries(path: Path) -> tuple[tuple[str, bytes], ...]:
-    raw = path.read_bytes()
-    stream = io.BytesIO(raw)
     metadata: list[tuple[str, int, int, int]] = []
-
-    while True:
-        name = _read_cstring(stream)
-        fields = stream.read(_PBO_ENTRY.size)
-        if len(fields) != _PBO_ENTRY.size:
-            raise ValueError("truncated PBO entry header")
-        packing, original_size, reserved, timestamp, data_size = _PBO_ENTRY.unpack(fields)
-
-        if not name:
-            if packing == _PBO_PROPERTIES:
-                while True:
-                    key = _read_cstring(stream)
-                    if not key:
-                        break
-                    _read_cstring(stream)
-                continue
-            if _is_pbo_header_terminator(
-                packing, original_size, reserved, timestamp, data_size
-            ):
-                break
-            raise ValueError(
-                "unsupported PBO extension record "
-                f"(packing={packing:#x}, original_size={original_size}, "
-                f"reserved={reserved}, timestamp={timestamp}, data_size={data_size})"
-            )
-
-        metadata.append((name, packing, original_size, data_size))
-
-    cursor = stream.tell()
     worlds: list[tuple[str, bytes]] = []
-    for name, packing, original_size, data_size in metadata:
-        end = cursor + data_size
-        if end > len(raw):
-            raise ValueError(f"truncated PBO entry {name!r}")
-        stored = raw[cursor:end]
-        cursor = end
-        if Path(name.replace("\\", "/")).suffix.casefold() != ".wrp":
-            continue
 
-        if packing == 0:
-            data = stored
-        elif packing == _PBO_COMPRESSED:
-            if original_size <= 0:
-                raise ValueError(f"compressed WRP entry {name!r} has no original size")
-            packed = io.BytesIO(stored)
-            data = _decompress_lzss_stream(packed, original_size)
-            if packed.read():
-                raise ValueError(f"compressed WRP entry {name!r} has trailing bytes")
-        else:
-            raise ValueError(
-                f"unsupported PBO packing method {packing:#x} for WRP entry {name!r}"
-            )
-        worlds.append((name.replace("/", "\\"), data))
+    with open_pbo_stream(path) as stream:
+        while True:
+            name = _read_cstring(stream)
+            fields = _read_exact(stream, _PBO_ENTRY.size, "PBO entry header")
+            packing, original_size, reserved, timestamp, data_size = _PBO_ENTRY.unpack(fields)
+
+            if not name:
+                if packing == _PBO_PROPERTIES:
+                    while True:
+                        key = _read_cstring(stream)
+                        if not key:
+                            break
+                        _read_cstring(stream)
+                    continue
+                if _is_pbo_header_terminator(
+                    packing, original_size, reserved, timestamp, data_size
+                ):
+                    break
+                raise ValueError(
+                    "unsupported PBO extension record "
+                    f"(packing={packing:#x}, original_size={original_size}, "
+                    f"reserved={reserved}, timestamp={timestamp}, data_size={data_size})"
+                )
+
+            metadata.append((name, packing, original_size, data_size))
+
+        for name, packing, original_size, data_size in metadata:
+            if Path(name.replace("\\", "/")).suffix.casefold() != ".wrp":
+                _skip_exact(stream, data_size, f"PBO entry {name!r}")
+                continue
+
+            stored = _read_exact(stream, data_size, f"PBO entry {name!r}")
+            if packing == 0:
+                data = stored
+            elif packing == _PBO_COMPRESSED:
+                if original_size <= 0:
+                    raise ValueError(f"compressed WRP entry {name!r} has no original size")
+                packed = io.BytesIO(stored)
+                data = _decompress_lzss_stream(packed, original_size)
+                if packed.read():
+                    raise ValueError(f"compressed WRP entry {name!r} has trailing bytes")
+            else:
+                raise ValueError(
+                    f"unsupported PBO packing method {packing:#x} for WRP entry {name!r}"
+                )
+            worlds.append((name.replace("/", "\\"), data))
 
     return tuple(worlds)
-
 
 def _rvw4_model_counts(data: bytes) -> Counter[str] | None:
     if len(data) < _RVW4_HEADER.size or data[:4] != b"4WVR":
@@ -273,7 +271,7 @@ def scan_dependencies(
         wrp_names = (path.name,)
         rows.extend(scan_wrp_bytes(path.read_bytes(), wrp_name=path.name, stock_roots=roots))
         kind = "wrp"
-    elif suffix == ".pbo":
+    elif is_pbo_path(path):
         worlds = _pbo_wrp_entries(path)
         wrp_names = tuple(name for name, _data in worlds)
         if not worlds:
@@ -285,7 +283,7 @@ def scan_dependencies(
                 warnings.append(f"{name}: {exc}")
         kind = "pbo"
     else:
-        raise ValueError("input must be a .wrp or .pbo file")
+        raise ValueError("input must be a .wrp, .pbo, or .pbo.zst file")
 
     return ScanResult(
         input_path=str(path),

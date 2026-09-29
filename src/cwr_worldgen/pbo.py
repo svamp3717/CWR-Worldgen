@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from hashlib import sha256
@@ -10,7 +11,9 @@ import os
 import shutil
 import struct
 import subprocess
-from typing import Iterable
+from typing import BinaryIO, Iterable, Iterator
+
+import zstandard as zstd
 
 from .cache import atomic_write_json, cache_key
 
@@ -19,6 +22,73 @@ _PBO_COMPRESSED = 0x43707273  # 'Cprs' legacy BIS LZSS marker
 _PBO_HEADER_TERMINATOR_TIMESTAMPS = frozenset((0, 0xFFFFFFFF))
 _FIXED_POSEIDON_TIMESTAMP = 946684800  # 2000-01-01 UTC, safely representable by legacy tools.
 _VALID_BACKENDS = {"auto", "python", "poseidon"}
+_ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+
+
+def is_pbo_path(path: Path | str) -> bool:
+    """Return whether a path name is a raw or Zstandard-wrapped PBO."""
+    name = Path(path).name.casefold()
+    return name.endswith(".pbo") or name.endswith(".pbo.zst")
+
+
+def pbo_stem(path: Path | str) -> str:
+    """Return the logical PBO stem, stripping both .pbo and optional .zst."""
+    name = Path(path).name
+    if name.casefold().endswith(".zst"):
+        name = name[:-4]
+    if name.casefold().endswith(".pbo"):
+        name = name[:-4]
+    return name
+
+
+def is_zstd_wrapped_pbo(path: Path | str) -> bool:
+    """Detect CWR-CE whole-file Zstandard wrapping by frame magic, not extension."""
+    with Path(path).open("rb") as stream:
+        return stream.read(len(_ZSTD_MAGIC)) == _ZSTD_MAGIC
+
+
+@contextmanager
+def open_pbo_stream(path: Path | str) -> Iterator[BinaryIO]:
+    """Open PBO bytes, transparently decoding a whole-file Zstandard wrapper.
+
+    CWR-CE distributes mod artifacts as .pbo.zst files. Some archives in the
+    wild retain only the .pbo suffix, so detection uses the Zstd frame magic
+    instead of trusting the filename.
+    """
+    source = Path(path)
+    raw = source.open("rb")
+    try:
+        magic = raw.read(len(_ZSTD_MAGIC))
+        raw.seek(0)
+        if magic != _ZSTD_MAGIC:
+            yield raw
+            return
+
+        decoder = zstd.ZstdDecompressor()
+        try:
+            with decoder.stream_reader(raw, read_across_frames=True) as stream:
+                yield stream
+        except zstd.ZstdError as exc:
+            raise ValueError(f"invalid Zstandard-wrapped PBO: {source}: {exc}") from exc
+    finally:
+        raw.close()
+
+
+def _read_exact(stream: BinaryIO, size: int, label: str) -> bytes:
+    data = stream.read(size)
+    if len(data) != size:
+        raise ValueError(f"truncated {label}")
+    return data
+
+
+def _skip_exact(stream: BinaryIO, size: int, label: str = "PBO data") -> None:
+    remaining = int(size)
+    while remaining > 0:
+        chunk = stream.read(min(1024 * 1024, remaining))
+        if not chunk:
+            raise ValueError(f"truncated {label}")
+        remaining -= len(chunk)
+
 
 
 def _is_pbo_header_terminator(
@@ -317,35 +387,31 @@ def pack_directory_cached(
 
 
 def read_pbo(path: Path) -> tuple[PboEntry, ...]:
-    stream = io.BytesIO(path.read_bytes())
-    metadata: list[tuple[str, int]] = []
-    while True:
-        name_bytes = bytearray()
+    with open_pbo_stream(path) as stream:
+        metadata: list[tuple[str, int]] = []
         while True:
-            value = stream.read(1)
-            if not value:
-                raise ValueError("truncated PBO header")
-            if value == b"\0":
+            name_bytes = bytearray()
+            while True:
+                value = stream.read(1)
+                if not value:
+                    raise ValueError("truncated PBO header")
+                if value == b"\0":
+                    break
+                name_bytes.extend(value)
+            fields = _read_exact(stream, _ENTRY_FIELDS.size, "PBO entry fields")
+            packing, original_size, reserved, timestamp, data_size = _ENTRY_FIELDS.unpack(fields)
+            if not name_bytes:
+                if not _is_pbo_header_terminator(
+                    packing, original_size, reserved, timestamp, data_size
+                ):
+                    raise ValueError("unsupported PBO properties entry")
                 break
-            name_bytes.extend(value)
-        fields = stream.read(_ENTRY_FIELDS.size)
-        if len(fields) != _ENTRY_FIELDS.size:
-            raise ValueError("truncated PBO entry fields")
-        packing, original_size, reserved, timestamp, data_size = _ENTRY_FIELDS.unpack(fields)
-        if not name_bytes:
-            if not _is_pbo_header_terminator(
-                packing, original_size, reserved, timestamp, data_size
-            ):
-                raise ValueError("unsupported PBO properties entry")
-            break
-        if packing != 0:
-            raise ValueError("compressed PBO entries are not supported by this reader")
-        metadata.append((name_bytes.decode("ascii"), data_size))
+            if packing != 0:
+                raise ValueError("compressed PBO entries are not supported by this reader")
+            metadata.append((name_bytes.decode("ascii"), data_size))
 
-    entries: list[PboEntry] = []
-    for name, size in metadata:
-        data = stream.read(size)
-        if len(data) != size:
-            raise ValueError(f"truncated PBO data for {name}")
-        entries.append(PboEntry(name, data))
-    return tuple(entries)
+        entries: list[PboEntry] = []
+        for name, size in metadata:
+            data = _read_exact(stream, size, f"PBO data for {name}")
+            entries.append(PboEntry(name, data))
+        return tuple(entries)
