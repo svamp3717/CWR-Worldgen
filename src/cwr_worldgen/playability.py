@@ -19,6 +19,7 @@ from .procedural_infrastructure import (
     GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES,
     GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
     GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES,
+    custom_road_model_path,
     gravel_curve_model_path,
     gravel_junction_model_path,
     gravel_road_model_path,
@@ -808,6 +809,42 @@ class _RoadPiece:
     model_path: str
     length_metres: float
     nominal_length: int
+
+
+def gravel_filler_piece(spec: object, nominal_length: int) -> _RoadPiece:
+    """Return a short gravel repair piece without changing a configured mod style."""
+
+    configured = str(getattr(spec, "gravel_road_model", "") or "").strip()
+    segment_length = float(getattr(spec, "road_segment_length", 25.0))
+    if configured:
+        for piece in road_model_variants(configured, segment_length):
+            if int(piece.nominal_length) == int(nominal_length):
+                return piece
+        if bool(getattr(spec, "custom_road_shapes", False)):
+            measured = road_model_dimensions(configured)
+            width = (
+                float(measured[0])
+                if measured is not None
+                else GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
+            )
+            length = segment_length * float(nominal_length) / 25.0
+            return _RoadPiece(
+                custom_road_model_path(
+                    str(getattr(spec, "name", "world")),
+                    "gravel",
+                    width,
+                    length,
+                    0.0,
+                ),
+                length,
+                int(nominal_length),
+            )
+
+    return _RoadPiece(
+        gravel_road_model_path(str(getattr(spec, "name", "world")), nominal_length),
+        segment_length * float(nominal_length) / 25.0,
+        int(nominal_length),
+    )
 
 
 @dataclass(frozen=True, slots=True)
