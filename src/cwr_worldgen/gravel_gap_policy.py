@@ -12,7 +12,6 @@ from . import road_quality_policy as _rq
 from .procedural_infrastructure import (
     GENERATED_GRAVEL_HALF_WIDTH_METRES,
     GENERATED_GRAVEL_VISUAL_OVERLAP_METRES,
-    gravel_road_model_path,
 )
 
 _GRAVEL_GAP_MAX_METRES = 8.0
@@ -63,7 +62,7 @@ def _gravel_endpoints(dataset, projection, spec) -> tuple[_GravelEndpoint, ...]:
 
 
 def _gravel_piece_length(spec, nominal: int) -> float:
-    return float(spec.road_segment_length) * float(nominal) / 25.0
+    return float(_p.gravel_filler_piece(spec, nominal).length_metres)
 
 
 def _gravel_bridge_nominal(spec, span: float, *, endpoint_pair: bool) -> int | None:
@@ -149,7 +148,7 @@ def _bridge_short_gravel_gaps(report, dataset, projection, elevations, spec, con
         )
         start = (centre[0] - ux * model_length * 0.5, centre[1] - uz * model_length * 0.5)
         end = (centre[0] + ux * model_length * 0.5, centre[1] + uz * model_length * 0.5)
-        fillers.append((gravel_road_model_path(spec.name, nominal), start, end))
+        fillers.append((_p.gravel_filler_piece(spec, nominal).model_path, start, end))
         used.update((left_index, right_index))
 
     # Endpoint-to-hub repair. Generated 3-way gravel hubs deliberately render all
@@ -222,7 +221,7 @@ def _bridge_short_gravel_gaps(report, dataset, projection, elevations, spec, con
         model_length = _gravel_piece_length(spec, nominal)
         start = (centre[0] - ux * model_length * 0.5, centre[1] - uz * model_length * 0.5)
         end = (centre[0] + ux * model_length * 0.5, centre[1] + uz * model_length * 0.5)
-        fillers.append((gravel_road_model_path(spec.name, nominal), start, end))
+        fillers.append((_p.gravel_filler_piece(spec, nominal).model_path, start, end))
         used.add(endpoint_index)
 
     if not fillers:
