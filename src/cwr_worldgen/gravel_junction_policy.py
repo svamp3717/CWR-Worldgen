@@ -122,6 +122,9 @@ def _quality_window(measure, pieces, start_distance, preferred_end, minimum_end,
 def _ordinary_gravel_cap_model_path(world_name: str, degree: int) -> str:
     if degree not in {3, 4}:
         raise ValueError("gravel junction degree must be 3 or 4")
+    context = _RQ._CONTEXT.get()
+    if context is not None:
+        return _RQ._p.gravel_filler_piece(context.spec, 6).model_path
     return _RQ._p.gravel_road_model_path(world_name, 6)
 
 
