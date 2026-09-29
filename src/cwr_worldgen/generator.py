@@ -1598,6 +1598,20 @@ _ROAD_DONOR_TEXTURE_FALLBACKS = {
 }
 
 
+def _road_style_donor(spec: PlayabilitySpec, surface: str) -> str:
+    """Return the explicit curve donor when present, otherwise the straight donor."""
+
+    if surface not in {"paved", "gravel", "dirt"}:
+        raise ValueError(f"unsupported road surface {surface!r}")
+    curve = str(
+        getattr(spec, f"{surface}_road_curve_model", "") or ""
+    ).strip()
+    straight = str(
+        getattr(spec, f"{surface}_road_model", "") or ""
+    ).strip()
+    return curve or straight
+
+
 def _resolved_road_donor_texture(
     records: Sequence[AssetRecord],
     *,
@@ -3965,16 +3979,16 @@ def build_milestone4(
     dirt_texture_path: str | None = None
 
     road_texture_donors: dict[str, str] = {}
-    paved_curve = str(getattr(spec, "paved_road_curve_model", "") or "").strip()
-    gravel_curve = str(getattr(spec, "gravel_road_curve_model", "") or "").strip()
-    dirt_curve = str(getattr(spec, "dirt_road_curve_model", "") or "").strip()
     if generated_paved_usage:
-        road_texture_donors["paved"] = paved_curve or spec.paved_road_model
+        road_texture_donors["paved"] = _road_style_donor(spec, "paved")
     configured_gravel = str(getattr(spec, "gravel_road_model", "") or "").strip()
-    if generated_gravel_usage and (gravel_curve or configured_gravel):
-        road_texture_donors["gravel"] = gravel_curve or configured_gravel
+    configured_gravel_curve = str(
+        getattr(spec, "gravel_road_curve_model", "") or ""
+    ).strip()
+    if generated_gravel_usage and (configured_gravel_curve or configured_gravel):
+        road_texture_donors["gravel"] = _road_style_donor(spec, "gravel")
     if generated_dirt_usage:
-        road_texture_donors["dirt"] = dirt_curve or spec.dirt_road_model
+        road_texture_donors["dirt"] = _road_style_donor(spec, "dirt")
 
     if road_texture_donors:
         report_progress(79, "Resolving road textures from configured stock/modded donor models")
