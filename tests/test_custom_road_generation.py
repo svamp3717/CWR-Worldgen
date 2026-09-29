@@ -205,3 +205,24 @@ def test_custom_road_audit_uses_encoded_length() -> None:
         "customroads", "dirt", 3.5, 8.3, 19.0
     )
     assert quality._piece_length(model, 25.0) == pytest.approx(8.3)
+
+
+def test_custom_road_width_uses_mapped_highway_class() -> None:
+    spec = _spec()
+    dirt_piece = playability._RoadPiece(r"o\road\ces6.p3d", 6.0, 6)
+    token = playability._ACTIVE_ROAD_TAGS.set(
+        {"highway": "track", "surface": "dirt"}
+    )
+    try:
+        assert fallback._generated_width((dirt_piece,), spec, "dirt") == pytest.approx(3.5)
+    finally:
+        playability._ACTIVE_ROAD_TAGS.reset(token)
+
+    paved_piece = playability._RoadPiece(r"o\road\sil6.p3d", 6.0, 6)
+    token = playability._ACTIVE_ROAD_TAGS.set(
+        {"highway": "residential", "surface": "asphalt"}
+    )
+    try:
+        assert fallback._generated_width((paved_piece,), spec, "paved") == pytest.approx(6.0)
+    finally:
+        playability._ACTIVE_ROAD_TAGS.reset(token)
