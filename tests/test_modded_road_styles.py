@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,11 +9,13 @@ import pytest
 
 from cwr_worldgen import generator
 from cwr_worldgen import paved_junction_policy
+from cwr_worldgen import paved_road_generated_fallback_policy as fallback
 from cwr_worldgen import playability
 from cwr_worldgen import procedural_infrastructure as infrastructure
 from cwr_worldgen.assets import model_texture_dependencies, scan_assets
 from cwr_worldgen.osm import road_model_for_tags
 from cwr_worldgen.pbo import PboEntry, write_pbo
+from cwr_worldgen.procedural_buildings import _Face, _Lod, _MLOD_HEADER, _write_lod
 from cwr_worldgen.gui import build_milestone9_command, default_gui_values
 
 
@@ -21,6 +24,43 @@ def _write_fake_mod_asset(root: Path, relative: str, payload: bytes) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(payload)
     return path
+
+
+def _mlod_road(
+    width: float,
+    length: float,
+    texture: str,
+) -> bytes:
+    half_width = width * 0.5
+    half_length = length * 0.5
+    lod = _Lod(
+        (
+            (-half_width, 0.025, -half_length),
+            (-half_width, 0.025, half_length),
+            (half_width, 0.025, half_length),
+            (half_width, 0.025, -half_length),
+        ),
+        ((0.0, -1.0, 0.0),),
+        (
+            _Face(
+                texture,
+                (
+                    (0, 0, 0.0, 0.0),
+                    (1, 0, 0.0, 1.0),
+                    (2, 0, 1.0, 1.0),
+                    (3, 0, 1.0, 0.0),
+                ),
+                0,
+            ),
+        ),
+        1.0,
+        properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
+        point_flags=(0x13F,) * 4,
+    )
+    stream = io.BytesIO()
+    stream.write(_MLOD_HEADER.pack(b"MLOD", 1, 1, 0, 1))
+    _write_lod(stream, lod)
+    return stream.getvalue()
 
 
 def test_modded_road_texture_is_discovered_from_donor_p3d(tmp_path: Path) -> None:
@@ -274,3 +314,80 @@ def test_modded_road_family_and_texture_are_discovered_inside_pbo(
         spec.paved_road_model,
     )
     assert dependencies == (r"myroads\textures\asphalt_main.paa",)
+
+
+def test_modded_donor_geometry_controls_generated_width_and_length(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "mod"
+    donor = r"myroads\asphalt_long.p3d"
+    texture = r"myroads\textures\asphalt_main.paa"
+    _write_fake_mod_asset(root, donor, _mlod_road(7.2, 21.4, texture))
+    _write_fake_mod_asset(root, texture, b"synthetic-paa")
+
+    spec = SimpleNamespace(
+        name="donorworld",
+        paved_road_model=donor,
+        gravel_road_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        road_segment_length=25.0,
+        asset_roots=(root,),
+        cache_dir=None,
+        cache_enabled=False,
+        cache_refresh=False,
+        custom_road_shapes=True,
+    )
+    dimensions = generator._modded_road_model_dimensions(spec)
+    key = playability._road_model_key(donor)
+    assert dimensions[key] == pytest.approx((7.2, 21.4))
+
+    dimension_token = playability._ROAD_MODEL_DIMENSIONS.set(dimensions)
+    tag_token = playability._ACTIVE_ROAD_TAGS.set(
+        {"highway": "residential", "surface": "asphalt"}
+    )
+    try:
+        variants = playability.road_model_variants(donor, spec.road_segment_length)
+        assert len(variants) == 1
+        assert variants[0].model_path == donor
+        assert variants[0].length_metres == pytest.approx(21.4)
+
+        # Residential OSM width is 6 m, but a generated bend joining this donor
+        # must stay 7.2 m wide or it would visibly neck down at the seam.
+        assert fallback._generated_width(
+            variants,
+            spec,
+            "paved",
+        ) == pytest.approx(7.2)
+    finally:
+        playability._ACTIVE_ROAD_TAGS.reset(tag_token)
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimension_token)
+
+
+def test_modded_donor_geometry_is_measured_inside_pbo(tmp_path: Path) -> None:
+    texture = r"myroads\textures\track.paa"
+    pbo = tmp_path / "myroads.pbo"
+    write_pbo(
+        pbo,
+        (
+            PboEntry(
+                "track_long.p3d",
+                _mlod_road(3.8, 18.6, texture),
+            ),
+            PboEntry("textures/track.paa", b"synthetic-paa"),
+        ),
+    )
+    spec = SimpleNamespace(
+        paved_road_model=r"o\road\sil25.p3d",
+        gravel_road_model="",
+        dirt_road_model=r"myroads\track_long.p3d",
+        road_segment_length=25.0,
+        asset_roots=(pbo,),
+        cache_dir=None,
+        cache_enabled=False,
+        cache_refresh=False,
+    )
+
+    dimensions = generator._modded_road_model_dimensions(spec)
+    assert dimensions[
+        playability._road_model_key(spec.dirt_road_model)
+    ] == pytest.approx((3.8, 18.6))
