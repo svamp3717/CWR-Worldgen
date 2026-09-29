@@ -513,6 +513,70 @@ def _targeted_scan(
     return result, stats
 
 
+def locate_assets_fast(
+    roots: Sequence[Path],
+    selected_assets: Iterable[str],
+    *,
+    cache_dir: Path | None = None,
+    use_cache: bool = True,
+    refresh: bool = False,
+) -> _assets.AssetScanResult:
+    """Locate exact assets without dependency validation or exhaustive fallback.
+
+    Road-family discovery uses this because it only needs exact P3D records.
+    Missing texture dependencies must not turn a tiny donor lookup into a
+    recursive scan of an entire game installation.
+    """
+
+    root_paths = _resolved_roots(roots)
+    root_names = tuple(str(path) for path in root_paths)
+    selected = tuple(
+        sorted({_assets.canonical_asset_path(value) for value in selected_assets})
+    )
+    index_root = _persistent_index_root(cache_dir)
+    stats = _LookupStats()
+    records: dict[str, _assets.AssetRecord] = {}
+    missing: list[str] = []
+    for asset_path in selected:
+        record = _locate(
+            root_paths,
+            asset_path,
+            index_root=index_root,
+            use_cache=use_cache,
+            refresh=refresh,
+            stats=stats,
+        )
+        if record is None:
+            missing.append(asset_path)
+        else:
+            records[record.path] = record
+
+    ordered = tuple(records[key] for key in sorted(records))
+    canonical_doc = {
+        "mode": "exact-targeted",
+        "roots": list(root_names),
+        "records": [asdict(record) for record in ordered],
+        "selected_models": selected,
+        "missing_models": sorted(missing),
+        "missing_dependencies": [],
+        "unreadable_pbos": [],
+    }
+    digest = hashlib.sha256(
+        (json.dumps(canonical_doc, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    ).hexdigest()
+    return _assets.AssetScanResult(
+        roots=root_names,
+        records=ordered,
+        selected_models=selected,
+        missing_models=tuple(sorted(missing)) if root_names else (),
+        missing_dependencies=(),
+        unreadable_pbos=(),
+        catalogue_sha256=digest,
+        cache_hit=bool(stats.index_hits) and stats.index_misses == 0,
+        cache_path=str(index_root) if index_root is not None else None,
+    )
+
+
 def scan_assets_fast(
     roots: Sequence[Path],
     selected_models: Iterable[str],
