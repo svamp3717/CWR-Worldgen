@@ -53,13 +53,15 @@ class ProxyCloneInfo:
 
 @dataclass(frozen=True, slots=True)
 class VisualModelDimensions:
-    """Plan-view dimensions of the first drawable visual LOD."""
+    """Plan-view dimensions and straightness of the first drawable visual LOD."""
 
     source_format: str
     width_metres: float
     length_metres: float
     height_metres: float
     texture_paths: tuple[str, ...]
+    lateral_center_shift_metres: float = 0.0
+    is_straight_road_candidate: bool = True
 
 
 def proxy_safe_model_path(world_name: str, source_model: str) -> str:
@@ -379,12 +381,36 @@ def inspect_visual_model_dimensions(data: bytes) -> VisualModelDimensions:
         raise ProxyCloneError(
             f"visual LOD has degenerate plan dimensions {width:g} x {length:g}"
         )
+
+    # A modular straight road is centred on local +Z at both ends. Curved road
+    # donors are commonly still centred around the object origin, so a plain
+    # bounding box looks deceptively valid. Compare the lateral centres of the
+    # terminal 20% bands to distinguish a straight ribbon from a bent one.
+    band = max(length * 0.20, 1.0e-4)
+    lower_x = tuple(
+        float(point[0]) for point in lod.points
+        if float(point[2]) <= min(zs) + band
+    )
+    upper_x = tuple(
+        float(point[0]) for point in lod.points
+        if float(point[2]) >= max(zs) - band
+    )
+    if lower_x and upper_x:
+        lower_center = (min(lower_x) + max(lower_x)) * 0.5
+        upper_center = (min(upper_x) + max(upper_x)) * 0.5
+        lateral_shift = abs(upper_center - lower_center)
+    else:
+        lateral_shift = 0.0
+    straight_tolerance = max(0.08, width * 0.025)
+
     return VisualModelDimensions(
         source_format=source_format,
         width_metres=width,
         length_metres=length,
         height_metres=height,
         texture_paths=textures,
+        lateral_center_shift_metres=lateral_shift,
+        is_straight_road_candidate=lateral_shift <= straight_tolerance,
     )
 
 
