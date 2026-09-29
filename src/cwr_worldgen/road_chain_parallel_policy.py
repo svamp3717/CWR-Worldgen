@@ -561,7 +561,8 @@ def _fit_stock_piece_road_objects_parallel(
         values = cap_incidents[key]
         use_dirt = all(value[1] for value in values)
         all_gravel = all(
-            _playability.is_generated_gravel_road_model(value[2]) for value in values
+            _playability.road_model_surface(spec, value[2]) == "gravel"
+            for value in values
         )
         incident_models = {value[2].casefold(): value[2] for value in values}
         generated_paved_t = _playability._generated_paved_t_cap_plan(values, spec)
