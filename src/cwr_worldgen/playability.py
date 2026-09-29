@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from collections import deque
+from contextvars import ContextVar
 from dataclasses import dataclass
 import hashlib
 import math
@@ -46,6 +47,13 @@ from .osm import (
     road_is_supported,
     projected_road_polylines,
     road_width_metres,
+)
+
+
+
+_ACTIVE_ROAD_TAGS: ContextVar[Mapping[str, str] | None] = ContextVar(
+    "cwr_active_road_tags",
+    default=None,
 )
 
 
@@ -2485,14 +2493,18 @@ def _fit_stock_piece_road_objects(
             minimum_end = max(start_distance, total_length - end_cover)
             shortest = min(piece.length_metres for piece in variants)
             maximum_end = total_length + (0.70 if end_cover > 0.0 else shortest * 0.5)
-            fitted_pieces = _stock_piece_chain(
-                measure,
-                variants,
-                start_distance=start_distance,
-                preferred_end_distance=preferred_end,
-                minimum_end_distance=minimum_end,
-                maximum_end_distance=maximum_end,
-            )
+            road_tags_token = _ACTIVE_ROAD_TAGS.set(feature.tags)
+            try:
+                fitted_pieces = _stock_piece_chain(
+                    measure,
+                    variants,
+                    start_distance=start_distance,
+                    preferred_end_distance=preferred_end,
+                    minimum_end_distance=minimum_end,
+                    maximum_end_distance=maximum_end,
+                )
+            finally:
+                _ACTIVE_ROAD_TAGS.reset(road_tags_token)
             covered_by_hubs = False
             if not fitted_pieces:
                 covered_by_hubs = total_length <= start_cover + end_cover + 1e-6
