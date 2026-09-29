@@ -1715,6 +1715,10 @@ def _modded_road_effective_donors(
     exists.
     """
 
+    stock_defaults = {
+        _road_model_key(r"o\road\sil25.p3d"),
+        _road_model_key(r"o\road\ces25.p3d"),
+    }
     configured = tuple(dict.fromkeys(
         value
         for value in (
@@ -1722,7 +1726,7 @@ def _modded_road_effective_donors(
             str(getattr(spec, "gravel_road_model", "") or "").strip(),
             str(getattr(spec, "dirt_road_model", "") or "").strip(),
         )
-        if value
+        if value and _road_model_key(value) not in stock_defaults
     ))
     if not configured or not tuple(getattr(spec, "asset_roots", ()) or ()):
         return {}
