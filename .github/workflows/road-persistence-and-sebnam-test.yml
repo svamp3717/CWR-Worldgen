@@ -1,0 +1,40 @@
+name: Road persistence and SEBNAM verification
+
+on:
+  push:
+    branches:
+      - feature/custom-road-generation
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest matplotlib
+      - run: >
+          python -m compileall -q
+          src/cwr_worldgen/gui.py
+          src/cwr_worldgen/generator.py
+          src/cwr_worldgen/playability.py
+          src/cwr_worldgen/model.py
+          src/cwr_worldgen/source_pipeline.py
+          tests/test_gui.py
+          tests/test_modded_road_styles.py
+      - run: >
+          python -m pytest -q
+          tests/test_gui.py::GuiCommandTests::test_gui_state_restores_road_donors_between_restarts
+          tests/test_gui.py::GuiCommandTests::test_road_and_asset_persistence_writes_gui_state
+          tests/test_modded_road_styles.py::test_sebnam_curve_donor_resolves_to_straight_family
+          tests/test_modded_road_styles.py::test_sebnam_style_uses_straight_family_and_explicit_curve_reference
+          tests/test_modded_road_styles.py::test_legacy_curved_sebnam_selection_auto_resolves_to_straight_sibling
+          tests/test_modded_road_styles.py::test_legacy_curve_resolution_never_walks_unrelated_models
