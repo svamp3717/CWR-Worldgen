@@ -8,6 +8,7 @@ from itertools import chain
 import hashlib
 import json
 import math
+import re
 import shutil
 from typing import Callable, Sequence
 
@@ -130,6 +131,7 @@ from .playability import (
     TerrainGradeReport,
     TransitionReport,
     _ROAD_MODEL_DIMENSIONS,
+    _ROAD_MODEL_EFFECTIVE_DONORS,
     _ROAD_MODEL_VARIANTS_AVAILABLE,
     _road_model_key,
     fit_road_objects,
@@ -1681,8 +1683,130 @@ def _world_icon_filename(spec: PlayabilitySpec) -> str:
     return "icon.paa" if _surface_pass_enabled(spec) else "g.paa"
 
 
+_CURVED_ROAD_DONOR_NAME = re.compile(
+    r"^(?P<prefix>.*?)(?P<angle>\d{1,3})[ _-]+(?P<radius>\d{1,4})\.p3d$",
+    re.IGNORECASE,
+)
+
+
+def _modded_road_effective_donors(
+    spec: PlayabilitySpec,
+) -> dict[str, str]:
+    """Resolve curved style samples to straight placement donors from the same mod."""
+
+    configured = tuple(dict.fromkeys(
+        value
+        for value in (
+            str(getattr(spec, "paved_road_model", "") or "").strip(),
+            str(getattr(spec, "gravel_road_model", "") or "").strip(),
+            str(getattr(spec, "dirt_road_model", "") or "").strip(),
+        )
+        if value
+    ))
+    if not configured or not tuple(getattr(spec, "asset_roots", ()) or ()):
+        return {}
+
+    scan = scan_assets(
+        spec.asset_roots,
+        configured,
+        cache_dir=getattr(spec, "cache_dir", None),
+        use_cache=bool(getattr(spec, "cache_enabled", True)),
+        refresh=bool(getattr(spec, "cache_refresh", False)),
+    )
+    by_path = {record.path: record for record in scan.records}
+    p3d_records = tuple(
+        record for record in scan.records if record.path.casefold().endswith(".p3d")
+    )
+    configured_length = float(getattr(spec, "road_segment_length", 25.0))
+    result: dict[str, str] = {}
+
+    for donor in configured:
+        donor_key = _road_model_key(donor)
+        record = by_path.get(donor_key)
+        if record is None:
+            # External runtime-only donors cannot be inspected. Preserve the
+            # configured path and let strict asset/style validation report it.
+            continue
+        try:
+            donor_shape = inspect_visual_model_dimensions(
+                read_asset_record_bytes(record)
+            )
+        except (OSError, ValueError, ProxyCloneError):
+            continue
+        if donor_shape.is_straight_road_candidate:
+            result[donor_key] = donor
+            continue
+
+        donor_dir, _, donor_name = donor_key.rpartition("\\")
+        donor_textures = set(model_texture_dependencies(scan.records, donor))
+        donor_width = float(donor_shape.width_metres)
+        name_match = _CURVED_ROAD_DONOR_NAME.fullmatch(donor_name)
+        preferred_straight = None
+        if name_match is not None:
+            preferred_name = f"{name_match.group('prefix')}25.p3d"
+            preferred_straight = (
+                f"{donor_dir}\\{preferred_name}" if donor_dir else preferred_name
+            )
+
+        candidates: list[tuple[tuple[float, float, float, str], str]] = []
+        for candidate in p3d_records:
+            candidate_dir, _, candidate_name = candidate.path.rpartition("\\")
+            if candidate.path == donor_key or candidate_dir != donor_dir:
+                continue
+            try:
+                shape = inspect_visual_model_dimensions(
+                    read_asset_record_bytes(candidate)
+                )
+            except (OSError, ValueError, ProxyCloneError):
+                continue
+            if not shape.is_straight_road_candidate:
+                continue
+            width = float(shape.width_metres)
+            length = float(shape.length_metres)
+            if abs(width - donor_width) > max(0.75, donor_width * 0.30):
+                continue
+            if length < max(width * 1.50, configured_length * 0.40):
+                continue
+
+            candidate_textures = set(
+                model_texture_dependencies(scan.records, candidate.path)
+            )
+            if donor_textures and candidate_textures and not (
+                donor_textures & candidate_textures
+            ):
+                continue
+
+            common = 0
+            for left, right in zip(donor_name, candidate_name):
+                if left != right:
+                    break
+                common += 1
+            exact_family = 1.0 if preferred_straight == candidate.path else 0.0
+            score = (
+                -exact_family,
+                abs(length - configured_length),
+                -float(common),
+                candidate.path,
+            )
+            candidates.append((score, candidate.path))
+
+        if not candidates:
+            raise ValueError(
+                f"configured road donor {donor!r} appears to be a curved road "
+                f"piece (lateral end shift {donor_shape.lateral_center_shift_metres:.2f} m), "
+                "but no compatible straight sibling could be found in the configured "
+                "asset roots. Select a straight donor or add the PBO containing its family."
+            )
+
+        candidates.sort(key=lambda item: item[0])
+        result[donor_key] = candidates[0][1]
+
+    return result
+
+
 def _modded_road_variant_availability(
     spec: PlayabilitySpec,
+    effective_donors: dict[str, str] | None = None,
 ) -> dict[str, frozenset[str]]:
     """Discover real short siblings for configured modded road donor families."""
 
@@ -1690,15 +1814,16 @@ def _modded_road_variant_availability(
         _road_model_key(r"o\road\sil25.p3d"),
         _road_model_key(r"o\road\ces25.p3d"),
     }
-    donors = tuple(
-        value
+    effective_donors = effective_donors or {}
+    donors = tuple(dict.fromkeys(
+        effective_donors.get(_road_model_key(value), value)
         for value in (
             str(getattr(spec, "paved_road_model", "") or "").strip(),
             str(getattr(spec, "gravel_road_model", "") or "").strip(),
             str(getattr(spec, "dirt_road_model", "") or "").strip(),
         )
         if value and _road_model_key(value) not in defaults
-    )
+    ))
     if not donors:
         return {}
 
@@ -1734,6 +1859,7 @@ def _modded_road_variant_availability(
 
 def _modded_road_model_dimensions(
     spec: PlayabilitySpec,
+    effective_donors: dict[str, str] | None = None,
 ) -> dict[str, tuple[float, float]]:
     """Measure configured mod road donors so generated shapes meet them cleanly."""
 
@@ -1741,7 +1867,8 @@ def _modded_road_model_dimensions(
         _road_model_key(r"o\road\sil25.p3d"),
         _road_model_key(r"o\road\ces25.p3d"),
     }
-    donors = tuple(dict.fromkeys(
+    effective_donors = effective_donors or {}
+    configured_donors = tuple(
         value
         for value in (
             str(getattr(spec, "paved_road_model", "") or "").strip(),
@@ -1749,6 +1876,10 @@ def _modded_road_model_dimensions(
             str(getattr(spec, "dirt_road_model", "") or "").strip(),
         )
         if value and _road_model_key(value) not in stock_defaults
+    )
+    donors = tuple(dict.fromkeys(
+        effective_donors.get(_road_model_key(value), value)
+        for value in configured_donors
     ))
     if not donors or not tuple(getattr(spec, "asset_roots", ()) or ()):
         return {}
@@ -1782,6 +1913,9 @@ def _modded_road_model_dimensions(
         ):
             continue
         result[key] = (width, length)
+        for configured in configured_donors:
+            if effective_donors.get(_road_model_key(configured), configured) == donor:
+                result[_road_model_key(configured)] = (width, length)
     return result
 
 
@@ -3528,8 +3662,13 @@ def build_milestone4(
         site_library.prepare(dataset, projection)
 
     report_progress(41, "Discovering configured mod road-piece families")
-    road_variant_availability = _modded_road_variant_availability(spec)
-    road_model_dimensions = _modded_road_model_dimensions(spec)
+    effective_road_donors = _modded_road_effective_donors(spec)
+    road_variant_availability = _modded_road_variant_availability(
+        spec, effective_road_donors
+    )
+    road_model_dimensions = _modded_road_model_dimensions(
+        spec, effective_road_donors
+    )
     report_progress(42, "Fitting road geometry to terrain")
     road_variant_token = _ROAD_MODEL_VARIANTS_AVAILABLE.set(
         road_variant_availability or None
@@ -3537,12 +3676,16 @@ def build_milestone4(
     road_dimensions_token = _ROAD_MODEL_DIMENSIONS.set(
         road_model_dimensions or None
     )
+    road_effective_token = _ROAD_MODEL_EFFECTIVE_DONORS.set(
+        effective_road_donors or None
+    )
     try:
         road_fit = fit_road_objects(
             dataset, projection, elevations, spec, starting_id=1,
             progress_callback=_scaled_progress_callback(42, 49),
         )
     finally:
+        _ROAD_MODEL_EFFECTIVE_DONORS.reset(road_effective_token)
         _ROAD_MODEL_DIMENSIONS.reset(road_dimensions_token)
         _ROAD_MODEL_VARIANTS_AVAILABLE.reset(road_variant_token)
     road_fingerprint = _road_object_fingerprint(road_fit.objects)
@@ -4253,11 +4396,15 @@ def build_milestone4(
         repeat_road_dimensions_token = _ROAD_MODEL_DIMENSIONS.set(
             road_model_dimensions or None
         )
+        repeat_road_effective_token = _ROAD_MODEL_EFFECTIVE_DONORS.set(
+            effective_road_donors or None
+        )
         try:
             repeat_roads = fit_road_objects(
                 dataset, projection, repeat_elevations, spec, starting_id=1
             )
         finally:
+            _ROAD_MODEL_EFFECTIVE_DONORS.reset(repeat_road_effective_token)
             _ROAD_MODEL_DIMENSIONS.reset(repeat_road_dimensions_token)
             _ROAD_MODEL_VARIANTS_AVAILABLE.reset(repeat_road_variant_token)
         repeat_nonroads = generate_world_objects(
