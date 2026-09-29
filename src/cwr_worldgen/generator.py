@@ -187,6 +187,14 @@ class BuildResult:
         return self.texture_paths[0]
 
 
+def _validate_asset_roots_exist(spec: PlayabilitySpec) -> None:
+    """Fail before terrain work when a configured asset root has disappeared."""
+    for value in tuple(getattr(spec, "asset_roots", ()) or ()):
+        root = Path(value).expanduser().resolve()
+        if not root.exists():
+            raise ValueError(f"asset root does not exist: {root}")
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -3469,6 +3477,7 @@ def build_milestone4(
     dataset_override: OsmDataset | None = None,
 ) -> BuildResult:
     spec.validate()
+    _validate_asset_roots_exist(spec)
     output_dir = output_dir.resolve()
     prepare_output_directory(output_dir, spec.name, clean=clean)
 
