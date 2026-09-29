@@ -25,6 +25,7 @@ from .pbo import PboPackResult, pack_directory, pack_directory_cached, read_pbo
 from ._version import GENERATOR_VERSION
 from .output_ownership import prepare_output_directory, record_build_ownership
 from .legacy_proxy_models import ProxyCloneError, inspect_visual_model_dimensions
+from . import assets as _asset_catalogue
 from .assets import (
     AssetRecord,
     canonical_asset_path,
@@ -1706,7 +1707,7 @@ def _modded_road_effective_donors(
     if not configured or not tuple(getattr(spec, "asset_roots", ()) or ()):
         return {}
 
-    scan = scan_assets(
+    scan = _asset_catalogue.scan_assets(
         spec.asset_roots,
         configured,
         cache_dir=getattr(spec, "cache_dir", None),
@@ -1843,7 +1844,7 @@ def _modded_road_variant_availability(
         candidates_by_donor[_road_model_key(donor)] = candidates
         requested.extend(candidates)
 
-    scan = scan_assets(
+    scan = _asset_catalogue.scan_assets(
         spec.asset_roots,
         tuple(dict.fromkeys(requested)),
         cache_dir=getattr(spec, "cache_dir", None),
@@ -1893,7 +1894,7 @@ def _modded_road_model_dimensions(
     if not donors or not tuple(getattr(spec, "asset_roots", ()) or ()):
         return {}
 
-    scan = scan_assets(
+    scan = _asset_catalogue.scan_assets(
         spec.asset_roots,
         donors,
         cache_dir=getattr(spec, "cache_dir", None),
