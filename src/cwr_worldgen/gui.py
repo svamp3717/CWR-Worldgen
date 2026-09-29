@@ -2189,8 +2189,9 @@ class WorldgenGui(tk.Tk):
             text=(
                 "Set a straight donor for placement and an optional curve donor for style. "
                 "Worldgen reuses real straight siblings where available and generates missing "
-                "bends/lengths using the selected road family's texture. Add the containing "
-                "mod/PBO under Asset roots."
+                "bends/lengths using the selected road family's texture. Example for SEBNAM gravel: "
+                "Straight = sebnam_obj\\sebtrailpath25.p3d; Curve = "
+                "sebnam_obj\\sebtrailpath10 25.p3d. Add the containing mod/PBO under Asset roots."
             ),
             style="Hint.TLabel",
             wraplength=760,
