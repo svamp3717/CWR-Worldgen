@@ -67,6 +67,11 @@ GENERATED_GRAVEL_EDGE_SECTION_METRES = 0.65
 # Five-degree curve buckets and decimetre dimensions deliberately trade a tiny
 # amount of precision for aggressive model reuse.
 GENERATED_PAVED_CURVE_BUCKETS = tuple(range(5, 50, 5))
+# Custom road ribbons use one-degree turn buckets instead of being restricted to
+# the stock/fallback five-degree catalogue. Sixty degrees is deliberately the
+# ceiling: tighter bends on short/wide ribbons can fold the inside edge back over
+# itself and are better represented by another short generated piece.
+CUSTOM_ROAD_MAX_CURVE_DEGREES = 60
 GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.0
 # Curved generated paved turns retain the pre-junction-regression seam treatment
 # from terrtest39: tangent-aligned mouths plus a short lowered visual tongue.
@@ -198,6 +203,40 @@ def create_gravel_road_texture_image(
     return image
 
 
+def create_dirt_road_texture_image(size: int = 512) -> Image.Image:
+    """Create a seamless earth track with subtle wheel ruts and soft cutout edges."""
+
+    size = int(size)
+    if size < 32:
+        raise ValueError("dirt road texture size must be at least 32 pixels")
+    image = Image.new("RGBA", (size, size), (112, 91, 60, 255))
+    pixels = image.load()
+    for y in range(size):
+        yf = (y + 0.5) / size
+        for x in range(size):
+            xf = (x + 0.5) / size
+            # Deterministic multi-frequency soil variation. Longitudinal darker
+            # bands at 30/70% width read as worn wheel tracks without creating a
+            # painted-on centre line.
+            grain = (
+                8.0 * math.sin(math.tau * (7.0 * xf + 11.0 * yf))
+                + 5.0 * math.sin(math.tau * (19.0 * xf - 5.0 * yf + 0.17))
+                + 3.0 * math.sin(math.tau * (37.0 * xf + 23.0 * yf + 0.41))
+            )
+            rut = 0.0
+            for centre in (0.30, 0.70):
+                distance = (xf - centre) / 0.075
+                rut -= 18.0 * math.exp(-(distance * distance))
+            shoulder = -7.0 * (abs(xf - 0.5) * 2.0) ** 1.6
+            delta = grain + rut + shoulder
+            r = max(0, min(255, int(round(112 + delta))))
+            g = max(0, min(255, int(round(91 + delta * 0.82))))
+            b = max(0, min(255, int(round(60 + delta * 0.55))))
+            alpha = 0 if min(xf, 1.0 - xf) <= 0.018 else 255
+            pixels[x, y] = (r, g, b, alpha)
+    return image.filter(ImageFilter.UnsharpMask(radius=0.45, percent=25, threshold=3))
+
+
 def create_gravel_junction_texture_image(size: int = 512) -> Image.Image:
     """Build an opaque, earth-toned gravel texture for generated junctions.
 
@@ -280,6 +319,7 @@ _TEXTURE_FILE_STEMS = {
     "bridge": "b",
     "gravel": "g",
     "gravel_junction": "gj",
+    "dirt": "dt",
     "paved": "pv",
     "power_pole": "up",
     "power_tower": "ut",
@@ -300,6 +340,7 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         "rock": (118, 116, 107),
         "gravel": (126, 119, 103),
         "gravel_junction": (126, 119, 103),
+        "dirt": (112, 91, 60),
         "paved": (69, 70, 68),
         "power_pole": (116, 102, 78),
         "power_tower": (118, 120, 119),
@@ -336,6 +377,8 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         return create_gravel_road_texture_image(size)
     elif kind == "gravel_junction":
         return create_gravel_junction_texture_image(size)
+    elif kind == "dirt":
+        return create_dirt_road_texture_image(size)
     elif kind == "paved":
         # Keep fallback pavement deliberately plain. Stock road P3Ds remain the
         # preferred visible asset; this texture only covers geometry for which
@@ -555,6 +598,25 @@ def _paved_curve_degrees(subtype: str) -> int:
         return 0
     amount = int(match.group(2))
     return amount if match.group(1).casefold() == "r" else -amount
+
+
+_CUSTOM_ROAD_SUBTYPE = re.compile(
+    r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
+    r"(?P<length>\d{4})(?:_(?P<side>[lr])(?P<curve>\d{3}))?$",
+    re.IGNORECASE,
+)
+
+
+def _custom_road_signature(subtype: str) -> tuple[str, int] | None:
+    match = _CUSTOM_ROAD_SUBTYPE.fullmatch(str(subtype))
+    if match is None:
+        return None
+    curve = int(match.group("curve") or 0)
+    if curve > CUSTOM_ROAD_MAX_CURVE_DEGREES:
+        raise ValueError(f"custom road curve exceeds {CUSTOM_ROAD_MAX_CURVE_DEGREES} degrees")
+    if match.group("side"):
+        curve = curve if match.group("side").casefold() == "r" else -curve
+    return match.group("surface").casefold(), curve
 
 
 def _road_ribbon_sections(
@@ -1444,11 +1506,20 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
     width = key.width_m
     length = key.length_m
     half_w = width * 0.5
-    paved_fallback = key.subtype.casefold().startswith("paved_")
+    custom = _custom_road_signature(key.subtype)
+    custom_surface = custom[0] if custom is not None else ""
+    paved_fallback = (
+        key.subtype.casefold().startswith("paved_")
+        or custom_surface == "paved"
+    )
     curve_degrees = (
-        _paved_curve_degrees(key.subtype)
-        if paved_fallback
-        else _gravel_curve_degrees(key.subtype)
+        custom[1]
+        if custom is not None
+        else (
+            _paved_curve_degrees(key.subtype)
+            if paved_fallback
+            else _gravel_curve_degrees(key.subtype)
+        )
     )
 
     paved_turn = paved_fallback and abs(curve_degrees) > 0
@@ -1485,6 +1556,9 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
             raw_visual.point_flags,
         )
     else:
+        # Gravel and dirt tracks share the terrain-hugging, softly irregular
+        # ribbon geometry. Their textures keep the surface families visually
+        # distinct while preserving identical connection behaviour.
         visual = _gravel_visual_lod(length, half_w, curve_degrees, texture)
 
     # Keep road simulation on the first Resolution LOD, but also emit a face-less
@@ -1647,6 +1721,9 @@ def gravel_curve_model_path(model_path: str, curve_degrees: int) -> str:
 
 
 def is_generated_gravel_road_model(model_path: str) -> bool:
+    signature = custom_road_model_signature(model_path)
+    if signature is not None:
+        return signature[0] == "gravel"
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
     return re.fullmatch(r"gravel(?:25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d", filename, re.IGNORECASE) is not None
 
@@ -1703,13 +1780,73 @@ def paved_fallback_model_path(
     return rf"{world_name}\i\paved_w{width_dm:03d}_l{length_dm:04d}{suffix}.p3d"
 
 
+def custom_road_model_path(
+    world_name: str,
+    surface: str,
+    width_metres: float,
+    length_metres: float,
+    curve_degrees: float = 0.0,
+) -> str:
+    """Return a reusable generated road model for geometry absent from stock CWA."""
+
+    surface = str(surface).strip().casefold()
+    if surface not in {"paved", "gravel", "dirt"}:
+        raise ValueError("custom road surface must be paved, gravel, or dirt")
+    width_dm = max(10, min(999, int(round(float(width_metres) * 10.0))))
+    length_dm = max(5, min(9999, int(round(float(length_metres) * 10.0))))
+    signed = float(curve_degrees)
+    if not math.isfinite(signed):
+        raise ValueError("custom road curve must be finite")
+    magnitude = min(CUSTOM_ROAD_MAX_CURVE_DEGREES, max(0, int(round(abs(signed)))))
+    suffix = ""
+    if magnitude >= 1:
+        side = "r" if signed > 0.0 else "l"
+        suffix = f"_{side}{magnitude:03d}"
+    return (
+        rf"{world_name}\i\road_{surface}_w{width_dm:03d}_l{length_dm:04d}"
+        rf"{suffix}.p3d"
+    )
+
+
+def custom_road_model_signature(
+    model_path: str,
+) -> tuple[str, float, float, int] | None:
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
+    if not filename.casefold().endswith(".p3d"):
+        return None
+    match = _CUSTOM_ROAD_SUBTYPE.fullmatch(filename[:-4])
+    if match is None:
+        return None
+    curve = int(match.group("curve") or 0)
+    if match.group("side"):
+        curve = curve if match.group("side").casefold() == "r" else -curve
+    return (
+        match.group("surface").casefold(),
+        int(match.group("width")) / 10.0,
+        int(match.group("length")) / 10.0,
+        curve,
+    )
+
+
+def is_generated_custom_road_model(model_path: str) -> bool:
+    return custom_road_model_signature(model_path) is not None
+
+
 def is_generated_paved_road_model(model_path: str) -> bool:
+    signature = custom_road_model_signature(model_path)
+    if signature is not None:
+        return signature[0] == "paved"
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
     return re.fullmatch(
         r"paved_w\d{3}_l\d{4}(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d",
         filename,
         re.IGNORECASE,
     ) is not None
+
+
+def is_generated_dirt_road_model(model_path: str) -> bool:
+    signature = custom_road_model_signature(model_path)
+    return signature is not None and signature[0] == "dirt"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1752,6 +1889,9 @@ def _infrastructure_texture_kind(key: InfrastructureModelKey) -> str:
     """Return the generated texture family used by one infrastructure model."""
     if key.kind == "road":
         subtype = key.subtype.casefold()
+        custom = _custom_road_signature(subtype)
+        if custom is not None:
+            return custom[0]
         if subtype.startswith("paved_"):
             return "paved"
         # Junction polygons tile their UV coordinates in two dimensions. They
@@ -1767,6 +1907,11 @@ class ProceduralInfrastructureLibrary:
     _GRAVEL_JUNCTION_PATTERN = re.compile(r"^gravel_j([34])\.p3d$", re.IGNORECASE)
     _PAVED_PATTERN = re.compile(
         r"^paved_w(?P<width>\d{3})_l(?P<length>\d{4})(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+        re.IGNORECASE,
+    )
+    _CUSTOM_ROAD_PATTERN = re.compile(
+        r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
+        r"(?P<length>\d{4})(?:_[lr]\d{3})?\.p3d$",
         re.IGNORECASE,
     )
     _PAVED_JUNCTION_PATTERN = re.compile(
@@ -1906,6 +2051,15 @@ class ProceduralInfrastructureLibrary:
                 int(round(GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 20.0)),
             )] += count
             return
+        custom_road_match = self._CUSTOM_ROAD_PATTERN.fullmatch(filename)
+        if custom_road_match:
+            self._usage[InfrastructureModelKey(
+                "road",
+                filename[:-4].casefold(),
+                int(custom_road_match.group("width")),
+                int(custom_road_match.group("length")),
+            )] += count
+            return
         paved_match = self._PAVED_PATTERN.fullmatch(filename)
         if paved_match:
             self._usage[InfrastructureModelKey(
@@ -1975,6 +2129,14 @@ class ProceduralInfrastructureLibrary:
                 )
                 producer = lambda target: write_rgba_dxt1_paa(
                     target, create_gravel_road_texture_image(512)
+                )
+            elif kind == "dirt":
+                asset_key = cache_key(
+                    "procedural-infrastructure-texture-v1-custom-dirt-track",
+                    {"kind": kind, "size": 512, "recipe": "earth-ruts-cutout-v1"},
+                )
+                producer = lambda target: write_rgba_dxt1_paa(
+                    target, create_dirt_road_texture_image(512)
                 )
             elif kind == "gravel_junction":
                 asset_key = cache_key(
@@ -2077,6 +2239,13 @@ class ProceduralInfrastructureLibrary:
             ):
                 model_cache_version = (
                     "procedural-infrastructure-model-v23-tangent-paved-turn-seams"
+                )
+            elif (
+                key.kind == "road"
+                and key.subtype.casefold().startswith("road_")
+            ):
+                model_cache_version = (
+                    "procedural-infrastructure-model-v25-custom-road-ribbons"
                 )
             elif key.kind == "road":
                 model_cache_version = (
