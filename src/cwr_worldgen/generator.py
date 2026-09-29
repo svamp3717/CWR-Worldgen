@@ -40,6 +40,10 @@ from .procedural_infrastructure import (
     InfrastructureAssetResult,
     ProceduralInfrastructureLibrary,
     _texture_file_stem,
+    custom_road_model_signature,
+    is_generated_dirt_road_model,
+    is_generated_gravel_junction_model,
+    is_generated_gravel_road_model,
     is_generated_paved_junction_model,
     is_generated_paved_road_model,
 )
@@ -1526,28 +1530,29 @@ def _generation_fingerprint(
     )
 
 
-def _preferred_stock_paved_texture(
+def _preferred_road_texture(
     model_path: str,
     dependencies: Sequence[str],
-) -> str:
-    """Choose the stock paved texture that best matches the configured road family."""
+    *,
+    fallback: str | None = None,
+) -> str | None:
+    """Choose the most likely visible road texture embedded in a donor P3D."""
+
     values = tuple(
         str(value).replace("/", "\\").strip("\\")
         for value in dependencies
         if str(value).casefold().endswith((".paa", ".pac"))
     )
     if not values:
-        # Classic OFP paved network artwork. Builds with a readable stock P3D
-        # should resolve that model's exact embedded dependency before this.
-        return r"landtext\silnice.pac"
+        return fallback
     if len(values) == 1:
         return values[0]
 
     filename = str(model_path).replace("/", "\\").rsplit("\\", 1)[-1].casefold()
-    family = filename
-    for suffix in ("25.p3d", "12.p3d", "6.p3d"):
+    family = filename[:-4] if filename.endswith(".p3d") else filename
+    for suffix in ("25", "12", "6", "3"):
         if family.endswith(suffix):
-            family = family[: -len(suffix)]
+            family = family[: -len(suffix)].rstrip("_- ")
             break
     aliases = {
         "sil": ("sil", "silnice"),
@@ -1555,6 +1560,8 @@ def _preferred_stock_paved_texture(
         "asf": ("asf", "asfalt"),
         "asfaltka": ("asfalt", "asf"),
         "kos": ("kos",),
+        "ces": ("ces", "cesta", "dirt", "track"),
+        "cesta": ("cesta", "ces", "dirt", "track"),
     }.get(family, (family,))
 
     def rank(value: str) -> tuple[int, int, str]:
@@ -1563,14 +1570,30 @@ def _preferred_stock_paved_texture(
         score = 0
         if any(token and token in basename for token in aliases):
             score += 100
-        if "road" in lowered:
+        if any(token in lowered for token in ("road", "cesta", "track", "asfalt", "gravel")):
             score += 20
         if "landtext" in lowered:
             score += 10
+        # Avoid common secondary material maps when a conventional diffuse road
+        # texture is also present.
+        if any(token in basename for token in ("detail", "mask", "spec", "normal", "_nohq")):
+            score -= 40
         return (-score, len(value), lowered)
 
     return min(values, key=rank)
 
+
+def _preferred_stock_paved_texture(
+    model_path: str,
+    dependencies: Sequence[str],
+) -> str:
+    """Compatibility wrapper for the historical paved-only donor resolver."""
+
+    return _preferred_road_texture(
+        model_path,
+        dependencies,
+        fallback=r"landtext\silnice.pac",
+    ) or r"landtext\silnice.pac"
 
 def _ground_texture_profile(spec: PlayabilitySpec) -> str:
     return str(getattr(spec, "ground_texture_profile", "generated"))
@@ -1628,7 +1651,11 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
     """
     if milestone_number < 8:
         return ()
-    configured_roads = [spec.paved_road_model, spec.dirt_road_model]
+    configured_roads = [
+        spec.paved_road_model,
+        str(getattr(spec, "gravel_road_model", "") or ""),
+        spec.dirt_road_model,
+    ]
     road_models = {
         canonical_asset_path(path)
         for configured in configured_roads
@@ -3582,28 +3609,71 @@ def build_milestone4(
             or is_generated_paved_junction_model(model_path)
         )
     )
+    generated_gravel_usage = tuple(
+        (model_path, count)
+        for model_path, count in generated_infrastructure_usage
+        if (
+            is_generated_gravel_road_model(model_path)
+            or is_generated_gravel_junction_model(model_path)
+            or (
+                (signature := custom_road_model_signature(model_path)) is not None
+                and signature[0] == "gravel"
+            )
+        )
+    )
+    generated_dirt_usage = tuple(
+        (model_path, count)
+        for model_path, count in generated_infrastructure_usage
+        if is_generated_dirt_road_model(model_path)
+    )
+
     paved_texture_path = r"landtext\silnice.pac"
+    gravel_texture_path: str | None = None
+    dirt_texture_path: str | None = None
+
+    road_texture_donors: dict[str, str] = {}
     if generated_paved_usage:
-        report_progress(79, "Resolving stock paved-road texture for generated fallback")
-        paved_model_scan = scan_assets(
+        road_texture_donors["paved"] = spec.paved_road_model
+    configured_gravel = str(getattr(spec, "gravel_road_model", "") or "").strip()
+    if generated_gravel_usage and configured_gravel:
+        road_texture_donors["gravel"] = configured_gravel
+    if generated_dirt_usage:
+        road_texture_donors["dirt"] = spec.dirt_road_model
+
+    if road_texture_donors:
+        report_progress(79, "Resolving road textures from configured stock/modded donor models")
+        road_model_scan = scan_assets(
             spec.asset_roots,
-            (spec.paved_road_model,),
+            tuple(road_texture_donors.values()),
             cache_dir=getattr(spec, "cache_dir", None),
             use_cache=bool(getattr(spec, "cache_enabled", True)),
             refresh=bool(getattr(spec, "cache_refresh", False)),
         )
-        paved_texture_path = _preferred_stock_paved_texture(
-            spec.paved_road_model,
-            model_texture_dependencies(
-                paved_model_scan.records,
-                spec.paved_road_model,
-            ),
-        )
+        donor_textures: dict[str, str | None] = {}
+        for surface, donor_model in road_texture_donors.items():
+            dependencies = model_texture_dependencies(
+                road_model_scan.records,
+                donor_model,
+            )
+            donor_textures[surface] = _preferred_road_texture(
+                donor_model,
+                dependencies,
+                fallback=(
+                    r"landtext\silnice.pac"
+                    if surface == "paved"
+                    else None
+                ),
+            )
+        paved_texture_path = donor_textures.get("paved") or paved_texture_path
+        gravel_texture_path = donor_textures.get("gravel")
+        dirt_texture_path = donor_textures.get("dirt")
     if generated_infrastructure_usage:
         infrastructure_library = ProceduralInfrastructureLibrary(
             spec.name,
             road_segment_length=spec.road_segment_length,
             paved_texture_path=paved_texture_path,
+            gravel_texture_path=gravel_texture_path,
+            dirt_texture_path=dirt_texture_path,
             cache_dir=getattr(spec, "cache_dir", None),
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
@@ -3644,7 +3714,15 @@ def build_milestone4(
         + tuple(external_ground_textures)
         + tuple(osm_asset_mapping_report.selected_models)
         + tuple(osm_asset_mapping_report.selected_textures)
-        + ((paved_texture_path,) if generated_paved_usage else ())
+        + tuple(
+            value
+            for value in (
+                paved_texture_path if generated_paved_usage else None,
+                gravel_texture_path,
+                dirt_texture_path,
+            )
+            if value
+        )
     ))
     report_progress(82, "Scanning configured CWA asset roots and OSM asset mapping")
     asset_scan = scan_assets(
@@ -4066,6 +4144,8 @@ def build_milestone4(
                 spec.name,
                 road_segment_length=spec.road_segment_length,
                 paved_texture_path=paved_texture_path,
+                gravel_texture_path=gravel_texture_path,
+                dirt_texture_path=dirt_texture_path,
                 cache_dir=getattr(spec, "cache_dir", None),
                 cache_enabled=bool(getattr(spec, "cache_enabled", True)),
                 cache_refresh=bool(getattr(spec, "cache_refresh", False)),
