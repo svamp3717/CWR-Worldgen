@@ -321,7 +321,7 @@ def test_modded_donor_geometry_controls_generated_width_and_length(
 ) -> None:
     root = tmp_path / "mod"
     donor = r"myroads\asphalt_long.p3d"
-    texture = r"myroads\textures\asphalt_main.paa"
+    texture = r"myroads\tex\road.paa"
     _write_fake_mod_asset(root, donor, _mlod_road(7.2, 21.4, texture))
     _write_fake_mod_asset(root, texture, b"synthetic-paa")
 
