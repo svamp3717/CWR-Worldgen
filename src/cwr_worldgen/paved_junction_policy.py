@@ -435,7 +435,12 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
         if family is None:
             continue
         dirt = _p.road_is_dirt(feature.tags)
-        road_width = max(1.0, float(_p.road_width_metres(feature.tags)))
+        measured = _p.road_model_dimensions(model) if modded_paved else None
+        road_width = (
+            max(1.0, float(measured[0]))
+            if measured is not None
+            else max(1.0, float(_p.road_width_metres(feature.tags)))
+        )
         for index, (start, end) in enumerate(zip(points, points[1:])):
             if math.dist(start, end) <= 0.05:
                 continue
