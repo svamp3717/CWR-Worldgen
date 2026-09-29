@@ -2342,7 +2342,12 @@ def _fit_stock_piece_road_objects(
     for key in sorted(cap_keys):
         values = cap_incidents[key]
         use_dirt = all(value[1] for value in values)
-        all_gravel = all(is_generated_gravel_road_model(value[2]) for value in values)
+        configured_gravel = str(getattr(spec, "gravel_road_model", "") or "").casefold()
+        all_gravel = all(
+            is_generated_gravel_road_model(value[2])
+            or (configured_gravel and value[2].casefold() == configured_gravel)
+            for value in values
+        )
         incident_models = {value[2].casefold(): value[2] for value in values}
         generated_paved_t = _generated_paved_t_cap_plan(values, spec)
         axis_override = None
