@@ -47,6 +47,7 @@ class AssetBrowserApp:
         self._build_ui()
         root.bind("<Control-o>", lambda _event: self.select_pbo())
         root.bind("<Control-f>", lambda _event: self.search_entry.focus_set())
+        root.bind("<Control-Shift-C>", lambda _event: self.copy_current_path())
         root.bind("<Escape>", lambda _event: self.search_var.set(""))
 
     def _build_ui(self) -> None:
@@ -137,6 +138,13 @@ class AssetBrowserApp:
         ttk.Button(controls, text="Reset view", command=self._reset_view).pack(
             side=tk.LEFT, padx=(12, 0)
         )
+        self.skip_textures_var = tk.BooleanVar(master=self.root, value=False)
+        ttk.Checkbutton(
+            controls,
+            text="Skip textures (faster)",
+            variable=self.skip_textures_var,
+            command=self._redraw_current_model,
+        ).pack(side=tk.LEFT, padx=(18, 0))
 
         details = ttk.Frame(main)
         details.grid(row=2, column=0, sticky="ew", pady=(8, 0))
@@ -149,6 +157,19 @@ class AssetBrowserApp:
         ttk.Label(info_box, textvariable=self.info_var, justify=tk.LEFT, wraplength=600).pack(
             anchor="w", fill=tk.X
         )
+        self.copy_path_button = ttk.Button(
+            info_box,
+            text="Copy asset path",
+            command=self.copy_current_path,
+            state=tk.DISABLED,
+        )
+        self.copy_path_button.pack(anchor="w", pady=(8, 0))
+        ttk.Label(
+            info_box,
+            text="Copies the in-game path used by Worldgen, not the PBO source chain.",
+            wraplength=600,
+            justify=tk.LEFT,
+        ).pack(anchor="w", pady=(3, 0))
 
         related_box = ttk.LabelFrame(details, text="Related assets • double-click to jump", padding=5)
         related_box.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
@@ -265,6 +286,7 @@ class AssetBrowserApp:
         self._refresh_lists()
         self._clear_related()
         self.info_var.set("Nothing selected")
+        self.copy_path_button.configure(text="Copy asset path", state=tk.DISABLED)
         self.status_var.set("Select a PBO or folder to browse models and textures.")
         self._show_empty_preview()
 
@@ -337,6 +359,10 @@ class AssetBrowserApp:
     def _show_asset(self, item: BrowserAsset) -> None:
         self.current = item
         self.zoom = 1.0
+        self.copy_path_button.configure(
+            text="Copy P3D path" if item.kind == "model" else "Copy texture path",
+            state=tk.NORMAL,
+        )
         if item.kind == "model":
             self._show_model(item)
         else:
@@ -388,12 +414,18 @@ class AssetBrowserApp:
             azim_deg=self.azim,
             elev_deg=self.elev,
             zoom=self.zoom,
+            load_textures=not self.skip_textures_var.get(),
         )
         self.ax_preview.imshow(image, interpolation="nearest")
-        self.ax_preview.set_title(
-            f"{model.model_path} • {hits} textured face hit(s)"
-            + (f" • {misses} missing" if misses else "")
-        )
+        if self.skip_textures_var.get():
+            self.ax_preview.set_title(
+                f"{model.model_path} • geometry preview • textures skipped"
+            )
+        else:
+            self.ax_preview.set_title(
+                f"{model.model_path} • {hits} textured face hit(s)"
+                + (f" • {misses} missing" if misses else "")
+            )
         self.ax_preview.axis("off")
         self.figure.tight_layout(pad=1.0)
         self.canvas.draw_idle()
@@ -532,6 +564,32 @@ class AssetBrowserApp:
         self.azim, self.elev, self.zoom = 35.0, 25.0, 1.0
         if self.current_model is not None:
             self._draw_model(self.current_model)
+
+    def _redraw_current_model(self) -> None:
+        if self.current_model is None:
+            return
+        self._draw_model(self.current_model)
+        if self.skip_textures_var.get():
+            self.status_var.set(
+                "Texture lookup skipped for faster model browsing."
+            )
+        elif self.current is not None:
+            self.status_var.set(f"Model loaded: {self.current.path}")
+
+    def copy_current_path(self) -> None:
+        item = self.current
+        if item is None:
+            return
+        path = item.path
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(path)
+            self.root.update_idletasks()
+        except tk.TclError as exc:
+            self.status_var.set(f"Could not copy path: {exc}")
+            return
+        kind = "P3D" if item.kind == "model" else "texture"
+        self.status_var.set(f"Copied {kind} path: {path}")
 
     def _on_scroll_zoom(self, event) -> None:
         if self.current_model is None:
