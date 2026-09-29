@@ -23,6 +23,11 @@ _CURVE = re.compile(r"^(?:.*[\\/])(?P<family>sil|ces|asf|kos)10 (?P<radius>25|50
 _T = re.compile(r"^(?:.*[\\/])kr_new_(?P<main>sil|asf|kos)_(?P<branch>sil|ces|asf|kos)_t\.p3d$", re.I)
 _X = re.compile(r"^(?:.*[\\/])kr_new_silxsil\.p3d$", re.I)
 _GRAVEL = re.compile(r"^(?:.*[\\/])gravel(?P<length>25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.I)
+_CUSTOM_ROAD = re.compile(
+    r"^(?:.*[\\/])road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
+    r"(?P<length>\d{4})(?:_(?P<side>[lr])(?P<degrees>\d{3}))?\.p3d$",
+    re.I,
+)
 _GRAVEL_JUNCTION = re.compile(
     r"^(?:.*[\\/])gravel_j(?P<degree>[34])(?:_(?P<variant>t(?:30|45|60|75)[lr]|t90|y120|x(?:30|45|60|75|90)))?\.p3d$",
     re.I,
@@ -136,9 +141,22 @@ def _curve_points(family: str, radius: float) -> tuple[tuple[float, float], tupl
     )
 
 
-def _endpoint(road_id: int, model: str, family: str, kind: str, index: int,
-              point: tuple[float, float], tangent: float, outward: float) -> RoadEndpoint:
-    return RoadEndpoint(road_id, model, family, kind, index, point, tangent % 180.0, outward % 360.0, _WIDTHS[family])
+def _endpoint(
+    road_id: int,
+    model: str,
+    family: str,
+    kind: str,
+    index: int,
+    point: tuple[float, float],
+    tangent: float,
+    outward: float,
+    half_width: float | None = None,
+) -> RoadEndpoint:
+    width = _WIDTHS[family] if half_width is None else float(half_width)
+    return RoadEndpoint(
+        road_id, model, family, kind, index, point,
+        tangent % 180.0, outward % 360.0, width,
+    )
 
 
 def _gravel_junction_headings(degree: int, variant: str | None) -> tuple[float, ...]:
@@ -172,6 +190,49 @@ def _road(values) -> RoadObject | None:
     yaw = math.degrees(math.atan2(-float(values[2]), float(values[0]))) % 360.0
     pitch = math.degrees(math.asin(max(-1.0, min(1.0, float(values[7])))))
     origin = x, z
+
+    match = _CUSTOM_ROAD.fullmatch(path)
+    if match:
+        surface = match.group("surface").casefold()
+        family = {"paved": "paved", "gravel": "gravel", "dirt": "ces"}[surface]
+        width = int(match.group("width")) / 10.0
+        half_width = width * 0.5
+        length = int(match.group("length")) / 10.0
+        side = match.group("side")
+        degrees = float(match.group("degrees") or 0.0)
+        begin = _world_point((0.0, -length * 0.5), origin, yaw, pitch)
+        end = _world_point((0.0, length * 0.5), origin, yaw, pitch)
+        if side and degrees > 0.0:
+            signed = degrees if side.casefold() == "r" else -degrees
+            theta = math.radians(abs(signed))
+            radius = length / max(1.0e-9, 2.0 * math.sin(theta * 0.5))
+            sagitta = math.copysign(
+                radius * (1.0 - math.cos(theta * 0.5)),
+                signed,
+            )
+            control_x = sagitta * 2.0
+            tangent_offset = math.degrees(
+                math.atan2(2.0 * control_x, max(length, 1.0e-9))
+            )
+        else:
+            tangent_offset = 0.0
+        begin_heading = _world_heading(tangent_offset, yaw, pitch)
+        end_heading = _world_heading(-tangent_offset, yaw, pitch)
+        endpoints = (
+            _endpoint(
+                object_id, model, family, "custom_curve" if side else "custom_straight",
+                0, begin, begin_heading, (begin_heading + 180.0) % 360.0,
+                half_width,
+            ),
+            _endpoint(
+                object_id, model, family, "custom_curve" if side else "custom_straight",
+                1, end, end_heading, end_heading, half_width,
+            ),
+        )
+        return RoadObject(
+            object_id, model, x, y, z, yaw, pitch, family,
+            "custom_curve" if side else "custom_straight", endpoints,
+        )
 
     match = _STRAIGHT.fullmatch(path)
     if match:
@@ -420,7 +481,7 @@ def _segment_intersection(a: tuple[float, float], b: tuple[float, float],
 
 
 def _paved_crossing_issues(roads: Sequence[RoadObject]) -> list[RoadIssue]:
-    paved = tuple(road for road in roads if road.kind == "straight" and road.family in {"sil", "asf", "kos"})
+    paved = tuple(road for road in roads if road.kind == "straight" and road.family in {"sil", "asf", "kos", "paved"})
     buckets: dict[tuple[int, int], list[int]] = {}
     for index, road in enumerate(paved):
         first, last = road.endpoints[0].point, road.endpoints[-1].point
