@@ -25,7 +25,6 @@ from .pbo import PboPackResult, pack_directory, pack_directory_cached, read_pbo
 from ._version import GENERATOR_VERSION
 from .output_ownership import prepare_output_directory, record_build_ownership
 from .legacy_proxy_models import ProxyCloneError, inspect_visual_model_dimensions
-from . import assets as _asset_catalogue
 from .assets import (
     AssetRecord,
     canonical_asset_path,
@@ -1707,7 +1706,13 @@ _CURVED_ROAD_DONOR_NAME = re.compile(
 def _modded_road_effective_donors(
     spec: PlayabilitySpec,
 ) -> dict[str, str]:
-    """Resolve curved style samples to straight placement donors from the same mod."""
+    """Resolve curved legacy selections without scanning every P3D in the install.
+
+    Explicit straight/curve donor fields are the preferred configuration. For
+    backwards compatibility, a straight field with an angle/radius filename such
+    as sebtrailpath10 25.p3d maps to sebtrailpath25.p3d when that exact sibling
+    exists.
+    """
 
     configured = tuple(dict.fromkeys(
         value
@@ -1721,109 +1726,67 @@ def _modded_road_effective_donors(
     if not configured or not tuple(getattr(spec, "asset_roots", ()) or ()):
         return {}
 
-    scan = _asset_catalogue.scan_assets(
+    preferred_by_donor: dict[str, str] = {}
+    requested: list[str] = list(configured)
+    for donor in configured:
+        donor_key = _road_model_key(donor)
+        donor_dir, _, donor_name = donor_key.rpartition("\\")
+        match = _CURVED_ROAD_DONOR_NAME.fullmatch(donor_name)
+        if match is None:
+            continue
+        preferred_name = f"{match.group('prefix')}25.p3d"
+        preferred = (
+            f"{donor_dir}\\{preferred_name}" if donor_dir else preferred_name
+        )
+        preferred_by_donor[donor_key] = preferred
+        requested.append(preferred)
+
+    # Use the installed targeted scanner. The previous implementation called
+    # assets.scan_assets directly, forcing a recursive catalogue of the entire
+    # game folder and then opening every P3D while searching for a sibling.
+    scan = scan_assets(
         spec.asset_roots,
-        configured,
+        tuple(dict.fromkeys(requested)),
         cache_dir=getattr(spec, "cache_dir", None),
         use_cache=bool(getattr(spec, "cache_enabled", True)),
         refresh=bool(getattr(spec, "cache_refresh", False)),
     )
     by_path = {record.path: record for record in scan.records}
-    p3d_records = tuple(
-        record for record in scan.records if record.path.casefold().endswith(".p3d")
-    )
-    configured_length = float(getattr(spec, "road_segment_length", 25.0))
     result: dict[str, str] = {}
 
     for donor in configured:
         donor_key = _road_model_key(donor)
+        preferred = preferred_by_donor.get(donor_key)
+        if preferred is not None and preferred in by_path:
+            result[donor_key] = preferred
+            continue
+
         record = by_path.get(donor_key)
         if record is None:
-            # External runtime-only donors cannot be inspected. Preserve the
-            # configured path and let strict asset/style validation report it.
             continue
         try:
-            donor_shape = inspect_visual_model_dimensions(
+            shape = inspect_visual_model_dimensions(
                 read_asset_record_bytes(record)
             )
         except (OSError, ValueError, ProxyCloneError):
             continue
-        if donor_shape.is_straight_road_candidate:
+        if shape.is_straight_road_candidate:
             result[donor_key] = donor
             continue
 
-        donor_dir, _, donor_name = donor_key.rpartition("\\")
-        donor_textures = set(model_texture_dependencies(scan.records, donor))
-        donor_width = float(donor_shape.width_metres)
-        name_match = _CURVED_ROAD_DONOR_NAME.fullmatch(donor_name)
-        preferred_straight = None
-        if name_match is not None:
-            preferred_name = f"{name_match.group('prefix')}25.p3d"
-            preferred_straight = (
-                f"{donor_dir}\\{preferred_name}" if donor_dir else preferred_name
-            )
-
-        if preferred_straight is not None and preferred_straight in by_path:
-            # Angle/radius families such as SEBNAM use names like
-            # sebtrailpath10 25.p3d for a 10-degree, 25-m-radius curve and
-            # sebtrailpath25.p3d for the long straight. Once the selected donor
-            # has already been proven curved, that explicit sibling is more
-            # authoritative than bounding-box heuristics.
-            result[donor_key] = preferred_straight
-            continue
-
-        candidates: list[tuple[tuple[float, float, float, str], str]] = []
-        for candidate in p3d_records:
-            candidate_dir, _, candidate_name = candidate.path.rpartition("\\")
-            if candidate.path == donor_key or candidate_dir != donor_dir:
-                continue
-            try:
-                shape = inspect_visual_model_dimensions(
-                    read_asset_record_bytes(candidate)
-                )
-            except (OSError, ValueError, ProxyCloneError):
-                continue
-            if not shape.is_straight_road_candidate:
-                continue
-            width = float(shape.width_metres)
-            length = float(shape.length_metres)
-            if abs(width - donor_width) > max(0.75, donor_width * 0.30):
-                continue
-            if length < max(width * 1.50, configured_length * 0.40):
-                continue
-
-            candidate_textures = set(
-                model_texture_dependencies(scan.records, candidate.path)
-            )
-            if donor_textures and candidate_textures and not (
-                donor_textures & candidate_textures
-            ):
-                continue
-
-            common = 0
-            for left, right in zip(donor_name, candidate_name):
-                if left != right:
-                    break
-                common += 1
-            exact_family = 1.0 if preferred_straight == candidate.path else 0.0
-            score = (
-                -exact_family,
-                abs(length - configured_length),
-                -float(common),
-                candidate.path,
-            )
-            candidates.append((score, candidate.path))
-
-        if not candidates:
+        if preferred is not None:
             raise ValueError(
-                f"configured road donor {donor!r} appears to be a curved road "
-                f"piece (lateral end shift {donor_shape.lateral_center_shift_metres:.2f} m), "
-                "but no compatible straight sibling could be found in the configured "
-                "asset roots. Select a straight donor or add the PBO containing its family."
+                f"configured road donor {donor!r} is a curved road piece, but "
+                f"its expected straight sibling {preferred!r} was not found. "
+                "Set the Straight P3D field explicitly and keep this model in "
+                "the Curve P3D field."
             )
-
-        candidates.sort(key=lambda item: item[0])
-        result[donor_key] = candidates[0][1]
+        raise ValueError(
+            f"configured road donor {donor!r} appears to be curved "
+            f"(lateral end shift {shape.lateral_center_shift_metres:.2f} m). "
+            "Set a straight model in the Straight P3D field and put this model "
+            "in the matching Curve P3D field."
+        )
 
     return result
 
