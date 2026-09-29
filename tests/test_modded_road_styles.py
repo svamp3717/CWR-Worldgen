@@ -12,6 +12,7 @@ from cwr_worldgen import playability
 from cwr_worldgen import procedural_infrastructure as infrastructure
 from cwr_worldgen.assets import model_texture_dependencies, scan_assets
 from cwr_worldgen.osm import road_model_for_tags
+from cwr_worldgen.gui import build_milestone9_command, default_gui_values
 
 
 def _write_fake_mod_asset(root: Path, relative: str, payload: bytes) -> Path:
@@ -193,3 +194,25 @@ def test_generated_custom_paved_is_recognized_by_junction_policy() -> None:
         "donorworld", "paved", 6.0, 10.0, 27.0
     )
     assert paved_junction_policy._family(model) == "sil"
+
+
+def test_gui_command_exposes_all_three_modded_road_donors() -> None:
+    values = default_gui_values()
+    values.update({
+        "source_dir": "source",
+        "output": "build",
+        "name": "donorworld",
+        "display_name": "Donor World",
+        "paved_road_model": r"myroads\asphalt25.p3d",
+        "gravel_road_model": r"myroads\gravel25.p3d",
+        "dirt_road_model": r"myroads\track25.p3d",
+    })
+    command = build_milestone9_command(values, python="python")
+
+    for option, model in (
+        ("--paved-road-model", r"myroads\asphalt25.p3d"),
+        ("--gravel-road-model", r"myroads\gravel25.p3d"),
+        ("--dirt-road-model", r"myroads\track25.p3d"),
+    ):
+        index = command.index(option)
+        assert command[index + 1] == model
