@@ -12,6 +12,7 @@ from cwr_worldgen import playability
 from cwr_worldgen import procedural_infrastructure as infrastructure
 from cwr_worldgen.assets import model_texture_dependencies, scan_assets
 from cwr_worldgen.osm import road_model_for_tags
+from cwr_worldgen.pbo import PboEntry, write_pbo
 from cwr_worldgen.gui import build_milestone9_command, default_gui_values
 
 
@@ -216,3 +217,60 @@ def test_gui_command_exposes_all_three_modded_road_donors() -> None:
     ):
         index = command.index(option)
         assert command[index + 1] == model
+
+
+def test_modded_road_family_and_texture_are_discovered_inside_pbo(
+    tmp_path: Path,
+) -> None:
+    pbo = tmp_path / "myroads.pbo"
+    write_pbo(
+        pbo,
+        (
+            PboEntry(
+                "asphalt25.p3d",
+                b"MLOD donor myroads\\textures\\asphalt_main.paa\x00",
+            ),
+            PboEntry(
+                "asphalt12.p3d",
+                b"MLOD short myroads\\textures\\asphalt_main.paa\x00",
+            ),
+            PboEntry("textures/asphalt_main.paa", b"synthetic-paa"),
+        ),
+    )
+
+    spec = SimpleNamespace(
+        paved_road_model=r"myroads\asphalt25.p3d",
+        gravel_road_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        road_segment_length=25.0,
+        asset_roots=(pbo,),
+        cache_dir=None,
+        cache_enabled=False,
+        cache_refresh=False,
+    )
+
+    availability = generator._modded_road_variant_availability(spec)
+    token = playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(availability)
+    try:
+        variants = playability.road_model_variants(
+            spec.paved_road_model,
+            spec.road_segment_length,
+        )
+    finally:
+        playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(token)
+
+    assert [piece.model_path for piece in variants] == [
+        r"myroads\asphalt25.p3d",
+        r"myroads\asphalt12.p3d",
+    ]
+
+    scan = scan_assets(
+        (pbo,),
+        (spec.paved_road_model,),
+        use_cache=False,
+    )
+    dependencies = model_texture_dependencies(
+        scan.records,
+        spec.paved_road_model,
+    )
+    assert dependencies == (r"myroads\textures\asphalt_main.paa",)
