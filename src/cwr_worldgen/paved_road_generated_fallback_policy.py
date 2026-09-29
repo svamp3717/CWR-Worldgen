@@ -92,6 +92,19 @@ def _generated_width(
     surface: str,
 ) -> float:
     if bool(getattr(spec, "custom_road_shapes", False)):
+        donor_attribute = {
+            "paved": "paved_road_model",
+            "gravel": "gravel_road_model",
+            "dirt": "dirt_road_model",
+        }.get(surface)
+        donor_model = (
+            str(getattr(spec, donor_attribute, "") or "")
+            if donor_attribute is not None
+            else ""
+        )
+        measured = _p.road_model_dimensions(donor_model) if donor_model else None
+        if measured is not None:
+            return max(1.5, float(measured[0]))
         active_tags = _p._ACTIVE_ROAD_TAGS.get()
         if active_tags is not None:
             return max(1.5, float(_p.road_width_metres(active_tags)))
