@@ -23,9 +23,11 @@ from .paa import inspect_paa, write_rgb_dxt1_paa, write_solid_dxt1_paa
 from .pbo import PboPackResult, pack_directory, pack_directory_cached, read_pbo
 from ._version import GENERATOR_VERSION
 from .output_ownership import prepare_output_directory, record_build_ownership
+from .legacy_proxy_models import ProxyCloneError, inspect_visual_model_dimensions
 from .assets import (
     canonical_asset_path,
     model_texture_dependencies,
+    read_asset_record_bytes,
     scan_assets,
     write_asset_catalogue,
 )
@@ -126,6 +128,7 @@ from .playability import (
     RoadFitReport,
     TerrainGradeReport,
     TransitionReport,
+    _ROAD_MODEL_DIMENSIONS,
     _ROAD_MODEL_VARIANTS_AVAILABLE,
     _road_model_key,
     fit_road_objects,
@@ -1691,6 +1694,59 @@ def _modded_road_variant_availability(
             if _road_model_key(candidate) in existing
         )
         result[donor_key] = frozenset(values)
+    return result
+
+
+def _modded_road_model_dimensions(
+    spec: PlayabilitySpec,
+) -> dict[str, tuple[float, float]]:
+    """Measure configured mod road donors so generated shapes meet them cleanly."""
+
+    stock_defaults = {
+        _road_model_key(r"o\road\sil25.p3d"),
+        _road_model_key(r"o\road\ces25.p3d"),
+    }
+    donors = tuple(dict.fromkeys(
+        value
+        for value in (
+            str(getattr(spec, "paved_road_model", "") or "").strip(),
+            str(getattr(spec, "gravel_road_model", "") or "").strip(),
+            str(getattr(spec, "dirt_road_model", "") or "").strip(),
+        )
+        if value and _road_model_key(value) not in stock_defaults
+    ))
+    if not donors or not tuple(getattr(spec, "asset_roots", ()) or ()):
+        return {}
+
+    scan = scan_assets(
+        spec.asset_roots,
+        donors,
+        cache_dir=getattr(spec, "cache_dir", None),
+        use_cache=bool(getattr(spec, "cache_enabled", True)),
+        refresh=bool(getattr(spec, "cache_refresh", False)),
+    )
+    by_path = {record.path: record for record in scan.records}
+    result: dict[str, tuple[float, float]] = {}
+    for donor in donors:
+        key = _road_model_key(donor)
+        record = by_path.get(key)
+        if record is None:
+            continue
+        try:
+            info = inspect_visual_model_dimensions(read_asset_record_bytes(record))
+        except (OSError, ValueError, ProxyCloneError):
+            continue
+        width = float(info.width_metres)
+        length = float(info.length_metres)
+        if (
+            not math.isfinite(width)
+            or not math.isfinite(length)
+            or not 0.75 <= width <= 30.0
+            or not 2.0 <= length <= 200.0
+            or length < width * 1.15
+        ):
+            continue
+        result[key] = (width, length)
     return result
 
 
@@ -3438,9 +3494,13 @@ def build_milestone4(
 
     report_progress(41, "Discovering configured mod road-piece families")
     road_variant_availability = _modded_road_variant_availability(spec)
+    road_model_dimensions = _modded_road_model_dimensions(spec)
     report_progress(42, "Fitting road geometry to terrain")
     road_variant_token = _ROAD_MODEL_VARIANTS_AVAILABLE.set(
         road_variant_availability or None
+    )
+    road_dimensions_token = _ROAD_MODEL_DIMENSIONS.set(
+        road_model_dimensions or None
     )
     try:
         road_fit = fit_road_objects(
@@ -3448,6 +3508,7 @@ def build_milestone4(
             progress_callback=_scaled_progress_callback(42, 49),
         )
     finally:
+        _ROAD_MODEL_DIMENSIONS.reset(road_dimensions_token)
         _ROAD_MODEL_VARIANTS_AVAILABLE.reset(road_variant_token)
     road_fingerprint = _road_object_fingerprint(road_fit.objects)
     report_progress(49, "Road fitting complete")
@@ -4162,11 +4223,15 @@ def build_milestone4(
         repeat_road_variant_token = _ROAD_MODEL_VARIANTS_AVAILABLE.set(
             road_variant_availability or None
         )
+        repeat_road_dimensions_token = _ROAD_MODEL_DIMENSIONS.set(
+            road_model_dimensions or None
+        )
         try:
             repeat_roads = fit_road_objects(
                 dataset, projection, repeat_elevations, spec, starting_id=1
             )
         finally:
+            _ROAD_MODEL_DIMENSIONS.reset(repeat_road_dimensions_token)
             _ROAD_MODEL_VARIANTS_AVAILABLE.reset(repeat_road_variant_token)
         repeat_nonroads = generate_world_objects(
             dataset,
