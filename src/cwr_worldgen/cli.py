@@ -453,6 +453,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     _add_source_feature_arguments(milestone9, include_minor_roads_default=True)
     _add_playability_arguments(milestone9)
+    milestone9.add_argument(
+        "--no-custom-road-shapes",
+        action="store_false",
+        dest="custom_road_shapes",
+        help=(
+            "disable generated paved/gravel/dirt road shapes and retain the "
+            "legacy stock-piece/fallback behaviour"
+        ),
+    )
+    milestone9.set_defaults(custom_road_shapes=True)
     _add_normalization_arguments(milestone9, include_minor_flag=False)
     _add_constraint_solver_arguments(milestone9)
     _add_procedural_building_arguments(milestone9)
@@ -884,6 +894,7 @@ def main(argv: list[str] | None = None) -> int:
                 forest_tree_spacing=args.forest_tree_spacing,
                 max_forest_objects=args.max_forest_objects,
                 advisory_object_limits=True,
+                custom_road_shapes=args.custom_road_shapes,
                 road_connection_tolerance=args.road_connection_tolerance,
                 maximum_road_grade_percent=args.maximum_road_grade,
                 road_grade_radius=args.road_grade_radius,
