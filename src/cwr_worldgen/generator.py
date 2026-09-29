@@ -19,6 +19,7 @@ from .cache import (
     load_or_create_pickle, restore_bundle, store_bundle, streaming_hash,
 )
 from .images import HeightmapLoadResult, load_heightmap, load_material_mask
+from .fast_asset_scan_policy import locate_assets_fast
 from .model import ConstraintPlayabilitySpec, HeightmapSpec, OsmSpec, PlayabilitySpec, WorldObject, WorldSpec
 from .paa import inspect_paa, write_rgb_dxt1_paa, write_solid_dxt1_paa
 from .pbo import PboPackResult, pack_directory, pack_directory_cached, read_pbo
@@ -1744,7 +1745,7 @@ def _modded_road_effective_donors(
     # Use the installed targeted scanner. The previous implementation called
     # assets.scan_assets directly, forcing a recursive catalogue of the entire
     # game folder and then opening every P3D while searching for a sibling.
-    scan = scan_assets(
+    scan = locate_assets_fast(
         spec.asset_roots,
         tuple(dict.fromkeys(requested)),
         cache_dir=getattr(spec, "cache_dir", None),
@@ -1878,7 +1879,7 @@ def _modded_road_model_dimensions(
             donor, float(getattr(spec, "road_segment_length", 25.0))
         )
     ))
-    scan = scan_assets(
+    scan = locate_assets_fast(
         spec.asset_roots,
         requested,
         cache_dir=getattr(spec, "cache_dir", None),
