@@ -53,7 +53,10 @@ def _junction_geometry(dataset, projection, spec):
 
     for key, junction in tuple(result.items()):
         models = models_by_key.get(key, ())
-        if not models or not all(rq._p.is_generated_gravel_road_model(model) for model in models):
+        if not models or not all(
+            rq._p.road_model_surface(spec, model) == "gravel"
+            for model in models
+        ):
             continue
         if len(junction.directions) not in {3, 4}:
             continue
