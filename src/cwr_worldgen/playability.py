@@ -842,6 +842,32 @@ def road_model_variant_paths(model_path: str, configured_long_length: float) -> 
     return tuple(piece.model_path for piece in road_model_variants(model_path, configured_long_length))
 
 
+def road_model_surface(spec: object, model_path: str) -> str | None:
+    """Classify stock, generated, or configured mod road models by surface."""
+
+    if is_generated_gravel_road_model(model_path):
+        return "gravel"
+    if is_generated_dirt_road_model(model_path):
+        return "dirt"
+    if is_generated_paved_road_model(model_path):
+        return "paved"
+
+    target = _road_model_key(model_path)
+    configured = (
+        ("gravel", str(getattr(spec, "gravel_road_model", "") or "")),
+        ("dirt", str(getattr(spec, "dirt_road_model", "") or "")),
+        ("paved", str(getattr(spec, "paved_road_model", "") or "")),
+    )
+    segment_length = float(getattr(spec, "road_segment_length", 25.0))
+    for surface, base_model in configured:
+        if not base_model:
+            continue
+        variants = road_model_variants(base_model, segment_length)
+        if target in {_road_model_key(piece.model_path) for piece in variants}:
+            return surface
+    return None
+
+
 def _point_along_straight_segment(
     start: tuple[float, float], end: tuple[float, float], distance: float
 ) -> tuple[float, float]:
@@ -1998,7 +2024,11 @@ def _road_object_on_slope(
     pitch = max(-35.0, min(35.0, pitch))
     terrain_raise = 0.0
     placement_offset = vertical_offset
-    if is_generated_gravel_road_model(model_path) or is_generated_gravel_junction_model(model_path):
+    if (
+        is_generated_gravel_road_model(model_path)
+        or is_generated_dirt_road_model(model_path)
+        or is_generated_gravel_junction_model(model_path)
+    ):
         # Gravel is a normal terrain-following road, not a raised slab. Place
         # its rendered surface and Roadway LOD exactly on the fitted terrain
         # plane and never lift the whole piece to clear a local terrain bump.
