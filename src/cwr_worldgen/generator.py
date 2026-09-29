@@ -3676,14 +3676,17 @@ def build_milestone4(
         )
         site_library.prepare(dataset, projection)
 
-    report_progress(41, "Discovering configured mod road-piece families")
+    report_progress(41, "Resolving configured straight and curve road donors")
     effective_road_donors = _modded_road_effective_donors(spec)
+    report_progress(41, "Checking exact mod road 25/12/6 sibling models")
     road_variant_availability = _modded_road_variant_availability(
         spec, effective_road_donors
     )
+    report_progress(41, "Measuring mod road sibling geometry")
     road_model_dimensions = _modded_road_model_dimensions(
         spec, effective_road_donors
     )
+    report_progress(41, "Configured mod road families ready")
     report_progress(42, "Fitting road geometry to terrain")
     road_variant_token = _ROAD_MODEL_VARIANTS_AVAILABLE.set(
         road_variant_availability or None
