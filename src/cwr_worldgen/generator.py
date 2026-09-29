@@ -1893,8 +1893,16 @@ def _modded_road_model_dimensions(
     )
     by_path = {record.path: record for record in scan.records}
     result: dict[str, tuple[float, float]] = {}
+
+    candidate_paths: list[str] = []
     for donor in donors:
-        key = _road_model_key(donor)
+        candidate_paths.append(donor)
+        candidate_paths.extend(
+            road_model_variant_paths(donor, spec.road_segment_length)
+        )
+
+    for model_path in dict.fromkeys(candidate_paths):
+        key = _road_model_key(model_path)
         record = by_path.get(key)
         if record is None:
             continue
@@ -1905,7 +1913,8 @@ def _modded_road_model_dimensions(
         width = float(info.width_metres)
         length = float(info.length_metres)
         if (
-            not math.isfinite(width)
+            not info.is_straight_road_candidate
+            or not math.isfinite(width)
             or not math.isfinite(length)
             or not 0.75 <= width <= 30.0
             or not 2.0 <= length <= 200.0
@@ -1913,9 +1922,13 @@ def _modded_road_model_dimensions(
         ):
             continue
         result[key] = (width, length)
-        for configured in configured_donors:
-            if effective_donors.get(_road_model_key(configured), configured) == donor:
-                result[_road_model_key(configured)] = (width, length)
+
+    for configured in configured_donors:
+        configured_key = _road_model_key(configured)
+        effective = effective_donors.get(configured_key, configured)
+        measured = result.get(_road_model_key(effective))
+        if measured is not None:
+            result[configured_key] = measured
     return result
 
 
