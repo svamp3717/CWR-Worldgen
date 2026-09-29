@@ -25,6 +25,7 @@ from cwr_worldgen.milestone6 import Milestone6Spec
 from cwr_worldgen.milestone7 import Milestone7Spec
 from cwr_worldgen.milestone8 import Milestone8Spec
 from cwr_worldgen.milestone9 import Milestone9Spec
+from cwr_worldgen.legacy_proxy_models import inspect_visual_model_dimensions
 
 
 def _write_fake_mod_asset(root: Path, relative: str, payload: bytes) -> Path:
@@ -638,6 +639,23 @@ def test_sebnam_curve_donor_resolves_to_straight_family(tmp_path: Path) -> None:
         custom_road_shapes=True,
         procedural_gravel_roads=True,
     )
+
+    scan = scan_assets((pbo,), (curved,), use_cache=False)
+    by_path = {record.path: record for record in scan.records}
+    curved_shape = inspect_visual_model_dimensions(
+        asset_module.read_asset_record_bytes(by_path[curved])
+    )
+    straight_shape = inspect_visual_model_dimensions(
+        asset_module.read_asset_record_bytes(
+            by_path[r"sebnam_obj\sebtrailpath25.p3d"]
+        )
+    )
+    assert curved_shape.is_straight_road_candidate is False
+    assert straight_shape.is_straight_road_candidate is True
+    assert model_texture_dependencies(scan.records, curved) == (texture,)
+    assert model_texture_dependencies(
+        scan.records, r"sebnam_obj\sebtrailpath25.p3d"
+    ) == (texture,)
 
     effective = generator._modded_road_effective_donors(spec)
     assert effective[playability._road_model_key(curved)] == (
