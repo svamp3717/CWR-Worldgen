@@ -63,9 +63,25 @@ _ROAD_MODEL_VARIANTS_AVAILABLE: ContextVar[
     default=None,
 )
 
+_ROAD_MODEL_DIMENSIONS: ContextVar[
+    Mapping[str, tuple[float, float]] | None
+] = ContextVar(
+    "cwr_road_model_dimensions",
+    default=None,
+)
+
 
 def _road_model_key(value: str) -> str:
     return str(value).replace("/", "\\").strip().lstrip("\\").casefold()
+
+
+def road_model_dimensions(model_path: str) -> tuple[float, float] | None:
+    """Return measured (width, long-piece length) for a configured mod road."""
+
+    values = _ROAD_MODEL_DIMENSIONS.get()
+    if values is None:
+        return None
+    return values.get(_road_model_key(model_path))
 
 
 @dataclass(frozen=True, slots=True)
@@ -814,6 +830,12 @@ def road_model_variants(model_path: str, configured_long_length: float) -> tuple
     availability = _ROAD_MODEL_VARIANTS_AVAILABLE.get()
     base_key = _road_model_key(model_path)
     available = availability.get(base_key) if availability is not None else None
+    measured = road_model_dimensions(model_path)
+    long_length = (
+        float(measured[1])
+        if measured is not None
+        else float(configured_long_length)
+    )
     for nominal in nominals:
         if nominal == 3 and gravel:
             world_name = model_path.split("\\", 1)[0]
@@ -832,7 +854,7 @@ def road_model_variants(model_path: str, configured_long_length: float) -> tuple
             and _road_model_key(path) not in available
         ):
             continue
-        pieces.append(_RoadPiece(path, configured_long_length * nominal / 25.0, nominal))
+        pieces.append(_RoadPiece(path, long_length * nominal / 25.0, nominal))
     return tuple(pieces)
 
 
