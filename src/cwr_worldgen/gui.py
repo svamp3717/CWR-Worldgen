@@ -2745,7 +2745,7 @@ class WorldgenGui(tk.Tk):
             self._add_asset(value)
 
     def _add_asset_file(self) -> None:
-        value = filedialog.askopenfilename(filetypes=(("PBO archives", "*.pbo"), ("All files", "*.*")))
+        value = filedialog.askopenfilename(filetypes=(("PBO archives", "*.pbo"), ("Zstd-wrapped PBO archives", "*.pbo.zst"), ("All files", "*.*")))
         if value:
             self._add_asset(value)
 
