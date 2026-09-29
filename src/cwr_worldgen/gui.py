@@ -499,6 +499,12 @@ def defaults_with_recent_source(
         "osm_asset_mapping_global_models",
         "osm_asset_mapping_global_textures",
         "run_road_inspector_after_build",
+        "paved_road_model",
+        "paved_road_curve_model",
+        "gravel_road_model",
+        "gravel_road_curve_model",
+        "dirt_road_model",
+        "dirt_road_curve_model",
     ):
         if key in state:
             result[key] = state[key]
@@ -1223,6 +1229,7 @@ class WorldgenGui(tk.Tk):
         self._build_ui()
         self._set_defaults()
         self._install_appearance_state_persistence()
+        self._install_road_asset_state_persistence()
         self._show_step(0)
         self.after(100, self._drain_output)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -1244,6 +1251,41 @@ class WorldgenGui(tk.Tk):
         }
         if not values:
             return
+        try:
+            update_gui_state(self.state_path, values)
+        except OSError:
+            pass
+
+    def _install_road_asset_state_persistence(self) -> None:
+        for key in (
+            "paved_road_model",
+            "paved_road_curve_model",
+            "gravel_road_model",
+            "gravel_road_curve_model",
+            "dirt_road_model",
+            "dirt_road_curve_model",
+        ):
+            variable = self.vars.get(key)
+            if variable is not None:
+                variable.trace_add(
+                    "write",
+                    lambda *_args: self._persist_road_asset_state(),
+                )
+
+    def _persist_road_asset_state(self) -> None:
+        values: dict[str, object] = {
+            key: self.vars[key].get()
+            for key in (
+                "paved_road_model",
+                "paved_road_curve_model",
+                "gravel_road_model",
+                "gravel_road_curve_model",
+                "dirt_road_model",
+                "dirt_road_curve_model",
+            )
+            if key in self.vars
+        }
+        values["asset_roots"] = list(self.asset_roots)
         try:
             update_gui_state(self.state_path, values)
         except OSError:
@@ -2327,11 +2369,22 @@ class WorldgenGui(tk.Tk):
         log_scroll.pack(side="right", fill="y")
 
     def _set_defaults(self) -> None:
-        defaults = defaults_with_recent_source(default_gui_values(), load_gui_state(self.state_path))
+        state = load_gui_state(self.state_path)
+        defaults = defaults_with_recent_source(default_gui_values(), state)
         for key, value in defaults.items():
             if key not in self.vars:
                 self._var(key, value, boolean=isinstance(value, bool))
             self.vars[key].set(value)
+        self.asset_roots = [
+            str(item)
+            for item in state.get("asset_roots", [])
+            if str(item).strip()
+        ]
+        asset_list = getattr(self, "asset_list", None)
+        if asset_list is not None:
+            asset_list.delete(0, "end")
+            for root in self.asset_roots:
+                asset_list.insert("end", root)
         self._sync_source_paths()
         self._refresh_views()
 
@@ -2777,6 +2830,7 @@ class WorldgenGui(tk.Tk):
                         asset_list.insert("end", normalized)
                 except tk.TclError:
                     pass
+            self._persist_road_asset_state()
             self._refresh_views()
 
     def _remove_asset(self) -> None:
@@ -2787,6 +2841,7 @@ class WorldgenGui(tk.Tk):
         for index in reversed(selected):
             asset_list.delete(index)
             del self.asset_roots[index]
+        self._persist_road_asset_state()
         self._refresh_views()
 
     def _candidate_game_roots(self) -> list[Path]:
@@ -3494,6 +3549,7 @@ class WorldgenGui(tk.Tk):
             for root in self.asset_roots:
                 self.asset_list.insert("end", root)
             self.profile_path = Path(path)
+            self._persist_road_asset_state()
             self.footer_status_var.set(f"Loaded profile: {path}")
             self._show_step(0)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -3503,6 +3559,7 @@ class WorldgenGui(tk.Tk):
         if (self.process is not None or self._pipeline_active) and not messagebox.askyesno(APP_TITLE, "A process is still running. Stop it and exit?"):
             return
         self._persist_appearance_state()
+        self._persist_road_asset_state()
         self._persist_osm_mapping_state()
         self._stop_process()
         self.destroy()
