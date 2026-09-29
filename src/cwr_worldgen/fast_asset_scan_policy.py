@@ -41,6 +41,7 @@ _PBO_INDEX_SCHEMA = 2
 _INSTALLED = False
 _FULL_SCAN = _assets.scan_assets
 _PBO_INDEX_MEMORY: dict[tuple[str, int, int], "_PboIndex"] = {}
+_FALLBACK_PBO_MEMORY: dict[tuple[str, str], tuple[Path, ...]] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,13 +300,25 @@ def _likely_pbos(root: Path, prefix: str) -> tuple[Path, ...]:
     return tuple(result)
 
 def _fallback_named_pbos(root: Path, prefix: str) -> tuple[Path, ...]:
-    """Rare compatibility path for unusual mod layouts; never used for stock paths."""
+    """Rare compatibility path for unusual mod layouts; cache the expensive walk.
+
+    Road-family discovery probes several exact sibling names with the same addon
+    prefix. When the package is absent from the normal CWA locations, repeating
+    a recursive walk for every 25/12/6 candidate can make the UI appear frozen.
+    Cache both hits and misses for the lifetime of the process.
+    """
     if not root.is_dir():
         return ()
+    resolved = root.resolve()
+    cache_key_value = (os.path.normcase(str(resolved)), prefix.casefold())
+    cached = _FALLBACK_PBO_MEMORY.get(cache_key_value)
+    if cached is not None:
+        return cached
+
     wanted = {f"{prefix}.pbo".casefold(), f"{prefix}.pbo.zst".casefold()}
     matches: list[Path] = []
     try:
-        for directory, dirnames, filenames in os.walk(root):
+        for directory, dirnames, filenames in os.walk(resolved):
             dirnames[:] = [
                 name for name in dirnames
                 if not name.casefold().startswith(".cwr-worldgen-")
@@ -315,8 +328,10 @@ def _fallback_named_pbos(root: Path, prefix: str) -> tuple[Path, ...]:
                 if name.casefold() in wanted:
                     matches.append(Path(directory) / name)
     except OSError:
-        return ()
-    return tuple(matches)
+        matches = []
+    result = tuple(matches)
+    _FALLBACK_PBO_MEMORY[cache_key_value] = result
+    return result
 
 def _read_indexed_entry(path: Path, entry: _PboEntry) -> bytes | None:
     if entry.packing != 0:
