@@ -21,7 +21,7 @@ from cwr_worldgen.osm import (
     _square_elevation_samples,
     _triangle_elevation_bounds,
 )
-from cwr_worldgen.pbo import read_pbo
+from cwr_worldgen.pbo import is_pbo_path, read_pbo
 
 _RVW4_HEADER = struct.Struct("<4sii")
 _RVW4_OBJECT = struct.Struct("<12fi76s")
@@ -45,7 +45,7 @@ def _classify_tree_model(model: str) -> str | None:
 
 
 def _read_source(path: Path, cell_size_override: float | None) -> tuple[bytes, float]:
-    if path.suffix.casefold() != ".pbo":
+    if not is_pbo_path(path):
         return path.read_bytes(), float(cell_size_override or 25.0)
 
     entries = {entry.name: entry.data for entry in read_pbo(path)}

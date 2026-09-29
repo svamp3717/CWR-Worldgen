@@ -112,8 +112,9 @@ def render_textured_model(
     elev_deg: float = 25.0,
     zoom: float = 1.0,
     max_triangles: int = 12_000,
+    load_textures: bool = True,
 ) -> tuple[np.ndarray, int, int]:
-    """Perspective-correct UV rasterization with a z-buffer and bilinear filtering."""
+    """Perspective-correct rasterization, optionally skipping all texture I/O."""
     image = np.full((height, width, 3), 236, dtype=np.uint8)
     zbuf = np.full((height, width), np.inf, dtype=float)
     projected = _project(points, width, height, azim_deg, elev_deg, zoom)
@@ -163,13 +164,14 @@ def render_textured_model(
             continue
 
         texture = None
-        if texture_path:
+        if load_textures and texture_path:
             canonical = measure._canonical_model_path(texture_path)
             if canonical not in cache:
                 cache[canonical] = resolver.load_rgba(canonical, source)
             texture = cache[canonical]
         if texture is None:
-            misses += 1
+            if load_textures:
+                misses += 1
             world = points[idx].astype(float)
             normal = np.cross(world[1] - world[0], world[2] - world[0])
             nlen = np.linalg.norm(normal)

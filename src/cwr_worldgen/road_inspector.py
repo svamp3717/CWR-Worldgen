@@ -8,7 +8,7 @@ from pathlib import Path
 import argparse, csv, html, io, json, math, re, struct
 from typing import Iterable, Sequence
 
-from .pbo import read_pbo
+from .pbo import is_pbo_path, read_pbo
 
 _HEADER = struct.Struct("<4sii")
 _OBJECT = struct.Struct("<12fi76s")
@@ -281,8 +281,8 @@ def _roads(data: bytes) -> tuple[RoadObject, ...]:
 def _wrp(path: Path) -> tuple[bytes, str]:
     if path.suffix.casefold() == ".wrp":
         return path.read_bytes(), path.name
-    if path.suffix.casefold() != ".pbo":
-        raise ValueError("input must be a .wrp or uncompressed .pbo")
+    if not is_pbo_path(path):
+        raise ValueError("input must be a .wrp, .pbo, or .pbo.zst")
     entries = tuple(entry for entry in read_pbo(path) if entry.name.casefold().endswith(".wrp"))
     if len(entries) == 1:
         return entries[0].data, entries[0].name

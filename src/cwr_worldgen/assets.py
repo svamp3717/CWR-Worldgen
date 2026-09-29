@@ -11,7 +11,14 @@ import struct
 from typing import Iterable, Mapping, Sequence
 
 from .cache import CACHE_SCHEMA_VERSION, atomic_write_json, cache_key
-from .pbo import _is_pbo_header_terminator
+from .pbo import (
+    _is_pbo_header_terminator,
+    _read_exact,
+    _skip_exact,
+    is_pbo_path,
+    open_pbo_stream,
+    pbo_stem,
+)
 
 _ENTRY_FIELDS = struct.Struct("<IIIII")
 _PBO_PROPERTIES = 0x56657273  # 'Vers' in the legacy little-endian PBO header
@@ -158,31 +165,13 @@ def _decompress_lzss_stream(stream: io.BytesIO, expected_size: int) -> bytes:
     return bytes(output)
 
 
-def read_asset_record_bytes(record: AssetRecord) -> bytes:
-    """Read one previously scanned loose/PBO asset, decompressing Cprs if needed.
-
-    Asset scanning deliberately avoids decompressing every archive entry. Generated
-    proxy-safe vegetation only needs a handful of selected models, so decode those
-    exact records on demand instead of making every scan pay the price.
-    """
-    source = Path(record.source)
-    if source.suffix.casefold() != ".pbo":
-        data = source.read_bytes()
-        if record.sha256 is not None and _sha256_bytes(data) != record.sha256:
-            raise ValueError(f"asset changed since scan: {source}")
-        return data
-
-    raw = source.read_bytes()
-    stream = io.BytesIO(raw)
+def _read_pbo_header(stream) -> tuple[list[tuple[str, int, int, int]], dict[str, str]]:
     metadata: list[tuple[str, int, int, int]] = []
     properties: dict[str, str] = {}
     while True:
         name = _read_cstring(stream)
-        fields = stream.read(_ENTRY_FIELDS.size)
-        if len(fields) != _ENTRY_FIELDS.size:
-            raise ValueError(f"truncated PBO header: {source}")
+        fields = _read_exact(stream, _ENTRY_FIELDS.size, "PBO entry fields")
         packing, original_size, reserved, timestamp, data_size = _ENTRY_FIELDS.unpack(fields)
-        del reserved, timestamp
         if not name:
             if packing == _PBO_PROPERTIES:
                 while True:
@@ -191,122 +180,247 @@ def read_asset_record_bytes(record: AssetRecord) -> bytes:
                         break
                     properties[key.casefold()] = _read_cstring(stream)
                 continue
-            if any((packing, original_size, data_size)):
-                raise ValueError(f"unsupported PBO extension record: {source}")
+            if not _is_pbo_header_terminator(
+                packing, original_size, reserved, timestamp, data_size
+            ):
+                raise ValueError("unsupported PBO extension record")
             break
         metadata.append((name, packing, original_size, data_size))
+    return metadata, properties
 
-    prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or source.stem
-    cursor = stream.tell()
-    target = canonical_asset_path(record.path)
+
+def _member_suffix(name: str) -> str:
+    return Path(name.replace("\\", "/")).suffix.casefold()
+
+
+def _member_basename(name: str) -> str:
+    return Path(name.replace("\\", "/")).name
+
+
+def _effective_pbo_prefix(
+    properties: Mapping[str, str],
+    metadata: Sequence[tuple[str, int, int, int]],
+    fallback: str,
+) -> str:
+    prefix = str(properties.get("prefix", "")).replace("/", "\\").strip("\\")
+    if prefix:
+        return prefix
+    # A CWR-CE mod artifact is a PBO used as a virtual installation directory.
+    # Its entries include AddOns/*.pbo and loose top-level assets; prepending the
+    # outer package filename would invent paths that do not exist after install.
+    if any(_member_suffix(name) == ".pbo" for name, *_rest in metadata):
+        return ""
+    return fallback
+
+
+def _read_stored_member(
+    stream,
+    *,
+    name: str,
+    packing: int,
+    original_size: int,
+    data_size: int,
+) -> bytes:
+    stored = _read_exact(stream, data_size, f"PBO entry {name!r}")
+    if packing == 0:
+        return stored
+    if packing == _PBO_COMPRESSED:
+        if original_size <= 0:
+            raise ValueError(f"compressed PBO entry {name!r} has no original size")
+        packed = io.BytesIO(stored)
+        data = _decompress_lzss_stream(packed, original_size)
+        if packed.read():
+            raise ValueError(f"compressed PBO entry {name!r} has trailing bytes")
+        return data
+    raise ValueError(f"unsupported PBO packing method {packing:#x} for {name!r}")
+
+
+def _read_named_pbo_member(stream, member_name: str) -> bytes:
+    metadata, _properties = _read_pbo_header(stream)
+    wanted = member_name.replace("/", "\\").lstrip("\\").casefold()
     for name, packing, original_size, data_size in metadata:
-        end = cursor + data_size
-        if end > len(raw):
-            raise ValueError(f"truncated PBO entry {name!r}: {source}")
-        stored = raw[cursor:end]
-        cursor = end
+        if name.replace("/", "\\").lstrip("\\").casefold() == wanted:
+            return _read_stored_member(
+                stream,
+                name=name,
+                packing=packing,
+                original_size=original_size,
+                data_size=data_size,
+            )
+        _skip_exact(stream, data_size, f"PBO entry {name!r}")
+    raise FileNotFoundError(f"nested PBO member not found: {member_name}")
 
+
+def _read_asset_from_pbo_stream(
+    stream,
+    *,
+    target: str,
+    fallback_prefix: str,
+) -> bytes:
+    metadata, properties = _read_pbo_header(stream)
+    prefix = _effective_pbo_prefix(properties, metadata, fallback_prefix)
+    wanted = canonical_asset_path(target)
+    for name, packing, original_size, data_size in metadata:
         combined = name.replace("/", "\\").lstrip("\\")
         if prefix and not canonical_asset_path(combined).startswith(
             canonical_asset_path(prefix) + "\\"
         ):
             combined = prefix + "\\" + combined
-        if canonical_asset_path(combined) != target:
-            continue
-
-        if packing == 0:
-            data = stored
-        elif packing == _PBO_COMPRESSED:
-            if original_size <= 0:
-                raise ValueError(f"compressed PBO entry {target} has no original size")
-            packed = io.BytesIO(stored)
-            data = _decompress_lzss_stream(packed, original_size)
-            if packed.read():
-                raise ValueError(f"compressed PBO entry {target} has trailing bytes")
-        else:
-            raise ValueError(
-                f"unsupported PBO packing method {packing:#x} for {target}"
+        if canonical_asset_path(combined) == wanted:
+            return _read_stored_member(
+                stream,
+                name=name,
+                packing=packing,
+                original_size=original_size,
+                data_size=data_size,
             )
+        _skip_exact(stream, data_size, f"PBO entry {name!r}")
+    raise FileNotFoundError(f"{wanted} not found in PBO")
 
+
+def _split_pbo_source(source: str) -> tuple[Path, tuple[str, ...]]:
+    parts = source.split("!")
+    return Path(parts[0]), tuple(part for part in parts[1:] if part)
+
+
+def read_asset_record_bytes(record: AssetRecord) -> bytes:
+    """Read one scanned asset from a loose file, PBO, or CWR-CE mod artifact.
+
+    Whole-file Zstandard wrappers are decoded transparently. Asset records inside
+    nested addon PBOs use an internal outer!addons\\inner.pbo source chain so
+    callers can retrieve them without extracting the complete mod package.
+    """
+    source_path, nested_members = _split_pbo_source(record.source)
+    if not nested_members and not is_pbo_path(source_path):
+        data = source_path.read_bytes()
         if record.sha256 is not None and _sha256_bytes(data) != record.sha256:
-            raise ValueError(f"asset changed since scan: {source}!{target}")
+            raise ValueError(f"asset changed since scan: {source_path}")
         return data
 
-    raise FileNotFoundError(f"{target} not found in scanned source {source}")
+    with open_pbo_stream(source_path) as outer:
+        current = outer
+        owned_streams: list[io.BytesIO] = []
+        try:
+            fallback = pbo_stem(source_path)
+            for member in nested_members:
+                nested = _read_named_pbo_member(current, member)
+                nested_stream = io.BytesIO(nested)
+                owned_streams.append(nested_stream)
+                current = nested_stream
+                fallback = pbo_stem(_member_basename(member))
+
+            data = _read_asset_from_pbo_stream(
+                current,
+                target=record.path,
+                fallback_prefix=fallback,
+            )
+        finally:
+            for nested_stream in owned_streams:
+                nested_stream.close()
+
+    if record.sha256 is not None and _sha256_bytes(data) != record.sha256:
+        raise ValueError(f"asset changed since scan: {record.source}!{record.path}")
+    return data
 
 
-def _pbo_records(path: Path) -> tuple[list[AssetRecord], str | None]:
-    """List uncompressed and compressed PBO assets without requiring extraction.
+def _pbo_records_from_stream(
+    stream,
+    *,
+    source: str,
+    fallback_prefix: str,
+    depth: int = 0,
+) -> list[AssetRecord]:
+    metadata, properties = _read_pbo_header(stream)
+    prefix = _effective_pbo_prefix(properties, metadata, fallback_prefix)
+    records: list[AssetRecord] = []
 
-    Compressed entries remain useful for existence checks. Their bytes and embedded
-    P3D dependencies cannot be inspected, so they are marked unreadable rather than
-    being treated as absent, a distinction humans occasionally appreciate.
-    """
-    try:
-        raw = path.read_bytes()
-        stream = io.BytesIO(raw)
-        metadata: list[tuple[str, int, int]] = []  # name, method, stored size
-        properties: dict[str, str] = {}
-        while True:
-            name = _read_cstring(stream)
-            fields = stream.read(_ENTRY_FIELDS.size)
-            if len(fields) != _ENTRY_FIELDS.size:
-                raise ValueError("truncated PBO header")
-            packing, original_size, reserved, timestamp, data_size = _ENTRY_FIELDS.unpack(fields)
-            if not name:
-                if packing == _PBO_PROPERTIES:
-                    while True:
-                        key = _read_cstring(stream)
-                        if not key:
-                            break
-                        properties[key.casefold()] = _read_cstring(stream)
-                    continue
-                if not _is_pbo_header_terminator(
-                    packing, original_size, reserved, timestamp, data_size
-                ):
-                    raise ValueError("unsupported PBO extension record")
-                break
-            metadata.append((name, packing, data_size))
+    for name, packing, original_size, data_size in metadata:
+        suffix = _member_suffix(name)
+        combined = name.replace("/", "\\").lstrip("\\")
+        if prefix and not canonical_asset_path(combined).startswith(
+            canonical_asset_path(prefix) + "\\"
+        ):
+            combined = prefix + "\\" + combined
+        canonical = canonical_asset_path(combined)
 
-        prefix = properties.get("prefix", "").replace("/", "\\").strip("\\")
-        if not prefix:
-            prefix = path.stem
-        records: list[AssetRecord] = []
-        data_cursor = stream.tell()
-        for name, packing, data_size in metadata:
-            data = raw[data_cursor : data_cursor + data_size]
-            if len(data) != data_size:
-                raise ValueError(f"truncated PBO entry {name}")
-            data_cursor += data_size
-            combined = name.replace("/", "\\").lstrip("\\")
-            if prefix and not canonical_asset_path(combined).startswith(canonical_asset_path(prefix) + "\\"):
-                combined = prefix + "\\" + combined
-            canonical = canonical_asset_path(combined)
-            if Path(canonical).suffix.casefold() not in _ASSET_SUFFIXES:
-                continue
+        if suffix in _ASSET_SUFFIXES:
             readable = packing == 0
-            dependencies = _p3d_dependencies(data) if readable and canonical.endswith(".p3d") else ()
+            if readable:
+                data = _read_exact(stream, data_size, f"PBO entry {name!r}")
+                digest = _sha256_bytes(data)
+                dependencies = _p3d_dependencies(data) if canonical.endswith(".p3d") else ()
+            else:
+                _skip_exact(stream, data_size, f"PBO entry {name!r}")
+                digest = None
+                dependencies = ()
             records.append(
                 AssetRecord(
                     path=canonical,
-                    source=str(path),
+                    source=source,
                     size=data_size,
-                    sha256=_sha256_bytes(data) if readable else None,
+                    sha256=digest,
                     dependencies=dependencies,
                     readable=readable,
                 )
             )
-        return records, None
-    except (OSError, ValueError, UnicodeDecodeError) as exc:
-        return [], f"{path}: {exc}"
+            continue
 
+        if suffix == ".pbo" and depth < 4:
+            try:
+                nested = _read_stored_member(
+                    stream,
+                    name=name,
+                    packing=packing,
+                    original_size=original_size,
+                    data_size=data_size,
+                )
+                nested_source = source + "!" + name.replace("/", "\\")
+                nested_prefix = pbo_stem(_member_basename(name))
+                with io.BytesIO(nested) as nested_stream:
+                    records.extend(
+                        _pbo_records_from_stream(
+                            nested_stream,
+                            source=nested_source,
+                            fallback_prefix=nested_prefix,
+                            depth=depth + 1,
+                        )
+                    )
+            except (ValueError, UnicodeDecodeError):
+                # Keep indexing the rest of the mod artifact if one nested PBO
+                # uses an unsupported or damaged layout.
+                pass
+            continue
+
+        _skip_exact(stream, data_size, f"PBO entry {name!r}")
+
+    return records
+
+
+def _pbo_records(path: Path) -> tuple[list[AssetRecord], str | None]:
+    """List assets from raw PBOs and CWR-CE Zstd-wrapped mod packages.
+
+    Nested addon PBO members are treated like PBOs in an extracted mod directory,
+    while loose package members retain their package-relative paths.
+    """
+    try:
+        with open_pbo_stream(path) as stream:
+            return (
+                _pbo_records_from_stream(
+                    stream,
+                    source=str(path),
+                    fallback_prefix=pbo_stem(path),
+                ),
+                None,
+            )
+    except (OSError, RuntimeError, ValueError, UnicodeDecodeError) as exc:
+        return [], f"{path}: {exc}"
 
 def _loose_records(root: Path) -> tuple[list[AssetRecord], list[str]]:
     records: list[AssetRecord] = []
     errors: list[str] = []
     for path in sorted((item for item in root.rglob("*") if item.is_file()), key=lambda item: item.as_posix().casefold()):
         suffix = path.suffix.casefold()
-        if suffix == ".pbo":
+        if is_pbo_path(path):
             scanned, error = _pbo_records(path)
             records.extend(scanned)
             if error:
@@ -341,7 +455,7 @@ def _root_snapshot(roots: Sequence[Path]) -> tuple[tuple[str, ...], list[dict[st
             raise ValueError(f"asset root does not exist: {raw_root}")
         root_names.append(str(raw_root))
         if raw_root.is_file():
-            if raw_root.suffix.casefold() != ".pbo":
+            if not is_pbo_path(raw_root):
                 raise ValueError(f"asset root file must be a PBO: {raw_root}")
             stat = raw_root.stat()
             entries.append({
@@ -352,7 +466,7 @@ def _root_snapshot(roots: Sequence[Path]) -> tuple[tuple[str, ...], list[dict[st
             })
             continue
         for path in sorted((item for item in raw_root.rglob("*") if item.is_file()), key=lambda item: item.as_posix().casefold()):
-            if path.suffix.casefold() not in _ASSET_SUFFIXES | {".pbo"}:
+            if path.suffix.casefold() not in _ASSET_SUFFIXES and not is_pbo_path(path):
                 continue
             stat = path.stat()
             entries.append({

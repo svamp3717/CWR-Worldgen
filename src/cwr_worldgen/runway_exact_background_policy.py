@@ -30,6 +30,7 @@ from PIL import Image, ImageStat
 
 from . import runway_surface_policy as _runway
 from .paa import _compress_dxt1_rgb_bytes
+from .pbo import _read_exact, _skip_exact, is_pbo_path, open_pbo_stream, pbo_stem
 
 
 _DXT1_MAGIC = 0xFF01
@@ -384,50 +385,40 @@ def _decompress_pbo_payload(data: bytes, output_size: int) -> bytes:
 
 
 def _extract_pbo_asset(path: Path, target: str) -> bytes | None:
-    raw = path.read_bytes()
-    stream = io.BytesIO(raw)
     entries: list[tuple[str, int, int, int]] = []
     properties: dict[str, str] = {}
-    while True:
-        name = _read_cstring(stream)
-        fields = stream.read(_PBO_FIELDS.size)
-        if len(fields) != _PBO_FIELDS.size:
-            raise ValueError("truncated PBO header")
-        packing, original_size, _reserved, _timestamp, data_size = _PBO_FIELDS.unpack(fields)
-        if not name:
-            if packing == _PBO_PROPERTIES:
-                while True:
-                    key = _read_cstring(stream)
-                    if not key:
-                        break
-                    properties[key.casefold()] = _read_cstring(stream)
+    with open_pbo_stream(path) as stream:
+        while True:
+            name = _read_cstring(stream)
+            fields = _read_exact(stream, _PBO_FIELDS.size, "PBO entry fields")
+            packing, original_size, _reserved, _timestamp, data_size = _PBO_FIELDS.unpack(fields)
+            if not name:
+                if packing == _PBO_PROPERTIES:
+                    while True:
+                        key = _read_cstring(stream)
+                        if not key:
+                            break
+                        properties[key.casefold()] = _read_cstring(stream)
+                    continue
+                break
+            entries.append((name, packing, original_size, data_size))
+
+        prefix = properties.get("prefix", "").replace("/", "\\").strip("\\") or pbo_stem(path)
+        for name, packing, original_size, data_size in entries:
+            combined = name.replace("/", "\\").lstrip("\\")
+            if prefix and not _canonical(combined).startswith(_canonical(prefix) + "\\"):
+                combined = prefix + "\\" + combined
+            if _canonical(combined) != target:
+                _skip_exact(stream, data_size, f"PBO entry {name!r}")
                 continue
-            # Resistance PBOs may use a non-zero end-of-header marker. Filename
-            # emptiness, rather than the remaining fields, is the reliable fence.
-            break
-        entries.append((name, packing, original_size, data_size))
 
-    prefix = properties.get("prefix", "").replace("/", "\\").strip("\\")
-    if not prefix:
-        prefix = path.stem
-    data_cursor = stream.tell()
-    for name, packing, original_size, data_size in entries:
-        stored = raw[data_cursor : data_cursor + data_size]
-        if len(stored) != data_size:
-            raise ValueError(f"truncated PBO entry {name}")
-        data_cursor += data_size
-        combined = name.replace("/", "\\").lstrip("\\")
-        if prefix and not _canonical(combined).startswith(_canonical(prefix) + "\\"):
-            combined = prefix + "\\" + combined
-        if _canonical(combined) != target:
-            continue
-        if packing == 0:
-            return stored
-        if packing == _PBO_COMPRESSED and original_size > 0:
-            return _decompress_pbo_payload(stored, original_size)
-        return None
+            stored = _read_exact(stream, data_size, f"PBO entry {name!r}")
+            if packing == 0:
+                return stored
+            if packing == _PBO_COMPRESSED and original_size > 0:
+                return _decompress_pbo_payload(stored, original_size)
+            return None
     return None
-
 
 def _casefold_child(parent: Path, name: str) -> Path | None:
     direct = parent / name
@@ -486,24 +477,30 @@ def _candidate_asset_roots(spec) -> tuple[Path, ...]:
 
 def _likely_pbos(root: Path, prefix: str) -> tuple[Path, ...]:
     if root.is_file():
-        return (root,) if root.suffix.casefold() == ".pbo" else ()
-    wanted = f"{prefix}.pbo".casefold()
+        return (root,) if is_pbo_path(root) else ()
+    wanted = {f"{prefix}.pbo".casefold(), f"{prefix}.pbo.zst".casefold()}
     candidates: list[Path] = []
-    for relative in (
+    relatives = (
         Path(f"{prefix}.pbo"),
+        Path(f"{prefix}.pbo.zst"),
         Path("Res") / "AddOns" / f"{prefix}.pbo",
+        Path("Res") / "AddOns" / f"{prefix}.pbo.zst",
         Path("AddOns") / f"{prefix}.pbo",
+        Path("AddOns") / f"{prefix}.pbo.zst",
         Path("res") / "addons" / f"{prefix}.pbo",
+        Path("res") / "addons" / f"{prefix}.pbo.zst",
         Path("addons") / f"{prefix}.pbo",
-    ):
+        Path("addons") / f"{prefix}.pbo.zst",
+    )
+    for relative in relatives:
         candidate = root / relative
         if candidate.is_file() and candidate not in candidates:
             candidates.append(candidate)
     if candidates:
         return tuple(candidates)
     try:
-        for candidate in root.rglob("*.pbo"):
-            if candidate.name.casefold() == wanted:
+        for candidate in root.rglob("*"):
+            if candidate.is_file() and candidate.name.casefold() in wanted:
                 candidates.append(candidate)
     except OSError:
         pass
