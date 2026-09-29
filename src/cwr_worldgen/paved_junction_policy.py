@@ -25,8 +25,8 @@ _STRAIGHTS = {25: 25.0, 12: 12.5, 6: 6.25}
 _T = re.compile(r"kr_new_(sil|asf|kos)_(sil|asf|kos)_t\.p3d$", re.I)
 _CURVE = re.compile(r"(?:sil|asf|kos)10 (?:25|50|75|100)\.p3d$", re.I)
 _GENERATED_PAVED_ROAD = re.compile(
-    r"paved_w\d{3}_l(?P<length>\d{4})"
-    r"(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+    r"(?:paved_w|road_paved_w)\d{3}_l(?P<length>\d{4})"
+    r"(?:_[lr](?:\d{2}|\d{3}))?\.p3d$",
     re.I,
 )
 _CATALOGUE = Path(__file__).with_name("data") / "road_types.json"
@@ -145,6 +145,10 @@ def _family_info() -> dict[str, dict]:
 def _family(path: str) -> str | None:
     if _p.is_generated_gravel_road_model(path):
         return "gravel"
+    if _pi.is_generated_paved_road_model(path):
+        # Generated/custom paved ribbons use the generic wide paved junction
+        # family. Their actual width is carried separately by generated hubs.
+        return "sil"
     value = path.replace("/", "\\").casefold()
     for entry in _catalogue()["families"]:
         root = str(entry.get("root", "")).casefold()
@@ -264,6 +268,7 @@ def _generated_plan(
     incidents,
     *,
     world_name: str,
+    width_override: float | None = None,
 ) -> _Plan | None:
     """Build an exact-heading generated T/X only for stock-plan fallback."""
 
@@ -274,9 +279,13 @@ def _generated_plan(
 
     directions = tuple(value[0] for value in incidents)
     headings, axis = _pi.paved_junction_signature_for_directions(directions)
-    width = max(
-        _paved_half_width(family) * 2.0
-        for _direction_value, family in incidents
+    width = (
+        max(1.0, float(width_override))
+        if width_override is not None
+        else max(
+            _paved_half_width(family) * 2.0
+            for _direction_value, family in incidents
+        )
     )
     model_path = _pi.paved_junction_signature_model_path(
         world_name,
@@ -404,6 +413,8 @@ def _plan(
 def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
     incidents = {}
     positions = {}
+    widths_by_key: dict[tuple[int, int], list[float]] = {}
+    force_generated_keys: set[tuple[int, int]] = set()
     for feature, projected in zip(
         dataset.roads,
         _p._paved_junction_augmented_polylines(dataset, projection, spec),
@@ -415,9 +426,16 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
         points = tuple(_p._clean_road_points(projected))
         model = _p.road_model_for_tags(spec, feature.tags)
         family = _family(model)
+        modded_paved = (
+            family is None
+            and _p.road_model_surface(spec, model) == "paved"
+        )
+        if modded_paved:
+            family = "sil"
         if family is None:
             continue
         dirt = _p.road_is_dirt(feature.tags)
+        road_width = max(1.0, float(_p.road_width_metres(feature.tags)))
         for index, (start, end) in enumerate(zip(points, points[1:])):
             if math.dist(start, end) <= 0.05:
                 continue
@@ -430,6 +448,9 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
                     (direction, dirt, model, segment, feature.osm_key)
                 )
                 positions.setdefault(key, node)
+                widths_by_key.setdefault(key, []).append(road_width)
+                if modded_paved:
+                    force_generated_keys.add(key)
 
     result = {}
     for key, raw in incidents.items():
@@ -437,21 +458,46 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
         if len(values) not in {3, 4}:
             continue
         typed = tuple((value[0], _family(value[2])) for value in values)
+        # Configured modded paved models are deliberately not part of the stock
+        # family catalogue. Treat them as generic paved only for the generated
+        # hub topology, never as permission to substitute a stock junction.
+        typed = tuple(
+            (
+                direction,
+                family
+                if family is not None
+                else (
+                    "sil"
+                    if _p.road_model_surface(spec, values[index][2]) == "paved"
+                    else None
+                ),
+            )
+            for index, (direction, family) in enumerate(typed)
+        )
         if any(family is None for _direction_value, family in typed):
             continue
-        plan = _plan(
-            positions[key],
-            tuple(
-                (direction, family)
-                for direction, family in typed
-                if family is not None
-            ),
-            world_name=(
-                spec.name
-                if bool(getattr(spec, "procedural_paved_road_fallback", False))
-                else None
-            ),
+        paved_incidents = tuple(
+            (direction, family)
+            for direction, family in typed
+            if family is not None
         )
+        if key in force_generated_keys:
+            plan = _generated_plan(
+                positions[key],
+                paved_incidents,
+                world_name=spec.name,
+                width_override=max(widths_by_key.get(key, (9.1,))),
+            )
+        else:
+            plan = _plan(
+                positions[key],
+                paved_incidents,
+                world_name=(
+                    spec.name
+                    if bool(getattr(spec, "procedural_paved_road_fallback", False))
+                    else None
+                ),
+            )
         if plan is not None:
             result[key] = plan
     return result
