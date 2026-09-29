@@ -50,7 +50,7 @@ def _gravel_endpoints(dataset, projection, spec) -> tuple[_GravelEndpoint, ...]:
         if not _p.road_is_supported(feature.tags, include_minor=spec.include_minor_roads):
             continue
         model = _p.road_model_for_tags(spec, feature.tags)
-        if not _p.is_generated_gravel_road_model(model):
+        if _p.road_model_surface(spec, model) != "gravel":
             continue
         points = tuple(_p._clean_road_points(raw_points))
         if len(points) < 2:
