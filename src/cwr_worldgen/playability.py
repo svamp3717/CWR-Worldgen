@@ -21,6 +21,7 @@ from .procedural_infrastructure import (
     gravel_curve_model_path,
     gravel_junction_model_path,
     gravel_road_model_path,
+    is_generated_dirt_road_model,
     is_generated_gravel_junction_model,
     is_generated_gravel_road_model,
     is_generated_paved_junction_model,
