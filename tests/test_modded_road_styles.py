@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from cwr_worldgen import cli
 from cwr_worldgen import generator
 from cwr_worldgen import paved_junction_policy
 from cwr_worldgen import paved_road_generated_fallback_policy as fallback
@@ -391,3 +392,41 @@ def test_modded_donor_geometry_is_measured_inside_pbo(tmp_path: Path) -> None:
     assert dimensions[
         playability._road_model_key(spec.dirt_road_model)
     ] == pytest.approx((3.8, 18.6))
+
+
+def test_milestone9_cli_accepts_modded_road_donor_flags() -> None:
+    args = cli._parser().parse_args(
+        [
+            "milestone9",
+            "--source-dir",
+            "source",
+            "--output",
+            "build",
+            "--paved-road-model",
+            r"myroads\paved25.p3d",
+            "--gravel-road-model",
+            r"myroads\gravel25.p3d",
+            "--dirt-road-model",
+            r"myroads\track25.p3d",
+        ]
+    )
+
+    assert args.paved_road_model == r"myroads\paved25.p3d"
+    assert args.gravel_road_model == r"myroads\gravel25.p3d"
+    assert args.dirt_road_model == r"myroads\track25.p3d"
+
+
+@pytest.mark.parametrize("command", ("milestone5", "milestone6", "milestone7", "milestone8", "milestone9"))
+def test_source_bundle_cli_exposes_road_donor_flags(command: str) -> None:
+    args = cli._parser().parse_args(
+        [
+            command,
+            "--source-dir",
+            "source",
+            "--output",
+            "build",
+            "--paved-road-model",
+            r"myroads\paved25.p3d",
+        ]
+    )
+    assert args.paved_road_model == r"myroads\paved25.p3d"
