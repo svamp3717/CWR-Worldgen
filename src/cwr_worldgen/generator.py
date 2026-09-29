@@ -126,6 +126,8 @@ from .playability import (
     RoadFitReport,
     TerrainGradeReport,
     TransitionReport,
+    _ROAD_MODEL_VARIANTS_AVAILABLE,
+    _road_model_key,
     fit_road_objects,
     grade_terrain,
     road_model_variant_paths,
@@ -1639,6 +1641,57 @@ def _external_ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
 
 def _world_icon_filename(spec: PlayabilitySpec) -> str:
     return "icon.paa" if _surface_pass_enabled(spec) else "g.paa"
+
+
+def _modded_road_variant_availability(
+    spec: PlayabilitySpec,
+) -> dict[str, frozenset[str]]:
+    """Discover real short siblings for configured modded road donor families."""
+
+    defaults = {
+        _road_model_key(r"o\road\sil25.p3d"),
+        _road_model_key(r"o\road\ces25.p3d"),
+    }
+    donors = tuple(
+        value
+        for value in (
+            str(getattr(spec, "paved_road_model", "") or "").strip(),
+            str(getattr(spec, "gravel_road_model", "") or "").strip(),
+            str(getattr(spec, "dirt_road_model", "") or "").strip(),
+        )
+        if value and _road_model_key(value) not in defaults
+    )
+    if not donors:
+        return {}
+
+    candidates_by_donor: dict[str, tuple[str, ...]] = {}
+    requested: list[str] = []
+    for donor in donors:
+        candidates = road_model_variant_paths(donor, spec.road_segment_length)
+        candidates_by_donor[_road_model_key(donor)] = candidates
+        requested.extend(candidates)
+
+    scan = scan_assets(
+        spec.asset_roots,
+        tuple(dict.fromkeys(requested)),
+        cache_dir=getattr(spec, "cache_dir", None),
+        use_cache=bool(getattr(spec, "cache_enabled", True)),
+        refresh=bool(getattr(spec, "cache_refresh", False)),
+    )
+    existing = {record.path for record in scan.records}
+    result: dict[str, frozenset[str]] = {}
+    for donor_key, candidates in candidates_by_donor.items():
+        # The configured long donor remains usable even when it lives in a mod
+        # loaded at runtime but outside the verification roots. Only guessed
+        # siblings require proof from the configured roots.
+        values = {donor_key}
+        values.update(
+            _road_model_key(candidate)
+            for candidate in candidates
+            if _road_model_key(candidate) in existing
+        )
+        result[donor_key] = frozenset(values)
+    return result
 
 
 def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) -> tuple[str, ...]:
@@ -3383,11 +3436,19 @@ def build_milestone4(
         )
         site_library.prepare(dataset, projection)
 
+    report_progress(41, "Discovering configured mod road-piece families")
+    road_variant_availability = _modded_road_variant_availability(spec)
     report_progress(42, "Fitting road geometry to terrain")
-    road_fit = fit_road_objects(
-        dataset, projection, elevations, spec, starting_id=1,
-        progress_callback=_scaled_progress_callback(42, 49),
+    road_variant_token = _ROAD_MODEL_VARIANTS_AVAILABLE.set(
+        road_variant_availability or None
     )
+    try:
+        road_fit = fit_road_objects(
+            dataset, projection, elevations, spec, starting_id=1,
+            progress_callback=_scaled_progress_callback(42, 49),
+        )
+    finally:
+        _ROAD_MODEL_VARIANTS_AVAILABLE.reset(road_variant_token)
     road_fingerprint = _road_object_fingerprint(road_fit.objects)
     report_progress(49, "Road fitting complete")
     report_progress(52, "Placing buildings and vegetation")
@@ -4098,7 +4159,15 @@ def build_milestone4(
                 cache_refresh=site_library.cache_refresh,
             )
             repeat_site_library.prepare(dataset, projection)
-        repeat_roads = fit_road_objects(dataset, projection, repeat_elevations, spec, starting_id=1)
+        repeat_road_variant_token = _ROAD_MODEL_VARIANTS_AVAILABLE.set(
+            road_variant_availability or None
+        )
+        try:
+            repeat_roads = fit_road_objects(
+                dataset, projection, repeat_elevations, spec, starting_id=1
+            )
+        finally:
+            _ROAD_MODEL_VARIANTS_AVAILABLE.reset(repeat_road_variant_token)
         repeat_nonroads = generate_world_objects(
             dataset,
             projection,
