@@ -72,6 +72,46 @@ def _mlod_road(
     return stream.getvalue()
 
 
+def _mlod_curve_sample(
+    width: float,
+    length: float,
+    lateral_shift: float,
+    texture: str,
+) -> bytes:
+    half_width = width * 0.5
+    half_length = length * 0.5
+    lower_center = -lateral_shift * 0.5
+    upper_center = lateral_shift * 0.5
+    lod = _Lod(
+        (
+            (lower_center - half_width, 0.025, -half_length),
+            (upper_center - half_width, 0.025, half_length),
+            (upper_center + half_width, 0.025, half_length),
+            (lower_center + half_width, 0.025, -half_length),
+        ),
+        ((0.0, -1.0, 0.0),),
+        (
+            _Face(
+                texture,
+                (
+                    (0, 0, 0.0, 0.0),
+                    (1, 0, 0.0, 1.0),
+                    (2, 0, 1.0, 1.0),
+                    (3, 0, 1.0, 0.0),
+                ),
+                0,
+            ),
+        ),
+        1.0,
+        properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
+        point_flags=(0x13F,) * 4,
+    )
+    stream = io.BytesIO()
+    stream.write(_MLOD_HEADER.pack(b"MLOD", 1, 1, 0, 1))
+    _write_lod(stream, lod)
+    return stream.getvalue()
+
+
 def _mlod_skewed_road(
     width: float,
     chord_length: float,
@@ -293,15 +333,21 @@ def test_gui_command_exposes_all_three_modded_road_donors() -> None:
         "name": "donorworld",
         "display_name": "Donor World",
         "paved_road_model": r"myroads\asphalt25.p3d",
+        "paved_road_curve_model": r"myroads\asphalt_curve.p3d",
         "gravel_road_model": r"myroads\gravel25.p3d",
+        "gravel_road_curve_model": r"myroads\gravel_curve.p3d",
         "dirt_road_model": r"myroads\track25.p3d",
+        "dirt_road_curve_model": r"myroads\track_curve.p3d",
     })
     command = build_milestone9_command(values, python="python")
 
     for option, model in (
         ("--paved-road-model", r"myroads\asphalt25.p3d"),
+        ("--paved-road-curve-model", r"myroads\asphalt_curve.p3d"),
         ("--gravel-road-model", r"myroads\gravel25.p3d"),
+        ("--gravel-road-curve-model", r"myroads\gravel_curve.p3d"),
         ("--dirt-road-model", r"myroads\track25.p3d"),
+        ("--dirt-road-curve-model", r"myroads\track_curve.p3d"),
     ):
         index = command.index(option)
         assert command[index + 1] == model
@@ -487,13 +533,19 @@ def test_source_bundle_specs_accept_road_donor_models(spec_type) -> None:
     spec = spec_type(
         source_dir=Path("source"),
         paved_road_model=r"myroads\paved25.p3d",
+        paved_road_curve_model=r"myroads\paved_curve.p3d",
         gravel_road_model=r"myroads\gravel25.p3d",
+        gravel_road_curve_model=r"myroads\gravel_curve.p3d",
         dirt_road_model=r"myroads\track25.p3d",
+        dirt_road_curve_model=r"myroads\track_curve.p3d",
     )
 
     assert spec.paved_road_model == r"myroads\paved25.p3d"
+    assert spec.paved_road_curve_model == r"myroads\paved_curve.p3d"
     assert spec.gravel_road_model == r"myroads\gravel25.p3d"
+    assert spec.gravel_road_curve_model == r"myroads\gravel_curve.p3d"
     assert spec.dirt_road_model == r"myroads\track25.p3d"
+    assert spec.dirt_road_curve_model == r"myroads\track_curve.p3d"
 
 
 def test_milestone9_spec_accepts_gui_road_arguments_exactly() -> None:
@@ -733,3 +785,89 @@ def test_curved_mod_donor_without_straight_sibling_is_rejected(tmp_path: Path) -
 
     with pytest.raises(ValueError, match="appears to be a curved road piece"):
         generator._modded_road_effective_donors(spec)
+
+
+def test_sebnam_style_uses_straight_family_and_explicit_curve_reference(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "mod"
+    texture = r"sebnam_obj\p\sebtrailpath.paa"
+    straight25 = r"sebnam_obj\sebtrailpath25.p3d"
+    straight12 = r"sebnam_obj\sebtrailpath12.p3d"
+    straight6 = r"sebnam_obj\sebtrailpath6.p3d"
+    curve = r"sebnam_obj\sebtrailpath10 25.p3d"
+
+    _write_fake_mod_asset(root, straight25, _mlod_road(3.5, 25.0, texture))
+    _write_fake_mod_asset(root, straight12, _mlod_road(3.5, 12.5, texture))
+    _write_fake_mod_asset(root, straight6, _mlod_road(3.5, 6.25, texture))
+    _write_fake_mod_asset(root, curve, _mlod_curve_sample(3.5, 4.65, 0.38, texture))
+    _write_fake_mod_asset(root, texture, b"synthetic-paa")
+
+    spec = SimpleNamespace(
+        name="sebworld",
+        paved_road_model=r"o\road\sil25.p3d",
+        paved_road_curve_model="",
+        gravel_road_model=straight25,
+        gravel_road_curve_model=curve,
+        dirt_road_model=r"o\road\ces25.p3d",
+        dirt_road_curve_model="",
+        road_segment_length=25.0,
+        asset_roots=(root,),
+        cache_dir=None,
+        cache_enabled=False,
+        cache_refresh=False,
+        custom_road_shapes=True,
+    )
+
+    effective = generator._modded_road_effective_donors(spec)
+    assert effective[playability._road_model_key(straight25)] == straight25
+    assert generator._road_style_donor(spec, "gravel") == curve
+
+    availability = generator._modded_road_variant_availability(spec, effective)
+    dimensions = generator._modded_road_model_dimensions(spec, effective)
+    effective_token = playability._ROAD_MODEL_EFFECTIVE_DONORS.set(effective)
+    availability_token = playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(availability)
+    dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(dimensions)
+    try:
+        pieces = playability.road_model_variants(straight25, 25.0)
+    finally:
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
+        playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
+        playability._ROAD_MODEL_EFFECTIVE_DONORS.reset(effective_token)
+
+    assert [piece.model_path for piece in pieces] == [
+        straight25,
+        straight12,
+        straight6,
+    ]
+    assert [piece.length_metres for piece in pieces] == pytest.approx(
+        [25.0, 12.5, 6.25]
+    )
+
+
+def test_legacy_curved_sebnam_selection_auto_resolves_to_straight_sibling(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "mod"
+    texture = r"sebnam_obj\p\sebtrailpath.paa"
+    curve = r"sebnam_obj\sebtrailpath10 25.p3d"
+    straight = r"sebnam_obj\sebtrailpath25.p3d"
+    _write_fake_mod_asset(root, curve, _mlod_curve_sample(3.5, 4.65, 0.38, texture))
+    _write_fake_mod_asset(root, straight, _mlod_road(3.5, 25.0, texture))
+    _write_fake_mod_asset(root, r"sebnam_obj\sebtrailpath12.p3d", _mlod_road(3.5, 12.5, texture))
+    _write_fake_mod_asset(root, r"sebnam_obj\sebtrailpath6.p3d", _mlod_road(3.5, 6.25, texture))
+    _write_fake_mod_asset(root, texture, b"synthetic-paa")
+
+    spec = SimpleNamespace(
+        paved_road_model=r"o\road\sil25.p3d",
+        gravel_road_model=curve,
+        dirt_road_model=r"o\road\ces25.p3d",
+        road_segment_length=25.0,
+        asset_roots=(root,),
+        cache_dir=None,
+        cache_enabled=False,
+        cache_refresh=False,
+    )
+
+    effective = generator._modded_road_effective_donors(spec)
+    assert effective[playability._road_model_key(curve)] == straight
