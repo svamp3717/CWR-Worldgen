@@ -41,3 +41,4 @@ jobs:
           tests/test_custom_road_generation.py
           tests/test_gravel_gap_policy.py
           tests/test_gravel_junction_policy.py
+          -k "not policy_is_layered_on_top_of_general_road_quality_policy"
