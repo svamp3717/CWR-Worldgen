@@ -43,7 +43,7 @@ from .osm import (
     road_span_has_in_game_water,
     road_is_dirt,
     road_is_gravel,
-    road_model_for_tags,
+    road_model_for_tags as _osm_road_model_for_tags,
     road_is_supported,
     projected_road_polylines,
     road_width_metres,
@@ -70,9 +70,25 @@ _ROAD_MODEL_DIMENSIONS: ContextVar[
     default=None,
 )
 
+_ROAD_MODEL_EFFECTIVE_DONORS: ContextVar[
+    Mapping[str, str] | None
+] = ContextVar(
+    "cwr_road_model_effective_donors",
+    default=None,
+)
+
 
 def _road_model_key(value: str) -> str:
     return str(value).replace("/", "\\").strip().lstrip("\\").casefold()
+
+
+def effective_road_model(model_path: str) -> str:
+    """Resolve a selected style donor to the straight model used for placement."""
+
+    values = _ROAD_MODEL_EFFECTIVE_DONORS.get()
+    if values is None:
+        return model_path
+    return values.get(_road_model_key(model_path), model_path)
 
 
 def road_model_dimensions(model_path: str) -> tuple[float, float] | None:
@@ -81,7 +97,17 @@ def road_model_dimensions(model_path: str) -> tuple[float, float] | None:
     values = _ROAD_MODEL_DIMENSIONS.get()
     if values is None:
         return None
-    return values.get(_road_model_key(model_path))
+    direct = values.get(_road_model_key(model_path))
+    if direct is not None:
+        return direct
+    return values.get(_road_model_key(effective_road_model(model_path)))
+
+
+def road_model_for_tags(spec: OsmSpec, tags: Mapping[str, str]) -> str:
+    """Select a road surface, then resolve any curved style donor to its straight base."""
+
+    selected = _osm_road_model_for_tags(spec, tags)
+    return effective_road_model(selected)
 
 
 @dataclass(frozen=True, slots=True)
@@ -824,6 +850,7 @@ def road_model_variants(model_path: str, configured_long_length: float) -> tuple
 
     if configured_long_length <= 0.0:
         raise ValueError("configured road length must be positive")
+    model_path = effective_road_model(model_path)
     gravel = is_generated_gravel_road_model(model_path)
     nominals = (25, 12, 6, 3) if gravel else (25, 12, 6)
     pieces: list[_RoadPiece] = []
