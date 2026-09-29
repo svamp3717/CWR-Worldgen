@@ -351,6 +351,7 @@ class OsmSpec(HeightmapSpec):
     include_minor_roads: bool = False
     procedural_gravel_roads: bool = False
     paved_road_model: str = r"o\road\sil25.p3d"
+    gravel_road_model: str = ""
     dirt_road_model: str = r"o\road\ces25.p3d"
     generic_building_model: str = r"O\Hous\domek_sedy.p3d"
     urban_building_model: str = r"data3d\dum_mesto2.p3d"
@@ -411,6 +412,8 @@ class OsmSpec(HeightmapSpec):
             self.forest_tree_model,
         ):
             _ascii_wire(path, 75, "model path")
+        if self.gravel_road_model:
+            _ascii_wire(self.gravel_road_model, 75, "model path")
         for code in ("w", "s", "g", "r", "f", "a", "u", "p"):
             _ascii_wire(self.terrain_texture_path(code), 31, "terrain texture path")
 
