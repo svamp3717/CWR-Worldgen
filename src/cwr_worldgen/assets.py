@@ -443,7 +443,10 @@ def _loose_records(root: Path) -> tuple[list[AssetRecord], list[str]]:
 
 
 
-_ASSET_CACHE_SCHEMA = 1
+# v2 invalidates catalogues created before transparent Zstd/nested-PBO
+# indexing. Reusing a v1 cache can make a configured mod donor appear missing
+# even though the current scanner can see it inside a compressed mod package.
+_ASSET_CACHE_SCHEMA = 2
 _CATALOGUE_MEMORY: dict[str, tuple[tuple[str, ...], tuple[AssetRecord, ...], tuple[str, ...]]] = {}
 
 
