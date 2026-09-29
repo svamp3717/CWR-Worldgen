@@ -635,6 +635,75 @@ class GuiCommandTests(unittest.TestCase):
         self.assertNotIn("--no-steep-hill-bushes", command)
         self.assertNotIn("--no-wetland-reeds", command)
 
+    def test_gui_state_restores_road_donors_between_restarts(self) -> None:
+        defaults = defaults_with_recent_source(
+            default_gui_values(),
+            {
+                "paved_road_model": r"mod\\road25.p3d",
+                "paved_road_curve_model": r"mod\\road10 25.p3d",
+                "gravel_road_model": r"sebnam_obj\\sebtrailpath25.p3d",
+                "gravel_road_curve_model": r"sebnam_obj\\sebtrailpath10 25.p3d",
+                "dirt_road_model": r"mod\\track25.p3d",
+                "dirt_road_curve_model": r"mod\\track_curve.p3d",
+            },
+        )
+        self.assertEqual(defaults["paved_road_model"], r"mod\\road25.p3d")
+        self.assertEqual(
+            defaults["gravel_road_model"],
+            r"sebnam_obj\\sebtrailpath25.p3d",
+        )
+        self.assertEqual(
+            defaults["gravel_road_curve_model"],
+            r"sebnam_obj\\sebtrailpath10 25.p3d",
+        )
+        self.assertEqual(defaults["dirt_road_curve_model"], r"mod\\track_curve.p3d")
+
+    def test_road_and_asset_persistence_writes_gui_state(self) -> None:
+        class _Value:
+            def __init__(self, value: object) -> None:
+                self.value = value
+
+            def get(self) -> object:
+                return self.value
+
+        with TemporaryDirectory() as temporary:
+            state_path = Path(temporary) / "gui-state.json"
+            gui = object.__new__(WorldgenGui)
+            gui.state_path = state_path
+            gui.asset_roots = [
+                r"G:\\mods\\sebnam_obj.pbo",
+                r"G:\\mods\\liberation.pbo.zst",
+            ]
+            gui.vars = {
+                "paved_road_model": _Value(r"o\\road\\sil25.p3d"),
+                "paved_road_curve_model": _Value(""),
+                "gravel_road_model": _Value(r"sebnam_obj\\sebtrailpath25.p3d"),
+                "gravel_road_curve_model": _Value(
+                    r"sebnam_obj\\sebtrailpath10 25.p3d"
+                ),
+                "dirt_road_model": _Value(r"o\\road\\ces25.p3d"),
+                "dirt_road_curve_model": _Value(""),
+            }
+
+            WorldgenGui._persist_road_asset_state(gui)
+
+            state = load_gui_state(state_path)
+            self.assertEqual(
+                state["gravel_road_model"],
+                r"sebnam_obj\\sebtrailpath25.p3d",
+            )
+            self.assertEqual(
+                state["gravel_road_curve_model"],
+                r"sebnam_obj\\sebtrailpath10 25.p3d",
+            )
+            self.assertEqual(
+                state["asset_roots"],
+                [
+                    r"G:\\mods\\sebnam_obj.pbo",
+                    r"G:\\mods\\liberation.pbo.zst",
+                ],
+            )
+
     def test_gui_state_restores_ground_and_vegetation_selections(self) -> None:
         defaults = defaults_with_recent_source(
             default_gui_values(),
