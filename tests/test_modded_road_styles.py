@@ -656,6 +656,14 @@ def test_sebnam_curve_donor_resolves_to_straight_family(tmp_path: Path) -> None:
     assert model_texture_dependencies(
         scan.records, r"sebnam_obj\sebtrailpath25.p3d"
     ) == (texture,)
+    match = generator._CURVED_ROAD_DONOR_NAME.fullmatch(
+        r"sebtrailpath10 25.p3d"
+    )
+    assert match is not None
+    assert match.group("prefix") == "sebtrailpath"
+    preferred = rf"sebnam_obj\{match.group('prefix')}25.p3d"
+    assert preferred == r"sebnam_obj\sebtrailpath25.p3d"
+    assert preferred in by_path
 
     effective = generator._modded_road_effective_donors(spec)
     assert effective[playability._road_model_key(curved)] == (
