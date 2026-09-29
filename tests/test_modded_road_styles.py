@@ -792,7 +792,7 @@ def test_curved_mod_donor_without_straight_sibling_is_rejected(tmp_path: Path) -
         cache_refresh=False,
     )
 
-    with pytest.raises(ValueError, match="appears to be a curved road piece"):
+    with pytest.raises(ValueError, match="curved road piece"):
         generator._modded_road_effective_donors(spec)
 
 
@@ -880,3 +880,82 @@ def test_legacy_curved_sebnam_selection_auto_resolves_to_straight_sibling(
 
     effective = generator._modded_road_effective_donors(spec)
     assert effective[playability._road_model_key(curve)] == straight
+
+
+def test_legacy_curve_resolution_never_walks_unrelated_models(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "mod"
+    texture = r"sebnam_obj\p\sebtrailpath.paa"
+    curve = r"sebnam_obj\sebtrailpath10 25.p3d"
+    straight = r"sebnam_obj\sebtrailpath25.p3d"
+    _write_fake_mod_asset(root, curve, _mlod_curve_sample(3.5, 4.65, 0.38, texture))
+    _write_fake_mod_asset(root, straight, _mlod_road(3.5, 25.0, texture))
+    _write_fake_mod_asset(root, texture, b"synthetic-paa")
+
+    # Hundreds of unrelated invalid P3Ds reproduce the old pathological case.
+    # The resolver must not open any of them merely to identify one road family.
+    for index in range(300):
+        _write_fake_mod_asset(
+            root,
+            rf"unrelated\junk{index:03d}.p3d",
+            b"not-a-p3d",
+        )
+
+    inspected: list[bytes] = []
+    real_inspect = generator.inspect_visual_model_dimensions
+
+    def counted_inspect(data: bytes):
+        inspected.append(data[:8])
+        return real_inspect(data)
+
+    monkeypatch.setattr(
+        generator,
+        "inspect_visual_model_dimensions",
+        counted_inspect,
+    )
+
+    spec = SimpleNamespace(
+        paved_road_model="",
+        paved_road_curve_model="",
+        gravel_road_model=curve,
+        gravel_road_curve_model="",
+        dirt_road_model="",
+        dirt_road_curve_model="",
+        road_segment_length=25.0,
+        asset_roots=(root,),
+        cache_dir=None,
+        cache_enabled=False,
+        cache_refresh=False,
+    )
+
+    effective = generator._modded_road_effective_donors(spec)
+
+    assert effective[playability._road_model_key(curve)] == straight
+    # The filename + exact sibling lookup is enough; no model mesh walk occurs.
+    assert inspected == []
+
+
+def test_exact_road_family_lookup_ignores_missing_texture_dependencies(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "mod"
+    donor = r"myroads\road25.p3d"
+    _write_fake_mod_asset(
+        root,
+        donor,
+        _mlod_road(4.0, 25.0, r"myroads\missing.paa"),
+    )
+
+    from cwr_worldgen.fast_asset_scan_policy import locate_assets_fast
+
+    result = locate_assets_fast(
+        (root,),
+        (donor,),
+        use_cache=False,
+    )
+
+    assert result.missing_models == ()
+    assert result.missing_dependencies == ()
+    assert [record.path for record in result.records] == [donor]
