@@ -2135,7 +2135,19 @@ class ProceduralInfrastructureLibrary:
             and not (kind == "dirt" and self.dirt_texture_path)
         )
         texture_files: list[str] = []
-        # Paved fallback P3Ds now point at the configured stock road texture.
+        # A donor texture is referenced from the external mod rather than copied
+        # into the generated world. Remove stale locally-generated surface files
+        # from an earlier build so they are not accidentally repacked.
+        if self.gravel_texture_path:
+            for stale_name in ("g.paa", "gj.paa", "gravel-source-surfaces.txt"):
+                stale = source_dir / "i" / stale_name
+                if stale.exists():
+                    stale.unlink()
+        if self.dirt_texture_path:
+            stale = source_dir / "i" / f"{_texture_file_stem('dirt')}.paa"
+            if stale.exists():
+                stale.unlink()
+        # Paved fallback P3Ds now point at the configured stock/mod road texture.
         # Remove the old generated asphalt file so incremental builds cannot
         # accidentally keep packing an obsolete visual.
         stale_paved = source_dir / "i" / f"{_texture_file_stem('paved')}.paa"
