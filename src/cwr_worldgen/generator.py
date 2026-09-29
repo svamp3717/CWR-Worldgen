@@ -4297,7 +4297,32 @@ def build_milestone4(
         asset_catalogue_path, asset_scan,
         osm_asset_mapping=osm_asset_mapping_report.to_manifest(),
     )
-    _write_json(road_report_path, asdict(road_fit) | {"objects": len(road_fit.objects)})
+    road_donor_report = {}
+    for surface in ("paved", "gravel", "dirt"):
+        straight = str(
+            getattr(spec, f"{surface}_road_model", "") or ""
+        ).strip()
+        curve = str(
+            getattr(spec, f"{surface}_road_curve_model", "") or ""
+        ).strip()
+        effective = (
+            effective_road_donors.get(_road_model_key(straight), straight)
+            if straight
+            else ""
+        )
+        road_donor_report[surface] = {
+            "straight": straight,
+            "curve": curve,
+            "effective_straight": effective,
+        }
+    _write_json(
+        road_report_path,
+        asdict(road_fit)
+        | {
+            "objects": len(road_fit.objects),
+            "road_model_donors": road_donor_report,
+        },
+    )
     # Avoid duplicating every graded elevation in the human report.
     grading_doc = asdict(grading)
     grading_doc.pop("elevations", None)
