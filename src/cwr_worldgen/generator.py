@@ -25,6 +25,7 @@ from ._version import GENERATOR_VERSION
 from .output_ownership import prepare_output_directory, record_build_ownership
 from .legacy_proxy_models import ProxyCloneError, inspect_visual_model_dimensions
 from .assets import (
+    AssetRecord,
     canonical_asset_path,
     model_texture_dependencies,
     read_asset_record_bytes,
@@ -1586,6 +1587,40 @@ def _preferred_road_texture(
         return (-score, len(value), lowered)
 
     return min(values, key=rank)
+
+
+_ROAD_DONOR_TEXTURE_FALLBACKS = {
+    canonical_asset_path(r"o\road\sil25.p3d"): r"landtext\silnice.pac",
+    canonical_asset_path(r"o\road\ces25.p3d"): r"o\road\ces_hned.paa",
+}
+
+
+def _resolved_road_donor_texture(
+    records: Sequence[AssetRecord],
+    *,
+    surface: str,
+    donor_model: str,
+) -> str:
+    """Resolve one road donor's visible texture without silent style changes."""
+
+    dependencies = model_texture_dependencies(records, donor_model)
+    fallback = _ROAD_DONOR_TEXTURE_FALLBACKS.get(
+        canonical_asset_path(donor_model)
+    )
+    texture = _preferred_road_texture(
+        donor_model,
+        dependencies,
+        fallback=fallback,
+    )
+    if texture:
+        return texture
+
+    raise ValueError(
+        f"could not resolve the {surface} road donor {donor_model!r} from the "
+        "configured asset roots. Add the PBO/PBO.ZST or directory containing "
+        "that model to --asset-root (or refresh the asset cache). Worldgen will "
+        "not silently substitute its generic road texture."
+    )
 
 
 def _preferred_stock_paved_texture(
@@ -3773,18 +3808,10 @@ def build_milestone4(
         )
         donor_textures: dict[str, str | None] = {}
         for surface, donor_model in road_texture_donors.items():
-            dependencies = model_texture_dependencies(
+            donor_textures[surface] = _resolved_road_donor_texture(
                 road_model_scan.records,
-                donor_model,
-            )
-            donor_textures[surface] = _preferred_road_texture(
-                donor_model,
-                dependencies,
-                fallback=(
-                    r"landtext\silnice.pac"
-                    if surface == "paved"
-                    else None
-                ),
+                surface=surface,
+                donor_model=donor_model,
             )
         paved_texture_path = donor_textures.get("paved") or paved_texture_path
         gravel_texture_path = donor_textures.get("gravel")
