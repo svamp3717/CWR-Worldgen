@@ -28,6 +28,11 @@ _CUSTOM_ROAD = re.compile(
     r"(?P<length>\d{4})(?:_(?P<side>[lr])(?P<degrees>\d{3}))?\.p3d$",
     re.I,
 )
+_CUSTOM_ROAD_JUNCTION = re.compile(
+    r"^(?:.*[\\/])road_j(?P<degree>[34])_(?P<surface>paved|gravel|dirt)_w"
+    r"(?P<width>\d{3})_h(?P<headings>\d{3}(?:_\d{3}){2,3})\.p3d$",
+    re.I,
+)
 _GRAVEL_JUNCTION = re.compile(
     r"^(?:.*[\\/])gravel_j(?P<degree>[34])(?:_(?P<variant>t(?:30|45|60|75)[lr]|t90|y120|x(?:30|45|60|75|90)))?\.p3d$",
     re.I,
@@ -190,6 +195,53 @@ def _road(values) -> RoadObject | None:
     yaw = math.degrees(math.atan2(-float(values[2]), float(values[0]))) % 360.0
     pitch = math.degrees(math.asin(max(-1.0, min(1.0, float(values[7])))))
     origin = x, z
+
+    match = _CUSTOM_ROAD_JUNCTION.fullmatch(path)
+    if match:
+        surface = match.group("surface").casefold()
+        family = {"paved": "paved", "gravel": "gravel", "dirt": "ces"}[surface]
+        width = int(match.group("width")) / 10.0
+        half_width = width * 0.5
+        headings = tuple(
+            int(value) % 360 for value in match.group("headings").split("_")
+        )
+        degree = int(match.group("degree"))
+        if len(headings) != degree or len(set(headings)) != degree:
+            return None
+        endpoints = tuple(
+            _endpoint(
+                object_id,
+                model,
+                family,
+                "junction",
+                index,
+                _world_point(
+                    (
+                        math.sin(math.radians(direction)) * _JUNCTION_RADIUS,
+                        math.cos(math.radians(direction)) * _JUNCTION_RADIUS,
+                    ),
+                    origin,
+                    yaw,
+                    pitch,
+                ),
+                _world_heading(direction, yaw, pitch),
+                _world_heading(direction, yaw, pitch),
+                half_width,
+            )
+            for index, direction in enumerate(headings)
+        )
+        return RoadObject(
+            object_id,
+            model,
+            x,
+            y,
+            z,
+            yaw,
+            pitch,
+            family,
+            f"junction_{surface}",
+            endpoints,
+        )
 
     match = _CUSTOM_ROAD.fullmatch(path)
     if match:
