@@ -71,6 +71,13 @@ _ROAD_MODEL_DIMENSIONS: ContextVar[
     default=None,
 )
 
+_ROAD_MODEL_MEASUREMENT_ERRORS: ContextVar[
+    Mapping[str, str] | None
+] = ContextVar(
+    "cwr_road_model_measurement_errors",
+    default=None,
+)
+
 _ROAD_MODEL_EFFECTIVE_DONORS: ContextVar[
     Mapping[str, str] | None
 ] = ContextVar(
@@ -96,6 +103,18 @@ def road_model_dimensions(model_path: str) -> tuple[float, float] | None:
     """Return measured (width, long-piece length) for a configured mod road."""
 
     values = _ROAD_MODEL_DIMENSIONS.get()
+    if values is None:
+        return None
+    direct = values.get(_road_model_key(model_path))
+    if direct is not None:
+        return direct
+    return values.get(_road_model_key(effective_road_model(model_path)))
+
+
+def road_model_measurement_error(model_path: str) -> str | None:
+    """Return the concrete reason a configured mod road could not be measured."""
+
+    values = _ROAD_MODEL_MEASUREMENT_ERRORS.get()
     if values is None:
         return None
     direct = values.get(_road_model_key(model_path))
