@@ -436,19 +436,25 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
         points = tuple(_p._clean_road_points(projected))
         model = _p.road_model_for_tags(spec, feature.tags)
         family = _family(model)
-        modded_paved = (
-            family is None
-            and _p.road_model_surface(spec, model) == "paved"
+        surface = _p.road_model_surface(spec, model)
+        modded_paved = family is None and surface == "paved"
+        unified_paved = (
+            bool(getattr(spec, "custom_road_shapes", False))
+            and surface == "paved"
         )
         if modded_paved:
             family = "sil"
         if family is None:
             continue
         dirt = _p.road_is_dirt(feature.tags)
-        measured = _p.road_model_dimensions(model) if modded_paved else None
+        donor_width = (
+            _p.road_model_width_metres(model)
+            if (modded_paved or unified_paved)
+            else None
+        )
         road_width = (
-            max(1.0, float(measured[0]))
-            if measured is not None
+            max(1.0, float(donor_width))
+            if donor_width is not None
             else max(1.0, float(_p.road_width_metres(feature.tags)))
         )
         for index, (start, end) in enumerate(zip(points, points[1:])):
@@ -464,7 +470,7 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
                 )
                 positions.setdefault(key, node)
                 widths_by_key.setdefault(key, []).append(road_width)
-                if modded_paved:
+                if modded_paved or unified_paved:
                     force_generated_keys.add(key)
 
     result = {}
