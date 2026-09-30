@@ -344,15 +344,27 @@ def _pbo_records_from_stream(
         canonical = canonical_asset_path(combined)
 
         if suffix in _ASSET_SUFFIXES:
-            readable = packing == 0
+            readable = packing in {0, _PBO_COMPRESSED}
+            data: bytes | None = None
             if readable:
-                data = _read_exact(stream, data_size, f"PBO entry {name!r}")
-                digest = _sha256_bytes(data)
-                dependencies = _p3d_dependencies(data) if canonical.endswith(".p3d") else ()
+                try:
+                    data = _read_stored_member(
+                        stream,
+                        name=name,
+                        packing=packing,
+                        original_size=original_size,
+                        data_size=data_size,
+                    )
+                except ValueError:
+                    readable = False
             else:
                 _skip_exact(stream, data_size, f"PBO entry {name!r}")
-                digest = None
-                dependencies = ()
+            digest = _sha256_bytes(data) if data is not None else None
+            dependencies = (
+                _p3d_dependencies(data)
+                if data is not None and canonical.endswith(".p3d")
+                else ()
+            )
             records.append(
                 AssetRecord(
                     path=canonical,
