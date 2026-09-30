@@ -56,7 +56,11 @@ def _configured_variants(spec: Any, attribute: str) -> set[str]:
     configured_length = float(getattr(spec, "road_segment_length", 25.0))
     return {
         _canonical(piece.model_path)
-        for piece in _p.road_model_variants(model, configured_length)
+        for piece in _p.road_model_variants(
+            model,
+            configured_length,
+            donor_only=bool(getattr(spec, "custom_road_shapes", False)),
+        )
     }
 
 
