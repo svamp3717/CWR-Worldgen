@@ -967,3 +967,74 @@ def test_exact_road_family_lookup_ignores_missing_texture_dependencies(
     assert result.missing_models == ()
     assert result.missing_dependencies == ()
     assert [record.path for record in result.records] == [donor]
+
+
+def test_bas_o_straight_curve_pair_keeps_width_and_texture(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "mod"
+    texture = r"bas_o\_tobj\bas_road2.paa"
+    straight25 = r"bas_o\_road\bas_asf25.p3d"
+    straight12 = r"bas_o\_road\bas_asf12.p3d"
+    straight6 = r"bas_o\_road\bas_asf6.p3d"
+    curve = r"bas_o\_road\bas_asf10 25.p3d"
+
+    _write_fake_mod_asset(root, straight25, _mlod_road(5.2, 25.0, texture))
+    _write_fake_mod_asset(root, straight12, _mlod_road(5.2, 12.5, texture))
+    _write_fake_mod_asset(root, straight6, _mlod_road(5.2, 6.25, texture))
+    _write_fake_mod_asset(root, curve, _mlod_curve_sample(5.2, 4.36, 0.38, texture))
+    _write_fake_mod_asset(root, texture, b"synthetic-paa")
+
+    spec = SimpleNamespace(
+        name="basworld",
+        paved_road_model=straight25,
+        paved_road_curve_model=curve,
+        gravel_road_model="",
+        gravel_road_curve_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        dirt_road_curve_model="",
+        road_segment_length=25.0,
+        asset_roots=(root,),
+        cache_dir=None,
+        cache_enabled=False,
+        cache_refresh=False,
+        custom_road_shapes=True,
+    )
+
+    effective = generator._modded_road_effective_donors(spec)
+    availability = generator._modded_road_variant_availability(spec, effective)
+    dimensions = generator._modded_road_model_dimensions(spec, effective)
+
+    effective_token = playability._ROAD_MODEL_EFFECTIVE_DONORS.set(effective)
+    availability_token = playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(availability)
+    dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(dimensions)
+    tag_token = playability._ACTIVE_ROAD_TAGS.set(
+        {"highway": "primary", "surface": "asphalt"}
+    )
+    try:
+        pieces = playability.road_model_variants(straight25, 25.0)
+        generated_width = fallback._generated_width(pieces, spec, "paved")
+    finally:
+        playability._ACTIVE_ROAD_TAGS.reset(tag_token)
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
+        playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
+        playability._ROAD_MODEL_EFFECTIVE_DONORS.reset(effective_token)
+
+    assert [piece.model_path for piece in pieces] == [
+        straight25,
+        straight12,
+        straight6,
+    ]
+    assert [piece.length_metres for piece in pieces] == pytest.approx(
+        [25.0, 12.5, 6.25]
+    )
+    assert generated_width == pytest.approx(5.2)
+    assert generated_width != pytest.approx(9.1)
+
+    assert generator._road_style_donor(spec, "paved") == curve
+    scan = scan_assets((root,), (curve,), use_cache=False)
+    assert generator._resolved_road_donor_texture(
+        scan.records,
+        surface="paved",
+        donor_model=curve,
+    ) == texture
