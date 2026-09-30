@@ -751,7 +751,7 @@ def test_full_pipeline_keeps_mixed_paved_gravel_t_connected(
     key = playability._road_model_key(paved_model)
     dimensions = (
         {key: (paved_width, 25.0)}
-        if not key.startswith(r"o\road\")
+        if not key.startswith("o\\road\\")
         else {}
     )
     dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(dimensions)
@@ -805,7 +805,7 @@ def test_full_pipeline_keeps_mixed_paved_gravel_t_connected(
         ))
 
     assert {"paved", "gravel"} <= surfaces
-    if not paved_model.casefold().startswith(r"o\road\"):
+    if not paved_model.casefold().startswith("o\\road\\"):
         assert all(
             obj.model_path.casefold() != paved_model.casefold()
             for obj in report.objects
