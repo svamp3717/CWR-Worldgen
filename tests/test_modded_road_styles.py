@@ -20,7 +20,12 @@ from cwr_worldgen.assets import model_texture_dependencies, scan_assets
 from cwr_worldgen.osm import road_model_for_tags
 from cwr_worldgen.pbo import PboEntry, write_pbo
 from cwr_worldgen.procedural_buildings import _Face, _Lod, _MLOD_HEADER, _write_lod
-from cwr_worldgen.gui import WorldgenGui, build_milestone9_command, default_gui_values
+from cwr_worldgen.gui import (
+    WorldgenGui,
+    build_milestone9_command,
+    default_gui_values,
+    defaults_with_recent_source,
+)
 from cwr_worldgen.source_pipeline import Milestone5Spec
 from cwr_worldgen.milestone6 import Milestone6Spec
 from cwr_worldgen.milestone7 import Milestone7Spec
@@ -430,6 +435,25 @@ def test_gui_road_defaults_include_stock_curve_donors() -> None:
     assert values["gravel_road_curve_model"] == ""
     assert values["dirt_road_model"] == r"o\road\ces25.p3d"
     assert values["dirt_road_curve_model"] == r"o\road\ces10 25.p3d"
+
+
+def test_saved_blank_stock_curves_upgrade_without_touching_custom_families() -> None:
+    defaults = default_gui_values()
+    state = {
+        "paved_road_model": r"o\road\sil25.p3d",
+        "paved_road_curve_model": "",
+        "gravel_road_model": r"mods\gravel25.p3d",
+        "gravel_road_curve_model": "",
+        "dirt_road_model": r"mods\dirt25.p3d",
+        "dirt_road_curve_model": "",
+    }
+
+    values = defaults_with_recent_source(defaults, state)
+
+    assert values["paved_road_curve_model"] == r"o\road\sil10 25.p3d"
+    assert values["gravel_road_curve_model"] == ""
+    assert values["dirt_road_model"] == r"mods\dirt25.p3d"
+    assert values["dirt_road_curve_model"] == ""
 
 
 def test_restore_road_defaults_resets_straight_and_curve_together() -> None:
