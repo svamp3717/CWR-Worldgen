@@ -203,6 +203,7 @@ def test_select_pbo_replaces_previous_sources(monkeypatch, tmp_path: Path) -> No
     new_pbo.write_bytes(b"new")
 
     app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
+    app.root = object()
     app._scan_in_progress = False
     app.status_var = _FakeVar("")
     app.sources = [old_pbo]
