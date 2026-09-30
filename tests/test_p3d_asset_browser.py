@@ -151,6 +151,108 @@ class _FakeClipboardRoot:
         pass
 
 
+class _FakeScanRoot:
+    def __init__(self):
+        self.cursor = ""
+        self.after_calls = []
+
+    def configure(self, **kwargs):
+        if "cursor" in kwargs:
+            self.cursor = kwargs["cursor"]
+
+    def update_idletasks(self):
+        pass
+
+    def after(self, delay, callback):
+        self.after_calls.append(delay)
+        callback()
+
+
+class _FakeButton:
+    def __init__(self):
+        self.state = None
+
+    def configure(self, **kwargs):
+        self.state = kwargs.get("state", self.state)
+
+
+class _FakeProgress:
+    def __init__(self):
+        self.running = False
+        self.visible = False
+        self.interval = None
+
+    def pack(self, **_kwargs):
+        self.visible = True
+
+    def pack_forget(self):
+        self.visible = False
+
+    def start(self, interval=None):
+        self.running = True
+        self.interval = interval
+
+    def stop(self):
+        self.running = False
+
+
+def test_browser_scan_progress_runs_while_catalogue_is_built(monkeypatch, tmp_path: Path) -> None:
+    app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
+    app.root = _FakeScanRoot()
+    app.sources = [tmp_path / "roads.pbo"]
+    app.catalogue = browser_app.BrowserCatalogue((), (), {})
+    app.texture_resolver = object()
+    app.current = None
+    app.current_model = None
+    app._scan_queue = __import__("queue").Queue()
+    app._scan_generation = 0
+    app._scan_in_progress = False
+    app._source_buttons = [_FakeButton(), _FakeButton(), _FakeButton()]
+    app.scan_progress = _FakeProgress()
+    app.status_var = _FakeVar("")
+    app.sources_var = _FakeVar("")
+    app.info_var = _FakeVar("")
+    app._refresh_lists = lambda: None
+    app._clear_related = lambda: None
+    app._show_empty_preview = lambda: None
+
+    catalogue = browser_app.BrowserCatalogue(
+        (app.sources[0],),
+        (
+            BrowserAsset("model", r"roads\road25.p3d", "roads.pbo", 123),
+            BrowserAsset("texture", r"roads\road.paa", "roads.pbo", 456),
+        ),
+        {},
+    )
+    monkeypatch.setattr(browser_app, "scan_catalogue", lambda _sources: catalogue)
+    monkeypatch.setattr(browser_app, "TextureResolver", lambda sources: tuple(sources))
+
+    class ImmediateThread:
+        def __init__(self, *, target, name, daemon):
+            self.target = target
+            self.name = name
+            self.daemon = daemon
+
+        def start(self):
+            assert app.scan_progress.running is True
+            assert app.scan_progress.visible is True
+            assert all(button.state == browser_app.tk.DISABLED for button in app._source_buttons)
+            self.target()
+
+    monkeypatch.setattr(browser_app.threading, "Thread", ImmediateThread)
+
+    app._scan_sources()
+
+    assert app._scan_in_progress is False
+    assert app.scan_progress.running is False
+    assert app.scan_progress.visible is False
+    assert all(button.state == browser_app.tk.NORMAL for button in app._source_buttons)
+    assert app.catalogue is catalogue
+    assert "Indexed 1 model(s) and 1 texture(s)." == app.status_var.get()
+    assert app.root.cursor == ""
+    assert app.root.after_calls == [50]
+
+
 def test_browser_skip_textures_disables_texture_loading(monkeypatch) -> None:
     app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
     app.ax_preview = _FakeAxis()
