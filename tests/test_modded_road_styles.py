@@ -20,7 +20,7 @@ from cwr_worldgen.assets import model_texture_dependencies, scan_assets
 from cwr_worldgen.osm import road_model_for_tags
 from cwr_worldgen.pbo import PboEntry, write_pbo
 from cwr_worldgen.procedural_buildings import _Face, _Lod, _MLOD_HEADER, _write_lod
-from cwr_worldgen.gui import build_milestone9_command, default_gui_values
+from cwr_worldgen.gui import WorldgenGui, build_milestone9_command, default_gui_values
 from cwr_worldgen.source_pipeline import Milestone5Spec
 from cwr_worldgen.milestone6 import Milestone6Spec
 from cwr_worldgen.milestone7 import Milestone7Spec
@@ -420,6 +420,54 @@ def test_generated_custom_paved_is_recognized_by_junction_policy() -> None:
         "donorworld", "paved", 6.0, 10.0, 27.0
     )
     assert paved_junction_policy._family(model) == "sil"
+
+
+def test_gui_road_defaults_include_stock_curve_donors() -> None:
+    values = default_gui_values()
+    assert values["paved_road_model"] == r"o\road\sil25.p3d"
+    assert values["paved_road_curve_model"] == r"o\road\sil10 25.p3d"
+    assert values["gravel_road_model"] == ""
+    assert values["gravel_road_curve_model"] == ""
+    assert values["dirt_road_model"] == r"o\road\ces25.p3d"
+    assert values["dirt_road_curve_model"] == r"o\road\ces10 25.p3d"
+
+
+def test_restore_road_defaults_resets_straight_and_curve_together() -> None:
+    class FakeVar:
+        def __init__(self, value: str = "") -> None:
+            self.value = value
+
+        def get(self) -> str:
+            return self.value
+
+        def set(self, value: object) -> None:
+            self.value = str(value)
+
+    fake = SimpleNamespace(
+        vars={
+            "paved_road_model": FakeVar(r"mods\custom25.p3d"),
+            "paved_road_curve_model": FakeVar(r"mods\custom_curve.p3d"),
+            "gravel_road_model": FakeVar(r"mods\gravel25.p3d"),
+            "gravel_road_curve_model": FakeVar(r"mods\gravel_curve.p3d"),
+            "dirt_road_model": FakeVar(r"mods\dirt25.p3d"),
+            "dirt_road_curve_model": FakeVar(r"mods\dirt_curve.p3d"),
+        },
+        footer_status_var=FakeVar(),
+    )
+
+    WorldgenGui._restore_road_defaults(fake, "paved")
+    assert fake.vars["paved_road_model"].get() == r"o\road\sil25.p3d"
+    assert fake.vars["paved_road_curve_model"].get() == r"o\road\sil10 25.p3d"
+    assert fake.vars["gravel_road_model"].get() == r"mods\gravel25.p3d"
+
+    WorldgenGui._restore_road_defaults(fake, "gravel")
+    assert fake.vars["gravel_road_model"].get() == ""
+    assert fake.vars["gravel_road_curve_model"].get() == ""
+
+    WorldgenGui._restore_road_defaults(fake, "dirt")
+    assert fake.vars["dirt_road_model"].get() == r"o\road\ces25.p3d"
+    assert fake.vars["dirt_road_curve_model"].get() == r"o\road\ces10 25.p3d"
+    assert "default dirt straight and curve" in fake.footer_status_var.get()
 
 
 def test_gui_command_exposes_all_three_modded_road_donors() -> None:
