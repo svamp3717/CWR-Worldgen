@@ -334,19 +334,37 @@ def _fallback_named_pbos(root: Path, prefix: str) -> tuple[Path, ...]:
     return result
 
 def _read_indexed_entry(path: Path, entry: _PboEntry) -> bytes | None:
-    if entry.packing != 0:
+    if entry.packing not in {0, _assets._PBO_COMPRESSED}:
         return None
+
     if not is_zstd_wrapped_pbo(path):
         with path.open("rb") as stream:
             stream.seek(entry.data_offset)
-            data = stream.read(entry.data_size)
-        if len(data) != entry.data_size:
+            stored = stream.read(entry.data_size)
+        if len(stored) != entry.data_size:
             raise ValueError(f"truncated PBO entry {entry.canonical_path}")
-        return data
+    else:
+        with open_pbo_stream(path) as stream:
+            _skip_exact(stream, entry.data_offset, "PBO data before selected entry")
+            stored = _read_exact(
+                stream,
+                entry.data_size,
+                f"PBO entry {entry.canonical_path}",
+            )
 
-    with open_pbo_stream(path) as stream:
-        _skip_exact(stream, entry.data_offset, "PBO data before selected entry")
-        return _read_exact(stream, entry.data_size, f"PBO entry {entry.canonical_path}")
+    if entry.packing == 0:
+        return stored
+    if entry.original_size <= 0:
+        raise ValueError(
+            f"compressed PBO entry {entry.canonical_path} has no original size"
+        )
+    packed = io.BytesIO(stored)
+    data = _assets._decompress_lzss_stream(packed, entry.original_size)
+    if packed.read():
+        raise ValueError(
+            f"compressed PBO entry {entry.canonical_path} has trailing bytes"
+        )
+    return data
 
 def _record_from_loose(path: Path, canonical_path: str) -> _assets.AssetRecord:
     data = path.read_bytes()
