@@ -304,7 +304,8 @@ def _generated_piece(
     end: tuple[float, float],
     deviation: float,
 ) -> Any:
-    length = math.dist(start, end)
+    # Encoded dimensions must cover the fitted endpoints after decimetre rounding.
+    length = math.ceil(math.dist(start, end) * 10.0 - 1.0e-9) / 10.0
     curve = _signed_curve_degrees(
         measure,
         start_distance,
@@ -443,9 +444,18 @@ def _upgrade_stock_result(
         custom_shapes = bool(
             getattr(context.spec, "custom_road_shapes", False)
         )
+        donor_length = _p.road_model_variants(
+            piece.model_path,
+            float(getattr(context.spec, "road_segment_length", 25.0)),
+            donor_only=True,
+        )[0].length_metres if custom_shapes else piece.length_metres
         custom_shape_needed = (
             custom_shapes
-            and (turn >= 2.0 or deviation >= 0.05)
+            and (
+                turn >= 2.0
+                or deviation >= 0.05
+                or abs(float(piece.length_metres) - float(donor_length)) > 0.05
+            )
         )
         if (
             (
@@ -519,6 +529,33 @@ def _upgrade_stock_result(
     return tuple(upgraded)
 
 
+def _fitting_pieces(pieces: Sequence[Any]) -> tuple[Any, ...]:
+    """Offer short procedural spans without discovering donor sibling assets."""
+
+    context = _quality._CONTEXT.get()
+    if (
+        context is None
+        or not bool(getattr(context.spec, "custom_road_shapes", False))
+        or len(pieces) != 1
+    ):
+        return tuple(pieces)
+    surface = _chain_surface(pieces, context.spec)
+    if surface is None or _pi.custom_road_model_signature(pieces[0].model_path) is not None:
+        return tuple(pieces)
+
+    donor = pieces[0]
+    lengths = (12.5, 6.25, 3.125) if surface == "gravel" else (12.5, 6.25)
+    return (donor,) + tuple(
+        _p._RoadPiece(
+            donor.model_path,
+            length,
+            max(1, int(round(length))),
+        )
+        for length in lengths
+        if length < float(donor.length_metres) - 0.05
+    )
+
+
 def _serial_chain(
     measure: Any,
     pieces: Sequence[Any],
@@ -528,6 +565,7 @@ def _serial_chain(
     minimum_end_distance: float,
     maximum_end_distance: float,
 ):
+    pieces = _fitting_pieces(pieces)
     result = _ORIGINAL_SERIAL_CHAIN(
         measure,
         pieces,
@@ -556,6 +594,7 @@ def _parallel_chain(
     minimum_end_distance: float,
     maximum_end_distance: float,
 ):
+    pieces = _fitting_pieces(pieces)
     result = _ORIGINAL_PARALLEL_CHAIN(
         measure,
         pieces,

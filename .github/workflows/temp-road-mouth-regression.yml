@@ -26,6 +26,9 @@ jobs:
         run: >-
           python -m pytest -sv
           tests/test_road_mouth_regression.py
+          tests/test_custom_road_generation.py
+          tests/test_paved_generated_road_fallback.py
+          tests/test_modded_road_styles.py
           tests/test_synthetic_paved_junctions.py
           tests/test_road_chain_parallel_policy.py
           tests/test_road_finish_parallel_policy.py

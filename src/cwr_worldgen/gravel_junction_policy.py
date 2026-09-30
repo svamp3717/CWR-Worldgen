@@ -93,8 +93,15 @@ def _quality_window(measure, pieces, start_distance, preferred_end, minimum_end,
         return start_distance, preferred_end, minimum_end, maximum_end
     rq = _RQ
     shortest = min(piece.length_metres for piece in pieces)
-    start_junction = context.junctions.get(rq._p._road_node_key(measure.points[0]))
-    end_junction = context.junctions.get(rq._p._road_node_key(measure.points[-1]))
+    start_cap = context.junctions.get(rq._p._road_node_key(measure.points[0]))
+    end_cap = context.junctions.get(rq._p._road_node_key(measure.points[-1]))
+    start_junction = rq._chain_junction(start_cap, pieces, context.spec)
+    end_junction = rq._chain_junction(end_cap, pieces, context.spec)
+    if start_cap is not None and start_junction is None:
+        start_distance = 0.0
+    if end_cap is not None and end_junction is None:
+        preferred_end = minimum_end = measure.total
+        maximum_end = max(maximum_end, measure.total)
     desired_start = start_distance
     desired_end_trim = max(0.0, measure.total - preferred_end)
     desired_end_cover = max(0.0, measure.total - minimum_end)

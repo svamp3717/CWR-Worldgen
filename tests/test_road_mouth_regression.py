@@ -28,8 +28,13 @@ def _world_polygon(obj, points):
 
 def _road_footprint(obj, spec):
     signature = infrastructure.custom_road_model_signature(obj.model_path)
-    if signature is not None:
-        _surface, width, length, _curve = signature
+    junction = infrastructure.custom_road_junction_signature(obj.model_path)
+    if signature is not None or junction is not None:
+        if signature is not None:
+            _surface, width, length, _curve = signature
+        else:
+            _surface, width, _headings = junction
+            length = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 2.0
         subtype = obj.model_path.replace("/", "\\").rsplit("\\", 1)[-1][:-4]
         key = infrastructure.InfrastructureModelKey(
             "road", subtype, round(width * 10), round(length * 10)
@@ -110,6 +115,9 @@ def _fit(paved_model, roads):
         surfaces = {}
         for obj in report.objects:
             surface = playability.road_model_surface(spec, obj.model_path)
+            junction = infrastructure.custom_road_junction_signature(obj.model_path)
+            if junction is not None:
+                surface = junction[0]
             if surface is not None:
                 surfaces.setdefault(surface, []).append(_road_footprint(obj, spec))
         footprints = {surface: unary_union(values) for surface, values in surfaces.items()}

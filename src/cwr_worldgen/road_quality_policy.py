@@ -34,6 +34,7 @@ class _Junction:
     directional_exit_distances: tuple[
         tuple[tuple[float, float], float], ...
     ] = ()
+    surface: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +139,13 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
             half_width,
             tuple(v[0] for v in values),
             directional_exit_distances,
+            surface=(
+                next(iter(surfaces))
+                if len(surfaces := {
+                    _p.road_model_surface(spec, value[2]) for value in values
+                }) == 1
+                else None
+            ),
         )
     return result
 
@@ -179,12 +187,30 @@ def _end_direction(measure, *, start: bool) -> tuple[float, float]:
     return (0.0, 1.0)
 
 
+def _chain_junction(junction, pieces, spec):
+    """A hub may trim only roads belonging to its own surface."""
+
+    surface = getattr(junction, "surface", None)
+    if surface is None or not pieces:
+        return junction
+    if any(_p.road_model_surface(spec, piece.model_path) != surface for piece in pieces):
+        return None
+    return junction
+
+
 def _quality_window(measure, pieces, start_distance, preferred_end, minimum_end, maximum_end, context):
     if not pieces:
         return start_distance, preferred_end, minimum_end, maximum_end
     shortest = min(piece.length_metres for piece in pieces)
-    start_junction = context.junctions.get(_p._road_node_key(measure.points[0]))
-    end_junction = context.junctions.get(_p._road_node_key(measure.points[-1]))
+    start_cap = context.junctions.get(_p._road_node_key(measure.points[0]))
+    end_cap = context.junctions.get(_p._road_node_key(measure.points[-1]))
+    start_junction = _chain_junction(start_cap, pieces, context.spec)
+    end_junction = _chain_junction(end_cap, pieces, context.spec)
+    if start_cap is not None and start_junction is None:
+        start_distance = 0.0
+    if end_cap is not None and end_junction is None:
+        preferred_end = minimum_end = measure.total
+        maximum_end = max(maximum_end, measure.total)
     desired_start = start_distance
     desired_end_trim = max(0.0, measure.total - preferred_end)
     desired_end_cover = max(0.0, measure.total - minimum_end)
