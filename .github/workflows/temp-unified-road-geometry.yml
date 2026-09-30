@@ -1,4 +1,5 @@
 name: Temporary unified road geometry verification
+# Re-run after measured bridge terminal alignment update.
 
 on:
   push:
