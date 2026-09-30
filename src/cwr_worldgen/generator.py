@@ -46,6 +46,7 @@ from .procedural_infrastructure import (
     ProceduralInfrastructureLibrary,
     _texture_file_stem,
     custom_road_model_signature,
+    is_generated_dirt_junction_model,
     is_generated_dirt_road_model,
     is_generated_gravel_junction_model,
     is_generated_gravel_road_model,
@@ -4066,7 +4067,10 @@ def build_milestone4(
     generated_dirt_usage = tuple(
         (model_path, count)
         for model_path, count in generated_infrastructure_usage
-        if is_generated_dirt_road_model(model_path)
+        if (
+            is_generated_dirt_road_model(model_path)
+            or is_generated_dirt_junction_model(model_path)
+        )
     )
 
     paved_texture_path = r"landtext\silnice.pac"
