@@ -31,11 +31,14 @@ jobs:
           tests/test_modded_road_styles.py
           tests/test_road_chain_parallel_policy.py
           tests/test_road_finish_parallel_policy.py
-      - name: Run bridge road tests
+      - name: Run bridge alignment tests
         run: >-
           python -m pytest -q
           tests/test_bridge_final_alignment_policy.py
           tests/test_bridge_final_alignment_performance_policy.py
+      - name: Run bridge underlay tests isolated
+        run: >-
+          python -m pytest -q
           tests/test_bridge_underlay_cleanup_policy.py
           tests/test_bridge_underlay_spatial_policy.py
       - name: Run cleanup road tests
