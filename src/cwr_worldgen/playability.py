@@ -13,6 +13,7 @@ from typing import Callable, Mapping, Sequence
 
 from .model import OsmSpec, PlayabilitySpec, WorldObject
 from .procedural_infrastructure import (
+    CUSTOM_ROAD_MAX_CURVE_DEGREES,
     GENERATED_GRAVEL_HALF_WIDTH_METRES,
     GENERATED_GRAVEL_SURFACE_CLEARANCE_METRES,
     GENERATED_GRAVEL_VISUAL_TOP_METRES,
@@ -2469,6 +2470,9 @@ def _short_run_fallback_piece(
     *,
     start_trim: float,
     end_trim: float,
+    generated_world_name: str = "",
+    generated_surface: str | None = None,
+    generated_width_metres: float | None = None,
 ) -> tuple[tuple[_RoadPiece, tuple[float, float], tuple[float, float]], ...]:
     """Return one aligned short stock piece for a run hidden by hub trimming.
 
@@ -2480,6 +2484,36 @@ def _short_run_fallback_piece(
 
     if not pieces or measure.total <= 0.05:
         return ()
+
+    if (
+        generated_world_name
+        and generated_surface in {"paved", "gravel", "dirt"}
+        and generated_width_metres is not None
+    ):
+        start_x, start_z, start_heading = measure.point(0.0)
+        end_x, end_z, end_heading = measure.point(measure.total)
+        length = math.hypot(end_x - start_x, end_z - start_z)
+        if length <= 0.05:
+            return ()
+        curve = _signed_heading_delta(start_heading, end_heading)
+        curve = max(
+            -float(CUSTOM_ROAD_MAX_CURVE_DEGREES),
+            min(float(CUSTOM_ROAD_MAX_CURVE_DEGREES), curve),
+        )
+        model_path = custom_road_model_path(
+            generated_world_name,
+            generated_surface,
+            float(generated_width_metres),
+            length,
+            curve,
+        )
+        generated = _RoadPiece(
+            model_path,
+            length,
+            max(1, int(round(length))),
+        )
+        return ((generated, (start_x, start_z), (end_x, end_z)),)
+
     piece = min(pieces, key=lambda item: (item.length_metres, item.model_path.casefold()))
     if start_trim > 0.0 and end_trim <= 1e-9:
         start_distance = min(start_trim, max(0.0, measure.total - piece.length_metres))
@@ -2865,6 +2899,21 @@ def _fit_stock_piece_road_objects(
                         variants,
                         start_trim=start_trim,
                         end_trim=end_trim,
+                        generated_world_name=(
+                            spec.name
+                            if bool(getattr(spec, "custom_road_shapes", False))
+                            else ""
+                        ),
+                        generated_surface=(
+                            road_model_surface(spec, model)
+                            if bool(getattr(spec, "custom_road_shapes", False))
+                            else None
+                        ),
+                        generated_width_metres=(
+                            road_model_width_metres(model)
+                            if bool(getattr(spec, "custom_road_shapes", False))
+                            else None
+                        ),
                     )
                     if fitted_pieces:
                         covered_by_hubs = False
