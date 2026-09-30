@@ -1,0 +1,21 @@
+name: Temporary P3D source replacement verification
+
+on:
+  push:
+    branches:
+      - feature/custom-road-generation
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install
+        run: python -m pip install -e . pytest matplotlib zstandard
+      - name: Compile browser
+        run: python -m compileall -q tools/browse_p3d_assets.py tools/p3d_asset_browser_app.py
+      - name: Run browser tests
+        run: python -m pytest -q tests/test_p3d_asset_browser.py
