@@ -747,6 +747,33 @@ def _dirt_variant_path(model_path: str, nominal: int) -> str:
     parent = normalized.rsplit("\\", 1)[0]
     return f"{parent}\\ces{nominal}.p3d"
 
+def _replacement_dirt_model_path(
+    obj,
+    axis: _RoadAxis,
+    nominal: int,
+    length: float,
+    spec,
+) -> str:
+    """Keep dirt repair pieces on the active road-shape family."""
+
+    custom = _CUSTOM_ROAD.fullmatch(_filename(obj.model_path))
+    if (
+        bool(getattr(spec, "custom_road_shapes", False))
+        or (
+            custom is not None
+            and custom.group("surface").casefold() == "dirt"
+        )
+    ):
+        return _p.custom_road_model_path(
+            str(getattr(spec, "name", "world")),
+            "dirt",
+            float(axis.half_width) * 2.0,
+            float(length),
+            0.0,
+        )
+    return _dirt_variant_path(obj.model_path, nominal)
+
+
 def _dirt_variant_lengths(spec) -> tuple[tuple[int, float], ...]:
     scale = float(spec.road_segment_length) / 25.0
     return (
@@ -797,6 +824,7 @@ def _replacement_dirt_object(
     end: float,
     *,
     object_id: int,
+    spec,
 ):
     centre = (start + end) * 0.5
     x = axis.start[0] + axis.ux * centre
@@ -810,7 +838,13 @@ def _replacement_dirt_object(
     return replace(
         obj,
         object_id=int(object_id),
-        model_path=_dirt_variant_path(obj.model_path, nominal),
+        model_path=_replacement_dirt_model_path(
+            obj,
+            axis,
+            nominal,
+            end - start,
+            spec,
+        ),
         x=x,
         y=y,
         z=z,
@@ -838,6 +872,7 @@ def _replacement_dirt_underlay_object(
     blocker_buckets: dict[tuple[int, int], list[int]],
     blockers: tuple[_PavedBlocker, ...],
     object_id: int,
+    spec,
 ):
     start_point = _axis_point(axis, start)
     end_point = _axis_point(axis, end)
@@ -952,7 +987,13 @@ def _replacement_dirt_underlay_object(
     return replace(
         obj,
         object_id=int(object_id),
-        model_path=_dirt_variant_path(obj.model_path, nominal),
+        model_path=_replacement_dirt_model_path(
+            obj,
+            axis,
+            nominal,
+            end - start,
+            spec,
+        ),
         x=point[0],
         y=(start_y + end_y) * 0.5,
         z=point[1],
@@ -1087,11 +1128,20 @@ def _trim_dirt_under_paved(report, spec):
         object_id = int(obj.object_id)
         filename = _filename(obj.model_path)
         straight = _STOCK_STRAIGHT.fullmatch(filename)
+        custom = _CUSTOM_ROAD.fullmatch(filename)
+        stock_dirt_straight = (
+            straight is not None
+            and straight.group("family").casefold() == "ces"
+        )
+        generated_dirt_straight = (
+            custom is not None
+            and custom.group("surface").casefold() == "dirt"
+            and custom.group("curve") is None
+        )
         if (
             index < protected_prefix
             or dirt.curved_model
-            or straight is None
-            or straight.group("family").casefold() != "ces"
+            or not (stock_dirt_straight or generated_dirt_straight)
         ):
             replacements[object_id] = ()
             if index < protected_prefix:
