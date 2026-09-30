@@ -13,6 +13,7 @@ from typing import Callable, Mapping, Sequence
 
 from .model import OsmSpec, PlayabilitySpec, WorldObject
 from .procedural_infrastructure import (
+    GENERATED_GRAVEL_HALF_WIDTH_METRES,
     GENERATED_GRAVEL_SURFACE_CLEARANCE_METRES,
     GENERATED_GRAVEL_VISUAL_TOP_METRES,
     GENERATED_PAVED_HALF_WIDTH_METRES,
