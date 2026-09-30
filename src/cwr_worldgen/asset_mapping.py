@@ -337,12 +337,24 @@ def default_osm_asset_mapping(spec: Any, milestone_number: int, *, global_textur
     gravel_surfaces = ("gravel", "fine_gravel", "compacted", "pebblestone", "unpaved")
     dirt_surfaces = ("dirt", "earth", "ground", "mud", "sand")
     if bool(getattr(spec, "procedural_gravel_roads", False)):
+        gravel_models = (
+            (gravel_road_model_path(spec.name, 25),)
+            if bool(getattr(spec, "custom_road_shapes", False))
+            else tuple(
+                gravel_road_model_path(spec.name, nominal)
+                for nominal in (25, 12, 6, 3)
+            )
+        )
         rules.append(_rule(
             "road-gravel", ("gravel_roads",), {},
-            models=tuple(gravel_road_model_path(spec.name, nominal) for nominal in (25, 12, 6, 3)),
+            models=gravel_models,
             textures=(rf"{spec.name}\i\{_texture_file_stem('gravel')}.paa",),
             geometry="line",
-            description="Generated world-local gravel road ribbon family",
+            description=(
+                "Single built-in gravel donor for generated road shapes"
+                if bool(getattr(spec, "custom_road_shapes", False))
+                else "Generated world-local gravel road ribbon family"
+            ),
         ))
     else:
         rules.append(_rule(
@@ -353,12 +365,12 @@ def default_osm_asset_mapping(spec: Any, milestone_number: int, *, global_textur
     rules.append(_rule(
         "road-paved", ("roads",), {"highway": paved_highways},
         exclude={"surface": (*gravel_surfaces, *dirt_surfaces)}, models=(getattr(spec, "paved_road_model", r"o\road\sil25.p3d"),),
-        geometry="line", description="Current paved-road model family",
+        geometry="line", description="Configured paved straight donor",
     ))
     rules.append(_rule(
         "road-dirt-by-class", ("roads",), {"highway": dirt_highways},
         exclude={"surface": ("asphalt", "paved", "concrete", "concrete:plates", "sett")}, models=(getattr(spec, "dirt_road_model", r"o\road\ces25.p3d"),),
-        geometry="line", description="Current dirt-road model family",
+        geometry="line", description="Configured dirt-road straight donor",
     ))
     rules.append(_rule(
         "road-dirt-by-surface", ("roads",), {"surface": dirt_surfaces},
