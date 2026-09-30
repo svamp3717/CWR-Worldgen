@@ -55,6 +55,8 @@ def _junction_geometry(dataset, projection, spec):
             models_by_key.setdefault(rq._p._road_node_key(end), []).append(model)
 
     for key, junction in tuple(result.items()):
+        if tuple(getattr(junction, "directional_exit_distances", ()) or ()):
+            continue
         models = models_by_key.get(key, ())
         if not models or not all(
             rq._p.road_model_surface(spec, model) == "gravel"
