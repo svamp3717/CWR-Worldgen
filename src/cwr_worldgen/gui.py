@@ -515,8 +515,23 @@ def defaults_with_recent_source(
         "dirt_road_model",
         "dirt_road_curve_model",
     ):
-        if key in state:
-            result[key] = state[key]
+        if key not in state:
+            continue
+        if key.endswith("_road_curve_model") and not str(state[key]).strip():
+            straight_key = key.replace("_road_curve_model", "_road_model")
+            remembered_straight = str(
+                state.get(straight_key, result.get(straight_key, ""))
+            ).strip()
+            stock_straight = str(
+                DEFAULT_ROAD_MODEL_VALUES.get(straight_key, "")
+            ).strip()
+            stock_curve = str(DEFAULT_ROAD_MODEL_VALUES.get(key, "")).strip()
+            if stock_curve and remembered_straight.casefold() == stock_straight.casefold():
+                # Older GUI state persisted blank optional curves. When the
+                # corresponding straight donor is still the stock default, adopt
+                # the new stock curve default rather than pinning that old blank.
+                continue
+        result[key] = state[key]
     return result
 
 
