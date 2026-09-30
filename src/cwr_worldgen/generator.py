@@ -4319,6 +4319,10 @@ def build_milestone4(
         effective_road_donors,
         road_model_dimensions,
     )
+    # Keep a compact donor record inside the generated world PBO as well as in
+    # the external road report. This makes mod-road width/style problems
+    # diagnosable from an uploaded PBO alone.
+    _write_json(source_dir / "i" / "road-donors.json", road_donor_report)
     _write_json(
         road_report_path,
         asdict(road_fit)
