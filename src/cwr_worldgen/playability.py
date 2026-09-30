@@ -905,6 +905,15 @@ def _road_model_with_length(model_path: str, nominal_length: int) -> str | None:
     return model_path[: -len(suffix)] + f"{nominal_length}.p3d"
 
 
+def _known_stock_road_donor_length(model_path: str) -> float | None:
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+    match = re.fullmatch(
+        r"(?:sil|silnice|asf|asfaltka|kos|ces|cesta)(?P<length>25|12|6)\.p3d",
+        filename,
+    )
+    return float(match.group("length")) if match is not None else None
+
+
 def road_model_variants(
     model_path: str,
     configured_long_length: float,
@@ -934,9 +943,16 @@ def road_model_variants(
         )
 
     measured = road_model_dimensions(model_path)
+    stock_donor_length = (
+        _known_stock_road_donor_length(model_path)
+        if donor_only and measured is None
+        else None
+    )
     long_length = (
         float(measured[1])
         if measured is not None
+        else float(stock_donor_length)
+        if stock_donor_length is not None
         else float(configured_long_length)
     )
     if donor_only:
