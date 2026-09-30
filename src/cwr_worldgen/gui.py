@@ -2248,12 +2248,11 @@ class WorldgenGui(tk.Tk):
         ttk.Label(
             road_models,
             text=(
-                "Set a straight donor for placement and an optional curve donor for style. "
-                "Worldgen reuses real straight siblings where available and generates missing "
-                "bends/lengths using the selected road family's texture. Examples: SEBNAM gravel "
-                "Straight = sebnam_obj\\sebtrailpath25.p3d; Curve = sebnam_obj\\sebtrailpath10 25.p3d. "
-                "BAS asphalt Straight = bas_o\\_road\\bas_asf25.p3d; Curve = "
-                "bas_o\\_road\\bas_asf10 25.p3d. Add the containing mod/PBO under Asset roots."
+                "Custom road donors are supported only when the road is roughly the same width "
+                "as vanilla CWA roads. Very wide highways, divided carriageways, and unusually "
+                "shaped road meshes are not supported and may produce incorrect bends or junctions. "
+                "Set a straight donor for placement and, optionally, a matching curve donor for style. "
+                "Add the containing mod/PBO under Asset roots."
             ),
             style="Hint.TLabel",
             wraplength=760,
