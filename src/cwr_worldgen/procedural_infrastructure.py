@@ -88,6 +88,11 @@ _PAVED_JUNCTION_SIGNATURE_SUBTYPE_PATTERN = re.compile(
     r"(?P<headings>\d{3}(?:_\d{3}){2,3})$",
     re.IGNORECASE,
 )
+_CUSTOM_ROAD_JUNCTION_SUBTYPE_PATTERN = re.compile(
+    r"^road_j(?P<degree>[34])_(?P<surface>paved|gravel|dirt)_w"
+    r"(?P<width>\d{3})_h(?P<headings>\d{3}(?:_\d{3}){2,3})$",
+    re.IGNORECASE,
+)
 # Donor branch stock-style junction mesh: logical connector/Roadway geometry
 # stays at 6.25 m while only the visual road artwork extends over the approach.
 GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES = 0.55
@@ -1484,8 +1489,50 @@ def _paved_junction_lods(
     land = _Lod(boundary, (), (), _LAND_CONTACT_LOD)
     return visual, map_geometry, roadway, land
 
+def _custom_road_junction_lods(
+    key: InfrastructureModelKey,
+    texture: str,
+) -> tuple[_Lod, ...]:
+    signature = custom_road_junction_signature(key.subtype + ".p3d")
+    if signature is None:
+        raise ValueError(f"invalid custom road junction subtype: {key.subtype}")
+    _surface, width, headings = signature
+    half_width = max(0.5, width * 0.5)
+    logical_polygon = _paved_junction_polygon_for_headings(
+        headings,
+        half_width,
+        extent=GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+    )
+    visual = _stock_style_paved_junction_visual_lod(
+        headings=headings,
+        half_width=half_width,
+        texture=texture,
+    )
+    boundary = tuple(
+        (float(x), 0.0, float(z))
+        for x, z in tuple(logical_polygon.exterior.coords)[:-1]
+    )
+    map_geometry = _Lod(
+        boundary,
+        (),
+        (),
+        _GEOMETRY_LOD,
+        properties=(("map", "road"),),
+    )
+    roadway = _paved_junction_triangulated_lod(
+        logical_polygon,
+        y=GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES,
+        texture="",
+        resolution=_ROADWAY_LOD,
+    )
+    land = _Lod(boundary, (), (), _LAND_CONTACT_LOD)
+    return visual, map_geometry, roadway, land
+
+
 def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
     subtype = key.subtype.casefold()
+    if custom_road_junction_signature(subtype + ".p3d") is not None:
+        return _custom_road_junction_lods(key, texture)
     if (
         subtype.startswith("paved_j3_")
         or subtype.startswith("paved_j4_")
@@ -1695,6 +1742,9 @@ def gravel_junction_model_path(world_name: str, degree: int) -> str:
 
 
 def is_generated_gravel_junction_model(model_path: str) -> bool:
+    custom = custom_road_junction_signature(model_path)
+    if custom is not None:
+        return custom[0] == "gravel"
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
     return re.fullmatch(r"gravel_j[34]\.p3d", filename, re.IGNORECASE) is not None
 
@@ -1734,6 +1784,9 @@ def paved_junction_model_path(
 
 
 def is_generated_paved_junction_model(model_path: str) -> bool:
+    custom = custom_road_junction_signature(model_path)
+    if custom is not None:
+        return custom[0] == "paved"
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
     legacy = re.fullmatch(
         r"paved_j3_m\d{3}_b\d{3}_a(?P<angle>\d{3})\.p3d",
@@ -1768,6 +1821,57 @@ def paved_fallback_model_path(
         side = "r" if float(curve_degrees) > 0.0 else "l"
         suffix = f"_{side}{amount:02d}"
     return rf"{world_name}\i\paved_w{width_dm:03d}_l{length_dm:04d}{suffix}.p3d"
+
+
+def custom_road_junction_model_path(
+    world_name: str,
+    surface: str,
+    width_metres: float,
+    headings: Iterable[int],
+) -> str:
+    """Return a generated T/X junction styled from one custom road donor."""
+
+    surface = str(surface).strip().casefold()
+    if surface not in {"paved", "gravel", "dirt"}:
+        raise ValueError("custom road junction surface must be paved, gravel, or dirt")
+    normalized = tuple(int(value) % 360 for value in headings)
+    degree = len(normalized)
+    if degree not in {3, 4} or len(set(normalized)) != degree:
+        raise ValueError("custom road junction requires three or four unique headings")
+    if 0 not in normalized:
+        raise ValueError("custom road junction signature must include local heading 000")
+    width_dm = max(10, min(999, int(round(float(width_metres) * 10.0))))
+    encoded = "_".join(f"{value:03d}" for value in normalized)
+    return (
+        rf"{world_name}\i\road_j{degree}_{surface}_w{width_dm:03d}"
+        rf"_h{encoded}.p3d"
+    )
+
+
+def custom_road_junction_signature(
+    model_path: str,
+) -> tuple[str, float, tuple[int, ...]] | None:
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
+    if filename.casefold().endswith(".p3d"):
+        filename = filename[:-4]
+    match = _CUSTOM_ROAD_JUNCTION_SUBTYPE_PATTERN.fullmatch(filename)
+    if match is None:
+        return None
+    degree = int(match.group("degree"))
+    headings = tuple(
+        int(value) % 360 for value in match.group("headings").split("_")
+    )
+    if len(headings) != degree or len(set(headings)) != degree or 0 not in headings:
+        return None
+    return (
+        match.group("surface").casefold(),
+        int(match.group("width")) / 10.0,
+        headings,
+    )
+
+
+def is_generated_custom_road_junction_model(model_path: str) -> bool:
+    return custom_road_junction_signature(model_path) is not None
 
 
 def custom_road_model_path(
@@ -1839,6 +1943,11 @@ def is_generated_dirt_road_model(model_path: str) -> bool:
     return signature is not None and signature[0] == "dirt"
 
 
+def is_generated_dirt_junction_model(model_path: str) -> bool:
+    signature = custom_road_junction_signature(model_path)
+    return signature is not None and signature[0] == "dirt"
+
+
 @dataclass(frozen=True, slots=True)
 class _InfrastructureAssetTask:
     key: InfrastructureModelKey
@@ -1879,6 +1988,9 @@ def _infrastructure_texture_kind(key: InfrastructureModelKey) -> str:
     """Return the generated texture family used by one infrastructure model."""
     if key.kind == "road":
         subtype = key.subtype.casefold()
+        custom_junction = custom_road_junction_signature(subtype + ".p3d")
+        if custom_junction is not None:
+            return custom_junction[0]
         custom = _custom_road_signature(subtype)
         if custom is not None:
             return custom[0]
@@ -1902,6 +2014,11 @@ class ProceduralInfrastructureLibrary:
     _CUSTOM_ROAD_PATTERN = re.compile(
         r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
         r"(?P<length>\d{4})(?:_[lr]\d{3})?\.p3d$",
+        re.IGNORECASE,
+    )
+    _CUSTOM_ROAD_JUNCTION_PATTERN = re.compile(
+        r"^road_j(?P<degree>[34])_(?P<surface>paved|gravel|dirt)_w"
+        r"(?P<width>\d{3})_h(?P<headings>\d{3}(?:_\d{3}){2,3})\.p3d$",
         re.IGNORECASE,
     )
     _PAVED_JUNCTION_PATTERN = re.compile(
@@ -2050,6 +2167,22 @@ class ProceduralInfrastructureLibrary:
                 "road",
                 filename[:-4].casefold(),
                 int(paved_junction_match.group("main")),
+                int(round(GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 20.0)),
+            )] += count
+            return
+        custom_junction_match = self._CUSTOM_ROAD_JUNCTION_PATTERN.fullmatch(filename)
+        if custom_junction_match:
+            degree = int(custom_junction_match.group("degree"))
+            headings = tuple(
+                int(value) % 360
+                for value in custom_junction_match.group("headings").split("_")
+            )
+            if len(headings) != degree or len(set(headings)) != degree:
+                raise ValueError("generated custom road junction heading mismatch")
+            self._usage[InfrastructureModelKey(
+                "road",
+                filename[:-4].casefold(),
+                int(custom_junction_match.group("width")),
                 int(round(GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 20.0)),
             )] += count
             return
