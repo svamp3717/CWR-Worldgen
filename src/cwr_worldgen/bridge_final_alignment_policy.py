@@ -45,6 +45,11 @@ _STOCK_BRIDGE_FOOTPRINT_MARGIN_METRES = 0.15
 # existing road. This exposes only the missing gap and avoids coplanar z-fighting.
 _APPROACH_FILL_MIN_GAP_METRES = 0.20
 _APPROACH_FILL_MAX_GAP_METRES = 5.75
+# Unified generated ribbons are not constrained to the stock 6 m sibling. Bridge
+# cleanup can remove a 25 m ribbon whose centre lies inside the bridge footprint,
+# leaving roughly half a segment between the surviving approach and the abutment.
+# Allow that deterministic phase gap to be regenerated exactly.
+_APPROACH_FILL_MAX_CUSTOM_GAP_METRES = 15.0
 _APPROACH_FILL_NOMINAL_LENGTH_METRES = 6.0
 _APPROACH_FILL_OVERLAP_BURY_METRES = 0.02
 _APPROACH_FILL_HEADING_TOLERANCE_DEGREES = 30.0
@@ -159,6 +164,48 @@ def _six_metre_sibling(model_path: str) -> str | None:
     return path[:start] + "6" + path[end:]
 
 
+def _approach_fill_max_gap(model_path: str) -> float:
+    custom = _playability.custom_road_model_signature(model_path)
+    if custom is None or int(custom[3]) != 0:
+        return _APPROACH_FILL_MAX_GAP_METRES
+    # A removed straight ribbon can expose at most about half its own length at
+    # one abutment. Keep a small tolerance for measured bridge spacing and WRP
+    # float quantisation, while retaining a hard safety ceiling.
+    return min(
+        _APPROACH_FILL_MAX_CUSTOM_GAP_METRES,
+        max(
+            _APPROACH_FILL_MAX_GAP_METRES,
+            float(custom[2]) * 0.55 + 1.0,
+        ),
+    )
+
+
+def _custom_approach_fill_model(
+    model_path: str,
+    required_length: float,
+) -> tuple[str, float] | None:
+    custom = _playability.custom_road_model_signature(model_path)
+    if custom is None or int(custom[3]) != 0:
+        return None
+    normalized = str(model_path).replace("/", "\\")
+    world_name = normalized.split("\\", 1)[0]
+    # custom_road_model_path quantises length to decimetres. Round upward so the
+    # replacement can overlap the surviving road by a few centimetres instead of
+    # reopening a hairline gap through normal rounding.
+    quantized_length = math.ceil(max(0.5, float(required_length)) * 10.0) / 10.0
+    generated = _playability.custom_road_model_path(
+        world_name,
+        custom[0],
+        float(custom[1]),
+        quantized_length,
+        0.0,
+    )
+    signature = _playability.custom_road_model_signature(generated)
+    if signature is None:
+        return None
+    return generated, float(signature[2])
+
+
 def _road_endpoints(
     obj,
 ) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
@@ -256,7 +303,7 @@ def _approach_candidate(bridge_point, bridge_heading, road_objects):
             (near[0], near[2]),
             (float(bridge_point[0]), float(bridge_point[1])),
         )
-        if gap > _APPROACH_FILL_MAX_GAP_METRES:
+        if gap > _approach_fill_max_gap(obj.model_path):
             continue
         connected = _road_has_outward_neighbour(
             obj,
@@ -312,12 +359,12 @@ def _approach_filler(
 ) -> WorldObject | None:
     if gap <= _APPROACH_FILL_MIN_GAP_METRES:
         return None
-    if gap > _APPROACH_FILL_MAX_GAP_METRES:
+    if gap > _approach_fill_max_gap(candidate.model_path):
         return None
 
-    model = _six_metre_sibling(candidate.model_path)
-    if model is None:
-        return None
+    custom = _playability.custom_road_model_signature(candidate.model_path)
+    model = None
+    length = _APPROACH_FILL_NOMINAL_LENGTH_METRES
 
     dx = float(candidate_near[0]) - float(bridge_point[0])
     dz = float(candidate_near[2]) - float(bridge_point[1])
@@ -345,17 +392,30 @@ def _approach_filler(
     # two centimetres below the existing road exactly there, then let the unused
     # remainder of the 6 m slab continue underneath the existing road.
     buried_join_y = candidate_y - _APPROACH_FILL_OVERLAP_BURY_METRES
+    vertical_delta = buried_join_y - float(bridge_deck_y)
     pitch = math.degrees(
         math.atan2(
-            buried_join_y - float(bridge_deck_y),
+            vertical_delta,
             max(gap, 1.0e-9),
         )
     )
     if abs(pitch) > _APPROACH_FILL_MAX_PITCH_DEGREES:
         return None
 
+    if custom is not None:
+        replacement = _custom_approach_fill_model(
+            candidate.model_path,
+            math.hypot(gap, vertical_delta),
+        )
+        if replacement is None:
+            return None
+        model, length = replacement
+    else:
+        model = _six_metre_sibling(candidate.model_path)
+        if model is None:
+            return None
+
     pitch_radians = math.radians(pitch)
-    length = _APPROACH_FILL_NOMINAL_LENGTH_METRES
     horizontal = length * math.cos(pitch_radians)
     end_x = float(bridge_point[0]) + ux * horizontal
     end_z = float(bridge_point[1]) + uz * horizontal
