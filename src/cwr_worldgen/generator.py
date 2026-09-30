@@ -1946,16 +1946,15 @@ def _modded_road_model_dimensions(
     ) or not tuple(getattr(spec, "asset_roots", ()) or ()):
         return {}
 
-    requested = tuple(dict.fromkeys((
-        *(
-            candidate
-            for donor in donors
-            for candidate in road_model_variant_paths(
-                donor, float(getattr(spec, "road_segment_length", 25.0))
-            )
-        ),
-        *curve_donors,
-    )))
+    straight_requested = tuple(dict.fromkeys(
+        candidate
+        for donor in donors
+        for candidate in road_model_variant_paths(
+            donor, float(getattr(spec, "road_segment_length", 25.0))
+        )
+    ))
+    requested = tuple(dict.fromkeys((*straight_requested, *curve_donors)))
+    straight_keys = {_road_model_key(value) for value in straight_requested}
     curve_keys = {_road_model_key(value) for value in curve_donors}
     scan = locate_assets_fast(
         spec.asset_roots,
@@ -1982,7 +1981,7 @@ def _modded_road_model_dimensions(
             else info.width_metres
         )
         length = float(info.length_metres)
-        curve_donor = key in curve_keys
+        curve_donor = key in curve_keys and key not in straight_keys
         if (
             not math.isfinite(width)
             or not math.isfinite(length)
