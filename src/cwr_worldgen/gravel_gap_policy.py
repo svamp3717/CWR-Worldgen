@@ -188,13 +188,23 @@ def _bridge_short_gravel_gaps(report, dataset, projection, elevations, spec, con
             if _dot(endpoint.outward, to_junction) < _GRAVEL_GAP_ALIGNMENT_COSINE:
                 continue
             from_junction = (-to_junction[0], -to_junction[1])
-            ax, az = junction.axis
-            perpendicular = (-az, ax)
-            if max(
-                abs(_dot(from_junction, (ax, az))),
-                abs(_dot(from_junction, perpendicular)),
-            ) < _GRAVEL_GAP_ALIGNMENT_COSINE:
-                continue
+            directional = tuple(
+                getattr(junction, "directional_exit_distances", ()) or ()
+            )
+            if directional:
+                if max(
+                    _dot(from_junction, tuple(value[0]))
+                    for value in directional
+                ) < _GRAVEL_GAP_ALIGNMENT_COSINE:
+                    continue
+            else:
+                ax, az = junction.axis
+                perpendicular = (-az, ax)
+                if max(
+                    abs(_dot(from_junction, (ax, az))),
+                    abs(_dot(from_junction, perpendicular)),
+                ) < _GRAVEL_GAP_ALIGNMENT_COSINE:
+                    continue
             hub_exit = _rq._exit_distance(junction, from_junction)
             span = node_distance - hub_exit
             visible_gap = span - GENERATED_GRAVEL_VISUAL_OVERLAP_METRES
