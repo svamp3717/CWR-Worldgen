@@ -665,10 +665,11 @@ def test_mixed_modded_paved_gravel_t_has_no_open_connector_gap() -> None:
         elif obj.model_path.casefold() == paved.casefold():
             length = 25.0
         else:
-            length = road_quality_policy._piece_length(
+            length = playability.road_model_variants(
                 obj.model_path,
                 spec.road_segment_length,
-            )
+                donor_only=True,
+            )[0].length_metres
         radians = math.radians(float(obj.heading_degrees))
         dx = math.sin(radians) * length * 0.5
         dz = math.cos(radians) * length * 0.5
@@ -692,7 +693,7 @@ def test_mixed_modded_paved_gravel_t_has_no_open_connector_gap() -> None:
         for connector in connectors
     ]
     assert max(connector_gaps) <= (
-        infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES + 0.30
+        infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES + 0.08
     ), connector_gaps
 
 
