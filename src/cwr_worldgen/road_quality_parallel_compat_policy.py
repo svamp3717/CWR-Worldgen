@@ -505,6 +505,9 @@ def _quality_aware_plan_run(job: Any):
                 job.variants,
                 start_trim=job.start_trim,
                 end_trim=job.end_trim,
+                generated_world_name=job.generated_world_name,
+                generated_surface=job.generated_surface,
+                generated_width_metres=job.generated_width_metres,
             )
             if fitted_pieces:
                 covered_by_hubs = False
