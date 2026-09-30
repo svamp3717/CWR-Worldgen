@@ -346,6 +346,9 @@ def _replace_gravel_caps(report, dataset, projection, elevations, spec):
     changed = False
     for index, key in enumerate(keys[: report.junction_cap_objects]):
         junction = junctions[key]
+        old = objects[index]
+        if _pi.is_generated_custom_road_junction_model(old.model_path):
+            continue
         if not math.isclose(
             float(junction.half_width),
             float(_pi.GENERATED_GRAVEL_HALF_WIDTH_METRES),
@@ -359,7 +362,6 @@ def _replace_gravel_caps(report, dataset, projection, elevations, spec):
         half = GRAVEL_JUNCTION_ARM_EXTENT_METRES
         start = (junction.point[0] - axis[0] * half, junction.point[1] - axis[1] * half)
         end = (junction.point[0] + axis[0] * half, junction.point[1] + axis[1] * half)
-        old = objects[index]
         objects[index] = _p._road_object_on_slope(
             old.object_id,
             model_path,
