@@ -9,6 +9,10 @@ from cwr_worldgen import bridge_render_policy as bridge
 from cwr_worldgen import bridge_underlay_cleanup_policy as cleanup
 from cwr_worldgen import bridge_water_deck_clamp_policy as clamp
 from cwr_worldgen.model import WorldObject
+from cwr_worldgen.procedural_infrastructure import (
+    custom_road_model_path,
+    custom_road_model_signature,
+)
 
 
 def _spec():
@@ -213,6 +217,61 @@ def test_tinybridgetest11_connector_starts_exactly_on_bridge_abutment() -> None:
     ) < 1.0e-6
     assert abs(bridge_end[1] - bridge_deck_y) < 1.0e-6
     assert filler.model_path.casefold().endswith(r"\sil6.p3d")
+
+
+def test_unified_bridge_approach_connector_stays_generated() -> None:
+    bridge_point = (928.2240006, 884.8959707)
+    bridge_deck_y = 7.1565831
+    bridge_heading = 57.01882435
+    model = custom_road_model_path(
+        "unified",
+        "paved",
+        9.1,
+        6.0,
+    )
+    approach = WorldObject(
+        1068,
+        model,
+        932.2178345,
+        7.1381631,
+        886.4214478,
+        249.0762802,
+        0.2536515,
+    )
+    continuation = WorldObject(
+        1067,
+        model,
+        937.7100830,
+        7.1102862,
+        888.5213623,
+        249.0762803,
+        0.2896126,
+    )
+
+    selected = policy._approach_candidate(
+        bridge_point,
+        bridge_heading,
+        (approach, continuation),
+    )
+    assert selected is not None
+    candidate, near, gap = selected
+    filler = policy._approach_filler(
+        2000,
+        bridge_point,
+        (0.0, 1.0),
+        bridge_heading,
+        candidate,
+        near,
+        gap,
+        bridge_deck_y,
+    )
+    assert filler is not None
+    signature = custom_road_model_signature(filler.model_path)
+    assert signature is not None
+    assert signature[0] == "paved"
+    assert signature[1] == 9.1
+    assert signature[2] == 6.0
+    assert signature[3] == 0
 
 
 def test_connector_is_buried_at_existing_road_join() -> None:
