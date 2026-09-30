@@ -284,7 +284,10 @@ def _fit(dataset, projection, elevations, spec, *, starting_id: int = 1, progres
 
     def progress(value: int, message: str) -> None:
         nonlocal deferred_completion
-        if value >= 100 and message.startswith("Stock road fitting complete:"):
+        if value >= 100 and (
+            message.startswith("Stock road fitting complete:")
+            or message.startswith("Road fitting complete:")
+        ):
             deferred_completion = (value, message)
             return
         if progress_callback is not None:
@@ -314,7 +317,7 @@ def _fit(dataset, projection, elevations, spec, *, starting_id: int = 1, progres
         # the tiny visual bridge pass appended its connector objects.
         progress_callback(
             deferred_completion[0],
-            f"Stock road fitting complete: {len(report.objects):,} objects in {report.chain_count:,} chains",
+            f"Road fitting complete: {len(report.objects):,} objects in {report.chain_count:,} chains",
         )
     return report
 
