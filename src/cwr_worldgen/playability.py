@@ -1127,18 +1127,18 @@ def _junction_cap_incidents(
     *,
     include_mixed_surfaces: bool = False,
 ) -> tuple[tuple[tuple[float, float], bool, str, str, str], ...]:
-    """Return incidents that participate in junction-cap topology.
+    """Let paved roads own mixed-surface junction topology.
 
-    Legacy stock-road mode lets paved roads own mixed-surface nodes and ignores
-    gravel/dirt branches while choosing a cap. Unified generated-road mode must
-    keep every arm instead: otherwise a paved-through + gravel/dirt branch is
-    collapsed to degree two and no generated hub is emitted, leaving the branch
-    several metres short of the paved road.
+    This intentionally matches the pre-unification modded-road path. A paved
+    through-road stays continuous at a gravel/dirt branch; the unpaved arm
+    terminates into the paved surface instead of forcing a mixed generated hub
+    that trims every arm away from the node.
+
+    The include_mixed_surfaces argument remains accepted for wrapper
+    compatibility but is deliberately ignored.
     """
 
     values = tuple(values)
-    if include_mixed_surfaces:
-        return values
     paved = tuple(value for value in values if not value[1])
     return paved or values
 
@@ -1663,60 +1663,41 @@ def _generated_custom_road_junction_cap_plan(
     values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
     spec: PlayabilitySpec,
 ) -> tuple[str, tuple[float, float]] | None:
-    """Create a generated T/X hub from the active donor road styles.
-
-    Same-surface junctions keep their normal donor surface. Mixed junctions that
-    contain paved road are owned by paved: the generated paved hub covers the
-    centre and all incident arm headings, while gravel/dirt approaches terminate
-    against those arms. This avoids trimming every approach for a fictitious
-    straight 25 m cap, which otherwise leaves a large grass wedge at paved-to-
-    gravel/dirt junctions.
-    """
+    """Create a donor-styled T/X hub for one road surface family."""
 
     if len(values) not in {3, 4}:
         return None
     if not bool(getattr(spec, "custom_road_shapes", False)):
         return None
 
-    incident_surfaces = tuple(
+    surfaces = {
         road_model_surface(spec, value[2])
         for value in values
-    )
-    surfaces = set(incident_surfaces)
-    if None in surfaces or not surfaces:
+    }
+    if len(surfaces) != 1:
+        return None
+    surface = next(iter(surfaces))
+    if surface not in {"paved", "gravel", "dirt"}:
         return None
 
-    mixed = len(surfaces) > 1
-    if mixed:
-        if "paved" not in surfaces:
-            return None
-        surface = "paved"
-    else:
-        surface = next(iter(surfaces))
-        if surface not in {"paved", "gravel", "dirt"}:
-            return None
-
-    configured_widths: dict[str, float | None] = {}
-    for candidate_surface in surfaces:
-        configured = str(
-            getattr(spec, f"{candidate_surface}_road_model", "") or ""
-        ).strip()
-        configured_widths[candidate_surface] = (
-            road_model_width_metres(configured)
-            if configured
-            else (
-                GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
-                if candidate_surface == "gravel"
-                else None
-            )
+    configured = str(
+        getattr(spec, f"{surface}_road_model", "") or ""
+    ).strip()
+    configured_width = (
+        road_model_width_metres(configured)
+        if configured
+        else (
+            GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
+            if surface == "gravel"
+            else None
         )
+    )
 
     widths: list[float] = []
-    for value, candidate_surface in zip(values, incident_surfaces):
-        assert candidate_surface is not None
+    for value in values:
         width = road_model_width_metres(value[2])
         if width is None:
-            width = configured_widths.get(candidate_surface)
+            width = configured_width
         if width is None:
             return None
         widths.append(float(width))
@@ -1725,16 +1706,9 @@ def _generated_custom_road_junction_cap_plan(
 
     minimum_width = min(widths)
     maximum_width = max(widths)
-    if not mixed:
-        tolerance = max(0.20, minimum_width * 0.08)
-        if maximum_width - minimum_width > tolerance:
-            return None
-
-    # For mixed junctions the central hub must cover the widest incident road.
-    # The owner surface remains paved so the visual transition ends as pavement
-    # before the gravel/dirt branch begins, matching the old paved turn/cap
-    # behavior without requiring a stock 6 m sibling.
-    hub_width = maximum_width
+    tolerance = max(0.20, minimum_width * 0.08)
+    if maximum_width - minimum_width > tolerance:
+        return None
 
     directions = tuple(value[0] for value in values)
     try:
@@ -1742,13 +1716,12 @@ def _generated_custom_road_junction_cap_plan(
         model_path = custom_road_junction_model_path(
             str(getattr(spec, "name", "world")),
             surface,
-            hub_width,
+            maximum_width,
             headings,
         )
     except ValueError:
         return None
     return model_path, axis
-
 
 def _generated_paved_t_cap_plan(
     values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
