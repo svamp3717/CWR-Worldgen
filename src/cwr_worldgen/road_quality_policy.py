@@ -83,21 +83,31 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
         values = _p._junction_cap_incidents(_p._unique_incidents(raw))
         if not 3 <= len(values) <= 4:
             continue
+        donor_junction = _p._generated_custom_road_junction_cap_plan(values, spec)
         all_gravel = all(_p.road_model_surface(spec, v[2]) == "gravel" for v in values)
-        if all_gravel:
-            hub_length = 5.4 if len(values) == 3 else 6.0
+        half_width = _HUB_HALF_WIDTH
+        if donor_junction is not None:
+            donor_model, axis = donor_junction
+            signature = _pi.custom_road_junction_signature(donor_model)
+            if signature is None:
+                continue
+            hub_length = _pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 2.0
+            half_width = max(0.5, signature[1] * 0.5)
         else:
-            models = {v[2].casefold(): v[2] for v in values}
-            if len(models) == 1:
-                base_model = next(iter(models.values()))
+            if all_gravel:
+                hub_length = 5.4 if len(values) == 3 else 6.0
             else:
-                base_model = spec.dirt_road_model if all(v[1] for v in values) else spec.paved_road_model
-            variants = _p.road_model_variants(base_model, spec.road_segment_length)
-            cap = next((piece for piece in variants if piece.nominal_length == 6), variants[-1])
-            hub_length = cap.length_metres
-        axis = _p._dominant_node_axis(tuple((v[0], v[1], v[2], v[3]) for v in values))
+                models = {v[2].casefold(): v[2] for v in values}
+                if len(models) == 1:
+                    base_model = next(iter(models.values()))
+                else:
+                    base_model = spec.dirt_road_model if all(v[1] for v in values) else spec.paved_road_model
+                variants = _p.road_model_variants(base_model, spec.road_segment_length)
+                cap = next((piece for piece in variants if piece.nominal_length == 6), variants[-1])
+                hub_length = cap.length_metres
+            axis = _p._dominant_node_axis(tuple((v[0], v[1], v[2], v[3]) for v in values))
         result[key] = _Junction(
-            positions[key], axis, hub_length * 0.5, _HUB_HALF_WIDTH, tuple(v[0] for v in values)
+            positions[key], axis, hub_length * 0.5, half_width, tuple(v[0] for v in values)
         )
     return result
 
