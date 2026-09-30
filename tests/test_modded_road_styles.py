@@ -1234,7 +1234,7 @@ def test_unmeasured_pbo_donor_reports_actual_p3d_failure(tmp_path: Path) -> None
     )
     key = playability._road_model_key(donor)
     assert key not in dimensions
-    assert str(pbo) in errors[key]
+    assert pbo.name in errors[key]
     assert "unsupported ODOL version 99" in errors[key]
 
     pieces = (playability._RoadPiece(donor, 25.0, 25),)
