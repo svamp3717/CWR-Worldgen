@@ -171,7 +171,7 @@ def _object_endpoints(obj):
         return playability._model_axis(obj, length)
 
     generated = re.search(
-        r"\\paved_w\d{3}_l(?P<length>\d{4})(?:_[lr]\d{2})?\.p3d$",
+        r"\\(?:road_)?paved_w\d{3}_l(?P<length>\d{4})(?:_[lr]\d{2,3})?\.p3d$",
         path,
     )
     if generated:
@@ -666,58 +666,24 @@ def test_base_fitter_does_not_preempt_stock_paved_junction_policy() -> None:
     )
     assert "kr_new_" in stock_plan.model_path.casefold()
 
-def test_diagonal_t_junction_falls_back_to_generated_hub_after_stock_fails(
+def test_diagonal_unified_t_uses_generated_hub_with_connected_approaches(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
-    original_success = fallback._successful_plan_keys
-    rejected_stock = []
-
-    def reject_stock_success(report, plans, spec=None, progress_callback=None):
-        successful = original_success(
-            report, plans, spec=spec, progress_callback=progress_callback
-        )
-        stock = {
-            key for key in successful
-            if not infrastructure.is_generated_paved_junction_model(
-                plans[key].model_path
-            )
-        }
-        rejected_stock.extend(stock)
-        return successful.difference(stock)
-
-    monkeypatch.setattr(fallback, "_successful_plan_keys", reject_stock_success)
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     dataset = _junction_dataset(projection, (650.0, 650.0))
-    spec = _junction_spec(bbox)
+    spec = _junction_spec(bbox, custom_road_shapes=True)
     report = playability.fit_road_objects(
         dataset, projection, [0.0] * (40 * 40), spec
     )
 
-    node = (500.0, 500.0)
-    key = playability._road_node_key(node)
-    stock_plan = paved_junctions._plans(
-        dataset, projection, spec
-    )[key]
-    assert not infrastructure.is_generated_paved_junction_model(
-        stock_plan.model_path
+    key = playability._road_node_key((500.0, 500.0))
+    generated_plan = paved_junctions._plans(dataset, projection, spec)[key]
+    assert infrastructure.is_generated_custom_road_junction_model(
+        generated_plan.model_path
     )
-
-    generated_plan = paved_junctions._generated_plan(
-        stock_plan.point,
-        tuple(
-            (arm.source_direction, arm.family)
-            for arm in stock_plan.arms
-        ),
-        world_name=spec.name,
-    )
-    assert generated_plan is not None
-
-    assert rejected_stock
     assert report.junction_cap_objects == 1
     hub = report.objects[0]
-    assert infrastructure.is_generated_paved_junction_model(hub.model_path)
     assert hub.model_path.casefold() == generated_plan.model_path.casefold()
 
     approaches = report.objects[report.junction_cap_objects :]
@@ -745,9 +711,10 @@ def test_diagonal_t_junction_falls_back_to_generated_hub_after_stock_fails(
     )
     assert emitted.generated_variants == 1
     assert len(emitted.model_files) == 1
-    assert "paved_j3_" in emitted.model_files[0].casefold()
+    assert infrastructure.is_generated_custom_road_junction_model(
+        emitted.model_files[0]
+    )
     assert (tmp_path / emitted.model_files[0]).is_file()
-
 
 def test_skew_four_way_intersection_uses_stock_x_and_turn_approaches() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
