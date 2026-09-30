@@ -131,6 +131,62 @@ def test_paved_interior_crossing_is_reported(tmp_path: Path) -> None:
     assert issue.object_ids == (1, 2)
 
 
+def test_custom_donor_junction_is_inspected_with_encoded_connectors(
+    tmp_path: Path,
+) -> None:
+    wrp = _write_wrp(tmp_path, "donor-junction.wrp", (
+        (
+            1,
+            r"donorworld\i\road_j3_paved_w052_h000_090_180.p3d",
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
+        (
+            2,
+            r"donorworld\i\road_paved_w052_l0250.p3d",
+            0.0,
+            0.0,
+            18.75,
+            0.0,
+            0.0,
+        ),
+        (
+            3,
+            r"donorworld\i\road_paved_w052_l0250.p3d",
+            0.0,
+            0.0,
+            -18.75,
+            0.0,
+            0.0,
+        ),
+        (
+            4,
+            r"donorworld\i\road_paved_w052_l0250.p3d",
+            18.75,
+            0.0,
+            0.0,
+            90.0,
+            0.0,
+        ),
+    ))
+    result = inspect_road_geometry(wrp)
+    junction = next(
+        road for road in result.road_objects
+        if road.kind == "junction_paved"
+    )
+    assert junction.family == "paved"
+    assert len(junction.endpoints) == 3
+    assert all(endpoint.half_width == 2.6 for endpoint in junction.endpoints)
+    assert not [
+        issue
+        for issue in result.issues
+        if issue.category in {"bad_junction", "junction_connector_mismatch"}
+    ]
+
+
 def test_generated_gravel_is_mapped_but_not_seam_scored(tmp_path: Path) -> None:
     wrp = _write_wrp(tmp_path, "gravel.wrp", (
         (1, r"wg_demo\i\gravel12.p3d", 0.0, 0.0, 0.0, 0.0, 0.0),
