@@ -775,10 +775,10 @@ def apply_paved_junctions_fast(
     """Apply paved-junction plans with spatial indexing and live progress."""
     if not plans or report.junction_cap_objects <= 0:
         return report
-    plans = _paved._pending_approach_plans(report, plans)
-    if not plans:
-        return report
 
+    # Keep the optimized path semantically identical to paved_junction_policy:
+    # donor-style generated caps still need the approach topology solver. The
+    # emitted approach pieces are donor-styled generated roads in unified mode.
     callback = _audit_progress._PROGRESS_CALLBACK.get()
     reporter = _Reporter(callback)
     state = _build_spatial_state(report, spec, reporter)
