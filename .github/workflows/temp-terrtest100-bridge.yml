@@ -16,9 +16,9 @@ jobs:
       - name: Install
         run: python -m pip install -e . pytest matplotlib zstandard
       - name: Compile bridge alignment
-        run: python -m compileall -q src/cwr_worldgen/bridge_final_alignment_policy.py
+        run: python -m compileall -q src/cwr_worldgen/bridge_final_alignment_policy.py src/cwr_worldgen/bridge_final_alignment_performance_policy.py
       - name: Run bridge alignment tests
-        run: python -m pytest -q tests/test_bridge_final_alignment_policy.py
+        run: python -m pytest -q tests/test_bridge_final_alignment_policy.py tests/test_bridge_final_alignment_performance_policy.py
       - name: Run unified road bridge checks
         run: >-
           python -m pytest -q
