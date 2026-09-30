@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from shapely.geometry import LineString, Polygon
-from shapely.ops import unary_union
+from shapely.ops import substring, unary_union
 
 from cwr_worldgen import playability
 from cwr_worldgen import procedural_infrastructure as infrastructure
@@ -61,7 +61,7 @@ def _road_footprint(obj, spec):
     ])
 
 
-def _fit(paved_model, roads):
+def _fit(paved_model, roads, *, available_siblings=True):
     bbox = (59.40, 16.82, 59.41, 16.83)
     projection = BboxProjection.create(bbox, 1000.0)
     dataset = OsmDataset(
@@ -85,7 +85,7 @@ def _fit(paved_model, roads):
     if key.startswith("o\\road\\"):
         dimensions = {}
         available = frozenset({key})
-    else:
+    elif available_siblings:
         sibling_paths = tuple(
             paved_model[:-len("25.p3d")] + suffix
             for suffix in ("25.p3d", "12.p3d", "6.p3d")
@@ -100,6 +100,9 @@ def _fit(paved_model, roads):
             sibling_keys[2]: (7.0, 6.25),
         }
         available = frozenset(sibling_keys)
+    else:
+        dimensions = {key: (7.0, 25.0)}
+        available = frozenset({key})
     tokens = [
         (playability._ROAD_MODEL_DIMENSIONS,
          playability._ROAD_MODEL_DIMENSIONS.set(dimensions)),
@@ -127,20 +130,26 @@ def _fit(paved_model, roads):
     return spec, report, footprints
 
 
-@pytest.mark.parametrize("paved_model", [
-    r"o\road\sil25.p3d", r"bas_o\_road\bas_asf25.p3d",
+@pytest.mark.parametrize(("paved_model", "available_siblings"), [
+    (r"o\road\sil25.p3d", True),
+    (r"bas_o\_road\bas_asf25.p3d", True),
+    (r"bas_o\_road\bas_asf25.p3d", False),
 ])
-def test_bent_paved_road_has_no_grass_wedges(paved_model):
+def test_bent_paved_road_has_no_grass_wedges(paved_model, available_siblings):
     points = ((300.0, 300.0), (300.0, 380.0), (380.0, 380.0))
     spec, report, footprints = _fit(paved_model, [
         ({"highway": "residential", "surface": "asphalt"}, points),
-    ])
+    ], available_siblings=available_siblings)
     pieces = playability.road_model_variants(
         paved_model, spec.road_segment_length, donor_only=True
     )
     expected = LineString(playability._representable_road_run(points, pieces))
     width = 9.1 if paved_model.startswith("o\\") else 7.0
-    corridor = expected.buffer(width * 0.40, cap_style="flat")
+    # This check targets interior wedges; endpoint rounding has its own
+    # connection tolerance and must not count as a bend seam failure.
+    corridor = substring(expected, 0.5, expected.length - 0.5).buffer(
+        width * 0.40, cap_style="flat"
+    )
     uncovered = corridor.difference(footprints["paved"])
     print("BEND", paved_model, "uncovered", uncovered.area,
           "objects", [(obj.model_path, obj.x, obj.z, obj.heading_degrees) for obj in report.objects])

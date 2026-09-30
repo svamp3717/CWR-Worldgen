@@ -132,6 +132,7 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
                 cap = next((piece for piece in variants if piece.nominal_length == 6), variants[-1])
                 hub_length = cap.length_metres
             axis = _p._dominant_node_axis(tuple((v[0], v[1], v[2], v[3]) for v in values))
+        surfaces = {_p.road_model_surface(spec, value[2]) for value in values}
         result[key] = _Junction(
             positions[key],
             axis,
@@ -139,13 +140,7 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
             half_width,
             tuple(v[0] for v in values),
             directional_exit_distances,
-            surface=(
-                next(iter(surfaces))
-                if len(surfaces := {
-                    _p.road_model_surface(spec, value[2]) for value in values
-                }) == 1
-                else None
-            ),
+            surface=next(iter(surfaces)) if len(surfaces) == 1 else None,
         )
     return result
 
@@ -193,7 +188,10 @@ def _chain_junction(junction, pieces, spec):
     surface = getattr(junction, "surface", None)
     if surface is None or not pieces:
         return junction
-    if any(_p.road_model_surface(spec, piece.model_path) != surface for piece in pieces):
+    if any(
+        _p.road_model_surface(spec, piece.model_path) != surface
+        for piece in pieces
+    ):
         return None
     return junction
 

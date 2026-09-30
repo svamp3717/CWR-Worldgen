@@ -76,15 +76,24 @@ def _chain_surface(pieces: Sequence[Any], spec: Any) -> str | None:
         return "paved"
 
     gravel_variants = _configured_variants(spec, "gravel_road_model")
-    if gravel_variants and all(path in gravel_variants for path in paths):
+    if gravel_variants and all(
+        path in gravel_variants or _p.is_generated_gravel_road_model(path)
+        for path in paths
+    ):
         return "gravel"
 
     dirt_variants = _configured_variants(spec, "dirt_road_model")
-    if dirt_variants and all(path in dirt_variants for path in paths):
+    if dirt_variants and all(
+        path in dirt_variants or _pi.is_generated_dirt_road_model(path)
+        for path in paths
+    ):
         return "dirt"
 
     paved_variants = _configured_variants(spec, "paved_road_model")
-    if paved_variants and all(path in paved_variants for path in paths):
+    if paved_variants and all(
+        path in paved_variants or _pi.is_generated_paved_road_model(path)
+        for path in paths
+    ):
         return "paved"
     return None
 
@@ -444,18 +453,9 @@ def _upgrade_stock_result(
         custom_shapes = bool(
             getattr(context.spec, "custom_road_shapes", False)
         )
-        donor_length = _p.road_model_variants(
-            piece.model_path,
-            float(getattr(context.spec, "road_segment_length", 25.0)),
-            donor_only=True,
-        )[0].length_metres if custom_shapes else piece.length_metres
         custom_shape_needed = (
             custom_shapes
-            and (
-                turn >= 2.0
-                or deviation >= 0.05
-                or abs(float(piece.length_metres) - float(donor_length)) > 0.05
-            )
+            and (turn >= 2.0 or deviation >= 0.05)
         )
         if (
             (
@@ -540,14 +540,24 @@ def _fitting_pieces(pieces: Sequence[Any]) -> tuple[Any, ...]:
     ):
         return tuple(pieces)
     surface = _chain_surface(pieces, context.spec)
-    if surface is None or _pi.custom_road_model_signature(pieces[0].model_path) is not None:
+    if (
+        surface is None
+        or _pi.custom_road_model_signature(pieces[0].model_path) is not None
+    ):
         return tuple(pieces)
 
     donor = pieces[0]
+    width = _generated_width(pieces, context.spec, surface)
     lengths = (12.5, 6.25, 3.125) if surface == "gravel" else (12.5, 6.25)
     return (donor,) + tuple(
         _p._RoadPiece(
-            donor.model_path,
+            _pi.custom_road_model_path(
+                context.spec.name,
+                surface,
+                width,
+                math.ceil(length * 10.0) / 10.0,
+                0.0,
+            ),
             length,
             max(1, int(round(length))),
         )

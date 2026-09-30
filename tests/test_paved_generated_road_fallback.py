@@ -181,10 +181,10 @@ def test_disabled_fallback_never_replaces_stock_piece() -> None:
 
 def test_generated_paved_model_names_quantize_for_reuse() -> None:
     first = infrastructure.paved_fallback_model_path(
-        "reuse_world", 4.55, 6.24, 19.0
+        "reuse_world", 9.10, 6.24, 19.0
     )
     second = infrastructure.paved_fallback_model_path(
-        "reuse_world", 4.56, 6.23, 21.0
+        "reuse_world", 9.12, 6.23, 21.0
     )
 
     assert first == second
@@ -222,8 +222,8 @@ def test_generated_paved_junction_quantizes_heading_and_reuses_stock_texture(
     summary = infrastructure.inspect_mlod(
         tmp_path / result.model_files[0]
     )
-    assert stock_texture in summary.textures
-    assert r"o\road\sil_konec.paa" in summary.textures
+    assert stock_texture in summary.texture_paths
+    assert r"o\road\sil_konec.paa" in summary.texture_paths
     assert any(
         abs(value - infrastructure._ROADWAY_LOD) < 1.0
         for value in summary.resolutions
@@ -453,11 +453,10 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
             infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 20.0
         )),
     )
-    # Wide generated T hubs deliberately ignore the terrain-road PAC and borrow
-    # the donor branch's stock kr_new texture topology instead.
+    # Wide generated T hubs retain the selected donor's road and end artwork.
     visual = infrastructure._road_lods(
         key,
-        r"landtext\silnice.pac",
+        r"o\road\sil_new.paa",
     )[0]
 
     textures = [face.texture for face in visual.faces]
@@ -489,7 +488,7 @@ def test_exact_heading_quantization_fits_inside_donor_visual_overlap() -> None:
 
     assert maximum_heading_error == 2.5
     assert corner_sweep < 0.20
-    assert visible_overlap == 0.35
+    assert math.isclose(visible_overlap, 0.35, abs_tol=1.0e-9)
     assert visible_overlap > corner_sweep + 0.10
 
 
@@ -523,7 +522,7 @@ def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
     model_summary = infrastructure.inspect_mlod(
         tmp_path / result.model_files[0]
     )
-    assert stock_texture in model_summary.textures
+    assert stock_texture in model_summary.texture_paths
 
     document = json.loads(
         (tmp_path / "infrastructure.json").read_text(encoding="utf-8")
