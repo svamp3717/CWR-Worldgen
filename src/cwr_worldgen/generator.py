@@ -1620,6 +1620,43 @@ def _road_style_donor(spec: PlayabilitySpec, surface: str) -> str:
     return curve or straight
 
 
+def _road_donor_diagnostics(
+    spec: PlayabilitySpec,
+    effective_donors: dict[str, str],
+    dimensions: dict[str, tuple[float, float]],
+) -> dict[str, dict[str, object]]:
+    """Describe the exact straight/curve pair used by each road surface."""
+
+    result: dict[str, dict[str, object]] = {}
+    for surface in ("paved", "gravel", "dirt"):
+        straight = str(
+            getattr(spec, f"{surface}_road_model", "") or ""
+        ).strip()
+        curve = str(
+            getattr(spec, f"{surface}_road_curve_model", "") or ""
+        ).strip()
+        effective = (
+            effective_donors.get(_road_model_key(straight), straight)
+            if straight
+            else ""
+        )
+        measured = dimensions.get(_road_model_key(effective)) if effective else None
+        result[surface] = {
+            "straight": straight,
+            "curve": curve,
+            "style_donor": _road_style_donor(spec, surface),
+            "effective_straight": effective,
+            "measured_straight_width_metres": (
+                float(measured[0]) if measured is not None else None
+            ),
+            "measured_straight_length_metres": (
+                float(measured[1]) if measured is not None else None
+            ),
+            "straight_geometry_measured": measured is not None,
+        }
+    return result
+
+
 def _resolved_road_donor_texture(
     records: Sequence[AssetRecord],
     *,
@@ -4277,24 +4314,11 @@ def build_milestone4(
         asset_catalogue_path, asset_scan,
         osm_asset_mapping=osm_asset_mapping_report.to_manifest(),
     )
-    road_donor_report = {}
-    for surface in ("paved", "gravel", "dirt"):
-        straight = str(
-            getattr(spec, f"{surface}_road_model", "") or ""
-        ).strip()
-        curve = str(
-            getattr(spec, f"{surface}_road_curve_model", "") or ""
-        ).strip()
-        effective = (
-            effective_road_donors.get(_road_model_key(straight), straight)
-            if straight
-            else ""
-        )
-        road_donor_report[surface] = {
-            "straight": straight,
-            "curve": curve,
-            "effective_straight": effective,
-        }
+    road_donor_report = _road_donor_diagnostics(
+        spec,
+        effective_road_donors,
+        road_model_dimensions,
+    )
     _write_json(
         road_report_path,
         asdict(road_fit)
