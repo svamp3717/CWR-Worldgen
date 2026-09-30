@@ -269,6 +269,7 @@ def _generated_plan(
     *,
     world_name: str,
     width_override: float | None = None,
+    donor_surface: str | None = None,
 ) -> _Plan | None:
     """Build an exact-heading generated T/X only for stock-plan fallback."""
 
@@ -287,10 +288,19 @@ def _generated_plan(
             for _direction_value, family in incidents
         )
     )
-    model_path = _pi.paved_junction_signature_model_path(
-        world_name,
-        width,
-        headings,
+    model_path = (
+        _pi.custom_road_junction_model_path(
+            world_name,
+            donor_surface,
+            width,
+            headings,
+        )
+        if donor_surface in {"paved", "gravel", "dirt"}
+        else _pi.paved_junction_signature_model_path(
+            world_name,
+            width,
+            headings,
+        )
     )
     connector_radius = (
         _JUNCTION_RADIUS
@@ -492,6 +502,7 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
                 paved_incidents,
                 world_name=spec.name,
                 width_override=max(widths_by_key.get(key, (9.1,))),
+                donor_surface="paved",
             )
         else:
             plan = _plan(
