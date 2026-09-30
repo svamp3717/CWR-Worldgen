@@ -1,4 +1,4 @@
-from concurrent.futures import Future
+from concurrent.futures import Future, ProcessPoolExecutor
 from types import SimpleNamespace
 
 from cwr_worldgen import playability
@@ -220,3 +220,24 @@ def test_spawned_worker_receives_mod_road_context(monkeypatch) -> None:
         measurement_errors,
         effective,
     )
+
+
+def test_real_process_worker_receives_mod_road_context() -> None:
+    variants = {r"bas_o\_road\bas_asf25.p3d": frozenset({
+        r"bas_o\_road\bas_asf25.p3d",
+    })}
+    dimensions = {r"bas_o\_road\bas_asf25.p3d": (5.2, 25.0)}
+    measurement_errors = {r"bas_o\_road\bad.p3d": "synthetic failure"}
+    effective = {
+        r"bas_o\_road\legacy10 25.p3d": r"bas_o\_road\bas_asf25.p3d",
+    }
+    road_context = (variants, dimensions, measurement_errors, effective)
+
+    with ProcessPoolExecutor(
+        max_workers=1,
+        initializer=quality_perf._install_worker_quality_context,
+        initargs=(None, road_context),
+    ) as executor:
+        observed = executor.submit(quality_perf._road_worker_context).result()
+
+    assert observed == road_context
