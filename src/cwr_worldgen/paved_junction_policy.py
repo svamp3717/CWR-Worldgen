@@ -648,7 +648,14 @@ def _object_axis(obj, spec):
         return _p._model_axis(obj, length)
 
     family = _family(obj.model_path)
-    if family is None or _kind(family) != "paved":
+    if family is None:
+        if _p.road_model_surface(spec, obj.model_path) != "paved":
+            return None
+        measured = _p.road_model_dimensions(obj.model_path)
+        if measured is None:
+            return None
+        return _p._model_axis(obj, float(measured[1]))
+    if _kind(family) != "paved":
         return None
     if _CURVE.fullmatch(filename) or filename.startswith("kr_"):
         return None
@@ -832,22 +839,54 @@ def _cap_index(report, plan, used):
     return best[1]
 
 
-def _pending_approach_plans(report, plans):
-    """Exclude donor-style hubs already emitted by the base road fitter."""
+def _generated_approach_style(plan: _Plan, spec):
+    if not bool(getattr(spec, "custom_road_shapes", False)):
+        return None
+    signature = _pi.custom_road_junction_signature(plan.model_path)
+    if signature is None:
+        return None
+    surface, width, _headings = signature
+    if surface != "paved":
+        return None
+    return surface, float(width)
 
-    pending = {}
-    for key, plan in plans.items():
-        if _pi.is_generated_custom_road_junction_model(plan.model_path):
-            cap_index = _cap_index(report, plan, set())
-            if cap_index is not None:
-                emitted = report.objects[cap_index]
-                if (
-                    emitted.model_path.replace("/", "\\").casefold()
-                    == plan.model_path.replace("/", "\\").casefold()
-                ):
-                    continue
-        pending[key] = plan
-    return pending
+
+def _generated_approach_object(
+    object_id,
+    plan: _Plan,
+    start,
+    end,
+    curve_degrees,
+    elevations,
+    spec,
+):
+    style = _generated_approach_style(plan, spec)
+    if style is None:
+        return None
+    surface, width = style
+    chord = math.dist(start, end)
+    if chord <= 0.05:
+        return None
+    # P3D filenames encode decimetres. Round upward so an approach piece
+    # overlaps the intended connector by a few centimetres rather than exposing
+    # a terrain sliver through normal rounding.
+    generated_length = math.ceil(chord * 10.0 - 1.0e-9) / 10.0
+    model_path = _pi.custom_road_model_path(
+        str(getattr(spec, "name", "world")),
+        surface,
+        width,
+        generated_length,
+        float(curve_degrees),
+    )
+    return _p._road_object_on_slope(
+        object_id,
+        model_path,
+        start,
+        end,
+        elevations,
+        spec,
+        vertical_offset=0.060,
+    )
 
 
 def _segment_distance(point, axis):
@@ -859,12 +898,36 @@ def _approach_objects(plan, arm, choice, next_id, elevations, spec):
     point = arm.connector.point
     heading = _heading(arm.connector.direction)
     objects = []
+    generated_style = _generated_approach_style(plan, spec)
 
     for _index in range(choice.first_turns):
-        obj, point, heading = _curve_object(
-            next_id, family, choice.first_radius, point, heading,
-            choice.turn_sign, elevations, spec
-        )
+        if generated_style is not None:
+            next_point, next_heading = _arc_step(
+                point, heading, choice.turn_sign, choice.first_radius
+            )
+            obj = _generated_approach_object(
+                next_id,
+                plan,
+                point,
+                next_point,
+                choice.turn_sign * _TURN_DEGREES,
+                elevations,
+                spec,
+            )
+            if obj is None:
+                return (), next_id
+            point, heading = next_point, next_heading
+        else:
+            obj, point, heading = _curve_object(
+                next_id,
+                family,
+                choice.first_radius,
+                point,
+                heading,
+                choice.turn_sign,
+                elevations,
+                spec,
+            )
         objects.append(obj)
         next_id += 1
 
@@ -874,42 +937,84 @@ def _approach_objects(plan, arm, choice, next_id, elevations, spec):
             point[0] + direction[0] * _STRAIGHTS[6],
             point[1] + direction[1] * _STRAIGHTS[6],
         )
-        objects.append(
-            _straight_object(next_id, family, 6, point, end, elevations, spec)
-        )
+        if generated_style is not None:
+            obj = _generated_approach_object(
+                next_id, plan, point, end, 0.0, elevations, spec
+            )
+            if obj is None:
+                return (), next_id
+        else:
+            obj = _straight_object(
+                next_id, family, 6, point, end, elevations, spec
+            )
+        objects.append(obj)
         next_id += 1
         point = end
 
     for _index in range(choice.counter_turns):
-        obj, point, heading = _curve_object(
-            next_id, family, choice.counter_radius, point, heading,
-            -choice.turn_sign, elevations, spec
-        )
+        turn_sign = -choice.turn_sign
+        if generated_style is not None:
+            next_point, next_heading = _arc_step(
+                point, heading, turn_sign, choice.counter_radius
+            )
+            obj = _generated_approach_object(
+                next_id,
+                plan,
+                point,
+                next_point,
+                turn_sign * _TURN_DEGREES,
+                elevations,
+                spec,
+            )
+            if obj is None:
+                return (), next_id
+            point, heading = next_point, next_heading
+        else:
+            obj, point, heading = _curve_object(
+                next_id,
+                family,
+                choice.counter_radius,
+                point,
+                heading,
+                turn_sign,
+                elevations,
+                spec,
+            )
         objects.append(obj)
         next_id += 1
 
-    objects.append(
-        _straight_object(
-            next_id, family, choice.merge_nominal, point,
-            choice.merge_target, elevations, spec
+    if generated_style is not None:
+        obj = _generated_approach_object(
+            next_id,
+            plan,
+            point,
+            choice.merge_target,
+            0.0,
+            elevations,
+            spec,
         )
-    )
+        if obj is None:
+            return (), next_id
+    else:
+        obj = _straight_object(
+            next_id,
+            family,
+            choice.merge_nominal,
+            point,
+            choice.merge_target,
+            elevations,
+            spec,
+        )
+    objects.append(obj)
     return tuple(objects), next_id + 1
-
 
 def _apply_plans(report, plans, elevations, spec):
     if not plans or report.junction_cap_objects <= 0:
         return report
 
-    # Donor-style generated hubs are already emitted by the base road fitter
-    # with exact arm headings and generated ribbon approaches. Re-running the
-    # historical stock approach solver here would replace those approaches with
-    # sil/asf/kos P3Ds and reintroduce the seam/grass-wedge geometry this system
-    # is meant to avoid.
-    plans = _pending_approach_plans(report, plans)
-    if not plans:
-        return report
-
+    # Generated donor hubs still need the proven approach topology solver.
+    # In unified mode _approach_objects emits donor-styled generated pieces, so
+    # restoring this pass does not reintroduce hidden sil/asf sibling assets.
     applications = []
     used_caps = set()
     for key in sorted(plans):
