@@ -673,7 +673,7 @@ def test_mixed_modded_paved_gravel_t_has_no_open_connector_gap() -> None:
         min(math.dist(connector, endpoint) for endpoint in approach_endpoints)
         for connector in connectors
     ]
-    assert max(connector_gaps) <= pytest.approx(
+    assert max(connector_gaps) <= (
         infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES + 0.08
     )
 
