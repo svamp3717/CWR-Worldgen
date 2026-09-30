@@ -764,8 +764,12 @@ def test_full_pipeline_keeps_mixed_paved_gravel_t_connected(
     assert distances["gravel"]
     # Paved must remain continuous through the shared node. Gravel may overlap
     # underneath it, but it must never stop metres short and expose terrain.
-    assert min(distances["paved"]) <= 0.30
-    assert min(distances["gravel"]) <= max(0.50, paved_width * 0.5)
+    assert min(distances["paved"]) <= 0.30, distances
+    # Preserve the pre-stock-unification mixed-join behavior: the gravel arm
+    # reaches the shared node underneath the paved through-road. Stopping at the
+    # paved footprint edge can still expose a triangular grass wedge at skewed
+    # joins, so half the paved width is not a valid connection tolerance.
+    assert min(distances["gravel"]) <= 0.30, distances
 
     if not paved_model.casefold().startswith("o\\road\\"):
         assert any(
