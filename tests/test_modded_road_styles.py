@@ -18,8 +18,14 @@ from cwr_worldgen import paved_junction_fallback_policy as junction_fallback
 from cwr_worldgen import paved_road_generated_fallback_policy as fallback
 from cwr_worldgen import playability
 from cwr_worldgen import procedural_infrastructure as infrastructure
+from cwr_worldgen import road_chain_parallel_policy
 from cwr_worldgen.assets import model_texture_dependencies, scan_assets
-from cwr_worldgen.osm import road_model_for_tags
+from cwr_worldgen.osm import (
+    BboxProjection,
+    OsmDataset,
+    OsmLineFeature,
+    road_model_for_tags,
+)
 from cwr_worldgen.pbo import PboEntry, write_pbo
 from cwr_worldgen.procedural_buildings import (
     _Face,
@@ -38,7 +44,7 @@ from cwr_worldgen.source_pipeline import Milestone5Spec
 from cwr_worldgen.milestone6 import Milestone6Spec
 from cwr_worldgen.milestone7 import Milestone7Spec
 from cwr_worldgen.milestone8 import Milestone8Spec
-from cwr_worldgen.milestone9 import Milestone9Spec
+from cwr_worldgen.milestone9 import Milestone9Spec, _Milestone9PlayabilitySpec
 from cwr_worldgen.legacy_proxy_models import inspect_visual_model_dimensions
 
 
@@ -480,6 +486,80 @@ def test_measured_custom_donor_builds_matching_three_way_junction_plan(
     assert len(signature[2]) == 3
     assert 0 in signature[2]
     assert math.hypot(*axis) == pytest.approx(1.0)
+
+
+def test_parallel_fitter_emits_custom_donor_junction_cap() -> None:
+    bbox = (59.40, 16.82, 59.41, 16.83)
+    projection = BboxProjection.create(bbox, 1000.0)
+    centre = (500.0, 500.0)
+    donor = r"modroads\paved25.p3d"
+    dataset = OsmDataset(
+        source_generator="custom-donor-junction",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/main",
+                {"highway": "residential", "surface": "asphalt"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in ((500.0, 250.0), centre, (500.0, 750.0))
+                ),
+            ),
+            OsmLineFeature(
+                "way/branch",
+                {"highway": "residential", "surface": "asphalt"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in (centre, (750.0, 500.0))
+                ),
+            ),
+        ),
+    )
+    spec = _Milestone9PlayabilitySpec(
+        name="donorworld",
+        heightmap_path=Path("unused.png"),
+        bbox=bbox,
+        cells=40,
+        cell_size=25.0,
+        max_road_objects=10000,
+        strict_assets=False,
+        paved_road_model=donor,
+    )
+    donor_key = playability._road_model_key(donor)
+    dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(
+        {donor_key: (5.2, 25.0)}
+    )
+    availability_token = playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(
+        {donor_key: frozenset({donor_key})}
+    )
+    effective_token = playability._ROAD_MODEL_EFFECTIVE_DONORS.set(
+        {donor_key: donor}
+    )
+    try:
+        report = road_chain_parallel_policy._fit_stock_piece_road_objects_parallel(
+            dataset,
+            projection,
+            [0.0] * (spec.cells * spec.cells),
+            spec,
+        )
+    finally:
+        playability._ROAD_MODEL_EFFECTIVE_DONORS.reset(effective_token)
+        playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
+
+    assert report.junction_cap_objects == 1
+    cap = report.objects[0]
+    signature = infrastructure.custom_road_junction_signature(cap.model_path)
+    assert signature is not None
+    assert signature[0] == "paved"
+    assert signature[1] == pytest.approx(5.2)
+    assert len(signature[2]) == 3
+    assert cap.model_path.startswith(r"donorworld\i\road_j3_paved_w052_")
 
 
 def test_stock_paved_family_does_not_create_donor_junction_plan() -> None:
