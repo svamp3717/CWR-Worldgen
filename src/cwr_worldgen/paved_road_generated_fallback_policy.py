@@ -384,8 +384,7 @@ def _upgrade_stock_result(
             # approach reserve instead of inserting a tiny generated slab.
             target_distance = min(float(preferred_end_distance), float(measure.total))
             if (
-                not bool(getattr(context.spec, "custom_road_shapes", False))
-                and surface == "paved"
+                surface == "paved"
                 and _stock_junction_protects_interval(
                     measure,
                     current,
@@ -437,20 +436,26 @@ def _upgrade_stock_result(
         )
         turn_limit, deviation_limit = _piece_limits(piece, surface)
 
-        # The quality scorer puts fidelity_penalty first. If its selected stock
-        # piece still fails this test, every available stock candidate at this
-        # chain step failed the same geometric-fit class.
-        unified_shapes = bool(
+        # Match the pre-unification donor behavior: a clean donor-length
+        # straight stays the real configured P3D. Generate only when the mapped
+        # line actually bends/deviates or the fitted donor piece exceeds its
+        # safe geometric limits. This keeps stock and modded donors on the same
+        # proven segmentation rule without turning every straight into a ribbon.
+        custom_shapes = bool(
             getattr(context.spec, "custom_road_shapes", False)
         )
-        custom_shape_needed = unified_shapes or (
-            turn > turn_limit or deviation > deviation_limit
+        custom_shape_needed = (
+            custom_shapes
+            and (turn >= 2.0 or deviation >= 0.05)
         )
         if (
-            custom_shape_needed
+            (
+                custom_shape_needed
+                or turn > turn_limit
+                or deviation > deviation_limit
+            )
             and not (
-                not unified_shapes
-                and surface == "paved"
+                surface == "paved"
                 and _stock_junction_protects_interval(
                     measure,
                     current,
@@ -481,8 +486,7 @@ def _upgrade_stock_result(
         if (
             target_distance > current + 0.05
             and not (
-                not bool(getattr(context.spec, "custom_road_shapes", False))
-                and surface == "paved"
+                surface == "paved"
                 and _stock_junction_protects_interval(
                     measure,
                     current,
