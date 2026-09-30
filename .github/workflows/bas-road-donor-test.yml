@@ -27,7 +27,8 @@ jobs:
           src/cwr_worldgen/generator.py
           src/cwr_worldgen/playability.py
           tests/test_modded_road_styles.py
-          tests/test_gui.py
+          tests/test_gui.py::GuiCommandTests::test_gui_state_restores_road_donors_between_restarts
+          tests/test_gui.py::GuiCommandTests::test_road_and_asset_persistence_writes_gui_state
       - run: >
           python -m pytest -q
           tests/test_modded_road_styles.py
