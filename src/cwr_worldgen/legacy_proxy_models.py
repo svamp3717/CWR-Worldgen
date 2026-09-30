@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from hashlib import sha256
 import io
+import math
 import struct
 
 from .assets import _decompress_lzss_stream, canonical_asset_path
@@ -350,6 +351,147 @@ def _read_mlod_visual(data: bytes) -> tuple[_Lod, int, tuple[str, ...]]:
     )
 
 
+def _boundary_connector_width(
+    lod: _Lod,
+    *,
+    visual_width: float,
+    visual_length: float,
+) -> float | None:
+    """Measure curved modular-road mouths from visual boundary topology.
+
+    A curved road's far connector is not generally located at global max-Z.
+    When the ordinary terminal-Z bands cannot see both mouths, find straight,
+    collinear boundary-edge groups instead. Multi-lane/divided roads commonly
+    expose several lane-width boundary edges on each terminal line, so the full
+    mouth span remains measurable even when a median separates carriageways.
+    """
+
+    edge_counts: dict[
+        tuple[
+            tuple[float, float, float],
+            tuple[float, float, float],
+        ],
+        int,
+    ] = {}
+
+    def point_key(index: int) -> tuple[float, float, float]:
+        point = lod.points[index]
+        return (
+            round(float(point[0]), 5),
+            round(float(point[1]), 5),
+            round(float(point[2]), 5),
+        )
+
+    for face in lod.faces:
+        indices = tuple(
+            int(vertex[0])
+            for vertex in face.vertices
+            if 0 <= int(vertex[0]) < len(lod.points)
+        )
+        if len(indices) < 3:
+            continue
+        for first, second in zip(indices, (*indices[1:], indices[0])):
+            a = point_key(first)
+            b = point_key(second)
+            if a == b:
+                continue
+            edge = tuple(sorted((a, b)))
+            edge_counts[edge] = edge_counts.get(edge, 0) + 1
+
+    boundary_edges = tuple(
+        edge for edge, count in edge_counts.items() if count == 1
+    )
+    if len(boundary_edges) < 4:
+        return None
+
+    angle_cosine = math.cos(math.radians(1.0))
+    groups: list[dict[str, object]] = []
+    for a, b in boundary_edges:
+        dx = float(b[0] - a[0])
+        dz = float(b[2] - a[2])
+        edge_length = math.hypot(dx, dz)
+        if edge_length <= 1.0e-4:
+            continue
+        ux, uz = dx / edge_length, dz / edge_length
+        if ux < 0.0 or (abs(ux) <= 1.0e-9 and uz < 0.0):
+            ux, uz = -ux, -uz
+        nx, nz = -uz, ux
+        midpoint_x = (float(a[0]) + float(b[0])) * 0.5
+        midpoint_z = (float(a[2]) + float(b[2])) * 0.5
+        offset = nx * midpoint_x + nz * midpoint_z
+
+        selected = None
+        for group in groups:
+            gux, guz = group["direction"]  # type: ignore[misc]
+            dot = abs(ux * float(gux) + uz * float(guz))
+            if (
+                dot >= angle_cosine
+                and abs(offset - float(group["offset"])) <= 0.08
+            ):
+                selected = group
+                break
+        if selected is None:
+            selected = {
+                "direction": (ux, uz),
+                "offset": offset,
+                "edges": [],
+            }
+            groups.append(selected)
+        selected["edges"].append((a, b))  # type: ignore[index]
+
+    minimum_span = max(0.50, float(visual_width) * 0.15)
+    maximum_span = max(minimum_span, float(visual_width) * 1.25)
+    candidates: list[tuple[int, float, tuple[float, float]]] = []
+    for group in groups:
+        edges = tuple(group["edges"])  # type: ignore[arg-type]
+        if len(edges) < 2:
+            continue
+        ux, uz = group["direction"]  # type: ignore[misc]
+        projections = tuple(
+            float(point[0]) * float(ux) + float(point[2]) * float(uz)
+            for edge in edges
+            for point in edge
+        )
+        span = max(projections) - min(projections)
+        if not minimum_span <= span <= maximum_span:
+            continue
+        midpoint_projection = (min(projections) + max(projections)) * 0.5
+        nx, nz = -float(uz), float(ux)
+        offset = float(group["offset"])
+        centre = (
+            float(ux) * midpoint_projection + nx * offset,
+            float(uz) * midpoint_projection + nz * offset,
+        )
+        candidates.append((len(edges), float(span), centre))
+
+    if len(candidates) < 2:
+        return None
+
+    minimum_separation = max(
+        0.50,
+        math.hypot(float(visual_width), float(visual_length)) * 0.15,
+    )
+    best = None
+    for first_index, first in enumerate(candidates[:-1]):
+        for second in candidates[first_index + 1:]:
+            separation = math.dist(first[2], second[2])
+            if separation < minimum_separation:
+                continue
+            width_delta = abs(first[1] - second[1])
+            tolerance = max(0.25, min(first[1], second[1]) * 0.10)
+            if width_delta > tolerance:
+                continue
+            score = (
+                min(first[0], second[0]),
+                -width_delta,
+                separation,
+                min(first[1], second[1]),
+            )
+            if best is None or score > best[0]:
+                best = score, min(first[1], second[1])
+    return None if best is None else float(best[1])
+
+
 def inspect_visual_model_dimensions(data: bytes) -> VisualModelDimensions:
     """Measure a conventional +Z road/object visual from ODOL or MLOD bytes.
 
@@ -411,6 +553,15 @@ def inspect_visual_model_dimensions(data: bytes) -> VisualModelDimensions:
                 (min(lower_connector_x) + max(lower_connector_x)) * 0.5,
                 (min(upper_connector_x) + max(upper_connector_x)) * 0.5,
             )
+
+    if connector_centers is None:
+        boundary_width = _boundary_connector_width(
+            lod,
+            visual_width=width,
+            visual_length=length,
+        )
+        if boundary_width is not None:
+            connector_width = boundary_width
 
     # Classify straightness from the same terminal mouths used for connector
     # width whenever possible. Wider shoulders or asymmetric mid-span detail in
