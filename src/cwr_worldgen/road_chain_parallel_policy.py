@@ -395,7 +395,7 @@ def _execute_run_jobs(
                     local = 35 + round(completed_jobs / len(jobs) * 23)
                     progress_callback(
                         min(58, local),
-                        f"Planning stock road lines {completed_jobs:,}/{len(jobs):,} chains "
+                        f"Planning road lines {completed_jobs:,}/{len(jobs):,} chains "
                         f"with {workers} workers",
                     )
     except (OSError, RuntimeError, BrokenPipeError):
@@ -809,7 +809,7 @@ def _fit_stock_piece_road_objects_parallel(
             local = 63 + round(feature_index / max(1, len(planned_features)) * 33)
             progress_callback(
                 min(96, local),
-                f"Fitting stock road lines {feature_index:,}/{len(planned_features):,}; "
+                f"Fitting road lines {feature_index:,}/{len(planned_features):,}; "
                 f"{len(objects):,}/{required_objects:,} objects",
             )
         for (
@@ -915,7 +915,7 @@ def _fit_stock_piece_road_objects_parallel(
     if progress_callback is not None:
         progress_callback(
             100,
-            f"Stock road fitting complete: {len(objects):,} objects in {chain_count:,} chains",
+            f"Road fitting complete: {len(objects):,} objects in {chain_count:,} chains",
         )
     return _playability.RoadFitReport(
         objects=tuple(objects),
