@@ -398,6 +398,7 @@ def inspect_visual_model_dimensions(data: bytes) -> VisualModelDimensions:
         if float(point[2]) >= max(zs) - connector_band
     )
     connector_width = width
+    connector_centers: tuple[float, float] | None = None
     if len(lower_connector_x) >= 2 and len(upper_connector_x) >= 2:
         lower_width = max(lower_connector_x) - min(lower_connector_x)
         upper_width = max(upper_connector_x) - min(upper_connector_x)
@@ -406,27 +407,33 @@ def inspect_visual_model_dimensions(data: bytes) -> VisualModelDimensions:
         # occupy a meaningful fraction of the complete visual footprint.
         if candidate_width >= max(0.50, width * 0.15):
             connector_width = candidate_width
+            connector_centers = (
+                (min(lower_connector_x) + max(lower_connector_x)) * 0.5,
+                (min(upper_connector_x) + max(upper_connector_x)) * 0.5,
+            )
 
-    # A modular straight road is centred on local +Z at both ends. Curved road
-    # donors are commonly still centred around the object origin, so a plain
-    # bounding box looks deceptively valid. Compare the lateral centres of the
-    # terminal 20% bands to distinguish a straight ribbon from a bent one.
-    band = max(length * 0.20, 1.0e-4)
-    lower_x = tuple(
-        float(point[0]) for point in lod.points
-        if float(point[2]) <= min(zs) + band
-    )
-    upper_x = tuple(
-        float(point[0]) for point in lod.points
-        if float(point[2]) >= max(zs) - band
-    )
-    if lower_x and upper_x:
-        lower_center = (min(lower_x) + max(lower_x)) * 0.5
-        upper_center = (min(upper_x) + max(upper_x)) * 0.5
-        lateral_shift = abs(upper_center - lower_center)
+    # Classify straightness from the same terminal mouths used for connector
+    # width whenever possible. Wider shoulders or asymmetric mid-span detail in
+    # mod roads must not make a genuinely straight donor look curved.
+    if connector_centers is not None:
+        lateral_shift = abs(connector_centers[1] - connector_centers[0])
     else:
-        lateral_shift = 0.0
-    straight_tolerance = max(0.08, width * 0.025)
+        band = max(length * 0.20, 1.0e-4)
+        lower_x = tuple(
+            float(point[0]) for point in lod.points
+            if float(point[2]) <= min(zs) + band
+        )
+        upper_x = tuple(
+            float(point[0]) for point in lod.points
+            if float(point[2]) >= max(zs) - band
+        )
+        if lower_x and upper_x:
+            lower_center = (min(lower_x) + max(lower_x)) * 0.5
+            upper_center = (min(upper_x) + max(upper_x)) * 0.5
+            lateral_shift = abs(upper_center - lower_center)
+        else:
+            lateral_shift = 0.0
+    straight_tolerance = max(0.08, connector_width * 0.025)
 
     return VisualModelDimensions(
         source_format=source_format,
