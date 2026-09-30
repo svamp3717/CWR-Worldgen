@@ -888,12 +888,12 @@ def test_unified_stock_and_modded_roads_use_one_straight_donor() -> None:
     try:
         stock_pieces = playability.road_model_variants(
             stock,
-            25.0,
+            24.5,
             donor_only=True,
         )
         modded_pieces = playability.road_model_variants(
             modded,
-            25.0,
+            24.5,
             donor_only=True,
         )
     finally:
