@@ -1509,9 +1509,19 @@ def test_sebnam_curve_donor_resolves_to_straight_family(tmp_path: Path) -> None:
             spec,
             "gravel",
         ) == pytest.approx(3.5)
-        assert playability.gravel_filler_piece(spec, 6).model_path == (
-            r"sebnam_obj\sebtrailpath6.p3d"
+        filler = playability.gravel_filler_piece(spec, 6)
+        assert filler.model_path == infrastructure.custom_road_model_path(
+            "sebworld",
+            "gravel",
+            3.5,
+            spec.road_segment_length * 6.0 / 25.0,
         )
+        filler_signature = infrastructure.custom_road_model_signature(
+            filler.model_path
+        )
+        assert filler_signature is not None
+        assert filler_signature[0] == "gravel"
+        assert filler_signature[1] == pytest.approx(3.5)
     finally:
         playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
         playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
