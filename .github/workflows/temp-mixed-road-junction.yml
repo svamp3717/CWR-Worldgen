@@ -22,6 +22,11 @@ jobs:
           src/cwr_worldgen/road_chain_parallel_policy.py
           src/cwr_worldgen/paved_junction_policy.py
           src/cwr_worldgen/paved_junction_parallel_planning_policy.py
+      - name: Run angled road mouth regression
+        run: >-
+          python -m pytest -q -s
+          tests/test_road_mouth_regression.py
+          -k angled
       - name: Run mixed join regression
         run: >-
           python -m pytest -q -s
