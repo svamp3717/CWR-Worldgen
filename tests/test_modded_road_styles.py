@@ -1257,3 +1257,27 @@ def test_generated_mod_road_rejects_different_straight_and_curve_mouths() -> Non
             fallback._generated_width(pieces, spec, "paved")
     finally:
         playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
+
+
+def test_curve_path_cannot_bypass_straight_donor_validation(tmp_path: Path) -> None:
+    root = tmp_path / "mod"
+    texture = r"bas_o\_tobj\bas_road2.paa"
+    curve = r"bas_o\_road\bas_asf10 25.p3d"
+    _write_fake_mod_asset(root, curve, _mlod_curve_sample(5.2, 4.36, 0.38, texture))
+
+    spec = SimpleNamespace(
+        paved_road_model=curve,
+        paved_road_curve_model=curve,
+        gravel_road_model="",
+        gravel_road_curve_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        dirt_road_curve_model="",
+        road_segment_length=25.0,
+        asset_roots=(root,),
+        cache_dir=None,
+        cache_enabled=False,
+        cache_refresh=False,
+    )
+
+    dimensions = generator._modded_road_model_dimensions(spec, {})
+    assert playability._road_model_key(curve) not in dimensions
