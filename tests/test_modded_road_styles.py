@@ -565,6 +565,119 @@ def test_parallel_fitter_emits_custom_donor_junction_cap() -> None:
     assert cap.model_path.startswith(r"donorworld\i\road_j3_paved_w052_")
 
 
+def test_mixed_modded_paved_gravel_t_has_no_open_connector_gap() -> None:
+    bbox = (59.40, 16.82, 59.41, 16.83)
+    projection = BboxProjection.create(bbox, 1000.0)
+    centre = (500.0, 500.0)
+    paved = r"bas_o\_road\bas_asf25.p3d"
+    dataset = OsmDataset(
+        source_generator="mixed-modded-junction",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/paved-main",
+                {"highway": "residential", "surface": "asphalt"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in ((500.0, 250.0), centre, (500.0, 750.0))
+                ),
+            ),
+            OsmLineFeature(
+                "way/gravel-branch",
+                {"highway": "track", "surface": "gravel"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in (centre, (750.0, 500.0))
+                ),
+            ),
+        ),
+    )
+    spec = _Milestone9PlayabilitySpec(
+        name="mixedworld",
+        heightmap_path=Path("unused.png"),
+        bbox=bbox,
+        cells=40,
+        cell_size=25.0,
+        max_road_objects=10000,
+        strict_assets=False,
+        paved_road_model=paved,
+    )
+    paved_key = playability._road_model_key(paved)
+    dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(
+        {paved_key: (7.0, 25.0)}
+    )
+    availability_token = playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(
+        {paved_key: frozenset({paved_key})}
+    )
+    effective_token = playability._ROAD_MODEL_EFFECTIVE_DONORS.set(
+        {paved_key: paved}
+    )
+    try:
+        report = road_chain_parallel_policy._fit_stock_piece_road_objects_parallel(
+            dataset,
+            projection,
+            [0.0] * (spec.cells * spec.cells),
+            spec,
+        )
+    finally:
+        playability._ROAD_MODEL_EFFECTIVE_DONORS.reset(effective_token)
+        playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
+
+    assert report.junction_cap_objects == 1
+    cap = report.objects[0]
+    junction = infrastructure.custom_road_junction_signature(cap.model_path)
+    assert junction is not None
+    assert junction[0] == "paved"
+    assert junction[1] == pytest.approx(7.0)
+    assert len(junction[2]) == 3
+
+    yaw = math.radians(cap.heading_degrees)
+    cosine = math.cos(yaw)
+    sine = math.sin(yaw)
+    arm_extent = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+
+    connectors = []
+    for heading in junction[2]:
+        radians = math.radians(float(heading))
+        local_x = math.sin(radians) * arm_extent
+        local_z = math.cos(radians) * arm_extent
+        connectors.append((
+            float(cap.x) + local_x * cosine + local_z * sine,
+            float(cap.z) - local_x * sine + local_z * cosine,
+        ))
+
+    approach_endpoints = []
+    surfaces = set()
+    for obj in report.objects[report.junction_cap_objects:]:
+        signature = infrastructure.custom_road_model_signature(obj.model_path)
+        if signature is None:
+            continue
+        surfaces.add(signature[0])
+        length = float(signature[2])
+        radians = math.radians(float(obj.heading_degrees))
+        dx = math.sin(radians) * length * 0.5
+        dz = math.cos(radians) * length * 0.5
+        approach_endpoints.extend((
+            (float(obj.x) - dx, float(obj.z) - dz),
+            (float(obj.x) + dx, float(obj.z) + dz),
+        ))
+
+    assert {"paved", "gravel"} <= surfaces
+    connector_gaps = [
+        min(math.dist(connector, endpoint) for endpoint in approach_endpoints)
+        for connector in connectors
+    ]
+    assert max(connector_gaps) <= pytest.approx(
+        infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES + 0.08
+    )
+
+
 def test_custom_gravel_donor_junction_keeps_directional_arm_reach() -> None:
     arm_extent = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
     junction = road_quality_policy._Junction(
