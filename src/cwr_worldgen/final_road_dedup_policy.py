@@ -1062,12 +1062,14 @@ def _terminal_underlay_span(
 def _trim_dirt_under_paved(report, spec):
     """Keep dirt visible to the asphalt edge, then dive its final slab underneath.
 
-    Paved roads are authoritative. Straight dirt slabs are retiled into stock
-    25/12/6 pieces on each clear approach. A final ces6 continues underneath the
-    paved footprint, with its outer endpoint left on the original dirt grade and
-    its hidden endpoint pitched below the paved surface. Dirt curves and dirt
-    junction caps are still removed wholesale on conflict because there is no
-    safe stock sub-piece that preserves their geometry.
+    Paved roads are authoritative. Straight dirt slabs are retiled into the
+    active road-shape family on each clear approach. Unified mode keeps those
+    repairs as generated road_dirt ribbons; legacy mode retains stock ces25/12/6
+    pieces. A short terminal continues underneath the paved footprint, with its
+    outer endpoint left on the original dirt grade and its hidden endpoint pitched
+    below the paved surface. Dirt curves and dirt junction caps are still removed
+    wholesale on conflict because there is no safe sub-piece that preserves their
+    geometry.
     """
 
     if not report.objects:
