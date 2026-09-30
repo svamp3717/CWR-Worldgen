@@ -906,6 +906,18 @@ def test_unified_stock_and_modded_roads_use_one_straight_donor() -> None:
     assert [piece.length_metres for piece in modded_pieces] == pytest.approx([25.0])
 
 
+def test_unified_builtin_gravel_uses_single_25m_donor() -> None:
+    pieces = playability.road_model_variants(
+        r"unified\i\gravel25.p3d",
+        24.5,
+        donor_only=True,
+    )
+    assert [piece.model_path for piece in pieces] == [
+        r"unified\i\gravel25.p3d"
+    ]
+    assert [piece.length_metres for piece in pieces] == pytest.approx([25.0])
+
+
 def test_unified_variant_paths_ignore_stock_and_modded_siblings() -> None:
     assert playability.road_model_variant_paths(
         r"o\road\sil25.p3d",
