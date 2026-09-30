@@ -1087,7 +1087,7 @@ def test_fast_mod_road_measurement_reads_legacy_compressed_p3d(
         payload,
     )
 
-    scan = locate_assets_fast(
+    scan = generator.locate_assets_fast(
         (pbo,),
         (donor,),
         use_cache=False,
