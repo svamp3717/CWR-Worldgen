@@ -883,6 +883,24 @@ def _apply_plans(report, plans, elevations, spec):
     if not plans or report.junction_cap_objects <= 0:
         return report
 
+    # Donor-style generated hubs are already emitted by the base road fitter
+    # with exact arm headings and generated ribbon approaches. Re-running the
+    # historical stock approach solver here would replace those approaches with
+    # sil/asf/kos P3Ds and reintroduce the seam/grass-wedge geometry this system
+    # is meant to avoid. Only fall through when the expected generated cap is
+    # actually missing from the base report.
+    pending_plans = {}
+    for key, plan in plans.items():
+        if (
+            _pi.is_generated_custom_road_junction_model(plan.model_path)
+            and _cap_index(report, plan, set()) is not None
+        ):
+            continue
+        pending_plans[key] = plan
+    plans = pending_plans
+    if not plans:
+        return report
+
     applications = []
     used_caps = set()
     for key in sorted(plans):
