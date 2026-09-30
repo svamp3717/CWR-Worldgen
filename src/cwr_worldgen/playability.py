@@ -21,6 +21,7 @@ from .procedural_infrastructure import (
     GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES,
     custom_road_junction_model_path,
     custom_road_model_path,
+    custom_road_model_signature,
     gravel_curve_model_path,
     gravel_junction_model_path,
     gravel_road_model_path,
@@ -833,33 +834,38 @@ class _RoadPiece:
 
 
 def gravel_filler_piece(spec: object, nominal_length: int) -> _RoadPiece:
-    """Return a short gravel repair piece without changing a configured mod style."""
+    """Return a short gravel repair piece using the active road-shape system."""
 
     configured = str(getattr(spec, "gravel_road_model", "") or "").strip()
     segment_length = float(getattr(spec, "road_segment_length", 25.0))
+    if bool(getattr(spec, "custom_road_shapes", False)):
+        width = (
+            road_model_width_metres(configured)
+            if configured
+            else GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
+        )
+        width = (
+            float(width)
+            if width is not None
+            else GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
+        )
+        length = segment_length * float(nominal_length) / 25.0
+        return _RoadPiece(
+            custom_road_model_path(
+                str(getattr(spec, "name", "world")),
+                "gravel",
+                width,
+                length,
+                0.0,
+            ),
+            length,
+            int(nominal_length),
+        )
+
     if configured:
         for piece in road_model_variants(configured, segment_length):
             if int(piece.nominal_length) == int(nominal_length):
                 return piece
-        if bool(getattr(spec, "custom_road_shapes", False)):
-            measured = road_model_dimensions(configured)
-            width = (
-                float(measured[0])
-                if measured is not None
-                else GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
-            )
-            length = segment_length * float(nominal_length) / 25.0
-            return _RoadPiece(
-                custom_road_model_path(
-                    str(getattr(spec, "name", "world")),
-                    "gravel",
-                    width,
-                    length,
-                    0.0,
-                ),
-                length,
-                int(nominal_length),
-            )
 
     return _RoadPiece(
         gravel_road_model_path(str(getattr(spec, "name", "world")), nominal_length),
@@ -909,6 +915,15 @@ def road_model_variants(model_path: str, configured_long_length: float) -> tuple
     if configured_long_length <= 0.0:
         raise ValueError("configured road length must be positive")
     model_path = effective_road_model(model_path)
+    custom = custom_road_model_signature(model_path)
+    if custom is not None:
+        return (
+            _RoadPiece(
+                model_path,
+                float(custom[2]),
+                max(1, int(round(float(custom[2])))),
+            ),
+        )
     gravel = is_generated_gravel_road_model(model_path)
     nominals = (25, 12, 6, 3) if gravel else (25, 12, 6)
     pieces: list[_RoadPiece] = []
@@ -953,6 +968,38 @@ def road_model_variant_paths(model_path: str, configured_long_length: float) -> 
     """Public helper used by strict-asset classification and manifests."""
 
     return tuple(piece.model_path for piece in road_model_variants(model_path, configured_long_length))
+
+
+def road_model_width_metres(model_path: str) -> float | None:
+    """Return a measured or deterministic visible width for one road model."""
+
+    measured = road_model_dimensions(model_path)
+    if measured is not None:
+        return float(measured[0])
+
+    custom = custom_road_model_signature(model_path)
+    if custom is not None:
+        return float(custom[1])
+
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+    generated_paved = re.fullmatch(
+        r"paved_w(?P<width>\d{3})_l\d{4}(?:_[lr]\d{2})?\.p3d",
+        filename,
+    )
+    if generated_paved is not None:
+        return int(generated_paved.group("width")) / 10.0
+    if re.fullmatch(
+        r"gravel(?:25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d",
+        filename,
+    ):
+        return GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
+    if filename.startswith(("sil", "kos")):
+        return 9.10
+    if filename.startswith("asf"):
+        return 7.00
+    if filename.startswith("ces"):
+        return 3.50
+    return None
 
 
 def road_model_surface(spec: object, model_path: str) -> str | None:
@@ -1575,24 +1622,30 @@ def _generated_custom_road_junction_cap_plan(
     if surface not in {"paved", "gravel", "dirt"}:
         return None
 
+    if not bool(getattr(spec, "custom_road_shapes", False)):
+        return None
+
     configured = str(
         getattr(spec, f"{surface}_road_model", "") or ""
     ).strip()
-    if not configured:
-        return None
-    configured_key = _road_model_key(configured)
-    # Stock CWA/OFP families already have their own junction rules. Donor hubs
-    # are for external/custom road families only.
-    if configured_key.startswith("o\\road\\"):
-        return None
+    configured_width = (
+        road_model_width_metres(configured)
+        if configured
+        else (
+            GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
+            if surface == "gravel"
+            else None
+        )
+    )
 
     widths = []
-    configured_dimensions = road_model_dimensions(configured)
     for value in values:
-        measured = road_model_dimensions(value[2]) or configured_dimensions
-        if measured is None:
+        width = road_model_width_metres(value[2])
+        if width is None:
+            width = configured_width
+        if width is None:
             return None
-        widths.append(float(measured[0]))
+        widths.append(float(width))
     if not widths:
         return None
     minimum_width = min(widths)
@@ -2160,7 +2213,11 @@ def _curved_gravel_model_for_run(
     start: tuple[float, float],
     end: tuple[float, float],
 ) -> str:
-    if not is_generated_gravel_road_model(model_path) or len(run) < 3:
+    if (
+        custom_road_model_signature(model_path) is not None
+        or not is_generated_gravel_road_model(model_path)
+        or len(run) < 3
+    ):
         return model_path
     start_heading = _nearest_polyline_heading(run, start)
     end_heading = _nearest_polyline_heading(run, end)
