@@ -544,7 +544,9 @@ def _fit_stock_piece_road_objects_parallel(
         variants = variant_cache.get(model_path)
         if variants is None:
             variants = _playability.road_model_variants(
-                model_path, spec.road_segment_length
+                model_path,
+                spec.road_segment_length,
+                donor_only=bool(getattr(spec, "custom_road_shapes", False)),
             )
             if _playability.is_generated_gravel_road_model(model_path):
                 variants = tuple(
