@@ -1583,7 +1583,7 @@ def _generated_custom_road_junction_cap_plan(
     configured_key = _road_model_key(configured)
     # Stock CWA/OFP families already have their own junction rules. Donor hubs
     # are for external/custom road families only.
-    if configured_key.startswith(r"o\road\"):
+    if configured_key.startswith("o\\road\\"):
         return None
 
     widths = []
