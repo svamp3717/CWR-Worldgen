@@ -1048,39 +1048,20 @@ def test_stock_paved_junction_policy_uses_unified_generated_hub() -> None:
     assert signature[1] == pytest.approx(9.10)
 
 
-def test_paved_postpass_preserves_existing_unified_hub() -> None:
+def test_generated_paved_hub_keeps_donor_approach_style() -> None:
     model = infrastructure.custom_road_junction_model_path(
         "unified",
         "paved",
         9.10,
         (0, 90, 180),
     )
-    cap = playability.WorldObject(
-        1,
-        model,
-        100.0,
-        0.06,
-        100.0,
-        0.0,
-    )
-    report = SimpleNamespace(
-        objects=(cap,),
-        junction_cap_objects=1,
-    )
-    plan = SimpleNamespace(
-        model_path=model,
-        point=(100.0, 100.0),
-    )
+    plan = SimpleNamespace(model_path=model)
+    spec = SimpleNamespace(custom_road_shapes=True)
 
-    applied = paved_junction_policy._apply_plans(
-        report,
-        {(1000, 1000): plan},
-        (),
-        SimpleNamespace(),
-    )
-
-    assert applied is report
-    assert applied.objects == (cap,)
+    assert paved_junction_policy._generated_approach_style(
+        plan,
+        spec,
+    ) == ("paved", pytest.approx(9.10))
 
 
 def test_unified_gravel_gap_fillers_use_custom_ribbon_family() -> None:
