@@ -23,11 +23,14 @@ _INSTALLED = False
 
 
 def _is_gravel_junction(junction) -> bool:
-    return math.isclose(
-        float(junction.half_width),
-        float(GENERATED_GRAVEL_HALF_WIDTH_METRES),
-        rel_tol=0.0,
-        abs_tol=1.0e-7,
+    return (
+        not tuple(getattr(junction, "directional_exit_distances", ()) or ())
+        and math.isclose(
+            float(junction.half_width),
+            float(GENERATED_GRAVEL_HALF_WIDTH_METRES),
+            rel_tol=0.0,
+            abs_tol=1.0e-7,
+        )
     )
 
 
