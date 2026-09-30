@@ -272,7 +272,12 @@ def _road_has_outward_neighbour(obj, bridge_point, road_objects) -> bool:
     return False
 
 
-def _approach_candidate(bridge_point, bridge_heading, road_objects):
+def _approach_candidate(
+    bridge_point,
+    bridge_heading,
+    road_objects,
+    outward=None,
+):
     candidates = []
     for obj in road_objects:
         custom = _playability.custom_road_model_signature(obj.model_path)
@@ -299,6 +304,23 @@ def _approach_candidate(bridge_point, bridge_heading, road_objects):
                 (float(bridge_point[0]), float(bridge_point[1])),
             ),
         )
+        if outward is not None:
+            far = max(
+                endpoints,
+                key=lambda point: math.dist(
+                    (point[0], point[2]),
+                    (float(bridge_point[0]), float(bridge_point[1])),
+                ),
+            )
+            outward_projection = (
+                (float(far[0]) - float(bridge_point[0])) * float(outward[0])
+                + (float(far[2]) - float(bridge_point[1])) * float(outward[1])
+            )
+            # Terminal mask ribbons extend inward from the bridge endpoint. They
+            # are deliberately present under the bridge deck and must not satisfy
+            # the search for the surviving ordinary-road approach outside it.
+            if outward_projection <= _APPROACH_FILL_MIN_GAP_METRES:
+                continue
         gap = math.dist(
             (near[0], near[2]),
             (float(bridge_point[0]), float(bridge_point[1])),
@@ -463,6 +485,7 @@ def _add_bridge_approach_fillers(report, spans, elevations, spec):
                 bridge_point,
                 bridge_heading,
                 road_objects,
+                outward,
             )
             if selected is None:
                 continue
