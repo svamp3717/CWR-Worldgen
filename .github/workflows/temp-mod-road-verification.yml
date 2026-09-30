@@ -1,4 +1,5 @@
 name: Temporary mod road donor verification
+# Temporary branch-only verification; removed after the run.
 
 on:
   push:
