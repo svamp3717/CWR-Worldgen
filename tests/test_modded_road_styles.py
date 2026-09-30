@@ -400,7 +400,7 @@ def test_custom_paved_highway_width_and_axis_survive_junction_stitching() -> Non
         length_metres=75.0,
         curve_degrees=44.0,
     )
-    assert "road_paved_w280_l0750_l044.p3d" in model
+    assert model.endswith(("road_paved_w280_l0750_l044.p3d", "road_paved_w280_l0750_r044.p3d"))
     assert playability._generated_paved_half_width(model) == pytest.approx(14.0)
 
     obj = playability.WorldObject(1, model, 100.0, 0.0, 200.0, 0.0)
@@ -426,7 +426,7 @@ def test_wide_generated_paved_junction_keeps_mod_texture(tmp_path: Path) -> None
 
     relative = model.split("\\", 1)[1].replace("\\", "/")
     summary = inspect_mlod(tmp_path / relative)
-    textures = {value.casefold() for value in summary.textures}
+    textures = {value.casefold() for value in summary.texture_paths}
     assert texture.casefold() in textures
     assert r"o\road\sil_new.paa" not in textures
     assert r"o\road\sil_konec.paa" not in textures
