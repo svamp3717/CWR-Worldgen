@@ -42,6 +42,9 @@ class _RunJob:
     end_cover: float
     cap_surface_mismatch: bool
     world_size: float
+    generated_world_name: str = ""
+    generated_surface: str | None = None
+    generated_width_metres: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +311,9 @@ def _plan_run(job: _RunJob) -> _RunPlan:
                 job.variants,
                 start_trim=job.start_trim,
                 end_trim=job.end_trim,
+                generated_world_name=job.generated_world_name,
+                generated_surface=job.generated_surface,
+                generated_width_metres=job.generated_width_metres,
             )
             if fitted_pieces:
                 covered_by_hubs = False
@@ -703,6 +709,21 @@ def _fit_stock_piece_road_objects_parallel(
                 end_cover=end_cover,
                 cap_surface_mismatch=cap_surface_mismatch,
                 world_size=float(spec.world_size),
+                generated_world_name=(
+                    str(spec.name)
+                    if bool(getattr(spec, "custom_road_shapes", False))
+                    else ""
+                ),
+                generated_surface=(
+                    _playability.road_model_surface(spec, model)
+                    if bool(getattr(spec, "custom_road_shapes", False))
+                    else None
+                ),
+                generated_width_metres=(
+                    _playability.road_model_width_metres(model)
+                    if bool(getattr(spec, "custom_road_shapes", False))
+                    else None
+                ),
             ))
             feature_job_counts[feature_index] += 1
             order += 1
