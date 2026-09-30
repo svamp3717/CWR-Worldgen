@@ -335,10 +335,10 @@ def apply_paved_junctions_parallel(report, plans, elevations, spec):
     """Pre-plan junction choices in parallel, then delegate exact application."""
     if not plans or report.junction_cap_objects <= 0:
         return _BASE_APPLY(report, plans, elevations, spec)
-    plans = _paved._pending_approach_plans(report, plans)
-    if not plans:
-        return report
 
+    # Generated donor caps still require the same approach topology solver as
+    # the historical modded-road path. Parallel planning only accelerates choice
+    # search; it must not filter those plans out.
     callback = _audit_progress._PROGRESS_CALLBACK.get()
     reporter = _perf._Reporter(callback)
     state = _BASE_BUILD_STATE(report, spec, reporter)
