@@ -132,6 +132,7 @@ from .playability import (
     TerrainGradeReport,
     TransitionReport,
     _ROAD_MODEL_DIMENSIONS,
+    _ROAD_MODEL_MEASUREMENT_ERRORS,
     _ROAD_MODEL_EFFECTIVE_DONORS,
     _ROAD_MODEL_VARIANTS_AVAILABLE,
     _road_model_key,
@@ -1910,8 +1911,9 @@ def _modded_road_variant_availability(
 def _modded_road_model_dimensions(
     spec: PlayabilitySpec,
     effective_donors: dict[str, str] | None = None,
+    measurement_errors: dict[str, str] | None = None,
 ) -> dict[str, tuple[float, float]]:
-    """Measure configured mod straight donors and every real length sibling."""
+    """Measure configured mod road geometry and retain concrete failure reasons."""
 
     stock_defaults = {
         _road_model_key(r"o\road\sil25.p3d"),
@@ -1965,15 +1967,33 @@ def _modded_road_model_dimensions(
     )
     by_path = {record.path: record for record in scan.records}
     result: dict[str, tuple[float, float]] = {}
+    errors = measurement_errors if measurement_errors is not None else {}
+    roots_text = ", ".join(str(Path(value)) for value in spec.asset_roots)
 
     for candidate in requested:
         key = _road_model_key(candidate)
         record = by_path.get(key)
         if record is None:
+            errors[key] = (
+                "not found while searching the configured Asset roots"
+                + (f": {roots_text}" if roots_text else "")
+            )
             continue
         try:
-            info = inspect_visual_model_dimensions(read_asset_record_bytes(record))
-        except (OSError, ValueError, ProxyCloneError):
+            data = read_asset_record_bytes(record)
+        except (OSError, ValueError, FileNotFoundError) as exc:
+            errors[key] = (
+                f"found as {record.source!r}, but its bytes could not be read: {exc}"
+            )
+            continue
+        try:
+            info = inspect_visual_model_dimensions(data)
+        except (OSError, ValueError, ProxyCloneError) as exc:
+            signature = repr(data[:4])
+            errors[key] = (
+                f"found as {record.source!r}, but its P3D geometry could not be "
+                f"inspected: {exc} (signature {signature})"
+            )
             continue
         width = float(
             info.connector_width_metres
@@ -1982,28 +2002,41 @@ def _modded_road_model_dimensions(
         )
         length = float(info.length_metres)
         curve_donor = key in curve_keys and key not in straight_keys
-        if (
+        invalid_numeric = (
             not math.isfinite(width)
             or not math.isfinite(length)
             or not 0.75 <= width <= 30.0
             or not 0.25 <= length <= 200.0
-            or (
-                not curve_donor
-                and (
-                    not info.is_straight_road_candidate
-                    or length < width * 1.15
-                )
+        )
+        invalid_straight = (
+            not curve_donor
+            and (
+                not info.is_straight_road_candidate
+                or length < width * 1.15
             )
-        ):
+        )
+        if invalid_numeric or invalid_straight:
+            kind = "curve" if curve_donor else "straight"
+            errors[key] = (
+                f"found as {record.source!r}, but its {kind} geometry was rejected "
+                f"(connector width {width:.3f} m, length {length:.3f} m, "
+                f"lateral end shift {info.lateral_center_shift_metres:.3f} m, "
+                f"visual width {info.width_metres:.3f} m)"
+            )
             continue
         result[key] = (width, length)
+        errors.pop(key, None)
 
     for configured in configured_donors:
         configured_key = _road_model_key(configured)
         effective = effective_donors.get(configured_key, configured)
-        measured = result.get(_road_model_key(effective))
+        effective_key = _road_model_key(effective)
+        measured = result.get(effective_key)
         if measured is not None:
             result[configured_key] = measured
+            errors.pop(configured_key, None)
+        elif effective_key in errors:
+            errors[configured_key] = errors[effective_key]
     return result
 
 
@@ -3767,8 +3800,11 @@ def build_milestone4(
         spec, effective_road_donors
     )
     report_progress(41, "Measuring mod road sibling geometry")
+    road_model_measurement_errors: dict[str, str] = {}
     road_model_dimensions = _modded_road_model_dimensions(
-        spec, effective_road_donors
+        spec,
+        effective_road_donors,
+        measurement_errors=road_model_measurement_errors,
     )
     report_progress(41, "Configured mod road families ready")
     report_progress(42, "Fitting road geometry to terrain")
@@ -3777,6 +3813,9 @@ def build_milestone4(
     )
     road_dimensions_token = _ROAD_MODEL_DIMENSIONS.set(
         road_model_dimensions or None
+    )
+    road_measurement_errors_token = _ROAD_MODEL_MEASUREMENT_ERRORS.set(
+        road_model_measurement_errors or None
     )
     road_effective_token = _ROAD_MODEL_EFFECTIVE_DONORS.set(
         effective_road_donors or None
@@ -3788,6 +3827,7 @@ def build_milestone4(
         )
     finally:
         _ROAD_MODEL_EFFECTIVE_DONORS.reset(road_effective_token)
+        _ROAD_MODEL_MEASUREMENT_ERRORS.reset(road_measurement_errors_token)
         _ROAD_MODEL_DIMENSIONS.reset(road_dimensions_token)
         _ROAD_MODEL_VARIANTS_AVAILABLE.reset(road_variant_token)
     road_fingerprint = _road_object_fingerprint(road_fit.objects)
@@ -4517,6 +4557,9 @@ def build_milestone4(
         repeat_road_dimensions_token = _ROAD_MODEL_DIMENSIONS.set(
             road_model_dimensions or None
         )
+        repeat_road_measurement_errors_token = _ROAD_MODEL_MEASUREMENT_ERRORS.set(
+            road_model_measurement_errors or None
+        )
         repeat_road_effective_token = _ROAD_MODEL_EFFECTIVE_DONORS.set(
             effective_road_donors or None
         )
@@ -4526,6 +4569,7 @@ def build_milestone4(
             )
         finally:
             _ROAD_MODEL_EFFECTIVE_DONORS.reset(repeat_road_effective_token)
+            _ROAD_MODEL_MEASUREMENT_ERRORS.reset(repeat_road_measurement_errors_token)
             _ROAD_MODEL_DIMENSIONS.reset(repeat_road_dimensions_token)
             _ROAD_MODEL_VARIANTS_AVAILABLE.reset(repeat_road_variant_token)
         repeat_nonroads = generate_world_objects(
