@@ -687,7 +687,18 @@ def test_mixed_modded_paved_gravel_t_has_no_open_connector_gap() -> None:
     ]
     assert max(connector_gaps) <= (
         infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES + 0.08
-    )
+    ), {
+        "connector_gaps": connector_gaps,
+        "objects": [
+            (
+                obj.model_path,
+                round(float(obj.x), 3),
+                round(float(obj.z), 3),
+                round(float(obj.heading_degrees), 3),
+            )
+            for obj in report.objects
+        ],
+    }
 
 
 def test_custom_gravel_donor_junction_keeps_directional_arm_reach() -> None:
