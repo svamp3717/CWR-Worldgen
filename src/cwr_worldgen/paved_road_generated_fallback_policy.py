@@ -136,6 +136,13 @@ def _generated_width(
         if donor_family in _DIRT_HALF_WIDTHS:
             return _DIRT_HALF_WIDTHS[donor_family] * 2.0
         if donor_model and not _p.is_generated_gravel_road_model(donor_model):
+            measurement_error = _p.road_model_measurement_error(donor_model)
+            if measurement_error:
+                raise ValueError(
+                    f"could not measure the {surface} road donor {donor_model!r}: "
+                    f"{measurement_error}. Generated road shapes cannot safely "
+                    "match its width."
+                )
             raise ValueError(
                 f"could not measure the {surface} road donor {donor_model!r}; "
                 "generated road shapes cannot safely match its width. Add the "
