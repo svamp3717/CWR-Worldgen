@@ -697,6 +697,149 @@ def test_mixed_modded_paved_gravel_t_has_no_open_connector_gap() -> None:
     ), connector_gaps
 
 
+@pytest.mark.parametrize(
+    ("paved_model", "paved_width"),
+    (
+        (r"bas_o\_road\bas_asf25.p3d", 7.0),
+        (r"o\road\sil25.p3d", 9.1),
+    ),
+)
+def test_full_pipeline_keeps_mixed_paved_gravel_t_connected(
+    paved_model: str,
+    paved_width: float,
+) -> None:
+    bbox = (59.40, 16.82, 59.41, 16.83)
+    projection = BboxProjection.create(bbox, 1000.0)
+    centre = (500.0, 500.0)
+    dataset = OsmDataset(
+        source_generator="mixed-full-pipeline-junction",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/paved-main",
+                {"highway": "residential", "surface": "asphalt"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in ((500.0, 250.0), centre, (500.0, 750.0))
+                ),
+            ),
+            OsmLineFeature(
+                "way/gravel-branch",
+                {"highway": "track", "surface": "gravel"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in (centre, (750.0, 500.0))
+                ),
+            ),
+        ),
+    )
+    spec = _Milestone9PlayabilitySpec(
+        name="mixedfull",
+        heightmap_path=Path("unused.png"),
+        bbox=bbox,
+        cells=40,
+        cell_size=25.0,
+        max_road_objects=10000,
+        strict_assets=False,
+        paved_road_model=paved_model,
+    )
+    key = playability._road_model_key(paved_model)
+    dimensions = (
+        {key: (paved_width, 25.0)}
+        if not key.startswith(r"o\road\")
+        else {}
+    )
+    dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(dimensions)
+    availability_token = playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(
+        {key: frozenset({key})}
+    )
+    effective_token = playability._ROAD_MODEL_EFFECTIVE_DONORS.set(
+        {key: paved_model}
+    )
+    try:
+        report = playability.fit_road_objects(
+            dataset,
+            projection,
+            [0.0] * (spec.cells * spec.cells),
+            spec,
+        )
+    finally:
+        playability._ROAD_MODEL_EFFECTIVE_DONORS.reset(effective_token)
+        playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
+
+    caps = [
+        obj
+        for obj in report.objects
+        if infrastructure.custom_road_junction_signature(obj.model_path)
+        is not None
+    ]
+    assert len(caps) == 1
+    cap = caps[0]
+    junction = infrastructure.custom_road_junction_signature(cap.model_path)
+    assert junction is not None
+    assert junction[0] == "paved"
+    assert junction[1] == pytest.approx(max(paved_width, 4.6))
+    assert len(junction[2]) == 3
+
+    road_segments = []
+    surfaces = set()
+    for obj in report.objects:
+        signature = infrastructure.custom_road_model_signature(obj.model_path)
+        if signature is None:
+            continue
+        surfaces.add(signature[0])
+        length = float(signature[2])
+        radians = math.radians(float(obj.heading_degrees))
+        dx = math.sin(radians) * length * 0.5
+        dz = math.cos(radians) * length * 0.5
+        road_segments.append((
+            (float(obj.x) - dx, float(obj.z) - dz),
+            (float(obj.x) + dx, float(obj.z) + dz),
+            signature[0],
+        ))
+
+    assert {"paved", "gravel"} <= surfaces
+    if not paved_model.casefold().startswith(r"o\road\"):
+        assert all(
+            obj.model_path.casefold() != paved_model.casefold()
+            for obj in report.objects
+        )
+
+    yaw = math.radians(float(cap.heading_degrees))
+    cosine = math.cos(yaw)
+    sine = math.sin(yaw)
+    extent = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+    connector_gaps = []
+    for heading in junction[2]:
+        radians = math.radians(float(heading))
+        local_x = math.sin(radians) * extent
+        local_z = math.cos(radians) * extent
+        connector = (
+            float(cap.x) + local_x * cosine + local_z * sine,
+            float(cap.z) - local_x * sine + local_z * cosine,
+        )
+        connector_gaps.append(min(
+            playability._point_segment_distance(
+                connector,
+                segment_start,
+                segment_end,
+            )
+            for segment_start, segment_end, _surface in road_segments
+        ))
+
+    assert max(connector_gaps) <= (
+        infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+        + infrastructure.GENERATED_PAVED_TURN_VISUAL_OVERLAP_METRES
+        + 0.08
+    ), connector_gaps
+
+
 def test_custom_gravel_donor_junction_keeps_directional_arm_reach() -> None:
     arm_extent = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
     junction = road_quality_policy._Junction(
