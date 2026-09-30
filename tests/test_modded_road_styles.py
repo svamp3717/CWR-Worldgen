@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import struct
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,13 +14,20 @@ from cwr_worldgen import assets as asset_module
 from cwr_worldgen import cli
 from cwr_worldgen import generator
 from cwr_worldgen import paved_junction_policy
+from cwr_worldgen import paved_junction_fallback_policy as junction_fallback
 from cwr_worldgen import paved_road_generated_fallback_policy as fallback
 from cwr_worldgen import playability
 from cwr_worldgen import procedural_infrastructure as infrastructure
 from cwr_worldgen.assets import model_texture_dependencies, scan_assets
 from cwr_worldgen.osm import road_model_for_tags
 from cwr_worldgen.pbo import PboEntry, write_pbo
-from cwr_worldgen.procedural_buildings import _Face, _Lod, _MLOD_HEADER, _write_lod
+from cwr_worldgen.procedural_buildings import (
+    _Face,
+    _Lod,
+    _MLOD_HEADER,
+    _write_lod,
+    inspect_mlod,
+)
 from cwr_worldgen.gui import (
     WorldgenGui,
     build_milestone9_command,
@@ -253,6 +261,72 @@ def _mlod_skewed_road(
     return stream.getvalue()
 
 
+def _mlod_divided_curved_highway(
+    texture: str,
+) -> bytes:
+    """Synthetic AGS-style divided highway with a rotated far connector mouth."""
+
+    start_center = (0.0, -20.0)
+    end_center = (6.0, 12.0)
+    end_cross = (0.8191520443, -0.5735764364)
+
+    def point(
+        center: tuple[float, float],
+        cross: tuple[float, float],
+        offset: float,
+    ) -> tuple[float, float, float]:
+        return (
+            center[0] + cross[0] * offset,
+            0.025,
+            center[1] + cross[1] * offset,
+        )
+
+    # Two 12 m carriageways separated by a 4 m median: total mouth width 28 m.
+    points = (
+        point(start_center, (1.0, 0.0), -14.0),
+        point(start_center, (1.0, 0.0), -2.0),
+        point(end_center, end_cross, -2.0),
+        point(end_center, end_cross, -14.0),
+        point(start_center, (1.0, 0.0), 2.0),
+        point(start_center, (1.0, 0.0), 14.0),
+        point(end_center, end_cross, 14.0),
+        point(end_center, end_cross, 2.0),
+    )
+    lod = _Lod(
+        points,
+        ((0.0, -1.0, 0.0),),
+        (
+            _Face(
+                texture,
+                (
+                    (0, 0, 0.0, 0.0),
+                    (1, 0, 1.0, 0.0),
+                    (2, 0, 1.0, 1.0),
+                    (3, 0, 0.0, 1.0),
+                ),
+                0,
+            ),
+            _Face(
+                texture,
+                (
+                    (4, 0, 0.0, 0.0),
+                    (5, 0, 1.0, 0.0),
+                    (6, 0, 1.0, 1.0),
+                    (7, 0, 0.0, 1.0),
+                ),
+                0,
+            ),
+        ),
+        1.0,
+        properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
+        point_flags=(0x13F,) * len(points),
+    )
+    stream = io.BytesIO()
+    stream.write(_MLOD_HEADER.pack(b"MLOD", 1, 1, 0, 1))
+    _write_lod(stream, lod)
+    return stream.getvalue()
+
+
 def test_modded_road_texture_is_discovered_from_donor_p3d(tmp_path: Path) -> None:
     root = tmp_path / "mod"
     _write_fake_mod_asset(
@@ -281,6 +355,81 @@ def test_modded_road_texture_is_discovered_from_donor_p3d(tmp_path: Path) -> Non
         r"myroads\asphalt25.p3d",
         dependencies,
     ) == r"myroads\textures\asphalt_main.paa"
+
+
+def test_divided_curved_highway_uses_rotated_connector_mouth_width(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "mod"
+    texture = r"ags_roads\auto_1.paa"
+    straight = r"ags_roads\hway75.p3d"
+    curve = r"ags_roads\hway50c2.p3d"
+    _write_fake_mod_asset(root, straight, _mlod_road(28.0, 75.0, texture))
+    _write_fake_mod_asset(root, curve, _mlod_divided_curved_highway(texture))
+    _write_fake_mod_asset(root, texture, b"synthetic-paa")
+
+    curve_info = inspect_visual_model_dimensions(
+        (root / curve.replace("\\", "/")).read_bytes()
+    )
+    assert curve_info.width_metres > 30.0
+    assert curve_info.connector_width_metres == pytest.approx(28.0, abs=0.02)
+
+    spec = SimpleNamespace(
+        paved_road_model=straight,
+        paved_road_curve_model=curve,
+        gravel_road_model="",
+        gravel_road_curve_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        dirt_road_curve_model="",
+        road_segment_length=75.0,
+        asset_roots=(root,),
+        cache_dir=None,
+        cache_enabled=False,
+        cache_refresh=False,
+    )
+    dimensions = generator._modded_road_model_dimensions(spec, {})
+    assert dimensions[playability._road_model_key(straight)][0] == pytest.approx(28.0)
+    assert dimensions[playability._road_model_key(curve)][0] == pytest.approx(28.0)
+
+
+def test_custom_paved_highway_width_and_axis_survive_junction_stitching() -> None:
+    model = infrastructure.custom_road_model_path(
+        "agsworld",
+        "paved",
+        width_metres=28.0,
+        length_metres=75.0,
+        curve_degrees=44.0,
+    )
+    assert "road_paved_w280_l0750_l044.p3d" in model
+    assert playability._generated_paved_half_width(model) == pytest.approx(14.0)
+
+    obj = playability.WorldObject(1, model, 100.0, 0.0, 200.0, 0.0)
+    axis = junction_fallback._generated_paved_axis(obj, SimpleNamespace())
+    assert axis is not None
+    assert math.dist(*axis) == pytest.approx(75.0)
+
+
+def test_wide_generated_paved_junction_keeps_mod_texture(tmp_path: Path) -> None:
+    texture = r"ags_roads\auto_1.paa"
+    model = infrastructure.paved_junction_signature_model_path(
+        "agsworld",
+        28.0,
+        (0, 90, 180),
+    )
+    library = infrastructure.ProceduralInfrastructureLibrary(
+        "agsworld",
+        paved_texture_path=texture,
+        cache_enabled=False,
+    )
+    library.register_model(model)
+    library.write_assets(tmp_path, tmp_path / "infrastructure.json")
+
+    relative = model.split("\\", 1)[1].replace("\\", "/")
+    summary = inspect_mlod(tmp_path / relative)
+    textures = {value.casefold() for value in summary.textures}
+    assert texture.casefold() in textures
+    assert r"o\road\sil_new.paa" not in textures
+    assert r"o\road\sil_konec.paa" not in textures
 
 
 def test_modded_family_reuses_only_existing_sibling_models(tmp_path: Path) -> None:
