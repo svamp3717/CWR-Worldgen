@@ -906,6 +906,38 @@ def test_unified_stock_and_modded_roads_use_one_straight_donor() -> None:
     assert [piece.length_metres for piece in modded_pieces] == pytest.approx([25.0])
 
 
+def test_unified_short_run_fallback_generates_exact_ribbon() -> None:
+    donor = playability._RoadPiece(
+        r"unified\i\gravel25.p3d",
+        25.0,
+        25,
+    )
+    measure = playability._PolylineMeasure.create(
+        ((0.0, 0.0), (6.0, 0.0))
+    )
+
+    fitted = playability._short_run_fallback_piece(
+        measure,
+        (donor,),
+        start_trim=0.0,
+        end_trim=0.0,
+        generated_world_name="unified",
+        generated_surface="gravel",
+        generated_width_metres=4.6,
+    )
+
+    assert len(fitted) == 1
+    piece, start, end = fitted[0]
+    signature = infrastructure.custom_road_model_signature(piece.model_path)
+    assert signature is not None
+    assert signature[0] == "gravel"
+    assert signature[1] == pytest.approx(4.6)
+    assert signature[2] == pytest.approx(6.0)
+    assert piece.model_path != donor.model_path
+    assert start == pytest.approx((0.0, 0.0))
+    assert end == pytest.approx((6.0, 0.0))
+
+
 def test_unified_builtin_gravel_uses_single_25m_donor() -> None:
     pieces = playability.road_model_variants(
         r"unified\i\gravel25.p3d",
