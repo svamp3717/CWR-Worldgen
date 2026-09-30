@@ -1213,7 +1213,10 @@ def test_road_donor_diagnostics_records_measured_straight_and_curve_style() -> N
     diagnostics = generator._road_donor_diagnostics(
         spec,
         {playability._road_model_key(straight): straight},
-        {playability._road_model_key(straight): (5.2, 25.0)},
+        {
+            playability._road_model_key(straight): (5.2, 25.0),
+            playability._road_model_key(curve): (5.2, 4.36),
+        },
     )
 
     gravel = diagnostics["gravel"]
@@ -1224,6 +1227,10 @@ def test_road_donor_diagnostics_records_measured_straight_and_curve_style() -> N
     assert gravel["measured_straight_width_metres"] == pytest.approx(5.2)
     assert gravel["measured_straight_length_metres"] == pytest.approx(25.0)
     assert gravel["straight_geometry_measured"] is True
+    assert gravel["measured_curve_connector_width_metres"] == pytest.approx(5.2)
+    assert gravel["measured_curve_chord_length_metres"] == pytest.approx(4.36)
+    assert gravel["curve_geometry_measured"] is True
+    assert gravel["connector_width_delta_metres"] == pytest.approx(0.0)
 
 
 def test_generated_mod_road_rejects_different_straight_and_curve_mouths() -> None:
