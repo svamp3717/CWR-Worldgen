@@ -66,13 +66,14 @@ def test_short_aligned_gap_between_gravel_endpoints_gets_a_small_filler() -> Non
         [0.0] * (spec.cells * spec.cells),
         spec,
     )
+    expected_filler_length = spec.road_segment_length * 3.0 / 25.0
     fillers = [
         obj for obj in report.objects
         if (
             (signature := custom_road_model_signature(obj.model_path)) is not None
             and signature[0] == "gravel"
             and signature[1] == 4.6
-            and abs(signature[2] - 3.0) <= 0.1
+            and abs(signature[2] - expected_filler_length) <= 0.06
         )
         and 505.5 <= obj.x <= 506.5
         and abs(obj.z - 500.0) <= 0.1
@@ -98,7 +99,7 @@ def test_short_aligned_gap_between_gravel_endpoints_gets_a_small_filler() -> Non
     # The 3 m filler plus the lowered visual tips participating in the seams is
     # enough to cover the six-metre source-data hole without inserting a long
     # overlapping slab.
-    actual_length = spec.road_segment_length * 3.0 / 25.0
+    actual_length = expected_filler_length
     assert actual_length + 4.0 * GENERATED_GRAVEL_VISUAL_OVERLAP_METRES > 6.0
 
 
@@ -144,11 +145,12 @@ def test_detached_gravel_endpoint_can_join_the_unused_arm_of_a_nearby_t_hub() ->
         [0.0] * (spec.cells * spec.cells),
         spec,
     )
+    expected_filler_length = spec.road_segment_length * 6.0 / 25.0
     assert any(
         (signature := custom_road_model_signature(obj.model_path)) is not None
         and signature[0] == "gravel"
         and signature[1] == 4.6
-        and abs(signature[2] - 6.0) <= 0.1
+        and abs(signature[2] - expected_filler_length) <= 0.06
         and 502.5 <= obj.x <= 504.5
         and abs(obj.z - 500.0) <= 0.1
         for obj in report.objects
