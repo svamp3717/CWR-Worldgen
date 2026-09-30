@@ -706,6 +706,31 @@ def test_mixed_modded_paved_gravel_t_has_no_open_connector_gap() -> None:
         for connector in connectors
     ]
     connector_gaps = [value[0] for value in nearest_details]
+    print(
+        "MIXED_JUNCTION_DIAG",
+        {
+            "cap": (
+                cap.model_path,
+                round(float(cap.x), 6),
+                round(float(cap.z), 6),
+                round(float(cap.heading_degrees), 6),
+            ),
+            "junction": junction,
+            "connectors": connectors,
+            "nearest": nearest_details,
+            "objects": [
+                (
+                    int(obj.object_id),
+                    obj.model_path,
+                    round(float(obj.x), 6),
+                    round(float(obj.z), 6),
+                    round(float(obj.heading_degrees), 6),
+                )
+                for obj in report.objects
+            ],
+        },
+        flush=True,
+    )
     assert max(connector_gaps) <= (
         infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES + 0.08
     ), {
