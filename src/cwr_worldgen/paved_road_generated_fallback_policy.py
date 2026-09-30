@@ -104,7 +104,27 @@ def _generated_width(
         )
         measured = _p.road_model_dimensions(donor_model) if donor_model else None
         if measured is not None:
-            return max(1.5, float(measured[0]))
+            width = max(1.5, float(measured[0]))
+            curve_model = str(
+                getattr(context_spec := spec, f"{surface}_road_curve_model", "") or ""
+            ).strip()
+            curve_measured = (
+                _p.road_model_dimensions(curve_model)
+                if curve_model
+                else None
+            )
+            if curve_measured is not None:
+                curve_width = max(1.5, float(curve_measured[0]))
+                tolerance = max(0.15, width * 0.05)
+                if abs(curve_width - width) > tolerance:
+                    raise ValueError(
+                        f"{surface} road donor connector widths do not match: "
+                        f"{donor_model!r} is {width:.2f} m, while "
+                        f"{curve_model!r} is {curve_width:.2f} m. "
+                        "Choose a straight/curve pair from the same modular road "
+                        "family or fix the selected P3Ds."
+                    )
+            return width
 
         # Known stock families have stable widths even when their P3Ds are not
         # present under the configured asset roots. Unknown/modded families do
