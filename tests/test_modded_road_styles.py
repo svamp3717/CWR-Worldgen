@@ -1549,11 +1549,9 @@ def test_sebnam_curve_donor_resolves_to_straight_family(tmp_path: Path) -> None:
         )
         assert [piece.model_path for piece in variants] == [
             r"sebnam_obj\sebtrailpath25.p3d",
-            r"sebnam_obj\sebtrailpath12.p3d",
-            r"sebnam_obj\sebtrailpath6.p3d",
         ]
         assert [piece.length_metres for piece in variants] == pytest.approx(
-            [25.0, 12.5, 6.25]
+            [25.0]
         )
         assert fallback._generated_width(
             variants,
@@ -1844,14 +1842,15 @@ def test_bas_o_straight_curve_pair_keeps_width_and_texture(
         playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
         playability._ROAD_MODEL_EFFECTIVE_DONORS.reset(effective_token)
 
-    assert [piece.model_path for piece in pieces] == [
-        straight25,
-        straight12,
-        straight6,
-    ]
-    assert [piece.length_metres for piece in pieces] == pytest.approx(
-        [25.0, 12.5, 6.25]
-    )
+    assert availability == {
+        playability._road_model_key(straight25): frozenset({
+            playability._road_model_key(straight25)
+        })
+    }
+    assert playability._road_model_key(straight12) not in dimensions
+    assert playability._road_model_key(straight6) not in dimensions
+    assert [piece.model_path for piece in pieces] == [straight25]
+    assert [piece.length_metres for piece in pieces] == pytest.approx([25.0])
     assert generated_width == pytest.approx(5.2)
     assert generated_width != pytest.approx(9.1)
 
