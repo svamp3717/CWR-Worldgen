@@ -835,14 +835,19 @@ def _cap_index(report, plan, used):
 def _pending_approach_plans(report, plans):
     """Exclude donor-style hubs already emitted by the base road fitter."""
 
-    return {
-        key: plan
-        for key, plan in plans.items()
-        if not (
-            _pi.is_generated_custom_road_junction_model(plan.model_path)
-            and _cap_index(report, plan, set()) is not None
-        )
-    }
+    pending = {}
+    for key, plan in plans.items():
+        if _pi.is_generated_custom_road_junction_model(plan.model_path):
+            cap_index = _cap_index(report, plan, set())
+            if cap_index is not None:
+                emitted = report.objects[cap_index]
+                if (
+                    emitted.model_path.replace("/", "\\").casefold()
+                    == plan.model_path.replace("/", "\\").casefold()
+                ):
+                    continue
+        pending[key] = plan
+    return pending
 
 
 def _segment_distance(point, axis):
