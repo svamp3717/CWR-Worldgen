@@ -584,6 +584,30 @@ def locate_assets_fast(
         else:
             records[record.path] = record
 
+    # An explicitly selected PBO is a small, deliberate search scope. If the
+    # header-only resolver misses an asset there, fall back to the complete PBO
+    # reader before declaring it absent. This covers wrapper/mod-package PBOs
+    # containing nested AddOns/*.pbo members and uncommon prefix metadata without
+    # turning ordinary game-folder road discovery into a recursive full scan.
+    if missing:
+        explicit_pbos = tuple(
+            root for root in root_paths
+            if root.is_file() and is_pbo_path(root)
+        )
+        if explicit_pbos:
+            fallback = _FULL_SCAN(
+                explicit_pbos,
+                tuple(missing),
+                cache_dir=cache_dir,
+                use_cache=use_cache,
+                refresh=refresh,
+            )
+            wanted = set(missing)
+            for record in fallback.records:
+                if record.path in wanted:
+                    records[record.path] = record
+            missing = [value for value in missing if value not in records]
+
     ordered = tuple(records[key] for key in sorted(records))
     canonical_doc = {
         "mode": "exact-targeted",
