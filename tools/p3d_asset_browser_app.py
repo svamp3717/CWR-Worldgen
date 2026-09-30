@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import queue
 import sys
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -40,6 +42,10 @@ class AssetBrowserApp:
         self.zoom = 1.0
         self._row_assets: dict[str, BrowserAsset] = {}
         self._related_assets: dict[str, BrowserAsset] = {}
+        self._scan_queue: queue.Queue[tuple[int, str, object]] = queue.Queue()
+        self._scan_generation = 0
+        self._scan_in_progress = False
+        self._source_buttons: list[ttk.Button] = []
 
         root.title("CWR P3D Model & Texture Browser")
         root.geometry("1650x980")
@@ -58,12 +64,16 @@ class AssetBrowserApp:
 
         toolbar = ttk.Frame(outer)
         toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 7))
-        ttk.Button(toolbar, text="Select PBO…", command=self.select_pbo).pack(side=tk.LEFT)
-        ttk.Button(toolbar, text="Add folder…", command=self.select_folder).pack(
-            side=tk.LEFT, padx=(6, 0)
+        select_pbo_button = ttk.Button(toolbar, text="Select PBO…", command=self.select_pbo)
+        select_pbo_button.pack(side=tk.LEFT)
+        add_folder_button = ttk.Button(toolbar, text="Add folder…", command=self.select_folder)
+        add_folder_button.pack(side=tk.LEFT, padx=(6, 0))
+        clear_sources_button = ttk.Button(
+            toolbar, text="Clear sources", command=self.clear_sources
         )
-        ttk.Button(toolbar, text="Clear sources", command=self.clear_sources).pack(
-            side=tk.LEFT, padx=(6, 14)
+        clear_sources_button.pack(side=tk.LEFT, padx=(6, 14))
+        self._source_buttons.extend(
+            (select_pbo_button, add_folder_button, clear_sources_button)
         )
         self.sources_var = tk.StringVar(master=self.root, value="No source selected")
         ttk.Label(toolbar, textvariable=self.sources_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -73,6 +83,11 @@ class AssetBrowserApp:
             value="Select a PBO or folder to browse models and textures.",
         )
         ttk.Label(toolbar, textvariable=self.status_var).pack(side=tk.RIGHT, padx=(12, 0))
+        self.scan_progress = ttk.Progressbar(
+            toolbar,
+            mode="indeterminate",
+            length=190,
+        )
 
         sidebar = ttk.Frame(outer, padding=(0, 0, 8, 0))
         sidebar.grid(row=1, column=0, sticky="nsew")
@@ -239,7 +254,25 @@ class AssetBrowserApp:
         if text:
             self.status_var.set(text)
 
+    def _set_scan_active(self, active: bool) -> None:
+        self._scan_in_progress = bool(active)
+        state = tk.DISABLED if active else tk.NORMAL
+        for button in self._source_buttons:
+            button.configure(state=state)
+        if active:
+            self.scan_progress.pack(side=tk.RIGHT, padx=(10, 0))
+            self.scan_progress.start(12)
+            self.root.configure(cursor="watch")
+        else:
+            self.scan_progress.stop()
+            self.scan_progress.pack_forget()
+            self.root.configure(cursor="")
+        self.root.update_idletasks()
+
     def select_pbo(self) -> None:
+        if self._scan_in_progress:
+            self.status_var.set("Asset scan already in progress.")
+            return
         values = filedialog.askopenfilenames(
             parent=self.root,
             title="Select PBO archive(s)",
@@ -253,6 +286,9 @@ class AssetBrowserApp:
             self._add_sources(Path(value) for value in values)
 
     def select_folder(self) -> None:
+        if self._scan_in_progress:
+            self.status_var.set("Asset scan already in progress.")
+            return
         value = filedialog.askdirectory(
             parent=self.root,
             title="Select asset folder",
@@ -294,30 +330,66 @@ class AssetBrowserApp:
         if not self.sources:
             self.clear_sources()
             return
-        self._busy("Scanning models and textures…")
-        try:
-            catalogue = scan_catalogue(self.sources)
-        except Exception as exc:
-            self.root.configure(cursor="")
-            messagebox.showerror("Asset scan failed", str(exc), parent=self.root)
-            self.status_var.set(f"Scan failed: {exc}")
+        if self._scan_in_progress:
             return
-        self.catalogue = catalogue
-        self.texture_resolver = TextureResolver(self.sources)
-        self.current = None
-        self.current_model = None
-        self.sources_var.set(
-            " • ".join(path.name or str(path) for path in self.sources[-3:])
-            + (f" • +{len(self.sources) - 3} more" if len(self.sources) > 3 else "")
-        )
-        self._refresh_lists()
-        self._clear_related()
-        self._show_empty_preview()
-        self.info_var.set("Select a model or texture from the catalogue.")
-        self._unbusy(
-            f"Indexed {len(catalogue.models):,} model(s) and "
-            f"{len(catalogue.textures):,} texture(s)."
-        )
+
+        sources = tuple(self.sources)
+        self._scan_generation += 1
+        generation = self._scan_generation
+        self.status_var.set("Scanning models and textures…")
+        self._set_scan_active(True)
+
+        def worker() -> None:
+            try:
+                catalogue = scan_catalogue(sources)
+            except Exception as exc:
+                self._scan_queue.put((generation, "error", exc))
+            else:
+                self._scan_queue.put((generation, "success", (sources, catalogue)))
+
+        threading.Thread(
+            target=worker,
+            name="p3d-asset-browser-scan",
+            daemon=True,
+        ).start()
+        self.root.after(50, self._poll_scan_queue)
+
+    def _poll_scan_queue(self) -> None:
+        handled = False
+        while True:
+            try:
+                generation, kind, payload = self._scan_queue.get_nowait()
+            except queue.Empty:
+                break
+            if generation != self._scan_generation:
+                continue
+            handled = True
+            self._set_scan_active(False)
+            if kind == "error":
+                exc = payload
+                messagebox.showerror("Asset scan failed", str(exc), parent=self.root)
+                self.status_var.set(f"Scan failed: {exc}")
+                continue
+            sources, catalogue = payload
+            self.catalogue = catalogue
+            self.texture_resolver = TextureResolver(sources)
+            self.current = None
+            self.current_model = None
+            self.sources_var.set(
+                " • ".join(path.name or str(path) for path in sources[-3:])
+                + (f" • +{len(sources) - 3} more" if len(sources) > 3 else "")
+            )
+            self._refresh_lists()
+            self._clear_related()
+            self._show_empty_preview()
+            self.info_var.set("Select a model or texture from the catalogue.")
+            self.status_var.set(
+                f"Indexed {len(catalogue.models):,} model(s) and "
+                f"{len(catalogue.textures):,} texture(s)."
+            )
+
+        if self._scan_in_progress and not handled:
+            self.root.after(50, self._poll_scan_queue)
 
     def _refresh_lists(self) -> None:
         query = self.search_var.get() if hasattr(self, "search_var") else ""
