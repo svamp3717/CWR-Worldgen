@@ -781,25 +781,52 @@ def test_skew_four_way_intersection_uses_stock_x_and_turn_approaches() -> None:
     )
 
 
-def test_gravel_spur_does_not_promote_paved_through_road_to_junction_cap() -> None:
+def test_unified_gravel_spur_uses_paved_three_way_hub() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     dataset = _mixed_paved_gravel_dataset(projection)
     spec = _junction_spec(bbox, procedural_gravel_roads=True)
     centre_key = playability._road_node_key((500.0, 500.0))
 
-    # Gravel is an underlay at a mixed node. It must not turn the two paved
-    # through-road incidents into a synthetic three-way paved junction.
-    assert centre_key not in road_quality._junction_geometry(dataset, projection, spec)
-    assert centre_key not in paved_junctions._plans(dataset, projection, spec)
+    geometry = road_quality._junction_geometry(dataset, projection, spec)
+    assert centre_key in geometry
+    assert len(geometry[centre_key].directions) == 3
+    assert geometry[centre_key].directional_exit_distances
 
     report = playability.fit_road_objects(
         dataset, projection, [0.0] * (40 * 40), spec
     )
-    assert report.junction_cap_objects == 0
+    caps = [
+        obj for obj in report.objects
+        if infrastructure.custom_road_junction_signature(obj.model_path)
+        is not None
+    ]
+    assert len(caps) == 1
+    signature = infrastructure.custom_road_junction_signature(
+        caps[0].model_path
+    )
+    assert signature is not None
+    assert signature[0] == "paved"
+    assert len(signature[2]) == 3
     assert any(
         playability.is_generated_gravel_road_model(obj.model_path)
         for obj in report.objects
+    )
+
+
+def test_legacy_gravel_spur_keeps_paved_through_road_without_cap() -> None:
+    bbox = (0.0, 0.0, 0.01, 0.01)
+    projection = BboxProjection.create(bbox, 1000.0)
+    dataset = _mixed_paved_gravel_dataset(projection)
+    spec = _junction_spec(bbox, procedural_gravel_roads=True)
+    object.__setattr__(spec, "custom_road_shapes", False)
+    centre_key = playability._road_node_key((500.0, 500.0))
+
+    assert centre_key not in road_quality._junction_geometry(
+        dataset, projection, spec
+    )
+    assert centre_key not in paved_junctions._plans(
+        dataset, projection, spec
     )
 
 
