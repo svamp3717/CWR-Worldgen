@@ -432,6 +432,121 @@ def test_wide_generated_paved_junction_keeps_mod_texture(tmp_path: Path) -> None
     assert r"o\road\sil_konec.paa" not in textures
 
 
+@pytest.mark.parametrize(
+    ("surface", "width", "texture"),
+    (
+        ("paved", 5.2, r"modroads\paved.paa"),
+        ("gravel", 4.6, r"modroads\gravel.paa"),
+        ("dirt", 3.8, r"modroads\dirt.paa"),
+    ),
+)
+def test_measured_custom_donor_builds_matching_three_way_junction_plan(
+    surface: str,
+    width: float,
+    texture: str,
+) -> None:
+    donors = {
+        "paved": r"modroads\paved25.p3d",
+        "gravel": r"modroads\gravel25.p3d",
+        "dirt": r"modroads\dirt25.p3d",
+    }
+    spec = SimpleNamespace(
+        name="donorworld",
+        paved_road_model=donors["paved"],
+        gravel_road_model=donors["gravel"],
+        dirt_road_model=donors["dirt"],
+        road_segment_length=25.0,
+    )
+    model = donors[surface]
+    values = (
+        ((0.0, 1.0), surface == "dirt", model, "north", "way-a"),
+        ((0.0, -1.0), surface == "dirt", model, "south", "way-a"),
+        ((1.0, 0.0), surface == "dirt", model, "east", "way-b"),
+    )
+    token = playability._ROAD_MODEL_DIMENSIONS.set(
+        {playability._road_model_key(model): (width, 25.0)}
+    )
+    try:
+        plan = playability._generated_custom_road_junction_cap_plan(values, spec)
+    finally:
+        playability._ROAD_MODEL_DIMENSIONS.reset(token)
+
+    assert plan is not None
+    model_path, axis = plan
+    signature = infrastructure.custom_road_junction_signature(model_path)
+    assert signature is not None
+    assert signature[0] == surface
+    assert signature[1] == pytest.approx(width)
+    assert len(signature[2]) == 3
+    assert 0 in signature[2]
+    assert math.hypot(*axis) == pytest.approx(1.0)
+
+
+def test_stock_paved_family_does_not_create_donor_junction_plan() -> None:
+    model = r"o\road\sil25.p3d"
+    spec = SimpleNamespace(
+        name="stockworld",
+        paved_road_model=model,
+        gravel_road_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        road_segment_length=25.0,
+    )
+    values = (
+        ((0.0, 1.0), False, model, "north", "way-a"),
+        ((0.0, -1.0), False, model, "south", "way-a"),
+        ((1.0, 0.0), False, model, "east", "way-b"),
+    )
+    token = playability._ROAD_MODEL_DIMENSIONS.set(
+        {playability._road_model_key(model): (9.1, 25.0)}
+    )
+    try:
+        assert playability._generated_custom_road_junction_cap_plan(values, spec) is None
+    finally:
+        playability._ROAD_MODEL_DIMENSIONS.reset(token)
+
+
+@pytest.mark.parametrize(
+    ("surface", "texture"),
+    (
+        ("paved", r"modroads\textures\paved.paa"),
+        ("gravel", r"modroads\textures\gravel.paa"),
+        ("dirt", r"modroads\textures\dirt.paa"),
+    ),
+)
+def test_custom_donor_junction_model_uses_surface_donor_texture(
+    tmp_path: Path,
+    surface: str,
+    texture: str,
+) -> None:
+    model = infrastructure.custom_road_junction_model_path(
+        "donorworld",
+        surface,
+        5.2,
+        (0, 90, 180),
+    )
+    library = infrastructure.ProceduralInfrastructureLibrary(
+        "donorworld",
+        paved_texture_path=(
+            texture if surface == "paved" else r"o\road\sil_new.paa"
+        ),
+        gravel_texture_path=texture if surface == "gravel" else None,
+        dirt_texture_path=texture if surface == "dirt" else None,
+        cache_enabled=False,
+    )
+    library.register_model(model)
+    library.write_assets(tmp_path, tmp_path / "infrastructure.json")
+
+    relative = model.split("\\", 1)[1].replace("\\", "/")
+    summary = inspect_mlod(tmp_path / relative)
+    assert texture.casefold() in {
+        value.casefold() for value in summary.texture_paths
+    }
+    assert any(
+        math.isclose(value, infrastructure._ROADWAY_LOD, rel_tol=1e-6)
+        for value in summary.resolutions
+    )
+
+
 def test_modded_family_reuses_only_existing_sibling_models(tmp_path: Path) -> None:
     root = tmp_path / "mod"
     _write_fake_mod_asset(root, r"myroads\asphalt25.p3d", b"donor")
