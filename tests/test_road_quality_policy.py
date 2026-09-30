@@ -137,6 +137,7 @@ def _junction_spec(
     bbox: tuple[float, float, float, float],
     *,
     procedural_gravel_roads: bool = False,
+    custom_road_shapes: bool = False,
 ) -> _Milestone9PlayabilitySpec:
     return _Milestone9PlayabilitySpec(
         name="road_quality",
@@ -147,6 +148,7 @@ def _junction_spec(
         max_road_objects=10000,
         strict_assets=False,
         procedural_gravel_roads=procedural_gravel_roads,
+        custom_road_shapes=custom_road_shapes,
     )
 
 
@@ -182,7 +184,7 @@ def _object_endpoints(obj):
 
 def test_policy_is_installed_for_playability_and_generator() -> None:
     assert playability.fit_road_objects is generator.fit_road_objects
-    assert playability.fit_road_objects.__module__ == "cwr_worldgen.gravel_family_policy"
+    assert paved_junctions._ORIGINAL_FIT is road_quality._fit
 
 
 def test_road_type_catalogue_lists_reference_families_turns_and_paved_junctions() -> None:
@@ -781,33 +783,28 @@ def test_skew_four_way_intersection_uses_stock_x_and_turn_approaches() -> None:
     )
 
 
-def test_unified_gravel_spur_uses_paved_three_way_hub() -> None:
+def test_unified_gravel_spur_keeps_paved_through_road_without_cap() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     dataset = _mixed_paved_gravel_dataset(projection)
-    spec = _junction_spec(bbox, procedural_gravel_roads=True)
+    spec = _junction_spec(
+        bbox, procedural_gravel_roads=True, custom_road_shapes=True
+    )
     centre_key = playability._road_node_key((500.0, 500.0))
 
-    geometry = road_quality._junction_geometry(dataset, projection, spec)
-    assert centre_key in geometry
-    assert len(geometry[centre_key].directions) == 3
-    assert geometry[centre_key].directional_exit_distances
-
+    assert centre_key not in road_quality._junction_geometry(
+        dataset, projection, spec
+    )
+    assert centre_key not in paved_junctions._plans(dataset, projection, spec)
     report = playability.fit_road_objects(
         dataset, projection, [0.0] * (40 * 40), spec
     )
-    caps = [
-        obj for obj in report.objects
-        if infrastructure.custom_road_junction_signature(obj.model_path)
+    assert report.junction_cap_objects == 0
+    assert not any(
+        infrastructure.custom_road_junction_signature(obj.model_path)
         is not None
-    ]
-    assert len(caps) == 1
-    signature = infrastructure.custom_road_junction_signature(
-        caps[0].model_path
+        for obj in report.objects
     )
-    assert signature is not None
-    assert signature[0] == "paved"
-    assert len(signature[2]) == 3
     assert any(
         playability.is_generated_gravel_road_model(obj.model_path)
         for obj in report.objects

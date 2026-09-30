@@ -225,7 +225,7 @@ def test_generated_paved_junction_quantizes_heading_and_reuses_stock_texture(
     assert stock_texture in summary.texture_paths
     assert r"o\road\sil_konec.paa" in summary.texture_paths
     assert any(
-        abs(value - infrastructure._ROADWAY_LOD) < 1.0
+        math.isclose(value, infrastructure._ROADWAY_LOD, rel_tol=1.0e-7)
         for value in summary.resolutions
     )
 
@@ -529,12 +529,12 @@ def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
     )
     assert document["models"][0]["usage_count"] == 3
     assert document["paved_texture_source"] == {
-        "type": "external-stock-texture",
+        "type": "external-road-texture",
         "texture": stock_texture,
         "generated_texture": False,
     }
     assert any(
-        abs(value - infrastructure._ROADWAY_LOD) < 1.0
+        math.isclose(value, infrastructure._ROADWAY_LOD, rel_tol=1.0e-7)
         for value in document["models"][0]["lod_resolutions"]
     )
 
