@@ -114,6 +114,61 @@ def _mlod_road(
     return stream.getvalue()
 
 
+def _mlod_road_with_midspan_detail(
+    width: float,
+    length: float,
+    visual_width: float,
+    texture: str,
+) -> bytes:
+    """Road mouth width stays narrow while decorative mid-span mesh is wider."""
+    half_width = width * 0.5
+    half_visual_width = visual_width * 0.5
+    half_length = length * 0.5
+    detail_half_length = min(1.0, length * 0.10)
+    lod = _Lod(
+        (
+            (-half_width, 0.025, -half_length),
+            (-half_width, 0.025, half_length),
+            (half_width, 0.025, half_length),
+            (half_width, 0.025, -half_length),
+            (-half_visual_width, 0.035, -detail_half_length),
+            (-half_visual_width, 0.035, detail_half_length),
+            (half_visual_width, 0.035, detail_half_length),
+            (half_visual_width, 0.035, -detail_half_length),
+        ),
+        ((0.0, -1.0, 0.0),),
+        (
+            _Face(
+                texture,
+                (
+                    (0, 0, 0.0, 0.0),
+                    (1, 0, 0.0, 1.0),
+                    (2, 0, 1.0, 1.0),
+                    (3, 0, 1.0, 0.0),
+                ),
+                0,
+            ),
+            _Face(
+                texture,
+                (
+                    (4, 0, 0.0, 0.0),
+                    (5, 0, 0.0, 1.0),
+                    (6, 0, 1.0, 1.0),
+                    (7, 0, 1.0, 0.0),
+                ),
+                0,
+            ),
+        ),
+        1.0,
+        properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
+        point_flags=(0x13F,) * 8,
+    )
+    stream = io.BytesIO()
+    stream.write(_MLOD_HEADER.pack(b"MLOD", 1, 1, 0, 1))
+    _write_lod(stream, lod)
+    return stream.getvalue()
+
+
 def _mlod_curve_sample(
     width: float,
     length: float,
@@ -1013,7 +1068,11 @@ def test_bas_o_straight_curve_pair_keeps_width_and_texture(
     straight6 = r"bas_o\_road\bas_asf6.p3d"
     curve = r"bas_o\_road\bas_asf10 25.p3d"
 
-    _write_fake_mod_asset(root, straight25, _mlod_road(5.2, 25.0, texture))
+    _write_fake_mod_asset(
+        root,
+        straight25,
+        _mlod_road_with_midspan_detail(5.2, 25.0, 8.4, texture),
+    )
     _write_fake_mod_asset(root, straight12, _mlod_road(5.2, 12.5, texture))
     _write_fake_mod_asset(root, straight6, _mlod_road(5.2, 6.25, texture))
     _write_fake_mod_asset(root, curve, _mlod_curve_sample(5.2, 4.36, 0.38, texture))
@@ -1038,6 +1097,22 @@ def test_bas_o_straight_curve_pair_keeps_width_and_texture(
     effective = generator._modded_road_effective_donors(spec)
     availability = generator._modded_road_variant_availability(spec, effective)
     dimensions = generator._modded_road_model_dimensions(spec, effective)
+
+    straight_info = inspect_visual_model_dimensions(
+        (root / straight25.replace("\\\\", "/")).read_bytes()
+    )
+    curve_info = inspect_visual_model_dimensions(
+        (root / curve.replace("\\\\", "/")).read_bytes()
+    )
+    assert straight_info.width_metres == pytest.approx(8.4)
+    assert straight_info.connector_width_metres == pytest.approx(5.2)
+    assert curve_info.connector_width_metres == pytest.approx(5.2)
+    assert dimensions[playability._road_model_key(straight25)] == pytest.approx(
+        (5.2, 25.0)
+    )
+    assert dimensions[playability._road_model_key(curve)] == pytest.approx(
+        (5.2, 4.36)
+    )
 
     effective_token = playability._ROAD_MODEL_EFFECTIVE_DONORS.set(effective)
     availability_token = playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(availability)
@@ -1149,3 +1224,29 @@ def test_road_donor_diagnostics_records_measured_straight_and_curve_style() -> N
     assert gravel["measured_straight_width_metres"] == pytest.approx(5.2)
     assert gravel["measured_straight_length_metres"] == pytest.approx(25.0)
     assert gravel["straight_geometry_measured"] is True
+
+
+def test_generated_mod_road_rejects_different_straight_and_curve_mouths() -> None:
+    straight = r"bas_o\_road\bas_asf25.p3d"
+    curve = r"bas_o\_road\bas_asf10 25.p3d"
+    spec = SimpleNamespace(
+        paved_road_model=straight,
+        paved_road_curve_model=curve,
+        gravel_road_model="",
+        gravel_road_curve_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        dirt_road_curve_model="",
+        custom_road_shapes=True,
+    )
+    pieces = (playability._RoadPiece(straight, 25.0, 25),)
+    dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(
+        {
+            playability._road_model_key(straight): (5.2, 25.0),
+            playability._road_model_key(curve): (6.0, 4.36),
+        }
+    )
+    try:
+        with pytest.raises(ValueError, match="connector widths do not match"):
+            fallback._generated_width(pieces, spec, "paved")
+    finally:
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
