@@ -774,6 +774,107 @@ def test_full_pipeline_keeps_mixed_paved_gravel_t_connected(
         )
 
 
+@pytest.mark.parametrize(
+    ("paved_model", "paved_width"),
+    (
+        (r"bas_o\_road\bas_asf25.p3d", 7.0),
+        (r"o\road\sil25.p3d", 9.1),
+    ),
+)
+def test_full_pipeline_keeps_two_way_paved_gravel_transition_closed(
+    paved_model: str,
+    paved_width: float,
+) -> None:
+    bbox = (59.40, 16.82, 59.41, 16.83)
+    projection = BboxProjection.create(bbox, 1000.0)
+    centre = (500.0, 500.0)
+    dataset = OsmDataset(
+        source_generator="mixed-two-way-transition",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/paved",
+                {"highway": "residential", "surface": "asphalt"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in ((500.0, 250.0), centre)
+                ),
+            ),
+            OsmLineFeature(
+                "way/gravel",
+                {"highway": "track", "surface": "gravel"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in (centre, (500.0, 750.0))
+                ),
+            ),
+        ),
+    )
+    spec = _Milestone9PlayabilitySpec(
+        name="mixedtransition",
+        heightmap_path=Path("unused.png"),
+        bbox=bbox,
+        cells=40,
+        cell_size=25.0,
+        max_road_objects=10000,
+        strict_assets=False,
+        paved_road_model=paved_model,
+    )
+    key = playability._road_model_key(paved_model)
+    dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(
+        {key: (paved_width, 25.0)}
+        if not key.startswith("o\\road\\")
+        else {}
+    )
+    availability_token = playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(
+        {key: frozenset({key})}
+    )
+    effective_token = playability._ROAD_MODEL_EFFECTIVE_DONORS.set(
+        {key: paved_model}
+    )
+    try:
+        report = playability.fit_road_objects(
+            dataset,
+            projection,
+            [0.0] * (spec.cells * spec.cells),
+            spec,
+        )
+    finally:
+        playability._ROAD_MODEL_EFFECTIVE_DONORS.reset(effective_token)
+        playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
+
+    assert report.junction_cap_objects == 0
+    distances: dict[str, list[float]] = {"paved": [], "gravel": []}
+    for obj in report.objects:
+        surface = playability.road_model_surface(spec, obj.model_path)
+        if surface not in distances:
+            continue
+        signature = infrastructure.custom_road_model_signature(obj.model_path)
+        if signature is not None:
+            length = float(signature[2])
+        else:
+            length = playability.road_model_variants(
+                obj.model_path,
+                spec.road_segment_length,
+                donor_only=True,
+            )[0].length_metres
+        axis = playability._model_axis(obj, length)
+        distances[surface].append(
+            playability._point_segment_distance(centre, axis[0], axis[1])
+        )
+
+    assert distances["paved"]
+    assert distances["gravel"]
+    assert min(distances["paved"]) <= 0.30
+    assert min(distances["gravel"]) <= 0.30
+
+
 def test_custom_gravel_donor_junction_keeps_directional_arm_reach() -> None:
     arm_extent = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
     junction = road_quality_policy._Junction(
