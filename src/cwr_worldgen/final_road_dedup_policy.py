@@ -981,7 +981,13 @@ def _replacement_dirt_underlay_object(
         start_y -= maximum_deficit + 1.0e-6
         end_y -= maximum_deficit + 1.0e-6
 
-    pitch = math.degrees(math.asin(rise))
+    pitch = max(
+        -_MAXIMUM_DIRT_PAVED_UNDERLAY_PITCH_DEGREES,
+        min(
+            _MAXIMUM_DIRT_PAVED_UNDERLAY_PITCH_DEGREES,
+            math.degrees(math.asin(rise)),
+        ),
+    )
     centre = (start + end) * 0.5
     point = _axis_point(axis, centre)
     return replace(
