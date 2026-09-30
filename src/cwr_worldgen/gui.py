@@ -41,6 +41,15 @@ DEFAULT_GUI_CELL_SIZE_METRES = 25.0
 TRAILING_NUMBER = re.compile(r"^(.*?)(\d+)$")
 FROZEN_CLI_MARKER = "--cwr-cli"
 
+DEFAULT_ROAD_MODEL_VALUES: dict[str, str] = {
+    "paved_road_model": r"o\road\sil25.p3d",
+    "paved_road_curve_model": r"o\road\sil10 25.p3d",
+    "gravel_road_model": "",
+    "gravel_road_curve_model": "",
+    "dirt_road_model": r"o\road\ces25.p3d",
+    "dirt_road_curve_model": r"o\road\ces10 25.p3d",
+}
+
 RECOMMENDED_APPEARANCE_PRESET = "Nogova textures + Everon trees (recommended)"
 RESISTANCE_APPEARANCE_PRESET = "Nogova Resistance leaf forests"
 LEGACY_RESISTANCE_APPEARANCE_PRESET = "Nogova Resistance forests"
@@ -960,12 +969,7 @@ def default_gui_values() -> dict[str, object]:
         "osm_asset_mapping_global_textures": "",
         "keep_output": False,
         "include_minor_roads": True,
-        "paved_road_model": r"o\road\sil25.p3d",
-        "paved_road_curve_model": "",
-        "gravel_road_model": "",
-        "gravel_road_curve_model": "",
-        "dirt_road_model": r"o\road\ces25.p3d",
-        "dirt_road_curve_model": "",
+        **DEFAULT_ROAD_MODEL_VALUES,
         "cache_refresh": False,
         "no_cache": False,
         "normalization_refresh": False,
@@ -2242,18 +2246,33 @@ class WorldgenGui(tk.Tk):
         self._entry_row(
             road_models, 1, "Paved straight P3D", "paved_road_model", advanced=True
         )
+        ttk.Button(
+            road_models,
+            text="Restore paved",
+            command=lambda: self._restore_road_defaults("paved"),
+        ).grid(row=1, column=2, padx=(6, 0), pady=4)
         self._entry_row(
             road_models, 2, "Paved curve P3D (optional)", "paved_road_curve_model", advanced=True
         )
         self._entry_row(
             road_models, 3, "Gravel straight P3D (optional)", "gravel_road_model", advanced=True
         )
+        ttk.Button(
+            road_models,
+            text="Restore gravel",
+            command=lambda: self._restore_road_defaults("gravel"),
+        ).grid(row=3, column=2, padx=(6, 0), pady=4)
         self._entry_row(
             road_models, 4, "Gravel curve P3D (optional)", "gravel_road_curve_model", advanced=True
         )
         self._entry_row(
             road_models, 5, "Dirt-track straight P3D", "dirt_road_model", advanced=True
         )
+        ttk.Button(
+            road_models,
+            text="Restore dirt",
+            command=lambda: self._restore_road_defaults("dirt"),
+        ).grid(row=5, column=2, padx=(6, 0), pady=4)
         self._entry_row(
             road_models, 6, "Dirt-track curve P3D (optional)", "dirt_road_curve_model", advanced=True
         )
@@ -2740,6 +2759,17 @@ class WorldgenGui(tk.Tk):
         for key in ("selection_mode", "center_lat", "center_lon", "south", "west", "north", "east", "fetch_cells", "fetch_cell_size"):
             self.vars[key].set(defaults[key])
         self.footer_status_var.set("Restored the recommended 6.4 km default area.")
+
+    def _restore_road_defaults(self, surface: str) -> None:
+        prefix = str(surface).strip().casefold()
+        if prefix not in {"paved", "gravel", "dirt"}:
+            raise ValueError(f"unknown road surface {surface!r}")
+        for suffix in ("road_model", "road_curve_model"):
+            key = f"{prefix}_{suffix}"
+            self.vars[key].set(DEFAULT_ROAD_MODEL_VALUES[key])
+        self.footer_status_var.set(
+            f"Restored the default {prefix} straight and curve road donors."
+        )
 
     def _initial_map_selection(self) -> tuple[tuple[float, float], int, tuple[float, float, float, float] | None]:
         bbox: tuple[float, float, float, float] | None = None
