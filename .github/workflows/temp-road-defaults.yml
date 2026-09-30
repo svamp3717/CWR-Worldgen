@@ -1,0 +1,21 @@
+name: Temporary road defaults verification
+
+on:
+  push:
+    branches:
+      - feature/custom-road-generation
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install
+        run: python -m pip install -e . pytest matplotlib
+      - name: Compile GUI
+        run: python -m compileall -q src/cwr_worldgen/gui.py
+      - name: Run road GUI tests
+        run: python -m pytest -q tests/test_modded_road_styles.py
