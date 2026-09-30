@@ -904,7 +904,7 @@ def test_custom_gravel_donor_junction_keeps_directional_arm_reach() -> None:
         ("gravel", r"unified\i\gravel25.p3d", 4.60),
     ),
 )
-def test_unified_shape_mode_converts_straight_roads_to_generated_ribbons(
+def test_unified_shape_mode_preserves_clean_straight_donors(
     surface: str,
     source_model: str,
     expected_width: float,
@@ -948,13 +948,13 @@ def test_unified_shape_mode_converts_straight_roads_to_generated_ribbons(
         road_quality_policy._CONTEXT.reset(token)
 
     assert len(upgraded) == 1
-    signature = infrastructure.custom_road_model_signature(
+    assert upgraded[0][0].model_path.casefold() == source_model.casefold()
+    assert infrastructure.custom_road_model_signature(
         upgraded[0][0].model_path
+    ) is None
+    assert playability.road_model_width_metres(source_model) == pytest.approx(
+        expected_width
     )
-    assert signature is not None
-    assert signature[0] == surface
-    assert signature[1] == pytest.approx(expected_width)
-    assert signature[3] == 0
 
 
 @pytest.mark.parametrize(
