@@ -511,7 +511,12 @@ def _fit_stock_piece_road_objects_parallel(
         for key, values in incidents.items()
     }
     cap_incidents = {
-        key: _playability._junction_cap_incidents(values)
+        key: _playability._junction_cap_incidents(
+            values,
+            include_mixed_surfaces=bool(
+                getattr(spec, "custom_road_shapes", False)
+            ),
+        )
         for key, values in effective_incidents.items()
     }
     degree_two_turn_keys: set[tuple[int, int]] = set()
