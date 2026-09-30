@@ -9,6 +9,7 @@ from cwr_worldgen import bridge_render_policy as bridge
 from cwr_worldgen import bridge_underlay_cleanup_policy as cleanup
 from cwr_worldgen import bridge_water_deck_clamp_policy as clamp
 from cwr_worldgen.model import WorldObject
+from cwr_worldgen.playability import RoadFitReport
 from cwr_worldgen.procedural_infrastructure import (
     custom_road_model_path,
     custom_road_model_signature,
@@ -355,6 +356,121 @@ def test_terrtest100_bas_unified_bridge_gaps_are_filled() -> None:
             (road_end[0], road_end[2]),
             (near[0], near[2]),
         ) < 0.15
+
+
+def test_terrtest100_bridge_postpass_adds_both_bas_connectors() -> None:
+    bridge_heading = 56.10946398814617
+    start = (665.8329235049226, 716.6461719500688)
+    end = (832.3277210263274, 828.4860912335249)
+    model25 = custom_road_model_path(
+        "wg_terrtest100",
+        "paved",
+        7.0,
+        25.0,
+    )
+    model6 = custom_road_model_path(
+        "wg_terrtest100",
+        "paved",
+        7.0,
+        6.0,
+    )
+    objects = (
+        WorldObject(
+            1049,
+            model25,
+            676.209228515625,
+            6.335000038146973,
+            723.6162719726562,
+            bridge_heading,
+            0.0,
+        ),
+        WorldObject(
+            1052,
+            model25,
+            821.951416015625,
+            6.335000038146973,
+            821.5159912109375,
+            bridge_heading,
+            0.0,
+        ),
+        WorldObject(
+            1047,
+            model25,
+            646.1287841796875,
+            6.427552223205566,
+            703.4102783203125,
+            bridge_heading,
+            -0.5387977020665613,
+        ),
+        WorldObject(
+            1046,
+            model25,
+            625.3761596679688,
+            6.709303855895996,
+            689.4700317382812,
+            bridge_heading,
+            -0.7525930681628292,
+        ),
+        WorldObject(
+            1048,
+            model25,
+            852.8247680664062,
+            6.402408123016357,
+            842.254638671875,
+            bridge_heading,
+            0.42355765533427736,
+        ),
+        WorldObject(
+            1045,
+            model6,
+            863.1032104492188,
+            6.498169422149658,
+            849.1357421875,
+            236.79299078600377,
+            -0.761284228467361,
+        ),
+    )
+    report = RoadFitReport(
+        objects=objects,
+        chain_count=1,
+        connection_count=0,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+    )
+    span = cleanup._BridgeSpan(
+        points=(start, end),
+        road_width=7.0,
+        road_model_path=model25,
+    )
+
+    with patch.object(
+        policy,
+        "_bridge_endpoint_deck_height",
+        side_effect=lambda _point, _outward, candidate_y, _elevations, _spec: candidate_y,
+    ):
+        filled, added = policy._add_bridge_approach_fillers(
+            report,
+            (span,),
+            (),
+            SimpleNamespace(),
+        )
+
+    assert added == 2
+    assert len(filled.objects) == len(objects) + 2
+    added_objects = filled.objects[-2:]
+    signatures = [
+        custom_road_model_signature(obj.model_path)
+        for obj in added_objects
+    ]
+    assert all(signature is not None for signature in signatures)
+    assert all(signature[0] == "paved" for signature in signatures)
+    assert all(signature[1] == 7.0 for signature in signatures)
+    assert sorted(signature[2] for signature in signatures) == pytest.approx(
+        [11.3, 12.2],
+        abs=0.1,
+    )
 
 
 def test_unified_bridge_approach_connector_stays_generated() -> None:
