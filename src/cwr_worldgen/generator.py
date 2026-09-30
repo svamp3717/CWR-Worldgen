@@ -1604,7 +1604,9 @@ def _preferred_road_texture(
 
 _ROAD_DONOR_TEXTURE_FALLBACKS = {
     canonical_asset_path(r"o\road\sil25.p3d"): r"landtext\silnice.pac",
+    canonical_asset_path(r"o\road\sil10 25.p3d"): r"landtext\silnice.pac",
     canonical_asset_path(r"o\road\ces25.p3d"): r"o\road\ces_hned.paa",
+    canonical_asset_path(r"o\road\ces10 25.p3d"): r"o\road\ces_hned.paa",
 }
 
 
