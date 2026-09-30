@@ -24,7 +24,7 @@ jobs:
           src/cwr_worldgen/paved_junction_parallel_planning_policy.py
       - name: Run road donor and mixed join suite
         run: >-
-          python -m pytest -x -sv
+          python -m pytest -sv
           tests/test_road_mouth_regression.py
           tests/test_synthetic_paved_junctions.py
           tests/test_road_chain_parallel_policy.py

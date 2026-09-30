@@ -146,3 +146,28 @@ def test_angled_paved_gravel_transition_covers_both_mouths(paved_model, angle):
           "objects", [(obj.model_path, obj.x, obj.z, obj.heading_degrees) for obj in report.objects
                       if math.dist((obj.x, obj.z), node) < 25.0])
     assert uncovered.area <= 0.10
+
+@pytest.mark.parametrize("paved_model", [
+    r"o\road\sil25.p3d", r"bas_o\_road\bas_asf25.p3d",
+])
+@pytest.mark.parametrize("angle", [45.0, 90.0, 135.0])
+def test_gravel_arm_reaches_paved_three_way_hub(paved_model, angle):
+    node = (500.0, 500.0)
+    heading = math.radians(angle)
+    direction = math.sin(heading), math.cos(heading)
+    end = (node[0] + direction[0] * 100.0, node[1] + direction[1] * 100.0)
+    _spec, report, footprints = _fit(paved_model, [
+        ({"highway": "residential", "surface": "asphalt"},
+         ((500.0, 400.0), node, (500.0, 600.0))),
+        ({"highway": "residential", "surface": "asphalt"},
+         (node, (400.0, 500.0))),
+        ({"highway": "track", "surface": "gravel"}, (node, end)),
+    ])
+    expected = LineString([node, (node[0] + direction[0] * 15.0,
+                                 node[1] + direction[1] * 15.0)])
+    corridor = expected.buffer(1.9, cap_style="flat")
+    uncovered = corridor.difference(unary_union(tuple(footprints.values())))
+    print("HUB", paved_model, angle, "uncovered", uncovered.area,
+          "objects", [(obj.model_path, obj.x, obj.z, obj.heading_degrees) for obj in report.objects
+                      if math.dist((obj.x, obj.z), node) < 25.0])
+    assert uncovered.area <= 0.10
