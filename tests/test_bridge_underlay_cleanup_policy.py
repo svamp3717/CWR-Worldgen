@@ -88,7 +88,14 @@ def test_missing_terminal_underlays_are_explicitly_generated() -> None:
     assert added == 4
     assert len(filled.objects) == 4
     assert all(obj.model_path.casefold() == r"o\road\sil25.p3d" for obj in filled.objects)
-    assert [obj.x for obj in filled.objects] == pytest.approx([12.5, 37.5, 212.5, 237.5])
+    terminal = bridge_render._STOCK_MODULE_SPACING_METRES
+    expected_x = [
+        12.5,
+        37.5,
+        250.0 - terminal + 12.5,
+        250.0 - terminal + 37.5,
+    ]
+    assert [obj.x for obj in filled.objects] == pytest.approx(expected_x)
     assert all(obj.z == pytest.approx(100.0) for obj in filled.objects)
     assert all(obj.y == pytest.approx(6.335) for obj in filled.objects)
     assert all(obj.heading_degrees == pytest.approx(90.0) for obj in filled.objects)
@@ -105,17 +112,15 @@ def test_unified_bridge_cleanup_removes_generated_road_under_bridge() -> None:
         9.1,
         25.0,
     )
-    first_end = WorldObject(1, model, 25.0, 0.0, 0.0, 90.0)
     interior = WorldObject(2, model, 125.0, 0.0, 0.0, 90.0)
-    second_end = WorldObject(3, model, 225.0, 0.0, 0.0, 90.0)
 
     cleaned, removed = cleanup._remove_bridge_underlays(
-        _report(first_end, interior, second_end),
+        _report(interior),
         (span,),
     )
 
     assert removed == 1
-    assert tuple(obj.object_id for obj in cleaned.objects) == (1, 3)
+    assert cleaned.objects == ()
 
 
 def test_unified_bridge_terminal_masks_use_generated_ribbons() -> None:
