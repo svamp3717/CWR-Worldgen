@@ -2251,8 +2251,10 @@ class WorldgenGui(tk.Tk):
                 "Custom road donors are supported only when the road is roughly the same width "
                 "as vanilla CWA roads. Very wide highways, divided carriageways, and unusually "
                 "shaped road meshes are not supported and may produce incorrect bends or junctions. "
-                "Set a straight donor for placement and, optionally, a matching curve donor for style. "
-                "Add the containing mod/PBO under Asset roots."
+                "Set one straight donor and, optionally, one matching curve donor. Worldgen uses "
+                "only those configured donors for width/style and generates every placed road length, "
+                "bend, filler, and junction itself; 12/6/3 sibling P3Ds are ignored. Add the containing "
+                "mod/PBO under Asset roots."
             ),
             style="Hint.TLabel",
             wraplength=760,
