@@ -1180,6 +1180,7 @@ def _trim_dirt_under_paved(report, spec):
                     start,
                     end,
                     object_id=allocate_id(),
+                    spec=spec,
                 ))
 
             left_block = next(
@@ -1211,6 +1212,7 @@ def _trim_dirt_under_paved(report, spec):
                         blocker_buckets=blocker_buckets,
                         blockers=blockers,
                         object_id=allocate_id(),
+                        spec=spec,
                     )
                     if terminal is not None:
                         pieces.append(terminal)
@@ -1244,6 +1246,7 @@ def _trim_dirt_under_paved(report, spec):
                         blocker_buckets=blocker_buckets,
                         blockers=blockers,
                         object_id=allocate_id(),
+                        spec=spec,
                     )
                     if terminal is not None:
                         pieces.append(terminal)
