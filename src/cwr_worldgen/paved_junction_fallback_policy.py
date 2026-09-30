@@ -381,7 +381,7 @@ def _generated_paved_axis(obj, spec):
             obj.model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
         )
         match = re.fullmatch(
-            r"paved_w\d{3}_l(?P<length>\d{4})(?:_[lr]\d{2})?\.p3d",
+            r"(?:road_)?paved_w\d{3}_l(?P<length>\d{4})(?:_[lr]\d{2,3})?\.p3d",
             filename,
         )
         if match is not None:
