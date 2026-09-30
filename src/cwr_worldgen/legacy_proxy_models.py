@@ -60,6 +60,7 @@ class VisualModelDimensions:
     length_metres: float
     height_metres: float
     texture_paths: tuple[str, ...]
+    connector_width_metres: float | None = None
     lateral_center_shift_metres: float = 0.0
     is_straight_road_candidate: bool = True
 
@@ -382,6 +383,30 @@ def inspect_visual_model_dimensions(data: bytes) -> VisualModelDimensions:
             f"visual LOD has degenerate plan dimensions {width:g} x {length:g}"
         )
 
+    # A modular road connects at its terminal mouths, not at the widest point
+    # anywhere in the visual LOD. Mod roads can carry shoulders, marker meshes,
+    # or other mid-span detail outside the actual road surface. Preserve the
+    # complete visual width above for diagnostics, but separately measure a
+    # narrow band at both ends for generated-road matching.
+    connector_band = max(0.05, min(0.75, length * 0.04))
+    lower_connector_x = tuple(
+        float(point[0]) for point in lod.points
+        if float(point[2]) <= min(zs) + connector_band
+    )
+    upper_connector_x = tuple(
+        float(point[0]) for point in lod.points
+        if float(point[2]) >= max(zs) - connector_band
+    )
+    connector_width = width
+    if len(lower_connector_x) >= 2 and len(upper_connector_x) >= 2:
+        lower_width = max(lower_connector_x) - min(lower_connector_x)
+        upper_width = max(upper_connector_x) - min(upper_connector_x)
+        candidate_width = min(lower_width, upper_width)
+        # Ignore degenerate end markers. A real modular road mouth should still
+        # occupy a meaningful fraction of the complete visual footprint.
+        if candidate_width >= max(0.50, width * 0.15):
+            connector_width = candidate_width
+
     # A modular straight road is centred on local +Z at both ends. Curved road
     # donors are commonly still centred around the object origin, so a plain
     # bounding box looks deceptively valid. Compare the lateral centres of the
@@ -409,6 +434,7 @@ def inspect_visual_model_dimensions(data: bytes) -> VisualModelDimensions:
         length_metres=length,
         height_metres=height,
         texture_paths=textures,
+        connector_width_metres=connector_width,
         lateral_center_shift_metres=lateral_shift,
         is_straight_road_candidate=lateral_shift <= straight_tolerance,
     )
