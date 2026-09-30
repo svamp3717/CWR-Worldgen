@@ -1101,3 +1101,51 @@ def test_fast_mod_road_measurement_reads_legacy_compressed_p3d(
     )
     assert measured.width_metres == pytest.approx(6.4)
     assert measured.length_metres == pytest.approx(25.0)
+
+
+def test_unmeasured_mod_road_width_fails_instead_of_using_generic_width() -> None:
+    donor = r"bas_o\_road\bas_asf25.p3d"
+    spec = SimpleNamespace(
+        paved_road_model=r"o\road\sil25.p3d",
+        paved_road_curve_model="",
+        gravel_road_model=donor,
+        gravel_road_curve_model=r"bas_o\_road\bas_asf10 25.p3d",
+        dirt_road_model=r"o\road\ces25.p3d",
+        dirt_road_curve_model="",
+        custom_road_shapes=True,
+    )
+    pieces = (playability._RoadPiece(donor, 25.0, 25),)
+
+    dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(None)
+    try:
+        with pytest.raises(ValueError, match="could not measure the gravel road donor"):
+            fallback._generated_width(pieces, spec, "gravel")
+    finally:
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
+
+
+def test_road_donor_diagnostics_records_measured_straight_and_curve_style() -> None:
+    straight = r"bas_o\_road\bas_asf25.p3d"
+    curve = r"bas_o\_road\bas_asf10 25.p3d"
+    spec = SimpleNamespace(
+        paved_road_model=r"o\road\sil25.p3d",
+        paved_road_curve_model="",
+        gravel_road_model=straight,
+        gravel_road_curve_model=curve,
+        dirt_road_model=r"o\road\ces25.p3d",
+        dirt_road_curve_model="",
+    )
+    diagnostics = generator._road_donor_diagnostics(
+        spec,
+        {playability._road_model_key(straight): straight},
+        {playability._road_model_key(straight): (5.2, 25.0)},
+    )
+
+    gravel = diagnostics["gravel"]
+    assert gravel["straight"] == straight
+    assert gravel["curve"] == curve
+    assert gravel["style_donor"] == curve
+    assert gravel["effective_straight"] == straight
+    assert gravel["measured_straight_width_metres"] == pytest.approx(5.2)
+    assert gravel["measured_straight_length_metres"] == pytest.approx(25.0)
+    assert gravel["straight_geometry_measured"] is True
