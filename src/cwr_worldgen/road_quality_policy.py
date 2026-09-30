@@ -31,6 +31,9 @@ class _Junction:
     half_length: float
     half_width: float
     directions: tuple[tuple[float, float], ...]
+    directional_exit_distances: tuple[
+        tuple[tuple[float, float], float], ...
+    ] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +89,7 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
         donor_junction = _p._generated_custom_road_junction_cap_plan(values, spec)
         all_gravel = all(_p.road_model_surface(spec, v[2]) == "gravel" for v in values)
         half_width = _HUB_HALF_WIDTH
+        directional_exit_distances = ()
         if donor_junction is not None:
             donor_model, axis = donor_junction
             signature = _pi.custom_road_junction_signature(donor_model)
@@ -93,6 +97,19 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
                 continue
             hub_length = _pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 2.0
             half_width = max(0.5, signature[1] * 0.5)
+            right = (axis[1], -axis[0])
+            directional_exit_distances = tuple(
+                (
+                    (
+                        right[0] * math.sin(math.radians(heading))
+                        + axis[0] * math.cos(math.radians(heading)),
+                        right[1] * math.sin(math.radians(heading))
+                        + axis[1] * math.cos(math.radians(heading)),
+                    ),
+                    float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES),
+                )
+                for heading in signature[2]
+            )
         else:
             if all_gravel:
                 hub_length = 5.4 if len(values) == 3 else 6.0
@@ -107,12 +124,31 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
                 hub_length = cap.length_metres
             axis = _p._dominant_node_axis(tuple((v[0], v[1], v[2], v[3]) for v in values))
         result[key] = _Junction(
-            positions[key], axis, hub_length * 0.5, half_width, tuple(v[0] for v in values)
+            positions[key],
+            axis,
+            hub_length * 0.5,
+            half_width,
+            tuple(v[0] for v in values),
+            directional_exit_distances,
         )
     return result
 
 
 def _exit_distance(junction: _Junction, direction: tuple[float, float]) -> float:
+    if junction.directional_exit_distances:
+        magnitude = math.hypot(float(direction[0]), float(direction[1]))
+        if magnitude > 1.0e-9:
+            dx = float(direction[0]) / magnitude
+            dz = float(direction[1]) / magnitude
+            best = max(
+                (
+                    dx * float(candidate[0][0]) + dz * float(candidate[0][1]),
+                    float(candidate[1]),
+                )
+                for candidate in junction.directional_exit_distances
+            )
+            if best[0] >= math.cos(math.radians(12.0)):
+                return best[1]
     dx, dz = direction
     ax, az = junction.axis
     along = abs(dx * ax + dz * az)
