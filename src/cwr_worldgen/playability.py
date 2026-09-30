@@ -1124,17 +1124,21 @@ def _unique_incidents(
 
 def _junction_cap_incidents(
     values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
+    *,
+    include_mixed_surfaces: bool = False,
 ) -> tuple[tuple[tuple[float, float], bool, str, str, str], ...]:
-    """Let paved roads own mixed-surface junction topology.
+    """Return incidents that participate in junction-cap topology.
 
-    Dirt and gravel are deliberately rendered below paved roads. When a node
-    contains any paved incidents, ignore every unpaved arm while deciding
-    whether to create a cap. This keeps a paved through-road continuous at a
-    dirt T/crossing instead of inserting a dirt/mixed short road slab on top of
-    the asphalt. Pure dirt/gravel nodes retain their normal junction behavior.
+    Legacy stock-road mode lets paved roads own mixed-surface nodes and ignores
+    gravel/dirt branches while choosing a cap. Unified generated-road mode must
+    keep every arm instead: otherwise a paved-through + gravel/dirt branch is
+    collapsed to degree two and no generated hub is emitted, leaving the branch
+    several metres short of the paved road.
     """
 
     values = tuple(values)
+    if include_mixed_surfaces:
+        return values
     paved = tuple(value for value in values if not value[1])
     return paved or values
 
