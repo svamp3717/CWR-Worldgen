@@ -196,6 +196,41 @@ class _FakeProgress:
         self.running = False
 
 
+def test_select_pbo_replaces_previous_sources(monkeypatch, tmp_path: Path) -> None:
+    old_pbo = tmp_path / "old.pbo"
+    new_pbo = tmp_path / "new.pbo"
+    old_pbo.write_bytes(b"old")
+    new_pbo.write_bytes(b"new")
+
+    app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
+    app._scan_in_progress = False
+    app.status_var = _FakeVar("")
+    app.sources = [old_pbo]
+    calls = []
+
+    def fake_clear_sources():
+        calls.append("clear")
+        app.sources.clear()
+
+    def fake_add_sources(paths):
+        values = list(paths)
+        calls.append(("add", values))
+        app.sources.extend(values)
+
+    app.clear_sources = fake_clear_sources
+    app._add_sources = fake_add_sources
+    monkeypatch.setattr(
+        browser_app.filedialog,
+        "askopenfilenames",
+        lambda **_kwargs: (str(new_pbo),),
+    )
+
+    app.select_pbo()
+
+    assert calls == ["clear", ("add", [new_pbo])]
+    assert app.sources == [new_pbo]
+
+
 def test_browser_scan_progress_runs_while_catalogue_is_built(monkeypatch, tmp_path: Path) -> None:
     app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
     app.root = _FakeScanRoot()
