@@ -16,7 +16,7 @@ jobs:
       - name: Install
         run: python -m pip install -e . pytest matplotlib zstandard
       - name: Compile unified road modules
-        run: python -m compileall -q src/cwr_worldgen/playability.py src/cwr_worldgen/paved_road_generated_fallback_policy.py src/cwr_worldgen/paved_junction_policy.py src/cwr_worldgen/paved_junction_performance_policy.py src/cwr_worldgen/paved_junction_parallel_planning_policy.py src/cwr_worldgen/gravel_junction_policy.py src/cwr_worldgen/gravel_gap_policy.py src/cwr_worldgen/bridge_underlay_cleanup_policy.py src/cwr_worldgen/bridge_underlay_spatial_policy.py src/cwr_worldgen/final_road_dedup_policy.py src/cwr_worldgen/generator.py src/cwr_worldgen/road_chain_parallel_policy.py
+        run: python -m compileall -q src/cwr_worldgen/playability.py src/cwr_worldgen/paved_road_generated_fallback_policy.py src/cwr_worldgen/paved_junction_policy.py src/cwr_worldgen/paved_junction_performance_policy.py src/cwr_worldgen/paved_junction_parallel_planning_policy.py src/cwr_worldgen/gravel_junction_policy.py src/cwr_worldgen/gravel_gap_policy.py src/cwr_worldgen/bridge_underlay_cleanup_policy.py src/cwr_worldgen/bridge_underlay_spatial_policy.py src/cwr_worldgen/bridge_final_alignment_policy.py src/cwr_worldgen/final_road_dedup_policy.py src/cwr_worldgen/generator.py src/cwr_worldgen/road_chain_parallel_policy.py
       - name: Run unified road tests
         run: python -m pytest -q tests/test_modded_road_styles.py tests/test_paved_junction_performance_policy.py tests/test_paved_junction_parallel_planning_policy.py tests/test_road_finish_parallel_policy.py
       - name: Run gravel gap tests isolated
@@ -29,6 +29,10 @@ jobs:
           tests/test_bridge_underlay_cleanup_policy.py::test_missing_terminal_underlays_are_explicitly_generated
       - name: Run bridge underlay spatial tests isolated
         run: python -m pytest -q tests/test_bridge_underlay_spatial_policy.py
+      - name: Run unified bridge approach test isolated
+        run: >-
+          python -m pytest -q
+          tests/test_bridge_final_alignment_policy.py::test_unified_bridge_approach_connector_stays_generated
       - name: Run unified dirt dedup tests isolated
         run: >-
           python -m pytest -q
