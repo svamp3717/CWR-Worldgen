@@ -19,10 +19,12 @@ from .procedural_infrastructure import (
     GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES,
     GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
     GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES,
+    custom_road_junction_model_path,
     custom_road_model_path,
     gravel_curve_model_path,
     gravel_junction_model_path,
     gravel_road_model_path,
+    is_generated_dirt_junction_model,
     is_generated_dirt_road_model,
     is_generated_gravel_junction_model,
     is_generated_gravel_road_model,
@@ -956,11 +958,11 @@ def road_model_variant_paths(model_path: str, configured_long_length: float) -> 
 def road_model_surface(spec: object, model_path: str) -> str | None:
     """Classify stock, generated, or configured mod road models by surface."""
 
-    if is_generated_gravel_road_model(model_path):
+    if is_generated_gravel_road_model(model_path) or is_generated_gravel_junction_model(model_path):
         return "gravel"
-    if is_generated_dirt_road_model(model_path):
+    if is_generated_dirt_road_model(model_path) or is_generated_dirt_junction_model(model_path):
         return "dirt"
-    if is_generated_paved_road_model(model_path):
+    if is_generated_paved_road_model(model_path) or is_generated_paved_junction_model(model_path):
         return "paved"
 
     target = _road_model_key(model_path)
@@ -1555,6 +1557,64 @@ def _generated_paved_half_width(model_path: str) -> float:
     return GENERATED_PAVED_HALF_WIDTH_METRES
 
 
+def _generated_custom_road_junction_cap_plan(
+    values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
+    spec: PlayabilitySpec,
+) -> tuple[str, tuple[float, float]] | None:
+    """Create a donor-styled T/X hub for one measurable custom road family."""
+
+    if len(values) not in {3, 4}:
+        return None
+    surfaces = {
+        road_model_surface(spec, value[2])
+        for value in values
+    }
+    if len(surfaces) != 1:
+        return None
+    surface = next(iter(surfaces))
+    if surface not in {"paved", "gravel", "dirt"}:
+        return None
+
+    configured = str(
+        getattr(spec, f"{surface}_road_model", "") or ""
+    ).strip()
+    if not configured:
+        return None
+    configured_key = _road_model_key(configured)
+    # Stock CWA/OFP families already have their own junction rules. Donor hubs
+    # are for external/custom road families only.
+    if configured_key.startswith(r"o\road\"):
+        return None
+
+    widths = []
+    configured_dimensions = road_model_dimensions(configured)
+    for value in values:
+        measured = road_model_dimensions(value[2]) or configured_dimensions
+        if measured is None:
+            return None
+        widths.append(float(measured[0]))
+    if not widths:
+        return None
+    minimum_width = min(widths)
+    maximum_width = max(widths)
+    tolerance = max(0.20, minimum_width * 0.08)
+    if maximum_width - minimum_width > tolerance:
+        return None
+
+    directions = tuple(value[0] for value in values)
+    try:
+        headings, axis = paved_junction_signature_for_directions(directions)
+        model_path = custom_road_junction_model_path(
+            str(getattr(spec, "name", "world")),
+            surface,
+            max(widths),
+            headings,
+        )
+    except ValueError:
+        return None
+    return model_path, axis
+
+
 def _generated_paved_t_cap_plan(
     values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
     spec: PlayabilitySpec,
@@ -2142,6 +2202,7 @@ def _road_object_on_slope(
         is_generated_gravel_road_model(model_path)
         or is_generated_dirt_road_model(model_path)
         or is_generated_gravel_junction_model(model_path)
+        or is_generated_dirt_junction_model(model_path)
     ):
         # Gravel is a normal terrain-following road, not a raised slab. Place
         # its rendered surface and Roadway LOD exactly on the fitted terrain
