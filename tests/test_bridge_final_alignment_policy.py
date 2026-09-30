@@ -253,6 +253,15 @@ def test_terrtest100_bas_unified_bridge_gaps_are_filled() -> None:
                 bridge_heading,
                 -0.7525930681628292,
             ),
+            WorldObject(
+                1049,
+                model,
+                676.209228515625,
+                6.335000038146973,
+                723.6162719726562,
+                bridge_heading,
+                0.0,
+            ),
         ),
         (
             (832.3277210263274, 828.4860912335249),
@@ -279,14 +288,25 @@ def test_terrtest100_bas_unified_bridge_gaps_are_filled() -> None:
                 236.79299078600377,
                 -0.761284228467361,
             ),
+            WorldObject(
+                1052,
+                model,
+                821.951416015625,
+                6.335000038146973,
+                821.5159912109375,
+                bridge_heading,
+                0.0,
+            ),
         ),
     )
 
-    for index, (bridge_point, approach, continuation) in enumerate(cases):
+    for index, (bridge_point, approach, continuation, terminal_mask) in enumerate(cases):
+        outward = (-axis[0], -axis[1]) if index == 0 else axis
         selected = policy._approach_candidate(
             bridge_point,
             bridge_heading,
-            (approach, continuation),
+            (terminal_mask, approach, continuation),
+            outward,
         )
         assert selected is not None
         candidate, near, gap = selected
@@ -296,7 +316,7 @@ def test_terrtest100_bas_unified_bridge_gaps_are_filled() -> None:
         filler = policy._approach_filler(
             3000 + index,
             bridge_point,
-            (-axis[0], -axis[1]) if index == 0 else axis,
+            outward,
             bridge_heading,
             candidate,
             near,
