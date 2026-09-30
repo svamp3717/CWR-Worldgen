@@ -105,6 +105,24 @@ def _generated_width(
         measured = _p.road_model_dimensions(donor_model) if donor_model else None
         if measured is not None:
             return max(1.5, float(measured[0]))
+
+        # Known stock families have stable widths even when their P3Ds are not
+        # present under the configured asset roots. Unknown/modded families do
+        # not. Falling back to OSM width here creates visibly different-width
+        # generated bends beside the real mod straight pieces.
+        donor_family = _family(donor_model) if donor_model else ""
+        if donor_family in _PAVED_HALF_WIDTHS:
+            return _PAVED_HALF_WIDTHS[donor_family] * 2.0
+        if donor_family in _DIRT_HALF_WIDTHS:
+            return _DIRT_HALF_WIDTHS[donor_family] * 2.0
+        if donor_model and not _p.is_generated_gravel_road_model(donor_model):
+            raise ValueError(
+                f"could not measure the {surface} road donor {donor_model!r}; "
+                "generated road shapes cannot safely match its width. Add the "
+                "PBO/PBO.ZST containing the straight donor to Asset roots, or "
+                "select a measurable straight P3D."
+            )
+
         active_tags = _p._ACTIVE_ROAD_TAGS.get()
         if active_tags is not None:
             return max(1.5, float(_p.road_width_metres(active_tags)))
