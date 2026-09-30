@@ -608,7 +608,11 @@ def test_unified_shape_mode_converts_straight_roads_to_generated_ribbons(
         custom_road_shapes=True,
         procedural_paved_road_fallback=True,
     )
-    pieces = playability.road_model_variants(source_model, 25.0)
+    pieces = playability.road_model_variants(
+        source_model,
+        25.0,
+        donor_only=True,
+    )
     piece = next(
         (value for value in pieces if value.nominal_length == 6),
         pieces[-1],
