@@ -905,12 +905,19 @@ def _road_model_with_length(model_path: str, nominal_length: int) -> str | None:
     return model_path[: -len(suffix)] + f"{nominal_length}.p3d"
 
 
-def road_model_variants(model_path: str, configured_long_length: float) -> tuple[_RoadPiece, ...]:
-    """Return deterministic road-model length variants.
+def road_model_variants(
+    model_path: str,
+    configured_long_length: float,
+    *,
+    donor_only: bool = False,
+) -> tuple[_RoadPiece, ...]:
+    """Return deterministic road-model fitting pieces.
 
-    Stock OFP/CWA road families stop at 6 m. Generated gravel additionally has
-    a 3 m sibling so tight bends can use shorter curved sections without
-    inventing nonexistent stock assets.
+    Unified custom-road mode treats the configured straight P3D purely as one
+    donor: no 12/6/3 siblings are inferred or discovered. Its measured length is
+    the single segmentation unit and Worldgen procedurally generates every placed
+    straight/curve/filler piece from that donor style. Legacy callers retain the
+    historical stock-family sibling catalogue.
     """
 
     if configured_long_length <= 0.0:
@@ -925,18 +932,28 @@ def road_model_variants(model_path: str, configured_long_length: float) -> tuple
                 max(1, int(round(float(custom[2])))),
             ),
         )
-    gravel = is_generated_gravel_road_model(model_path)
-    nominals = (25, 12, 6, 3) if gravel else (25, 12, 6)
-    pieces: list[_RoadPiece] = []
-    availability = _ROAD_MODEL_VARIANTS_AVAILABLE.get()
-    base_key = _road_model_key(model_path)
-    available = availability.get(base_key) if availability is not None else None
+
     measured = road_model_dimensions(model_path)
     long_length = (
         float(measured[1])
         if measured is not None
         else float(configured_long_length)
     )
+    if donor_only:
+        return (
+            _RoadPiece(
+                model_path,
+                long_length,
+                max(1, int(round(long_length))),
+            ),
+        )
+
+    gravel = is_generated_gravel_road_model(model_path)
+    nominals = (25, 12, 6, 3) if gravel else (25, 12, 6)
+    pieces: list[_RoadPiece] = []
+    availability = _ROAD_MODEL_VARIANTS_AVAILABLE.get()
+    base_key = _road_model_key(model_path)
+    available = availability.get(base_key) if availability is not None else None
     for nominal in nominals:
         if nominal == 3 and gravel:
             world_name = model_path.split("\\", 1)[0]
@@ -965,10 +982,22 @@ def road_model_variants(model_path: str, configured_long_length: float) -> tuple
     return tuple(pieces)
 
 
-def road_model_variant_paths(model_path: str, configured_long_length: float) -> tuple[str, ...]:
+def road_model_variant_paths(
+    model_path: str,
+    configured_long_length: float,
+    *,
+    donor_only: bool = False,
+) -> tuple[str, ...]:
     """Public helper used by strict-asset classification and manifests."""
 
-    return tuple(piece.model_path for piece in road_model_variants(model_path, configured_long_length))
+    return tuple(
+        piece.model_path
+        for piece in road_model_variants(
+            model_path,
+            configured_long_length,
+            donor_only=donor_only,
+        )
+    )
 
 
 def road_model_width_metres(model_path: str) -> float | None:
@@ -1023,7 +1052,11 @@ def road_model_surface(spec: object, model_path: str) -> str | None:
     for surface, base_model in configured:
         if not base_model:
             continue
-        variants = road_model_variants(base_model, segment_length)
+        variants = road_model_variants(
+            base_model,
+            segment_length,
+            donor_only=bool(getattr(spec, "custom_road_shapes", False)),
+        )
         if target in {_road_model_key(piece.model_path) for piece in variants}:
             return surface
     return None
@@ -2601,7 +2634,11 @@ def _fit_stock_piece_road_objects(
     def variants_for(model_path: str) -> tuple[_RoadPiece, ...]:
         variants = variant_cache.get(model_path)
         if variants is None:
-            variants = road_model_variants(model_path, spec.road_segment_length)
+            variants = road_model_variants(
+                model_path,
+                spec.road_segment_length,
+                donor_only=bool(getattr(spec, "custom_road_shapes", False)),
+            )
             if is_generated_gravel_road_model(model_path):
                 # Keep the 25 m gravel slab out of terrain-following chains, but
                 # allow 12 m curved ribbons as well as 6 m ones. The previous
