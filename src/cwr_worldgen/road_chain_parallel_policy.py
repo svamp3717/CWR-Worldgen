@@ -565,9 +565,18 @@ def _fit_stock_piece_road_objects_parallel(
             for value in values
         )
         incident_models = {value[2].casefold(): value[2] for value in values}
+        donor_junction = _playability._generated_custom_road_junction_cap_plan(
+            values, spec
+        )
         generated_paved_t = _playability._generated_paved_t_cap_plan(values, spec)
         axis_override = None
-        if all_gravel:
+        if donor_junction is not None:
+            base_model, axis_override = donor_junction
+            hub_length = (
+                _playability.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 2.0
+            )
+            cap_piece = _playability._RoadPiece(base_model, hub_length, 6)
+        elif all_gravel:
             degree = len(values)
             base_model = _playability.gravel_junction_model_path(spec.name, degree)
             hub_length = 5.4 if degree == 3 else 6.0
@@ -611,7 +620,7 @@ def _fit_stock_piece_road_objects_parallel(
             end_point,
             cap_vertical_offset,
         )
-        if generated_paved_t is not None:
+        if donor_junction is not None or generated_paved_t is not None:
             cap_trim_lengths[key] = (
                 half
                 + _playability.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
