@@ -653,6 +653,7 @@ def test_mixed_modded_paved_gravel_t_has_no_open_connector_gap() -> None:
         ))
 
     approach_endpoints = []
+    endpoint_details = []
     surfaces = set()
     for obj in report.objects[report.junction_cap_objects:]:
         signature = infrastructure.custom_road_model_signature(obj.model_path)
@@ -675,20 +676,42 @@ def test_mixed_modded_paved_gravel_t_has_no_open_connector_gap() -> None:
         radians = math.radians(float(obj.heading_degrees))
         dx = math.sin(radians) * length * 0.5
         dz = math.cos(radians) * length * 0.5
-        approach_endpoints.extend((
+        object_endpoints = (
             (float(obj.x) - dx, float(obj.z) - dz),
             (float(obj.x) + dx, float(obj.z) + dz),
-        ))
+        )
+        approach_endpoints.extend(object_endpoints)
+        endpoint_details.extend(
+            (
+                endpoint,
+                surface,
+                obj.model_path,
+                int(obj.object_id),
+            )
+            for endpoint in object_endpoints
+        )
 
     assert {"paved", "gravel"} <= surfaces
-    connector_gaps = [
-        min(math.dist(connector, endpoint) for endpoint in approach_endpoints)
+    nearest_details = [
+        min(
+            (
+                math.dist(connector, endpoint),
+                surface,
+                model_path,
+                object_id,
+                endpoint,
+            )
+            for endpoint, surface, model_path, object_id in endpoint_details
+        )
         for connector in connectors
     ]
+    connector_gaps = [value[0] for value in nearest_details]
     assert max(connector_gaps) <= (
         infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES + 0.08
     ), {
         "connector_gaps": connector_gaps,
+        "nearest": nearest_details,
+        "connectors": connectors,
         "objects": [
             (
                 obj.model_path,
