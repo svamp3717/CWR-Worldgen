@@ -106,7 +106,7 @@ def _generated_width(
         if measured is not None:
             width = max(1.5, float(measured[0]))
             curve_model = str(
-                getattr(context_spec := spec, f"{surface}_road_curve_model", "") or ""
+                getattr(spec, f"{surface}_road_curve_model", "") or ""
             ).strip()
             curve_measured = (
                 _p.road_model_dimensions(curve_model)
