@@ -1199,6 +1199,58 @@ def test_unmeasured_mod_road_width_fails_instead_of_using_generic_width() -> Non
         playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
 
 
+def test_unmeasured_pbo_donor_reports_actual_p3d_failure(tmp_path: Path) -> None:
+    donor = r"bas_o\_road\bas_asf25.p3d"
+    pbo = tmp_path / "BAS_O.pbo"
+    write_pbo(
+        pbo,
+        (
+            PboEntry(
+                r"_road\bas_asf25.p3d",
+                b"ODOL" + struct.pack("<II", 99, 1),
+            ),
+        ),
+    )
+    spec = SimpleNamespace(
+        paved_road_model=r"o\road\sil25.p3d",
+        paved_road_curve_model="",
+        gravel_road_model=donor,
+        gravel_road_curve_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        dirt_road_curve_model="",
+        road_segment_length=25.0,
+        asset_roots=(pbo,),
+        cache_dir=None,
+        cache_enabled=False,
+        cache_refresh=False,
+        custom_road_shapes=True,
+    )
+
+    errors: dict[str, str] = {}
+    dimensions = generator._modded_road_model_dimensions(
+        spec,
+        {},
+        measurement_errors=errors,
+    )
+    key = playability._road_model_key(donor)
+    assert key not in dimensions
+    assert str(pbo) in errors[key]
+    assert "unsupported ODOL version 99" in errors[key]
+
+    pieces = (playability._RoadPiece(donor, 25.0, 25),)
+    dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(dimensions or None)
+    errors_token = playability._ROAD_MODEL_MEASUREMENT_ERRORS.set(errors)
+    try:
+        with pytest.raises(
+            ValueError,
+            match="unsupported ODOL version 99",
+        ):
+            fallback._generated_width(pieces, spec, "gravel")
+    finally:
+        playability._ROAD_MODEL_MEASUREMENT_ERRORS.reset(errors_token)
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
+
+
 def test_road_donor_diagnostics_records_measured_straight_and_curve_style() -> None:
     straight = r"bas_o\_road\bas_asf25.p3d"
     curve = r"bas_o\_road\bas_asf10 25.p3d"
