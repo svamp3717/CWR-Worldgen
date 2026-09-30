@@ -1432,15 +1432,10 @@ def _paved_junction_lods(
             half_width,
             extent=GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
         )
-        junction_texture = (
-            r"o\road\sil_new.paa"
-            if key.width_m >= 8.5
-            else texture
-        )
         visual = _stock_style_paved_junction_visual_lod(
             headings=headings,
             half_width=half_width,
-            texture=junction_texture,
+            texture=texture,
         )
     else:
         match = re.fullmatch(
@@ -1462,16 +1457,11 @@ def _paved_junction_lods(
             extent=GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
         )
         half_width = max(main_half_width, branch_half_width)
-        junction_texture = (
-            r"o\road\sil_new.paa"
-            if half_width * 2.0 >= 8.5
-            else texture
-        )
         visual = _paved_junction_visual_lod(
             main_half_width=main_half_width,
             branch_half_width=branch_half_width,
             branch_heading_degrees=branch_heading,
-            texture=junction_texture,
+            texture=texture,
         )
 
     boundary = tuple(
