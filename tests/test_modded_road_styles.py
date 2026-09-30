@@ -864,6 +864,57 @@ def test_custom_donor_junction_model_uses_surface_donor_texture(
     )
 
 
+def test_unified_stock_and_modded_roads_use_one_straight_donor() -> None:
+    stock = r"o\road\sil25.p3d"
+    modded = r"bas_o\_road\bas_asf25.p3d"
+    modded_key = playability._road_model_key(modded)
+
+    dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(
+        {modded_key: (7.0, 25.0)}
+    )
+    availability_token = playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(
+        {
+            modded_key: frozenset({
+                modded_key,
+                playability._road_model_key(r"bas_o\_road\bas_asf12.p3d"),
+                playability._road_model_key(r"bas_o\_road\bas_asf6.p3d"),
+            })
+        }
+    )
+    try:
+        stock_pieces = playability.road_model_variants(
+            stock,
+            25.0,
+            donor_only=True,
+        )
+        modded_pieces = playability.road_model_variants(
+            modded,
+            25.0,
+            donor_only=True,
+        )
+    finally:
+        playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
+
+    assert [piece.model_path for piece in stock_pieces] == [stock]
+    assert [piece.model_path for piece in modded_pieces] == [modded]
+    assert [piece.length_metres for piece in stock_pieces] == pytest.approx([25.0])
+    assert [piece.length_metres for piece in modded_pieces] == pytest.approx([25.0])
+
+
+def test_unified_variant_paths_ignore_stock_and_modded_siblings() -> None:
+    assert playability.road_model_variant_paths(
+        r"o\road\sil25.p3d",
+        25.0,
+        donor_only=True,
+    ) == (r"o\road\sil25.p3d",)
+    assert playability.road_model_variant_paths(
+        r"bas_o\_road\bas_asf25.p3d",
+        25.0,
+        donor_only=True,
+    ) == (r"bas_o\_road\bas_asf25.p3d",)
+
+
 def test_modded_family_reuses_only_existing_sibling_models(tmp_path: Path) -> None:
     root = tmp_path / "mod"
     _write_fake_mod_asset(root, r"myroads\asphalt25.p3d", b"donor")
@@ -1604,14 +1655,15 @@ def test_sebnam_style_uses_straight_family_and_explicit_curve_reference(
         playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
         playability._ROAD_MODEL_EFFECTIVE_DONORS.reset(effective_token)
 
-    assert [piece.model_path for piece in pieces] == [
-        straight25,
-        straight12,
-        straight6,
-    ]
-    assert [piece.length_metres for piece in pieces] == pytest.approx(
-        [25.0, 12.5, 6.25]
-    )
+    assert availability == {
+        playability._road_model_key(straight25): frozenset({
+            playability._road_model_key(straight25)
+        })
+    }
+    assert playability._road_model_key(straight12) not in dimensions
+    assert playability._road_model_key(straight6) not in dimensions
+    assert [piece.model_path for piece in pieces] == [straight25]
+    assert [piece.length_metres for piece in pieces] == pytest.approx([25.0])
 
 
 def test_legacy_curved_sebnam_selection_auto_resolves_to_straight_sibling(
