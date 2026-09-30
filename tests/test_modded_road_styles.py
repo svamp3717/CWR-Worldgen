@@ -681,6 +681,94 @@ def test_unified_shape_mode_builds_generated_junctions_for_stock_surfaces(
     assert len(signature[2]) == 3
 
 
+def test_stock_paved_junction_policy_uses_unified_generated_hub() -> None:
+    bbox = (59.40, 16.82, 59.41, 16.83)
+    projection = BboxProjection.create(bbox, 1000.0)
+    centre = (500.0, 500.0)
+    dataset = OsmDataset(
+        source_generator="stock-unified-junction",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/main",
+                {"highway": "residential", "surface": "asphalt"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in ((500.0, 250.0), centre, (500.0, 750.0))
+                ),
+            ),
+            OsmLineFeature(
+                "way/branch",
+                {"highway": "residential", "surface": "asphalt"},
+                tuple(
+                    projection.to_latlon(point)
+                    for point in (centre, (750.0, 500.0))
+                ),
+            ),
+        ),
+    )
+    spec = _Milestone9PlayabilitySpec(
+        name="unified",
+        heightmap_path=Path("unused.png"),
+        bbox=bbox,
+        cells=40,
+        cell_size=25.0,
+        max_road_objects=10000,
+        strict_assets=False,
+    )
+
+    plans = paved_junction_policy._plans(dataset, projection, spec)
+
+    key = playability._road_node_key(centre)
+    assert key in plans
+    signature = infrastructure.custom_road_junction_signature(
+        plans[key].model_path
+    )
+    assert signature is not None
+    assert signature[0] == "paved"
+    assert signature[1] == pytest.approx(9.10)
+
+
+def test_paved_postpass_preserves_existing_unified_hub() -> None:
+    model = infrastructure.custom_road_junction_model_path(
+        "unified",
+        "paved",
+        9.10,
+        (0, 90, 180),
+    )
+    cap = playability.WorldObject(
+        1,
+        model,
+        100.0,
+        0.06,
+        100.0,
+        0.0,
+    )
+    report = SimpleNamespace(
+        objects=(cap,),
+        junction_cap_objects=1,
+    )
+    plan = SimpleNamespace(
+        model_path=model,
+        point=(100.0, 100.0),
+    )
+
+    applied = paved_junction_policy._apply_plans(
+        report,
+        {(1000, 1000): plan},
+        (),
+        SimpleNamespace(),
+    )
+
+    assert applied is report
+    assert applied.objects == (cap,)
+
+
 def test_unified_gravel_gap_fillers_use_custom_ribbon_family() -> None:
     spec = SimpleNamespace(
         name="unified",
