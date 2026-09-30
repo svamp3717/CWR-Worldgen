@@ -129,6 +129,9 @@ def _road_object_under_bridge(obj, spans) -> bool:
 
 
 def _straight_road_nominal_length(model_path: str) -> float | None:
+    custom = _playability.custom_road_model_signature(model_path)
+    if custom is not None and int(custom[3]) == 0:
+        return float(custom[2])
     filename = str(model_path).replace("/", "\\").rsplit("\\", 1)[-1]
     match = _STRAIGHT_ROAD_LENGTH_RE.search(filename)
     return float(match.group("length")) if match else None
@@ -136,6 +139,19 @@ def _straight_road_nominal_length(model_path: str) -> float | None:
 
 def _six_metre_sibling(model_path: str) -> str | None:
     path = str(model_path)
+    custom = _playability.custom_road_model_signature(path)
+    if custom is not None:
+        if int(custom[3]) != 0:
+            return None
+        normalized = path.replace("/", "\\")
+        world_name = normalized.split("\\", 1)[0]
+        return _playability.custom_road_model_path(
+            world_name,
+            custom[0],
+            float(custom[1]),
+            _APPROACH_FILL_NOMINAL_LENGTH_METRES,
+            0.0,
+        )
     match = _STRAIGHT_ROAD_LENGTH_RE.search(path)
     if match is None:
         return None
@@ -212,7 +228,11 @@ def _road_has_outward_neighbour(obj, bridge_point, road_objects) -> bool:
 def _approach_candidate(bridge_point, bridge_heading, road_objects):
     candidates = []
     for obj in road_objects:
-        if _cleanup._paved._family(obj.model_path) is None:
+        custom = _playability.custom_road_model_signature(obj.model_path)
+        if (
+            _cleanup._paved._family(obj.model_path) is None
+            and custom is None
+        ):
             continue
         endpoints = _road_endpoints(obj)
         if endpoints is None or _six_metre_sibling(obj.model_path) is None:
@@ -456,7 +476,7 @@ def _final_fit(
     if added and progress_callback is not None:
         progress_callback(
             99,
-            f"Added {added:,} stock road approach connector(s) at bridge abutments",
+            f"Added {added:,} road approach connector(s) at bridge abutments",
         )
     return filled
 
