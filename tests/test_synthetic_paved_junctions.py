@@ -171,7 +171,7 @@ def test_mixed_paved_dirt_node_keeps_only_paved_cap_incidents() -> None:
     assert actual == values[:2]
 
 
-def test_unified_mixed_node_keeps_gravel_or_dirt_branch_for_generated_hub() -> None:
+def test_unified_mixed_node_keeps_pre_unification_paved_ownership() -> None:
     values = (
         ((0.0, 1.0), False, r"o\road\sil25.p3d", "paved/north", "paved"),
         ((0.0, -1.0), False, r"o\road\sil25.p3d", "paved/south", "paved"),
@@ -181,7 +181,7 @@ def test_unified_mixed_node_keeps_gravel_or_dirt_branch_for_generated_hub() -> N
     assert playability._junction_cap_incidents(
         values,
         include_mixed_surfaces=True,
-    ) == values
+    ) == values[:2]
 
 
 def test_pure_dirt_node_keeps_dirt_junction_topology() -> None:
