@@ -283,6 +283,10 @@ class AssetBrowserApp:
             ),
         )
         if values:
+            # Selecting a PBO is a replacement operation. This keeps the browser
+            # focused on the newly chosen archive(s) instead of silently retaining
+            # models and textures from a previous package.
+            self.clear_sources()
             self._add_sources(Path(value) for value in values)
 
     def select_folder(self) -> None:
