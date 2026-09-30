@@ -19,6 +19,8 @@ from cwr_worldgen import paved_road_generated_fallback_policy as fallback
 from cwr_worldgen import playability
 from cwr_worldgen import procedural_infrastructure as infrastructure
 from cwr_worldgen import road_chain_parallel_policy
+from cwr_worldgen import road_quality_policy
+from cwr_worldgen import gravel_junction_policy
 from cwr_worldgen.assets import model_texture_dependencies, scan_assets
 from cwr_worldgen.osm import (
     BboxProjection,
@@ -560,6 +562,27 @@ def test_parallel_fitter_emits_custom_donor_junction_cap() -> None:
     assert signature[1] == pytest.approx(5.2)
     assert len(signature[2]) == 3
     assert cap.model_path.startswith(r"donorworld\i\road_j3_paved_w052_")
+
+
+def test_custom_gravel_donor_junction_keeps_directional_arm_reach() -> None:
+    arm_extent = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+    junction = road_quality_policy._Junction(
+        point=(0.0, 0.0),
+        axis=(0.0, 1.0),
+        half_length=arm_extent,
+        half_width=infrastructure.GENERATED_GRAVEL_HALF_WIDTH_METRES,
+        directions=((0.0, 1.0), (0.0, -1.0), (1.0, 0.0)),
+        directional_exit_distances=(
+            ((0.0, 1.0), arm_extent),
+            ((0.0, -1.0), arm_extent),
+            ((1.0, 0.0), arm_extent),
+        ),
+    )
+
+    assert road_quality_policy._exit_distance(
+        junction, (1.0, 0.0)
+    ) == pytest.approx(arm_extent)
+    assert gravel_junction_policy._is_gravel_junction(junction) is False
 
 
 def test_stock_paved_family_does_not_create_donor_junction_plan() -> None:
