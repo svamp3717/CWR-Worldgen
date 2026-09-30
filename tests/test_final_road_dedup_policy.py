@@ -32,6 +32,23 @@ def _road(object_id, model, x, z, *, heading=0.0, y=0.0):
     return WorldObject(object_id, model, x, y, z, heading, 0.0)
 
 
+def test_unified_generated_duplicate_straights_keep_one_deterministically():
+    model = custom_road_model_path(
+        "unified",
+        "paved",
+        9.1,
+        25.0,
+    )
+    report = _report((
+        _road(20, model, 100.0, 100.0),
+        _road(10, model, 100.0, 100.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (10,)
+
+
 def test_exact_duplicate_straights_keep_one_deterministically():
     report = _report((
         _road(20, r"o\road\sil25.p3d", 100.0, 100.0),
