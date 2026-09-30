@@ -629,72 +629,34 @@ def test_mixed_modded_paved_gravel_t_has_no_open_connector_gap() -> None:
         playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
         playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
 
-    assert report.junction_cap_objects == 1
-    cap = report.objects[0]
-    junction = infrastructure.custom_road_junction_signature(cap.model_path)
-    assert junction is not None
-    assert junction[0] == "paved"
-    assert junction[1] == pytest.approx(7.0)
-    assert len(junction[2]) == 3
+    # This is the pre-stock-unification modded behavior: paved owns the mixed
+    # node, so there is no mixed T cap. The paved through-road stays continuous
+    # and the gravel branch reaches the same node underneath it.
+    assert report.junction_cap_objects == 0
 
-    yaw = math.radians(cap.heading_degrees)
-    cosine = math.cos(yaw)
-    sine = math.sin(yaw)
-    arm_extent = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
-
-    connectors = []
-    for heading in junction[2]:
-        radians = math.radians(float(heading))
-        local_x = math.sin(radians) * arm_extent
-        local_z = math.cos(radians) * arm_extent
-        connectors.append((
-            float(cap.x) + local_x * cosine + local_z * sine,
-            float(cap.z) - local_x * sine + local_z * cosine,
-        ))
-
-    road_segments = []
-    surfaces = set()
-    for obj in report.objects[report.junction_cap_objects:]:
-        signature = infrastructure.custom_road_model_signature(obj.model_path)
+    distances: dict[str, list[float]] = {"paved": [], "gravel": []}
+    for obj in report.objects:
         surface = playability.road_model_surface(spec, obj.model_path)
-        if surface is None:
+        if surface not in distances:
             continue
-        surfaces.add(surface)
+        signature = infrastructure.custom_road_model_signature(obj.model_path)
         if signature is not None:
             length = float(signature[2])
-        elif obj.model_path.casefold() == paved.casefold():
-            length = 25.0
         else:
             length = playability.road_model_variants(
                 obj.model_path,
                 spec.road_segment_length,
                 donor_only=True,
             )[0].length_metres
-        radians = math.radians(float(obj.heading_degrees))
-        dx = math.sin(radians) * length * 0.5
-        dz = math.cos(radians) * length * 0.5
-        road_segments.append((
-            (float(obj.x) - dx, float(obj.z) - dz),
-            (float(obj.x) + dx, float(obj.z) + dz),
-            surface,
-            obj.model_path,
-        ))
-
-    assert {"paved", "gravel"} <= surfaces
-    connector_gaps = [
-        min(
-            playability._point_segment_distance(
-                connector,
-                segment_start,
-                segment_end,
-            )
-            for segment_start, segment_end, _surface, _model in road_segments
+        axis = playability._model_axis(obj, length)
+        distances[surface].append(
+            playability._point_segment_distance(centre, axis[0], axis[1])
         )
-        for connector in connectors
-    ]
-    assert max(connector_gaps) <= (
-        infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES + 0.08
-    ), connector_gaps
+
+    assert distances["paved"]
+    assert distances["gravel"]
+    assert min(distances["paved"]) <= 0.30
+    assert min(distances["gravel"]) <= 0.30
 
 
 @pytest.mark.parametrize(
@@ -773,71 +735,43 @@ def test_full_pipeline_keeps_mixed_paved_gravel_t_connected(
         playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
         playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
 
-    caps = [
-        obj
-        for obj in report.objects
+    assert not [
+        obj for obj in report.objects
         if infrastructure.custom_road_junction_signature(obj.model_path)
         is not None
     ]
-    assert len(caps) == 1
-    cap = caps[0]
-    junction = infrastructure.custom_road_junction_signature(cap.model_path)
-    assert junction is not None
-    assert junction[0] == "paved"
-    assert junction[1] == pytest.approx(max(paved_width, 4.6))
-    assert len(junction[2]) == 3
 
-    road_segments = []
-    surfaces = set()
+    distances: dict[str, list[float]] = {"paved": [], "gravel": []}
     for obj in report.objects:
-        signature = infrastructure.custom_road_model_signature(obj.model_path)
-        if signature is None:
+        surface = playability.road_model_surface(spec, obj.model_path)
+        if surface not in distances:
             continue
-        surfaces.add(signature[0])
-        length = float(signature[2])
-        radians = math.radians(float(obj.heading_degrees))
-        dx = math.sin(radians) * length * 0.5
-        dz = math.cos(radians) * length * 0.5
-        road_segments.append((
-            (float(obj.x) - dx, float(obj.z) - dz),
-            (float(obj.x) + dx, float(obj.z) + dz),
-            signature[0],
-        ))
+        signature = infrastructure.custom_road_model_signature(obj.model_path)
+        if signature is not None:
+            length = float(signature[2])
+        else:
+            length = playability.road_model_variants(
+                obj.model_path,
+                spec.road_segment_length,
+                donor_only=True,
+            )[0].length_metres
+        axis = playability._model_axis(obj, length)
+        distances[surface].append(
+            playability._point_segment_distance(centre, axis[0], axis[1])
+        )
 
-    assert {"paved", "gravel"} <= surfaces
+    assert distances["paved"]
+    assert distances["gravel"]
+    # Paved must remain continuous through the shared node. Gravel may overlap
+    # underneath it, but it must never stop metres short and expose terrain.
+    assert min(distances["paved"]) <= 0.30
+    assert min(distances["gravel"]) <= max(0.50, paved_width * 0.5)
+
     if not paved_model.casefold().startswith("o\\road\\"):
-        assert all(
-            obj.model_path.casefold() != paved_model.casefold()
+        assert any(
+            obj.model_path.casefold() == paved_model.casefold()
             for obj in report.objects
         )
-
-    yaw = math.radians(float(cap.heading_degrees))
-    cosine = math.cos(yaw)
-    sine = math.sin(yaw)
-    extent = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
-    connector_gaps = []
-    for heading in junction[2]:
-        radians = math.radians(float(heading))
-        local_x = math.sin(radians) * extent
-        local_z = math.cos(radians) * extent
-        connector = (
-            float(cap.x) + local_x * cosine + local_z * sine,
-            float(cap.z) - local_x * sine + local_z * cosine,
-        )
-        connector_gaps.append(min(
-            playability._point_segment_distance(
-                connector,
-                segment_start,
-                segment_end,
-            )
-            for segment_start, segment_end, _surface in road_segments
-        ))
-
-    assert max(connector_gaps) <= (
-        infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
-        + infrastructure.GENERATED_PAVED_TURN_VISUAL_OVERLAP_METRES
-        + 0.08
-    ), connector_gaps
 
 
 def test_custom_gravel_donor_junction_keeps_directional_arm_reach() -> None:
