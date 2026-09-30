@@ -219,6 +219,124 @@ def test_tinybridgetest11_connector_starts_exactly_on_bridge_abutment() -> None:
     assert filler.model_path.casefold().endswith(r"\sil6.p3d")
 
 
+def test_terrtest100_bas_unified_bridge_gaps_are_filled() -> None:
+    bridge_heading = 56.10946398814617
+    model = custom_road_model_path(
+        "wg_terrtest100",
+        "paved",
+        7.0,
+        25.0,
+    )
+    axis = (
+        math.sin(math.radians(bridge_heading)),
+        math.cos(math.radians(bridge_heading)),
+    )
+
+    cases = (
+        (
+            (665.8329235049226, 716.6461719500688),
+            WorldObject(
+                1047,
+                model,
+                646.1287841796875,
+                6.427552223205566,
+                703.4102783203125,
+                bridge_heading,
+                -0.5387977020665613,
+            ),
+            WorldObject(
+                1046,
+                model,
+                625.3761596679688,
+                6.709303855895996,
+                689.4700317382812,
+                bridge_heading,
+                -0.7525930681628292,
+            ),
+        ),
+        (
+            (832.3277210263274, 828.4860912335249),
+            WorldObject(
+                1048,
+                model,
+                852.8247680664062,
+                6.402408123016357,
+                842.254638671875,
+                bridge_heading,
+                0.42355765533427736,
+            ),
+            WorldObject(
+                1045,
+                custom_road_model_path(
+                    "wg_terrtest100",
+                    "paved",
+                    7.0,
+                    6.0,
+                ),
+                863.1032104492188,
+                6.498169422149658,
+                849.1357421875,
+                236.79299078600377,
+                -0.761284228467361,
+            ),
+        ),
+    )
+
+    for index, (bridge_point, approach, continuation) in enumerate(cases):
+        selected = policy._approach_candidate(
+            bridge_point,
+            bridge_heading,
+            (approach, continuation),
+        )
+        assert selected is not None
+        candidate, near, gap = selected
+        assert candidate.object_id == approach.object_id
+        assert 11.0 < gap < 12.5
+
+        filler = policy._approach_filler(
+            3000 + index,
+            bridge_point,
+            (-axis[0], -axis[1]) if index == 0 else axis,
+            bridge_heading,
+            candidate,
+            near,
+            gap,
+            float(near[1]),
+        )
+        assert filler is not None
+        signature = custom_road_model_signature(filler.model_path)
+        assert signature is not None
+        assert signature[0] == "paved"
+        assert signature[1] == 7.0
+        assert signature[2] >= gap
+        assert signature[2] - gap < 0.15
+
+        endpoints = policy._road_endpoints(filler)
+        assert endpoints is not None
+        bridge_end = min(
+            endpoints,
+            key=lambda point: math.dist(
+                (point[0], point[2]),
+                bridge_point,
+            ),
+        )
+        road_end = min(
+            endpoints,
+            key=lambda point: math.dist(
+                (point[0], point[2]),
+                (near[0], near[2]),
+            ),
+        )
+        assert math.dist(
+            (bridge_end[0], bridge_end[2]),
+            bridge_point,
+        ) < 1.0e-6
+        assert math.dist(
+            (road_end[0], road_end[2]),
+            (near[0], near[2]),
+        ) < 0.15
+
+
 def test_unified_bridge_approach_connector_stays_generated() -> None:
     bridge_point = (928.2240006, 884.8959707)
     bridge_deck_y = 7.1565831
