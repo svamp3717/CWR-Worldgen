@@ -1641,6 +1641,7 @@ def _road_donor_diagnostics(
             else ""
         )
         measured = dimensions.get(_road_model_key(effective)) if effective else None
+        curve_measured = dimensions.get(_road_model_key(curve)) if curve else None
         result[surface] = {
             "straight": straight,
             "curve": curve,
@@ -1653,6 +1654,18 @@ def _road_donor_diagnostics(
                 float(measured[1]) if measured is not None else None
             ),
             "straight_geometry_measured": measured is not None,
+            "measured_curve_connector_width_metres": (
+                float(curve_measured[0]) if curve_measured is not None else None
+            ),
+            "measured_curve_chord_length_metres": (
+                float(curve_measured[1]) if curve_measured is not None else None
+            ),
+            "curve_geometry_measured": curve_measured is not None,
+            "connector_width_delta_metres": (
+                abs(float(measured[0]) - float(curve_measured[0]))
+                if measured is not None and curve_measured is not None
+                else None
+            ),
         }
     return result
 
@@ -1918,16 +1931,32 @@ def _modded_road_model_dimensions(
         effective_donors.get(_road_model_key(value), value)
         for value in configured_donors
     ))
-    if not donors or not tuple(getattr(spec, "asset_roots", ()) or ()):
+    curve_donors = tuple(dict.fromkeys(
+        value
+        for value in (
+            str(getattr(spec, "paved_road_curve_model", "") or "").strip(),
+            str(getattr(spec, "gravel_road_curve_model", "") or "").strip(),
+            str(getattr(spec, "dirt_road_curve_model", "") or "").strip(),
+        )
+        if value
+    ))
+    if (
+        not donors
+        and not curve_donors
+    ) or not tuple(getattr(spec, "asset_roots", ()) or ()):
         return {}
 
-    requested = tuple(dict.fromkeys(
-        candidate
-        for donor in donors
-        for candidate in road_model_variant_paths(
-            donor, float(getattr(spec, "road_segment_length", 25.0))
-        )
-    ))
+    requested = tuple(dict.fromkeys((
+        *(
+            candidate
+            for donor in donors
+            for candidate in road_model_variant_paths(
+                donor, float(getattr(spec, "road_segment_length", 25.0))
+            )
+        ),
+        *curve_donors,
+    )))
+    curve_keys = {_road_model_key(value) for value in curve_donors}
     scan = locate_assets_fast(
         spec.asset_roots,
         requested,
@@ -1947,15 +1976,25 @@ def _modded_road_model_dimensions(
             info = inspect_visual_model_dimensions(read_asset_record_bytes(record))
         except (OSError, ValueError, ProxyCloneError):
             continue
-        width = float(info.width_metres)
+        width = float(
+            info.connector_width_metres
+            if info.connector_width_metres is not None
+            else info.width_metres
+        )
         length = float(info.length_metres)
+        curve_donor = key in curve_keys
         if (
-            not info.is_straight_road_candidate
-            or not math.isfinite(width)
+            not math.isfinite(width)
             or not math.isfinite(length)
             or not 0.75 <= width <= 30.0
-            or not 2.0 <= length <= 200.0
-            or length < width * 1.15
+            or not 0.25 <= length <= 200.0
+            or (
+                not curve_donor
+                and (
+                    not info.is_straight_road_candidate
+                    or length < width * 1.15
+                )
+            )
         ):
             continue
         result[key] = (width, length)
