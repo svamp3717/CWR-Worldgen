@@ -668,7 +668,25 @@ def test_base_fitter_does_not_preempt_stock_paved_junction_policy() -> None:
 
 def test_diagonal_t_junction_falls_back_to_generated_hub_after_stock_fails(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    original_success = fallback._successful_plan_keys
+    rejected_stock = []
+
+    def reject_stock_success(report, plans, spec=None, progress_callback=None):
+        successful = original_success(
+            report, plans, spec=spec, progress_callback=progress_callback
+        )
+        stock = {
+            key for key in successful
+            if not infrastructure.is_generated_paved_junction_model(
+                plans[key].model_path
+            )
+        }
+        rejected_stock.extend(stock)
+        return successful.difference(stock)
+
+    monkeypatch.setattr(fallback, "_successful_plan_keys", reject_stock_success)
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     dataset = _junction_dataset(projection, (650.0, 650.0))
@@ -696,6 +714,7 @@ def test_diagonal_t_junction_falls_back_to_generated_hub_after_stock_fails(
     )
     assert generated_plan is not None
 
+    assert rejected_stock
     assert report.junction_cap_objects == 1
     hub = report.objects[0]
     assert infrastructure.is_generated_paved_junction_model(hub.model_path)
