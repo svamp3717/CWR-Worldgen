@@ -77,7 +77,22 @@ def test_short_aligned_gap_between_gravel_endpoints_gets_a_small_filler() -> Non
         and 505.5 <= obj.x <= 506.5
         and abs(obj.z - 500.0) <= 0.1
     ]
-    assert len(fillers) == 1
+    assert len(fillers) == 1, {
+        "nearby": [
+            (
+                obj.object_id,
+                obj.model_path,
+                round(float(obj.x), 3),
+                round(float(obj.z), 3),
+                round(float(obj.heading_degrees), 3),
+            )
+            for obj in report.objects
+            if 490.0 <= float(obj.x) <= 520.0
+            and 490.0 <= float(obj.z) <= 510.0
+        ],
+        "short_piece_objects": report.short_piece_objects,
+        "chain_count": report.chain_count,
+    }
     assert abs(((fillers[0].heading_degrees - 90.0 + 180.0) % 360.0) - 180.0) <= 0.1
 
     # The 3 m filler plus the lowered visual tips participating in the seams is
