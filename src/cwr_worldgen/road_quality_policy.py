@@ -119,7 +119,11 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
                     base_model = next(iter(models.values()))
                 else:
                     base_model = spec.dirt_road_model if all(v[1] for v in values) else spec.paved_road_model
-                variants = _p.road_model_variants(base_model, spec.road_segment_length)
+                variants = _p.road_model_variants(
+                    base_model,
+                    spec.road_segment_length,
+                    donor_only=bool(getattr(spec, "custom_road_shapes", False)),
+                )
                 cap = next((piece for piece in variants if piece.nominal_length == 6), variants[-1])
                 hub_length = cap.length_metres
             axis = _p._dominant_node_axis(tuple((v[0], v[1], v[2], v[3]) for v in values))
