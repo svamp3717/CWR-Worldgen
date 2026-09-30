@@ -77,12 +77,29 @@ def _fit(paved_model, roads):
         strict_assets=False, paved_road_model=paved_model,
     )
     key = playability._road_model_key(paved_model)
-    dimensions = {} if key.startswith("o\\road\\") else {key: (7.0, 25.0)}
+    if key.startswith("o\\road\\"):
+        dimensions = {}
+        available = frozenset({key})
+    else:
+        sibling_paths = tuple(
+            paved_model[:-len("25.p3d")] + suffix
+            for suffix in ("25.p3d", "12.p3d", "6.p3d")
+        )
+        sibling_keys = tuple(
+            playability._road_model_key(path)
+            for path in sibling_paths
+        )
+        dimensions = {
+            sibling_keys[0]: (7.0, 25.0),
+            sibling_keys[1]: (7.0, 12.5),
+            sibling_keys[2]: (7.0, 6.25),
+        }
+        available = frozenset(sibling_keys)
     tokens = [
         (playability._ROAD_MODEL_DIMENSIONS,
          playability._ROAD_MODEL_DIMENSIONS.set(dimensions)),
         (playability._ROAD_MODEL_VARIANTS_AVAILABLE,
-         playability._ROAD_MODEL_VARIANTS_AVAILABLE.set({key: frozenset({key})})),
+         playability._ROAD_MODEL_VARIANTS_AVAILABLE.set({key: available})),
         (playability._ROAD_MODEL_EFFECTIVE_DONORS,
          playability._ROAD_MODEL_EFFECTIVE_DONORS.set({key: paved_model})),
     ]

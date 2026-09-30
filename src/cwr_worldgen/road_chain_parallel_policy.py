@@ -554,10 +554,13 @@ def _fit_stock_piece_road_objects_parallel(
     def variants_for(model_path: str) -> tuple[Any, ...]:
         variants = variant_cache.get(model_path)
         if variants is None:
+            # Unified geometry still needs the short segmentation catalogue.
+            # For mod families road_model_variants only returns siblings that the
+            # asset scan proved exist; generated curves continue to use the
+            # configured donor's style.
             variants = _playability.road_model_variants(
                 model_path,
                 spec.road_segment_length,
-                donor_only=bool(getattr(spec, "custom_road_shapes", False)),
             )
             if _playability.is_generated_gravel_road_model(model_path):
                 variants = tuple(

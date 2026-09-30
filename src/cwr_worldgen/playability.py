@@ -1069,10 +1069,12 @@ def road_model_surface(spec: object, model_path: str) -> str | None:
     for surface, base_model in configured:
         if not base_model:
             continue
+        # Surface identity follows the real fitting catalogue. In unified mode
+        # stock 25/12/6 pieces and existing mod siblings are still valid
+        # segmentation pieces; the configured long model remains the style donor.
         variants = road_model_variants(
             base_model,
             segment_length,
-            donor_only=bool(getattr(spec, "custom_road_shapes", False)),
         )
         if target in {_road_model_key(piece.model_path) for piece in variants}:
             return surface
@@ -2688,10 +2690,12 @@ def _fit_stock_piece_road_objects(
     def variants_for(model_path: str) -> tuple[_RoadPiece, ...]:
         variants = variant_cache.get(model_path)
         if variants is None:
+            # Keep short real siblings available for segmentation even when
+            # generated road shapes are enabled. Curved/poor-fit spans are still
+            # upgraded to donor-styled generated ribbons by the fallback policy.
             variants = road_model_variants(
                 model_path,
                 spec.road_segment_length,
-                donor_only=bool(getattr(spec, "custom_road_shapes", False)),
             )
             if is_generated_gravel_road_model(model_path):
                 # Keep the 25 m gravel slab out of terrain-following chains, but

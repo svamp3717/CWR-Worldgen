@@ -59,7 +59,6 @@ def _configured_variants(spec: Any, attribute: str) -> set[str]:
         for piece in _p.road_model_variants(
             model,
             configured_length,
-            donor_only=bool(getattr(spec, "custom_road_shapes", False)),
         )
     }
 
