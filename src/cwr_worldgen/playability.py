@@ -1542,7 +1542,10 @@ def _generated_paved_half_width(model_path: str) -> float:
     """Return the visible half-width used by a paved road family."""
 
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
-    generated = re.fullmatch(r"paved_w(?P<width>\d{3})_l\d{4}(?:_[lr]\d{2})?\.p3d", filename)
+    generated = re.fullmatch(
+        r"(?:road_)?paved_w(?P<width>\d{3})_l\d{4}(?:_[lr]\d{2,3})?\.p3d",
+        filename,
+    )
     if generated is not None:
         return int(generated.group("width")) / 20.0
     if filename.startswith("asf"):
