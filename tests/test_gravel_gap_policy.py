@@ -3,7 +3,10 @@ from pathlib import Path
 import cwr_worldgen.playability as playability
 from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
 from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
-from cwr_worldgen.procedural_infrastructure import GENERATED_GRAVEL_VISUAL_OVERLAP_METRES
+from cwr_worldgen.procedural_infrastructure import (
+    GENERATED_GRAVEL_VISUAL_OVERLAP_METRES,
+    custom_road_model_signature,
+)
 
 
 def _gravel_feature(projection, osm_key: str, points):
@@ -65,7 +68,12 @@ def test_short_aligned_gap_between_gravel_endpoints_gets_a_small_filler() -> Non
     )
     fillers = [
         obj for obj in report.objects
-        if obj.model_path.casefold().endswith(r"\gravel3.p3d")
+        if (
+            (signature := custom_road_model_signature(obj.model_path)) is not None
+            and signature[0] == "gravel"
+            and signature[1] == 4.6
+            and abs(signature[2] - 3.0) <= 0.1
+        )
         and 505.5 <= obj.x <= 506.5
         and abs(obj.z - 500.0) <= 0.1
     ]
@@ -122,7 +130,10 @@ def test_detached_gravel_endpoint_can_join_the_unused_arm_of_a_nearby_t_hub() ->
         spec,
     )
     assert any(
-        obj.model_path.casefold().endswith(r"\gravel6.p3d")
+        (signature := custom_road_model_signature(obj.model_path)) is not None
+        and signature[0] == "gravel"
+        and signature[1] == 4.6
+        and abs(signature[2] - 6.0) <= 0.1
         and 502.5 <= obj.x <= 504.5
         and abs(obj.z - 500.0) <= 0.1
         for obj in report.objects
