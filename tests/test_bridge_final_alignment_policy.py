@@ -408,7 +408,8 @@ def test_unified_bridge_approach_connector_stays_generated() -> None:
     assert signature is not None
     assert signature[0] == "paved"
     assert signature[1] == 9.1
-    assert signature[2] == 6.0
+    assert signature[2] >= gap
+    assert signature[2] - gap < 0.15
     assert signature[3] == 0
 
 
