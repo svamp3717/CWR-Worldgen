@@ -24,6 +24,6 @@ jobs:
           src/cwr_worldgen/paved_junction_parallel_planning_policy.py
       - name: Run mixed modded road regression
         run: >-
-          python -m pytest -q
+          python -m pytest -q -s
           tests/test_modded_road_styles.py::test_mixed_modded_paved_gravel_t_has_no_open_connector_gap
           tests/test_modded_road_styles.py::test_parallel_fitter_emits_custom_donor_junction_cap
