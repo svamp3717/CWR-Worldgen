@@ -27,5 +27,6 @@ jobs:
           python -m pytest -q -s
           tests/test_modded_road_styles.py::test_mixed_modded_paved_gravel_t_has_no_open_connector_gap
           tests/test_modded_road_styles.py::test_full_pipeline_keeps_mixed_paved_gravel_t_connected
+          tests/test_modded_road_styles.py::test_full_pipeline_keeps_two_way_paved_gravel_transition_closed
           tests/test_modded_road_styles.py::test_parallel_fitter_emits_custom_donor_junction_cap
           tests/test_synthetic_paved_junctions.py::test_unified_mixed_node_keeps_pre_unification_paved_ownership
