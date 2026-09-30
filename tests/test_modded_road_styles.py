@@ -656,10 +656,22 @@ def test_mixed_modded_paved_gravel_t_has_no_open_connector_gap() -> None:
     surfaces = set()
     for obj in report.objects[report.junction_cap_objects:]:
         signature = infrastructure.custom_road_model_signature(obj.model_path)
-        if signature is None:
+        surface = playability.road_model_surface(spec, obj.model_path)
+        if surface is None:
             continue
-        surfaces.add(signature[0])
-        length = float(signature[2])
+        surfaces.add(surface)
+        if signature is not None:
+            length = float(signature[2])
+        else:
+            measured = playability.road_model_dimensions(obj.model_path)
+            length = (
+                float(measured[1])
+                if measured is not None
+                else road_quality_policy._piece_length(
+                    obj.model_path,
+                    spec.road_segment_length,
+                )
+            )
         radians = math.radians(float(obj.heading_degrees))
         dx = math.sin(radians) * length * 0.5
         dz = math.cos(radians) * length * 0.5
