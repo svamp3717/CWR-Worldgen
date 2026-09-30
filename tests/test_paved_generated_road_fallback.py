@@ -131,7 +131,7 @@ def test_generated_junction_approach_still_allows_generated_paved_fallback() -> 
     plan_token = junctions._PLANS.set({
         key: SimpleNamespace(
             model_path=(
-                r"paved_fallback_test\i\"
+                "paved_fallback_test\\i\\"
                 r"paved_j3_w091_h000_095_190.p3d"
             )
         )
