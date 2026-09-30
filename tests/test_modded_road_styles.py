@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import struct
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -41,6 +42,39 @@ def _write_fake_mod_asset(root: Path, relative: str, payload: bytes) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(payload)
     return path
+
+
+def _literal_lzss(payload: bytes) -> bytes:
+    """Encode a valid BIS LZSS stream using literals only for test fixtures."""
+    packed = bytearray()
+    for offset in range(0, len(payload), 8):
+        chunk = payload[offset:offset + 8]
+        packed.append((1 << len(chunk)) - 1)
+        packed.extend(chunk)
+    packed.extend(struct.pack("<I", sum(payload) & 0xFFFFFFFF))
+    return bytes(packed)
+
+
+def _write_compressed_member_pbo(
+    path: Path,
+    member: str,
+    payload: bytes,
+) -> None:
+    stored = _literal_lzss(payload)
+    header = bytearray()
+    header.extend(member.replace("/", "\\").encode("ascii") + b"\0")
+    header.extend(
+        struct.pack(
+            "<IIIII",
+            asset_module._PBO_COMPRESSED,
+            len(payload),
+            0,
+            0,
+            len(stored),
+        )
+    )
+    header.extend(b"\0" + struct.pack("<IIIII", 0, 0, 0, 0, 0))
+    path.write_bytes(bytes(header) + stored)
 
 
 def _mlod_road(
@@ -1038,3 +1072,32 @@ def test_bas_o_straight_curve_pair_keeps_width_and_texture(
         surface="paved",
         donor_model=curve,
     ) == texture
+
+
+def test_fast_mod_road_measurement_reads_legacy_compressed_p3d(
+    tmp_path: Path,
+) -> None:
+    texture = r"bas_o\_tobj\bas_road2.paa"
+    donor = r"bas_o\_road\bas_asf25.p3d"
+    payload = _mlod_road(6.4, 25.0, texture)
+    pbo = tmp_path / "bas_o.pbo"
+    _write_compressed_member_pbo(
+        pbo,
+        r"_road\bas_asf25.p3d",
+        payload,
+    )
+
+    scan = locate_assets_fast(
+        (pbo,),
+        (donor,),
+        use_cache=False,
+    )
+    record = next(record for record in scan.records if record.path == donor)
+
+    assert record.readable is True
+    assert asset_module.read_asset_record_bytes(record) == payload
+    measured = inspect_visual_model_dimensions(
+        asset_module.read_asset_record_bytes(record)
+    )
+    assert measured.width_metres == pytest.approx(6.4)
+    assert measured.length_metres == pytest.approx(25.0)
