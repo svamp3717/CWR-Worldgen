@@ -832,6 +832,19 @@ def _cap_index(report, plan, used):
     return best[1]
 
 
+def _pending_approach_plans(report, plans):
+    """Exclude donor-style hubs already emitted by the base road fitter."""
+
+    return {
+        key: plan
+        for key, plan in plans.items()
+        if not (
+            _pi.is_generated_custom_road_junction_model(plan.model_path)
+            and _cap_index(report, plan, set()) is not None
+        )
+    }
+
+
 def _segment_distance(point, axis):
     return _p._point_segment_distance(point, axis[0], axis[1])
 
@@ -887,17 +900,8 @@ def _apply_plans(report, plans, elevations, spec):
     # with exact arm headings and generated ribbon approaches. Re-running the
     # historical stock approach solver here would replace those approaches with
     # sil/asf/kos P3Ds and reintroduce the seam/grass-wedge geometry this system
-    # is meant to avoid. Only fall through when the expected generated cap is
-    # actually missing from the base report.
-    pending_plans = {}
-    for key, plan in plans.items():
-        if (
-            _pi.is_generated_custom_road_junction_model(plan.model_path)
-            and _cap_index(report, plan, set()) is not None
-        ):
-            continue
-        pending_plans[key] = plan
-    plans = pending_plans
+    # is meant to avoid.
+    plans = _pending_approach_plans(report, plans)
     if not plans:
         return report
 
