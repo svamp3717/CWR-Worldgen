@@ -464,6 +464,7 @@ def test_measured_custom_donor_builds_matching_three_way_junction_plan(
         gravel_road_model=donors["gravel"],
         dirt_road_model=donors["dirt"],
         road_segment_length=25.0,
+        custom_road_shapes=True,
     )
     model = donors[surface]
     values = (
@@ -583,6 +584,131 @@ def test_custom_gravel_donor_junction_keeps_directional_arm_reach() -> None:
         junction, (1.0, 0.0)
     ) == pytest.approx(arm_extent)
     assert gravel_junction_policy._is_gravel_junction(junction) is False
+
+
+@pytest.mark.parametrize(
+    ("surface", "source_model", "expected_width"),
+    (
+        ("paved", r"o\road\sil25.p3d", 9.10),
+        ("dirt", r"o\road\ces25.p3d", 3.50),
+        ("gravel", r"unified\i\gravel25.p3d", 4.60),
+    ),
+)
+def test_unified_shape_mode_converts_straight_roads_to_generated_ribbons(
+    surface: str,
+    source_model: str,
+    expected_width: float,
+) -> None:
+    spec = SimpleNamespace(
+        name="unified",
+        paved_road_model=r"o\road\sil25.p3d",
+        gravel_road_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        road_segment_length=25.0,
+        custom_road_shapes=True,
+        procedural_paved_road_fallback=True,
+    )
+    pieces = playability.road_model_variants(source_model, 25.0)
+    piece = next(
+        (value for value in pieces if value.nominal_length == 6),
+        pieces[-1],
+    )
+    measure = playability._PolylineMeasure.create(
+        ((0.0, 0.0), (0.0, float(piece.length_metres)))
+    )
+    result = ((piece, (0.0, 0.0), (0.0, float(piece.length_metres))),)
+    token = road_quality_policy._CONTEXT.set(
+        road_quality_policy._Context((), spec, {})
+    )
+    try:
+        upgraded = fallback._upgrade_stock_result(
+            result,
+            measure,
+            pieces,
+            start_distance=0.0,
+            preferred_end_distance=measure.total,
+            minimum_end_distance=0.0,
+            maximum_end_distance=measure.total,
+        )
+    finally:
+        road_quality_policy._CONTEXT.reset(token)
+
+    assert len(upgraded) == 1
+    signature = infrastructure.custom_road_model_signature(
+        upgraded[0][0].model_path
+    )
+    assert signature is not None
+    assert signature[0] == surface
+    assert signature[1] == pytest.approx(expected_width)
+    assert signature[3] == 0
+
+
+@pytest.mark.parametrize(
+    ("surface", "model", "expected_width"),
+    (
+        ("paved", r"o\road\sil25.p3d", 9.10),
+        ("dirt", r"o\road\ces25.p3d", 3.50),
+        ("gravel", r"unified\i\gravel25.p3d", 4.60),
+    ),
+)
+def test_unified_shape_mode_builds_generated_junctions_for_stock_surfaces(
+    surface: str,
+    model: str,
+    expected_width: float,
+) -> None:
+    spec = SimpleNamespace(
+        name="unified",
+        paved_road_model=r"o\road\sil25.p3d",
+        gravel_road_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        road_segment_length=25.0,
+        custom_road_shapes=True,
+    )
+    values = (
+        ((0.0, 1.0), surface == "dirt", model, "north", "way-a"),
+        ((0.0, -1.0), surface == "dirt", model, "south", "way-a"),
+        ((1.0, 0.0), surface == "dirt", model, "east", "way-b"),
+    )
+
+    plan = playability._generated_custom_road_junction_cap_plan(values, spec)
+
+    assert plan is not None
+    model_path, _axis = plan
+    signature = infrastructure.custom_road_junction_signature(model_path)
+    assert signature is not None
+    assert signature[0] == surface
+    assert signature[1] == pytest.approx(expected_width)
+    assert len(signature[2]) == 3
+
+
+def test_unified_gravel_gap_fillers_use_custom_ribbon_family() -> None:
+    spec = SimpleNamespace(
+        name="unified",
+        gravel_road_model="",
+        road_segment_length=25.0,
+        custom_road_shapes=True,
+    )
+
+    piece = playability.gravel_filler_piece(spec, 6)
+
+    signature = infrastructure.custom_road_model_signature(piece.model_path)
+    assert signature is not None
+    assert signature[0] == "gravel"
+    assert signature[1] == pytest.approx(4.60)
+    assert signature[2] == pytest.approx(6.0)
+
+
+def test_stock_curve_donor_texture_fallbacks_support_unified_generation() -> None:
+    assert generator._resolved_road_donor_texture(
+        (),
+        surface="paved",
+        donor_model=r"o\road\sil10 25.p3d",
+    ) == r"landtext\silnice.pac"
+    assert generator._resolved_road_donor_texture(
+        (),
+        surface="dirt",
+        donor_model=r"o\road\ces10 25.p3d",
+    ) == r"o\road\ces_hned.paa"
 
 
 def test_stock_paved_family_does_not_create_donor_junction_plan() -> None:
