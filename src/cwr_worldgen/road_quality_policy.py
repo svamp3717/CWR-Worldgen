@@ -83,7 +83,12 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
 
     result: dict[tuple[int, int], _Junction] = {}
     for key, raw in incidents.items():
-        values = _p._junction_cap_incidents(_p._unique_incidents(raw))
+        values = _p._junction_cap_incidents(
+            _p._unique_incidents(raw),
+            include_mixed_surfaces=bool(
+                getattr(spec, "custom_road_shapes", False)
+            ),
+        )
         if not 3 <= len(values) <= 4:
             continue
         donor_junction = _p._generated_custom_road_junction_cap_plan(values, spec)
