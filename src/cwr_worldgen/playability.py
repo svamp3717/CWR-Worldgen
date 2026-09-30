@@ -908,7 +908,7 @@ def _road_model_with_length(model_path: str, nominal_length: int) -> str | None:
 def _known_stock_road_donor_length(model_path: str) -> float | None:
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
     match = re.fullmatch(
-        r"(?:sil|silnice|asf|asfaltka|kos|ces|cesta)(?P<length>25|12|6)\.p3d",
+        r"(?:sil|silnice|asf|asfaltka|kos|ces|cesta|gravel)(?P<length>25|12|6|3)\.p3d",
         filename,
     )
     return float(match.group("length")) if match is not None else None
