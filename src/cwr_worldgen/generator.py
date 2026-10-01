@@ -29,6 +29,7 @@ from .legacy_proxy_models import (
     ProxyCloneError,
     inspect_visual_model_dimensions,
     inspect_visual_surface_style,
+    inspect_roadway_surface_style,
 )
 from .assets import (
     AssetRecord,
@@ -1696,27 +1697,6 @@ def _road_donor_diagnostics(
             ),
         }
     return result
-
-
-def _roadway_surface_texture_for_donor(
-    surface: str,
-    donor_model: str,
-    visual_texture: str,
-) -> str:
-    """Choose the stock CWA surface-class texture for generated Roadway LODs."""
-
-    surface_name = surface.casefold()
-    donor = canonical_asset_path(donor_model)
-    if surface_name == "paved" and donor.startswith(r"o\road\sil"):
-        return r"landtext\silnice.pac"
-    if surface_name == "dirt" and (
-        donor.startswith(r"o\road\ces")
-        or donor.startswith(r"data3d\cesta")
-    ):
-        return r"landtext\cesta.pac"
-    if surface_name == "gravel" and not donor:
-        return r"landtext\cesta.pac"
-    return visual_texture
 
 
 def _resolved_road_donor_texture(
@@ -4260,26 +4240,13 @@ def build_milestone4(
     configured_gravel_curve = str(
         getattr(spec, "gravel_road_curve_model", "") or ""
     ).strip()
+    borrow_dirt_surface_for_gravel = bool(
+        generated_gravel_usage
+        and not (configured_gravel_curve or configured_gravel)
+    )
     if generated_gravel_usage and (configured_gravel_curve or configured_gravel):
         road_texture_donors["gravel"] = effective_texture_donor("gravel")
-    elif generated_gravel_usage:
-        gravel_roadway_texture = _roadway_surface_texture_for_donor(
-            "gravel",
-            "",
-            "",
-        )
-        gravel_style = RoadSurfaceStyle(
-            roadway_texture=gravel_roadway_texture,
-        )
-        road_surface_styles["gravel"] = gravel_style
-        road_surface_style_report["gravel"] = {
-            "source_format": "generated-default",
-            "visual_texture": None,
-            "roadway_texture": gravel_roadway_texture,
-            "point_flag": f"0x{int(gravel_style.point_flag) & 0xFFFFFFFF:08x}",
-            "face_flag": f"0x{int(gravel_style.face_flag) & 0xFFFFFFFF:08x}",
-        }
-    if generated_dirt_usage:
+    if generated_dirt_usage or borrow_dirt_surface_for_gravel:
         road_texture_donors["dirt"] = effective_texture_donor("dirt")
 
     if road_texture_donors:
@@ -4303,53 +4270,127 @@ def build_milestone4(
                 donor_model=donor_model,
             )
             donor_textures[surface] = texture
-            roadway_texture = _roadway_surface_texture_for_donor(
-                surface,
-                donor_model,
-                texture,
-            )
             donor_record = road_records.get(canonical_asset_path(donor_model))
-            if donor_record is None:
-                road_surface_styles[surface] = RoadSurfaceStyle(
-                    roadway_texture=roadway_texture,
-                )
-                road_surface_style_report[surface] = {
-                    "source_format": None,
-                    "visual_texture": texture,
-                    "roadway_texture": roadway_texture,
-                    "point_flag": None,
-                    "face_flag": None,
-                }
-                continue
-            try:
-                donor_style = inspect_visual_surface_style(
-                    read_asset_record_bytes(donor_record),
-                    texture_path=texture,
-                )
-            except (OSError, ValueError, FileNotFoundError, ProxyCloneError):
-                road_surface_styles[surface] = RoadSurfaceStyle(
-                    roadway_texture=roadway_texture,
-                )
-                road_surface_style_report[surface] = {
-                    "source_format": None,
-                    "visual_texture": texture,
-                    "roadway_texture": roadway_texture,
-                    "point_flag": None,
-                    "face_flag": None,
-                }
-                continue
-            road_surface_styles[surface] = RoadSurfaceStyle(
-                point_flag=int(donor_style.point_flag),
-                face_flag=int(donor_style.face_flag),
-                roadway_texture=roadway_texture,
-            )
-            road_surface_style_report[surface] = {
-                "source_format": donor_style.source_format,
+            style = RoadSurfaceStyle()
+            report_entry: dict[str, object] = {
+                "source_format": None,
                 "visual_texture": texture,
-                "roadway_texture": roadway_texture,
-                "point_flag": f"0x{int(donor_style.point_flag) & 0xFFFFFFFF:08x}",
-                "face_flag": f"0x{int(donor_style.face_flag) & 0xFFFFFFFF:08x}",
+                "point_flag": None,
+                "face_flag": None,
+                "roadway_source_format": None,
+                "roadway_texture": None,
+                "roadway_point_flag": None,
+                "roadway_face_flag": None,
             }
+            if donor_record is not None:
+                try:
+                    donor_bytes = read_asset_record_bytes(donor_record)
+                    visual_style = inspect_visual_surface_style(
+                        donor_bytes,
+                        texture_path=texture,
+                    )
+                    style = replace(
+                        style,
+                        point_flag=int(visual_style.point_flag),
+                        face_flag=int(visual_style.face_flag),
+                    )
+                    report_entry.update({
+                        "source_format": visual_style.source_format,
+                        "point_flag": (
+                            f"0x{int(visual_style.point_flag) & 0xFFFFFFFF:08x}"
+                        ),
+                        "face_flag": (
+                            f"0x{int(visual_style.face_flag) & 0xFFFFFFFF:08x}"
+                        ),
+                    })
+                except (
+                    OSError, ValueError, FileNotFoundError, ProxyCloneError
+                ):
+                    donor_bytes = None
+
+                if donor_bytes is not None:
+                    try:
+                        roadway_style = inspect_roadway_surface_style(
+                            donor_bytes
+                        )
+                        style = replace(
+                            style,
+                            roadway_texture=roadway_style.texture_path,
+                            roadway_point_flag=int(roadway_style.point_flag),
+                            roadway_face_flag=int(roadway_style.face_flag),
+                        )
+                        report_entry.update({
+                            "roadway_source_format": roadway_style.source_format,
+                            "roadway_texture": roadway_style.texture_path,
+                            "roadway_point_flag": (
+                                f"0x{int(roadway_style.point_flag) & 0xFFFFFFFF:08x}"
+                            ),
+                            "roadway_face_flag": (
+                                f"0x{int(roadway_style.face_flag) & 0xFFFFFFFF:08x}"
+                            ),
+                        })
+                    except (
+                        OSError, ValueError, FileNotFoundError, ProxyCloneError
+                    ):
+                        # Safe fallback: use a real donor texture that is known
+                        # to exist rather than inventing a landtext path.
+                        style = replace(
+                            style,
+                            roadway_texture=texture,
+                            roadway_point_flag=0,
+                            roadway_face_flag=0,
+                        )
+                        report_entry.update({
+                            "roadway_source_format": "visual-fallback",
+                            "roadway_texture": texture,
+                            "roadway_point_flag": "0x00000000",
+                            "roadway_face_flag": "0x00000000",
+                        })
+            else:
+                style = replace(
+                    style,
+                    roadway_texture=texture,
+                    roadway_point_flag=0,
+                    roadway_face_flag=0,
+                )
+                report_entry.update({
+                    "roadway_source_format": "visual-fallback",
+                    "roadway_texture": texture,
+                    "roadway_point_flag": "0x00000000",
+                    "roadway_face_flag": "0x00000000",
+                })
+
+            road_surface_styles[surface] = style
+            road_surface_style_report[surface] = report_entry
+        if borrow_dirt_surface_for_gravel:
+            dirt_style = road_surface_styles.get("dirt")
+            if dirt_style is not None:
+                gravel_default = RoadSurfaceStyle()
+                road_surface_styles["gravel"] = replace(
+                    gravel_default,
+                    roadway_texture=dirt_style.roadway_texture,
+                    roadway_point_flag=dirt_style.roadway_point_flag,
+                    roadway_face_flag=dirt_style.roadway_face_flag,
+                )
+                road_surface_style_report["gravel"] = {
+                    "source_format": "generated-default",
+                    "visual_texture": None,
+                    "point_flag": (
+                        f"0x{int(gravel_default.point_flag) & 0xFFFFFFFF:08x}"
+                    ),
+                    "face_flag": (
+                        f"0x{int(gravel_default.face_flag) & 0xFFFFFFFF:08x}"
+                    ),
+                    "roadway_source_format": "borrowed-dirt-donor",
+                    "roadway_texture": dirt_style.roadway_texture,
+                    "roadway_point_flag": (
+                        f"0x{int(dirt_style.roadway_point_flag) & 0xFFFFFFFF:08x}"
+                    ),
+                    "roadway_face_flag": (
+                        f"0x{int(dirt_style.roadway_face_flag) & 0xFFFFFFFF:08x}"
+                    ),
+                }
+
         paved_texture_path = donor_textures.get("paved") or paved_texture_path
         gravel_texture_path = donor_textures.get("gravel")
         dirt_texture_path = donor_textures.get("dirt")
