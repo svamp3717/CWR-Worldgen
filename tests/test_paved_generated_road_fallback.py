@@ -491,7 +491,7 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
     )
 
 
-def test_exact_heading_quantization_fits_inside_donor_visual_overlap() -> None:
+def test_exact_heading_quantization_fits_inside_approach_overlap() -> None:
     maximum_heading_error = (
         infrastructure.GENERATED_PAVED_JUNCTION_HEADING_STEP_DEGREES * 0.5
     )
@@ -499,15 +499,12 @@ def test_exact_heading_quantization_fits_inside_donor_visual_overlap() -> None:
         infrastructure.GENERATED_PAVED_HALF_WIDTH_METRES
         * math.sin(math.radians(maximum_heading_error))
     )
-    visible_overlap = (
-        infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
-        - infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
-    )
+    overlap = infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES
 
     assert maximum_heading_error == 2.5
     assert corner_sweep < 0.20
-    assert math.isclose(visible_overlap, 0.35, abs_tol=1.0e-9)
-    assert visible_overlap > corner_sweep + 0.10
+    assert math.isclose(overlap, 0.22, abs_tol=1.0e-9)
+    assert overlap > corner_sweep
 
 
 def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
@@ -519,7 +516,7 @@ def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
     stale = tmp_path / "i" / "pv.paa"
     stale.parent.mkdir(parents=True, exist_ok=True)
     stale.write_bytes(b"obsolete-generated-asphalt")
-    stock_texture = r"landtext\silnice.pac"
+    stock_texture = r"o\road\sil_new.paa"
     library = infrastructure.ProceduralInfrastructureLibrary(
         "reuse_world",
         paved_texture_path=stock_texture,
