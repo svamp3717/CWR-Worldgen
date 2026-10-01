@@ -2768,7 +2768,9 @@ def _fit_stock_piece_road_objects(
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
         cap_vertical_offset = (
-            _STOCK_DIRT_VERTICAL_OFFSET_METRES
+            _STOCK_ROAD_VERTICAL_OFFSET_METRES
+            if generated_paved_t is not None
+            else _STOCK_DIRT_VERTICAL_OFFSET_METRES
             if use_dirt
             else _STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
         )
