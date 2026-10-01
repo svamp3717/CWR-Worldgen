@@ -199,3 +199,69 @@ def test_gravel_arm_reaches_paved_three_way_hub(paved_model, angle, reverse):
     corridor = expected.buffer(1.9, cap_style="flat")
     uncovered = corridor.difference(unary_union(tuple(footprints.values())))
     assert uncovered.area <= 0.10
+
+@pytest.mark.parametrize(("paved_model", "available_siblings"), [
+    (r"o\road\sil25.p3d", True),
+    (r"bas_o\_road\bas_asf25.p3d", True),
+    (r"bas_o\_road\bas_asf25.p3d", False),
+])
+@pytest.mark.parametrize("turn_angle", [30.0, 60.0, 90.0])
+@pytest.mark.parametrize("reverse_gravel", (False, True))
+def test_angled_paved_bend_with_gravel_branch_has_no_wedge(
+    paved_model,
+    available_siblings,
+    turn_angle,
+    reverse_gravel,
+):
+    node = (500.0, 500.0)
+    paved_heading = math.radians(turn_angle)
+    paved_direction = math.sin(paved_heading), math.cos(paved_heading)
+    paved_end = (
+        node[0] + paved_direction[0] * 100.0,
+        node[1] + paved_direction[1] * 100.0,
+    )
+    gravel_end = (node[0] - 100.0, node[1])
+    paved_points = ((500.0, 400.0), node, paved_end)
+    gravel_points = (
+        (gravel_end, node) if reverse_gravel else (node, gravel_end)
+    )
+
+    spec, report, footprints = _fit(
+        paved_model,
+        [
+            (
+                {"highway": "residential", "surface": "asphalt"},
+                paved_points,
+            ),
+            (
+                {"highway": "track", "surface": "gravel"},
+                gravel_points,
+            ),
+        ],
+        available_siblings=available_siblings,
+    )
+
+    pieces = playability.road_model_variants(
+        paved_model, spec.road_segment_length, donor_only=True
+    )
+    paved_centreline = LineString(
+        playability._representable_road_run(paved_points, pieces)
+    )
+    paved_width = 9.1 if paved_model.startswith("o\\") else 7.0
+    paved_corridor = substring(
+        paved_centreline,
+        0.5,
+        paved_centreline.length - 0.5,
+    ).buffer(paved_width * 0.40, cap_style="flat")
+
+    gravel_centreline = LineString(
+        [node, (node[0] - 15.0, node[1])]
+    )
+    gravel_corridor = gravel_centreline.buffer(1.9, cap_style="flat")
+    expected = unary_union((paved_corridor, gravel_corridor))
+    actual = unary_union(tuple(footprints.values()))
+    uncovered = expected.difference(actual)
+
+    assert report.junction_cap_objects == 0
+    assert uncovered.area <= 0.10
+
