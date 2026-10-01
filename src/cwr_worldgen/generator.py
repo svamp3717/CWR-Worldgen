@@ -1790,6 +1790,22 @@ def _road_donor_provenance(
                 texture = ""
             if texture:
                 texture_record = by_path.get(canonical_asset_path(texture))
+                if texture_record is None:
+                    texture_scan = locate_assets_fast(
+                        spec.asset_roots,
+                        (texture,),
+                        cache_dir=getattr(spec, "cache_dir", None),
+                        use_cache=bool(getattr(spec, "cache_enabled", True)),
+                        refresh=bool(getattr(spec, "cache_refresh", False)),
+                    )
+                    texture_record = next(
+                        (
+                            record
+                            for record in texture_scan.records
+                            if record.path == canonical_asset_path(texture)
+                        ),
+                        None,
+                    )
                 if texture_record is not None:
                     texture_source = {
                         "path": texture,
