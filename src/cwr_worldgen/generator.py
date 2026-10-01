@@ -4355,22 +4355,35 @@ def build_milestone4(
                                 texture,
                             )
                         )
+                        stock_selector = roadway_texture_source.startswith("stock-")
+                        roadway_point_flag = (
+                            0 if stock_selector else int(roadway_style.point_flag)
+                        )
+                        roadway_face_flag = (
+                            0 if stock_selector else int(roadway_style.face_flag)
+                        )
                         style = replace(
                             style,
                             roadway_texture=roadway_texture,
-                            roadway_point_flag=int(roadway_style.point_flag),
-                            roadway_face_flag=int(roadway_style.face_flag),
+                            roadway_point_flag=roadway_point_flag,
+                            roadway_face_flag=roadway_face_flag,
                         )
                         report_entry.update({
                             "roadway_source_format": roadway_style.source_format,
                             "roadway_inspected_texture": roadway_style.texture_path,
+                            "roadway_inspected_point_flag": (
+                                f"0x{int(roadway_style.point_flag) & 0xFFFFFFFF:08x}"
+                            ),
+                            "roadway_inspected_face_flag": (
+                                f"0x{int(roadway_style.face_flag) & 0xFFFFFFFF:08x}"
+                            ),
                             "roadway_texture_source": roadway_texture_source,
                             "roadway_texture": roadway_texture,
                             "roadway_point_flag": (
-                                f"0x{int(roadway_style.point_flag) & 0xFFFFFFFF:08x}"
+                                f"0x{roadway_point_flag & 0xFFFFFFFF:08x}"
                             ),
                             "roadway_face_flag": (
-                                f"0x{int(roadway_style.face_flag) & 0xFFFFFFFF:08x}"
+                                f"0x{roadway_face_flag & 0xFFFFFFFF:08x}"
                             ),
                         })
                     except (
