@@ -57,7 +57,6 @@ from .procedural_infrastructure import (
     is_generated_gravel_road_model,
     is_generated_paved_junction_model,
     is_generated_paved_road_model,
-    stock_road_surface_selector_path,
 )
 from .procedural_forests import (
     ForestClusterAssetResult,
@@ -1703,27 +1702,20 @@ def _roadway_surface_texture_for_donor(
     surface: str,
     donor_model: str,
     visual_texture: str,
-    *,
-    world_name: str,
 ) -> str:
-    """Choose the texture that selects the intended CWA CfgSurfaces class.
-
-    Stock surface selectors are world-local generated textures whose filenames
-    match CWA's protected silnice* / cesta* wildcard classes. This avoids
-    depending on a particular stock archive path being present at runtime.
-    """
+    """Choose the stock CWA surface-class texture for generated Roadway LODs."""
 
     surface_name = surface.casefold()
     donor = canonical_asset_path(donor_model)
     if surface_name == "paved" and donor.startswith(r"o\road\sil"):
-        return stock_road_surface_selector_path(world_name, "paved")
+        return r"landtext\silnice.pac"
     if surface_name == "dirt" and (
         donor.startswith(r"o\road\ces")
         or donor.startswith(r"data3d\cesta")
     ):
-        return stock_road_surface_selector_path(world_name, "dirt")
+        return r"landtext\cesta.pac"
     if surface_name == "gravel" and not donor:
-        return stock_road_surface_selector_path(world_name, "gravel")
+        return r"landtext\cesta.pac"
     return visual_texture
 
 
@@ -4275,7 +4267,6 @@ def build_milestone4(
             "gravel",
             "",
             "",
-            world_name=spec.name,
         )
         gravel_style = RoadSurfaceStyle(
             roadway_texture=gravel_roadway_texture,
@@ -4316,7 +4307,6 @@ def build_milestone4(
                 surface,
                 donor_model,
                 texture,
-                world_name=spec.name,
             )
             donor_record = road_records.get(canonical_asset_path(donor_model))
             if donor_record is None:
@@ -4421,9 +4411,6 @@ def build_milestone4(
                     style.roadway_texture
                     for style in road_surface_styles.values()
                     if style.roadway_texture
-                    and not style.roadway_texture.casefold().startswith(
-                        (spec.name + "\\").casefold()
-                    )
                 ),
             )
             if value
