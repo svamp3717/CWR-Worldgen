@@ -122,11 +122,13 @@ _CUSTOM_ROAD_JUNCTION_SUBTYPE_PATTERN = re.compile(
     r"(?P<width>\d{3})_h(?P<headings>\d{3}(?:_\d{3}){2,3})$",
     re.IGNORECASE,
 )
-# Donor branch stock-style junction mesh: logical connector/Roadway geometry
-# stays at 6.25 m while only the visual road artwork extends over the approach.
-GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES = 0.55
-# Keep the existing planner's approach clearance. The donor visual hub covers
-# the resulting 0.35 m seam without changing road-fitting behavior.
+# Generated junction visuals now stop at the logical 6.25 m connector.
+# Older builds advertised 0.55 m of visual overhang to the fitter, then lowered
+# that overhang below terrain. That produced the grass bar seen in terrtest115.
+# Keep the constant as a compatibility export, but its truthful value is zero.
+GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES = 0.0
+# Legacy stock-junction clearance retained for non-unified callers. Unified
+# generated roads use the explicit positive approach overlap below.
 GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES = 0.20
 # Unified donor roads should overlap the logical junction mouth rather than
 # leaving a clearance that depends on visual overhang to hide terrain.
