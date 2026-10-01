@@ -609,12 +609,21 @@ def _stitch_generated_hub_approaches(
                 connector_direction,
                 continuation,
             )
-            model_path = _pi.paved_fallback_model_path(
-                str(getattr(spec, "name", "world")),
-                width,
-                length,
-                curve,
-            )
+            if bool(getattr(spec, "custom_road_shapes", False)):
+                model_path = _pi.custom_road_model_path(
+                    str(getattr(spec, "name", "world")),
+                    "paved",
+                    width,
+                    length,
+                    curve,
+                )
+            else:
+                model_path = _pi.paved_fallback_model_path(
+                    str(getattr(spec, "name", "world")),
+                    width,
+                    length,
+                    curve,
+                )
             replacements[object_id] = _p._road_object_on_slope(
                 object_id,
                 model_path,
