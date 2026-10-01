@@ -48,7 +48,7 @@ class RoadSurfaceStyle:
 
     point_flag: int = _ROAD_SURFACE_POINT_FLAG
     face_flag: int = _ROAD_SURFACE_FACE_FLAG
-    roadway_texture: str = ""
+    roadway_texture: str | None = None
     roadway_point_flag: int = 0
     roadway_face_flag: int = 0
 
@@ -62,7 +62,11 @@ def _roadway_surface_texture(
 ) -> str:
     """Return the texture that selects CWA's CfgSurfaces class on Roadway LOD."""
 
-    return surface_style.roadway_texture or visual_texture
+    return (
+        visual_texture
+        if surface_style.roadway_texture is None
+        else surface_style.roadway_texture
+    )
 
 
 # Generated roads keep their visible skin close to graded terrain, but the
