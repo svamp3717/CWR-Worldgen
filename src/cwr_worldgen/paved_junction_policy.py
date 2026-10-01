@@ -1115,6 +1115,7 @@ def _trusted_legacy_asset_paths(spec, milestone_number: int):
     if (
         milestone_number < 8
         or not bool(getattr(spec, "stock_road_piece_fitting", False))
+        or bool(getattr(spec, "custom_road_shapes", False))
     ):
         return base
     trusted = set(base)
