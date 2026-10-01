@@ -1624,6 +1624,25 @@ def _road_style_donor(spec: PlayabilitySpec, surface: str) -> str:
     return curve or straight
 
 
+def _road_texture_donor(spec: PlayabilitySpec, surface: str) -> str:
+    """Return the straight donor that owns the visible generated road surface.
+
+    Curve donors are geometry references. Using them as the texture authority can
+    silently switch a configured mod family to a stock/Everon texture when a
+    curve P3D reuses a generic texture path.
+    """
+
+    if surface not in {"paved", "gravel", "dirt"}:
+        raise ValueError(f"unsupported road surface {surface!r}")
+    straight = str(
+        getattr(spec, f"{surface}_road_model", "") or ""
+    ).strip()
+    curve = str(
+        getattr(spec, f"{surface}_road_curve_model", "") or ""
+    ).strip()
+    return straight or curve
+
+
 def _road_donor_diagnostics(
     spec: PlayabilitySpec,
     effective_donors: dict[str, str],
@@ -4097,19 +4116,19 @@ def build_milestone4(
 
     road_texture_donors: dict[str, str] = {}
     if generated_paved_usage:
-        road_texture_donors["paved"] = _road_style_donor(spec, "paved")
+        road_texture_donors["paved"] = _road_texture_donor(spec, "paved")
     configured_gravel = str(getattr(spec, "gravel_road_model", "") or "").strip()
     configured_gravel_curve = str(
         getattr(spec, "gravel_road_curve_model", "") or ""
     ).strip()
     if generated_gravel_usage and (configured_gravel_curve or configured_gravel):
-        road_texture_donors["gravel"] = _road_style_donor(spec, "gravel")
+        road_texture_donors["gravel"] = _road_texture_donor(spec, "gravel")
     if generated_dirt_usage:
-        road_texture_donors["dirt"] = _road_style_donor(spec, "dirt")
+        road_texture_donors["dirt"] = _road_texture_donor(spec, "dirt")
 
     if road_texture_donors:
         report_progress(79, "Resolving road textures from configured stock/modded donor models")
-        road_model_scan = scan_assets(
+        road_model_scan = locate_assets_fast(
             spec.asset_roots,
             tuple(road_texture_donors.values()),
             cache_dir=getattr(spec, "cache_dir", None),
