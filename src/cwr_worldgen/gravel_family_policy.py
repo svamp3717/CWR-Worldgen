@@ -250,17 +250,24 @@ def _triangulated_lod(
                 points.append((float(x), y, float(z)))
             vertices.append((index, 0, float(x) / 3.0, float(z) / 3.0))
         if len(vertices) == 3:
+            face_flag = (
+                surface_style.roadway_face_flag
+                if resolution == _pi._ROADWAY_LOD
+                else surface_style.face_flag
+            )
             faces.append(_pi._Face(
                 texture,
                 tuple(vertices),
-                surface_style.face_flag,
+                face_flag,
             ))
     properties = ()
     if resolution == _pi._VISUAL_LOD:
         properties = (("autocenter", "0"), ("class", "road"), ("map", "road"))
     point_flags = (
-        (surface_style.point_flag,) * len(points)
-        if resolution in {_pi._VISUAL_LOD, _pi._ROADWAY_LOD}
+        (surface_style.roadway_point_flag,) * len(points)
+        if resolution == _pi._ROADWAY_LOD
+        else (surface_style.point_flag,) * len(points)
+        if resolution == _pi._VISUAL_LOD
         else ()
     )
     return _pi._Lod(
