@@ -2188,6 +2188,28 @@ def test_ordered_road_texture_lookup_keeps_first_matching_asset_root(
         donor_model=donor,
     ) == sfp_texture
 
+    spec = SimpleNamespace(
+        paved_road_model=donor,
+        paved_road_curve_model="",
+        gravel_road_model="",
+        gravel_road_curve_model="",
+        dirt_road_model="",
+        dirt_road_curve_model="",
+        asset_roots=(preferred, colliding),
+        cache_dir=None,
+        cache_enabled=False,
+        cache_refresh=False,
+    )
+    provenance = generator._road_donor_provenance(
+        spec,
+        {playability._road_model_key(donor): donor},
+    )["paved"]
+    assert provenance["straight_asset"]["source"].endswith("sil25.p3d")
+    assert provenance["resolved_texture"] == sfp_texture
+    assert provenance["resolved_texture_asset"]["source"].endswith(
+        "sfp_asphalt.paa"
+    )
+
 
 def test_bas_o_straight_curve_pair_keeps_width_and_texture(
     tmp_path: Path,
