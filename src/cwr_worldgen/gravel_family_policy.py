@@ -296,7 +296,7 @@ def _family_junction_lods(key, texture: str, surface_style=None):
     roadway = _triangulated_lod(
         polygon,
         y=_pi.GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES,
-        texture=texture,
+        texture=_pi._roadway_surface_texture(texture, surface_style),
         resolution=_pi._ROADWAY_LOD,
         surface_style=surface_style,
     )
@@ -313,7 +313,7 @@ def _road_lods(key, texture: str, surface_style=None):
         return _family_junction_lods(family_key, texture, surface_style)
     if subtype == "gravel_j4":
         family_key = replace(key, subtype="gravel_j4_x90", length_dm=int(round(GRAVEL_JUNCTION_ARM_EXTENT_METRES * 20.0)))
-        return _family_junction_lods(family_key, texture)
+        return _family_junction_lods(family_key, texture, surface_style)
     if re.fullmatch(r"gravel_j[34]_.+", key.subtype, re.IGNORECASE):
         return _family_junction_lods(key, texture, surface_style)
     return _ORIGINAL_ROAD_LODS(key, texture, surface_style)
