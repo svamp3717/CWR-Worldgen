@@ -460,8 +460,8 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
     )[0]
 
     textures = [face.texture for face in visual.faces]
-    assert len(visual.faces) == 16
-    assert textures.count(r"o\road\sil_new.paa") == 16
+    assert len(visual.faces) == 8
+    assert textures.count(r"o\road\sil_new.paa") == 8
     assert r"o\road\sil_konec.paa" not in textures
     assert r"landtext\silnice.pac" not in textures
 
@@ -549,13 +549,15 @@ def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
 
 
 
-def test_stock_paved_generated_models_keep_visual_texture_but_use_silnice_roadway() -> None:
+def test_generated_models_keep_visual_style_and_exact_donor_roadway_style() -> None:
     visual_texture = r"o\road\sil_new.paa"
-    roadway_texture = r"landtext\silnice.pac"
+    roadway_texture = r"o\road\donor_contact.paa"
     style = infrastructure.RoadSurfaceStyle(
         point_flag=0x13F,
         face_flag=0x24102,
         roadway_texture=roadway_texture,
+        roadway_point_flag=0x55AA,
+        roadway_face_flag=0x12345678,
     )
     keys = (
         infrastructure.InfrastructureModelKey(
@@ -585,12 +587,17 @@ def test_stock_paved_generated_models_keep_visual_texture_but_use_silnice_roadwa
         ) * len(roadway.points)
 
 
-def test_unmodded_gravel_and_stock_dirt_share_cesta_groundtype() -> None:
-    cesta = r"landtext\cesta.pac"
+def test_unmodded_gravel_and_dirt_can_share_exact_donor_groundtype() -> None:
+    dirt_contact = r"o\road\dirt_contact.paa"
     gravel_visual = r"reuse_world\i\g.paa"
     dirt_visual = r"o\road\ces_hned.paa"
-    gravel_style = infrastructure.RoadSurfaceStyle(roadway_texture=cesta)
-    dirt_style = infrastructure.RoadSurfaceStyle(roadway_texture=cesta)
+    shared = dict(
+        roadway_texture=dirt_contact,
+        roadway_point_flag=0x77,
+        roadway_face_flag=0x8811,
+    )
+    gravel_style = infrastructure.RoadSurfaceStyle(**shared)
+    dirt_style = infrastructure.RoadSurfaceStyle(**shared)
 
     cases = (
         (
@@ -616,7 +623,14 @@ def test_unmodded_gravel_and_stock_dirt_share_cesta_groundtype() -> None:
             style,
         )
         assert all(face.texture == visual_texture for face in visual.faces)
-        assert all(face.texture == cesta for face in roadway.faces)
+        assert all(face.texture == dirt_contact for face in roadway.faces)
+        assert roadway.point_flags == (
+            style.roadway_point_flag,
+        ) * len(roadway.points)
+        assert all(
+            face.flags == style.roadway_face_flag
+            for face in roadway.faces
+        )
 
 
 def test_generated_junction_intersecting_branches_stay_below_through_road() -> None:
@@ -647,6 +661,7 @@ def test_generated_junction_intersecting_branches_stay_below_through_road() -> N
             math.isclose(value, top - branch_drop, abs_tol=1.0e-9)
             for value in ys
         )
+        assert min(ys) >= -1.0e-9
         assert all(value <= top + 1.0e-9 for value in ys)
 
 
@@ -697,11 +712,14 @@ def test_generated_roadway_lod_sits_above_visual_skin() -> None:
     key = infrastructure.InfrastructureModelKey(
         "road", "road_paved_w091_l0063", 91, 63
     )
+    contact_texture = r"o\road\donor_contact.paa"
     visual, _geometry, roadway, _land = infrastructure._road_lods(
         key,
         r"o\road\sil_new.paa",
         infrastructure.RoadSurfaceStyle(
-            roadway_texture=r"landtext\silnice.pac",
+            roadway_texture=contact_texture,
+            roadway_point_flag=0x44,
+            roadway_face_flag=0x5500,
         ),
     )
 
@@ -714,9 +732,9 @@ def test_generated_roadway_lod_sits_above_visual_skin() -> None:
     assert min(point[1] for point in roadway.points) > max(
         point[1] for point in visual.points
     )
-    assert all(face.texture == r"landtext\silnice.pac" for face in roadway.faces)
-    assert roadway.point_flags == (0,) * len(roadway.points)
-    assert all(face.flags == 0 for face in roadway.faces)
+    assert all(face.texture == contact_texture for face in roadway.faces)
+    assert roadway.point_flags == (0x44,) * len(roadway.points)
+    assert all(face.flags == 0x5500 for face in roadway.faces)
 
 
 def test_generated_paved_and_gravel_roads_use_native_render_metadata() -> None:
