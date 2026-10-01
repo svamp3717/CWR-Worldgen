@@ -146,6 +146,19 @@ class LegacyProxyModelTests(unittest.TestCase):
         self.assertEqual(style.point_flag, 0x55AA)
         self.assertEqual(style.face_flag, 0x12345678)
 
+    def test_roadway_surface_style_preserves_blank_donor_texture(self) -> None:
+        source = _synthetic_road_odol().replace(
+            b"o\\road\\contact.paa\0",
+            b"\0",
+            1,
+        )
+        style = inspect_roadway_surface_style(source)
+
+        self.assertEqual(style.source_format, "ODOL")
+        self.assertEqual(style.texture_path, "")
+        self.assertEqual(style.point_flag, 0x55AA)
+        self.assertEqual(style.face_flag, 0x12345678)
+
     def test_cwa_safe_clusters_reject_missing_proxy_source_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
