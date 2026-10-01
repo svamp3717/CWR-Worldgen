@@ -1010,6 +1010,28 @@ def road_model_variant_paths(
     )
 
 
+def road_fitting_variants(
+    spec: object,
+    model_path: str,
+) -> tuple[_RoadPiece, ...]:
+    """Return the external road pieces allowed in the active fitting mode.
+
+    Unified custom-road generation is intentionally donor-only: the effective
+    configured straight model is the sole external P3D the fitter may place.
+    Short straights, bends, fillers, and connection geometry are generated
+    procedurally from the configured straight/curve donor style instead of
+    pulling in stock or mod-family 12/6/3 siblings that can introduce seams.
+
+    Legacy fitting retains the historical sibling catalogue.
+    """
+
+    return road_model_variants(
+        model_path,
+        float(getattr(spec, "road_segment_length", 25.0)),
+        donor_only=bool(getattr(spec, "custom_road_shapes", False)),
+    )
+
+
 def road_model_width_metres(model_path: str) -> float | None:
     """Return a measured or deterministic visible width for one road model."""
 
@@ -1062,12 +1084,10 @@ def road_model_surface(spec: object, model_path: str) -> str | None:
     for surface, base_model in configured:
         if not base_model:
             continue
-        # Surface identity follows the real fitting catalogue. In unified mode
-        # stock 25/12/6 pieces and existing mod siblings are still valid
-        # segmentation pieces; the configured long model remains the style donor.
         variants = road_model_variants(
             base_model,
             segment_length,
+            donor_only=bool(getattr(spec, "custom_road_shapes", False)),
         )
         if target in {_road_model_key(piece.model_path) for piece in variants}:
             return surface
@@ -2683,13 +2703,7 @@ def _fit_stock_piece_road_objects(
     def variants_for(model_path: str) -> tuple[_RoadPiece, ...]:
         variants = variant_cache.get(model_path)
         if variants is None:
-            # Keep short real siblings available for segmentation even when
-            # generated road shapes are enabled. Curved/poor-fit spans are still
-            # upgraded to donor-styled generated ribbons by the fallback policy.
-            variants = road_model_variants(
-                model_path,
-                spec.road_segment_length,
-            )
+            variants = road_fitting_variants(spec, model_path)
             if is_generated_gravel_road_model(model_path):
                 # Keep the 25 m gravel slab out of terrain-following chains, but
                 # allow 12 m curved ribbons as well as 6 m ones. The previous
