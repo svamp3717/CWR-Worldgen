@@ -2778,11 +2778,12 @@ def _fit_stock_piece_road_objects(
             cap_vertical_offset,
         )
         if generated_paved_t is not None:
-            # The generated hub owns the seam. Keep logical/collision geometry
-            # at 6.25 m, stop approach slabs at 6.45 m, and let only the visible
-            # hub reach 6.80 m over them.
-            cap_trim_lengths[key] = (
-                half + GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+            # Unified approaches now overlap the generated hub slightly
+            # instead of stopping outside its logical connector. The previous
+            # 0.20 m clearance produced visible grass slits beside the junction.
+            cap_trim_lengths[key] = max(
+                0.40,
+                half - _JUNCTION_OVERLAP,
             )
             cap_cover_lengths[key] = (
                 half + GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
