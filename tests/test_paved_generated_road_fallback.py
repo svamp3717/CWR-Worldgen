@@ -461,7 +461,7 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
 
     textures = [face.texture for face in visual.faces]
     assert len(visual.faces) == 16
-    assert textures.count(r"o\road\sil_new.paa") == 8
+    assert textures.count(r"o\road\sil_new.paa") == 16
     assert r"o\road\sil_konec.paa" not in textures
     assert r"landtext\silnice.pac" not in textures
 
@@ -551,7 +551,7 @@ def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
 
 def test_stock_paved_generated_models_keep_visual_texture_but_use_silnice_roadway() -> None:
     visual_texture = r"o\road\sil_new.paa"
-    roadway_texture = r"reuse_world\i\silnice_worldgen.paa"
+    roadway_texture = r"landtext\silnice.pac"
     style = infrastructure.RoadSurfaceStyle(
         point_flag=0x13F,
         face_flag=0x24102,
@@ -581,7 +581,7 @@ def test_stock_paved_generated_models_keep_visual_texture_but_use_silnice_roadwa
 
 
 def test_unmodded_gravel_and_stock_dirt_share_cesta_groundtype() -> None:
-    cesta = r"reuse_world\i\cesta_worldgen.paa"
+    cesta = r"landtext\cesta.pac"
     gravel_visual = r"reuse_world\i\g.paa"
     dirt_visual = r"o\road\ces_hned.paa"
     gravel_style = infrastructure.RoadSurfaceStyle(roadway_texture=cesta)
@@ -645,56 +645,6 @@ def test_generated_junction_intersecting_branches_stay_below_through_road() -> N
         assert all(value <= top + 1.0e-9 for value in ys)
 
 
-def test_surface_selector_textures_are_bundled_with_generated_roads(
-    tmp_path: Path,
-) -> None:
-    paved_selector = infrastructure.stock_road_surface_selector_path(
-        "selector_world", "paved"
-    )
-    cesta_selector = infrastructure.stock_road_surface_selector_path(
-        "selector_world", "gravel"
-    )
-    library = infrastructure.ProceduralInfrastructureLibrary(
-        "selector_world",
-        paved_texture_path=r"o\road\sil_new.paa",
-        road_surface_styles={
-            "paved": infrastructure.RoadSurfaceStyle(
-                roadway_texture=paved_selector
-            ),
-            "gravel": infrastructure.RoadSurfaceStyle(
-                roadway_texture=cesta_selector
-            ),
-        },
-        cache_enabled=False,
-    )
-    paved_model = infrastructure.custom_road_model_path(
-        "selector_world", "paved", 9.1, 6.3
-    )
-    gravel_model = infrastructure.custom_road_model_path(
-        "selector_world", "gravel", 4.6, 6.3
-    )
-    library.register_model_usage(paved_model)
-    library.register_model_usage(gravel_model)
-    result = library.write_assets(
-        tmp_path,
-        tmp_path / "infrastructure.json",
-    )
-
-    assert "i/silnice_worldgen.paa" in result.texture_files
-    assert "i/cesta_worldgen.paa" in result.texture_files
-    assert (tmp_path / "i" / "silnice_worldgen.paa").is_file()
-    assert (tmp_path / "i" / "cesta_worldgen.paa").is_file()
-
-    paved_summary = infrastructure.inspect_mlod(
-        tmp_path / "i" / "road_paved_w091_l0063.p3d"
-    )
-    gravel_summary = infrastructure.inspect_mlod(
-        tmp_path / "i" / "road_gravel_w046_l0063.p3d"
-    )
-    assert paved_selector in paved_summary.texture_paths
-    assert cesta_selector in gravel_summary.texture_paths
-
-
 def test_generated_roads_and_junctions_inherit_donor_surface_metadata() -> None:
     texture = r"myroads\surface.paa"
     style = infrastructure.RoadSurfaceStyle(
@@ -725,12 +675,43 @@ def test_generated_roads_and_junctions_inherit_donor_surface_metadata() -> None:
         assert visual.faces
         assert roadway.faces
         assert visual.point_flags == (style.point_flag,) * len(visual.points)
-        assert roadway.point_flags == (style.point_flag,) * len(roadway.points)
+        assert roadway.point_flags == (
+            style.roadway_point_flag,
+        ) * len(roadway.points)
         assert all(face.flags == style.face_flag for face in visual.faces)
-        assert all(face.flags == style.face_flag for face in roadway.faces)
+        assert all(
+            face.flags == style.roadway_face_flag
+            for face in roadway.faces
+        )
         # CfgSurfaces matches the Roadway face texture. Leaving this blank makes
         # a road look like its donor while driving like the default surface.
         assert all(face.texture == texture for face in roadway.faces)
+
+
+def test_generated_roadway_lod_sits_above_visual_skin() -> None:
+    key = infrastructure.InfrastructureModelKey(
+        "road", "road_paved_w091_l0063", 91, 63
+    )
+    visual, _geometry, roadway, _land = infrastructure._road_lods(
+        key,
+        r"o\road\sil_new.paa",
+        infrastructure.RoadSurfaceStyle(
+            roadway_texture=r"landtext\silnice.pac",
+        ),
+    )
+
+    assert math.isclose(
+        infrastructure.GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES
+        - infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES,
+        0.01,
+        abs_tol=1.0e-9,
+    )
+    assert min(point[1] for point in roadway.points) > max(
+        point[1] for point in visual.points
+    )
+    assert all(face.texture == r"landtext\silnice.pac" for face in roadway.faces)
+    assert roadway.point_flags == (0,) * len(roadway.points)
+    assert all(face.flags == 0 for face in roadway.faces)
 
 
 def test_generated_paved_and_gravel_roads_use_native_render_metadata() -> None:
@@ -765,9 +746,7 @@ def test_generated_paved_and_gravel_roads_use_native_render_metadata() -> None:
         assert visual.point_flags == (
             infrastructure._ROAD_SURFACE_POINT_FLAG,
         ) * len(visual.points)
-        assert roadway.point_flags == (
-            infrastructure._ROAD_SURFACE_POINT_FLAG,
-        ) * len(roadway.points)
+        assert roadway.point_flags == (0,) * len(roadway.points)
         assert visual.normals == (infrastructure._ROAD_SURFACE_NORMAL,)
         assert roadway.normals == (infrastructure._ROAD_SURFACE_NORMAL,)
         assert visual.faces
@@ -776,10 +755,7 @@ def test_generated_paved_and_gravel_roads_use_native_render_metadata() -> None:
             face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
             for face in visual.faces
         )
-        assert all(
-            face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
-            for face in roadway.faces
-        )
+        assert all(face.flags == 0 for face in roadway.faces)
         assert all(
             face.texture == r"o\road\sil_new.paa"
             for face in roadway.faces
