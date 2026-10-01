@@ -123,6 +123,9 @@ GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES = 0.20
 # Unified donor roads should overlap the logical junction mouth rather than
 # leaving a clearance that depends on visual overhang to hide terrain.
 GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES = 0.22
+# Keep side/intersecting junction artwork beneath the straight-through strip at
+# the hub centre. It rises back to normal road height toward the outer connector.
+GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES = 0.02
 # Matches the stock sil/kos effective half-width used throughout the fitter.
 GENERATED_PAVED_HALF_WIDTH_METRES = 4.55
 
@@ -1356,13 +1359,13 @@ def _stock_style_paved_junction_visual_lod(
 
     end_texture = texture
     stub_inner = 0.0 if len(headings) == 3 else 0.14
-    stub_rise = 0.0666 if len(headings) == 3 else 0.0118
+    branch_inner_y = y - GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES
     for heading in side_headings:
         inner_left, inner_right = _paved_junction_cross_section(
             heading,
             stub_inner,
             half_width,
-            y + stub_rise,
+            branch_inner_y,
         )
         outer_left, outer_right = _paved_junction_cross_section(
             heading,
