@@ -887,7 +887,7 @@ def _generated_approach_object(
         end,
         elevations,
         spec,
-        vertical_offset=0.060,
+        vertical_offset=_p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
     )
 
 
@@ -1071,7 +1071,11 @@ def _apply_plans(report, plans, elevations, spec):
         )
         objects[current_index] = _p._road_object_on_slope(
             old_id, plan.model_path, start, end, elevations, spec,
-            vertical_offset=0.060,
+            vertical_offset=(
+                _p._STOCK_ROAD_VERTICAL_OFFSET_METRES
+                if _pi.is_generated_paved_junction_model(plan.model_path)
+                else _p._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+            ),
         )
 
     next_id = max((obj.object_id for obj in objects), default=0) + 1
