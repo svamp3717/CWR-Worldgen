@@ -1379,7 +1379,7 @@ def _stock_style_paved_junction_visual_lod(
             end_right=outer_right,
             v_start=0.0,
             v_end=stub_length / GENERATED_PAVED_TEXTURE_REPEAT_METRES,
-            face_flags=_ROAD_SURFACE_FACE_FLAG,
+            face_flags=surface_style.face_flag,
         )
 
     return _Lod(
@@ -1558,8 +1558,9 @@ def _custom_road_junction_lods(
     roadway = _paved_junction_triangulated_lod(
         logical_polygon,
         y=GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES,
-        texture="",
+        texture=texture,
         resolution=_ROADWAY_LOD,
+        surface_style=surface_style,
     )
     land = _Lod(boundary, (), (), _LAND_CONTACT_LOD)
     return visual, map_geometry, roadway, land
