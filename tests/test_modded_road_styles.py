@@ -1120,7 +1120,7 @@ def test_stock_curve_donor_texture_fallbacks_support_unified_generation() -> Non
         (),
         surface="paved",
         donor_model=r"o\road\sil10 25.p3d",
-    ) == r"landtext\silnice.pac"
+    ) == r"o\road\sil_new.paa"
     assert generator._resolved_road_donor_texture(
         (),
         surface="dirt",
