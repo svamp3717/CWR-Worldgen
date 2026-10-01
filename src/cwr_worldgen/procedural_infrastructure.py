@@ -44,13 +44,23 @@ _ROAD_SURFACE_NORMAL = (0.0, -1.0, 0.0)
 
 @dataclass(frozen=True, slots=True)
 class RoadSurfaceStyle:
-    """Render metadata inherited from the configured road donor."""
+    """Render and driving-surface metadata inherited from the road donor."""
 
     point_flag: int = _ROAD_SURFACE_POINT_FLAG
     face_flag: int = _ROAD_SURFACE_FACE_FLAG
+    roadway_texture: str = ""
 
 
 _DEFAULT_ROAD_SURFACE_STYLE = RoadSurfaceStyle()
+
+
+def _roadway_surface_texture(
+    visual_texture: str,
+    surface_style: RoadSurfaceStyle,
+) -> str:
+    """Return the texture that selects CWA's CfgSurfaces class on Roadway LOD."""
+
+    return surface_style.roadway_texture or visual_texture
 
 # Generated gravel is a terrain-hugging surface ribbon, not a raised slab.
 # Its visible skin and Roadway LOD are coplanar and are placed directly on the
@@ -898,7 +908,7 @@ def _gravel_junction_lods(
         roadway_points,
         (_ROAD_SURFACE_NORMAL,),
         (_Face(
-            texture,
+            _roadway_surface_texture(texture, surface_style),
             ((0, 0, 0.0, 1.0), (3, 0, 0.0, 0.0),
              (2, 0, 1.0, 0.0), (1, 0, 1.0, 1.0)),
             surface_style.face_flag,
@@ -1508,7 +1518,7 @@ def _paved_junction_lods(
     roadway = _paved_junction_triangulated_lod(
         logical_polygon,
         y=GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES,
-        texture=texture,
+        texture=_roadway_surface_texture(texture, surface_style),
         resolution=_ROADWAY_LOD,
         surface_style=surface_style,
     )
@@ -1651,7 +1661,9 @@ def _road_lods(
         square_ends=(paved_fallback and not paved_turn),
     )
     roadway = _ribbon_lod(
-        roadway_sections, texture=texture, resolution=_ROADWAY_LOD,
+        roadway_sections,
+        texture=_roadway_surface_texture(texture, surface_style),
+        resolution=_ROADWAY_LOD,
         height=GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES, lowered_overlap=False,
         double_sided=False, u_span_override=1.0,
         surface_style=surface_style,
