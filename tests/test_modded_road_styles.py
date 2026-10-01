@@ -1258,7 +1258,11 @@ def test_unified_variant_paths_ignore_stock_and_modded_siblings() -> None:
     ) == (r"bas_o\_road\bas_asf25.p3d",)
 
 
-def test_modded_family_reuses_only_existing_sibling_models(tmp_path: Path) -> None:
+@pytest.mark.parametrize("custom_road_shapes", (False, True))
+def test_modded_family_reuses_only_existing_sibling_models(
+    tmp_path: Path,
+    custom_road_shapes: bool,
+) -> None:
     root = tmp_path / "mod"
     _write_fake_mod_asset(root, r"myroads\asphalt25.p3d", b"donor")
     _write_fake_mod_asset(root, r"myroads\asphalt6.p3d", b"short")
@@ -1273,6 +1277,7 @@ def test_modded_family_reuses_only_existing_sibling_models(tmp_path: Path) -> No
         cache_dir=None,
         cache_enabled=False,
         cache_refresh=False,
+        custom_road_shapes=custom_road_shapes,
     )
     availability = generator._modded_road_variant_availability(spec)
     token = playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(availability)
