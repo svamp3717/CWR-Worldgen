@@ -698,7 +698,7 @@ def test_unmodded_gravel_and_dirt_can_share_exact_donor_groundtype() -> None:
 
 def test_generated_junction_intersecting_branches_stay_below_through_road() -> None:
     branch_drop = infrastructure.GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES
-    overlap_drop = infrastructure.GENERATED_JUNCTION_OVERLAP_VISUAL_DROP_METRES
+    overlap_rise = infrastructure.GENERATED_JUNCTION_OVERLAP_VISUAL_RISE_METRES
     top = infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
     keys = (
         infrastructure.InfrastructureModelKey(
@@ -718,14 +718,13 @@ def test_generated_junction_intersecting_branches_stay_below_through_road() -> N
             r"roads\surface.paa",
         )
         ys = tuple(point[1] for point in visual.points)
-        assert math.isclose(max(ys), top, abs_tol=1.0e-9)
-        assert math.isclose(min(ys), top - overlap_drop, abs_tol=1.0e-9)
+        assert math.isclose(max(ys), top + overlap_rise, abs_tol=1.0e-9)
+        assert math.isclose(min(ys), top - branch_drop, abs_tol=1.0e-9)
         assert any(
-            math.isclose(value, top - branch_drop, abs_tol=1.0e-9)
+            math.isclose(value, top, abs_tol=1.0e-9)
             for value in ys
         )
         assert min(ys) >= -1.0e-9
-        assert all(value <= top + 1.0e-9 for value in ys)
 
 
 def test_generated_roads_and_junctions_inherit_donor_surface_metadata() -> None:
