@@ -1894,6 +1894,19 @@ def test_modded_roadway_groundtype_keeps_donor_contact_texture() -> None:
     assert source == "donor-roadway-lod"
 
 
+def test_stock_groundtype_selector_uses_neutral_generated_roadway_flags() -> None:
+    assert generator._roadway_groundtype_flags(
+        "stock-paved-cfgsurface",
+        0x13F,
+        0x24102,
+    ) == (0, 0)
+    assert generator._roadway_groundtype_flags(
+        "donor-roadway-lod",
+        0x55AA,
+        0x12345678,
+    ) == (0x55AA, 0x12345678)
+
+
 def test_sebnam_curve_donor_resolves_to_straight_family(tmp_path: Path) -> None:
     texture = r"sebnam_obj\p\sebtrailpath.paa"
     curved = r"sebnam_obj\sebtrailpath10 25.p3d"
