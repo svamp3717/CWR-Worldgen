@@ -1698,6 +1698,25 @@ def _road_donor_diagnostics(
     return result
 
 
+def _roadway_surface_texture_for_donor(
+    surface: str,
+    donor_model: str,
+    visual_texture: str,
+) -> str:
+    """Choose the texture that selects the donor's CWA CfgSurfaces class.
+
+    Stock paved road visuals use sil_new.paa, but CWA's Roadway surface class
+    matches silnice*. Generated stock-family roads therefore need the stock
+    landtext surface texture on Roadway LOD while keeping sil_new on Visual LOD.
+    Modded donors keep their resolved texture unless a dedicated mapping is known.
+    """
+
+    donor = canonical_asset_path(donor_model)
+    if surface.casefold() == "paved" and donor.startswith(r"o\road\sil"):
+        return r"landtext\silnice.pac"
+    return visual_texture
+
+
 def _resolved_road_donor_texture(
     records: Sequence[AssetRecord],
     *,
@@ -4259,8 +4278,23 @@ def build_milestone4(
                 donor_model=donor_model,
             )
             donor_textures[surface] = texture
+            roadway_texture = _roadway_surface_texture_for_donor(
+                surface,
+                donor_model,
+                texture,
+            )
             donor_record = road_records.get(canonical_asset_path(donor_model))
             if donor_record is None:
+                road_surface_styles[surface] = RoadSurfaceStyle(
+                    roadway_texture=roadway_texture,
+                )
+                road_surface_style_report[surface] = {
+                    "source_format": None,
+                    "visual_texture": texture,
+                    "roadway_texture": roadway_texture,
+                    "point_flag": None,
+                    "face_flag": None,
+                }
                 continue
             try:
                 donor_style = inspect_visual_surface_style(
@@ -4268,14 +4302,26 @@ def build_milestone4(
                     texture_path=texture,
                 )
             except (OSError, ValueError, FileNotFoundError, ProxyCloneError):
+                road_surface_styles[surface] = RoadSurfaceStyle(
+                    roadway_texture=roadway_texture,
+                )
+                road_surface_style_report[surface] = {
+                    "source_format": None,
+                    "visual_texture": texture,
+                    "roadway_texture": roadway_texture,
+                    "point_flag": None,
+                    "face_flag": None,
+                }
                 continue
             road_surface_styles[surface] = RoadSurfaceStyle(
                 point_flag=int(donor_style.point_flag),
                 face_flag=int(donor_style.face_flag),
+                roadway_texture=roadway_texture,
             )
             road_surface_style_report[surface] = {
                 "source_format": donor_style.source_format,
-                "texture": texture,
+                "visual_texture": texture,
+                "roadway_texture": roadway_texture,
                 "point_flag": f"0x{int(donor_style.point_flag) & 0xFFFFFFFF:08x}",
                 "face_flag": f"0x{int(donor_style.face_flag) & 0xFFFFFFFF:08x}",
             }
@@ -4336,6 +4382,11 @@ def build_milestone4(
                 paved_texture_path if generated_paved_usage else None,
                 gravel_texture_path,
                 dirt_texture_path,
+                *(
+                    style.roadway_texture
+                    for style in road_surface_styles.values()
+                    if style.roadway_texture
+                ),
             )
             if value
         )
