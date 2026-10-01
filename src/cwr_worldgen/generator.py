@@ -4215,16 +4215,21 @@ def build_milestone4(
     dirt_texture_path: str | None = None
 
     road_texture_donors: dict[str, str] = {}
+
+    def effective_texture_donor(surface: str) -> str:
+        donor = _road_texture_donor(spec, surface)
+        return effective_road_donors.get(_road_model_key(donor), donor)
+
     if generated_paved_usage:
-        road_texture_donors["paved"] = _road_texture_donor(spec, "paved")
+        road_texture_donors["paved"] = effective_texture_donor("paved")
     configured_gravel = str(getattr(spec, "gravel_road_model", "") or "").strip()
     configured_gravel_curve = str(
         getattr(spec, "gravel_road_curve_model", "") or ""
     ).strip()
     if generated_gravel_usage and (configured_gravel_curve or configured_gravel):
-        road_texture_donors["gravel"] = _road_texture_donor(spec, "gravel")
+        road_texture_donors["gravel"] = effective_texture_donor("gravel")
     if generated_dirt_usage:
-        road_texture_donors["dirt"] = _road_texture_donor(spec, "dirt")
+        road_texture_donors["dirt"] = effective_texture_donor("dirt")
 
     if road_texture_donors:
         report_progress(79, "Resolving road textures from configured stock/modded donor models")
