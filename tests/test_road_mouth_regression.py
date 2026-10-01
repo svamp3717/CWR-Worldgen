@@ -316,6 +316,13 @@ def test_unified_paved_junction_emits_no_external_road_pieces_except_donor(
         ],
         available_siblings=True,
     )
+    local = {
+        obj.model_path.casefold()
+        for obj in report.objects
+        if obj.model_path.casefold().startswith("seamtest\\i\\")
+    }
+    assert not any(path.startswith("seamtest\\i\\paved_w") for path in local)
+
     external = {
         obj.model_path.casefold()
         for obj in report.objects
