@@ -223,7 +223,7 @@ def test_generated_paved_junction_quantizes_heading_and_reuses_stock_texture(
         tmp_path / result.model_files[0]
     )
     assert stock_texture in summary.texture_paths
-    assert r"o\road\sil_konec.paa" in summary.texture_paths
+    assert r"o\road\sil_konec.paa" not in summary.texture_paths
     assert any(
         math.isclose(value, infrastructure._ROADWAY_LOD, rel_tol=1.0e-7)
         for value in summary.resolutions
@@ -453,7 +453,7 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
             infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 20.0
         )),
     )
-    # Wide generated T hubs retain the selected donor's road and end artwork.
+    # Wide generated T hubs use the selected donor surface consistently.
     visual = infrastructure._road_lods(
         key,
         r"o\road\sil_new.paa",
@@ -461,8 +461,8 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
 
     textures = [face.texture for face in visual.faces]
     assert len(visual.faces) == 8
-    assert textures.count(r"o\road\sil_new.paa") == 4
-    assert textures.count(r"o\road\sil_konec.paa") == 4
+    assert textures.count(r"o\road\sil_new.paa") == 8
+    assert r"o\road\sil_konec.paa" not in textures
     assert r"landtext\silnice.pac" not in textures
 
     ys = [point[1] for point in visual.points]
