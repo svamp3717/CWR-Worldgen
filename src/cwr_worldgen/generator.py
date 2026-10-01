@@ -2267,6 +2267,12 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
     if milestone_number >= 9 and bool(getattr(spec, "forest_hillside_fallback", False)):
         trusted.add(canonical_asset_path(str(getattr(spec, "forest_hillside_tree_model", ""))))
     if milestone_number >= 9:
+        # These stock textures are surface-class selectors on Roadway LODs,
+        # supplied by the CWA runtime rather than redistributed in the world PBO.
+        trusted.update({
+            canonical_asset_path(r"landtext\silnice.pac"),
+            canonical_asset_path(r"landtext\cesta.pac"),
+        })
         proxy_profile = _forest_proxy_profile(spec)
         mapped_tree_models = (
             NOGOVA_PINE_INDIVIDUAL_TREE_MODELS
