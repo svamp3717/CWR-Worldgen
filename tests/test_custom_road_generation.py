@@ -131,7 +131,7 @@ def test_sharp_chain_can_be_replaced_by_custom_surface(
         assert base_model == spec.paved_road_model
 
     measure = playability._PolylineMeasure.create(
-        ((0.0, 0.0), (2.5, 0.0), (4.5, 2.5), (6.5, 5.0))
+        ((0.0, 0.0), (10.0, 0.0), (20.0, 10.0), (30.0, 20.0))
     )
     piece = pieces[0]
     endpoint = measure.chord_endpoint(0.0, piece.length_metres, measure.total)
