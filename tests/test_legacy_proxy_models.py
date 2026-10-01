@@ -56,7 +56,10 @@ def _synthetic_odol() -> bytes:
 
 
 
-def _synthetic_road_odol() -> bytes:
+def _synthetic_road_odol(
+    *,
+    roadway_texture: str = r"o\road\contact.paa",
+) -> bytes:
     def lod(texture: str, point_flag: int, face_flag: int) -> bytes:
         points = (
             (-2.0, 0.0, -3.0),
@@ -93,7 +96,7 @@ def _synthetic_road_odol() -> bytes:
     out = bytearray(b"ODOL")
     out += struct.pack("<II", 7, 2)
     out += lod(r"o\road\visual.paa", 0x13F, 0x24102)
-    out += lod(r"o\road\contact.paa", 0x55AA, 0x12345678)
+    out += lod(roadway_texture, 0x55AA, 0x12345678)
     out += struct.pack("<ff", 1.0, 3.0e15)
     return bytes(out)
 
@@ -147,12 +150,9 @@ class LegacyProxyModelTests(unittest.TestCase):
         self.assertEqual(style.face_flag, 0x12345678)
 
     def test_roadway_surface_style_preserves_blank_donor_texture(self) -> None:
-        source = _synthetic_road_odol().replace(
-            b"o\\road\\contact.paa\0",
-            b"\0",
-            1,
+        style = inspect_roadway_surface_style(
+            _synthetic_road_odol(roadway_texture="")
         )
-        style = inspect_roadway_surface_style(source)
 
         self.assertEqual(style.source_format, "ODOL")
         self.assertEqual(style.texture_path, "")
