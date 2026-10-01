@@ -1,0 +1,39 @@
+name: Temporary terrtest114 road verification
+
+on:
+  push:
+    branches:
+      - feature/custom-road-generation
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install
+        run: python -m pip install -e . pytest matplotlib zstandard
+      - name: Compile touched modules
+        run: >-
+          python -m compileall -q
+          src/cwr_worldgen/generator.py
+          src/cwr_worldgen/procedural_infrastructure.py
+          src/cwr_worldgen/gravel_family_policy.py
+      - name: Run focused regressions
+        run: >-
+          python -m pytest -q
+          tests/test_paved_generated_road_fallback.py
+          tests/test_modded_road_styles.py
+          tests/test_custom_road_generation.py
+          tests/test_gravel_junction_texture.py
+          tests/test_gravel_junction_policy.py
+          tests/test_road_mouth_regression.py
+          tests/test_road_quality_policy.py
+          tests/test_road_quality_parallel_performance.py
+          tests/test_road_chain_parallel_policy.py
+          tests/test_paved_junction_performance_policy.py
+          tests/test_paved_junction_parallel_planning_policy.py
+          tests/test_performance_paths.py
