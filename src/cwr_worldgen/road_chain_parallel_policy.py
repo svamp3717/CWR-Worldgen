@@ -633,9 +633,10 @@ def _fit_stock_piece_road_objects_parallel(
             cap_vertical_offset,
         )
         if donor_junction is not None or generated_paved_t is not None:
-            cap_trim_lengths[key] = (
+            cap_trim_lengths[key] = max(
+                0.40,
                 half
-                + _playability.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+                - _playability.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES,
             )
             cap_cover_lengths[key] = (
                 half
