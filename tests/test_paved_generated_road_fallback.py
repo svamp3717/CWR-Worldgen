@@ -299,7 +299,7 @@ def test_generated_paved_junction_signature_writes_exact_heading_asset(
         r"o\road\sil_new.paa",
     )
     textures = [face.texture for face in visual.faces]
-    assert textures.count(r"o\road\sil_new.paa") == 8
+    assert textures.count(r"o\road\sil_new.paa") == 16
     assert r"o\road\sil_konec.paa" not in textures
     assert visual.faces
     assert roadway.faces
@@ -469,10 +469,20 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
     )[0]
 
     textures = [face.texture for face in visual.faces]
-    assert len(visual.faces) == 8
-    assert textures.count(r"o\road\sil_new.paa") == 8
+    assert len(visual.faces) == 16
+    assert textures.count(r"o\road\sil_new.paa") == 16
     assert r"o\road\sil_konec.paa" not in textures
     assert r"landtext\silnice.pac" not in textures
+    # Poseidon/CWA culls the single generated triangle winding in game. Keep
+    # every junction quad paired with its exact reverse winding, just like the
+    # generated road ribbons that remain visible in terrtest116.
+    for offset in range(0, len(visual.faces), 4):
+        assert visual.faces[offset + 2].vertices == tuple(
+            reversed(visual.faces[offset].vertices)
+        )
+        assert visual.faces[offset + 3].vertices == tuple(
+            reversed(visual.faces[offset + 1].vertices)
+        )
 
     ys = [point[1] for point in visual.points]
     assert math.isclose(
