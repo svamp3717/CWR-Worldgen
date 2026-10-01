@@ -299,8 +299,8 @@ def test_generated_paved_junction_signature_writes_exact_heading_asset(
         r"o\road\sil_new.paa",
     )
     textures = [face.texture for face in visual.faces]
-    assert textures.count(r"o\road\sil_new.paa") == 4
-    assert textures.count(r"o\road\sil_konec.paa") == 4
+    assert textures.count(r"o\road\sil_new.paa") == 8
+    assert r"o\road\sil_konec.paa" not in textures
     assert visual.faces
     assert roadway.faces
 
@@ -539,6 +539,45 @@ def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
     )
 
 
+
+def test_generated_roads_and_junctions_inherit_donor_surface_metadata() -> None:
+    texture = r"myroads\surface.paa"
+    style = infrastructure.RoadSurfaceStyle(
+        point_flag=0x0040013F,
+        face_flag=0x0007C142,
+    )
+    keys = (
+        infrastructure.InfrastructureModelKey(
+            "road", "road_paved_w060_l0125_r015", 60, 125
+        ),
+        infrastructure.InfrastructureModelKey(
+            "road", "road_j3_paved_w060_h000_090_180", 60, 125
+        ),
+        infrastructure.InfrastructureModelKey(
+            "road", "road_gravel_w046_l0060", 46, 60
+        ),
+        infrastructure.InfrastructureModelKey(
+            "road", "road_j3_gravel_w046_h000_090_180", 46, 125
+        ),
+    )
+
+    for key in keys:
+        visual, _geometry, roadway, _land = infrastructure._road_lods(
+            key,
+            texture,
+            style,
+        )
+        assert visual.faces
+        assert roadway.faces
+        assert visual.point_flags == (style.point_flag,) * len(visual.points)
+        assert roadway.point_flags == (style.point_flag,) * len(roadway.points)
+        assert all(face.flags == style.face_flag for face in visual.faces)
+        assert all(face.flags == style.face_flag for face in roadway.faces)
+        # CfgSurfaces matches the Roadway face texture. Leaving this blank makes
+        # a road look like its donor while driving like the default surface.
+        assert all(face.texture == texture for face in roadway.faces)
+
+
 def test_generated_paved_and_gravel_roads_use_native_render_metadata() -> None:
     keys = (
         infrastructure.InfrastructureModelKey(
@@ -584,5 +623,9 @@ def test_generated_paved_and_gravel_roads_use_native_render_metadata() -> None:
         )
         assert all(
             face.flags == infrastructure._ROAD_SURFACE_FACE_FLAG
+            for face in roadway.faces
+        )
+        assert all(
+            face.texture == r"o\road\sil_new.paa"
             for face in roadway.faces
         )
