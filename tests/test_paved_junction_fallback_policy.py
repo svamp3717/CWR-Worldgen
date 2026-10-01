@@ -76,6 +76,31 @@ def _generated_approach(
     )
 
 
+
+def test_unified_generated_plan_overlaps_approaches_into_hub() -> None:
+    incidents = (
+        ((0.0, 1.0), "sil"),
+        ((0.0, -1.0), "sil"),
+        ((1.0, 0.0), "sil"),
+    )
+    plan = paved._generated_plan(
+        (0.0, 0.0),
+        incidents,
+        world_name="seam_world",
+        width_override=9.1,
+        donor_surface="paved",
+    )
+    assert plan is not None
+    expected = (
+        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        - infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES
+    )
+    assert all(
+        math.isclose(math.dist(plan.point, arm.connector.point), expected, abs_tol=1.0e-9)
+        for arm in plan.arms
+    )
+
+
 def test_generated_plan_uses_compact_quality_reserve_not_stock_approach_reserve() -> None:
     key = (100, 100)
     plan = _generated_plan((100.0, 100.0))
@@ -240,6 +265,7 @@ def test_terrtest48_fallback_hub_stitches_real_nearby_approaches() -> None:
         cells=64,
         cell_size=25.0,
         road_segment_length=25.0,
+        custom_road_shapes=True,
     )
     elevations = (0.0,) * (64 * 64)
     plans = {(104, 90): plan}
@@ -258,6 +284,14 @@ def test_terrtest48_fallback_hub_stitches_real_nearby_approaches() -> None:
     )
 
     assert stitched.objects[0].model_path == plan.model_path
+    assert not any(
+        "\\i\\paved_w" in obj.model_path.casefold()
+        for obj in stitched.objects
+    )
+    assert any(
+        "\\i\\road_paved_" in obj.model_path.casefold()
+        for obj in stitched.objects
+    )
     assert fallback._successful_plan_keys(
         stitched,
         plans,
