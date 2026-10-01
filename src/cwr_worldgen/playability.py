@@ -19,6 +19,7 @@ from .procedural_infrastructure import (
     GENERATED_GRAVEL_VISUAL_TOP_METRES,
     GENERATED_PAVED_HALF_WIDTH_METRES,
     GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES,
+    GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES,
     GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
     GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES,
     custom_road_junction_model_path,
@@ -2783,7 +2784,7 @@ def _fit_stock_piece_road_objects(
             # 0.20 m clearance produced visible grass slits beside the junction.
             cap_trim_lengths[key] = max(
                 0.40,
-                half - _JUNCTION_OVERLAP,
+                half - GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES,
             )
             cap_cover_lengths[key] = (
                 half + GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
