@@ -77,6 +77,20 @@ def test_donor_surface_style_preserves_render_flags_but_not_land_deformation() -
     assert style.point_flag == source_point_flag
 
 
+def test_stock_paved_surface_texture_uses_cfgsurfaces_silnice_name() -> None:
+    assert generator._roadway_surface_texture_for_donor(
+        "paved",
+        r"o\road\sil25.p3d",
+        r"o\road\sil_new.paa",
+    ) == r"landtext\silnice.pac"
+
+    assert generator._roadway_surface_texture_for_donor(
+        "paved",
+        r"bas_o\_road\bas_asf25.p3d",
+        r"bas_o\_road\asfalt.paa",
+    ) == r"bas_o\_road\asfalt.paa"
+
+
 def test_missing_asset_pbo_is_rejected_before_world_generation(tmp_path: Path) -> None:
     missing = tmp_path / "missing-roads.pbo"
     spec = SimpleNamespace(asset_roots=(missing,))
