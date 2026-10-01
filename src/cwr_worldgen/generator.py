@@ -1703,17 +1703,25 @@ def _roadway_surface_texture_for_donor(
     donor_model: str,
     visual_texture: str,
 ) -> str:
-    """Choose the texture that selects the donor's CWA CfgSurfaces class.
+    """Choose the texture that selects the intended CWA CfgSurfaces class.
 
-    Stock paved road visuals use sil_new.paa, but CWA's Roadway surface class
-    matches silnice*. Generated stock-family roads therefore need the stock
-    landtext surface texture on Roadway LOD while keeping sil_new on Visual LOD.
-    Modded donors keep their resolved texture unless a dedicated mapping is known.
+    Stock paved road visuals use sil_new.paa while Roadway matches silnice*.
+    Stock dirt roads use the Cesta class, matched by cesta*. Built-in procedural
+    gravel intentionally uses that same Cesta class so unmodded gravel drives
+    like the stock dirt-road family while retaining its gravel artwork.
     """
 
+    surface_name = surface.casefold()
     donor = canonical_asset_path(donor_model)
-    if surface.casefold() == "paved" and donor.startswith(r"o\road\sil"):
+    if surface_name == "paved" and donor.startswith(r"o\road\sil"):
         return r"landtext\silnice.pac"
+    if surface_name == "dirt" and (
+        donor.startswith(r"o\road\ces")
+        or donor.startswith(r"data3d\cesta")
+    ):
+        return r"landtext\cesta.pac"
+    if surface_name == "gravel" and not donor:
+        return r"landtext\cesta.pac"
     return visual_texture
 
 
@@ -4254,6 +4262,22 @@ def build_milestone4(
     ).strip()
     if generated_gravel_usage and (configured_gravel_curve or configured_gravel):
         road_texture_donors["gravel"] = effective_texture_donor("gravel")
+    elif generated_gravel_usage:
+        gravel_roadway_texture = _roadway_surface_texture_for_donor(
+            "gravel",
+            "",
+            "",
+        )
+        road_surface_styles["gravel"] = RoadSurfaceStyle(
+            roadway_texture=gravel_roadway_texture,
+        )
+        road_surface_style_report["gravel"] = {
+            "source_format": None,
+            "visual_texture": None,
+            "roadway_texture": gravel_roadway_texture,
+            "point_flag": f"0x{_ROAD_SURFACE_POINT_FLAG:08x}" if False else None,
+            "face_flag": None,
+        }
     if generated_dirt_usage:
         road_texture_donors["dirt"] = effective_texture_donor("dirt")
 
