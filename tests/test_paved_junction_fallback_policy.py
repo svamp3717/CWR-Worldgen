@@ -2,10 +2,24 @@ import math
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import cwr_worldgen.playability as playability
 import cwr_worldgen.paved_junction_fallback_policy as fallback
 import cwr_worldgen.paved_junction_policy as paved
 import cwr_worldgen.procedural_infrastructure as infrastructure
 import cwr_worldgen.road_quality_policy as road_quality
+
+
+def _road_report(objects, *, junction_cap_objects=0):
+    return playability.RoadFitReport(
+        objects=tuple(objects),
+        chain_count=0,
+        connection_count=0,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+        junction_cap_objects=junction_cap_objects,
+    )
 
 
 def _plan(model: str, point: tuple[float, float], axis=(0.0, 1.0)):
@@ -161,10 +175,7 @@ def test_terrtest48_generated_fallback_replaces_plain_sil6_cap() -> None:
         heading_degrees=286.0,
         pitch_degrees=0.0,
     )
-    report = SimpleNamespace(
-        objects=(cap, untouched),
-        junction_cap_objects=1,
-    )
+    report = _road_report((cap, untouched), junction_cap_objects=1)
     spec = SimpleNamespace(
         cells=8,
         cell_size=25.0,
@@ -256,10 +267,7 @@ def test_terrtest48_fallback_hub_stitches_real_nearby_approaches() -> None:
             pitch_degrees=0.0,
         ),
     )
-    report = SimpleNamespace(
-        objects=objects,
-        junction_cap_objects=1,
-    )
+    report = _road_report(objects, junction_cap_objects=1)
     spec = SimpleNamespace(
         name="terrtest48",
         cells=64,
@@ -402,10 +410,7 @@ def test_stitcher_replaces_stock_sil6_that_straddles_generated_connector() -> No
         heading_degrees=0.0,
         pitch_degrees=0.0,
     )
-    report = SimpleNamespace(
-        objects=(hub, straddler),
-        junction_cap_objects=1,
-    )
+    report = _road_report((hub, straddler), junction_cap_objects=1)
     spec = SimpleNamespace(
         name="seam_world",
         road_segment_length=25.0,
@@ -476,10 +481,7 @@ def test_stitcher_rebuilds_endpoint_matched_but_angle_mismatched_approach() -> N
         heading_degrees=0.0,
         pitch_degrees=0.0,
     )
-    report = SimpleNamespace(
-        objects=(hub, old),
-        junction_cap_objects=1,
-    )
+    report = _road_report((hub, old), junction_cap_objects=1)
     spec = SimpleNamespace(
         name="seam_world",
         road_segment_length=25.0,
