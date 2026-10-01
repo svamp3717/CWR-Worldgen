@@ -82,15 +82,13 @@ def test_stock_surface_textures_select_expected_cfgsurfaces_classes() -> None:
         "paved",
         r"o\road\sil25.p3d",
         r"o\road\sil_new.paa",
-        world_name="surface_world",
-    ) == r"surface_world\i\silnice_worldgen.paa"
+    ) == r"landtext\silnice.pac"
 
     assert generator._roadway_surface_texture_for_donor(
         "dirt",
         r"o\road\ces25.p3d",
         r"o\road\ces_hned.paa",
-        world_name="surface_world",
-    ) == r"surface_world\i\cesta_worldgen.paa"
+    ) == r"landtext\cesta.pac"
 
     # Built-in procedural gravel deliberately drives like the stock dirt-road
     # family while retaining its generated gravel artwork.
@@ -98,8 +96,7 @@ def test_stock_surface_textures_select_expected_cfgsurfaces_classes() -> None:
         "gravel",
         "",
         "",
-        world_name="surface_world",
-    ) == r"surface_world\i\cesta_worldgen.paa"
+    ) == r"landtext\cesta.pac"
 
     # Modded paved donors keep their own surface filename unless explicitly
     # mapped; their addon may define its own matching CfgSurfaces entry.
@@ -107,7 +104,6 @@ def test_stock_surface_textures_select_expected_cfgsurfaces_classes() -> None:
         "paved",
         r"bas_o\_road\bas_asf25.p3d",
         r"bas_o\_road\asfalt.paa",
-        world_name="surface_world",
     ) == r"bas_o\_road\asfalt.paa"
 
 
