@@ -1851,12 +1851,15 @@ def test_unresolved_mod_gravel_donor_never_silently_uses_generic_texture() -> No
         )
 
 
-def test_stock_road_donors_keep_known_texture_fallbacks() -> None:
+def test_stock_road_donors_keep_known_visual_texture_fallbacks() -> None:
+    # Visual fallback is the donor's real visible texture. Ground/contact
+    # behavior comes from the donor's actual Roadway LOD inspection and must
+    # never be guessed from a nonexistent landtext selector.
     assert generator._resolved_road_donor_texture(
         (),
         surface="paved",
         donor_model=r"o\road\sil25.p3d",
-    ) == r"landtext\silnice.pac"
+    ) == r"o\road\sil_new.paa"
     assert generator._resolved_road_donor_texture(
         (),
         surface="dirt",
