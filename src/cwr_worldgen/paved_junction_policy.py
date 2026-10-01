@@ -303,7 +303,9 @@ def _generated_plan(
         )
     )
     connector_radius = (
-        _JUNCTION_RADIUS
+        _JUNCTION_RADIUS - _rq._JUNCTION_OVERLAP
+        if donor_surface in {"paved", "gravel", "dirt"}
+        else _JUNCTION_RADIUS
         + _pi.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
     )
     right = axis[1], -axis[0]
