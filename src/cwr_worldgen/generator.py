@@ -4268,15 +4268,16 @@ def build_milestone4(
             "",
             "",
         )
-        road_surface_styles["gravel"] = RoadSurfaceStyle(
+        gravel_style = RoadSurfaceStyle(
             roadway_texture=gravel_roadway_texture,
         )
+        road_surface_styles["gravel"] = gravel_style
         road_surface_style_report["gravel"] = {
-            "source_format": None,
+            "source_format": "generated-default",
             "visual_texture": None,
             "roadway_texture": gravel_roadway_texture,
-            "point_flag": f"0x{_ROAD_SURFACE_POINT_FLAG:08x}" if False else None,
-            "face_flag": None,
+            "point_flag": f"0x{int(gravel_style.point_flag) & 0xFFFFFFFF:08x}",
+            "face_flag": f"0x{int(gravel_style.face_flag) & 0xFFFFFFFF:08x}",
         }
     if generated_dirt_usage:
         road_texture_donors["dirt"] = effective_texture_donor("dirt")
