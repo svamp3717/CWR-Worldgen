@@ -1852,9 +1852,7 @@ def test_unresolved_mod_gravel_donor_never_silently_uses_generic_texture() -> No
 
 
 def test_stock_road_donors_keep_known_visual_texture_fallbacks() -> None:
-    # Visual fallback is the donor's real visible texture. Ground/contact
-    # behavior comes from the donor's actual Roadway LOD inspection and must
-    # never be guessed from a nonexistent landtext selector.
+    # Visual generation still uses the donor's real diffuse artwork.
     assert generator._resolved_road_donor_texture(
         (),
         surface="paved",
@@ -1865,6 +1863,35 @@ def test_stock_road_donors_keep_known_visual_texture_fallbacks() -> None:
         surface="dirt",
         donor_model=r"o\road\ces25.p3d",
     ) == r"o\road\ces_hned.paa"
+
+
+def test_stock_roadway_groundtype_uses_cwa_cfgsurface_selector() -> None:
+    paved, paved_source = generator._roadway_groundtype_texture_for_donor(
+        r"o\road\sil25.p3d",
+        r"o\road\sil_new.paa",
+        r"o\road\sil_new.paa",
+    )
+    dirt, dirt_source = generator._roadway_groundtype_texture_for_donor(
+        r"o\road\ces25.p3d",
+        r"o\road\ces_hned.paa",
+        r"o\road\ces_hned.paa",
+    )
+
+    assert paved == r"landtext\silnice.pac"
+    assert paved_source == "stock-paved-cfgsurface"
+    assert dirt == r"landtext\cesta.pac"
+    assert dirt_source == "stock-dirt-cfgsurface"
+
+
+def test_modded_roadway_groundtype_keeps_donor_contact_texture() -> None:
+    texture, source = generator._roadway_groundtype_texture_for_donor(
+        r"modroads\asphalt25.p3d",
+        r"modroads\asphalt_ground.paa",
+        r"modroads\asphalt_visual.paa",
+    )
+
+    assert texture == r"modroads\asphalt_ground.paa"
+    assert source == "donor-roadway-lod"
 
 
 def test_sebnam_curve_donor_resolves_to_straight_family(tmp_path: Path) -> None:
