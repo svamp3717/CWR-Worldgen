@@ -44,11 +44,13 @@ _ROAD_SURFACE_NORMAL = (0.0, -1.0, 0.0)
 
 @dataclass(frozen=True, slots=True)
 class RoadSurfaceStyle:
-    """Render and driving-surface metadata inherited from the road donor."""
+    """Visual donor metadata plus independent Roadway contact metadata."""
 
     point_flag: int = _ROAD_SURFACE_POINT_FLAG
     face_flag: int = _ROAD_SURFACE_FACE_FLAG
     roadway_texture: str = ""
+    roadway_point_flag: int = 0
+    roadway_face_flag: int = 0
 
 
 _DEFAULT_ROAD_SURFACE_STYLE = RoadSurfaceStyle()
@@ -63,28 +65,12 @@ def _roadway_surface_texture(
     return surface_style.roadway_texture or visual_texture
 
 
-def stock_road_surface_selector_path(world_name: str, surface: str) -> str:
-    """Return a guaranteed-present world-local CfgSurfaces selector texture.
-
-    CWA's protected stock CfgSurfaces matches texture filenames. Keeping the
-    selector inside the generated world avoids depending on a particular stock
-    archive path while still matching the stock silnice* / cesta* families.
-    """
-
-    value = str(surface).strip().casefold()
-    if value == "paved":
-        filename = "silnice_worldgen.paa"
-    elif value in {"dirt", "gravel"}:
-        filename = "cesta_worldgen.paa"
-    else:
-        raise ValueError("road surface selector must be paved, dirt, or gravel")
-    return rf"{world_name}\i\{filename}"
-
-# Generated gravel is a terrain-hugging surface ribbon, not a raised slab.
-# Its visible skin and Roadway LOD are coplanar and are placed directly on the
-# graded terrain; the Geometry LOD carries map metadata only and has no faces.
+# Generated roads keep their visible skin close to graded terrain, but the
+# Roadway contact plane is lifted 1 cm above it. OFP/CWA otherwise lets the
+# terrain compete with a coplanar Roadway LOD, producing grass/default surface
+# behavior even when the Roadway face carries a road texture.
 GENERATED_GRAVEL_VISUAL_TOP_METRES = 0.025
-GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES = 0.025
+GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES = 0.035
 GENERATED_GRAVEL_HALF_WIDTH_METRES = 2.30
 GENERATED_GRAVEL_SURFACE_CLEARANCE_METRES = 0.0
 GENERATED_GRAVEL_VISUAL_OVERLAP_METRES = 0.90
@@ -2395,52 +2381,6 @@ class ProceduralInfrastructureLibrary:
             and not (kind == "dirt" and self.dirt_texture_path)
         )
         texture_files: list[str] = []
-
-        # Roadway LOD surface selectors must be real textures. CWA matches the
-        # selector by filename against its protected CfgSurfaces classes; a
-        # guessed external path can silently fall back to Default/grass when
-        # that texture is not present in the runtime. These tiny world-local
-        # textures are invisible but guaranteed to exist in the packed PBO.
-        selector_prefix = (self.world_name + "\\i\\").casefold()
-        selector_paths = sorted({
-            style.roadway_texture
-            for style in self.road_surface_styles.values()
-            if style.roadway_texture
-            and style.roadway_texture.casefold().startswith(selector_prefix)
-            and style.roadway_texture.casefold().endswith(
-                ("silnice_worldgen.paa", "cesta_worldgen.paa")
-            )
-        })
-        for wire in selector_paths:
-            relative = wire.split("\\", 1)[1].replace("\\", "/")
-            destination = source_dir / relative
-            filename = wire.rsplit("\\", 1)[-1].casefold()
-            selector_family = (
-                "silnice" if filename.startswith("silnice") else "cesta"
-            )
-            asset_key = cache_key(
-                "procedural-road-surface-selector-v1",
-                {"family": selector_family, "size": 4},
-            )
-            cached = (
-                self.cache_dir / "procedural-assets" / f"{asset_key}.paa"
-                if self.cache_dir
-                else None
-            )
-            hit = restore_or_create_file(
-                cache_path=cached,
-                destination=destination,
-                producer=lambda target: write_rgb_dxt1_paa(
-                    target,
-                    Image.new("RGB", (4, 4), (128, 128, 128)),
-                ),
-                enabled=self.cache_enabled,
-                refresh=self.cache_refresh,
-            )
-            self.cache_hits += int(hit)
-            self.cache_misses += int(not hit)
-            inspect_paa(destination)
-            texture_files.append(relative)
 
         # A donor texture is referenced from the external mod rather than copied
         # into the generated world. Remove stale locally-generated surface files
