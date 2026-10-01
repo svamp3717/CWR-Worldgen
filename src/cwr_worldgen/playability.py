@@ -921,14 +921,7 @@ def road_model_variants(
     *,
     donor_only: bool = False,
 ) -> tuple[_RoadPiece, ...]:
-    """Return deterministic road-model fitting pieces.
-
-    Unified custom-road mode treats the configured straight P3D purely as one
-    donor: no 12/6/3 siblings are inferred or discovered. Its measured length is
-    the single segmentation unit and Worldgen procedurally generates every placed
-    straight/curve/filler piece from that donor style. Legacy callers retain the
-    historical stock-family sibling catalogue.
-    """
+    """Return deterministic road-model fitting pieces.\n\n    Normal fitting reuses real 25/12/6 siblings when the active availability map\n    proves they exist. Mod families therefore retain their native short straights,\n    while missing lengths can be supplied procedurally by the unified fallback.\n    ``donor_only`` deliberately returns only the configured/effective style donor\n    for measurement, texture, and generated-model decisions.\n    """
 
     if configured_long_length <= 0.0:
         raise ValueError("configured road length must be positive")
