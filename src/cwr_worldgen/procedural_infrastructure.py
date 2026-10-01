@@ -1560,7 +1560,7 @@ def _custom_road_junction_lods(
     roadway = _paved_junction_triangulated_lod(
         logical_polygon,
         y=GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES,
-        texture=texture,
+        texture=_roadway_surface_texture(texture, surface_style),
         resolution=_ROADWAY_LOD,
         surface_style=surface_style,
     )
