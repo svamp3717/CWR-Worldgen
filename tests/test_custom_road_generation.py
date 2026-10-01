@@ -102,7 +102,7 @@ def test_custom_road_library_emits_all_three_surface_families(tmp_path: Path) ->
         (
             "paved",
             r"o\road\sil25.p3d",
-            (playability._RoadPiece(r"o\road\sil6.p3d", 6.0, 6),),
+            (playability._RoadPiece(r"o\road\sil25.p3d", 25.0, 25),),
         ),
         (
             "gravel",
@@ -112,7 +112,7 @@ def test_custom_road_library_emits_all_three_surface_families(tmp_path: Path) ->
         (
             "dirt",
             r"o\road\ces25.p3d",
-            (playability._RoadPiece(r"o\road\ces6.p3d", 6.0, 6),),
+            (playability._RoadPiece(r"o\road\ces25.p3d", 25.0, 25),),
         ),
     ),
 )
