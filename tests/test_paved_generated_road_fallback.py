@@ -484,6 +484,30 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
             reversed(visual.faces[offset + 1].vertices)
         )
 
+    # CWA resolves these intersecting donor-texture faces by MLOD face order more
+    # reliably than by their tiny Y separation. The branch quad must be emitted
+    # first (points 0..3), with the straight-through carriageway after it
+    # (points 4..7), so the main road visually prints over the branch.
+    assert all(
+        0 <= vertex[0] <= 3
+        for vertex in visual.faces[0].vertices
+    )
+    assert all(
+        4 <= vertex[0] <= 7
+        for vertex in visual.faces[4].vertices
+    )
+    assert min(point[1] for point in visual.points[:4]) < (
+        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+    )
+    assert all(
+        math.isclose(
+            point[1],
+            infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES,
+            abs_tol=1.0e-9,
+        )
+        for point in visual.points[4:8]
+    )
+
     ys = [point[1] for point in visual.points]
     assert math.isclose(
         min(ys),
