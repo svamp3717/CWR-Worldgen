@@ -299,7 +299,7 @@ def test_generated_paved_junction_signature_writes_exact_heading_asset(
         r"o\road\sil_new.paa",
     )
     textures = [face.texture for face in visual.faces]
-    assert textures.count(r"o\road\sil_new.paa") == 8
+    assert textures.count(r"o\road\sil_new.paa") == 16
     assert r"o\road\sil_konec.paa" not in textures
     assert visual.faces
     assert roadway.faces
@@ -460,7 +460,7 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
     )[0]
 
     textures = [face.texture for face in visual.faces]
-    assert len(visual.faces) == 8
+    assert len(visual.faces) == 16
     assert textures.count(r"o\road\sil_new.paa") == 8
     assert r"o\road\sil_konec.paa" not in textures
     assert r"landtext\silnice.pac" not in textures
@@ -468,7 +468,7 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
     ys = [point[1] for point in visual.points]
     assert math.isclose(
         max(ys) - min(ys),
-        infrastructure.GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES,
+        infrastructure.GENERATED_JUNCTION_OVERLAP_VISUAL_DROP_METRES,
         abs_tol=1.0e-7,
     )
     assert math.isclose(
@@ -551,7 +551,7 @@ def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
 
 def test_stock_paved_generated_models_keep_visual_texture_but_use_silnice_roadway() -> None:
     visual_texture = r"o\road\sil_new.paa"
-    roadway_texture = r"landtext\silnice.pac"
+    roadway_texture = r"reuse_world\i\silnice_worldgen.paa"
     style = infrastructure.RoadSurfaceStyle(
         point_flag=0x13F,
         face_flag=0x24102,
@@ -581,7 +581,7 @@ def test_stock_paved_generated_models_keep_visual_texture_but_use_silnice_roadwa
 
 
 def test_unmodded_gravel_and_stock_dirt_share_cesta_groundtype() -> None:
-    cesta = r"landtext\cesta.pac"
+    cesta = r"reuse_world\i\cesta_worldgen.paa"
     gravel_visual = r"reuse_world\i\g.paa"
     dirt_visual = r"o\road\ces_hned.paa"
     gravel_style = infrastructure.RoadSurfaceStyle(roadway_texture=cesta)
@@ -615,7 +615,8 @@ def test_unmodded_gravel_and_stock_dirt_share_cesta_groundtype() -> None:
 
 
 def test_generated_junction_intersecting_branches_stay_below_through_road() -> None:
-    drop = infrastructure.GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES
+    branch_drop = infrastructure.GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES
+    overlap_drop = infrastructure.GENERATED_JUNCTION_OVERLAP_VISUAL_DROP_METRES
     top = infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
     keys = (
         infrastructure.InfrastructureModelKey(
@@ -636,8 +637,62 @@ def test_generated_junction_intersecting_branches_stay_below_through_road() -> N
         )
         ys = tuple(point[1] for point in visual.points)
         assert math.isclose(max(ys), top, abs_tol=1.0e-9)
-        assert math.isclose(min(ys), top - drop, abs_tol=1.0e-9)
+        assert math.isclose(min(ys), top - overlap_drop, abs_tol=1.0e-9)
+        assert any(
+            math.isclose(value, top - branch_drop, abs_tol=1.0e-9)
+            for value in ys
+        )
         assert all(value <= top + 1.0e-9 for value in ys)
+
+
+def test_surface_selector_textures_are_bundled_with_generated_roads(
+    tmp_path: Path,
+) -> None:
+    paved_selector = infrastructure.stock_road_surface_selector_path(
+        "selector_world", "paved"
+    )
+    cesta_selector = infrastructure.stock_road_surface_selector_path(
+        "selector_world", "gravel"
+    )
+    library = infrastructure.ProceduralInfrastructureLibrary(
+        "selector_world",
+        paved_texture_path=r"o\road\sil_new.paa",
+        road_surface_styles={
+            "paved": infrastructure.RoadSurfaceStyle(
+                roadway_texture=paved_selector
+            ),
+            "gravel": infrastructure.RoadSurfaceStyle(
+                roadway_texture=cesta_selector
+            ),
+        },
+        cache_enabled=False,
+    )
+    paved_model = infrastructure.custom_road_model_path(
+        "selector_world", "paved", 9.1, 6.3
+    )
+    gravel_model = infrastructure.custom_road_model_path(
+        "selector_world", "gravel", 4.6, 6.3
+    )
+    library.register_model_usage(paved_model)
+    library.register_model_usage(gravel_model)
+    result = library.write_assets(
+        tmp_path,
+        tmp_path / "infrastructure.json",
+    )
+
+    assert "i/silnice_worldgen.paa" in result.texture_files
+    assert "i/cesta_worldgen.paa" in result.texture_files
+    assert (tmp_path / "i" / "silnice_worldgen.paa").is_file()
+    assert (tmp_path / "i" / "cesta_worldgen.paa").is_file()
+
+    paved_summary = infrastructure.inspect_mlod(
+        tmp_path / "i" / "road_paved_w091_l0063.p3d"
+    )
+    gravel_summary = infrastructure.inspect_mlod(
+        tmp_path / "i" / "road_gravel_w046_l0063.p3d"
+    )
+    assert paved_selector in paved_summary.texture_paths
+    assert cesta_selector in gravel_summary.texture_paths
 
 
 def test_generated_roads_and_junctions_inherit_donor_surface_metadata() -> None:
