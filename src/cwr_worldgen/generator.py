@@ -25,7 +25,11 @@ from .paa import inspect_paa, write_rgb_dxt1_paa, write_solid_dxt1_paa
 from .pbo import PboPackResult, pack_directory, pack_directory_cached, read_pbo
 from ._version import GENERATOR_VERSION
 from .output_ownership import prepare_output_directory, record_build_ownership
-from .legacy_proxy_models import ProxyCloneError, inspect_visual_model_dimensions
+from .legacy_proxy_models import (
+    ProxyCloneError,
+    inspect_visual_model_dimensions,
+    inspect_visual_surface_style,
+)
 from .assets import (
     AssetRecord,
     canonical_asset_path,
@@ -44,6 +48,7 @@ from .procedural_buildings import BuildingGenerationResult, ProceduralBuildingLi
 from .procedural_infrastructure import (
     InfrastructureAssetResult,
     ProceduralInfrastructureLibrary,
+    RoadSurfaceStyle,
     _texture_file_stem,
     custom_road_model_signature,
     is_generated_dirt_junction_model,
@@ -4213,6 +4218,8 @@ def build_milestone4(
     paved_texture_path = r"landtext\silnice.pac"
     gravel_texture_path: str | None = None
     dirt_texture_path: str | None = None
+    road_surface_styles: dict[str, RoadSurfaceStyle] = {}
+    road_surface_style_report: dict[str, dict[str, object]] = {}
 
     road_texture_donors: dict[str, str] = {}
 
@@ -4241,12 +4248,37 @@ def build_milestone4(
             refresh=bool(getattr(spec, "cache_refresh", False)),
         )
         donor_textures: dict[str, str | None] = {}
+        road_records = {
+            record.path: record
+            for record in road_model_scan.records
+        }
         for surface, donor_model in road_texture_donors.items():
-            donor_textures[surface] = _resolved_road_donor_texture(
+            texture = _resolved_road_donor_texture(
                 road_model_scan.records,
                 surface=surface,
                 donor_model=donor_model,
             )
+            donor_textures[surface] = texture
+            donor_record = road_records.get(canonical_asset_path(donor_model))
+            if donor_record is None:
+                continue
+            try:
+                donor_style = inspect_visual_surface_style(
+                    read_asset_record_bytes(donor_record),
+                    texture_path=texture,
+                )
+            except (OSError, ValueError, FileNotFoundError, ProxyCloneError):
+                continue
+            road_surface_styles[surface] = RoadSurfaceStyle(
+                point_flag=int(donor_style.point_flag),
+                face_flag=int(donor_style.face_flag),
+            )
+            road_surface_style_report[surface] = {
+                "source_format": donor_style.source_format,
+                "texture": texture,
+                "point_flag": f"0x{int(donor_style.point_flag) & 0xFFFFFFFF:08x}",
+                "face_flag": f"0x{int(donor_style.face_flag) & 0xFFFFFFFF:08x}",
+            }
         paved_texture_path = donor_textures.get("paved") or paved_texture_path
         gravel_texture_path = donor_textures.get("gravel")
         dirt_texture_path = donor_textures.get("dirt")
@@ -4257,6 +4289,7 @@ def build_milestone4(
             paved_texture_path=paved_texture_path,
             gravel_texture_path=gravel_texture_path,
             dirt_texture_path=dirt_texture_path,
+            road_surface_styles=road_surface_styles,
             cache_dir=getattr(spec, "cache_dir", None),
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
@@ -4549,6 +4582,8 @@ def build_milestone4(
     )
     for surface, details in donor_provenance.items():
         road_donor_report.setdefault(surface, {}).update(details)
+    for surface, style in road_surface_style_report.items():
+        road_donor_report.setdefault(surface, {})["generated_surface_style"] = style
     # Keep a compact donor record inside the generated world PBO as well as in
     # the external road report. This makes mod-road width/style problems
     # diagnosable from an uploaded PBO alone.
@@ -4771,6 +4806,7 @@ def build_milestone4(
                 paved_texture_path=paved_texture_path,
                 gravel_texture_path=gravel_texture_path,
                 dirt_texture_path=dirt_texture_path,
+                road_surface_styles=road_surface_styles,
                 cache_dir=getattr(spec, "cache_dir", None),
                 cache_enabled=bool(getattr(spec, "cache_enabled", True)),
                 cache_refresh=bool(getattr(spec, "cache_refresh", False)),
