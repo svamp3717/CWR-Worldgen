@@ -294,3 +294,32 @@ def test_unified_fit_never_emits_external_short_road_siblings(
         for path in external
     )
 
+@pytest.mark.parametrize("paved_model", [
+    r"o\road\sil25.p3d",
+    r"bas_o\_road\bas_asf25.p3d",
+])
+def test_unified_paved_junction_emits_no_external_road_pieces_except_donor(
+    paved_model,
+):
+    node = (500.0, 500.0)
+    _spec, report, _footprints = _fit(
+        paved_model,
+        [
+            (
+                {"highway": "residential", "surface": "asphalt"},
+                ((500.0, 400.0), node, (500.0, 600.0)),
+            ),
+            (
+                {"highway": "residential", "surface": "asphalt"},
+                (node, (600.0, 500.0)),
+            ),
+        ],
+        available_siblings=True,
+    )
+    external = {
+        obj.model_path.casefold()
+        for obj in report.objects
+        if not obj.model_path.casefold().startswith("seamtest\\i\\")
+    }
+    assert external <= {paved_model.casefold()}
+
