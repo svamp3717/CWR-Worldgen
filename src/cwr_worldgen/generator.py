@@ -1609,8 +1609,8 @@ def _preferred_road_texture(
 
 
 _ROAD_DONOR_TEXTURE_FALLBACKS = {
-    canonical_asset_path(r"o\road\sil25.p3d"): r"landtext\silnice.pac",
-    canonical_asset_path(r"o\road\sil10 25.p3d"): r"landtext\silnice.pac",
+    canonical_asset_path(r"o\road\sil25.p3d"): r"o\road\sil_new.paa",
+    canonical_asset_path(r"o\road\sil10 25.p3d"): r"o\road\sil_new.paa",
     canonical_asset_path(r"o\road\ces25.p3d"): r"o\road\ces_hned.paa",
     canonical_asset_path(r"o\road\ces10 25.p3d"): r"o\road\ces_hned.paa",
 }
@@ -1836,8 +1836,8 @@ def _preferred_stock_paved_texture(
     return _preferred_road_texture(
         model_path,
         dependencies,
-        fallback=r"landtext\silnice.pac",
-    ) or r"landtext\silnice.pac"
+        fallback=r"o\road\sil_new.paa",
+    ) or r"o\road\sil_new.paa"
 
 def _ground_texture_profile(spec: PlayabilitySpec) -> str:
     return str(getattr(spec, "ground_texture_profile", "generated"))
@@ -2241,12 +2241,6 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
     if milestone_number >= 9 and bool(getattr(spec, "forest_hillside_fallback", False)):
         trusted.add(canonical_asset_path(str(getattr(spec, "forest_hillside_tree_model", ""))))
     if milestone_number >= 9:
-        # These stock textures are surface-class selectors on Roadway LODs,
-        # supplied by the CWA runtime rather than redistributed in the world PBO.
-        trusted.update({
-            canonical_asset_path(r"landtext\silnice.pac"),
-            canonical_asset_path(r"landtext\cesta.pac"),
-        })
         proxy_profile = _forest_proxy_profile(spec)
         mapped_tree_models = (
             NOGOVA_PINE_INDIVIDUAL_TREE_MODELS
@@ -4222,7 +4216,7 @@ def build_milestone4(
         )
     )
 
-    paved_texture_path = r"landtext\silnice.pac"
+    paved_texture_path = r"o\road\sil_new.paa"
     gravel_texture_path: str | None = None
     dirt_texture_path: str | None = None
     road_surface_styles: dict[str, RoadSurfaceStyle] = {}
