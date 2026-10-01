@@ -446,9 +446,9 @@ def test_generated_paved_junction_overlap_stays_above_terrain() -> None:
         ),
         abs_tol=1.0e-9,
     )
-    assert (
-        infrastructure.GENERATED_JUNCTION_OVERLAP_VISUAL_DROP_METRES
-        < infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+    assert infrastructure.GENERATED_JUNCTION_OVERLAP_VISUAL_RISE_METRES > 0.0
+    assert max(point[1] for point in visual.points) > (
+        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
     )
     assert min(point[1] for point in visual.points) > 0.0
 
@@ -486,19 +486,42 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
 
     ys = [point[1] for point in visual.points]
     assert math.isclose(
-        max(ys) - min(ys),
-        infrastructure.GENERATED_JUNCTION_OVERLAP_VISUAL_DROP_METRES,
+        min(ys),
+        (
+            infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+            - infrastructure.GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES
+        ),
         abs_tol=1.0e-7,
     )
     assert math.isclose(
         max(ys),
-        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES,
+        (
+            infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+            + infrastructure.GENERATED_JUNCTION_OVERLAP_VISUAL_RISE_METRES
+        ),
         abs_tol=1.0e-7,
     )
     assert all(
         flag == infrastructure._ROAD_SURFACE_POINT_FLAG
         for flag in visual.point_flags
     )
+
+
+def test_generated_paved_junction_branch_mouth_layers_over_approach() -> None:
+    # The incoming generated approach is authored at VISUAL_TOP. The T-junction
+    # branch starts lower in the hub so the through road wins at the centre, but
+    # must climb above the approach before the 0.22 m overlap begins. Otherwise
+    # CWA draws the square end of the connecting road on top of the junction.
+    y = infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+    inner_y = y - infrastructure.GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES
+    outer_y = y + infrastructure.GENERATED_JUNCTION_OVERLAP_VISUAL_RISE_METRES
+    extent = infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+    overlap_start = infrastructure.GENERATED_JUNCTION_OVERLAP_TONGUE_START_METRES
+    fraction = overlap_start / extent
+    branch_y_at_overlap_start = inner_y + (outer_y - inner_y) * fraction
+
+    assert branch_y_at_overlap_start > y
+    assert outer_y > y
 
 
 def test_exact_heading_quantization_fits_inside_approach_overlap() -> None:
