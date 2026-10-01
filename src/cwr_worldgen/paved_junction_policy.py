@@ -303,7 +303,7 @@ def _generated_plan(
         )
     )
     connector_radius = (
-        _JUNCTION_RADIUS - _rq._JUNCTION_OVERLAP
+        _JUNCTION_RADIUS - _pi.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES
         if donor_surface in {"paved", "gravel", "dirt"}
         else _JUNCTION_RADIUS
         + _pi.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
