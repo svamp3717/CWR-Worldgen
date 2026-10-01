@@ -540,6 +540,37 @@ def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
 
 
 
+def test_stock_paved_generated_models_keep_visual_texture_but_use_silnice_roadway() -> None:
+    visual_texture = r"o\road\sil_new.paa"
+    roadway_texture = r"landtext\silnice.pac"
+    style = infrastructure.RoadSurfaceStyle(
+        point_flag=0x13F,
+        face_flag=0x24102,
+        roadway_texture=roadway_texture,
+    )
+    keys = (
+        infrastructure.InfrastructureModelKey(
+            "road", "road_paved_w091_l0063", 91, 63
+        ),
+        infrastructure.InfrastructureModelKey(
+            "road", "road_j3_paved_w091_h000_095_190", 91, 125
+        ),
+    )
+
+    for key in keys:
+        visual, _geometry, roadway, _land = infrastructure._road_lods(
+            key,
+            visual_texture,
+            style,
+        )
+        assert visual.faces
+        assert roadway.faces
+        assert all(face.texture == visual_texture for face in visual.faces)
+        assert all(face.texture == roadway_texture for face in roadway.faces)
+        assert all(face.flags == style.face_flag for face in roadway.faces)
+        assert roadway.point_flags == (style.point_flag,) * len(roadway.points)
+
+
 def test_generated_roads_and_junctions_inherit_donor_surface_metadata() -> None:
     texture = r"myroads\surface.paa"
     style = infrastructure.RoadSurfaceStyle(
