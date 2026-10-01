@@ -47,7 +47,34 @@ from cwr_worldgen.milestone6 import Milestone6Spec
 from cwr_worldgen.milestone7 import Milestone7Spec
 from cwr_worldgen.milestone8 import Milestone8Spec
 from cwr_worldgen.milestone9 import Milestone9Spec, _Milestone9PlayabilitySpec
-from cwr_worldgen.legacy_proxy_models import inspect_visual_model_dimensions
+from cwr_worldgen.legacy_proxy_models import (
+    inspect_visual_model_dimensions,
+    inspect_visual_surface_style,
+)
+
+
+
+def test_donor_surface_style_preserves_render_flags_but_not_land_deformation() -> None:
+    texture = r"myroads\surface.paa"
+    # Include ClipLandOn/ClipLandKeep bits (0x0900) plus a distinctive render
+    # bit. The generated road should inherit the render metadata but not ask the
+    # engine to deform an already terrain-fitted procedural mesh.
+    source_point_flag = 0x0040013F | 0x0900
+    source_face_flag = 0x0007C142
+    style = inspect_visual_surface_style(
+        _mlod_road(
+            6.0,
+            25.0,
+            texture,
+            point_flag=source_point_flag,
+            face_flag=source_face_flag,
+        ),
+        texture_path=texture,
+    )
+
+    assert style.texture_path == texture
+    assert style.face_flag == source_face_flag
+    assert style.point_flag == (source_point_flag & ~0x0900)
 
 
 def test_missing_asset_pbo_is_rejected_before_world_generation(tmp_path: Path) -> None:
@@ -102,6 +129,9 @@ def _mlod_road(
     width: float,
     length: float,
     texture: str,
+    *,
+    point_flag: int = 0x13F,
+    face_flag: int = 0,
 ) -> bytes:
     half_width = width * 0.5
     half_length = length * 0.5
@@ -122,12 +152,12 @@ def _mlod_road(
                     (2, 0, 1.0, 1.0),
                     (3, 0, 1.0, 0.0),
                 ),
-                0,
+                face_flag,
             ),
         ),
         1.0,
         properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
-        point_flags=(0x13F,) * 4,
+        point_flags=(point_flag,) * 4,
     )
     stream = io.BytesIO()
     stream.write(_MLOD_HEADER.pack(b"MLOD", 1, 1, 0, 1))
