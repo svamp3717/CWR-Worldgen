@@ -2155,7 +2155,7 @@ def test_ordered_road_texture_lookup_keeps_first_matching_asset_root(
     preferred = tmp_path / "preferred-sfp"
     colliding = tmp_path / "colliding-everon"
     donor = r"sfp_objects\roads\sil25.p3d"
-    sfp_texture = r"sfp_objects\roads\sfp_asphalt.paa"
+    sfp_texture = r"sfp_objects\r\sfp.paa"
     everon_texture = r"data\asfaltka.paa"
 
     _write_fake_mod_asset(
@@ -2207,7 +2207,7 @@ def test_ordered_road_texture_lookup_keeps_first_matching_asset_root(
     assert provenance["straight_asset"]["source"].endswith("sil25.p3d")
     assert provenance["resolved_texture"] == sfp_texture
     assert provenance["resolved_texture_asset"]["source"].endswith(
-        "sfp_asphalt.paa"
+        "sfp.paa"
     )
 
 
