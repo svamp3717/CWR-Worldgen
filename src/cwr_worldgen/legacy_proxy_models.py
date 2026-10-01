@@ -146,7 +146,11 @@ def _proxy_lod(
     )
 
 
-def _read_odol_visual(data: bytes) -> tuple[_Lod, int, tuple[str, ...]]:
+def _read_odol_visual(
+    data: bytes,
+    *,
+    strip_land_deform: bool = True,
+) -> tuple[_Lod, int, tuple[str, ...]]:
     stream = io.BytesIO(data)
     if _read_exact(stream, 4, "ODOL signature") != b"ODOL":
         raise ProxyCloneError("not an ODOL P3D")
@@ -265,19 +269,27 @@ def _read_odol_visual(data: bytes) -> tuple[_Lod, int, tuple[str, ...]]:
         faces.append(_Face(texture, vertices, int(face_flags)))
 
     land_count = sum(bool(flag & _LAND_DEFORM_MASK) for flag in flags)
-    safe_flags = tuple(int(flag & ~_LAND_DEFORM_MASK) for flag in flags)
+    output_flags = (
+        tuple(int(flag & ~_LAND_DEFORM_MASK) for flag in flags)
+        if strip_land_deform
+        else tuple(int(flag) for flag in flags)
+    )
     lod = _proxy_lod(
         points=points,
         normals=normals,
         faces=tuple(faces),
-        point_flags=safe_flags,
+        point_flags=output_flags,
     )
     return lod, land_count, tuple(
         sorted({face.texture for face in faces if face.texture})
     )
 
 
-def _read_mlod_visual(data: bytes) -> tuple[_Lod, int, tuple[str, ...]]:
+def _read_mlod_visual(
+    data: bytes,
+    *,
+    strip_land_deform: bool = True,
+) -> tuple[_Lod, int, tuple[str, ...]]:
     stream = io.BytesIO(data)
     if _read_exact(stream, 4, "MLOD signature") != b"MLOD":
         raise ProxyCloneError("not an MLOD P3D")
@@ -350,12 +362,16 @@ def _read_mlod_visual(data: bytes) -> tuple[_Lod, int, tuple[str, ...]]:
         faces.append(_Face(texture, vertices, face_flags))
 
     land_count = sum(bool(flag & _LAND_DEFORM_MASK) for flag in flags)
-    safe_flags = tuple(int(flag & ~_LAND_DEFORM_MASK) for flag in flags)
+    output_flags = (
+        tuple(int(flag & ~_LAND_DEFORM_MASK) for flag in flags)
+        if strip_land_deform
+        else tuple(int(flag) for flag in flags)
+    )
     lod = _proxy_lod(
         points=tuple(points),
         normals=normals,
         faces=tuple(faces),
-        point_flags=safe_flags,
+        point_flags=output_flags,
     )
     return lod, land_count, tuple(
         sorted({face.texture for face in faces if face.texture})
@@ -617,16 +633,23 @@ def inspect_visual_surface_style(
 ) -> VisualSurfaceStyle:
     """Read donor visual flags that affect road alpha/render behaviour.
 
-    Land-deformation point bits are intentionally stripped by the shared visual
-    reader before we choose a point flag. Generated road geometry is already
-    terrain-fitted and must not inherit donor mesh deformation behaviour.
+    Road donors retain their raw visual point and face flags. Stock modular
+    roads use surface/land flag combinations such as 0x13f as part of their
+    native rendering and ground interaction, so road generation must not apply
+    the vegetation-proxy flag stripping policy here.
     """
 
     if data.startswith(b"ODOL"):
-        lod, _land_count, _textures = _read_odol_visual(data)
+        lod, _land_count, _textures = _read_odol_visual(
+            data,
+            strip_land_deform=False,
+        )
         source_format = "ODOL"
     elif data.startswith(b"MLOD"):
-        lod, _land_count, _textures = _read_mlod_visual(data)
+        lod, _land_count, _textures = _read_mlod_visual(
+            data,
+            strip_land_deform=False,
+        )
         source_format = "MLOD"
     else:
         raise ProxyCloneError(
