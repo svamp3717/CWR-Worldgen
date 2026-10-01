@@ -136,15 +136,16 @@ GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES = 0.22
 # Keep side/intersecting junction artwork beneath the straight-through strip at
 # the hub centre. It rises back to normal road height toward the outer connector.
 GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES = 0.02
-# The final ~0.25 m before the logical connector is covered by the incoming
-# approach. Drop the hub's visual overlap tongue there so the straight road is
-# always the top visible surface even when independently fitted object planes
-# differ by a few centimetres.
+# The final ~0.25 m before the logical connector overlaps the incoming
+# approach. Keep the generated junction mouth a few millimetres above that
+# approach so Poseidon's old depth buffer consistently draws the junction cap
+# over the square road end instead of letting the connecting road print on top.
+# Five millimetres is enough ordering bias without creating a visible road step.
 GENERATED_JUNCTION_OVERLAP_TONGUE_START_METRES = (
     GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
     - GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES
 )
-GENERATED_JUNCTION_OVERLAP_VISUAL_DROP_METRES = 0.02
+GENERATED_JUNCTION_OVERLAP_VISUAL_RISE_METRES = 0.005
 # Matches the stock sil/kos effective half-width used throughout the fitter.
 GENERATED_PAVED_HALF_WIDTH_METRES = 4.55
 
@@ -1356,7 +1357,7 @@ def _stock_style_paved_junction_visual_lod(
         GENERATED_JUNCTION_OVERLAP_TONGUE_START_METRES,
         extent - 0.10,
     )
-    tongue_y = y - GENERATED_JUNCTION_OVERLAP_VISUAL_DROP_METRES
+    tongue_outer_y = y + GENERATED_JUNCTION_OVERLAP_VISUAL_RISE_METRES
 
     a_inner_left, a_inner_right = _paved_junction_cross_section(
         through_a, tongue_start, half_width, y
@@ -1398,13 +1399,13 @@ def _stock_style_paved_junction_visual_lod(
             heading,
             tongue_start,
             half_width,
-            tongue_y,
+            y,
         )
         tongue_outer_left, tongue_outer_right = _paved_junction_cross_section(
             heading,
             extent,
             half_width,
-            tongue_y,
+            tongue_outer_y,
         )
         _append_paved_junction_quad(
             points,
@@ -1433,7 +1434,7 @@ def _stock_style_paved_junction_visual_lod(
             heading,
             extent,
             half_width,
-            y,
+            tongue_outer_y,
         )
         stub_length = max(0.01, extent - stub_inner)
         _append_paved_junction_quad(
