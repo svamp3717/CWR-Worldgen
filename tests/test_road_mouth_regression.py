@@ -265,3 +265,32 @@ def test_angled_paved_bend_with_gravel_branch_has_no_wedge(
     assert report.junction_cap_objects == 0
     assert uncovered.area <= 0.10
 
+@pytest.mark.parametrize(("paved_model", "available_siblings"), [
+    (r"o\road\sil25.p3d", True),
+    (r"bas_o\_road\bas_asf25.p3d", True),
+])
+def test_unified_fit_never_emits_external_short_road_siblings(
+    paved_model,
+    available_siblings,
+):
+    _spec, report, _footprints = _fit(
+        paved_model,
+        [
+            (
+                {"highway": "residential", "surface": "asphalt"},
+                ((300.0, 300.0), (300.0, 360.0), (345.0, 390.0)),
+            ),
+        ],
+        available_siblings=available_siblings,
+    )
+    external = {
+        obj.model_path.casefold()
+        for obj in report.objects
+        if not obj.model_path.casefold().startswith("seamtest\\i\\")
+    }
+    assert external <= {paved_model.casefold()}
+    assert not any(
+        path.endswith(("12.p3d", "6.p3d"))
+        for path in external
+    )
+
