@@ -1129,6 +1129,7 @@ def _append_paved_junction_region(
     uv_for_point,
     points: list[tuple[float, float, float]],
     faces: list[_Face],
+    surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
 ) -> None:
     for polygon in _iter_paved_junction_polygon_parts(geometry):
         point_indices: dict[tuple[float, float], int] = {}
@@ -1153,7 +1154,7 @@ def _append_paved_junction_region(
                 faces.append(_Face(
                     texture,
                     tuple(vertices),
-                    _ROAD_SURFACE_FACE_FLAG,
+                    surface_style.face_flag,
                 ))
 
 
@@ -1190,15 +1191,6 @@ def _paved_junction_core_uv(
     u = max(0.28, min(0.72, u))
     v = -float(z) / GENERATED_PAVED_TEXTURE_REPEAT_METRES
     return u, v
-
-
-def _paved_junction_end_texture(texture: str) -> str:
-    """Return the stock road-end artwork used by CWA paved junction arms."""
-
-    normalized = str(texture).replace("/", "\\").strip("\\")
-    if normalized.casefold().endswith(r"\sil_new.paa"):
-        return normalized[:-len("sil_new.paa")] + "sil_konec.paa"
-    return normalized
 
 
 def _paved_junction_through_pair(
