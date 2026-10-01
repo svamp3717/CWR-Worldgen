@@ -774,7 +774,13 @@ def _ribbon_lod(
     )
 
 
-def _gravel_visual_lod(length: float, half_width: float, curve_degrees: int, texture: str) -> _Lod:
+def _gravel_visual_lod(
+    length: float,
+    half_width: float,
+    curve_degrees: int,
+    texture: str,
+    surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
+) -> _Lod:
     """Build a softly irregular gravel ribbon with terrain-visible outer verges."""
 
     visual_section_count = max(6, min(20, int(math.ceil(length / GENERATED_GRAVEL_EDGE_SECTION_METRES))))
@@ -821,6 +827,7 @@ def _gravel_visual_lod(length: float, half_width: float, curve_degrees: int, tex
         tuple(sections), texture=texture, resolution=_VISUAL_LOD,
         height=GENERATED_GRAVEL_VISUAL_TOP_METRES, lowered_overlap=True,
         double_sided=True, u_span_override=1.0,
+        surface_style=surface_style,
     )
     return _Lod(
         visual.points,
@@ -833,7 +840,11 @@ def _gravel_visual_lod(length: float, half_width: float, curve_degrees: int, tex
         visual.point_flags,
     )
 
-def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
+def _gravel_junction_lods(
+    key: InfrastructureModelKey,
+    texture: str,
+    surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
+) -> tuple[_Lod, ...]:
     """Build a compact terrain-coplanar gravel hub for 3/4-way junctions."""
 
     half_w = max(1.8, key.width_m * 0.5)
@@ -855,7 +866,7 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
         faces.append(_Face(
             texture,
             tuple((start + index, 0, u, v) for index, (u, v) in enumerate(uv)),
-            _ROAD_SURFACE_FACE_FLAG,
+            surface_style.face_flag,
         ))
 
     # Centre samples only the fully opaque portion of the gravel artwork.
@@ -875,7 +886,7 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
         tuple(faces),
         _VISUAL_LOD,
         properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
-        point_flags=(_ROAD_SURFACE_POINT_FLAG,) * len(points),
+        point_flags=(surface_style.point_flag,) * len(points),
     )
     map_geometry = _Lod(
         ((-extent, 0.0, -extent), (extent, 0.0, -extent), (extent, 0.0, extent), (-extent, 0.0, extent)),
@@ -887,13 +898,13 @@ def _gravel_junction_lods(key: InfrastructureModelKey, texture: str) -> tuple[_L
         roadway_points,
         (_ROAD_SURFACE_NORMAL,),
         (_Face(
-            "",
+            texture,
             ((0, 0, 0.0, 1.0), (3, 0, 0.0, 0.0),
              (2, 0, 1.0, 0.0), (1, 0, 1.0, 1.0)),
-            _ROAD_SURFACE_FACE_FLAG,
+            surface_style.face_flag,
         ),),
         _ROADWAY_LOD,
-        point_flags=(_ROAD_SURFACE_POINT_FLAG,) * len(roadway_points),
+        point_flags=(surface_style.point_flag,) * len(roadway_points),
     )
     land = _Lod(roadway_points, (), (), _LAND_CONTACT_LOD)
     return visual, map_geometry, roadway, land
@@ -1289,6 +1300,7 @@ def _stock_style_paved_junction_visual_lod(
     headings: tuple[int, ...],
     half_width: float,
     texture: str,
+    surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
 ) -> _Lod:
     """Build a donor-style paved hub that follows every encoded road heading."""
 
@@ -1337,10 +1349,10 @@ def _stock_style_paved_junction_visual_lod(
         end_right=a_right,
         v_start=0.0,
         v_end=through_v_span,
-        face_flags=_ROAD_SURFACE_FACE_FLAG,
+        face_flags=surface_style.face_flag,
     )
 
-    end_texture = _paved_junction_end_texture(texture)
+    end_texture = texture
     stub_inner = 0.0 if len(headings) == 3 else 0.14
     stub_rise = 0.0666 if len(headings) == 3 else 0.0118
     for heading in side_headings:
@@ -1376,7 +1388,7 @@ def _stock_style_paved_junction_visual_lod(
         tuple(faces),
         _VISUAL_LOD,
         properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
-        point_flags=(_ROAD_SURFACE_POINT_FLAG,) * len(points),
+        point_flags=(surface_style.point_flag,) * len(points),
     )
 
 
@@ -1386,6 +1398,7 @@ def _paved_junction_visual_lod(
     branch_half_width: float,
     branch_heading_degrees: float,
     texture: str,
+    surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
 ) -> _Lod:
     """Legacy angle-only wrapper retained for existing cached/model references."""
 
@@ -1397,6 +1410,7 @@ def _paved_junction_visual_lod(
             float(branch_half_width),
         ),
         texture=texture,
+        surface_style=surface_style,
     )
 
 def _paved_junction_triangulated_lod(
@@ -1405,6 +1419,7 @@ def _paved_junction_triangulated_lod(
     y: float,
     texture: str,
     resolution: float,
+    surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
 ) -> _Lod:
     point_indices: dict[tuple[float, float], int] = {}
     points: list[tuple[float, float, float]] = []
@@ -1429,19 +1444,20 @@ def _paved_junction_triangulated_lod(
             faces.append(_Face(
                 texture,
                 tuple(vertices),
-                _ROAD_SURFACE_FACE_FLAG,
+                surface_style.face_flag,
             ))
     return _Lod(
         tuple(points),
         (_ROAD_SURFACE_NORMAL,),
         tuple(faces),
         resolution,
-        point_flags=(_ROAD_SURFACE_POINT_FLAG,) * len(points),
+        point_flags=(surface_style.point_flag,) * len(points),
     )
 
 def _paved_junction_lods(
     key: InfrastructureModelKey,
     texture: str,
+    surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
 ) -> tuple[_Lod, ...]:
     signature = _parse_paved_junction_signature_subtype(key.subtype)
     if signature is not None:
@@ -1456,6 +1472,7 @@ def _paved_junction_lods(
             headings=headings,
             half_width=half_width,
             texture=texture,
+            surface_style=surface_style,
         )
     else:
         match = re.fullmatch(
@@ -1482,6 +1499,7 @@ def _paved_junction_lods(
             branch_half_width=branch_half_width,
             branch_heading_degrees=branch_heading,
             texture=texture,
+            surface_style=surface_style,
         )
 
     boundary = tuple(
@@ -1498,8 +1516,9 @@ def _paved_junction_lods(
     roadway = _paved_junction_triangulated_lod(
         logical_polygon,
         y=GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES,
-        texture="",
+        texture=texture,
         resolution=_ROADWAY_LOD,
+        surface_style=surface_style,
     )
     land = _Lod(boundary, (), (), _LAND_CONTACT_LOD)
     return visual, map_geometry, roadway, land
@@ -1507,6 +1526,7 @@ def _paved_junction_lods(
 def _custom_road_junction_lods(
     key: InfrastructureModelKey,
     texture: str,
+    surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
 ) -> tuple[_Lod, ...]:
     signature = custom_road_junction_signature(key.subtype + ".p3d")
     if signature is None:
@@ -1522,6 +1542,7 @@ def _custom_road_junction_lods(
         headings=headings,
         half_width=half_width,
         texture=texture,
+        surface_style=surface_style,
     )
     boundary = tuple(
         (float(x), 0.0, float(z))
@@ -1544,17 +1565,21 @@ def _custom_road_junction_lods(
     return visual, map_geometry, roadway, land
 
 
-def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
+def _road_lods(
+    key: InfrastructureModelKey,
+    texture: str,
+    surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
+) -> tuple[_Lod, ...]:
     subtype = key.subtype.casefold()
     if custom_road_junction_signature(subtype + ".p3d") is not None:
-        return _custom_road_junction_lods(key, texture)
+        return _custom_road_junction_lods(key, texture, surface_style)
     if (
         subtype.startswith("paved_j3_")
         or subtype.startswith("paved_j4_")
     ):
-        return _paved_junction_lods(key, texture)
+        return _paved_junction_lods(key, texture, surface_style)
     if subtype in {"gravel_j3", "gravel_j4"}:
-        return _gravel_junction_lods(key, texture)
+        return _gravel_junction_lods(key, texture, surface_style)
     width = key.width_m
     length = key.length_m
     half_w = width * 0.5
@@ -1596,6 +1621,7 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
             double_sided=True,
             u_span_override=1.0,
             texture_scale_override=GENERATED_PAVED_TEXTURE_REPEAT_METRES,
+            surface_style=surface_style,
         )
         visual = _Lod(
             raw_visual.points,
@@ -1611,7 +1637,9 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
         # Gravel and dirt tracks share the terrain-hugging, softly irregular
         # ribbon geometry. Their textures keep the surface families visually
         # distinct while preserving identical connection behaviour.
-        visual = _gravel_visual_lod(length, half_w, curve_degrees, texture)
+        visual = _gravel_visual_lod(
+            length, half_w, curve_degrees, texture, surface_style
+        )
 
     # Keep road simulation on the first Resolution LOD, but also emit a face-less
     # Geometry LOD carrying map=road. OFP/CWA reliably reads the 2D map symbol
@@ -1633,6 +1661,7 @@ def _road_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
         roadway_sections, texture=texture, resolution=_ROADWAY_LOD,
         height=GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES, lowered_overlap=False,
         double_sided=False, u_span_override=1.0,
+        surface_style=surface_style,
     )
     first = roadway_sections[0]
     last = roadway_sections[-1]
