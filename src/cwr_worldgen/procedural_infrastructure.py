@@ -1296,7 +1296,13 @@ def _append_paved_junction_quad(
     v_end: float,
     face_flags: int,
 ) -> None:
-    """Append one top-facing donor road rectangle as two triangles."""
+    """Append one donor road rectangle with both triangle windings.
+
+    OFP/CWA's Poseidon renderer backface-culls these generated MLOD triangles in
+    game even though modern tooling can preview the single winding correctly.
+    Generated road ribbons are already double-sided for the same compatibility
+    reason, so keep the junction hub double-sided as well.
+    """
 
     start = len(points)
     points.extend((start_left, start_right, end_left, end_right))
@@ -1318,7 +1324,12 @@ def _append_paved_junction_quad(
         ),
         face_flags,
     )
-    faces.extend((first, second))
+    faces.extend((
+        first,
+        second,
+        _Face(texture, tuple(reversed(first.vertices)), face_flags),
+        _Face(texture, tuple(reversed(second.vertices)), face_flags),
+    ))
 
 
 def _stock_style_paved_junction_visual_lod(
