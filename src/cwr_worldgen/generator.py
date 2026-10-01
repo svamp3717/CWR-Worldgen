@@ -4421,6 +4421,9 @@ def build_milestone4(
                     style.roadway_texture
                     for style in road_surface_styles.values()
                     if style.roadway_texture
+                    and not style.roadway_texture.casefold().startswith(
+                        (spec.name + "\\").casefold()
+                    )
                 ),
             )
             if value
