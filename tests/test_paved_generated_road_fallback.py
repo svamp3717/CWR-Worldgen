@@ -576,8 +576,13 @@ def test_stock_paved_generated_models_keep_visual_texture_but_use_silnice_roadwa
         assert roadway.faces
         assert all(face.texture == visual_texture for face in visual.faces)
         assert all(face.texture == roadway_texture for face in roadway.faces)
-        assert all(face.flags == style.face_flag for face in roadway.faces)
-        assert roadway.point_flags == (style.point_flag,) * len(roadway.points)
+        assert all(
+            face.flags == style.roadway_face_flag
+            for face in roadway.faces
+        )
+        assert roadway.point_flags == (
+            style.roadway_point_flag,
+        ) * len(roadway.points)
 
 
 def test_unmodded_gravel_and_stock_dirt_share_cesta_groundtype() -> None:
