@@ -1359,6 +1359,41 @@ def _stock_style_paved_junction_visual_lod(
     )
     tongue_outer_y = y + GENERATED_JUNCTION_OVERLAP_VISUAL_RISE_METRES
 
+    # Poseidon/CWA does not reliably resolve same-texture intersecting road faces
+    # by depth alone. In practice the later faces in this MLOD win the visual
+    # overlap. Emit the side/connecting road first, then the through carriageway
+    # last, so a T junction reads as "branch under main road" instead of printing
+    # the branch texture across the full width of the through road.
+    end_texture = texture
+    stub_inner = 0.0 if len(headings) == 3 else 0.14
+    branch_inner_y = y - GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES
+    for heading in side_headings:
+        inner_left, inner_right = _paved_junction_cross_section(
+            heading,
+            stub_inner,
+            half_width,
+            branch_inner_y,
+        )
+        outer_left, outer_right = _paved_junction_cross_section(
+            heading,
+            extent,
+            half_width,
+            tongue_outer_y,
+        )
+        stub_length = max(0.01, extent - stub_inner)
+        _append_paved_junction_quad(
+            points,
+            faces,
+            texture=end_texture,
+            start_left=inner_left,
+            start_right=inner_right,
+            end_left=outer_left,
+            end_right=outer_right,
+            v_start=0.0,
+            v_end=stub_length / GENERATED_PAVED_TEXTURE_REPEAT_METRES,
+            face_flags=surface_style.face_flag,
+        )
+
     a_inner_left, a_inner_right = _paved_junction_cross_section(
         through_a, tongue_start, half_width, y
     )
@@ -1393,6 +1428,9 @@ def _stock_style_paved_junction_visual_lod(
         face_flags=surface_style.face_flag,
     )
 
+    # Through-road mouth tongues are also emitted after every side arm. They are
+    # the last visual faces in the hub and therefore retain the same ordering at
+    # the outer approach seams in the old renderer.
     tongue_length = max(0.01, extent - tongue_start)
     for heading in (through_a, through_b):
         tongue_inner_left, tongue_inner_right = _paved_junction_cross_section(
@@ -1420,36 +1458,6 @@ def _stock_style_paved_junction_visual_lod(
             face_flags=surface_style.face_flag,
         )
 
-    end_texture = texture
-    stub_inner = 0.0 if len(headings) == 3 else 0.14
-    branch_inner_y = y - GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES
-    for heading in side_headings:
-        inner_left, inner_right = _paved_junction_cross_section(
-            heading,
-            stub_inner,
-            half_width,
-            branch_inner_y,
-        )
-        outer_left, outer_right = _paved_junction_cross_section(
-            heading,
-            extent,
-            half_width,
-            tongue_outer_y,
-        )
-        stub_length = max(0.01, extent - stub_inner)
-        _append_paved_junction_quad(
-            points,
-            faces,
-            texture=end_texture,
-            start_left=inner_left,
-            start_right=inner_right,
-            end_left=outer_left,
-            end_right=outer_right,
-            v_start=0.0,
-            v_end=stub_length / GENERATED_PAVED_TEXTURE_REPEAT_METRES,
-            face_flags=surface_style.face_flag,
-        )
-
     return _Lod(
         tuple(points),
         (_ROAD_SURFACE_NORMAL,),
@@ -1458,7 +1466,6 @@ def _stock_style_paved_junction_visual_lod(
         properties=(("autocenter", "0"), ("class", "road"), ("map", "road")),
         point_flags=(surface_style.point_flag,) * len(points),
     )
-
 
 def _paved_junction_visual_lod(
     *,
