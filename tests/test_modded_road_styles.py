@@ -1998,13 +1998,25 @@ def test_sebnam_style_uses_straight_family_and_explicit_curve_reference(
 
     assert availability == {
         playability._road_model_key(straight25): frozenset({
-            playability._road_model_key(straight25)
+            playability._road_model_key(straight25),
+            playability._road_model_key(straight12),
+            playability._road_model_key(straight6),
         })
     }
-    assert playability._road_model_key(straight12) not in dimensions
-    assert playability._road_model_key(straight6) not in dimensions
-    assert [piece.model_path for piece in pieces] == [straight25]
-    assert [piece.length_metres for piece in pieces] == pytest.approx([25.0])
+    assert dimensions[playability._road_model_key(straight12)] == pytest.approx(
+        (3.5, 12.5)
+    )
+    assert dimensions[playability._road_model_key(straight6)] == pytest.approx(
+        (3.5, 6.25)
+    )
+    assert [piece.model_path for piece in pieces] == [
+        straight25,
+        straight12,
+        straight6,
+    ]
+    assert [piece.length_metres for piece in pieces] == pytest.approx(
+        [25.0, 12.5, 6.25]
+    )
 
 
 def test_legacy_curved_sebnam_selection_auto_resolves_to_straight_sibling(
@@ -2187,13 +2199,25 @@ def test_bas_o_straight_curve_pair_keeps_width_and_texture(
 
     assert availability == {
         playability._road_model_key(straight25): frozenset({
-            playability._road_model_key(straight25)
+            playability._road_model_key(straight25),
+            playability._road_model_key(straight12),
+            playability._road_model_key(straight6),
         })
     }
-    assert playability._road_model_key(straight12) not in dimensions
-    assert playability._road_model_key(straight6) not in dimensions
-    assert [piece.model_path for piece in pieces] == [straight25]
-    assert [piece.length_metres for piece in pieces] == pytest.approx([25.0])
+    assert dimensions[playability._road_model_key(straight12)] == pytest.approx(
+        (5.2, 12.5)
+    )
+    assert dimensions[playability._road_model_key(straight6)] == pytest.approx(
+        (5.2, 6.25)
+    )
+    assert [piece.model_path for piece in pieces] == [
+        straight25,
+        straight12,
+        straight6,
+    ]
+    assert [piece.length_metres for piece in pieces] == pytest.approx(
+        [25.0, 12.5, 6.25]
+    )
     assert generated_width == pytest.approx(5.2)
     assert generated_width != pytest.approx(9.1)
 
