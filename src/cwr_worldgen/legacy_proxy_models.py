@@ -12,6 +12,7 @@ clears the land-interaction bits so the already-grounded generated carrier owns
 terrain fitting instead.
 """
 
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from hashlib import sha256
@@ -64,6 +65,16 @@ class VisualModelDimensions:
     connector_width_metres: float | None = None
     lateral_center_shift_metres: float = 0.0
     is_straight_road_candidate: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class VisualSurfaceStyle:
+    """Dominant render metadata for one donor road surface texture."""
+
+    source_format: str
+    texture_path: str
+    point_flag: int
+    face_flag: int
 
 
 def proxy_safe_model_path(world_name: str, source_model: str) -> str:
@@ -595,6 +606,81 @@ def inspect_visual_model_dimensions(data: bytes) -> VisualModelDimensions:
         connector_width_metres=connector_width,
         lateral_center_shift_metres=lateral_shift,
         is_straight_road_candidate=lateral_shift <= straight_tolerance,
+    )
+
+
+
+def inspect_visual_surface_style(
+    data: bytes,
+    *,
+    texture_path: str | None = None,
+) -> VisualSurfaceStyle:
+    """Read donor visual flags that affect road alpha/render behaviour.
+
+    Land-deformation point bits are intentionally stripped by the shared visual
+    reader before we choose a point flag. Generated road geometry is already
+    terrain-fitted and must not inherit donor mesh deformation behaviour.
+    """
+
+    if data.startswith(b"ODOL"):
+        lod, _land_count, _textures = _read_odol_visual(data)
+        source_format = "ODOL"
+    elif data.startswith(b"MLOD"):
+        lod, _land_count, _textures = _read_mlod_visual(data)
+        source_format = "MLOD"
+    else:
+        raise ProxyCloneError(
+            f"unsupported P3D signature {data[:4]!r}"
+        )
+
+    if not lod.faces:
+        raise ProxyCloneError("visual LOD contains no drawable faces")
+
+    target = canonical_asset_path(texture_path or "")
+    target_base = target.rsplit("\\", 1)[-1] if target else ""
+    target_stem = target_base.rsplit(".", 1)[0] if "." in target_base else target_base
+
+    def matches(face: _Face) -> bool:
+        if not target:
+            return bool(face.texture)
+        value = canonical_asset_path(face.texture)
+        if value == target:
+            return True
+        base = value.rsplit("\\", 1)[-1]
+        stem = base.rsplit(".", 1)[0] if "." in base else base
+        return stem == target_stem and bool(stem)
+
+    selected = tuple(face for face in lod.faces if matches(face))
+    if not selected:
+        selected = tuple(face for face in lod.faces if face.texture)
+    if not selected:
+        selected = lod.faces
+
+    face_flag = Counter(int(face.flags) for face in selected).most_common(1)[0][0]
+
+    point_indices = tuple(
+        int(vertex[0])
+        for face in selected
+        for vertex in face.vertices
+        if 0 <= int(vertex[0]) < len(lod.point_flags)
+    )
+    point_values = tuple(
+        int(lod.point_flags[index])
+        for index in point_indices
+    ) or tuple(int(value) for value in lod.point_flags)
+    if not point_values:
+        raise ProxyCloneError("visual LOD contains no point flags")
+    point_flag = Counter(point_values).most_common(1)[0][0]
+
+    chosen_texture = next(
+        (face.texture for face in selected if face.texture),
+        texture_path or "",
+    )
+    return VisualSurfaceStyle(
+        source_format=source_format,
+        texture_path=chosen_texture,
+        point_flag=point_flag,
+        face_flag=face_flag,
     )
 
 
