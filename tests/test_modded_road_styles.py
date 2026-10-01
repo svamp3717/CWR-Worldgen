@@ -1258,8 +1258,23 @@ def test_unified_variant_paths_ignore_stock_and_modded_siblings() -> None:
     ) == (r"bas_o\_road\bas_asf25.p3d",)
 
 
+def test_unified_stock_fitting_never_uses_short_stock_siblings() -> None:
+    spec = SimpleNamespace(
+        custom_road_shapes=True,
+        road_segment_length=25.0,
+    )
+    pieces = playability.road_fitting_variants(
+        spec,
+        r"o\road\sil25.p3d",
+    )
+    assert [piece.model_path for piece in pieces] == [
+        r"o\road\sil25.p3d",
+    ]
+
+
+
 @pytest.mark.parametrize("custom_road_shapes", (False, True))
-def test_modded_family_reuses_only_existing_sibling_models(
+def test_modded_family_uses_siblings_only_in_legacy_mode(
     tmp_path: Path,
     custom_road_shapes: bool,
 ) -> None:
@@ -1289,10 +1304,10 @@ def test_modded_family_reuses_only_existing_sibling_models(
     finally:
         playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(token)
 
-    assert [piece.model_path for piece in variants] == [
-        r"myroads\asphalt25.p3d",
-        r"myroads\asphalt6.p3d",
-    ]
+    expected = [r"myroads\asphalt25.p3d"]
+    if not custom_road_shapes:
+        expected.append(r"myroads\asphalt6.p3d")
+    assert [piece.model_path for piece in variants] == expected
 
 
 def test_modded_family_without_asset_roots_never_invents_siblings() -> None:
@@ -1897,11 +1912,9 @@ def test_sebnam_curve_donor_resolves_to_straight_family(tmp_path: Path) -> None:
         )
         assert [piece.model_path for piece in variants] == [
             r"sebnam_obj\sebtrailpath25.p3d",
-            r"sebnam_obj\sebtrailpath12.p3d",
-            r"sebnam_obj\sebtrailpath6.p3d",
         ]
         assert [piece.length_metres for piece in variants] == pytest.approx(
-            [25.0, 12.5, 6.25]
+            [25.0]
         )
         assert fallback._generated_width(
             variants,
@@ -2006,24 +2019,12 @@ def test_sebnam_style_uses_straight_family_and_explicit_curve_reference(
     assert availability == {
         playability._road_model_key(straight25): frozenset({
             playability._road_model_key(straight25),
-            playability._road_model_key(straight12),
-            playability._road_model_key(straight6),
         })
     }
-    assert dimensions[playability._road_model_key(straight12)] == pytest.approx(
-        (3.5, 12.5)
-    )
-    assert dimensions[playability._road_model_key(straight6)] == pytest.approx(
-        (3.5, 6.25)
-    )
-    assert [piece.model_path for piece in pieces] == [
-        straight25,
-        straight12,
-        straight6,
-    ]
-    assert [piece.length_metres for piece in pieces] == pytest.approx(
-        [25.0, 12.5, 6.25]
-    )
+    assert playability._road_model_key(straight12) not in dimensions
+    assert playability._road_model_key(straight6) not in dimensions
+    assert [piece.model_path for piece in pieces] == [straight25]
+    assert [piece.length_metres for piece in pieces] == pytest.approx([25.0])
 
 
 def test_legacy_curved_sebnam_selection_auto_resolves_to_straight_sibling(
@@ -2207,24 +2208,12 @@ def test_bas_o_straight_curve_pair_keeps_width_and_texture(
     assert availability == {
         playability._road_model_key(straight25): frozenset({
             playability._road_model_key(straight25),
-            playability._road_model_key(straight12),
-            playability._road_model_key(straight6),
         })
     }
-    assert dimensions[playability._road_model_key(straight12)] == pytest.approx(
-        (5.2, 12.5)
-    )
-    assert dimensions[playability._road_model_key(straight6)] == pytest.approx(
-        (5.2, 6.25)
-    )
-    assert [piece.model_path for piece in pieces] == [
-        straight25,
-        straight12,
-        straight6,
-    ]
-    assert [piece.length_metres for piece in pieces] == pytest.approx(
-        [25.0, 12.5, 6.25]
-    )
+    assert playability._road_model_key(straight12) not in dimensions
+    assert playability._road_model_key(straight6) not in dimensions
+    assert [piece.model_path for piece in pieces] == [straight25]
+    assert [piece.length_metres for piece in pieces] == pytest.approx([25.0])
     assert generated_width == pytest.approx(5.2)
     assert generated_width != pytest.approx(9.1)
 
