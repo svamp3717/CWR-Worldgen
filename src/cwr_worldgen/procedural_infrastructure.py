@@ -99,6 +99,9 @@ GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES = 0.55
 # Keep the existing planner's approach clearance. The donor visual hub covers
 # the resulting 0.35 m seam without changing road-fitting behavior.
 GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES = 0.20
+# Unified donor roads should overlap the logical junction mouth rather than
+# leaving a clearance that depends on visual overhang to hide terrain.
+GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES = 0.22
 # Matches the stock sil/kos effective half-width used throughout the fitter.
 GENERATED_PAVED_HALF_WIDTH_METRES = 4.55
 
