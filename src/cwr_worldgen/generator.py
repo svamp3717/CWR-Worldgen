@@ -1761,6 +1761,22 @@ def _roadway_groundtype_texture_for_donor(
     return str(visual_texture).replace("/", "\\").strip("\\"), "visual-fallback"
 
 
+def _roadway_groundtype_flags(
+    texture_source: str,
+    point_flag: int,
+    face_flag: int,
+) -> tuple[int, int]:
+    """Return contact flags safe for the emitted generated MLOD Roadway LOD."""
+
+    if str(texture_source).startswith("stock-"):
+        # Stock ODOL carries compiled surface state that is not represented by
+        # simply copying its Roadway point/face flags into an MLOD. The known
+        # CfgSurfaces selector texture is the authority; keep MLOD contact flags
+        # neutral so they do not interfere with that classification.
+        return 0, 0
+    return int(point_flag), int(face_flag)
+
+
 
 def _asset_source_label(source: str) -> str:
     """Return useful asset provenance without embedding the user's full path."""
@@ -4355,12 +4371,12 @@ def build_milestone4(
                                 texture,
                             )
                         )
-                        stock_selector = roadway_texture_source.startswith("stock-")
-                        roadway_point_flag = (
-                            0 if stock_selector else int(roadway_style.point_flag)
-                        )
-                        roadway_face_flag = (
-                            0 if stock_selector else int(roadway_style.face_flag)
+                        roadway_point_flag, roadway_face_flag = (
+                            _roadway_groundtype_flags(
+                                roadway_texture_source,
+                                roadway_style.point_flag,
+                                roadway_style.face_flag,
+                            )
                         )
                         style = replace(
                             style,
