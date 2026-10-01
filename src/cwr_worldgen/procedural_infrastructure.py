@@ -8,7 +8,7 @@ from pathlib import Path
 import json
 import math
 import re
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 from shapely.geometry import Point as ShapelyPoint, Polygon as ShapelyPolygon
@@ -40,6 +40,17 @@ _ROADWAY_LOD = 3.0e15
 _ROAD_SURFACE_POINT_FLAG = 0x0000013F
 _ROAD_SURFACE_FACE_FLAG = 0x0002C102
 _ROAD_SURFACE_NORMAL = (0.0, -1.0, 0.0)
+
+
+@dataclass(frozen=True, slots=True)
+class RoadSurfaceStyle:
+    """Render metadata inherited from the configured road donor."""
+
+    point_flag: int = _ROAD_SURFACE_POINT_FLAG
+    face_flag: int = _ROAD_SURFACE_FACE_FLAG
+
+
+_DEFAULT_ROAD_SURFACE_STYLE = RoadSurfaceStyle()
 
 # Generated gravel is a terrain-hugging surface ribbon, not a raised slab.
 # Its visible skin and Roadway LOD are coplanar and are placed directly on the
