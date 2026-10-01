@@ -713,6 +713,7 @@ def _ribbon_lod(
     double_sided: bool,
     u_span_override: float | None = None,
     texture_scale_override: float | None = None,
+    surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
 ) -> _Lod:
     points: list[tuple[float, float, float]] = []
     cumulative = [0.0]
@@ -743,7 +744,7 @@ def _ribbon_lod(
             texture,
             ((ls, 0, 0.0, v0), (le, 0, 0.0, v1),
              (re, 0, u_span, v1), (rs, 0, u_span, v0)),
-            _ROAD_SURFACE_FACE_FLAG,
+            surface_style.face_flag,
         )
         faces.append(top)
         if double_sided:
@@ -751,7 +752,7 @@ def _ribbon_lod(
                 texture,
                 ((rs, 0, u_span, v0), (re, 0, u_span, v1),
                  (le, 0, 0.0, v1), (ls, 0, 0.0, v0)),
-                _ROAD_SURFACE_FACE_FLAG,
+                surface_style.face_flag,
             ))
     properties = (
         (("autocenter", "0"), ("class", "road"), ("map", "road"))
@@ -759,7 +760,7 @@ def _ribbon_lod(
         else ()
     )
     point_flags = (
-        (_ROAD_SURFACE_POINT_FLAG,) * len(points)
+        (surface_style.point_flag,) * len(points)
         if resolution in {_VISUAL_LOD, _ROADWAY_LOD}
         else ()
     )
