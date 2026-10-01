@@ -1746,13 +1746,19 @@ def utility_model_path(world_name: str, subtype: str) -> str:
     return rf"{world_name}\i\util_{subtype}.p3d"
 
 
-def write_infrastructure_mlod(path: Path, key: InfrastructureModelKey, texture_path: str) -> None:
+def write_infrastructure_mlod(
+    path: Path,
+    key: InfrastructureModelKey,
+    texture_path: str,
+    *,
+    road_surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
+) -> None:
     if key.kind == "barrier":
         lods = _barrier_lods(key, texture_path)
     elif key.kind == "bridge":
         lods = _bridge_lods(key, texture_path)
     elif key.kind == "road":
-        lods = _road_lods(key, texture_path)
+        lods = _road_lods(key, texture_path, road_surface_style)
     elif key.kind == "rock":
         lods = _rock_lods(key, texture_path)
     elif key.kind == "utility":
@@ -2000,6 +2006,7 @@ class _InfrastructureAssetTask:
     relative: str
     destination: Path
     texture: str
+    surface_style: RoadSurfaceStyle
     cache_path: Path | None
     cache_enabled: bool
     cache_refresh: bool
@@ -2010,7 +2017,12 @@ def _write_infrastructure_asset_task(task: _InfrastructureAssetTask) -> tuple[di
     hit = restore_or_create_file(
         cache_path=task.cache_path,
         destination=task.destination,
-        producer=lambda target: write_infrastructure_mlod(target, task.key, task.texture),
+        producer=lambda target: write_infrastructure_mlod(
+            target,
+            task.key,
+            task.texture,
+            road_surface_style=task.surface_style,
+        ),
         enabled=task.cache_enabled,
         refresh=task.cache_refresh,
     )
@@ -2085,6 +2097,7 @@ class ProceduralInfrastructureLibrary:
         paved_texture_path: str = r"landtext\silnice.pac",
         gravel_texture_path: str | None = None,
         dirt_texture_path: str | None = None,
+        road_surface_styles: Mapping[str, RoadSurfaceStyle] | None = None,
         cache_dir: Path | None = None,
         cache_enabled: bool = True,
         cache_refresh: bool = False,
@@ -2102,6 +2115,10 @@ class ProceduralInfrastructureLibrary:
             if dirt_texture_path
             else None
         )
+        self.road_surface_styles = {
+            str(surface).casefold(): style
+            for surface, style in dict(road_surface_styles or {}).items()
+        }
         if not self.paved_texture_path:
             raise ValueError("paved texture path must not be empty")
         if not math.isfinite(self.road_segment_length) or self.road_segment_length <= 0.0:
@@ -2284,6 +2301,17 @@ class ProceduralInfrastructureLibrary:
         if kind == "dirt" and self.dirt_texture_path:
             return self.dirt_texture_path
         return rf"{self.world_name}\i\{_texture_file_stem(kind)}.paa"
+
+
+    def _road_surface_style(self, key: InfrastructureModelKey) -> RoadSurfaceStyle:
+        if key.kind != "road":
+            return _DEFAULT_ROAD_SURFACE_STYLE
+        kind = _infrastructure_texture_kind(key)
+        surface = "gravel" if kind == "gravel_junction" else kind
+        return self.road_surface_styles.get(
+            surface.casefold(),
+            _DEFAULT_ROAD_SURFACE_STYLE,
+        )
 
     def write_assets(self, source_dir: Path, catalogue_path: Path) -> InfrastructureAssetResult:
         used_texture_kind_set = {
@@ -2482,12 +2510,18 @@ class ProceduralInfrastructureLibrary:
                 )
             asset_key = cache_key(
                 model_cache_version,
-                {"world": self.world_name, "key": asdict(key), "texture": texture},
+                {
+                    "world": self.world_name,
+                    "key": asdict(key),
+                    "texture": texture,
+                    "surface_style": asdict(self._road_surface_style(key)),
+                },
             )
             cached = self.cache_dir / "procedural-assets" / f"{asset_key}.p3d" if self.cache_dir else None
             model_tasks.append(_InfrastructureAssetTask(
                 key=key, wire=wire, relative=relative, destination=destination,
-                texture=texture, cache_path=cached, cache_enabled=self.cache_enabled,
+                texture=texture, surface_style=self._road_surface_style(key),
+                cache_path=cached, cache_enabled=self.cache_enabled,
                 cache_refresh=self.cache_refresh, usage_count=self._usage[key],
             ))
 
