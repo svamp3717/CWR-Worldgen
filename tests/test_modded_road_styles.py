@@ -2134,6 +2134,61 @@ def test_exact_road_family_lookup_ignores_missing_texture_dependencies(
     assert [record.path for record in result.records] == [donor]
 
 
+
+def test_unified_texture_donor_is_straight_not_curve() -> None:
+    spec = SimpleNamespace(
+        paved_road_model=r"sfp_objects\roads\sil25.p3d",
+        paved_road_curve_model=r"sfp_objects\roads\sil10 25.p3d",
+    )
+
+    assert generator._road_style_donor(spec, "paved") == (
+        r"sfp_objects\roads\sil10 25.p3d"
+    )
+    assert generator._road_texture_donor(spec, "paved") == (
+        r"sfp_objects\roads\sil25.p3d"
+    )
+
+
+def test_ordered_road_texture_lookup_keeps_first_matching_asset_root(
+    tmp_path: Path,
+) -> None:
+    preferred = tmp_path / "preferred-sfp"
+    colliding = tmp_path / "colliding-everon"
+    donor = r"sfp_objects\roads\sil25.p3d"
+    sfp_texture = r"sfp_objects\roads\sfp_asphalt.paa"
+    everon_texture = r"data\asfaltka.paa"
+
+    _write_fake_mod_asset(
+        preferred,
+        donor,
+        _mlod_road(9.1, 25.0, sfp_texture),
+    )
+    _write_fake_mod_asset(preferred, sfp_texture, b"sfp-road-texture")
+    _write_fake_mod_asset(
+        colliding,
+        donor,
+        _mlod_road(9.1, 25.0, everon_texture),
+    )
+    _write_fake_mod_asset(colliding, everon_texture, b"everon-road-texture")
+
+    scan = generator.locate_assets_fast(
+        (preferred, colliding),
+        (donor,),
+        use_cache=False,
+    )
+    record = next(
+        value for value in scan.records
+        if value.path == playability._road_model_key(donor)
+    )
+
+    assert Path(record.source).is_relative_to(preferred)
+    assert generator._resolved_road_donor_texture(
+        scan.records,
+        surface="paved",
+        donor_model=donor,
+    ) == sfp_texture
+
+
 def test_bas_o_straight_curve_pair_keeps_width_and_texture(
     tmp_path: Path,
 ) -> None:
