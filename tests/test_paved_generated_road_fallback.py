@@ -299,7 +299,7 @@ def test_generated_paved_junction_signature_writes_exact_heading_asset(
         r"o\road\sil_new.paa",
     )
     textures = [face.texture for face in visual.faces]
-    assert textures.count(r"o\road\sil_new.paa") == 16
+    assert textures.count(r"o\road\sil_new.paa") == 8
     assert r"o\road\sil_konec.paa" not in textures
     assert visual.faces
     assert roadway.faces
@@ -403,7 +403,7 @@ def test_generated_curved_paved_turn_restores_terrtest39_seam_geometry() -> None
     )
 
 
-def test_generated_paved_junction_visual_overhang_covers_logical_seam() -> None:
+def test_generated_paved_junction_overlap_stays_above_terrain() -> None:
     key = infrastructure.InfrastructureModelKey(
         "road",
         "paved_j3_m091_b091_a260",
@@ -433,15 +433,24 @@ def test_generated_paved_junction_visual_overhang_covers_logical_seam() -> None:
         infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
         abs_tol=0.01,
     )
-    assert visual_reach >= (
-        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
-        + infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
-        - 0.01
+    assert math.isclose(
+        visual_reach,
+        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
+        abs_tol=0.01,
+    )
+    assert math.isclose(
+        infrastructure.GENERATED_JUNCTION_OVERLAP_TONGUE_START_METRES,
+        (
+            infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+            - infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES
+        ),
+        abs_tol=1.0e-9,
     )
     assert (
-        infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
-        < infrastructure.GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
+        infrastructure.GENERATED_JUNCTION_OVERLAP_VISUAL_DROP_METRES
+        < infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
     )
+    assert min(point[1] for point in visual.points) > 0.0
 
 
 def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
