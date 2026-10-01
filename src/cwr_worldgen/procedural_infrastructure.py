@@ -144,6 +144,12 @@ GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES = 0.22
 # Keep side/intersecting junction artwork beneath the straight-through strip at
 # the hub centre. It rises back to normal road height toward the outer connector.
 GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES = 0.02
+# The final ~0.25 m before the logical connector is covered by the incoming
+# approach. Drop the hub's visual overlap tongue there so the straight road is
+# always the top visible surface even when independently fitted object planes
+# differ by a few centimetres.
+GENERATED_JUNCTION_OVERLAP_TONGUE_START_METRES = 6.00
+GENERATED_JUNCTION_OVERLAP_VISUAL_DROP_METRES = 0.06
 # Matches the stock sil/kos effective half-width used throughout the fitter.
 GENERATED_PAVED_HALF_WIDTH_METRES = 4.55
 
@@ -1341,20 +1347,26 @@ def _stock_style_paved_junction_visual_lod(
     points: list[tuple[float, float, float]] = []
     faces: list[_Face] = []
 
-    a_left, a_right = _paved_junction_cross_section(
-        through_a, extent, half_width, y
+    tongue_start = min(
+        GENERATED_JUNCTION_OVERLAP_TONGUE_START_METRES,
+        extent - 0.10,
     )
-    b_left, b_right = _paved_junction_cross_section(
-        through_b, extent, half_width, y
+    tongue_y = y - GENERATED_JUNCTION_OVERLAP_VISUAL_DROP_METRES
+
+    a_inner_left, a_inner_right = _paved_junction_cross_section(
+        through_a, tongue_start, half_width, y
+    )
+    b_inner_left, b_inner_right = _paved_junction_cross_section(
+        through_b, tongue_start, half_width, y
     )
     through_length = math.dist(
         (
-            (a_left[0] + a_right[0]) * 0.5,
-            (a_left[2] + a_right[2]) * 0.5,
+            (a_inner_left[0] + a_inner_right[0]) * 0.5,
+            (a_inner_left[2] + a_inner_right[2]) * 0.5,
         ),
         (
-            (b_left[0] + b_right[0]) * 0.5,
-            (b_left[2] + b_right[2]) * 0.5,
+            (b_inner_left[0] + b_inner_right[0]) * 0.5,
+            (b_inner_left[2] + b_inner_right[2]) * 0.5,
         ),
     )
     through_v_span = (
@@ -1366,14 +1378,41 @@ def _stock_style_paved_junction_visual_lod(
         points,
         faces,
         texture=texture,
-        start_left=b_right,
-        start_right=b_left,
-        end_left=a_left,
-        end_right=a_right,
+        start_left=b_inner_right,
+        start_right=b_inner_left,
+        end_left=a_inner_left,
+        end_right=a_inner_right,
         v_start=0.0,
         v_end=through_v_span,
         face_flags=surface_style.face_flag,
     )
+
+    tongue_length = max(0.01, extent - tongue_start)
+    for heading in (through_a, through_b):
+        tongue_inner_left, tongue_inner_right = _paved_junction_cross_section(
+            heading,
+            tongue_start,
+            half_width,
+            tongue_y,
+        )
+        tongue_outer_left, tongue_outer_right = _paved_junction_cross_section(
+            heading,
+            extent,
+            half_width,
+            tongue_y,
+        )
+        _append_paved_junction_quad(
+            points,
+            faces,
+            texture=texture,
+            start_left=tongue_inner_left,
+            start_right=tongue_inner_right,
+            end_left=tongue_outer_left,
+            end_right=tongue_outer_right,
+            v_start=0.0,
+            v_end=tongue_length / GENERATED_PAVED_TEXTURE_REPEAT_METRES,
+            face_flags=surface_style.face_flag,
+        )
 
     end_texture = texture
     stub_inner = 0.0 if len(headings) == 3 else 0.14
@@ -1389,7 +1428,7 @@ def _stock_style_paved_junction_visual_lod(
             heading,
             extent,
             half_width,
-            y,
+            tongue_y,
         )
         stub_length = max(0.01, extent - stub_inner)
         _append_paved_junction_quad(
