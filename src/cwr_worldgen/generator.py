@@ -1727,6 +1727,40 @@ def _resolved_road_donor_texture(
     )
 
 
+def _roadway_groundtype_texture_for_donor(
+    donor_model: str,
+    inspected_texture: str | None,
+    visual_texture: str,
+) -> tuple[str, str]:
+    """Return the Roadway texture that actually selects the donor ground type.
+
+    Stock CWA ODOL road models report their visible road artwork on Roadway
+    faces (for example o\\road\\sil_new.paa), but copying that diffuse texture
+    into a generated MLOD does not reproduce the compiled ODOL surface class.
+    Generated MLODs must use CWA's runtime CfgSurfaces selector texture for
+    those stock families. Modded donors keep their inspected Roadway texture
+    exactly, because their own CfgSurfaces rules may intentionally match it.
+    """
+
+    donor = canonical_asset_path(donor_model)
+    if donor.startswith((
+        canonical_asset_path(r"o\road\sil"),
+        canonical_asset_path(r"o\road\asf"),
+        canonical_asset_path(r"o\road\kos"),
+    )):
+        return r"landtext\silnice.pac", "stock-paved-cfgsurface"
+    if (
+        donor.startswith(canonical_asset_path(r"o\road\ces"))
+        or donor.startswith(canonical_asset_path(r"data3d\cesta"))
+    ):
+        return r"landtext\cesta.pac", "stock-dirt-cfgsurface"
+
+    inspected = str(inspected_texture or "").replace("/", "\\").strip("\\")
+    if inspected:
+        return inspected, "donor-roadway-lod"
+    return str(visual_texture).replace("/", "\\").strip("\\"), "visual-fallback"
+
+
 
 def _asset_source_label(source: str) -> str:
     """Return useful asset provenance without embedding the user's full path."""
@@ -2223,6 +2257,13 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
         canonical_asset_path(spec.forest_tree_model),
     }
     if milestone_number >= 9:
+        # Generated MLOD Roadway faces use these base-game CfgSurfaces selector
+        # names for stock paved/dirt donors. They are runtime selectors, not
+        # world-owned textures that should be repacked into the generated PBO.
+        trusted.update({
+            canonical_asset_path(r"landtext\silnice.pac"),
+            canonical_asset_path(r"landtext\cesta.pac"),
+        })
         if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "vietnam"}:
             trusted.add(canonical_asset_path(str(getattr(spec, "forest_everon_steep_model", ""))))
         # Road-cut forest blocks use individually checked stock trees and bushes
@@ -4307,15 +4348,24 @@ def build_milestone4(
                         roadway_style = inspect_roadway_surface_style(
                             donor_bytes
                         )
+                        roadway_texture, roadway_texture_source = (
+                            _roadway_groundtype_texture_for_donor(
+                                donor_model,
+                                roadway_style.texture_path,
+                                texture,
+                            )
+                        )
                         style = replace(
                             style,
-                            roadway_texture=roadway_style.texture_path,
+                            roadway_texture=roadway_texture,
                             roadway_point_flag=int(roadway_style.point_flag),
                             roadway_face_flag=int(roadway_style.face_flag),
                         )
                         report_entry.update({
                             "roadway_source_format": roadway_style.source_format,
-                            "roadway_texture": roadway_style.texture_path,
+                            "roadway_inspected_texture": roadway_style.texture_path,
+                            "roadway_texture_source": roadway_texture_source,
+                            "roadway_texture": roadway_texture,
                             "roadway_point_flag": (
                                 f"0x{int(roadway_style.point_flag) & 0xFFFFFFFF:08x}"
                             ),
@@ -4326,30 +4376,46 @@ def build_milestone4(
                     except (
                         OSError, ValueError, FileNotFoundError, ProxyCloneError
                     ):
-                        # Safe fallback: use a real donor texture that is known
-                        # to exist rather than inventing a landtext path.
+                        roadway_texture, roadway_texture_source = (
+                            _roadway_groundtype_texture_for_donor(
+                                donor_model,
+                                None,
+                                texture,
+                            )
+                        )
                         style = replace(
                             style,
-                            roadway_texture=texture,
+                            roadway_texture=roadway_texture,
                             roadway_point_flag=0,
                             roadway_face_flag=0,
                         )
                         report_entry.update({
                             "roadway_source_format": "visual-fallback",
-                            "roadway_texture": texture,
+                            "roadway_inspected_texture": None,
+                            "roadway_texture_source": roadway_texture_source,
+                            "roadway_texture": roadway_texture,
                             "roadway_point_flag": "0x00000000",
                             "roadway_face_flag": "0x00000000",
                         })
             else:
+                roadway_texture, roadway_texture_source = (
+                    _roadway_groundtype_texture_for_donor(
+                        donor_model,
+                        None,
+                        texture,
+                    )
+                )
                 style = replace(
                     style,
-                    roadway_texture=texture,
+                    roadway_texture=roadway_texture,
                     roadway_point_flag=0,
                     roadway_face_flag=0,
                 )
                 report_entry.update({
                     "roadway_source_format": "visual-fallback",
-                    "roadway_texture": texture,
+                    "roadway_inspected_texture": None,
+                    "roadway_texture_source": roadway_texture_source,
+                    "roadway_texture": roadway_texture,
                     "roadway_point_flag": "0x00000000",
                     "roadway_face_flag": "0x00000000",
                 })
