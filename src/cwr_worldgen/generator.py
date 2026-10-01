@@ -1862,12 +1862,11 @@ def _modded_road_variant_availability(
     spec: PlayabilitySpec,
     effective_donors: dict[str, str] | None = None,
 ) -> dict[str, frozenset[str]]:
-    """Discover real short siblings for configured modded road donor families.
+    """Return the external straight road models allowed for fitting.
 
-    Unified road fitting keeps proven native siblings when they exist and falls
-    back to donor-styled procedural short spans only for missing lengths. This
-    preserves the pre-stock-unification mod-road behavior without inventing P3Ds
-    that are not present in the configured asset roots.
+    Unified custom-road mode is strictly donor-only: even when 12/6 siblings
+    exist in stock or mod families, they are not discovered or placed. Legacy
+    fitting may still discover proven siblings from the configured asset roots.
     """
 
     defaults = {
@@ -1886,6 +1885,11 @@ def _modded_road_variant_availability(
     ))
     if not donors:
         return {}
+    if bool(getattr(spec, "custom_road_shapes", False)):
+        return {
+            _road_model_key(donor): frozenset({_road_model_key(donor)})
+            for donor in donors
+        }
     candidates_by_donor: dict[str, tuple[str, ...]] = {}
     requested: list[str] = []
     for donor in donors:
@@ -1956,12 +1960,14 @@ def _modded_road_model_dimensions(
     ) or not tuple(getattr(spec, "asset_roots", ()) or ()):
         return {}
 
+    donor_only = bool(getattr(spec, "custom_road_shapes", False))
     straight_requested = tuple(dict.fromkeys(
         candidate
         for donor in donors
         for candidate in road_model_variant_paths(
             donor,
             float(getattr(spec, "road_segment_length", 25.0)),
+            donor_only=donor_only,
         )
     ))
     requested = tuple(dict.fromkeys((*straight_requested, *curve_donors)))
@@ -2080,6 +2086,7 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
             road_model_variant_paths(
                 configured,
                 spec.road_segment_length,
+                donor_only=bool(getattr(spec, "custom_road_shapes", False)),
             )
             if bool(getattr(spec, "stock_road_piece_fitting", False))
             else (configured,)
