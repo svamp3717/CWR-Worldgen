@@ -466,7 +466,16 @@ def test_generated_paved_junction_uses_donor_stock_texture_topology() -> None:
     assert r"landtext\silnice.pac" not in textures
 
     ys = [point[1] for point in visual.points]
-    assert math.isclose(max(ys) - min(ys), 0.0666, abs_tol=1.0e-7)
+    assert math.isclose(
+        max(ys) - min(ys),
+        infrastructure.GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES,
+        abs_tol=1.0e-7,
+    )
+    assert math.isclose(
+        max(ys),
+        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES,
+        abs_tol=1.0e-7,
+    )
     assert all(
         flag == infrastructure._ROAD_SURFACE_POINT_FLAG
         for flag in visual.point_flags
@@ -569,6 +578,66 @@ def test_stock_paved_generated_models_keep_visual_texture_but_use_silnice_roadwa
         assert all(face.texture == roadway_texture for face in roadway.faces)
         assert all(face.flags == style.face_flag for face in roadway.faces)
         assert roadway.point_flags == (style.point_flag,) * len(roadway.points)
+
+
+def test_unmodded_gravel_and_stock_dirt_share_cesta_groundtype() -> None:
+    cesta = r"landtext\cesta.pac"
+    gravel_visual = r"reuse_world\i\g.paa"
+    dirt_visual = r"o\road\ces_hned.paa"
+    gravel_style = infrastructure.RoadSurfaceStyle(roadway_texture=cesta)
+    dirt_style = infrastructure.RoadSurfaceStyle(roadway_texture=cesta)
+
+    cases = (
+        (
+            infrastructure.InfrastructureModelKey(
+                "road", "road_gravel_w046_l0063", 46, 63
+            ),
+            gravel_visual,
+            gravel_style,
+        ),
+        (
+            infrastructure.InfrastructureModelKey(
+                "road", "road_dirt_w035_l0063", 35, 63
+            ),
+            dirt_visual,
+            dirt_style,
+        ),
+    )
+
+    for key, visual_texture, style in cases:
+        visual, _geometry, roadway, _land = infrastructure._road_lods(
+            key,
+            visual_texture,
+            style,
+        )
+        assert all(face.texture == visual_texture for face in visual.faces)
+        assert all(face.texture == cesta for face in roadway.faces)
+
+
+def test_generated_junction_intersecting_branches_stay_below_through_road() -> None:
+    drop = infrastructure.GENERATED_JUNCTION_INTERSECTING_VISUAL_DROP_METRES
+    top = infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+    keys = (
+        infrastructure.InfrastructureModelKey(
+            "road", "road_j3_paved_w091_h000_095_190", 91, 125
+        ),
+        infrastructure.InfrastructureModelKey(
+            "road", "road_j4_gravel_w046_h000_090_180_270", 46, 125
+        ),
+        infrastructure.InfrastructureModelKey(
+            "road", "road_j3_dirt_w035_h000_090_180", 35, 125
+        ),
+    )
+
+    for key in keys:
+        visual, _geometry, _roadway, _land = infrastructure._road_lods(
+            key,
+            r"roads\surface.paa",
+        )
+        ys = tuple(point[1] for point in visual.points)
+        assert math.isclose(max(ys), top, abs_tol=1.0e-9)
+        assert math.isclose(min(ys), top - drop, abs_tol=1.0e-9)
+        assert all(value <= top + 1.0e-9 for value in ys)
 
 
 def test_generated_roads_and_junctions_inherit_donor_surface_metadata() -> None:
