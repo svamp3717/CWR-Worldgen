@@ -1897,9 +1897,11 @@ def test_sebnam_curve_donor_resolves_to_straight_family(tmp_path: Path) -> None:
         )
         assert [piece.model_path for piece in variants] == [
             r"sebnam_obj\sebtrailpath25.p3d",
+            r"sebnam_obj\sebtrailpath12.p3d",
+            r"sebnam_obj\sebtrailpath6.p3d",
         ]
         assert [piece.length_metres for piece in variants] == pytest.approx(
-            [25.0]
+            [25.0, 12.5, 6.25]
         )
         assert fallback._generated_width(
             variants,
