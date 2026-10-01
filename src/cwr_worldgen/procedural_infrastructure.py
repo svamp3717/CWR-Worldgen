@@ -758,6 +758,11 @@ def _ribbon_lod(
         points.extend(((lx, y, lz), (rx, y, rz)))
 
     faces: list[_Face] = []
+    face_flag = (
+        surface_style.roadway_face_flag
+        if resolution == _ROADWAY_LOD
+        else surface_style.face_flag
+    )
     for index in range(len(sections) - 1):
         ls, rs = index * 2, index * 2 + 1
         le, re = (index + 1) * 2, (index + 1) * 2 + 1
@@ -767,7 +772,7 @@ def _ribbon_lod(
             texture,
             ((ls, 0, 0.0, v0), (le, 0, 0.0, v1),
              (re, 0, u_span, v1), (rs, 0, u_span, v0)),
-            surface_style.face_flag,
+            face_flag,
         )
         faces.append(top)
         if double_sided:
@@ -775,7 +780,7 @@ def _ribbon_lod(
                 texture,
                 ((rs, 0, u_span, v0), (re, 0, u_span, v1),
                  (le, 0, 0.0, v1), (ls, 0, 0.0, v0)),
-                surface_style.face_flag,
+                face_flag,
             ))
     properties = (
         (("autocenter", "0"), ("class", "road"), ("map", "road"))
@@ -783,8 +788,10 @@ def _ribbon_lod(
         else ()
     )
     point_flags = (
-        (surface_style.point_flag,) * len(points)
-        if resolution in {_VISUAL_LOD, _ROADWAY_LOD}
+        (surface_style.roadway_point_flag,) * len(points)
+        if resolution == _ROADWAY_LOD
+        else (surface_style.point_flag,) * len(points)
+        if resolution == _VISUAL_LOD
         else ()
     )
     return _Lod(
@@ -924,10 +931,10 @@ def _gravel_junction_lods(
             _roadway_surface_texture(texture, surface_style),
             ((0, 0, 0.0, 1.0), (3, 0, 0.0, 0.0),
              (2, 0, 1.0, 0.0), (1, 0, 1.0, 1.0)),
-            surface_style.face_flag,
+            surface_style.roadway_face_flag,
         ),),
         _ROADWAY_LOD,
-        point_flags=(surface_style.point_flag,) * len(roadway_points),
+        point_flags=(surface_style.roadway_point_flag,) * len(roadway_points),
     )
     land = _Lod(roadway_points, (), (), _LAND_CONTACT_LOD)
     return visual, map_geometry, roadway, land
@@ -1489,17 +1496,27 @@ def _paved_junction_triangulated_lod(
                 points.append((px, float(y), pz))
             vertices.append((index, 0, px, pz))
         if len(vertices) == 3:
+            face_flag = (
+                surface_style.roadway_face_flag
+                if resolution == _ROADWAY_LOD
+                else surface_style.face_flag
+            )
             faces.append(_Face(
                 texture,
                 tuple(vertices),
-                surface_style.face_flag,
+                face_flag,
             ))
+    point_flag = (
+        surface_style.roadway_point_flag
+        if resolution == _ROADWAY_LOD
+        else surface_style.point_flag
+    )
     return _Lod(
         tuple(points),
         (_ROAD_SURFACE_NORMAL,),
         tuple(faces),
         resolution,
-        point_flags=(surface_style.point_flag,) * len(points),
+        point_flags=(point_flag,) * len(points),
     )
 
 def _paved_junction_lods(
