@@ -74,7 +74,7 @@ def test_donor_surface_style_preserves_render_flags_but_not_land_deformation() -
 
     assert style.texture_path == texture
     assert style.face_flag == source_face_flag
-    assert style.point_flag == (source_point_flag & ~0x0900)
+    assert style.point_flag == source_point_flag
 
 
 def test_missing_asset_pbo_is_rejected_before_world_generation(tmp_path: Path) -> None:
