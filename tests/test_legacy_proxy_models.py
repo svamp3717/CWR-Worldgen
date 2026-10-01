@@ -91,7 +91,7 @@ class LegacyProxyModelTests(unittest.TestCase):
 
             summary = inspect_mlod(path)
             self.assertEqual(summary.lod_count, 1)
-            self.assertIn(r"data\leaf.paa", summary.textures)
+            self.assertIn(r"data\leaf.paa", summary.texture_paths)
             self.assertIn(("class", "bushsoft"), summary.named_properties[0])
 
     def test_cwa_safe_clusters_reject_missing_proxy_source_assets(self) -> None:
