@@ -1721,6 +1721,90 @@ def _resolved_road_donor_texture(
     )
 
 
+
+def _asset_source_label(source: str) -> str:
+    """Return useful asset provenance without embedding the user's full path."""
+
+    parts = str(source).split("!")
+    outer = Path(parts[0]).name
+    return "!".join((outer, *parts[1:])) if parts[1:] else outer
+
+
+def _road_donor_provenance(
+    spec: PlayabilitySpec,
+    effective_donors: dict[str, str],
+) -> dict[str, dict[str, object]]:
+    """Record the exact donor bytes and texture asset selected from root order."""
+
+    selected: list[str] = []
+    donors_by_surface: dict[str, tuple[str, str, str]] = {}
+    for surface in ("paved", "gravel", "dirt"):
+        straight = str(getattr(spec, f"{surface}_road_model", "") or "").strip()
+        effective = (
+            effective_donors.get(_road_model_key(straight), straight)
+            if straight
+            else ""
+        )
+        curve = str(getattr(spec, f"{surface}_road_curve_model", "") or "").strip()
+        texture_donor = effective or curve
+        donors_by_surface[surface] = (effective, curve, texture_donor)
+        selected.extend(value for value in (effective, curve) if value)
+
+    if not selected or not tuple(getattr(spec, "asset_roots", ()) or ()):
+        return {}
+
+    scan = locate_assets_fast(
+        spec.asset_roots,
+        tuple(dict.fromkeys(selected)),
+        cache_dir=getattr(spec, "cache_dir", None),
+        use_cache=bool(getattr(spec, "cache_enabled", True)),
+        refresh=bool(getattr(spec, "cache_refresh", False)),
+    )
+    by_path = {record.path: record for record in scan.records}
+    result: dict[str, dict[str, object]] = {}
+
+    def record_info(model: str) -> dict[str, object] | None:
+        if not model:
+            return None
+        record = by_path.get(canonical_asset_path(model))
+        if record is None:
+            return None
+        return {
+            "model": model,
+            "source": _asset_source_label(record.source),
+            "sha256": record.sha256,
+            "embedded_textures": list(model_texture_dependencies(scan.records, model)),
+        }
+
+    for surface, (straight, curve, texture_donor) in donors_by_surface.items():
+        texture = ""
+        texture_source = None
+        if texture_donor:
+            try:
+                texture = _resolved_road_donor_texture(
+                    scan.records,
+                    surface=surface,
+                    donor_model=texture_donor,
+                )
+            except ValueError:
+                texture = ""
+            if texture:
+                texture_record = by_path.get(canonical_asset_path(texture))
+                if texture_record is not None:
+                    texture_source = {
+                        "path": texture,
+                        "source": _asset_source_label(texture_record.source),
+                        "sha256": texture_record.sha256,
+                    }
+        result[surface] = {
+            "straight_asset": record_info(straight),
+            "curve_asset": record_info(curve),
+            "texture_donor": texture_donor,
+            "resolved_texture": texture or None,
+            "resolved_texture_asset": texture_source,
+        }
+    return result
+
 def _preferred_stock_paved_texture(
     model_path: str,
     dependencies: Sequence[str],
@@ -4438,6 +4522,12 @@ def build_milestone4(
         effective_road_donors,
         road_model_dimensions,
     )
+    donor_provenance = _road_donor_provenance(
+        spec,
+        effective_road_donors,
+    )
+    for surface, details in donor_provenance.items():
+        road_donor_report.setdefault(surface, {}).update(details)
     # Keep a compact donor record inside the generated world PBO as well as in
     # the external road report. This makes mod-road width/style problems
     # diagnosable from an uploaded PBO alone.
