@@ -865,7 +865,11 @@ def apply_paved_junctions_fast(
             end,
             elevations,
             spec,
-            vertical_offset=0.060,
+            vertical_offset=(
+                _paved._p._STOCK_ROAD_VERTICAL_OFFSET_METRES
+                if _paved._pi.is_generated_paved_junction_model(plan.model_path)
+                else _paved._p._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+            ),
         )
 
     next_id = max(
