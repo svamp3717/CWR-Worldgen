@@ -381,10 +381,11 @@ def _candidate_templates_local(
     radius = max(float(value) for value in _paved._STRAIGHTS.values()) + tolerance
     index = _path_template_index(turn_sign)
     candidates = []
+    padding = 1.0e-9
     legal_ranges = tuple(
         (
-            max(0.0, float(value) - tolerance) ** 2,
-            (float(value) + tolerance) ** 2,
+            max(0.0, float(value) - tolerance - padding) ** 2,
+            (float(value) + tolerance + padding) ** 2,
         )
         for value in _paved._STRAIGHTS.values()
     )
@@ -425,17 +426,6 @@ _MAX_APPROACH_ANGLE_DEGREES = 12.0
 _MIN_APPROACH_DOT = math.cos(math.radians(_MAX_APPROACH_ANGLE_DEGREES))
 
 
-def _unit_angle_degrees(
-    first: tuple[float, float],
-    second: tuple[float, float],
-) -> float:
-    dot = (
-        float(first[0]) * float(second[0])
-        + float(first[1]) * float(second[1])
-    )
-    return math.degrees(math.acos(max(-1.0, min(1.0, dot))))
-
-
 def _approach_choice_to_target(
     plan,
     arm,
@@ -447,11 +437,11 @@ def _approach_choice_to_target(
         connector.direction, target.continuation
     )
     preferred_sign = 1 if delta >= 0.0 else -1
+    initial_heading = _paved._heading(connector.direction)
 
-    # All template endpoints/headings are authored in connector-local space.
-    # Keep the whole search there. Rotating each candidate back to world space
-    # is mathematically redundant and used to dominate this phase on maps with
-    # hundreds of junctions.
+    # Templates are indexed in connector-local space. Use that cheap frame to
+    # discard almost everything, then run the historical world-space arithmetic
+    # only on survivors so scoring and deterministic tie behaviour stay exact.
     local = _target_local_point(arm, target)
     direction = connector.direction
     right = direction[1], -direction[0]
@@ -467,59 +457,72 @@ def _approach_choice_to_target(
         for path in _candidate_templates_local(
             local, tolerance, turn_sign
         ):
-            merge_vector = (
+            merge_local = (
                 local[0] - path.point[0],
                 local[1] - path.point[1],
             )
-            merge_distance_sq = (
-                merge_vector[0] * merge_vector[0]
-                + merge_vector[1] * merge_vector[1]
+            merge_local_sq = (
+                merge_local[0] * merge_local[0]
+                + merge_local[1] * merge_local[1]
             )
-            if merge_distance_sq <= 0.05 * 0.05:
+            if merge_local_sq <= 0.05 * 0.05:
                 continue
 
-            # Reject impossible stock merge lengths before sqrt/angle work.
-            possible_nominals = []
-            for nominal in (6, 12, 25):
-                stock_length = float(_paved._STRAIGHTS[nominal])
-                minimum = max(0.0, stock_length - tolerance)
-                maximum = stock_length + tolerance
-                if minimum * minimum <= merge_distance_sq <= maximum * maximum:
-                    possible_nominals.append(nominal)
-            if not possible_nominals:
-                continue
-
-            merge_distance = math.sqrt(merge_distance_sq)
-            merge_direction = (
-                merge_vector[0] / merge_distance,
-                merge_vector[1] / merge_distance,
+            local_distance = math.sqrt(merge_local_sq)
+            merge_local_direction = (
+                merge_local[0] / local_distance,
+                merge_local[1] / local_distance,
             )
             in_dot = (
-                path.direction[0] * merge_direction[0]
-                + path.direction[1] * merge_direction[1]
+                path.direction[0] * merge_local_direction[0]
+                + path.direction[1] * merge_local_direction[1]
             )
             out_dot = (
-                merge_direction[0] * continuation_local[0]
-                + merge_direction[1] * continuation_local[1]
+                merge_local_direction[0] * continuation_local[0]
+                + merge_local_direction[1] * continuation_local[1]
             )
-            # The expensive inverse trig is only needed for viable candidates.
             if (
                 in_dot < _MIN_APPROACH_DOT
                 or out_dot < _MIN_APPROACH_DOT
             ):
                 continue
 
-            in_error = _unit_angle_degrees(
-                path.direction, merge_direction
+            # Exact historical narrow phase. This is now reached by only a tiny
+            # fraction of the catalogue templates.
+            world_point = _paved._world(
+                path.point,
+                connector.point,
+                connector.direction,
             )
-            out_error = _unit_angle_degrees(
-                merge_direction, continuation_local
+            merge_vector = (
+                target.point[0] - world_point[0],
+                target.point[1] - world_point[1],
             )
+            merge_distance = math.hypot(*merge_vector)
+            if merge_distance <= 0.05:
+                continue
+            merge_direction = (
+                merge_vector[0] / merge_distance,
+                merge_vector[1] / merge_distance,
+            )
+            path_direction = _paved._direction(
+                (initial_heading + path.heading) % 360.0
+            )
+            in_error = _paved._angle(
+                path_direction, merge_direction
+            )
+            out_error = _paved._angle(
+                merge_direction, target.continuation
+            )
+            if max(in_error, out_error) > _MAX_APPROACH_ANGLE_DEGREES:
+                continue
 
-            for nominal in possible_nominals:
+            for nominal in (6, 12, 25):
                 length_error = abs(
                     merge_distance - _paved._STRAIGHTS[nominal]
                 )
+                if length_error > tolerance:
+                    continue
                 piece_count = (
                     path.first_turns
                     + path.counter_turns
