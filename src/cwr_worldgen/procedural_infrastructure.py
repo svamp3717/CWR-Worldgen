@@ -778,18 +778,27 @@ def _ribbon_lod(
         le, re = (index + 1) * 2, (index + 1) * 2 + 1
         v0 = cumulative[index] / texture_scale
         v1 = cumulative[index + 1] / texture_scale
-        top = _Face(
-            texture,
-            ((ls, 0, 0.0, v0), (le, 0, 0.0, v1),
-             (re, 0, u_span, v1), (rs, 0, u_span, v0)),
-            face_flag,
+        forward_vertices = (
+            (ls, 0, 0.0, v0), (le, 0, 0.0, v1),
+            (re, 0, u_span, v1), (rs, 0, u_span, v0),
         )
-        faces.append(top)
+        reverse_vertices = tuple(reversed(forward_vertices))
+        # CWA treats Roadway faces as one-sided contact surfaces. Generated
+        # ribbons were accidentally authored with the opposite winding from
+        # working donor Roadway LODs, so vehicles fell through to the terrain
+        # surface classification underneath. The stored road normal is -Y;
+        # emit the matching negative-Y winding for Roadway, while retaining the
+        # historical visual winding and its explicit backface.
+        top_vertices = (
+            reverse_vertices
+            if resolution == _ROADWAY_LOD
+            else forward_vertices
+        )
+        faces.append(_Face(texture, top_vertices, face_flag))
         if double_sided:
             faces.append(_Face(
                 texture,
-                ((rs, 0, u_span, v0), (re, 0, u_span, v1),
-                 (le, 0, 0.0, v1), (ls, 0, 0.0, v0)),
+                tuple(reversed(top_vertices)),
                 face_flag,
             ))
     properties = (
