@@ -10,6 +10,7 @@ from typing import Mapping, Sequence
 
 from . import generator as _generator
 from . import playability as _p
+from . import procedural_infrastructure as _pi
 
 _JUNCTION_OVERLAP = 0.22
 _JUNCTION_MARGIN = 0.14
@@ -30,6 +31,10 @@ class _Junction:
     half_length: float
     half_width: float
     directions: tuple[tuple[float, float], ...]
+    directional_exit_distances: tuple[
+        tuple[tuple[float, float], float], ...
+    ] = ()
+    surface: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,29 +84,82 @@ def _junction_geometry(dataset, projection, spec) -> dict[tuple[int, int], _Junc
 
     result: dict[tuple[int, int], _Junction] = {}
     for key, raw in incidents.items():
-        values = _p._junction_cap_incidents(_p._unique_incidents(raw))
+        values = _p._junction_cap_incidents(
+            _p._unique_incidents(raw),
+            include_mixed_surfaces=bool(
+                getattr(spec, "custom_road_shapes", False)
+            ),
+        )
         if not 3 <= len(values) <= 4:
             continue
-        all_gravel = all(_p.is_generated_gravel_road_model(v[2]) for v in values)
-        if all_gravel:
-            hub_length = 5.4 if len(values) == 3 else 6.0
+        donor_junction = _p._generated_custom_road_junction_cap_plan(values, spec)
+        all_gravel = all(_p.road_model_surface(spec, v[2]) == "gravel" for v in values)
+        half_width = _HUB_HALF_WIDTH
+        directional_exit_distances = ()
+        if donor_junction is not None:
+            donor_model, axis = donor_junction
+            signature = _pi.custom_road_junction_signature(donor_model)
+            if signature is None:
+                continue
+            hub_length = _pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 2.0
+            half_width = max(0.5, signature[1] * 0.5)
+            right = (axis[1], -axis[0])
+            directional_exit_distances = tuple(
+                (
+                    (
+                        right[0] * math.sin(math.radians(heading))
+                        + axis[0] * math.cos(math.radians(heading)),
+                        right[1] * math.sin(math.radians(heading))
+                        + axis[1] * math.cos(math.radians(heading)),
+                    ),
+                    float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES),
+                )
+                for heading in signature[2]
+            )
         else:
-            models = {v[2].casefold(): v[2] for v in values}
-            if len(models) == 1:
-                base_model = next(iter(models.values()))
+            if all_gravel:
+                hub_length = 5.4 if len(values) == 3 else 6.0
             else:
-                base_model = spec.dirt_road_model if all(v[1] for v in values) else spec.paved_road_model
-            variants = _p.road_model_variants(base_model, spec.road_segment_length)
-            cap = next((piece for piece in variants if piece.nominal_length == 6), variants[-1])
-            hub_length = cap.length_metres
-        axis = _p._dominant_node_axis(tuple((v[0], v[1], v[2], v[3]) for v in values))
+                models = {v[2].casefold(): v[2] for v in values}
+                if len(models) == 1:
+                    base_model = next(iter(models.values()))
+                else:
+                    base_model = spec.dirt_road_model if all(v[1] for v in values) else spec.paved_road_model
+                variants = _p.road_fitting_variants(
+                    spec,
+                    base_model,
+                )
+                cap = next((piece for piece in variants if piece.nominal_length == 6), variants[-1])
+                hub_length = cap.length_metres
+            axis = _p._dominant_node_axis(tuple((v[0], v[1], v[2], v[3]) for v in values))
+        surfaces = {_p.road_model_surface(spec, value[2]) for value in values}
         result[key] = _Junction(
-            positions[key], axis, hub_length * 0.5, _HUB_HALF_WIDTH, tuple(v[0] for v in values)
+            positions[key],
+            axis,
+            hub_length * 0.5,
+            half_width,
+            tuple(v[0] for v in values),
+            directional_exit_distances,
+            surface=next(iter(surfaces)) if len(surfaces) == 1 else None,
         )
     return result
 
 
 def _exit_distance(junction: _Junction, direction: tuple[float, float]) -> float:
+    if junction.directional_exit_distances:
+        magnitude = math.hypot(float(direction[0]), float(direction[1]))
+        if magnitude > 1.0e-9:
+            dx = float(direction[0]) / magnitude
+            dz = float(direction[1]) / magnitude
+            best = max(
+                (
+                    dx * float(candidate[0][0]) + dz * float(candidate[0][1]),
+                    float(candidate[1]),
+                )
+                for candidate in junction.directional_exit_distances
+            )
+            if best[0] >= math.cos(math.radians(12.0)):
+                return best[1]
     dx, dz = direction
     ax, az = junction.axis
     along = abs(dx * ax + dz * az)
@@ -124,12 +182,33 @@ def _end_direction(measure, *, start: bool) -> tuple[float, float]:
     return (0.0, 1.0)
 
 
+def _chain_junction(junction, pieces, spec):
+    """A hub may trim only roads belonging to its own surface."""
+
+    surface = getattr(junction, "surface", None)
+    if surface is None or not pieces:
+        return junction
+    if any(
+        _p.road_model_surface(spec, piece.model_path) != surface
+        for piece in pieces
+    ):
+        return None
+    return junction
+
+
 def _quality_window(measure, pieces, start_distance, preferred_end, minimum_end, maximum_end, context):
     if not pieces:
         return start_distance, preferred_end, minimum_end, maximum_end
     shortest = min(piece.length_metres for piece in pieces)
-    start_junction = context.junctions.get(_p._road_node_key(measure.points[0]))
-    end_junction = context.junctions.get(_p._road_node_key(measure.points[-1]))
+    start_cap = context.junctions.get(_p._road_node_key(measure.points[0]))
+    end_cap = context.junctions.get(_p._road_node_key(measure.points[-1]))
+    start_junction = _chain_junction(start_cap, pieces, context.spec)
+    end_junction = _chain_junction(end_cap, pieces, context.spec)
+    if start_cap is not None and start_junction is None:
+        start_distance = 0.0
+    if end_cap is not None and end_junction is None:
+        preferred_end = minimum_end = measure.total
+        maximum_end = max(maximum_end, measure.total)
     desired_start = start_distance
     desired_end_trim = max(0.0, measure.total - preferred_end)
     desired_end_cover = max(0.0, measure.total - minimum_end)
@@ -294,6 +373,9 @@ def _quality_chain(measure, pieces, *, start_distance, preferred_end_distance, m
 
 
 def _piece_length(model_path: str, configured_long_length: float) -> float:
+    custom = _pi.custom_road_model_signature(model_path)
+    if custom is not None:
+        return custom[2]
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
     match = _PIECE_LENGTH_PATTERN.search(filename)
     return configured_long_length if match is None else configured_long_length * int(match.group(1)) / 25.0

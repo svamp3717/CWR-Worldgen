@@ -3,7 +3,10 @@ from pathlib import Path
 import cwr_worldgen.playability as playability
 from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
 from cwr_worldgen.osm import BboxProjection, OsmDataset, OsmLineFeature
-from cwr_worldgen.procedural_infrastructure import GENERATED_GRAVEL_VISUAL_OVERLAP_METRES
+from cwr_worldgen.procedural_infrastructure import (
+    GENERATED_GRAVEL_VISUAL_OVERLAP_METRES,
+    custom_road_model_signature,
+)
 
 
 def _gravel_feature(projection, osm_key: str, points):
@@ -63,19 +66,40 @@ def test_short_aligned_gap_between_gravel_endpoints_gets_a_small_filler() -> Non
         [0.0] * (spec.cells * spec.cells),
         spec,
     )
+    expected_filler_length = spec.road_segment_length * 3.0 / 25.0
     fillers = [
         obj for obj in report.objects
-        if obj.model_path.casefold().endswith(r"\gravel3.p3d")
+        if (
+            (signature := custom_road_model_signature(obj.model_path)) is not None
+            and signature[0] == "gravel"
+            and signature[1] == 4.6
+            and abs(signature[2] - expected_filler_length) <= 0.06
+        )
         and 505.5 <= obj.x <= 506.5
         and abs(obj.z - 500.0) <= 0.1
     ]
-    assert len(fillers) == 1
+    assert len(fillers) == 1, {
+        "nearby": [
+            (
+                obj.object_id,
+                obj.model_path,
+                round(float(obj.x), 3),
+                round(float(obj.z), 3),
+                round(float(obj.heading_degrees), 3),
+            )
+            for obj in report.objects
+            if 490.0 <= float(obj.x) <= 520.0
+            and 490.0 <= float(obj.z) <= 510.0
+        ],
+        "short_piece_objects": report.short_piece_objects,
+        "chain_count": report.chain_count,
+    }
     assert abs(((fillers[0].heading_degrees - 90.0 + 180.0) % 360.0) - 180.0) <= 0.1
 
     # The 3 m filler plus the lowered visual tips participating in the seams is
     # enough to cover the six-metre source-data hole without inserting a long
     # overlapping slab.
-    actual_length = spec.road_segment_length * 3.0 / 25.0
+    actual_length = expected_filler_length
     assert actual_length + 4.0 * GENERATED_GRAVEL_VISUAL_OVERLAP_METRES > 6.0
 
 
@@ -121,8 +145,12 @@ def test_detached_gravel_endpoint_can_join_the_unused_arm_of_a_nearby_t_hub() ->
         [0.0] * (spec.cells * spec.cells),
         spec,
     )
+    expected_filler_length = spec.road_segment_length * 6.0 / 25.0
     assert any(
-        obj.model_path.casefold().endswith(r"\gravel6.p3d")
+        (signature := custom_road_model_signature(obj.model_path)) is not None
+        and signature[0] == "gravel"
+        and signature[1] == 4.6
+        and abs(signature[2] - expected_filler_length) <= 0.06
         and 502.5 <= obj.x <= 504.5
         and abs(obj.z - 500.0) <= 0.1
         for obj in report.objects

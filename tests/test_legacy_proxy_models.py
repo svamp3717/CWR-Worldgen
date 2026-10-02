@@ -9,6 +9,7 @@ import unittest
 
 from cwr_worldgen.assets import AssetRecord, canonical_asset_path
 from cwr_worldgen.legacy_proxy_models import (
+    inspect_roadway_surface_style,
     proxy_safe_model_path,
     write_proxy_safe_visual_clone,
 )
@@ -54,6 +55,52 @@ def _synthetic_odol() -> bytes:
     return bytes(out)
 
 
+
+def _synthetic_road_odol(
+    *,
+    roadway_texture: str = r"o\road\contact.paa",
+) -> bytes:
+    def lod(texture: str, point_flag: int, face_flag: int) -> bytes:
+        points = (
+            (-2.0, 0.0, -3.0),
+            (2.0, 0.0, -3.0),
+            (2.0, 0.0, 3.0),
+            (-2.0, 0.0, 3.0),
+        )
+        uvs = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
+        normals = ((0.0, -1.0, 0.0),) * 4
+        out = bytearray()
+        out += struct.pack("<I", 4)
+        out += b"".join(struct.pack("<I", point_flag) for _ in range(4))
+        out += struct.pack("<I", 4)
+        out += b"".join(struct.pack("<ff", *value) for value in uvs)
+        out += struct.pack("<I", 4)
+        out += b"".join(struct.pack("<fff", *value) for value in points)
+        out += struct.pack("<I", 4)
+        out += b"".join(struct.pack("<fff", *value) for value in normals)
+        out += b"\0" * 48
+        out += struct.pack("<I", 1)
+        out += texture.encode("ascii") + b"\0"
+        out += struct.pack("<I", 0)  # point-to-vertex
+        out += struct.pack("<I", 0)  # vertex-to-point
+        out += struct.pack("<II", 1, 10)
+        out += struct.pack("<IhBHHHH", face_flag, 0, 4, 0, 1, 2, 3)
+        out += struct.pack("<I", 0)  # sections
+        out += struct.pack("<I", 0)  # named selections
+        out += struct.pack("<I", 0)  # named properties
+        out += struct.pack("<I", 0)  # animation phases
+        out += b"\0" * 12            # colors + flags
+        out += struct.pack("<I", 0)  # proxies
+        return bytes(out)
+
+    out = bytearray(b"ODOL")
+    out += struct.pack("<II", 7, 2)
+    out += lod(r"o\road\visual.paa", 0x13F, 0x24102)
+    out += lod(roadway_texture, 0x55AA, 0x12345678)
+    out += struct.pack("<ff", 1.0, 3.0e15)
+    return bytes(out)
+
+
 def _first_lod_point_flags(data: bytes) -> tuple[int, ...]:
     if data[:4] != b"MLOD" or data[12:16] != b"SP3X":
         raise AssertionError("expected generated MLOD/SP3X")
@@ -91,8 +138,26 @@ class LegacyProxyModelTests(unittest.TestCase):
 
             summary = inspect_mlod(path)
             self.assertEqual(summary.lod_count, 1)
-            self.assertIn(r"data\leaf.paa", summary.textures)
+            self.assertIn(r"data\leaf.paa", summary.texture_paths)
             self.assertIn(("class", "bushsoft"), summary.named_properties[0])
+
+    def test_roadway_surface_style_reads_actual_odol_roadway_lod(self) -> None:
+        style = inspect_roadway_surface_style(_synthetic_road_odol())
+
+        self.assertEqual(style.source_format, "ODOL")
+        self.assertEqual(style.texture_path, r"o\road\contact.paa")
+        self.assertEqual(style.point_flag, 0x55AA)
+        self.assertEqual(style.face_flag, 0x12345678)
+
+    def test_roadway_surface_style_preserves_blank_donor_texture(self) -> None:
+        style = inspect_roadway_surface_style(
+            _synthetic_road_odol(roadway_texture="")
+        )
+
+        self.assertEqual(style.source_format, "ODOL")
+        self.assertEqual(style.texture_path, "")
+        self.assertEqual(style.point_flag, 0x55AA)
+        self.assertEqual(style.face_flag, 0x12345678)
 
     def test_cwa_safe_clusters_reject_missing_proxy_source_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

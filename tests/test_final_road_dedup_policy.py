@@ -5,6 +5,10 @@ from cwr_worldgen import playability
 from cwr_worldgen.final_road_dedup_policy import deduplicate_final_road_objects
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.playability import RoadFitReport
+from cwr_worldgen.procedural_infrastructure import (
+    custom_road_model_path,
+    custom_road_model_signature,
+)
 
 
 def _report(objects, *, caps=0):
@@ -26,6 +30,23 @@ def _spec():
 
 def _road(object_id, model, x, z, *, heading=0.0, y=0.0):
     return WorldObject(object_id, model, x, y, z, heading, 0.0)
+
+
+def test_unified_generated_duplicate_straights_keep_one_deterministically():
+    model = custom_road_model_path(
+        "unified",
+        "paved",
+        9.1,
+        25.0,
+    )
+    report = _report((
+        _road(20, model, 100.0, 100.0),
+        _road(10, model, 100.0, 100.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, _spec())
+
+    assert tuple(obj.object_id for obj in result.objects) == (10,)
 
 
 def test_exact_duplicate_straights_keep_one_deterministically():
@@ -546,6 +567,44 @@ def test_badly_grounded_dirt_above_paved_is_still_trimmed():
     result = deduplicate_final_road_objects(report, _spec())
 
     assert tuple(obj.object_id for obj in result.objects) == (2,)
+
+
+def test_unified_dirt_overlap_repairs_remain_generated_ribbons():
+    spec = SimpleNamespace(
+        name="unified",
+        road_segment_length=25.0,
+        custom_road_shapes=True,
+    )
+    dirt_model = custom_road_model_path(
+        "unified",
+        "dirt",
+        3.5,
+        25.0,
+    )
+    report = _report((
+        _road(1, dirt_model, 100.0, 89.0, heading=0.0, y=0.0),
+        _road(2, r"o\road\sil25.p3d", 100.0, 100.0, heading=90.0, y=0.0),
+    ))
+
+    result = deduplicate_final_road_objects(report, spec)
+
+    dirt = tuple(
+        obj
+        for obj in result.objects
+        if (
+            (signature := custom_road_model_signature(obj.model_path))
+            is not None
+            and signature[0] == "dirt"
+        )
+    )
+    assert dirt
+    assert all(
+        not obj.model_path.casefold().endswith(
+            (r"\ces25.p3d", r"\ces12.p3d", r"\ces6.p3d")
+        )
+        for obj in dirt
+    )
+    assert any(abs(obj.pitch_degrees) > 0.01 for obj in dirt)
 
 
 def test_extreme_dirt_underlay_never_exceeds_rvw4_pitch_limit():

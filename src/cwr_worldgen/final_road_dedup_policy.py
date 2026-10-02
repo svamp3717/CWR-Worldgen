@@ -89,6 +89,11 @@ _GENERATED_PAVED = re.compile(
     r"(?P<curve>_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
     re.I,
 )
+_CUSTOM_ROAD = re.compile(
+    r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
+    r"(?P<length>\d{4})(?P<curve>_[lr]\d{3})?\.p3d$",
+    re.I,
+)
 _GRAVEL_STRAIGHT = re.compile(r"^gravel(?P<nominal>25|12|6|3)\.p3d$", re.I)
 _DIRT_CURVE = re.compile(
     r"^ces10 (?P<radius>25|50|75|100)\.p3d$",
@@ -196,47 +201,58 @@ def _road_axis(
     stock_model = True
     curved_model = False
 
-    match = _STOCK_STRAIGHT.fullmatch(filename)
+    match = _CUSTOM_ROAD.fullmatch(filename)
     if match is not None:
-        family = match.group("family").casefold()
-        nominal = int(match.group("nominal"))
-        expected_length = (
-            float(spec.road_segment_length) * nominal / 25.0
-        )
-        half_width = float(_HALF_WIDTH_METRES[family])
+        surface = match.group("surface").casefold()
+        family = {"paved": "paved", "gravel": "gravel", "dirt": "ces"}[surface]
+        half_width = int(match.group("width")) / 20.0
+        expected_length = int(match.group("length")) / 10.0
         start, end = _p._model_axis(obj, expected_length)
+        stock_model = False
+        curved_model = match.group("curve") is not None
     else:
-        match = _STOCK_CURVE.fullmatch(filename)
+        match = _STOCK_STRAIGHT.fullmatch(filename)
         if match is not None:
             family = match.group("family").casefold()
-            half_width = float(_HALF_WIDTH_METRES[family])
-            curved_model = True
-            start, end = _stock_curve_axis(
-                obj,
-                family,
-                float(match.group("radius")),
+            nominal = int(match.group("nominal"))
+            expected_length = (
+                float(spec.road_segment_length) * nominal / 25.0
             )
+            half_width = float(_HALF_WIDTH_METRES[family])
+            start, end = _p._model_axis(obj, expected_length)
         else:
-            match = _GENERATED_PAVED.fullmatch(filename)
+            match = _STOCK_CURVE.fullmatch(filename)
             if match is not None:
-                family = "paved"
-                half_width = int(match.group("width")) / 20.0
-                expected_length = int(match.group("length")) / 10.0
-                start, end = _p._model_axis(obj, expected_length)
-                stock_model = False
-                curved_model = match.group("curve") is not None
-            else:
-                match = _GRAVEL_STRAIGHT.fullmatch(filename)
-                if match is None:
-                    return None
-                family = "gravel"
-                nominal = int(match.group("nominal"))
-                expected_length = (
-                    float(spec.road_segment_length) * nominal / 25.0
-                )
+                family = match.group("family").casefold()
                 half_width = float(_HALF_WIDTH_METRES[family])
-                start, end = _p._model_axis(obj, expected_length)
-                stock_model = False
+                curved_model = True
+                start, end = _stock_curve_axis(
+                    obj,
+                    family,
+                    float(match.group("radius")),
+                )
+            else:
+                match = _GENERATED_PAVED.fullmatch(filename)
+                if match is not None:
+                    family = "paved"
+                    half_width = int(match.group("width")) / 20.0
+                    expected_length = int(match.group("length")) / 10.0
+                    start, end = _p._model_axis(obj, expected_length)
+                    stock_model = False
+                    curved_model = match.group("curve") is not None
+                else:
+                    match = _GRAVEL_STRAIGHT.fullmatch(filename)
+                    if match is None:
+                        return None
+                    family = "gravel"
+                    nominal = int(match.group("nominal"))
+                    expected_length = (
+                        float(spec.road_segment_length) * nominal / 25.0
+                    )
+                    half_width = float(_HALF_WIDTH_METRES[family])
+                    start, end = _p._model_axis(obj, expected_length)
+                    stock_model = False
+
     dx = end[0] - start[0]
     dz = end[1] - start[1]
     length = math.hypot(dx, dz)
@@ -257,7 +273,6 @@ def _road_axis(
         curved_model=curved_model,
         junction_cap=bool(junction_cap),
     )
-
 
 def _dirt_axis(
     obj,
@@ -732,6 +747,33 @@ def _dirt_variant_path(model_path: str, nominal: int) -> str:
     parent = normalized.rsplit("\\", 1)[0]
     return f"{parent}\\ces{nominal}.p3d"
 
+def _replacement_dirt_model_path(
+    obj,
+    axis: _RoadAxis,
+    nominal: int,
+    length: float,
+    spec,
+) -> str:
+    """Keep dirt repair pieces on the active road-shape family."""
+
+    custom = _CUSTOM_ROAD.fullmatch(_filename(obj.model_path))
+    if (
+        bool(getattr(spec, "custom_road_shapes", False))
+        or (
+            custom is not None
+            and custom.group("surface").casefold() == "dirt"
+        )
+    ):
+        return _p.custom_road_model_path(
+            str(getattr(spec, "name", "world")),
+            "dirt",
+            float(axis.half_width) * 2.0,
+            float(length),
+            0.0,
+        )
+    return _dirt_variant_path(obj.model_path, nominal)
+
+
 def _dirt_variant_lengths(spec) -> tuple[tuple[int, float], ...]:
     scale = float(spec.road_segment_length) / 25.0
     return (
@@ -782,6 +824,7 @@ def _replacement_dirt_object(
     end: float,
     *,
     object_id: int,
+    spec,
 ):
     centre = (start + end) * 0.5
     x = axis.start[0] + axis.ux * centre
@@ -795,7 +838,13 @@ def _replacement_dirt_object(
     return replace(
         obj,
         object_id=int(object_id),
-        model_path=_dirt_variant_path(obj.model_path, nominal),
+        model_path=_replacement_dirt_model_path(
+            obj,
+            axis,
+            nominal,
+            end - start,
+            spec,
+        ),
         x=x,
         y=y,
         z=z,
@@ -823,6 +872,7 @@ def _replacement_dirt_underlay_object(
     blocker_buckets: dict[tuple[int, int], list[int]],
     blockers: tuple[_PavedBlocker, ...],
     object_id: int,
+    spec,
 ):
     start_point = _axis_point(axis, start)
     end_point = _axis_point(axis, end)
@@ -931,13 +981,25 @@ def _replacement_dirt_underlay_object(
         start_y -= maximum_deficit + 1.0e-6
         end_y -= maximum_deficit + 1.0e-6
 
-    pitch = math.degrees(math.asin(rise))
+    pitch = max(
+        -_MAXIMUM_DIRT_PAVED_UNDERLAY_PITCH_DEGREES,
+        min(
+            _MAXIMUM_DIRT_PAVED_UNDERLAY_PITCH_DEGREES,
+            math.degrees(math.asin(rise)),
+        ),
+    )
     centre = (start + end) * 0.5
     point = _axis_point(axis, centre)
     return replace(
         obj,
         object_id=int(object_id),
-        model_path=_dirt_variant_path(obj.model_path, nominal),
+        model_path=_replacement_dirt_model_path(
+            obj,
+            axis,
+            nominal,
+            end - start,
+            spec,
+        ),
         x=point[0],
         y=(start_y + end_y) * 0.5,
         z=point[1],
@@ -1006,12 +1068,14 @@ def _terminal_underlay_span(
 def _trim_dirt_under_paved(report, spec):
     """Keep dirt visible to the asphalt edge, then dive its final slab underneath.
 
-    Paved roads are authoritative. Straight dirt slabs are retiled into stock
-    25/12/6 pieces on each clear approach. A final ces6 continues underneath the
-    paved footprint, with its outer endpoint left on the original dirt grade and
-    its hidden endpoint pitched below the paved surface. Dirt curves and dirt
-    junction caps are still removed wholesale on conflict because there is no
-    safe stock sub-piece that preserves their geometry.
+    Paved roads are authoritative. Straight dirt slabs are retiled into the
+    active road-shape family on each clear approach. Unified mode keeps those
+    repairs as generated road_dirt ribbons; legacy mode retains stock ces25/12/6
+    pieces. A short terminal continues underneath the paved footprint, with its
+    outer endpoint left on the original dirt grade and its hidden endpoint pitched
+    below the paved surface. Dirt curves and dirt junction caps are still removed
+    wholesale on conflict because there is no safe sub-piece that preserves their
+    geometry.
     """
 
     if not report.objects:
@@ -1072,11 +1136,20 @@ def _trim_dirt_under_paved(report, spec):
         object_id = int(obj.object_id)
         filename = _filename(obj.model_path)
         straight = _STOCK_STRAIGHT.fullmatch(filename)
+        custom = _CUSTOM_ROAD.fullmatch(filename)
+        stock_dirt_straight = (
+            straight is not None
+            and straight.group("family").casefold() == "ces"
+        )
+        generated_dirt_straight = (
+            custom is not None
+            and custom.group("surface").casefold() == "dirt"
+            and custom.group("curve") is None
+        )
         if (
             index < protected_prefix
             or dirt.curved_model
-            or straight is None
-            or straight.group("family").casefold() != "ces"
+            or not (stock_dirt_straight or generated_dirt_straight)
         ):
             replacements[object_id] = ()
             if index < protected_prefix:
@@ -1115,6 +1188,7 @@ def _trim_dirt_under_paved(report, spec):
                     start,
                     end,
                     object_id=allocate_id(),
+                    spec=spec,
                 ))
 
             left_block = next(
@@ -1146,6 +1220,7 @@ def _trim_dirt_under_paved(report, spec):
                         blocker_buckets=blocker_buckets,
                         blockers=blockers,
                         object_id=allocate_id(),
+                        spec=spec,
                     )
                     if terminal is not None:
                         pieces.append(terminal)
@@ -1179,6 +1254,7 @@ def _trim_dirt_under_paved(report, spec):
                         blocker_buckets=blocker_buckets,
                         blockers=blockers,
                         object_id=allocate_id(),
+                        spec=spec,
                     )
                     if terminal is not None:
                         pieces.append(terminal)

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from functools import lru_cache
-from itertools import product
 import math
 from typing import Callable, Iterable
 
@@ -56,6 +55,7 @@ class _PathTemplate:
     counter_radius: int
     point: tuple[float, float]
     heading: float
+    direction: tuple[float, float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,6 +337,7 @@ def _path_template_index(turn_sign: int) -> _PathTemplateIndex:
                             counter_radius,
                             point,
                             heading,
+                            _paved._direction(heading),
                         )
                         order += 1
                         templates.append(template)
@@ -365,17 +366,29 @@ def _target_local_point(arm, target) -> tuple[float, float]:
     )
 
 
-def _candidate_templates(
-    arm,
-    target,
+def _candidate_templates_local(
+    local: tuple[float, float],
     tolerance: float,
     turn_sign: int,
 ):
-    local = _target_local_point(arm, target)
+    """Return only templates that can end with one legal merge straight.
+
+    Work entirely in connector-local space and compare squared distances. The
+    previous implementation called sqrt for every template in every nearby
+    bucket, then repeated the same local transform for both turn signs.
+    """
+
     radius = max(float(value) for value in _paved._STRAIGHTS.values()) + tolerance
     index = _path_template_index(turn_sign)
     candidates = []
-    legal_lengths = tuple(float(value) for value in _paved._STRAIGHTS.values())
+    padding = 1.0e-9
+    legal_ranges = tuple(
+        (
+            max(0.0, float(value) - tolerance - padding) ** 2,
+            (float(value) + tolerance + padding) ** 2,
+        )
+        for value in _paved._STRAIGHTS.values()
+    )
     for key in _bucket_keys_for_bbox(
         local[0] - radius,
         local[0] + radius,
@@ -384,18 +397,33 @@ def _candidate_templates(
         size=_PATH_BUCKET_METRES,
     ):
         for template in index.buckets.get(key, ()):
-            # Rotation/translation from connector-local to world space preserves
-            # Euclidean distance. Reject templates that cannot possibly finish
-            # with one legal 6/12/25 m merge slab before doing world transforms
-            # and tangent comparisons.
-            merge_distance = math.dist(local, template.point)
+            dx = local[0] - template.point[0]
+            dz = local[1] - template.point[1]
+            distance_sq = dx * dx + dz * dz
             if any(
-                abs(merge_distance - length) <= tolerance
-                for length in legal_lengths
+                minimum <= distance_sq <= maximum
+                for minimum, maximum in legal_ranges
             ):
                 candidates.append(template)
     candidates.sort(key=lambda template: template.order)
     return candidates
+
+
+def _candidate_templates(
+    arm,
+    target,
+    tolerance: float,
+    turn_sign: int,
+):
+    return _candidate_templates_local(
+        _target_local_point(arm, target),
+        tolerance,
+        turn_sign,
+    )
+
+
+_MAX_APPROACH_ANGLE_DEGREES = 12.0
+_MIN_APPROACH_DOT = math.cos(math.radians(_MAX_APPROACH_ANGLE_DEGREES))
 
 
 def _approach_choice_to_target(
@@ -410,12 +438,57 @@ def _approach_choice_to_target(
     )
     preferred_sign = 1 if delta >= 0.0 else -1
     initial_heading = _paved._heading(connector.direction)
+
+    # Templates are indexed in connector-local space. Use that cheap frame to
+    # discard almost everything, then run the historical world-space arithmetic
+    # only on survivors so scoring and deterministic tie behaviour stay exact.
+    local = _target_local_point(arm, target)
+    direction = connector.direction
+    right = direction[1], -direction[0]
+    continuation_local = (
+        target.continuation[0] * right[0]
+        + target.continuation[1] * right[1],
+        target.continuation[0] * direction[0]
+        + target.continuation[1] * direction[1],
+    )
     best = None
 
     for turn_sign in (preferred_sign, -preferred_sign):
-        for path in _candidate_templates(
-            arm, target, tolerance, turn_sign
+        for path in _candidate_templates_local(
+            local, tolerance, turn_sign
         ):
+            merge_local = (
+                local[0] - path.point[0],
+                local[1] - path.point[1],
+            )
+            merge_local_sq = (
+                merge_local[0] * merge_local[0]
+                + merge_local[1] * merge_local[1]
+            )
+            if merge_local_sq <= 0.05 * 0.05:
+                continue
+
+            local_distance = math.sqrt(merge_local_sq)
+            merge_local_direction = (
+                merge_local[0] / local_distance,
+                merge_local[1] / local_distance,
+            )
+            in_dot = (
+                path.direction[0] * merge_local_direction[0]
+                + path.direction[1] * merge_local_direction[1]
+            )
+            out_dot = (
+                merge_local_direction[0] * continuation_local[0]
+                + merge_local_direction[1] * continuation_local[1]
+            )
+            if (
+                in_dot < _MIN_APPROACH_DOT
+                or out_dot < _MIN_APPROACH_DOT
+            ):
+                continue
+
+            # Exact historical narrow phase. This is now reached by only a tiny
+            # fraction of the catalogue templates.
             world_point = _paved._world(
                 path.point,
                 connector.point,
@@ -428,20 +501,6 @@ def _approach_choice_to_target(
             merge_distance = math.hypot(*merge_vector)
             if merge_distance <= 0.05:
                 continue
-
-            # Reject by stock straight length before doing expensive heading
-            # comparisons. This is mathematically independent of the headings
-            # and discards almost every path candidate on real junctions.
-            nominal_errors = []
-            for nominal in (6, 12, 25):
-                length_error = abs(
-                    merge_distance - _paved._STRAIGHTS[nominal]
-                )
-                if length_error <= tolerance:
-                    nominal_errors.append((nominal, length_error))
-            if not nominal_errors:
-                continue
-
             merge_direction = (
                 merge_vector[0] / merge_distance,
                 merge_vector[1] / merge_distance,
@@ -455,10 +514,15 @@ def _approach_choice_to_target(
             out_error = _paved._angle(
                 merge_direction, target.continuation
             )
-            if max(in_error, out_error) > 12.0:
+            if max(in_error, out_error) > _MAX_APPROACH_ANGLE_DEGREES:
                 continue
 
-            for nominal, length_error in nominal_errors:
+            for nominal in (6, 12, 25):
+                length_error = abs(
+                    merge_distance - _paved._STRAIGHTS[nominal]
+                )
+                if length_error > tolerance:
+                    continue
                 piece_count = (
                     path.first_turns
                     + path.counter_turns
@@ -515,17 +579,50 @@ def _plan_application(state: _SpatialState, plan, spec):
     )
     if any(not values for values in options):
         return None
-    best = None
-    for combination in product(*options):
-        object_ids = tuple(
-            value[1].object_id for value in combination
+
+    # This is a tiny minimum-cost assignment problem, not a reason to enumerate
+    # 8^4 combinations for every four-way intersection. Traverse in the same
+    # order as itertools.product and prune branches that cannot beat the first
+    # best score, preserving deterministic tie behaviour exactly.
+    suffix_minimum = [0.0] * (len(options) + 1)
+    for index in range(len(options) - 1, -1, -1):
+        suffix_minimum[index] = (
+            suffix_minimum[index + 1]
+            + min(float(value[0]) for value in options[index])
         )
-        if len(set(object_ids)) != len(object_ids):
-            continue
-        score = sum(value[0] for value in combination)
-        if best is None or score < best[0]:
-            best = score, combination
-    return None if best is None else best[1]
+
+    best_score = math.inf
+    best_combination = None
+    selected = []
+    used_ids: set[int] = set()
+
+    def visit(index: int, score: float) -> None:
+        nonlocal best_score, best_combination
+        if score + suffix_minimum[index] >= best_score:
+            return
+        if index >= len(options):
+            best_score = score
+            best_combination = tuple(selected)
+            return
+
+        for value in options[index]:
+            object_id = int(value[1].object_id)
+            if object_id in used_ids:
+                continue
+            next_score = score + float(value[0])
+            if (
+                next_score + suffix_minimum[index + 1]
+                >= best_score
+            ):
+                continue
+            used_ids.add(object_id)
+            selected.append(value)
+            visit(index + 1, next_score)
+            selected.pop()
+            used_ids.remove(object_id)
+
+    visit(0, 0.0)
+    return best_combination
 
 
 def _application_point_buckets(applications):
@@ -776,6 +873,9 @@ def apply_paved_junctions_fast(
     if not plans or report.junction_cap_objects <= 0:
         return report
 
+    # Keep the optimized path semantically identical to paved_junction_policy:
+    # donor-style generated caps still need the approach topology solver. The
+    # emitted approach pieces are donor-styled generated roads in unified mode.
     callback = _audit_progress._PROGRESS_CALLBACK.get()
     reporter = _Reporter(callback)
     state = _build_spatial_state(report, spec, reporter)
@@ -862,7 +962,11 @@ def apply_paved_junctions_fast(
             end,
             elevations,
             spec,
-            vertical_offset=0.060,
+            vertical_offset=(
+                _paved._p._STOCK_ROAD_VERTICAL_OFFSET_METRES
+                if _paved._pi.is_generated_paved_junction_model(plan.model_path)
+                else _paved._p._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+            ),
         )
 
     next_id = max(

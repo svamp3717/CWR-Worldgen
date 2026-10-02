@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from collections import deque
+from contextvars import ContextVar
 from dataclasses import dataclass
 import hashlib
 import math
@@ -12,15 +13,23 @@ from typing import Callable, Mapping, Sequence
 
 from .model import OsmSpec, PlayabilitySpec, WorldObject
 from .procedural_infrastructure import (
+    CUSTOM_ROAD_MAX_CURVE_DEGREES,
+    GENERATED_GRAVEL_HALF_WIDTH_METRES,
     GENERATED_GRAVEL_SURFACE_CLEARANCE_METRES,
     GENERATED_GRAVEL_VISUAL_TOP_METRES,
     GENERATED_PAVED_HALF_WIDTH_METRES,
     GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES,
+    GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES,
     GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES,
     GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES,
+    custom_road_junction_model_path,
+    custom_road_model_path,
+    custom_road_model_signature,
     gravel_curve_model_path,
     gravel_junction_model_path,
     gravel_road_model_path,
+    is_generated_dirt_junction_model,
+    is_generated_dirt_road_model,
     is_generated_gravel_junction_model,
     is_generated_gravel_road_model,
     is_generated_paved_junction_model,
@@ -41,11 +50,90 @@ from .osm import (
     road_span_has_in_game_water,
     road_is_dirt,
     road_is_gravel,
-    road_model_for_tags,
+    road_model_for_tags as _osm_road_model_for_tags,
     road_is_supported,
     projected_road_polylines,
     road_width_metres,
 )
+
+
+
+_ACTIVE_ROAD_TAGS: ContextVar[Mapping[str, str] | None] = ContextVar(
+    "cwr_active_road_tags",
+    default=None,
+)
+
+_ROAD_MODEL_VARIANTS_AVAILABLE: ContextVar[
+    Mapping[str, frozenset[str]] | None
+] = ContextVar(
+    "cwr_road_model_variants_available",
+    default=None,
+)
+
+_ROAD_MODEL_DIMENSIONS: ContextVar[
+    Mapping[str, tuple[float, float]] | None
+] = ContextVar(
+    "cwr_road_model_dimensions",
+    default=None,
+)
+
+_ROAD_MODEL_MEASUREMENT_ERRORS: ContextVar[
+    Mapping[str, str] | None
+] = ContextVar(
+    "cwr_road_model_measurement_errors",
+    default=None,
+)
+
+_ROAD_MODEL_EFFECTIVE_DONORS: ContextVar[
+    Mapping[str, str] | None
+] = ContextVar(
+    "cwr_road_model_effective_donors",
+    default=None,
+)
+
+
+def _road_model_key(value: str) -> str:
+    return str(value).replace("/", "\\").strip().lstrip("\\").casefold()
+
+
+def effective_road_model(model_path: str) -> str:
+    """Resolve a selected style donor to the straight model used for placement."""
+
+    values = _ROAD_MODEL_EFFECTIVE_DONORS.get()
+    if values is None:
+        return model_path
+    return values.get(_road_model_key(model_path), model_path)
+
+
+def road_model_dimensions(model_path: str) -> tuple[float, float] | None:
+    """Return measured (width, long-piece length) for a configured mod road."""
+
+    values = _ROAD_MODEL_DIMENSIONS.get()
+    if values is None:
+        return None
+    direct = values.get(_road_model_key(model_path))
+    if direct is not None:
+        return direct
+    return values.get(_road_model_key(effective_road_model(model_path)))
+
+
+def road_model_measurement_error(model_path: str) -> str | None:
+    """Return the concrete reason a configured mod road could not be measured."""
+
+    values = _ROAD_MODEL_MEASUREMENT_ERRORS.get()
+    if values is None:
+        return None
+    direct = values.get(_road_model_key(model_path))
+    if direct is not None:
+        return direct
+    return values.get(_road_model_key(effective_road_model(model_path)))
+
+
+def road_model_for_tags(spec: OsmSpec, tags: Mapping[str, str]) -> str:
+    """Select a road surface, then resolve any curved style donor to its straight base."""
+
+    selected = _osm_road_model_for_tags(spec, tags)
+    return effective_road_model(selected)
 
 
 @dataclass(frozen=True, slots=True)
@@ -748,6 +836,47 @@ class _RoadPiece:
     nominal_length: int
 
 
+def gravel_filler_piece(spec: object, nominal_length: int) -> _RoadPiece:
+    """Return a short gravel repair piece using the active road-shape system."""
+
+    configured = str(getattr(spec, "gravel_road_model", "") or "").strip()
+    segment_length = float(getattr(spec, "road_segment_length", 25.0))
+    if bool(getattr(spec, "custom_road_shapes", False)):
+        width = (
+            road_model_width_metres(configured)
+            if configured
+            else GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
+        )
+        width = (
+            float(width)
+            if width is not None
+            else GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
+        )
+        length = segment_length * float(nominal_length) / 25.0
+        return _RoadPiece(
+            custom_road_model_path(
+                str(getattr(spec, "name", "world")),
+                "gravel",
+                width,
+                length,
+                0.0,
+            ),
+            length,
+            int(nominal_length),
+        )
+
+    if configured:
+        for piece in road_model_variants(configured, segment_length):
+            if int(piece.nominal_length) == int(nominal_length):
+                return piece
+
+    return _RoadPiece(
+        gravel_road_model_path(str(getattr(spec, "name", "world")), nominal_length),
+        segment_length * float(nominal_length) / 25.0,
+        int(nominal_length),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _ProjectedRoadSegment:
     osm_key: str
@@ -778,19 +907,64 @@ def _road_model_with_length(model_path: str, nominal_length: int) -> str | None:
     return model_path[: -len(suffix)] + f"{nominal_length}.p3d"
 
 
-def road_model_variants(model_path: str, configured_long_length: float) -> tuple[_RoadPiece, ...]:
-    """Return deterministic road-model length variants.
+def _known_stock_road_donor_length(model_path: str) -> float | None:
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+    match = re.fullmatch(
+        r"(?:sil|silnice|asf|asfaltka|kos|ces|cesta|gravel)(?P<length>25|12|6|3)\.p3d",
+        filename,
+    )
+    return float(match.group("length")) if match is not None else None
 
-    Stock OFP/CWA road families stop at 6 m. Generated gravel additionally has
-    a 3 m sibling so tight bends can use shorter curved sections without
-    inventing nonexistent stock assets.
-    """
+
+def road_model_variants(
+    model_path: str,
+    configured_long_length: float,
+    *,
+    donor_only: bool = False,
+) -> tuple[_RoadPiece, ...]:
+    """Return deterministic road-model fitting pieces.\n\n    Normal fitting reuses real 25/12/6 siblings when the active availability map\n    proves they exist. Mod families therefore retain their native short straights,\n    while missing lengths can be supplied procedurally by the unified fallback.\n    ``donor_only`` deliberately returns only the configured/effective style donor\n    for measurement, texture, and generated-model decisions.\n    """
 
     if configured_long_length <= 0.0:
         raise ValueError("configured road length must be positive")
+    model_path = effective_road_model(model_path)
+    custom = custom_road_model_signature(model_path)
+    if custom is not None:
+        return (
+            _RoadPiece(
+                model_path,
+                float(custom[2]),
+                max(1, int(round(float(custom[2])))),
+            ),
+        )
+
+    measured = road_model_dimensions(model_path)
+    stock_donor_length = (
+        _known_stock_road_donor_length(model_path)
+        if donor_only and measured is None
+        else None
+    )
+    long_length = (
+        float(measured[1])
+        if measured is not None
+        else float(stock_donor_length)
+        if stock_donor_length is not None
+        else float(configured_long_length)
+    )
+    if donor_only:
+        return (
+            _RoadPiece(
+                model_path,
+                long_length,
+                max(1, int(round(long_length))),
+            ),
+        )
+
     gravel = is_generated_gravel_road_model(model_path)
     nominals = (25, 12, 6, 3) if gravel else (25, 12, 6)
     pieces: list[_RoadPiece] = []
+    availability = _ROAD_MODEL_VARIANTS_AVAILABLE.get()
+    base_key = _road_model_key(model_path)
+    available = availability.get(base_key) if availability is not None else None
     for nominal in nominals:
         if nominal == 3 and gravel:
             world_name = model_path.split("\\", 1)[0]
@@ -799,14 +973,126 @@ def road_model_variants(model_path: str, configured_long_length: float) -> tuple
             path = _road_model_with_length(model_path, nominal)
         if path is None:
             continue
-        pieces.append(_RoadPiece(path, configured_long_length * nominal / 25.0, nominal))
+        # Stock families retain their historical deterministic sibling catalogue.
+        # For configured mod families, the generator installs an availability map
+        # from the actual asset roots so we never reference a sibling P3D that the
+        # mod does not contain.
+        if (
+            available is not None
+            and _road_model_key(path) != base_key
+            and _road_model_key(path) not in available
+        ):
+            continue
+        measured_piece = road_model_dimensions(path)
+        piece_length = (
+            float(measured_piece[1])
+            if measured_piece is not None
+            else long_length * nominal / 25.0
+        )
+        pieces.append(_RoadPiece(path, piece_length, nominal))
     return tuple(pieces)
 
 
-def road_model_variant_paths(model_path: str, configured_long_length: float) -> tuple[str, ...]:
+def road_model_variant_paths(
+    model_path: str,
+    configured_long_length: float,
+    *,
+    donor_only: bool = False,
+) -> tuple[str, ...]:
     """Public helper used by strict-asset classification and manifests."""
 
-    return tuple(piece.model_path for piece in road_model_variants(model_path, configured_long_length))
+    return tuple(
+        piece.model_path
+        for piece in road_model_variants(
+            model_path,
+            configured_long_length,
+            donor_only=donor_only,
+        )
+    )
+
+
+def road_fitting_variants(
+    spec: object,
+    model_path: str,
+) -> tuple[_RoadPiece, ...]:
+    """Return the external road pieces allowed in the active fitting mode.
+
+    Unified custom-road generation is intentionally donor-only: the effective
+    configured straight model is the sole external P3D the fitter may place.
+    Short straights, bends, fillers, and connection geometry are generated
+    procedurally from the configured straight/curve donor style instead of
+    pulling in stock or mod-family 12/6/3 siblings that can introduce seams.
+
+    Legacy fitting retains the historical sibling catalogue.
+    """
+
+    return road_model_variants(
+        model_path,
+        float(getattr(spec, "road_segment_length", 25.0)),
+        donor_only=bool(getattr(spec, "custom_road_shapes", False)),
+    )
+
+
+def road_model_width_metres(model_path: str) -> float | None:
+    """Return a measured or deterministic visible width for one road model."""
+
+    measured = road_model_dimensions(model_path)
+    if measured is not None:
+        return float(measured[0])
+
+    custom = custom_road_model_signature(model_path)
+    if custom is not None:
+        return float(custom[1])
+
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+    generated_paved = re.fullmatch(
+        r"paved_w(?P<width>\d{3})_l\d{4}(?:_[lr]\d{2})?\.p3d",
+        filename,
+    )
+    if generated_paved is not None:
+        return int(generated_paved.group("width")) / 10.0
+    if re.fullmatch(
+        r"gravel(?:25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d",
+        filename,
+    ):
+        return GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
+    if filename.startswith(("sil", "kos")):
+        return 9.10
+    if filename.startswith("asf"):
+        return 7.00
+    if filename.startswith("ces"):
+        return 3.50
+    return None
+
+
+def road_model_surface(spec: object, model_path: str) -> str | None:
+    """Classify stock, generated, or configured mod road models by surface."""
+
+    if is_generated_gravel_road_model(model_path) or is_generated_gravel_junction_model(model_path):
+        return "gravel"
+    if is_generated_dirt_road_model(model_path) or is_generated_dirt_junction_model(model_path):
+        return "dirt"
+    if is_generated_paved_road_model(model_path) or is_generated_paved_junction_model(model_path):
+        return "paved"
+
+    target = _road_model_key(model_path)
+    configured = (
+        ("gravel", str(getattr(spec, "gravel_road_model", "") or "")),
+        ("dirt", str(getattr(spec, "dirt_road_model", "") or "")),
+        ("paved", str(getattr(spec, "paved_road_model", "") or "")),
+    )
+    segment_length = float(getattr(spec, "road_segment_length", 25.0))
+    for surface, base_model in configured:
+        if not base_model:
+            continue
+        variants = road_model_variants(
+            base_model,
+            segment_length,
+            donor_only=bool(getattr(spec, "custom_road_shapes", False)),
+        )
+        if target in {_road_model_key(piece.model_path) for piece in variants}:
+            return surface
+    return None
 
 
 def _point_along_straight_segment(
@@ -854,14 +1140,18 @@ def _unique_incidents(
 
 def _junction_cap_incidents(
     values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
+    *,
+    include_mixed_surfaces: bool = False,
 ) -> tuple[tuple[tuple[float, float], bool, str, str, str], ...]:
     """Let paved roads own mixed-surface junction topology.
 
-    Dirt and gravel are deliberately rendered below paved roads. When a node
-    contains any paved incidents, ignore every unpaved arm while deciding
-    whether to create a cap. This keeps a paved through-road continuous at a
-    dirt T/crossing instead of inserting a dirt/mixed short road slab on top of
-    the asphalt. Pure dirt/gravel nodes retain their normal junction behavior.
+    This intentionally matches the pre-unification modded-road path. A paved
+    through-road stays continuous at a gravel/dirt branch; the unpaved arm
+    terminates into the paved surface instead of forcing a mixed generated hub
+    that trims every arm away from the node.
+
+    The include_mixed_surfaces argument remains accepted for wrapper
+    compatibility but is deliberately ignored.
     """
 
     values = tuple(values)
@@ -1372,7 +1662,10 @@ def _generated_paved_half_width(model_path: str) -> float:
     """Return the visible half-width used by a paved road family."""
 
     filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
-    generated = re.fullmatch(r"paved_w(?P<width>\d{3})_l\d{4}(?:_[lr]\d{2})?\.p3d", filename)
+    generated = re.fullmatch(
+        r"(?:road_)?paved_w(?P<width>\d{3})_l\d{4}(?:_[lr]\d{2,3})?\.p3d",
+        filename,
+    )
     if generated is not None:
         return int(generated.group("width")) / 20.0
     if filename.startswith("asf"):
@@ -1381,6 +1674,70 @@ def _generated_paved_half_width(model_path: str) -> float:
         return 4.55
     return GENERATED_PAVED_HALF_WIDTH_METRES
 
+
+def _generated_custom_road_junction_cap_plan(
+    values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
+    spec: PlayabilitySpec,
+) -> tuple[str, tuple[float, float]] | None:
+    """Create a donor-styled T/X hub for one road surface family."""
+
+    if len(values) not in {3, 4}:
+        return None
+    if not bool(getattr(spec, "custom_road_shapes", False)):
+        return None
+
+    surfaces = {
+        road_model_surface(spec, value[2])
+        for value in values
+    }
+    if len(surfaces) != 1:
+        return None
+    surface = next(iter(surfaces))
+    if surface not in {"paved", "gravel", "dirt"}:
+        return None
+
+    configured = str(
+        getattr(spec, f"{surface}_road_model", "") or ""
+    ).strip()
+    configured_width = (
+        road_model_width_metres(configured)
+        if configured
+        else (
+            GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
+            if surface == "gravel"
+            else None
+        )
+    )
+
+    widths: list[float] = []
+    for value in values:
+        width = road_model_width_metres(value[2])
+        if width is None:
+            width = configured_width
+        if width is None:
+            return None
+        widths.append(float(width))
+    if not widths:
+        return None
+
+    minimum_width = min(widths)
+    maximum_width = max(widths)
+    tolerance = max(0.20, minimum_width * 0.08)
+    if maximum_width - minimum_width > tolerance:
+        return None
+
+    directions = tuple(value[0] for value in values)
+    try:
+        headings, axis = paved_junction_signature_for_directions(directions)
+        model_path = custom_road_junction_model_path(
+            str(getattr(spec, "name", "world")),
+            surface,
+            maximum_width,
+            headings,
+        )
+    except ValueError:
+        return None
+    return model_path, axis
 
 def _generated_paved_t_cap_plan(
     values: Sequence[tuple[tuple[float, float], bool, str, str, str]],
@@ -1927,7 +2284,11 @@ def _curved_gravel_model_for_run(
     start: tuple[float, float],
     end: tuple[float, float],
 ) -> str:
-    if not is_generated_gravel_road_model(model_path) or len(run) < 3:
+    if (
+        custom_road_model_signature(model_path) is not None
+        or not is_generated_gravel_road_model(model_path)
+        or len(run) < 3
+    ):
         return model_path
     start_heading = _nearest_polyline_heading(run, start)
     end_heading = _nearest_polyline_heading(run, end)
@@ -1965,7 +2326,12 @@ def _road_object_on_slope(
     pitch = max(-35.0, min(35.0, pitch))
     terrain_raise = 0.0
     placement_offset = vertical_offset
-    if is_generated_gravel_road_model(model_path) or is_generated_gravel_junction_model(model_path):
+    if (
+        is_generated_gravel_road_model(model_path)
+        or is_generated_dirt_road_model(model_path)
+        or is_generated_gravel_junction_model(model_path)
+        or is_generated_dirt_junction_model(model_path)
+    ):
         # Gravel is a normal terrain-following road, not a raised slab. Place
         # its rendered surface and Roadway LOD exactly on the fitted terrain
         # plane and never lift the whole piece to clear a local terrain bump.
@@ -2124,6 +2490,9 @@ def _short_run_fallback_piece(
     *,
     start_trim: float,
     end_trim: float,
+    generated_world_name: str = "",
+    generated_surface: str | None = None,
+    generated_width_metres: float | None = None,
 ) -> tuple[tuple[_RoadPiece, tuple[float, float], tuple[float, float]], ...]:
     """Return one aligned short stock piece for a run hidden by hub trimming.
 
@@ -2135,6 +2504,36 @@ def _short_run_fallback_piece(
 
     if not pieces or measure.total <= 0.05:
         return ()
+
+    if (
+        generated_world_name
+        and generated_surface in {"paved", "gravel", "dirt"}
+        and generated_width_metres is not None
+    ):
+        start_x, start_z, start_heading = measure.point(0.0)
+        end_x, end_z, end_heading = measure.point(measure.total)
+        length = math.hypot(end_x - start_x, end_z - start_z)
+        if length <= 0.05:
+            return ()
+        curve = _signed_heading_delta(start_heading, end_heading)
+        curve = max(
+            -float(CUSTOM_ROAD_MAX_CURVE_DEGREES),
+            min(float(CUSTOM_ROAD_MAX_CURVE_DEGREES), curve),
+        )
+        model_path = custom_road_model_path(
+            generated_world_name,
+            generated_surface,
+            float(generated_width_metres),
+            length,
+            curve,
+        )
+        generated = _RoadPiece(
+            model_path,
+            length,
+            max(1, int(round(length))),
+        )
+        return ((generated, (start_x, start_z), (end_x, end_z)),)
+
     piece = min(pieces, key=lambda item: (item.length_metres, item.model_path.casefold()))
     if start_trim > 0.0 and end_trim <= 1e-9:
         start_distance = min(start_trim, max(0.0, measure.total - piece.length_metres))
@@ -2305,7 +2704,7 @@ def _fit_stock_piece_road_objects(
     def variants_for(model_path: str) -> tuple[_RoadPiece, ...]:
         variants = variant_cache.get(model_path)
         if variants is None:
-            variants = road_model_variants(model_path, spec.road_segment_length)
+            variants = road_fitting_variants(spec, model_path)
             if is_generated_gravel_road_model(model_path):
                 # Keep the 25 m gravel slab out of terrain-following chains, but
                 # allow 12 m curved ribbons as well as 6 m ones. The previous
@@ -2333,7 +2732,12 @@ def _fit_stock_piece_road_objects(
     for key in sorted(cap_keys):
         values = cap_incidents[key]
         use_dirt = all(value[1] for value in values)
-        all_gravel = all(is_generated_gravel_road_model(value[2]) for value in values)
+        configured_gravel = str(getattr(spec, "gravel_road_model", "") or "").casefold()
+        all_gravel = all(
+            is_generated_gravel_road_model(value[2])
+            or (configured_gravel and value[2].casefold() == configured_gravel)
+            for value in values
+        )
         incident_models = {value[2].casefold(): value[2] for value in values}
         generated_paved_t = _generated_paved_t_cap_plan(values, spec)
         axis_override = None
@@ -2364,7 +2768,9 @@ def _fit_stock_piece_road_objects(
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
         cap_vertical_offset = (
-            _STOCK_DIRT_VERTICAL_OFFSET_METRES
+            _STOCK_ROAD_VERTICAL_OFFSET_METRES
+            if generated_paved_t is not None
+            else _STOCK_DIRT_VERTICAL_OFFSET_METRES
             if use_dirt
             else _STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
         )
@@ -2375,11 +2781,12 @@ def _fit_stock_piece_road_objects(
             cap_vertical_offset,
         )
         if generated_paved_t is not None:
-            # The generated hub owns the seam. Keep logical/collision geometry
-            # at 6.25 m, stop approach slabs at 6.45 m, and let only the visible
-            # hub reach 6.80 m over them.
-            cap_trim_lengths[key] = (
-                half + GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+            # Unified approaches now overlap the generated hub slightly
+            # instead of stopping outside its logical connector. The previous
+            # 0.20 m clearance produced visible grass slits beside the junction.
+            cap_trim_lengths[key] = max(
+                0.40,
+                half - GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES,
             )
             cap_cover_lengths[key] = (
                 half + GENERATED_PAVED_JUNCTION_VISUAL_OVERHANG_METRES
@@ -2484,14 +2891,18 @@ def _fit_stock_piece_road_objects(
             minimum_end = max(start_distance, total_length - end_cover)
             shortest = min(piece.length_metres for piece in variants)
             maximum_end = total_length + (0.70 if end_cover > 0.0 else shortest * 0.5)
-            fitted_pieces = _stock_piece_chain(
-                measure,
-                variants,
-                start_distance=start_distance,
-                preferred_end_distance=preferred_end,
-                minimum_end_distance=minimum_end,
-                maximum_end_distance=maximum_end,
-            )
+            road_tags_token = _ACTIVE_ROAD_TAGS.set(feature.tags)
+            try:
+                fitted_pieces = _stock_piece_chain(
+                    measure,
+                    variants,
+                    start_distance=start_distance,
+                    preferred_end_distance=preferred_end,
+                    minimum_end_distance=minimum_end,
+                    maximum_end_distance=maximum_end,
+                )
+            finally:
+                _ACTIVE_ROAD_TAGS.reset(road_tags_token)
             covered_by_hubs = False
             if not fitted_pieces:
                 covered_by_hubs = total_length <= start_cover + end_cover + 1e-6
@@ -2507,6 +2918,21 @@ def _fit_stock_piece_road_objects(
                         variants,
                         start_trim=start_trim,
                         end_trim=end_trim,
+                        generated_world_name=(
+                            spec.name
+                            if bool(getattr(spec, "custom_road_shapes", False))
+                            else ""
+                        ),
+                        generated_surface=(
+                            road_model_surface(spec, model)
+                            if bool(getattr(spec, "custom_road_shapes", False))
+                            else None
+                        ),
+                        generated_width_metres=(
+                            road_model_width_metres(model)
+                            if bool(getattr(spec, "custom_road_shapes", False))
+                            else None
+                        ),
                     )
                     if fitted_pieces:
                         covered_by_hubs = False

@@ -41,6 +41,7 @@ _PBO_INDEX_SCHEMA = 2
 _INSTALLED = False
 _FULL_SCAN = _assets.scan_assets
 _PBO_INDEX_MEMORY: dict[tuple[str, int, int], "_PboIndex"] = {}
+_FALLBACK_PBO_MEMORY: dict[tuple[str, str], tuple[Path, ...]] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,13 +300,25 @@ def _likely_pbos(root: Path, prefix: str) -> tuple[Path, ...]:
     return tuple(result)
 
 def _fallback_named_pbos(root: Path, prefix: str) -> tuple[Path, ...]:
-    """Rare compatibility path for unusual mod layouts; never used for stock paths."""
+    """Rare compatibility path for unusual mod layouts; cache the expensive walk.
+
+    Road-family discovery probes several exact sibling names with the same addon
+    prefix. When the package is absent from the normal CWA locations, repeating
+    a recursive walk for every 25/12/6 candidate can make the UI appear frozen.
+    Cache both hits and misses for the lifetime of the process.
+    """
     if not root.is_dir():
         return ()
+    resolved = root.resolve()
+    cache_key_value = (os.path.normcase(str(resolved)), prefix.casefold())
+    cached = _FALLBACK_PBO_MEMORY.get(cache_key_value)
+    if cached is not None:
+        return cached
+
     wanted = {f"{prefix}.pbo".casefold(), f"{prefix}.pbo.zst".casefold()}
     matches: list[Path] = []
     try:
-        for directory, dirnames, filenames in os.walk(root):
+        for directory, dirnames, filenames in os.walk(resolved):
             dirnames[:] = [
                 name for name in dirnames
                 if not name.casefold().startswith(".cwr-worldgen-")
@@ -315,23 +328,43 @@ def _fallback_named_pbos(root: Path, prefix: str) -> tuple[Path, ...]:
                 if name.casefold() in wanted:
                     matches.append(Path(directory) / name)
     except OSError:
-        return ()
-    return tuple(matches)
+        matches = []
+    result = tuple(matches)
+    _FALLBACK_PBO_MEMORY[cache_key_value] = result
+    return result
 
 def _read_indexed_entry(path: Path, entry: _PboEntry) -> bytes | None:
-    if entry.packing != 0:
+    if entry.packing not in {0, _assets._PBO_COMPRESSED}:
         return None
+
     if not is_zstd_wrapped_pbo(path):
         with path.open("rb") as stream:
             stream.seek(entry.data_offset)
-            data = stream.read(entry.data_size)
-        if len(data) != entry.data_size:
+            stored = stream.read(entry.data_size)
+        if len(stored) != entry.data_size:
             raise ValueError(f"truncated PBO entry {entry.canonical_path}")
-        return data
+    else:
+        with open_pbo_stream(path) as stream:
+            _skip_exact(stream, entry.data_offset, "PBO data before selected entry")
+            stored = _read_exact(
+                stream,
+                entry.data_size,
+                f"PBO entry {entry.canonical_path}",
+            )
 
-    with open_pbo_stream(path) as stream:
-        _skip_exact(stream, entry.data_offset, "PBO data before selected entry")
-        return _read_exact(stream, entry.data_size, f"PBO entry {entry.canonical_path}")
+    if entry.packing == 0:
+        return stored
+    if entry.original_size <= 0:
+        raise ValueError(
+            f"compressed PBO entry {entry.canonical_path} has no original size"
+        )
+    packed = io.BytesIO(stored)
+    data = _assets._decompress_lzss_stream(packed, entry.original_size)
+    if packed.read():
+        raise ValueError(
+            f"compressed PBO entry {entry.canonical_path} has trailing bytes"
+        )
+    return data
 
 def _record_from_loose(path: Path, canonical_path: str) -> _assets.AssetRecord:
     data = path.read_bytes()
@@ -511,6 +544,94 @@ def _targeted_scan(
         cache_path=str(index_root) if index_root is not None else None,
     )
     return result, stats
+
+
+def locate_assets_fast(
+    roots: Sequence[Path],
+    selected_assets: Iterable[str],
+    *,
+    cache_dir: Path | None = None,
+    use_cache: bool = True,
+    refresh: bool = False,
+) -> _assets.AssetScanResult:
+    """Locate exact assets without dependency validation or exhaustive fallback.
+
+    Road-family discovery uses this because it only needs exact P3D records.
+    Missing texture dependencies must not turn a tiny donor lookup into a
+    recursive scan of an entire game installation.
+    """
+
+    root_paths = _resolved_roots(roots)
+    root_names = tuple(str(path) for path in root_paths)
+    selected = tuple(
+        sorted({_assets.canonical_asset_path(value) for value in selected_assets})
+    )
+    index_root = _persistent_index_root(cache_dir)
+    stats = _LookupStats()
+    records: dict[str, _assets.AssetRecord] = {}
+    missing: list[str] = []
+    for asset_path in selected:
+        record = _locate(
+            root_paths,
+            asset_path,
+            index_root=index_root,
+            use_cache=use_cache,
+            refresh=refresh,
+            stats=stats,
+        )
+        if record is None:
+            missing.append(asset_path)
+        else:
+            records[record.path] = record
+
+    # An explicitly selected PBO is a small, deliberate search scope. If the
+    # header-only resolver misses an asset there, fall back to the complete PBO
+    # reader before declaring it absent. This covers wrapper/mod-package PBOs
+    # containing nested AddOns/*.pbo members and uncommon prefix metadata without
+    # turning ordinary game-folder road discovery into a recursive full scan.
+    if missing:
+        explicit_pbos = tuple(
+            root for root in root_paths
+            if root.is_file() and is_pbo_path(root)
+        )
+        if explicit_pbos:
+            fallback = _FULL_SCAN(
+                explicit_pbos,
+                tuple(missing),
+                cache_dir=cache_dir,
+                use_cache=use_cache,
+                refresh=refresh,
+            )
+            wanted = set(missing)
+            for record in fallback.records:
+                if record.path in wanted:
+                    records[record.path] = record
+            missing = [value for value in missing if value not in records]
+
+    ordered = tuple(records[key] for key in sorted(records))
+    canonical_doc = {
+        "mode": "exact-targeted",
+        "roots": list(root_names),
+        "records": [asdict(record) for record in ordered],
+        "selected_models": selected,
+        "missing_models": sorted(missing),
+        "missing_dependencies": [],
+        "unreadable_pbos": [],
+    }
+    digest = hashlib.sha256(
+        (json.dumps(canonical_doc, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    ).hexdigest()
+    return _assets.AssetScanResult(
+        roots=root_names,
+        records=ordered,
+        selected_models=selected,
+        missing_models=tuple(sorted(missing)) if root_names else (),
+        missing_dependencies=(),
+        unreadable_pbos=(),
+        catalogue_sha256=digest,
+        cache_hit=bool(stats.index_hits) and stats.index_misses == 0,
+        cache_path=str(index_root) if index_root is not None else None,
+    )
 
 
 def scan_assets_fast(

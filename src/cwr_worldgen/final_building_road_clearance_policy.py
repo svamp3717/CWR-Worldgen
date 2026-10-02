@@ -42,7 +42,7 @@ _MAXIMUM_CORRECTION_VECTORS = 4
 _MAXIMUM_VERTICAL_TERRAIN_GAP_METRES = 2.0
 _PROGRESS_BUCKET_PERCENT = 2
 _RAW_PROGRESS_PERCENT = 52
-_CACHE_REVISION = "final-road-building-clearance-v3-stock-fit-overlap"
+_CACHE_REVISION = "final-road-building-clearance-v4-custom-road-ribbons"
 
 _WIDTHS = {
     "sil": 4.55,
@@ -63,6 +63,11 @@ _STOCK_T = re.compile(
 _STOCK_X = re.compile(r"^kr_new_silxsil\.p3d$", re.I)
 _GRAVEL = re.compile(
     r"^gravel(?P<nominal>25|12|6|3)(?:_(?P<side>[lr])(?P<degrees>05|10|15|20|30|45))?\.p3d$",
+    re.I,
+)
+_CUSTOM_ROAD = re.compile(
+    r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
+    r"(?P<length>\d{4})(?:_(?P<side>[lr])(?P<degrees>\d{3}))?\.p3d$",
     re.I,
 )
 _GRAVEL_JUNCTION = re.compile(
@@ -322,6 +327,27 @@ def _gravel_junction_headings(
 
 def _road_object_primitives(obj, spec) -> tuple[_RoadPrimitive, ...]:
     filename = _filename(obj.model_path)
+
+    match = _CUSTOM_ROAD.fullmatch(filename)
+    if match is not None:
+        length = int(match.group("length")) / 10.0
+        half_width = int(match.group("width")) / 20.0
+        side = match.group("side")
+        degrees = float(match.group("degrees") or 0.0)
+        points = (
+            ((0.0, -length * 0.5), (0.0, length * 0.5))
+            if side is None or degrees <= 0.0
+            else _gravel_curve_points(length, side, degrees)
+        )
+        return tuple(
+            _make_primitive(
+                obj,
+                start,
+                end,
+                half_width + (0.20 if side else 0.0),
+            )
+            for start, end in zip(points, points[1:])
+        )
 
     match = _STOCK_STRAIGHT.fullmatch(filename)
     if match is not None:

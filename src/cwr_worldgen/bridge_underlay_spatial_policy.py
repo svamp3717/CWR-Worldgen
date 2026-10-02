@@ -175,6 +175,22 @@ def _remove_bridge_underlays(report, spans):
     return replace(report, objects=tuple(kept)), removed
 
 
+def _road_style_key(model_path: str):
+    custom = _cleanup._p.custom_road_model_signature(model_path)
+    if custom is not None:
+        return ("custom", custom[0], round(float(custom[1]), 3))
+    family = _cleanup._paved._family(model_path)
+    if family is not None:
+        return ("stock", family)
+    if _cleanup._p.is_generated_gravel_road_model(model_path):
+        return ("generated", "gravel")
+    if _cleanup._p.is_generated_dirt_road_model(model_path):
+        return ("generated", "dirt")
+    if _cleanup._p.is_generated_paved_road_model(model_path):
+        return ("generated", "paved")
+    return None
+
+
 def _has_matching_underlay(
     index: _ObjectPointIndex,
     start: tuple[float, float],
@@ -191,7 +207,7 @@ def _has_matching_underlay(
             float(end[1]) - float(start[1]),
         )
     ) % 360.0
-    target_family = _cleanup._paved._family(model_path)
+    target_style = _road_style_key(model_path)
 
     for object_index in index.candidate_indices(
         midpoint[0],
@@ -199,7 +215,7 @@ def _has_matching_underlay(
         _MATCH_RADIUS_METRES,
     ):
         obj = index.objects[object_index]
-        if _cleanup._paved._family(obj.model_path) != target_family:
+        if _road_style_key(obj.model_path) != target_style:
             continue
         if math.dist((float(obj.x), float(obj.z)), midpoint) > _MATCH_RADIUS_METRES:
             continue
@@ -226,10 +242,14 @@ def _add_terminal_underlays(report, spans, elevations, spec):
     added = 0
 
     for span in spans:
-        model = _cleanup._terminal_model(span.road_model_path)
-        if model is None:
-            continue
         for start, end in _cleanup._terminal_segments(span):
+            model = _cleanup._terminal_model(
+                span.road_model_path,
+                spec,
+                math.dist(start, end),
+            )
+            if model is None:
+                continue
             if _has_matching_underlay(index, start, end, model):
                 continue
             obj = _cleanup._terminal_underlay_object(

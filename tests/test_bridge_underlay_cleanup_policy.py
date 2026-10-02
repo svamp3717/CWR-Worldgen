@@ -10,6 +10,10 @@ from cwr_worldgen import bridge_render_policy as bridge_render
 from cwr_worldgen import bridge_underlay_cleanup_policy as cleanup
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.playability import RoadFitReport
+from cwr_worldgen.procedural_infrastructure import (
+    custom_road_model_path,
+    custom_road_model_signature,
+)
 
 
 def _report(*objects: WorldObject) -> RoadFitReport:
@@ -84,10 +88,75 @@ def test_missing_terminal_underlays_are_explicitly_generated() -> None:
     assert added == 4
     assert len(filled.objects) == 4
     assert all(obj.model_path.casefold() == r"o\road\sil25.p3d" for obj in filled.objects)
-    assert [obj.x for obj in filled.objects] == pytest.approx([12.5, 37.5, 212.5, 237.5])
+    terminal = bridge_render._STOCK_MODULE_SPACING_METRES
+    expected_x = [
+        12.5,
+        37.5,
+        250.0 - terminal + 12.5,
+        250.0 - terminal + 37.5,
+    ]
+    assert [obj.x for obj in filled.objects] == pytest.approx(expected_x)
     assert all(obj.z == pytest.approx(100.0) for obj in filled.objects)
     assert all(obj.y == pytest.approx(6.335) for obj in filled.objects)
     assert all(obj.heading_degrees == pytest.approx(90.0) for obj in filled.objects)
+
+
+def test_unified_bridge_cleanup_removes_generated_road_under_bridge() -> None:
+    span = cleanup._BridgeSpan(
+        points=((0.0, 0.0), (250.0, 0.0)),
+        road_width=9.1,
+    )
+    model = custom_road_model_path(
+        "unified",
+        "paved",
+        9.1,
+        25.0,
+    )
+    interior = WorldObject(2, model, 125.0, 0.0, 0.0, 90.0)
+
+    cleaned, removed = cleanup._remove_bridge_underlays(
+        _report(interior),
+        (span,),
+    )
+
+    assert removed == 1
+    assert cleaned.objects == ()
+
+
+def test_unified_bridge_terminal_masks_use_generated_ribbons() -> None:
+    span = cleanup._BridgeSpan(
+        points=((0.0, 100.0), (250.0, 100.0)),
+        road_width=9.1,
+        road_model_path=r"o\road\sil25.p3d",
+    )
+    spec = SimpleNamespace(
+        name="unified",
+        cells=16,
+        cell_size=50.0,
+        road_segment_length=25.0,
+        paved_road_model=r"o\road\sil25.p3d",
+        gravel_road_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        custom_road_shapes=True,
+    )
+    elevations = (6.30,) * (spec.cells * spec.cells)
+
+    filled, added = cleanup._add_terminal_underlays(
+        _report(),
+        (span,),
+        elevations,
+        spec,
+    )
+
+    assert added == 4
+    signatures = tuple(
+        custom_road_model_signature(obj.model_path)
+        for obj in filled.objects
+    )
+    assert all(signature is not None for signature in signatures)
+    assert all(signature[0] == "paved" for signature in signatures)
+    assert all(signature[1] == pytest.approx(9.1) for signature in signatures)
+    assert all(signature[2] == pytest.approx(25.0) for signature in signatures)
 
 
 def test_cleanup_removes_curved_source_road_that_bows_away_from_straight_bridge() -> None:

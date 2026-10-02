@@ -106,18 +106,28 @@ def _indexed_approach_candidate(
     bridge_point,
     bridge_heading,
     road_index: _RoadCentreIndex,
+    outward=None,
 ):
     """Return exactly the historical best candidate without the global scans."""
     radius = (
         road_index.maximum_half_length
-        + float(_alignment._APPROACH_FILL_MAX_GAP_METRES)
+        + max(
+            float(_alignment._APPROACH_FILL_MAX_GAP_METRES),
+            float(_alignment._APPROACH_FILL_MAX_CUSTOM_GAP_METRES),
+        )
     )
     candidates = []
     for obj in road_index.query(
         (float(bridge_point[0]), float(bridge_point[1])),
         radius,
     ):
-        if _alignment._cleanup._paved._family(obj.model_path) is None:
+        custom = _alignment._playability.custom_road_model_signature(
+            obj.model_path
+        )
+        if (
+            _alignment._cleanup._paved._family(obj.model_path) is None
+            and custom is None
+        ):
             continue
         endpoints = _alignment._road_endpoints(obj)
         if endpoints is None or _alignment._six_metre_sibling(obj.model_path) is None:
@@ -137,11 +147,25 @@ def _indexed_approach_candidate(
                 (float(bridge_point[0]), float(bridge_point[1])),
             ),
         )
+        if outward is not None:
+            far = max(
+                endpoints,
+                key=lambda point: math.dist(
+                    (point[0], point[2]),
+                    (float(bridge_point[0]), float(bridge_point[1])),
+                ),
+            )
+            outward_projection = (
+                (float(far[0]) - float(bridge_point[0])) * float(outward[0])
+                + (float(far[2]) - float(bridge_point[1])) * float(outward[1])
+            )
+            if outward_projection <= _alignment._APPROACH_FILL_MIN_GAP_METRES:
+                continue
         gap = math.dist(
             (near[0], near[2]),
             (float(bridge_point[0]), float(bridge_point[1])),
         )
-        if gap > _alignment._APPROACH_FILL_MAX_GAP_METRES:
+        if gap > _alignment._approach_fill_max_gap(obj.model_path):
             continue
         connected = _indexed_road_has_outward_neighbour(
             obj,
@@ -212,6 +236,7 @@ def _fast_add_bridge_approach_fillers(report, spans, elevations, spec):
                 bridge_point,
                 bridge_heading,
                 road_index,
+                outward,
             )
             if selected is None:
                 continue

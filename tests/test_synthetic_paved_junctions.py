@@ -171,6 +171,19 @@ def test_mixed_paved_dirt_node_keeps_only_paved_cap_incidents() -> None:
     assert actual == values[:2]
 
 
+def test_unified_mixed_node_keeps_pre_unification_paved_ownership() -> None:
+    values = (
+        ((0.0, 1.0), False, r"o\road\sil25.p3d", "paved/north", "paved"),
+        ((0.0, -1.0), False, r"o\road\sil25.p3d", "paved/south", "paved"),
+        ((1.0, 0.0), True, r"world\i\gravel25.p3d", "gravel/east", "gravel"),
+    )
+
+    assert playability._junction_cap_incidents(
+        values,
+        include_mixed_surfaces=True,
+    ) == values[:2]
+
+
 def test_pure_dirt_node_keeps_dirt_junction_topology() -> None:
     values = (
         ((0.0, 1.0), True, r"o\road\ces25.p3d", "dirt/north", "dirt-a"),

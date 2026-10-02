@@ -23,11 +23,14 @@ _INSTALLED = False
 
 
 def _is_gravel_junction(junction) -> bool:
-    return math.isclose(
-        float(junction.half_width),
-        float(GENERATED_GRAVEL_HALF_WIDTH_METRES),
-        rel_tol=0.0,
-        abs_tol=1.0e-7,
+    return (
+        not tuple(getattr(junction, "directional_exit_distances", ()) or ())
+        and math.isclose(
+            float(junction.half_width),
+            float(GENERATED_GRAVEL_HALF_WIDTH_METRES),
+            rel_tol=0.0,
+            abs_tol=1.0e-7,
+        )
     )
 
 
@@ -52,8 +55,13 @@ def _junction_geometry(dataset, projection, spec):
             models_by_key.setdefault(rq._p._road_node_key(end), []).append(model)
 
     for key, junction in tuple(result.items()):
+        if tuple(getattr(junction, "directional_exit_distances", ()) or ()):
+            continue
         models = models_by_key.get(key, ())
-        if not models or not all(rq._p.is_generated_gravel_road_model(model) for model in models):
+        if not models or not all(
+            rq._p.road_model_surface(spec, model) == "gravel"
+            for model in models
+        ):
             continue
         if len(junction.directions) not in {3, 4}:
             continue
@@ -85,8 +93,15 @@ def _quality_window(measure, pieces, start_distance, preferred_end, minimum_end,
         return start_distance, preferred_end, minimum_end, maximum_end
     rq = _RQ
     shortest = min(piece.length_metres for piece in pieces)
-    start_junction = context.junctions.get(rq._p._road_node_key(measure.points[0]))
-    end_junction = context.junctions.get(rq._p._road_node_key(measure.points[-1]))
+    start_cap = context.junctions.get(rq._p._road_node_key(measure.points[0]))
+    end_cap = context.junctions.get(rq._p._road_node_key(measure.points[-1]))
+    start_junction = rq._chain_junction(start_cap, pieces, context.spec)
+    end_junction = rq._chain_junction(end_cap, pieces, context.spec)
+    if start_cap is not None and start_junction is None:
+        start_distance = 0.0
+    if end_cap is not None and end_junction is None:
+        preferred_end = minimum_end = measure.total
+        maximum_end = max(maximum_end, measure.total)
     desired_start = start_distance
     desired_end_trim = max(0.0, measure.total - preferred_end)
     desired_end_cover = max(0.0, measure.total - minimum_end)
@@ -119,6 +134,9 @@ def _quality_window(measure, pieces, start_distance, preferred_end, minimum_end,
 def _ordinary_gravel_cap_model_path(world_name: str, degree: int) -> str:
     if degree not in {3, 4}:
         raise ValueError("gravel junction degree must be 3 or 4")
+    context = _RQ._CONTEXT.get()
+    if context is not None:
+        return _RQ._p.gravel_filler_piece(context.spec, 6).model_path
     return _RQ._p.gravel_road_model_path(world_name, 6)
 
 

@@ -3,6 +3,7 @@ import math
 from cwr_worldgen import bridge_final_alignment_performance_policy as perf
 from cwr_worldgen import bridge_final_alignment_policy as historical
 from cwr_worldgen.model import WorldObject
+from cwr_worldgen.procedural_infrastructure import custom_road_model_path
 
 
 def _road(
@@ -48,6 +49,52 @@ def test_indexed_candidate_matches_historical_connected_priority() -> None:
     assert _result_signature(actual) == _result_signature(expected)
     assert actual is not None
     assert actual[0].object_id == connected.object_id
+
+
+def test_indexed_candidate_matches_unified_long_gap_and_ignores_terminal_mask() -> None:
+    model = custom_road_model_path(
+        "unified",
+        "paved",
+        7.0,
+        25.0,
+    )
+    terminal_mask = _road(
+        10,
+        z=12.5,
+        model=model,
+    )
+    approach = _road(
+        11,
+        z=-23.75,
+        model=model,
+    )
+    continuation = _road(
+        12,
+        z=-48.75,
+        model=model,
+    )
+    roads = (terminal_mask, approach, continuation)
+    bridge_point = (0.0, 0.0)
+    bridge_heading = 0.0
+    outward = (0.0, -1.0)
+
+    expected = historical._approach_candidate(
+        bridge_point,
+        bridge_heading,
+        roads,
+        outward,
+    )
+    actual = perf._indexed_approach_candidate(
+        bridge_point,
+        bridge_heading,
+        perf._RoadCentreIndex.build(roads),
+        outward,
+    )
+
+    assert _result_signature(actual) == _result_signature(expected)
+    assert actual is not None
+    assert actual[0].object_id == approach.object_id
+    assert math.isclose(actual[2], 11.25, abs_tol=1.0e-9)
 
 
 def test_indexed_neighbour_preserves_exact_three_dimensional_join() -> None:

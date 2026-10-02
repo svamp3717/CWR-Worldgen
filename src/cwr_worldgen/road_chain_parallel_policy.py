@@ -42,6 +42,9 @@ class _RunJob:
     end_cover: float
     cap_surface_mismatch: bool
     world_size: float
+    generated_world_name: str = ""
+    generated_surface: str | None = None
+    generated_width_metres: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +311,9 @@ def _plan_run(job: _RunJob) -> _RunPlan:
                 job.variants,
                 start_trim=job.start_trim,
                 end_trim=job.end_trim,
+                generated_world_name=job.generated_world_name,
+                generated_surface=job.generated_surface,
+                generated_width_metres=job.generated_width_metres,
             )
             if fitted_pieces:
                 covered_by_hubs = False
@@ -395,7 +401,7 @@ def _execute_run_jobs(
                     local = 35 + round(completed_jobs / len(jobs) * 23)
                     progress_callback(
                         min(58, local),
-                        f"Planning stock road lines {completed_jobs:,}/{len(jobs):,} chains "
+                        f"Planning road lines {completed_jobs:,}/{len(jobs):,} chains "
                         f"with {workers} workers",
                     )
     except (OSError, RuntimeError, BrokenPipeError):
@@ -505,7 +511,12 @@ def _fit_stock_piece_road_objects_parallel(
         for key, values in incidents.items()
     }
     cap_incidents = {
-        key: _playability._junction_cap_incidents(values)
+        key: _playability._junction_cap_incidents(
+            values,
+            include_mixed_surfaces=bool(
+                getattr(spec, "custom_road_shapes", False)
+            ),
+        )
         for key, values in effective_incidents.items()
     }
     degree_two_turn_keys: set[tuple[int, int]] = set()
@@ -543,8 +554,9 @@ def _fit_stock_piece_road_objects_parallel(
     def variants_for(model_path: str) -> tuple[Any, ...]:
         variants = variant_cache.get(model_path)
         if variants is None:
-            variants = _playability.road_model_variants(
-                model_path, spec.road_segment_length
+            variants = _playability.road_fitting_variants(
+                spec,
+                model_path,
             )
             if _playability.is_generated_gravel_road_model(model_path):
                 variants = tuple(
@@ -561,12 +573,22 @@ def _fit_stock_piece_road_objects_parallel(
         values = cap_incidents[key]
         use_dirt = all(value[1] for value in values)
         all_gravel = all(
-            _playability.is_generated_gravel_road_model(value[2]) for value in values
+            _playability.road_model_surface(spec, value[2]) == "gravel"
+            for value in values
         )
         incident_models = {value[2].casefold(): value[2] for value in values}
+        donor_junction = _playability._generated_custom_road_junction_cap_plan(
+            values, spec
+        )
         generated_paved_t = _playability._generated_paved_t_cap_plan(values, spec)
         axis_override = None
-        if all_gravel:
+        if donor_junction is not None:
+            base_model, axis_override = donor_junction
+            hub_length = (
+                _playability.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES * 2.0
+            )
+            cap_piece = _playability._RoadPiece(base_model, hub_length, 6)
+        elif all_gravel:
             degree = len(values)
             base_model = _playability.gravel_junction_model_path(spec.name, degree)
             hub_length = 5.4 if degree == 3 else 6.0
@@ -600,7 +622,9 @@ def _fit_stock_piece_road_objects_parallel(
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
         cap_vertical_offset = (
-            _playability._STOCK_DIRT_VERTICAL_OFFSET_METRES
+            _playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
+            if donor_junction is not None or generated_paved_t is not None
+            else _playability._STOCK_DIRT_VERTICAL_OFFSET_METRES
             if use_dirt
             else _playability._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
         )
@@ -610,10 +634,11 @@ def _fit_stock_piece_road_objects_parallel(
             end_point,
             cap_vertical_offset,
         )
-        if generated_paved_t is not None:
-            cap_trim_lengths[key] = (
+        if donor_junction is not None or generated_paved_t is not None:
+            cap_trim_lengths[key] = max(
+                0.40,
                 half
-                + _playability.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
+                - _playability.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES,
             )
             cap_cover_lengths[key] = (
                 half
@@ -691,6 +716,21 @@ def _fit_stock_piece_road_objects_parallel(
                 end_cover=end_cover,
                 cap_surface_mismatch=cap_surface_mismatch,
                 world_size=float(spec.world_size),
+                generated_world_name=(
+                    str(spec.name)
+                    if bool(getattr(spec, "custom_road_shapes", False))
+                    else ""
+                ),
+                generated_surface=(
+                    _playability.road_model_surface(spec, model)
+                    if bool(getattr(spec, "custom_road_shapes", False))
+                    else None
+                ),
+                generated_width_metres=(
+                    _playability.road_model_width_metres(model)
+                    if bool(getattr(spec, "custom_road_shapes", False))
+                    else None
+                ),
             ))
             feature_job_counts[feature_index] += 1
             order += 1
@@ -799,7 +839,7 @@ def _fit_stock_piece_road_objects_parallel(
             local = 63 + round(feature_index / max(1, len(planned_features)) * 33)
             progress_callback(
                 min(96, local),
-                f"Fitting stock road lines {feature_index:,}/{len(planned_features):,}; "
+                f"Fitting road lines {feature_index:,}/{len(planned_features):,}; "
                 f"{len(objects):,}/{required_objects:,} objects",
             )
         for (
@@ -905,7 +945,7 @@ def _fit_stock_piece_road_objects_parallel(
     if progress_callback is not None:
         progress_callback(
             100,
-            f"Stock road fitting complete: {len(objects):,} objects in {chain_count:,} chains",
+            f"Road fitting complete: {len(objects):,} objects in {chain_count:,} chains",
         )
     return _playability.RoadFitReport(
         objects=tuple(objects),

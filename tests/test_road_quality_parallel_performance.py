@@ -1,3 +1,4 @@
+from concurrent.futures import Future, ProcessPoolExecutor
 from types import SimpleNamespace
 
 from cwr_worldgen import playability
@@ -130,3 +131,113 @@ def test_run_plan_cache_reuses_unchanged_pass_and_invalidates_changed_endpoint(
         quality_perf._clear_run_plan_cache()
 
     assert calls == 2
+
+
+def test_spawned_worker_receives_mod_road_context(monkeypatch) -> None:
+    quality_perf._clear_run_plan_cache()
+    context = _quality_context()
+    run = ((0.0, 0.0), (30.0, 0.0), (55.0, 8.0), (85.0, 8.0))
+    pieces = playability.road_model_variants(r"data3d\sil25.p3d", 25.0)
+    job = parallel._RunJob(
+        order=0,
+        feature_index=0,
+        run_index=0,
+        run=run,
+        variants=pieces,
+        start_trim=2.0,
+        end_trim=2.0,
+        start_cover=3.2,
+        end_cover=3.2,
+        cap_surface_mismatch=False,
+        world_size=6400.0,
+    )
+
+    variants = {r"bas_o\_road\bas_asf25.p3d": frozenset({
+        r"bas_o\_road\bas_asf25.p3d",
+    })}
+    dimensions = {
+        r"bas_o\_road\bas_asf25.p3d": (5.2, 25.0),
+    }
+    measurement_errors = {
+        r"bas_o\_road\bad.p3d": "synthetic failure",
+    }
+    effective = {
+        r"bas_o\_road\legacy10 25.p3d": r"bas_o\_road\bas_asf25.p3d",
+    }
+    observed: dict[str, object] = {}
+
+    class FakeExecutor:
+        def __init__(self, *, max_workers, initializer, initargs):
+            observed["max_workers"] = max_workers
+            observed["initargs"] = initargs
+            self.initializer = initializer
+            self.initargs = initargs
+
+        def __enter__(self):
+            # Simulate a fresh Windows spawn where ContextVars start empty.
+            playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(None)
+            playability._ROAD_MODEL_DIMENSIONS.set(None)
+            playability._ROAD_MODEL_MEASUREMENT_ERRORS.set(None)
+            playability._ROAD_MODEL_EFFECTIVE_DONORS.set(None)
+            self.initializer(*self.initargs)
+            observed["worker_context"] = quality_perf._road_worker_context()
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def submit(self, function, *args):
+            future = Future()
+            try:
+                future.set_result(function(*args))
+            except Exception as exc:
+                future.set_exception(exc)
+            return future
+
+    monkeypatch.setattr(parallel, "_worker_count", lambda _count: 2)
+    monkeypatch.setattr(quality_perf, "ProcessPoolExecutor", FakeExecutor)
+
+    quality_token = quality._CONTEXT.set(context)
+    variants_token = playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(variants)
+    dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(dimensions)
+    errors_token = playability._ROAD_MODEL_MEASUREMENT_ERRORS.set(measurement_errors)
+    effective_token = playability._ROAD_MODEL_EFFECTIVE_DONORS.set(effective)
+    try:
+        plans = quality_perf._quality_aware_execute_run_jobs((job,))
+    finally:
+        playability._ROAD_MODEL_EFFECTIVE_DONORS.reset(effective_token)
+        playability._ROAD_MODEL_MEASUREMENT_ERRORS.reset(errors_token)
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
+        playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(variants_token)
+        quality._CONTEXT.reset(quality_token)
+        quality_perf._clear_run_plan_cache()
+
+    assert len(plans) == 1
+    assert observed["max_workers"] == 2
+    assert observed["worker_context"] == (
+        variants,
+        dimensions,
+        measurement_errors,
+        effective,
+    )
+
+
+def test_real_process_worker_receives_mod_road_context() -> None:
+    variants = {r"bas_o\_road\bas_asf25.p3d": frozenset({
+        r"bas_o\_road\bas_asf25.p3d",
+    })}
+    dimensions = {r"bas_o\_road\bas_asf25.p3d": (5.2, 25.0)}
+    measurement_errors = {r"bas_o\_road\bad.p3d": "synthetic failure"}
+    effective = {
+        r"bas_o\_road\legacy10 25.p3d": r"bas_o\_road\bas_asf25.p3d",
+    }
+    road_context = (variants, dimensions, measurement_errors, effective)
+
+    with ProcessPoolExecutor(
+        max_workers=1,
+        initializer=quality_perf._install_worker_quality_context,
+        initargs=(None, road_context),
+    ) as executor:
+        observed = executor.submit(quality_perf._road_worker_context).result()
+
+    assert observed == road_context

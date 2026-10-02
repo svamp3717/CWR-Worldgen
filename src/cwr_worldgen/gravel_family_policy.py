@@ -221,7 +221,16 @@ def _junction_polygon(variant: str, half_width: float):
     return polygon
 
 
-def _triangulated_lod(polygon, *, y: float, texture: str, resolution: float):
+def _triangulated_lod(
+    polygon,
+    *,
+    y: float,
+    texture: str,
+    resolution: float,
+    surface_style=None,
+):
+    if surface_style is None:
+        surface_style = _pi._DEFAULT_ROAD_SURFACE_STYLE
     point_indices: dict[tuple[float, float], int] = {}
     points: list[tuple[float, float, float]] = []
     faces: list[_pi._Face] = []
@@ -241,17 +250,24 @@ def _triangulated_lod(polygon, *, y: float, texture: str, resolution: float):
                 points.append((float(x), y, float(z)))
             vertices.append((index, 0, float(x) / 3.0, float(z) / 3.0))
         if len(vertices) == 3:
+            face_flag = (
+                surface_style.roadway_face_flag
+                if resolution == _pi._ROADWAY_LOD
+                else surface_style.face_flag
+            )
             faces.append(_pi._Face(
                 texture,
                 tuple(vertices),
-                _pi._ROAD_SURFACE_FACE_FLAG,
+                face_flag,
             ))
     properties = ()
     if resolution == _pi._VISUAL_LOD:
         properties = (("autocenter", "0"), ("class", "road"), ("map", "road"))
     point_flags = (
-        (_pi._ROAD_SURFACE_POINT_FLAG,) * len(points)
-        if resolution in {_pi._VISUAL_LOD, _pi._ROADWAY_LOD}
+        (surface_style.roadway_point_flag,) * len(points)
+        if resolution == _pi._ROADWAY_LOD
+        else (surface_style.point_flag,) * len(points)
+        if resolution == _pi._VISUAL_LOD
         else ()
     )
     return _pi._Lod(
@@ -264,7 +280,9 @@ def _triangulated_lod(polygon, *, y: float, texture: str, resolution: float):
     )
 
 
-def _family_junction_lods(key, texture: str):
+def _family_junction_lods(key, texture: str, surface_style=None):
+    if surface_style is None:
+        surface_style = _pi._DEFAULT_ROAD_SURFACE_STYLE
     match = re.fullmatch(r"gravel_j([34])_(.+)", key.subtype.casefold())
     if match is None:
         raise ValueError(f"invalid fixed gravel junction subtype: {key.subtype}")
@@ -278,30 +296,34 @@ def _family_junction_lods(key, texture: str):
         y=_pi.GENERATED_GRAVEL_VISUAL_TOP_METRES,
         texture=texture,
         resolution=_pi._VISUAL_LOD,
+        surface_style=surface_style,
     )
     boundary = tuple((float(x), 0.0, float(z)) for x, z in tuple(polygon.exterior.coords)[:-1])
     map_geometry = _pi._Lod(boundary, (), (), _pi._GEOMETRY_LOD, properties=(("map", "road"),))
     roadway = _triangulated_lod(
         polygon,
         y=_pi.GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES,
-        texture="",
+        texture=_pi._roadway_surface_texture(texture, surface_style),
         resolution=_pi._ROADWAY_LOD,
+        surface_style=surface_style,
     )
     land = _pi._Lod(boundary, (), (), _pi._LAND_CONTACT_LOD)
     return visual, map_geometry, roadway, land
 
 
-def _road_lods(key, texture: str):
+def _road_lods(key, texture: str, surface_style=None):
+    if surface_style is None:
+        surface_style = _pi._DEFAULT_ROAD_SURFACE_STYLE
     subtype = key.subtype.casefold()
     if subtype == "gravel_j3":
         family_key = replace(key, subtype="gravel_j3_t90", length_dm=int(round(GRAVEL_JUNCTION_ARM_EXTENT_METRES * 20.0)))
-        return _family_junction_lods(family_key, texture)
+        return _family_junction_lods(family_key, texture, surface_style)
     if subtype == "gravel_j4":
         family_key = replace(key, subtype="gravel_j4_x90", length_dm=int(round(GRAVEL_JUNCTION_ARM_EXTENT_METRES * 20.0)))
-        return _family_junction_lods(family_key, texture)
+        return _family_junction_lods(family_key, texture, surface_style)
     if re.fullmatch(r"gravel_j[34]_.+", key.subtype, re.IGNORECASE):
-        return _family_junction_lods(key, texture)
-    return _ORIGINAL_ROAD_LODS(key, texture)
+        return _family_junction_lods(key, texture, surface_style)
+    return _ORIGINAL_ROAD_LODS(key, texture, surface_style)
 
 
 def _register_model_usage(self, model_path: str, count: int = 1) -> None:
@@ -346,6 +368,9 @@ def _replace_gravel_caps(report, dataset, projection, elevations, spec):
     changed = False
     for index, key in enumerate(keys[: report.junction_cap_objects]):
         junction = junctions[key]
+        old = objects[index]
+        if _pi.is_generated_custom_road_junction_model(old.model_path):
+            continue
         if not math.isclose(
             float(junction.half_width),
             float(_pi.GENERATED_GRAVEL_HALF_WIDTH_METRES),
@@ -359,7 +384,6 @@ def _replace_gravel_caps(report, dataset, projection, elevations, spec):
         half = GRAVEL_JUNCTION_ARM_EXTENT_METRES
         start = (junction.point[0] - axis[0] * half, junction.point[1] - axis[1] * half)
         end = (junction.point[0] + axis[0] * half, junction.point[1] + axis[1] * half)
-        old = objects[index]
         objects[index] = _p._road_object_on_slope(
             old.object_id,
             model_path,

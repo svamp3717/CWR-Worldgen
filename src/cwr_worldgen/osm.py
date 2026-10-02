@@ -1514,6 +1514,9 @@ def road_model_for_tags(spec: OsmSpec, tags: Mapping[str, str]) -> str:
     if tags.get("highway", "").strip().casefold() in PEDESTRIAN_ONLY_HIGHWAYS:
         return spec.dirt_road_model
     if road_is_gravel(tags):
+        configured_gravel = str(getattr(spec, "gravel_road_model", "") or "").strip()
+        if configured_gravel:
+            return configured_gravel
         if bool(getattr(spec, "procedural_gravel_roads", False)):
             return gravel_road_model_path(spec.name, 25)
         return spec.dirt_road_model

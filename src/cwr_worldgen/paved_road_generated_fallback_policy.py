@@ -1,16 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Generate paved road pieces only when the stock P3D family cannot fit.
+"""Generate road geometry when the stock/fixed P3D family cannot fit.
 
-The stock road fitter remains authoritative. This policy looks at the piece it
-selected and only substitutes a generated world-local paved ribbon when that
-piece exceeds the same turn/deviation limits used by the quality scorer. It also
-replaces the historical oversized-stock-piece fallback for a required short tail.
+The stock road fitter remains authoritative. For legacy specs this retains the
+historical paved-only fallback. Milestone 9 can additionally opt into custom
+road shapes, allowing paved, gravel and dirt chains to substitute world-local
+ribbons whose width, chord length and turn angle are encoded in the model name.
 
-Generated names are canonicalized by width, decimetre chord length and a
-five-degree curve bucket, so identical failures reuse one P3D and the existing
-procedural infrastructure cache reuses it across builds.
-
-Dirt and gravel chains are deliberately excluded from this first implementation.
+Custom turns use one-degree buckets up to the safe procedural-ribbon limit, so
+mapped geometry is no longer restricted to the finite stock curve catalogue.
 """
 from __future__ import annotations
 
@@ -30,8 +27,14 @@ _ORIGINAL_PARALLEL_CHAIN: Any = None
 
 _PAVED_HALF_WIDTHS = {
     "sil": 4.55,
+    "silnice": 4.55,
     "kos": 4.55,
     "asf": 3.50,
+    "asfaltka": 3.50,
+}
+_DIRT_HALF_WIDTHS = {
+    "ces": 1.75,
+    "cesta": 1.75,
 }
 _FAMILY = re.compile(r"^([a-z]+)", re.IGNORECASE)
 
@@ -46,7 +49,136 @@ def _family(path: str) -> str:
     return match.group(1).casefold() if match else ""
 
 
-def _generated_width(pieces: Sequence[Any], spec: Any) -> float:
+def _configured_variants(spec: Any, attribute: str) -> set[str]:
+    model = str(getattr(spec, attribute, "") or "")
+    if not model:
+        return set()
+    configured_length = float(getattr(spec, "road_segment_length", 25.0))
+    return {
+        _canonical(piece.model_path)
+        for piece in _p.road_model_variants(
+            model,
+            configured_length,
+            donor_only=bool(getattr(spec, "custom_road_shapes", False)),
+        )
+    }
+
+
+def _chain_surface(pieces: Sequence[Any], spec: Any) -> str | None:
+    if not pieces:
+        return None
+
+    paths = tuple(_canonical(piece.model_path) for piece in pieces)
+    if all(_p.is_generated_gravel_road_model(piece.model_path) for piece in pieces):
+        return "gravel"
+    if all(_pi.is_generated_dirt_road_model(piece.model_path) for piece in pieces):
+        return "dirt"
+    if all(_pi.is_generated_paved_road_model(piece.model_path) for piece in pieces):
+        return "paved"
+
+    gravel_variants = _configured_variants(spec, "gravel_road_model")
+    if gravel_variants and all(
+        path in gravel_variants or _p.is_generated_gravel_road_model(path)
+        for path in paths
+    ):
+        return "gravel"
+
+    dirt_variants = _configured_variants(spec, "dirt_road_model")
+    if dirt_variants and all(
+        path in dirt_variants or _pi.is_generated_dirt_road_model(path)
+        for path in paths
+    ):
+        return "dirt"
+
+    paved_variants = _configured_variants(spec, "paved_road_model")
+    if paved_variants and all(
+        path in paved_variants or _pi.is_generated_paved_road_model(path)
+        for path in paths
+    ):
+        return "paved"
+    return None
+
+
+def _generated_width(
+    pieces: Sequence[Any],
+    spec: Any,
+    surface: str,
+) -> float:
+    if bool(getattr(spec, "custom_road_shapes", False)):
+        donor_attribute = {
+            "paved": "paved_road_model",
+            "gravel": "gravel_road_model",
+            "dirt": "dirt_road_model",
+        }.get(surface)
+        donor_model = (
+            str(getattr(spec, donor_attribute, "") or "")
+            if donor_attribute is not None
+            else ""
+        )
+        measured = _p.road_model_dimensions(donor_model) if donor_model else None
+        if measured is not None:
+            width = max(1.5, float(measured[0]))
+            curve_model = str(
+                getattr(spec, f"{surface}_road_curve_model", "") or ""
+            ).strip()
+            curve_measured = (
+                _p.road_model_dimensions(curve_model)
+                if curve_model
+                else None
+            )
+            if curve_measured is not None:
+                curve_width = max(1.5, float(curve_measured[0]))
+                tolerance = max(0.15, width * 0.05)
+                if abs(curve_width - width) > tolerance:
+                    raise ValueError(
+                        f"{surface} road donor connector widths do not match: "
+                        f"{donor_model!r} is {width:.2f} m, while "
+                        f"{curve_model!r} is {curve_width:.2f} m. "
+                        "Choose a straight/curve pair from the same modular road "
+                        "family or fix the selected P3Ds."
+                    )
+            return width
+
+        # Known stock families have stable widths even when their P3Ds are not
+        # present under the configured asset roots. Unknown/modded families do
+        # not. Falling back to OSM width here creates visibly different-width
+        # generated bends beside the real mod straight pieces.
+        donor_family = _family(donor_model) if donor_model else ""
+        if donor_family in _PAVED_HALF_WIDTHS:
+            return _PAVED_HALF_WIDTHS[donor_family] * 2.0
+        if donor_family in _DIRT_HALF_WIDTHS:
+            return _DIRT_HALF_WIDTHS[donor_family] * 2.0
+        if surface == "gravel" and not donor_model:
+            return _pi.GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
+
+        if donor_model and not _p.is_generated_gravel_road_model(donor_model):
+            measurement_error = _p.road_model_measurement_error(donor_model)
+            if measurement_error:
+                raise ValueError(
+                    f"could not measure the {surface} road donor {donor_model!r}: "
+                    f"{measurement_error}. Generated road shapes cannot safely "
+                    "match its width."
+                )
+            raise ValueError(
+                f"could not measure the {surface} road donor {donor_model!r}; "
+                "generated road shapes cannot safely match its width. Add the "
+                "PBO/PBO.ZST containing the straight donor to Asset roots, or "
+                "select a measurable straight P3D."
+            )
+
+        active_tags = _p._ACTIVE_ROAD_TAGS.get()
+        if active_tags is not None:
+            return max(1.5, float(_p.road_width_metres(active_tags)))
+    if surface == "gravel":
+        return _pi.GENERATED_GRAVEL_HALF_WIDTH_METRES * 2.0
+    if surface == "dirt":
+        for piece in pieces:
+            family = _family(piece.model_path)
+            if family in _DIRT_HALF_WIDTHS:
+                return _DIRT_HALF_WIDTHS[family] * 2.0
+        family = _family(getattr(spec, "dirt_road_model", ""))
+        return _DIRT_HALF_WIDTHS.get(family, 1.75) * 2.0
+
     for piece in pieces:
         family = _family(piece.model_path)
         if family in _PAVED_HALF_WIDTHS:
@@ -57,32 +189,29 @@ def _generated_width(pieces: Sequence[Any], spec: Any) -> float:
     ) * 2.0
 
 
-def _eligible_paved_chain(pieces: Sequence[Any], spec: Any) -> bool:
-    if not pieces or not bool(getattr(spec, "procedural_paved_road_fallback", False)):
-        return False
-    if any(
-        _p.is_generated_gravel_road_model(piece.model_path)
-        or _pi.is_generated_paved_road_model(piece.model_path)
-        for piece in pieces
+def _eligible_chain(pieces: Sequence[Any], spec: Any) -> str | None:
+    surface = _chain_surface(pieces, spec)
+    if surface is None:
+        return None
+    if bool(getattr(spec, "custom_road_shapes", False)):
+        return surface
+    # Preserve the original API/behavior for specs that predate custom roads.
+    if (
+        surface == "paved"
+        and bool(getattr(spec, "procedural_paved_road_fallback", False))
+        and not any(
+            _p.is_generated_gravel_road_model(piece.model_path)
+            or _pi.is_generated_paved_road_model(piece.model_path)
+            for piece in pieces
+        )
     ):
-        return False
+        return "paved"
+    return None
 
-    configured_length = float(getattr(spec, "road_segment_length", 25.0))
-    dirt_model = getattr(spec, "dirt_road_model", "")
-    dirt_variants = {
-        _canonical(piece.model_path)
-        for piece in _p.road_model_variants(dirt_model, configured_length)
-    } if dirt_model else set()
-    if any(_canonical(piece.model_path) in dirt_variants for piece in pieces):
-        return False
 
-    paved_model = getattr(spec, "paved_road_model", "")
-    paved_variants = {
-        _canonical(piece.model_path)
-        for piece in _p.road_model_variants(paved_model, configured_length)
-    } if paved_model else set()
-    return any(_canonical(piece.model_path) in paved_variants for piece in pieces)
-
+def _eligible_paved_chain(pieces: Sequence[Any], spec: Any) -> bool:
+    """Compatibility helper retained for the paved-fallback test surface."""
+    return _eligible_chain(pieces, spec) == "paved"
 
 def _stock_junction_protects_interval(
     measure: Any,
@@ -116,8 +245,16 @@ def _stock_junction_protects_interval(
     return False
 
 
-def _stock_limits(piece: Any) -> tuple[float, float]:
+def _piece_limits(piece: Any, surface: str) -> tuple[float, float]:
     nominal = int(getattr(piece, "nominal_length", 0))
+    if surface == "gravel":
+        if nominal >= 25:
+            return 15.0, 0.85
+        if nominal >= 12:
+            return 22.0, 0.55
+        if nominal >= 6:
+            return 30.0, 0.35
+        return 42.0, 0.20
     if nominal >= 25:
         return 7.0, 0.45
     if nominal >= 12:
@@ -158,7 +295,10 @@ def _signed_curve_degrees(
     # For a circular arc, theta = 4*atan(2*sagitta/chord). The generated ribbon
     # uses a quadratic Bezier whose midpoint has the same sagitta.
     magnitude = math.degrees(4.0 * math.atan2(2.0 * deviation, chord))
-    magnitude = min(45.0, max(0.0, magnitude))
+    magnitude = min(
+        float(_pi.CUSTOM_ROAD_MAX_CURVE_DEGREES),
+        max(0.0, magnitude),
+    )
     return magnitude if best_lateral > 0.0 else -magnitude
 
 
@@ -167,13 +307,15 @@ def _generated_piece(
     pieces: Sequence[Any],
     measure: Any,
     *,
+    surface: str,
     start_distance: float,
     end_distance: float,
     start: tuple[float, float],
     end: tuple[float, float],
     deviation: float,
 ) -> Any:
-    length = math.dist(start, end)
+    # Encoded dimensions must cover the fitted endpoints after decimetre rounding.
+    length = math.ceil(math.dist(start, end) * 10.0 - 1.0e-9) / 10.0
     curve = _signed_curve_degrees(
         measure,
         start_distance,
@@ -182,12 +324,21 @@ def _generated_piece(
         end,
         deviation,
     )
-    model_path = _pi.paved_fallback_model_path(
-        context.spec.name,
-        _generated_width(pieces, context.spec),
-        length,
-        curve,
-    )
+    if bool(getattr(context.spec, "custom_road_shapes", False)):
+        model_path = _pi.custom_road_model_path(
+            context.spec.name,
+            surface,
+            _generated_width(pieces, context.spec, surface),
+            length,
+            curve,
+        )
+    else:
+        model_path = _pi.paved_fallback_model_path(
+            context.spec.name,
+            _generated_width(pieces, context.spec, "paved"),
+            length,
+            curve,
+        )
     return _p._RoadPiece(
         model_path,
         length,
@@ -206,7 +357,12 @@ def _upgrade_stock_result(
     maximum_end_distance: float,
 ) -> tuple[Any, ...]:
     context = _quality._CONTEXT.get()
-    if context is None or not _eligible_paved_chain(pieces, context.spec):
+    surface = (
+        _eligible_chain(pieces, context.spec)
+        if context is not None
+        else None
+    )
+    if context is None or surface is None:
         return tuple(result)
 
     (
@@ -237,10 +393,13 @@ def _upgrade_stock_result(
             # vanilla junction, preserve that stock behavior inside the 32 m
             # approach reserve instead of inserting a tiny generated slab.
             target_distance = min(float(preferred_end_distance), float(measure.total))
-            if _stock_junction_protects_interval(
-                measure,
-                current,
-                target_distance,
+            if (
+                surface == "paved"
+                and _stock_junction_protects_interval(
+                    measure,
+                    current,
+                    target_distance,
+                )
             ):
                 upgraded.append((piece, start_point, end_point))
                 break
@@ -259,6 +418,7 @@ def _upgrade_stock_result(
                     context,
                     pieces,
                     measure,
+                    surface=surface,
                     start_distance=current,
                     end_distance=target_distance,
                     start=start,
@@ -284,23 +444,40 @@ def _upgrade_stock_result(
             (start_x, start_z),
             (end_x, end_z),
         )
-        turn_limit, deviation_limit = _stock_limits(piece)
+        turn_limit, deviation_limit = _piece_limits(piece, surface)
 
-        # The quality scorer puts fidelity_penalty first. If its selected stock
-        # piece still fails this test, every available stock candidate at this
-        # chain step failed the same geometric-fit class.
+        # Match the pre-unification donor behavior: a clean donor-length
+        # straight stays the real configured P3D. Generate only when the mapped
+        # line actually bends/deviates or the fitted donor piece exceeds its
+        # safe geometric limits. This keeps stock and modded donors on the same
+        # proven segmentation rule without turning every straight into a ribbon.
+        custom_shapes = bool(
+            getattr(context.spec, "custom_road_shapes", False)
+        )
+        custom_shape_needed = (
+            custom_shapes
+            and (turn >= 2.0 or deviation >= 0.05)
+        )
         if (
-            (turn > turn_limit or deviation > deviation_limit)
-            and not _stock_junction_protects_interval(
-                measure,
-                current,
-                end_distance,
+            (
+                custom_shape_needed
+                or turn > turn_limit
+                or deviation > deviation_limit
+            )
+            and not (
+                surface == "paved"
+                and _stock_junction_protects_interval(
+                    measure,
+                    current,
+                    end_distance,
+                )
             )
         ):
             generated = _generated_piece(
                 context,
                 pieces,
                 measure,
+                surface=surface,
                 start_distance=current,
                 end_distance=end_distance,
                 start=(start_x, start_z),
@@ -318,10 +495,13 @@ def _upgrade_stock_result(
         target_distance = min(float(preferred_end_distance), float(measure.total))
         if (
             target_distance > current + 0.05
-            and not _stock_junction_protects_interval(
-                measure,
-                current,
-                target_distance,
+            and not (
+                surface == "paved"
+                and _stock_junction_protects_interval(
+                    measure,
+                    current,
+                    target_distance,
+                )
             )
         ):
             sx, sz, _ = measure.point(current)
@@ -338,6 +518,7 @@ def _upgrade_stock_result(
                 context,
                 pieces,
                 measure,
+                surface=surface,
                 start_distance=current,
                 end_distance=target_distance,
                 start=start,
@@ -349,6 +530,43 @@ def _upgrade_stock_result(
     return tuple(upgraded)
 
 
+def _fitting_pieces(pieces: Sequence[Any]) -> tuple[Any, ...]:
+    """Offer short procedural spans without discovering donor sibling assets."""
+
+    context = _quality._CONTEXT.get()
+    if (
+        context is None
+        or not bool(getattr(context.spec, "custom_road_shapes", False))
+        or len(pieces) != 1
+    ):
+        return tuple(pieces)
+    surface = _chain_surface(pieces, context.spec)
+    if (
+        surface is None
+        or _pi.custom_road_model_signature(pieces[0].model_path) is not None
+    ):
+        return tuple(pieces)
+
+    donor = pieces[0]
+    width = _generated_width(pieces, context.spec, surface)
+    lengths = (12.5, 6.25, 3.125) if surface == "gravel" else (12.5, 6.25)
+    return (donor,) + tuple(
+        _p._RoadPiece(
+            _pi.custom_road_model_path(
+                context.spec.name,
+                surface,
+                width,
+                math.ceil(length * 10.0) / 10.0,
+                0.0,
+            ),
+            length,
+            max(1, int(round(length))),
+        )
+        for length in lengths
+        if length < float(donor.length_metres) - 0.05
+    )
+
+
 def _serial_chain(
     measure: Any,
     pieces: Sequence[Any],
@@ -358,6 +576,7 @@ def _serial_chain(
     minimum_end_distance: float,
     maximum_end_distance: float,
 ):
+    pieces = _fitting_pieces(pieces)
     result = _ORIGINAL_SERIAL_CHAIN(
         measure,
         pieces,
@@ -386,6 +605,7 @@ def _parallel_chain(
     minimum_end_distance: float,
     maximum_end_distance: float,
 ):
+    pieces = _fitting_pieces(pieces)
     result = _ORIGINAL_PARALLEL_CHAIN(
         measure,
         pieces,

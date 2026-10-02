@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from cwr_worldgen.fast_asset_scan_policy import (
+    _FALLBACK_PBO_MEMORY,
     _PBO_INDEX_MEMORY,
+    locate_assets_fast,
     scan_assets_fast,
 )
 from cwr_worldgen.pbo import PboEntry, write_pbo
@@ -111,3 +113,67 @@ def test_different_world_reuses_persistent_pbo_header_indexes(
     assert second.verified
     assert second.cache_hit
     assert second.catalogue_sha256 == first.catalogue_sha256
+
+
+def test_missing_road_siblings_walk_nonstandard_layout_once(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "game"
+    nested = root / "@Example" / "AddOns"
+    nested.mkdir(parents=True)
+    (nested / "unrelated.txt").write_text("x", encoding="utf-8")
+
+    import cwr_worldgen.fast_asset_scan_policy as fast
+
+    _FALLBACK_PBO_MEMORY.clear()
+    real_walk = fast.os.walk
+    walks = 0
+
+    def counting_walk(*args, **kwargs):
+        nonlocal walks
+        walks += 1
+        return real_walk(*args, **kwargs)
+
+    monkeypatch.setattr(fast.os, "walk", counting_walk)
+    result = locate_assets_fast(
+        (root,),
+        (
+            r"missingroads\\road25.p3d",
+            r"missingroads\\road12.p3d",
+            r"missingroads\\road6.p3d",
+        ),
+        use_cache=False,
+    )
+
+    assert walks == 1
+    assert result.missing_models == (
+        r"missingroads\\road12.p3d",
+        r"missingroads\\road25.p3d",
+        r"missingroads\\road6.p3d",
+    )
+
+
+def test_explicit_wrapper_pbo_falls_back_to_nested_addon_scan(tmp_path) -> None:
+    inner = tmp_path / "BAS_O.pbo"
+    write_pbo(
+        inner,
+        (
+            PboEntry(r"_road\bas_asf25.p3d", b"nested-bas-road"),
+        ),
+    )
+    wrapper = tmp_path / "bas-mod-package.pbo"
+    write_pbo(
+        wrapper,
+        (
+            PboEntry(r"AddOns\BAS_O.pbo", inner.read_bytes()),
+        ),
+    )
+
+    donor = r"bas_o\_road\bas_asf25.p3d"
+    result = locate_assets_fast(
+        (wrapper,),
+        (donor,),
+        use_cache=False,
+    )
+
+    assert result.missing_models == ()
+    record = next(record for record in result.records if record.path == donor)
+    assert record.source == f"{wrapper}!AddOns\\BAS_O.pbo"

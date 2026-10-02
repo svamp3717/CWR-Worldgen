@@ -2,10 +2,24 @@ import math
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import cwr_worldgen.playability as playability
 import cwr_worldgen.paved_junction_fallback_policy as fallback
 import cwr_worldgen.paved_junction_policy as paved
 import cwr_worldgen.procedural_infrastructure as infrastructure
 import cwr_worldgen.road_quality_policy as road_quality
+
+
+def _road_report(objects, *, junction_cap_objects=0):
+    return playability.RoadFitReport(
+        objects=tuple(objects),
+        chain_count=0,
+        connection_count=0,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+        junction_cap_objects=junction_cap_objects,
+    )
 
 
 def _plan(model: str, point: tuple[float, float], axis=(0.0, 1.0)):
@@ -76,6 +90,31 @@ def _generated_approach(
     )
 
 
+
+def test_unified_generated_plan_overlaps_approaches_into_hub() -> None:
+    incidents = (
+        ((0.0, 1.0), "sil"),
+        ((0.0, -1.0), "sil"),
+        ((1.0, 0.0), "sil"),
+    )
+    plan = paved._generated_plan(
+        (0.0, 0.0),
+        incidents,
+        world_name="seam_world",
+        width_override=9.1,
+        donor_surface="paved",
+    )
+    assert plan is not None
+    expected = (
+        infrastructure.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES
+        - infrastructure.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES
+    )
+    assert all(
+        math.isclose(math.dist(plan.point, arm.connector.point), expected, abs_tol=1.0e-9)
+        for arm in plan.arms
+    )
+
+
 def test_generated_plan_uses_compact_quality_reserve_not_stock_approach_reserve() -> None:
     key = (100, 100)
     plan = _generated_plan((100.0, 100.0))
@@ -136,10 +175,7 @@ def test_terrtest48_generated_fallback_replaces_plain_sil6_cap() -> None:
         heading_degrees=286.0,
         pitch_degrees=0.0,
     )
-    report = SimpleNamespace(
-        objects=(cap, untouched),
-        junction_cap_objects=1,
-    )
+    report = _road_report((cap, untouched), junction_cap_objects=1)
     spec = SimpleNamespace(
         cells=8,
         cell_size=25.0,
@@ -231,15 +267,13 @@ def test_terrtest48_fallback_hub_stitches_real_nearby_approaches() -> None:
             pitch_degrees=0.0,
         ),
     )
-    report = SimpleNamespace(
-        objects=objects,
-        junction_cap_objects=1,
-    )
+    report = _road_report(objects, junction_cap_objects=1)
     spec = SimpleNamespace(
         name="terrtest48",
         cells=64,
         cell_size=25.0,
         road_segment_length=25.0,
+        custom_road_shapes=True,
     )
     elevations = (0.0,) * (64 * 64)
     plans = {(104, 90): plan}
@@ -258,6 +292,14 @@ def test_terrtest48_fallback_hub_stitches_real_nearby_approaches() -> None:
     )
 
     assert stitched.objects[0].model_path == plan.model_path
+    assert not any(
+        "\\i\\paved_w" in obj.model_path.casefold()
+        for obj in stitched.objects
+    )
+    assert any(
+        "\\i\\road_paved_" in obj.model_path.casefold()
+        for obj in stitched.objects
+    )
     assert fallback._successful_plan_keys(
         stitched,
         plans,
@@ -368,10 +410,7 @@ def test_stitcher_replaces_stock_sil6_that_straddles_generated_connector() -> No
         heading_degrees=0.0,
         pitch_degrees=0.0,
     )
-    report = SimpleNamespace(
-        objects=(hub, straddler),
-        junction_cap_objects=1,
-    )
+    report = _road_report((hub, straddler), junction_cap_objects=1)
     spec = SimpleNamespace(
         name="seam_world",
         road_segment_length=25.0,
@@ -442,10 +481,7 @@ def test_stitcher_rebuilds_endpoint_matched_but_angle_mismatched_approach() -> N
         heading_degrees=0.0,
         pitch_degrees=0.0,
     )
-    report = SimpleNamespace(
-        objects=(hub, old),
-        junction_cap_objects=1,
-    )
+    report = _road_report((hub, old), junction_cap_objects=1)
     spec = SimpleNamespace(
         name="seam_world",
         road_segment_length=25.0,

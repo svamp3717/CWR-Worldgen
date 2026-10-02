@@ -41,6 +41,15 @@ DEFAULT_GUI_CELL_SIZE_METRES = 25.0
 TRAILING_NUMBER = re.compile(r"^(.*?)(\d+)$")
 FROZEN_CLI_MARKER = "--cwr-cli"
 
+DEFAULT_ROAD_MODEL_VALUES: dict[str, str] = {
+    "paved_road_model": r"o\road\sil25.p3d",
+    "paved_road_curve_model": r"o\road\sil10 25.p3d",
+    "gravel_road_model": "",
+    "gravel_road_curve_model": "",
+    "dirt_road_model": r"o\road\ces25.p3d",
+    "dirt_road_curve_model": r"o\road\ces10 25.p3d",
+}
+
 RECOMMENDED_APPEARANCE_PRESET = "Nogova textures + Everon trees (recommended)"
 RESISTANCE_APPEARANCE_PRESET = "Nogova Resistance leaf forests"
 LEGACY_RESISTANCE_APPEARANCE_PRESET = "Nogova Resistance forests"
@@ -499,9 +508,30 @@ def defaults_with_recent_source(
         "osm_asset_mapping_global_models",
         "osm_asset_mapping_global_textures",
         "run_road_inspector_after_build",
+        "paved_road_model",
+        "paved_road_curve_model",
+        "gravel_road_model",
+        "gravel_road_curve_model",
+        "dirt_road_model",
+        "dirt_road_curve_model",
     ):
-        if key in state:
-            result[key] = state[key]
+        if key not in state:
+            continue
+        if key.endswith("_road_curve_model") and not str(state[key]).strip():
+            straight_key = key.replace("_road_curve_model", "_road_model")
+            remembered_straight = str(
+                state.get(straight_key, result.get(straight_key, ""))
+            ).strip()
+            stock_straight = str(
+                DEFAULT_ROAD_MODEL_VALUES.get(straight_key, "")
+            ).strip()
+            stock_curve = str(DEFAULT_ROAD_MODEL_VALUES.get(key, "")).strip()
+            if stock_curve and remembered_straight.casefold() == stock_straight.casefold():
+                # Older GUI state persisted blank optional curves. When the
+                # corresponding straight donor is still the stock default, adopt
+                # the new stock curve default rather than pinning that old blank.
+                continue
+        result[key] = state[key]
     return result
 
 
@@ -612,6 +642,12 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         ("--haybale-field-percent", "haybale_field_percent"),
         ("--cache-dir", "cache_dir"),
         ("--max-road-objects", "max_road_objects"),
+        ("--paved-road-model", "paved_road_model"),
+        ("--paved-road-curve-model", "paved_road_curve_model"),
+        ("--gravel-road-model", "gravel_road_model"),
+        ("--gravel-road-curve-model", "gravel_road_curve_model"),
+        ("--dirt-road-model", "dirt_road_model"),
+        ("--dirt-road-curve-model", "dirt_road_curve_model"),
         ("--max-buildings", "max_buildings"),
         ("--building-ground-clearance", "building_ground_clearance"),
         ("--church-ground-clearance", "church_ground_clearance"),
@@ -948,6 +984,7 @@ def default_gui_values() -> dict[str, object]:
         "osm_asset_mapping_global_textures": "",
         "keep_output": False,
         "include_minor_roads": True,
+        **DEFAULT_ROAD_MODEL_VALUES,
         "cache_refresh": False,
         "no_cache": False,
         "normalization_refresh": False,
@@ -1211,6 +1248,7 @@ class WorldgenGui(tk.Tk):
         self._build_ui()
         self._set_defaults()
         self._install_appearance_state_persistence()
+        self._install_road_asset_state_persistence()
         self._show_step(0)
         self.after(100, self._drain_output)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -1232,6 +1270,41 @@ class WorldgenGui(tk.Tk):
         }
         if not values:
             return
+        try:
+            update_gui_state(self.state_path, values)
+        except OSError:
+            pass
+
+    def _install_road_asset_state_persistence(self) -> None:
+        for key in (
+            "paved_road_model",
+            "paved_road_curve_model",
+            "gravel_road_model",
+            "gravel_road_curve_model",
+            "dirt_road_model",
+            "dirt_road_curve_model",
+        ):
+            variable = self.vars.get(key)
+            if variable is not None:
+                variable.trace_add(
+                    "write",
+                    lambda *_args: self._persist_road_asset_state(),
+                )
+
+    def _persist_road_asset_state(self) -> None:
+        values: dict[str, object] = {
+            key: self.vars[key].get()
+            for key in (
+                "paved_road_model",
+                "paved_road_curve_model",
+                "gravel_road_model",
+                "gravel_road_curve_model",
+                "dirt_road_model",
+                "dirt_road_curve_model",
+            )
+            if key in self.vars
+        }
+        values["asset_roots"] = list(self.asset_roots)
         try:
             update_gui_state(self.state_path, values)
         except OSError:
@@ -2166,6 +2239,60 @@ class WorldgenGui(tk.Tk):
                 key, check, normal_style="TCheckbutton", changed_style="AdvancedChanged.TCheckbutton"
             )
 
+        road_models = ttk.LabelFrame(
+            advanced.body,
+            text="Road model donors",
+            padding=10,
+        )
+        road_models.pack(fill="x", pady=(0, 10))
+        ttk.Label(
+            road_models,
+            text=(
+                "Custom road donors are supported only when the road is roughly the same width "
+                "as vanilla CWA roads. Very wide highways, divided carriageways, and unusually "
+                "shaped road meshes are not supported and may produce incorrect bends or junctions. "
+                "Set one straight donor and, optionally, one matching curve donor. Worldgen uses "
+                "only those configured donors for width/style and generates every placed road length, "
+                "bend, filler, and junction itself; 12/6/3 sibling P3Ds are ignored. Add the containing "
+                "mod/PBO under Asset roots."
+            ),
+            style="Hint.TLabel",
+            wraplength=760,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        self._entry_row(
+            road_models, 1, "Paved straight P3D", "paved_road_model", advanced=True
+        )
+        ttk.Button(
+            road_models,
+            text="Restore paved",
+            command=lambda: self._restore_road_defaults("paved"),
+        ).grid(row=1, column=2, padx=(6, 0), pady=4)
+        self._entry_row(
+            road_models, 2, "Paved curve P3D (optional)", "paved_road_curve_model", advanced=True
+        )
+        self._entry_row(
+            road_models, 3, "Gravel straight P3D (optional)", "gravel_road_model", advanced=True
+        )
+        ttk.Button(
+            road_models,
+            text="Restore gravel",
+            command=lambda: self._restore_road_defaults("gravel"),
+        ).grid(row=3, column=2, padx=(6, 0), pady=4)
+        self._entry_row(
+            road_models, 4, "Gravel curve P3D (optional)", "gravel_road_curve_model", advanced=True
+        )
+        self._entry_row(
+            road_models, 5, "Dirt-track straight P3D", "dirt_road_model", advanced=True
+        )
+        ttk.Button(
+            road_models,
+            text="Restore dirt",
+            command=lambda: self._restore_road_defaults("dirt"),
+        ).grid(row=5, column=2, padx=(6, 0), pady=4)
+        self._entry_row(
+            road_models, 6, "Dirt-track curve P3D (optional)", "dirt_road_curve_model", advanced=True
+        )
+
         tuning = ttk.LabelFrame(advanced.body, text="Limits and solver", padding=10)
         tuning.pack(fill="x", pady=(0, 10))
         fields = (
@@ -2278,11 +2405,22 @@ class WorldgenGui(tk.Tk):
         log_scroll.pack(side="right", fill="y")
 
     def _set_defaults(self) -> None:
-        defaults = defaults_with_recent_source(default_gui_values(), load_gui_state(self.state_path))
+        state = load_gui_state(self.state_path)
+        defaults = defaults_with_recent_source(default_gui_values(), state)
         for key, value in defaults.items():
             if key not in self.vars:
                 self._var(key, value, boolean=isinstance(value, bool))
             self.vars[key].set(value)
+        self.asset_roots = [
+            str(item)
+            for item in state.get("asset_roots", [])
+            if str(item).strip()
+        ]
+        asset_list = getattr(self, "asset_list", None)
+        if asset_list is not None:
+            asset_list.delete(0, "end")
+            for root in self.asset_roots:
+                asset_list.insert("end", root)
         self._sync_source_paths()
         self._refresh_views()
 
@@ -2638,6 +2776,17 @@ class WorldgenGui(tk.Tk):
             self.vars[key].set(defaults[key])
         self.footer_status_var.set("Restored the recommended 6.4 km default area.")
 
+    def _restore_road_defaults(self, surface: str) -> None:
+        prefix = str(surface).strip().casefold()
+        if prefix not in {"paved", "gravel", "dirt"}:
+            raise ValueError(f"unknown road surface {surface!r}")
+        for suffix in ("road_model", "road_curve_model"):
+            key = f"{prefix}_{suffix}"
+            self.vars[key].set(DEFAULT_ROAD_MODEL_VALUES[key])
+        self.footer_status_var.set(
+            f"Restored the default {prefix} straight and curve road donors."
+        )
+
     def _initial_map_selection(self) -> tuple[tuple[float, float], int, tuple[float, float, float, float] | None]:
         bbox: tuple[float, float, float, float] | None = None
         try:
@@ -2728,6 +2877,7 @@ class WorldgenGui(tk.Tk):
                         asset_list.insert("end", normalized)
                 except tk.TclError:
                     pass
+            self._persist_road_asset_state()
             self._refresh_views()
 
     def _remove_asset(self) -> None:
@@ -2738,6 +2888,7 @@ class WorldgenGui(tk.Tk):
         for index in reversed(selected):
             asset_list.delete(index)
             del self.asset_roots[index]
+        self._persist_road_asset_state()
         self._refresh_views()
 
     def _candidate_game_roots(self) -> list[Path]:
@@ -3445,6 +3596,7 @@ class WorldgenGui(tk.Tk):
             for root in self.asset_roots:
                 self.asset_list.insert("end", root)
             self.profile_path = Path(path)
+            self._persist_road_asset_state()
             self.footer_status_var.set(f"Loaded profile: {path}")
             self._show_step(0)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -3454,6 +3606,7 @@ class WorldgenGui(tk.Tk):
         if (self.process is not None or self._pipeline_active) and not messagebox.askyesno(APP_TITLE, "A process is still running. Stop it and exit?"):
             return
         self._persist_appearance_state()
+        self._persist_road_asset_state()
         self._persist_osm_mapping_state()
         self._stop_process()
         self.destroy()

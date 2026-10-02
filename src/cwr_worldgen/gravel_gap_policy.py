@@ -12,7 +12,6 @@ from . import road_quality_policy as _rq
 from .procedural_infrastructure import (
     GENERATED_GRAVEL_HALF_WIDTH_METRES,
     GENERATED_GRAVEL_VISUAL_OVERLAP_METRES,
-    gravel_road_model_path,
 )
 
 _GRAVEL_GAP_MAX_METRES = 8.0
@@ -50,7 +49,7 @@ def _gravel_endpoints(dataset, projection, spec) -> tuple[_GravelEndpoint, ...]:
         if not _p.road_is_supported(feature.tags, include_minor=spec.include_minor_roads):
             continue
         model = _p.road_model_for_tags(spec, feature.tags)
-        if not _p.is_generated_gravel_road_model(model):
+        if _p.road_model_surface(spec, model) != "gravel":
             continue
         points = tuple(_p._clean_road_points(raw_points))
         if len(points) < 2:
@@ -63,7 +62,7 @@ def _gravel_endpoints(dataset, projection, spec) -> tuple[_GravelEndpoint, ...]:
 
 
 def _gravel_piece_length(spec, nominal: int) -> float:
-    return float(spec.road_segment_length) * float(nominal) / 25.0
+    return float(_p.gravel_filler_piece(spec, nominal).length_metres)
 
 
 def _gravel_bridge_nominal(spec, span: float, *, endpoint_pair: bool) -> int | None:
@@ -149,7 +148,7 @@ def _bridge_short_gravel_gaps(report, dataset, projection, elevations, spec, con
         )
         start = (centre[0] - ux * model_length * 0.5, centre[1] - uz * model_length * 0.5)
         end = (centre[0] + ux * model_length * 0.5, centre[1] + uz * model_length * 0.5)
-        fillers.append((gravel_road_model_path(spec.name, nominal), start, end))
+        fillers.append((_p.gravel_filler_piece(spec, nominal).model_path, start, end))
         used.update((left_index, right_index))
 
     # Endpoint-to-hub repair. Generated 3-way gravel hubs deliberately render all
@@ -189,13 +188,23 @@ def _bridge_short_gravel_gaps(report, dataset, projection, elevations, spec, con
             if _dot(endpoint.outward, to_junction) < _GRAVEL_GAP_ALIGNMENT_COSINE:
                 continue
             from_junction = (-to_junction[0], -to_junction[1])
-            ax, az = junction.axis
-            perpendicular = (-az, ax)
-            if max(
-                abs(_dot(from_junction, (ax, az))),
-                abs(_dot(from_junction, perpendicular)),
-            ) < _GRAVEL_GAP_ALIGNMENT_COSINE:
-                continue
+            directional = tuple(
+                getattr(junction, "directional_exit_distances", ()) or ()
+            )
+            if directional:
+                if max(
+                    _dot(from_junction, tuple(value[0]))
+                    for value in directional
+                ) < _GRAVEL_GAP_ALIGNMENT_COSINE:
+                    continue
+            else:
+                ax, az = junction.axis
+                perpendicular = (-az, ax)
+                if max(
+                    abs(_dot(from_junction, (ax, az))),
+                    abs(_dot(from_junction, perpendicular)),
+                ) < _GRAVEL_GAP_ALIGNMENT_COSINE:
+                    continue
             hub_exit = _rq._exit_distance(junction, from_junction)
             span = node_distance - hub_exit
             visible_gap = span - GENERATED_GRAVEL_VISUAL_OVERLAP_METRES
@@ -222,7 +231,7 @@ def _bridge_short_gravel_gaps(report, dataset, projection, elevations, spec, con
         model_length = _gravel_piece_length(spec, nominal)
         start = (centre[0] - ux * model_length * 0.5, centre[1] - uz * model_length * 0.5)
         end = (centre[0] + ux * model_length * 0.5, centre[1] + uz * model_length * 0.5)
-        fillers.append((gravel_road_model_path(spec.name, nominal), start, end))
+        fillers.append((_p.gravel_filler_piece(spec, nominal).model_path, start, end))
         used.add(endpoint_index)
 
     if not fillers:
@@ -275,7 +284,10 @@ def _fit(dataset, projection, elevations, spec, *, starting_id: int = 1, progres
 
     def progress(value: int, message: str) -> None:
         nonlocal deferred_completion
-        if value >= 100 and message.startswith("Stock road fitting complete:"):
+        if value >= 100 and (
+            message.startswith("Stock road fitting complete:")
+            or message.startswith("Road fitting complete:")
+        ):
             deferred_completion = (value, message)
             return
         if progress_callback is not None:
@@ -305,7 +317,7 @@ def _fit(dataset, projection, elevations, spec, *, starting_id: int = 1, progres
         # the tiny visual bridge pass appended its connector objects.
         progress_callback(
             deferred_completion[0],
-            f"Stock road fitting complete: {len(report.objects):,} objects in {report.chain_count:,} chains",
+            f"Road fitting complete: {len(report.objects):,} objects in {report.chain_count:,} chains",
         )
     return report
 

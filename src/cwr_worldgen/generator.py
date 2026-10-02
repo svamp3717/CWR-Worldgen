@@ -8,6 +8,7 @@ from itertools import chain
 import hashlib
 import json
 import math
+import re
 import shutil
 from typing import Callable, Sequence
 
@@ -18,14 +19,23 @@ from .cache import (
     load_or_create_pickle, restore_bundle, store_bundle, streaming_hash,
 )
 from .images import HeightmapLoadResult, load_heightmap, load_material_mask
+from .fast_asset_scan_policy import locate_assets_fast
 from .model import ConstraintPlayabilitySpec, HeightmapSpec, OsmSpec, PlayabilitySpec, WorldObject, WorldSpec
 from .paa import inspect_paa, write_rgb_dxt1_paa, write_solid_dxt1_paa
 from .pbo import PboPackResult, pack_directory, pack_directory_cached, read_pbo
 from ._version import GENERATOR_VERSION
 from .output_ownership import prepare_output_directory, record_build_ownership
+from .legacy_proxy_models import (
+    ProxyCloneError,
+    inspect_visual_model_dimensions,
+    inspect_visual_surface_style,
+    inspect_roadway_surface_style,
+)
 from .assets import (
+    AssetRecord,
     canonical_asset_path,
     model_texture_dependencies,
+    read_asset_record_bytes,
     scan_assets,
     write_asset_catalogue,
 )
@@ -39,7 +49,13 @@ from .procedural_buildings import BuildingGenerationResult, ProceduralBuildingLi
 from .procedural_infrastructure import (
     InfrastructureAssetResult,
     ProceduralInfrastructureLibrary,
+    RoadSurfaceStyle,
     _texture_file_stem,
+    custom_road_model_signature,
+    is_generated_dirt_junction_model,
+    is_generated_dirt_road_model,
+    is_generated_gravel_junction_model,
+    is_generated_gravel_road_model,
     is_generated_paved_junction_model,
     is_generated_paved_road_model,
 )
@@ -122,6 +138,11 @@ from .playability import (
     RoadFitReport,
     TerrainGradeReport,
     TransitionReport,
+    _ROAD_MODEL_DIMENSIONS,
+    _ROAD_MODEL_MEASUREMENT_ERRORS,
+    _ROAD_MODEL_EFFECTIVE_DONORS,
+    _ROAD_MODEL_VARIANTS_AVAILABLE,
+    _road_model_key,
     fit_road_objects,
     grade_terrain,
     road_model_variant_paths,
@@ -172,6 +193,14 @@ class BuildResult:
     def texture_path(self) -> Path:
         """Milestone 1 compatibility alias for its single texture."""
         return self.texture_paths[0]
+
+
+def _validate_asset_roots_exist(spec: PlayabilitySpec) -> None:
+    """Fail before terrain work when a configured asset root has disappeared."""
+    for value in tuple(getattr(spec, "asset_roots", ()) or ()):
+        root = Path(value).expanduser().resolve()
+        if not root.exists():
+            raise ValueError(f"asset root does not exist: {root}")
 
 
 def _sha256(path: Path) -> str:
@@ -1526,28 +1555,29 @@ def _generation_fingerprint(
     )
 
 
-def _preferred_stock_paved_texture(
+def _preferred_road_texture(
     model_path: str,
     dependencies: Sequence[str],
-) -> str:
-    """Choose the stock paved texture that best matches the configured road family."""
+    *,
+    fallback: str | None = None,
+) -> str | None:
+    """Choose the most likely visible road texture embedded in a donor P3D."""
+
     values = tuple(
         str(value).replace("/", "\\").strip("\\")
         for value in dependencies
         if str(value).casefold().endswith((".paa", ".pac"))
     )
     if not values:
-        # Classic OFP paved network artwork. Builds with a readable stock P3D
-        # should resolve that model's exact embedded dependency before this.
-        return r"landtext\silnice.pac"
+        return fallback
     if len(values) == 1:
         return values[0]
 
     filename = str(model_path).replace("/", "\\").rsplit("\\", 1)[-1].casefold()
-    family = filename
-    for suffix in ("25.p3d", "12.p3d", "6.p3d"):
+    family = filename[:-4] if filename.endswith(".p3d") else filename
+    for suffix in ("25", "12", "6", "3"):
         if family.endswith(suffix):
-            family = family[: -len(suffix)]
+            family = family[: -len(suffix)].rstrip("_- ")
             break
     aliases = {
         "sil": ("sil", "silnice"),
@@ -1555,6 +1585,8 @@ def _preferred_stock_paved_texture(
         "asf": ("asf", "asfalt"),
         "asfaltka": ("asfalt", "asf"),
         "kos": ("kos",),
+        "ces": ("ces", "cesta", "dirt", "track"),
+        "cesta": ("cesta", "ces", "dirt", "track"),
     }.get(family, (family,))
 
     def rank(value: str) -> tuple[int, int, str]:
@@ -1563,14 +1595,281 @@ def _preferred_stock_paved_texture(
         score = 0
         if any(token and token in basename for token in aliases):
             score += 100
-        if "road" in lowered:
+        if any(token in lowered for token in ("road", "cesta", "track", "asfalt", "gravel")):
             score += 20
         if "landtext" in lowered:
             score += 10
+        # Avoid common secondary material maps when a conventional diffuse road
+        # texture is also present.
+        if any(token in basename for token in ("detail", "mask", "spec", "normal", "_nohq")):
+            score -= 40
         return (-score, len(value), lowered)
 
     return min(values, key=rank)
 
+
+_ROAD_DONOR_TEXTURE_FALLBACKS = {
+    canonical_asset_path(r"o\road\sil25.p3d"): r"o\road\sil_new.paa",
+    canonical_asset_path(r"o\road\sil10 25.p3d"): r"o\road\sil_new.paa",
+    canonical_asset_path(r"o\road\ces25.p3d"): r"o\road\ces_hned.paa",
+    canonical_asset_path(r"o\road\ces10 25.p3d"): r"o\road\ces_hned.paa",
+}
+
+
+def _road_style_donor(spec: PlayabilitySpec, surface: str) -> str:
+    """Return the explicit curve donor when present, otherwise the straight donor."""
+
+    if surface not in {"paved", "gravel", "dirt"}:
+        raise ValueError(f"unsupported road surface {surface!r}")
+    curve = str(
+        getattr(spec, f"{surface}_road_curve_model", "") or ""
+    ).strip()
+    straight = str(
+        getattr(spec, f"{surface}_road_model", "") or ""
+    ).strip()
+    return curve or straight
+
+
+def _road_texture_donor(spec: PlayabilitySpec, surface: str) -> str:
+    """Return the straight donor that owns the visible generated road surface.
+
+    Curve donors are geometry references. Using them as the texture authority can
+    silently switch a configured mod family to a stock/Everon texture when a
+    curve P3D reuses a generic texture path.
+    """
+
+    if surface not in {"paved", "gravel", "dirt"}:
+        raise ValueError(f"unsupported road surface {surface!r}")
+    straight = str(
+        getattr(spec, f"{surface}_road_model", "") or ""
+    ).strip()
+    curve = str(
+        getattr(spec, f"{surface}_road_curve_model", "") or ""
+    ).strip()
+    return straight or curve
+
+
+def _road_donor_diagnostics(
+    spec: PlayabilitySpec,
+    effective_donors: dict[str, str],
+    dimensions: dict[str, tuple[float, float]],
+) -> dict[str, dict[str, object]]:
+    """Describe the exact straight/curve pair used by each road surface."""
+
+    result: dict[str, dict[str, object]] = {}
+    for surface in ("paved", "gravel", "dirt"):
+        straight = str(
+            getattr(spec, f"{surface}_road_model", "") or ""
+        ).strip()
+        curve = str(
+            getattr(spec, f"{surface}_road_curve_model", "") or ""
+        ).strip()
+        effective = (
+            effective_donors.get(_road_model_key(straight), straight)
+            if straight
+            else ""
+        )
+        measured = dimensions.get(_road_model_key(effective)) if effective else None
+        curve_measured = dimensions.get(_road_model_key(curve)) if curve else None
+        result[surface] = {
+            "straight": straight,
+            "curve": curve,
+            "style_donor": _road_style_donor(spec, surface),
+            "effective_straight": effective,
+            "measured_straight_width_metres": (
+                float(measured[0]) if measured is not None else None
+            ),
+            "measured_straight_length_metres": (
+                float(measured[1]) if measured is not None else None
+            ),
+            "straight_geometry_measured": measured is not None,
+            "measured_curve_connector_width_metres": (
+                float(curve_measured[0]) if curve_measured is not None else None
+            ),
+            "measured_curve_chord_length_metres": (
+                float(curve_measured[1]) if curve_measured is not None else None
+            ),
+            "curve_geometry_measured": curve_measured is not None,
+            "connector_width_delta_metres": (
+                abs(float(measured[0]) - float(curve_measured[0]))
+                if measured is not None and curve_measured is not None
+                else None
+            ),
+        }
+    return result
+
+
+def _resolved_road_donor_texture(
+    records: Sequence[AssetRecord],
+    *,
+    surface: str,
+    donor_model: str,
+) -> str:
+    """Resolve one road donor's visible texture without silent style changes."""
+
+    dependencies = model_texture_dependencies(records, donor_model)
+    fallback = _ROAD_DONOR_TEXTURE_FALLBACKS.get(
+        canonical_asset_path(donor_model)
+    )
+    texture = _preferred_road_texture(
+        donor_model,
+        dependencies,
+        fallback=fallback,
+    )
+    if texture:
+        return texture
+
+    raise ValueError(
+        f"could not resolve the {surface} road donor {donor_model!r} from the "
+        "configured asset roots. Add the PBO/PBO.ZST or directory containing "
+        "that model to --asset-root (or refresh the asset cache). Worldgen will "
+        "not silently substitute its generic road texture."
+    )
+
+
+def _roadway_groundtype_texture_for_donor(
+    donor_model: str,
+    inspected_texture: str | None,
+    visual_texture: str,
+) -> tuple[str, str]:
+    """Return the exact Roadway texture carried by the selected donor.
+
+    The donor P3D is the authority for driving-surface classification. Rewriting
+    stock Roadway textures to guessed landtext selectors made generated models
+    differ from the models they were supposed to emulate. Preserve the inspected
+    Roadway texture for stock and modded donors alike; only fall back to the
+    visual texture when the donor has no usable Roadway texture.
+    """
+
+    _ = donor_model
+    inspected = str(inspected_texture or "").replace("/", "\\").strip("\\")
+    if inspected:
+        return inspected, "donor-roadway-lod"
+    return str(visual_texture).replace("/", "\\").strip("\\"), "visual-fallback"
+
+
+def _roadway_groundtype_flags(
+    texture_source: str,
+    point_flag: int,
+    face_flag: int,
+) -> tuple[int, int]:
+    """Preserve the donor's Roadway contact flags exactly."""
+
+    _ = texture_source
+    return int(point_flag), int(face_flag)
+
+
+
+def _asset_source_label(source: str) -> str:
+    """Return useful asset provenance without embedding the user's full path."""
+
+    parts = str(source).split("!")
+    outer = Path(parts[0]).name
+    return "!".join((outer, *parts[1:])) if parts[1:] else outer
+
+
+def _road_donor_provenance(
+    spec: PlayabilitySpec,
+    effective_donors: dict[str, str],
+) -> dict[str, dict[str, object]]:
+    """Record the exact donor bytes and texture asset selected from root order."""
+
+    selected: list[str] = []
+    donors_by_surface: dict[str, tuple[str, str, str]] = {}
+    for surface in ("paved", "gravel", "dirt"):
+        straight = str(getattr(spec, f"{surface}_road_model", "") or "").strip()
+        effective = (
+            effective_donors.get(_road_model_key(straight), straight)
+            if straight
+            else ""
+        )
+        curve = str(getattr(spec, f"{surface}_road_curve_model", "") or "").strip()
+        texture_donor = effective or curve
+        donors_by_surface[surface] = (effective, curve, texture_donor)
+        selected.extend(value for value in (effective, curve) if value)
+
+    if not selected or not tuple(getattr(spec, "asset_roots", ()) or ()):
+        return {}
+
+    scan = locate_assets_fast(
+        spec.asset_roots,
+        tuple(dict.fromkeys(selected)),
+        cache_dir=getattr(spec, "cache_dir", None),
+        use_cache=bool(getattr(spec, "cache_enabled", True)),
+        refresh=bool(getattr(spec, "cache_refresh", False)),
+    )
+    by_path = {record.path: record for record in scan.records}
+    result: dict[str, dict[str, object]] = {}
+
+    def record_info(model: str) -> dict[str, object] | None:
+        if not model:
+            return None
+        record = by_path.get(canonical_asset_path(model))
+        if record is None:
+            return None
+        return {
+            "model": model,
+            "source": _asset_source_label(record.source),
+            "sha256": record.sha256,
+            "embedded_textures": list(model_texture_dependencies(scan.records, model)),
+        }
+
+    for surface, (straight, curve, texture_donor) in donors_by_surface.items():
+        texture = ""
+        texture_source = None
+        if texture_donor:
+            try:
+                texture = _resolved_road_donor_texture(
+                    scan.records,
+                    surface=surface,
+                    donor_model=texture_donor,
+                )
+            except ValueError:
+                texture = ""
+            if texture:
+                texture_record = by_path.get(canonical_asset_path(texture))
+                if texture_record is None:
+                    texture_scan = locate_assets_fast(
+                        spec.asset_roots,
+                        (texture,),
+                        cache_dir=getattr(spec, "cache_dir", None),
+                        use_cache=bool(getattr(spec, "cache_enabled", True)),
+                        refresh=bool(getattr(spec, "cache_refresh", False)),
+                    )
+                    texture_record = next(
+                        (
+                            record
+                            for record in texture_scan.records
+                            if record.path == canonical_asset_path(texture)
+                        ),
+                        None,
+                    )
+                if texture_record is not None:
+                    texture_source = {
+                        "path": texture,
+                        "source": _asset_source_label(texture_record.source),
+                        "sha256": texture_record.sha256,
+                    }
+        result[surface] = {
+            "straight_asset": record_info(straight),
+            "curve_asset": record_info(curve),
+            "texture_donor": texture_donor,
+            "resolved_texture": texture or None,
+            "resolved_texture_asset": texture_source,
+        }
+    return result
+
+def _preferred_stock_paved_texture(
+    model_path: str,
+    dependencies: Sequence[str],
+) -> str:
+    """Compatibility wrapper for the historical paved-only donor resolver."""
+
+    return _preferred_road_texture(
+        model_path,
+        dependencies,
+        fallback=r"o\road\sil_new.paa",
+    ) or r"o\road\sil_new.paa"
 
 def _ground_texture_profile(spec: PlayabilitySpec) -> str:
     return str(getattr(spec, "ground_texture_profile", "generated"))
@@ -1618,6 +1917,301 @@ def _world_icon_filename(spec: PlayabilitySpec) -> str:
     return "icon.paa" if _surface_pass_enabled(spec) else "g.paa"
 
 
+_CURVED_ROAD_DONOR_NAME = re.compile(
+    r"^(?P<prefix>.*?)(?P<angle>\d{1,3})[ _-]+(?P<radius>\d{1,4})\.p3d$",
+    re.IGNORECASE,
+)
+
+
+def _modded_road_effective_donors(
+    spec: PlayabilitySpec,
+) -> dict[str, str]:
+    """Resolve curved legacy selections without scanning every P3D in the install.
+
+    Explicit straight/curve donor fields are the preferred configuration. For
+    backwards compatibility, a straight field with an angle/radius filename such
+    as sebtrailpath10 25.p3d maps to sebtrailpath25.p3d when that exact sibling
+    exists.
+    """
+
+    stock_defaults = {
+        _road_model_key(r"o\road\sil25.p3d"),
+        _road_model_key(r"o\road\ces25.p3d"),
+    }
+    configured = tuple(dict.fromkeys(
+        value
+        for value in (
+            str(getattr(spec, "paved_road_model", "") or "").strip(),
+            str(getattr(spec, "gravel_road_model", "") or "").strip(),
+            str(getattr(spec, "dirt_road_model", "") or "").strip(),
+        )
+        if value and _road_model_key(value) not in stock_defaults
+    ))
+    if not configured or not tuple(getattr(spec, "asset_roots", ()) or ()):
+        return {}
+
+    preferred_by_donor: dict[str, str] = {}
+    requested: list[str] = list(configured)
+    for donor in configured:
+        donor_key = _road_model_key(donor)
+        donor_dir, _, donor_name = donor_key.rpartition("\\")
+        match = _CURVED_ROAD_DONOR_NAME.fullmatch(donor_name)
+        if match is None:
+            continue
+        preferred_name = f"{match.group('prefix')}25.p3d"
+        preferred = (
+            f"{donor_dir}\\{preferred_name}" if donor_dir else preferred_name
+        )
+        preferred_by_donor[donor_key] = preferred
+        requested.append(preferred)
+
+    # Use the installed targeted scanner. The previous implementation called
+    # assets.scan_assets directly, forcing a recursive catalogue of the entire
+    # game folder and then opening every P3D while searching for a sibling.
+    scan = locate_assets_fast(
+        spec.asset_roots,
+        tuple(dict.fromkeys(requested)),
+        cache_dir=getattr(spec, "cache_dir", None),
+        use_cache=bool(getattr(spec, "cache_enabled", True)),
+        refresh=bool(getattr(spec, "cache_refresh", False)),
+    )
+    by_path = {record.path: record for record in scan.records}
+    result: dict[str, str] = {}
+
+    for donor in configured:
+        donor_key = _road_model_key(donor)
+        preferred = preferred_by_donor.get(donor_key)
+        if preferred is not None and preferred in by_path:
+            result[donor_key] = preferred
+            continue
+
+        record = by_path.get(donor_key)
+        if record is None:
+            continue
+        try:
+            shape = inspect_visual_model_dimensions(
+                read_asset_record_bytes(record)
+            )
+        except (OSError, ValueError, ProxyCloneError):
+            continue
+        if shape.is_straight_road_candidate:
+            result[donor_key] = donor
+            continue
+
+        if preferred is not None:
+            raise ValueError(
+                f"configured road donor {donor!r} is a curved road piece, but "
+                f"its expected straight sibling {preferred!r} was not found. "
+                "Set the Straight P3D field explicitly and keep this model in "
+                "the Curve P3D field."
+            )
+        raise ValueError(
+            f"configured road donor {donor!r} appears to be curved "
+            f"(lateral end shift {shape.lateral_center_shift_metres:.2f} m). "
+            "Set a straight model in the Straight P3D field and put this model "
+            "in the matching Curve P3D field."
+        )
+
+    return result
+
+
+def _modded_road_variant_availability(
+    spec: PlayabilitySpec,
+    effective_donors: dict[str, str] | None = None,
+) -> dict[str, frozenset[str]]:
+    """Return the external straight road models allowed for fitting.
+
+    Unified custom-road mode is strictly donor-only: even when 12/6 siblings
+    exist in stock or mod families, they are not discovered or placed. Legacy
+    fitting may still discover proven siblings from the configured asset roots.
+    """
+
+    defaults = {
+        _road_model_key(r"o\road\sil25.p3d"),
+        _road_model_key(r"o\road\ces25.p3d"),
+    }
+    effective_donors = effective_donors or {}
+    donors = tuple(dict.fromkeys(
+        effective_donors.get(_road_model_key(value), value)
+        for value in (
+            str(getattr(spec, "paved_road_model", "") or "").strip(),
+            str(getattr(spec, "gravel_road_model", "") or "").strip(),
+            str(getattr(spec, "dirt_road_model", "") or "").strip(),
+        )
+        if value and _road_model_key(value) not in defaults
+    ))
+    if not donors:
+        return {}
+    if bool(getattr(spec, "custom_road_shapes", False)):
+        return {
+            _road_model_key(donor): frozenset({_road_model_key(donor)})
+            for donor in donors
+        }
+    candidates_by_donor: dict[str, tuple[str, ...]] = {}
+    requested: list[str] = []
+    for donor in donors:
+        candidates = road_model_variant_paths(donor, spec.road_segment_length)
+        candidates_by_donor[_road_model_key(donor)] = candidates
+        requested.extend(candidates)
+
+    scan = locate_assets_fast(
+        spec.asset_roots,
+        tuple(dict.fromkeys(requested)),
+        cache_dir=getattr(spec, "cache_dir", None),
+        use_cache=bool(getattr(spec, "cache_enabled", True)),
+        refresh=bool(getattr(spec, "cache_refresh", False)),
+    )
+    existing = {record.path for record in scan.records}
+    result: dict[str, frozenset[str]] = {}
+    for donor_key, candidates in candidates_by_donor.items():
+        # The configured long donor remains usable even when it lives in a mod
+        # loaded at runtime but outside the verification roots. Only guessed
+        # siblings require proof from the configured roots.
+        values = {donor_key}
+        values.update(
+            _road_model_key(candidate)
+            for candidate in candidates
+            if _road_model_key(candidate) in existing
+        )
+        result[donor_key] = frozenset(values)
+    return result
+
+
+def _modded_road_model_dimensions(
+    spec: PlayabilitySpec,
+    effective_donors: dict[str, str] | None = None,
+    measurement_errors: dict[str, str] | None = None,
+) -> dict[str, tuple[float, float]]:
+    """Measure configured mod road geometry and retain concrete failure reasons."""
+
+    stock_defaults = {
+        _road_model_key(r"o\road\sil25.p3d"),
+        _road_model_key(r"o\road\ces25.p3d"),
+    }
+    effective_donors = effective_donors or {}
+    configured_donors = tuple(
+        value
+        for value in (
+            str(getattr(spec, "paved_road_model", "") or "").strip(),
+            str(getattr(spec, "gravel_road_model", "") or "").strip(),
+            str(getattr(spec, "dirt_road_model", "") or "").strip(),
+        )
+        if value and _road_model_key(value) not in stock_defaults
+    )
+    donors = tuple(dict.fromkeys(
+        effective_donors.get(_road_model_key(value), value)
+        for value in configured_donors
+    ))
+    curve_donors = tuple(dict.fromkeys(
+        value
+        for value in (
+            str(getattr(spec, "paved_road_curve_model", "") or "").strip(),
+            str(getattr(spec, "gravel_road_curve_model", "") or "").strip(),
+            str(getattr(spec, "dirt_road_curve_model", "") or "").strip(),
+        )
+        if value
+    ))
+    if (
+        not donors
+        and not curve_donors
+    ) or not tuple(getattr(spec, "asset_roots", ()) or ()):
+        return {}
+
+    donor_only = bool(getattr(spec, "custom_road_shapes", False))
+    straight_requested = tuple(dict.fromkeys(
+        candidate
+        for donor in donors
+        for candidate in road_model_variant_paths(
+            donor,
+            float(getattr(spec, "road_segment_length", 25.0)),
+            donor_only=donor_only,
+        )
+    ))
+    requested = tuple(dict.fromkeys((*straight_requested, *curve_donors)))
+    straight_keys = {_road_model_key(value) for value in straight_requested}
+    curve_keys = {_road_model_key(value) for value in curve_donors}
+    scan = locate_assets_fast(
+        spec.asset_roots,
+        requested,
+        cache_dir=getattr(spec, "cache_dir", None),
+        use_cache=bool(getattr(spec, "cache_enabled", True)),
+        refresh=bool(getattr(spec, "cache_refresh", False)),
+    )
+    by_path = {record.path: record for record in scan.records}
+    result: dict[str, tuple[float, float]] = {}
+    errors = measurement_errors if measurement_errors is not None else {}
+    roots_text = ", ".join(str(Path(value)) for value in spec.asset_roots)
+
+    for candidate in requested:
+        key = _road_model_key(candidate)
+        record = by_path.get(key)
+        if record is None:
+            errors[key] = (
+                "not found while searching the configured Asset roots"
+                + (f": {roots_text}" if roots_text else "")
+            )
+            continue
+        try:
+            data = read_asset_record_bytes(record)
+        except (OSError, ValueError, FileNotFoundError) as exc:
+            errors[key] = (
+                f"found as {record.source!r}, but its bytes could not be read: {exc}"
+            )
+            continue
+        try:
+            info = inspect_visual_model_dimensions(data)
+        except (OSError, ValueError, ProxyCloneError) as exc:
+            signature = repr(data[:4])
+            errors[key] = (
+                f"found as {record.source!r}, but its P3D geometry could not be "
+                f"inspected: {exc} (signature {signature})"
+            )
+            continue
+        width = float(
+            info.connector_width_metres
+            if info.connector_width_metres is not None
+            else info.width_metres
+        )
+        length = float(info.length_metres)
+        curve_donor = key in curve_keys and key not in straight_keys
+        invalid_numeric = (
+            not math.isfinite(width)
+            or not math.isfinite(length)
+            or not 0.75 <= width <= 30.0
+            or not 0.25 <= length <= 200.0
+        )
+        invalid_straight = (
+            not curve_donor
+            and (
+                not info.is_straight_road_candidate
+                or length < width * 1.15
+            )
+        )
+        if invalid_numeric or invalid_straight:
+            kind = "curve" if curve_donor else "straight"
+            errors[key] = (
+                f"found as {record.source!r}, but its {kind} geometry was rejected "
+                f"(connector width {width:.3f} m, length {length:.3f} m, "
+                f"lateral end shift {info.lateral_center_shift_metres:.3f} m, "
+                f"visual width {info.width_metres:.3f} m)"
+            )
+            continue
+        result[key] = (width, length)
+        errors.pop(key, None)
+
+    for configured in configured_donors:
+        configured_key = _road_model_key(configured)
+        effective = effective_donors.get(configured_key, configured)
+        effective_key = _road_model_key(effective)
+        measured = result.get(effective_key)
+        if measured is not None:
+            result[configured_key] = measured
+            errors.pop(configured_key, None)
+        elif effective_key in errors:
+            errors[configured_key] = errors[effective_key]
+    return result
+
+
 def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) -> tuple[str, ...]:
     """Return assets inherited from an earlier milestone and trusted at runtime.
 
@@ -1628,18 +2222,36 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
     """
     if milestone_number < 8:
         return ()
-    configured_roads = [spec.paved_road_model, spec.dirt_road_model]
+    configured_roads = [
+        spec.paved_road_model,
+        str(getattr(spec, "gravel_road_model", "") or ""),
+        spec.dirt_road_model,
+    ]
+    configured_curve_roads = tuple(
+        value
+        for value in (
+            str(getattr(spec, "paved_road_curve_model", "") or "").strip(),
+            str(getattr(spec, "gravel_road_curve_model", "") or "").strip(),
+            str(getattr(spec, "dirt_road_curve_model", "") or "").strip(),
+        )
+        if value
+    )
     road_models = {
         canonical_asset_path(path)
         for configured in configured_roads
         for path in (
-            road_model_variant_paths(configured, spec.road_segment_length)
+            road_model_variant_paths(
+                configured,
+                spec.road_segment_length,
+                donor_only=bool(getattr(spec, "custom_road_shapes", False)),
+            )
             if bool(getattr(spec, "stock_road_piece_fitting", False))
             else (configured,)
         )
     }
     trusted = {
         *road_models,
+        *(canonical_asset_path(path) for path in configured_curve_roads),
         canonical_asset_path(spec.forest_tree_model),
     }
     if milestone_number >= 9:
@@ -3149,6 +3761,7 @@ def build_milestone4(
     dataset_override: OsmDataset | None = None,
 ) -> BuildResult:
     spec.validate()
+    _validate_asset_roots_exist(spec)
     output_dir = output_dir.resolve()
     prepare_output_directory(output_dir, spec.name, clean=clean)
 
@@ -3356,11 +3969,43 @@ def build_milestone4(
         )
         site_library.prepare(dataset, projection)
 
-    report_progress(42, "Fitting road geometry to terrain")
-    road_fit = fit_road_objects(
-        dataset, projection, elevations, spec, starting_id=1,
-        progress_callback=_scaled_progress_callback(42, 49),
+    report_progress(41, "Resolving configured straight and curve road donors")
+    effective_road_donors = _modded_road_effective_donors(spec)
+    report_progress(41, "Checking exact mod road 25/12/6 sibling models")
+    road_variant_availability = _modded_road_variant_availability(
+        spec, effective_road_donors
     )
+    report_progress(41, "Measuring mod road sibling geometry")
+    road_model_measurement_errors: dict[str, str] = {}
+    road_model_dimensions = _modded_road_model_dimensions(
+        spec,
+        effective_road_donors,
+        measurement_errors=road_model_measurement_errors,
+    )
+    report_progress(41, "Configured mod road families ready")
+    report_progress(42, "Fitting road geometry to terrain")
+    road_variant_token = _ROAD_MODEL_VARIANTS_AVAILABLE.set(
+        road_variant_availability or None
+    )
+    road_dimensions_token = _ROAD_MODEL_DIMENSIONS.set(
+        road_model_dimensions or None
+    )
+    road_measurement_errors_token = _ROAD_MODEL_MEASUREMENT_ERRORS.set(
+        road_model_measurement_errors or None
+    )
+    road_effective_token = _ROAD_MODEL_EFFECTIVE_DONORS.set(
+        effective_road_donors or None
+    )
+    try:
+        road_fit = fit_road_objects(
+            dataset, projection, elevations, spec, starting_id=1,
+            progress_callback=_scaled_progress_callback(42, 49),
+        )
+    finally:
+        _ROAD_MODEL_EFFECTIVE_DONORS.reset(road_effective_token)
+        _ROAD_MODEL_MEASUREMENT_ERRORS.reset(road_measurement_errors_token)
+        _ROAD_MODEL_DIMENSIONS.reset(road_dimensions_token)
+        _ROAD_MODEL_VARIANTS_AVAILABLE.reset(road_variant_token)
     road_fingerprint = _road_object_fingerprint(road_fit.objects)
     report_progress(49, "Road fitting complete")
     report_progress(52, "Placing buildings and vegetation")
@@ -3582,28 +4227,245 @@ def build_milestone4(
             or is_generated_paved_junction_model(model_path)
         )
     )
-    paved_texture_path = r"landtext\silnice.pac"
+    generated_gravel_usage = tuple(
+        (model_path, count)
+        for model_path, count in generated_infrastructure_usage
+        if (
+            is_generated_gravel_road_model(model_path)
+            or is_generated_gravel_junction_model(model_path)
+            or (
+                (signature := custom_road_model_signature(model_path)) is not None
+                and signature[0] == "gravel"
+            )
+        )
+    )
+    generated_dirt_usage = tuple(
+        (model_path, count)
+        for model_path, count in generated_infrastructure_usage
+        if (
+            is_generated_dirt_road_model(model_path)
+            or is_generated_dirt_junction_model(model_path)
+        )
+    )
+
+    paved_texture_path = r"o\road\sil_new.paa"
+    gravel_texture_path: str | None = None
+    dirt_texture_path: str | None = None
+    road_surface_styles: dict[str, RoadSurfaceStyle] = {}
+    road_surface_style_report: dict[str, dict[str, object]] = {}
+
+    road_texture_donors: dict[str, str] = {}
+
+    def effective_texture_donor(surface: str) -> str:
+        donor = _road_texture_donor(spec, surface)
+        return effective_road_donors.get(_road_model_key(donor), donor)
+
     if generated_paved_usage:
-        report_progress(79, "Resolving stock paved-road texture for generated fallback")
-        paved_model_scan = scan_assets(
+        road_texture_donors["paved"] = effective_texture_donor("paved")
+    configured_gravel = str(getattr(spec, "gravel_road_model", "") or "").strip()
+    configured_gravel_curve = str(
+        getattr(spec, "gravel_road_curve_model", "") or ""
+    ).strip()
+    borrow_dirt_surface_for_gravel = bool(
+        generated_gravel_usage
+        and not (configured_gravel_curve or configured_gravel)
+    )
+    if generated_gravel_usage and (configured_gravel_curve or configured_gravel):
+        road_texture_donors["gravel"] = effective_texture_donor("gravel")
+    if generated_dirt_usage or borrow_dirt_surface_for_gravel:
+        road_texture_donors["dirt"] = effective_texture_donor("dirt")
+
+    if road_texture_donors:
+        report_progress(79, "Resolving road textures from configured stock/modded donor models")
+        road_model_scan = locate_assets_fast(
             spec.asset_roots,
-            (spec.paved_road_model,),
+            tuple(road_texture_donors.values()),
             cache_dir=getattr(spec, "cache_dir", None),
             use_cache=bool(getattr(spec, "cache_enabled", True)),
             refresh=bool(getattr(spec, "cache_refresh", False)),
         )
-        paved_texture_path = _preferred_stock_paved_texture(
-            spec.paved_road_model,
-            model_texture_dependencies(
-                paved_model_scan.records,
-                spec.paved_road_model,
-            ),
-        )
+        donor_textures: dict[str, str | None] = {}
+        road_records = {
+            record.path: record
+            for record in road_model_scan.records
+        }
+        for surface, donor_model in road_texture_donors.items():
+            texture = _resolved_road_donor_texture(
+                road_model_scan.records,
+                surface=surface,
+                donor_model=donor_model,
+            )
+            donor_textures[surface] = texture
+            donor_record = road_records.get(canonical_asset_path(donor_model))
+            style = RoadSurfaceStyle()
+            report_entry: dict[str, object] = {
+                "source_format": None,
+                "visual_texture": texture,
+                "point_flag": None,
+                "face_flag": None,
+                "roadway_source_format": None,
+                "roadway_texture": None,
+                "roadway_point_flag": None,
+                "roadway_face_flag": None,
+            }
+            if donor_record is not None:
+                try:
+                    donor_bytes = read_asset_record_bytes(donor_record)
+                    visual_style = inspect_visual_surface_style(
+                        donor_bytes,
+                        texture_path=texture,
+                    )
+                    style = replace(
+                        style,
+                        point_flag=int(visual_style.point_flag),
+                        face_flag=int(visual_style.face_flag),
+                    )
+                    report_entry.update({
+                        "source_format": visual_style.source_format,
+                        "point_flag": (
+                            f"0x{int(visual_style.point_flag) & 0xFFFFFFFF:08x}"
+                        ),
+                        "face_flag": (
+                            f"0x{int(visual_style.face_flag) & 0xFFFFFFFF:08x}"
+                        ),
+                    })
+                except (
+                    OSError, ValueError, FileNotFoundError, ProxyCloneError
+                ):
+                    donor_bytes = None
+
+                if donor_bytes is not None:
+                    try:
+                        roadway_style = inspect_roadway_surface_style(
+                            donor_bytes
+                        )
+                        roadway_texture, roadway_texture_source = (
+                            _roadway_groundtype_texture_for_donor(
+                                donor_model,
+                                roadway_style.texture_path,
+                                texture,
+                            )
+                        )
+                        roadway_point_flag, roadway_face_flag = (
+                            _roadway_groundtype_flags(
+                                roadway_texture_source,
+                                roadway_style.point_flag,
+                                roadway_style.face_flag,
+                            )
+                        )
+                        style = replace(
+                            style,
+                            roadway_texture=roadway_texture,
+                            roadway_point_flag=roadway_point_flag,
+                            roadway_face_flag=roadway_face_flag,
+                        )
+                        report_entry.update({
+                            "roadway_source_format": roadway_style.source_format,
+                            "roadway_inspected_texture": roadway_style.texture_path,
+                            "roadway_inspected_point_flag": (
+                                f"0x{int(roadway_style.point_flag) & 0xFFFFFFFF:08x}"
+                            ),
+                            "roadway_inspected_face_flag": (
+                                f"0x{int(roadway_style.face_flag) & 0xFFFFFFFF:08x}"
+                            ),
+                            "roadway_texture_source": roadway_texture_source,
+                            "roadway_texture": roadway_texture,
+                            "roadway_point_flag": (
+                                f"0x{roadway_point_flag & 0xFFFFFFFF:08x}"
+                            ),
+                            "roadway_face_flag": (
+                                f"0x{roadway_face_flag & 0xFFFFFFFF:08x}"
+                            ),
+                        })
+                    except (
+                        OSError, ValueError, FileNotFoundError, ProxyCloneError
+                    ):
+                        roadway_texture, roadway_texture_source = (
+                            _roadway_groundtype_texture_for_donor(
+                                donor_model,
+                                None,
+                                texture,
+                            )
+                        )
+                        style = replace(
+                            style,
+                            roadway_texture=roadway_texture,
+                            roadway_point_flag=0,
+                            roadway_face_flag=0,
+                        )
+                        report_entry.update({
+                            "roadway_source_format": "visual-fallback",
+                            "roadway_inspected_texture": None,
+                            "roadway_texture_source": roadway_texture_source,
+                            "roadway_texture": roadway_texture,
+                            "roadway_point_flag": "0x00000000",
+                            "roadway_face_flag": "0x00000000",
+                        })
+            else:
+                roadway_texture, roadway_texture_source = (
+                    _roadway_groundtype_texture_for_donor(
+                        donor_model,
+                        None,
+                        texture,
+                    )
+                )
+                style = replace(
+                    style,
+                    roadway_texture=roadway_texture,
+                    roadway_point_flag=0,
+                    roadway_face_flag=0,
+                )
+                report_entry.update({
+                    "roadway_source_format": "visual-fallback",
+                    "roadway_inspected_texture": None,
+                    "roadway_texture_source": roadway_texture_source,
+                    "roadway_texture": roadway_texture,
+                    "roadway_point_flag": "0x00000000",
+                    "roadway_face_flag": "0x00000000",
+                })
+
+            road_surface_styles[surface] = style
+            road_surface_style_report[surface] = report_entry
+        if borrow_dirt_surface_for_gravel:
+            dirt_style = road_surface_styles.get("dirt")
+            if dirt_style is not None:
+                gravel_default = RoadSurfaceStyle()
+                road_surface_styles["gravel"] = replace(
+                    gravel_default,
+                    roadway_texture=dirt_style.roadway_texture,
+                    roadway_point_flag=dirt_style.roadway_point_flag,
+                    roadway_face_flag=dirt_style.roadway_face_flag,
+                )
+                road_surface_style_report["gravel"] = {
+                    "source_format": "generated-default",
+                    "visual_texture": None,
+                    "point_flag": (
+                        f"0x{int(gravel_default.point_flag) & 0xFFFFFFFF:08x}"
+                    ),
+                    "face_flag": (
+                        f"0x{int(gravel_default.face_flag) & 0xFFFFFFFF:08x}"
+                    ),
+                    "roadway_source_format": "borrowed-dirt-donor",
+                    "roadway_texture": dirt_style.roadway_texture,
+                    "roadway_point_flag": (
+                        f"0x{int(dirt_style.roadway_point_flag) & 0xFFFFFFFF:08x}"
+                    ),
+                    "roadway_face_flag": (
+                        f"0x{int(dirt_style.roadway_face_flag) & 0xFFFFFFFF:08x}"
+                    ),
+                }
+
+        paved_texture_path = donor_textures.get("paved") or paved_texture_path
+        gravel_texture_path = donor_textures.get("gravel")
+        dirt_texture_path = donor_textures.get("dirt")
     if generated_infrastructure_usage:
         infrastructure_library = ProceduralInfrastructureLibrary(
             spec.name,
             road_segment_length=spec.road_segment_length,
             paved_texture_path=paved_texture_path,
+            gravel_texture_path=gravel_texture_path,
+            dirt_texture_path=dirt_texture_path,
+            road_surface_styles=road_surface_styles,
             cache_dir=getattr(spec, "cache_dir", None),
             cache_enabled=bool(getattr(spec, "cache_enabled", True)),
             cache_refresh=bool(getattr(spec, "cache_refresh", False)),
@@ -3644,7 +4506,20 @@ def build_milestone4(
         + tuple(external_ground_textures)
         + tuple(osm_asset_mapping_report.selected_models)
         + tuple(osm_asset_mapping_report.selected_textures)
-        + ((paved_texture_path,) if generated_paved_usage else ())
+        + tuple(
+            value
+            for value in (
+                paved_texture_path if generated_paved_usage else None,
+                gravel_texture_path,
+                dirt_texture_path,
+                *(
+                    style.roadway_texture
+                    for style in road_surface_styles.values()
+                    if style.roadway_texture
+                ),
+            )
+            if value
+        )
     ))
     report_progress(82, "Scanning configured CWA asset roots and OSM asset mapping")
     asset_scan = scan_assets(
@@ -3877,7 +4752,31 @@ def build_milestone4(
         asset_catalogue_path, asset_scan,
         osm_asset_mapping=osm_asset_mapping_report.to_manifest(),
     )
-    _write_json(road_report_path, asdict(road_fit) | {"objects": len(road_fit.objects)})
+    road_donor_report = _road_donor_diagnostics(
+        spec,
+        effective_road_donors,
+        road_model_dimensions,
+    )
+    donor_provenance = _road_donor_provenance(
+        spec,
+        effective_road_donors,
+    )
+    for surface, details in donor_provenance.items():
+        road_donor_report.setdefault(surface, {}).update(details)
+    for surface, style in road_surface_style_report.items():
+        road_donor_report.setdefault(surface, {})["generated_surface_style"] = style
+    # Keep a compact donor record inside the generated world PBO as well as in
+    # the external road report. This makes mod-road width/style problems
+    # diagnosable from an uploaded PBO alone.
+    _write_json(source_dir / "i" / "road-donors.json", road_donor_report)
+    _write_json(
+        road_report_path,
+        asdict(road_fit)
+        | {
+            "objects": len(road_fit.objects),
+            "road_model_donors": road_donor_report,
+        },
+    )
     # Avoid duplicating every graded elevation in the human report.
     grading_doc = asdict(grading)
     grading_doc.pop("elevations", None)
@@ -4020,7 +4919,27 @@ def build_milestone4(
                 cache_refresh=site_library.cache_refresh,
             )
             repeat_site_library.prepare(dataset, projection)
-        repeat_roads = fit_road_objects(dataset, projection, repeat_elevations, spec, starting_id=1)
+        repeat_road_variant_token = _ROAD_MODEL_VARIANTS_AVAILABLE.set(
+            road_variant_availability or None
+        )
+        repeat_road_dimensions_token = _ROAD_MODEL_DIMENSIONS.set(
+            road_model_dimensions or None
+        )
+        repeat_road_measurement_errors_token = _ROAD_MODEL_MEASUREMENT_ERRORS.set(
+            road_model_measurement_errors or None
+        )
+        repeat_road_effective_token = _ROAD_MODEL_EFFECTIVE_DONORS.set(
+            effective_road_donors or None
+        )
+        try:
+            repeat_roads = fit_road_objects(
+                dataset, projection, repeat_elevations, spec, starting_id=1
+            )
+        finally:
+            _ROAD_MODEL_EFFECTIVE_DONORS.reset(repeat_road_effective_token)
+            _ROAD_MODEL_MEASUREMENT_ERRORS.reset(repeat_road_measurement_errors_token)
+            _ROAD_MODEL_DIMENSIONS.reset(repeat_road_dimensions_token)
+            _ROAD_MODEL_VARIANTS_AVAILABLE.reset(repeat_road_variant_token)
         repeat_nonroads = generate_world_objects(
             dataset,
             projection,
@@ -4066,6 +4985,9 @@ def build_milestone4(
                 spec.name,
                 road_segment_length=spec.road_segment_length,
                 paved_texture_path=paved_texture_path,
+                gravel_texture_path=gravel_texture_path,
+                dirt_texture_path=dirt_texture_path,
+                road_surface_styles=road_surface_styles,
                 cache_dir=getattr(spec, "cache_dir", None),
                 cache_enabled=bool(getattr(spec, "cache_enabled", True)),
                 cache_refresh=bool(getattr(spec, "cache_refresh", False)),

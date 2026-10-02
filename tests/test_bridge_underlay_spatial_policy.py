@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+from cwr_worldgen import bridge_render_policy as bridge
 from cwr_worldgen import bridge_underlay_cleanup_policy as cleanup
 from cwr_worldgen import bridge_underlay_spatial_policy as spatial
 from cwr_worldgen.model import WorldObject
@@ -119,8 +120,14 @@ def test_spatial_terminal_generation_matches_existing_geometry() -> None:
 
     assert added == 4
     assert len(filled.objects) == 4
+    terminal = float(bridge._STOCK_MODULE_SPACING_METRES)
     assert [obj.x for obj in filled.objects] == pytest.approx(
-        [12.5, 37.5, 212.5, 237.5]
+        [
+            12.5,
+            37.5,
+            250.0 - terminal + 12.5,
+            250.0 - terminal + 37.5,
+        ]
     )
     assert all(obj.z == pytest.approx(100.0) for obj in filled.objects)
     assert all(obj.y == pytest.approx(6.335) for obj in filled.objects)

@@ -111,6 +111,39 @@ def _heightmap_kwargs(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _add_road_model_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--paved-road-model",
+        default=r"o\road\sil25.p3d",
+        help="straight paved donor P3D used for placement and sibling discovery",
+    )
+    parser.add_argument(
+        "--paved-road-curve-model",
+        default="",
+        help="optional paved curve donor P3D used as the generated-bend style reference",
+    )
+    parser.add_argument(
+        "--gravel-road-model",
+        default="",
+        help="optional straight gravel donor P3D; blank keeps Worldgen's generated gravel family",
+    )
+    parser.add_argument(
+        "--gravel-road-curve-model",
+        default="",
+        help="optional gravel curve donor P3D used as the generated-bend style reference",
+    )
+    parser.add_argument(
+        "--dirt-road-model",
+        default=r"o\road\ces25.p3d",
+        help="straight dirt-track donor P3D used for placement and sibling discovery",
+    )
+    parser.add_argument(
+        "--dirt-road-curve-model",
+        default="",
+        help="optional dirt-track curve donor P3D used as the generated-bend style reference",
+    )
+
+
 def _add_osm_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--bbox", type=float, nargs=4, metavar=("SOUTH", "WEST", "NORTH", "EAST"), required=True, help="OpenStreetMap bounding box mapped onto the square WRP world")
     parser.add_argument("--osm-json", type=Path, help="saved Overpass JSON; omit to fetch the bbox from Overpass")
@@ -119,6 +152,7 @@ def _add_osm_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--water-depth", type=float, default=5.0, help="metres below sea level for OSM water")
     parser.add_argument("--coast-blend-cells", type=int, default=2, help="shore smoothing distance")
     parser.add_argument("--road-segment-length", type=float, default=24.5, help="road model spacing in metres")
+    _add_road_model_arguments(parser)
     parser.add_argument("--max-road-objects", type=int, default=DEFAULT_MAX_ROAD_OBJECTS, help=f"stock-road warning threshold; exceeded values are logged but the complete network is still emitted; 0 disables road objects (default: {DEFAULT_MAX_ROAD_OBJECTS:,})")
     parser.add_argument("--max-buildings", type=int, default=DEFAULT_MAX_BUILDINGS, help=f"building-footprint warning threshold; exceeded values are logged and generation continues; 0 disables buildings (default: {DEFAULT_MAX_BUILDINGS:,})")
     parser.add_argument("--building-min-area", type=float, default=20.0, help="minimum OSM footprint area in world m2")
@@ -141,6 +175,12 @@ def _osm_kwargs(args: argparse.Namespace) -> dict[str, object]:
         "water_depth": args.water_depth,
         "coastline_blend_cells": args.coast_blend_cells,
         "road_segment_length": args.road_segment_length,
+        "paved_road_model": args.paved_road_model,
+        "paved_road_curve_model": args.paved_road_curve_model,
+        "gravel_road_model": args.gravel_road_model,
+        "gravel_road_curve_model": args.gravel_road_curve_model,
+        "dirt_road_model": args.dirt_road_model,
+        "dirt_road_curve_model": args.dirt_road_curve_model,
         "max_road_objects": args.max_road_objects,
         "max_buildings": args.max_buildings,
         "building_minimum_area": args.building_min_area,
@@ -180,6 +220,7 @@ def _add_source_feature_arguments(
     parser.add_argument("--water-depth", type=float, default=5.0, help="metres below sea level for OSM water")
     parser.add_argument("--coast-blend-cells", type=int, default=2, help="shore smoothing distance")
     parser.add_argument("--road-segment-length", type=float, default=24.5, help="road model spacing in metres")
+    _add_road_model_arguments(parser)
     parser.add_argument("--max-road-objects", type=int, default=DEFAULT_MAX_ROAD_OBJECTS, help=f"stock-road warning threshold; exceeded values are logged but the complete network is still emitted; 0 disables road objects (default: {DEFAULT_MAX_ROAD_OBJECTS:,})")
     parser.add_argument("--max-buildings", type=int, default=DEFAULT_MAX_BUILDINGS, help=f"building-footprint warning threshold; exceeded values are logged and generation continues; 0 disables buildings (default: {DEFAULT_MAX_BUILDINGS:,})")
     parser.add_argument("--building-min-area", type=float, default=20.0, help="minimum OSM footprint area in world m2")
@@ -453,6 +494,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     _add_source_feature_arguments(milestone9, include_minor_roads_default=True)
     _add_playability_arguments(milestone9)
+    milestone9.add_argument(
+        "--no-custom-road-shapes",
+        action="store_false",
+        dest="custom_road_shapes",
+        help=(
+            "disable generated paved/gravel/dirt road shapes and retain the "
+            "legacy stock-piece/fallback behaviour"
+        ),
+    )
+    milestone9.set_defaults(custom_road_shapes=True)
     _add_normalization_arguments(milestone9, include_minor_flag=False)
     _add_constraint_solver_arguments(milestone9)
     _add_procedural_building_arguments(milestone9)
@@ -831,6 +882,12 @@ def main(argv: list[str] | None = None) -> int:
                 water_depth=args.water_depth,
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
+                paved_road_model=args.paved_road_model,
+                paved_road_curve_model=args.paved_road_curve_model,
+                gravel_road_model=args.gravel_road_model,
+                gravel_road_curve_model=args.gravel_road_curve_model,
+                dirt_road_model=args.dirt_road_model,
+                dirt_road_curve_model=args.dirt_road_curve_model,
                 max_road_objects=args.max_road_objects,
                 max_buildings=args.max_buildings,
                 building_minimum_area=args.building_min_area,
@@ -878,12 +935,19 @@ def main(argv: list[str] | None = None) -> int:
                 water_depth=args.water_depth,
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
+                paved_road_model=args.paved_road_model,
+                paved_road_curve_model=args.paved_road_curve_model,
+                gravel_road_model=args.gravel_road_model,
+                gravel_road_curve_model=args.gravel_road_curve_model,
+                dirt_road_model=args.dirt_road_model,
+                dirt_road_curve_model=args.dirt_road_curve_model,
                 max_road_objects=args.max_road_objects,
                 max_buildings=args.max_buildings,
                 building_minimum_area=args.building_min_area,
                 forest_tree_spacing=args.forest_tree_spacing,
                 max_forest_objects=args.max_forest_objects,
                 advisory_object_limits=True,
+                custom_road_shapes=args.custom_road_shapes,
                 road_connection_tolerance=args.road_connection_tolerance,
                 maximum_road_grade_percent=args.maximum_road_grade,
                 road_grade_radius=args.road_grade_radius,
@@ -924,6 +988,12 @@ def main(argv: list[str] | None = None) -> int:
                 water_depth=args.water_depth,
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
+                paved_road_model=args.paved_road_model,
+                paved_road_curve_model=args.paved_road_curve_model,
+                gravel_road_model=args.gravel_road_model,
+                gravel_road_curve_model=args.gravel_road_curve_model,
+                dirt_road_model=args.dirt_road_model,
+                dirt_road_curve_model=args.dirt_road_curve_model,
                 max_road_objects=args.max_road_objects,
                 max_buildings=args.max_buildings,
                 building_minimum_area=args.building_min_area,
@@ -981,6 +1051,12 @@ def main(argv: list[str] | None = None) -> int:
                 water_depth=args.water_depth,
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
+                paved_road_model=args.paved_road_model,
+                paved_road_curve_model=args.paved_road_curve_model,
+                gravel_road_model=args.gravel_road_model,
+                gravel_road_curve_model=args.gravel_road_curve_model,
+                dirt_road_model=args.dirt_road_model,
+                dirt_road_curve_model=args.dirt_road_curve_model,
                 max_road_objects=args.max_road_objects,
                 max_buildings=args.max_buildings,
                 building_minimum_area=args.building_min_area,
@@ -1060,6 +1136,12 @@ def main(argv: list[str] | None = None) -> int:
                 water_depth=args.water_depth,
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
+                paved_road_model=args.paved_road_model,
+                paved_road_curve_model=args.paved_road_curve_model,
+                gravel_road_model=args.gravel_road_model,
+                gravel_road_curve_model=args.gravel_road_curve_model,
+                dirt_road_model=args.dirt_road_model,
+                dirt_road_curve_model=args.dirt_road_curve_model,
                 max_road_objects=args.max_road_objects,
                 max_buildings=args.max_buildings,
                 building_minimum_area=args.building_min_area,

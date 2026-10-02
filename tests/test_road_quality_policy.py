@@ -137,6 +137,7 @@ def _junction_spec(
     bbox: tuple[float, float, float, float],
     *,
     procedural_gravel_roads: bool = False,
+    custom_road_shapes: bool = False,
 ) -> _Milestone9PlayabilitySpec:
     return _Milestone9PlayabilitySpec(
         name="road_quality",
@@ -147,6 +148,7 @@ def _junction_spec(
         max_road_objects=10000,
         strict_assets=False,
         procedural_gravel_roads=procedural_gravel_roads,
+        custom_road_shapes=custom_road_shapes,
     )
 
 
@@ -169,7 +171,7 @@ def _object_endpoints(obj):
         return playability._model_axis(obj, length)
 
     generated = re.search(
-        r"\\paved_w\d{3}_l(?P<length>\d{4})(?:_[lr]\d{2})?\.p3d$",
+        r"\\(?:road_)?paved_w\d{3}_l(?P<length>\d{4})(?:_[lr]\d{2,3})?\.p3d$",
         path,
     )
     if generated:
@@ -182,7 +184,7 @@ def _object_endpoints(obj):
 
 def test_policy_is_installed_for_playability_and_generator() -> None:
     assert playability.fit_road_objects is generator.fit_road_objects
-    assert playability.fit_road_objects.__module__ == "cwr_worldgen.gravel_family_policy"
+    assert paved_junctions._ORIGINAL_FIT is road_quality._fit
 
 
 def test_road_type_catalogue_lists_reference_families_turns_and_paved_junctions() -> None:
@@ -664,39 +666,24 @@ def test_base_fitter_does_not_preempt_stock_paved_junction_policy() -> None:
     )
     assert "kr_new_" in stock_plan.model_path.casefold()
 
-def test_diagonal_t_junction_falls_back_to_generated_hub_after_stock_fails(
+def test_diagonal_unified_t_uses_generated_hub_with_connected_approaches(
     tmp_path: Path,
 ) -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     dataset = _junction_dataset(projection, (650.0, 650.0))
-    spec = _junction_spec(bbox)
+    spec = _junction_spec(bbox, custom_road_shapes=True)
     report = playability.fit_road_objects(
         dataset, projection, [0.0] * (40 * 40), spec
     )
 
-    node = (500.0, 500.0)
-    key = playability._road_node_key(node)
-    stock_plan = paved_junctions._plans(
-        dataset, projection, spec
-    )[key]
-    assert not infrastructure.is_generated_paved_junction_model(
-        stock_plan.model_path
+    key = playability._road_node_key((500.0, 500.0))
+    generated_plan = paved_junctions._plans(dataset, projection, spec)[key]
+    assert infrastructure.is_generated_custom_road_junction_model(
+        generated_plan.model_path
     )
-
-    generated_plan = paved_junctions._generated_plan(
-        stock_plan.point,
-        tuple(
-            (arm.source_direction, arm.family)
-            for arm in stock_plan.arms
-        ),
-        world_name=spec.name,
-    )
-    assert generated_plan is not None
-
     assert report.junction_cap_objects == 1
     hub = report.objects[0]
-    assert infrastructure.is_generated_paved_junction_model(hub.model_path)
     assert hub.model_path.casefold() == generated_plan.model_path.casefold()
 
     approaches = report.objects[report.junction_cap_objects :]
@@ -724,9 +711,10 @@ def test_diagonal_t_junction_falls_back_to_generated_hub_after_stock_fails(
     )
     assert emitted.generated_variants == 1
     assert len(emitted.model_files) == 1
-    assert "paved_j3_" in emitted.model_files[0].casefold()
+    assert infrastructure.is_generated_custom_road_junction_model(
+        emitted.model_files[0]
+    )
     assert (tmp_path / emitted.model_files[0]).is_file()
-
 
 def test_skew_four_way_intersection_uses_stock_x_and_turn_approaches() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
@@ -781,25 +769,47 @@ def test_skew_four_way_intersection_uses_stock_x_and_turn_approaches() -> None:
     )
 
 
-def test_gravel_spur_does_not_promote_paved_through_road_to_junction_cap() -> None:
+def test_unified_gravel_spur_keeps_paved_through_road_without_cap() -> None:
     bbox = (0.0, 0.0, 0.01, 0.01)
     projection = BboxProjection.create(bbox, 1000.0)
     dataset = _mixed_paved_gravel_dataset(projection)
-    spec = _junction_spec(bbox, procedural_gravel_roads=True)
+    spec = _junction_spec(
+        bbox, procedural_gravel_roads=True, custom_road_shapes=True
+    )
     centre_key = playability._road_node_key((500.0, 500.0))
 
-    # Gravel is an underlay at a mixed node. It must not turn the two paved
-    # through-road incidents into a synthetic three-way paved junction.
-    assert centre_key not in road_quality._junction_geometry(dataset, projection, spec)
+    assert centre_key not in road_quality._junction_geometry(
+        dataset, projection, spec
+    )
     assert centre_key not in paved_junctions._plans(dataset, projection, spec)
-
     report = playability.fit_road_objects(
         dataset, projection, [0.0] * (40 * 40), spec
     )
     assert report.junction_cap_objects == 0
+    assert not any(
+        infrastructure.custom_road_junction_signature(obj.model_path)
+        is not None
+        for obj in report.objects
+    )
     assert any(
         playability.is_generated_gravel_road_model(obj.model_path)
         for obj in report.objects
+    )
+
+
+def test_legacy_gravel_spur_keeps_paved_through_road_without_cap() -> None:
+    bbox = (0.0, 0.0, 0.01, 0.01)
+    projection = BboxProjection.create(bbox, 1000.0)
+    dataset = _mixed_paved_gravel_dataset(projection)
+    spec = _junction_spec(bbox, procedural_gravel_roads=True)
+    object.__setattr__(spec, "custom_road_shapes", False)
+    centre_key = playability._road_node_key((500.0, 500.0))
+
+    assert centre_key not in road_quality._junction_geometry(
+        dataset, projection, spec
+    )
+    assert centre_key not in paved_junctions._plans(
+        dataset, projection, spec
     )
 
 

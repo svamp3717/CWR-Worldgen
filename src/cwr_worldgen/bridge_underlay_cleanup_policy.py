@@ -166,7 +166,12 @@ def _road_matches_terminal_underlay(obj, points, road_width, start_measure=0.0, 
 
 
 def _road_object_under_bridge(obj, spans) -> bool:
-    if _paved._family(obj.model_path) is None:
+    if not (
+        _paved._family(obj.model_path) is not None
+        or _p.is_generated_paved_road_model(obj.model_path)
+        or _p.is_generated_gravel_road_model(obj.model_path)
+        or _p.is_generated_dirt_road_model(obj.model_path)
+    ):
         return False
     for span in spans:
         if _road_matches_terminal_underlay(obj, span.points, span.road_width):
@@ -208,7 +213,26 @@ def _remove_bridge_underlays(report, spans):
     return (replace(report, objects=kept), removed) if removed else (report, 0)
 
 
-def _terminal_model(path: str) -> str | None:
+def _terminal_model(
+    path: str,
+    spec,
+    length_metres: float,
+) -> str | None:
+    if bool(getattr(spec, "custom_road_shapes", False)):
+        surface = _p.road_model_surface(spec, path)
+        width = _p.road_model_width_metres(path)
+        if (
+            surface in {"paved", "gravel", "dirt"}
+            and width is not None
+        ):
+            return _p.custom_road_model_path(
+                str(getattr(spec, "name", "world")),
+                surface,
+                float(width),
+                float(length_metres),
+                0.0,
+            )
+
     family = _paved._family(path)
     mapping = {
         "sil": r"o\road\sil25.p3d",
@@ -347,10 +371,14 @@ def _add_terminal_underlays(report, spans, elevations, spec):
     next_id = max((int(obj.object_id) for obj in objects), default=0) + 1
     added = 0
     for span in spans:
-        model = _terminal_model(span.road_model_path)
-        if model is None:
-            continue
         for start, end in _terminal_segments(span):
+            model = _terminal_model(
+                span.road_model_path,
+                spec,
+                math.dist(start, end),
+            )
+            if model is None:
+                continue
             if _has_matching_underlay(objects, start, end, model):
                 continue
             obj = _terminal_underlay_object(

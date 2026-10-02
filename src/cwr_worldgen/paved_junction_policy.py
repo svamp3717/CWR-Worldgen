@@ -25,8 +25,8 @@ _STRAIGHTS = {25: 25.0, 12: 12.5, 6: 6.25}
 _T = re.compile(r"kr_new_(sil|asf|kos)_(sil|asf|kos)_t\.p3d$", re.I)
 _CURVE = re.compile(r"(?:sil|asf|kos)10 (?:25|50|75|100)\.p3d$", re.I)
 _GENERATED_PAVED_ROAD = re.compile(
-    r"paved_w\d{3}_l(?P<length>\d{4})"
-    r"(?:_[lr](?:05|10|15|20|25|30|35|40|45))?\.p3d$",
+    r"(?:paved_w|road_paved_w)\d{3}_l(?P<length>\d{4})"
+    r"(?:_[lr](?:\d{2}|\d{3}))?\.p3d$",
     re.I,
 )
 _CATALOGUE = Path(__file__).with_name("data") / "road_types.json"
@@ -145,6 +145,10 @@ def _family_info() -> dict[str, dict]:
 def _family(path: str) -> str | None:
     if _p.is_generated_gravel_road_model(path):
         return "gravel"
+    if _pi.is_generated_paved_road_model(path):
+        # Generated/custom paved ribbons use the generic wide paved junction
+        # family. Their actual width is carried separately by generated hubs.
+        return "sil"
     value = path.replace("/", "\\").casefold()
     for entry in _catalogue()["families"]:
         root = str(entry.get("root", "")).casefold()
@@ -264,6 +268,8 @@ def _generated_plan(
     incidents,
     *,
     world_name: str,
+    width_override: float | None = None,
+    donor_surface: str | None = None,
 ) -> _Plan | None:
     """Build an exact-heading generated T/X only for stock-plan fallback."""
 
@@ -274,17 +280,32 @@ def _generated_plan(
 
     directions = tuple(value[0] for value in incidents)
     headings, axis = _pi.paved_junction_signature_for_directions(directions)
-    width = max(
-        _paved_half_width(family) * 2.0
-        for _direction_value, family in incidents
+    width = (
+        max(1.0, float(width_override))
+        if width_override is not None
+        else max(
+            _paved_half_width(family) * 2.0
+            for _direction_value, family in incidents
+        )
     )
-    model_path = _pi.paved_junction_signature_model_path(
-        world_name,
-        width,
-        headings,
+    model_path = (
+        _pi.custom_road_junction_model_path(
+            world_name,
+            donor_surface,
+            width,
+            headings,
+        )
+        if donor_surface in {"paved", "gravel", "dirt"}
+        else _pi.paved_junction_signature_model_path(
+            world_name,
+            width,
+            headings,
+        )
     )
     connector_radius = (
-        _JUNCTION_RADIUS
+        _JUNCTION_RADIUS - _pi.GENERATED_PAVED_JUNCTION_APPROACH_OVERLAP_METRES
+        if donor_surface in {"paved", "gravel", "dirt"}
+        else _JUNCTION_RADIUS
         + _pi.GENERATED_PAVED_JUNCTION_APPROACH_CLEARANCE_METRES
     )
     right = axis[1], -axis[0]
@@ -404,6 +425,8 @@ def _plan(
 def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
     incidents = {}
     positions = {}
+    widths_by_key: dict[tuple[int, int], list[float]] = {}
+    force_generated_keys: set[tuple[int, int]] = set()
     for feature, projected in zip(
         dataset.roads,
         _p._paved_junction_augmented_polylines(dataset, projection, spec),
@@ -415,9 +438,27 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
         points = tuple(_p._clean_road_points(projected))
         model = _p.road_model_for_tags(spec, feature.tags)
         family = _family(model)
+        surface = _p.road_model_surface(spec, model)
+        modded_paved = family is None and surface == "paved"
+        unified_paved = (
+            bool(getattr(spec, "custom_road_shapes", False))
+            and surface == "paved"
+        )
+        if modded_paved:
+            family = "sil"
         if family is None:
             continue
         dirt = _p.road_is_dirt(feature.tags)
+        donor_width = (
+            _p.road_model_width_metres(model)
+            if (modded_paved or unified_paved)
+            else None
+        )
+        road_width = (
+            max(1.0, float(donor_width))
+            if donor_width is not None
+            else max(1.0, float(_p.road_width_metres(feature.tags)))
+        )
         for index, (start, end) in enumerate(zip(points, points[1:])):
             if math.dist(start, end) <= 0.05:
                 continue
@@ -430,6 +471,9 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
                     (direction, dirt, model, segment, feature.osm_key)
                 )
                 positions.setdefault(key, node)
+                widths_by_key.setdefault(key, []).append(road_width)
+                if modded_paved or unified_paved:
+                    force_generated_keys.add(key)
 
     result = {}
     for key, raw in incidents.items():
@@ -437,21 +481,47 @@ def _plans(dataset, projection, spec) -> dict[tuple[int, int], _Plan]:
         if len(values) not in {3, 4}:
             continue
         typed = tuple((value[0], _family(value[2])) for value in values)
+        # Configured modded paved models are deliberately not part of the stock
+        # family catalogue. Treat them as generic paved only for the generated
+        # hub topology, never as permission to substitute a stock junction.
+        typed = tuple(
+            (
+                direction,
+                family
+                if family is not None
+                else (
+                    "sil"
+                    if _p.road_model_surface(spec, values[index][2]) == "paved"
+                    else None
+                ),
+            )
+            for index, (direction, family) in enumerate(typed)
+        )
         if any(family is None for _direction_value, family in typed):
             continue
-        plan = _plan(
-            positions[key],
-            tuple(
-                (direction, family)
-                for direction, family in typed
-                if family is not None
-            ),
-            world_name=(
-                spec.name
-                if bool(getattr(spec, "procedural_paved_road_fallback", False))
-                else None
-            ),
+        paved_incidents = tuple(
+            (direction, family)
+            for direction, family in typed
+            if family is not None
         )
+        if key in force_generated_keys:
+            plan = _generated_plan(
+                positions[key],
+                paved_incidents,
+                world_name=spec.name,
+                width_override=max(widths_by_key.get(key, (9.1,))),
+                donor_surface="paved",
+            )
+        else:
+            plan = _plan(
+                positions[key],
+                paved_incidents,
+                world_name=(
+                    spec.name
+                    if bool(getattr(spec, "procedural_paved_road_fallback", False))
+                    else None
+                ),
+            )
         if plan is not None:
             result[key] = plan
     return result
@@ -580,7 +650,14 @@ def _object_axis(obj, spec):
         return _p._model_axis(obj, length)
 
     family = _family(obj.model_path)
-    if family is None or _kind(family) != "paved":
+    if family is None:
+        if _p.road_model_surface(spec, obj.model_path) != "paved":
+            return None
+        measured = _p.road_model_dimensions(obj.model_path)
+        if measured is None:
+            return None
+        return _p._model_axis(obj, float(measured[1]))
+    if _kind(family) != "paved":
         return None
     if _CURVE.fullmatch(filename) or filename.startswith("kr_"):
         return None
@@ -764,6 +841,56 @@ def _cap_index(report, plan, used):
     return best[1]
 
 
+def _generated_approach_style(plan: _Plan, spec):
+    if not bool(getattr(spec, "custom_road_shapes", False)):
+        return None
+    signature = _pi.custom_road_junction_signature(plan.model_path)
+    if signature is None:
+        return None
+    surface, width, _headings = signature
+    if surface != "paved":
+        return None
+    return surface, float(width)
+
+
+def _generated_approach_object(
+    object_id,
+    plan: _Plan,
+    start,
+    end,
+    curve_degrees,
+    elevations,
+    spec,
+):
+    style = _generated_approach_style(plan, spec)
+    if style is None:
+        return None
+    surface, width = style
+    chord = math.dist(start, end)
+    if chord <= 0.05:
+        return None
+    # P3D filenames encode decimetres. Round upward so an approach piece
+    # overlaps the intended connector by a few centimetres rather than exposing
+    # a terrain sliver through normal rounding.
+    generated_length = math.ceil(chord * 10.0 - 1.0e-9) / 10.0
+    model_path = _pi.custom_road_model_path(
+        str(getattr(spec, "name", "world")),
+        surface,
+        width,
+        generated_length,
+        float(curve_degrees),
+    )
+    return _p._road_object_on_slope(
+        object_id,
+        model_path,
+        start,
+        end,
+        elevations,
+        spec,
+        vertical_offset=_p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
+    )
+
+
 def _segment_distance(point, axis):
     return _p._point_segment_distance(point, axis[0], axis[1])
 
@@ -773,12 +900,36 @@ def _approach_objects(plan, arm, choice, next_id, elevations, spec):
     point = arm.connector.point
     heading = _heading(arm.connector.direction)
     objects = []
+    generated_style = _generated_approach_style(plan, spec)
 
     for _index in range(choice.first_turns):
-        obj, point, heading = _curve_object(
-            next_id, family, choice.first_radius, point, heading,
-            choice.turn_sign, elevations, spec
-        )
+        if generated_style is not None:
+            next_point, next_heading = _arc_step(
+                point, heading, choice.turn_sign, choice.first_radius
+            )
+            obj = _generated_approach_object(
+                next_id,
+                plan,
+                point,
+                next_point,
+                choice.turn_sign * _TURN_DEGREES,
+                elevations,
+                spec,
+            )
+            if obj is None:
+                return (), next_id
+            point, heading = next_point, next_heading
+        else:
+            obj, point, heading = _curve_object(
+                next_id,
+                family,
+                choice.first_radius,
+                point,
+                heading,
+                choice.turn_sign,
+                elevations,
+                spec,
+            )
         objects.append(obj)
         next_id += 1
 
@@ -788,33 +939,84 @@ def _approach_objects(plan, arm, choice, next_id, elevations, spec):
             point[0] + direction[0] * _STRAIGHTS[6],
             point[1] + direction[1] * _STRAIGHTS[6],
         )
-        objects.append(
-            _straight_object(next_id, family, 6, point, end, elevations, spec)
-        )
+        if generated_style is not None:
+            obj = _generated_approach_object(
+                next_id, plan, point, end, 0.0, elevations, spec
+            )
+            if obj is None:
+                return (), next_id
+        else:
+            obj = _straight_object(
+                next_id, family, 6, point, end, elevations, spec
+            )
+        objects.append(obj)
         next_id += 1
         point = end
 
     for _index in range(choice.counter_turns):
-        obj, point, heading = _curve_object(
-            next_id, family, choice.counter_radius, point, heading,
-            -choice.turn_sign, elevations, spec
-        )
+        turn_sign = -choice.turn_sign
+        if generated_style is not None:
+            next_point, next_heading = _arc_step(
+                point, heading, turn_sign, choice.counter_radius
+            )
+            obj = _generated_approach_object(
+                next_id,
+                plan,
+                point,
+                next_point,
+                turn_sign * _TURN_DEGREES,
+                elevations,
+                spec,
+            )
+            if obj is None:
+                return (), next_id
+            point, heading = next_point, next_heading
+        else:
+            obj, point, heading = _curve_object(
+                next_id,
+                family,
+                choice.counter_radius,
+                point,
+                heading,
+                turn_sign,
+                elevations,
+                spec,
+            )
         objects.append(obj)
         next_id += 1
 
-    objects.append(
-        _straight_object(
-            next_id, family, choice.merge_nominal, point,
-            choice.merge_target, elevations, spec
+    if generated_style is not None:
+        obj = _generated_approach_object(
+            next_id,
+            plan,
+            point,
+            choice.merge_target,
+            0.0,
+            elevations,
+            spec,
         )
-    )
+        if obj is None:
+            return (), next_id
+    else:
+        obj = _straight_object(
+            next_id,
+            family,
+            choice.merge_nominal,
+            point,
+            choice.merge_target,
+            elevations,
+            spec,
+        )
+    objects.append(obj)
     return tuple(objects), next_id + 1
-
 
 def _apply_plans(report, plans, elevations, spec):
     if not plans or report.junction_cap_objects <= 0:
         return report
 
+    # Generated donor hubs still need the proven approach topology solver.
+    # In unified mode _approach_objects emits donor-styled generated pieces, so
+    # restoring this pass does not reintroduce hidden sil/asf sibling assets.
     applications = []
     used_caps = set()
     for key in sorted(plans):
@@ -869,7 +1071,11 @@ def _apply_plans(report, plans, elevations, spec):
         )
         objects[current_index] = _p._road_object_on_slope(
             old_id, plan.model_path, start, end, elevations, spec,
-            vertical_offset=0.060,
+            vertical_offset=(
+                _p._STOCK_ROAD_VERTICAL_OFFSET_METRES
+                if _pi.is_generated_paved_junction_model(plan.model_path)
+                else _p._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+            ),
         )
 
     next_id = max((obj.object_id for obj in objects), default=0) + 1
@@ -915,6 +1121,7 @@ def _trusted_legacy_asset_paths(spec, milestone_number: int):
     if (
         milestone_number < 8
         or not bool(getattr(spec, "stock_road_piece_fitting", False))
+        or bool(getattr(spec, "custom_road_shapes", False))
     ):
         return base
     trusted = set(base)

@@ -37,6 +37,11 @@ _MINOR_GRAVEL = re.compile(
     r"^gravel(?P<nominal>25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$",
     re.I,
 )
+_MINOR_CUSTOM = re.compile(
+    r"^road_(?P<surface>gravel|dirt)_w\d{3}_l(?P<length>\d{4})"
+    r"(?:_[lr]\d{3})?\.p3d$",
+    re.I,
+)
 
 _INSTALLED = False
 _ORIGINAL_RESOLVE = None
@@ -129,10 +134,13 @@ def _minor_object_length(obj, spec, protected_ids: frozenset[int]) -> float | No
     match = _MINOR_CES.fullmatch(filename)
     if match is None:
         match = _MINOR_GRAVEL.fullmatch(filename)
-    if match is None:
-        return None
-    nominal = int(match.group("nominal"))
-    return float(spec.road_segment_length) * nominal / 25.0
+    if match is not None:
+        nominal = int(match.group("nominal"))
+        return float(spec.road_segment_length) * nominal / 25.0
+    custom = _MINOR_CUSTOM.fullmatch(filename)
+    if custom is not None:
+        return int(custom.group("length")) / 10.0
+    return None
 
 
 def _suppression_budget_allows(

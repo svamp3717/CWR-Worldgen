@@ -12,10 +12,12 @@ clears the land-interaction bits so the already-grounded generated carrier owns
 terrain fitting instead.
 """
 
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from hashlib import sha256
 import io
+import math
 import struct
 
 from .assets import _decompress_lzss_stream, canonical_asset_path
@@ -49,6 +51,40 @@ class ProxyCloneInfo:
     face_count: int
     land_flagged_points: int
     texture_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class VisualModelDimensions:
+    """Plan-view dimensions and straightness of the first drawable visual LOD."""
+
+    source_format: str
+    width_metres: float
+    length_metres: float
+    height_metres: float
+    texture_paths: tuple[str, ...]
+    connector_width_metres: float | None = None
+    lateral_center_shift_metres: float = 0.0
+    is_straight_road_candidate: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class VisualSurfaceStyle:
+    """Dominant render metadata for one donor road surface texture."""
+
+    source_format: str
+    texture_path: str
+    point_flag: int
+    face_flag: int
+
+
+@dataclass(frozen=True, slots=True)
+class RoadwaySurfaceStyle:
+    """Dominant contact metadata from the donor's actual Roadway LOD."""
+
+    source_format: str
+    texture_path: str
+    point_flag: int
+    face_flag: int
 
 
 def proxy_safe_model_path(world_name: str, source_model: str) -> str:
@@ -120,7 +156,11 @@ def _proxy_lod(
     )
 
 
-def _read_odol_visual(data: bytes) -> tuple[_Lod, int, tuple[str, ...]]:
+def _read_odol_visual(
+    data: bytes,
+    *,
+    strip_land_deform: bool = True,
+) -> tuple[_Lod, int, tuple[str, ...]]:
     stream = io.BytesIO(data)
     if _read_exact(stream, 4, "ODOL signature") != b"ODOL":
         raise ProxyCloneError("not an ODOL P3D")
@@ -239,19 +279,27 @@ def _read_odol_visual(data: bytes) -> tuple[_Lod, int, tuple[str, ...]]:
         faces.append(_Face(texture, vertices, int(face_flags)))
 
     land_count = sum(bool(flag & _LAND_DEFORM_MASK) for flag in flags)
-    safe_flags = tuple(int(flag & ~_LAND_DEFORM_MASK) for flag in flags)
+    output_flags = (
+        tuple(int(flag & ~_LAND_DEFORM_MASK) for flag in flags)
+        if strip_land_deform
+        else tuple(int(flag) for flag in flags)
+    )
     lod = _proxy_lod(
         points=points,
         normals=normals,
         faces=tuple(faces),
-        point_flags=safe_flags,
+        point_flags=output_flags,
     )
     return lod, land_count, tuple(
         sorted({face.texture for face in faces if face.texture})
     )
 
 
-def _read_mlod_visual(data: bytes) -> tuple[_Lod, int, tuple[str, ...]]:
+def _read_mlod_visual(
+    data: bytes,
+    *,
+    strip_land_deform: bool = True,
+) -> tuple[_Lod, int, tuple[str, ...]]:
     stream = io.BytesIO(data)
     if _read_exact(stream, 4, "MLOD signature") != b"MLOD":
         raise ProxyCloneError("not an MLOD P3D")
@@ -324,15 +372,744 @@ def _read_mlod_visual(data: bytes) -> tuple[_Lod, int, tuple[str, ...]]:
         faces.append(_Face(texture, vertices, face_flags))
 
     land_count = sum(bool(flag & _LAND_DEFORM_MASK) for flag in flags)
-    safe_flags = tuple(int(flag & ~_LAND_DEFORM_MASK) for flag in flags)
+    output_flags = (
+        tuple(int(flag & ~_LAND_DEFORM_MASK) for flag in flags)
+        if strip_land_deform
+        else tuple(int(flag) for flag in flags)
+    )
     lod = _proxy_lod(
         points=tuple(points),
         normals=normals,
         faces=tuple(faces),
-        point_flags=safe_flags,
+        point_flags=output_flags,
     )
     return lod, land_count, tuple(
         sorted({face.texture for face in faces if face.texture})
+    )
+
+
+def _boundary_connector_width(
+    lod: _Lod,
+    *,
+    visual_width: float,
+    visual_length: float,
+) -> float | None:
+    """Measure curved modular-road mouths from visual boundary topology.
+
+    A curved road's far connector is not generally located at global max-Z.
+    When the ordinary terminal-Z bands cannot see both mouths, find straight,
+    collinear boundary-edge groups instead. Multi-lane/divided roads commonly
+    expose several lane-width boundary edges on each terminal line, so the full
+    mouth span remains measurable even when a median separates carriageways.
+    """
+
+    edge_counts: dict[
+        tuple[
+            tuple[float, float, float],
+            tuple[float, float, float],
+        ],
+        int,
+    ] = {}
+
+    def point_key(index: int) -> tuple[float, float, float]:
+        point = lod.points[index]
+        return (
+            round(float(point[0]), 5),
+            round(float(point[1]), 5),
+            round(float(point[2]), 5),
+        )
+
+    for face in lod.faces:
+        indices = tuple(
+            int(vertex[0])
+            for vertex in face.vertices
+            if 0 <= int(vertex[0]) < len(lod.points)
+        )
+        if len(indices) < 3:
+            continue
+        for first, second in zip(indices, (*indices[1:], indices[0])):
+            a = point_key(first)
+            b = point_key(second)
+            if a == b:
+                continue
+            edge = tuple(sorted((a, b)))
+            edge_counts[edge] = edge_counts.get(edge, 0) + 1
+
+    boundary_edges = tuple(
+        edge for edge, count in edge_counts.items() if count == 1
+    )
+    if len(boundary_edges) < 4:
+        return None
+
+    angle_cosine = math.cos(math.radians(1.0))
+    groups: list[dict[str, object]] = []
+    for a, b in boundary_edges:
+        dx = float(b[0] - a[0])
+        dz = float(b[2] - a[2])
+        edge_length = math.hypot(dx, dz)
+        if edge_length <= 1.0e-4:
+            continue
+        ux, uz = dx / edge_length, dz / edge_length
+        if ux < 0.0 or (abs(ux) <= 1.0e-9 and uz < 0.0):
+            ux, uz = -ux, -uz
+        nx, nz = -uz, ux
+        midpoint_x = (float(a[0]) + float(b[0])) * 0.5
+        midpoint_z = (float(a[2]) + float(b[2])) * 0.5
+        offset = nx * midpoint_x + nz * midpoint_z
+
+        selected = None
+        for group in groups:
+            gux, guz = group["direction"]  # type: ignore[misc]
+            dot = abs(ux * float(gux) + uz * float(guz))
+            if (
+                dot >= angle_cosine
+                and abs(offset - float(group["offset"])) <= 0.08
+            ):
+                selected = group
+                break
+        if selected is None:
+            selected = {
+                "direction": (ux, uz),
+                "offset": offset,
+                "edges": [],
+            }
+            groups.append(selected)
+        selected["edges"].append((a, b))  # type: ignore[index]
+
+    minimum_span = max(0.50, float(visual_width) * 0.15)
+    maximum_span = max(minimum_span, float(visual_width) * 1.25)
+    candidates: list[tuple[int, float, tuple[float, float]]] = []
+    for group in groups:
+        edges = tuple(group["edges"])  # type: ignore[arg-type]
+        if len(edges) < 2:
+            continue
+        ux, uz = group["direction"]  # type: ignore[misc]
+        projections = tuple(
+            float(point[0]) * float(ux) + float(point[2]) * float(uz)
+            for edge in edges
+            for point in edge
+        )
+        span = max(projections) - min(projections)
+        if not minimum_span <= span <= maximum_span:
+            continue
+        midpoint_projection = (min(projections) + max(projections)) * 0.5
+        nx, nz = -float(uz), float(ux)
+        offset = float(group["offset"])
+        centre = (
+            float(ux) * midpoint_projection + nx * offset,
+            float(uz) * midpoint_projection + nz * offset,
+        )
+        candidates.append((len(edges), float(span), centre))
+
+    if len(candidates) < 2:
+        return None
+
+    minimum_separation = max(
+        0.50,
+        math.hypot(float(visual_width), float(visual_length)) * 0.15,
+    )
+    best = None
+    for first_index, first in enumerate(candidates[:-1]):
+        for second in candidates[first_index + 1:]:
+            separation = math.dist(first[2], second[2])
+            if separation < minimum_separation:
+                continue
+            width_delta = abs(first[1] - second[1])
+            tolerance = max(0.25, min(first[1], second[1]) * 0.10)
+            if width_delta > tolerance:
+                continue
+            score = (
+                min(first[0], second[0]),
+                -width_delta,
+                separation,
+                min(first[1], second[1]),
+            )
+            if best is None or score > best[0]:
+                best = score, min(first[1], second[1])
+    return None if best is None else float(best[1])
+
+
+def inspect_visual_model_dimensions(data: bytes) -> VisualModelDimensions:
+    """Measure a conventional +Z road/object visual from ODOL or MLOD bytes.
+
+    CWA modular roads are authored with width on local X and travel direction on
+    local Z.  Keeping those axes explicit is useful: accepting a sideways donor
+    would make the fitter place the original mod model incorrectly even before
+    generated fallback geometry entered the picture.
+    """
+
+    if data.startswith(b"ODOL"):
+        lod, _land_count, textures = _read_odol_visual(data)
+        source_format = "ODOL"
+    elif data.startswith(b"MLOD"):
+        lod, _land_count, textures = _read_mlod_visual(data)
+        source_format = "MLOD"
+    else:
+        raise ProxyCloneError(
+            f"unsupported P3D signature {data[:4]!r}"
+        )
+
+    if not lod.points:
+        raise ProxyCloneError("visual LOD contains no points")
+    xs = tuple(float(point[0]) for point in lod.points)
+    ys = tuple(float(point[1]) for point in lod.points)
+    zs = tuple(float(point[2]) for point in lod.points)
+    width = max(xs) - min(xs)
+    length = max(zs) - min(zs)
+    height = max(ys) - min(ys)
+    if width <= 1.0e-4 or length <= 1.0e-4:
+        raise ProxyCloneError(
+            f"visual LOD has degenerate plan dimensions {width:g} x {length:g}"
+        )
+
+    # A modular road connects at its terminal mouths, not at the widest point
+    # anywhere in the visual LOD. Mod roads can carry shoulders, marker meshes,
+    # or other mid-span detail outside the actual road surface. Preserve the
+    # complete visual width above for diagnostics, but separately measure a
+    # narrow band at both ends for generated-road matching.
+    connector_band = max(0.05, min(0.75, length * 0.04))
+    lower_connector_x = tuple(
+        float(point[0]) for point in lod.points
+        if float(point[2]) <= min(zs) + connector_band
+    )
+    upper_connector_x = tuple(
+        float(point[0]) for point in lod.points
+        if float(point[2]) >= max(zs) - connector_band
+    )
+    connector_width = width
+    connector_centers: tuple[float, float] | None = None
+    if len(lower_connector_x) >= 2 and len(upper_connector_x) >= 2:
+        lower_width = max(lower_connector_x) - min(lower_connector_x)
+        upper_width = max(upper_connector_x) - min(upper_connector_x)
+        candidate_width = min(lower_width, upper_width)
+        # Ignore degenerate end markers. A real modular road mouth should still
+        # occupy a meaningful fraction of the complete visual footprint.
+        if candidate_width >= max(0.50, width * 0.15):
+            connector_width = candidate_width
+            connector_centers = (
+                (min(lower_connector_x) + max(lower_connector_x)) * 0.5,
+                (min(upper_connector_x) + max(upper_connector_x)) * 0.5,
+            )
+
+    if connector_centers is None:
+        boundary_width = _boundary_connector_width(
+            lod,
+            visual_width=width,
+            visual_length=length,
+        )
+        if boundary_width is not None:
+            connector_width = boundary_width
+
+    # Classify straightness from the same terminal mouths used for connector
+    # width whenever possible. Wider shoulders or asymmetric mid-span detail in
+    # mod roads must not make a genuinely straight donor look curved.
+    if connector_centers is not None:
+        lateral_shift = abs(connector_centers[1] - connector_centers[0])
+    else:
+        band = max(length * 0.20, 1.0e-4)
+        lower_x = tuple(
+            float(point[0]) for point in lod.points
+            if float(point[2]) <= min(zs) + band
+        )
+        upper_x = tuple(
+            float(point[0]) for point in lod.points
+            if float(point[2]) >= max(zs) - band
+        )
+        if lower_x and upper_x:
+            lower_center = (min(lower_x) + max(lower_x)) * 0.5
+            upper_center = (min(upper_x) + max(upper_x)) * 0.5
+            lateral_shift = abs(upper_center - lower_center)
+        else:
+            lateral_shift = 0.0
+    straight_tolerance = max(0.08, connector_width * 0.025)
+
+    return VisualModelDimensions(
+        source_format=source_format,
+        width_metres=width,
+        length_metres=length,
+        height_metres=height,
+        texture_paths=textures,
+        connector_width_metres=connector_width,
+        lateral_center_shift_metres=lateral_shift,
+        is_straight_road_candidate=lateral_shift <= straight_tolerance,
+    )
+
+
+
+
+@dataclass(frozen=True, slots=True)
+class _SurfaceLodSummary:
+    point_flags: tuple[int, ...]
+    textures: tuple[str, ...]
+    faces: tuple[tuple[str, int, tuple[int, ...]], ...]
+
+
+def _skip_odol_compressed_array(
+    stream: io.BytesIO,
+    *,
+    item_size: int,
+    label: str,
+) -> None:
+    count = _read_u32(stream, f"{label} count")
+    _read_odol_array(stream, count, item_size, label)
+
+
+def _read_odol_surface_lod(
+    stream: io.BytesIO,
+    *,
+    lod_index: int,
+) -> _SurfaceLodSummary:
+    flag_count = _read_u32(stream, f"ODOL LOD {lod_index} point flag count")
+    raw_flags = _read_odol_array(
+        stream, flag_count, 4, f"ODOL LOD {lod_index} point flags"
+    )
+    point_flags = tuple(
+        struct.unpack_from("<I", raw_flags, offset)[0]
+        for offset in range(0, len(raw_flags), 4)
+    )
+
+    uv_count = _read_u32(stream, f"ODOL LOD {lod_index} UV count")
+    _read_odol_array(stream, uv_count, 8, f"ODOL LOD {lod_index} UVs")
+
+    point_count = _read_u32(stream, f"ODOL LOD {lod_index} point count")
+    _read_exact(
+        stream,
+        point_count * _VEC3.size,
+        f"ODOL LOD {lod_index} points",
+    )
+    normal_count = _read_u32(stream, f"ODOL LOD {lod_index} normal count")
+    _read_exact(
+        stream,
+        normal_count * _VEC3.size,
+        f"ODOL LOD {lod_index} normals",
+    )
+    _read_exact(stream, 48, f"ODOL LOD {lod_index} bounds")
+
+    texture_count = _read_u32(stream, f"ODOL LOD {lod_index} texture count")
+    if texture_count > _MAX_TEXTURE_COUNT:
+        raise ProxyCloneError(
+            f"implausible ODOL LOD {lod_index} texture count {texture_count}"
+        )
+    textures = tuple(
+        _read_cstring(stream, f"ODOL LOD {lod_index} texture {index}")
+        for index in range(texture_count)
+    )
+
+    _skip_odol_compressed_array(
+        stream, item_size=2, label=f"ODOL LOD {lod_index} point-to-vertex"
+    )
+    _skip_odol_compressed_array(
+        stream, item_size=2, label=f"ODOL LOD {lod_index} vertex-to-point"
+    )
+
+    face_count = _read_u32(stream, f"ODOL LOD {lod_index} face count")
+    _read_u32(stream, f"ODOL LOD {lod_index} face allocation size")
+    if face_count > _MAX_FACE_COUNT:
+        raise ProxyCloneError(
+            f"implausible ODOL LOD {lod_index} face count {face_count}"
+        )
+    faces: list[tuple[str, int, tuple[int, ...]]] = []
+    for face_index in range(face_count):
+        face_flag = _read_u32(
+            stream, f"ODOL LOD {lod_index} face {face_index} flags"
+        )
+        texture_index = _I16.unpack(
+            _read_exact(
+                stream, 2,
+                f"ODOL LOD {lod_index} face {face_index} texture index",
+            )
+        )[0]
+        vertex_count = _U8.unpack(
+            _read_exact(
+                stream, 1,
+                f"ODOL LOD {lod_index} face {face_index} vertex count",
+            )
+        )[0]
+        raw = _read_exact(
+            stream,
+            vertex_count * 2,
+            f"ODOL LOD {lod_index} face {face_index} indices",
+        )
+        indices = (
+            struct.unpack("<" + "H" * vertex_count, raw)
+            if vertex_count
+            else ()
+        )
+        texture = (
+            textures[texture_index]
+            if 0 <= texture_index < len(textures)
+            else ""
+        )
+        faces.append((texture, int(face_flag), tuple(int(v) for v in indices)))
+
+    section_count = _read_u32(stream, f"ODOL LOD {lod_index} section count")
+    for section_index in range(section_count):
+        _read_exact(
+            stream, 18, f"ODOL LOD {lod_index} section {section_index}"
+        )
+
+    selection_count = _read_u32(
+        stream, f"ODOL LOD {lod_index} named selection count"
+    )
+    for selection_index in range(selection_count):
+        _read_cstring(
+            stream,
+            f"ODOL LOD {lod_index} named selection {selection_index} name",
+        )
+        for item_size, name in (
+            (2, "face indices"),
+            (1, "face weights"),
+            (4, "face selection indices"),
+        ):
+            _skip_odol_compressed_array(
+                stream,
+                item_size=item_size,
+                label=(
+                    f"ODOL LOD {lod_index} named selection "
+                    f"{selection_index} {name}"
+                ),
+            )
+        _read_exact(
+            stream, 1,
+            f"ODOL LOD {lod_index} named selection {selection_index} enabled",
+        )
+        for item_size, name in (
+            (4, "face selection indices 2"),
+            (2, "vertex indices"),
+            (1, "vertex weights"),
+        ):
+            _skip_odol_compressed_array(
+                stream,
+                item_size=item_size,
+                label=(
+                    f"ODOL LOD {lod_index} named selection "
+                    f"{selection_index} {name}"
+                ),
+            )
+
+    property_count = _read_u32(
+        stream, f"ODOL LOD {lod_index} named property count"
+    )
+    for property_index in range(property_count):
+        _read_cstring(
+            stream, f"ODOL LOD {lod_index} property {property_index} name"
+        )
+        _read_cstring(
+            stream, f"ODOL LOD {lod_index} property {property_index} value"
+        )
+
+    animation_count = _read_u32(
+        stream, f"ODOL LOD {lod_index} animation phase count"
+    )
+    for animation_index in range(animation_count):
+        _read_exact(
+            stream, 4, f"ODOL LOD {lod_index} animation {animation_index} time"
+        )
+        animation_points = _read_u32(
+            stream,
+            f"ODOL LOD {lod_index} animation {animation_index} point count",
+        )
+        _read_exact(
+            stream,
+            animation_points * _VEC3.size,
+            f"ODOL LOD {lod_index} animation {animation_index} points",
+        )
+
+    _read_exact(stream, 12, f"ODOL LOD {lod_index} colors and flags")
+    proxy_count = _read_u32(stream, f"ODOL LOD {lod_index} proxy count")
+    if proxy_count:
+        # Modular road donors should not contain proxies. Refuse to guess the
+        # legacy matrix payload size because a wrong skip would silently select
+        # another LOD as Roadway.
+        raise ProxyCloneError(
+            f"ODOL LOD {lod_index} contains {proxy_count} proxies; "
+            "roadway inspection requires a proxy-free road donor"
+        )
+
+    return _SurfaceLodSummary(
+        point_flags=point_flags,
+        textures=textures,
+        faces=tuple(faces),
+    )
+
+
+def _read_odol_surface_lods(data: bytes) -> tuple[
+    tuple[_SurfaceLodSummary, ...],
+    tuple[float, ...],
+]:
+    stream = io.BytesIO(data)
+    if _read_exact(stream, 4, "ODOL signature") != b"ODOL":
+        raise ProxyCloneError("not an ODOL P3D")
+    version = _read_u32(stream, "ODOL version")
+    lod_count = _read_u32(stream, "ODOL LOD count")
+    if version not in {6, 7}:
+        raise ProxyCloneError(
+            f"unsupported ODOL version {version}; expected 6 or 7"
+        )
+    if lod_count <= 0 or lod_count > 128:
+        raise ProxyCloneError(f"implausible ODOL LOD count {lod_count}")
+    lods = tuple(
+        _read_odol_surface_lod(stream, lod_index=index)
+        for index in range(lod_count)
+    )
+    resolutions = tuple(
+        struct.unpack("<f", _read_exact(stream, 4, "ODOL LOD resolution"))[0]
+        for _ in range(lod_count)
+    )
+    return lods, resolutions
+
+
+def _read_mlod_surface_lods(data: bytes) -> tuple[
+    tuple[_SurfaceLodSummary, ...],
+    tuple[float, ...],
+]:
+    stream = io.BytesIO(data)
+    signature, _major, _minor, _reserved, lod_count = _MLOD_HEADER.unpack(
+        _read_exact(stream, _MLOD_HEADER.size, "MLOD header")
+    )
+    if signature != b"MLOD":
+        raise ProxyCloneError("not an MLOD P3D")
+    lods: list[_SurfaceLodSummary] = []
+    resolutions: list[float] = []
+    tag_header = struct.Struct("<64si")
+    for lod_index in range(lod_count):
+        if _read_exact(stream, 4, "SP3X signature") != b"SP3X":
+            raise ProxyCloneError(
+                f"MLOD LOD {lod_index} is not an SP3X LOD"
+            )
+        head_size = _read_i32(stream, f"MLOD LOD {lod_index} header size")
+        _read_i32(stream, f"MLOD LOD {lod_index} version")
+        point_count = _read_i32(stream, f"MLOD LOD {lod_index} point count")
+        normal_count = _read_i32(stream, f"MLOD LOD {lod_index} normal count")
+        face_count = _read_i32(stream, f"MLOD LOD {lod_index} face count")
+        _read_i32(stream, f"MLOD LOD {lod_index} flags")
+        if head_size < 28 or head_size > 4096:
+            raise ProxyCloneError(
+                f"implausible MLOD LOD {lod_index} header size {head_size}"
+            )
+        if head_size > 28:
+            _read_exact(
+                stream,
+                head_size - 28,
+                f"MLOD LOD {lod_index} extra header",
+            )
+        points = tuple(
+            _POINT.unpack(
+                _read_exact(
+                    stream, _POINT.size, f"MLOD LOD {lod_index} point {i}"
+                )
+            )
+            for i in range(point_count)
+        )
+        _read_exact(
+            stream,
+            normal_count * _VEC3.size,
+            f"MLOD LOD {lod_index} normals",
+        )
+        faces: list[tuple[str, int, tuple[int, ...]]] = []
+        textures: set[str] = set()
+        for face_index in range(face_count):
+            texture = _read_exact(
+                stream, 32, f"MLOD LOD {lod_index} face texture"
+            ).split(b"\0", 1)[0].decode("latin-1")
+            vertex_count = _read_i32(
+                stream, f"MLOD LOD {lod_index} face vertex count"
+            )
+            vertices = tuple(
+                _FACE_VERTEX.unpack(
+                    _read_exact(
+                        stream,
+                        _FACE_VERTEX.size,
+                        f"MLOD LOD {lod_index} face vertex",
+                    )
+                )
+                for _ in range(4)
+            )
+            face_flag = _read_i32(
+                stream, f"MLOD LOD {lod_index} face flags"
+            )
+            indices = tuple(
+                int(vertex[0])
+                for vertex in vertices[:max(0, min(4, vertex_count))]
+                if 0 <= int(vertex[0]) < point_count
+            )
+            faces.append((texture, int(face_flag), indices))
+            if texture:
+                textures.add(texture)
+
+        if _read_exact(stream, 4, "MLOD TAGG signature") != b"TAGG":
+            raise ProxyCloneError(
+                f"MLOD LOD {lod_index} is missing TAGG metadata"
+            )
+        while True:
+            raw_name, payload_size = tag_header.unpack(
+                _read_exact(stream, tag_header.size, "MLOD tag header")
+            )
+            tag_name = raw_name.split(b"\0", 1)[0].decode("latin-1")
+            _read_exact(stream, payload_size, f"MLOD tag {tag_name}")
+            if tag_name == "#EndOfFile#":
+                break
+        resolution = struct.unpack(
+            "<f", _read_exact(stream, 4, "MLOD LOD resolution")
+        )[0]
+        lods.append(_SurfaceLodSummary(
+            point_flags=tuple(int(point[3]) & 0xFFFFFFFF for point in points),
+            textures=tuple(sorted(textures)),
+            faces=tuple(faces),
+        ))
+        resolutions.append(float(resolution))
+    return tuple(lods), tuple(resolutions)
+
+
+def _dominant_surface_style(
+    summary: _SurfaceLodSummary,
+    *,
+    source_format: str,
+) -> RoadwaySurfaceStyle:
+    usable = tuple(
+        face for face in summary.faces
+        if len(face[2]) in {3, 4}
+    )
+    if not usable:
+        raise ProxyCloneError("Roadway LOD contains no drawable faces")
+    texture, face_flag = Counter(
+        (face[0], int(face[1])) for face in usable
+    ).most_common(1)[0][0]
+    selected = tuple(
+        face for face in usable
+        if face[0] == texture and int(face[1]) == int(face_flag)
+    )
+    point_values = tuple(
+        int(summary.point_flags[index])
+        for face in selected
+        for index in face[2]
+        if 0 <= index < len(summary.point_flags)
+    )
+    if not point_values:
+        point_values = summary.point_flags
+    point_flag = (
+        Counter(point_values).most_common(1)[0][0]
+        if point_values
+        else 0
+    )
+    return RoadwaySurfaceStyle(
+        source_format=source_format,
+        texture_path=texture,
+        point_flag=int(point_flag),
+        face_flag=int(face_flag),
+    )
+
+
+def inspect_roadway_surface_style(data: bytes) -> RoadwaySurfaceStyle:
+    """Read the exact texture and flags from a donor model's Roadway LOD."""
+
+    if data.startswith(b"ODOL"):
+        lods, resolutions = _read_odol_surface_lods(data)
+        source_format = "ODOL"
+    elif data.startswith(b"MLOD"):
+        lods, resolutions = _read_mlod_surface_lods(data)
+        source_format = "MLOD"
+    else:
+        raise ProxyCloneError(
+            f"unsupported P3D signature {data[:4]!r}"
+        )
+
+    candidates = tuple(
+        index
+        for index, resolution in enumerate(resolutions)
+        if math.isclose(
+            float(resolution),
+            3.0e15,
+            rel_tol=1.0e-4,
+            abs_tol=1.0e8,
+        )
+    )
+    if not candidates:
+        raise ProxyCloneError("donor model has no Roadway LOD")
+    return _dominant_surface_style(
+        lods[candidates[0]],
+        source_format=source_format,
+    )
+
+
+def inspect_visual_surface_style(
+    data: bytes,
+    *,
+    texture_path: str | None = None,
+) -> VisualSurfaceStyle:
+    """Read donor visual flags that affect road alpha/render behaviour.
+
+    Road donors retain their raw visual point and face flags. Stock modular
+    roads use surface/land flag combinations such as 0x13f as part of their
+    native rendering and ground interaction, so road generation must not apply
+    the vegetation-proxy flag stripping policy here.
+    """
+
+    if data.startswith(b"ODOL"):
+        lod, _land_count, _textures = _read_odol_visual(
+            data,
+            strip_land_deform=False,
+        )
+        source_format = "ODOL"
+    elif data.startswith(b"MLOD"):
+        lod, _land_count, _textures = _read_mlod_visual(
+            data,
+            strip_land_deform=False,
+        )
+        source_format = "MLOD"
+    else:
+        raise ProxyCloneError(
+            f"unsupported P3D signature {data[:4]!r}"
+        )
+
+    if not lod.faces:
+        raise ProxyCloneError("visual LOD contains no drawable faces")
+
+    target = canonical_asset_path(texture_path or "")
+    target_base = target.rsplit("\\", 1)[-1] if target else ""
+    target_stem = target_base.rsplit(".", 1)[0] if "." in target_base else target_base
+
+    def matches(face: _Face) -> bool:
+        if not target:
+            return bool(face.texture)
+        value = canonical_asset_path(face.texture)
+        if value == target:
+            return True
+        base = value.rsplit("\\", 1)[-1]
+        stem = base.rsplit(".", 1)[0] if "." in base else base
+        return stem == target_stem and bool(stem)
+
+    selected = tuple(face for face in lod.faces if matches(face))
+    if not selected:
+        selected = tuple(face for face in lod.faces if face.texture)
+    if not selected:
+        selected = lod.faces
+
+    face_flag = Counter(int(face.flags) for face in selected).most_common(1)[0][0]
+
+    point_indices = tuple(
+        int(vertex[0])
+        for face in selected
+        for vertex in face.vertices
+        if 0 <= int(vertex[0]) < len(lod.point_flags)
+    )
+    point_values = tuple(
+        int(lod.point_flags[index])
+        for index in point_indices
+    ) or tuple(int(value) for value in lod.point_flags)
+    if not point_values:
+        raise ProxyCloneError("visual LOD contains no point flags")
+    point_flag = Counter(point_values).most_common(1)[0][0]
+
+    chosen_texture = next(
+        (face.texture for face in selected if face.texture),
+        texture_path or "",
+    )
+    return VisualSurfaceStyle(
+        source_format=source_format,
+        texture_path=chosen_texture,
+        point_flag=point_flag,
+        face_flag=face_flag,
     )
 
 

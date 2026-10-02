@@ -505,6 +505,9 @@ def _quality_aware_plan_run(job: Any):
                 job.variants,
                 start_trim=job.start_trim,
                 end_trim=job.end_trim,
+                generated_world_name=job.generated_world_name,
+                generated_surface=job.generated_surface,
+                generated_width_metres=job.generated_width_metres,
             )
             if fitted_pieces:
                 covered_by_hubs = False
@@ -541,9 +544,29 @@ def _quality_aware_plan_run(job: Any):
     )
 
 
-def _install_worker_quality_context(context: Any) -> None:
+def _road_worker_context() -> tuple[Any, Any, Any, Any]:
+    """Capture immutable road-model ContextVars for spawned planner workers."""
+
+    return (
+        _playability._ROAD_MODEL_VARIANTS_AVAILABLE.get(),
+        _playability._ROAD_MODEL_DIMENSIONS.get(),
+        _playability._ROAD_MODEL_MEASUREMENT_ERRORS.get(),
+        _playability._ROAD_MODEL_EFFECTIVE_DONORS.get(),
+    )
+
+
+def _install_worker_quality_context(
+    context: Any,
+    road_context: tuple[Any, Any, Any, Any] | None = None,
+) -> None:
     if context is not None:
         _quality._CONTEXT.set(context)
+    if road_context is not None:
+        variants, dimensions, measurement_errors, effective_donors = road_context
+        _playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(variants)
+        _playability._ROAD_MODEL_DIMENSIONS.set(dimensions)
+        _playability._ROAD_MODEL_MEASUREMENT_ERRORS.set(measurement_errors)
+        _playability._ROAD_MODEL_EFFECTIVE_DONORS.set(effective_donors)
 
 
 def _quality_aware_execute_run_jobs(jobs, progress_callback=None):
@@ -553,6 +576,7 @@ def _quality_aware_execute_run_jobs(jobs, progress_callback=None):
         return ()
 
     quality_context = _quality._CONTEXT.get()
+    road_context = _road_worker_context()
     use_cache = quality_context is not None
     if use_cache and (
         _PLAN_CACHE_ELEVATIONS is not quality_context.elevations
@@ -605,7 +629,7 @@ def _quality_aware_execute_run_jobs(jobs, progress_callback=None):
                 with ProcessPoolExecutor(
                     max_workers=workers,
                     initializer=_install_worker_quality_context,
-                    initargs=(quality_context,),
+                    initargs=(quality_context, road_context),
                 ) as executor:
                     futures = {
                         executor.submit(_parallel._plan_run_batch, batch): len(batch)
