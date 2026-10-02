@@ -1322,34 +1322,125 @@ def _normalize_buildings(
     return accepted, statistics
 
 
-def _coastline_ocean(lines: Sequence[LineString], boundary: Polygon) -> list[Polygon]:
+def _nearest_coastline_segment_indexes(
+    segments: Sequence[LineString],
+    points: Sequence[Point],
+    *,
+    batch_size: int = 8192,
+) -> tuple[int, ...]:
+    """Return the first nearest segment for every query point using one STRtree.
+
+    The old coastline classifier compared every polygonized face with every
+    coastline segment. Archipelagos therefore approached O(faces * segments)
+    distance calls and could spend minutes at normalization's 45% marker.
+    query_nearest performs the same nearest-segment search inside GEOS. When
+    several segments are exactly equidistant, choose the lowest segment index to
+    preserve Python min's historical first-match tie behaviour.
+    """
+
+    if not points:
+        return ()
+    if not segments:
+        return tuple(-1 for _ in points)
+
+    tree = STRtree(segments)
+    nearest = [-1] * len(points)
+    size = max(1, int(batch_size))
+    for offset in range(0, len(points), size):
+        batch = points[offset : offset + size]
+        pairs = tree.query_nearest(batch, all_matches=True)
+        if getattr(pairs, "ndim", 1) != 2:
+            # Sequence queries are two-row arrays on Shapely 2.x. Keep a tiny
+            # compatibility fallback rather than turning an unusual GEOS result
+            # into a silently misclassified coastline.
+            for local_index, point in enumerate(batch):
+                match = tree.nearest(point)
+                if match is not None:
+                    nearest[offset + local_index] = int(match)
+            continue
+        for local_index, segment_index in zip(pairs[0].tolist(), pairs[1].tolist()):
+            index = offset + int(local_index)
+            candidate = int(segment_index)
+            previous = nearest[index]
+            if previous < 0 or candidate < previous:
+                nearest[index] = candidate
+    return tuple(nearest)
+
+
+def _coastline_ocean(
+    lines: Sequence[LineString],
+    boundary: Polygon,
+    *,
+    lines_are_clipped: bool = False,
+    progress_callback: Callable[[int, str], None] | None = None,
+) -> list[Polygon]:
     if not lines:
         return []
-    clipped = [line.intersection(boundary) for line in lines]
-    clipped_lines = [line for geometry in clipped for line in _iter_lines(geometry) if line.length > 0.05]
+
+    def report(percent: int, message: str) -> None:
+        if progress_callback is not None:
+            progress_callback(max(0, min(100, int(percent))), message)
+
+    report(5, f"Clipping {len(lines):,} coastline lines")
+    if lines_are_clipped:
+        clipped_lines = [
+            line
+            for line in lines
+            if line is not None and not line.is_empty and line.length > 0.05
+        ]
+    else:
+        clipped = vector_intersection(list(lines), boundary)
+        clipped_lines = [
+            line
+            for geometry in clipped
+            for line in _iter_lines(geometry)
+            if line.length > 0.05
+        ]
     if not clipped_lines:
         return []
+
+    report(25, f"Polygonizing {len(clipped_lines):,} coastline lines")
     faces = list(polygonize(unary_union([boundary.boundary, *clipped_lines])))
     if not faces:
         return []
 
-    segments: list[tuple[LineString, tuple[float, float], tuple[float, float]]] = []
+    segments: list[LineString] = []
+    endpoints: list[tuple[tuple[float, float], tuple[float, float]]] = []
     for line in clipped_lines:
         coords = list(line.coords)
         for start, end in zip(coords, coords[1:]):
             segment = LineString([start, end])
             if segment.length > 0.01:
-                segments.append((segment, start, end))
+                segments.append(segment)
+                endpoints.append((start, end))
+    if not segments:
+        return []
 
+    report(
+        50,
+        f"Indexing {len(segments):,} coastline segments for {len(faces):,} polygon faces",
+    )
+    points = [face.representative_point() for face in faces]
+    nearest_indexes = _nearest_coastline_segment_indexes(segments, points)
+
+    report(80, f"Classifying {len(faces):,} coastline polygon faces")
     ocean: list[Polygon] = []
-    for face in faces:
-        point = face.representative_point()
-        segment, start, end = min(segments, key=lambda item: item[0].distance(point))
-        cross = (end[0] - start[0]) * (point.y - start[1]) - (end[1] - start[1]) * (point.x - start[0])
+    for face, point, segment_index in zip(faces, points, nearest_indexes):
+        if segment_index < 0:
+            continue
+        start, end = endpoints[segment_index]
+        cross = (
+            (end[0] - start[0]) * (point.y - start[1])
+            - (end[1] - start[1]) * (point.x - start[0])
+        )
         # OSM coastline direction has land on the left and water on the right.
         if cross < 0:
             ocean.append(face)
-    return _repair_polygonal(unary_union(ocean), boundary)
+
+    report(90, f"Dissolving {len(ocean):,} ocean polygon faces")
+    result = _repair_polygonal(unary_union(ocean), boundary)
+    report(100, f"Reconstructed {len(result):,} ocean polygon(s)")
+    return result
 
 
 def _extract_category_polygons(
@@ -1987,12 +2078,27 @@ def normalize_source_bundle(
         progress_callback=lambda value, message: progress(34 + int(value * 10 / 100), message),
     )
 
-    progress(45, "Reconstructing coastline and inland-water polygons")
+    progress(
+        45,
+        f"Reconstructing coastline from {len(coastline_elements):,} tagged elements",
+    )
     coastline_lines: list[LineString] = []
     for element in coastline_elements:
         coastline_lines.extend(_element_lines(element, projection, boundary))
-    ocean_polygons = _coastline_ocean(coastline_lines, boundary)
+    ocean_polygons = _coastline_ocean(
+        coastline_lines,
+        boundary,
+        lines_are_clipped=True,
+        progress_callback=lambda value, message: progress(
+            45 + int(value * 5 / 100),
+            message,
+        ),
+    )
 
+    progress(
+        51,
+        f"Reconstructing inland water from {len(water_polygon_elements):,} tagged elements",
+    )
     water_inputs = _extract_category_polygons(
         water_polygon_elements, projection, boundary,
         lambda tags: "inland" if (
@@ -2000,7 +2106,12 @@ def normalize_source_bundle(
             or tags.get("landuse") in {"reservoir", "basin"} or tags.get("landcover") == "water"
         ) else None,
     )
+    progress(53, f"Unioning {len(water_inputs):,} inland-water polygons")
     inland_water = _repair_polygonal(_spatial_union_polygonal(item[0] for item in water_inputs), boundary) if water_inputs else []
+    progress(
+        54,
+        f"Combining {len(ocean_polygons):,} ocean and {len(inland_water):,} inland-water polygons",
+    )
     water_geometry = _union_geometries([*ocean_polygons, *inland_water]) if ocean_polygons or inland_water else GeometryCollection()
 
     progress(55, f"Extracting farmland and urban polygons from {len(landuse_elements):,} tagged elements")
