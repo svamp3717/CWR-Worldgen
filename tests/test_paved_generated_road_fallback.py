@@ -799,6 +799,43 @@ def test_generated_roadway_lod_sits_above_visual_skin() -> None:
     assert all(face.flags == 0x5500 for face in roadway.faces)
 
 
+def test_generated_roadway_faces_match_negative_y_surface_normal() -> None:
+    keys = (
+        infrastructure.InfrastructureModelKey(
+            "road", "road_paved_w091_l0063", 91, 63
+        ),
+        infrastructure.InfrastructureModelKey(
+            "road", "road_paved_w091_l0044_r010", 91, 44
+        ),
+        infrastructure.InfrastructureModelKey(
+            "road", "road_gravel_w046_l0063", 46, 63
+        ),
+        infrastructure.InfrastructureModelKey(
+            "road", "road_j3_paved_w091_h000_090_200", 91, 125
+        ),
+    )
+
+    for key in keys:
+        _visual, _geometry, roadway, _land = infrastructure._road_lods(
+            key,
+            r"roads\surface.paa",
+            infrastructure.RoadSurfaceStyle(
+                roadway_texture=r"roads\contact.paa",
+            ),
+        )
+        assert roadway.normals == (infrastructure._ROAD_SURFACE_NORMAL,)
+        assert roadway.faces
+        for face in roadway.faces:
+            p0 = roadway.points[face.vertices[0][0]]
+            p1 = roadway.points[face.vertices[1][0]]
+            p2 = roadway.points[face.vertices[2][0]]
+            cross_y = (
+                (p1[2] - p0[2]) * (p2[0] - p0[0])
+                - (p1[0] - p0[0]) * (p2[2] - p0[2])
+            )
+            assert cross_y < 0.0
+
+
 def test_generated_paved_and_gravel_roads_use_native_render_metadata() -> None:
     keys = (
         infrastructure.InfrastructureModelKey(
