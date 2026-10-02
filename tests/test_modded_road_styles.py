@@ -1865,7 +1865,7 @@ def test_stock_road_donors_keep_known_visual_texture_fallbacks() -> None:
     ) == r"o\road\ces_hned.paa"
 
 
-def test_stock_roadway_groundtype_uses_cwa_cfgsurface_selector() -> None:
+def test_stock_roadway_groundtype_keeps_exact_donor_contact_texture() -> None:
     paved, paved_source = generator._roadway_groundtype_texture_for_donor(
         r"o\road\sil25.p3d",
         r"o\road\sil_new.paa",
@@ -1877,10 +1877,10 @@ def test_stock_roadway_groundtype_uses_cwa_cfgsurface_selector() -> None:
         r"o\road\ces_hned.paa",
     )
 
-    assert paved == r"landtext\silnice.pac"
-    assert paved_source == "stock-paved-cfgsurface"
-    assert dirt == r"landtext\cesta.pac"
-    assert dirt_source == "stock-dirt-cfgsurface"
+    assert paved == r"o\road\sil_new.paa"
+    assert paved_source == "donor-roadway-lod"
+    assert dirt == r"o\road\ces_hned.paa"
+    assert dirt_source == "donor-roadway-lod"
 
 
 def test_modded_roadway_groundtype_keeps_donor_contact_texture() -> None:
@@ -1894,12 +1894,12 @@ def test_modded_roadway_groundtype_keeps_donor_contact_texture() -> None:
     assert source == "donor-roadway-lod"
 
 
-def test_stock_groundtype_selector_uses_neutral_generated_roadway_flags() -> None:
+def test_roadway_groundtype_keeps_donor_contact_flags() -> None:
     assert generator._roadway_groundtype_flags(
-        "stock-paved-cfgsurface",
+        "donor-roadway-lod",
         0x13F,
         0x24102,
-    ) == (0, 0)
+    ) == (0x13F, 0x24102)
     assert generator._roadway_groundtype_flags(
         "donor-roadway-lod",
         0x55AA,
