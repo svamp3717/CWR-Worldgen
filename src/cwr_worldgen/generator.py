@@ -1732,29 +1732,16 @@ def _roadway_groundtype_texture_for_donor(
     inspected_texture: str | None,
     visual_texture: str,
 ) -> tuple[str, str]:
-    """Return the Roadway texture that actually selects the donor ground type.
+    """Return the exact Roadway texture carried by the selected donor.
 
-    Stock CWA ODOL road models report their visible road artwork on Roadway
-    faces (for example o\\road\\sil_new.paa), but copying that diffuse texture
-    into a generated MLOD does not reproduce the compiled ODOL surface class.
-    Generated MLODs must use CWA's runtime CfgSurfaces selector texture for
-    those stock families. Modded donors keep their inspected Roadway texture
-    exactly, because their own CfgSurfaces rules may intentionally match it.
+    The donor P3D is the authority for driving-surface classification. Rewriting
+    stock Roadway textures to guessed landtext selectors made generated models
+    differ from the models they were supposed to emulate. Preserve the inspected
+    Roadway texture for stock and modded donors alike; only fall back to the
+    visual texture when the donor has no usable Roadway texture.
     """
 
-    donor = canonical_asset_path(donor_model)
-    if donor.startswith((
-        canonical_asset_path(r"o\road\sil"),
-        canonical_asset_path(r"o\road\asf"),
-        canonical_asset_path(r"o\road\kos"),
-    )):
-        return r"landtext\silnice.pac", "stock-paved-cfgsurface"
-    if (
-        donor.startswith(canonical_asset_path(r"o\road\ces"))
-        or donor.startswith(canonical_asset_path(r"data3d\cesta"))
-    ):
-        return r"landtext\cesta.pac", "stock-dirt-cfgsurface"
-
+    _ = donor_model
     inspected = str(inspected_texture or "").replace("/", "\\").strip("\\")
     if inspected:
         return inspected, "donor-roadway-lod"
@@ -1766,14 +1753,9 @@ def _roadway_groundtype_flags(
     point_flag: int,
     face_flag: int,
 ) -> tuple[int, int]:
-    """Return contact flags safe for the emitted generated MLOD Roadway LOD."""
+    """Preserve the donor's Roadway contact flags exactly."""
 
-    if str(texture_source).startswith("stock-"):
-        # Stock ODOL carries compiled surface state that is not represented by
-        # simply copying its Roadway point/face flags into an MLOD. The known
-        # CfgSurfaces selector texture is the authority; keep MLOD contact flags
-        # neutral so they do not interfere with that classification.
-        return 0, 0
+    _ = texture_source
     return int(point_flag), int(face_flag)
 
 
@@ -2273,13 +2255,6 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
         canonical_asset_path(spec.forest_tree_model),
     }
     if milestone_number >= 9:
-        # Generated MLOD Roadway faces use these base-game CfgSurfaces selector
-        # names for stock paved/dirt donors. They are runtime selectors, not
-        # world-owned textures that should be repacked into the generated PBO.
-        trusted.update({
-            canonical_asset_path(r"landtext\silnice.pac"),
-            canonical_asset_path(r"landtext\cesta.pac"),
-        })
         if str(getattr(spec, "forest_profile", "malden")).casefold() in {"everon", "kolgujev", "vietnam"}:
             trusted.add(canonical_asset_path(str(getattr(spec, "forest_everon_steep_model", ""))))
         # Road-cut forest blocks use individually checked stock trees and bushes
