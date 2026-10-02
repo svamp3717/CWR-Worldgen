@@ -37,152 +37,27 @@ _ORIGINAL_PLACE_CLUSTER_AT: Any = None
 # Paved-junction planning
 
 
-def _fast_approach_choice_to_target(plan: Any, arm: Any, target: Any, tolerance: float):
-    """Reject impossible path templates in connector-local space first.
+def _fast_approach_choice_to_target(
+    plan: Any,
+    arm: Any,
+    target: Any,
+    tolerance: float,
+):
+    """Use the optimized connector-local solver installed underneath this layer.
 
-    Rotation/translation do not change the distance from the path endpoint to
-    the merge target.  Most templates miss every stock 6/12/25 m straight, so
-    reject those before transforming points back to world space and doing the
-    heading comparisons.  Survivors use the historical calculations verbatim.
+    paved_junction_performance_policy now performs squared-distance pruning,
+    local-space tangent checks, and precomputed template directions itself.
+    Keeping the older compatibility wrapper's world-space reconstruction would
+    simply redo the expensive work in every worker process.
     """
 
-    connector = arm.connector
-    delta = _paved._signed_angle(connector.direction, target.continuation)
-    preferred_sign = 1 if delta >= 0.0 else -1
-    initial_heading = _paved._heading(connector.direction)
-    local_target = _paved_perf._target_local_point(arm, target)
-    straight_lengths = tuple(
-        (nominal, float(_paved._STRAIGHTS[nominal])) for nominal in (6, 12, 25)
-    )
-    best = None
-
-    for turn_sign in (preferred_sign, -preferred_sign):
-        for path in _paved_perf._candidate_templates(arm, target, tolerance, turn_sign):
-            local_dx = local_target[0] - path.point[0]
-            local_dz = local_target[1] - path.point[1]
-            local_distance = math.hypot(local_dx, local_dz)
-            if local_distance <= 0.05:
-                continue
-
-            nominal_errors = []
-            for nominal, straight_length in straight_lengths:
-                length_error = abs(local_distance - straight_length)
-                if length_error <= tolerance:
-                    nominal_errors.append((nominal, length_error))
-            if not nominal_errors:
-                continue
-
-            # Preserve the original world-space arithmetic for viable templates
-            # so scoring/tie behaviour remains identical to the existing policy.
-            world_point = _paved._world(
-                path.point,
-                connector.point,
-                connector.direction,
-            )
-            merge_vector = (
-                target.point[0] - world_point[0],
-                target.point[1] - world_point[1],
-            )
-            merge_distance = math.hypot(*merge_vector)
-            if merge_distance <= 0.05:
-                continue
-            merge_direction = (
-                merge_vector[0] / merge_distance,
-                merge_vector[1] / merge_distance,
-            )
-            path_direction = _paved._direction(
-                (initial_heading + path.heading) % 360.0
-            )
-            in_error = _paved._angle(path_direction, merge_direction)
-            out_error = _paved._angle(merge_direction, target.continuation)
-            if max(in_error, out_error) > 12.0:
-                continue
-
-            # Recompute the tiny length error from the historical world-space
-            # distance for exact score compatibility after the local prefilter.
-            for nominal, _local_error in nominal_errors:
-                length_error = abs(
-                    merge_distance - float(_paved._STRAIGHTS[nominal])
-                )
-                if length_error > tolerance:
-                    continue
-                piece_count = (
-                    path.first_turns
-                    + path.counter_turns
-                    + path.middle_units
-                    + 1
-                )
-                score = (
-                    length_error * 20.0
-                    + in_error
-                    + out_error
-                    + piece_count * 0.25
-                    + path.first_radius * 0.001
-                    + path.counter_radius * 0.001
-                )
-                choice = _paved._ApproachChoice(
-                    path.turn_sign,
-                    path.first_turns,
-                    path.first_radius,
-                    path.middle_units,
-                    path.counter_turns,
-                    path.counter_radius,
-                    nominal,
-                    target.point,
-                )
-                if best is None or score < best[0]:
-                    best = score, choice
-    return best
+    return _ORIGINAL_APPROACH_CHOICE(plan, arm, target, tolerance)
 
 
 def _fast_plan_application(state: Any, plan: Any, spec: Any):
-    """Find the same lowest-score distinct-arm assignment with pruning."""
+    """Use the exact branch-and-bound assignment installed underneath."""
 
-    options = tuple(
-        _paved_perf._arm_options(state, plan, arm, spec)
-        for arm in plan.arms
-    )
-    if any(not values for values in options):
-        return None
-
-    # A lower bound for every remaining arm lets us skip Cartesian subtrees that
-    # cannot beat the incumbent.  Traversal order is unchanged, and equal scores
-    # are still ignored just like the original ``product`` implementation.
-    minimum_tail = [0.0] * (len(options) + 1)
-    for index in range(len(options) - 1, -1, -1):
-        minimum_tail[index] = minimum_tail[index + 1] + min(
-            float(value[0]) for value in options[index]
-        )
-
-    best_score = math.inf
-    best_combination: tuple[Any, ...] | None = None
-    chosen: list[Any] = []
-    used_object_ids: set[int] = set()
-
-    def visit(arm_index: int, score: float) -> None:
-        nonlocal best_score, best_combination
-        if arm_index == len(options):
-            if score < best_score:
-                best_score = score
-                best_combination = tuple(chosen)
-            return
-        if score + minimum_tail[arm_index] >= best_score:
-            return
-        for value in options[arm_index]:
-            object_id = int(value[1].object_id)
-            if object_id in used_object_ids:
-                continue
-            next_score = score + float(value[0])
-            if next_score + minimum_tail[arm_index + 1] >= best_score:
-                continue
-            used_object_ids.add(object_id)
-            chosen.append(value)
-            visit(arm_index + 1, next_score)
-            chosen.pop()
-            used_object_ids.remove(object_id)
-
-    visit(0, 0.0)
-    return best_combination
+    return _ORIGINAL_PLAN_APPLICATION(state, plan, spec)
 
 
 # ---------------------------------------------------------------------------
