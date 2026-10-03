@@ -138,6 +138,62 @@ def test_cached_generated_paved_transform_matches_stock_surface_plane() -> None:
         perf._CONTEXT.reset(token)
 
 
+def test_cached_generated_surfaces_preserve_dirt_gravel_paved_stack() -> None:
+    elevations = (0.0,) * 4
+    spec = SimpleNamespace(cells=2, cell_size=25.0)
+    start = (0.0, 0.0)
+    end = (0.0, 6.25)
+    cases = (
+        ("dirt", playability._STOCK_DIRT_VERTICAL_OFFSET_METRES, 3.5),
+        ("gravel", playability._STOCK_GRAVEL_VERTICAL_OFFSET_METRES, 4.6),
+        ("paved", playability._STOCK_ROAD_VERTICAL_OFFSET_METRES, 9.1),
+    )
+
+    context = perf._Context(elevations, 2, 25.0)
+    context.geometry[perf._geometry_key(start, end)] = (
+        0.0,
+        0.0,
+        3.125,
+        0.0,
+        0.0,
+    )
+    token = perf._CONTEXT.set(context)
+    try:
+        heights = {}
+        for index, (surface, requested_height, width) in enumerate(
+            cases, start=1
+        ):
+            model = infrastructure.custom_road_model_path(
+                "height_world",
+                surface,
+                width,
+                6.25,
+            )
+            obj = perf._cached_road_object(
+                index,
+                model,
+                start,
+                end,
+                elevations,
+                spec,
+                vertical_offset=requested_height,
+            )
+            actual = (
+                obj.y + infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+            )
+            assert np.isclose(
+                actual,
+                requested_height,
+                rtol=0.0,
+                atol=1.0e-12,
+            )
+            heights[surface] = actual
+    finally:
+        perf._CONTEXT.reset(token)
+
+    assert heights["dirt"] < heights["gravel"] < heights["paved"]
+
+
 def test_vector_chain_diagnostics_match_scalar_axis_formula() -> None:
     cells = 4
     elevations = (2.0,) * (cells * cells)
