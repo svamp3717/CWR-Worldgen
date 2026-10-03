@@ -621,10 +621,17 @@ def _fit_stock_piece_road_objects_parallel(
         half = cap_piece.length_metres * 0.5
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
+        cap_surface = _playability.road_model_surface(
+            spec, cap_piece.model_path
+        )
         cap_vertical_offset = (
-            _playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
-            if donor_junction is not None or generated_paved_t is not None
-            else _playability._STOCK_DIRT_VERTICAL_OFFSET_METRES
+            _playability._road_surface_vertical_offset(cap_surface)
+            if donor_junction is not None
+            else _playability._road_surface_vertical_offset("gravel")
+            if all_gravel
+            else _playability._road_surface_vertical_offset("paved")
+            if generated_paved_t is not None
+            else _playability._road_surface_vertical_offset("dirt")
             if use_dirt
             else _playability._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
         )
