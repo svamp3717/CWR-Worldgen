@@ -194,12 +194,13 @@ class TownLocation:
 
 # Stock road meshes sit extremely close to the terrain. At mixed crossings the
 # engine can therefore z-fight when two road families share the same height.
-# Keep gravel slightly below ordinary asphalt and emit paved chains
-# after unpaved chains so asphalt consistently wins both geometry and draw order.
-_STOCK_ROAD_VERTICAL_OFFSET_METRES = 0.035
+# Keep one explicit surface stack everywhere: dirt < gravel < paved. Object
+# ordering mirrors these offsets so CWA gets the same precedence from geometry
+# and draw order instead of making two ancient rendering heuristics argue.
 _STOCK_DIRT_VERTICAL_OFFSET_METRES = 0.010
-_STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES = 0.060
 _STOCK_GRAVEL_VERTICAL_OFFSET_METRES = 0.018
+_STOCK_ROAD_VERTICAL_OFFSET_METRES = 0.035
+_STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES = 0.060
 
 # OSM extracts are not always topologically noded where two paved ways visibly
 # cross. Before stock-piece fitting, promote safe planar crossings and tiny
@@ -240,12 +241,23 @@ def _road_surface_priority(tags: Mapping[str, str]) -> int:
     return 0  # dirt / earth
 
 
-def _road_vertical_offset(tags: Mapping[str, str]) -> float:
-    if road_is_gravel(tags):
+def _road_surface_vertical_offset(surface: str | None) -> float:
+    """Return the shared visual surface plane for one road family."""
+
+    value = str(surface or "").casefold()
+    if value == "gravel":
         return _STOCK_GRAVEL_VERTICAL_OFFSET_METRES
-    if road_is_dirt(tags):
+    if value == "dirt":
         return _STOCK_DIRT_VERTICAL_OFFSET_METRES
     return _STOCK_ROAD_VERTICAL_OFFSET_METRES
+
+
+def _road_vertical_offset(tags: Mapping[str, str]) -> float:
+    if road_is_gravel(tags):
+        return _road_surface_vertical_offset("gravel")
+    if road_is_dirt(tags):
+        return _road_surface_vertical_offset("dirt")
+    return _road_surface_vertical_offset("paved")
 
 
 def _road_is_explicit_bridge(tags: Mapping[str, str]) -> bool:
@@ -2329,23 +2341,15 @@ def _road_object_on_slope(
     if (
         is_generated_gravel_road_model(model_path)
         or is_generated_dirt_road_model(model_path)
+        or is_generated_paved_road_model(model_path)
         or is_generated_gravel_junction_model(model_path)
         or is_generated_dirt_junction_model(model_path)
-    ):
-        # Gravel is a normal terrain-following road, not a raised slab. Place
-        # its rendered surface and Roadway LOD exactly on the fitted terrain
-        # plane and never lift the whole piece to clear a local terrain bump.
-        # Terrain grading already owns the road surface underneath.
-        placement_offset = -GENERATED_GRAVEL_VISUAL_TOP_METRES * math.cos(
-            math.radians(pitch)
-        )
-    elif (
-        is_generated_paved_road_model(model_path)
         or is_generated_paved_junction_model(model_path)
     ):
-        # Generated paved P3Ds author their visible/Roadway skin 25 mm above
-        # model origin. Cancel that local rise so the world-space paved surface
-        # lands on the same requested plane as adjacent stock road P3Ds.
+        # Every generated road family authors its visible skin 25 mm above the
+        # model origin. Preserve the requested world-space surface plane rather
+        # than flattening generated dirt/gravel back onto terrain. This keeps the
+        # same explicit stack as stock placement: dirt < gravel < paved.
         placement_offset = (
             float(vertical_offset)
             - GENERATED_GRAVEL_VISUAL_TOP_METRES * math.cos(math.radians(pitch))
@@ -2768,9 +2772,11 @@ def _fit_stock_piece_road_objects(
         start_point = (node[0] - axis[0] * half, node[1] - axis[1] * half)
         end_point = (node[0] + axis[0] * half, node[1] + axis[1] * half)
         cap_vertical_offset = (
-            _STOCK_ROAD_VERTICAL_OFFSET_METRES
+            _road_surface_vertical_offset("gravel")
+            if all_gravel
+            else _road_surface_vertical_offset("paved")
             if generated_paved_t is not None
-            else _STOCK_DIRT_VERTICAL_OFFSET_METRES
+            else _road_surface_vertical_offset("dirt")
             if use_dirt
             else _STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
         )
