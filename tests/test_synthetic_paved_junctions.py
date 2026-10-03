@@ -205,10 +205,12 @@ def test_dirt_road_surface_is_always_below_paved_surface() -> None:
         {"highway": "track", "surface": "gravel"}
     )
 
-    assert dirt_offset < paved_offset
-    assert gravel_offset < paved_offset
-    assert playability._STOCK_DIRT_VERTICAL_OFFSET_METRES < (
-        playability._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+    assert dirt_offset < gravel_offset < paved_offset
+    assert (
+        playability._STOCK_DIRT_VERTICAL_OFFSET_METRES
+        < playability._STOCK_GRAVEL_VERTICAL_OFFSET_METRES
+        < playability._STOCK_ROAD_VERTICAL_OFFSET_METRES
+        < playability._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
     )
 
 
