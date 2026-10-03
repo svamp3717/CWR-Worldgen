@@ -335,6 +335,62 @@ def test_generated_paved_hub_and_ribbon_match_stock_surface_height() -> None:
         )
 
 
+def test_generated_road_surfaces_keep_dirt_gravel_paved_height_order() -> None:
+    spec = SimpleNamespace(cells=4, cell_size=10.0)
+    elevations = (0.0,) * 16
+    cases = (
+        (
+            "dirt",
+            {"highway": "track", "surface": "dirt"},
+            3.5,
+        ),
+        (
+            "gravel",
+            {"highway": "track", "surface": "gravel"},
+            4.6,
+        ),
+        (
+            "paved",
+            {"highway": "residential", "surface": "asphalt"},
+            9.1,
+        ),
+    )
+
+    surface_heights = {}
+    for index, (surface, tags, width) in enumerate(cases, start=1):
+        requested_surface_height = playability._road_vertical_offset(tags)
+        model = infrastructure.custom_road_model_path(
+            "height_world",
+            surface,
+            width,
+            6.25,
+        )
+        obj = playability._road_object_on_slope(
+            index,
+            model,
+            (0.0, 0.0),
+            (0.0, 6.25),
+            elevations,
+            spec,
+            vertical_offset=requested_surface_height,
+        )
+        actual_surface_height = (
+            obj.y + infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+        )
+        assert math.isclose(
+            actual_surface_height,
+            requested_surface_height,
+            abs_tol=1.0e-9,
+        )
+        surface_heights[surface] = actual_surface_height
+
+    assert (
+        surface_heights["dirt"]
+        < surface_heights["gravel"]
+        < surface_heights["paved"]
+    )
+
+
 def test_generated_curved_paved_turn_restores_terrtest39_seam_geometry() -> None:
     curved_key = infrastructure.InfrastructureModelKey(
         "road",
