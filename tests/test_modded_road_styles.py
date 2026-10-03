@@ -595,6 +595,113 @@ def test_parallel_fitter_emits_custom_donor_junction_cap() -> None:
     assert cap.model_path.startswith(r"donorworld\i\road_j3_paved_w052_")
 
 
+@pytest.mark.parametrize(
+    ("surface", "donor", "tags", "width"),
+    (
+        (
+            "dirt",
+            r"modroads\dirt25.p3d",
+            {"highway": "track", "surface": "dirt"},
+            3.8,
+        ),
+        (
+            "gravel",
+            r"modroads\gravel25.p3d",
+            {"highway": "track", "surface": "gravel"},
+            4.6,
+        ),
+        (
+            "paved",
+            r"modroads\paved25.p3d",
+            {"highway": "residential", "surface": "asphalt"},
+            5.2,
+        ),
+    ),
+)
+def test_custom_donor_junction_caps_follow_surface_height_stack(
+    surface: str,
+    donor: str,
+    tags: dict[str, str],
+    width: float,
+) -> None:
+    bbox = (59.40, 16.82, 59.41, 16.83)
+    projection = BboxProjection.create(bbox, 1000.0)
+    centre = (500.0, 500.0)
+    dataset = OsmDataset(
+        source_generator=f"{surface}-junction-height",
+        element_count=2,
+        coastlines=(),
+        water=(),
+        forests=(),
+        farmland=(),
+        urban=(),
+        roads=(
+            OsmLineFeature(
+                "way/main",
+                tags,
+                tuple(
+                    projection.to_latlon(point)
+                    for point in ((500.0, 250.0), centre, (500.0, 750.0))
+                ),
+            ),
+            OsmLineFeature(
+                "way/branch",
+                tags,
+                tuple(
+                    projection.to_latlon(point)
+                    for point in (centre, (750.0, 500.0))
+                ),
+            ),
+        ),
+    )
+    road_overrides = {
+        "paved": {"paved_road_model": donor},
+        "gravel": {"gravel_road_model": donor},
+        "dirt": {"dirt_road_model": donor},
+    }[surface]
+    spec = _Milestone9PlayabilitySpec(
+        name="junctionheight",
+        heightmap_path=Path("unused.png"),
+        bbox=bbox,
+        cells=40,
+        cell_size=25.0,
+        max_road_objects=10000,
+        strict_assets=False,
+        **road_overrides,
+    )
+    donor_key = playability._road_model_key(donor)
+    dimensions_token = playability._ROAD_MODEL_DIMENSIONS.set(
+        {donor_key: (width, 25.0)}
+    )
+    availability_token = playability._ROAD_MODEL_VARIANTS_AVAILABLE.set(
+        {donor_key: frozenset({donor_key})}
+    )
+    effective_token = playability._ROAD_MODEL_EFFECTIVE_DONORS.set(
+        {donor_key: donor}
+    )
+    try:
+        report = road_chain_parallel_policy._fit_stock_piece_road_objects_parallel(
+            dataset,
+            projection,
+            [0.0] * (spec.cells * spec.cells),
+            spec,
+        )
+    finally:
+        playability._ROAD_MODEL_EFFECTIVE_DONORS.reset(effective_token)
+        playability._ROAD_MODEL_VARIANTS_AVAILABLE.reset(availability_token)
+        playability._ROAD_MODEL_DIMENSIONS.reset(dimensions_token)
+
+    assert report.junction_cap_objects == 1
+    cap = report.objects[0]
+    signature = infrastructure.custom_road_junction_signature(cap.model_path)
+    assert signature is not None
+    assert signature[0] == surface
+    assert cap.y + infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES == pytest.approx(
+        playability._road_surface_vertical_offset(surface)
+    )
+
+
+
 def test_mixed_modded_paved_gravel_t_has_no_open_connector_gap() -> None:
     bbox = (59.40, 16.82, 59.41, 16.83)
     projection = BboxProjection.create(bbox, 1000.0)
