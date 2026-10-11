@@ -16,6 +16,7 @@ from p3d_asset_browser_catalog import (
     BrowserAsset,
     BrowserCatalogue,
     ModelPreviewCache,
+    TexturePreviewCache,
     filter_assets,
     load_model,
     load_texture,
@@ -37,6 +38,7 @@ class AssetBrowserApp:
         self.catalogue = BrowserCatalogue((), (), {})
         self.texture_resolver = TextureResolver(())
         self.model_cache = ModelPreviewCache()
+        self.texture_preview_cache = TexturePreviewCache()
         self.mipmap_cache = MipmapCache()
         self.current: BrowserAsset | None = None
         self.current_model = None
@@ -325,6 +327,8 @@ class AssetBrowserApp:
         self.texture_resolver = TextureResolver(())
         if hasattr(self, "model_cache"):
             self.model_cache.clear()
+        if hasattr(self, "texture_preview_cache"):
+            self.texture_preview_cache.clear()
         if hasattr(self, "mipmap_cache"):
             self.mipmap_cache.clear()
         self.current = None
@@ -386,6 +390,8 @@ class AssetBrowserApp:
             self.texture_resolver = TextureResolver(sources)
             if hasattr(self, "model_cache"):
                 self.model_cache.clear()
+            if hasattr(self, "texture_preview_cache"):
+                self.texture_preview_cache.clear()
             if hasattr(self, "mipmap_cache"):
                 self.mipmap_cache.clear()
             self.current = None
@@ -586,7 +592,11 @@ class AssetBrowserApp:
     def _show_texture(self, item: BrowserAsset) -> None:
         self._busy(f"Loading texture {item.path}…")
         try:
-            image = load_texture(item, self.catalogue)
+            cache = getattr(self, "texture_preview_cache", None)
+            image = (
+                cache.get(item, self.catalogue) if cache is not None
+                else load_texture(item, self.catalogue)
+            )
             self.current_model = None
             self.ax_preview.clear()
             self.ax_preview.imshow(image, interpolation="nearest")
