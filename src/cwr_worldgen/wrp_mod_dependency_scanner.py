@@ -517,7 +517,7 @@ class ScannerGui:
         ttk.Entry(options, textvariable=self.stock_var, width=25).pack(side="left", padx=(8, 14))
         ttk.Checkbutton(
             options,
-            text="Show stock CWA/OFP models too",
+            text="Show stock models too",
             variable=self.include_stock_var,
             command=self._populate,
         ).pack(side="left")
