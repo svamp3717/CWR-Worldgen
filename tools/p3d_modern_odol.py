@@ -55,7 +55,7 @@ def _u32(stream: io.BytesIO, label: str) -> int:
 def _cstring(stream: io.BytesIO, label: str) -> None:
     for _ in range(MAX_MUZZLE_FLASH_BYTES):
         byte = _take(stream, 1, label)
-        if byte == b"\\0":
+        if byte == b"\0":
             return
     raise ModernOdolError(f"{label} exceeds {MAX_MUZZLE_FLASH_BYTES} bytes")
 
