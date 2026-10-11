@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Scan CWA/OFP WRP files for P3D model dependencies.
+"""Scan OFP/CWA and Arma WRP files for P3D model dependencies.
 
-The scanner accepts either a loose WRP or a PBO containing one or more WRP
-members. RVW4/4WVR worlds are parsed exactly. Older/addon WRP variants fall back
-to conservative ASCII P3D-path discovery so the utility remains useful for
-legacy worlds without pretending to understand transforms it does not need.
+The scanner accepts loose WRPs and PBOs. 4WVR and unbinarized 8WVR objects
+are counted from their records. Binarized OPRW worlds use conservative P3D
+string discovery: those counts are model-name occurrences, NOT object counts.
 """
 from __future__ import annotations
 
@@ -36,7 +35,21 @@ _PBO_COMPRESSED = 0x43707273  # 'Cprs'
 _RVW4_HEADER = struct.Struct("<4sii")
 _RVW4_OBJECT = struct.Struct("<12fi76s")
 _RVW4_TEXTURE_BYTES = 512 * 32
+_8WVR_HEADER = struct.Struct("<4sIIIIf")
+_8WVR_OBJECT_PREFIX = struct.Struct("<12fII")
 DEFAULT_STOCK_ROOTS = ("data3d", "o")
+GAME_STOCK_ROOTS = {
+    "cwa": DEFAULT_STOCK_ROOTS,
+    "arma2": ("ca",),
+    "arma2oa": ("ca", "ca_e"),
+    "arma3": ("a3",),
+}
+GAME_LABELS = {
+    "CWA / OFP": "cwa",
+    "Arma 2": "arma2",
+    "Arma 2 OA": "arma2oa",
+    "Arma 3": "arma3",
+}
 
 _ASCII_RUN = re.compile(rb"[ -~]{5,}")
 _P3D_PATH = re.compile(
@@ -208,6 +221,63 @@ def _rvw4_model_counts(data: bytes) -> Counter[str] | None:
     return counts
 
 
+def _8wvr_model_counts(data: bytes) -> Counter[str] | None:
+    """Count unbinarized Armed Assault (8WVR) object model paths exactly.
+
+    8WVR has separate terrain/texture grid sizes, a length-prefixed material
+    table (with a dummy entry zero), and length-prefixed object model names.
+    A final zero-length model name terminates the object list.
+    """
+    if data[:4] != b"8WVR":
+        return None
+    if len(data) < _8WVR_HEADER.size:
+        raise ValueError("truncated 8WVR header")
+    _, texture_x, texture_y, terrain_x, terrain_y, cell_size = _8WVR_HEADER.unpack_from(data)
+    if min(texture_x, texture_y, terrain_x, terrain_y) == 0 or not 0 < cell_size < 1e6:
+        raise ValueError("invalid 8WVR grid sizes or cell size")
+
+    cursor = _8WVR_HEADER.size + terrain_x * terrain_y * 4 + texture_x * texture_y * 2
+    if cursor + 4 > len(data):
+        raise ValueError("truncated 8WVR terrain or material table")
+    material_count = struct.unpack_from("<I", data, cursor)[0]
+    cursor += 4
+    if material_count == 0:
+        raise ValueError("invalid 8WVR material count")
+    # The first material is an implicit dummy, without a name.
+    for _ in range(1, material_count):
+        while True:
+            if cursor + 4 > len(data):
+                raise ValueError("truncated 8WVR material name")
+            length = struct.unpack_from("<I", data, cursor)[0]
+            cursor += 4
+            if length == 0:
+                break
+            if length > len(data) - cursor:
+                raise ValueError("truncated 8WVR material name")
+            cursor += length
+
+    counts: Counter[str] = Counter()
+    terminated = False
+    while cursor < len(data):
+        if cursor + _8WVR_OBJECT_PREFIX.size > len(data):
+            raise ValueError("truncated 8WVR object record")
+        values = _8WVR_OBJECT_PREFIX.unpack_from(data, cursor)
+        cursor += _8WVR_OBJECT_PREFIX.size
+        length = values[-1]
+        if length == 0:
+            terminated = True
+            break
+        if length > len(data) - cursor:
+            raise ValueError("truncated 8WVR object model name")
+        model = canonical_model_path(data[cursor : cursor + length].rstrip(b"\0").decode("latin-1"))
+        cursor += length
+        if model.endswith(".p3d"):
+            counts[model] += 1
+    if not terminated or cursor != len(data):
+        raise ValueError("missing or invalid 8WVR final dummy object")
+    return counts
+
+
 def _legacy_wrp_model_counts(data: bytes) -> Counter[str]:
     """Find model paths in legacy/addon WRP variants without parsing transforms.
 
@@ -237,7 +307,16 @@ def scan_wrp_bytes(
 ) -> tuple[DependencyRow, ...]:
     roots = normalize_stock_roots(stock_roots)
     exact = _rvw4_model_counts(data)
-    parser = "RVW4 object records" if exact is not None else "legacy P3D string scan"
+    if exact is not None:
+        parser = "RVW4 object records"
+    else:
+        exact = _8wvr_model_counts(data)
+        if exact is not None:
+            parser = "8WVR object records"
+        elif data[:4] == b"OPRW":
+            parser = "OPRW P3D string occurrences"
+        else:
+            parser = "legacy P3D string scan"
     counts = exact if exact is not None else _legacy_wrp_model_counts(data)
 
     return tuple(
@@ -256,13 +335,16 @@ def scan_wrp_bytes(
 def scan_dependencies(
     input_path: Path | str,
     *,
-    stock_roots: Sequence[str] = DEFAULT_STOCK_ROOTS,
+    stock_roots: Sequence[str] | None = None,
+    game: str = "cwa",
 ) -> ScanResult:
+    if game not in GAME_STOCK_ROOTS:
+        raise ValueError(f"unknown game profile: {game!r}")
     path = Path(input_path).expanduser()
     if not path.is_file():
         raise FileNotFoundError(path)
 
-    roots = normalize_stock_roots(stock_roots)
+    roots = normalize_stock_roots(stock_roots if stock_roots is not None else GAME_STOCK_ROOTS[game])
     suffix = path.suffix.casefold()
     warnings: list[str] = []
     rows: list[DependencyRow] = []
@@ -400,6 +482,7 @@ class ScannerGui:
         self.root.minsize(820, 500)
 
         self.input_var = tk.StringVar(value=str(initial_path or ""))
+        self.game_var = tk.StringVar(value="CWA / OFP")
         self.stock_var = tk.StringVar(value="; ".join(DEFAULT_STOCK_ROOTS))
         self.include_stock_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Choose a PBO or WRP to scan.")
@@ -424,8 +507,14 @@ class ScannerGui:
 
         options = ttk.Frame(outer)
         options.pack(fill="x", pady=(10, 8))
+        ttk.Label(options, text="Game").pack(side="left")
+        game_choice = ttk.Combobox(
+            options, textvariable=self.game_var, values=tuple(GAME_LABELS), state="readonly", width=12
+        )
+        game_choice.pack(side="left", padx=(8, 14))
+        game_choice.bind("<<ComboboxSelected>>", self._game_changed)
         ttk.Label(options, text="Stock model roots").pack(side="left")
-        ttk.Entry(options, textvariable=self.stock_var, width=30).pack(side="left", padx=(8, 14))
+        ttk.Entry(options, textvariable=self.stock_var, width=25).pack(side="left", padx=(8, 14))
         ttk.Checkbutton(
             options,
             text="Show stock CWA/OFP models too",
@@ -465,12 +554,16 @@ class ScannerGui:
         ttk.Button(actions, text="Export JSON…", command=self._export_json).pack(side="left", padx=(8, 0))
         ttk.Label(actions, textvariable=self.status_var).pack(side="right")
 
+    def _game_changed(self, _event: object = None) -> None:
+        game = GAME_LABELS[self.game_var.get()]
+        self.stock_var.set("; ".join(GAME_STOCK_ROOTS[game]))
+
     def _browse(self) -> None:
         from tkinter import filedialog
 
         selected = filedialog.askopenfilename(
             title="Choose WRP or PBO",
-            filetypes=(("WRP / PBO", "*.wrp *.pbo"), ("WRP", "*.wrp"), ("PBO", "*.pbo"), ("All files", "*.*")),
+            filetypes=(("WRP / PBO", "*.wrp *.pbo *.pbo.zst"), ("WRP", "*.wrp"), ("PBO", "*.pbo *.pbo.zst"), ("All files", "*.*")),
         )
         if selected:
             self.input_var.set(selected)
@@ -597,14 +690,18 @@ def gui_main(argv: Sequence[str] | None = None) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="cwr-wrp-mod-scan",
-        description="List mod P3D dependencies referenced by a CWA/OFP WRP or PBO.",
+        description="List mod P3D dependencies referenced by an OFP/CWA or Arma WRP/PBO.",
     )
     parser.add_argument("input", nargs="?", type=Path, help="WRP file or PBO containing WRP files")
+    parser.add_argument(
+        "--game", choices=tuple(GAME_STOCK_ROOTS), default="cwa",
+        help="Stock asset profile: cwa (default), arma2, arma2oa, or arma3",
+    )
     parser.add_argument(
         "--stock-root",
         action="append",
         default=None,
-        help="Namespace treated as stock; repeat as needed (default: data3d, o)",
+        help="Override the selected game's stock roots; repeat as needed",
     )
     parser.add_argument("--include-stock", action="store_true", help="Show stock P3D references too")
     parser.add_argument("--json", type=Path, help="Write a JSON report")
@@ -615,7 +712,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.gui or args.input is None:
         return ScannerGui(args.input).run()
 
-    result = scan_dependencies(args.input, stock_roots=normalize_stock_roots(args.stock_root))
+    result = scan_dependencies(args.input, game=args.game, stock_roots=args.stock_root)
     if args.json:
         write_json_report(result, args.json, include_stock=args.include_stock)
     if args.csv:
