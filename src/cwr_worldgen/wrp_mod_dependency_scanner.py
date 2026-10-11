@@ -54,7 +54,7 @@ GAME_STOCK_ROOTS = {
 GAME_LABELS = {
     "CWA / OFP": "cwa",
     "Arma 1": "arma1",
-    "Arma 1 + Queen\'s Gambit": "arma1qg",
+    "Arma 1 + Queen's Gambit": "arma1qg",
     "Arma 2": "arma2",
     "Arma 2 OA": "arma2oa",
     "Arma 3": "arma3",
