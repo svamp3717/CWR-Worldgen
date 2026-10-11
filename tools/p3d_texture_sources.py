@@ -21,7 +21,7 @@ def sibling_namespace_pbos(
     *,
     available_pbos: Sequence[Path] | None = None,
 ) -> tuple[Path, ...]:
-    """Find sibling PBOs for CWA and Arma texture namespaces.
+    r"""Find sibling PBOs for CWA and Arma texture namespaces.
 
     CWA data\foo.pac commonly lives in Data.pbo, whereas Arma textures
     such as ca\structures\data\foo.paa live in Structures.pbo. Try the addon
