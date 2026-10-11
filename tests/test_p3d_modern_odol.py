@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 import struct
 import sys
 
@@ -95,3 +97,36 @@ def test_v49_model_header_is_not_modified() -> None:
     original = bytes(data)
     modern.read_model_bounds(data)
     assert data == original
+
+
+def test_browser_draws_modern_odol_wireframe_without_mesh_render(monkeypatch) -> None:
+    import p3d_asset_browser_app as app_module
+
+    def render_should_not_run(*args, **kwargs):
+        raise AssertionError("bounds-only models must not use polygon rasterizer")
+
+    monkeypatch.setattr(app_module, "render_textured_model", render_should_not_run)
+    app = app_module.AssetBrowserApp.__new__(app_module.AssetBrowserApp)
+    app.ax_preview = Mock()
+    app.canvas = Mock()
+    app.azim = 35.0
+    app.elev = 25.0
+    app.zoom = 1.0
+    bounds = modern.read_model_bounds(_modern_odol(49))
+    model = SimpleNamespace(
+        render_mode="bounds only",
+        model_path="test.p3d",
+        measurement=SimpleNamespace(version=49),
+        points=np.asarray(modern.box_vertices(bounds), dtype=np.float32),
+        edges=np.asarray(modern.BOX_EDGES, dtype=np.int32),
+    )
+
+    app._draw_model(model)
+    assert app.ax_preview.plot.call_count == 12
+    baseline = app.ax_preview.set_xlim.call_args.args[1]
+    assert "bounds only" in app.ax_preview.set_title.call_args.args[0]
+    app.zoom = 2.0
+    app._draw_model(model)
+    zoomed = app.ax_preview.set_xlim.call_args.args[1]
+    assert zoomed == pytest.approx(baseline / 2)
+    assert app.canvas.draw_idle.call_count == 2
