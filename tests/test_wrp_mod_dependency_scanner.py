@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 import struct
+from unittest.mock import Mock
 
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.pbo import PboEntry, write_pbo
 from cwr_worldgen.wrp import write_rvw4
 from cwr_worldgen.wrp_mod_dependency_scanner import (
     DEFAULT_STOCK_ROOTS,
+    DependencyRow,
+    ScanResult,
+    ScannerGui,
+    _sort_display_rows,
     model_namespace,
     normalize_stock_roots,
     result_document,
@@ -301,3 +306,70 @@ def test_game_profile_does_not_modify_input_files(tmp_path: Path) -> None:
     before = _write_8wvr(wrp, (r"a3\structures_f\house.p3d",))
     assert scan_dependencies(wrp, game="arma3").unique_mod_models == 0
     assert wrp.read_bytes() == before
+
+
+def _sortable_rows() -> tuple[DependencyRow, ...]:
+    return (
+        DependencyRow("Zoo.wrp", r"z\\Alpha.p3d", "Z", 2, False, "RVW4"),
+        DependencyRow("alpha.wrp", r"a\\Zulu.p3d", "A", 10, True, "OPRW"),
+        DependencyRow("Beta.wrp", r"b\\beta.p3d", "b", 1, False, "legacy"),
+    )
+
+
+def test_table_sort_handles_all_columns_and_numeric_reference_counts() -> None:
+    rows = _sortable_rows()
+    expected = {
+        "wrp": (1, 2, 0),
+        "namespace": (1, 2, 0),
+        "model": (1, 2, 0),
+        "refs": (2, 0, 1),
+        "type": (0, 2, 1),
+        "parser": (2, 1, 0),
+    }
+    for column, order in expected.items():
+        ascending = _sort_display_rows(rows, column)
+        assert ascending == tuple(rows[index] for index in order)
+        assert _sort_display_rows(rows, column, descending=True) == tuple(reversed(ascending))
+    assert rows[1].references == 10  # Numeric, not lexicographic ordering.
+
+
+def test_gui_heading_click_toggles_direction_and_changes_column() -> None:
+    gui = ScannerGui.__new__(ScannerGui)
+    gui.tree = Mock()
+    gui._populate = Mock()
+    gui._column_headings = {"wrp": "WRP", "refs": "Refs"}
+    gui._sort_column = None
+    gui._sort_descending = False
+
+    gui._sort_by("refs")
+    assert (gui._sort_column, gui._sort_descending) == ("refs", False)
+    gui.tree.heading.assert_any_call("refs", text="Refs ▲")
+
+    gui._sort_by("refs")
+    assert (gui._sort_column, gui._sort_descending) == ("refs", True)
+    gui.tree.heading.assert_any_call("refs", text="Refs ▼")
+
+    gui._sort_by("wrp")
+    assert (gui._sort_column, gui._sort_descending) == ("wrp", False)
+    gui.tree.heading.assert_any_call("refs", text="Refs")
+    assert gui._populate.call_count == 3
+
+
+def test_gui_reapplies_sort_after_stock_visibility_changes() -> None:
+    gui = ScannerGui.__new__(ScannerGui)
+    gui.tree = Mock()
+    gui.tree.get_children.return_value = ()
+    gui.status_var = Mock()
+    gui.include_stock_var = Mock()
+    gui._result = ScanResult("example.wrp", "wrp", ("a",), ("example.wrp",), _sortable_rows())
+    gui._sort_column = "refs"
+    gui._sort_descending = True
+
+    gui.include_stock_var.get.return_value = False
+    gui._populate()
+    assert [call.kwargs["values"][3] for call in gui.tree.insert.call_args_list] == [2, 1]
+
+    gui.tree.insert.reset_mock()
+    gui.include_stock_var.get.return_value = True
+    gui._populate()
+    assert [call.kwargs["values"][3] for call in gui.tree.insert.call_args_list] == [10, 2, 1]
