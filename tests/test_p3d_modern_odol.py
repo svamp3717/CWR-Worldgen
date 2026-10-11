@@ -30,10 +30,10 @@ def _modern_odol(
     if version >= 59:
         out.extend(struct.pack("<I", 1234))  # AppID
     if version >= 58:
-        out.extend(b"muzzle\\flash.p3d\\0")
+        out.extend(b"muzzle\\flash.p3d\0")
     out.extend(struct.pack("<I", lod_count))
     out.extend(struct.pack("<" + "f" * lod_count, *([1.0] * lod_count)))
-    out.extend(b"\\0" * 48)  # ModelInfo preceding BboxMin
+    out.extend(b"\0" * 48)  # ModelInfo preceding BboxMin
     out.extend(struct.pack("<6f", *bounds_min, *bounds_max))
     return bytes(out)
 
@@ -68,7 +68,7 @@ def test_bounding_box_has_twelve_edges() -> None:
 
 
 @pytest.mark.parametrize("bad", [
-    b"BAD!" + b"\\0" * 80,
+    b"BAD!" + b"\0" * 80,
     b"ODOL" + struct.pack("<I", 49),
     _modern_odol(49)[:-6],
     _modern_odol(49, bounds_min=(10.0, 0.0, 0.0)),
