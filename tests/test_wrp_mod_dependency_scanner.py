@@ -373,3 +373,78 @@ def test_gui_reapplies_sort_after_stock_visibility_changes() -> None:
     gui.include_stock_var.get.return_value = True
     gui._populate()
     assert [call.kwargs["values"][3] for call in gui.tree.insert.call_args_list] == [10, 2, 1]
+
+
+def test_arma1_queens_gambit_and_ironfront_stock_profiles(tmp_path: Path) -> None:
+    data = (
+        b"OPRW" + struct.pack("<I", 25)
+        + b"\\0ca\\\\buildings\\\\wall.p3d\\0"
+        + b"dbe1\\\\buildings\\\\palace.p3d\\0"
+        + b"models_dbe1\\\\objects\\\\tree.p3d\\0"
+        + b"sara_dbe1\\\\plants\\\\bush.p3d\\0"
+        + b"lib\\\\buildings\\\\farm.p3d\\0"
+        + b"LIB_HOUSES\\\\structures\\\\barn.p3d\\0"
+        + b"lib_customtool\\\\objects\\\\car.p3d\\0"
+        + b"customaddon\\\\objects\\\\addon.p3d\\0"
+    )
+    wrp = tmp_path / "mixed.wrp"
+    wrp.write_bytes(data)
+    def visible(game: str) -> set[str]:
+        return {row.model_path for row in rows_for_display(scan_dependencies(wrp, game=game))}
+
+    arma1 = visible("arma1")
+    queens_gambit = visible("arma1qg")
+    iron_front = visible("ironfront")
+    assert r"ca\\buildings\\wall.p3d" not in arma1
+    assert r"dbe1\\buildings\\palace.p3d" in arma1
+    assert r"dbe1\\buildings\\palace.p3d" not in queens_gambit
+    assert r"models_dbe1\\objects\\tree.p3d" not in queens_gambit
+    assert r"sara_dbe1\\plants\\bush.p3d" not in queens_gambit
+    assert r"lib\\buildings\\farm.p3d" not in iron_front
+    assert r"lib_houses\\structures\\barn.p3d" not in iron_front
+    assert r"lib_customtool\\objects\\car.p3d" not in iron_front
+    assert r"dbe1\\buildings\\palace.p3d" in iron_front
+    assert r"customaddon\\objects\\addon.p3d" in all_visible := visible("ironfront")
+    assert wrp.read_bytes() == data
+
+
+def test_ironfront_ifa_archive_scans_without_renaming(tmp_path: Path) -> None:
+    archive = tmp_path / "staszow.ifa"
+    original = _write_wrp(tmp_path / "staszow.wrp", (
+        r"lib_houses\\buildings\\farm.p3d",
+        r"ownmod\\props\\object.p3d",
+    ))
+    write_pbo(archive, (PboEntry("staszow.wrp", original),))
+    archive_bytes = archive.read_bytes()
+
+    result = scan_dependencies(archive, game="ironfront")
+    assert result.input_kind == "ifa"
+    assert result.wrp_names == ("staszow.wrp",)
+    assert result.unique_models == 2
+    assert {row.model_path for row in rows_for_display(result)} == {
+        r"ownmod\\props\\object.p3d",
+    }
+    assert archive.read_bytes() == archive_bytes
+
+
+def test_ironfront_namespace_pattern_does_not_match_every_lib_prefix(tmp_path: Path) -> None:
+    wrp = tmp_path / "addon.wrp"
+    _write_wrp(wrp, (
+        r"lib_objects\\bridge.p3d",
+        r"libraryaddon\\bridge.p3d",
+    ))
+    visible = {row.model_path for row in rows_for_display(scan_dependencies(wrp, game="ironfront"))}
+    assert visible == {r"libraryaddon\\bridge.p3d"}
+
+
+def test_sort_behavior_retained_when_adding_game_profiles() -> None:
+    gui = ScannerGui.__new__(ScannerGui)
+    gui.tree = Mock()
+    gui._populate = Mock()
+    gui._column_headings = {"wrp": "WRP", "refs": "Refs"}
+    gui._sort_column = None
+    gui._sort_descending = False
+    gui._sort_by("refs")
+    gui._sort_by("refs")
+    assert gui._sort_descending is True
+    gui.tree.heading.assert_any_call("refs", text="Refs ▼")
