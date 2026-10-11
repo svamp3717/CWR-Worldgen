@@ -183,6 +183,39 @@ def load_texture(item: BrowserAsset, catalogue: BrowserCatalogue) -> np.ndarray:
     return decode_paa(data, is_paa=item.path.casefold().endswith(".paa"))
 
 
+class TexturePreviewCache:
+    """Bounded decoded-RGBA LRU for repeatedly visited standalone textures."""
+
+    def __init__(self, max_images: int = 12, max_bytes: int = 64 * 1024 * 1024):
+        self.max_images = max(0, int(max_images))
+        self.max_bytes = max(0, int(max_bytes))
+        self._items: OrderedDict[
+            tuple[str, str], np.ndarray
+        ] = OrderedDict()
+        self.bytes_used = 0
+
+    def clear(self) -> None:
+        self._items.clear()
+        self.bytes_used = 0
+
+    def get(self, item: BrowserAsset, catalogue: BrowserCatalogue) -> np.ndarray:
+        key = (item.source, item.path)
+        if key in self._items:
+            self._items.move_to_end(key)
+            return self._items[key]
+        image = load_texture(item, catalogue)
+        if self.max_images and image.nbytes <= self.max_bytes:
+            while self._items and (
+                len(self._items) >= self.max_images
+                or self.bytes_used + image.nbytes > self.max_bytes
+            ):
+                _, old = self._items.popitem(last=False)
+                self.bytes_used -= old.nbytes
+            self._items[key] = image
+            self.bytes_used += image.nbytes
+        return image
+
+
 def model_texture_paths(
     item: BrowserAsset,
     catalogue: BrowserCatalogue,
