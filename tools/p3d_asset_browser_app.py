@@ -52,7 +52,7 @@ class AssetBrowserApp:
         self._scan_in_progress = False
         self._source_buttons: list[ttk.Button] = []
 
-        root.title("CWR P3D Model & Texture Browser")
+        root.title("P3D Model & Texture Browser")
         root.geometry("1650x980")
         root.minsize(1180, 720)
         self._build_ui()
