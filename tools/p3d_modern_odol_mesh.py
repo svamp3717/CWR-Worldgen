@@ -456,7 +456,7 @@ def _read_resolution_lod(r: _Reader, resolution: float, start: int, end: int) ->
         r.condensed(4)
     if v >= 51:
         r.take(4)
-    r.take(8 + 48)  # LOD hints, bounds, centre, radius
+    r.take(8 + 40)  # LOD hints, three vector3 bounds/centre, and radius
 
     texture_list = [r.string() for _ in range(r.count(100_000))]
     materials = [_material(r) for _ in range(r.count(20_000))]
