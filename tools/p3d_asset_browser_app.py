@@ -530,7 +530,10 @@ class AssetBrowserApp:
             zoom=self.zoom,
             load_textures=not self.skip_textures_var.get(),
         )
-        self.ax_preview.imshow(image, interpolation="nearest")
+        # The renderer operates at 1400x980 but the Tk canvas is typically
+        # considerably smaller. Nearest-neighbour shrinking aliases fine
+        # brick/wall patterns into multicoloured speckle.
+        self.ax_preview.imshow(image, interpolation="hanning", resample=True)
         if self.skip_textures_var.get():
             self.ax_preview.set_title(
                 f"{model.model_path} • geometry preview • textures skipped"
