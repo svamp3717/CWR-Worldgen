@@ -103,7 +103,18 @@ def load_model(item: BrowserAsset, catalogue: BrowserCatalogue) -> preview.Previ
         model_path=item.path,
         source=source,
     )
-    edges = preview.collect_edges(faces)
+    bounds_only = measurement.lod == "model bounds only"
+    if bounds_only:
+        # The catalogue already extracts embedded texture references without
+        # interpreting the changing ODOL LOD/material tables.
+        textures = tuple(
+            path for path in item.dependencies
+            if path.casefold().endswith((".paa", ".pac"))
+        )
+    edges = (
+        np.asarray(preview.modern_odol.BOX_EDGES, dtype=np.int32)
+        if bounds_only else preview.collect_edges(faces)
+    )
     return preview.PreviewModel(
         item.path,
         source,
@@ -111,9 +122,9 @@ def load_model(item: BrowserAsset, catalogue: BrowserCatalogue) -> preview.Previ
         points.astype(np.float32, copy=False),
         faces,
         edges,
-        len(points),
+        0 if bounds_only else len(points),
         textures,
-        "textured mesh" if faces else "vertex fallback",
+        "bounds only" if bounds_only else ("textured mesh" if faces else "vertex fallback"),
     )
 
 
