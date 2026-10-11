@@ -255,6 +255,22 @@ def _lod_table(r: _Reader) -> tuple[tuple[float, int, int], ...]:
     return tuple(lods)
 
 
+def _material_diffuse_texture(paths: list[str]) -> str:
+    """Select a colour map rather than a normal/specular/material stage.
+
+    An RVMAT's first stage is frequently a _nohq normal map, *not* the
+    surface colour. Treating that stage as diffuse paints Arma models with
+    rainbow-looking lighting data. Prefer the LOD section texture, and only
+    use a material stage when it is recognizably a colour texture.
+    """
+    colour_suffixes = ("_co.paa", "_co.pac", "_ca.paa", "_ca.pac",
+                       "_mco.paa", "_mco.pac", "_mc.paa", "_mc.pac")
+    for path in paths:
+        if path.casefold().endswith(colour_suffixes):
+            return path
+    return ""
+
+
 def _material(r: _Reader) -> str:
     """Skip embedded RVMAT, capturing a diffuse texture when it has one."""
     r.string()  # material path
@@ -271,7 +287,7 @@ def _material(r: _Reader) -> str:
         r.take(8)
     stages = r.count(1024) if version > 6 else 0
     transforms = r.count(1024) if version > 8 else stages
-    candidate = ""
+    stage_textures: list[str] = []
 
     def stage() -> str:
         if version >= 5:
@@ -290,20 +306,20 @@ def _material(r: _Reader) -> str:
         for _ in range(stages):
             transform()
             texture = stage()
-            if texture.casefold().endswith((".paa", ".pac")) and not candidate:
-                candidate = texture
+            if texture.casefold().endswith((".paa", ".pac")):
+                stage_textures.append(texture)
     else:
         for _ in range(stages):
             texture = stage()
-            if texture.casefold().endswith((".paa", ".pac")) and not candidate:
-                candidate = texture
+            if texture.casefold().endswith((".paa", ".pac")):
+                stage_textures.append(texture)
         for _ in range(transforms):
             transform()
     if version >= 10:
         texture = stage()
-        if texture.casefold().endswith((".paa", ".pac")) and not candidate:
-            candidate = texture
-    return candidate
+        if texture.casefold().endswith((".paa", ".pac")):
+            stage_textures.append(texture)
+    return _material_diffuse_texture(stage_textures)
 
 
 def _uvset(r: _Reader) -> np.ndarray:
@@ -379,7 +395,10 @@ def _read_resolution_lod(r: _Reader, resolution: float, start: int, end: int) ->
             r.string()
         direct = texture_list[texture_index] if 0 <= texture_index < len(texture_list) else ""
         by_material = materials[material_index] if 0 <= material_index < len(materials) else ""
-        texture = direct or by_material
+        # Non-PAA procedural colour strings cannot be resolved as assets.
+        # A material's normal/specular stage is never a colour-map fallback.
+        direct_colour = direct if direct.casefold().endswith((".paa", ".pac")) else ""
+        texture = direct_colour or by_material
         area_count = r.count(1024)
         r.take(4 * area_count)
         if v >= 67:
