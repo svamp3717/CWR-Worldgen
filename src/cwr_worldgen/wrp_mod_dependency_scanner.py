@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Scan OFP/CWA and Arma WRP files for P3D model dependencies.
 
-The scanner accepts loose WRPs and PBOs. 4WVR and unbinarized 8WVR objects
+The scanner accepts loose WRPs, PBOs and Iron Front IFA archives. 4WVR and unbinarized 8WVR objects
 are counted from their records. Binarized OPRW worlds use conservative P3D
 string discovery: those counts are model-name occurrences, NOT object counts.
 """
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, dataclass
+from fnmatch import fnmatchcase
 from pathlib import Path
 import argparse
 import csv
@@ -40,15 +41,24 @@ _8WVR_OBJECT_PREFIX = struct.Struct("<12fII")
 DEFAULT_STOCK_ROOTS = ("data3d", "o")
 GAME_STOCK_ROOTS = {
     "cwa": DEFAULT_STOCK_ROOTS,
+    "arma1": ("ca",),
+    # Queen's Gambit (Arma Gold) adds DBE1 namespaces on top of Arma 1.
+    "arma1qg": ("ca", "dbe1", "models_dbe1", "sara_dbe1"),
     "arma2": ("ca",),
     "arma2oa": ("ca", "ca_e"),
     "arma3": ("a3",),
+    # Original 2012 Iron Front uses Arma 2 technology and LIB_ addons.
+    # lib_* intentionally matches addon namespace segments, not full paths.
+    "ironfront": ("lib", "lib_*", "ca", "ca_e"),
 }
 GAME_LABELS = {
     "CWA / OFP": "cwa",
+    "Arma 1": "arma1",
+    "Arma 1 QG": "arma1qg",
     "Arma 2": "arma2",
     "Arma 2 OA": "arma2oa",
     "Arma 3": "arma3",
+    "Iron Front": "ironfront",
 }
 
 _ASCII_RUN = re.compile(rb"[ -~]{5,}")
@@ -118,7 +128,12 @@ def model_namespace(model_path: str) -> str:
 
 
 def _is_stock_model(model_path: str, stock_roots: Sequence[str]) -> bool:
-    return model_namespace(model_path) in {root.casefold() for root in stock_roots}
+    namespace = model_namespace(model_path)
+    return any(
+        fnmatchcase(namespace, root.casefold()) if "*" in root or "?" in root
+        else namespace == root.casefold()
+        for root in stock_roots
+    )
 
 
 def _read_cstring(stream: io.BytesIO) -> str:
@@ -353,19 +368,19 @@ def scan_dependencies(
         wrp_names = (path.name,)
         rows.extend(scan_wrp_bytes(path.read_bytes(), wrp_name=path.name, stock_roots=roots))
         kind = "wrp"
-    elif is_pbo_path(path):
+    elif is_pbo_path(path) or path.name.casefold().endswith((".ifa", ".ifa.zst")):
         worlds = _pbo_wrp_entries(path)
         wrp_names = tuple(name for name, _data in worlds)
         if not worlds:
-            warnings.append("PBO contains no .wrp entries")
+            warnings.append("Archive contains no .wrp entries")
         for name, data in worlds:
             try:
                 rows.extend(scan_wrp_bytes(data, wrp_name=name, stock_roots=roots))
             except ValueError as exc:
                 warnings.append(f"{name}: {exc}")
-        kind = "pbo"
+        kind = "ifa" if path.name.casefold().endswith((".ifa", ".ifa.zst")) else "pbo"
     else:
-        raise ValueError("input must be a .wrp, .pbo, or .pbo.zst file")
+        raise ValueError("input must be a .wrp, .pbo, .pbo.zst, .ifa, or .ifa.zst file")
 
     return ScanResult(
         input_path=str(path),
@@ -506,8 +521,6 @@ class ScannerGui:
         self.stock_var = tk.StringVar(value="; ".join(DEFAULT_STOCK_ROOTS))
         self.include_stock_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Choose a PBO or WRP to scan.")
-        self._sort_column: str | None = None
-        self._sort_reverse = False
         self._result: ScanResult | None = None
         self._sort_column: str | None = None
         self._sort_descending = False
@@ -533,7 +546,7 @@ class ScannerGui:
         options.pack(fill="x", pady=(10, 8))
         ttk.Label(options, text="Game").pack(side="left")
         game_choice = ttk.Combobox(
-            options, textvariable=self.game_var, values=tuple(GAME_LABELS), state="readonly", width=12
+            options, textvariable=self.game_var, values=tuple(GAME_LABELS), state="readonly", width=14
         )
         game_choice.pack(side="left", padx=(8, 14))
         game_choice.bind("<<ComboboxSelected>>", self._game_changed)
@@ -601,8 +614,8 @@ class ScannerGui:
         from tkinter import filedialog
 
         selected = filedialog.askopenfilename(
-            title="Choose WRP or PBO",
-            filetypes=(("WRP / PBO", "*.wrp *.pbo *.pbo.zst"), ("WRP", "*.wrp"), ("PBO", "*.pbo *.pbo.zst"), ("All files", "*.*")),
+            title="Choose WRP, PBO or Iron Front IFA",
+            filetypes=(("WRP / PBO / IFA", "*.wrp *.pbo *.pbo.zst *.ifa *.ifa.zst"), ("WRP", "*.wrp"), ("PBO / IFA", "*.pbo *.pbo.zst *.ifa *.ifa.zst"), ("All files", "*.*")),
         )
         if selected:
             self.input_var.set(selected)
@@ -639,14 +652,6 @@ class ScannerGui:
             pass
         self.root.after(100, self._poll_worker)
 
-    def _sort_by(self, column: str) -> None:
-        if self._sort_column == column:
-            self._sort_reverse = not self._sort_reverse
-        else:
-            self._sort_column = column
-            self._sort_reverse = False
-        self._populate()
-
     def _populate(self) -> None:
         self.tree.delete(*self.tree.get_children())
         result = self._result
@@ -657,16 +662,6 @@ class ScannerGui:
             rows = _sort_display_rows(
                 rows, self._sort_column, descending=self._sort_descending
             )
-        if self._sort_column:
-            sort_keys = {
-                "wrp": lambda row: row.wrp_name.casefold(),
-                "namespace": lambda row: row.namespace.casefold(),
-                "model": lambda row: row.model_path.casefold(),
-                "refs": lambda row: row.references,
-                "type": lambda row: row.is_stock,
-                "parser": lambda row: row.parser.casefold(),
-            }
-            rows = tuple(sorted(rows, key=sort_keys[self._sort_column], reverse=self._sort_reverse))
         for row in rows:
             self.tree.insert(
                 "",
@@ -751,12 +746,12 @@ def gui_main(argv: Sequence[str] | None = None) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="cwr-wrp-mod-scan",
-        description="List mod P3D dependencies referenced by an OFP/CWA or Arma WRP/PBO.",
+        description="List mod P3D dependencies in OFP, Arma and Iron Front WRP/PBO/IFA archives.",
     )
-    parser.add_argument("input", nargs="?", type=Path, help="WRP file or PBO containing WRP files")
+    parser.add_argument("input", nargs="?", type=Path, help="WRP file, PBO or Iron Front IFA archive containing WRP files")
     parser.add_argument(
         "--game", choices=tuple(GAME_STOCK_ROOTS), default="cwa",
-        help="Stock asset profile: cwa (default), arma2, arma2oa, or arma3",
+        help="Stock asset profile: cwa (default), arma1, arma1qg, arma2, arma2oa, arma3, ironfront",
     )
     parser.add_argument(
         "--stock-root",
