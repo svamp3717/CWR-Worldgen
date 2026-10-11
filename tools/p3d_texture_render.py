@@ -6,6 +6,7 @@ import math
 from typing import Sequence
 
 import numpy as np
+from PIL import Image
 
 import measure_p3d_models as measure
 from p3d_texture_io import TextureResolver
@@ -100,6 +101,75 @@ def _sample_bilinear(texture: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.nd
     return np.clip(top * (1.0 - fy) + bottom * fy, 0, 255).astype(np.uint8)
 
 
+
+def _mipmap_chain(image: np.ndarray) -> tuple[np.ndarray, ...]:
+    """Build progressively filtered mipmaps from a decoded RGBA texture.
+
+    Sampling the 1024px base image on a handful of screen pixels causes the
+    speckled moiré visible in detailed modern Arma buildings. BOX downsampling
+    approximates the area covered by distant fragments before bilinear lookup.
+    """
+    levels = [image]
+    while min(levels[-1].shape[:2]) > 1 or max(levels[-1].shape[:2]) > 1:
+        current = levels[-1]
+        height, width = current.shape[:2]
+        next_size = (max(1, (width + 1) // 2), max(1, (height + 1) // 2))
+        reduced = Image.fromarray(current).resize(next_size, resample=Image.Resampling.BOX)
+        levels.append(np.asarray(reduced))
+    return tuple(levels)
+
+
+def _triangle_texture_lod(
+    uv: np.ndarray,
+    xy: np.ndarray,
+    texture_width: int,
+    texture_height: int,
+    max_level: int,
+) -> float:
+    """Estimate the number of texture texels covered by one screen pixel.
+
+    UVs stay unwrapped for derivatives. Wrapping them first would turn a
+    correctly repeating brick texture into an arbitrarily scaled atlas.
+    """
+    dx1, dy1 = xy[1] - xy[0]
+    dx2, dy2 = xy[2] - xy[0]
+    det = float(dx1 * dy2 - dx2 * dy1)
+    if abs(det) < 1.0e-12:
+        return 0.0
+    du1, dv1 = uv[1] - uv[0]
+    du2, dv2 = uv[2] - uv[0]
+    dudx = (du1 * dy2 - du2 * dy1) / det
+    dudy = (dx1 * du2 - dx2 * du1) / det
+    dvdx = (dv1 * dy2 - dv2 * dy1) / det
+    dvdy = (dx1 * dv2 - dx2 * dv1) / det
+    footprint = max(
+        math.hypot(dudx * texture_width, dvdx * texture_height),
+        math.hypot(dudy * texture_width, dvdy * texture_height),
+    )
+    if not math.isfinite(footprint) or footprint <= 1.0:
+        return 0.0
+    return min(float(max_level), math.log2(footprint))
+
+
+def _sample_mipmapped(
+    levels: Sequence[np.ndarray],
+    u: np.ndarray,
+    v: np.ndarray,
+    lod: float,
+) -> np.ndarray:
+    """Bilinear texture sampling with trilinear transitions between mipmaps."""
+    base = max(0, min(int(math.floor(lod)), len(levels) - 1))
+    fraction = min(1.0, max(0.0, lod - base))
+    first = _sample_bilinear(levels[base], u, v)
+    if fraction <= 1.0e-6 or base == len(levels) - 1:
+        return first
+    second = _sample_bilinear(levels[base + 1], u, v)
+    return np.clip(
+        first.astype(np.float32) * (1.0 - fraction)
+        + second.astype(np.float32) * fraction + 0.5, 0, 255
+    ).astype(np.uint8)
+
+
 def render_textured_model(
     points: np.ndarray,
     faces: Sequence[RenderFace],
@@ -122,7 +192,7 @@ def render_textured_model(
     if len(tris) > max_triangles:
         picks = np.linspace(0, len(tris) - 1, max_triangles, dtype=np.int64)
         tris = [tris[int(i)] for i in picks]
-    cache: dict[str, np.ndarray | None] = {}
+    cache: dict[str, tuple[np.ndarray, ...] | None] = {}
     hits = misses = 0
     light = np.array([0.35, 0.75, -0.55])
     light /= np.linalg.norm(light)
@@ -163,13 +233,14 @@ def render_textured_model(
         if not mask.any():
             continue
 
-        texture = None
+        mipmaps = None
         if load_textures and texture_path:
             canonical = measure._canonical_model_path(texture_path)
             if canonical not in cache:
-                cache[canonical] = resolver.load_rgba(canonical, source)
-            texture = cache[canonical]
-        if texture is None:
+                decoded = resolver.load_rgba(canonical, source)
+                cache[canonical] = _mipmap_chain(decoded) if decoded is not None else None
+            mipmaps = cache[canonical]
+        if mipmaps is None:
             if load_textures:
                 misses += 1
             world = points[idx].astype(float)
@@ -199,7 +270,10 @@ def render_textured_model(
             + w1 * uv[1, 1] * iz[1]
             + w2 * uv[2, 1] * iz[2]
         ) / np.maximum(inv_z, 1e-12)
-        sampled = _sample_bilinear(texture, u, v)
+        lod = _triangle_texture_lod(
+            uv, xy, mipmaps[0].shape[1], mipmaps[0].shape[0], len(mipmaps) - 1
+        )
+        sampled = _sample_mipmapped(mipmaps, u, v, lod)
         visible = mask & (sampled[:, :, 3] >= 16)
         if visible.any():
             target = image[min_y : max_y + 1, min_x : max_x + 1]
