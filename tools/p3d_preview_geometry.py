@@ -229,16 +229,27 @@ def preview_models(inputs: Sequence[Path], patterns: Sequence[str], max_points: 
     for model_path, source, data in measure._iter_models(inputs, patterns):
         try:
             measurement, points, faces, textures = extract_first_lod_geometry(data, model_path=model_path, source=source)
-            edges = collect_edges(faces)
-            original_vertex_count = len(points)
-            if faces:
+            bounds_only = measurement.lod == "model bounds only"
+            edges = (
+                np.asarray(modern_odol.BOX_EDGES, dtype=np.int32)
+                if bounds_only else collect_edges(faces)
+            )
+            original_vertex_count = 0 if bounds_only else len(points)
+            if bounds_only:
+                # Modern ODOL fallback points are eight bounding-box corners,
+                # not a vertex cloud. Show an honest wireframe instead.
+                preview_points, mode = points.astype(np.float32, copy=False), "bounds only"
+            elif faces:
                 preview_points, mode = points.astype(np.float32, copy=False), "textured mesh"
             else:
                 if len(points) > max_points:
-                    picks = np.linspace(0, len(points)-1, max_points, dtype=np.int64)
+                    picks = np.linspace(0, len(points) - 1, max_points, dtype=np.int64)
                     points = points[picks]
                 preview_points, mode = points.astype(np.float32, copy=False), "vertex fallback"
-            yield PreviewModel(model_path, source, measurement, preview_points, faces, edges, original_vertex_count, textures, mode)
+            yield PreviewModel(
+                model_path, source, measurement, preview_points, faces,
+                edges, original_vertex_count, textures, mode,
+            )
         except (measure.ModelReadError, OSError, struct.error, OverflowError, IndexError, ValueError) as exc:
             failure = measure.ModelFailure(model_path=model_path, source=source, error=str(exc))
             print(f"[model error] {failure.model_path}\n  source: {failure.source}\n  error:  {failure.error}", file=sys.stderr, flush=True)
