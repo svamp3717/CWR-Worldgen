@@ -47,9 +47,9 @@ def _resolve_inputs(raw_inputs: Sequence[Path]) -> list[Path]:
 
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Preview textured OFP/CWA P3D first-LOD meshes and assign categories."
+        description="Categorise P3D models from OFP/CWA, Arma 1/2/OA/3 and Iron Front archives."
     )
-    p.add_argument("inputs", nargs="+", type=Path, help="P3D, PBO, or directory to scan")
+    p.add_argument("inputs", nargs="+", type=Path, help="P3D, PBO, IFA, Zstd-wrapped archive, or directory to scan")
     p.add_argument(
         "--include",
         action="append",
@@ -64,9 +64,10 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="PATH",
         help=(
-            "Additional PBO or directory used only for texture lookup. May be repeated; "
-            "it does not add models to the scan. Sibling namespace PBOs such as Data.pbo "
-            "for data\\*.paa/.pac references are also discovered automatically."
+            "Additional PBO/IFA archive or directory used only for texture lookup. "
+            "May be repeated; it does not add models to the scan. "
+            "Sibling Data.pbo, Structures.pbo, LIB_*.ifa and other "
+            "namespace archives are discovered automatically."
         ),
     )
     p.add_argument(
