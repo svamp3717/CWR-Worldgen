@@ -81,11 +81,50 @@ class TextureResolver:
         self.indexed_nested_sources: set[str] = set()
         self.attempted_nested_namespaces: set[tuple[Path, str]] = set()
         self.indexed_all = False
-        self.bytes_cache: dict[str, bytes | None] = {}
-        self.image_cache: dict[str, np.ndarray | None] = {}
+        self.bytes_cache: OrderedDict[str, bytes | None] = OrderedDict()
+        self.image_cache: OrderedDict[str, np.ndarray | None] = OrderedDict()
+        self._bytes_cache_bytes = 0
+        self._bytes_cache_limit = 64 * 1024 * 1024
+        self._image_cache_bytes = 0
+        self._image_cache_limit = 192 * 1024 * 1024
+        self._cache_max_entries = 4096
         self._nested_pbo_cache: OrderedDict[str, bytes] = OrderedDict()
         self._nested_pbo_cache_bytes = 0
         self._nested_pbo_cache_limit = 256 * 1024 * 1024
+
+    def _cache_raw(self, key: str, value: bytes | None) -> None:
+        """Keep small PBO texture payloads in a size-bounded LRU."""
+        existing = self.bytes_cache.pop(key, None)
+        if existing is not None:
+            self._bytes_cache_bytes -= len(existing)
+        weight = len(value) if value is not None else 0
+        if weight > self._bytes_cache_limit:
+            return
+        while self.bytes_cache and (
+            self._bytes_cache_bytes + weight > self._bytes_cache_limit
+            or len(self.bytes_cache) >= self._cache_max_entries
+        ):
+            _, old = self.bytes_cache.popitem(last=False)
+            self._bytes_cache_bytes -= len(old) if old is not None else 0
+        self.bytes_cache[key] = value
+        self._bytes_cache_bytes += weight
+
+    def _cache_rgba(self, key: str, value: np.ndarray | None) -> None:
+        """Bound decoded texture RAM without evicting live image users."""
+        existing = self.image_cache.pop(key, None)
+        if existing is not None:
+            self._image_cache_bytes -= existing.nbytes
+        weight = value.nbytes if value is not None else 0
+        if weight > self._image_cache_limit:
+            return
+        while self.image_cache and (
+            self._image_cache_bytes + weight > self._image_cache_limit
+            or len(self.image_cache) >= self._cache_max_entries
+        ):
+            _, old = self.image_cache.popitem(last=False)
+            self._image_cache_bytes -= old.nbytes if old is not None else 0
+        self.image_cache[key] = value
+        self._image_cache_bytes += weight
 
     def _remember(self, canonical: str, ref: AssetRef) -> None:
         canonical = _canonical(canonical)
@@ -421,10 +460,11 @@ class TextureResolver:
     def load_bytes(self, texture_path: str, source: str) -> bytes | None:
         canonical = _canonical(texture_path)
         if canonical in self.bytes_cache:
+            self.bytes_cache.move_to_end(canonical)
             return self.bytes_cache[canonical]
         ref = self._find_ref(canonical, source)
         if ref is None:
-            self.bytes_cache[canonical] = None
+            self._cache_raw(canonical, None)
             return None
         try:
             if isinstance(ref, LooseAssetRef):
@@ -468,24 +508,25 @@ class TextureResolver:
         except (OSError, ValueError, struct.error) as exc:
             print(f"[texture error] {canonical}: {exc}", file=sys.stderr, flush=True)
             data = None
-        self.bytes_cache[canonical] = data
+        self._cache_raw(canonical, data)
         return data
 
     def load_rgba(self, texture_path: str, source: str) -> np.ndarray | None:
         canonical = _canonical(texture_path)
         if canonical in self.image_cache:
+            self.image_cache.move_to_end(canonical)
             return self.image_cache[canonical]
         data = self.load_bytes(canonical, source)
         if data is None:
             print(f"[texture missing] {canonical}", file=sys.stderr, flush=True)
-            self.image_cache[canonical] = None
+            self._cache_rgba(canonical, None)
             return None
         try:
             image = decode_paa(data, is_paa=canonical.endswith(".paa"))
         except (ValueError, struct.error, IndexError) as exc:
             print(f"[texture decode error] {canonical}: {exc}", file=sys.stderr, flush=True)
             image = None
-        self.image_cache[canonical] = image
+        self._cache_rgba(canonical, image)
         return image
 
 
