@@ -1,0 +1,17 @@
+name: Temporary ODOL mesh preview validation
+on:
+  push:
+    branches:
+      - feature/p3d-browser-modern-odol
+jobs:
+  test-odol:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e . pytest matplotlib
+      - run: python -m pytest -q tests/test_p3d_modern_odol_mesh.py tests/test_p3d_modern_odol.py tests/test_p3d_asset_browser.py
