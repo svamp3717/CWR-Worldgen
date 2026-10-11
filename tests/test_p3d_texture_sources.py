@@ -227,3 +227,33 @@ def test_missing_sibling_does_not_return_incorrect_namespace_pbo(tmp_path: Path)
         r"ca\structures\data\plastic\plastic_grey_old_co.paa",
         f"{source}!models\\house.p3d",
     ) is None
+
+
+def test_real_modern_paa_decodes_after_sibling_texture_lookup(tmp_path: Path) -> None:
+    """End-to-end: model PBO -> sibling CA/Structures PBO -> Arma LZO DXT1 RGBA."""
+    source = tmp_path / "buildings2.pbo"
+    structures = tmp_path / "Structures.pbo"
+    _write_pbo(source, {"building.p3d": b"synthetic-model"})
+    lzo_red_16 = bytes.fromhex(
+        "0500f800000000000020431c0000020000000000f800000000000000f8000000000000110000"
+    )
+    paa = (
+        struct.pack("<H", 0xFF01)
+        + struct.pack("<H", 0)  # empty DXT palette
+        + struct.pack("<HH", 0x8010, 16)  # Arma 2 LZO width flag
+        + len(lzo_red_16).to_bytes(3, "little")
+        + lzo_red_16
+    )
+    _write_prefixed_pbo(
+        structures, r"ca\structures",
+        {r"data\bricks\bricks_broken_dirt_03_co.paa": paa},
+    )
+    resolver = TextureResolver([source])
+    rgba = resolver.load_rgba(
+        r"ca\structures\data\bricks\bricks_broken_dirt_03_co.paa",
+        f"{source}!ca\\buildings2\\house.p3d",
+    )
+    assert rgba is not None
+    assert rgba.shape == (16, 16, 4)
+    assert tuple(int(x) for x in rgba[0, 0]) == (255, 0, 0, 255)
+    assert structures.resolve() in resolver.auto_sibling_pbos
