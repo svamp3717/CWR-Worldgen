@@ -492,6 +492,12 @@ class AssetBrowserApp:
                     (vertical[a], vertical[b]),
                     linewidth=1.5,
                 )
+            # Unlike normal mesh rendering, Matplotlib autoscaling would ignore
+            # the browser zoom control. Keep a square, zoomable view here too.
+            extent = max(float(np.ptp(horizontal)), float(np.ptp(vertical)), 0.1)
+            half = 0.6 * extent / max(float(self.zoom), 0.05)
+            self.ax_preview.set_xlim(-half, half)
+            self.ax_preview.set_ylim(-half, half)
             self.ax_preview.set_aspect("equal", adjustable="box")
             self.ax_preview.set_title(
                 f"{model.model_path} • ODOL v{model.measurement.version}"
