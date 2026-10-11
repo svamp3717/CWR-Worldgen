@@ -20,7 +20,7 @@ if str(TOOLS) not in sys.path:
 
 import p3d_asset_browser_app as app_module
 import p3d_asset_browser_catalog as catalog
-from p3d_texture_io import _decode_dxt, _dxt1_block
+from p3d_texture_io import TextureResolver, _decode_dxt, _dxt1_block
 from p3d_texture_render import MipmapCache
 
 
@@ -222,3 +222,33 @@ def test_model_render_uses_cache_and_canvas_dimensions(monkeypatch) -> None:
     assert arguments["height"] == 500
     assert arguments["mipmap_cache"] is app.mipmap_cache
     assert arguments["load_textures"] is True
+
+
+
+def test_texture_resolver_bounds_raw_bytes_and_rgba_images() -> None:
+    resolver = TextureResolver(())
+    resolver._bytes_cache_limit = 10
+    resolver._image_cache_limit = 160
+    resolver._cache_max_entries = 2
+
+    resolver._cache_raw("a", b"a" * 5)
+    resolver._cache_raw("b", b"b" * 5)
+    resolver.bytes_cache.move_to_end("a")
+    resolver._cache_raw("c", b"c" * 5)
+    assert list(resolver.bytes_cache) == ["a", "c"]
+    assert resolver._bytes_cache_bytes == 10
+    resolver._cache_raw("huge", b"x" * 11)
+    assert "huge" not in resolver.bytes_cache
+
+    first = np.full((5, 5, 4), 11, dtype=np.uint8)  # 100 bytes
+    second = np.full((5, 5, 4), 22, dtype=np.uint8)
+    resolver._cache_rgba("a", first)
+    resolver._cache_rgba("b", second)
+    assert list(resolver.image_cache) == ["b"]
+    assert resolver._image_cache_bytes == 100
+    resolver._cache_rgba("missing", None)
+    assert list(resolver.image_cache) == ["b", "missing"]
+    assert resolver._image_cache_bytes == 100
+    resolver._cache_rgba("huge", np.zeros((100, 100, 4), dtype=np.uint8))
+    assert "huge" not in resolver.image_cache
+    assert resolver._image_cache_bytes <= resolver._image_cache_limit
