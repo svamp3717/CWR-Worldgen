@@ -278,3 +278,54 @@ def test_material_does_not_paint_normal_map_as_a_colour_texture() -> None:
     assert odol._material_diffuse_texture(list(materials)) == ""
     r = odol._Reader(_synthetic_rvmat(materials), 49)
     assert odol._material(r) == ""
+
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_actual_odol_v49_mesh_and_paa_open_inside_ironfront_ifa(
+    tmp_path: Path, wrapped: bool,
+) -> None:
+    """Opening a real decoded model through .ifa must be equivalent to .pbo."""
+    import zstandard
+    from cwr_worldgen.pbo import PboEntry, write_pbo
+    from p3d_asset_browser_catalog import load_model, model_source, scan_catalogue
+    from p3d_texture_sources import TextureResolver
+
+    # LOD texture path in full_odol(49) is ca\data\brick.paa.
+    brick = (
+        struct.pack("<H", 0xFF01)  # DXT1
+        + struct.pack("<H", 0)     # palette entries
+        + struct.pack("<HH", 4, 4)
+        + b"\x08\x00\x00"
+        + struct.pack("<HHI", 0xF800, 0, 0)
+    )
+    archive = tmp_path / "ca.ifa"
+    write_pbo(
+        archive,
+        (
+            PboEntry("building.p3d", full_odol(49)),
+            PboEntry(r"data\brick.paa", brick),
+        ),
+    )
+    if wrapped:
+        compressed = tmp_path / "ca.ifa.zst"
+        compressed.write_bytes(zstandard.ZstdCompressor().compress(archive.read_bytes()))
+        archive.unlink()
+        archive = compressed
+    before = archive.read_bytes()
+
+    catalogue = scan_catalogue((archive,), use_cache=False)
+    assert [item.path for item in catalogue.models] == [r"ca\building.p3d"]
+    assert [item.path for item in catalogue.textures] == [r"ca\data\brick.paa"]
+    model = load_model(catalogue.models[0], catalogue)
+    assert model.measurement.version == 49
+    assert model.points.shape == (4, 3)
+    assert len(model.faces) == 2
+    assert model.faces[0].texture_path == r"ca\data\brick.paa"
+
+    resolver = TextureResolver((archive,))
+    image = resolver.load_rgba(r"ca\data\brick.paa", model_source(catalogue.models[0]))
+    assert image is not None
+    assert image.shape == (4, 4, 4)
+    assert tuple(image[0, 0]) == (255, 0, 0, 255)
+    assert archive.read_bytes() == before
