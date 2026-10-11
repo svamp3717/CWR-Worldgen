@@ -1,6 +1,7 @@
 """Asset catalogue helpers for the interactive P3D model/texture browser."""
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -103,7 +104,18 @@ def load_model(item: BrowserAsset, catalogue: BrowserCatalogue) -> preview.Previ
         model_path=item.path,
         source=source,
     )
-    edges = preview.collect_edges(faces)
+    bounds_only = measurement.lod == "model bounds only"
+    if bounds_only:
+        # The catalogue already extracts embedded texture references without
+        # interpreting the changing ODOL LOD/material tables.
+        textures = tuple(
+            path for path in item.dependencies
+            if path.casefold().endswith((".paa", ".pac"))
+        )
+    edges = (
+        np.asarray(preview.modern_odol.BOX_EDGES, dtype=np.int32)
+        if bounds_only else preview.collect_edges(faces)
+    )
     return preview.PreviewModel(
         item.path,
         source,
@@ -111,10 +123,56 @@ def load_model(item: BrowserAsset, catalogue: BrowserCatalogue) -> preview.Previ
         points.astype(np.float32, copy=False),
         faces,
         edges,
-        len(points),
+        0 if bounds_only else len(points),
         textures,
-        "textured mesh" if faces else "vertex fallback",
+        "bounds only" if bounds_only else ("textured mesh" if faces else "vertex fallback"),
     )
+
+
+class ModelPreviewCache:
+    """Bounded in-memory LRU of already-parsed preview geometry.
+
+    Loading an ODOL can decompress substantial vertex buffers and read a PBO.
+    Keep a handful of commonly revisited models until the source selection
+    changes; skip caching models too large to fit the configured budget.
+    """
+
+    def __init__(self, max_models: int = 8, max_bytes: int = 96 * 1024 * 1024):
+        self.max_models = max(0, int(max_models))
+        self.max_bytes = max(0, int(max_bytes))
+        self._items: OrderedDict[
+            tuple[str, str], tuple[preview.PreviewModel, int]
+        ] = OrderedDict()
+        self.bytes_used = 0
+
+    def clear(self) -> None:
+        self._items.clear()
+        self.bytes_used = 0
+
+    def get(
+        self, item: BrowserAsset, catalogue: BrowserCatalogue
+    ) -> preview.PreviewModel:
+        key = (item.source, item.path)
+        if key in self._items:
+            self._items.move_to_end(key)
+            return self._items[key][0]
+        model = load_model(item, catalogue)
+        # Include decoded arrays, approximate Python face/UV objects and PBO
+        # input size so highly detailed models cannot silently grow unbounded.
+        weight = (
+            model.points.nbytes + model.edges.nbytes
+            + 160 * len(model.faces) + item.size
+        )
+        if self.max_models and weight <= self.max_bytes:
+            while self._items and (
+                len(self._items) >= self.max_models
+                or self.bytes_used + weight > self.max_bytes
+            ):
+                _, (_, evicted) = self._items.popitem(last=False)
+                self.bytes_used -= evicted
+            self._items[key] = (model, weight)
+            self.bytes_used += weight
+        return model
 
 
 def load_texture(item: BrowserAsset, catalogue: BrowserCatalogue) -> np.ndarray:
@@ -123,6 +181,39 @@ def load_texture(item: BrowserAsset, catalogue: BrowserCatalogue) -> np.ndarray:
     record = catalogue.record_for(item)
     data = assets.read_asset_record_bytes(record)
     return decode_paa(data, is_paa=item.path.casefold().endswith(".paa"))
+
+
+class TexturePreviewCache:
+    """Bounded decoded-RGBA LRU for repeatedly visited standalone textures."""
+
+    def __init__(self, max_images: int = 12, max_bytes: int = 64 * 1024 * 1024):
+        self.max_images = max(0, int(max_images))
+        self.max_bytes = max(0, int(max_bytes))
+        self._items: OrderedDict[
+            tuple[str, str], np.ndarray
+        ] = OrderedDict()
+        self.bytes_used = 0
+
+    def clear(self) -> None:
+        self._items.clear()
+        self.bytes_used = 0
+
+    def get(self, item: BrowserAsset, catalogue: BrowserCatalogue) -> np.ndarray:
+        key = (item.source, item.path)
+        if key in self._items:
+            self._items.move_to_end(key)
+            return self._items[key]
+        image = load_texture(item, catalogue)
+        if self.max_images and image.nbytes <= self.max_bytes:
+            while self._items and (
+                len(self._items) >= self.max_images
+                or self.bytes_used + image.nbytes > self.max_bytes
+            ):
+                _, old = self._items.popitem(last=False)
+                self.bytes_used -= old.nbytes
+            self._items[key] = image
+            self.bytes_used += image.nbytes
+        return image
 
 
 def model_texture_paths(

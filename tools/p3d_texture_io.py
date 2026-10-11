@@ -1,4 +1,4 @@
-"""Resolve OFP/CWA model textures and decode PAA first mip levels."""
+"""Resolve OFP/CWA and modern Arma model textures and decode PAA mipmaps."""
 from __future__ import annotations
 
 from collections import OrderedDict
@@ -12,6 +12,7 @@ from typing import Sequence
 import numpy as np
 
 import measure_p3d_models as measure
+from p3d_lzo import decode_lzo_bytes
 from cwr_worldgen import assets as world_assets
 from cwr_worldgen.pbo import (
     _read_exact as _read_pbo_exact,
@@ -80,11 +81,50 @@ class TextureResolver:
         self.indexed_nested_sources: set[str] = set()
         self.attempted_nested_namespaces: set[tuple[Path, str]] = set()
         self.indexed_all = False
-        self.bytes_cache: dict[str, bytes | None] = {}
-        self.image_cache: dict[str, np.ndarray | None] = {}
+        self.bytes_cache: OrderedDict[str, bytes | None] = OrderedDict()
+        self.image_cache: OrderedDict[str, np.ndarray | None] = OrderedDict()
+        self._bytes_cache_bytes = 0
+        self._bytes_cache_limit = 64 * 1024 * 1024
+        self._image_cache_bytes = 0
+        self._image_cache_limit = 192 * 1024 * 1024
+        self._cache_max_entries = 4096
         self._nested_pbo_cache: OrderedDict[str, bytes] = OrderedDict()
         self._nested_pbo_cache_bytes = 0
         self._nested_pbo_cache_limit = 256 * 1024 * 1024
+
+    def _cache_raw(self, key: str, value: bytes | None) -> None:
+        """Keep small PBO texture payloads in a size-bounded LRU."""
+        existing = self.bytes_cache.pop(key, None)
+        if existing is not None:
+            self._bytes_cache_bytes -= len(existing)
+        weight = len(value) if value is not None else 0
+        if weight > self._bytes_cache_limit:
+            return
+        while self.bytes_cache and (
+            self._bytes_cache_bytes + weight > self._bytes_cache_limit
+            or len(self.bytes_cache) >= self._cache_max_entries
+        ):
+            _, old = self.bytes_cache.popitem(last=False)
+            self._bytes_cache_bytes -= len(old) if old is not None else 0
+        self.bytes_cache[key] = value
+        self._bytes_cache_bytes += weight
+
+    def _cache_rgba(self, key: str, value: np.ndarray | None) -> None:
+        """Bound decoded texture RAM without evicting live image users."""
+        existing = self.image_cache.pop(key, None)
+        if existing is not None:
+            self._image_cache_bytes -= existing.nbytes
+        weight = value.nbytes if value is not None else 0
+        if weight > self._image_cache_limit:
+            return
+        while self.image_cache and (
+            self._image_cache_bytes + weight > self._image_cache_limit
+            or len(self.image_cache) >= self._cache_max_entries
+        ):
+            _, old = self.image_cache.popitem(last=False)
+            self._image_cache_bytes -= old.nbytes if old is not None else 0
+        self.image_cache[key] = value
+        self._image_cache_bytes += weight
 
     def _remember(self, canonical: str, ref: AssetRef) -> None:
         canonical = _canonical(canonical)
@@ -196,7 +236,7 @@ class TextureResolver:
                 cursor += data_size
                 continue
 
-            if recursive and suffix == ".pbo" and depth < 4:
+            if recursive and suffix in {".pbo", ".ifa"} and depth < 4:
                 stored = _read_pbo_exact(handle, data_size, f"PBO entry {name!r}")
                 cursor += data_size
                 if packing == 0:
@@ -311,7 +351,7 @@ class TextureResolver:
             )
 
     def _index_nested_namespace(self, outer: Path, texture_path: str) -> None:
-        """Target one nested addon PBO whose filename matches the texture namespace."""
+        """Target a nested PBO/IFA addon whose filename matches the texture namespace."""
         canonical = _canonical(texture_path)
         if "\\" not in canonical or not outer.is_file():
             return
@@ -333,7 +373,7 @@ class TextureResolver:
                 metadata, _properties = world_assets._read_pbo_header(handle)
                 for name, packing, original_size, data_size in metadata:
                     is_match = (
-                        world_assets._member_suffix(name) == ".pbo"
+                        world_assets._member_suffix(name) in {".pbo", ".ifa"}
                         and pbo_stem(world_assets._member_basename(name)).casefold()
                         == namespace.casefold()
                     )
@@ -420,10 +460,11 @@ class TextureResolver:
     def load_bytes(self, texture_path: str, source: str) -> bytes | None:
         canonical = _canonical(texture_path)
         if canonical in self.bytes_cache:
+            self.bytes_cache.move_to_end(canonical)
             return self.bytes_cache[canonical]
         ref = self._find_ref(canonical, source)
         if ref is None:
-            self.bytes_cache[canonical] = None
+            self._cache_raw(canonical, None)
             return None
         try:
             if isinstance(ref, LooseAssetRef):
@@ -467,24 +508,25 @@ class TextureResolver:
         except (OSError, ValueError, struct.error) as exc:
             print(f"[texture error] {canonical}: {exc}", file=sys.stderr, flush=True)
             data = None
-        self.bytes_cache[canonical] = data
+        self._cache_raw(canonical, data)
         return data
 
     def load_rgba(self, texture_path: str, source: str) -> np.ndarray | None:
         canonical = _canonical(texture_path)
         if canonical in self.image_cache:
+            self.image_cache.move_to_end(canonical)
             return self.image_cache[canonical]
         data = self.load_bytes(canonical, source)
         if data is None:
             print(f"[texture missing] {canonical}", file=sys.stderr, flush=True)
-            self.image_cache[canonical] = None
+            self._cache_rgba(canonical, None)
             return None
         try:
             image = decode_paa(data, is_paa=canonical.endswith(".paa"))
         except (ValueError, struct.error, IndexError) as exc:
             print(f"[texture decode error] {canonical}: {exc}", file=sys.stderr, flush=True)
             image = None
-        self.image_cache[canonical] = image
+        self._cache_rgba(canonical, image)
         return image
 
 
@@ -569,7 +611,7 @@ def _dxt1_block(block: bytes, punch_through: bool) -> np.ndarray:
     colors[0], colors[1] = _expand565(c0), _expand565(c1)
     if c0 > c1 or not punch_through:
         colors[2, :3] = ((2 * colors[0, :3].astype(np.uint16) + colors[1, :3] + 1) // 3).astype(np.uint8)
-        colors[3, :3] = ((colors[0, :3].astype(np.uint16) + 2 * colors[1, :3] + 1) // 3).astype(np.uint8)
+        colors[3, :3] = ((colors[0, :3].astype(np.uint16) + 2 * colors[1, :3].astype(np.uint16) + 1) // 3).astype(np.uint8)
         colors[2:, 3] = 255
     else:
         colors[2, :3] = ((colors[0, :3].astype(np.uint16) + colors[1, :3]) // 2).astype(np.uint8)
@@ -583,40 +625,97 @@ def _dxt1_block(block: bytes, punch_through: bool) -> np.ndarray:
 
 
 def _decode_dxt(data: bytes, width: int, height: int, kind: str) -> np.ndarray:
+    """Decode BC1/BC2/BC3 with batched NumPy operations, not pixel Python loops.
+
+    A 1024x1024 DXT image has 65,536 blocks. Decoding 16 pixels per block
+    in Python is needlessly slow; bounded batches vectorize both palettes and
+    per-pixel indices while avoiding a large temporary allocation.
+    """
     block_bytes = 8 if kind == "DXT1" else 16
     bw, bh = (width + 3) // 4, (height + 3) // 4
-    needed = bw * bh * block_bytes
+    count = bw * bh
+    needed = count * block_bytes
     if len(data) < needed:
         raise ValueError(f"truncated {kind} PAA mip: need {needed}, got {len(data)}")
-    rgba = np.zeros((height, width, 4), dtype=np.uint8)
-    offset = 0
-    for by in range(bh):
-        for bx in range(bw):
-            block = data[offset : offset + block_bytes]
-            if kind == "DXT1":
-                pixels = _dxt1_block(block, True)
-            elif kind in {"DXT2", "DXT3"}:
-                pixels = _dxt1_block(block[8:], False)
-                for i in range(16):
-                    nibble = (block[i // 2] >> (4 if i & 1 else 0)) & 0xF
-                    pixels[i // 4, i % 4, 3] = (nibble << 4) | nibble
-            else:
-                a0, a1 = block[0], block[1]
-                alphas = [a0, a1]
-                if a0 > a1:
-                    alphas.extend([((7 - i) * a0 + i * a1 + 3) // 7 for i in range(1, 7)])
+
+    blocks = np.frombuffer(data, dtype=np.uint8, count=needed).reshape(count, block_bytes)
+    decoded = np.empty((count, 4, 4, 4), dtype=np.uint8)
+    pixel_indices = np.arange(16, dtype=np.uint32)
+    alpha_indices = np.arange(16, dtype=np.uint64)
+
+    for start in range(0, count, 8192):
+        chunk = blocks[start:start + 8192]
+        n = len(chunk)
+        color = chunk if kind == "DXT1" else chunk[:, 8:]
+        c0 = color[:, 0].astype(np.uint16) | (color[:, 1].astype(np.uint16) << 8)
+        c1 = color[:, 2].astype(np.uint16) | (color[:, 3].astype(np.uint16) << 8)
+
+        def unpack_565(values: np.ndarray) -> np.ndarray:
+            r = (values >> 11) & 31
+            g = (values >> 5) & 63
+            b = values & 31
+            return np.stack(
+                ((r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)),
+                axis=1,
+            ).astype(np.uint8)
+
+        palette = np.empty((n, 4, 4), dtype=np.uint8)
+        palette[:, 0, :3] = unpack_565(c0)
+        palette[:, 1, :3] = unpack_565(c1)
+        palette[:, :2, 3] = 255
+
+        first = palette[:, 0, :3].astype(np.uint16)
+        second = palette[:, 1, :3].astype(np.uint16)
+        palette[:, 2, :3] = ((2 * first + second + 1) // 3).astype(np.uint8)
+        palette[:, 3, :3] = ((first + 2 * second + 1) // 3).astype(np.uint8)
+        palette[:, 2:, 3] = 255
+
+        if kind == "DXT1":
+            transparent = c0 <= c1
+            if transparent.any():
+                palette[transparent, 2, :3] = (
+                    (first[transparent] + second[transparent]) // 2
+                ).astype(np.uint8)
+                palette[transparent, 3] = 0
+                palette[transparent, 2, 3] = 255
+
+        bits = np.zeros(n, dtype=np.uint32)
+        for byte_idx in range(4):
+            bits |= color[:, 4 + byte_idx].astype(np.uint32) << (byte_idx * 8)
+        codes = (bits[:, None] >> (pixel_indices[None, :] * 2)) & 3
+        pixels = palette[np.arange(n)[:, None], codes].reshape(n, 4, 4, 4)
+
+        if kind in {"DXT2", "DXT3"}:
+            nibble_bytes = chunk[:, pixel_indices // 2]
+            nibbles = (
+                nibble_bytes >> ((pixel_indices % 2) * 4)[None, :]
+            ) & 15
+            pixels[:, :, :, 3] = (nibbles * 17).reshape(n, 4, 4)
+        elif kind in {"DXT4", "DXT5"}:
+            a0 = chunk[:, 0].astype(np.uint16)
+            a1 = chunk[:, 1].astype(np.uint16)
+            alphas = np.empty((n, 8), dtype=np.uint8)
+            alphas[:, 0], alphas[:, 1] = a0, a1
+            for i in range(1, 7):
+                # BC3's two alpha interpolation modes depend on a0 > a1.
+                if i <= 4:
+                    short = ((5 - i) * a0 + i * a1 + 2) // 5
                 else:
-                    alphas.extend([((5 - i) * a0 + i * a1 + 2) // 5 for i in range(1, 5)])
-                    alphas.extend([0, 255])
-                alpha_bits = int.from_bytes(block[2:8], "little")
-                pixels = _dxt1_block(block[8:], False)
-                for i in range(16):
-                    pixels[i // 4, i % 4, 3] = alphas[(alpha_bits >> (i * 3)) & 7]
-            offset += block_bytes
-            y0, x0 = by * 4, bx * 4
-            h, w = min(4, height - y0), min(4, width - x0)
-            rgba[y0 : y0 + h, x0 : x0 + w] = pixels[:h, :w]
-    return rgba
+                    short = np.zeros(n, dtype=np.uint16) if i == 5 else np.full(n, 255, dtype=np.uint16)
+                long = ((7 - i) * a0 + i * a1 + 3) // 7
+                alphas[:, i + 1] = np.where(a0 > a1, long, short).astype(np.uint8)
+            alpha_bits = np.zeros(n, dtype=np.uint64)
+            for byte_idx in range(6):
+                alpha_bits |= chunk[:, 2 + byte_idx].astype(np.uint64) << (byte_idx * 8)
+            alpha_codes = (alpha_bits[:, None] >> (alpha_indices[None, :] * 3)) & 7
+            pixels[:, :, :, 3] = alphas[
+                np.arange(n)[:, None], alpha_codes
+            ].reshape(n, 4, 4)
+        decoded[start:start + n] = pixels
+
+    tiled = decoded.reshape(bh, bw, 4, 4, 4).transpose(0, 2, 1, 3, 4)
+    # .copy() keeps odd-dimension mips from retaining the padded block array.
+    return tiled.reshape(bh * 4, bw * 4, 4)[:height, :width].copy()
 
 
 def _decode_4444(raw: bytes, width: int, height: int, ai88: bool = False) -> np.ndarray:
@@ -697,10 +796,17 @@ def decode_paa(data: bytes, *, is_paa: bool = True) -> np.ndarray:
         b, g, r = palette_raw[index * 3 : index * 3 + 3]
         packed = b | (g << 8) | (r << 16)
         palette[index] = (r, g, b, 0 if packed in {0xFF00FF, 0x00FFFF} else 255)
-    width, height = _u16(stream), _u16(stream)
-    lzw_p8 = width == 1234 and height == 8765
+    width_field, height = _u16(stream), _u16(stream)
+    lzw_p8 = width_field == 1234 and height == 8765
     if lzw_p8:
-        width, height = _u16(stream), _u16(stream)
+        width_field, height = _u16(stream), _u16(stream)
+
+    # Arma 2+ PAA mipmaps may LZO-compress the DXT/BCn block stream.
+    # The high bit of the *width* is the LZO flag, not a dimension bit.
+    # e.g. 0x8400 is 1024 pixels wide, not 33792 pixels.
+    is_dxt = kind.startswith("DXT")
+    dxt_lzo = is_dxt and bool(width_field & 0x8000)
+    width = width_field & 0x7FFF if is_dxt else width_field
     if width <= 0 or height <= 0 or width > 8192 or height > 8192:
         raise ValueError(f"invalid PAA dimensions {width}x{height}")
     data_size = _u24(stream)
@@ -709,8 +815,22 @@ def decode_paa(data: bytes, *, is_paa: bool = True) -> np.ndarray:
         raise ValueError(f"truncated PAA/PAC mip payload: need {data_size} bytes")
     if kind == "P8":
         return _decode_p8_payload(stream, width, height, palette, lzw=lzw_p8)
-    if kind.startswith("DXT"):
-        return _decode_dxt(stream.read(data_size), width, height, kind)
+    if is_dxt:
+        payload = stream.read(data_size)
+        block_size = 8 if kind == "DXT1" else 16
+        # BCn payloads are block-compressed on the GPU even when they are
+        # additionally LZO-compressed inside a modern PAA.
+        expected = ((width + 3) // 4) * ((height + 3) // 4) * block_size
+        if dxt_lzo:
+            try:
+                payload = decode_lzo_bytes(payload, expected)
+            except ValueError as exc:
+                raise ValueError(f"invalid LZO-compressed {kind} PAA mip: {exc}") from exc
+        elif len(payload) != expected:
+            raise ValueError(
+                f"invalid raw {kind} PAA mip length: expected {expected}, got {len(payload)}"
+            )
+        return _decode_dxt(payload, width, height, kind)
     if kind == "ARGB8888":
         payload = stream.read(data_size)
         needed = width * height * 4

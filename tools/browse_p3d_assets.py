@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open the CWR P3D model and texture browser."""
+"""Open the P3D model and texture browser."""
 from __future__ import annotations
 
 try:

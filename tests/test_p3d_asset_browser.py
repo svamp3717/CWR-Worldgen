@@ -339,3 +339,36 @@ def test_browser_copy_path_uses_worldgen_asset_path() -> None:
 
     assert app.root.value == r"a\road\modroad25.p3d"
     assert "a\\road\\modroad25.p3d" in app.status_var.get()
+
+
+
+def test_archive_picker_offers_ifa_and_replaces_previous_sources(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    old_pbo = tmp_path / "old.pbo"
+    new_ifa = tmp_path / "new.ifa"
+    old_pbo.touch()
+    new_ifa.touch()
+    app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
+    app.root = object()
+    app._scan_in_progress = False
+    app.status_var = _FakeVar("")
+    app.sources = [old_pbo]
+    app.clear_sources = lambda: app.sources.clear()
+    app._add_sources = lambda paths: app.sources.extend(paths)
+
+    selected = {}
+
+    def fake_picker(**kwargs):
+        selected.update(kwargs)
+        return (str(new_ifa),)
+
+    monkeypatch.setattr(browser_app.filedialog, "askopenfilenames", fake_picker)
+    app.select_pbo()
+
+    assert app.sources == [new_ifa]
+    assert "IFA" in selected["title"]
+    extensions = " ".join(pattern for _title, pattern in selected["filetypes"])
+    assert "*.ifa" in extensions
+    assert "*.ifa.zst" in extensions
+    assert "*.pbo" in extensions

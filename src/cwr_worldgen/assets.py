@@ -208,7 +208,7 @@ def _effective_pbo_prefix(
     # A CWR-CE mod artifact is a PBO used as a virtual installation directory.
     # Its entries include AddOns/*.pbo and loose top-level assets; prepending the
     # outer package filename would invent paths that do not exist after install.
-    if any(_member_suffix(name) == ".pbo" for name, *_rest in metadata):
+    if any(is_pbo_path(_member_basename(name)) for name, *_rest in metadata):
         return ""
     return fallback
 
@@ -377,7 +377,7 @@ def _pbo_records_from_stream(
             )
             continue
 
-        if suffix == ".pbo" and depth < 4:
+        if suffix in {".pbo", ".ifa"} and depth < 4:
             try:
                 nested = _read_stored_member(
                     stream,
@@ -409,7 +409,7 @@ def _pbo_records_from_stream(
 
 
 def _pbo_records(path: Path) -> tuple[list[AssetRecord], str | None]:
-    """List assets from raw PBOs and CWR-CE Zstd-wrapped mod packages.
+    """List assets from PBO/IFA archives and Zstd-wrapped mod packages.
 
     Nested addon PBO members are treated like PBOs in an extracted mod directory,
     while loose package members retain their package-relative paths.
@@ -455,10 +455,9 @@ def _loose_records(root: Path) -> tuple[list[AssetRecord], list[str]]:
 
 
 
-# v2 invalidates catalogues created before transparent Zstd/nested-PBO
-# indexing. Reusing a v1 cache can make a configured mod donor appear missing
-# even though the current scanner can see it inside a compressed mod package.
-_ASSET_CACHE_SCHEMA = 3
+# v4 invalidates catalogues built before IFA archive discovery. Old cache
+# snapshots skipped .ifa files in folders and cannot be reused safely.
+_ASSET_CACHE_SCHEMA = 4
 _CATALOGUE_MEMORY: dict[str, tuple[tuple[str, ...], tuple[AssetRecord, ...], tuple[str, ...]]] = {}
 
 
@@ -471,7 +470,7 @@ def _root_snapshot(roots: Sequence[Path]) -> tuple[tuple[str, ...], list[dict[st
         root_names.append(str(raw_root))
         if raw_root.is_file():
             if not is_pbo_path(raw_root):
-                raise ValueError(f"asset root file must be a PBO: {raw_root}")
+                raise ValueError(f"asset root file must be a PBO or IFA archive: {raw_root}")
             stat = raw_root.stat()
             entries.append({
                 "root": str(raw_root),

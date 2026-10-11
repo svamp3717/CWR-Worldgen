@@ -15,6 +15,8 @@ import numpy as np
 from p3d_asset_browser_catalog import (
     BrowserAsset,
     BrowserCatalogue,
+    ModelPreviewCache,
+    TexturePreviewCache,
     filter_assets,
     load_model,
     load_texture,
@@ -22,8 +24,8 @@ from p3d_asset_browser_catalog import (
     scan_catalogue,
     texture_users,
 )
-from p3d_texture_io import TextureResolver
-from p3d_texture_render import render_textured_model
+from p3d_texture_sources import TextureResolver
+from p3d_texture_render import MipmapCache, render_textured_model
 from cwr_worldgen.assets import canonical_asset_path
 
 
@@ -35,6 +37,9 @@ class AssetBrowserApp:
         self.sources: list[Path] = []
         self.catalogue = BrowserCatalogue((), (), {})
         self.texture_resolver = TextureResolver(())
+        self.model_cache = ModelPreviewCache()
+        self.texture_preview_cache = TexturePreviewCache()
+        self.mipmap_cache = MipmapCache()
         self.current: BrowserAsset | None = None
         self.current_model = None
         self.azim = 35.0
@@ -47,7 +52,7 @@ class AssetBrowserApp:
         self._scan_in_progress = False
         self._source_buttons: list[ttk.Button] = []
 
-        root.title("CWR P3D Model & Texture Browser")
+        root.title("P3D Model & Texture Browser")
         root.geometry("1650x980")
         root.minsize(1180, 720)
         self._build_ui()
@@ -64,7 +69,7 @@ class AssetBrowserApp:
 
         toolbar = ttk.Frame(outer)
         toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 7))
-        select_pbo_button = ttk.Button(toolbar, text="Select PBO…", command=self.select_pbo)
+        select_pbo_button = ttk.Button(toolbar, text="Select PBO / IFA…", command=self.select_pbo)
         select_pbo_button.pack(side=tk.LEFT)
         add_folder_button = ttk.Button(toolbar, text="Add folder…", command=self.select_folder)
         add_folder_button.pack(side=tk.LEFT, padx=(6, 0))
@@ -80,7 +85,7 @@ class AssetBrowserApp:
 
         self.status_var = tk.StringVar(
             master=self.root,
-            value="Select a PBO or folder to browse models and textures.",
+            value="Select a PBO, IFA or folder to browse models and textures.",
         )
         ttk.Label(toolbar, textvariable=self.status_var).pack(side=tk.RIGHT, padx=(12, 0))
         self.scan_progress = ttk.Progressbar(
@@ -275,15 +280,16 @@ class AssetBrowserApp:
             return
         values = filedialog.askopenfilenames(
             parent=self.root,
-            title="Select PBO archive(s)",
+            title="Select PBO or Iron Front IFA archive(s)",
             filetypes=(
-                ("PBO archives", "*.pbo"),
-                ("Zstd-wrapped PBO archives", "*.pbo.zst"),
+                ("PBO / IFA archives", "*.pbo *.ifa *.pbo.zst *.ifa.zst"),
+                ("PBO archives", "*.pbo *.pbo.zst"),
+                ("Iron Front IFA archives", "*.ifa *.ifa.zst"),
                 ("All files", "*.*"),
             ),
         )
         if values:
-            # Selecting a PBO is a replacement operation. This keeps the browser
+            # Selecting an archive is a replacement operation. This keeps the browser
             # focused on the newly chosen archive(s) instead of silently retaining
             # models and textures from a previous package.
             self.clear_sources()
@@ -320,6 +326,12 @@ class AssetBrowserApp:
         self.sources.clear()
         self.catalogue = BrowserCatalogue((), (), {})
         self.texture_resolver = TextureResolver(())
+        if hasattr(self, "model_cache"):
+            self.model_cache.clear()
+        if hasattr(self, "texture_preview_cache"):
+            self.texture_preview_cache.clear()
+        if hasattr(self, "mipmap_cache"):
+            self.mipmap_cache.clear()
         self.current = None
         self.current_model = None
         self.sources_var.set("No source selected")
@@ -377,6 +389,12 @@ class AssetBrowserApp:
             sources, catalogue = payload
             self.catalogue = catalogue
             self.texture_resolver = TextureResolver(sources)
+            if hasattr(self, "model_cache"):
+                self.model_cache.clear()
+            if hasattr(self, "texture_preview_cache"):
+                self.texture_preview_cache.clear()
+            if hasattr(self, "mipmap_cache"):
+                self.mipmap_cache.clear()
             self.current = None
             self.current_model = None
             self.sources_var.set(
@@ -447,7 +465,11 @@ class AssetBrowserApp:
     def _show_model(self, item: BrowserAsset) -> None:
         self._busy(f"Loading model {item.path}…")
         try:
-            model = load_model(item, self.catalogue)
+            cache = getattr(self, "model_cache", None)
+            model = (
+                cache.get(item, self.catalogue) if cache is not None
+                else load_model(item, self.catalogue)
+            )
             self.current_model = model
             self._draw_model(model)
             texture_paths = tuple(
@@ -463,6 +485,15 @@ class AssetBrowserApp:
                 f"Size: {self._format_size(item.size)}\n"
                 f"Dimensions: {m.width_m:.2f} × {m.length_m:.2f} × {m.height_m:.2f} m\n"
                 f"Textures referenced: {len(texture_paths):,}"
+                + (
+                    "\nPreview: bounding box only (ODOL geometry not decoded)"
+                    if model.render_mode == "bounds only"
+                    else (
+                        f"\nLOD: {m.lod}\nMesh: {model.original_vertex_count:,}"
+                        f" vertices, {len(model.faces):,} faces"
+                        if model.faces else ""
+                    )
+                )
             )
             self._unbusy(f"Model loaded: {item.path}")
         except Exception as exc:
@@ -470,8 +501,57 @@ class AssetBrowserApp:
             self._show_error("Model preview failed", exc)
             self._unbusy(f"Could not preview {item.path}")
 
+    def _preview_render_size(self) -> tuple[int, int]:
+        """Match raster size to actual on-screen pixels, with modest AA margin.
+
+        The former fixed 1400x980 frame wasted most of its pixels in a
+        small desktop preview. Keep a little oversampling for thin edges
+        and cap memory/work on very large displays.
+        """
+        try:
+            widget = self.canvas.get_tk_widget()
+            width = int(widget.winfo_width())
+            height = int(widget.winfo_height())
+        except (AttributeError, TypeError, ValueError, tk.TclError):
+            return (960, 720)
+        if width <= 2 or height <= 2:
+            return (960, 720)
+        return (
+            max(480, min(1200, round(width * 1.25))),
+            max(360, min(840, round(height * 1.25))),
+        )
+
     def _draw_model(self, model) -> None:
         self.ax_preview.clear()
+        if getattr(model, "render_mode", "") == "bounds only":
+            # An Arma-era ModelInfo bounding box is useful for identification
+            # and scale, but must never be mistaken for the model's polygons.
+            centre = model.points.mean(axis=0)
+            points = model.points - centre
+            azim = np.deg2rad(self.azim)
+            elev = np.deg2rad(self.elev)
+            horizontal = np.cos(azim) * points[:, 0] - np.sin(azim) * points[:, 2]
+            depth = np.sin(azim) * points[:, 0] + np.cos(azim) * points[:, 2]
+            vertical = np.cos(elev) * points[:, 1] - np.sin(elev) * depth
+            for a, b in model.edges:
+                self.ax_preview.plot(
+                    (horizontal[a], horizontal[b]),
+                    (vertical[a], vertical[b]),
+                    linewidth=1.5,
+                )
+            # Unlike normal mesh rendering, Matplotlib autoscaling would ignore
+            # the browser zoom control. Keep a square, zoomable view here too.
+            extent = max(float(np.ptp(horizontal)), float(np.ptp(vertical)), 0.1)
+            half = 0.6 * extent / max(float(self.zoom), 0.05)
+            self.ax_preview.set_xlim(-half, half)
+            self.ax_preview.set_ylim(-half, half)
+            self.ax_preview.set_aspect("equal", adjustable="box")
+            self.ax_preview.set_title(
+                f"{model.model_path} • ODOL v{model.measurement.version}"
+                " • bounds only, NOT model geometry"
+            )
+            self.canvas.draw_idle()
+            return
         if not model.faces:
             points = model.points
             if len(points):
@@ -480,27 +560,31 @@ class AssetBrowserApp:
             self.ax_preview.set_title(f"{model.model_path} • vertex preview")
             self.canvas.draw_idle()
             return
+        render_width, render_height = self._preview_render_size()
         image, hits, misses = render_textured_model(
             model.points,
             model.faces,
             self.texture_resolver,
             model.source,
-            width=1400,
-            height=980,
+            width=render_width,
+            height=render_height,
             azim_deg=self.azim,
             elev_deg=self.elev,
             zoom=self.zoom,
             load_textures=not self.skip_textures_var.get(),
+            mipmap_cache=getattr(self, "mipmap_cache", None),
         )
-        self.ax_preview.imshow(image, interpolation="nearest")
+        # Downsampling remains filtered when the canvas is smaller than the
+        # already screen-sized raster, avoiding shimmering brick patterns.
+        self.ax_preview.imshow(image, interpolation="hanning", resample=True)
         if self.skip_textures_var.get():
             self.ax_preview.set_title(
                 f"{model.model_path} • geometry preview • textures skipped"
             )
         else:
             self.ax_preview.set_title(
-                f"{model.model_path} • {hits} textured face hit(s)"
-                + (f" • {misses} missing" if misses else "")
+                f"{model.model_path} • {hits} textured triangle(s)"
+                + (f" • {misses} untextured triangle(s)" if misses else "")
             )
         self.ax_preview.axis("off")
         self.figure.tight_layout(pad=1.0)
@@ -509,7 +593,11 @@ class AssetBrowserApp:
     def _show_texture(self, item: BrowserAsset) -> None:
         self._busy(f"Loading texture {item.path}…")
         try:
-            image = load_texture(item, self.catalogue)
+            cache = getattr(self, "texture_preview_cache", None)
+            image = (
+                cache.get(item, self.catalogue) if cache is not None
+                else load_texture(item, self.catalogue)
+            )
             self.current_model = None
             self.ax_preview.clear()
             self.ax_preview.imshow(image, interpolation="nearest")
@@ -554,7 +642,7 @@ class AssetBrowserApp:
         self.ax_preview.text(
             0.5,
             0.5,
-            "Select PBO… or Add folder…\n\n"
+            "Select PBO / IFA… or Add folder…\n\n"
             "Then click any model or texture in the catalogue.",
             ha="center",
             va="center",

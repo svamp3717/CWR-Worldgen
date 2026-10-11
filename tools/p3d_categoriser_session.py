@@ -77,7 +77,7 @@ class SessionCategoriserApp(CategoriserApp):
     def _create_loading_screen(self, root: tk.Tk) -> None:
         window = tk.Toplevel(root)
         self._loading_window = window
-        window.title("Loading CWR P3D Model Categoriser")
+        window.title("Loading P3D Model Categoriser")
         window.resizable(False, False)
         window.protocol("WM_DELETE_WINDOW", lambda: None)
 
@@ -106,7 +106,7 @@ class SessionCategoriserApp(CategoriserApp):
         bar.start(12)
         ttk.Label(
             frame,
-            text="The browser will open when the first requested textured preview is ready.",
+            text="The categoriser will open when the first requested preview is ready.",
             wraplength=480,
             justify=tk.LEFT,
         ).pack(anchor="w", pady=(12, 0))
@@ -467,65 +467,8 @@ class SessionCategoriserApp(CategoriserApp):
         super()._show_model(model)
 
     def _draw_model(self, model) -> None:
-        """Render a larger, zoomable, filtered textured view for close inspection."""
-        self.ax_preview.clear()
-        self.status_var.set("")
-
-        if not model.faces:
-            self.ax_preview.text(
-                0.5,
-                0.5,
-                "Textured preview unavailable\nNo polygon topology was parsed for this model.",
-                ha="center",
-                va="center",
-                transform=self.ax_preview.transAxes,
-                fontsize=13,
-            )
-            self.ax_preview.axis("off")
-            self.figure.tight_layout(pad=1.2)
-            self.canvas.draw_idle()
-            return
-
-        image, hits, misses = render_textured_model(
-            model.points,
-            model.faces,
-            self.texture_resolver,
-            model.source,
-            width=1400,
-            height=980,
-            azim_deg=self.azim,
-            elev_deg=self.elev,
-            zoom=self.zoom,
-            load_textures=not self.skip_textures_var.get(),
-        )
-        self.ax_preview.imshow(image, interpolation="nearest")
-        if self.skip_textures_var.get():
-            self.ax_preview.set_title(
-                f"Geometry preview • textures skipped • az {self.azim:.0f}° / "
-                f"el {self.elev:.0f}° • zoom {self.zoom:.2f}×"
-            )
-            self.status_var.set(
-                "Texture lookup skipped for faster model browsing. "
-                "Mouse wheel still zooms the geometry preview."
-            )
-        else:
-            self.ax_preview.set_title(
-                f"Textured model • az {self.azim:.0f}° / el {self.elev:.0f}° • "
-                f"zoom {self.zoom:.2f}×"
-            )
-            if misses:
-                self.status_var.set(
-                    f"Texture sampling: {hits} textured face hit(s), "
-                    f"{misses} missing/unreadable face texture(s). See console."
-                )
-            else:
-                self.status_var.set(
-                    f"Texture sampling: {hits} textured face hit(s). "
-                    "Mouse wheel zooms for signs and small details."
-                )
-        self.ax_preview.axis("off")
-        self.figure.tight_layout(pad=1.0)
-        self.canvas.draw_idle()
+        """Share Arma-era previews and caches with the base categoriser view."""
+        self._render_model(model, renderer=render_textured_model, zoom=self.zoom)
 
     def restart_from_beginning(self) -> None:
         """Move navigation to the first model without clearing classifications."""

@@ -12,7 +12,7 @@ if str(TOOLS_DIR) not in sys.path:
 
 import p3d_texture_io as texture_io
 from p3d_texture_io import NestedPBOAssetRef, PBOAssetRef
-from p3d_texture_sources import TextureResolver, sibling_namespace_pbo
+from p3d_texture_sources import TextureResolver, sibling_namespace_pbo, sibling_namespace_pbos
 
 
 _PBO_ENTRY = struct.Struct("<IIIII")
@@ -169,3 +169,91 @@ def test_nested_model_texture_lookup_targets_current_addon_and_reuses_cache(
     assert f"{wrapped}!addons\\target.pbo" in resolver.indexed_nested_sources
     assert f"{wrapped}!addons\\broken.pbo" not in resolver.indexed_nested_sources
 
+
+
+def _write_prefixed_pbo(path: Path, prefix: str, entries: dict[str, bytes]) -> None:
+    """Minimal real PBO header with a BI prefix property."""
+    header = bytearray(b"\0" + _PBO_ENTRY.pack(0x56657273, 0, 0, 0, 0))
+    header.extend(b"prefix\0" + prefix.encode("latin-1") + b"\0\0")
+    data = bytearray()
+    for name, payload in entries.items():
+        header.extend(name.encode("latin-1") + b"\0")
+        header.extend(_PBO_ENTRY.pack(0, len(payload), 0, 0, len(payload)))
+        data.extend(payload)
+    header.extend(b"\0" + _PBO_ENTRY.pack(0, 0, 0, 0, 0))
+    path.write_bytes(bytes(header + data))
+
+
+def test_arma_structures_and_oa_structures_e_sibling_pbo_lookup(tmp_path: Path) -> None:
+    """A ca/structures texture lives in Structures.pbo, not in CA.pbo."""
+    model_pbo = tmp_path / "buildings.pbo"
+    general_pbo = tmp_path / "ca.pbo"
+    structures = tmp_path / "Structures.pbo"
+    structures_e = tmp_path / "structures_E.pbo"
+    _write_pbo(model_pbo, {"model.p3d": b"placeholder"})
+    _write_pbo(general_pbo, {"unrelated.paa": b"not the desired archive"})
+    _write_prefixed_pbo(
+        structures, r"ca\structures",
+        {r"data\bricks\bricks_broken_dirt_03_co.paa": b"arma2-texture"},
+    )
+    _write_prefixed_pbo(
+        structures_e, r"ca\structures_e",
+        {r"data\wood\ground_wood01_co.paa": b"oa-texture"},
+    )
+
+    name_a2 = r"ca\structures\data\bricks\bricks_broken_dirt_03_co.paa"
+    name_oa = r"ca\structures_e\data\wood\ground_wood01_co.paa"
+    assert sibling_namespace_pbo(model_pbo, name_a2) == structures
+    assert sibling_namespace_pbo(model_pbo, name_oa) == structures_e
+    assert sibling_namespace_pbos(model_pbo, name_a2) == (structures, general_pbo)
+
+    resolver = TextureResolver([model_pbo])
+    model_source = f"{model_pbo}!ca\\buildings\\house.p3d"
+    assert resolver.load_bytes(name_a2, model_source) == b"arma2-texture"
+    assert resolver.load_bytes(name_oa, model_source) == b"oa-texture"
+    assert structures.resolve() in resolver.auto_sibling_pbos
+    assert structures_e.resolve() in resolver.auto_sibling_pbos
+    assert general_pbo.resolve() not in resolver.auto_sibling_pbos
+    assert resolver.indexed_all is False
+
+
+def test_missing_sibling_does_not_return_incorrect_namespace_pbo(tmp_path: Path) -> None:
+    source = tmp_path / "models.pbo"
+    _write_pbo(source, {})
+    ca = tmp_path / "ca.pbo"
+    _write_pbo(ca, {"random.paa": b"unrelated"})
+    resolver = TextureResolver([source])
+    assert resolver.load_bytes(
+        r"ca\structures\data\plastic\plastic_grey_old_co.paa",
+        f"{source}!models\\house.p3d",
+    ) is None
+
+
+def test_real_modern_paa_decodes_after_sibling_texture_lookup(tmp_path: Path) -> None:
+    """End-to-end: model PBO -> sibling CA/Structures PBO -> Arma LZO DXT1 RGBA."""
+    source = tmp_path / "buildings2.pbo"
+    structures = tmp_path / "Structures.pbo"
+    _write_pbo(source, {"building.p3d": b"synthetic-model"})
+    lzo_red_16 = bytes.fromhex(
+        "0500f800000000000020431c0000020000000000f800000000000000f8000000000000110000"
+    )
+    paa = (
+        struct.pack("<H", 0xFF01)
+        + struct.pack("<H", 0)  # empty DXT palette
+        + struct.pack("<HH", 0x8010, 16)  # Arma 2 LZO width flag
+        + len(lzo_red_16).to_bytes(3, "little")
+        + lzo_red_16
+    )
+    _write_prefixed_pbo(
+        structures, r"ca\structures",
+        {r"data\bricks\bricks_broken_dirt_03_co.paa": paa},
+    )
+    resolver = TextureResolver([source])
+    rgba = resolver.load_rgba(
+        r"ca\structures\data\bricks\bricks_broken_dirt_03_co.paa",
+        f"{source}!ca\\buildings2\\house.p3d",
+    )
+    assert rgba is not None
+    assert rgba.shape == (16, 16, 4)
+    assert tuple(int(x) for x in rgba[0, 0]) == (255, 0, 0, 255)
+    assert structures.resolve() in resolver.auto_sibling_pbos

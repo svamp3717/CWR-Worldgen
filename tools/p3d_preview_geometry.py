@@ -1,7 +1,7 @@
 """Parse first-LOD P3D geometry, UVs and material references for previewing."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import io
 from pathlib import Path
 import struct
@@ -11,6 +11,8 @@ from typing import Iterator, Sequence
 import numpy as np
 
 import measure_p3d_models as measure
+import p3d_modern_odol as modern_odol
+import p3d_modern_odol_mesh as modern_mesh
 from p3d_texture_render import RenderFace
 
 _MAX_FACE_COUNT = 2_000_000
@@ -105,6 +107,39 @@ def extract_first_lod_geometry(data: bytes, *, model_path: str, source: str):
     faces: tuple[RenderFace, ...] = ()
     textures: tuple[str, ...] = ()
 
+    if signature == b"ODOL" and struct.unpack_from("<I", data, 4)[0] >= 40:
+        try:
+            mesh = modern_mesh.read_model_mesh(data)
+        except modern_odol.ModernOdolError as exc:
+            # Preserve the existing metadata-only fallback for encrypted,
+            # incomplete or not-yet-decoded ODOL layouts. Never pass bounding
+            # box corners off as the actual polygon mesh.
+            print(
+                f"[preview warning] {model_path}: modern ODOL mesh unavailable:"
+                f" {exc}; showing model bounds instead",
+                file=sys.stderr,
+            )
+            try:
+                bounds = modern_odol.read_model_bounds(data)
+            except modern_odol.ModernOdolError as header_exc:
+                raise measure.ModelReadError(str(header_exc)) from header_exc
+            points = np.asarray(modern_odol.box_vertices(bounds), dtype=np.float32)
+            measured = measure._measurement(
+                model_path=model_path, source=source, format_name="ODOL",
+                version=bounds.version, lod="model bounds only", points=points,
+            )
+            return replace(measured, vertex_count=0), points, (), ()
+        measurement = measure._measurement(
+            model_path=model_path, source=source, format_name="ODOL",
+            version=mesh.version, lod=f"resolution {mesh.resolution:g}",
+            points=mesh.points,
+        )
+        faces = tuple(
+            RenderFace(indices, uvs, texture)
+            for indices, uvs, texture in mesh.faces
+        )
+        return measurement, mesh.points, faces, mesh.textures
+
     if signature == b"ODOL":
         measure._read_exact(stream, 4, "ODOL signature")
         version = measure._read_u32(stream, "ODOL version")
@@ -194,16 +229,27 @@ def preview_models(inputs: Sequence[Path], patterns: Sequence[str], max_points: 
     for model_path, source, data in measure._iter_models(inputs, patterns):
         try:
             measurement, points, faces, textures = extract_first_lod_geometry(data, model_path=model_path, source=source)
-            edges = collect_edges(faces)
-            original_vertex_count = len(points)
-            if faces:
+            bounds_only = measurement.lod == "model bounds only"
+            edges = (
+                np.asarray(modern_odol.BOX_EDGES, dtype=np.int32)
+                if bounds_only else collect_edges(faces)
+            )
+            original_vertex_count = 0 if bounds_only else len(points)
+            if bounds_only:
+                # Modern ODOL fallback points are eight bounding-box corners,
+                # not a vertex cloud. Show an honest wireframe instead.
+                preview_points, mode = points.astype(np.float32, copy=False), "bounds only"
+            elif faces:
                 preview_points, mode = points.astype(np.float32, copy=False), "textured mesh"
             else:
                 if len(points) > max_points:
-                    picks = np.linspace(0, len(points)-1, max_points, dtype=np.int64)
+                    picks = np.linspace(0, len(points) - 1, max_points, dtype=np.int64)
                     points = points[picks]
                 preview_points, mode = points.astype(np.float32, copy=False), "vertex fallback"
-            yield PreviewModel(model_path, source, measurement, preview_points, faces, edges, original_vertex_count, textures, mode)
+            yield PreviewModel(
+                model_path, source, measurement, preview_points, faces,
+                edges, original_vertex_count, textures, mode,
+            )
         except (measure.ModelReadError, OSError, struct.error, OverflowError, IndexError, ValueError) as exc:
             failure = measure.ModelFailure(model_path=model_path, source=source, error=str(exc))
             print(f"[model error] {failure.model_path}\n  source: {failure.source}\n  error:  {failure.error}", file=sys.stderr, flush=True)
