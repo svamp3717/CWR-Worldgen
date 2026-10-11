@@ -240,3 +240,41 @@ def test_real_mesh_uses_textured_renderer(monkeypatch) -> None:
     assert captured["faces"][0].texture_path == r"ca\data\brick.paa"
     assert captured["source"] == "roads.pbo"
     assert "bounds only" not in app.ax_preview.set_title.call_args.args[0]
+
+
+
+def _synthetic_rvmat(stage_textures: tuple[str, ...], *, version: int = 9) -> bytes:
+    """Tiny embedded RVMAT with texture stages but no transforms."""
+    out = bytearray(b"ca\\data\\test.rvmat\x00")
+    out.extend(pack(version))
+    out.extend(bytes(6 * 16))  # emissive, ambient, diffuse, specular etc.
+    out.extend(bytes(20))  # specular power, shader IDs, lighting and fog
+    out.extend(b"\x00")  # surface file (v6+)
+    out.extend(bytes(8))  # render flags (v4+)
+    out.extend(pack(len(stage_textures)))
+    out.extend(pack(0))  # transform count (v9+)
+    for texture in stage_textures:
+        out.extend(pack(0))  # filter
+        out.extend(texture.encode("latin-1") + b"\x00")
+        out.extend(pack(0))  # stage ID
+    return bytes(out)
+
+
+def test_material_selects_diffuse_after_normal_and_specular_stages() -> None:
+    materials = (
+        r"ca\structures_e\data\wood\ground_wood01_nohq.paa",
+        r"ca\structures_e\data\wood\ground_wood01_smdi.paa",
+        r"ca\structures_e\data\wood\ground_wood01_co.paa",
+    )
+    r = odol._Reader(_synthetic_rvmat(materials), 49)
+    assert odol._material(r) == materials[2]
+
+
+def test_material_does_not_paint_normal_map_as_a_colour_texture() -> None:
+    materials = (
+        r"ca\structures_e\data\stone\wall_nohq.paa",
+        r"ca\structures_e\data\stone\wall_smdi.paa",
+    )
+    assert odol._material_diffuse_texture(list(materials)) == ""
+    r = odol._Reader(_synthetic_rvmat(materials), 49)
+    assert odol._material(r) == ""
