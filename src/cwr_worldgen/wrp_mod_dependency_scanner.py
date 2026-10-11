@@ -383,6 +383,26 @@ def rows_for_display(result: ScanResult, *, include_stock: bool = False) -> tupl
     return tuple(row for row in result.rows if not row.is_stock)
 
 
+def _sort_display_rows(
+    rows: Sequence[DependencyRow], column: str, *, descending: bool = False
+) -> tuple[DependencyRow, ...]:
+    """Sort visible table rows, treating reference counts as numbers."""
+    if column == "refs":
+        key = lambda row: row.references
+    elif column == "type":
+        key = lambda row: row.is_stock  # Mod first, then Stock.
+    else:
+        attributes = {
+            "wrp": "wrp_name",
+            "namespace": "namespace",
+            "model": "model_path",
+            "parser": "parser",
+        }
+        attribute = attributes[column]
+        key = lambda row: getattr(row, attribute).casefold()
+    return tuple(sorted(rows, key=key, reverse=descending))
+
+
 def result_document(
     result: ScanResult, *, include_stock: bool = False
 ) -> dict[str, object]:
@@ -487,6 +507,8 @@ class ScannerGui:
         self.include_stock_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Choose a PBO or WRP to scan.")
         self._result: ScanResult | None = None
+        self._sort_column: str | None = None
+        self._sort_descending = False
         self._queue: queue.Queue[tuple[str, object]] = queue.Queue()
 
         self._build()
@@ -535,8 +557,11 @@ class ScannerGui:
             "parser": "Detection",
         }
         widths = {"wrp": 170, "namespace": 150, "model": 390, "refs": 65, "type": 75, "parser": 150}
+        self._column_headings = headings
         for key in columns:
-            self.tree.heading(key, text=headings[key])
+            self.tree.heading(
+                key, text=headings[key], command=lambda column=key: self._sort_by(column)
+            )
             self.tree.column(key, width=widths[key], anchor="w")
         scroll_y = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
         scroll_x = ttk.Scrollbar(table_frame, orient="horizontal", command=self.tree.xview)
@@ -553,6 +578,18 @@ class ScannerGui:
         ttk.Button(actions, text="Export CSV…", command=self._export_csv).pack(side="left", padx=(8, 0))
         ttk.Button(actions, text="Export JSON…", command=self._export_json).pack(side="left", padx=(8, 0))
         ttk.Label(actions, textvariable=self.status_var).pack(side="right")
+
+    def _sort_by(self, column: str) -> None:
+        if self._sort_column == column:
+            self._sort_descending = not self._sort_descending
+        else:
+            self._sort_column = column
+            self._sort_descending = False
+
+        for key, label in self._column_headings.items():
+            arrow = (" ▼" if self._sort_descending else " ▲") if key == column else ""
+            self.tree.heading(key, text=label + arrow)
+        self._populate()
 
     def _game_changed(self, _event: object = None) -> None:
         game = GAME_LABELS[self.game_var.get()]
@@ -606,6 +643,10 @@ class ScannerGui:
         if result is None:
             return
         rows = rows_for_display(result, include_stock=bool(self.include_stock_var.get()))
+        if self._sort_column is not None:
+            rows = _sort_display_rows(
+                rows, self._sort_column, descending=self._sort_descending
+            )
         for row in rows:
             self.tree.insert(
                 "",
