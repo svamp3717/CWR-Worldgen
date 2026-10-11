@@ -26,17 +26,22 @@ _ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
 
 
 def is_pbo_path(path: Path | str) -> bool:
-    """Return whether a path name is a raw or Zstandard-wrapped PBO."""
+    """Recognize PBO and Iron Front IFA archives, including Zstd wrappers.
+
+    IFA is Iron Front's PBO-compatible addon container. Keep a single
+    archive predicate so asset scanning, model reads, and texture resolution
+    all agree about its contents.
+    """
     name = Path(path).name.casefold()
-    return name.endswith(".pbo") or name.endswith(".pbo.zst")
+    return name.endswith((".pbo", ".pbo.zst", ".ifa", ".ifa.zst"))
 
 
 def pbo_stem(path: Path | str) -> str:
-    """Return the logical PBO stem, stripping both .pbo and optional .zst."""
+    """Return a PBO/IFA archive's logical stem without its wrapper extension."""
     name = Path(path).name
     if name.casefold().endswith(".zst"):
         name = name[:-4]
-    if name.casefold().endswith(".pbo"):
+    if name.casefold().endswith((".pbo", ".ifa")):
         name = name[:-4]
     return name
 
@@ -51,8 +56,8 @@ def is_zstd_wrapped_pbo(path: Path | str) -> bool:
 def open_pbo_stream(path: Path | str) -> Iterator[BinaryIO]:
     """Open PBO bytes, transparently decoding a whole-file Zstandard wrapper.
 
-    CWR-CE distributes mod artifacts as .pbo.zst files. Some archives in the
-    wild retain only the .pbo suffix, so detection uses the Zstd frame magic
+    CWR-CE uses .pbo.zst files; Iron Front may also use .ifa or .ifa.zst.
+    Detection uses the Zstd frame magic rather than the filename
     instead of trusting the filename.
     """
     source = Path(path)
