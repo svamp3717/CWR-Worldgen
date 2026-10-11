@@ -54,7 +54,7 @@ GAME_STOCK_ROOTS = {
 GAME_LABELS = {
     "CWA / OFP": "cwa",
     "Arma 1": "arma1",
-    "Arma 1 QG": "arma1qg",
+    "Arma 1 + Queen\'s Gambit": "arma1qg",
     "Arma 2": "arma2",
     "Arma 2 OA": "arma2oa",
     "Arma 3": "arma3",
@@ -546,7 +546,7 @@ class ScannerGui:
         options.pack(fill="x", pady=(10, 8))
         ttk.Label(options, text="Game").pack(side="left")
         game_choice = ttk.Combobox(
-            options, textvariable=self.game_var, values=tuple(GAME_LABELS), state="readonly", width=14
+            options, textvariable=self.game_var, values=tuple(GAME_LABELS), state="readonly", width=22
         )
         game_choice.pack(side="left", padx=(8, 14))
         game_choice.bind("<<ComboboxSelected>>", self._game_changed)
