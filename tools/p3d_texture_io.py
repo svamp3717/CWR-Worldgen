@@ -236,7 +236,7 @@ class TextureResolver:
                 cursor += data_size
                 continue
 
-            if recursive and suffix == ".pbo" and depth < 4:
+            if recursive and suffix in {".pbo", ".ifa"} and depth < 4:
                 stored = _read_pbo_exact(handle, data_size, f"PBO entry {name!r}")
                 cursor += data_size
                 if packing == 0:
@@ -351,7 +351,7 @@ class TextureResolver:
             )
 
     def _index_nested_namespace(self, outer: Path, texture_path: str) -> None:
-        """Target one nested addon PBO whose filename matches the texture namespace."""
+        """Target a nested PBO/IFA addon whose filename matches the texture namespace."""
         canonical = _canonical(texture_path)
         if "\\" not in canonical or not outer.is_file():
             return
@@ -373,7 +373,7 @@ class TextureResolver:
                 metadata, _properties = world_assets._read_pbo_header(handle)
                 for name, packing, original_size, data_size in metadata:
                     is_match = (
-                        world_assets._member_suffix(name) == ".pbo"
+                        world_assets._member_suffix(name) in {".pbo", ".ifa"}
                         and pbo_stem(world_assets._member_basename(name)).casefold()
                         == namespace.casefold()
                     )
