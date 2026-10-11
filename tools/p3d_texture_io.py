@@ -1,4 +1,4 @@
-"""Resolve OFP/CWA model textures and decode PAA first mip levels."""
+"""Resolve OFP/CWA and modern Arma model textures and decode PAA mipmaps."""
 from __future__ import annotations
 
 from collections import OrderedDict
@@ -12,6 +12,7 @@ from typing import Sequence
 import numpy as np
 
 import measure_p3d_models as measure
+from p3d_lzo import decode_lzo_bytes
 from cwr_worldgen import assets as world_assets
 from cwr_worldgen.pbo import (
     _read_exact as _read_pbo_exact,
@@ -697,10 +698,17 @@ def decode_paa(data: bytes, *, is_paa: bool = True) -> np.ndarray:
         b, g, r = palette_raw[index * 3 : index * 3 + 3]
         packed = b | (g << 8) | (r << 16)
         palette[index] = (r, g, b, 0 if packed in {0xFF00FF, 0x00FFFF} else 255)
-    width, height = _u16(stream), _u16(stream)
-    lzw_p8 = width == 1234 and height == 8765
+    width_field, height = _u16(stream), _u16(stream)
+    lzw_p8 = width_field == 1234 and height == 8765
     if lzw_p8:
-        width, height = _u16(stream), _u16(stream)
+        width_field, height = _u16(stream), _u16(stream)
+
+    # Arma 2+ PAA mipmaps may LZO-compress the DXT/BCn block stream.
+    # The high bit of the *width* is the LZO flag, not a dimension bit.
+    # e.g. 0x8400 is 1024 pixels wide, not 33792 pixels.
+    is_dxt = kind.startswith("DXT")
+    dxt_lzo = is_dxt and bool(width_field & 0x8000)
+    width = width_field & 0x7FFF if is_dxt else width_field
     if width <= 0 or height <= 0 or width > 8192 or height > 8192:
         raise ValueError(f"invalid PAA dimensions {width}x{height}")
     data_size = _u24(stream)
@@ -709,8 +717,22 @@ def decode_paa(data: bytes, *, is_paa: bool = True) -> np.ndarray:
         raise ValueError(f"truncated PAA/PAC mip payload: need {data_size} bytes")
     if kind == "P8":
         return _decode_p8_payload(stream, width, height, palette, lzw=lzw_p8)
-    if kind.startswith("DXT"):
-        return _decode_dxt(stream.read(data_size), width, height, kind)
+    if is_dxt:
+        payload = stream.read(data_size)
+        block_size = 8 if kind == "DXT1" else 16
+        # BCn payloads are block-compressed on the GPU even when they are
+        # additionally LZO-compressed inside a modern PAA.
+        expected = ((width + 3) // 4) * ((height + 3) // 4) * block_size
+        if dxt_lzo:
+            try:
+                payload = decode_lzo_bytes(payload, expected)
+            except ValueError as exc:
+                raise ValueError(f"invalid LZO-compressed {kind} PAA mip: {exc}") from exc
+        elif len(payload) != expected:
+            raise ValueError(
+                f"invalid raw {kind} PAA mip length: expected {expected}, got {len(payload)}"
+            )
+        return _decode_dxt(payload, width, height, kind)
     if kind == "ARGB8888":
         payload = stream.read(data_size)
         needed = width * height * 4
