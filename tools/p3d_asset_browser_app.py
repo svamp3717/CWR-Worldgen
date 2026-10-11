@@ -540,8 +540,8 @@ class AssetBrowserApp:
             )
         else:
             self.ax_preview.set_title(
-                f"{model.model_path} • {hits} textured face hit(s)"
-                + (f" • {misses} missing" if misses else "")
+                f"{model.model_path} • {hits} textured triangle(s)"
+                + (f" • {misses} untextured triangle(s)" if misses else "")
             )
         self.ax_preview.axis("off")
         self.figure.tight_layout(pad=1.0)
