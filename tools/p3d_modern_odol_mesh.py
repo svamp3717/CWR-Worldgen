@@ -18,6 +18,7 @@ import struct
 import numpy as np
 
 import measure_p3d_models as measure
+from p3d_lzo import LzoReadError, decode_lzo_stream
 from p3d_modern_odol import ModernOdolError, read_model_bounds
 
 _MAX_VERTICES = 2_000_000
@@ -110,7 +111,10 @@ class _Reader:
             if self.version >= 64:
                 compressed = bool(self.u8())
             if compressed:
-                return _decode_lzo(self, expected)
+                try:
+                    return decode_lzo_stream(self, expected)
+                except LzoReadError as exc:
+                    raise MeshReadError(str(exc)) from exc
             return self.take(expected, "uncompressed ODOL array")
         if expected < 1024:
             return self.take(expected, "uncompressed ODOL array")
@@ -133,120 +137,6 @@ class _Reader:
         if same:
             return count, self.take(width, "condensed array default")
         return count, self.compressed(count * width)
-
-
-def _decode_lzo(reader: _Reader, expected: int) -> bytes:
-    """Expand an unframed BI LZO1X array, consuming its end marker.
-
-    The compressed size is not stored in the ODOL array header, so decoding
-    must consume the stream through the LZO end-of-stream instruction.
-    """
-    out = bytearray()
-
-    def byte() -> int:
-        return reader.u8()
-
-    def literals(n: int) -> None:
-        if n < 0 or n > expected - len(out):
-            raise MeshReadError("LZO literal run exceeds expected output")
-        out.extend(reader.take(n, "LZO literals"))
-
-    def copy(position: int, n: int) -> None:
-        if position < 0 or position >= len(out) or n < 0 or n > expected - len(out):
-            raise MeshReadError("invalid LZO match offset or output size")
-        for offset in range(n):
-            out.append(out[position + offset])
-
-    def extended(base: int) -> int:
-        amount = base
-        while True:
-            value = byte()
-            if value:
-                return amount + value
-            amount += 255
-            if amount > expected:
-                raise MeshReadError("excessively long LZO literal/match run")
-
-    def after_match() -> int:
-        # The two last bytes of a match encode its following literal count.
-        pos = reader.tell()
-        reader.seek(pos - 2)
-        value = reader.u8() & 3
-        reader.seek(pos)
-        return value
-
-    state = "start"
-    token = 0
-    if reader.tell() < reader.limit:
-        first = reader.take(1)[0]
-        reader.seek(reader.tell() - 1)
-        if first > 17:
-            token = byte() - 17
-            if token < 4:
-                state = "match_next"
-            else:
-                literals(token)
-                state = "first_literal"
-        else:
-            state = "literal"
-    while True:
-        if state == "literal":
-            token = byte()
-            if token >= 16:
-                state = "match"
-                continue
-            if token == 0:
-                token = extended(15)
-            literals(token + 3)
-            state = "first_literal"
-            continue
-        if state == "first_literal":
-            token = byte()
-            if token >= 16:
-                state = "match"
-                continue
-            offset = 1 + 0x800 + (token >> 2) + (byte() << 2)
-            copy(len(out) - offset, 3)
-            state = "after_match"
-            continue
-        if state == "match_next":
-            literals(token)
-            token = byte()
-            state = "match"
-            continue
-        if state == "match":
-            if token >= 64:
-                offset = 1 + ((token >> 2) & 7) + (byte() << 3)
-                copy(len(out) - offset, (token >> 5) + 1)
-            elif token >= 32:
-                length = token & 31
-                if not length:
-                    length = extended(31)
-                first, second = byte(), byte()
-                offset = 1 + (first >> 2) + (second << 6)
-                copy(len(out) - offset, length + 2)
-            elif token >= 16:
-                high = (token & 8) << 11
-                length = token & 7
-                if not length:
-                    length = extended(7)
-                first, second = byte(), byte()
-                distance = high + (first >> 2) + (second << 6)
-                if distance == 0:
-                    if len(out) != expected:
-                        raise MeshReadError("LZO end marker before expected output size")
-                    return bytes(out)
-                copy(len(out) - distance - 0x4000, length + 2)
-            else:
-                offset = 1 + (token >> 2) + (byte() << 2)
-                copy(len(out) - offset, 2)
-            state = "after_match"
-            continue
-        if state == "after_match":
-            token = after_match()
-            state = "match_next" if token else "literal"
-            continue
-        raise MeshReadError(f"unknown LZO decoder state {state}")
 
 
 def _skip_skeleton(r: _Reader) -> None:
