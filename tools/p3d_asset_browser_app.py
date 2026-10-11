@@ -22,7 +22,7 @@ from p3d_asset_browser_catalog import (
     scan_catalogue,
     texture_users,
 )
-from p3d_texture_io import TextureResolver
+from p3d_texture_sources import TextureResolver
 from p3d_texture_render import render_textured_model
 from cwr_worldgen.assets import canonical_asset_path
 
