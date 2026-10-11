@@ -506,6 +506,8 @@ class ScannerGui:
         self.stock_var = tk.StringVar(value="; ".join(DEFAULT_STOCK_ROOTS))
         self.include_stock_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Choose a PBO or WRP to scan.")
+        self._sort_column: str | None = None
+        self._sort_reverse = False
         self._result: ScanResult | None = None
         self._sort_column: str | None = None
         self._sort_descending = False
@@ -637,6 +639,14 @@ class ScannerGui:
             pass
         self.root.after(100, self._poll_worker)
 
+    def _sort_by(self, column: str) -> None:
+        if self._sort_column == column:
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = column
+            self._sort_reverse = False
+        self._populate()
+
     def _populate(self) -> None:
         self.tree.delete(*self.tree.get_children())
         result = self._result
@@ -647,6 +657,16 @@ class ScannerGui:
             rows = _sort_display_rows(
                 rows, self._sort_column, descending=self._sort_descending
             )
+        if self._sort_column:
+            sort_keys = {
+                "wrp": lambda row: row.wrp_name.casefold(),
+                "namespace": lambda row: row.namespace.casefold(),
+                "model": lambda row: row.model_path.casefold(),
+                "refs": lambda row: row.references,
+                "type": lambda row: row.is_stock,
+                "parser": lambda row: row.parser.casefold(),
+            }
+            rows = tuple(sorted(rows, key=sort_keys[self._sort_column], reverse=self._sort_reverse))
         for row in rows:
             self.tree.insert(
                 "",
