@@ -15,6 +15,9 @@ from p3d_texture_render import (
     RenderFace,
     _project,
     _sample_bilinear,
+    _sample_mipmapped,
+    _mipmap_chain,
+    _triangle_texture_lod,
     render_textured_model,
 )
 
@@ -103,3 +106,99 @@ def test_bilinear_sampling_blends_adjacent_texels() -> None:
     assert 110 <= int(sampled[1]) <= 145
     assert 110 <= int(sampled[2]) <= 145
     assert int(sampled[3]) == 255
+
+
+
+def _dense_checkerboard(size: int = 64) -> np.ndarray:
+    image = np.zeros((size, size, 4), dtype=np.uint8)
+    pixels = (np.indices((size, size)).sum(axis=0) & 1) * 255
+    image[:, :, :3] = pixels[:, :, None]
+    image[:, :, 3] = 255
+    return image
+
+
+def test_mipmapped_preview_averages_distant_checkerboard_instead_of_moire() -> None:
+    """Large, repetitive Arma building textures need minification filtering."""
+    texture = _dense_checkerboard()
+    levels = _mipmap_chain(texture)
+    assert levels[0].shape == (64, 64, 4)
+    assert levels[-1].shape == (1, 1, 4)
+    assert all(120 <= int(x) <= 135 for x in levels[-1][0, 0, :3])
+    assert int(levels[-1][0, 0, 3]) == 255
+
+    # A 64-pixel-wide image spanning 4 screen pixels needs around mip level 4.
+    uv = np.array(((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)))
+    screen_xy = np.array(((1.0, 1.0), (5.0, 1.0), (1.0, 5.0)))
+    lod = _triangle_texture_lod(uv, screen_xy, 64, 64, len(levels) - 1)
+    assert lod == 4.0
+    samples = _sample_mipmapped(
+        levels, np.array([[0.01, 0.25, 0.7]]),
+        np.array([[0.01, 0.25, 0.7]]), lod,
+    )
+    assert np.ptp(samples[0, :, 0]) <= 1
+
+
+def test_mipmapped_preview_keeps_sharp_texture_when_magnified() -> None:
+    levels = _mipmap_chain(_dense_checkerboard())
+    uv = np.array(((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)))
+    screen_xy = np.array(((0.0, 0.0), (128.0, 0.0), (0.0, 128.0)))
+    lod = _triangle_texture_lod(uv, screen_xy, 64, 64, len(levels) - 1)
+    assert lod == 0.0
+    sampled = _sample_mipmapped(levels, np.array([[1.5 / 64]]), np.array([[1.5 / 64]]), lod)
+    assert np.array_equal(sampled, _sample_bilinear(levels[0], np.array([[1.5 / 64]]), np.array([[1.5 / 64]])))
+
+
+def test_perspective_rasterizer_minifies_tiled_wall_texture() -> None:
+    class CheckerResolver:
+        def __init__(self):
+            self.calls = 0
+        def load_rgba(self, texture_path: str, source: str) -> np.ndarray:
+            self.calls += 1
+            return _dense_checkerboard()
+
+    resolver = CheckerResolver()
+    points = np.array([
+        [-1.0, -1.0, 0.0], [1.0, -1.0, 0.0],
+        [1.0, 1.0, 0.0], [-1.0, 1.0, 0.0],
+    ], dtype=np.float32)
+    face = RenderFace(
+        (0, 1, 2, 3),
+        ((0.0, 0.0), (32.0, 0.0), (32.0, 32.0), (0.0, 32.0)),
+        r"ca\structures\data\checker_co.paa",
+    )
+    rendered, hits, misses = render_textured_model(
+        points, (face,), resolver, "example.pbo",
+        width=320, height=240, azim_deg=0, elev_deg=0,
+    )
+    assert (hits, misses) == (2, 0)
+    assert resolver.calls == 1
+    assert np.max(np.abs(rendered[120, 160].astype(int) - 128)) <= 3
+
+
+def test_browser_uses_antialiased_downsampling_for_3d_models(monkeypatch) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import p3d_asset_browser_app as browser_app
+
+    app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
+    app.ax_preview = Mock()
+    app.canvas = Mock()
+    app.figure = Mock()
+    app.texture_resolver = object()
+    app.skip_textures_var = SimpleNamespace(get=lambda: False)
+    app.azim = 35.0
+    app.elev = 25.0
+    app.zoom = 1.0
+
+    def mock_render(*args, **kwargs):
+        return np.zeros((40, 40, 3), dtype=np.uint8), 1, 0
+
+    monkeypatch.setattr(browser_app, "render_textured_model", mock_render)
+    model = SimpleNamespace(
+        points=np.zeros((3, 3), dtype=np.float32),
+        faces=(object(),),
+        source="buildings.pbo", model_path="building.p3d",
+    )
+    app._draw_model(model)
+    assert app.ax_preview.imshow.call_args.kwargs["interpolation"] == "hanning"
+    assert app.ax_preview.imshow.call_args.kwargs["resample"] is True
