@@ -443,7 +443,7 @@ def _pbo_entries_from_stream(
     fallback_prefix: str,
     depth: int = 0,
 ) -> Iterator[tuple[str, str, bytes]]:
-    """Yield P3Ds from one PBO stream and nested addon PBO members."""
+    """Yield P3Ds from PBO/IFA streams and nested addon archives."""
     metadata, properties = _pbo_header(stream)
     prefix = _pbo_prefix(properties, metadata, fallback_prefix)
     canonical_prefix = _canonical_model_path(prefix)
@@ -468,7 +468,7 @@ def _pbo_entries_from_stream(
             yield model_path, source + "!" + model_path, data
             continue
 
-        if suffix == ".pbo" and depth < 4:
+        if suffix in {".pbo", ".ifa"} and depth < 4:
             try:
                 nested = _read_pbo_member(
                     stream,
@@ -525,7 +525,7 @@ def _pbo_model_paths_from_stream(
     fallback_prefix: str,
     depth: int = 0,
 ) -> Iterator[str]:
-    """Yield model paths while only reading nested containers and PBO headers."""
+    """Yield model paths from PBO/IFA archives without parsing P3D payloads."""
     metadata, properties = _pbo_header(stream)
     prefix = _pbo_prefix(properties, metadata, fallback_prefix)
     canonical_prefix = _canonical_model_path(prefix)
@@ -544,7 +544,7 @@ def _pbo_model_paths_from_stream(
             _skip_pbo_bytes(stream, data_size, f"PBO entry {name!r}")
             continue
 
-        if suffix == ".pbo" and depth < 4:
+        if suffix in {".pbo", ".ifa"} and depth < 4:
             try:
                 nested = _read_pbo_member(
                     stream,
@@ -572,7 +572,7 @@ def _pbo_model_paths_from_stream(
 
 
 def _pbo_model_paths(path: Path) -> Iterator[str]:
-    """Yield canonical P3D paths from raw/wrapped PBOs and nested addon PBOs."""
+    """Yield P3D paths from raw/wrapped PBO/IFA and nested addon archives."""
     with open_pbo_stream(path) as stream:
         yield from _pbo_model_paths_from_stream(
             stream,
