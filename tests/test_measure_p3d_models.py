@@ -74,7 +74,9 @@ def test_cprs_empty_name_record_is_accepted_as_pbo_terminator(tmp_path: Path) ->
     payload = bytearray()
     for name, data in members:
         header += name.encode("latin-1") + b"\0"
-        header += entry.pack(measure._PBO_COMPRESSED, len(data), 0, 0, len(data))
+        # The test targets the nonstandard *terminator*, not LZSS payloads.
+        # Entries are raw, so their packing flags must also be raw.
+        header += entry.pack(0, len(data), 0, 0, len(data))
         payload += data
 
     # MAP_Shed.pbo and some other legacy/addon archives use an empty-name Cprs
