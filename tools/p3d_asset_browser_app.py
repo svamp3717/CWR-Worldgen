@@ -15,6 +15,7 @@ import numpy as np
 from p3d_asset_browser_catalog import (
     BrowserAsset,
     BrowserCatalogue,
+    ModelPreviewCache,
     filter_assets,
     load_model,
     load_texture,
@@ -23,7 +24,7 @@ from p3d_asset_browser_catalog import (
     texture_users,
 )
 from p3d_texture_sources import TextureResolver
-from p3d_texture_render import render_textured_model
+from p3d_texture_render import MipmapCache, render_textured_model
 from cwr_worldgen.assets import canonical_asset_path
 
 
@@ -35,6 +36,8 @@ class AssetBrowserApp:
         self.sources: list[Path] = []
         self.catalogue = BrowserCatalogue((), (), {})
         self.texture_resolver = TextureResolver(())
+        self.model_cache = ModelPreviewCache()
+        self.mipmap_cache = MipmapCache()
         self.current: BrowserAsset | None = None
         self.current_model = None
         self.azim = 35.0
@@ -320,6 +323,10 @@ class AssetBrowserApp:
         self.sources.clear()
         self.catalogue = BrowserCatalogue((), (), {})
         self.texture_resolver = TextureResolver(())
+        if hasattr(self, "model_cache"):
+            self.model_cache.clear()
+        if hasattr(self, "mipmap_cache"):
+            self.mipmap_cache.clear()
         self.current = None
         self.current_model = None
         self.sources_var.set("No source selected")
@@ -377,6 +384,10 @@ class AssetBrowserApp:
             sources, catalogue = payload
             self.catalogue = catalogue
             self.texture_resolver = TextureResolver(sources)
+            if hasattr(self, "model_cache"):
+                self.model_cache.clear()
+            if hasattr(self, "mipmap_cache"):
+                self.mipmap_cache.clear()
             self.current = None
             self.current_model = None
             self.sources_var.set(
@@ -447,7 +458,11 @@ class AssetBrowserApp:
     def _show_model(self, item: BrowserAsset) -> None:
         self._busy(f"Loading model {item.path}…")
         try:
-            model = load_model(item, self.catalogue)
+            cache = getattr(self, "model_cache", None)
+            model = (
+                cache.get(item, self.catalogue) if cache is not None
+                else load_model(item, self.catalogue)
+            )
             self.current_model = model
             self._draw_model(model)
             texture_paths = tuple(
@@ -478,6 +493,26 @@ class AssetBrowserApp:
             self.current_model = None
             self._show_error("Model preview failed", exc)
             self._unbusy(f"Could not preview {item.path}")
+
+    def _preview_render_size(self) -> tuple[int, int]:
+        """Match raster size to actual on-screen pixels, with modest AA margin.
+
+        The former fixed 1400x980 frame wasted most of its pixels in a
+        small desktop preview. Keep a little oversampling for thin edges
+        and cap memory/work on very large displays.
+        """
+        try:
+            widget = self.canvas.get_tk_widget()
+            width = int(widget.winfo_width())
+            height = int(widget.winfo_height())
+        except (AttributeError, TypeError, ValueError, tk.TclError):
+            return (960, 720)
+        if width <= 2 or height <= 2:
+            return (960, 720)
+        return (
+            max(480, min(1200, round(width * 1.25))),
+            max(360, min(840, round(height * 1.25))),
+        )
 
     def _draw_model(self, model) -> None:
         self.ax_preview.clear()
@@ -518,21 +553,22 @@ class AssetBrowserApp:
             self.ax_preview.set_title(f"{model.model_path} • vertex preview")
             self.canvas.draw_idle()
             return
+        render_width, render_height = self._preview_render_size()
         image, hits, misses = render_textured_model(
             model.points,
             model.faces,
             self.texture_resolver,
             model.source,
-            width=1400,
-            height=980,
+            width=render_width,
+            height=render_height,
             azim_deg=self.azim,
             elev_deg=self.elev,
             zoom=self.zoom,
             load_textures=not self.skip_textures_var.get(),
+            mipmap_cache=getattr(self, "mipmap_cache", None),
         )
-        # The renderer operates at 1400x980 but the Tk canvas is typically
-        # considerably smaller. Nearest-neighbour shrinking aliases fine
-        # brick/wall patterns into multicoloured speckle.
+        # Downsampling remains filtered when the canvas is smaller than the
+        # already screen-sized raster, avoiding shimmering brick patterns.
         self.ax_preview.imshow(image, interpolation="hanning", resample=True)
         if self.skip_textures_var.get():
             self.ax_preview.set_title(
