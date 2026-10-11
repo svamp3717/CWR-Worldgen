@@ -177,7 +177,7 @@ def test_legacy_wrp_fallback_extracts_namespaced_p3d_paths() -> None:
         r"data3d\str smrk.p3d",
         r"dma_libya_o\ags_middleeasternhouse3.p3d",
     }
-    assert by_path[r"dma_libya_o\ags_middleeasternhouse3.p3d"].parser == "legacy P3D string scan"
+    assert by_path[r"dma_libya_o\ags_middleeasternhouse3.p3d"].parser == "OPRW P3D string occurrences"
     assert by_path[r"data3d\str smrk.p3d"].is_stock is True
     assert by_path[r"bas_o\foo bar\house.p3d"].is_stock is False
 
@@ -228,3 +228,76 @@ def test_cli_and_gui_entrypoints_and_source_launcher_are_registered() -> None:
     assert 'cwr-wrp-mod-scan = "cwr_worldgen.wrp_mod_dependency_scanner:main"' in pyproject
     assert 'cwr-wrp-mod-scan-gui = "cwr_worldgen.wrp_mod_dependency_scanner:gui_main"' in pyproject
     assert (root / "tools" / "wrp_mod_dependency_scanner.py").is_file()
+
+
+def _write_8wvr(path: Path, models: tuple[str, ...]) -> bytes:
+    """Minimal unbinarized Arma WRP with one material and a dummy object."""
+    material = b"ca\\data\\grass.rvmat"
+    data = bytearray(b"8WVR" + struct.pack("<IIIIf", 1, 1, 1, 1, 10.0))
+    data.extend(struct.pack("<fH", 2.5, 1))  # elevation, material index
+    data.extend(struct.pack("<II", 2, len(material)))
+    data.extend(material)
+    data.extend(struct.pack("<I", 0))  # end of material's concat strings
+    for idx, model in enumerate(models):
+        encoded = model.encode("ascii")
+        data.extend(struct.pack("<12fII", *([0.0] * 12), idx + 1, len(encoded)))
+        data.extend(encoded)
+    data.extend(struct.pack("<12fII", *([0.0] * 12), 0, 0))
+    path.write_bytes(data)
+    return bytes(data)
+
+
+def test_8wvr_scans_arma_object_records_with_exact_counts(tmp_path: Path) -> None:
+    data = _write_8wvr(
+        tmp_path / "arma.wrp",
+        (
+            r"ca\buildings\house.p3d",
+            r"addon\house.p3d",
+            r"addon\house.p3d",
+        ),
+    )
+    rows = scan_wrp_bytes(data, wrp_name="arma.wrp", stock_roots=("ca",))
+    by_path = {row.model_path: row for row in rows}
+    assert by_path[r"ca\buildings\house.p3d"].is_stock
+    assert not by_path[r"addon\house.p3d"].is_stock
+    assert by_path[r"addon\house.p3d"].references == 2
+    assert by_path[r"addon\house.p3d"].parser == "8WVR object records"
+
+
+def test_8wvr_truncated_record_is_rejected(tmp_path: Path) -> None:
+    import pytest
+
+    data = _write_8wvr(tmp_path / "truncated.wrp", (r"addon\house.p3d",))
+    with pytest.raises(ValueError, match="8WVR"):
+        scan_wrp_bytes(data[:-4], wrp_name="truncated.wrp")
+
+
+def test_game_profiles_filter_stock_models_but_keep_addons(tmp_path: Path) -> None:
+    data = (
+        b"OPRW" + struct.pack("<I", 25)
+        + b"\0ca\\buildings\\arma2.p3d\0"
+        + b"ca_e\\buildings_e\\oa.p3d\0"
+        + b"a3\\structures_f\\house.p3d\0"
+        + b"custom_mod\\building.p3d\0"
+    )
+    wrp = tmp_path / "binarized.wrp"
+    wrp.write_bytes(data)
+    by_game = {
+        game: {r.model_path for r in rows_for_display(scan_dependencies(wrp, game=game))}
+        for game in ("cwa", "arma2", "arma2oa", "arma3")
+    }
+    assert r"ca\buildings\arma2.p3d" not in by_game["arma2"]
+    assert r"ca_e\buildings_e\oa.p3d" in by_game["arma2"]
+    assert r"ca_e\buildings_e\oa.p3d" not in by_game["arma2oa"]
+    assert r"a3\structures_f\house.p3d" not in by_game["arma3"]
+    assert r"custom_mod\building.p3d" in by_game["arma3"]
+    assert r"a3\structures_f\house.p3d" in by_game["cwa"]
+    assert scan_dependencies(wrp, game="arma3").rows[0].parser == "OPRW P3D string occurrences"
+    assert scan_dependencies(wrp, game="arma3", stock_roots=("custom_mod",)).stock_roots == ("custom_mod",)
+
+
+def test_game_profile_does_not_modify_input_files(tmp_path: Path) -> None:
+    wrp = tmp_path / "input.wrp"
+    before = _write_8wvr(wrp, (r"a3\structures_f\house.p3d",))
+    assert scan_dependencies(wrp, game="arma3").unique_mod_models == 0
+    assert wrp.read_bytes() == before
