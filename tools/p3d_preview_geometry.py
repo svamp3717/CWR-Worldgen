@@ -1,7 +1,7 @@
 """Parse first-LOD P3D geometry, UVs and material references for previewing."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import io
 from pathlib import Path
 import struct
@@ -11,6 +11,7 @@ from typing import Iterator, Sequence
 import numpy as np
 
 import measure_p3d_models as measure
+import p3d_modern_odol as modern_odol
 from p3d_texture_render import RenderFace
 
 _MAX_FACE_COUNT = 2_000_000
@@ -104,6 +105,19 @@ def extract_first_lod_geometry(data: bytes, *, model_path: str, source: str):
     stream = io.BytesIO(data)
     faces: tuple[RenderFace, ...] = ()
     textures: tuple[str, ...] = ()
+
+    if signature == b"ODOL" and struct.unpack_from("<I", data, 4)[0] >= 40:
+        try:
+            bounds = modern_odol.read_model_bounds(data)
+        except modern_odol.ModernOdolError as exc:
+            raise measure.ModelReadError(str(exc)) from exc
+        points = np.asarray(modern_odol.box_vertices(bounds), dtype=np.float32)
+        measured = measure._measurement(
+            model_path=model_path, source=source, format_name="ODOL",
+            version=bounds.version, lod="model bounds only", points=points,
+        )
+        # Eight wireframe corners are not actual vertices from an ODOL LOD.
+        return replace(measured, vertex_count=0), points, (), ()
 
     if signature == b"ODOL":
         measure._read_exact(stream, 4, "ODOL signature")
