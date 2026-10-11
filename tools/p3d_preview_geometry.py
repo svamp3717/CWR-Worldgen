@@ -12,6 +12,7 @@ import numpy as np
 
 import measure_p3d_models as measure
 import p3d_modern_odol as modern_odol
+import p3d_modern_odol_mesh as modern_mesh
 from p3d_texture_render import RenderFace
 
 _MAX_FACE_COUNT = 2_000_000
@@ -108,16 +109,36 @@ def extract_first_lod_geometry(data: bytes, *, model_path: str, source: str):
 
     if signature == b"ODOL" and struct.unpack_from("<I", data, 4)[0] >= 40:
         try:
-            bounds = modern_odol.read_model_bounds(data)
+            mesh = modern_mesh.read_model_mesh(data)
         except modern_odol.ModernOdolError as exc:
-            raise measure.ModelReadError(str(exc)) from exc
-        points = np.asarray(modern_odol.box_vertices(bounds), dtype=np.float32)
-        measured = measure._measurement(
+            # Preserve the existing metadata-only fallback for encrypted,
+            # incomplete or not-yet-decoded ODOL layouts. Never pass bounding
+            # box corners off as the actual polygon mesh.
+            print(
+                f"[preview warning] {model_path}: modern ODOL mesh unavailable:"
+                f" {exc}; showing model bounds instead",
+                file=sys.stderr,
+            )
+            try:
+                bounds = modern_odol.read_model_bounds(data)
+            except modern_odol.ModernOdolError as header_exc:
+                raise measure.ModelReadError(str(header_exc)) from header_exc
+            points = np.asarray(modern_odol.box_vertices(bounds), dtype=np.float32)
+            measured = measure._measurement(
+                model_path=model_path, source=source, format_name="ODOL",
+                version=bounds.version, lod="model bounds only", points=points,
+            )
+            return replace(measured, vertex_count=0), points, (), ()
+        measurement = measure._measurement(
             model_path=model_path, source=source, format_name="ODOL",
-            version=bounds.version, lod="model bounds only", points=points,
+            version=mesh.version, lod=f"resolution {mesh.resolution:g}",
+            points=mesh.points,
         )
-        # Eight wireframe corners are not actual vertices from an ODOL LOD.
-        return replace(measured, vertex_count=0), points, (), ()
+        faces = tuple(
+            RenderFace(indices, uvs, texture)
+            for indices, uvs, texture in mesh.faces
+        )
+        return measurement, mesh.points, faces, mesh.textures
 
     if signature == b"ODOL":
         measure._read_exact(stream, 4, "ODOL signature")
