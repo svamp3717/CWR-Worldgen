@@ -11,11 +11,12 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
+import numpy as np
 
 import measure_p3d_models as measure
 from p3d_preview_geometry import PreviewModel
-from p3d_texture_io import TextureResolver
-from p3d_texture_render import render_textured_model
+from p3d_texture_sources import TextureResolver
+from p3d_texture_render import MipmapCache, render_textured_model
 
 
 PLACEMENTS = ("Urban", "Rural", "Both")
@@ -95,6 +96,7 @@ class CategoriserApp:
         self.root = root
         self.model_iter = model_iter
         self.texture_resolver = texture_resolver
+        self.mipmap_cache = MipmapCache()
         self.output = output
         self.categories = list(categories)
         self.state = state
@@ -108,7 +110,7 @@ class CategoriserApp:
         self.azim = 35.0
         self.elev = 25.0
 
-        root.title("CWR P3D Model Categoriser")
+        root.title("P3D Model Categoriser")
         root.geometry("1500x920")
         root.minsize(1050, 700)
         self._build_ui()
@@ -405,6 +407,8 @@ class CategoriserApp:
         placement_text = classification.placement or "Unspecified"
         self.info_var.set(
             f"Format: {m.format} v{m.version}\n"
+            f"LOD: {m.lod}\n"
+            f"Preview: {'bounds only' if model.render_mode == 'bounds only' else model.render_mode}\n"
             f"Vertices: {model.original_vertex_count:,}\n"
             f"Faces: {len(model.faces):,}\n"
             f"Width: {m.width_m:g} m\n"
@@ -426,15 +430,59 @@ class CategoriserApp:
         self.next_button.configure(state=tk.NORMAL)
         self._redraw()
 
-    def _draw_model(self, model: PreviewModel) -> None:
+    def _preview_render_size(self) -> tuple[int, int]:
+        """Render near the canvas' actual size to avoid wasted raster work."""
+        try:
+            widget = self.canvas.get_tk_widget()
+            width, height = int(widget.winfo_width()), int(widget.winfo_height())
+        except (AttributeError, TypeError, ValueError, tk.TclError):
+            return (960, 720)
+        if width <= 2 or height <= 2:
+            return (960, 720)
+        return (
+            max(480, min(1200, round(width * 1.25))),
+            max(360, min(840, round(height * 1.25))),
+        )
+
+    def _render_model(self, model: PreviewModel, *, renderer, zoom: float = 1.0) -> None:
+        """Render through the browser's mesh, mipmap and bounds-only paths.
+
+        The session UI supplies its renderer for backwards-compatible tests and
+        scroll-zoom behavior; this shared implementation keeps both views in
+        sync with the modern Arma browser.
+        """
         self.ax_preview.clear()
         self.status_var.set("")
+
+        if getattr(model, "render_mode", "") == "bounds only":
+            points = model.points - model.points.mean(axis=0)
+            azim, elev = np.deg2rad(self.azim), np.deg2rad(self.elev)
+            horizontal = np.cos(azim) * points[:, 0] - np.sin(azim) * points[:, 2]
+            depth = np.sin(azim) * points[:, 0] + np.cos(azim) * points[:, 2]
+            vertical = np.cos(elev) * points[:, 1] - np.sin(elev) * depth
+            for a, b in model.edges:
+                self.ax_preview.plot(
+                    (horizontal[a], horizontal[b]),
+                    (vertical[a], vertical[b]),
+                    linewidth=1.5,
+                )
+            extent = max(float(np.ptp(horizontal)), float(np.ptp(vertical)), 0.1)
+            half = 0.6 * extent / max(float(zoom), 0.05)
+            self.ax_preview.set_xlim(-half, half)
+            self.ax_preview.set_ylim(-half, half)
+            self.ax_preview.set_aspect("equal", adjustable="box")
+            self.ax_preview.set_title(
+                f"ODOL v{model.measurement.version} • bounds only, NOT model geometry"
+            )
+            self.status_var.set("Model bounds preview only; polygon mesh not decoded.")
+            self.canvas.draw_idle()
+            return
 
         if not model.faces:
             self.ax_preview.text(
                 0.5,
                 0.5,
-                "Textured preview unavailable\nNo polygon topology was parsed for this model.",
+                "Textured preview unavailable\\nNo polygon topology was parsed for this model.",
                 ha="center",
                 va="center",
                 transform=self.ax_preview.transAxes,
@@ -445,39 +493,54 @@ class CategoriserApp:
             self.canvas.draw_idle()
             return
 
-        image, hits, misses = render_textured_model(
+        width, height = self._preview_render_size()
+        image, hits, misses = renderer(
             model.points,
             model.faces,
             self.texture_resolver,
             model.source,
-            width=1100,
-            height=760,
+            width=width,
+            height=height,
             azim_deg=self.azim,
             elev_deg=self.elev,
+            zoom=zoom,
             load_textures=not self.skip_textures_var.get(),
+            mipmap_cache=getattr(self, "mipmap_cache", None),
         )
-        self.ax_preview.imshow(image)
+        self.ax_preview.imshow(image, interpolation="hanning", resample=True)
         if self.skip_textures_var.get():
             self.ax_preview.set_title(
-                f"Geometry preview • textures skipped • az {self.azim:.0f}° / el {self.elev:.0f}°"
+                f"Geometry preview • textures skipped • az {self.azim:.0f}° / "
+                f"el {self.elev:.0f}° • zoom {zoom:.2f}×"
             )
             self.status_var.set(
-                "Texture lookup skipped for faster model browsing."
+                "Texture lookup skipped for faster model browsing. "
+                "Mouse wheel still zooms the geometry preview."
             )
         else:
             self.ax_preview.set_title(
-                f"Textured model • az {self.azim:.0f}° / el {self.elev:.0f}°"
+                f"Textured model • az {self.azim:.0f}° / el {self.elev:.0f}° • "
+                f"zoom {zoom:.2f}×"
             )
             if misses:
                 self.status_var.set(
-                    f"Texture sampling: {hits} textured face hit(s), "
-                    f"{misses} missing/unreadable face texture(s). See console."
+                    f"Texture sampling: {hits} textured triangle(s), "
+                    f"{misses} untextured triangle(s). See console for missing assets."
                 )
             else:
-                self.status_var.set(f"Texture sampling: {hits} textured face hit(s).")
+                self.status_var.set(
+                    f"Texture sampling: {hits} textured triangle(s)."
+                )
         self.ax_preview.axis("off")
-        self.figure.tight_layout(pad=1.2)
+        self.figure.tight_layout(pad=1.0)
         self.canvas.draw_idle()
+
+    def _draw_model(self, model: PreviewModel) -> None:
+        self._render_model(
+            model,
+            renderer=render_textured_model,
+            zoom=getattr(self, "zoom", 1.0),
+        )
 
     def save_state(self) -> None:
         self.output.parent.mkdir(parents=True, exist_ok=True)
