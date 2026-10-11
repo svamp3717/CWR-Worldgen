@@ -482,7 +482,7 @@ class CategoriserApp:
             self.ax_preview.text(
                 0.5,
                 0.5,
-                "Textured preview unavailable\\nNo polygon topology was parsed for this model.",
+                "Textured preview unavailable\nNo polygon topology was parsed for this model.",
                 ha="center",
                 va="center",
                 transform=self.ax_preview.transAxes,
