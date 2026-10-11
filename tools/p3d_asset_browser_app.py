@@ -69,7 +69,7 @@ class AssetBrowserApp:
 
         toolbar = ttk.Frame(outer)
         toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 7))
-        select_pbo_button = ttk.Button(toolbar, text="Select PBO…", command=self.select_pbo)
+        select_pbo_button = ttk.Button(toolbar, text="Select PBO / IFA…", command=self.select_pbo)
         select_pbo_button.pack(side=tk.LEFT)
         add_folder_button = ttk.Button(toolbar, text="Add folder…", command=self.select_folder)
         add_folder_button.pack(side=tk.LEFT, padx=(6, 0))
@@ -85,7 +85,7 @@ class AssetBrowserApp:
 
         self.status_var = tk.StringVar(
             master=self.root,
-            value="Select a PBO or folder to browse models and textures.",
+            value="Select a PBO, IFA or folder to browse models and textures.",
         )
         ttk.Label(toolbar, textvariable=self.status_var).pack(side=tk.RIGHT, padx=(12, 0))
         self.scan_progress = ttk.Progressbar(
@@ -280,15 +280,16 @@ class AssetBrowserApp:
             return
         values = filedialog.askopenfilenames(
             parent=self.root,
-            title="Select PBO archive(s)",
+            title="Select PBO or Iron Front IFA archive(s)",
             filetypes=(
-                ("PBO archives", "*.pbo"),
-                ("Zstd-wrapped PBO archives", "*.pbo.zst"),
+                ("PBO / IFA archives", "*.pbo *.ifa *.pbo.zst *.ifa.zst"),
+                ("PBO archives", "*.pbo *.pbo.zst"),
+                ("Iron Front IFA archives", "*.ifa *.ifa.zst"),
                 ("All files", "*.*"),
             ),
         )
         if values:
-            # Selecting a PBO is a replacement operation. This keeps the browser
+            # Selecting an archive is a replacement operation. This keeps the browser
             # focused on the newly chosen archive(s) instead of silently retaining
             # models and textures from a previous package.
             self.clear_sources()
@@ -641,7 +642,7 @@ class AssetBrowserApp:
         self.ax_preview.text(
             0.5,
             0.5,
-            "Select PBO… or Add folder…\n\n"
+            "Select PBO / IFA… or Add folder…\n\n"
             "Then click any model or texture in the catalogue.",
             ha="center",
             va="center",
