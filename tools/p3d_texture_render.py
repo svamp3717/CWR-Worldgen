@@ -1,6 +1,7 @@
 """Small CPU rasterizer for applying P3D face UVs to decoded textures."""
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 import math
 from typing import Sequence
@@ -170,6 +171,49 @@ def _sample_mipmapped(
     ).astype(np.uint8)
 
 
+
+class MipmapCache:
+    """Size-bounded LRU of decoded texture pyramids shared across redraws.
+
+    Texture files are only decoded once per resolver, but building the filtered
+    pyramid on every rotate/zoom used to consume CPU and memory repeatedly.
+    The cache is scoped to the current source selection and never persists to
+    disk. A missing texture is intentionally not held across source changes.
+    """
+
+    def __init__(self, max_bytes: int = 96 * 1024 * 1024):
+        self.max_bytes = max(0, int(max_bytes))
+        self._items: OrderedDict[
+            tuple[str, str], tuple[tuple[np.ndarray, ...], int]
+        ] = OrderedDict()
+        self.bytes_used = 0
+
+    def clear(self) -> None:
+        self._items.clear()
+        self.bytes_used = 0
+
+    def get(
+        self, texture_path: str, source: str, resolver: TextureResolver
+    ) -> tuple[np.ndarray, ...] | None:
+        canonical = measure._canonical_model_path(texture_path)
+        key = (source, canonical)
+        if key in self._items:
+            self._items.move_to_end(key)
+            return self._items[key][0]
+        image = resolver.load_rgba(canonical, source)
+        if image is None:
+            return None
+        levels = _mipmap_chain(image)
+        weight = sum(level.nbytes for level in levels)
+        if weight <= self.max_bytes:
+            while self._items and self.bytes_used + weight > self.max_bytes:
+                _, (_, old_weight) = self._items.popitem(last=False)
+                self.bytes_used -= old_weight
+            self._items[key] = (levels, weight)
+            self.bytes_used += weight
+        return levels
+
+
 def render_textured_model(
     points: np.ndarray,
     faces: Sequence[RenderFace],
@@ -183,6 +227,7 @@ def render_textured_model(
     zoom: float = 1.0,
     max_triangles: int = 12_000,
     load_textures: bool = True,
+    mipmap_cache: MipmapCache | None = None,
 ) -> tuple[np.ndarray, int, int]:
     """Perspective-correct rasterization, optionally skipping all texture I/O."""
     image = np.full((height, width, 3), 236, dtype=np.uint8)
@@ -237,8 +282,13 @@ def render_textured_model(
         if load_textures and texture_path:
             canonical = measure._canonical_model_path(texture_path)
             if canonical not in cache:
-                decoded = resolver.load_rgba(canonical, source)
-                cache[canonical] = _mipmap_chain(decoded) if decoded is not None else None
+                if mipmap_cache is not None:
+                    cache[canonical] = mipmap_cache.get(canonical, source, resolver)
+                else:
+                    decoded = resolver.load_rgba(canonical, source)
+                    cache[canonical] = (
+                        _mipmap_chain(decoded) if decoded is not None else None
+                    )
             mipmaps = cache[canonical]
         if mipmaps is None:
             if load_textures:
