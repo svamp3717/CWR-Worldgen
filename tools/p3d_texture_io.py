@@ -570,7 +570,7 @@ def _dxt1_block(block: bytes, punch_through: bool) -> np.ndarray:
     colors[0], colors[1] = _expand565(c0), _expand565(c1)
     if c0 > c1 or not punch_through:
         colors[2, :3] = ((2 * colors[0, :3].astype(np.uint16) + colors[1, :3] + 1) // 3).astype(np.uint8)
-        colors[3, :3] = ((colors[0, :3].astype(np.uint16) + 2 * colors[1, :3] + 1) // 3).astype(np.uint8)
+        colors[3, :3] = ((colors[0, :3].astype(np.uint16) + 2 * colors[1, :3].astype(np.uint16) + 1) // 3).astype(np.uint8)
         colors[2:, 3] = 255
     else:
         colors[2, :3] = ((colors[0, :3].astype(np.uint16) + colors[1, :3]) // 2).astype(np.uint8)
