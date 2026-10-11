@@ -584,40 +584,97 @@ def _dxt1_block(block: bytes, punch_through: bool) -> np.ndarray:
 
 
 def _decode_dxt(data: bytes, width: int, height: int, kind: str) -> np.ndarray:
+    """Decode BC1/BC2/BC3 with batched NumPy operations, not pixel Python loops.
+
+    A 1024x1024 DXT image has 65,536 blocks. Decoding 16 pixels per block
+    in Python is needlessly slow; bounded batches vectorize both palettes and
+    per-pixel indices while avoiding a large temporary allocation.
+    """
     block_bytes = 8 if kind == "DXT1" else 16
     bw, bh = (width + 3) // 4, (height + 3) // 4
-    needed = bw * bh * block_bytes
+    count = bw * bh
+    needed = count * block_bytes
     if len(data) < needed:
         raise ValueError(f"truncated {kind} PAA mip: need {needed}, got {len(data)}")
-    rgba = np.zeros((height, width, 4), dtype=np.uint8)
-    offset = 0
-    for by in range(bh):
-        for bx in range(bw):
-            block = data[offset : offset + block_bytes]
-            if kind == "DXT1":
-                pixels = _dxt1_block(block, True)
-            elif kind in {"DXT2", "DXT3"}:
-                pixels = _dxt1_block(block[8:], False)
-                for i in range(16):
-                    nibble = (block[i // 2] >> (4 if i & 1 else 0)) & 0xF
-                    pixels[i // 4, i % 4, 3] = (nibble << 4) | nibble
-            else:
-                a0, a1 = block[0], block[1]
-                alphas = [a0, a1]
-                if a0 > a1:
-                    alphas.extend([((7 - i) * a0 + i * a1 + 3) // 7 for i in range(1, 7)])
+
+    blocks = np.frombuffer(data, dtype=np.uint8, count=needed).reshape(count, block_bytes)
+    decoded = np.empty((count, 4, 4, 4), dtype=np.uint8)
+    pixel_indices = np.arange(16, dtype=np.uint32)
+    alpha_indices = np.arange(16, dtype=np.uint64)
+
+    for start in range(0, count, 8192):
+        chunk = blocks[start:start + 8192]
+        n = len(chunk)
+        color = chunk if kind == "DXT1" else chunk[:, 8:]
+        c0 = color[:, 0].astype(np.uint16) | (color[:, 1].astype(np.uint16) << 8)
+        c1 = color[:, 2].astype(np.uint16) | (color[:, 3].astype(np.uint16) << 8)
+
+        def unpack_565(values: np.ndarray) -> np.ndarray:
+            r = (values >> 11) & 31
+            g = (values >> 5) & 63
+            b = values & 31
+            return np.stack(
+                ((r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)),
+                axis=1,
+            ).astype(np.uint8)
+
+        palette = np.empty((n, 4, 4), dtype=np.uint8)
+        palette[:, 0, :3] = unpack_565(c0)
+        palette[:, 1, :3] = unpack_565(c1)
+        palette[:, :2, 3] = 255
+
+        first = palette[:, 0, :3].astype(np.uint16)
+        second = palette[:, 1, :3].astype(np.uint16)
+        palette[:, 2, :3] = ((2 * first + second + 1) // 3).astype(np.uint8)
+        palette[:, 3, :3] = ((first + 2 * second + 1) // 3).astype(np.uint8)
+        palette[:, 2:, 3] = 255
+
+        if kind == "DXT1":
+            transparent = c0 <= c1
+            if transparent.any():
+                palette[transparent, 2, :3] = (
+                    (first[transparent] + second[transparent]) // 2
+                ).astype(np.uint8)
+                palette[transparent, 3] = 0
+                palette[transparent, 2, 3] = 255
+
+        bits = np.zeros(n, dtype=np.uint32)
+        for byte_idx in range(4):
+            bits |= color[:, 4 + byte_idx].astype(np.uint32) << (byte_idx * 8)
+        codes = (bits[:, None] >> (pixel_indices[None, :] * 2)) & 3
+        pixels = palette[np.arange(n)[:, None], codes].reshape(n, 4, 4, 4)
+
+        if kind in {"DXT2", "DXT3"}:
+            nibble_bytes = chunk[:, pixel_indices // 2]
+            nibbles = (
+                nibble_bytes >> ((pixel_indices % 2) * 4)[None, :]
+            ) & 15
+            pixels[:, :, :, 3] = (nibbles * 17).reshape(n, 4, 4)
+        elif kind in {"DXT4", "DXT5"}:
+            a0 = chunk[:, 0].astype(np.uint16)
+            a1 = chunk[:, 1].astype(np.uint16)
+            alphas = np.empty((n, 8), dtype=np.uint8)
+            alphas[:, 0], alphas[:, 1] = a0, a1
+            for i in range(1, 7):
+                # BC3's two alpha interpolation modes depend on a0 > a1.
+                if i <= 4:
+                    short = ((5 - i) * a0 + i * a1 + 2) // 5
                 else:
-                    alphas.extend([((5 - i) * a0 + i * a1 + 2) // 5 for i in range(1, 5)])
-                    alphas.extend([0, 255])
-                alpha_bits = int.from_bytes(block[2:8], "little")
-                pixels = _dxt1_block(block[8:], False)
-                for i in range(16):
-                    pixels[i // 4, i % 4, 3] = alphas[(alpha_bits >> (i * 3)) & 7]
-            offset += block_bytes
-            y0, x0 = by * 4, bx * 4
-            h, w = min(4, height - y0), min(4, width - x0)
-            rgba[y0 : y0 + h, x0 : x0 + w] = pixels[:h, :w]
-    return rgba
+                    short = np.zeros(n, dtype=np.uint16) if i == 5 else np.full(n, 255, dtype=np.uint16)
+                long = ((7 - i) * a0 + i * a1 + 3) // 7
+                alphas[:, i + 1] = np.where(a0 > a1, long, short).astype(np.uint8)
+            alpha_bits = np.zeros(n, dtype=np.uint64)
+            for byte_idx in range(6):
+                alpha_bits |= chunk[:, 2 + byte_idx].astype(np.uint64) << (byte_idx * 8)
+            alpha_codes = (alpha_bits[:, None] >> (alpha_indices[None, :] * 3)) & 7
+            pixels[:, :, :, 3] = alphas[
+                np.arange(n)[:, None], alpha_codes
+            ].reshape(n, 4, 4)
+        decoded[start:start + n] = pixels
+
+    tiled = decoded.reshape(bh, bw, 4, 4, 4).transpose(0, 2, 1, 3, 4)
+    # .copy() keeps odd-dimension mips from retaining the padded block array.
+    return tiled.reshape(bh * 4, bw * 4, 4)[:height, :width].copy()
 
 
 def _decode_4444(raw: bytes, width: int, height: int, ai88: bool = False) -> np.ndarray:
