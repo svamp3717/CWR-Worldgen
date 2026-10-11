@@ -463,6 +463,10 @@ class AssetBrowserApp:
                 f"Size: {self._format_size(item.size)}\n"
                 f"Dimensions: {m.width_m:.2f} × {m.length_m:.2f} × {m.height_m:.2f} m\n"
                 f"Textures referenced: {len(texture_paths):,}"
+                + (
+                    "\\nPreview: bounding box only (ODOL geometry not decoded)"
+                    if model.render_mode == "bounds only" else ""
+                )
             )
             self._unbusy(f"Model loaded: {item.path}")
         except Exception as exc:
@@ -472,6 +476,29 @@ class AssetBrowserApp:
 
     def _draw_model(self, model) -> None:
         self.ax_preview.clear()
+        if model.render_mode == "bounds only":
+            # An Arma-era ModelInfo bounding box is useful for identification
+            # and scale, but must never be mistaken for the model's polygons.
+            centre = model.points.mean(axis=0)
+            points = model.points - centre
+            azim = np.deg2rad(self.azim)
+            elev = np.deg2rad(self.elev)
+            horizontal = np.cos(azim) * points[:, 0] - np.sin(azim) * points[:, 2]
+            depth = np.sin(azim) * points[:, 0] + np.cos(azim) * points[:, 2]
+            vertical = np.cos(elev) * points[:, 1] - np.sin(elev) * depth
+            for a, b in model.edges:
+                self.ax_preview.plot(
+                    (horizontal[a], horizontal[b]),
+                    (vertical[a], vertical[b]),
+                    linewidth=1.5,
+                )
+            self.ax_preview.set_aspect("equal", adjustable="box")
+            self.ax_preview.set_title(
+                f"{model.model_path} • ODOL v{model.measurement.version}"
+                " • bounds only, NOT model geometry"
+            )
+            self.canvas.draw_idle()
+            return
         if not model.faces:
             points = model.points
             if len(points):
