@@ -464,8 +464,13 @@ class AssetBrowserApp:
                 f"Dimensions: {m.width_m:.2f} × {m.length_m:.2f} × {m.height_m:.2f} m\n"
                 f"Textures referenced: {len(texture_paths):,}"
                 + (
-                    "\\nPreview: bounding box only (ODOL geometry not decoded)"
-                    if model.render_mode == "bounds only" else ""
+                    "\nPreview: bounding box only (ODOL geometry not decoded)"
+                    if model.render_mode == "bounds only"
+                    else (
+                        f"\nLOD: {m.lod}\nMesh: {model.original_vertex_count:,}"
+                        f" vertices, {len(model.faces):,} faces"
+                        if model.faces else ""
+                    )
                 )
             )
             self._unbusy(f"Model loaded: {item.path}")
@@ -476,7 +481,7 @@ class AssetBrowserApp:
 
     def _draw_model(self, model) -> None:
         self.ax_preview.clear()
-        if model.render_mode == "bounds only":
+        if getattr(model, "render_mode", "") == "bounds only":
             # An Arma-era ModelInfo bounding box is useful for identification
             # and scale, but must never be mistaken for the model's polygons.
             centre = model.points.mean(axis=0)
