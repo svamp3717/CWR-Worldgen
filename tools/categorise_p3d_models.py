@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Browse textured OFP/CWA P3D models and assign catalogue categories."""
+"""Categorise P3D models from OFP, Arma and Iron Front archives."""
 from __future__ import annotations
 
 import argparse
@@ -21,6 +21,7 @@ except ImportError as exc:
     raise SystemExit("Install dependencies with: python -m pip install matplotlib numpy") from exc
 
 from p3d_categoriser_session import load_resume_path
+from p3d_categoriser_startup import prompt_for_startup_selection
 from p3d_categoriser_split import SplitStateCategoriserApp
 from p3d_categoriser_storage import load_state
 import measure_p3d_models as measure
@@ -49,7 +50,13 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Categorise P3D models from OFP/CWA, Arma 1/2/OA/3 and Iron Front archives."
     )
-    p.add_argument("inputs", nargs="+", type=Path, help="P3D, PBO, IFA, Zstd-wrapped archive, or directory to scan")
+    p.add_argument(
+        "inputs", nargs="*", type=Path,
+        help=(
+            "P3D, PBO, IFA, Zstd-wrapped archive, or folder to scan. "
+            "If omitted, a GUI setup window opens to select model sources and JSON output."
+        ),
+    )
     p.add_argument(
         "--include",
         action="append",
@@ -124,6 +131,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     inputs = _resolve_inputs(args.inputs)
+    if not inputs:
+        # A double-click or "python categorise_p3d_models.py" should be a
+        # usable GUI workflow, rather than argparse exiting for a missing PBO.
+        try:
+            selected = prompt_for_startup_selection(default_output=args.output)
+        except tk.TclError as exc:
+            print(f"error: could not open model/JSON selection GUI: {exc}", file=sys.stderr)
+            return 2
+        if selected is None:
+            return 0  # Cancel: do not scan or touch the JSON output.
+        inputs = list(selected.inputs)
+        args.output = selected.output
     missing = [p for p in inputs if not p.exists()]
     if missing:
         text = (
