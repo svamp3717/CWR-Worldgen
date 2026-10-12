@@ -12,6 +12,7 @@ from typing import Sequence
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from p3d_frozen_support import dismiss_splash
 from cwr_worldgen.pbo import is_pbo_path
 
 
@@ -250,6 +251,7 @@ def prompt_for_startup_selection(
         dialog = StartupSelectionDialog(
             root, initial_inputs=initial_inputs, default_output=default_output,
         )
+        dismiss_splash(root)
         root.mainloop()
         return dialog.selection
     finally:

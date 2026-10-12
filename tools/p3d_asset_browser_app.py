@@ -24,6 +24,7 @@ from p3d_asset_browser_catalog import (
     scan_catalogue,
     texture_users,
 )
+from p3d_frozen_support import dismiss_splash
 from p3d_texture_sources import TextureResolver
 from p3d_texture_render import MipmapCache, render_textured_model
 from cwr_worldgen.assets import canonical_asset_path
@@ -772,5 +773,6 @@ class AssetBrowserApp:
 def launch() -> int:
     root = tk.Tk()
     AssetBrowserApp(root)
+    dismiss_splash(root)
     root.mainloop()
     return 0
