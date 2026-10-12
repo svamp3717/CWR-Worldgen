@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 from typing import Sequence
 
-from p3d_frozen_support import configure_windowed_logging
+from p3d_frozen_support import configure_windowed_logging, dismiss_splash
 
 # PyInstaller --windowed has no stderr/stdout. Preserve scan diagnostics.
 configure_windowed_logging("categorise-p3d-models")
@@ -251,6 +251,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if args.start_model is not None and args.start_model != 1:
         app.jump_to_model_number(args.start_model)
+    dismiss_splash(root)
     root.mainloop()
     del app
     return 0
