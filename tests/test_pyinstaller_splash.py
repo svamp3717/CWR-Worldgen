@@ -29,7 +29,7 @@ class SplashImageTests(unittest.TestCase):
                         self.assertEqual(image.size, SIZE)
                         self.assertEqual(image.getpixel((4, 100)), accent)
                         self.assertNotEqual(
-                            image.getpixel((40, 110)),
+                            image.getpixel((70, 323)),
                             image.getpixel((40, 350)),
                         )
 
