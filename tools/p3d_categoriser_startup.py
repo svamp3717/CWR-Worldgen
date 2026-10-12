@@ -40,10 +40,10 @@ def validate_startup_selection(
             )
         if not path.is_file() and not path.is_dir():
             return f"Model source is not a file or folder:\n{path}"
-    if not str(output).strip() or output.suffix.casefold() != ".json":
-        return "Choose a .json file for your completed model classifications."
     if output.exists() and not output.is_file():
         return f"The JSON output is not a file:\n{output}"
+    if not str(output).strip() or output.suffix.casefold() != ".json":
+        return "Choose a .json file for your completed model classifications."
     parent = output.parent
     if parent.exists() and not parent.is_dir():
         return f"The JSON output parent is not a directory:\n{parent}"
