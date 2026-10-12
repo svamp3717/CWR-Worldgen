@@ -8,13 +8,14 @@ import sys
 from typing import Iterator, Sequence
 
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 import numpy as np
 
 import measure_p3d_models as measure
 from p3d_preview_geometry import PreviewModel
+from cwr_worldgen.pbo import is_pbo_path
 from p3d_texture_sources import TextureResolver
 from p3d_texture_render import MipmapCache, render_textured_model
 
@@ -97,6 +98,11 @@ class CategoriserApp:
         self.model_iter = model_iter
         self.texture_resolver = texture_resolver
         self.mipmap_cache = MipmapCache()
+        # Browsing more texture archives must not restart the model stream or
+        # modify category JSON; keep its source list separate from the models.
+        self._base_texture_sources = tuple(texture_resolver.inputs)
+        self._extra_texture_sources: list[Path] = []
+        self._related_texture_paths: tuple[str, ...] = ()
         self.output = output
         self.categories = list(categories)
         self.state = state
@@ -117,6 +123,9 @@ class CategoriserApp:
         root.bind("<Left>", lambda _e: self.previous_model())
         root.bind("<Right>", lambda _e: self.next_model())
         root.bind("<Control-s>", lambda _e: self.save_state())
+        root.bind("<Control-f>", self._focus_model_search)
+        root.bind("<Control-Shift-C>", lambda _e: self.copy_current_path())
+        root.bind("<Control-r>", lambda _e: self._reset_view())
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.next_model(mark_current=False)
 
@@ -137,6 +146,24 @@ class CategoriserApp:
             font=("TkDefaultFont", 11, "bold"),
         ).grid(row=0, column=0, sticky="w")
         ttk.Label(header, textvariable=self.progress_var).grid(row=0, column=1, sticky="e")
+
+        search_row = ttk.Frame(header)
+        search_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(7, 0))
+        search_row.columnconfigure(1, weight=1)
+        ttk.Label(search_row, text="Find model:").grid(row=0, column=0, padx=(0, 6))
+        self.search_var = tk.StringVar(master=self.root, value="")
+        self.search_entry = ttk.Entry(search_row, textvariable=self.search_var)
+        self.search_entry.grid(row=0, column=1, sticky="ew")
+        self.search_entry.bind("<Return>", lambda _event: self.find_next_model())
+        ttk.Button(search_row, text="Find next", command=self.find_next_model).grid(
+            row=0, column=2, padx=(6, 0)
+        )
+        ttk.Button(
+            search_row, text="×", width=3, command=lambda: self.search_var.set("")
+        ).grid(row=0, column=3, padx=(4, 0))
+        ttk.Label(
+            search_row, text="Searches model paths (Ctrl+F)"
+        ).grid(row=0, column=4, padx=(9, 0))
 
         frame = ttk.Frame(outer)
         frame.grid(row=1, column=0, sticky="nsew", padx=(0, 8))
@@ -221,6 +248,20 @@ class CategoriserApp:
         ttk.Button(row2, text="Tilt -", command=lambda: self._tilt(-10)).pack(
             side=tk.LEFT, padx=4
         )
+        ttk.Button(row2, text="Zoom +", command=lambda: self._zoom_by(1.25)).pack(
+            side=tk.LEFT, padx=(8, 0)
+        )
+        ttk.Button(row2, text="Zoom −", command=lambda: self._zoom_by(1 / 1.25)).pack(
+            side=tk.LEFT, padx=4
+        )
+        row3 = ttk.Frame(side)
+        row3.pack(fill="x", pady=(5, 0))
+        ttk.Button(row3, text="Reset view", command=self._reset_view).pack(
+            side=tk.LEFT
+        )
+        ttk.Button(row3, text="Copy model path", command=self.copy_current_path).pack(
+            side=tk.LEFT, padx=(5, 0)
+        )
 
         ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
         self.info_var = tk.StringVar(master=self.root, value="")
@@ -230,13 +271,47 @@ class CategoriserApp:
             anchor="w"
         )
         ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
-        ttk.Label(side, text="Textures", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
+        ttk.Label(side, text="Referenced textures", font=("TkDefaultFont", 10, "bold")).pack(
+            anchor="w"
+        )
+        ttk.Label(side, textvariable=self.texture_var, justify=tk.LEFT, wraplength=300).pack(
+            anchor="w", pady=(2, 0)
+        )
+        texture_box = ttk.Frame(side)
+        texture_box.pack(fill=tk.X, pady=(4, 0))
+        self.texture_list = tk.Listbox(
+            texture_box, height=6, width=38, exportselection=False, selectmode=tk.BROWSE
+        )
+        self.texture_list.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        texture_scroll = ttk.Scrollbar(
+            texture_box, orient=tk.VERTICAL, command=self.texture_list.yview
+        )
+        texture_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.texture_list.configure(yscrollcommand=texture_scroll.set)
+        self.texture_list.bind("<Double-1>", self.preview_selected_texture)
+        texture_actions = ttk.Frame(side)
+        texture_actions.pack(fill=tk.X, pady=(5, 0))
+        ttk.Button(
+            texture_actions, text="Preview texture", command=self.preview_selected_texture
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            texture_actions, text="Copy texture path", command=self.copy_selected_texture_path
+        ).pack(side=tk.LEFT, padx=(5, 0))
         ttk.Label(
-            side,
-            textvariable=self.texture_var,
-            justify=tk.LEFT,
+            side, text="Add texture sources (does not change the model scan):",
             wraplength=300,
-        ).pack(anchor="w")
+        ).pack(anchor="w", pady=(9, 0))
+        source_actions = ttk.Frame(side)
+        source_actions.pack(fill=tk.X, pady=(5, 0))
+        ttk.Button(
+            source_actions, text="Add PBO / IFA…", command=self.select_texture_archives
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            source_actions, text="Add folder…", command=self.select_texture_folder
+        ).pack(side=tk.LEFT, padx=(5, 0))
+        ttk.Button(
+            side, text="Clear added texture sources", command=self.clear_added_texture_sources
+        ).pack(anchor="w", pady=(4, 0))
         ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
         ttk.Label(side, textvariable=self.status_var, wraplength=300).pack(anchor="w")
 
