@@ -64,6 +64,10 @@ jobs:
             --paths tools `
             --paths src `
             --collect-all cwr_worldgen `
+            --collect-all dem_stitcher `
+            --collect-all rasterio `
+            --collect-all pyarrow `
+            --collect-all duckdb `
             --name "${{ matrix.name }}" `
             "${{ matrix.script }}"
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
