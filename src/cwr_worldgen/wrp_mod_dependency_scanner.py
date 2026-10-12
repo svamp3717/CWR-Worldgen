@@ -732,8 +732,22 @@ class ScannerGui:
             self.status_var.set(f"Saved {Path(selected).name}")
 
     def run(self) -> int:
+        self.root.update_idletasks()
+        _dismiss_splash()
         self.root.mainloop()
         return 0
+
+
+def _dismiss_splash() -> None:
+    """Close the one-file bootloader loading screen, if enabled."""
+    try:
+        import pyi_splash
+    except ImportError:
+        return
+    try:
+        pyi_splash.close()
+    except (OSError, RuntimeError):
+        pass
 
 
 def gui_main(argv: Sequence[str] | None = None) -> int:
@@ -768,6 +782,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.gui or args.input is None:
         return ScannerGui(args.input).run()
 
+    _dismiss_splash()  # CLI mode has no Tk window; close before scanning.
     result = scan_dependencies(args.input, game=args.game, stock_roots=args.stock_root)
     if args.json:
         write_json_report(result, args.json, include_stock=args.include_stock)
