@@ -4,16 +4,17 @@ from __future__ import annotations
 import io
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
-from p3d_frozen_support import configure_windowed_logging
+from p3d_frozen_support import configure_windowed_logging, dismiss_splash
 
 
 class FrozenWindowedLoggingTests(unittest.TestCase):
@@ -36,6 +37,20 @@ class FrozenWindowedLoggingTests(unittest.TestCase):
             configure_windowed_logging("browse-p3d-assets")
             self.assertIs(sys.stdout, stdout)
             self.assertIs(sys.stderr, stderr)
+
+    def test_dismiss_splash_after_gui_ready(self) -> None:
+        root = Mock()
+        splash = SimpleNamespace(close=Mock())
+        with patch.dict(sys.modules, {"pyi_splash": splash}):
+            dismiss_splash(root)
+        root.update_idletasks.assert_called_once_with()
+        splash.close.assert_called_once_with()
+
+    def test_dismiss_splash_without_pyinstaller_module(self) -> None:
+        root = Mock()
+        with patch.dict(sys.modules, {"pyi_splash": None}):
+            dismiss_splash(root)
+        root.update_idletasks.assert_called_once_with()
 
     def test_frozen_windowed_run_redirects_prints_to_persistent_log(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
