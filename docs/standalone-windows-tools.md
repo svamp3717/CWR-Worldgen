@@ -20,6 +20,13 @@ also trigger builds. Artifacts are retained for 14 days.
 The programs package their Python runtime and dependencies. The input game
 files are **not** bundled; select your own P3D/WRP/PBO/IFA files.
 
+All three executables show a branded loading screen **during PyInstaller
+one-file extraction** and while their startup Python imports finish. The
+screen closes when the GUI is ready (or before a command-line WRP scan starts).
+This gives visible feedback without introducing an artificial delay. It does
+not make the one-file extraction faster. The splash is an experimental
+Windows-supported PyInstaller feature and needs a Windows desktop to display.
+
 The categoriser and asset browser open directly as GUI applications. The WRP
 scanner opens its GUI when run without arguments but keeps a console window so
 it can also be used with CLI options such as:
@@ -46,14 +53,24 @@ py -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install ".[sources]" matplotlib pyinstaller
 python -m unittest discover -s tests -p test_p3d_frozen_support.py -v
+python -m unittest discover -s tests -p test_pyinstaller_splash.py -v
 ```
 
-Run these from the repository root:
+Run these from the repository root. Generate the splash images first (the
+GitHub Actions workflow does this automatically):
 
 ```powershell
-python -m PyInstaller --noconfirm --clean --onefile --windowed --paths tools --paths src --collect-all cwr_worldgen --collect-all dem_stitcher --collect-all rasterio --collect-all pyarrow --collect-all duckdb --name Categorise-P3D-Models tools/categorise_p3d_models.py
-python -m PyInstaller --noconfirm --clean --onefile --windowed --paths tools --paths src --collect-all cwr_worldgen --collect-all dem_stitcher --collect-all rasterio --collect-all pyarrow --collect-all duckdb --name Browse-P3D-Assets tools/browse_p3d_assets.py
-python -m PyInstaller --noconfirm --clean --onefile --console --paths tools --paths src --collect-all cwr_worldgen --collect-all dem_stitcher --collect-all rasterio --collect-all pyarrow --collect-all duckdb --name WRP-Mod-Dependency-Scanner tools/wrp_mod_dependency_scanner.py
+python tools/generate_pyinstaller_splash.py --name Categorise-P3D-Models --output build/splash/Categorise-P3D-Models.png
+python tools/generate_pyinstaller_splash.py --name Browse-P3D-Assets --output build/splash/Browse-P3D-Assets.png
+python tools/generate_pyinstaller_splash.py --name WRP-Mod-Dependency-Scanner --output build/splash/WRP-Mod-Dependency-Scanner.png
+```
+
+Then package the executables:
+
+```powershell
+python -m PyInstaller --noconfirm --clean --onefile --splash build/splash/Categorise-P3D-Models.png --windowed --paths tools --paths src --collect-all cwr_worldgen --collect-all dem_stitcher --collect-all rasterio --collect-all pyarrow --collect-all duckdb --name Categorise-P3D-Models tools/categorise_p3d_models.py
+python -m PyInstaller --noconfirm --clean --onefile --splash build/splash/Browse-P3D-Assets.png --windowed --paths tools --paths src --collect-all cwr_worldgen --collect-all dem_stitcher --collect-all rasterio --collect-all pyarrow --collect-all duckdb --name Browse-P3D-Assets tools/browse_p3d_assets.py
+python -m PyInstaller --noconfirm --clean --onefile --splash build/splash/WRP-Mod-Dependency-Scanner.png --console --paths tools --paths src --collect-all cwr_worldgen --collect-all dem_stitcher --collect-all rasterio --collect-all pyarrow --collect-all duckdb --name WRP-Mod-Dependency-Scanner tools/wrp_mod_dependency_scanner.py
 ```
 
 The executables appear in `dist/`. Build Windows executables on Windows, not
