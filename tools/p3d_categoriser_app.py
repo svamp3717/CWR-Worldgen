@@ -182,8 +182,34 @@ class CategoriserApp:
         toolbar.update()
         toolbar.grid(row=1, column=0, sticky="ew")
 
-        side = ttk.Frame(outer, padding=(8, 4))
-        side.grid(row=1, column=1, sticky="ns")
+        # Categorisation plus independent texture browsing needs more room
+        # than the original CWA-only form. Keep the controls usable on laptop
+        # screens rather than allowing buttons below the window to be clipped.
+        side_container = ttk.Frame(outer)
+        side_container.grid(row=1, column=1, sticky="nsew")
+        side_canvas = tk.Canvas(
+            side_container, width=335, highlightthickness=0, borderwidth=0
+        )
+        side_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        side_scroll = ttk.Scrollbar(
+            side_container, orient=tk.VERTICAL, command=side_canvas.yview
+        )
+        side_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        side_canvas.configure(yscrollcommand=side_scroll.set)
+        side = ttk.Frame(side_canvas, padding=(8, 4))
+        sidebar_window = side_canvas.create_window(
+            (0, 0), window=side, anchor="nw"
+        )
+        side.bind(
+            "<Configure>",
+            lambda _event: side_canvas.configure(scrollregion=side_canvas.bbox("all")),
+        )
+        side_canvas.bind(
+            "<Configure>",
+            lambda event: side_canvas.itemconfigure(
+                sidebar_window, width=event.width
+            ),
+        )
         ttk.Label(side, text="Categories", font=("TkDefaultFont", 11, "bold")).pack(
             anchor="w", pady=(0, 6)
         )
