@@ -240,12 +240,31 @@ class SessionCategoriserApp(CategoriserApp):
             command=self.prompt_jump_to_model,
             accelerator="Ctrl+G",
         )
+        session_menu.add_command(
+            label="Find model by path...",
+            command=self._focus_model_search,
+            accelerator="Ctrl+F",
+        )
+        session_menu.add_command(
+            label="Browse scanned models...",
+            command=self.show_scanned_models,
+            accelerator="Ctrl+L",
+        )
+        session_menu.add_command(
+            label="Copy model path",
+            command=self.copy_current_path,
+            accelerator="Ctrl+Shift+C",
+        )
         menu.add_cascade(label="Session", menu=session_menu)
 
         view_menu = tk.Menu(menu, tearoff=False)
         view_menu.add_command(label="Zoom in", command=lambda: self._zoom_by(1.25), accelerator="+")
         view_menu.add_command(label="Zoom out", command=lambda: self._zoom_by(1 / 1.25), accelerator="-")
         view_menu.add_command(label="Fit model", command=self._reset_zoom, accelerator="0")
+        view_menu.add_command(label="Reset camera", command=self._reset_view, accelerator="Ctrl+R")
+        view_menu.add_command(label="Preview referenced texture", command=self.preview_selected_texture)
+        view_menu.add_command(label="Add texture PBO / IFA...", command=self.select_texture_archives)
+        view_menu.add_command(label="Add texture folder...", command=self.select_texture_folder)
         menu.add_cascade(label="View", menu=view_menu)
 
         self.root.configure(menu=menu)
