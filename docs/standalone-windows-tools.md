@@ -51,9 +51,9 @@ python -m unittest discover -s tests -p test_p3d_frozen_support.py -v
 Run these from the repository root:
 
 ```powershell
-python -m PyInstaller --noconfirm --clean --onefile --windowed --paths tools --paths src --collect-all cwr_worldgen --name Categorise-P3D-Models tools/categorise_p3d_models.py
-python -m PyInstaller --noconfirm --clean --onefile --windowed --paths tools --paths src --collect-all cwr_worldgen --name Browse-P3D-Assets tools/browse_p3d_assets.py
-python -m PyInstaller --noconfirm --clean --onefile --console --paths tools --paths src --collect-all cwr_worldgen --name WRP-Mod-Dependency-Scanner tools/wrp_mod_dependency_scanner.py
+python -m PyInstaller --noconfirm --clean --onefile --windowed --paths tools --paths src --collect-all cwr_worldgen --collect-all dem_stitcher --collect-all rasterio --collect-all pyarrow --collect-all duckdb --name Categorise-P3D-Models tools/categorise_p3d_models.py
+python -m PyInstaller --noconfirm --clean --onefile --windowed --paths tools --paths src --collect-all cwr_worldgen --collect-all dem_stitcher --collect-all rasterio --collect-all pyarrow --collect-all duckdb --name Browse-P3D-Assets tools/browse_p3d_assets.py
+python -m PyInstaller --noconfirm --clean --onefile --console --paths tools --paths src --collect-all cwr_worldgen --collect-all dem_stitcher --collect-all rasterio --collect-all pyarrow --collect-all duckdb --name WRP-Mod-Dependency-Scanner tools/wrp_mod_dependency_scanner.py
 ```
 
 The executables appear in `dist/`. Build Windows executables on Windows, not
