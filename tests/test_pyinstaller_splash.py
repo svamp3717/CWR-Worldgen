@@ -33,6 +33,21 @@ class SplashImageTests(unittest.TestCase):
                             image.getpixel((40, 350)),
                         )
 
+    def test_wrp_splash_only_uses_white_for_wrp_headline(self) -> None:
+        name = "WRP-Mod-Dependency-Scanner"
+        self.assertEqual(TOOLS[name][:2], ("WRP", "MOD DEPENDENCY SCANNER"))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wrp.png"
+            render_splash(name, path)
+            with Image.open(path) as image:
+                white = (244, 248, 252)
+                accent = TOOLS[name][2]
+                # The word WRP is white; the subtitle and other text are amber.
+                self.assertIn(white, image.crop((40, 90, 330, 149)).getdata())
+                self.assertIn(accent, image.crop((40, 148, 620, 202)).getdata())
+                self.assertNotIn(white, image.crop((0, 149, 640, 360)).getdata())
+                self.assertNotIn(white, image.crop((35, 29, 200, 70)).getdata())
+
     def test_refuses_unknown_tool(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "unknown standalone tool"):

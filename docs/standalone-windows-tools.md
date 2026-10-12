@@ -12,10 +12,22 @@ CWR-Worldgen executable:
 
 ## Downloading a build
 
-Go to **Actions → Build Windows Asset Tools → Run workflow** (after the workflow
-is merged into the default branch), then open the completed run and download
-each artifact from the **Artifacts** section. Pull requests touching the tools
-also trigger builds. Artifacts are retained for 14 days.
+Both Windows tool workflows are **manual-only**. Neither starts on commits,
+pull requests, or tags. Once merged into `main`, choose one:
+
+- **Actions → Build Windows Asset Tools → Run workflow:** build all three
+  executables and download them from that run's **Artifacts** section.
+  Artifacts are retained for 14 days.
+- **Actions → Build and Publish Windows Asset Tools → Run workflow:** build all
+  three tools and publish them as downloads on a separate GitHub Release,
+  with a `tools-v<project version>` tag by default. An optional
+  `release_tag` input (for example `tools-v0.9.262-patch1`) lets you
+  choose a unique tag. Publishing requires `main`, and refuses to reuse an
+  existing tag or overwrite an existing release.
+
+Publishing the tools will **not** update the separate main CWR Worldgen release
+or mark the tools release as the repository's latest release. No build or
+release action is started automatically.
 
 The programs package their Python runtime and dependencies. The input game
 files are **not** bundled; select your own P3D/WRP/PBO/IFA files.
@@ -26,6 +38,8 @@ screen closes when the GUI is ready (or before a command-line WRP scan starts).
 This gives visible feedback without introducing an artificial delay. It does
 not make the one-file extraction faster. The splash is an experimental
 Windows-supported PyInstaller feature and needs a Windows desktop to display.
+On the WRP splash, only **WRP** is white; **MOD DEPENDENCY SCANNER** and the
+other on-screen labels use the amber accent.
 
 The categoriser and asset browser open directly as GUI applications. The WRP
 scanner opens its GUI when run without arguments but keeps a console window so

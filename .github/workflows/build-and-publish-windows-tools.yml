@@ -1,0 +1,118 @@
+name: Build and Publish Windows Asset Tools
+
+# Publishing is always an explicit action. No push, PR, or tag triggers.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional new tools-v... release tag; defaults to tools-v<project version>"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-asset-tools-publish
+  cancel-in-progress: false
+
+jobs:
+  prepare-release:
+    name: Check manual release version and tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
+    steps:
+      - name: Require main branch
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "Publish the tools only from main. Current ref: ${GITHUB_REF}" >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Read version and check release tag
+        id: metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          VERSION="$(python -c 'import runpy; print(runpy.run_path("src/cwr_worldgen/_version.py")["__version__"])')"
+          if [[ -z "$VERSION" ]]; then
+            echo "Could not read the project version" >&2
+            exit 1
+          fi
+          TAG="${REQUESTED_TAG:-tools-v$VERSION}"
+          if [[ ! "$TAG" =~ ^tools-v[0-9][a-zA-Z0-9._-]*$ ]]; then
+            echo "Invalid tools release tag: $TAG (expected tools-v...)" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists; enter a different release_tag." >&2
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; enter a different release_tag." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  build-tools:
+    name: Build the three Windows asset tools
+    needs: prepare-release
+    uses: ./.github/workflows/build-windows-tools.yml
+    permissions:
+      contents: read
+
+  publish-tools:
+    name: Publish the Windows tools to GitHub Releases
+    needs:
+      - prepare-release
+      - build-tools
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download built tools
+        uses: actions/download-artifact@v8
+        with:
+          pattern: "*-Windows"
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify all three release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tool in Categorise-P3D-Models Browse-P3D-Assets WRP-Mod-Dependency-Scanner; do
+            test -s "release-assets/$tool.exe" || {
+              echo "Missing or empty release-assets/$tool.exe" >&2
+              exit 1
+            }
+          done
+          ls -lh release-assets/*.exe
+
+      - name: Create separate asset-tools GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            "release-assets/Categorise-P3D-Models.exe" \
+            "release-assets/Browse-P3D-Assets.exe" \
+            "release-assets/WRP-Mod-Dependency-Scanner.exe" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "CWR Worldgen Asset Tools $VERSION" \
+            --notes "Standalone Windows P3D model categoriser, P3D asset browser, and WRP mod dependency scanner. Includes PyInstaller loading screens." \
+            --latest=false
