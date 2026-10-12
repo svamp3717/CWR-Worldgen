@@ -9,6 +9,7 @@ on:
       - "src/**"
       - "pyproject.toml"
       - "tests/test_p3d_frozen_support.py"
+      - "tests/test_pyinstaller_splash.py"
 
 permissions:
   contents: read
@@ -52,6 +53,18 @@ jobs:
         shell: pwsh
         run: |
           python -m unittest discover -s tests -p test_p3d_frozen_support.py -v
+          python -m unittest discover -s tests -p test_pyinstaller_splash.py -v
+
+      - name: Generate tool loading screen
+        shell: pwsh
+        run: |
+          python tools/generate_pyinstaller_splash.py `
+            --name "${{ matrix.name }}" `
+            --output "build/splash/${{ matrix.name }}.png"
+          if ($LASTEXITCODE -ne 0) { throw "Splash generation failed" }
+          if (-not (Test-Path "build/splash/${{ matrix.name }}.png")) {
+            throw "Splash image was not generated"
+          }
 
       - name: Build Windows executable
         shell: pwsh
@@ -60,6 +73,7 @@ jobs:
             --noconfirm `
             --clean `
             --onefile `
+            --splash "build/splash/${{ matrix.name }}.png" `
             ${{ matrix.mode }} `
             --paths tools `
             --paths src `
