@@ -34,3 +34,19 @@ def configure_windowed_logging(tool_name: str) -> None:
         sys.stdout = stream
     if sys.stderr is None:
         sys.stderr = stream
+
+
+def dismiss_splash(root=None) -> None:
+    """Close PyInstaller's bootloader splash once the GUI is ready to draw."""
+    if root is not None:
+        root.update_idletasks()
+    try:
+        import pyi_splash
+    except ImportError:
+        # Running from Python source without a PyInstaller splash.
+        return
+    try:
+        pyi_splash.close()
+    except (OSError, RuntimeError):
+        # A terminated splash process must not stop the actual tool.
+        pass
