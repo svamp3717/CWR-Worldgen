@@ -635,7 +635,9 @@ class CategoriserApp:
 
         def refresh(*_args) -> None:
             term = measure._canonical_model_path(query.get())
-            tree.delete(*tree.get_children())
+            children = tree.get_children()
+            if children:
+                tree.delete(*children)
             for i, model in enumerate(self.models):
                 if term in model.model_path:
                     saved = self.state.get(model.model_path)
