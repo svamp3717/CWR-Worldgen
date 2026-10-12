@@ -251,6 +251,16 @@ class SessionCategoriserApp(CategoriserApp):
             accelerator="Ctrl+L",
         )
         session_menu.add_command(
+            label="Change output JSON...",
+            command=self.change_json_output,
+            accelerator="Ctrl+Shift+S",
+        )
+        session_menu.add_command(
+            label="Save classifications now",
+            command=self.save_state,
+            accelerator="Ctrl+S",
+        )
+        session_menu.add_command(
             label="Copy model path",
             command=self.copy_current_path,
             accelerator="Ctrl+Shift+C",
