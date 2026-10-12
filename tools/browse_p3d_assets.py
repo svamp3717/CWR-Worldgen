@@ -2,6 +2,10 @@
 """Open the P3D model and texture browser."""
 from __future__ import annotations
 
+from p3d_frozen_support import configure_windowed_logging
+
+configure_windowed_logging("browse-p3d-assets")
+
 try:
     import tkinter  # noqa: F401
 except ImportError as exc:
