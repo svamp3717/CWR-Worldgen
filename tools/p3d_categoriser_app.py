@@ -123,6 +123,7 @@ class CategoriserApp:
         root.bind("<Left>", lambda _e: self.previous_model())
         root.bind("<Right>", lambda _e: self.next_model())
         root.bind("<Control-s>", lambda _e: self.save_state())
+        root.bind("<Control-Shift-S>", lambda _e: self.change_json_output())
         root.bind("<Control-f>", self._focus_model_search)
         root.bind("<Control-Shift-C>", lambda _e: self.copy_current_path())
         root.bind("<Control-r>", lambda _e: self._reset_view())
@@ -148,8 +149,25 @@ class CategoriserApp:
         ).grid(row=0, column=0, sticky="w")
         ttk.Label(header, textvariable=self.progress_var).grid(row=0, column=1, sticky="e")
 
+        output_row = ttk.Frame(header)
+        output_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        output_row.columnconfigure(1, weight=1)
+        ttk.Label(output_row, text="JSON output:").grid(
+            row=0, column=0, sticky="w", padx=(0, 7)
+        )
+        self.output_var = tk.StringVar(master=self.root, value=str(self.output))
+        ttk.Label(output_row, textvariable=self.output_var).grid(
+            row=0, column=1, sticky="w"
+        )
+        ttk.Button(
+            output_row, text="Change output JSON…", command=self.change_json_output
+        ).grid(row=0, column=2, padx=(8, 0))
+        ttk.Button(output_row, text="Save now", command=self.save_state).grid(
+            row=0, column=3, padx=(6, 0)
+        )
+
         search_row = ttk.Frame(header)
-        search_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(7, 0))
+        search_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(7, 0))
         search_row.columnconfigure(1, weight=1)
         ttk.Label(search_row, text="Find model:").grid(row=0, column=0, padx=(0, 6))
         self.search_var = tk.StringVar(master=self.root, value="")
@@ -830,6 +848,61 @@ class CategoriserApp:
         if self.current is not None:
             self._redraw()
         self.status_var.set("Additional texture sources cleared. Model scan unchanged.")
+
+    def change_json_output(self) -> None:
+        """Save As without resetting the model stream or existing classifications.
+
+        Explicitly confirm replacing a pre-existing JSON or its reviewed
+        .unclassified.json companion rather than overwriting another session.
+        """
+        chosen = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Choose categoriser classification JSON output",
+            defaultextension=".json",
+            initialdir=str(self.output.parent),
+            initialfile=self.output.name,
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+        )
+        if not chosen:
+            return
+        new_output = Path(chosen).expanduser()
+        if new_output.suffix.casefold() != ".json":
+            messagebox.showerror(
+                "JSON output required",
+                "Choose a filename ending with .json.", parent=self.root,
+            )
+            return
+        try:
+            same_output = new_output.resolve() == self.output.resolve()
+        except OSError:
+            same_output = new_output == self.output
+        if not same_output:
+            from p3d_categoriser_storage import incomplete_state_path
+            companion = incomplete_state_path(new_output)
+            existing = [path for path in (new_output, companion) if path.exists()]
+            if existing and not messagebox.askyesno(
+                "Replace existing classifications?",
+                "The selected output already has saved classification data:\n\n"
+                + "\n".join(str(path) for path in existing)
+                + "\n\nReplace it with your current session?",
+                parent=self.root,
+            ):
+                return
+
+        previous = self.output
+        self.output = new_output
+        try:
+            if self.current is not None:
+                self._commit(False)
+            self.save_state()
+        except (OSError, ValueError) as exc:
+            self.output = previous
+            messagebox.showerror(
+                "Could not save classification JSON", str(exc), parent=self.root,
+            )
+            return
+        if hasattr(self, "output_var"):
+            self.output_var.set(str(new_output))
 
     def _zoom_by(self, factor: float) -> None:
         if self.current is None:
