@@ -254,3 +254,126 @@ def test_reset_view_restores_camera_and_zoom() -> None:
     app._reset_view()
     assert (app.azim, app.elev, app.zoom) == (35.0, 25.0, 1.0)
     app._redraw.assert_called_once()
+
+
+
+def _output_app(output: Path):
+    from p3d_categoriser_split import SplitStateCategoriserApp
+    from p3d_categoriser_app import Classification
+    app = SplitStateCategoriserApp.__new__(SplitStateCategoriserApp)
+    app.root = object()
+    app.output = output
+    app.output_var = Var(str(output))
+    app.categories = ["Residential"]
+    app.status_var = Var("")
+    app.current = model(r"ca\house.p3d")
+    app.state = {
+        r"ca\house.p3d": Classification(
+            ["Residential"], "Urban", reviewed=True
+        ),
+        r"ca\shed.p3d": Classification(
+            ["Residential"], "", reviewed=True
+        ),
+    }
+    app._commit = Mock()
+    return app
+
+
+def test_change_output_json_saves_completed_and_incomplete_companion(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    import json
+    from p3d_categoriser_storage import incomplete_state_path
+    old = tmp_path / "old.json"
+    new = tmp_path / "fresh" / "output.json"
+    app = _output_app(old)
+    monkeypatch.setattr(
+        ui.filedialog, "asksaveasfilename", Mock(return_value=str(new))
+    )
+    answer = Mock(return_value=True)
+    monkeypatch.setattr(ui.messagebox, "askyesno", answer)
+    app.change_json_output()
+
+    assert app.output == new
+    assert app.output_var.get() == str(new)
+    assert not old.exists()
+    assert new.exists()
+    assert incomplete_state_path(new).exists()
+    payload = json.loads(new.read_text(encoding="utf-8"))
+    assert payload["resume_model_path"] == r"ca\house.p3d"
+    assert [x["model_path"] for x in payload["models"]] == [r"ca\house.p3d"]
+    assert json.loads(incomplete_state_path(new).read_text())["models"][0]["model_path"] == r"ca\shed.p3d"
+    app._commit.assert_called_once_with(False)
+    answer.assert_not_called()
+
+
+def test_save_as_existing_json_asks_before_overwriting(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    old, existing = tmp_path / "old.json", tmp_path / "existing.json"
+    existing.write_text('{"leave": "untouched"}', encoding="utf-8")
+    app = _output_app(old)
+    monkeypatch.setattr(
+        ui.filedialog, "asksaveasfilename", Mock(return_value=str(existing))
+    )
+    question = Mock(return_value=False)
+    monkeypatch.setattr(ui.messagebox, "askyesno", question)
+    app.change_json_output()
+    question.assert_called_once()
+    assert app.output == old
+    assert app.output_var.get() == str(old)
+    assert existing.read_text() == '{"leave": "untouched"}'
+    assert not old.exists()
+    app._commit.assert_not_called()
+
+
+def test_save_as_companion_file_also_warns_before_overwriting(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from p3d_categoriser_storage import incomplete_state_path
+    old, new = tmp_path / "old.json", tmp_path / "new.json"
+    companion = incomplete_state_path(new)
+    companion.write_text('{"previous": true}', encoding="utf-8")
+    app = _output_app(old)
+    monkeypatch.setattr(
+        ui.filedialog, "asksaveasfilename", Mock(return_value=str(new))
+    )
+    monkeypatch.setattr(ui.messagebox, "askyesno", Mock(return_value=False))
+    app.change_json_output()
+    assert app.output == old
+    assert companion.read_text() == '{"previous": true}'
+
+
+def test_save_as_cancel_and_invalid_extension_preserve_original_output(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    old = tmp_path / "old.json"
+    app = _output_app(old)
+    choose = Mock(return_value="")
+    monkeypatch.setattr(ui.filedialog, "asksaveasfilename", choose)
+    app.change_json_output()
+    assert app.output == old
+    choose.return_value = str(tmp_path / "categories.txt")
+    error = Mock()
+    monkeypatch.setattr(ui.messagebox, "showerror", error)
+    app.change_json_output()
+    error.assert_called_once()
+    assert not old.exists()
+
+
+def test_save_as_failure_rolls_back_active_json_destination(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    old = tmp_path / "old.json"
+    new = tmp_path / "new.json"
+    app = _output_app(old)
+    monkeypatch.setattr(
+        ui.filedialog, "asksaveasfilename", Mock(return_value=str(new))
+    )
+    app.save_state = Mock(side_effect=OSError("write denied"))
+    error = Mock()
+    monkeypatch.setattr(ui.messagebox, "showerror", error)
+    app.change_json_output()
+    assert app.output == old
+    assert app.output_var.get() == str(old)
+    assert error.call_count == 1
