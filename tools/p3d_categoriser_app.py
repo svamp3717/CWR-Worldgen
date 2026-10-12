@@ -8,13 +8,14 @@ import sys
 from typing import Iterator, Sequence
 
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 import numpy as np
 
 import measure_p3d_models as measure
 from p3d_preview_geometry import PreviewModel
+from cwr_worldgen.pbo import is_pbo_path
 from p3d_texture_sources import TextureResolver
 from p3d_texture_render import MipmapCache, render_textured_model
 
@@ -97,6 +98,11 @@ class CategoriserApp:
         self.model_iter = model_iter
         self.texture_resolver = texture_resolver
         self.mipmap_cache = MipmapCache()
+        # Browsing more texture archives must not restart the model stream or
+        # modify category JSON; keep its source list separate from the models.
+        self._base_texture_sources = tuple(texture_resolver.inputs)
+        self._extra_texture_sources: list[Path] = []
+        self._related_texture_paths: tuple[str, ...] = ()
         self.output = output
         self.categories = list(categories)
         self.state = state
@@ -117,6 +123,10 @@ class CategoriserApp:
         root.bind("<Left>", lambda _e: self.previous_model())
         root.bind("<Right>", lambda _e: self.next_model())
         root.bind("<Control-s>", lambda _e: self.save_state())
+        root.bind("<Control-f>", self._focus_model_search)
+        root.bind("<Control-Shift-C>", lambda _e: self.copy_current_path())
+        root.bind("<Control-r>", lambda _e: self._reset_view())
+        root.bind("<Control-l>", lambda _e: self.show_scanned_models())
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.next_model(mark_current=False)
 
@@ -138,6 +148,27 @@ class CategoriserApp:
         ).grid(row=0, column=0, sticky="w")
         ttk.Label(header, textvariable=self.progress_var).grid(row=0, column=1, sticky="e")
 
+        search_row = ttk.Frame(header)
+        search_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(7, 0))
+        search_row.columnconfigure(1, weight=1)
+        ttk.Label(search_row, text="Find model:").grid(row=0, column=0, padx=(0, 6))
+        self.search_var = tk.StringVar(master=self.root, value="")
+        self.search_entry = ttk.Entry(search_row, textvariable=self.search_var)
+        self.search_entry.grid(row=0, column=1, sticky="ew")
+        self.search_entry.bind("<Return>", lambda _event: self.find_next_model())
+        ttk.Button(search_row, text="Find next", command=self.find_next_model).grid(
+            row=0, column=2, padx=(6, 0)
+        )
+        ttk.Button(search_row, text="Scanned models…", command=self.show_scanned_models).grid(
+            row=0, column=3, padx=(6, 0)
+        )
+        ttk.Button(
+            search_row, text="×", width=3, command=lambda: self.search_var.set("")
+        ).grid(row=0, column=4, padx=(4, 0))
+        ttk.Label(
+            search_row, text="Searches model paths (Ctrl+F)"
+        ).grid(row=0, column=5, padx=(9, 0))
+
         frame = ttk.Frame(outer)
         frame.grid(row=1, column=0, sticky="nsew", padx=(0, 8))
         frame.rowconfigure(0, weight=1)
@@ -151,8 +182,34 @@ class CategoriserApp:
         toolbar.update()
         toolbar.grid(row=1, column=0, sticky="ew")
 
-        side = ttk.Frame(outer, padding=(8, 4))
-        side.grid(row=1, column=1, sticky="ns")
+        # Categorisation plus independent texture browsing needs more room
+        # than the original CWA-only form. Keep the controls usable on laptop
+        # screens rather than allowing buttons below the window to be clipped.
+        side_container = ttk.Frame(outer)
+        side_container.grid(row=1, column=1, sticky="nsew")
+        side_canvas = tk.Canvas(
+            side_container, width=335, highlightthickness=0, borderwidth=0
+        )
+        side_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        side_scroll = ttk.Scrollbar(
+            side_container, orient=tk.VERTICAL, command=side_canvas.yview
+        )
+        side_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        side_canvas.configure(yscrollcommand=side_scroll.set)
+        side = ttk.Frame(side_canvas, padding=(8, 4))
+        sidebar_window = side_canvas.create_window(
+            (0, 0), window=side, anchor="nw"
+        )
+        side.bind(
+            "<Configure>",
+            lambda _event: side_canvas.configure(scrollregion=side_canvas.bbox("all")),
+        )
+        side_canvas.bind(
+            "<Configure>",
+            lambda event: side_canvas.itemconfigure(
+                sidebar_window, width=event.width
+            ),
+        )
         ttk.Label(side, text="Categories", font=("TkDefaultFont", 11, "bold")).pack(
             anchor="w", pady=(0, 6)
         )
@@ -221,6 +278,20 @@ class CategoriserApp:
         ttk.Button(row2, text="Tilt -", command=lambda: self._tilt(-10)).pack(
             side=tk.LEFT, padx=4
         )
+        ttk.Button(row2, text="Zoom +", command=lambda: self._zoom_by(1.25)).pack(
+            side=tk.LEFT, padx=(8, 0)
+        )
+        ttk.Button(row2, text="Zoom −", command=lambda: self._zoom_by(1 / 1.25)).pack(
+            side=tk.LEFT, padx=4
+        )
+        row3 = ttk.Frame(side)
+        row3.pack(fill="x", pady=(5, 0))
+        ttk.Button(row3, text="Reset view", command=self._reset_view).pack(
+            side=tk.LEFT
+        )
+        ttk.Button(row3, text="Copy model path", command=self.copy_current_path).pack(
+            side=tk.LEFT, padx=(5, 0)
+        )
 
         ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
         self.info_var = tk.StringVar(master=self.root, value="")
@@ -230,13 +301,47 @@ class CategoriserApp:
             anchor="w"
         )
         ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
-        ttk.Label(side, text="Textures", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
+        ttk.Label(side, text="Referenced textures", font=("TkDefaultFont", 10, "bold")).pack(
+            anchor="w"
+        )
+        ttk.Label(side, textvariable=self.texture_var, justify=tk.LEFT, wraplength=300).pack(
+            anchor="w", pady=(2, 0)
+        )
+        texture_box = ttk.Frame(side)
+        texture_box.pack(fill=tk.X, pady=(4, 0))
+        self.texture_list = tk.Listbox(
+            texture_box, height=6, width=38, exportselection=False, selectmode=tk.BROWSE
+        )
+        self.texture_list.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        texture_scroll = ttk.Scrollbar(
+            texture_box, orient=tk.VERTICAL, command=self.texture_list.yview
+        )
+        texture_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.texture_list.configure(yscrollcommand=texture_scroll.set)
+        self.texture_list.bind("<Double-1>", self.preview_selected_texture)
+        texture_actions = ttk.Frame(side)
+        texture_actions.pack(fill=tk.X, pady=(5, 0))
+        ttk.Button(
+            texture_actions, text="Preview texture", command=self.preview_selected_texture
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            texture_actions, text="Copy texture path", command=self.copy_selected_texture_path
+        ).pack(side=tk.LEFT, padx=(5, 0))
         ttk.Label(
-            side,
-            textvariable=self.texture_var,
-            justify=tk.LEFT,
+            side, text="Add texture sources (does not change the model scan):",
             wraplength=300,
-        ).pack(anchor="w")
+        ).pack(anchor="w", pady=(9, 0))
+        source_actions = ttk.Frame(side)
+        source_actions.pack(fill=tk.X, pady=(5, 0))
+        ttk.Button(
+            source_actions, text="Add PBO / IFA…", command=self.select_texture_archives
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            source_actions, text="Add folder…", command=self.select_texture_folder
+        ).pack(side=tk.LEFT, padx=(5, 0))
+        ttk.Button(
+            side, text="Clear added texture sources", command=self.clear_added_texture_sources
+        ).pack(anchor="w", pady=(4, 0))
         ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
         ttk.Label(side, textvariable=self.status_var, wraplength=300).pack(anchor="w")
 
@@ -418,16 +523,324 @@ class CategoriserApp:
             f"Placement: {placement_text}\n"
             f"Reviewed: {'yes' if classification.reviewed else 'no'}"
         )
-        names = [measure._canonical_model_path(n) for n in model.texture_paths if n]
+        names = tuple(dict.fromkeys(
+            measure._canonical_model_path(n) for n in model.texture_paths if n
+        ))
+        self._related_texture_paths = names
         self.texture_var.set(
-            "No texture references in this LOD"
-            if not names
-            else f"{len(names)} referenced\n"
-            + "\n".join(names[:8])
-            + (f"\n… +{len(names)-8} more" if len(names) > 8 else "")
+            f"{len(names)} unique texture reference(s)"
+            if names else "No texture references in this LOD"
         )
+        if hasattr(self, "texture_list"):
+            self.texture_list.delete(0, tk.END)
+            for name in names:
+                self.texture_list.insert(tk.END, name)
+            if names:
+                self.texture_list.selection_set(0)
         self.prev_button.configure(state=tk.NORMAL if self.index > 0 else tk.DISABLED)
         self.next_button.configure(state=tk.NORMAL)
+        self._redraw()
+
+    def _focus_model_search(self, _event=None) -> str:
+        self.search_entry.focus_set()
+        self.search_entry.selection_range(0, tk.END)
+        return "break"
+
+    def _select_model_index(self, target: int) -> None:
+        """Use existing category/resume semantics when jumping between models."""
+        if not 0 <= target < len(self.models):
+            return
+        if self.current is not None and self.index != target:
+            self._commit(True)
+            self.save_state()
+        self.index = target
+        self._show_model(self.models[target])
+        self.save_state()
+
+    def find_next_model(self) -> None:
+        """Search by model path, streaming forward without rendering every model.
+
+        Loaded models are searched first. Scanning proceeds only when needed,
+        and wraps around previously loaded models after reaching the end.
+        """
+        needle = measure._canonical_model_path(self.search_var.get()).strip()
+        if not needle:
+            self.status_var.set("Enter a model name or path to search.")
+            return
+        begin = getattr(self, "_begin_navigation_loading", None)
+        end = getattr(self, "_finish_navigation_loading", None)
+        if callable(begin) and not begin(
+            "Searching model paths…",
+            f"Searching for {needle} (new models are scanned without rendering).",
+        ):
+            return
+        try:
+            target = next(
+                (i for i in range(self.index + 1, len(self.models))
+                 if needle in self.models[i].model_path.casefold()), None
+            )
+            while target is None and not self.exhausted:
+                model = self._load_next()
+                if model is None:
+                    break
+                if needle in model.model_path.casefold():
+                    target = len(self.models) - 1
+                    break
+                if len(self.models) % 25 == 0:
+                    progress = getattr(self, "_set_navigation_status", None)
+                    if callable(progress):
+                        progress(
+                            "Searching model paths…",
+                            f"Scanned {len(self.models):,} models • {model.model_path}",
+                        )
+            if target is None:
+                target = next(
+                    (i for i in range(0, min(self.index + 1, len(self.models)))
+                     if needle in self.models[i].model_path.casefold()), None
+                )
+            if target is None:
+                self.status_var.set(f"No matching P3D model found: {needle}")
+                return
+            self._select_model_index(target)
+            self.status_var.set(
+                f"Found model {target + 1:,}: {self.models[target].model_path}"
+            )
+        except (OSError, ValueError) as exc:
+            print(f"[model search error] {exc}", file=sys.stderr, flush=True)
+            self.status_var.set(f"Model search failed: {exc}")
+        finally:
+            if callable(end):
+                end()
+
+    def show_scanned_models(self) -> None:
+        """Browsable, searchable index of models reached in this session.
+
+        The categoriser remains streaming; the list deliberately does not
+        read every unopened model just to show a catalogue.
+        """
+        if getattr(self, "_model_list_popup", None) is not None:
+            try:
+                if self._model_list_popup.winfo_exists():
+                    self._model_list_popup.lift()
+                    return
+            except tk.TclError:
+                pass
+        popup = tk.Toplevel(self.root)
+        popup.title("Scanned P3D models")
+        popup.geometry("850x530")
+        popup.columnconfigure(0, weight=1)
+        popup.rowconfigure(2, weight=1)
+        self._model_list_popup = popup
+        ttk.Label(
+            popup,
+            text=f"{len(self.models):,} models scanned so far. "
+                 "Double-click to jump; use Find next to search unopened models.",
+            wraplength=800,
+        ).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 5))
+        query = tk.StringVar(master=popup, value="")
+        field = ttk.Entry(popup, textvariable=query)
+        field.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
+        table_frame = ttk.Frame(popup)
+        table_frame.grid(row=2, column=0, sticky="nsew", padx=10)
+        table_frame.rowconfigure(0, weight=1)
+        table_frame.columnconfigure(0, weight=1)
+        tree = ttk.Treeview(
+            table_frame, columns=("index", "path", "reviewed"),
+            show="headings", selectmode="browse",
+        )
+        for column, label, width in (
+            ("index", "#", 65), ("path", "Model path", 600),
+            ("reviewed", "Reviewed", 95),
+        ):
+            tree.heading(column, text=label)
+            tree.column(column, width=width, stretch=column == "path")
+        tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=tree.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        tree.configure(yscrollcommand=scrollbar.set)
+
+        def refresh(*_args) -> None:
+            term = measure._canonical_model_path(query.get())
+            children = tree.get_children()
+            if children:
+                tree.delete(*children)
+            for i, model in enumerate(self.models):
+                if term in model.model_path:
+                    saved = self.state.get(model.model_path)
+                    tree.insert(
+                        "", tk.END, iid=str(i),
+                        values=(i + 1, model.model_path,
+                                "Yes" if saved and saved.reviewed else "No"),
+                    )
+
+        def jump(_event=None) -> None:
+            selected = tree.selection()
+            if not selected:
+                return
+            index = int(selected[0])
+            popup.destroy()
+            self._model_list_popup = None
+            # SessionCategoriserApp supports jumping with loading feedback;
+            # the base categoriser can navigate its already loaded entries too.
+            jump_to = getattr(self, "jump_to_model_number", None)
+            if callable(jump_to):
+                jump_to(index + 1)
+            else:
+                self._select_model_index(index)
+
+        tree.bind("<Double-1>", jump)
+        query.trace_add("write", refresh)
+        field.bind("<Return>", lambda _event: jump())
+        ttk.Button(popup, text="Jump to selected model", command=jump).grid(
+            row=3, column=0, sticky="e", padx=10, pady=8
+        )
+        refresh()
+        field.focus_set()
+
+    def _selected_texture_path(self) -> str | None:
+        if not hasattr(self, "texture_list"):
+            return None
+        selected = self.texture_list.curselection()
+        paths = getattr(self, "_related_texture_paths", ())
+        if not selected or selected[0] >= len(paths):
+            self.status_var.set("Select a referenced texture first.")
+            return None
+        return paths[selected[0]]
+
+    def preview_selected_texture(self, _event=None) -> None:
+        """Show the actual decoded PAA/PAC referenced by the current model."""
+        if self.current is None:
+            return
+        path = self._selected_texture_path()
+        if path is None:
+            return
+        self.status_var.set(f"Loading texture {path}…")
+        try:
+            image = self.texture_resolver.load_rgba(path, self.current.source)
+            if image is None:
+                self.status_var.set(
+                    f"Texture not found: {path}. Add its PBO/IFA or game folder."
+                )
+                return
+            previous = getattr(self, "_texture_popup", None)
+            if previous is not None:
+                try:
+                    previous.destroy()
+                except tk.TclError:
+                    pass
+            popup = tk.Toplevel(self.root)
+            popup.title(f"PAA/PAC texture • {path}")
+            popup.geometry("850x650")
+            popup.columnconfigure(0, weight=1)
+            popup.rowconfigure(1, weight=1)
+            ttk.Label(
+                popup,
+                text=f"{path}  •  {image.shape[1]} × {image.shape[0]} pixels",
+            ).grid(row=0, column=0, sticky="w", padx=8, pady=7)
+            figure = Figure(figsize=(8, 6), dpi=100)
+            ax = figure.add_subplot(1, 1, 1)
+            ax.imshow(image, interpolation="nearest")
+            ax.axis("off")
+            figure.tight_layout(pad=0.5)
+            canvas = FigureCanvasTkAgg(figure, master=popup)
+            canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
+            canvas.draw_idle()
+            popup._texture_canvas = canvas
+            self._texture_popup = popup
+            self.status_var.set(f"Texture loaded: {path}")
+        except (OSError, ValueError, measure.ModelReadError, tk.TclError) as exc:
+            self.status_var.set(f"Could not preview texture {path}: {exc}")
+            messagebox.showerror("Texture preview failed", str(exc), parent=self.root)
+
+    def _copy_path(self, path: str, label: str) -> None:
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(path)
+            self.root.update_idletasks()
+        except tk.TclError as exc:
+            self.status_var.set(f"Could not copy {label} path: {exc}")
+            return
+        self.status_var.set(f"Copied {label} path: {path}")
+
+    def copy_current_path(self) -> None:
+        if self.current is not None:
+            self._copy_path(self.current.model_path, "model")
+
+    def copy_selected_texture_path(self) -> None:
+        path = self._selected_texture_path()
+        if path is not None:
+            self._copy_path(path, "texture")
+
+    def _set_extra_texture_sources(self, paths: Sequence[Path]) -> None:
+        """Replace only the texture resolver; the model iterator stays intact."""
+        proposed = list(self._extra_texture_sources)
+        existing = set(self._base_texture_sources) | set(proposed)
+        for source in paths:
+            path = Path(source).expanduser()
+            if not path.exists() or not (path.is_dir() or
+                                           (path.is_file() and is_pbo_path(path))):
+                self.status_var.set(f"Not a PBO/IFA archive or folder: {path}")
+                return
+            if path not in existing:
+                proposed.append(path)
+                existing.add(path)
+        if proposed == self._extra_texture_sources:
+            self.status_var.set("All selected texture sources are already loaded.")
+            return
+        self._extra_texture_sources = proposed
+        self.texture_resolver = TextureResolver(
+            (*self._base_texture_sources, *self._extra_texture_sources)
+        )
+        self.mipmap_cache.clear()
+        if self.current is not None:
+            self._redraw()
+        self.status_var.set(
+            f"Added texture sources: {len(self._extra_texture_sources)}. "
+            "Model scan and classifications unchanged."
+        )
+
+    def select_texture_archives(self) -> None:
+        selected = filedialog.askopenfilenames(
+            parent=self.root,
+            title="Add texture PBO / IFA archives",
+            filetypes=(
+                ("PBO / IFA archives", "*.pbo *.pbo.zst *.ifa *.ifa.zst"),
+                ("PBO archives", "*.pbo *.pbo.zst"),
+                ("Iron Front IFA archives", "*.ifa *.ifa.zst"),
+                ("All files", "*.*"),
+            ),
+        )
+        if selected:
+            self._set_extra_texture_sources(tuple(Path(path) for path in selected))
+
+    def select_texture_folder(self) -> None:
+        folder = filedialog.askdirectory(
+            parent=self.root, title="Add folder containing PAA/PAC texture archives"
+        )
+        if folder:
+            self._set_extra_texture_sources((Path(folder),))
+
+    def clear_added_texture_sources(self) -> None:
+        if not self._extra_texture_sources:
+            self.status_var.set("No additional texture sources to clear.")
+            return
+        self._extra_texture_sources.clear()
+        self.texture_resolver = TextureResolver(self._base_texture_sources)
+        self.mipmap_cache.clear()
+        if self.current is not None:
+            self._redraw()
+        self.status_var.set("Additional texture sources cleared. Model scan unchanged.")
+
+    def _zoom_by(self, factor: float) -> None:
+        if self.current is None:
+            return
+        self.zoom = max(0.65, min(5.0, getattr(self, "zoom", 1.0) * factor))
+        self._redraw()
+
+    def _reset_view(self) -> None:
+        if self.current is None:
+            return
+        self.azim, self.elev, self.zoom = 35.0, 25.0, 1.0
         self._redraw()
 
     def _preview_render_size(self) -> tuple[int, int]:
