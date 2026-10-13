@@ -155,3 +155,96 @@ def test_cancel_of_setup_does_not_load_or_modify_existing_json(
     monkeypatch.setattr(cli, "prompt_for_startup_selection", Mock(return_value=None))
     assert cli.main(["-o", str(output)]) == 0
     assert output.read_bytes() == original
+
+
+
+def test_texture_archive_startup_validation_allows_multiple_individual_files(
+    tmp_path: Path,
+) -> None:
+    models = _archive(tmp_path, "models.pbo")
+    textures = [
+        tmp_path / "textures.pbo",
+        tmp_path / "extra.ifa",
+        tmp_path / "wrapped.pbo.zst",
+        tmp_path / "wrapped.ifa.zst",
+    ]
+    for path in textures:
+        path.touch()
+
+    assert startup.validate_startup_selection(
+        (models,), tmp_path / "categories.json", textures
+    ) is None
+    assert "does not exist" in startup.validate_startup_selection(
+        (models,), tmp_path / "categories.json", (tmp_path / "missing.pbo",)
+    )
+    wrong_file = tmp_path / "wrong.zip"
+    wrong_file.touch()
+    assert "Unsupported texture archive" in startup.validate_startup_selection(
+        (models,), tmp_path / "categories.json", (wrong_file,)
+    )
+    assert "Unsupported texture archive" in startup.validate_startup_selection(
+        (models,), tmp_path / "categories.json", (tmp_path,)
+    )
+
+
+def test_startup_texture_picker_collects_distinct_archives_separately_from_models(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    model = _archive(tmp_path, "house.pbo")
+    a = _archive(tmp_path, "walls.ifa")
+    b = _archive(tmp_path, "decorations.pbo")
+
+    dialog = startup.StartupSelectionDialog.__new__(startup.StartupSelectionDialog)
+    dialog.root = object()
+    dialog.inputs = [model]
+    dialog.texture_sources = []
+    dialog._refresh_texture_sources = Mock()
+    picked = []
+
+    def choose(**kwargs):
+        picked.append(kwargs)
+        return (str(a), str(b), str(a))
+
+    monkeypatch.setattr(startup.filedialog, "askopenfilenames", choose)
+    dialog.select_texture_archives()
+    assert dialog.inputs == [model]
+    assert dialog.texture_sources == [a, b]
+    assert len(picked) == 1
+    assert "*.ifa" in " ".join(pattern for _, pattern in picked[0]["filetypes"])
+    dialog._refresh_texture_sources.assert_called_once_with()
+
+    dialog.texture_source_list = SimpleNamespace(curselection=lambda: (0,))
+    dialog.remove_selected_textures()
+    assert dialog.texture_sources == [b]
+    assert dialog.inputs == [model]
+
+
+def test_gui_texture_archives_do_not_extend_categoriser_model_scan(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    model = _archive(tmp_path, "models.pbo")
+    extra_pbo = _archive(tmp_path, "tex1.pbo")
+    extra_ifa = _archive(tmp_path, "tex2.ifa")
+    selected = startup.StartupSelection(
+        (model,), tmp_path / "categories.json", (extra_pbo, extra_ifa)
+    )
+    monkeypatch.setattr(cli, "prompt_for_startup_selection", Mock(return_value=selected))
+    observed = []
+    monkeypatch.setattr(
+        cli.measure, "count_models",
+        lambda inputs, includes: observed.append(("count", tuple(inputs))) or 0,
+    )
+    monkeypatch.setattr(
+        cli, "preview_models",
+        lambda inputs, includes, max_points: observed.append(("preview", tuple(inputs))) or iter(()),
+    )
+    root = Mock()
+    monkeypatch.setattr(cli.tk, "Tk", Mock(return_value=root))
+    launch = Mock()
+    monkeypatch.setattr(cli, "SplitStateCategoriserApp", launch)
+
+    assert cli.main([]) == 0
+    assert observed == [("count", (model,)), ("preview", (model,))]
+    assert launch.call_args.kwargs["texture_resolver"].inputs == (
+        model, extra_pbo, extra_ifa
+    )
