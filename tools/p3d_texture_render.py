@@ -77,8 +77,13 @@ def _sample_bilinear(texture: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.nd
     th, tw = texture.shape[:2]
     # Half-texel convention keeps integer texel centres stable while still smoothing
     # between adjacent texels. P3D UVs may extend outside 0..1, so repeat-wrap them.
+    # P3D UVs and the decoded PAA/BCn rows both use the DirectX convention:
+    # V=0 is the top of the texture. Flipping V here maps the wrong atlas
+    # islands onto Arma models, although repeating textures can hide the bug.
+    # Blender importers flip V because Blender's UV space is bottom-origin;
+    # this CPU renderer samples top-origin NumPy image rows directly.
     x = (np.mod(u, 1.0) * tw) - 0.5
-    y = (np.mod(1.0 - v, 1.0) * th) - 0.5
+    y = (np.mod(v, 1.0) * th) - 0.5
 
     x0f = np.floor(x)
     y0f = np.floor(y)
