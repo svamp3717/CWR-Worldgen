@@ -543,7 +543,7 @@ class CategoriserApp:
         if hasattr(self, "lod_picker"):
             self.lod_picker.configure(values=tuple(choices))
         if hasattr(self, "preview_lod_var"):
-            quality = getattr(model, "selected_lod_quality", self._default_preview_lod)
+            quality = getattr(model, "selected_lod_quality", getattr(self, "_default_preview_lod", "fast"))
             selected = next(
                 (label for label, value in choices.items() if value == quality),
                 "Fast (lowest)",
