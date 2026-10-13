@@ -178,12 +178,16 @@ class ModelPreviewCache:
         return model
 
 
-def load_texture(item: BrowserAsset, catalogue: BrowserCatalogue) -> np.ndarray:
+def load_texture(
+    item: BrowserAsset, catalogue: BrowserCatalogue, *, mipmap: str = "auto"
+) -> np.ndarray:
     if item.kind != "texture":
         raise ValueError(f"not a texture asset: {item.path}")
     record = catalogue.record_for(item)
     data = assets.read_asset_record_bytes(record)
-    return decode_paa(data, is_paa=item.path.casefold().endswith(".paa"))
+    return decode_paa(
+        data, is_paa=item.path.casefold().endswith(".paa"), mipmap=mipmap,
+    )
 
 
 class TexturePreviewCache:
@@ -193,7 +197,7 @@ class TexturePreviewCache:
         self.max_images = max(0, int(max_images))
         self.max_bytes = max(0, int(max_bytes))
         self._items: OrderedDict[
-            tuple[str, str], np.ndarray
+            tuple[str, str, str], np.ndarray
         ] = OrderedDict()
         self.bytes_used = 0
 
@@ -201,12 +205,18 @@ class TexturePreviewCache:
         self._items.clear()
         self.bytes_used = 0
 
-    def get(self, item: BrowserAsset, catalogue: BrowserCatalogue) -> np.ndarray:
-        key = (item.source, item.path)
+    def get(
+        self, item: BrowserAsset, catalogue: BrowserCatalogue,
+        *, mipmap: str = "auto",
+    ) -> np.ndarray:
+        key = (item.source, item.path, mipmap)
         if key in self._items:
             self._items.move_to_end(key)
             return self._items[key]
-        image = load_texture(item, catalogue)
+        image = (
+            load_texture(item, catalogue) if mipmap == "auto"
+            else load_texture(item, catalogue, mipmap=mipmap)
+        )
         if self.max_images and image.nbytes <= self.max_bytes:
             while self._items and (
                 len(self._items) >= self.max_images
