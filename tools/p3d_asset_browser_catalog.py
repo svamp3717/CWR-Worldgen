@@ -115,35 +115,17 @@ def load_model(
     record = catalogue.record_for(item)
     data = assets.read_asset_record_bytes(record)
     source = model_source(item)
-    measurement, points, faces, textures = preview.extract_first_lod_geometry(
-        data,
-        model_path=item.path,
-        source=source,
-        lod_quality=lod_quality,
+    model = preview.build_preview_model(
+        data, model_path=item.path, source=source,
+        lod_quality=lod_quality, max_points=25_000,
     )
-    bounds_only = measurement.lod == "model bounds only"
-    if bounds_only:
-        # The catalogue already extracts embedded texture references without
-        # interpreting the changing ODOL LOD/material tables.
-        textures = tuple(
+    if model.render_mode == "bounds only":
+        # Fallback bounds cannot reveal textures; use the scan's reference list.
+        model.texture_paths = tuple(
             path for path in item.dependencies
             if path.casefold().endswith((".paa", ".pac"))
         )
-    edges = (
-        np.asarray(preview.modern_odol.BOX_EDGES, dtype=np.int32)
-        if bounds_only else preview.collect_edges(faces)
-    )
-    return preview.PreviewModel(
-        item.path,
-        source,
-        measurement,
-        points.astype(np.float32, copy=False),
-        faces,
-        edges,
-        0 if bounds_only else len(points),
-        textures,
-        "bounds only" if bounds_only else ("textured mesh" if faces else "vertex fallback"),
-    )
+    return model
 
 
 class ModelPreviewCache:
