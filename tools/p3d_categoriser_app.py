@@ -352,7 +352,7 @@ class CategoriserApp:
         source_actions = ttk.Frame(side)
         source_actions.pack(fill=tk.X, pady=(5, 0))
         ttk.Button(
-            source_actions, text="Add PBO / IFA…", command=self.select_texture_archives
+            source_actions, text="Add texture PBOs / IFAs…", command=self.select_texture_archives
         ).pack(side=tk.LEFT)
         ttk.Button(
             source_actions, text="Add folder…", command=self.select_texture_folder
@@ -820,7 +820,7 @@ class CategoriserApp:
     def select_texture_archives(self) -> None:
         selected = filedialog.askopenfilenames(
             parent=self.root,
-            title="Add texture PBO / IFA archives",
+            title="Add texture PBO / IFA archives (select multiple)",
             filetypes=(
                 ("PBO / IFA archives", "*.pbo *.pbo.zst *.ifa *.ifa.zst"),
                 ("PBO archives", "*.pbo *.pbo.zst"),
