@@ -312,3 +312,25 @@ def test_model_renderer_forwards_selected_texture_mipmap(monkeypatch) -> None:
         width=32, height=32, mipmap_cache=mipcache, texture_mipmap="max:256",
     )
     assert len(resolver.calls) == 1
+
+
+
+def test_legacy_paletted_pac_selects_embedded_mip_without_decoding_first() -> None:
+    # Old OFP/CWA PAC format has no DXT type marker: it begins with a
+    # palette, followed by RLE-compressed image payloads at each resolution.
+    palette = b"\x00\x00\xff" + b"\x00\xff\x00"  # red, green in BGR
+    data = bytearray(struct.pack("<H", 2) + palette)
+    for width, height, payload in (
+        (2, 2, b"\x03\x00\x00\x00\x00"),
+        (1, 1, b"\x00\x01"),
+    ):
+        data.extend(struct.pack("<HH", width, height))
+        data.extend(len(payload).to_bytes(3, "little"))
+        data.extend(payload)
+    assert list_paa_mips(bytes(data), is_paa=False) == ((2, 2), (1, 1))
+    first = decode_paa(bytes(data), is_paa=False)
+    second = decode_paa(bytes(data), is_paa=False, mipmap="mip:1")
+    assert first.shape == (2, 2, 4)
+    assert second.shape == (1, 1, 4)
+    assert tuple(first[0, 0]) == (255, 0, 0, 255)
+    assert tuple(second[0, 0]) == (0, 255, 0, 255)
