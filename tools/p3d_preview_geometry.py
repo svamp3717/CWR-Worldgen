@@ -99,7 +99,9 @@ def _read_mlod_faces(stream: io.BytesIO, point_count: int, face_count: int):
     return tuple(faces), tuple(textures)
 
 
-def extract_first_lod_geometry(data: bytes, *, model_path: str, source: str):
+def extract_first_lod_geometry(
+    data: bytes, *, model_path: str, source: str, lod_quality: str = "full"
+):
     if len(data) < 12:
         raise measure.ModelReadError("P3D is too small to contain a valid header")
     signature = data[:4]
@@ -109,7 +111,7 @@ def extract_first_lod_geometry(data: bytes, *, model_path: str, source: str):
 
     if signature == b"ODOL" and struct.unpack_from("<I", data, 4)[0] >= 40:
         try:
-            mesh = modern_mesh.read_model_mesh(data)
+            mesh = modern_mesh.read_model_mesh(data, lod_quality=lod_quality)
         except modern_odol.ModernOdolError as exc:
             # Preserve the existing metadata-only fallback for encrypted,
             # incomplete or not-yet-decoded ODOL layouts. Never pass bounding
@@ -225,10 +227,15 @@ def collect_edges(faces: Sequence[RenderFace]) -> np.ndarray:
     return np.asarray(sorted(edges), dtype=np.int32) if edges else np.empty((0, 2), dtype=np.int32)
 
 
-def preview_models(inputs: Sequence[Path], patterns: Sequence[str], max_points: int) -> Iterator[PreviewModel | measure.ModelFailure]:
+def preview_models(
+    inputs: Sequence[Path], patterns: Sequence[str], max_points: int,
+    *, lod_quality: str = "full",
+) -> Iterator[PreviewModel | measure.ModelFailure]:
     for model_path, source, data in measure._iter_models(inputs, patterns):
         try:
-            measurement, points, faces, textures = extract_first_lod_geometry(data, model_path=model_path, source=source)
+            measurement, points, faces, textures = extract_first_lod_geometry(
+                data, model_path=model_path, source=source, lod_quality=lod_quality
+            )
             bounds_only = measurement.lod == "model bounds only"
             edges = (
                 np.asarray(modern_odol.BOX_EDGES, dtype=np.int32)
