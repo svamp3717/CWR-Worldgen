@@ -552,6 +552,25 @@ class CategoriserApp:
             )
             self.preview_lod_var.set(selected)
 
+    @staticmethod
+    def _preview_asset_record(model: PreviewModel) -> world_assets.AssetRecord:
+        """Undo the model-member suffix attached by the categoriser scanner.
+
+        The stream reports PBO/IFA models as ``archive.pbo!model.p3d`` (or
+        ``outer.pbo!inner.pbo!model.p3d``) for texture lookup. The asset
+        reader instead expects the source to end at the containing archive;
+        otherwise it attempts to open the P3D as a nested PBO.
+        Loose .p3d files retain their complete filesystem path.
+        """
+        source = model.source
+        if "!" in source:
+            archive, member = source.rsplit("!", 1)
+            if measure._canonical_model_path(member) == measure._canonical_model_path(model.model_path):
+                source = archive
+        return world_assets.AssetRecord(
+            path=model.model_path, source=source, size=0, sha256=None,
+        )
+
     def _change_preview_lod(self, _event=None) -> None:
         """Switch only the active preview, preserving model order and categories."""
         if self.current is None:
@@ -561,10 +580,9 @@ class CategoriserApp:
             return
         previous = self.current
         try:
-            data = world_assets.read_asset_record_bytes(world_assets.AssetRecord(
-                path=previous.model_path, source=previous.source,
-                size=0, sha256=None,
-            ))
+            data = world_assets.read_asset_record_bytes(
+                self._preview_asset_record(previous)
+            )
             replacement = build_preview_model(
                 data, model_path=previous.model_path, source=previous.source,
                 lod_quality=quality,
