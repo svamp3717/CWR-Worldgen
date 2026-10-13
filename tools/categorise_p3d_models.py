@@ -136,6 +136,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     inputs = _resolve_inputs(args.inputs)
+    selected_texture_sources: tuple[Path, ...] = ()
     if not inputs:
         # A double-click or "python categorise_p3d_models.py" should be a
         # usable GUI workflow, rather than argparse exiting for a missing PBO.
@@ -147,6 +148,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if selected is None:
             return 0  # Cancel: do not scan or touch the JSON output.
         inputs = list(selected.inputs)
+        selected_texture_sources = selected.texture_sources
         args.output = selected.output
     missing = [p for p in inputs if not p.exists()]
     if missing:
@@ -165,7 +167,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             pass
         return 2
 
-    texture_sources = [path.expanduser() for path in args.texture_source]
+    # Only model inputs are counted/scanned. Extra archives are sent to the
+    # texture resolver, not the model iterator (also when picked at startup).
+    texture_sources = list(dict.fromkeys(
+        path.expanduser()
+        for path in (*args.texture_source, *selected_texture_sources)
+    ))
     missing_texture_sources = [path for path in texture_sources if not path.exists()]
     if missing_texture_sources:
         text = (
