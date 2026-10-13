@@ -166,7 +166,7 @@ class StartupSelectionDialog:
         lod_options.grid(row=7, column=0, sticky="w", pady=(0, 10))
         ttk.Label(lod_options, text="Model preview detail:").pack(side=tk.LEFT)
         ttk.Radiobutton(
-            lod_options, text="Fast (lower visual LOD)",
+            lod_options, text="Fast (lowest visual LOD)",
             value="fast", variable=self.preview_lod_var,
         ).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Radiobutton(
