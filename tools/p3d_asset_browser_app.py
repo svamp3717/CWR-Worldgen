@@ -26,6 +26,7 @@ from p3d_asset_browser_catalog import (
 )
 from p3d_frozen_support import dismiss_splash
 from p3d_texture_sources import TextureResolver
+from p3d_texture_io import MIPMAP_CHOICES
 from p3d_texture_render import MipmapCache, render_textured_model
 from cwr_worldgen.pbo import is_pbo_path
 from cwr_worldgen.assets import canonical_asset_path
@@ -195,7 +196,16 @@ class AssetBrowserApp:
             text="Skip textures (faster)",
             variable=self.skip_textures_var,
             command=self._redraw_current_model,
-        ).pack(side=tk.LEFT, padx=(18, 0))
+        ).pack(side=tk.LEFT, padx=(14, 0))
+        self._mipmap_choices = dict(MIPMAP_CHOICES)
+        self.texture_mipmap_var = tk.StringVar(master=self.root, value=MIPMAP_CHOICES[0][0])
+        ttk.Label(controls, text="Texture mip:").pack(side=tk.LEFT, padx=(12, 4))
+        mip_picker = ttk.Combobox(
+            controls, textvariable=self.texture_mipmap_var,
+            values=tuple(self._mipmap_choices), state="readonly", width=18,
+        )
+        mip_picker.pack(side=tk.LEFT)
+        mip_picker.bind("<<ComboboxSelected>>", self._change_texture_mipmap)
 
         details = ttk.Frame(main)
         details.grid(row=2, column=0, sticky="ew", pady=(8, 0))
@@ -595,6 +605,18 @@ class AssetBrowserApp:
         if getattr(self.current, "kind", None) == "model":
             self._show_model(self.current)
 
+    def _selected_texture_mipmap(self) -> str:
+        if not hasattr(self, "texture_mipmap_var"):
+            return "auto"
+        return self._mipmap_choices.get(self.texture_mipmap_var.get(), "auto")
+
+    def _change_texture_mipmap(self, _event=None) -> None:
+        """Change texture detail without rescanning the selected model/archive."""
+        if getattr(self.current, "kind", None) == "model":
+            self._redraw_current_model()
+        elif getattr(self.current, "kind", None) == "texture":
+            self._show_texture(self.current)
+
     def _show_model(self, item: BrowserAsset) -> None:
         self._busy(f"Loading model {item.path}…")
         try:
@@ -713,6 +735,7 @@ class AssetBrowserApp:
             zoom=self.zoom,
             load_textures=not self.skip_textures_var.get(),
             mipmap_cache=getattr(self, "mipmap_cache", None),
+            texture_mipmap=self._selected_texture_mipmap(),
         )
         # Downsampling remains filtered when the canvas is smaller than the
         # already screen-sized raster, avoiding shimmering brick patterns.
@@ -734,9 +757,10 @@ class AssetBrowserApp:
         self._busy(f"Loading texture {item.path}…")
         try:
             cache = getattr(self, "texture_preview_cache", None)
+            mipmap = self._selected_texture_mipmap()
             image = (
-                cache.get(item, self.catalogue) if cache is not None
-                else load_texture(item, self.catalogue)
+                cache.get(item, self.catalogue, mipmap=mipmap) if cache is not None
+                else load_texture(item, self.catalogue, mipmap=mipmap)
             )
             self.current_model = None
             self.ax_preview.clear()
