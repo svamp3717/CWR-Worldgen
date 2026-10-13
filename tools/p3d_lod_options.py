@@ -151,7 +151,7 @@ def _mlod_lods(data: bytes) -> tuple[LodOption, ...]:
         if max(points, normals, faces) > 4_000_000:
             raise measure.ModelReadError("implausible SP3X counts")
         _bounded_skip(stream, head_size - 28 + points * 16 + normals * 12
-                      + faces * 152, length, "SP3X geometry")
+                      + faces * 104, length, "SP3X geometry")
         if measure._read_exact(stream, 4, "MLOD TAGG") != b"TAGG":
             raise measure.ModelReadError("MLOD LOD is missing TAGG")
         for _ in range(100_000):
