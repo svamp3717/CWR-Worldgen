@@ -581,12 +581,13 @@ class AssetBrowserApp:
             self.lod_picker.configure(values=tuple(choices))
         quality = getattr(self, "_lod_current_quality", "fast")
         label = next((name for name, value in choices.items() if value == quality), "Fast (lowest)")
-        self.preview_lod_var.set(label)
+        if hasattr(self, "preview_lod_var"):
+            self.preview_lod_var.set(label)
 
     def _change_preview_lod(self, _event=None) -> None:
         """Reload just this model at the chosen LOD, with a separate cache entry."""
         choices = getattr(self, "_lod_choices", {"fast": "fast", "full": "full"})
-        label = self.preview_lod_var.get()
+        label = self.preview_lod_var.get() if hasattr(self, "preview_lod_var") else "fast"
         quality = choices.get(label, label)
         self._lod_current_quality = quality
         if quality in ("fast", "full"):
