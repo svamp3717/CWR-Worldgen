@@ -476,3 +476,103 @@ def test_replacing_model_pbos_preserves_selected_extra_texture_archives(
     assert app.sources == [new_model]
     assert app.texture_sources == [external_texture]
     assert app.texture_sources_var.get() == "1 extra texture archive(s)"
+
+
+
+class _RelatedAssetTree:
+    def __init__(self):
+        self.rows = {}
+
+    def get_children(self):
+        return tuple(self.rows)
+
+    def delete(self, iid):
+        self.rows.pop(iid)
+
+    def insert(self, _parent, _position, *, iid, values):
+        self.rows[iid] = values
+
+
+def test_related_texture_status_checks_external_pbos_instead_of_catalogue_only(
+    tmp_path: Path,
+) -> None:
+    model_pbo = tmp_path / "models.pbo"
+    external_pbo = tmp_path / "textures.ifa"
+    write_pbo(model_pbo, (
+        PboEntry("model.p3d", _fake_p3d(r"textures\outside.paa")),
+        PboEntry("local.paa", b"local-paa"),
+    ))
+    write_pbo(external_pbo, (PboEntry("outside.paa", b"external-paa"),))
+    catalogue = scan_catalogue((model_pbo,), use_cache=False)
+
+    app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
+    app.catalogue = catalogue
+    app.texture_resolver = browser_app.TextureResolver((model_pbo, external_pbo))
+    app.current_model = SimpleNamespace(
+        source=f"{model_pbo}!models\\model.p3d",
+        texture_paths=(r"models\local.paa", r"textures\outside.paa"),
+    )
+    app.skip_textures_var = _FakeVar(False)
+    app._related_assets = {}
+    app.related_tree = _RelatedAssetTree()
+
+    paths = (r"models\local.paa", r"textures\outside.paa", r"textures\absent.paa")
+    app._set_related_textures(paths)
+    assert [value[0] for value in app.related_tree.rows.values()] == [
+        "Texture", "External", "Missing",
+    ]
+    assert "r0" in app._related_assets
+    assert "r1" not in app._related_assets  # Not part of model catalogue.
+    assert "r2" not in app._related_assets
+
+    # The resolver may locate an archive entry even if its PAA cannot decode.
+    app.texture_resolver.image_cache[r"textures\outside.paa"] = None
+    app._set_related_textures(paths)
+    assert app.related_tree.rows["r1"][0] == "Unreadable"
+
+    # Skip textures is not evidence that a texture is missing or unreadable.
+    app.skip_textures_var.set(True)
+    app._set_related_textures(paths)
+    assert [value[0] for value in app.related_tree.rows.values()] == [
+        "Texture", "Unchecked", "Unchecked",
+    ]
+
+
+def test_extra_texture_archive_change_refreshes_related_status_without_model_scan(
+    tmp_path: Path,
+) -> None:
+    model_pbo = tmp_path / "models.pbo"
+    external_pbo = tmp_path / "textures.pbo"
+    write_pbo(model_pbo, (
+        PboEntry("model.p3d", _fake_p3d(r"textures\outside.paa")),
+    ))
+    write_pbo(external_pbo, (
+        PboEntry("outside.paa", b"external-paa"),
+    ))
+
+    app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
+    app.sources = [model_pbo]
+    app.texture_sources = [external_pbo]
+    app.catalogue = scan_catalogue((model_pbo,), use_cache=False)
+    app.texture_resolver = browser_app.TextureResolver((model_pbo, external_pbo))
+    app.current = BrowserAsset("model", r"models\model.p3d", str(model_pbo), 24)
+    app.current_model = SimpleNamespace(
+        source=f"{model_pbo}!models\\model.p3d",
+        texture_paths=(r"textures\outside.paa",),
+    )
+    app._related_assets = {}
+    app.related_tree = _RelatedAssetTree()
+    app.skip_textures_var = _FakeVar(False)
+    app.texture_sources_var = _FakeVar("")
+    app.status_var = _FakeVar("")
+    app.mipmap_cache = SimpleNamespace(clear=Mock())
+    app._draw_model = Mock()
+    app._scan_sources = Mock()
+
+    app._redraw_current_model()
+    assert app.related_tree.rows["r0"][0] == "External"
+    app.clear_texture_archives()
+    assert app.related_tree.rows["r0"][0] == "Missing"
+    app._scan_sources.assert_not_called()
+    assert app._draw_model.call_count == 2
+    assert app.texture_resolver.inputs == (model_pbo,)
