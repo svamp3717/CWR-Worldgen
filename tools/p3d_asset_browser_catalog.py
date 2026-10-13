@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -50,6 +51,19 @@ def _kind(path: str) -> str | None:
     return None
 
 
+def _browser_cache_dir() -> Path:
+    """Keep catalogue fingerprints between GUI launches.
+
+    The asset scanner otherwise reparses every PBO and hashes/decompresses
+    every P3D just to display the model list. Respect the Windows cache
+    location and XDG_CACHE_HOME, without writing beside users' game assets.
+    """
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        return Path(os.environ["LOCALAPPDATA"]) / "CWR-Worldgen" / "p3d-browser"
+    xdg_cache = os.environ.get("XDG_CACHE_HOME")
+    return (Path(xdg_cache) if xdg_cache else Path.home() / ".cache") / "cwr-worldgen" / "p3d-browser"
+
+
 def scan_catalogue(
     roots: Sequence[Path],
     *,
@@ -61,7 +75,7 @@ def scan_catalogue(
     result = assets.scan_assets(
         normalized,
         (),
-        cache_dir=cache_dir,
+        cache_dir=cache_dir if cache_dir is not None or not use_cache else _browser_cache_dir(),
         use_cache=use_cache,
         refresh=refresh,
     )
