@@ -82,11 +82,12 @@ updated when you add or clear them.
 ### Fast visual LOD previews
 
 Both P3D tools default to **Fast** preview detail for modern Arma-era ODOL
-models. When the model has enough visual LODs, Fast reads the **third visual
-LOD** rather than decoding the much larger high-detail mesh. With two visual
-LODs it uses the second, and with one it uses the only available LOD.
-If the selected LOD cannot be decoded, it falls back to another valid visual
-LOD, never deliberately choosing a physics, roadway, or shadow LOD.
+models. Fast reads the **lowest-detail available visual LOD**, regardless of
+how many visual LODs the model provides. With two visual LODs it uses the
+second; with one it uses the only available visual LOD. If that LOD cannot
+be decoded, it tries the next higher-detail visual LOD, moving upward until
+one works. Physics, roadway, and shadow LODs are never used as visual meshes;
+models without a valid visual LOD fall back to a bounds-only preview.
 This reduces geometry parsing and rasterization work but does **not** avoid
 reading the P3D from its PBO/IFA archive. Texture lookup may still be a
 separate bottleneck.
