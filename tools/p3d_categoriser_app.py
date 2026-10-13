@@ -93,6 +93,7 @@ class CategoriserApp:
         categories: Sequence[str],
         state: dict[str, Classification],
         total_models: int | None = None,
+        initial_texture_sources: Sequence[Path] = (),
     ) -> None:
         self.root = root
         self.model_iter = model_iter
@@ -100,8 +101,15 @@ class CategoriserApp:
         self.mipmap_cache = MipmapCache()
         # Browsing more texture archives must not restart the model stream or
         # modify category JSON; keep its source list separate from the models.
-        self._base_texture_sources = tuple(texture_resolver.inputs)
-        self._extra_texture_sources: list[Path] = []
+        # Startup-selected texture archives remain removable with the normal
+        # Clear added texture sources control, just like sources added later.
+        extra_sources = list(dict.fromkeys(
+            Path(path).expanduser() for path in initial_texture_sources
+        ))
+        self._base_texture_sources = tuple(
+            path for path in texture_resolver.inputs if path not in extra_sources
+        )
+        self._extra_texture_sources: list[Path] = extra_sources
         self._related_texture_paths: tuple[str, ...] = ()
         self.output = output
         self.categories = list(categories)
