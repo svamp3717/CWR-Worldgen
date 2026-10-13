@@ -157,7 +157,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0  # Cancel: do not scan or touch the JSON output.
         inputs = list(selected.inputs)
         selected_texture_sources = selected.texture_sources
-        args.preview_lod = selected.preview_lod
+        # LOD is now selected from the categoriser's main View controls.
+        # Preserve a CLI --preview-lod value even when sources use the GUI.
         args.output = selected.output
     missing = [p for p in inputs if not p.exists()]
     if missing:
