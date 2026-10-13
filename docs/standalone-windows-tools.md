@@ -79,30 +79,36 @@ and **Unchecked** means texture loading was skipped. Extra texture archives
 are deliberately not added to the model catalogue; the external status is
 updated when you add or clear them.
 
-### Fast visual LOD previews
+### Selecting all model LODs
 
-Both P3D tools default to **Fast** preview detail for modern Arma-era ODOL
-models. Fast reads the **lowest-detail available visual LOD**, regardless of
-how many visual LODs the model provides. With two visual LODs it uses the
-second; with one it uses the only available visual LOD. If that LOD cannot
-be decoded, it tries the next higher-detail visual LOD, moving upward until
-one works. Physics, roadway, and shadow LODs are never used as visual meshes;
-models without a valid visual LOD fall back to a bounds-only preview.
-This reduces geometry parsing and rasterization work but does **not** avoid
-reading the P3D from its PBO/IFA archive. Texture lookup may still be a
-separate bottleneck.
+The **Preview LOD** dropdown lists the actual LODs of the currently selected
+model for Arma-era ODOL, OFP/CWA **ODOL v6/v7**, and older **MLOD/SP3X** P3Ds.
 
-- **Model & Texture Browser:** change the **Preview LOD** dropdown between
-  `fast` and `full` while browsing. The current model reloads at the selected
-  quality, with independent in-memory caches for each detail level.
-- **Model Categoriser:** choose **Fast (lowest visual LOD)** or **Full detail**
-  in the startup dialog. When launching with a model path on the command
-  line, use `--preview-lod fast` (the default) or `--preview-lod full`.
+- **Fast (lowest):** Automatically uses the lowest-detail available *visual*
+  LOD, falling back toward higher visual detail if it cannot be decoded.
+- **Full (highest):** Uses the highest-detail available visual LOD.
+- **LOD 1 (1)**, **LOD 2 (9)**, and so on: Explicitly select that model's
+  real LOD resolution. Entries labelled **[special]** are nonvisual LODs
+  (geometry, roadway, shadow, etc.). They are listed for inspection but may
+  not support textured preview.
 
-Older OFP/CWA ODOL v6/v7 and MLOD/SP3X models continue to use their existing
-first-LOD reader. The selected mesh's reported vertex count, texture list,
-and measured dimensions can vary with preview LOD; use **Full detail** when
-precise, highest-detail mesh inspection or measurements matter.
+Each model has its own list. Changing the selected model refreshes the
+choices automatically. Switching LOD in the **Model & Texture Browser** reloads
+only that model's preview and keeps separate cached meshes for each quality,
+without rescanning the catalogue.
+
+In the **Model Categoriser**, LOD selection is now located **beside Skip
+textures** in the main View controls, rather than the startup setup window.
+You can switch to another LOD while categorising without changing the model
+order or saved categories. The CLI `--preview-lod fast|full` sets the *initial*
+quality. The per-model dropdown offers individual LODs once the model loads.
+
+Selecting a lower LOD reduces geometry parsing and preview rasterization but
+does not avoid reading the P3D from its archive. OFP/CWA ODOL files store
+LOD bodies sequentially, so their LOD index must be read before a later LOD
+can be selected. If the index cannot be parsed, legacy models retain their
+previously supported first-LOD fallback. Measurements and referenced textures
+shown for a preview are based on its selected LOD and may differ between LODs.
 
 Categoriser classification files and companion `.unclassified.json` files
 are saved to the output path selected in its GUI, not inside the executable.
