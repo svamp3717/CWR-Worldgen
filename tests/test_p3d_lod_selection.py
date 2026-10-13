@@ -17,6 +17,9 @@ import p3d_lod_options as lods
 import p3d_preview_geometry as preview
 import p3d_asset_browser_app as browser
 import p3d_categoriser_app as categoriser
+import measure_p3d_models as measure
+from cwr_worldgen import assets as world_assets
+from cwr_worldgen.pbo import PboEntry, write_pbo
 
 
 def _legacy_odol(
@@ -199,3 +202,63 @@ def test_categoriser_reloads_only_current_lod_without_touching_classifications(
     assert app.state["house.p3d"] is before
     assert app.model_iter is original_iterator
     app._show_model.assert_called_once_with(app.models[0])
+
+
+
+@pytest.mark.parametrize("source_kind", ("pbo", "nested_pbo", "loose"))
+def test_categoriser_lod_switch_reads_correct_model_bytes_from_source(
+    tmp_path: Path, source_kind: str,
+) -> None:
+    """Regression: scanner appends !model.p3d; that is NOT another PBO layer."""
+    data = _mlod(((1.0, 6), (9.0, 3)))
+    if source_kind == "loose":
+        input_path = tmp_path / "house.p3d"
+        input_path.write_bytes(data)
+    elif source_kind == "pbo":
+        input_path = tmp_path / "models.ifa"
+        write_pbo(input_path, (PboEntry("house.p3d", data),))
+    else:
+        inner = tmp_path / "modelpack.pbo"
+        write_pbo(inner, (PboEntry("house.p3d", data),))
+        input_path = tmp_path / "outer.pbo"
+        write_pbo(input_path, (PboEntry(r"Addons\modelpack.pbo", inner.read_bytes()),))
+
+    model_path, source, scanned = next(measure._iter_models((input_path,), ()))
+    assert scanned == data
+    if source_kind != "loose":
+        assert source.endswith("!" + model_path)
+    original = preview.build_preview_model(
+        scanned, model_path=model_path, source=source, lod_quality="fast",
+    )
+    assert original.original_vertex_count == 3
+
+    # Calling the real archive reader is essential: mocking it concealed the
+    # original bug, where house.p3d was mistaken for a nested PBO file.
+    record = categoriser.CategoriserApp._preview_asset_record(original)
+    assert world_assets.read_asset_record_bytes(record) == data
+    if source_kind == "loose":
+        assert record.source == str(input_path)
+    else:
+        assert record.source == source.rsplit("!", 1)[0]
+
+    app = categoriser.CategoriserApp.__new__(categoriser.CategoriserApp)
+    app.current = original
+    app.models = [original]
+    app.index = 0
+    app.state = {model_path: categoriser.Classification(["Residential"])}
+    previous_state = app.state[model_path]
+    app._lod_choices = {"LOD 1 (1)": "lod:0", "Fast (lowest)": "fast"}
+    app.preview_lod_var = SimpleNamespace(get=lambda: "LOD 1 (1)", set=lambda _: None)
+    app.status_var = SimpleNamespace(set=Mock())
+    app._max_preview_points = 25_000
+    app._show_model = Mock(side_effect=lambda model: setattr(app, "current", model))
+    app._change_preview_lod()
+
+    assert app.current is app.models[0]
+    assert app.current.selected_lod_quality == "lod:0"
+    assert app.current.original_vertex_count == 6
+    assert app.current.measurement.lod == "resolution 1"
+    assert app.state[model_path] is previous_state
+    assert app.state[model_path].categories == ["Residential"]
+    app.status_var.set.assert_not_called()
+    app._show_model.assert_called_once()
