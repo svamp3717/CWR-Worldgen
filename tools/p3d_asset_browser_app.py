@@ -308,10 +308,14 @@ class AssetBrowserApp:
             ),
         )
         if values:
-            # Selecting an archive is a replacement operation. This keeps the browser
-            # focused on the newly chosen archive(s) instead of silently retaining
-            # models and textures from a previous package.
+            # Replace model inputs while retaining deliberately selected texture
+            # archives. A model change must not silently undo the user's lookup
+            # sources; the explicit Clear sources action still clears everything.
+            selected_textures = tuple(getattr(self, "texture_sources", ()))
             self.clear_sources()
+            if selected_textures and hasattr(self, "texture_sources"):
+                self.texture_sources.extend(selected_textures)
+                self._update_texture_source_label()
             self._add_sources(Path(value) for value in values)
 
     def select_texture_archives(self) -> None:
