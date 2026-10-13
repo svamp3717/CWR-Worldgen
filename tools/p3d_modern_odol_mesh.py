@@ -464,8 +464,8 @@ def read_model_mesh(data: bytes, *, lod_quality: str = "full") -> ModernMesh:
     """Decode visual LOD vertices, faces, UVs and texture references.
 
     Full prefers the highest-detail visual LOD (the legacy behaviour).
-    Fast starts at the third visual LOD when available, avoiding expensive
-    high-detail geometry. An unreadable LOD falls back to other visual LODs.
+    Fast prefers the lowest-detail visual LOD available, avoiding expensive
+    high-detail geometry. An unreadable LOD falls back toward higher detail.
     """
     if lod_quality not in {"full", "fast"}:
         raise ValueError(f"unsupported preview LOD quality: {lod_quality}")
@@ -487,16 +487,16 @@ def read_model_mesh(data: bytes, *, lod_quality: str = "full") -> ModernMesh:
     entries = _lod_table(r)
     if not entries:
         raise MeshReadError("ODOL has no resolution LODs")
-    # Exclude geometry, roadway and shadow LODs from visual previews.
-    # Visual resolution entries are sorted from most to least detail.
+    # Only visual resolution LODs can provide a meaningful preview: geometry,
+    # roadway and shadow LODs may be the last entries in the file but must
+    # never be treated as the lowest-detail visual model.
     visual = [entry for entry in entries if 0 <= entry[0] < 10000]
-    if lod_quality == "fast" and visual:
-        selected = min(2, len(visual) - 1)
-        # Prefer equal/lower detail if selected data cannot be decoded;
-        # then try successively higher detail as a last resort.
-        candidates = visual[selected:] + list(reversed(visual[:selected]))
-    else:
-        candidates = visual or list(entries)
+    if not visual:
+        raise MeshReadError("ODOL has no visual resolution LODs")
+    # _lod_table sorts visual LODs from highest to lowest detail. Try the
+    # entire list in reverse for fast mode, so even models with 4+ LODs use
+    # their coarsest decodable visual mesh instead of a fixed third LOD.
+    candidates = list(reversed(visual)) if lod_quality == "fast" else visual
     failures: list[str] = []
     for resolution, start, end in candidates:
         try:
