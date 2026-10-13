@@ -96,6 +96,7 @@ class CategoriserApp:
         total_models: int | None = None,
         initial_texture_sources: Sequence[Path] = (),
         preview_lod: str = "fast",
+        max_preview_points: int = 25_000,
     ) -> None:
         self.root = root
         self.model_iter = model_iter
@@ -114,6 +115,7 @@ class CategoriserApp:
         self._extra_texture_sources: list[Path] = extra_sources
         self._related_texture_paths: tuple[str, ...] = ()
         self._default_preview_lod = preview_lod
+        self._max_preview_points = max_preview_points
         self._lod_choices = {"Fast (lowest)": "fast", "Full (highest)": "full"}
         self.output = output
         self.categories = list(categories)
@@ -294,7 +296,7 @@ class CategoriserApp:
         lod_row.pack(fill="x", pady=(4, 2))
         ttk.Checkbutton(
             lod_row,
-            text="Skip textures (faster)",
+            text="Skip textures",
             variable=self.skip_textures_var,
             command=self._redraw,
         ).pack(side=tk.LEFT)
@@ -302,7 +304,7 @@ class CategoriserApp:
         self.preview_lod_var = tk.StringVar(master=self.root, value="Fast (lowest)")
         self.lod_picker = ttk.Combobox(
             lod_row, textvariable=self.preview_lod_var,
-            values=tuple(self._lod_choices), state="readonly", width=17,
+            values=tuple(self._lod_choices), state="readonly", width=20,
         )
         self.lod_picker.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.lod_picker.bind("<<ComboboxSelected>>", self._change_preview_lod)
@@ -566,6 +568,8 @@ class CategoriserApp:
             replacement = build_preview_model(
                 data, model_path=previous.model_path, source=previous.source,
                 lod_quality=quality,
+                max_points=getattr(self, "_max_preview_points", 25_000),
+                available_lods=getattr(previous, "available_lods", None),
             )
         except (OSError, ValueError, IndexError, OverflowError) as exc:
             self._sync_lod_picker(previous)
