@@ -20,11 +20,14 @@ from cwr_worldgen.pbo import is_pbo_path
 class StartupSelection:
     inputs: tuple[Path, ...]
     output: Path
+    texture_sources: tuple[Path, ...] = ()
+    preview_lod: str = "fast"
 
 
 def validate_startup_selection(
     inputs: Sequence[Path],
     output: Path,
+    texture_sources: Sequence[Path] = (),
 ) -> str | None:
     """Check user-selected inputs before starting a potentially lengthy scan."""
     if not inputs:
@@ -41,6 +44,14 @@ def validate_startup_selection(
             )
         if not path.is_file() and not path.is_dir():
             return f"Model source is not a file or folder:\n{path}"
+    for path in texture_sources:
+        if not path.exists():
+            return f"Texture archive does not exist:\n{path}"
+        if not path.is_file() or not is_pbo_path(path):
+            return (
+                f"Unsupported texture archive:\n{path}\n\n"
+                "Choose individual .pbo, .ifa, .pbo.zst or .ifa.zst files."
+            )
     if output.exists() and not output.is_file():
         return f"The JSON output is not a file:\n{output}"
     if not str(output).strip() or output.suffix.casefold() != ".json":
@@ -63,17 +74,20 @@ class StartupSelectionDialog:
     ) -> None:
         self.root = root
         self.inputs = list(dict.fromkeys(Path(p).expanduser() for p in initial_inputs))
+        self.texture_sources: list[Path] = []
         self.selection: StartupSelection | None = None
         self.output_var = tk.StringVar(master=root, value=str(default_output))
+        self.preview_lod_var = tk.StringVar(master=root, value="fast")
         root.title("P3D Model Categoriser • Choose files")
-        root.geometry("760x480")
-        root.minsize(610, 380)
+        root.geometry("800x690")
+        root.minsize(670, 570)
         root.protocol("WM_DELETE_WINDOW", self.cancel)
 
         frame = ttk.Frame(root, padding=16)
         frame.pack(fill=tk.BOTH, expand=True)
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(2, weight=1)
+        frame.rowconfigure(5, weight=1)
 
         ttk.Label(
             frame,
@@ -105,7 +119,7 @@ class StartupSelectionDialog:
         self._refresh_sources()
 
         source_buttons = ttk.Frame(frame)
-        source_buttons.grid(row=3, column=0, sticky="ew", pady=(8, 14))
+        source_buttons.grid(row=3, column=0, sticky="ew", pady=(8, 10))
         ttk.Button(
             source_buttons, text="Select PBO / IFA…", command=self.select_archives
         ).pack(side=tk.LEFT)
@@ -116,8 +130,42 @@ class StartupSelectionDialog:
             source_buttons, text="Remove selected", command=self.remove_selected
         ).pack(side=tk.LEFT)
 
+        ttk.Label(
+            frame,
+            text="Additional texture PBO / IFA archives (not scanned for models):",
+        ).grid(row=4, column=0, sticky="w", pady=(2, 5))
+        texture_frame = ttk.Frame(frame)
+        texture_frame.grid(row=5, column=0, sticky="nsew")
+        texture_frame.columnconfigure(0, weight=1)
+        texture_frame.rowconfigure(0, weight=1)
+        self.texture_source_list = tk.Listbox(
+            texture_frame, selectmode=tk.EXTENDED, height=5, exportselection=False,
+        )
+        self.texture_source_list.grid(row=0, column=0, sticky="nsew")
+        texture_scrollbar = ttk.Scrollbar(
+            texture_frame, orient=tk.VERTICAL, command=self.texture_source_list.yview,
+        )
+        texture_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.texture_source_list.configure(yscrollcommand=texture_scrollbar.set)
+        self._refresh_texture_sources()
+
+        texture_buttons = ttk.Frame(frame)
+        texture_buttons.grid(row=6, column=0, sticky="ew", pady=(8, 12))
+        ttk.Button(
+            texture_buttons,
+            text="Add texture PBOs / IFAs…",
+            command=self.select_texture_archives,
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            texture_buttons,
+            text="Remove selected textures",
+            command=self.remove_selected_textures,
+        ).pack(side=tk.LEFT, padx=(6, 0))
+
+        # Preview LOD is chosen beside Skip textures in the main window,
+        # where the actual levels for the current model are known.
         output_frame = ttk.LabelFrame(frame, text="Classification JSON output", padding=9)
-        output_frame.grid(row=4, column=0, sticky="ew")
+        output_frame.grid(row=7, column=0, sticky="ew")
         output_frame.columnconfigure(0, weight=1)
         self.output_entry = ttk.Entry(output_frame, textvariable=self.output_var)
         self.output_entry.grid(row=0, column=0, sticky="ew")
@@ -137,7 +185,7 @@ class StartupSelectionDialog:
         ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         actions = ttk.Frame(frame)
-        actions.grid(row=5, column=0, sticky="e", pady=(16, 0))
+        actions.grid(row=8, column=0, sticky="e", pady=(12, 0))
         ttk.Button(actions, text="Cancel", command=self.cancel).pack(side=tk.LEFT)
         ttk.Button(
             actions, text="Start categorising", command=self.confirm,
@@ -157,6 +205,45 @@ class StartupSelectionDialog:
                 self.inputs.append(path)
                 existing.add(path)
         self._refresh_sources()
+
+    def _refresh_texture_sources(self) -> None:
+        self.texture_source_list.delete(0, tk.END)
+        for path in self.texture_sources:
+            self.texture_source_list.insert(tk.END, str(path))
+
+    def _add_texture_archives(self, paths: Sequence[Path]) -> None:
+        known = {str(path.resolve()).casefold() for path in self.texture_sources}
+        for source in paths:
+            path = Path(source).expanduser()
+            key = str(path.resolve()).casefold()
+            if key not in known:
+                self.texture_sources.append(path)
+                known.add(key)
+        self._refresh_texture_sources()
+
+    def select_texture_archives(self) -> None:
+        """Add any number of individual archives without adding model scan inputs."""
+        paths = filedialog.askopenfilenames(
+            parent=self.root,
+            title="Add texture PBO / IFA archives (select multiple)",
+            filetypes=(
+                ("PBO / IFA archives", "*.pbo *.ifa *.pbo.zst *.ifa.zst"),
+                ("PBO archives", "*.pbo *.pbo.zst"),
+                ("Iron Front IFA archives", "*.ifa *.ifa.zst"),
+                ("All files", "*.*"),
+            ),
+        )
+        if paths:
+            self._add_texture_archives(tuple(Path(p) for p in paths))
+
+    def remove_selected_textures(self) -> None:
+        indices = set(self.texture_source_list.curselection())
+        if indices:
+            self.texture_sources = [
+                path for index, path in enumerate(self.texture_sources)
+                if index not in indices
+            ]
+            self._refresh_texture_sources()
 
     def select_archives(self) -> None:
         paths = filedialog.askopenfilenames(
@@ -214,7 +301,9 @@ class StartupSelectionDialog:
     def confirm(self) -> None:
         text = self.output_var.get().strip()
         output = Path(text).expanduser() if text else Path("")
-        problem = validate_startup_selection(self.inputs, output) if text else (
+        problem = validate_startup_selection(
+            self.inputs, output, self.texture_sources
+        ) if text else (
             "Choose a JSON filename for model classifications."
         )
         if problem:
@@ -232,7 +321,10 @@ class StartupSelectionDialog:
                     "Cannot load existing classifications", str(exc), parent=self.root,
                 )
                 return
-        self.selection = StartupSelection(tuple(self.inputs), output)
+        self.selection = StartupSelection(
+            tuple(self.inputs), output, tuple(self.texture_sources),
+            self.preview_lod_var.get(),
+        )
         self.root.quit()
 
     def cancel(self) -> None:

@@ -28,6 +28,52 @@ _PAA_FORMATS = {
     0xFF01: "DXT1", 0xFF02: "DXT2", 0xFF03: "DXT3", 0xFF04: "DXT4", 0xFF05: "DXT5",
 }
 
+# One control shared by the browser and categoriser. "max:N" finds the first
+# embedded mip no larger than N pixels; "mip:N" picks an explicit stored mip
+# index, clamping to the last available level for short texture chains.
+MIPMAP_CHOICES = (
+    ("Full (mip 0)", "auto"),
+    ("Max 512 px", "max:512"),
+    ("Max 256 px", "max:256"),
+    ("Max 128 px", "max:128"),
+    ("Max 64 px", "max:64"),
+    *((f"Mip {i} (1/{1 << i})", f"mip:{i}") for i in range(1, 15)),
+)
+
+
+def _mipmap_selection(level: str) -> tuple[int | None, int | None]:
+    """Normalize a preview mip option to a mip index or max pixel dimension."""
+    if level == "auto" or level == "mip:0":
+        return 0, None
+    if level.startswith("mip:"):
+        try:
+            index = int(level[4:])
+        except ValueError as exc:
+            raise ValueError(f"invalid texture mip selection {level!r}") from exc
+        if not 0 <= index <= 31:
+            raise ValueError(f"invalid texture mip selection {level!r}")
+        return index, None
+    if level.startswith("max:"):
+        try:
+            dimension = int(level[4:])
+        except ValueError as exc:
+            raise ValueError(f"invalid texture mip selection {level!r}") from exc
+        if not 1 <= dimension <= 8192:
+            raise ValueError(f"invalid texture mip selection {level!r}")
+        return None, dimension
+    raise ValueError(f"invalid texture mip selection {level!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class PaaMip:
+    width: int
+    height: int
+    payload_start: int
+    payload_size: int
+    lzo: bool = False
+    lzw_p8: bool = False
+
+
 
 @dataclass(frozen=True, slots=True)
 class PBOAssetRef:
@@ -511,22 +557,27 @@ class TextureResolver:
         self._cache_raw(canonical, data)
         return data
 
-    def load_rgba(self, texture_path: str, source: str) -> np.ndarray | None:
+    def load_rgba(
+        self, texture_path: str, source: str, *, mipmap: str = "auto",
+    ) -> np.ndarray | None:
         canonical = _canonical(texture_path)
-        if canonical in self.image_cache:
-            self.image_cache.move_to_end(canonical)
-            return self.image_cache[canonical]
+        # Different mip choices must never return an RGBA from another detail
+        # level. Preserve the historical plain key for the full-resolution mip.
+        key = canonical if mipmap in ("auto", "mip:0") else canonical + "|" + mipmap
+        if key in self.image_cache:
+            self.image_cache.move_to_end(key)
+            return self.image_cache[key]
         data = self.load_bytes(canonical, source)
         if data is None:
             print(f"[texture missing] {canonical}", file=sys.stderr, flush=True)
-            self._cache_rgba(canonical, None)
+            self._cache_rgba(key, None)
             return None
         try:
-            image = decode_paa(data, is_paa=canonical.endswith(".paa"))
+            image = decode_paa(data, is_paa=canonical.endswith(".paa"), mipmap=mipmap)
         except (ValueError, struct.error, IndexError) as exc:
             print(f"[texture decode error] {canonical}: {exc}", file=sys.stderr, flush=True)
             image = None
-        self._cache_rgba(canonical, image)
+        self._cache_rgba(key, image)
         return image
 
 
@@ -766,8 +817,10 @@ def _decode_p8_payload(stream: io.BytesIO, width: int, height: int, palette: np.
     return palette[indices].reshape((height, width, 4)).copy()
 
 
-def decode_paa(data: bytes, *, is_paa: bool = True) -> np.ndarray:
-    """Decode the first PAA/PAC mip to HxWx4 RGBA, following CWR-CE's decoder."""
+def _paa_mip_directory(
+    data: bytes, *, is_paa: bool = True,
+) -> tuple[str, np.ndarray, tuple[PaaMip, ...]]:
+    """Read embedded mip headers without decompressing any image payload."""
     stream = io.BytesIO(data)
     magic = _u16(stream)
     kind = _PAA_FORMATS.get(magic)
@@ -796,23 +849,74 @@ def decode_paa(data: bytes, *, is_paa: bool = True) -> np.ndarray:
         b, g, r = palette_raw[index * 3 : index * 3 + 3]
         packed = b | (g << 8) | (r << 16)
         palette[index] = (r, g, b, 0 if packed in {0xFF00FF, 0x00FFFF} else 255)
-    width_field, height = _u16(stream), _u16(stream)
-    lzw_p8 = width_field == 1234 and height == 8765
-    if lzw_p8:
-        width_field, height = _u16(stream), _u16(stream)
 
-    # Arma 2+ PAA mipmaps may LZO-compress the DXT/BCn block stream.
-    # The high bit of the *width* is the LZO flag, not a dimension bit.
-    # e.g. 0x8400 is 1024 pixels wide, not 33792 pixels.
+    mips: list[PaaMip] = []
+    for _ in range(32):
+        if len(data) - stream.tell() < 7:
+            break
+        width_field, height = _u16(stream), _u16(stream)
+        lzw_p8 = kind == "P8" and width_field == 1234 and height == 8765
+        if lzw_p8:
+            width_field, height = _u16(stream), _u16(stream)
+        is_dxt = kind.startswith("DXT")
+        lzo = is_dxt and bool(width_field & 0x8000)
+        width = width_field & 0x7FFF if is_dxt else width_field
+        # 0,0 marks the end of a mip chain. Other trailing data may be an
+        # offset table/footer, not another image level.
+        if width == 0 and height == 0:
+            break
+        if width <= 0 or height <= 0 or width > 8192 or height > 8192:
+            if mips:
+                break
+            raise ValueError(f"invalid PAA dimensions {width}x{height}")
+        if mips and (width > mips[-1].width or height > mips[-1].height):
+            break
+        size = _u24(stream)
+        payload_start = stream.tell()
+        if payload_start + size > len(data):
+            if mips:
+                # Malformed trailing tables should not break a readable first
+                # mip; they are not valid selectable image levels.
+                break
+            raise ValueError(f"truncated PAA/PAC mip payload: need {size} bytes")
+        mips.append(PaaMip(width, height, payload_start, size, lzo, lzw_p8))
+        stream.seek(payload_start + size)
+        # Mip levels always shrink. Do not mistake an offset table, or an
+        # appended unrelated record, for additional image resolution levels.
+        if len(data) - stream.tell() < 7:
+            break
+    if not mips:
+        raise ValueError("PAA/PAC has no image mipmaps")
+    return kind, palette, tuple(mips)
+
+
+def list_paa_mips(data: bytes, *, is_paa: bool = True) -> tuple[tuple[int, int], ...]:
+    """Return the dimensions of the stored mip levels, not rescaled previews."""
+    _kind, _palette, mips = _paa_mip_directory(data, is_paa=is_paa)
+    return tuple((mip.width, mip.height) for mip in mips)
+
+
+def decode_paa(
+    data: bytes, *, is_paa: bool = True, mipmap: str = "auto",
+) -> np.ndarray:
+    """Decode a selected *embedded* PAA/PAC mip directly into RGBA."""
+    index, max_dimension = _mipmap_selection(mipmap)
+    kind, palette, mips = _paa_mip_directory(data, is_paa=is_paa)
+    if max_dimension is not None:
+        selected = next(
+            (mip for mip in mips if max(mip.width, mip.height) <= max_dimension),
+            mips[-1],
+        )
+    else:
+        selected = mips[min(index or 0, len(mips) - 1)]
+    width, height = selected.width, selected.height
+    stream = io.BytesIO(data)
+    stream.seek(selected.payload_start)
+    data_size = selected.payload_size
+    payload_start = selected.payload_start
+    dxt_lzo = selected.lzo
+    lzw_p8 = selected.lzw_p8
     is_dxt = kind.startswith("DXT")
-    dxt_lzo = is_dxt and bool(width_field & 0x8000)
-    width = width_field & 0x7FFF if is_dxt else width_field
-    if width <= 0 or height <= 0 or width > 8192 or height > 8192:
-        raise ValueError(f"invalid PAA dimensions {width}x{height}")
-    data_size = _u24(stream)
-    payload_start = stream.tell()
-    if payload_start + data_size > len(data):
-        raise ValueError(f"truncated PAA/PAC mip payload: need {data_size} bytes")
     if kind == "P8":
         return _decode_p8_payload(stream, width, height, palette, lzw=lzw_p8)
     if is_dxt:

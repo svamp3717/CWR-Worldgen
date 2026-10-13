@@ -228,7 +228,7 @@ def _skip_animations(r: _Reader) -> None:
                 r.take(24)
 
 
-def _lod_table(r: _Reader) -> tuple[tuple[float, int, int], ...]:
+def _lod_table(r: _Reader) -> tuple[tuple[int, float, int, int], ...]:
     count = r._lod_count
     _skip_model_info(r)
     if r.version >= 30:
@@ -244,14 +244,14 @@ def _lod_table(r: _Reader) -> tuple[tuple[float, int, int], ...]:
             if r.version >= 51:
                 r.take(8)
     lods = []
-    for resolution, start, end in zip(r._resolutions, starts, ends):
+    for index, (resolution, start, end) in enumerate(zip(r._resolutions, starts, ends)):
         if not math.isfinite(resolution):
             continue
         if not 0 < start < end <= r.size:
             raise MeshReadError("invalid ODOL LOD offsets")
-        lods.append((resolution, start, end))
+        lods.append((index, resolution, start, end))
     # Prefer actual visual resolution LODs to roadway, geometry and shadow.
-    lods.sort(key=lambda item: (not 0 <= item[0] < 10000, item[0] if item[0] < 10000 else 1e20))
+    lods.sort(key=lambda item: (not 0 <= item[1] < 10000, item[1] if item[1] < 10000 else 1e20))
     return tuple(lods)
 
 
@@ -460,12 +460,15 @@ def _read_resolution_lod(r: _Reader, resolution: float, start: int, end: int) ->
     return ModernMesh(v, resolution, points, tuple(faces), tuple(used_textures))
 
 
-def read_model_mesh(data: bytes) -> ModernMesh:
-    """Return real first visual LOD vertices, faces, UVs and texture references.
+def read_model_mesh(data: bytes, *, lod_quality: str = "full") -> ModernMesh:
+    """Decode visual LOD vertices, faces, UVs and texture references.
 
-    Raises MeshReadError if the file has no decodable visual LOD; callers may
-    still show the (separately parsed) ModelInfo bounds as a fallback.
+    Full prefers the highest-detail visual LOD (the legacy behaviour).
+    Fast prefers the lowest-detail visual LOD available, avoiding expensive
+    high-detail geometry. An unreadable LOD falls back toward higher detail.
     """
+    if lod_quality not in {"full", "fast"} and not lod_quality.startswith("lod:"):
+        raise ValueError(f"unsupported preview LOD quality: {lod_quality}")
     bounds = read_model_bounds(data)
     r = _Reader(data, bounds.version)
     r.seek(8)
@@ -484,8 +487,24 @@ def read_model_mesh(data: bytes) -> ModernMesh:
     entries = _lod_table(r)
     if not entries:
         raise MeshReadError("ODOL has no resolution LODs")
+    # Only visual resolution LODs can provide a meaningful preview: geometry,
+    # roadway and shadow LODs may be the last entries in the file but must
+    # never be treated as the lowest-detail visual model.
+    visual = [entry for entry in entries if 0 <= entry[1] < 10000]
+    if lod_quality.startswith("lod:"):
+        try:
+            chosen_index = int(lod_quality[4:])
+        except ValueError as exc:
+            raise MeshReadError(f"invalid LOD selection {lod_quality!r}") from exc
+        candidates = [entry for entry in entries if entry[0] == chosen_index]
+        if not candidates:
+            raise MeshReadError(f"LOD {chosen_index + 1} is not in this model")
+    else:
+        if not visual:
+            raise MeshReadError("ODOL has no visual resolution LODs")
+        candidates = list(reversed(visual)) if lod_quality == "fast" else visual
     failures: list[str] = []
-    for resolution, start, end in entries:
+    for _index, resolution, start, end in candidates:
         try:
             return _read_resolution_lod(r, resolution, start, end)
         except (MeshReadError, struct.error, OverflowError, ValueError) as exc:

@@ -128,78 +128,15 @@ def _read_cstring(stream: io.BytesIO, label: str) -> str:
 
 
 def _decompress_lzss_stream(stream: io.BytesIO, expected_size: int) -> bytes:
-    """Expand legacy BIS LZSS when only the output length is known.
+    """Decode legacy PBO/ODOL arrays using the shared fast BIS LZSS reader.
 
-    OFP ODOL compressed arrays and Cprs PBO entries use BIS' 4 KiB-window LZSS.
-    The dictionary starts filled with ASCII spaces. This matters for references
-    encountered before 4 KiB of real output exists: those references are valid
-    and read from the pre-filled dictionary rather than from already-emitted
-    output bytes.
-
-    ODOL blocks store only the uncompressed size, so decoding stops when exactly
-    ``expected_size`` bytes have been produced. The following four bytes are the
-    additive checksum for that decompressed block.
+    Preserve the tool's ModelReadError contract while avoiding a second,
+    independently maintained byte-by-byte decoder.
     """
-    if expected_size < 0:
-        raise ModelReadError("negative LZSS output size")
-    if expected_size == 0:
-        return b""
-
-    window = bytearray([_LZSS_FILL_BYTE]) * _LZSS_WINDOW_SIZE
-    window_pos = 0
-    out = bytearray()
-    checksum = 0
-
-    def emit(value: int) -> None:
-        nonlocal window_pos, checksum
-        out.append(value)
-        checksum = (checksum + value) & 0xFFFFFFFF
-        window[window_pos] = value
-        window_pos = (window_pos + 1) & _LZSS_WINDOW_MASK
-
-    while len(out) < expected_size:
-        flags_raw = stream.read(1)
-        if not flags_raw:
-            raise ModelReadError("truncated LZSS flag byte")
-        flags = flags_raw[0]
-
-        for bit in range(8):
-            if len(out) >= expected_size:
-                break
-
-            if flags & (1 << bit):
-                literal = stream.read(1)
-                if not literal:
-                    raise ModelReadError("truncated LZSS literal")
-                emit(literal[0])
-                continue
-
-            pair = stream.read(2)
-            if len(pair) != 2:
-                raise ModelReadError("truncated LZSS reference")
-            b1, b2 = pair
-            offset = b1 | ((b2 & 0xF0) << 4)
-            run_length = (b2 & 0x0F) + 3
-
-            # BIS' decoder copies from the circular dictionary relative to the
-            # current write cursor. Keep the source cursor advancing separately:
-            # overlapping matches intentionally consume bytes written earlier in
-            # this same run, which is how repeated patterns are represented.
-            source_pos = window_pos
-            for index in range(run_length):
-                if len(out) >= expected_size:
-                    break
-                value = window[(source_pos - offset + index) & _LZSS_WINDOW_MASK]
-                emit(value)
-
-    checksum_raw = _read_exact(stream, 4, "LZSS checksum")
-    stored_checksum = _U32.unpack(checksum_raw)[0]
-    if stored_checksum != checksum:
-        raise ModelReadError(
-            f"LZSS checksum mismatch: stored {stored_checksum:#x}, calculated {checksum:#x}"
-        )
-    return bytes(out)
-
+    try:
+        return world_assets._decompress_lzss_stream(stream, expected_size)
+    except ValueError as exc:
+        raise ModelReadError(str(exc)) from exc
 
 def _decompress_lzss_pbo(data: bytes, expected_size: int) -> bytes:
     stream = io.BytesIO(data)
@@ -442,9 +379,11 @@ def _pbo_entries_from_stream(
     source: str,
     fallback_prefix: str,
     depth: int = 0,
+    patterns: Sequence[str] = (),
 ) -> Iterator[tuple[str, str, bytes]]:
     """Yield P3Ds from PBO/IFA streams and nested addon archives."""
     metadata, properties = _pbo_header(stream)
+    stream_end = world_assets._random_access_end(stream)
     prefix = _pbo_prefix(properties, metadata, fallback_prefix)
     canonical_prefix = _canonical_model_path(prefix)
 
@@ -458,6 +397,9 @@ def _pbo_entries_from_stream(
         suffix = Path(name.replace("\\", "/")).suffix.casefold()
 
         if model_path.endswith(".p3d"):
+            if patterns and not _matches(model_path, patterns):
+                world_assets._skip_unselected_member(stream, data_size, f"PBO entry {name!r}", stream_end)
+                continue
             data = _read_pbo_member(
                 stream,
                 name=name,
@@ -486,6 +428,7 @@ def _pbo_entries_from_stream(
                         source=nested_source,
                         fallback_prefix=nested_fallback,
                         depth=depth + 1,
+                        patterns=patterns,
                     )
             except (ModelReadError, UnicodeDecodeError) as exc:
                 print(
@@ -495,7 +438,7 @@ def _pbo_entries_from_stream(
                 )
             continue
 
-        _skip_pbo_bytes(stream, data_size, f"PBO entry {name!r}")
+        world_assets._skip_unselected_member(stream, data_size, f"PBO entry {name!r}", stream_end)
 
 
 def _pbo_entries(path: Path) -> Iterator[tuple[str, bytes]]:
@@ -504,12 +447,15 @@ def _pbo_entries(path: Path) -> Iterator[tuple[str, bytes]]:
         yield model_path, data
 
 
-def _pbo_entries_with_sources(path: Path) -> Iterator[tuple[str, str, bytes]]:
+def _pbo_entries_with_sources(
+    path: Path, patterns: Sequence[str] = ()
+) -> Iterator[tuple[str, str, bytes]]:
     with open_pbo_stream(path) as stream:
         yield from _pbo_entries_from_stream(
             stream,
             source=str(path),
             fallback_prefix=pbo_stem(path),
+            patterns=patterns,
         )
 
 def _matches(model_path: str, patterns: Sequence[str]) -> bool:
@@ -527,6 +473,7 @@ def _pbo_model_paths_from_stream(
 ) -> Iterator[str]:
     """Yield model paths from PBO/IFA archives without parsing P3D payloads."""
     metadata, properties = _pbo_header(stream)
+    stream_end = world_assets._random_access_end(stream)
     prefix = _pbo_prefix(properties, metadata, fallback_prefix)
     canonical_prefix = _canonical_model_path(prefix)
 
@@ -541,7 +488,7 @@ def _pbo_model_paths_from_stream(
 
         if canonical.endswith(".p3d"):
             yield canonical
-            _skip_pbo_bytes(stream, data_size, f"PBO entry {name!r}")
+            world_assets._skip_unselected_member(stream, data_size, f"PBO entry {name!r}", stream_end)
             continue
 
         if suffix in {".pbo", ".ifa"} and depth < 4:
@@ -568,7 +515,7 @@ def _pbo_model_paths_from_stream(
                 )
             continue
 
-        _skip_pbo_bytes(stream, data_size, f"PBO entry {name!r}")
+        world_assets._skip_unselected_member(stream, data_size, f"PBO entry {name!r}", stream_end)
 
 
 def _pbo_model_paths(path: Path) -> Iterator[str]:
@@ -657,7 +604,7 @@ def _iter_models(inputs: Sequence[Path], patterns: Sequence[str]) -> Iterator[tu
         if resolved in seen_pbos:
             return
         seen_pbos.add(resolved)
-        for model_path, source, data in _pbo_entries_with_sources(path):
+        for model_path, source, data in _pbo_entries_with_sources(path, patterns):
             if _matches(model_path, patterns):
                 yield model_path, source, data
 

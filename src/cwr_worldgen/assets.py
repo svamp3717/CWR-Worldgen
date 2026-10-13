@@ -109,61 +109,66 @@ def _p3d_dependencies(data: bytes) -> tuple[str, ...]:
 
 
 def _decompress_lzss_stream(stream: io.BytesIO, expected_size: int) -> bytes:
-    """Decode the BIS/OFP 4 KiB-window LZSS stream plus additive checksum."""
+    """Decode BIS LZSS with a 4 KiB dictionary and additive checksum.
+
+    Preallocate the known output size, avoid calling a Python function for
+    every emitted byte, and calculate the checksum in one C-level pass. The
+    reference cursor remains fixed during each run so overlapping backrefs
+    and references to the initial space-filled dictionary decode correctly.
+    """
     if expected_size < 0:
         raise ValueError("negative LZSS output size")
     if expected_size == 0:
         return b""
 
-    window = bytearray([_LZSS_FILL_BYTE]) * _LZSS_WINDOW_SIZE
+    window = bytearray(b" ") * _LZSS_WINDOW_SIZE
     window_pos = 0
-    output = bytearray()
-    checksum = 0
+    output = bytearray(expected_size)
+    written = 0
+    read = stream.read
 
-    def emit(value: int) -> None:
-        nonlocal window_pos, checksum
-        output.append(value)
-        checksum = (checksum + value) & 0xFFFFFFFF
-        window[window_pos] = value
-        window_pos = (window_pos + 1) & _LZSS_WINDOW_MASK
-
-    while len(output) < expected_size:
-        raw_flags = stream.read(1)
-        if not raw_flags:
+    while written < expected_size:
+        flags_raw = read(1)
+        if not flags_raw:
             raise ValueError("truncated LZSS flag byte")
-        flags = raw_flags[0]
+        flags = flags_raw[0]
         for bit in range(8):
-            if len(output) >= expected_size:
+            if written >= expected_size:
                 break
             if flags & (1 << bit):
-                literal = stream.read(1)
+                literal = read(1)
                 if not literal:
                     raise ValueError("truncated LZSS literal")
-                emit(literal[0])
+                value = literal[0]
+                output[written] = value
+                window[window_pos] = value
+                written += 1
+                window_pos = (window_pos + 1) & _LZSS_WINDOW_MASK
                 continue
 
-            pair = stream.read(2)
+            pair = read(2)
             if len(pair) != 2:
                 raise ValueError("truncated LZSS reference")
-            b1, b2 = pair
-            offset = b1 | ((b2 & 0xF0) << 4)
-            run_length = (b2 & 0x0F) + 3
-            source_pos = window_pos
+            offset = pair[0] | ((pair[1] & 0xF0) << 4)
+            run_length = min((pair[1] & 0x0F) + 3, expected_size - written)
+            source_pos = window_pos - offset
             for index in range(run_length):
-                if len(output) >= expected_size:
-                    break
-                emit(window[(source_pos - offset + index) & _LZSS_WINDOW_MASK])
+                value = window[(source_pos + index) & _LZSS_WINDOW_MASK]
+                output[written + index] = value
+                window[(window_pos + index) & _LZSS_WINDOW_MASK] = value
+            written += run_length
+            window_pos = (window_pos + run_length) & _LZSS_WINDOW_MASK
 
-    checksum_raw = stream.read(4)
+    checksum_raw = read(4)
     if len(checksum_raw) != 4:
         raise ValueError("truncated LZSS checksum")
     stored_checksum = struct.unpack("<I", checksum_raw)[0]
+    checksum = sum(output) & 0xFFFFFFFF
     if stored_checksum != checksum:
         raise ValueError(
             f"LZSS checksum mismatch: stored {stored_checksum:#x}, calculated {checksum:#x}"
         )
     return bytes(output)
-
 
 def _read_pbo_header(stream) -> tuple[list[tuple[str, int, int, int]], dict[str, str]]:
     metadata: list[tuple[str, int, int, int]] = []
@@ -235,8 +240,34 @@ def _read_stored_member(
     raise ValueError(f"unsupported PBO packing method {packing:#x} for {name!r}")
 
 
+def _random_access_end(stream) -> int | None:
+    """Bound skipping with seeks to raw PBO files and in-memory nested PBOs.
+
+    Wrapped Zstandard readers are forward-only: they must consume skipped
+    payloads instead. Checking the physical end preserves truncation errors
+    that a plain seek beyond EOF would otherwise conceal.
+    """
+    if not isinstance(stream, (io.BufferedReader, io.BytesIO)):
+        return None
+    position = stream.tell()
+    end = stream.seek(0, io.SEEK_END)
+    stream.seek(position)
+    return end
+
+
+def _skip_unselected_member(stream, size: int, label: str, end: int | None) -> None:
+    if end is None:
+        _skip_exact(stream, size, label)
+        return
+    target = stream.tell() + size
+    if target > end:
+        raise ValueError(f"truncated {label}")
+    stream.seek(target)
+
+
 def _read_named_pbo_member(stream, member_name: str) -> bytes:
     metadata, _properties = _read_pbo_header(stream)
+    stream_end = _random_access_end(stream)
     wanted = member_name.replace("/", "\\").lstrip("\\").casefold()
     for name, packing, original_size, data_size in metadata:
         if name.replace("/", "\\").lstrip("\\").casefold() == wanted:
@@ -247,7 +278,7 @@ def _read_named_pbo_member(stream, member_name: str) -> bytes:
                 original_size=original_size,
                 data_size=data_size,
             )
-        _skip_exact(stream, data_size, f"PBO entry {name!r}")
+        _skip_unselected_member(stream, data_size, f"PBO entry {name!r}", stream_end)
     raise FileNotFoundError(f"nested PBO member not found: {member_name}")
 
 
@@ -258,6 +289,7 @@ def _read_asset_from_pbo_stream(
     fallback_prefix: str,
 ) -> bytes:
     metadata, properties = _read_pbo_header(stream)
+    stream_end = _random_access_end(stream)
     prefix = _effective_pbo_prefix(properties, metadata, fallback_prefix)
     wanted = canonical_asset_path(target)
     for name, packing, original_size, data_size in metadata:
@@ -274,7 +306,7 @@ def _read_asset_from_pbo_stream(
                 original_size=original_size,
                 data_size=data_size,
             )
-        _skip_exact(stream, data_size, f"PBO entry {name!r}")
+        _skip_unselected_member(stream, data_size, f"PBO entry {name!r}", stream_end)
     raise FileNotFoundError(f"{wanted} not found in PBO")
 
 

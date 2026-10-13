@@ -49,6 +49,93 @@ it can also be used with CLI options such as:
 .\WRP-Mod-Dependency-Scanner.exe "C:\path\to\island.wrp" --json "dependencies.json"
 ```
 
+### Choosing individual texture archives
+
+Both P3D tools can load **multiple individual texture PBO/IFA archives**
+(including `.pbo.zst` and `.ifa.zst`) without selecting or scanning an entire
+texture folder:
+
+- **Model & Texture Browser:** first choose the model PBO/IFA, then click
+  **Add texture PBOs / IFAs…** and multi-select the archives containing its
+  PAA/PAC files. You may add further archives with the same button later.
+  **Clear texture PBOs** removes only the extra texture lookup sources, not
+  the model catalogue. Replacing the model PBO keeps your extra texture choices.
+- **Model Categoriser:** select the model archives in the startup dialog,
+  then add individual **texture PBOs / IFAs** in the separate list before
+  starting. You may also add archives from the main categoriser window or
+  its View menu. Texture-only archives are not included in the model count
+  or classification stream. The CLI continues to support repeated
+  `--texture-source C:\\path\\to\\texture.pbo` arguments.
+
+For Windows multi-selection, use Ctrl-click or Shift-click in the archive
+picker. The original folder selection remains available when desired.
+
+The **Related assets** panel in the Model & Texture Browser distinguishes
+textures in the model catalogue (**Texture**) from textures located by the
+preview resolver in another PBO/IFA (**External**). **Missing** means no
+texture asset was located in the currently available sources. **Unreadable**
+means an archive entry exists but its texture failed to decode during preview,
+and **Unchecked** means texture loading was skipped. Extra texture archives
+are deliberately not added to the model catalogue; the external status is
+updated when you add or clear them.
+
+### Selecting embedded texture mipmaps
+
+Both P3D tools now offer a **Texture mipmap** dropdown independently of model
+LOD selection and **Skip textures**:
+
+- **Full (mip 0)** (default): Decode the largest embedded PAA/PAC image, with
+  the existing screen-space mipmapped filtering in the 3D renderer.
+- **Max 512 px / Max 256 px / Max 128 px / Max 64 px:** Decode the first
+  embedded mipmap whose width and height fit within that limit.
+- **Mip 1 (1/2), Mip 2 (1/4), ...:** Decode that numbered mipmap directly.
+  If a texture has fewer embedded levels, use its smallest available mip.
+
+A single model can reference several texture files with different mip counts.
+The dropdown is therefore a **per-preview setting**, applied separately to
+each referenced texture. The Model & Texture Browser uses it when displaying
+an individual texture, too. Changing mipmap settings redraws the currently
+selected preview without rescanning or reclassifying models. The categoriser's
+**Preview texture** popup uses the same mipmap setting.
+
+Only actual embedded mips are chosen. A single-mip image cannot be made
+faster to decode by requesting a smaller level; it remains full resolution.
+The PBO/IFA payload still has to be retrieved, but smaller embedded DXT/BCn or
+PAC/legacy PAA mipmaps can avoid expensive full-resolution image decoding.
+Texture decoding and generated filtering pyramids are cached separately
+per mip setting to prevent mixing resolutions.
+
+### Selecting all model LODs
+
+The **Preview LOD** dropdown lists the actual LODs of the currently selected
+model for Arma-era ODOL, OFP/CWA **ODOL v6/v7**, and older **MLOD/SP3X** P3Ds.
+
+- **Fast (lowest):** Automatically uses the lowest-detail available *visual*
+  LOD, falling back toward higher visual detail if it cannot be decoded.
+- **Full (highest):** Uses the highest-detail available visual LOD.
+- **LOD 1 (1)**, **LOD 2 (9)**, and so on: Explicitly select that model's
+  real LOD resolution. Entries labelled **[special]** are nonvisual LODs
+  (geometry, roadway, shadow, etc.). They are listed for inspection but may
+  not support textured preview.
+
+Each model has its own list. Changing the selected model refreshes the
+choices automatically. Switching LOD in the **Model & Texture Browser** reloads
+only that model's preview and keeps separate cached meshes for each quality,
+without rescanning the catalogue.
+
+In the **Model Categoriser**, LOD selection is now located **beside Skip
+textures** in the main View controls, rather than the startup setup window.
+You can switch to another LOD while categorising without changing the model
+order or saved categories. The CLI `--preview-lod fast|full` sets the *initial*
+quality. The per-model dropdown offers individual LODs once the model loads.
+
+Selecting a lower LOD reduces geometry parsing and preview rasterization but
+does not avoid reading the P3D from its archive. OFP/CWA ODOL files store
+LOD bodies sequentially, so their LOD index must be read before a later LOD
+can be selected. If the index cannot be parsed, legacy models retain their
+previously supported first-LOD fallback. Measurements and referenced textures
+shown for a preview are based on its selected LOD and may differ between LODs.
+
 Categoriser classification files and companion `.unclassified.json` files
 are saved to the output path selected in its GUI, not inside the executable.
 

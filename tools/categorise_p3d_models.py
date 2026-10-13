@@ -100,6 +100,14 @@ def _parser() -> argparse.ArgumentParser:
         help="Custom category checkbox; repeat for several.",
     )
     p.add_argument(
+        "--preview-lod", choices=("fast", "full"), default="fast",
+        help=(
+            "Initial preview detail for all supported P3D models (OFP/CWA, "
+            "Arma and Iron Front). Fast uses the lowest visual LOD; full uses "
+            "the highest. Choose individual LODs beside Skip textures in the GUI."
+        ),
+    )
+    p.add_argument(
         "--max-preview-points",
         type=int,
         default=DEFAULT_MAX_PREVIEW_POINTS,
@@ -136,6 +144,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     inputs = _resolve_inputs(args.inputs)
+    selected_texture_sources: tuple[Path, ...] = ()
     if not inputs:
         # A double-click or "python categorise_p3d_models.py" should be a
         # usable GUI workflow, rather than argparse exiting for a missing PBO.
@@ -147,6 +156,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if selected is None:
             return 0  # Cancel: do not scan or touch the JSON output.
         inputs = list(selected.inputs)
+        selected_texture_sources = selected.texture_sources
+        # LOD is now selected from the categoriser's main View controls.
+        # Preserve a CLI --preview-lod value even when sources use the GUI.
         args.output = selected.output
     missing = [p for p in inputs if not p.exists()]
     if missing:
@@ -165,7 +177,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             pass
         return 2
 
-    texture_sources = [path.expanduser() for path in args.texture_source]
+    # Only model inputs are counted/scanned. Extra archives are sent to the
+    # texture resolver, not the model iterator (also when picked at startup).
+    texture_sources = list(dict.fromkeys(
+        path.expanduser()
+        for path in (*args.texture_source, *selected_texture_sources)
+    ))
     missing_texture_sources = [path for path in texture_sources if not path.exists()]
     if missing_texture_sources:
         text = (
@@ -237,12 +254,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
 
-    iterator = preview_models(inputs, args.include, args.max_preview_points)
+    iterator = preview_models(
+        inputs, args.include, args.max_preview_points,
+        lod_quality=args.preview_lod,
+    )
     root = tk.Tk()
     app = SplitStateCategoriserApp(
         root,
         model_iter=iterator,
         texture_resolver=TextureResolver(texture_inputs),
+        initial_texture_sources=tuple(path for path in texture_sources if path not in inputs),
+        preview_lod=args.preview_lod,
+        max_preview_points=args.max_preview_points,
         output=args.output,
         categories=categories,
         state=state,

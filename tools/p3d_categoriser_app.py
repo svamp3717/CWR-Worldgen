@@ -14,9 +14,11 @@ from matplotlib.figure import Figure
 import numpy as np
 
 import measure_p3d_models as measure
-from p3d_preview_geometry import PreviewModel
+from cwr_worldgen import assets as world_assets
+from p3d_preview_geometry import PreviewModel, build_preview_model
 from cwr_worldgen.pbo import is_pbo_path
 from p3d_texture_sources import TextureResolver
+from p3d_texture_io import MIPMAP_CHOICES
 from p3d_texture_render import MipmapCache, render_textured_model
 
 
@@ -93,6 +95,9 @@ class CategoriserApp:
         categories: Sequence[str],
         state: dict[str, Classification],
         total_models: int | None = None,
+        initial_texture_sources: Sequence[Path] = (),
+        preview_lod: str = "fast",
+        max_preview_points: int = 25_000,
     ) -> None:
         self.root = root
         self.model_iter = model_iter
@@ -100,9 +105,19 @@ class CategoriserApp:
         self.mipmap_cache = MipmapCache()
         # Browsing more texture archives must not restart the model stream or
         # modify category JSON; keep its source list separate from the models.
-        self._base_texture_sources = tuple(texture_resolver.inputs)
-        self._extra_texture_sources: list[Path] = []
+        # Startup-selected texture archives remain removable with the normal
+        # Clear added texture sources control, just like sources added later.
+        extra_sources = list(dict.fromkeys(
+            Path(path).expanduser() for path in initial_texture_sources
+        ))
+        self._base_texture_sources = tuple(
+            path for path in texture_resolver.inputs if path not in extra_sources
+        )
+        self._extra_texture_sources: list[Path] = extra_sources
         self._related_texture_paths: tuple[str, ...] = ()
+        self._default_preview_lod = preview_lod
+        self._max_preview_points = max_preview_points
+        self._lod_choices = {"Fast (lowest)": "fast", "Full (highest)": "full"}
         self.output = output
         self.categories = list(categories)
         self.state = state
@@ -278,12 +293,33 @@ class CategoriserApp:
         ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
         ttk.Label(side, text="View", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
         self.skip_textures_var = tk.BooleanVar(master=self.root, value=False)
+        lod_row = ttk.Frame(side)
+        lod_row.pack(fill="x", pady=(4, 2))
         ttk.Checkbutton(
-            side,
-            text="Skip textures (faster)",
+            lod_row,
+            text="Skip textures",
             variable=self.skip_textures_var,
             command=self._redraw,
-        ).pack(anchor="w", fill="x", pady=(4, 2))
+        ).pack(side=tk.LEFT)
+        ttk.Label(lod_row, text="LOD:").pack(side=tk.LEFT, padx=(7, 3))
+        self.preview_lod_var = tk.StringVar(master=self.root, value="Fast (lowest)")
+        self.lod_picker = ttk.Combobox(
+            lod_row, textvariable=self.preview_lod_var,
+            values=tuple(self._lod_choices), state="readonly", width=20,
+        )
+        self.lod_picker.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.lod_picker.bind("<<ComboboxSelected>>", self._change_preview_lod)
+        self._mipmap_choices = dict(MIPMAP_CHOICES)
+        mip_row = ttk.Frame(side)
+        mip_row.pack(fill="x", pady=(2, 4))
+        ttk.Label(mip_row, text="Texture mipmap:").pack(side=tk.LEFT)
+        self.texture_mipmap_var = tk.StringVar(master=self.root, value=MIPMAP_CHOICES[0][0])
+        self.texture_mipmap_picker = ttk.Combobox(
+            mip_row, textvariable=self.texture_mipmap_var,
+            values=tuple(self._mipmap_choices), state="readonly", width=20,
+        )
+        self.texture_mipmap_picker.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
+        self.texture_mipmap_picker.bind("<<ComboboxSelected>>", self._change_texture_mipmap)
         row = ttk.Frame(side)
         row.pack(fill="x", pady=4)
         ttk.Button(row, text="↶ 15°", command=lambda: self._rotate(-15)).pack(side=tk.LEFT)
@@ -352,7 +388,7 @@ class CategoriserApp:
         source_actions = ttk.Frame(side)
         source_actions.pack(fill=tk.X, pady=(5, 0))
         ttk.Button(
-            source_actions, text="Add PBO / IFA…", command=self.select_texture_archives
+            source_actions, text="Add PBOs / IFAs…", command=self.select_texture_archives
         ).pack(side=tk.LEFT)
         ttk.Button(
             source_actions, text="Add folder…", command=self.select_texture_folder
@@ -512,8 +548,81 @@ class CategoriserApp:
         self.index -= 1
         self._show_model(self.models[self.index])
 
+    def _sync_lod_picker(self, model: PreviewModel) -> None:
+        """List every LOD for the current model beside Skip textures."""
+        choices = {"Fast (lowest)": "fast", "Full (highest)": "full"}
+        for lod in getattr(model, "available_lods", ()):
+            choices[lod.label] = lod.value
+        self._lod_choices = choices
+        if hasattr(self, "lod_picker"):
+            self.lod_picker.configure(values=tuple(choices))
+        if hasattr(self, "preview_lod_var"):
+            quality = getattr(model, "selected_lod_quality", getattr(self, "_default_preview_lod", "fast"))
+            selected = next(
+                (label for label, value in choices.items() if value == quality),
+                "Fast (lowest)",
+            )
+            self.preview_lod_var.set(selected)
+
+    @staticmethod
+    def _preview_asset_record(model: PreviewModel) -> world_assets.AssetRecord:
+        """Undo the model-member suffix attached by the categoriser scanner.
+
+        The stream reports PBO/IFA models as ``archive.pbo!model.p3d`` (or
+        ``outer.pbo!inner.pbo!model.p3d``) for texture lookup. The asset
+        reader instead expects the source to end at the containing archive;
+        otherwise it attempts to open the P3D as a nested PBO.
+        Loose .p3d files retain their complete filesystem path.
+        """
+        source = model.source
+        if "!" in source:
+            archive, member = source.rsplit("!", 1)
+            if measure._canonical_model_path(member) == measure._canonical_model_path(model.model_path):
+                source = archive
+        return world_assets.AssetRecord(
+            path=model.model_path, source=source, size=0, sha256=None,
+        )
+
+    def _selected_texture_mipmap(self) -> str:
+        if not hasattr(self, "texture_mipmap_var"):
+            return "auto"
+        return self._mipmap_choices.get(self.texture_mipmap_var.get(), "auto")
+
+    def _change_texture_mipmap(self, _event=None) -> None:
+        """Refresh preview texture detail without changing classification state."""
+        if self.current is not None:
+            self._redraw()
+
+    def _change_preview_lod(self, _event=None) -> None:
+        """Switch only the active preview, preserving model order and categories."""
+        if self.current is None:
+            return
+        quality = self._lod_choices.get(self.preview_lod_var.get(), "fast")
+        if quality == getattr(self.current, "selected_lod_quality", "full"):
+            return
+        previous = self.current
+        try:
+            data = world_assets.read_asset_record_bytes(
+                self._preview_asset_record(previous)
+            )
+            replacement = build_preview_model(
+                data, model_path=previous.model_path, source=previous.source,
+                lod_quality=quality,
+                max_points=getattr(self, "_max_preview_points", 25_000),
+                available_lods=getattr(previous, "available_lods", None),
+            )
+        except (OSError, ValueError, IndexError, OverflowError) as exc:
+            self._sync_lod_picker(previous)
+            if hasattr(self, "status_var"):
+                self.status_var.set(f"Cannot load selected LOD: {exc}")
+            return
+        self.models[self.index] = replacement
+        # Never commit/reclassify when switching preview detail.
+        self._show_model(replacement)
+
     def _show_model(self, model: PreviewModel) -> None:
         self.current = model
+        self._sync_lod_picker(model)
         self.path_var.set(model.model_path)
         self._update_progress_counter()
         classification = self.state.get(model.model_path, Classification([]))
@@ -734,7 +843,13 @@ class CategoriserApp:
             return
         self.status_var.set(f"Loading texture {path}…")
         try:
-            image = self.texture_resolver.load_rgba(path, self.current.source)
+            mipmap = self._selected_texture_mipmap()
+            image = (
+                self.texture_resolver.load_rgba(path, self.current.source)
+                if mipmap == "auto" else self.texture_resolver.load_rgba(
+                    path, self.current.source, mipmap=mipmap
+                )
+            )
             if image is None:
                 self.status_var.set(
                     f"Texture not found: {path}. Add its PBO/IFA or game folder."
@@ -820,7 +935,7 @@ class CategoriserApp:
     def select_texture_archives(self) -> None:
         selected = filedialog.askopenfilenames(
             parent=self.root,
-            title="Add texture PBO / IFA archives",
+            title="Add texture PBO / IFA archives (select multiple)",
             filetypes=(
                 ("PBO / IFA archives", "*.pbo *.pbo.zst *.ifa *.ifa.zst"),
                 ("PBO archives", "*.pbo *.pbo.zst"),
@@ -992,6 +1107,7 @@ class CategoriserApp:
             zoom=zoom,
             load_textures=not self.skip_textures_var.get(),
             mipmap_cache=getattr(self, "mipmap_cache", None),
+            texture_mipmap=self._selected_texture_mipmap(),
         )
         self.ax_preview.imshow(image, interpolation="hanning", resample=True)
         if self.skip_textures_var.get():

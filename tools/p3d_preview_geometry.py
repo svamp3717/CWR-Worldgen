@@ -13,6 +13,7 @@ import numpy as np
 import measure_p3d_models as measure
 import p3d_modern_odol as modern_odol
 import p3d_modern_odol_mesh as modern_mesh
+import p3d_lod_options as lod_options
 from p3d_texture_render import RenderFace
 
 _MAX_FACE_COUNT = 2_000_000
@@ -34,6 +35,8 @@ class PreviewModel:
     original_vertex_count: int
     texture_paths: tuple[str, ...]
     render_mode: str
+    available_lods: tuple[lod_options.LodOption, ...] = ()
+    selected_lod_quality: str = "full"
 
 
 def _read_i16(stream: io.BytesIO, label: str) -> int:
@@ -99,17 +102,21 @@ def _read_mlod_faces(stream: io.BytesIO, point_count: int, face_count: int):
     return tuple(faces), tuple(textures)
 
 
-def extract_first_lod_geometry(data: bytes, *, model_path: str, source: str):
+def extract_first_lod_geometry(
+    data: bytes, *, model_path: str, source: str, lod_quality: str = "full",
+    available_lods: tuple[lod_options.LodOption, ...] | None = None,
+):
     if len(data) < 12:
         raise measure.ModelReadError("P3D is too small to contain a valid header")
     signature = data[:4]
     stream = io.BytesIO(data)
     faces: tuple[RenderFace, ...] = ()
     textures: tuple[str, ...] = ()
+    selected_resolution: float | None = None
 
     if signature == b"ODOL" and struct.unpack_from("<I", data, 4)[0] >= 40:
         try:
-            mesh = modern_mesh.read_model_mesh(data)
+            mesh = modern_mesh.read_model_mesh(data, lod_quality=lod_quality)
         except modern_odol.ModernOdolError as exc:
             # Preserve the existing metadata-only fallback for encrypted,
             # incomplete or not-yet-decoded ODOL layouts. Never pass bounding
@@ -148,6 +155,16 @@ def extract_first_lod_geometry(data: bytes, *, model_path: str, source: str):
             raise measure.ModelReadError(f"unsupported ODOL version {version}; expected OFP/CWA v6/v7")
         if lod_count <= 0 or lod_count > 128:
             raise measure.ModelReadError(f"implausible ODOL LOD count {lod_count}")
+        if lod_quality != "full":
+            options = available_lods
+            if options is None:
+                options = lod_options.list_lods(data)
+            for option in lod_options.select_lod(options, lod_quality):
+                # Full legacy bodies are sequential. Seek directly past all
+                # preceding LODs after the lightweight index pass.
+                stream.seek(option.start)
+                selected_resolution = option.resolution
+                break
         flag_count = measure._read_u32(stream, "ODOL point-flag count")
         measure._read_odol_array(stream, flag_count, 4, "ODOL point flags")
         uv_count = measure._read_u32(stream, "ODOL UV count")
@@ -183,6 +200,14 @@ def extract_first_lod_geometry(data: bytes, *, model_path: str, source: str):
         lod_count = measure._read_u32(stream, "MLOD LOD count")
         if lod_count <= 0 or lod_count > 128:
             raise measure.ModelReadError(f"implausible MLOD LOD count {lod_count}")
+        if lod_quality != "full":
+            options = available_lods
+            if options is None:
+                options = lod_options.list_lods(data)
+            for option in lod_options.select_lod(options, lod_quality):
+                stream.seek(option.start)
+                selected_resolution = option.resolution
+                break
         if measure._read_exact(stream, 4, "MLOD first-LOD signature") != b"SP3X":
             raise measure.ModelReadError("unsupported MLOD LOD format; expected SP3X")
         head_size = _read_i32(stream, "SP3X header size")
@@ -210,7 +235,9 @@ def extract_first_lod_geometry(data: bytes, *, model_path: str, source: str):
 
     measurement = measure._measurement(
         model_path=model_path, source=source, format_name=format_name,
-        version=version, lod="first", points=points,
+        version=version,
+        lod=(f"resolution {selected_resolution:g}" if selected_resolution is not None else "first"),
+        points=points,
     )
     return measurement, points, faces, textures
 
@@ -225,30 +252,81 @@ def collect_edges(faces: Sequence[RenderFace]) -> np.ndarray:
     return np.asarray(sorted(edges), dtype=np.int32) if edges else np.empty((0, 2), dtype=np.int32)
 
 
-def preview_models(inputs: Sequence[Path], patterns: Sequence[str], max_points: int) -> Iterator[PreviewModel | measure.ModelFailure]:
+def build_preview_model(
+    data: bytes, *, model_path: str, source: str, lod_quality: str = "full",
+    max_points: int = 25_000,
+    available_lods: tuple[lod_options.LodOption, ...] | None = None,
+) -> PreviewModel:
+    """Build a preview, preserving discovered LODs for the GUI's selector."""
+    options = available_lods
+    try:
+        if options is None:
+            options = lod_options.list_lods(data)
+    except (measure.ModelReadError, modern_odol.ModernOdolError, struct.error,
+            ValueError, OverflowError):
+        # Damaged or unsupported LOD metadata must not hide a formerly
+        # previewable first LOD. Individual selections require a valid index.
+        if lod_quality.startswith("lod:"):
+            raise
+        options = ()
+        if data[:4] in (b"ODOL", b"MLOD") and (
+            data[:4] == b"MLOD" or struct.unpack_from("<I", data, 4)[0] in {6, 7}
+        ):
+            lod_quality = "full"
+    # Unlike modern ODOL's indexed mesh decoder, legacy LODs are sequential.
+    # Try the requested visual detail first, then nearby visual alternatives
+    # if that particular mesh is unreadable. Explicit LOD picks never silently
+    # switch to another LOD.
+    quality_candidates = (lod_quality,)
+    if options and lod_quality in ("fast", "full") and (
+        data[:4] == b"MLOD" or
+        (data[:4] == b"ODOL" and struct.unpack_from("<I", data, 4)[0] in {6, 7})
+    ):
+        quality_candidates = tuple(
+            option.value for option in lod_options.select_lod(options, lod_quality)
+        )
+    error: measure.ModelReadError | None = None
+    for candidate in quality_candidates:
+        try:
+            measurement, points, faces, textures = extract_first_lod_geometry(
+                data, model_path=model_path, source=source,
+                lod_quality=candidate, available_lods=options if options else None,
+            )
+            break
+        except measure.ModelReadError as exc:
+            error = exc
+    else:
+        raise error or measure.ModelReadError("no usable preview LOD")
+    bounds_only = measurement.lod == "model bounds only"
+    edges = (
+        np.asarray(modern_odol.BOX_EDGES, dtype=np.int32)
+        if bounds_only else collect_edges(faces)
+    )
+    original_vertex_count = 0 if bounds_only else len(points)
+    if bounds_only:
+        preview_points, mode = points.astype(np.float32, copy=False), "bounds only"
+    elif faces:
+        preview_points, mode = points.astype(np.float32, copy=False), "textured mesh"
+    else:
+        if len(points) > max_points:
+            picks = np.linspace(0, len(points) - 1, max_points, dtype=np.int64)
+            points = points[picks]
+        preview_points, mode = points.astype(np.float32, copy=False), "vertex fallback"
+    return PreviewModel(
+        model_path, source, measurement, preview_points, faces, edges,
+        original_vertex_count, textures, mode, options, lod_quality,
+    )
+
+
+def preview_models(
+    inputs: Sequence[Path], patterns: Sequence[str], max_points: int,
+    *, lod_quality: str = "full",
+) -> Iterator[PreviewModel | measure.ModelFailure]:
     for model_path, source, data in measure._iter_models(inputs, patterns):
         try:
-            measurement, points, faces, textures = extract_first_lod_geometry(data, model_path=model_path, source=source)
-            bounds_only = measurement.lod == "model bounds only"
-            edges = (
-                np.asarray(modern_odol.BOX_EDGES, dtype=np.int32)
-                if bounds_only else collect_edges(faces)
-            )
-            original_vertex_count = 0 if bounds_only else len(points)
-            if bounds_only:
-                # Modern ODOL fallback points are eight bounding-box corners,
-                # not a vertex cloud. Show an honest wireframe instead.
-                preview_points, mode = points.astype(np.float32, copy=False), "bounds only"
-            elif faces:
-                preview_points, mode = points.astype(np.float32, copy=False), "textured mesh"
-            else:
-                if len(points) > max_points:
-                    picks = np.linspace(0, len(points) - 1, max_points, dtype=np.int64)
-                    points = points[picks]
-                preview_points, mode = points.astype(np.float32, copy=False), "vertex fallback"
-            yield PreviewModel(
-                model_path, source, measurement, preview_points, faces,
-                edges, original_vertex_count, textures, mode,
+            yield build_preview_model(
+                data, model_path=model_path, source=source,
+                lod_quality=lod_quality, max_points=max_points,
             )
         except (measure.ModelReadError, OSError, struct.error, OverflowError, IndexError, ValueError) as exc:
             failure = measure.ModelFailure(model_path=model_path, source=source, error=str(exc))

@@ -377,3 +377,95 @@ def test_save_as_failure_rolls_back_active_json_destination(
     assert app.output == old
     assert app.output_var.get() == str(old)
     assert error.call_count == 1
+
+
+
+def test_categoriser_picker_selects_multiple_texture_archives_not_model_inputs(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    base = tmp_path / "models.pbo"
+    first = tmp_path / "first.pbo"
+    second = tmp_path / "second.ifa"
+    for path in (base, first, second):
+        path.touch()
+
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    app.root = object()
+    app._base_texture_sources = (base,)
+    app._extra_texture_sources = []
+    app.texture_resolver = TextureResolver((base,))
+    app.mipmap_cache = MipmapCache()
+    app.status_var = Var("")
+    app.current = None
+    app.model_iter = iter(["same iterator"])
+    app.models = []
+    app.state = {}
+    original_iterator = app.model_iter
+    original_state = app.state
+    selected = {}
+
+    def choose(**kwargs):
+        selected.update(kwargs)
+        return (str(first), str(second))
+
+    monkeypatch.setattr(ui.filedialog, "askopenfilenames", choose)
+    app.select_texture_archives()
+
+    assert app.texture_resolver.inputs == (base, first, second)
+    assert app._extra_texture_sources == [first, second]
+    assert app.model_iter is original_iterator
+    assert app.state is original_state
+    assert "IFA" in selected["title"]
+
+
+
+def test_startup_texture_sources_can_be_cleared_without_removing_model_sources(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    model = tmp_path / "models.pbo"
+    extra = tmp_path / "texture.ifa"
+    model.touch()
+    extra.touch()
+    monkeypatch.setattr(ui.CategoriserApp, "_build_ui", lambda self: None)
+    monkeypatch.setattr(
+        ui.CategoriserApp, "next_model", lambda self, *, mark_current=True: None
+    )
+    app = ui.CategoriserApp(
+        Mock(),
+        model_iter=iter(()),
+        texture_resolver=TextureResolver((model, extra)),
+        initial_texture_sources=(extra,),
+        output=tmp_path / "categories.json",
+        categories=("Residential",),
+        state={},
+    )
+    app.status_var = Var("")
+    assert app._base_texture_sources == (model,)
+    assert app._extra_texture_sources == [extra]
+    app.clear_added_texture_sources()
+    assert app.texture_resolver.inputs == (model,)
+    assert app._extra_texture_sources == []
+
+
+
+def test_categoriser_texture_mip_change_redraws_without_model_rescan() -> None:
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    app.current = model("house.p3d")
+    app._mipmap_choices = {"Full (mip 0)": "auto", "Max 256 px": "max:256"}
+    app.texture_mipmap_var = Var("Max 256 px")
+    app._redraw = Mock()
+    app.model_iter = iter(())
+    stream = app.model_iter
+    app.state = {"house.p3d": ui.Classification(["Residential"])}
+    before = app.state["house.p3d"]
+
+    assert app._selected_texture_mipmap() == "max:256"
+    app._change_texture_mipmap()
+    app._redraw.assert_called_once_with()
+    assert app.model_iter is stream
+    assert app.state["house.p3d"] is before
+
+
+def test_categoriser_texture_mip_defaults_to_full_for_older_test_views() -> None:
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    assert app._selected_texture_mipmap() == "auto"

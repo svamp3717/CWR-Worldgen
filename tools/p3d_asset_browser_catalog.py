@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -50,6 +51,19 @@ def _kind(path: str) -> str | None:
     return None
 
 
+def _browser_cache_dir() -> Path:
+    """Keep catalogue fingerprints between GUI launches.
+
+    The asset scanner otherwise reparses every PBO and hashes/decompresses
+    every P3D just to display the model list. Respect the Windows cache
+    location and XDG_CACHE_HOME, without writing beside users' game assets.
+    """
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        return Path(os.environ["LOCALAPPDATA"]) / "CWR-Worldgen" / "p3d-browser"
+    xdg_cache = os.environ.get("XDG_CACHE_HOME")
+    return (Path(xdg_cache) if xdg_cache else Path.home() / ".cache") / "cwr-worldgen" / "p3d-browser"
+
+
 def scan_catalogue(
     roots: Sequence[Path],
     *,
@@ -61,7 +75,7 @@ def scan_catalogue(
     result = assets.scan_assets(
         normalized,
         (),
-        cache_dir=cache_dir,
+        cache_dir=cache_dir if cache_dir is not None or not use_cache else _browser_cache_dir(),
         use_cache=use_cache,
         refresh=refresh,
     )
@@ -93,40 +107,25 @@ def model_source(item: BrowserAsset) -> str:
     return item.source
 
 
-def load_model(item: BrowserAsset, catalogue: BrowserCatalogue) -> preview.PreviewModel:
+def load_model(
+    item: BrowserAsset, catalogue: BrowserCatalogue, *, lod_quality: str = "full"
+) -> preview.PreviewModel:
     if item.kind != "model":
         raise ValueError(f"not a model asset: {item.path}")
     record = catalogue.record_for(item)
     data = assets.read_asset_record_bytes(record)
     source = model_source(item)
-    measurement, points, faces, textures = preview.extract_first_lod_geometry(
-        data,
-        model_path=item.path,
-        source=source,
+    model = preview.build_preview_model(
+        data, model_path=item.path, source=source,
+        lod_quality=lod_quality, max_points=25_000,
     )
-    bounds_only = measurement.lod == "model bounds only"
-    if bounds_only:
-        # The catalogue already extracts embedded texture references without
-        # interpreting the changing ODOL LOD/material tables.
-        textures = tuple(
+    if model.render_mode == "bounds only":
+        # Fallback bounds cannot reveal textures; use the scan's reference list.
+        model.texture_paths = tuple(
             path for path in item.dependencies
             if path.casefold().endswith((".paa", ".pac"))
         )
-    edges = (
-        np.asarray(preview.modern_odol.BOX_EDGES, dtype=np.int32)
-        if bounds_only else preview.collect_edges(faces)
-    )
-    return preview.PreviewModel(
-        item.path,
-        source,
-        measurement,
-        points.astype(np.float32, copy=False),
-        faces,
-        edges,
-        0 if bounds_only else len(points),
-        textures,
-        "bounds only" if bounds_only else ("textured mesh" if faces else "vertex fallback"),
-    )
+    return model
 
 
 class ModelPreviewCache:
@@ -141,7 +140,7 @@ class ModelPreviewCache:
         self.max_models = max(0, int(max_models))
         self.max_bytes = max(0, int(max_bytes))
         self._items: OrderedDict[
-            tuple[str, str], tuple[preview.PreviewModel, int]
+            tuple[str, str, str], tuple[preview.PreviewModel, int]
         ] = OrderedDict()
         self.bytes_used = 0
 
@@ -150,13 +149,17 @@ class ModelPreviewCache:
         self.bytes_used = 0
 
     def get(
-        self, item: BrowserAsset, catalogue: BrowserCatalogue
+        self, item: BrowserAsset, catalogue: BrowserCatalogue,
+        *, lod_quality: str = "full",
     ) -> preview.PreviewModel:
-        key = (item.source, item.path)
+        key = (item.source, item.path, lod_quality)
         if key in self._items:
             self._items.move_to_end(key)
             return self._items[key][0]
-        model = load_model(item, catalogue)
+        model = (
+            load_model(item, catalogue) if lod_quality == "full"
+            else load_model(item, catalogue, lod_quality=lod_quality)
+        )
         # Include decoded arrays, approximate Python face/UV objects and PBO
         # input size so highly detailed models cannot silently grow unbounded.
         weight = (
@@ -175,12 +178,16 @@ class ModelPreviewCache:
         return model
 
 
-def load_texture(item: BrowserAsset, catalogue: BrowserCatalogue) -> np.ndarray:
+def load_texture(
+    item: BrowserAsset, catalogue: BrowserCatalogue, *, mipmap: str = "auto"
+) -> np.ndarray:
     if item.kind != "texture":
         raise ValueError(f"not a texture asset: {item.path}")
     record = catalogue.record_for(item)
     data = assets.read_asset_record_bytes(record)
-    return decode_paa(data, is_paa=item.path.casefold().endswith(".paa"))
+    return decode_paa(
+        data, is_paa=item.path.casefold().endswith(".paa"), mipmap=mipmap,
+    )
 
 
 class TexturePreviewCache:
@@ -190,7 +197,7 @@ class TexturePreviewCache:
         self.max_images = max(0, int(max_images))
         self.max_bytes = max(0, int(max_bytes))
         self._items: OrderedDict[
-            tuple[str, str], np.ndarray
+            tuple[str, str, str], np.ndarray
         ] = OrderedDict()
         self.bytes_used = 0
 
@@ -198,12 +205,18 @@ class TexturePreviewCache:
         self._items.clear()
         self.bytes_used = 0
 
-    def get(self, item: BrowserAsset, catalogue: BrowserCatalogue) -> np.ndarray:
-        key = (item.source, item.path)
+    def get(
+        self, item: BrowserAsset, catalogue: BrowserCatalogue,
+        *, mipmap: str = "auto",
+    ) -> np.ndarray:
+        key = (item.source, item.path, mipmap)
         if key in self._items:
             self._items.move_to_end(key)
             return self._items[key]
-        image = load_texture(item, catalogue)
+        image = (
+            load_texture(item, catalogue) if mipmap == "auto"
+            else load_texture(item, catalogue, mipmap=mipmap)
+        )
         if self.max_images and image.nbytes <= self.max_bytes:
             while self._items and (
                 len(self._items) >= self.max_images

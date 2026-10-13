@@ -189,7 +189,7 @@ class MipmapCache:
     def __init__(self, max_bytes: int = 96 * 1024 * 1024):
         self.max_bytes = max(0, int(max_bytes))
         self._items: OrderedDict[
-            tuple[str, str], tuple[tuple[np.ndarray, ...], int]
+            tuple[str, str, str], tuple[tuple[np.ndarray, ...], int]
         ] = OrderedDict()
         self.bytes_used = 0
 
@@ -198,14 +198,18 @@ class MipmapCache:
         self.bytes_used = 0
 
     def get(
-        self, texture_path: str, source: str, resolver: TextureResolver
+        self, texture_path: str, source: str, resolver: TextureResolver,
+        *, mipmap: str = "auto",
     ) -> tuple[np.ndarray, ...] | None:
         canonical = measure._canonical_model_path(texture_path)
-        key = (source, canonical)
+        key = (source, canonical, mipmap)
         if key in self._items:
             self._items.move_to_end(key)
             return self._items[key][0]
-        image = resolver.load_rgba(canonical, source)
+        image = (
+            resolver.load_rgba(canonical, source) if mipmap == "auto"
+            else resolver.load_rgba(canonical, source, mipmap=mipmap)
+        )
         if image is None:
             return None
         levels = _mipmap_chain(image)
@@ -233,6 +237,7 @@ def render_textured_model(
     max_triangles: int = 12_000,
     load_textures: bool = True,
     mipmap_cache: MipmapCache | None = None,
+    texture_mipmap: str = "auto",
 ) -> tuple[np.ndarray, int, int]:
     """Perspective-correct rasterization, optionally skipping all texture I/O."""
     image = np.full((height, width, 3), 236, dtype=np.uint8)
@@ -288,9 +293,19 @@ def render_textured_model(
             canonical = measure._canonical_model_path(texture_path)
             if canonical not in cache:
                 if mipmap_cache is not None:
-                    cache[canonical] = mipmap_cache.get(canonical, source, resolver)
+                    cache[canonical] = (
+                        mipmap_cache.get(canonical, source, resolver)
+                        if texture_mipmap == "auto"
+                        else mipmap_cache.get(
+                            canonical, source, resolver, mipmap=texture_mipmap
+                        )
+                    )
                 else:
-                    decoded = resolver.load_rgba(canonical, source)
+                    decoded = (
+                        resolver.load_rgba(canonical, source)
+                        if texture_mipmap == "auto"
+                        else resolver.load_rgba(canonical, source, mipmap=texture_mipmap)
+                    )
                     cache[canonical] = (
                         _mipmap_chain(decoded) if decoded is not None else None
                     )

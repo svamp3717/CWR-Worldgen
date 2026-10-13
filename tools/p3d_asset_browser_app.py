@@ -26,7 +26,9 @@ from p3d_asset_browser_catalog import (
 )
 from p3d_frozen_support import dismiss_splash
 from p3d_texture_sources import TextureResolver
+from p3d_texture_io import MIPMAP_CHOICES
 from p3d_texture_render import MipmapCache, render_textured_model
+from cwr_worldgen.pbo import is_pbo_path
 from cwr_worldgen.assets import canonical_asset_path
 
 
@@ -36,6 +38,9 @@ class AssetBrowserApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.sources: list[Path] = []
+        # Additional texture archives are indexed by the lazy texture resolver,
+        # never added to the model/texture catalogue scan.
+        self.texture_sources: list[Path] = []
         self.catalogue = BrowserCatalogue((), (), {})
         self.texture_resolver = TextureResolver(())
         self.model_cache = ModelPreviewCache()
@@ -77,12 +82,26 @@ class AssetBrowserApp:
         clear_sources_button = ttk.Button(
             toolbar, text="Clear sources", command=self.clear_sources
         )
-        clear_sources_button.pack(side=tk.LEFT, padx=(6, 14))
+        clear_sources_button.pack(side=tk.LEFT, padx=(6, 10))
+        add_textures_button = ttk.Button(
+            toolbar, text="Add texture PBOs / IFAs…",
+            command=self.select_texture_archives,
+        )
+        add_textures_button.pack(side=tk.LEFT, padx=(6, 0))
+        clear_textures_button = ttk.Button(
+            toolbar, text="Clear texture PBOs", command=self.clear_texture_archives,
+        )
+        clear_textures_button.pack(side=tk.LEFT, padx=(6, 10))
         self._source_buttons.extend(
-            (select_pbo_button, add_folder_button, clear_sources_button)
+            (select_pbo_button, add_folder_button, clear_sources_button,
+             add_textures_button, clear_textures_button)
         )
         self.sources_var = tk.StringVar(master=self.root, value="No source selected")
         ttk.Label(toolbar, textvariable=self.sources_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.texture_sources_var = tk.StringVar(
+            master=self.root, value="0 extra texture archives",
+        )
+        ttk.Label(toolbar, textvariable=self.texture_sources_var).pack(side=tk.LEFT, padx=(4, 0))
 
         self.status_var = tk.StringVar(
             master=self.root,
@@ -159,13 +178,34 @@ class AssetBrowserApp:
         ttk.Button(controls, text="Reset view", command=self._reset_view).pack(
             side=tk.LEFT, padx=(12, 0)
         )
+        self._lod_default_quality = "fast"
+        self._lod_model_key = None
+        self._lod_current_quality = "fast"
+        self._lod_choices = {"Fast (lowest)": "fast", "Full (highest)": "full"}
+        self.preview_lod_var = tk.StringVar(master=self.root, value="Fast (lowest)")
+        ttk.Label(controls, text="Preview LOD:").pack(side=tk.LEFT, padx=(14, 4))
+        self.lod_picker = ttk.Combobox(
+            controls, textvariable=self.preview_lod_var,
+            values=tuple(self._lod_choices), state="readonly", width=23,
+        )
+        self.lod_picker.pack(side=tk.LEFT)
+        self.lod_picker.bind("<<ComboboxSelected>>", self._change_preview_lod)
         self.skip_textures_var = tk.BooleanVar(master=self.root, value=False)
         ttk.Checkbutton(
             controls,
             text="Skip textures (faster)",
             variable=self.skip_textures_var,
             command=self._redraw_current_model,
-        ).pack(side=tk.LEFT, padx=(18, 0))
+        ).pack(side=tk.LEFT, padx=(14, 0))
+        self._mipmap_choices = dict(MIPMAP_CHOICES)
+        self.texture_mipmap_var = tk.StringVar(master=self.root, value=MIPMAP_CHOICES[0][0])
+        ttk.Label(controls, text="Texture mip:").pack(side=tk.LEFT, padx=(12, 4))
+        mip_picker = ttk.Combobox(
+            controls, textvariable=self.texture_mipmap_var,
+            values=tuple(self._mipmap_choices), state="readonly", width=18,
+        )
+        mip_picker.pack(side=tk.LEFT)
+        mip_picker.bind("<<ComboboxSelected>>", self._change_texture_mipmap)
 
         details = ttk.Frame(main)
         details.grid(row=2, column=0, sticky="ew", pady=(8, 0))
@@ -203,9 +243,9 @@ class AssetBrowserApp:
             height=7,
             selectmode="browse",
         )
-        self.related_tree.heading("kind", text="Type")
+        self.related_tree.heading("kind", text="Type / status")
         self.related_tree.heading("path", text="Path")
-        self.related_tree.column("kind", width=80, stretch=False)
+        self.related_tree.column("kind", width=115, stretch=False)
         self.related_tree.column("path", width=520, stretch=True)
         self.related_tree.grid(row=0, column=0, sticky="nsew")
         related_scroll = ttk.Scrollbar(
@@ -290,11 +330,82 @@ class AssetBrowserApp:
             ),
         )
         if values:
-            # Selecting an archive is a replacement operation. This keeps the browser
-            # focused on the newly chosen archive(s) instead of silently retaining
-            # models and textures from a previous package.
+            # Replace model inputs while retaining deliberately selected texture
+            # archives. A model change must not silently undo the user's lookup
+            # sources; the explicit Clear sources action still clears everything.
+            selected_textures = tuple(getattr(self, "texture_sources", ()))
             self.clear_sources()
+            if selected_textures and hasattr(self, "texture_sources"):
+                self.texture_sources.extend(selected_textures)
+                self._update_texture_source_label()
             self._add_sources(Path(value) for value in values)
+
+    def select_texture_archives(self) -> None:
+        """Select multiple texture-only PBO/IFA files without rescanning models."""
+        if self._scan_in_progress:
+            self.status_var.set("Asset scan already in progress.")
+            return
+        values = filedialog.askopenfilenames(
+            parent=self.root,
+            title="Add texture PBO / IFA archives (select multiple)",
+            filetypes=(
+                ("PBO / IFA archives", "*.pbo *.ifa *.pbo.zst *.ifa.zst"),
+                ("PBO archives", "*.pbo *.pbo.zst"),
+                ("Iron Front IFA archives", "*.ifa *.ifa.zst"),
+                ("All files", "*.*"),
+            ),
+        )
+        if values:
+            self._add_texture_archives(tuple(Path(value) for value in values))
+
+    def _update_texture_source_label(self) -> None:
+        if hasattr(self, "texture_sources_var"):
+            self.texture_sources_var.set(
+                f"{len(self.texture_sources)} extra texture archive(s)"
+            )
+
+    def _refresh_texture_resolver(self) -> None:
+        self.texture_resolver = TextureResolver((*self.sources, *self.texture_sources))
+        if hasattr(self, "mipmap_cache"):
+            self.mipmap_cache.clear()
+        if getattr(self, "current_model", None) is not None:
+            self._redraw_current_model()
+
+    def _add_texture_archives(self, paths) -> None:
+        """Add only requested files, not their sibling folders or extra models."""
+        known = {
+            str(path.resolve()).casefold()
+            for path in (*self.sources, *self.texture_sources)
+        }
+        additions: list[Path] = []
+        for raw in paths:
+            path = Path(raw).expanduser()
+            if not path.is_file() or not is_pbo_path(path):
+                self.status_var.set(f"Not a PBO / IFA texture archive: {path}")
+                return
+            key = str(path.resolve()).casefold()
+            if key not in known:
+                additions.append(path)
+                known.add(key)
+        if not additions:
+            self.status_var.set("Selected texture archives are already available.")
+            return
+        self.texture_sources.extend(additions)
+        self._update_texture_source_label()
+        self._refresh_texture_resolver()
+        self.status_var.set(
+            f"Added {len(additions)} texture archive(s), "
+            f"{len(self.texture_sources)} total. Model catalogue unchanged."
+        )
+
+    def clear_texture_archives(self) -> None:
+        if not self.texture_sources:
+            self.status_var.set("No additional texture archives to clear.")
+            return
+        self.texture_sources.clear()
+        self._update_texture_source_label()
+        self._refresh_texture_resolver()
+        self.status_var.set("Extra texture archives cleared. Model catalogue unchanged.")
 
     def select_folder(self) -> None:
         if self._scan_in_progress:
@@ -325,6 +436,11 @@ class AssetBrowserApp:
 
     def clear_sources(self) -> None:
         self.sources.clear()
+        # A full reset also drops texture-only sources. The dedicated Clear
+        # texture PBOs button leaves the model catalogue untouched.
+        if hasattr(self, "texture_sources"):
+            self.texture_sources.clear()
+            self._update_texture_source_label()
         self.catalogue = BrowserCatalogue((), (), {})
         self.texture_resolver = TextureResolver(())
         if hasattr(self, "model_cache"):
@@ -389,7 +505,9 @@ class AssetBrowserApp:
                 continue
             sources, catalogue = payload
             self.catalogue = catalogue
-            self.texture_resolver = TextureResolver(sources)
+            self.texture_resolver = TextureResolver(
+                (*sources, *getattr(self, "texture_sources", ()))
+            )
             if hasattr(self, "model_cache"):
                 self.model_cache.clear()
             if hasattr(self, "texture_preview_cache"):
@@ -463,15 +581,58 @@ class AssetBrowserApp:
         else:
             self._show_texture(item)
 
+    def _update_lod_picker(self, model) -> None:
+        """Show every resolution and special LOD available for this model."""
+        choices = {"Fast (lowest)": "fast", "Full (highest)": "full"}
+        for entry in getattr(model, "available_lods", ()):
+            choices[entry.label] = entry.value
+        self._lod_choices = choices
+        if hasattr(self, "lod_picker"):
+            self.lod_picker.configure(values=tuple(choices))
+        quality = getattr(self, "_lod_current_quality", "fast")
+        label = next((name for name, value in choices.items() if value == quality), "Fast (lowest)")
+        if hasattr(self, "preview_lod_var"):
+            self.preview_lod_var.set(label)
+
+    def _change_preview_lod(self, _event=None) -> None:
+        """Reload just this model at the chosen LOD, with a separate cache entry."""
+        choices = getattr(self, "_lod_choices", {"fast": "fast", "full": "full"})
+        label = self.preview_lod_var.get() if hasattr(self, "preview_lod_var") else "fast"
+        quality = choices.get(label, label)
+        self._lod_current_quality = quality
+        if quality in ("fast", "full"):
+            self._lod_default_quality = quality
+        if getattr(self.current, "kind", None) == "model":
+            self._show_model(self.current)
+
+    def _selected_texture_mipmap(self) -> str:
+        if not hasattr(self, "texture_mipmap_var"):
+            return "auto"
+        return self._mipmap_choices.get(self.texture_mipmap_var.get(), "auto")
+
+    def _change_texture_mipmap(self, _event=None) -> None:
+        """Change texture detail without rescanning the selected model/archive."""
+        if getattr(self.current, "kind", None) == "model":
+            self._redraw_current_model()
+        elif getattr(self.current, "kind", None) == "texture":
+            self._show_texture(self.current)
+
     def _show_model(self, item: BrowserAsset) -> None:
         self._busy(f"Loading model {item.path}…")
         try:
+            key = (item.source, item.path)
+            if getattr(self, "_lod_model_key", None) != key:
+                self._lod_model_key = key
+                self._lod_current_quality = getattr(self, "_lod_default_quality", "fast")
             cache = getattr(self, "model_cache", None)
+            quality = getattr(self, "_lod_current_quality", "fast")
             model = (
-                cache.get(item, self.catalogue) if cache is not None
-                else load_model(item, self.catalogue)
+                cache.get(item, self.catalogue, lod_quality=quality)
+                if cache is not None
+                else load_model(item, self.catalogue, lod_quality=quality)
             )
             self.current_model = model
+            self._update_lod_picker(model)
             self._draw_model(model)
             texture_paths = tuple(
                 canonical_asset_path(value)
@@ -574,6 +735,7 @@ class AssetBrowserApp:
             zoom=self.zoom,
             load_textures=not self.skip_textures_var.get(),
             mipmap_cache=getattr(self, "mipmap_cache", None),
+            texture_mipmap=self._selected_texture_mipmap(),
         )
         # Downsampling remains filtered when the canvas is smaller than the
         # already screen-sized raster, avoiding shimmering brick patterns.
@@ -595,9 +757,10 @@ class AssetBrowserApp:
         self._busy(f"Loading texture {item.path}…")
         try:
             cache = getattr(self, "texture_preview_cache", None)
+            mipmap = self._selected_texture_mipmap()
             image = (
-                cache.get(item, self.catalogue) if cache is not None
-                else load_texture(item, self.catalogue)
+                cache.get(item, self.catalogue, mipmap=mipmap) if cache is not None
+                else load_texture(item, self.catalogue, mipmap=mipmap)
             )
             self.current_model = None
             self.ax_preview.clear()
@@ -658,6 +821,31 @@ class AssetBrowserApp:
         for child in self.related_tree.get_children():
             self.related_tree.delete(child)
 
+    def _external_texture_status(self, path: str) -> str:
+        """Resolve a reference outside the catalogue using the preview's sources.
+
+        Texture-only PBOs/IFAs intentionally aren't added to the model scan's
+        catalogue. That does not mean their textures are missing. Use the same
+        lazy resolver as the renderer, without decoding another image just to
+        display a status in the related-assets list.
+        """
+        if self.skip_textures_var.get() or self.current_model is None:
+            return "Unchecked"
+        resolver = self.texture_resolver
+        try:
+            ref = resolver._find_ref(path, self.current_model.source)
+        except (OSError, ValueError):
+            return "Unavailable"
+        if ref is None:
+            return "Missing"
+        # If rendering actually tried and failed to decode this texture,
+        # distinguish that from merely finding its bytes in an archive.
+        mipmap = self._selected_texture_mipmap()
+        key = path if mipmap in ("auto", "mip:0") else path + "|" + mipmap
+        if key in resolver.image_cache and resolver.image_cache[key] is None:
+            return "Unreadable"
+        return "External"
+
     def _set_related_textures(self, paths: tuple[str, ...]) -> None:
         self._clear_related()
         by_path = {item.path: item for item in self.catalogue.textures}
@@ -672,11 +860,12 @@ class AssetBrowserApp:
             iid = f"r{index}"
             if asset is not None:
                 self._related_assets[iid] = asset
+            status = "Texture" if asset is not None else self._external_texture_status(path)
             self.related_tree.insert(
                 "",
                 tk.END,
                 iid=iid,
-                values=("Texture" if asset else "Missing", path),
+                values=(status, path),
             )
 
     def _set_related_models(self, models: tuple[BrowserAsset, ...]) -> None:
@@ -734,6 +923,13 @@ class AssetBrowserApp:
         if self.current_model is None:
             return
         self._draw_model(self.current_model)
+        # Source changes and Skip textures must also refresh the related-list
+        # status. Previously it remained stale after adding a texture PBO.
+        if getattr(self.current, "kind", None) == "model":
+            self._set_related_textures(tuple(
+                canonical_asset_path(value)
+                for value in self.current_model.texture_paths if value
+            ))
         if self.skip_textures_var.get():
             self.status_var.set(
                 "Texture lookup skipped for faster model browsing."
