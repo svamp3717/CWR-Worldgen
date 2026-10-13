@@ -18,6 +18,7 @@ from cwr_worldgen import assets as world_assets
 from p3d_preview_geometry import PreviewModel, build_preview_model
 from cwr_worldgen.pbo import is_pbo_path
 from p3d_texture_sources import TextureResolver
+from p3d_texture_io import MIPMAP_CHOICES
 from p3d_texture_render import MipmapCache, render_textured_model
 
 
@@ -308,6 +309,17 @@ class CategoriserApp:
         )
         self.lod_picker.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.lod_picker.bind("<<ComboboxSelected>>", self._change_preview_lod)
+        self._mipmap_choices = dict(MIPMAP_CHOICES)
+        mip_row = ttk.Frame(side)
+        mip_row.pack(fill="x", pady=(2, 4))
+        ttk.Label(mip_row, text="Texture mipmap:").pack(side=tk.LEFT)
+        self.texture_mipmap_var = tk.StringVar(master=self.root, value=MIPMAP_CHOICES[0][0])
+        self.texture_mipmap_picker = ttk.Combobox(
+            mip_row, textvariable=self.texture_mipmap_var,
+            values=tuple(self._mipmap_choices), state="readonly", width=20,
+        )
+        self.texture_mipmap_picker.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
+        self.texture_mipmap_picker.bind("<<ComboboxSelected>>", self._change_texture_mipmap)
         row = ttk.Frame(side)
         row.pack(fill="x", pady=4)
         ttk.Button(row, text="↶ 15°", command=lambda: self._rotate(-15)).pack(side=tk.LEFT)
@@ -571,6 +583,16 @@ class CategoriserApp:
             path=model.model_path, source=source, size=0, sha256=None,
         )
 
+    def _selected_texture_mipmap(self) -> str:
+        if not hasattr(self, "texture_mipmap_var"):
+            return "auto"
+        return self._mipmap_choices.get(self.texture_mipmap_var.get(), "auto")
+
+    def _change_texture_mipmap(self, _event=None) -> None:
+        """Refresh preview texture detail without changing classification state."""
+        if self.current is not None:
+            self._redraw()
+
     def _change_preview_lod(self, _event=None) -> None:
         """Switch only the active preview, preserving model order and categories."""
         if self.current is None:
@@ -821,7 +843,13 @@ class CategoriserApp:
             return
         self.status_var.set(f"Loading texture {path}…")
         try:
-            image = self.texture_resolver.load_rgba(path, self.current.source)
+            mipmap = self._selected_texture_mipmap()
+            image = (
+                self.texture_resolver.load_rgba(path, self.current.source)
+                if mipmap == "auto" else self.texture_resolver.load_rgba(
+                    path, self.current.source, mipmap=mipmap
+                )
+            )
             if image is None:
                 self.status_var.set(
                     f"Texture not found: {path}. Add its PBO/IFA or game folder."
@@ -1079,6 +1107,7 @@ class CategoriserApp:
             zoom=zoom,
             load_textures=not self.skip_textures_var.get(),
             mipmap_cache=getattr(self, "mipmap_cache", None),
+            texture_mipmap=self._selected_texture_mipmap(),
         )
         self.ax_preview.imshow(image, interpolation="hanning", resample=True)
         if self.skip_textures_var.get():
