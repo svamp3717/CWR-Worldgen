@@ -416,3 +416,32 @@ def test_categoriser_picker_selects_multiple_texture_archives_not_model_inputs(
     assert app.model_iter is original_iterator
     assert app.state is original_state
     assert "IFA" in selected["title"]
+
+
+
+def test_startup_texture_sources_can_be_cleared_without_removing_model_sources(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    model = tmp_path / "models.pbo"
+    extra = tmp_path / "texture.ifa"
+    model.touch()
+    extra.touch()
+    monkeypatch.setattr(ui.CategoriserApp, "_build_ui", lambda self: None)
+    monkeypatch.setattr(
+        ui.CategoriserApp, "next_model", lambda self, *, mark_current=True: None
+    )
+    app = ui.CategoriserApp(
+        Mock(),
+        model_iter=iter(()),
+        texture_resolver=TextureResolver((model, extra)),
+        initial_texture_sources=(extra,),
+        output=tmp_path / "categories.json",
+        categories=("Residential",),
+        state={},
+    )
+    app.status_var = Var("")
+    assert app._base_texture_sources == (model,)
+    assert app._extra_texture_sources == [extra]
+    app.clear_added_texture_sources()
+    assert app.texture_resolver.inputs == (model,)
+    assert app._extra_texture_sources == []
