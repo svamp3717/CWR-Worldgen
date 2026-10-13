@@ -49,6 +49,27 @@ it can also be used with CLI options such as:
 .\WRP-Mod-Dependency-Scanner.exe "C:\path\to\island.wrp" --json "dependencies.json"
 ```
 
+### Choosing individual texture archives
+
+Both P3D tools can load **multiple individual texture PBO/IFA archives**
+(including `.pbo.zst` and `.ifa.zst`) without selecting or scanning an entire
+texture folder:
+
+- **Model & Texture Browser:** first choose the model PBO/IFA, then click
+  **Add texture PBOs / IFAs…** and multi-select the archives containing its
+  PAA/PAC files. You may add further archives with the same button later.
+  **Clear texture PBOs** removes only the extra texture lookup sources, not
+  the model catalogue. Replacing the model PBO keeps your extra texture choices.
+- **Model Categoriser:** select the model archives in the startup dialog,
+  then add individual **texture PBOs / IFAs** in the separate list before
+  starting. You may also add archives from the main categoriser window or
+  its View menu. Texture-only archives are not included in the model count
+  or classification stream. The CLI continues to support repeated
+  `--texture-source C:\\path\\to\\texture.pbo` arguments.
+
+For Windows multi-selection, use Ctrl-click or Shift-click in the archive
+picker. The original folder selection remains available when desired.
+
 Categoriser classification files and companion `.unclassified.json` files
 are saved to the output path selected in its GUI, not inside the executable.
 
