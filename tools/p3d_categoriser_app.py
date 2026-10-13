@@ -14,7 +14,8 @@ from matplotlib.figure import Figure
 import numpy as np
 
 import measure_p3d_models as measure
-from p3d_preview_geometry import PreviewModel
+from cwr_worldgen import assets as world_assets
+from p3d_preview_geometry import PreviewModel, build_preview_model
 from cwr_worldgen.pbo import is_pbo_path
 from p3d_texture_sources import TextureResolver
 from p3d_texture_render import MipmapCache, render_textured_model
@@ -94,6 +95,7 @@ class CategoriserApp:
         state: dict[str, Classification],
         total_models: int | None = None,
         initial_texture_sources: Sequence[Path] = (),
+        preview_lod: str = "fast",
     ) -> None:
         self.root = root
         self.model_iter = model_iter
@@ -111,6 +113,8 @@ class CategoriserApp:
         )
         self._extra_texture_sources: list[Path] = extra_sources
         self._related_texture_paths: tuple[str, ...] = ()
+        self._default_preview_lod = preview_lod
+        self._lod_choices = {"Fast (lowest)": "fast", "Full (highest)": "full"}
         self.output = output
         self.categories = list(categories)
         self.state = state
@@ -286,12 +290,22 @@ class CategoriserApp:
         ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
         ttk.Label(side, text="View", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
         self.skip_textures_var = tk.BooleanVar(master=self.root, value=False)
+        lod_row = ttk.Frame(side)
+        lod_row.pack(fill="x", pady=(4, 2))
         ttk.Checkbutton(
-            side,
+            lod_row,
             text="Skip textures (faster)",
             variable=self.skip_textures_var,
             command=self._redraw,
-        ).pack(anchor="w", fill="x", pady=(4, 2))
+        ).pack(side=tk.LEFT)
+        ttk.Label(lod_row, text="LOD:").pack(side=tk.LEFT, padx=(7, 3))
+        self.preview_lod_var = tk.StringVar(master=self.root, value="Fast (lowest)")
+        self.lod_picker = ttk.Combobox(
+            lod_row, textvariable=self.preview_lod_var,
+            values=tuple(self._lod_choices), state="readonly", width=17,
+        )
+        self.lod_picker.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.lod_picker.bind("<<ComboboxSelected>>", self._change_preview_lod)
         row = ttk.Frame(side)
         row.pack(fill="x", pady=4)
         ttk.Button(row, text="↶ 15°", command=lambda: self._rotate(-15)).pack(side=tk.LEFT)
@@ -520,8 +534,51 @@ class CategoriserApp:
         self.index -= 1
         self._show_model(self.models[self.index])
 
+    def _sync_lod_picker(self, model: PreviewModel) -> None:
+        """List every LOD for the current model beside Skip textures."""
+        choices = {"Fast (lowest)": "fast", "Full (highest)": "full"}
+        for lod in getattr(model, "available_lods", ()):
+            choices[lod.label] = lod.value
+        self._lod_choices = choices
+        if hasattr(self, "lod_picker"):
+            self.lod_picker.configure(values=tuple(choices))
+        if hasattr(self, "preview_lod_var"):
+            quality = getattr(model, "selected_lod_quality", self._default_preview_lod)
+            selected = next(
+                (label for label, value in choices.items() if value == quality),
+                "Fast (lowest)",
+            )
+            self.preview_lod_var.set(selected)
+
+    def _change_preview_lod(self, _event=None) -> None:
+        """Switch only the active preview, preserving model order and categories."""
+        if self.current is None:
+            return
+        quality = self._lod_choices.get(self.preview_lod_var.get(), "fast")
+        if quality == getattr(self.current, "selected_lod_quality", "full"):
+            return
+        previous = self.current
+        try:
+            data = world_assets.read_asset_record_bytes(world_assets.AssetRecord(
+                path=previous.model_path, source=previous.source,
+                size=0, sha256=None,
+            ))
+            replacement = build_preview_model(
+                data, model_path=previous.model_path, source=previous.source,
+                lod_quality=quality,
+            )
+        except (OSError, ValueError, IndexError, OverflowError) as exc:
+            self._sync_lod_picker(previous)
+            if hasattr(self, "status_var"):
+                self.status_var.set(f"Cannot load selected LOD: {exc}")
+            return
+        self.models[self.index] = replacement
+        # Never commit/reclassify when switching preview detail.
+        self._show_model(replacement)
+
     def _show_model(self, model: PreviewModel) -> None:
         self.current = model
+        self._sync_lod_picker(model)
         self.path_var.set(model.model_path)
         self._update_progress_counter()
         classification = self.state.get(model.model_path, Classification([]))
