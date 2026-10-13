@@ -70,6 +70,15 @@ texture folder:
 For Windows multi-selection, use Ctrl-click or Shift-click in the archive
 picker. The original folder selection remains available when desired.
 
+The **Related assets** panel in the Model & Texture Browser distinguishes
+textures in the model catalogue (**Texture**) from textures located by the
+preview resolver in another PBO/IFA (**External**). **Missing** means no
+texture asset was located in the currently available sources. **Unreadable**
+means an archive entry exists but its texture failed to decode during preview,
+and **Unchecked** means texture loading was skipped. Extra texture archives
+are deliberately not added to the model catalogue; the external status is
+updated when you add or clear them.
+
 Categoriser classification files and companion `.unclassified.json` files
 are saved to the output path selected in its GUI, not inside the executable.
 
