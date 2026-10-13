@@ -36,6 +36,7 @@ class PreviewModel:
     texture_paths: tuple[str, ...]
     render_mode: str
     available_lods: tuple[lod_options.LodOption, ...] = ()
+    selected_lod_quality: str = "full"
 
 
 def _read_i16(stream: io.BytesIO, label: str) -> int:
@@ -290,7 +291,7 @@ def build_preview_model(
         preview_points, mode = points.astype(np.float32, copy=False), "vertex fallback"
     return PreviewModel(
         model_path, source, measurement, preview_points, faces, edges,
-        original_vertex_count, textures, mode, options,
+        original_vertex_count, textures, mode, options, lod_quality,
     )
 
 
