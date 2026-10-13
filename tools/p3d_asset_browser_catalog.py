@@ -107,7 +107,9 @@ def model_source(item: BrowserAsset) -> str:
     return item.source
 
 
-def load_model(item: BrowserAsset, catalogue: BrowserCatalogue) -> preview.PreviewModel:
+def load_model(
+    item: BrowserAsset, catalogue: BrowserCatalogue, *, lod_quality: str = "full"
+) -> preview.PreviewModel:
     if item.kind != "model":
         raise ValueError(f"not a model asset: {item.path}")
     record = catalogue.record_for(item)
@@ -117,6 +119,7 @@ def load_model(item: BrowserAsset, catalogue: BrowserCatalogue) -> preview.Previ
         data,
         model_path=item.path,
         source=source,
+        lod_quality=lod_quality,
     )
     bounds_only = measurement.lod == "model bounds only"
     if bounds_only:
@@ -155,7 +158,7 @@ class ModelPreviewCache:
         self.max_models = max(0, int(max_models))
         self.max_bytes = max(0, int(max_bytes))
         self._items: OrderedDict[
-            tuple[str, str], tuple[preview.PreviewModel, int]
+            tuple[str, str, str], tuple[preview.PreviewModel, int]
         ] = OrderedDict()
         self.bytes_used = 0
 
@@ -164,13 +167,17 @@ class ModelPreviewCache:
         self.bytes_used = 0
 
     def get(
-        self, item: BrowserAsset, catalogue: BrowserCatalogue
+        self, item: BrowserAsset, catalogue: BrowserCatalogue,
+        *, lod_quality: str = "full",
     ) -> preview.PreviewModel:
-        key = (item.source, item.path)
+        key = (item.source, item.path, lod_quality)
         if key in self._items:
             self._items.move_to_end(key)
             return self._items[key][0]
-        model = load_model(item, catalogue)
+        model = (
+            load_model(item, catalogue) if lod_quality == "full"
+            else load_model(item, catalogue, lod_quality=lod_quality)
+        )
         # Include decoded arrays, approximate Python face/UV objects and PBO
         # input size so highly detailed models cannot silently grow unbounded.
         weight = (
