@@ -372,3 +372,76 @@ def test_archive_picker_offers_ifa_and_replaces_previous_sources(
     assert "*.ifa" in extensions
     assert "*.ifa.zst" in extensions
     assert "*.pbo" in extensions
+
+
+
+def test_add_multiple_texture_archives_without_rescanning_or_changing_models(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    model_pbo = tmp_path / "models.pbo"
+    texture_pbo = tmp_path / "textures.pbo"
+    texture_ifa = tmp_path / "textures.ifa.zst"
+    for path in (model_pbo, texture_pbo, texture_ifa):
+        path.touch()
+
+    app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
+    app.root = object()
+    app._scan_in_progress = False
+    app.sources = [model_pbo]
+    app.texture_sources = []
+    app.texture_sources_var = _FakeVar("")
+    app.status_var = _FakeVar("")
+    app.current_model = object()
+    app.catalogue = object()
+    original_catalogue = app.catalogue
+    app.mipmap_cache = SimpleNamespace(clear=__import__("unittest.mock", fromlist=["Mock"]).Mock())
+    app._redraw_current_model = __import__("unittest.mock", fromlist=["Mock"]).Mock()
+    app._scan_sources = __import__("unittest.mock", fromlist=["Mock"]).Mock()
+
+    captured = {}
+
+    def choose(**kwargs):
+        captured.update(kwargs)
+        return (str(texture_pbo), str(texture_ifa), str(texture_pbo))
+
+    monkeypatch.setattr(browser_app.filedialog, "askopenfilenames", choose)
+    app.select_texture_archives()
+
+    assert app.texture_sources == [texture_pbo, texture_ifa]
+    assert app.texture_resolver.inputs == (model_pbo, texture_pbo, texture_ifa)
+    assert app.catalogue is original_catalogue
+    app._scan_sources.assert_not_called()
+    app._redraw_current_model.assert_called_once_with()
+    app.mipmap_cache.clear.assert_called_once_with()
+    assert "2 extra texture archive(s)" == app.texture_sources_var.get()
+    assert "*.ifa.zst" in " ".join(pattern for _, pattern in captured["filetypes"])
+
+    app._add_texture_archives((texture_ifa,))
+    assert app.texture_sources == [texture_pbo, texture_ifa]
+    app._scan_sources.assert_not_called()
+    app._redraw_current_model.assert_called_once_with()
+
+    app.clear_texture_archives()
+    assert app.texture_sources == []
+    assert app.texture_resolver.inputs == (model_pbo,)
+    assert app.catalogue is original_catalogue
+    assert app._redraw_current_model.call_count == 2
+    app._scan_sources.assert_not_called()
+
+
+def test_texture_archive_picker_rejects_unrelated_files_atomically(tmp_path: Path) -> None:
+    model_pbo = tmp_path / "models.ifa"
+    archive = tmp_path / "textures.pbo"
+    invalid = tmp_path / "textures.zip"
+    for path in (model_pbo, archive, invalid):
+        path.touch()
+    app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
+    app.sources = [model_pbo]
+    app.texture_sources = []
+    app.status_var = _FakeVar("")
+    app._refresh_texture_resolver = lambda: (_ for _ in ()).throw(
+        AssertionError("invalid files must not replace the resolver")
+    )
+    app._add_texture_archives((archive, invalid))
+    assert app.texture_sources == []
+    assert "not a pbo / ifa" in app.status_var.get().lower()
