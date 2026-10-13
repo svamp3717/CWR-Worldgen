@@ -270,7 +270,9 @@ def test_gui_startup_lod_preference_is_passed_into_model_stream(
     monkeypatch.setattr(cli.tk, "Tk", Mock(return_value=Mock()))
     monkeypatch.setattr(cli, "SplitStateCategoriserApp", Mock())
 
-    assert cli.main([]) == 0
+    # The startup dialog no longer has an LOD radio button. Explicit CLI
+    # selection is preserved when model sources are picked in the GUI.
+    assert cli.main(["--preview-lod", "full"]) == 0
     assert preview.call_args.kwargs["lod_quality"] == "full"
 
 
