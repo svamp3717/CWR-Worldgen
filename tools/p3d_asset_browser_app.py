@@ -177,6 +177,14 @@ class AssetBrowserApp:
         ttk.Button(controls, text="Reset view", command=self._reset_view).pack(
             side=tk.LEFT, padx=(12, 0)
         )
+        self.preview_lod_var = tk.StringVar(master=self.root, value="fast")
+        ttk.Label(controls, text="Preview LOD:").pack(side=tk.LEFT, padx=(14, 4))
+        lod_picker = ttk.Combobox(
+            controls, textvariable=self.preview_lod_var, values=("fast", "full"),
+            state="readonly", width=6,
+        )
+        lod_picker.pack(side=tk.LEFT)
+        lod_picker.bind("<<ComboboxSelected>>", self._change_preview_lod)
         self.skip_textures_var = tk.BooleanVar(master=self.root, value=False)
         ttk.Checkbutton(
             controls,
@@ -559,13 +567,23 @@ class AssetBrowserApp:
         else:
             self._show_texture(item)
 
+    def _change_preview_lod(self, _event=None) -> None:
+        """Reload the selected model at the requested LOD without rescanning PBOs."""
+        if getattr(self.current, "kind", None) == "model":
+            self._show_model(self.current)
+
     def _show_model(self, item: BrowserAsset) -> None:
         self._busy(f"Loading model {item.path}…")
         try:
             cache = getattr(self, "model_cache", None)
+            quality = (
+                self.preview_lod_var.get() if hasattr(self, "preview_lod_var")
+                else "full"
+            )
             model = (
-                cache.get(item, self.catalogue) if cache is not None
-                else load_model(item, self.catalogue)
+                cache.get(item, self.catalogue, lod_quality=quality)
+                if cache is not None
+                else load_model(item, self.catalogue, lod_quality=quality)
             )
             self.current_model = model
             self._draw_model(model)
