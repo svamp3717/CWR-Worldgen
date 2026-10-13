@@ -255,10 +255,13 @@ def collect_edges(faces: Sequence[RenderFace]) -> np.ndarray:
 def build_preview_model(
     data: bytes, *, model_path: str, source: str, lod_quality: str = "full",
     max_points: int = 25_000,
+    available_lods: tuple[lod_options.LodOption, ...] | None = None,
 ) -> PreviewModel:
     """Build a preview, preserving discovered LODs for the GUI's selector."""
+    options = available_lods
     try:
-        options = lod_options.list_lods(data)
+        if options is None:
+            options = lod_options.list_lods(data)
     except (measure.ModelReadError, modern_odol.ModernOdolError, struct.error,
             ValueError, OverflowError):
         # Damaged or unsupported LOD metadata must not hide a formerly
