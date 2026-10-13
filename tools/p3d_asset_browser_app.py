@@ -27,6 +27,7 @@ from p3d_asset_browser_catalog import (
 from p3d_frozen_support import dismiss_splash
 from p3d_texture_sources import TextureResolver
 from p3d_texture_render import MipmapCache, render_textured_model
+from cwr_worldgen.pbo import is_pbo_path
 from cwr_worldgen.assets import canonical_asset_path
 
 
@@ -36,6 +37,9 @@ class AssetBrowserApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.sources: list[Path] = []
+        # Additional texture archives are indexed by the lazy texture resolver,
+        # never added to the model/texture catalogue scan.
+        self.texture_sources: list[Path] = []
         self.catalogue = BrowserCatalogue((), (), {})
         self.texture_resolver = TextureResolver(())
         self.model_cache = ModelPreviewCache()
@@ -77,12 +81,26 @@ class AssetBrowserApp:
         clear_sources_button = ttk.Button(
             toolbar, text="Clear sources", command=self.clear_sources
         )
-        clear_sources_button.pack(side=tk.LEFT, padx=(6, 14))
+        clear_sources_button.pack(side=tk.LEFT, padx=(6, 10))
+        add_textures_button = ttk.Button(
+            toolbar, text="Add texture PBOs / IFAs…",
+            command=self.select_texture_archives,
+        )
+        add_textures_button.pack(side=tk.LEFT, padx=(6, 0))
+        clear_textures_button = ttk.Button(
+            toolbar, text="Clear texture PBOs", command=self.clear_texture_archives,
+        )
+        clear_textures_button.pack(side=tk.LEFT, padx=(6, 10))
         self._source_buttons.extend(
-            (select_pbo_button, add_folder_button, clear_sources_button)
+            (select_pbo_button, add_folder_button, clear_sources_button,
+             add_textures_button, clear_textures_button)
         )
         self.sources_var = tk.StringVar(master=self.root, value="No source selected")
         ttk.Label(toolbar, textvariable=self.sources_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.texture_sources_var = tk.StringVar(
+            master=self.root, value="0 extra texture archives",
+        )
+        ttk.Label(toolbar, textvariable=self.texture_sources_var).pack(side=tk.LEFT, padx=(4, 0))
 
         self.status_var = tk.StringVar(
             master=self.root,
@@ -296,6 +314,73 @@ class AssetBrowserApp:
             self.clear_sources()
             self._add_sources(Path(value) for value in values)
 
+    def select_texture_archives(self) -> None:
+        """Select multiple texture-only PBO/IFA files without rescanning models."""
+        if self._scan_in_progress:
+            self.status_var.set("Asset scan already in progress.")
+            return
+        values = filedialog.askopenfilenames(
+            parent=self.root,
+            title="Add texture PBO / IFA archives (select multiple)",
+            filetypes=(
+                ("PBO / IFA archives", "*.pbo *.ifa *.pbo.zst *.ifa.zst"),
+                ("PBO archives", "*.pbo *.pbo.zst"),
+                ("Iron Front IFA archives", "*.ifa *.ifa.zst"),
+                ("All files", "*.*"),
+            ),
+        )
+        if values:
+            self._add_texture_archives(tuple(Path(value) for value in values))
+
+    def _update_texture_source_label(self) -> None:
+        if hasattr(self, "texture_sources_var"):
+            self.texture_sources_var.set(
+                f"{len(self.texture_sources)} extra texture archive(s)"
+            )
+
+    def _refresh_texture_resolver(self) -> None:
+        self.texture_resolver = TextureResolver((*self.sources, *self.texture_sources))
+        if hasattr(self, "mipmap_cache"):
+            self.mipmap_cache.clear()
+        if getattr(self, "current_model", None) is not None:
+            self._redraw_current_model()
+
+    def _add_texture_archives(self, paths) -> None:
+        """Add only requested files, not their sibling folders or extra models."""
+        known = {
+            str(path.resolve()).casefold()
+            for path in (*self.sources, *self.texture_sources)
+        }
+        additions: list[Path] = []
+        for raw in paths:
+            path = Path(raw).expanduser()
+            if not path.is_file() or not is_pbo_path(path):
+                self.status_var.set(f"Not a PBO / IFA texture archive: {path}")
+                return
+            key = str(path.resolve()).casefold()
+            if key not in known:
+                additions.append(path)
+                known.add(key)
+        if not additions:
+            self.status_var.set("Selected texture archives are already available.")
+            return
+        self.texture_sources.extend(additions)
+        self._update_texture_source_label()
+        self._refresh_texture_resolver()
+        self.status_var.set(
+            f"Added {len(additions)} texture archive(s), "
+            f"{len(self.texture_sources)} total. Model catalogue unchanged."
+        )
+
+    def clear_texture_archives(self) -> None:
+        if not self.texture_sources:
+            self.status_var.set("No additional texture archives to clear.")
+            return
+        self.texture_sources.clear()
+        self._update_texture_source_label()
+        self._refresh_texture_resolver()
+        self.status_var.set("Extra texture archives cleared. Model catalogue unchanged.")
+
     def select_folder(self) -> None:
         if self._scan_in_progress:
             self.status_var.set("Asset scan already in progress.")
@@ -325,6 +410,11 @@ class AssetBrowserApp:
 
     def clear_sources(self) -> None:
         self.sources.clear()
+        # A full reset also drops texture-only sources. The dedicated Clear
+        # texture PBOs button leaves the model catalogue untouched.
+        if hasattr(self, "texture_sources"):
+            self.texture_sources.clear()
+            self._update_texture_source_label()
         self.catalogue = BrowserCatalogue((), (), {})
         self.texture_resolver = TextureResolver(())
         if hasattr(self, "model_cache"):
@@ -389,7 +479,9 @@ class AssetBrowserApp:
                 continue
             sources, catalogue = payload
             self.catalogue = catalogue
-            self.texture_resolver = TextureResolver(sources)
+            self.texture_resolver = TextureResolver(
+                (*sources, *getattr(self, "texture_sources", ()))
+            )
             if hasattr(self, "model_cache"):
                 self.model_cache.clear()
             if hasattr(self, "texture_preview_cache"):
