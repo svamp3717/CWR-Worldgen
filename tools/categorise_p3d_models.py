@@ -250,6 +250,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         root,
         model_iter=iterator,
         texture_resolver=TextureResolver(texture_inputs),
+        initial_texture_sources=tuple(path for path in texture_sources if path not in inputs),
         output=args.output,
         categories=categories,
         state=state,
