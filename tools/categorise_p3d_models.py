@@ -100,6 +100,14 @@ def _parser() -> argparse.ArgumentParser:
         help="Custom category checkbox; repeat for several.",
     )
     p.add_argument(
+        "--preview-lod", choices=("fast", "full"), default="fast",
+        help=(
+            "Visual preview detail for Arma-era ODOL P3Ds. Fast chooses a lower "
+            "visual LOD where available; full chooses the most detailed LOD. "
+            "Neither changes the model scan or classification JSON."
+        ),
+    )
+    p.add_argument(
         "--max-preview-points",
         type=int,
         default=DEFAULT_MAX_PREVIEW_POINTS,
@@ -149,6 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0  # Cancel: do not scan or touch the JSON output.
         inputs = list(selected.inputs)
         selected_texture_sources = selected.texture_sources
+        args.preview_lod = selected.preview_lod
         args.output = selected.output
     missing = [p for p in inputs if not p.exists()]
     if missing:
@@ -244,7 +253,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
 
-    iterator = preview_models(inputs, args.include, args.max_preview_points)
+    iterator = preview_models(
+        inputs, args.include, args.max_preview_points,
+        lod_quality=args.preview_lod,
+    )
     root = tk.Tk()
     app = SplitStateCategoriserApp(
         root,
