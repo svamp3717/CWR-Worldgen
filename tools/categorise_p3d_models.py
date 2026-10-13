@@ -265,6 +265,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         texture_resolver=TextureResolver(texture_inputs),
         initial_texture_sources=tuple(path for path in texture_sources if path not in inputs),
         preview_lod=args.preview_lod,
+        max_preview_points=args.max_preview_points,
         output=args.output,
         categories=categories,
         state=state,
