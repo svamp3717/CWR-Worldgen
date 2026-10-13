@@ -236,7 +236,9 @@ def test_gui_texture_archives_do_not_extend_categoriser_model_scan(
     )
     monkeypatch.setattr(
         cli, "preview_models",
-        lambda inputs, includes, max_points: observed.append(("preview", tuple(inputs))) or iter(()),
+        lambda inputs, includes, max_points, *, lod_quality: observed.append(
+            ("preview", tuple(inputs), lod_quality)
+        ) or iter(()),
     )
     root = Mock()
     monkeypatch.setattr(cli.tk, "Tk", Mock(return_value=root))
@@ -244,10 +246,45 @@ def test_gui_texture_archives_do_not_extend_categoriser_model_scan(
     monkeypatch.setattr(cli, "SplitStateCategoriserApp", launch)
 
     assert cli.main([]) == 0
-    assert observed == [("count", (model,)), ("preview", (model,))]
+    assert observed == [("count", (model,)), ("preview", (model,), "fast")]
     assert launch.call_args.kwargs["texture_resolver"].inputs == (
         model, extra_pbo, extra_ifa
     )
     assert launch.call_args.kwargs["initial_texture_sources"] == (
         extra_pbo, extra_ifa
     )
+
+
+
+def test_gui_startup_lod_preference_is_passed_into_model_stream(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    model = _archive(tmp_path, "models.pbo")
+    selection = startup.StartupSelection(
+        (model,), tmp_path / "categories.json", (), "full",
+    )
+    monkeypatch.setattr(cli, "prompt_for_startup_selection", Mock(return_value=selection))
+    monkeypatch.setattr(cli.measure, "count_models", lambda *_args: 1)
+    preview = Mock(return_value=iter(()))
+    monkeypatch.setattr(cli, "preview_models", preview)
+    monkeypatch.setattr(cli.tk, "Tk", Mock(return_value=Mock()))
+    monkeypatch.setattr(cli, "SplitStateCategoriserApp", Mock())
+
+    assert cli.main([]) == 0
+    assert preview.call_args.kwargs["lod_quality"] == "full"
+
+
+def test_cli_preview_lod_defaults_fast_and_supports_full(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    archive = _archive(tmp_path, "models.pbo")
+    monkeypatch.setattr(cli.measure, "count_models", lambda *_args: 0)
+    preview = Mock(return_value=iter(()))
+    monkeypatch.setattr(cli, "preview_models", preview)
+    monkeypatch.setattr(cli.tk, "Tk", Mock(return_value=Mock()))
+    monkeypatch.setattr(cli, "SplitStateCategoriserApp", Mock())
+
+    assert cli.main([str(archive)]) == 0
+    assert preview.call_args.kwargs["lod_quality"] == "fast"
+    assert cli.main([str(archive), "--preview-lod", "full"]) == 0
+    assert preview.call_args.kwargs["lod_quality"] == "full"
