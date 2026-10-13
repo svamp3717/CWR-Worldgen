@@ -162,20 +162,10 @@ class StartupSelectionDialog:
             command=self.remove_selected_textures,
         ).pack(side=tk.LEFT, padx=(6, 0))
 
-        lod_options = ttk.Frame(frame)
-        lod_options.grid(row=7, column=0, sticky="w", pady=(0, 10))
-        ttk.Label(lod_options, text="Model preview detail:").pack(side=tk.LEFT)
-        ttk.Radiobutton(
-            lod_options, text="Fast (lowest visual LOD)",
-            value="fast", variable=self.preview_lod_var,
-        ).pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Radiobutton(
-            lod_options, text="Full detail",
-            value="full", variable=self.preview_lod_var,
-        ).pack(side=tk.LEFT, padx=(8, 0))
-
+        # Preview LOD is chosen beside Skip textures in the main window,
+        # where the actual levels for the current model are known.
         output_frame = ttk.LabelFrame(frame, text="Classification JSON output", padding=9)
-        output_frame.grid(row=8, column=0, sticky="ew")
+        output_frame.grid(row=7, column=0, sticky="ew")
         output_frame.columnconfigure(0, weight=1)
         self.output_entry = ttk.Entry(output_frame, textvariable=self.output_var)
         self.output_entry.grid(row=0, column=0, sticky="ew")
@@ -195,7 +185,7 @@ class StartupSelectionDialog:
         ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         actions = ttk.Frame(frame)
-        actions.grid(row=9, column=0, sticky="e", pady=(12, 0))
+        actions.grid(row=8, column=0, sticky="e", pady=(12, 0))
         ttk.Button(actions, text="Cancel", command=self.cancel).pack(side=tk.LEFT)
         ttk.Button(
             actions, text="Start categorising", command=self.confirm,
