@@ -360,7 +360,7 @@ class CategoriserApp:
         source_actions = ttk.Frame(side)
         source_actions.pack(fill=tk.X, pady=(5, 0))
         ttk.Button(
-            source_actions, text="Add texture PBOs / IFAs…", command=self.select_texture_archives
+            source_actions, text="Add PBOs / IFAs…", command=self.select_texture_archives
         ).pack(side=tk.LEFT)
         ttk.Button(
             source_actions, text="Add folder…", command=self.select_texture_folder
