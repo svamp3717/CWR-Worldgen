@@ -221,9 +221,9 @@ class AssetBrowserApp:
             height=7,
             selectmode="browse",
         )
-        self.related_tree.heading("kind", text="Type")
+        self.related_tree.heading("kind", text="Type / status")
         self.related_tree.heading("path", text="Path")
-        self.related_tree.column("kind", width=80, stretch=False)
+        self.related_tree.column("kind", width=115, stretch=False)
         self.related_tree.column("path", width=520, stretch=True)
         self.related_tree.grid(row=0, column=0, sticky="nsew")
         related_scroll = ttk.Scrollbar(
@@ -754,6 +754,29 @@ class AssetBrowserApp:
         for child in self.related_tree.get_children():
             self.related_tree.delete(child)
 
+    def _external_texture_status(self, path: str) -> str:
+        """Resolve a reference outside the catalogue using the preview's sources.
+
+        Texture-only PBOs/IFAs intentionally aren't added to the model scan's
+        catalogue. That does not mean their textures are missing. Use the same
+        lazy resolver as the renderer, without decoding another image just to
+        display a status in the related-assets list.
+        """
+        if self.skip_textures_var.get() or self.current_model is None:
+            return "Unchecked"
+        resolver = self.texture_resolver
+        try:
+            ref = resolver._find_ref(path, self.current_model.source)
+        except (OSError, ValueError):
+            return "Unavailable"
+        if ref is None:
+            return "Missing"
+        # If rendering actually tried and failed to decode this texture,
+        # distinguish that from merely finding its bytes in an archive.
+        if path in resolver.image_cache and resolver.image_cache[path] is None:
+            return "Unreadable"
+        return "External"
+
     def _set_related_textures(self, paths: tuple[str, ...]) -> None:
         self._clear_related()
         by_path = {item.path: item for item in self.catalogue.textures}
@@ -768,11 +791,12 @@ class AssetBrowserApp:
             iid = f"r{index}"
             if asset is not None:
                 self._related_assets[iid] = asset
+            status = "Texture" if asset is not None else self._external_texture_status(path)
             self.related_tree.insert(
                 "",
                 tk.END,
                 iid=iid,
-                values=("Texture" if asset else "Missing", path),
+                values=(status, path),
             )
 
     def _set_related_models(self, models: tuple[BrowserAsset, ...]) -> None:
@@ -830,6 +854,13 @@ class AssetBrowserApp:
         if self.current_model is None:
             return
         self._draw_model(self.current_model)
+        # Source changes and Skip textures must also refresh the related-list
+        # status. Previously it remained stale after adding a texture PBO.
+        if getattr(self.current, "kind", None) == "model":
+            self._set_related_textures(tuple(
+                canonical_asset_path(value)
+                for value in self.current_model.texture_paths if value
+            ))
         if self.skip_textures_var.get():
             self.status_var.set(
                 "Texture lookup skipped for faster model browsing."
