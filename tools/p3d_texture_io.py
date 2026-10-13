@@ -557,22 +557,27 @@ class TextureResolver:
         self._cache_raw(canonical, data)
         return data
 
-    def load_rgba(self, texture_path: str, source: str) -> np.ndarray | None:
+    def load_rgba(
+        self, texture_path: str, source: str, *, mipmap: str = "auto",
+    ) -> np.ndarray | None:
         canonical = _canonical(texture_path)
-        if canonical in self.image_cache:
-            self.image_cache.move_to_end(canonical)
-            return self.image_cache[canonical]
+        # Different mip choices must never return an RGBA from another detail
+        # level. Preserve the historical plain key for the full-resolution mip.
+        key = canonical if mipmap in ("auto", "mip:0") else canonical + "|" + mipmap
+        if key in self.image_cache:
+            self.image_cache.move_to_end(key)
+            return self.image_cache[key]
         data = self.load_bytes(canonical, source)
         if data is None:
             print(f"[texture missing] {canonical}", file=sys.stderr, flush=True)
-            self._cache_rgba(canonical, None)
+            self._cache_rgba(key, None)
             return None
         try:
-            image = decode_paa(data, is_paa=canonical.endswith(".paa"))
+            image = decode_paa(data, is_paa=canonical.endswith(".paa"), mipmap=mipmap)
         except (ValueError, struct.error, IndexError) as exc:
             print(f"[texture decode error] {canonical}: {exc}", file=sys.stderr, flush=True)
             image = None
-        self._cache_rgba(canonical, image)
+        self._cache_rgba(key, image)
         return image
 
 
