@@ -460,12 +460,15 @@ def _read_resolution_lod(r: _Reader, resolution: float, start: int, end: int) ->
     return ModernMesh(v, resolution, points, tuple(faces), tuple(used_textures))
 
 
-def read_model_mesh(data: bytes) -> ModernMesh:
-    """Return real first visual LOD vertices, faces, UVs and texture references.
+def read_model_mesh(data: bytes, *, lod_quality: str = "full") -> ModernMesh:
+    """Decode visual LOD vertices, faces, UVs and texture references.
 
-    Raises MeshReadError if the file has no decodable visual LOD; callers may
-    still show the (separately parsed) ModelInfo bounds as a fallback.
+    Full prefers the highest-detail visual LOD (the legacy behaviour).
+    Fast starts at the third visual LOD when available, avoiding expensive
+    high-detail geometry. An unreadable LOD falls back to other visual LODs.
     """
+    if lod_quality not in {"full", "fast"}:
+        raise ValueError(f"unsupported preview LOD quality: {lod_quality}")
     bounds = read_model_bounds(data)
     r = _Reader(data, bounds.version)
     r.seek(8)
@@ -484,8 +487,18 @@ def read_model_mesh(data: bytes) -> ModernMesh:
     entries = _lod_table(r)
     if not entries:
         raise MeshReadError("ODOL has no resolution LODs")
+    # Exclude geometry, roadway and shadow LODs from visual previews.
+    # Visual resolution entries are sorted from most to least detail.
+    visual = [entry for entry in entries if 0 <= entry[0] < 10000]
+    if lod_quality == "fast" and visual:
+        selected = min(2, len(visual) - 1)
+        # Prefer equal/lower detail if selected data cannot be decoded;
+        # then try successively higher detail as a last resort.
+        candidates = visual[selected:] + list(reversed(visual[:selected]))
+    else:
+        candidates = visual or list(entries)
     failures: list[str] = []
-    for resolution, start, end in entries:
+    for resolution, start, end in candidates:
         try:
             return _read_resolution_lod(r, resolution, start, end)
         except (MeshReadError, struct.error, OverflowError, ValueError) as exc:
