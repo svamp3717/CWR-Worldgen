@@ -10,7 +10,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from p3d_texture_io import decode_paa
+from p3d_texture_io import decode_paa, list_paa_mips, TextureResolver
 from p3d_texture_render import (
     RenderFace,
     _project,
@@ -202,3 +202,113 @@ def test_browser_uses_antialiased_downsampling_for_3d_models(monkeypatch) -> Non
     app._draw_model(model)
     assert app.ax_preview.imshow.call_args.kwargs["interpolation"] == "hanning"
     assert app.ax_preview.imshow.call_args.kwargs["resample"] is True
+
+
+
+def _embedded_dxt1_mips() -> bytes:
+    """Three true PAA payloads with different colours at each mip level."""
+    red = struct.pack("<HHI", 0xF800, 0x0000, 0)
+    green = struct.pack("<HHI", 0x07E0, 0x0000, 0)
+    blue = struct.pack("<HHI", 0x001F, 0x0000, 0)
+    data = bytearray(struct.pack("<HH", 0xFF01, 0))
+    for width, height, payload in (
+        (8, 8, red * 4), (4, 4, green), (2, 2, blue),
+    ):
+        data.extend(struct.pack("<HH", width, height))
+        data.extend(len(payload).to_bytes(3, "little"))
+        data.extend(payload)
+    data.extend(b"\0" * 7)  # end-of-chain sentinel
+    return bytes(data)
+
+
+def test_selects_original_embedded_paa_mip_without_decoding_base(monkeypatch) -> None:
+    import p3d_texture_io as paa_io
+    data = _embedded_dxt1_mips()
+    assert list_paa_mips(data) == ((8, 8), (4, 4), (2, 2))
+    original = paa_io._decode_dxt
+    sizes = []
+
+    def tracked(payload, width, height, kind):
+        sizes.append((width, height))
+        return original(payload, width, height, kind)
+
+    monkeypatch.setattr(paa_io, "_decode_dxt", tracked)
+
+    full = decode_paa(data)
+    half = decode_paa(data, mipmap="mip:1")
+    quarter = decode_paa(data, mipmap="mip:2")
+    max_four = decode_paa(data, mipmap="max:4")
+    max_one = decode_paa(data, mipmap="max:1")
+    beyond = decode_paa(data, mipmap="mip:9")
+
+    assert sizes == [(8, 8), (4, 4), (2, 2), (4, 4), (2, 2), (2, 2)]
+    assert full.shape == (8, 8, 4) and tuple(full[0, 0]) == (255, 0, 0, 255)
+    assert half.shape == (4, 4, 4) and tuple(half[0, 0]) == (0, 255, 0, 255)
+    assert quarter.shape == (2, 2, 4) and tuple(quarter[0, 0]) == (0, 0, 255, 255)
+    assert np.array_equal(max_four, half)
+    assert np.array_equal(max_one, quarter)
+    assert np.array_equal(beyond, quarter)
+
+
+def test_mipmap_decoder_handles_single_mip_and_invalid_selection() -> None:
+    block = struct.pack("<HHI", 0xF800, 0, 0)
+    data = (
+        struct.pack("<HHHH", 0xFF01, 0, 4, 4)
+        + len(block).to_bytes(3, "little") + block
+    )
+    assert list_paa_mips(data) == ((4, 4),)
+    assert np.array_equal(decode_paa(data), decode_paa(data, mipmap="max:64"))
+    assert np.array_equal(decode_paa(data), decode_paa(data, mipmap="mip:8"))
+    import pytest
+    with pytest.raises(ValueError, match="invalid texture mip"):
+        decode_paa(data, mipmap="mip:nope")
+
+
+def test_texture_resolver_separates_full_and_small_mip_cache(monkeypatch) -> None:
+    data = _embedded_dxt1_mips()
+    resolver = TextureResolver(())
+    from unittest.mock import Mock
+    resolver.load_bytes = Mock(return_value=data)
+
+    full = resolver.load_rgba("wall.paa", "models.pbo")
+    smaller = resolver.load_rgba("wall.paa", "models.pbo", mipmap="max:4")
+    assert full.shape == (8, 8, 4)
+    assert smaller.shape == (4, 4, 4)
+    assert resolver.load_rgba("wall.paa", "models.pbo") is full
+    assert resolver.load_rgba("wall.paa", "models.pbo", mipmap="max:4") is smaller
+    assert resolver.load_bytes.call_count == 2  # raw bytes reused by load_bytes in production
+    assert "wall.paa" in resolver.image_cache
+    assert "wall.paa|max:4" in resolver.image_cache
+
+
+def test_model_renderer_forwards_selected_texture_mipmap(monkeypatch) -> None:
+    import p3d_texture_render as rasterizer
+    from types import SimpleNamespace
+    import p3d_asset_browser_app as browser
+
+    class CapturingResolver:
+        def __init__(self):
+            self.calls = []
+        def load_rgba(self, path, source, *, mipmap="auto"):
+            self.calls.append((path, source, mipmap))
+            return np.full((4, 4, 4), (50, 100, 150, 255), dtype=np.uint8)
+
+    monkeypatch.setattr(rasterizer, "_project", lambda *_a: np.array([
+        [5.0, 5.0, 1.0], [26.0, 5.0, 1.0], [15.0, 26.0, 1.0],
+    ]))
+    points = np.array([[-1, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+    face = RenderFace((0, 1, 2), ((0, 0), (1, 0), (0, 1)), "wall.paa")
+    resolver = CapturingResolver()
+    mipcache = rasterizer.MipmapCache()
+    image, hits, misses = rasterizer.render_textured_model(
+        points, (face,), resolver, "models.pbo",
+        width=32, height=32, mipmap_cache=mipcache, texture_mipmap="max:256",
+    )
+    assert (hits, misses) == (1, 0)
+    assert resolver.calls == [("wall.paa", "models.pbo", "max:256")]
+    assert image.shape == (32, 32, 3)
+    rasterizer.render_textured_model(
+        points, (face,), resolver, "models.pbo",
+        width=32, height=32, mipmap_cache=mipcache, texture_mipmap="max:256",
+    )
+    assert len(resolver.calls) == 1
