@@ -445,3 +445,27 @@ def test_startup_texture_sources_can_be_cleared_without_removing_model_sources(
     app.clear_added_texture_sources()
     assert app.texture_resolver.inputs == (model,)
     assert app._extra_texture_sources == []
+
+
+
+def test_categoriser_texture_mip_change_redraws_without_model_rescan() -> None:
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    app.current = model("house.p3d")
+    app._mipmap_choices = {"Full (mip 0)": "auto", "Max 256 px": "max:256"}
+    app.texture_mipmap_var = Var("Max 256 px")
+    app._redraw = Mock()
+    app.model_iter = iter(())
+    stream = app.model_iter
+    app.state = {"house.p3d": ui.Classification(["Residential"])}
+    before = app.state["house.p3d"]
+
+    assert app._selected_texture_mipmap() == "max:256"
+    app._change_texture_mipmap()
+    app._redraw.assert_called_once_with()
+    assert app.model_iter is stream
+    assert app.state["house.p3d"] is before
+
+
+def test_categoriser_texture_mip_defaults_to_full_for_older_test_views() -> None:
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    assert app._selected_texture_mipmap() == "auto"
