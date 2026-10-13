@@ -365,16 +365,16 @@ def test_fast_lod_uses_lower_detail_mesh_without_decoding_full_lod(monkeypatch) 
 
     observed.clear()
     fast = odol.read_model_mesh(data, lod_quality="fast")
-    assert fast.resolution == pytest.approx(3.0)
-    assert len(fast.points) == 50
+    assert fast.resolution == pytest.approx(5.0)
+    assert len(fast.points) == 4
     assert len(fast.faces) == len(full.faces)
-    assert observed == [3.0]  # No high-detail, geometry, or shadow parsing.
+    assert observed == [5.0]  # The last VISUAL LOD, not the third or shadow.
 
     measured, points, faces, textures = geometry.extract_first_lod_geometry(
         data, model_path="example.p3d", source="models.pbo", lod_quality="fast",
     )
-    assert measured.lod == "resolution 3"
-    assert len(points) == 50
+    assert measured.lod == "resolution 5"
+    assert len(points) == 4
     assert len(faces) == 2
     assert textures == (r"ca\data\brick.paa",)
 
@@ -401,3 +401,54 @@ def test_fast_lod_keeps_one_lod_models_and_rejects_unknown_mode() -> None:
     assert odol.read_model_mesh(data, lod_quality="fast").resolution == 1.0
     with pytest.raises(ValueError, match="unsupported preview LOD"):
         odol.read_model_mesh(data, lod_quality="ultra")
+
+
+
+def test_fast_lod_uses_final_visual_lod_with_many_lods(monkeypatch) -> None:
+    data = full_odol(49, lod_specs=(
+        (1.0, 200), (10.0, 100), (2.0e13, 8),
+        (2.0, 150), (20.0, 75), (30.0, 20), (3.0, 125),
+    ))
+    chosen = []
+    original = odol._read_resolution_lod
+
+    def tracked(reader, resolution, start, end):
+        chosen.append(resolution)
+        return original(reader, resolution, start, end)
+
+    monkeypatch.setattr(odol, "_read_resolution_lod", tracked)
+    fast = odol.read_model_mesh(data, lod_quality="fast")
+    assert fast.resolution == pytest.approx(30.0)
+    assert len(fast.points) == 20
+    assert chosen == [30.0]
+
+
+def test_fast_lod_falls_back_from_coarsest_to_next_visual(monkeypatch) -> None:
+    data = full_odol(49, lod_specs=(
+        (1.0, 200), (2.0, 150), (3.0, 100), (4.0, 50), (5.0, 4),
+    ))
+    visited = []
+    original = odol._read_resolution_lod
+
+    def tracked(reader, resolution, start, end):
+        visited.append(resolution)
+        if resolution == 5.0:
+            raise odol.MeshReadError("coarsest visual LOD damaged")
+        return original(reader, resolution, start, end)
+
+    monkeypatch.setattr(odol, "_read_resolution_lod", tracked)
+    mesh = odol.read_model_mesh(data, lod_quality="fast")
+    assert mesh.resolution == pytest.approx(4.0)
+    assert visited == [5.0, 4.0]
+
+
+def test_nonvisual_lods_are_never_selected_for_fast_preview(monkeypatch) -> None:
+    data = full_odol(49, lod_specs=((1.0e13, 8), (2.0e13, 4)))
+    attempted = []
+    monkeypatch.setattr(
+        odol, "_read_resolution_lod",
+        lambda reader, resolution, start, end: attempted.append(resolution),
+    )
+    with pytest.raises(odol.MeshReadError, match="no visual resolution LODs"):
+        odol.read_model_mesh(data, lod_quality="fast")
+    assert attempted == []
