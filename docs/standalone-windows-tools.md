@@ -95,7 +95,7 @@ separate bottleneck.
 - **Model & Texture Browser:** change the **Preview LOD** dropdown between
   `fast` and `full` while browsing. The current model reloads at the selected
   quality, with independent in-memory caches for each detail level.
-- **Model Categoriser:** choose **Fast (lower visual LOD)** or **Full detail**
+- **Model Categoriser:** choose **Fast (lowest visual LOD)** or **Full detail**
   in the startup dialog. When launching with a model path on the command
   line, use `--preview-lod fast` (the default) or `--preview-lod full`.
 
