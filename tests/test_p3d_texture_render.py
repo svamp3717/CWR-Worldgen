@@ -98,3 +98,52 @@ def test_textured_mode_still_loads_texture(monkeypatch) -> None:
     ]
     assert hits == 1
     assert misses == 0
+
+
+def _two_band_atlas() -> np.ndarray:
+    """An asymmetric colour atlas: a vertical UV flip swaps the two bands."""
+    image = np.empty((8, 8, 4), dtype=np.uint8)
+    image[:4] = (225, 35, 20, 255)  # top: red
+    image[4:] = (20, 40, 225, 255)  # bottom: blue
+    return image
+
+
+def test_p3d_top_origin_uvs_sample_correct_colour_atlas_rows() -> None:
+    atlas = _two_band_atlas()
+    u = np.asarray([0.25, 0.25, 0.25])
+    v = np.asarray([0.25, 0.75, -0.25])
+    samples = render._sample_bilinear(atlas, u, v)
+
+    assert tuple(samples[0]) == (225, 35, 20, 255)
+    assert tuple(samples[1]) == (20, 40, 225, 255)
+    # UVs outside [0,1] still repeat; they must not flip when wrapped.
+    assert tuple(samples[2]) == (20, 40, 225, 255)
+
+
+def test_model_triangle_uses_correct_half_of_p3d_colour_atlas(monkeypatch) -> None:
+    monkeypatch.setattr(render, "_project", _visible_projection)
+    points, _faces = _triangle()
+
+    class AtlasResolver:
+        def load_rgba(self, texture_path: str, source: str):
+            assert texture_path == r"inner\wall.paa"
+            return _two_band_atlas()
+
+    # Same polygon and image, but with UVs deliberately confined to the top
+    # half of the atlas. Prior to the fix, these faces appeared blue.
+    faces = (
+        render.RenderFace(
+            indices=(0, 1, 2),
+            uvs=((0.125, 0.25), (0.375, 0.25), (0.25, 0.25)),
+            texture_path=r"inner\wall.paa",
+        ),
+    )
+    image, hits, misses = render.render_textured_model(
+        points, faces, AtlasResolver(), "inner.pbo",
+        width=32, height=32,
+    )
+    foreground = image[np.any(image != 236, axis=2)]
+    assert hits == 1
+    assert misses == 0
+    assert len(foreground) > 0
+    assert np.all(foreground == (225, 35, 20))
