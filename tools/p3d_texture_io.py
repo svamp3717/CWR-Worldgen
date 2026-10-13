@@ -37,7 +37,7 @@ MIPMAP_CHOICES = (
     ("Max 256 px", "max:256"),
     ("Max 128 px", "max:128"),
     ("Max 64 px", "max:64"),
-    *((f"Mip {i} (1/{1 << i})", f"mip:{i}") for i in range(1, 11)),
+    *((f"Mip {i} (1/{1 << i})", f"mip:{i}") for i in range(1, 15)),
 )
 
 
@@ -869,9 +869,15 @@ def _paa_mip_directory(
             if mips:
                 break
             raise ValueError(f"invalid PAA dimensions {width}x{height}")
+        if mips and (width > mips[-1].width or height > mips[-1].height):
+            break
         size = _u24(stream)
         payload_start = stream.tell()
         if payload_start + size > len(data):
+            if mips:
+                # Malformed trailing tables should not break a readable first
+                # mip; they are not valid selectable image levels.
+                break
             raise ValueError(f"truncated PAA/PAC mip payload: need {size} bytes")
         mips.append(PaaMip(width, height, payload_start, size, lzo, lzw_p8))
         stream.seek(payload_start + size)
