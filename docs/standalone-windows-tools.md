@@ -79,6 +79,30 @@ and **Unchecked** means texture loading was skipped. Extra texture archives
 are deliberately not added to the model catalogue; the external status is
 updated when you add or clear them.
 
+### Fast visual LOD previews
+
+Both P3D tools default to **Fast** preview detail for modern Arma-era ODOL
+models. When the model has enough visual LODs, Fast reads the **third visual
+LOD** rather than decoding the much larger high-detail mesh. With two visual
+LODs it uses the second, and with one it uses the only available LOD.
+If the selected LOD cannot be decoded, it falls back to another valid visual
+LOD, never deliberately choosing a physics, roadway, or shadow LOD.
+This reduces geometry parsing and rasterization work but does **not** avoid
+reading the P3D from its PBO/IFA archive. Texture lookup may still be a
+separate bottleneck.
+
+- **Model & Texture Browser:** change the **Preview LOD** dropdown between
+  `fast` and `full` while browsing. The current model reloads at the selected
+  quality, with independent in-memory caches for each detail level.
+- **Model Categoriser:** choose **Fast (lower visual LOD)** or **Full detail**
+  in the startup dialog. When launching with a model path on the command
+  line, use `--preview-lod fast` (the default) or `--preview-lod full`.
+
+Older OFP/CWA ODOL v6/v7 and MLOD/SP3X models continue to use their existing
+first-LOD reader. The selected mesh's reported vertex count, texture list,
+and measured dimensions can vary with preview LOD; use **Full detail** when
+precise, highest-detail mesh inspection or measurements matter.
+
 Categoriser classification files and companion `.unclassified.json` files
 are saved to the output path selected in its GUI, not inside the executable.
 
