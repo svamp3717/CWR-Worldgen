@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 import sys
 
 import zstandard
@@ -394,9 +395,9 @@ def test_add_multiple_texture_archives_without_rescanning_or_changing_models(
     app.current_model = object()
     app.catalogue = object()
     original_catalogue = app.catalogue
-    app.mipmap_cache = SimpleNamespace(clear=__import__("unittest.mock", fromlist=["Mock"]).Mock())
-    app._redraw_current_model = __import__("unittest.mock", fromlist=["Mock"]).Mock()
-    app._scan_sources = __import__("unittest.mock", fromlist=["Mock"]).Mock()
+    app.mipmap_cache = SimpleNamespace(clear=Mock())
+    app._redraw_current_model = Mock()
+    app._scan_sources = Mock()
 
     captured = {}
 
@@ -445,3 +446,33 @@ def test_texture_archive_picker_rejects_unrelated_files_atomically(tmp_path: Pat
     app._add_texture_archives((archive, invalid))
     assert app.texture_sources == []
     assert "not a pbo / ifa" in app.status_var.get().lower()
+
+
+
+def test_replacing_model_pbos_preserves_selected_extra_texture_archives(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    old_model = tmp_path / "old.pbo"
+    new_model = tmp_path / "new.ifa"
+    external_texture = tmp_path / "external.pbo"
+    for path in (old_model, new_model, external_texture):
+        path.touch()
+    app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
+    app.root = object()
+    app._scan_in_progress = False
+    app.status_var = _FakeVar("")
+    app.texture_sources_var = _FakeVar("")
+    app.sources = [old_model]
+    app.texture_sources = [external_texture]
+    app.clear_sources = lambda: (app.sources.clear(), app.texture_sources.clear())
+    app._add_sources = lambda values: app.sources.extend(values)
+    monkeypatch.setattr(
+        browser_app.filedialog, "askopenfilenames",
+        lambda **kwargs: (str(new_model),),
+    )
+
+    app.select_pbo()
+
+    assert app.sources == [new_model]
+    assert app.texture_sources == [external_texture]
+    assert app.texture_sources_var.get() == "1 extra texture archive(s)"
