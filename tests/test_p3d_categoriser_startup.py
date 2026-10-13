@@ -248,3 +248,6 @@ def test_gui_texture_archives_do_not_extend_categoriser_model_scan(
     assert launch.call_args.kwargs["texture_resolver"].inputs == (
         model, extra_pbo, extra_ifa
     )
+    assert launch.call_args.kwargs["initial_texture_sources"] == (
+        extra_pbo, extra_ifa
+    )
