@@ -289,3 +289,42 @@ def test_browser_changing_lod_reloads_selected_model_without_rescan() -> None:
     app._change_preview_lod()
     app._show_model.assert_called_once_with(app.current)
     app._scan_sources.assert_not_called()
+
+
+
+def test_browser_mip_selection_redraws_without_rescanning_or_reloading_mesh() -> None:
+    app = app_module.AssetBrowserApp.__new__(app_module.AssetBrowserApp)
+    app.current = _asset("house.p3d")
+    app._mipmap_choices = {"Full (mip 0)": "auto", "Max 256 px": "max:256"}
+    app.texture_mipmap_var = SimpleNamespace(get=lambda: "Max 256 px")
+    app._redraw_current_model = Mock()
+    app._scan_sources = Mock()
+    app._show_model = Mock()
+
+    assert app._selected_texture_mipmap() == "max:256"
+    app._change_texture_mipmap()
+    app._redraw_current_model.assert_called_once_with()
+    app._scan_sources.assert_not_called()
+    app._show_model.assert_not_called()
+
+
+def test_texture_preview_cache_separates_embedded_mip_choices(monkeypatch) -> None:
+    from p3d_asset_browser_catalog import TexturePreviewCache
+    observed = []
+
+    def fake_load(item, _catalogue, *, mipmap="auto"):
+        observed.append(mipmap)
+        width = 8 if mipmap == "auto" else 4
+        return np.ones((width, width, 4), dtype=np.uint8)
+
+    monkeypatch.setattr(catalog, "load_texture", fake_load)
+    cache = TexturePreviewCache(max_images=4)
+    item = _asset("data\\wall.paa", kind="texture")
+    catalogue = catalog.BrowserCatalogue((), (), {})
+    full = cache.get(item, catalogue)
+    smaller = cache.get(item, catalogue, mipmap="max:256")
+    assert full.shape == (8, 8, 4)
+    assert smaller.shape == (4, 4, 4)
+    assert cache.get(item, catalogue) is full
+    assert cache.get(item, catalogue, mipmap="max:256") is smaller
+    assert observed == ["auto", "max:256"]
