@@ -102,9 +102,9 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--preview-lod", choices=("fast", "full"), default="fast",
         help=(
-            "Visual preview detail for Arma-era ODOL P3Ds. Fast chooses the lowest-"
-            "detail visual LOD available; full chooses the most detailed LOD. "
-            "Neither changes the model scan or classification JSON."
+            "Initial preview detail for all supported P3D models (OFP/CWA, "
+            "Arma and Iron Front). Fast uses the lowest visual LOD; full uses "
+            "the highest. Choose individual LODs beside Skip textures in the GUI."
         ),
     )
     p.add_argument(
@@ -263,6 +263,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         model_iter=iterator,
         texture_resolver=TextureResolver(texture_inputs),
         initial_texture_sources=tuple(path for path in texture_sources if path not in inputs),
+        preview_lod=args.preview_lod,
         output=args.output,
         categories=categories,
         state=state,
