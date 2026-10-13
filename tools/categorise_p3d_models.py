@@ -102,8 +102,8 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--preview-lod", choices=("fast", "full"), default="fast",
         help=(
-            "Visual preview detail for Arma-era ODOL P3Ds. Fast chooses a lower "
-            "visual LOD where available; full chooses the most detailed LOD. "
+            "Visual preview detail for Arma-era ODOL P3Ds. Fast chooses the lowest-"
+            "detail visual LOD available; full chooses the most detailed LOD. "
             "Neither changes the model scan or classification JSON."
         ),
     )
