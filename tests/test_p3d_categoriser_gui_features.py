@@ -377,3 +377,42 @@ def test_save_as_failure_rolls_back_active_json_destination(
     assert app.output == old
     assert app.output_var.get() == str(old)
     assert error.call_count == 1
+
+
+
+def test_categoriser_picker_selects_multiple_texture_archives_not_model_inputs(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    base = tmp_path / "models.pbo"
+    first = tmp_path / "first.pbo"
+    second = tmp_path / "second.ifa"
+    for path in (base, first, second):
+        path.touch()
+
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    app.root = object()
+    app._base_texture_sources = (base,)
+    app._extra_texture_sources = []
+    app.texture_resolver = TextureResolver((base,))
+    app.mipmap_cache = MipmapCache()
+    app.status_var = Var("")
+    app.current = None
+    app.model_iter = iter(["same iterator"])
+    app.models = []
+    app.state = {}
+    original_iterator = app.model_iter
+    original_state = app.state
+    selected = {}
+
+    def choose(**kwargs):
+        selected.update(kwargs)
+        return (str(first), str(second))
+
+    monkeypatch.setattr(ui.filedialog, "askopenfilenames", choose)
+    app.select_texture_archives()
+
+    assert app.texture_resolver.inputs == (base, first, second)
+    assert app._extra_texture_sources == [first, second]
+    assert app.model_iter is original_iterator
+    assert app.state is original_state
+    assert "IFA" in selected["title"]
