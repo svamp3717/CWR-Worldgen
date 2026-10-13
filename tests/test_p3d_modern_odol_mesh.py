@@ -16,6 +16,7 @@ if str(TOOLS) not in sys.path:
 
 import p3d_modern_odol_mesh as odol
 import p3d_preview_geometry as geometry
+import p3d_lod_options as lod_options
 
 
 def pack(value: int) -> bytes:
@@ -452,3 +453,34 @@ def test_nonvisual_lods_are_never_selected_for_fast_preview(monkeypatch) -> None
     with pytest.raises(odol.MeshReadError, match="no visual resolution LODs"):
         odol.read_model_mesh(data, lod_quality="fast")
     assert attempted == []
+
+
+
+def test_modern_odol_reports_all_lods_in_original_order_and_selects_by_index() -> None:
+    data = full_odol(49, lod_specs=(
+        (9.0, 4), (1.0e13, 10), (1.0, 50), (4.0, 20),
+    ))
+    options = lod_options.list_lods(data)
+    assert [entry.index for entry in options] == [0, 1, 2, 3]
+    assert [entry.visual for entry in options] == [True, False, True, True]
+    assert options[1].label.endswith("[special]")
+
+    chosen = geometry.build_preview_model(
+        data, model_path="house.p3d", source="models.pbo",
+        lod_quality="lod:0",
+    )
+    assert chosen.measurement.lod == "resolution 9"
+    assert chosen.original_vertex_count == 4
+    assert chosen.selected_lod_quality == "lod:0"
+    assert chosen.available_lods == options
+
+    full = geometry.build_preview_model(
+        data, model_path="house.p3d", source="models.pbo",
+        lod_quality="full",
+    )
+    fast = geometry.build_preview_model(
+        data, model_path="house.p3d", source="models.pbo",
+        lod_quality="fast",
+    )
+    assert full.original_vertex_count == 50
+    assert fast.original_vertex_count == 4
