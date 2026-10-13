@@ -270,10 +270,30 @@ def build_preview_model(
             data[:4] == b"MLOD" or struct.unpack_from("<I", data, 4)[0] in {6, 7}
         ):
             lod_quality = "full"
-    measurement, points, faces, textures = extract_first_lod_geometry(
-        data, model_path=model_path, source=source,
-        lod_quality=lod_quality, available_lods=options if options else None,
-    )
+    # Unlike modern ODOL's indexed mesh decoder, legacy LODs are sequential.
+    # Try the requested visual detail first, then nearby visual alternatives
+    # if that particular mesh is unreadable. Explicit LOD picks never silently
+    # switch to another LOD.
+    quality_candidates = (lod_quality,)
+    if options and lod_quality in ("fast", "full") and (
+        data[:4] == b"MLOD" or
+        (data[:4] == b"ODOL" and struct.unpack_from("<I", data, 4)[0] in {6, 7})
+    ):
+        quality_candidates = tuple(
+            option.value for option in lod_options.select_lod(options, lod_quality)
+        )
+    error: measure.ModelReadError | None = None
+    for candidate in quality_candidates:
+        try:
+            measurement, points, faces, textures = extract_first_lod_geometry(
+                data, model_path=model_path, source=source,
+                lod_quality=candidate, available_lods=options if options else None,
+            )
+            break
+        except measure.ModelReadError as exc:
+            error = exc
+    else:
+        raise error or measure.ModelReadError("no usable preview LOD")
     bounds_only = measurement.lod == "model bounds only"
     edges = (
         np.asarray(modern_odol.BOX_EDGES, dtype=np.int32)
