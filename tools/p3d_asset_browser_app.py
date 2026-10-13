@@ -840,7 +840,9 @@ class AssetBrowserApp:
             return "Missing"
         # If rendering actually tried and failed to decode this texture,
         # distinguish that from merely finding its bytes in an archive.
-        if path in resolver.image_cache and resolver.image_cache[path] is None:
+        mipmap = self._selected_texture_mipmap()
+        key = path if mipmap in ("auto", "mip:0") else path + "|" + mipmap
+        if key in resolver.image_cache and resolver.image_cache[key] is None:
             return "Unreadable"
         return "External"
 
