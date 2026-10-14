@@ -310,6 +310,48 @@ class LegacyProxyModelTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "did not preserve donor Roadway"):
                     infrastructure._write_infrastructure_asset_task(task)
 
+    def test_generated_road_audit_rejects_one_wrong_contact_face(self) -> None:
+        """A minority offroad patch must not evade a dominant-face audit."""
+        contact_texture = r"stock\\asphalt_contact.paa"
+        donor = _synthetic_road_odol(roadway_texture=contact_texture)
+        style, _report = generator._road_surface_style_from_donor(
+            r"stock\\sil25.p3d", r"stock\\visual.paa", donor
+        )
+        original_writer = infrastructure.write_infrastructure_mlod
+
+        def write_bad_last_face(path, key, texture, *, road_surface_style):
+            original_writer(
+                path, key, texture, road_surface_style=road_surface_style,
+            )
+            blob = path.read_bytes()
+            last = blob.rfind(contact_texture.encode("ascii"))
+            self.assertGreaterEqual(last, 0)
+            path.write_bytes(blob[:last] + b"x" + blob[last + 1:])
+
+        with tempfile.TemporaryDirectory() as temp:
+            task = infrastructure._InfrastructureAssetTask(
+                key=infrastructure.InfrastructureModelKey(
+                    "road", "road_paved_w091_l0063", 91, 63
+                ),
+                wire=r"world\\i\\road_paved_w091_l0063.p3d",
+                relative="i/road_paved_w091_l0063.p3d",
+                destination=Path(temp) / "partial-bad.p3d",
+                texture=r"stock\\visual.paa",
+                surface_style=style,
+                cache_path=None,
+                cache_enabled=False,
+                cache_refresh=False,
+                usage_count=1,
+            )
+            with patch.object(
+                infrastructure, "write_infrastructure_mlod",
+                side_effect=write_bad_last_face,
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "did not preserve donor Roadway contact on faces"
+                ):
+                    infrastructure._write_infrastructure_asset_task(task)
+
     def test_cwa_safe_clusters_reject_missing_proxy_source_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
