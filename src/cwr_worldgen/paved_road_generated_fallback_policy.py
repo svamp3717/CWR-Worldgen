@@ -346,6 +346,72 @@ def _generated_piece(
     )
 
 
+_PAVED_CURVE_SIDE = re.compile(
+    r"^(?P<base>.*_)(?P<side>[lr])(?P<angle>\\d{2,3})\\.p3d$",
+    re.IGNORECASE,
+)
+
+
+def _align_generated_paved_curve_handedness(
+    fitted: Sequence[tuple[Any, tuple[float, float], tuple[float, float]]],
+) -> tuple[tuple[Any, tuple[float, float], tuple[float, float]], ...]:
+    """Match curved paved *mesh* direction to connected road chord headings.
+
+    The generated _r010 mesh actually turns toward negative local heading
+    (its +X sagitta faces the outside of a right turn). For a chain whose
+    successive chord headings increase 10 degrees, this leaves a wedge between
+    the two nominally connected Roadway/visual mouths. When the signed
+    deviation within a single chord disagrees with the *connected* centerline
+    turn, use the latter to choose the existing left/right model variant.
+
+    A road with no adjacent connected piece, inconsistent heading changes, or
+    only near-straight heading drift retains its existing mesh. This does not
+    move objects, change their lengths or alter the road fitter's search.
+    """
+    spans = tuple(fitted)
+    if len(spans) < 2:
+        return spans
+    headings = tuple(
+        math.degrees(math.atan2(end[0] - start[0], end[1] - start[1])) % 360.0
+        for _piece, start, end in spans
+    )
+    result = list(spans)
+    for i, (piece, start, end) in enumerate(spans):
+        if not _pi.is_generated_paved_road_model(piece.model_path):
+            continue
+        match = _PAVED_CURVE_SIDE.fullmatch(piece.model_path.replace("/", "\\"))
+        if match is None:
+            continue
+        turns: list[float] = []
+        if i > 0 and math.dist(spans[i - 1][2], start) <= 0.25:
+            turns.append(
+                (headings[i] - headings[i - 1] + 180.0) % 360.0 - 180.0
+            )
+        if i + 1 < len(spans) and math.dist(end, spans[i + 1][1]) <= 0.25:
+            turns.append(
+                (headings[i + 1] - headings[i] + 180.0) % 360.0 - 180.0
+            )
+        substantial = [turn for turn in turns if 1.5 <= abs(turn) <= 60.0]
+        if not substantial or (
+            min(substantial) < 0.0 < max(substantial)
+        ):
+            continue
+        # The _road_ribbon_sections mesh's +X sagitta starts with a +heading
+        # tangent and ends with a -heading tangent, so a positive *road* turn
+        # needs the negative ('l') model curve, and vice versa.
+        correct_side = "l" if sum(substantial) > 0.0 else "r"
+        if match.group("side").casefold() == correct_side:
+            continue
+        updated_path = (
+            match.group("base") + correct_side + match.group("angle") + ".p3d"
+        )
+        corrected_piece = _p._RoadPiece(
+            updated_path, piece.length_metres, piece.nominal_length,
+        )
+        result[i] = (corrected_piece, start, end)
+    return tuple(result)
+
+
 def _upgrade_stock_result(
     result: Sequence[Any],
     measure: Any,
@@ -527,7 +593,9 @@ def _upgrade_stock_result(
             )
             upgraded.append((generated, start, end))
 
-    return tuple(upgraded)
+    # Fit and clearance are unchanged; only fix generated paved mesh handedness
+    # when connected chord headings establish the actual turn direction.
+    return _align_generated_paved_curve_handedness(upgraded)
 
 
 def _fitting_pieces(pieces: Sequence[Any]) -> tuple[Any, ...]:
