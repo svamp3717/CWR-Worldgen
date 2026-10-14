@@ -855,6 +855,8 @@ class AssetBrowserApp:
             self.load_timing_var.set("")
 
     def _show_empty_preview(self) -> None:
+        if hasattr(self, "load_timing_var"):
+            self.load_timing_var.set("Load timings appear after selecting an asset.")
         self.ax_preview.clear()
         self.ax_preview.text(
             0.5,
