@@ -41,6 +41,7 @@ class PreviewModel:
     read_seconds: float = 0.0
     parse_seconds: float = 0.0
     archive_cached: bool = False
+    preview_cache_hit: bool = False
     source_bytes: bytes | None = field(default=None, repr=False, compare=False)
 
 
