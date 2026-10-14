@@ -257,6 +257,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     iterator = preview_models(
         inputs, args.include, args.max_preview_points,
         lod_quality=args.preview_lod,
+        retain_source_bytes=True,  # bounded by the categoriser's in-memory LRU
     )
     root = tk.Tk()
     app = SplitStateCategoriserApp(
