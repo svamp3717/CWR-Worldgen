@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import struct
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 
-from cwr_worldgen.cache import streaming_hash
+from cwr_worldgen.cache import (
+    float_sequence_sha256, int_sequence_sha256, streaming_hash,
+)
 from cwr_worldgen.generator import (
     _assemble_world_objects,
     _expand_cwa_generated_vegetation,
@@ -357,3 +360,60 @@ def test_bbox_projection_hot_path_is_affine_and_round_trips() -> None:
     latitude, longitude = projection.to_latlon((x, z))
     assert abs(latitude - point[0]) < 1.0e-12
     assert abs(longitude - point[1]) < 1.0e-12
+
+
+
+def test_chunked_float_terrain_hash_preserves_legacy_digest_across_boundaries() -> None:
+    """Byte-for-byte compatibility is required for existing road/terrain caches."""
+    values = [0.0, -0.0, float("inf"), float("-inf"), 0.125, -1.125]
+    values.extend((index % 257) * 0.05 for index in range(20_003))
+    baseline = sha256()
+    legacy_pack = struct.Struct("<d").pack
+    for value in values:
+        baseline.update(legacy_pack(float(value)))
+
+    assert float_sequence_sha256(values) == baseline.hexdigest()
+    assert float_sequence_sha256(iter(values)) == baseline.hexdigest()
+
+
+def test_chunked_int_terrain_hash_preserves_legacy_digest_across_boundaries() -> None:
+    values = [-(2**31), 2**31 - 1, 0, -1, 1]
+    values.extend((index % 250) - 125 for index in range(20_003))
+    baseline = sha256()
+    legacy_pack = struct.Struct("<i").pack
+    for value in values:
+        baseline.update(legacy_pack(int(value)))
+
+    assert int_sequence_sha256(values) == baseline.hexdigest()
+    assert int_sequence_sha256((value for value in values)) == baseline.hexdigest()
+
+
+def test_chunked_terrain_hash_handles_empty_inputs_and_single_use_iterators() -> None:
+    expected = sha256(b"").hexdigest()
+    assert float_sequence_sha256(()) == expected
+    assert int_sequence_sha256(iter(())) == expected
+
+    class Once:
+        def __init__(self):
+            self.reads = 0
+
+        def __iter__(self):
+            self.reads += 1
+            if self.reads != 1:
+                raise AssertionError("terrain fingerprint generator was reused")
+            yield 3
+            yield -2
+
+    assert float_sequence_sha256(Once()) == sha256(
+        struct.pack("<dd", 3.0, -2.0)
+    ).hexdigest()
+    assert int_sequence_sha256(Once()) == sha256(
+        struct.pack("<ii", 3, -2)
+    ).hexdigest()
+
+
+def test_chunked_terrain_hash_keeps_legacy_integer_overflow_semantics() -> None:
+    import pytest
+
+    with pytest.raises(struct.error):
+        int_sequence_sha256([0] * 8_192 + [2**31])
