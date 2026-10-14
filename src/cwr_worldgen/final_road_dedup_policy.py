@@ -1562,7 +1562,7 @@ _FINAL_PAVED_ENDPOINT_BUCKET_METRES = 0.25
 _FINAL_PAVED_ENDPOINT_TOLERANCE_METRES = 0.15
 _FINAL_PAVED_MAX_HEIGHT_DIFFERENCE_METRES = 0.75
 _FINAL_PAVED_CURVE_SUFFIX = re.compile(
-    r"(?P<side>[lr])(?P<angle>\\d{2,3})\\.p3d$", re.I,
+    r"(?P<side>[lr])(?P<angle>\d{2,3})\.p3d$", re.I,
 )
 
 
