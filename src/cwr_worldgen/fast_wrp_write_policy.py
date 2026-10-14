@@ -105,7 +105,7 @@ def _fast_write_rvw4(
                 end = min(object_count, start + _CHUNK_OBJECTS)
                 chunk = objects[start:end]
                 rows: list[
-                    tuple[float, float, float, float, float, float, float]
+                    tuple[float, float, float, float, float, float, float, float]
                 ] = []
                 models: list[bytes] = []
 
@@ -115,6 +115,7 @@ def _fast_write_rvw4(
                         float(obj.heading_degrees), float(obj.pitch_degrees),
                         float(getattr(obj, "terrain_shear_x", 0.0)),
                         float(getattr(obj, "terrain_shear_z", 0.0)),
+                        float(getattr(obj, "lateral_slope", 0.0)),
                     ))
                     model = model_cache.get(obj.model_path)
                     if model is None:
@@ -131,6 +132,10 @@ def _fast_write_rvw4(
                 pitches = numeric[:, 4] if numeric.size else np.empty(0, dtype=np.float64)
                 shear_x = numeric[:, 5] if numeric.size else np.empty(0, dtype=np.float64)
                 shear_z = numeric[:, 6] if numeric.size else np.empty(0, dtype=np.float64)
+                lateral_slope = (
+                    numeric[:, 7] if numeric.size
+                    else np.empty(0, dtype=np.float64)
+                )
                 if pitches.size and np.any((pitches <= -89.0) | (pitches >= 89.0)):
                     raise ValueError("object pitch must be within -89..89 degrees")
                 sheared = (shear_x != 0.0) | (shear_z != 0.0)
@@ -146,7 +151,10 @@ def _fast_write_rvw4(
                 sp = np.sin(pitch)
                 rotation = records["rotation"]
                 rotation[:, 0] = ch
-                rotation[:, 1] = shear_x * ch - shear_z * sh
+                # Road-only local-X slope follows the cross-road terrain without
+                # altering its longitudinal pitch. Forest terrain shear remains
+                # a separate transform with its existing no-pitch constraint.
+                rotation[:, 1] = shear_x * ch - shear_z * sh + lateral_slope
                 rotation[:, 2] = -sh
                 rotation[:, 3] = -sh * sp
                 rotation[:, 4] = cp
