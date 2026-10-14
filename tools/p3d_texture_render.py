@@ -272,23 +272,36 @@ def render_textured_model(
         denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
         if abs(denom) < 1e-9:
             continue
-        gx, gy = np.meshgrid(
-            np.arange(min_x, max_x + 1) + 0.5,
-            np.arange(min_y, max_y + 1) + 0.5,
+        # Broadcast coordinate vectors instead of allocating two complete
+        # meshgrids. Only pixels inside the triangle need perspective/depth
+        # interpolation; only *visible* pixels need expensive texture samples.
+        x = np.arange(min_x, max_x + 1, dtype=float)[None, :] + 0.5
+        y = np.arange(min_y, max_y + 1, dtype=float)[:, None] + 0.5
+        w0_grid = ((y1 - y2) * (x - x2) + (x2 - x1) * (y - y2)) / denom
+        w1_grid = ((y2 - y0) * (x - x2) + (x0 - x2) * (y - y2)) / denom
+        inside = (
+            (w0_grid >= -1e-7)
+            & (w1_grid >= -1e-7)
+            & (w0_grid + w1_grid <= 1.0 + 1e-7)
         )
-        w0 = ((y1 - y2) * (gx - x2) + (x2 - x1) * (gy - y2)) / denom
-        w1 = ((y2 - y0) * (gx - x2) + (x0 - x2) * (gy - y2)) / denom
-        w2 = 1.0 - w0 - w1
-        inside = (w0 >= -1e-7) & (w1 >= -1e-7) & (w2 >= -1e-7)
-        if not inside.any():
+        rows, cols = np.nonzero(inside)
+        if not len(rows):
             continue
+        w0 = w0_grid[rows, cols]
+        w1 = w1_grid[rows, cols]
+        w2 = 1.0 - w0 - w1
+        del w0_grid, w1_grid, inside
         iz = 1.0 / p[:, 2]
         inv_z = w0 * iz[0] + w1 * iz[1] + w2 * iz[2]
         depth = 1.0 / np.maximum(inv_z, 1e-12)
-        zslice = zbuf[min_y : max_y + 1, min_x : max_x + 1]
-        mask = inside & (depth < zslice)
-        if not mask.any():
+        screen_y, screen_x = min_y + rows, min_x + cols
+        visible = depth < zbuf[screen_y, screen_x]
+        if not visible.any():
             continue
+        # Cull occluded fragments *before* UV calculation and interpolation.
+        screen_y, screen_x = screen_y[visible], screen_x[visible]
+        w0, w1, w2 = w0[visible], w1[visible], w2[visible]
+        inv_z, depth = inv_z[visible], depth[visible]
 
         mipmaps = None
         if load_textures and texture_path:
@@ -328,11 +341,11 @@ def render_textured_model(
                 if nlen < 1e-8
                 else 0.55 + 0.45 * abs(float(np.dot(normal / nlen, light)))
             )
-            target = image[min_y : max_y + 1, min_x : max_x + 1]
-            target[mask] = np.clip(
+            colour = np.clip(
                 np.array([178, 184, 190]) * shade, 0, 255
             ).astype(np.uint8)
-            zslice[mask] = depth[mask]
+            image[screen_y, screen_x] = colour
+            zbuf[screen_y, screen_x] = depth[mask]
             continue
 
         hits += 1
@@ -351,9 +364,8 @@ def render_textured_model(
             uv, xy, mipmaps[0].shape[1], mipmaps[0].shape[0], len(mipmaps) - 1
         )
         sampled = _sample_mipmapped(mipmaps, u, v, lod)
-        visible = mask & (sampled[:, :, 3] >= 16)
-        if visible.any():
-            target = image[min_y : max_y + 1, min_x : max_x + 1]
-            target[visible] = sampled[:, :, :3][visible]
-            zslice[visible] = depth[visible]
+        opaque = sampled[:, 3] >= 16
+        if opaque.any():
+            image[screen_y[opaque], screen_x[opaque]] = sampled[opaque, :3]
+            zbuf[screen_y[opaque], screen_x[opaque]] = depth[opaque]
     return image, hits, misses
