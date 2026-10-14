@@ -151,10 +151,14 @@ def _fast_write_rvw4(
                 sp = np.sin(pitch)
                 rotation = records["rotation"]
                 rotation[:, 0] = ch
-                # Road-only local-X slope follows the cross-road terrain without
-                # altering its longitudinal pitch. Forest terrain shear remains
-                # a separate transform with its existing no-pitch constraint.
-                rotation[:, 1] = shear_x * ch - shear_z * sh + lateral_slope
+                # Preserve original signed-zero bytes for *all* normal objects
+                # and Nogova forest shears. Add the road-only local-X bank only
+                # for entries that actually use it; adding +0.0 everywhere can
+                # otherwise flip negative zero and break deterministic WRP hashes.
+                rotation[:, 1] = shear_x * ch - shear_z * sh
+                banked = lateral_slope != 0.0
+                if np.any(banked):
+                    rotation[banked, 1] += lateral_slope[banked]
                 rotation[:, 2] = -sh
                 rotation[:, 3] = -sh * sp
                 rotation[:, 4] = cp
