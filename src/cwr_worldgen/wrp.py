@@ -99,6 +99,8 @@ def _object_matrix_4x3_fast(obj: WorldObject) -> tuple[float, ...]:
     """Inline transform fast path used by the million-record WRP serializer."""
 
     if isinstance(obj, CrossSlopedRoadObject):
+        if not math.isfinite(obj.lateral_slope):
+            raise ValueError("road lateral slope must be finite")
         # Roads are a small fraction of terrain objects. Preserve their exact
         # pitch plus local-X cross-slope transform while keeping the standard
         # million-object writer's original fast path byte-for-byte unchanged.
