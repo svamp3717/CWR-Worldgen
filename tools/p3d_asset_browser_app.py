@@ -5,6 +5,7 @@ from pathlib import Path
 import queue
 import sys
 import threading
+from time import perf_counter
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -218,6 +219,13 @@ class AssetBrowserApp:
         ttk.Label(info_box, textvariable=self.info_var, justify=tk.LEFT, wraplength=600).pack(
             anchor="w", fill=tk.X
         )
+        self.load_timing_var = tk.StringVar(
+            master=self.root, value="Load timings appear after selecting an asset.",
+        )
+        ttk.Label(
+            info_box, textvariable=self.load_timing_var,
+            justify=tk.LEFT, wraplength=600,
+        ).pack(anchor="w", fill=tk.X, pady=(6, 3))
         self.copy_path_button = ttk.Button(
             info_box,
             text="Copy asset path",
@@ -683,7 +691,29 @@ class AssetBrowserApp:
             max(360, min(840, round(height * 1.25))),
         )
 
+    def _update_model_timing(
+        self, model, draw_seconds: float, texture_seconds: float = 0.0,
+    ) -> None:
+        """Display separately measured P3D, geometry, texture, and preview work."""
+        if not hasattr(self, "load_timing_var"):
+            return
+        read = max(0.0, getattr(model, "read_seconds", 0.0))
+        mesh = max(0.0, getattr(model, "parse_seconds", 0.0))
+        texture = max(0.0, min(draw_seconds, texture_seconds))
+        preview = max(0.0, draw_seconds - texture)
+        note = (
+            " (decoded LOD cache)" if getattr(model, "preview_cache_hit", False)
+            else " (P3D RAM cache)" if getattr(model, "archive_cached", False)
+            else ""
+        )
+        self.load_timing_var.set(
+            f"P3D read: {read * 1000:.1f} ms{note}  ·  Mesh: {mesh * 1000:.1f} ms\n"
+            f"Textures: {texture * 1000:.1f} ms  ·  Preview: {preview * 1000:.1f} ms\n"
+            f"Total: {(read + mesh + draw_seconds) * 1000:.1f} ms"
+        )
+
     def _draw_model(self, model) -> None:
+        draw_start = perf_counter()
         self.ax_preview.clear()
         if getattr(model, "render_mode", "") == "bounds only":
             # An Arma-era ModelInfo bounding box is useful for identification
@@ -713,6 +743,7 @@ class AssetBrowserApp:
                 " • bounds only, NOT model geometry"
             )
             self.canvas.draw_idle()
+            self._update_model_timing(model, perf_counter() - draw_start)
             return
         if not model.faces:
             points = model.points
@@ -721,8 +752,10 @@ class AssetBrowserApp:
                 self.ax_preview.set_aspect("equal", adjustable="box")
             self.ax_preview.set_title(f"{model.model_path} • vertex preview")
             self.canvas.draw_idle()
+            self._update_model_timing(model, perf_counter() - draw_start)
             return
         render_width, render_height = self._preview_render_size()
+        texture_timing: dict[str, float] = {}
         image, hits, misses = render_textured_model(
             model.points,
             model.faces,
@@ -736,6 +769,7 @@ class AssetBrowserApp:
             load_textures=not self.skip_textures_var.get(),
             mipmap_cache=getattr(self, "mipmap_cache", None),
             texture_mipmap=self._selected_texture_mipmap(),
+            texture_timing=texture_timing,
         )
         # Downsampling remains filtered when the canvas is smaller than the
         # already screen-sized raster, avoiding shimmering brick patterns.
@@ -752,16 +786,25 @@ class AssetBrowserApp:
         self.ax_preview.axis("off")
         self.figure.tight_layout(pad=1.0)
         self.canvas.draw_idle()
+        self._update_model_timing(
+            model, perf_counter() - draw_start, texture_timing.get("seconds", 0.0),
+        )
 
     def _show_texture(self, item: BrowserAsset) -> None:
         self._busy(f"Loading texture {item.path}…")
         try:
+            start = perf_counter()
             cache = getattr(self, "texture_preview_cache", None)
             mipmap = self._selected_texture_mipmap()
+            cached = (
+                cache is not None
+                and (item.source, item.path, mipmap) in getattr(cache, "_items", ())
+            )
             image = (
                 cache.get(item, self.catalogue, mipmap=mipmap) if cache is not None
                 else load_texture(item, self.catalogue, mipmap=mipmap)
             )
+            load_seconds = perf_counter() - start
             self.current_model = None
             self.ax_preview.clear()
             self.ax_preview.imshow(image, interpolation="nearest")
@@ -780,6 +823,14 @@ class AssetBrowserApp:
                 f"Decoded: {image.shape[1]} × {image.shape[0]}\n"
                 f"Indexed model users: {len(users):,}"
             )
+            if hasattr(self, "load_timing_var"):
+                total_seconds = perf_counter() - start
+                self.load_timing_var.set(
+                    f"Texture read/decode: {load_seconds * 1000:.1f} ms"
+                    + (" (RGBA cache)" if cached else "")
+                    + f"\nPreview/details: {(total_seconds - load_seconds) * 1000:.1f} ms"
+                    + f"\nTotal: {total_seconds * 1000:.1f} ms"
+                )
             self._unbusy(f"Texture loaded: {item.path}")
         except Exception as exc:
             self.current_model = None
@@ -800,6 +851,8 @@ class AssetBrowserApp:
         self.ax_preview.axis("off")
         self.canvas.draw_idle()
         self.info_var.set(f"{title}: {exc}")
+        if hasattr(self, "load_timing_var"):
+            self.load_timing_var.set("")
 
     def _show_empty_preview(self) -> None:
         self.ax_preview.clear()
