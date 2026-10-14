@@ -79,6 +79,15 @@ and **Unchecked** means texture loading was skipped. Extra texture archives
 are deliberately not added to the model catalogue; the external status is
 updated when you add or clear them.
 
+### Copyable Selected asset details in the explorer
+
+The browser's **Selected asset** panel is a read-only, scrollable text view.
+Drag to highlight any model path, source archive, dimensions, texture
+information, or load-time values and press **Ctrl+C** to copy only that
+selection. **Ctrl+A** selects the entire readout. The existing **Copy asset
+path** button remains available for quickly copying just the in-game asset
+path. Text selection never changes a model, texture, or saved file.
+
 ### Explorer raw-model cache and load-time diagnostics
 
 The **P3D Model & Texture Browser** now has the same model/texture timing
