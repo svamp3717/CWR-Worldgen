@@ -1529,6 +1529,22 @@ def _write_json(path: Path, document: object) -> None:
     path.write_text(_json_dumps(document) + "\n", encoding="utf-8", newline="\n")
 
 
+def _small_report_dict(report: object, *omitted_sequences: str) -> dict[str, object]:
+    """Keep report JSON unchanged without copying large arrays slated for removal.
+
+    dataclasses.asdict recursively deep-copies every item before the caller
+    can pop it. Terrain elevations and material indices can hold millions of
+    values; road reports can hold hundreds of thousands of WorldObjects.
+    Replace only the omitted fields with empty tuples before serialization,
+    retaining asdict's existing conversion of all remaining report fields.
+    """
+    minimal = replace(report, **{name: () for name in omitted_sequences})
+    result = asdict(minimal)
+    for name in omitted_sequences:
+        result.pop(name)
+    return result
+
+
 def _generation_fingerprint(
     spec: PlayabilitySpec,
     elevations: Sequence[float],
@@ -4771,17 +4787,16 @@ def build_milestone4(
     _write_json(source_dir / "i" / "road-donors.json", road_donor_report)
     _write_json(
         road_report_path,
-        asdict(road_fit)
+        _small_report_dict(road_fit, "objects")
         | {
             "objects": len(road_fit.objects),
             "road_model_donors": road_donor_report,
         },
     )
-    # Avoid duplicating every graded elevation in the human report.
-    grading_doc = asdict(grading)
-    grading_doc.pop("elevations", None)
-    grading_doc["transitions"] = asdict(transitions) | {"indices": len(transitions.indices)}
-    grading_doc["transitions"].pop("indices", None)
+    # Omit large raw sequences *before* asdict, rather than constructing and
+    # then discarding millions of copied elevations, materials and objects.
+    grading_doc = _small_report_dict(grading, "elevations")
+    grading_doc["transitions"] = _small_report_dict(transitions, "indices")
     _write_json(grading_report_path, grading_doc)
     solver_heightmap_path = None
     if isinstance(spec, ConstraintPlayabilitySpec):
