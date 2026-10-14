@@ -79,6 +79,37 @@ and **Unchecked** means texture loading was skipped. Extra texture archives
 are deliberately not added to the model catalogue; the external status is
 updated when you add or clear them.
 
+### Categoriser load-time diagnostics and faster LOD switching
+
+The **Model Categoriser** now displays a per-preview wall-clock breakdown in
+the **View** panel, directly below its LOD and texture mipmap settings:
+
+- **P3D read/scan:** Time to obtain the next model from the input archive
+  stream. For the first model, this can include archive header enumeration;
+  after a LOD change, a successful **RAM cache** hit reports zero reread time.
+- **Mesh:** Time spent indexing/decoding the P3D and preparing preview
+  geometry, separate from archive I/O.
+- **Textures:** Time spent resolving/loading textures, decoding the selected
+  embedded PAA/PAC mipmap, and preparing filtered texture levels. Previously
+  cached textures usually make this step much shorter.
+- **Preview:** Remaining synchronous preview/raster and plotting work, excluding
+  texture preparation. Tk/Matplotlib deferred canvas painting is not included.
+- **Total:** Sum of the displayed model-read, mesh, and most recent preview
+  stages. When rotating or zooming, the read/mesh values still refer to the
+  loaded model; only the preview stages are newly measured.
+
+The categoriser keeps a **64 MiB bounded LRU** of recently scanned raw model
+bytes (up to four models). Changing the current P3D LOD can decode another mesh
+from that memory instead of reopening the containing PBO/IFA. The raw bytes are
+removed from the long-lived model list after entering the cache and the cache
+evicts older models. Models too large for the budget still use the archive
+reader. Browsing model order, categories, and saved JSON are unchanged.
+
+PAA/PAC decoding also stops parsing embedded mip headers as soon as the chosen
+level is found. Full-resolution selection no longer scans the entire mip chain,
+and explicitly selecting a small embedded mip only inspects the necessary
+headers before decoding it.
+
 ### Selecting embedded texture mipmaps
 
 Both P3D tools now offer a **Texture mipmap** dropdown independently of model
