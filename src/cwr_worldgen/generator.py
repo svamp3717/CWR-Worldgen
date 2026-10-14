@@ -1758,9 +1758,11 @@ def _roadway_groundtype_texture_for_donor(
     """
 
     _ = donor_model
-    inspected = str(inspected_texture or "").replace("/", "\\").strip("\\")
-    if inspected:
-        return inspected, "donor-roadway-lod"
+    # An inspected empty texture is *not* a missing Roadway LOD. Some donor
+    # models use untextured contact faces together with their original flags.
+    # Replacing those with the visible asphalt image changes the engine surface.
+    if inspected_texture is not None:
+        return str(inspected_texture).replace("/", "\\").strip("\\"), "donor-roadway-lod"
     return str(visual_texture).replace("/", "\\").strip("\\"), "visual-fallback"
 
 
@@ -1773,6 +1775,101 @@ def _roadway_groundtype_flags(
 
     _ = texture_source
     return int(point_flag), int(face_flag)
+
+
+
+def _road_surface_style_from_donor(
+    donor_model: str,
+    visual_texture: str,
+    donor_bytes: bytes | None,
+) -> tuple[RoadSurfaceStyle, dict[str, object]]:
+    """Inspect visual and contact LODs independently.
+
+    Decoding the donor's visual style can fail without implying that the
+    Roadway LOD is unreadable. Never throw away successfully loaded donor
+    bytes just because visual metadata could not be extracted.
+    """
+    style = RoadSurfaceStyle()
+    report: dict[str, object] = {
+        "source_format": None,
+        "visual_texture": visual_texture,
+        "point_flag": None,
+        "face_flag": None,
+        "roadway_source_format": None,
+        "roadway_texture": None,
+        "roadway_point_flag": None,
+        "roadway_face_flag": None,
+    }
+    if donor_bytes is not None:
+        try:
+            visual = inspect_visual_surface_style(
+                donor_bytes, texture_path=visual_texture,
+            )
+            style = replace(
+                style,
+                point_flag=int(visual.point_flag),
+                face_flag=int(visual.face_flag),
+            )
+            report.update({
+                "source_format": visual.source_format,
+                "point_flag": f"0x{int(visual.point_flag) & 0xFFFFFFFF:08x}",
+                "face_flag": f"0x{int(visual.face_flag) & 0xFFFFFFFF:08x}",
+            })
+        except (OSError, ValueError, FileNotFoundError, ProxyCloneError):
+            # Contact properties are independent of visual styling.
+            pass
+
+        try:
+            contact = inspect_roadway_surface_style(donor_bytes)
+            roadway_texture, texture_source = _roadway_groundtype_texture_for_donor(
+                donor_model, contact.texture_path, visual_texture,
+            )
+            point_flag, face_flag = _roadway_groundtype_flags(
+                texture_source, contact.point_flag, contact.face_flag,
+            )
+            style = replace(
+                style,
+                roadway_texture=roadway_texture,
+                roadway_point_flag=point_flag,
+                roadway_face_flag=face_flag,
+            )
+            report.update({
+                "roadway_source_format": contact.source_format,
+                "roadway_inspected_texture": contact.texture_path,
+                "roadway_inspected_point_flag": (
+                    f"0x{int(contact.point_flag) & 0xFFFFFFFF:08x}"
+                ),
+                "roadway_inspected_face_flag": (
+                    f"0x{int(contact.face_flag) & 0xFFFFFFFF:08x}"
+                ),
+                "roadway_texture_source": texture_source,
+                "roadway_texture": roadway_texture,
+                "roadway_point_flag": f"0x{point_flag & 0xFFFFFFFF:08x}",
+                "roadway_face_flag": f"0x{face_flag & 0xFFFFFFFF:08x}",
+            })
+            return style, report
+        except (OSError, ValueError, FileNotFoundError, ProxyCloneError):
+            pass
+
+    # Only missing/unreadable donor contact data warrants this fallback.
+    roadway_texture, texture_source = _roadway_groundtype_texture_for_donor(
+        donor_model, None, visual_texture,
+    )
+    style = replace(
+        style,
+        roadway_texture=roadway_texture,
+        roadway_point_flag=0,
+        roadway_face_flag=0,
+    )
+    report.update({
+        "roadway_source_format": "visual-fallback",
+        "roadway_inspected_texture": None,
+        "roadway_texture_source": texture_source,
+        "roadway_texture": roadway_texture,
+        "roadway_point_flag": "0x00000000",
+        "roadway_face_flag": "0x00000000",
+    })
+    return style, report
 
 
 
@@ -4313,133 +4410,15 @@ def build_milestone4(
             )
             donor_textures[surface] = texture
             donor_record = road_records.get(canonical_asset_path(donor_model))
-            style = RoadSurfaceStyle()
-            report_entry: dict[str, object] = {
-                "source_format": None,
-                "visual_texture": texture,
-                "point_flag": None,
-                "face_flag": None,
-                "roadway_source_format": None,
-                "roadway_texture": None,
-                "roadway_point_flag": None,
-                "roadway_face_flag": None,
-            }
+            donor_bytes: bytes | None = None
             if donor_record is not None:
                 try:
                     donor_bytes = read_asset_record_bytes(donor_record)
-                    visual_style = inspect_visual_surface_style(
-                        donor_bytes,
-                        texture_path=texture,
-                    )
-                    style = replace(
-                        style,
-                        point_flag=int(visual_style.point_flag),
-                        face_flag=int(visual_style.face_flag),
-                    )
-                    report_entry.update({
-                        "source_format": visual_style.source_format,
-                        "point_flag": (
-                            f"0x{int(visual_style.point_flag) & 0xFFFFFFFF:08x}"
-                        ),
-                        "face_flag": (
-                            f"0x{int(visual_style.face_flag) & 0xFFFFFFFF:08x}"
-                        ),
-                    })
-                except (
-                    OSError, ValueError, FileNotFoundError, ProxyCloneError
-                ):
-                    donor_bytes = None
-
-                if donor_bytes is not None:
-                    try:
-                        roadway_style = inspect_roadway_surface_style(
-                            donor_bytes
-                        )
-                        roadway_texture, roadway_texture_source = (
-                            _roadway_groundtype_texture_for_donor(
-                                donor_model,
-                                roadway_style.texture_path,
-                                texture,
-                            )
-                        )
-                        roadway_point_flag, roadway_face_flag = (
-                            _roadway_groundtype_flags(
-                                roadway_texture_source,
-                                roadway_style.point_flag,
-                                roadway_style.face_flag,
-                            )
-                        )
-                        style = replace(
-                            style,
-                            roadway_texture=roadway_texture,
-                            roadway_point_flag=roadway_point_flag,
-                            roadway_face_flag=roadway_face_flag,
-                        )
-                        report_entry.update({
-                            "roadway_source_format": roadway_style.source_format,
-                            "roadway_inspected_texture": roadway_style.texture_path,
-                            "roadway_inspected_point_flag": (
-                                f"0x{int(roadway_style.point_flag) & 0xFFFFFFFF:08x}"
-                            ),
-                            "roadway_inspected_face_flag": (
-                                f"0x{int(roadway_style.face_flag) & 0xFFFFFFFF:08x}"
-                            ),
-                            "roadway_texture_source": roadway_texture_source,
-                            "roadway_texture": roadway_texture,
-                            "roadway_point_flag": (
-                                f"0x{roadway_point_flag & 0xFFFFFFFF:08x}"
-                            ),
-                            "roadway_face_flag": (
-                                f"0x{roadway_face_flag & 0xFFFFFFFF:08x}"
-                            ),
-                        })
-                    except (
-                        OSError, ValueError, FileNotFoundError, ProxyCloneError
-                    ):
-                        roadway_texture, roadway_texture_source = (
-                            _roadway_groundtype_texture_for_donor(
-                                donor_model,
-                                None,
-                                texture,
-                            )
-                        )
-                        style = replace(
-                            style,
-                            roadway_texture=roadway_texture,
-                            roadway_point_flag=0,
-                            roadway_face_flag=0,
-                        )
-                        report_entry.update({
-                            "roadway_source_format": "visual-fallback",
-                            "roadway_inspected_texture": None,
-                            "roadway_texture_source": roadway_texture_source,
-                            "roadway_texture": roadway_texture,
-                            "roadway_point_flag": "0x00000000",
-                            "roadway_face_flag": "0x00000000",
-                        })
-            else:
-                roadway_texture, roadway_texture_source = (
-                    _roadway_groundtype_texture_for_donor(
-                        donor_model,
-                        None,
-                        texture,
-                    )
-                )
-                style = replace(
-                    style,
-                    roadway_texture=roadway_texture,
-                    roadway_point_flag=0,
-                    roadway_face_flag=0,
-                )
-                report_entry.update({
-                    "roadway_source_format": "visual-fallback",
-                    "roadway_inspected_texture": None,
-                    "roadway_texture_source": roadway_texture_source,
-                    "roadway_texture": roadway_texture,
-                    "roadway_point_flag": "0x00000000",
-                    "roadway_face_flag": "0x00000000",
-                })
-
+                except (OSError, ValueError, FileNotFoundError, ProxyCloneError):
+                    pass
+            style, report_entry = _road_surface_style_from_donor(
+                donor_model, texture, donor_bytes,
+            )
             road_surface_styles[surface] = style
             road_surface_style_report[surface] = report_entry
         if borrow_dirt_surface_for_gravel:
