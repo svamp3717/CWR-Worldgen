@@ -5,7 +5,9 @@ from types import SimpleNamespace
 
 from cwr_worldgen import wrp
 from cwr_worldgen.fast_wrp_write_policy import _fast_write_rvw4, _install_writer_binding
-from cwr_worldgen.model import TerrainShearedWorldObject, WorldObject
+from cwr_worldgen.model import (
+    CrossSlopedRoadObject, TerrainShearedWorldObject, WorldObject,
+)
 
 
 def _objects(count: int) -> tuple[WorldObject, ...]:
@@ -190,3 +192,47 @@ def test_fast_writer_binds_beneath_existing_runway_wrapper() -> None:
         renumber_object_ids=False,
     )
     assert calls == ["runway", "scalar"]
+
+
+
+def test_vectorized_writer_matches_scalar_for_pitched_banked_generated_roads(
+    tmp_path: Path,
+) -> None:
+    """The production NumPy writer must not silently drop banked Roadway LODs."""
+    objects = (
+        WorldObject(1, r"o\road\sil25.p3d", 10.0, 1.0, 25.0, 0.0, 0.0),
+        CrossSlopedRoadObject(
+            2, r"world\i\road_paved_w091_l0063.p3d",
+            70.35, 19.1, 67.89, 0.0, 0.65,
+            lateral_slope=0.035,
+        ),
+        CrossSlopedRoadObject(
+            3, r"world\i\road_dirt_w035_l0063.p3d",
+            79.34, 20.5, 82.22, 37.0, -1.5,
+            lateral_slope=-0.022,
+        ),
+        TerrainShearedWorldObject(
+            4, r"o\tree\pinetree.p3d", 50.0, 10.0, 15.0,
+            23.0, 0.0, terrain_shear_x=0.08, terrain_shear_z=-0.04,
+        ),
+    )
+    for obj in objects:
+        assert wrp._object_matrix_4x3_fast(obj) == obj.matrix_4x3()
+
+    args = (
+        16, 16,
+        (0.0,) * 256,
+        (0,) * 256,
+        (r"world\data\g.paa",),
+        objects,
+    )
+    scalar = tmp_path / "grounded-scalar.wrp"
+    fast = tmp_path / "grounded-vector.wrp"
+    wrp.write_rvw4(
+        scalar, *args, height_scale=0.05, renumber_object_ids=True,
+    )
+    _fast_write_rvw4(
+        wrp.write_rvw4, wrp, fast, *args,
+        height_scale=0.05, renumber_object_ids=True,
+    )
+    assert fast.read_bytes() == scalar.read_bytes()
