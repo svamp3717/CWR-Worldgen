@@ -1032,6 +1032,50 @@ def inspect_roadway_surface_style(data: bytes) -> RoadwaySurfaceStyle:
     )
 
 
+def inspect_roadway_face_styles(
+    data: bytes,
+) -> tuple[tuple[str, int, tuple[int, ...]], ...]:
+    """Inspect every Roadway contact polygon, not only the dominant face.
+
+    A model may have one incorrectly textured/flagged face while all others
+    agree with its donor. Using the dominant face alone lets that patch of road
+    behave as the wrong groundtype. Each tuple is (texture, face flag, referenced
+    point flags). Only actual triangles/quads count as driving surfaces.
+    """
+    if data.startswith(b"ODOL"):
+        lods, resolutions = _read_odol_surface_lods(data)
+    elif data.startswith(b"MLOD"):
+        lods, resolutions = _read_mlod_surface_lods(data)
+    else:
+        raise ProxyCloneError(f"unsupported P3D signature {data[:4]!r}")
+    matches = (
+        index for index, resolution in enumerate(resolutions)
+        if math.isclose(
+            float(resolution), 3.0e15, rel_tol=1.0e-4, abs_tol=1.0e8,
+        )
+    )
+    lod_index = next(matches, None)
+    if lod_index is None:
+        raise ProxyCloneError("donor model has no Roadway LOD")
+    lod = lods[lod_index]
+    faces = tuple(
+        (
+            texture,
+            int(flag),
+            tuple(
+                int(lod.point_flags[index])
+                for index in vertices
+                if 0 <= index < len(lod.point_flags)
+            ),
+        )
+        for texture, flag, vertices in lod.faces
+        if len(vertices) in (3, 4)
+    )
+    if not faces:
+        raise ProxyCloneError("Roadway LOD contains no drawable faces")
+    return faces
+
+
 def inspect_visual_surface_style(
     data: bytes,
     *,
