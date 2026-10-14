@@ -334,3 +334,31 @@ def test_legacy_paletted_pac_selects_embedded_mip_without_decoding_first() -> No
     assert second.shape == (1, 1, 4)
     assert tuple(first[0, 0]) == (255, 0, 0, 255)
     assert tuple(second[0, 0]) == (0, 255, 0, 255)
+
+
+
+def test_paa_decoder_only_parses_mip_headers_until_requested_level(monkeypatch) -> None:
+    import p3d_texture_io as texture_io
+    data = _embedded_dxt1_mips()
+    original = texture_io._u16
+    reads = []
+
+    def count_headers(stream):
+        reads.append(stream.tell())
+        return original(stream)
+
+    monkeypatch.setattr(texture_io, "_u16", count_headers)
+    assert decode_paa(data, mipmap="auto").shape == (8, 8, 4)
+    assert len(reads) == 4  # kind, palette count, and only the first dimensions
+
+    reads.clear()
+    assert decode_paa(data, mipmap="mip:1").shape == (4, 4, 4)
+    assert len(reads) == 6
+
+    reads.clear()
+    assert decode_paa(data, mipmap="max:4").shape == (4, 4, 4)
+    assert len(reads) == 6
+
+    reads.clear()
+    assert list_paa_mips(data) == ((8, 8), (4, 4), (2, 2))
+    assert len(reads) > 6  # explicit enumeration still traverses all mips
