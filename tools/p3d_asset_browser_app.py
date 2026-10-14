@@ -215,6 +215,17 @@ class AssetBrowserApp:
 
         info_box = ttk.LabelFrame(details, text="Selected asset", padding=7)
         info_box.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        quality_row = ttk.Frame(info_box)
+        quality_row.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(quality_row, text="Render quality:").pack(side=tk.LEFT)
+        self.render_quality_var = tk.StringVar(master=self.root, value="Fast (60%)")
+        render_picker = ttk.Combobox(
+            quality_row, textvariable=self.render_quality_var,
+            values=("Fast (60%)", "Balanced (80%)", "Quality (100%)"),
+            state="readonly", width=18,
+        )
+        render_picker.pack(side=tk.LEFT, padx=(8, 0))
+        render_picker.bind("<<ComboboxSelected>>", self._change_render_quality)
         self.info_var = tk.StringVar(master=self.root, value="Nothing selected")
         self.load_timing_var = tk.StringVar(
             master=self.root, value="Load timings appear after selecting an asset.",
@@ -660,6 +671,22 @@ class AssetBrowserApp:
         if getattr(self.current, "kind", None) == "model":
             self._show_model(self.current)
 
+    def _render_quality_scale(self) -> float:
+        """Controls raster pixel count, independently of geometry/texture LOD."""
+        choice = getattr(self, "render_quality_var", None)
+        if choice is None:
+            return 1.0  # compatibility with headless lightweight test views
+        return {
+            "Fast (60%)": 0.6,
+            "Balanced (80%)": 0.8,
+            "Quality (100%)": 1.0,
+        }.get(choice.get(), 1.0)
+
+    def _change_render_quality(self, _event=None) -> None:
+        """Redraw an already-parsed model, without rereading the source PBO."""
+        if self.current_model is not None:
+            self._redraw_current_model()
+
     def _selected_texture_mipmap(self) -> str:
         if not hasattr(self, "texture_mipmap_var"):
             return "auto"
@@ -740,8 +767,9 @@ class AssetBrowserApp:
 
     def _update_model_timing(
         self, model, draw_seconds: float, texture_seconds: float = 0.0,
+        *, raster_seconds: float | None = None,
     ) -> None:
-        """Display separately measured P3D, geometry, texture, and preview work."""
+        """Separate CPU raster and Matplotlib plotting from texture preparation."""
         if not hasattr(self, "load_timing_var"):
             return
         read = max(0.0, getattr(model, "read_seconds", 0.0))
@@ -753,9 +781,21 @@ class AssetBrowserApp:
             else " (P3D RAM cache)" if getattr(model, "archive_cached", False)
             else ""
         )
+        details = (
+            f"Textures: {texture * 1000:.1f} ms  ·  Preview: {preview * 1000:.1f} ms"
+        )
+        if raster_seconds is not None:
+            # CPU raster includes the timed texture-loading work; subtract it
+            # once so all displayed stages add up to the reported total.
+            cpu = max(0.0, raster_seconds - texture)
+            plot = max(0.0, draw_seconds - raster_seconds)
+            details = (
+                f"Textures: {texture * 1000:.1f} ms  ·  CPU raster: {cpu * 1000:.1f} ms\n"
+                f"Matplotlib prep: {plot * 1000:.1f} ms"
+            )
         self.load_timing_var.set(
             f"P3D read: {read * 1000:.1f} ms{note}  ·  Mesh: {mesh * 1000:.1f} ms\n"
-            f"Textures: {texture * 1000:.1f} ms  ·  Preview: {preview * 1000:.1f} ms\n"
+            f"{details}\n"
             f"Total: {(read + mesh + draw_seconds) * 1000:.1f} ms"
         )
 
@@ -802,7 +842,11 @@ class AssetBrowserApp:
             self._update_model_timing(model, perf_counter() - draw_start)
             return
         render_width, render_height = self._preview_render_size()
+        scale = self._render_quality_scale()
+        render_width = max(240, round(render_width * scale))
+        render_height = max(180, round(render_height * scale))
         texture_timing: dict[str, float] = {}
+        raster_start = perf_counter()
         image, hits, misses = render_textured_model(
             model.points,
             model.faces,
@@ -818,6 +862,7 @@ class AssetBrowserApp:
             texture_mipmap=self._selected_texture_mipmap(),
             texture_timing=texture_timing,
         )
+        raster_seconds = perf_counter() - raster_start
         # Downsampling remains filtered when the canvas is smaller than the
         # already screen-sized raster, avoiding shimmering brick patterns.
         self.ax_preview.imshow(image, interpolation="hanning", resample=True)
@@ -835,6 +880,7 @@ class AssetBrowserApp:
         self.canvas.draw_idle()
         self._update_model_timing(
             model, perf_counter() - draw_start, texture_timing.get("seconds", 0.0),
+            raster_seconds=raster_seconds,
         )
 
     def _show_texture(self, item: BrowserAsset) -> None:
