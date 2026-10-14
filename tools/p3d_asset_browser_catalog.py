@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 import os
+from time import perf_counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -108,17 +109,28 @@ def model_source(item: BrowserAsset) -> str:
 
 
 def load_model(
-    item: BrowserAsset, catalogue: BrowserCatalogue, *, lod_quality: str = "full"
+    item: BrowserAsset, catalogue: BrowserCatalogue, *, lod_quality: str = "full",
+    source_data: bytes | None = None,
 ) -> preview.PreviewModel:
     if item.kind != "model":
         raise ValueError(f"not a model asset: {item.path}")
-    record = catalogue.record_for(item)
-    data = assets.read_asset_record_bytes(record)
+    read_start = perf_counter()
+    data = (
+        source_data if source_data is not None
+        else assets.read_asset_record_bytes(catalogue.record_for(item))
+    )
+    read_seconds = 0.0 if source_data is not None else perf_counter() - read_start
+    parse_start = perf_counter()
     source = model_source(item)
     model = preview.build_preview_model(
         data, model_path=item.path, source=source,
         lod_quality=lod_quality, max_points=25_000,
     )
+    model.read_seconds = read_seconds
+    model.parse_seconds = perf_counter() - parse_start
+    model.archive_cached = source_data is not None
+    # The browser's cache moves these bytes into its bounded raw-byte LRU.
+    model.source_bytes = data
     if model.render_mode == "bounds only":
         # Fallback bounds cannot reveal textures; use the scan's reference list.
         model.texture_paths = tuple(
@@ -136,17 +148,41 @@ class ModelPreviewCache:
     changes; skip caching models too large to fit the configured budget.
     """
 
-    def __init__(self, max_models: int = 8, max_bytes: int = 96 * 1024 * 1024):
+    def __init__(
+        self, max_models: int = 8, max_bytes: int = 96 * 1024 * 1024,
+        raw_limit: int = 64 * 1024 * 1024, max_raw_models: int = 4,
+    ):
         self.max_models = max(0, int(max_models))
         self.max_bytes = max(0, int(max_bytes))
         self._items: OrderedDict[
             tuple[str, str, str], tuple[preview.PreviewModel, int]
         ] = OrderedDict()
         self.bytes_used = 0
+        self.raw_limit = max(0, int(raw_limit))
+        self.max_raw_models = max(0, int(max_raw_models))
+        self._raw_items: OrderedDict[tuple[str, str], bytes] = OrderedDict()
+        self.raw_bytes_used = 0
+
+    def _remember_raw(self, key: tuple[str, str], data: bytes) -> None:
+        previous = self._raw_items.pop(key, None)
+        if previous is not None:
+            self.raw_bytes_used -= len(previous)
+        if not self.max_raw_models or len(data) > self.raw_limit:
+            return
+        while self._raw_items and (
+            len(self._raw_items) >= self.max_raw_models
+            or self.raw_bytes_used + len(data) > self.raw_limit
+        ):
+            _, evicted = self._raw_items.popitem(last=False)
+            self.raw_bytes_used -= len(evicted)
+        self._raw_items[key] = data
+        self.raw_bytes_used += len(data)
 
     def clear(self) -> None:
         self._items.clear()
         self.bytes_used = 0
+        self._raw_items.clear()
+        self.raw_bytes_used = 0
 
     def get(
         self, item: BrowserAsset, catalogue: BrowserCatalogue,
@@ -155,11 +191,34 @@ class ModelPreviewCache:
         key = (item.source, item.path, lod_quality)
         if key in self._items:
             self._items.move_to_end(key)
-            return self._items[key][0]
-        model = (
-            load_model(item, catalogue) if lod_quality == "full"
-            else load_model(item, catalogue, lod_quality=lod_quality)
-        )
+            model = self._items[key][0]
+            # Returning an already-decoded LOD performs neither PBO I/O nor
+            # mesh parsing. Keep those zero in the GUI's current load timings.
+            if hasattr(model, "preview_cache_hit"):
+                model.preview_cache_hit = True
+                model.archive_cached = True
+                model.read_seconds = 0.0
+                model.parse_seconds = 0.0
+            return model
+        raw_key = (item.source, item.path)
+        raw = self._raw_items.get(raw_key)
+        if raw is not None:
+            self._raw_items.move_to_end(raw_key)
+        if raw is None:
+            model = (
+                load_model(item, catalogue) if lod_quality == "full"
+                else load_model(item, catalogue, lod_quality=lod_quality)
+            )
+        else:
+            model = load_model(
+                item, catalogue, lod_quality=lod_quality, source_data=raw,
+            )
+        data = getattr(model, "source_bytes", None)
+        if data is not None:
+            self._remember_raw(raw_key, data)
+            model.source_bytes = None  # avoid retaining P3D bytes per parsed LOD
+        if hasattr(model, "preview_cache_hit"):
+            model.preview_cache_hit = False
         # Include decoded arrays, approximate Python face/UV objects and PBO
         # input size so highly detailed models cannot silently grow unbounded.
         weight = (
