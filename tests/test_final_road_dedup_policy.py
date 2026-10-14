@@ -2,7 +2,10 @@ import math
 from types import SimpleNamespace
 
 from cwr_worldgen import playability
-from cwr_worldgen.final_road_dedup_policy import deduplicate_final_road_objects
+from cwr_worldgen.final_road_dedup_policy import (
+    _align_final_paved_curve_handedness,
+    deduplicate_final_road_objects,
+)
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.playability import RoadFitReport
 from cwr_worldgen.procedural_infrastructure import (
@@ -647,3 +650,110 @@ def test_progress_reports_bounded_spatial_comparisons():
     assert "100/100" in events[-1][1]
     assert "0 removed" in events[-1][1]
     assert "nearby comparisons" in events[-1][1]
+
+
+
+def _lundby5_road(
+    object_id: int, model: str, x: float, y: float, z: float, heading: float,
+) -> WorldObject:
+    """Original, user-supplied wg_lundby5.wrp position and rotation."""
+    return WorldObject(
+        object_id, rf"wg_lundby5\i\{model}", x, y, z, heading, 0.0,
+    )
+
+
+def test_final_curve_direction_fix_spans_independent_lundby_road_runs():
+    """Per-run fallback failed here: the NEW WRP left all these r010 pieces.
+
+    Test completed road objects, not fitted pieces within one OSM run. The
+    0.04 m nominal endpoint gaps are present across a run boundary, but the
+    visual end corners diverge by 1–2 m with the wrong r010 curvature.
+    """
+    original = (
+        _lundby5_road(
+            8039, "road_paved_w091_l0131_r005.p3d",
+            3211.6614, 11.5716, 3177.3008, 248.07028,
+        ),
+        _lundby5_road(
+            8040, "road_paved_w091_l0044_r010.p3d",
+            3203.5825, 11.5318, 3174.0483, 248.07028,
+        ),
+        _lundby5_road(
+            8041, "road_paved_w091_l0044_r010.p3d",
+            3199.4294, 11.5052, 3172.7842, 258.07028,
+        ),
+        _lundby5_road(
+            8042, "road_paved_w091_l0044_r010.p3d",
+            3195.1201, 11.4748, 3172.2603, 268.07028,
+        ),
+        _lundby5_road(
+            8043, "road_paved_w091_l0248.p3d",
+            3180.6558, 11.3744, 3173.8499, 277.70777,
+        ),
+    )
+    # Deliberately insert an unrelated object out of chain order: the final
+    # spatial index must discover connections from coordinates, not IDs.
+    other = _road(9000, r"o\road\ces25.p3d", 200.0, 200.0)
+    reordered = (original[1], other, original[4], original[2],
+                 original[0], original[3])
+    report = _report(reordered)
+    corrected = _align_final_paved_curve_handedness(report, _spec())
+    by_id = {obj.object_id: obj for obj in corrected.objects}
+    for road_id in (8040, 8041, 8042):
+        assert by_id[road_id].model_path.endswith("_l010.p3d")
+    assert by_id[8039].model_path.endswith("_r005.p3d")
+    assert by_id[8043].model_path.endswith("road_paved_w091_l0248.p3d")
+    assert by_id[9000] is other
+    for before, after in zip(reordered, corrected.objects):
+        assert (before.object_id, before.x, before.y, before.z,
+                before.heading_degrees, before.pitch_degrees) == (
+            after.object_id, after.x, after.y, after.z,
+            after.heading_degrees, after.pitch_degrees,
+        )
+
+
+def test_final_curve_direction_does_not_globally_reverse_lundby_bend():
+    original = (
+        _lundby5_road(
+            6992, "road_paved_w091_l0063_r015.p3d",
+            3515.7480, 11.9234, 3144.5410, 317.48468,
+        ),
+        _lundby5_road(
+            6993, "road_paved_w091_l0063_r040.p3d",
+            3510.8765, 11.8905, 3148.3103, 297.97444,
+        ),
+        _lundby5_road(
+            6994, "road_paved_w091_l0063.p3d",
+            3505.0522, 11.8882, 3150.3892, 281.31171,
+        ),
+    )
+    report = _report(original)
+    assert _align_final_paved_curve_handedness(report, _spec()) is report
+
+
+def test_final_curve_direction_ignores_isolated_junctions_and_overpasses():
+    candidate = _lundby5_road(
+        8041, "road_paved_w091_l0044_r010.p3d",
+        3199.4294, 11.5052, 3172.7842, 258.07028,
+    )
+    isolated = _report((candidate,))
+    assert _align_final_paved_curve_handedness(isolated, _spec()) is isolated
+    next_road = _lundby5_road(
+        8042, "road_paved_w091_l0044_r010.p3d",
+        3195.1201, 20.0, 3172.2603, 268.07028,
+    )
+    separated = _report((candidate, next_road))
+    assert _align_final_paved_curve_handedness(separated, _spec()) is separated
+
+    # The same endpoint approached by two near-identical roads is ambiguous:
+    # a junction must never supply an arbitrary heading sign.
+    connected = _lundby5_road(
+        8042, "road_paved_w091_l0044_r010.p3d",
+        3195.1201, 11.4748, 3172.2603, 268.07028,
+    )
+    duplicate = _lundby5_road(
+        9998, "road_paved_w091_l0044_r010.p3d",
+        3195.1201, 11.4748, 3172.2603, 268.07028,
+    )
+    ambiguous = _report((candidate, connected, duplicate))
+    assert _align_final_paved_curve_handedness(ambiguous, _spec()) is ambiguous
