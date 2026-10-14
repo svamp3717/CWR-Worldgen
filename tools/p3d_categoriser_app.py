@@ -576,8 +576,8 @@ class CategoriserApp:
         display = max(0.0, draw_seconds - texture)
         cache_note = " (RAM cache)" if getattr(model, "archive_cached", False) else ""
         self.load_timing_var.set(
-            f"P3D read/scan: {read * 1000:.1f} ms{cache_note}  ·  Mesh: {parse * 1000:.1f} ms\\n"
-            f"Textures: {texture * 1000:.1f} ms  ·  Preview: {display * 1000:.1f} ms\\n"
+            f"P3D read/scan: {read * 1000:.1f} ms{cache_note}  ·  Mesh: {parse * 1000:.1f} ms\n"
+            f"Textures: {texture * 1000:.1f} ms  ·  Preview: {display * 1000:.1f} ms\n"
             f"Total: {(read + parse + draw_seconds) * 1000:.1f} ms"
         )
 
