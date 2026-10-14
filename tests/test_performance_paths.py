@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import math
 import struct
 from hashlib import sha256
 from pathlib import Path
@@ -15,7 +16,7 @@ from cwr_worldgen.generator import (
     _expand_cwa_generated_vegetation,
     _trusted_legacy_asset_paths,
 )
-from cwr_worldgen.model import WorldObject
+from cwr_worldgen.model import CrossSlopedRoadObject, WorldObject
 from cwr_worldgen.playability import (
     RoadFitReport, TerrainGradeReport, TransitionReport,
 )
@@ -36,7 +37,7 @@ from cwr_worldgen.procedural_forests import (
     VIETNAM_BORDER_PROXY_MODELS,
     VIETNAM_DITCH_PROXY_MODELS,
 )
-from cwr_worldgen.wrp import _height_grid_bytes, inspect_rvw4, quantize_height, write_rvw4
+from cwr_worldgen.wrp import _height_grid_bytes, _object_matrix_4x3_fast, inspect_rvw4, quantize_height, write_rvw4
 
 
 def _object(object_id: int, model: str) -> WorldObject:
@@ -479,3 +480,42 @@ def test_compact_reports_never_deepcopy_omitted_heavy_arrays() -> None:
 
     result = _small_report_dict(Report((RefuseCopy(),), Nested(7)), "heavy")
     assert result == {"nested": {"count": 7}}
+
+
+
+def test_cross_sloped_pitched_road_matrix_matches_fast_writer_and_wrp(tmp_path):
+    road = CrossSlopedRoadObject(
+        1, r"sample\i\road_paved_w091_l0063.p3d",
+        100.0, 12.0, 150.0, 35.0, 4.0, lateral_slope=0.035,
+    )
+    road.validate()
+    m = road.matrix_4x3()
+    assert m == _object_matrix_4x3_fast(road)
+    assert m[1] == 0.035
+    assert math.isclose(m[7], math.sin(math.radians(road.pitch_degrees)))
+    assert m[9:] == (100.0, 12.0, 150.0)
+
+    path = tmp_path / "banked.wrp"
+    write_rvw4(
+        path,
+        16, 16,
+        (0.0,) * 256, (0,) * 256,
+        (r"sample\data\g.paa",), (road,),
+        height_scale=0.05,
+    )
+    raw = path.read_bytes()
+    # RVW4 header + two int16 grids + 512 fixed 32-byte texture records.
+    object_start = 12 + 256 * 4 + 512 * 32
+    serialized = struct.unpack_from("<12f", raw, object_start)
+    assert all(math.isclose(actual, value, abs_tol=1e-5)
+               for actual, value in zip(serialized, m))
+
+
+def test_cross_sloped_road_rejects_nonfinite_transform():
+    import pytest
+
+    with pytest.raises(ValueError, match="road lateral slope must be finite"):
+        CrossSlopedRoadObject(
+            1, r"sample\i\road_paved_w091_l0063.p3d",
+            0., 0., 0., lateral_slope=float("nan"),
+        ).validate()
