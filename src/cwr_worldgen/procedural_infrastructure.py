@@ -687,8 +687,10 @@ def _road_ribbon_sections(
 
     Values are ``(left_x, left_z, right_x, right_z)``.  The nominal endpoints
     remain on the local Z axis, while curved variants bow sideways between them.
-    Short lowered overhangs hide the triangular cracks that otherwise appear
-    where independently rotated CWA road objects meet on a bend.
+    Curved paved turns extend a short tangent-aligned lip beyond their nominal
+    endpoints to cover the triangular cracks between rotated CWA road objects.
+    The paved lip must stay *above* the terrain; sinking it under the ground
+    exposes those cracks as visible grass bars.
     """
 
     half_length = length * 0.5
