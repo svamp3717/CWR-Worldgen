@@ -90,34 +90,38 @@ path. Text selection never changes a model, texture, or saved file.
 
 ### Faster CPU-rendered 3D previews
 
-The **Model & Texture Browser** now provides a **Render quality** selector
-in the Selected asset panel. It is independent from **Preview LOD**, texture
-mipmap choice, and the Skip textures option:
+Both the **Model & Texture Browser** (in the Selected asset panel) and the
+**Model Categoriser** (in the View sidebar, below Texture mipmap) now offer
+a **Render quality** selector. This is independent from **Preview LOD**,
+texture mipmap choice, and the Skip textures option:
 
-- **Fast (60%)** (browser default): Rasterize at 60% of the adaptive preview
+- **Fast (60%)** (default in both tools): Rasterize at 60% of the adaptive preview
   width and height (about 36% of the pixel workload), then upscale smoothly.
 - **Balanced (80%)**: Approximately 64% of the full pixel workload.
 - **Quality (100%)**: Retain the previous full preview resolution and sampling
   behavior.
 
 Changing render quality redraws the same loaded model without touching the
-archive, model order, classification state, or chosen model/texture LOD.
+archive, model order, classification state, or chosen model/texture LOD. The
+categoriser retains all selected categories, placement, current model, and
+session progress; the startup render quality is Fast in both applications.
 
 The shared CPU rasterizer now computes coverage using broadcast coordinate
 vectors, tests depth only for triangle-covered pixels, and performs expensive
 UV interpolation and bilinear/trilinear sampling **only on visible fragments**.
 Transparent pixels keep their existing alpha-test behavior; the result still
 uses perspective-correct UVs, repeating texture coordinates, and the same
-sampling filters. The optimisation also benefits the categoriser, which
-continues rendering at its existing resolution.
+sampling filters. The categoriser also benefits from the shared rasterizer
+and from its own selectable, reduced render resolution.
 
-The browser model timing readout separates **Textures** (lookup/decode/pyramid),
-**CPU raster** (remaining CPU geometry/pixel work), and **Matplotlib prep**
-(the synchronous plotting/figure setup). These categories sum with **P3D
-read** and **Mesh** to the reported **Total**. Matplotlib's deferred UI
-painting remains outside that total. Lower render resolution improves CPU
-pixel throughput, but neither the selected model LOD nor embedded texture mip
-changes automatically.
+The browser and categoriser model timing readouts both separate **Textures**
+(lookup/decode/pyramid), **CPU raster** (remaining CPU geometry/pixel work),
+and **Matplotlib prep** (synchronous plotting/figure setup). These sum with
+**P3D read** and **Mesh** to the reported **Total**. For bounds-only and
+vertex-only previews that skip CPU rasterization, the categoriser instead
+shows the combined **Preview** time. Matplotlib's deferred UI painting remains
+outside that total. Lower render resolution reduces CPU pixel workload, but
+neither the selected model LOD nor embedded texture mip changes automatically.
 
 ### Explorer raw-model cache and load-time diagnostics
 
@@ -158,8 +162,10 @@ the **View** panel, directly below its LOD and texture mipmap settings:
 - **Textures:** Time spent resolving/loading textures, decoding the selected
   embedded PAA/PAC mipmap, and preparing filtered texture levels. Previously
   cached textures usually make this step much shorter.
-- **Preview:** Remaining synchronous preview/raster and plotting work, excluding
-  texture preparation. Tk/Matplotlib deferred canvas painting is not included.
+- **CPU raster:** Synchronous renderer time excluding the **Textures** stage.
+- **Matplotlib prep:** Time to prepare the preview plot and schedule a redraw;
+  Tk/Matplotlib deferred canvas painting is not included. For bounds-only
+  and vertex-only fallbacks, **Preview** reports the combined duration.
 - **Total:** Sum of the displayed model-read, mesh, and most recent preview
   stages. When rotating or zooming, the read/mesh values still refer to the
   loaded model; only the preview stages are newly measured.
