@@ -4,9 +4,10 @@ from types import SimpleNamespace
 from cwr_worldgen import playability
 from cwr_worldgen.final_road_dedup_policy import (
     _align_final_paved_curve_handedness,
+    _ground_generated_roads_across_width,
     deduplicate_final_road_objects,
 )
-from cwr_worldgen.model import WorldObject
+from cwr_worldgen.model import CrossSlopedRoadObject, WorldObject
 from cwr_worldgen.playability import RoadFitReport
 from cwr_worldgen.procedural_infrastructure import (
     custom_road_model_path,
@@ -757,3 +758,85 @@ def test_final_curve_direction_ignores_isolated_junctions_and_overpasses():
     )
     ambiguous = _report((candidate, connected, duplicate))
     assert _align_final_paved_curve_handedness(ambiguous, _spec()) is ambiguous
+
+
+
+def _synthetic_sloped_terrain(cells=16, cell_size=25.0, *, gx=0.04, gz=0.01):
+    return tuple(
+        gx * (x * cell_size) + gz * (z * cell_size)
+        for z in range(cells) for x in range(cells)
+    )
+
+
+def _road_grounding_spec():
+    return SimpleNamespace(road_segment_length=25.0, cells=16, cell_size=25.0)
+
+
+def test_generated_road_contact_banks_across_width_without_moving_axis():
+    from cwr_worldgen import procedural_infrastructure as infra
+    from cwr_worldgen.playability import _sample_elevation
+
+    spec = _road_grounding_spec()
+    ground = _synthetic_sloped_terrain()
+    original = WorldObject(
+        11, r"world\i\road_paved_w091_l0063.p3d",
+        200.0, 10.01, 200.0, 0.0, math.degrees(math.atan(0.01)),
+    )
+    changed = _ground_generated_roads_across_width(
+        _report((original,)), ground, spec,
+    )
+    road = changed.objects[0]
+    assert isinstance(road, CrossSlopedRoadObject)
+    assert math.isclose(road.lateral_slope, 0.04, abs_tol=1.0e-9)
+    assert (road.x, road.y, road.z, road.heading_degrees, road.pitch_degrees) == (
+        original.x, original.y, original.z,
+        original.heading_degrees, original.pitch_degrees,
+    )
+    key = infra.InfrastructureModelKey("road", "road_paved_w091_l0063", 91, 63)
+    _visual, _geom, contact, _land = infra._road_lods(
+        key, r"o\road\sil_new.paa",
+    )
+    m = road.matrix_4x3()
+    for x, y, z in contact.points:
+        wx = x * m[0] + y * m[3] + z * m[6] + m[9]
+        wy = x * m[1] + y * m[4] + z * m[7] + m[10]
+        wz = x * m[2] + y * m[5] + z * m[8] + m[11]
+        terrain_y = _sample_elevation(
+            ground, spec.cells, spec.cell_size, wx, wz,
+        )
+        assert wy - terrain_y >= 0.04
+
+
+def test_generated_road_cross_slope_preserves_stock_and_junction_transforms():
+    spec = _road_grounding_spec()
+    ground = _synthetic_sloped_terrain()
+    stock = WorldObject(1, r"o\road\sil25.p3d", 200., 10., 200., 0., 0.)
+    junction = WorldObject(
+        2, r"world\i\road_j3_paved_w091_h000_090_180.p3d",
+        200., 10., 200., 0., 0.,
+    )
+    generated = WorldObject(
+        3, r"world\i\road_dirt_w035_l0063.p3d",
+        200., 10., 200., 0., 0.,
+    )
+    report = _report((stock, junction, generated))
+    result = _ground_generated_roads_across_width(report, ground, spec)
+    assert result.objects[0] is stock
+    assert result.objects[1] is junction
+    assert isinstance(result.objects[2], CrossSlopedRoadObject)
+    assert math.isclose(result.objects[2].lateral_slope, 0.04, abs_tol=1e-9)
+
+
+def test_generated_road_cross_slope_skips_flat_or_too_steep_terrain():
+    obj = WorldObject(
+        9, r"world\i\road_paved_w091_l0063.p3d",
+        200., 0.045, 200., 0., 0.,
+    )
+    spec = _road_grounding_spec()
+    report = _report((obj,))
+    assert _ground_generated_roads_across_width(
+        report, _synthetic_sloped_terrain(gx=0.0, gz=0.0), spec
+    ) is report
+    assert _ground_generated_roads_across_width(
+        report, _synthetic_sloped_terrain(gx=0.11, gz=0.0), spec
+    ) is report
