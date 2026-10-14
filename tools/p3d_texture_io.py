@@ -819,8 +819,9 @@ def _decode_p8_payload(stream: io.BytesIO, width: int, height: int, palette: np.
 
 def _paa_mip_directory(
     data: bytes, *, is_paa: bool = True,
+    max_mips: int | None = None, max_dimension: int | None = None,
 ) -> tuple[str, np.ndarray, tuple[PaaMip, ...]]:
-    """Read embedded mip headers without decompressing any image payload."""
+    """Read just enough mip headers to find the requested stored image."""
     stream = io.BytesIO(data)
     magic = _u16(stream)
     kind = _PAA_FORMATS.get(magic)
@@ -880,6 +881,10 @@ def _paa_mip_directory(
                 break
             raise ValueError(f"truncated PAA/PAC mip payload: need {size} bytes")
         mips.append(PaaMip(width, height, payload_start, size, lzo, lzw_p8))
+        if (max_mips is not None and len(mips) >= max_mips) or (
+            max_dimension is not None and max(width, height) <= max_dimension
+        ):
+            break
         stream.seek(payload_start + size)
         # Mip levels always shrink. Do not mistake an offset table, or an
         # appended unrelated record, for additional image resolution levels.
@@ -901,7 +906,11 @@ def decode_paa(
 ) -> np.ndarray:
     """Decode a selected *embedded* PAA/PAC mip directly into RGBA."""
     index, max_dimension = _mipmap_selection(mipmap)
-    kind, palette, mips = _paa_mip_directory(data, is_paa=is_paa)
+    kind, palette, mips = _paa_mip_directory(
+        data, is_paa=is_paa,
+        max_mips=index + 1 if index is not None else None,
+        max_dimension=max_dimension,
+    )
     if max_dimension is not None:
         selected = next(
             (mip for mip in mips if max(mip.width, mip.height) <= max_dimension),
