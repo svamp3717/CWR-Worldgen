@@ -147,3 +147,28 @@ def test_model_triangle_uses_correct_half_of_p3d_colour_atlas(monkeypatch) -> No
     assert misses == 0
     assert len(foreground) > 0
     assert np.all(foreground == (225, 35, 20))
+
+
+
+def test_texture_preparation_time_is_measured_separately_from_rasterization(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(render, "_project", _visible_projection)
+    points, faces = _triangle()
+    resolver = _Resolver()
+    timings = {}
+    image, hits, misses = render.render_textured_model(
+        points, faces, resolver, "models.pbo",
+        width=32, height=32, texture_timing=timings,
+    )
+    assert image.shape == (32, 32, 3)
+    assert (hits, misses) == (1, 0)
+    assert "seconds" in timings
+    assert timings["seconds"] >= 0
+
+    skipped = {}
+    render.render_textured_model(
+        points, faces, _Resolver(fail=True), "models.pbo",
+        width=32, height=32, load_textures=False, texture_timing=skipped,
+    )
+    assert skipped == {}
