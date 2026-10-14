@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import struct
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -391,7 +392,7 @@ def test_generated_road_surfaces_keep_dirt_gravel_paved_height_order() -> None:
     )
 
 
-def test_generated_curved_paved_turn_restores_terrtest39_seam_geometry() -> None:
+def test_generated_curved_paved_turn_end_lips_stay_above_terrain() -> None:
     curved_key = infrastructure.InfrastructureModelKey(
         "road",
         "paved_w091_l0059_r45",
@@ -403,29 +404,48 @@ def test_generated_curved_paved_turn_restores_terrtest39_seam_geometry() -> None
         r"o\road\sil_new.paa",
     )
 
-    # terrtest39 used tangent-aligned turn mouths. terrtest44's square ends made
-    # both edge points share the same Z plane and exposed large triangular grass
-    # wedges between consecutive turn pieces.
+    # Retain the tangent-aligned turn mouths; prior square-ended turns left
+    # wide triangular wedges between differently angled road segments.
     first_left, first_right = roadway.points[0], roadway.points[1]
     last_left, last_right = roadway.points[-2], roadway.points[-1]
     assert not math.isclose(first_left[2], first_right[2], abs_tol=0.10)
     assert not math.isclose(last_left[2], last_right[2], abs_tol=0.10)
 
-    # The visual LOD extends 0.18 m beyond the nominal tangent mouth and drops
-    # only that overlap below the paved surface, matching the seam treatment in
-    # terrtest39 without changing the Roadway extent.
+    # The original 40 mm downward tongue crossed below flat terrain: a road
+    # placed at 35 mm above grade had its 25 mm visual lip at -5 mm.
+    # Keep the same 0.18 m tangent overhang, but lift its last 5 mm above the
+    # main skin to cover open joints without making a grass stripe.
     assert infrastructure.GENERATED_PAVED_TURN_VISUAL_OVERLAP_METRES == 0.18
+    assert infrastructure.GENERATED_PAVED_TURN_OVERLAP_RISE_METRES == 0.005
     expected_first_visual = (
-        (-4.2943, -0.0150, -1.4354),
-        (4.1612, -0.0150, -4.7991),
+        (-4.2943, 0.0300, -1.4354),
+        (4.1612, 0.0300, -4.7991),
     )
     for actual, expected in zip(visual.points[:2], expected_first_visual):
         assert math.isclose(actual[0], expected[0], abs_tol=5.0e-4)
         assert math.isclose(actual[1], expected[1], abs_tol=5.0e-4)
         assert math.isclose(actual[2], expected[2], abs_tol=5.0e-4)
 
-    assert min(point[1] for point in visual.points) < (
-        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES - 0.03
+    assert math.isclose(
+        min(point[1] for point in visual.points),
+        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES,
+        abs_tol=1.0e-9,
+    )
+    assert math.isclose(
+        max(point[1] for point in visual.points),
+        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+        + infrastructure.GENERATED_PAVED_TURN_OVERLAP_RISE_METRES,
+        abs_tol=1.0e-9,
+    )
+    # After applying _road_object_on_slope's model-origin adjustment, no
+    # visual point lies below a flat 0 m terrain surface.
+    y_placement = (
+        playability._road_surface_vertical_offset("paved")
+        - infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+    )
+    assert min(point[1] + y_placement for point in visual.points) >= 0.035 - 1e-9
+    assert max(point[1] for point in visual.points) < min(
+        point[1] for point in roadway.points
     )
     assert all(
         math.isclose(point[1], infrastructure.GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES, abs_tol=1.0e-9)
@@ -456,6 +476,64 @@ def test_generated_curved_paved_turn_restores_terrtest39_seam_geometry() -> None
     )
     assert min(point[1] for point in straight_visual.points) >= (
         infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES - 1.0e-9
+    )
+
+
+def test_custom_paved_turns_share_the_above_ground_contact_safe_seam() -> None:
+    """The unified road_paved_ branch uses the same geometry as paved_w_."""
+    for subtype in ("road_paved_w091_l0063_r010", "road_paved_w091_l0063_l030"):
+        key = infrastructure.InfrastructureModelKey("road", subtype, 91, 63)
+        visual, _geometry, roadway, _land = infrastructure._road_lods(
+            key, r"o\\road\\sil_new.paa",
+        )
+        assert math.isclose(
+            min(y for _x, y, _z in visual.points),
+            infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES,
+            abs_tol=1e-9,
+        )
+        assert math.isclose(
+            max(y for _x, y, _z in visual.points),
+            infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+            + infrastructure.GENERATED_PAVED_TURN_OVERLAP_RISE_METRES,
+            abs_tol=1e-9,
+        )
+        assert all(
+            math.isclose(y, infrastructure.GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES, abs_tol=1e-9)
+            for _x, y, _z in roadway.points
+        )
+        assert max(y for _x, y, _z in visual.points) < min(
+            y for _x, y, _z in roadway.points
+        )
+
+
+def test_written_paved_turn_p3d_contains_no_buried_visual_vertices(
+    tmp_path: Path,
+) -> None:
+    """Inspect the real SP3X byte stream, not just the in-memory LOD."""
+    key = infrastructure.InfrastructureModelKey(
+        "road", "road_paved_w091_l0063_r010", 91, 63,
+    )
+    path = tmp_path / "curved-paved.p3d"
+    infrastructure.write_infrastructure_mlod(
+        path, key, r"o\\road\\sil_new.paa",
+    )
+    raw = path.read_bytes()
+    assert raw[:4] == b"MLOD"
+    assert raw[12:16] == b"SP3X"
+    header_size = struct.unpack_from("<i", raw, 16)[0]
+    point_count = struct.unpack_from("<i", raw, 24)[0]
+    visual_start = 12 + header_size
+    y_values = tuple(
+        struct.unpack_from("<f", raw, visual_start + 16 * index + 4)[0]
+        for index in range(point_count)
+    )
+    assert len(y_values) > 4
+    assert min(y_values) >= infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES - 1e-7
+    assert math.isclose(
+        max(y_values),
+        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+        + infrastructure.GENERATED_PAVED_TURN_OVERLAP_RISE_METRES,
+        abs_tol=1e-7,
     )
 
 
@@ -938,3 +1016,117 @@ def test_generated_paved_and_gravel_roads_use_native_render_metadata() -> None:
             face.texture == r"o\road\sil_new.paa"
             for face in roadway.faces
         )
+
+
+def _lundby_fitted_piece(
+    model_name: str, x: float, z: float, cosine: float, sine: float,
+):
+    """Recover a fitted chord from the actual wg_lundby4.wrp model transform."""
+    import re
+    match = re.search(r"_l(?P<length>\d{4})", model_name)
+    assert match is not None
+    length = int(match.group("length")) * 0.1
+    piece = playability._RoadPiece(
+        rf"wg_lundby4\i\{model_name}", length, int(round(length)),
+    )
+    start = (x - sine * length * 0.5, z - cosine * length * 0.5)
+    end = (x + sine * length * 0.5, z + cosine * length * 0.5)
+    return piece, start, end
+
+
+def _paved_join_side_displacements(first, second) -> tuple[float, float]:
+    """Measure the two transformed visual mouth corners, not just axes."""
+    def mouth(span, last):
+        piece, start, end = span
+        basename = piece.model_path.rsplit("\\", 1)[-1].removesuffix(".p3d")
+        key = infrastructure.InfrastructureModelKey(
+            "road", basename, 91, int(round(piece.length_metres * 10)),
+        )
+        visual, _geometry, _roadway, _land = infrastructure._road_lods(
+            key, r"o\road\sil_new.paa",
+        )
+        verts = visual.points[-2:] if last else visual.points[:2]
+        angle = math.atan2(end[0] - start[0], end[1] - start[1])
+        cos, sin = math.cos(angle), math.sin(angle)
+        cx, cz = (start[0] + end[0]) * .5, (start[1] + end[1]) * .5
+        return tuple(
+            (cx + cos * px + sin * pz, cz - sin * px + cos * pz)
+            for px, _py, pz in verts
+        )
+
+    previous_end = mouth(first, True)
+    following_start = mouth(second, False)
+    return tuple(
+        math.dist(previous_end[side], following_start[side])
+        for side in (0, 1)
+    )
+
+
+def test_lundby_center_curve_join_corrects_reversed_handedness() -> None:
+    """Actual PBO WRP objects 8040-8042 had 1.2/2.0 m side-to-side gaps.
+
+    The three original road_paved...r010 meshes bend opposite to the chain's
+    increasing +10-degree headings, despite nominal chord endpoints being
+    connected. Keep model positions and object/chord lengths unchanged.
+    """
+    spans = tuple(
+        _lundby_fitted_piece(*row)
+        for row in (
+            ("road_paved_w091_l0044_r010.p3d", 3203.5825195, 3174.0483398,
+             -0.373469085, -0.927628696),
+            ("road_paved_w091_l0044_r010.p3d", 3199.4294434, 3172.7841797,
+             -0.206711799, -0.978379607),
+            ("road_paved_w091_l0044_r010.p3d", 3195.1201172, 3172.2602539,
+             -0.033673681, -0.999406755),
+        )
+    )
+    from cwr_worldgen import paved_road_generated_fallback_policy as paved
+    old_gap = _paved_join_side_displacements(spans[0], spans[1])
+    assert min(old_gap) > 1.0
+    assert max(old_gap) > 1.8
+
+    corrected = paved._align_generated_paved_curve_handedness(spans)
+    assert all(
+        row[0].model_path.endswith("_l010.p3d") for row in corrected
+    )
+    assert tuple((row[1], row[2]) for row in corrected) == tuple(
+        (row[1], row[2]) for row in spans
+    )
+    for before, after in zip(spans, corrected):
+        assert before[0].length_metres == after[0].length_metres
+        assert before[0].nominal_length == after[0].nominal_length
+    for a, b in zip(corrected, corrected[1:]):
+        assert max(_paved_join_side_displacements(a, b)) < 0.55
+
+
+def test_lundby_correctly_handed_left_bend_keeps_original_right_curves() -> None:
+    """Do not globally swap curve signs: this different bend is already right."""
+    spans = tuple(
+        _lundby_fitted_piece(*row)
+        for row in (
+            ("road_paved_w091_l0063_r015.p3d", 3515.7480469, 3144.5410156,
+             0.737096667, -0.675768673),
+            ("road_paved_w091_l0063_r040.p3d", 3510.8764648, 3148.3103027,
+             0.469077617, -0.883152664),
+            ("road_paved_w091_l0063.p3d", 3505.0522461, 3150.3891602,
+             0.196146548, -0.980571866),
+        )
+    )
+    from cwr_worldgen import paved_road_generated_fallback_policy as paved
+    corrected = paved._align_generated_paved_curve_handedness(spans)
+    assert corrected == spans
+
+
+def test_paved_curve_handedness_requires_connected_unambiguous_neighbours() -> None:
+    from cwr_worldgen import paved_road_generated_fallback_policy as paved
+    pivot = _lundby_fitted_piece(
+        "road_paved_w091_l0044_r010.p3d", 3199.4294434, 3172.7841797,
+        -0.206711799, -0.978379607,
+    )
+    assert paved._align_generated_paved_curve_handedness((pivot,)) == (pivot,)
+    disconnected = _lundby_fitted_piece(
+        "road_paved_w091_l0044_r010.p3d", 1000.0, 1000.0, 1.0, 0.0,
+    )
+    assert paved._align_generated_paved_curve_handedness(
+        (pivot, disconnected)
+    ) == (pivot, disconnected)
