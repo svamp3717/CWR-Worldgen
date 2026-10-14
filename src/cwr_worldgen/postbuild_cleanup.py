@@ -79,7 +79,7 @@ def _widget_text(widget: Any) -> str:
 
 
 def install_postbuild_cleanup() -> None:
-    """Add build-cache routing, a default-on cleanup checkbox and final cleanup job."""
+    """Add build-cache routing, an opt-in cleanup checkbox and final cleanup job."""
     global _INSTALLED
     if _INSTALLED:
         return
@@ -109,7 +109,7 @@ def install_postbuild_cleanup() -> None:
 
         def default_gui_values() -> dict[str, object]:
             values = original_defaults()
-            values[CLEANUP_BUILD_AFTER_BUILD] = True
+            values[CLEANUP_BUILD_AFTER_BUILD] = False
             return values
 
         gui.default_gui_values = default_gui_values
@@ -141,8 +141,8 @@ def install_postbuild_cleanup() -> None:
                 )
                 cleanup = gui.ttk.Checkbutton(
                     checks,
-                    text="Delete temporary build files after a successful build",
-                    variable=self._var(CLEANUP_BUILD_AFTER_BUILD, True, boolean=True),
+                    text="Delete intermediates + build cache after build (slower rebuilds)",
+                    variable=self._var(CLEANUP_BUILD_AFTER_BUILD, False, boolean=True),
                 )
                 if inspector is None:
                     cleanup.pack(anchor="w")
