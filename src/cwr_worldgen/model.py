@@ -109,6 +109,29 @@ class WorldObject:
 
 
 @dataclass(frozen=True, slots=True)
+class CrossSlopedRoadObject(WorldObject):
+    """Generated road with a small lateral bank to follow terrain cross-slope.
+
+    The original road centreline, longitudinal pitch and y-position are retained.
+    Only the local X-axis contributes an additional height gradient, keeping
+    the full-width Roadway contact faces above the nearby terrain rather than
+    allowing one wheel track to pass under the ground. Unlike the affine
+    terrain-shear used for forest blocks, this can coexist with road pitch.
+    """
+
+    lateral_slope: float = 0.0
+
+    def matrix_4x3(self) -> tuple[float, ...]:
+        base = WorldObject.matrix_4x3(self)
+        return (base[0], float(self.lateral_slope), *base[2:])
+
+    def validate(self) -> None:
+        WorldObject.validate(self)
+        if not math.isfinite(self.lateral_slope):
+            raise ValueError("road lateral slope must be finite")
+
+
+@dataclass(frozen=True, slots=True)
 class TerrainShearedWorldObject(WorldObject):
     """WRP object whose local X/Z axes follow a terrain height plane.
 
