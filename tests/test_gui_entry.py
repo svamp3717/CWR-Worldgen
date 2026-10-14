@@ -196,14 +196,16 @@ def test_frozen_cleanup_command_reenters_existing_marker(tmp_path: Path) -> None
     ]
 
 
-def test_cleanup_checkbox_is_default_on_and_above_inspector() -> None:
+def test_cleanup_checkbox_is_opt_in_to_preserve_rebuild_caches() -> None:
     source = (
         Path(__file__).resolve().parents[1]
         / "src" / "cwr_worldgen" / "postbuild_cleanup.py"
     ).read_text(encoding="utf-8")
-    assert f'values[CLEANUP_BUILD_AFTER_BUILD] = True' in source
-    assert "Delete temporary build files after a successful build" in source
+    assert f'values[CLEANUP_BUILD_AFTER_BUILD] = False' in source
+    assert "variable=self._var(CLEANUP_BUILD_AFTER_BUILD, False, boolean=True)" in source
+    assert "Delete intermediates + build cache after build (slower rebuilds)" in source
     assert 'cleanup.pack(anchor="w", before=inspector)' in source
+    # Explicit cleanup remains available to users who prioritize disk space.
     assert 'CLEANUP_DIR_NAMES = ("source", "normalized", BUILD_CACHE_DIRNAME)' in source
 
 
