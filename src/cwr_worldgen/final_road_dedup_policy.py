@@ -1554,6 +1554,131 @@ def deduplicate_final_road_objects(
     return _trim_dirt_under_paved(deduplicated, spec)
 
 
+# Final curve-handedness correction: an OSM feature can split an otherwise
+# continuous road into multiple planning jobs. The per-run paved fallback cannot
+# see neighboring chords from a different job. This pass runs after final
+# deduplication, when all surviving generated/stock road axes are available.
+_FINAL_PAVED_ENDPOINT_BUCKET_METRES = 0.25
+_FINAL_PAVED_ENDPOINT_TOLERANCE_METRES = 0.15
+_FINAL_PAVED_MAX_HEIGHT_DIFFERENCE_METRES = 0.75
+_FINAL_PAVED_CURVE_SUFFIX = re.compile(
+    r"(?P<side>[lr])(?P<angle>\\d{2,3})\\.p3d$", re.I,
+)
+
+
+def _align_final_paved_curve_handedness(report, spec):
+    """Orient generated paved ribbons by *final* connected road neighbors.
+
+    Inspect only unique endpoint-to-endpoint connections of the same paved
+    family. Pitched/overlapping/crossing roads must not determine a curve sign.
+    Neither object positions nor donor/roadway geometry are modified here.
+    """
+    if len(report.objects) < 2:
+        return report
+
+    paved_families = frozenset(("paved", "sil", "kos", "asf"))
+    axes = []
+    for index, obj in enumerate(report.objects):
+        axis = _road_axis(obj, index, spec)
+        if axis is not None and axis.family in paved_families:
+            axes.append(axis)
+
+    if len(axes) < 2:
+        return report
+
+    bucket_size = _FINAL_PAVED_ENDPOINT_BUCKET_METRES
+    start_buckets: dict[tuple[int, int], list[int]] = {}
+    end_buckets: dict[tuple[int, int], list[int]] = {}
+
+    def bucket(point):
+        return (
+            math.floor(point[0] / bucket_size),
+            math.floor(point[1] / bucket_size),
+        )
+
+    for index, axis in enumerate(axes):
+        start_buckets.setdefault(bucket(axis.start), []).append(index)
+        end_buckets.setdefault(bucket(axis.end), []).append(index)
+
+    def unique_neighbor(index, *, previous):
+        axis = axes[index]
+        point = axis.start if previous else axis.end
+        key_x, key_z = bucket(point)
+        candidates = []
+        buckets = end_buckets if previous else start_buckets
+        for cell_z in range(key_z - 1, key_z + 2):
+            for cell_x in range(key_x - 1, key_x + 2):
+                for other_index in buckets.get((cell_x, cell_z), ()):
+                    if other_index == index:
+                        continue
+                    other = axes[other_index]
+                    other_point = other.end if previous else other.start
+                    if (
+                        math.dist(point, other_point)
+                        > _FINAL_PAVED_ENDPOINT_TOLERANCE_METRES
+                        or abs(axis.elevation - other.elevation)
+                        > _FINAL_PAVED_MAX_HEIGHT_DIFFERENCE_METRES
+                    ):
+                        continue
+                    cosine_turn = axis.ux * other.ux + axis.uz * other.uz
+                    if cosine_turn < 0.5:  # heading difference > 60 degrees
+                        continue
+                    candidates.append(other)
+                    if len(candidates) > 1:
+                        return None  # Ambiguous merge/intersection: do not alter
+        return candidates[0] if candidates else None
+
+    changed: dict[int, object] = {}
+    for index, axis in enumerate(axes):
+        if axis.family != "paved" or axis.stock_model or not axis.curved_model:
+            continue
+        original = report.objects[axis.object_index]
+        match = _FINAL_PAVED_CURVE_SUFFIX.search(original.model_path)
+        if match is None:
+            continue
+
+        previous = unique_neighbor(index, previous=True)
+        following = unique_neighbor(index, previous=False)
+        turns = []
+        heading = math.degrees(math.atan2(axis.ux, axis.uz))
+
+        if previous is not None:
+            before_heading = math.degrees(math.atan2(previous.ux, previous.uz))
+            turn = (heading - before_heading + 180.0) % 360.0 - 180.0
+            if 1.5 <= abs(turn) <= 60.0:
+                turns.append(turn)
+        if following is not None:
+            after_heading = math.degrees(math.atan2(following.ux, following.uz))
+            turn = (after_heading - heading + 180.0) % 360.0 - 180.0
+            if 1.5 <= abs(turn) <= 60.0:
+                turns.append(turn)
+
+        if not turns or min(turns) < 0 < max(turns):
+            continue
+        # Ribbon +X curvature rotates end tangents toward decreasing heading.
+        wanted_side = "l" if sum(turns) > 0.0 else "r"
+        if match.group("side").casefold() == wanted_side:
+            continue
+
+        path = original.model_path
+        corrected = (
+            path[:match.start("side")]
+            + wanted_side
+            + path[match.end("side"):]
+        )
+        changed[axis.object_index] = replace(original, model_path=corrected)
+
+    if not changed:
+        return report
+    return replace(
+        report,
+        objects=tuple(
+            changed.get(index, obj)
+            for index, obj in enumerate(report.objects)
+        ),
+    )
+
+
 def install_final_road_dedup_policy() -> None:
     """Install the dedupe wrapper after every existing road fitting policy."""
     global _INSTALLED, _ORIGINAL_FIT
@@ -1579,11 +1704,15 @@ def install_final_road_dedup_policy() -> None:
             starting_id=starting_id,
             progress_callback=progress_callback,
         )
-        return deduplicate_final_road_objects(
+        # The generator's per-run curve correction cannot see neighbors split
+        # across OSM planning jobs. Apply the same alignment after *all* final
+        # road axes have been assembled and redundant pieces removed.
+        deduplicated = deduplicate_final_road_objects(
             report,
             spec,
             progress_callback=progress_callback,
         )
+        return _align_final_paved_curve_handedness(deduplicated, spec)
 
     _p.fit_road_objects = deduplicating_fit
     _generator.fit_road_objects = deduplicating_fit
