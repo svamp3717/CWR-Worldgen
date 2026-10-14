@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 import struct
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 
-from cwr_worldgen.cache import streaming_hash
+from cwr_worldgen.cache import (
+    float_sequence_sha256, int_sequence_sha256, streaming_hash,
+)
 from cwr_worldgen.generator import (
+    _small_report_dict,
     _assemble_world_objects,
     _expand_cwa_generated_vegetation,
     _trusted_legacy_asset_paths,
 )
 from cwr_worldgen.model import WorldObject
+from cwr_worldgen.playability import (
+    RoadFitReport, TerrainGradeReport, TransitionReport,
+)
 from cwr_worldgen.osm import (
     BboxProjection, CompactOrientedRectangle, ObjectGenerationResult,
     _compact_support_polygon, _oriented_rectangle,
@@ -357,3 +365,117 @@ def test_bbox_projection_hot_path_is_affine_and_round_trips() -> None:
     latitude, longitude = projection.to_latlon((x, z))
     assert abs(latitude - point[0]) < 1.0e-12
     assert abs(longitude - point[1]) < 1.0e-12
+
+
+
+def test_chunked_float_terrain_hash_preserves_legacy_digest_across_boundaries() -> None:
+    """Byte-for-byte compatibility is required for existing road/terrain caches."""
+    values = [0.0, -0.0, float("inf"), float("-inf"), 0.125, -1.125]
+    values.extend((index % 257) * 0.05 for index in range(20_003))
+    baseline = sha256()
+    legacy_pack = struct.Struct("<d").pack
+    for value in values:
+        baseline.update(legacy_pack(float(value)))
+
+    assert float_sequence_sha256(values) == baseline.hexdigest()
+    assert float_sequence_sha256(iter(values)) == baseline.hexdigest()
+
+
+def test_chunked_int_terrain_hash_preserves_legacy_digest_across_boundaries() -> None:
+    values = [-(2**31), 2**31 - 1, 0, -1, 1]
+    values.extend((index % 250) - 125 for index in range(20_003))
+    baseline = sha256()
+    legacy_pack = struct.Struct("<i").pack
+    for value in values:
+        baseline.update(legacy_pack(int(value)))
+
+    assert int_sequence_sha256(values) == baseline.hexdigest()
+    assert int_sequence_sha256((value for value in values)) == baseline.hexdigest()
+
+
+def test_chunked_terrain_hash_handles_empty_inputs_and_single_use_iterators() -> None:
+    expected = sha256(b"").hexdigest()
+    assert float_sequence_sha256(()) == expected
+    assert int_sequence_sha256(iter(())) == expected
+
+    class Once:
+        def __init__(self):
+            self.reads = 0
+
+        def __iter__(self):
+            self.reads += 1
+            if self.reads != 1:
+                raise AssertionError("terrain fingerprint generator was reused")
+            yield 3
+            yield -2
+
+    assert float_sequence_sha256(Once()) == sha256(
+        struct.pack("<dd", 3.0, -2.0)
+    ).hexdigest()
+    assert int_sequence_sha256(Once()) == sha256(
+        struct.pack("<ii", 3, -2)
+    ).hexdigest()
+
+
+def test_chunked_terrain_hash_keeps_legacy_integer_overflow_semantics() -> None:
+    import pytest
+
+    with pytest.raises(struct.error):
+        int_sequence_sha256([0] * 8_192 + [2**31])
+
+
+
+def test_large_world_report_compaction_preserves_existing_json_data() -> None:
+    road = RoadFitReport(
+        objects=(WorldObject(1, "world\\road.p3d", 1.0, 2.0, 3.0, 45.0),),
+        chain_count=1,
+        connection_count=3,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+    )
+    legacy_road = asdict(road)
+    legacy_road["objects"] = len(road.objects)
+    assert _small_report_dict(road, "objects") | {
+        "objects": len(road.objects),
+    } == legacy_road
+
+    grading = TerrainGradeReport(
+        elevations=(3.25, 4.5, 5.75),
+        changed_cells=2,
+        road_seed_cells=1,
+        building_pad_cells=0,
+        maximum_cut=0.5,
+        maximum_fill=0.25,
+        maximum_road_slope_before_percent=6.0,
+        maximum_road_slope_after_percent=2.0,
+        building_roughness_before=0.9,
+        building_roughness_after=0.5,
+    )
+    transitions = TransitionReport(indices=(1, 2, 3), shoreline_cells=1, softened_landuse_cells=2)
+    legacy_grading = asdict(grading)
+    legacy_grading.pop("elevations")
+    legacy_grading["transitions"] = asdict(transitions)
+    legacy_grading["transitions"].pop("indices")
+    compact = _small_report_dict(grading, "elevations")
+    compact["transitions"] = _small_report_dict(transitions, "indices")
+    assert compact == legacy_grading
+
+
+def test_compact_reports_never_deepcopy_omitted_heavy_arrays() -> None:
+    @dataclass(frozen=True)
+    class Nested:
+        count: int
+
+    @dataclass(frozen=True)
+    class Report:
+        heavy: tuple[object, ...]
+        nested: Nested
+
+    class RefuseCopy:
+        def __deepcopy__(self, memo):
+            raise AssertionError("Unneeded report array was deep-copied")
+
+    result = _small_report_dict(Report((RefuseCopy(),), Nested(7)), "heavy")
+    assert result == {"nested": {"count": 7}}

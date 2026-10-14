@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, fields, is_dataclass
 from hashlib import sha256
+from itertools import islice
 from pathlib import Path, PurePath
 import json
 import os
@@ -190,19 +191,26 @@ def file_snapshot(path: Path | None) -> dict[str, Any] | None:
     }
 
 
+# Terrain arrays can contain millions of entries. Packing each individual
+# scalar and calling hashlib.update() per cell wastes CPU even on cache *hits*.
+# Batch the identical little-endian wire representation in bounded blocks.
+# Do not alter the hash format: existing persisted cache keys remain valid.
+_SEQUENCE_HASH_BLOCK = 8192
+
+
 def float_sequence_sha256(values: Any) -> str:
     digest = sha256()
-    pack = struct.Struct("<d").pack
-    for value in values:
-        digest.update(pack(float(value)))
+    iterator = iter(values)
+    while block := tuple(islice(iterator, _SEQUENCE_HASH_BLOCK)):
+        digest.update(struct.pack(f"<{len(block)}d", *(float(v) for v in block)))
     return digest.hexdigest()
 
 
 def int_sequence_sha256(values: Any) -> str:
     digest = sha256()
-    pack = struct.Struct("<i").pack
-    for value in values:
-        digest.update(pack(int(value)))
+    iterator = iter(values)
+    while block := tuple(islice(iterator, _SEQUENCE_HASH_BLOCK)):
+        digest.update(struct.pack(f"<{len(block)}i", *(int(v) for v in block)))
     return digest.hexdigest()
 
 
