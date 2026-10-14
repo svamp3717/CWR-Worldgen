@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
 import math
+from time import perf_counter
 from typing import Sequence
 
 import numpy as np
@@ -238,6 +239,7 @@ def render_textured_model(
     load_textures: bool = True,
     mipmap_cache: MipmapCache | None = None,
     texture_mipmap: str = "auto",
+    texture_timing: dict[str, float] | None = None,
 ) -> tuple[np.ndarray, int, int]:
     """Perspective-correct rasterization, optionally skipping all texture I/O."""
     image = np.full((height, width, 3), 236, dtype=np.uint8)
@@ -292,6 +294,7 @@ def render_textured_model(
         if load_textures and texture_path:
             canonical = measure._canonical_model_path(texture_path)
             if canonical not in cache:
+                texture_start = perf_counter() if texture_timing is not None else 0.0
                 if mipmap_cache is not None:
                     cache[canonical] = (
                         mipmap_cache.get(canonical, source, resolver)
@@ -308,6 +311,10 @@ def render_textured_model(
                     )
                     cache[canonical] = (
                         _mipmap_chain(decoded) if decoded is not None else None
+                    )
+                if texture_timing is not None:
+                    texture_timing["seconds"] = (
+                        texture_timing.get("seconds", 0.0) + perf_counter() - texture_start
                     )
             mipmaps = cache[canonical]
         if mipmaps is None:
