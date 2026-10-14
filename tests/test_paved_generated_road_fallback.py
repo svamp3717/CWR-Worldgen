@@ -391,7 +391,7 @@ def test_generated_road_surfaces_keep_dirt_gravel_paved_height_order() -> None:
     )
 
 
-def test_generated_curved_paved_turn_restores_terrtest39_seam_geometry() -> None:
+def test_generated_curved_paved_turn_end_lips_stay_above_terrain() -> None:
     curved_key = infrastructure.InfrastructureModelKey(
         "road",
         "paved_w091_l0059_r45",
@@ -403,29 +403,48 @@ def test_generated_curved_paved_turn_restores_terrtest39_seam_geometry() -> None
         r"o\road\sil_new.paa",
     )
 
-    # terrtest39 used tangent-aligned turn mouths. terrtest44's square ends made
-    # both edge points share the same Z plane and exposed large triangular grass
-    # wedges between consecutive turn pieces.
+    # Retain the tangent-aligned turn mouths; prior square-ended turns left
+    # wide triangular wedges between differently angled road segments.
     first_left, first_right = roadway.points[0], roadway.points[1]
     last_left, last_right = roadway.points[-2], roadway.points[-1]
     assert not math.isclose(first_left[2], first_right[2], abs_tol=0.10)
     assert not math.isclose(last_left[2], last_right[2], abs_tol=0.10)
 
-    # The visual LOD extends 0.18 m beyond the nominal tangent mouth and drops
-    # only that overlap below the paved surface, matching the seam treatment in
-    # terrtest39 without changing the Roadway extent.
+    # The original 40 mm downward tongue crossed below flat terrain: a road
+    # placed at 35 mm above grade had its 25 mm visual lip at -5 mm.
+    # Keep the same 0.18 m tangent overhang, but lift its last 5 mm above the
+    # main skin to cover open joints without making a grass stripe.
     assert infrastructure.GENERATED_PAVED_TURN_VISUAL_OVERLAP_METRES == 0.18
+    assert infrastructure.GENERATED_PAVED_TURN_OVERLAP_RISE_METRES == 0.005
     expected_first_visual = (
-        (-4.2943, -0.0150, -1.4354),
-        (4.1612, -0.0150, -4.7991),
+        (-4.2943, 0.0300, -1.4354),
+        (4.1612, 0.0300, -4.7991),
     )
     for actual, expected in zip(visual.points[:2], expected_first_visual):
         assert math.isclose(actual[0], expected[0], abs_tol=5.0e-4)
         assert math.isclose(actual[1], expected[1], abs_tol=5.0e-4)
         assert math.isclose(actual[2], expected[2], abs_tol=5.0e-4)
 
-    assert min(point[1] for point in visual.points) < (
-        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES - 0.03
+    assert math.isclose(
+        min(point[1] for point in visual.points),
+        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES,
+        abs_tol=1.0e-9,
+    )
+    assert math.isclose(
+        max(point[1] for point in visual.points),
+        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+        + infrastructure.GENERATED_PAVED_TURN_OVERLAP_RISE_METRES,
+        abs_tol=1.0e-9,
+    )
+    # After applying _road_object_on_slope's model-origin adjustment, no
+    # visual point lies below a flat 0 m terrain surface.
+    y_placement = (
+        playability._road_surface_vertical_offset("paved")
+        - infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+    )
+    assert min(point[1] + y_placement for point in visual.points) >= 0.035 - 1e-9
+    assert max(point[1] for point in visual.points) < min(
+        point[1] for point in roadway.points
     )
     assert all(
         math.isclose(point[1], infrastructure.GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES, abs_tol=1.0e-9)
@@ -457,6 +476,33 @@ def test_generated_curved_paved_turn_restores_terrtest39_seam_geometry() -> None
     assert min(point[1] for point in straight_visual.points) >= (
         infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES - 1.0e-9
     )
+
+
+def test_custom_paved_turns_share_the_above_ground_contact_safe_seam() -> None:
+    """The unified road_paved_ branch uses the same geometry as paved_w_."""
+    for subtype in ("road_paved_w091_l0063_r010", "road_paved_w091_l0063_l030"):
+        key = infrastructure.InfrastructureModelKey("road", subtype, 91, 63)
+        visual, _geometry, roadway, _land = infrastructure._road_lods(
+            key, r"o\\road\\sil_new.paa",
+        )
+        assert math.isclose(
+            min(y for _x, y, _z in visual.points),
+            infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES,
+            abs_tol=1e-9,
+        )
+        assert math.isclose(
+            max(y for _x, y, _z in visual.points),
+            infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+            + infrastructure.GENERATED_PAVED_TURN_OVERLAP_RISE_METRES,
+            abs_tol=1e-9,
+        )
+        assert all(
+            math.isclose(y, infrastructure.GENERATED_GRAVEL_ROADWAY_HEIGHT_METRES, abs_tol=1e-9)
+            for _x, y, _z in roadway.points
+        )
+        assert max(y for _x, y, _z in visual.points) < min(
+            y for _x, y, _z in roadway.points
+        )
 
 
 def test_generated_paved_junction_overlap_stays_above_terrain() -> None:
