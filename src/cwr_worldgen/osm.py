@@ -9200,19 +9200,8 @@ def generate_world_objects(
                         ):
                             break
                         if not (
-                            0 <= tree_x < spec.world_size
-                            and 0 <= tree_z < spec.world_size
-                            and _mask_at(
-                                raster.forest, spec.cells, spec.world_size, tree_x, tree_z
-                            )
-                            and not _mask_at(
-                                raster.water, spec.cells, spec.world_size, tree_x, tree_z
-                            )
-                            and not _mask_at(
-                                raster.roads, spec.cells, spec.world_size, tree_x, tree_z
-                            )
-                            and not _mask_at(
-                                raster.buildings, spec.cells, spec.world_size, tree_x, tree_z
+                            _forest_candidate_mask_ok(
+                                raster, spec.cells, spec.world_size, tree_x, tree_z
                             )
                         ):
                             continue
@@ -9285,19 +9274,8 @@ def generate_world_objects(
                             ):
                                 continue
                             if not (
-                                0 <= bush_x < spec.world_size
-                                and 0 <= bush_z < spec.world_size
-                                and _mask_at(
-                                    raster.forest, spec.cells, spec.world_size, bush_x, bush_z
-                                )
-                                and not _mask_at(
-                                    raster.water, spec.cells, spec.world_size, bush_x, bush_z
-                                )
-                                and not _mask_at(
-                                    raster.roads, spec.cells, spec.world_size, bush_x, bush_z
-                                )
-                                and not _mask_at(
-                                    raster.buildings, spec.cells, spec.world_size, bush_x, bush_z
+                                _forest_candidate_mask_ok(
+                                    raster, spec.cells, spec.world_size, bush_x, bush_z
                                 )
                             ):
                                 continue
@@ -9592,12 +9570,9 @@ def generate_world_objects(
                         ):
                             break
                         if not (
-                            0 <= tree_x < spec.world_size
-                            and 0 <= tree_z < spec.world_size
-                            and _mask_at(raster.forest, spec.cells, spec.world_size, tree_x, tree_z)
-                            and not _mask_at(raster.water, spec.cells, spec.world_size, tree_x, tree_z)
-                            and not _mask_at(raster.roads, spec.cells, spec.world_size, tree_x, tree_z)
-                            and not _mask_at(raster.buildings, spec.cells, spec.world_size, tree_x, tree_z)
+                            _forest_candidate_mask_ok(
+                                raster, spec.cells, spec.world_size, tree_x, tree_z
+                            )
                         ):
                             continue
                         if forest_block_intersects_road_corridors(
@@ -10020,12 +9995,9 @@ def generate_world_objects(
                             ):
                                 break
                             if not (
-                                0 <= tree_x < spec.world_size
-                                and 0 <= tree_z < spec.world_size
-                                and _mask_at(raster.forest, spec.cells, spec.world_size, tree_x, tree_z)
-                                and not _mask_at(raster.water, spec.cells, spec.world_size, tree_x, tree_z)
-                                and not _mask_at(raster.roads, spec.cells, spec.world_size, tree_x, tree_z)
-                                and not _mask_at(raster.buildings, spec.cells, spec.world_size, tree_x, tree_z)
+                                _forest_candidate_mask_ok(
+                                    raster, spec.cells, spec.world_size, tree_x, tree_z
+                                )
                             ):
                                 continue
                             if forest_block_intersects_road_corridors(
@@ -10090,35 +10062,8 @@ def generate_world_objects(
                             hillside_footprint,
                         )
                         if not (
-                            0 <= tree_x < spec.world_size
-                            and 0 <= tree_z < spec.world_size
-                            and _mask_at(
-                                raster.forest,
-                                spec.cells,
-                                spec.world_size,
-                                tree_x,
-                                tree_z,
-                            )
-                            and not _mask_at(
-                                raster.water,
-                                spec.cells,
-                                spec.world_size,
-                                tree_x,
-                                tree_z,
-                            )
-                            and not _mask_at(
-                                raster.roads,
-                                spec.cells,
-                                spec.world_size,
-                                tree_x,
-                                tree_z,
-                            )
-                            and not _mask_at(
-                                raster.buildings,
-                                spec.cells,
-                                spec.world_size,
-                                tree_x,
-                                tree_z,
+                            _forest_candidate_mask_ok(
+                                raster, spec.cells, spec.world_size, tree_x, tree_z
                             )
                         ):
                             forest_hillside_candidate_rejections += 1
