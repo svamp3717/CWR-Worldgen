@@ -1,11 +1,12 @@
 """Parse first-LOD P3D geometry, UVs and material references for previewing."""
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import io
 from pathlib import Path
 import struct
 import sys
+from time import perf_counter
 from typing import Iterator, Sequence
 
 import numpy as np
@@ -37,6 +38,11 @@ class PreviewModel:
     render_mode: str
     available_lods: tuple[lod_options.LodOption, ...] = ()
     selected_lod_quality: str = "full"
+    read_seconds: float = 0.0
+    parse_seconds: float = 0.0
+    archive_cached: bool = False
+    preview_cache_hit: bool = False
+    source_bytes: bytes | None = field(default=None, repr=False, compare=False)
 
 
 def _read_i16(stream: io.BytesIO, label: str) -> int:
@@ -320,14 +326,32 @@ def build_preview_model(
 
 def preview_models(
     inputs: Sequence[Path], patterns: Sequence[str], max_points: int,
-    *, lod_quality: str = "full",
+    *, lod_quality: str = "full", retain_source_bytes: bool = False,
 ) -> Iterator[PreviewModel | measure.ModelFailure]:
-    for model_path, source, data in measure._iter_models(inputs, patterns):
+    """Stream previews, separating archive iteration time from mesh decoding.
+
+    Only the interactive categoriser requests source bytes. It transfers them
+    into a bounded LRU as each model loads; batch consumers never retain P3Ds.
+    """
+    model_iter = iter(measure._iter_models(inputs, patterns))
+    while True:
+        read_start = perf_counter()
         try:
-            yield build_preview_model(
+            model_path, source, data = next(model_iter)
+        except StopIteration:
+            return
+        read_seconds = perf_counter() - read_start
+        parse_start = perf_counter()
+        try:
+            model = build_preview_model(
                 data, model_path=model_path, source=source,
                 lod_quality=lod_quality, max_points=max_points,
             )
+            model.read_seconds = read_seconds
+            model.parse_seconds = perf_counter() - parse_start
+            if retain_source_bytes:
+                model.source_bytes = data
+            yield model
         except (measure.ModelReadError, OSError, struct.error, OverflowError, IndexError, ValueError) as exc:
             failure = measure.ModelFailure(model_path=model_path, source=source, error=str(exc))
             print(f"[model error] {failure.model_path}\n  source: {failure.source}\n  error:  {failure.error}", file=sys.stderr, flush=True)

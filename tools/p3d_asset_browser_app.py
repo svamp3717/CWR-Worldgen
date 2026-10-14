@@ -5,6 +5,7 @@ from pathlib import Path
 import queue
 import sys
 import threading
+from time import perf_counter
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -214,10 +215,40 @@ class AssetBrowserApp:
 
         info_box = ttk.LabelFrame(details, text="Selected asset", padding=7)
         info_box.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-        self.info_var = tk.StringVar(master=self.root, value="Nothing selected")
-        ttk.Label(info_box, textvariable=self.info_var, justify=tk.LEFT, wraplength=600).pack(
-            anchor="w", fill=tk.X
+        quality_row = ttk.Frame(info_box)
+        quality_row.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(quality_row, text="Render quality:").pack(side=tk.LEFT)
+        self.render_quality_var = tk.StringVar(master=self.root, value="Fast (60%)")
+        render_picker = ttk.Combobox(
+            quality_row, textvariable=self.render_quality_var,
+            values=("Fast (60%)", "Balanced (80%)", "Quality (100%)"),
+            state="readonly", width=18,
         )
+        render_picker.pack(side=tk.LEFT, padx=(8, 0))
+        render_picker.bind("<<ComboboxSelected>>", self._change_render_quality)
+        self.info_var = tk.StringVar(master=self.root, value="Nothing selected")
+        self.load_timing_var = tk.StringVar(
+            master=self.root, value="Load timings appear after selecting an asset.",
+        )
+        # Labels cannot be selected. Keep existing StringVars so all model,
+        # texture and timing updates feed one read-only, scrollable text view.
+        text_frame = ttk.Frame(info_box)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+        self.selected_asset_text = tk.Text(
+            text_frame, height=11, width=52, wrap=tk.WORD,
+            state=tk.DISABLED, font="TkDefaultFont",
+        )
+        text_scroll = ttk.Scrollbar(
+            text_frame, orient=tk.VERTICAL, command=self.selected_asset_text.yview,
+        )
+        self.selected_asset_text.configure(yscrollcommand=text_scroll.set)
+        self.selected_asset_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        text_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.selected_asset_text.bind("<Control-a>", self._select_all_asset_text)
+        self.selected_asset_text.bind("<Control-c>", self._copy_selected_asset_text)
+        self.info_var.trace_add("write", self._refresh_selected_asset_text)
+        self.load_timing_var.trace_add("write", self._refresh_selected_asset_text)
+        self._refresh_selected_asset_text()
         self.copy_path_button = ttk.Button(
             info_box,
             text="Copy asset path",
@@ -280,6 +311,41 @@ class AssetBrowserApp:
         tree.bind("<Double-1>", self._asset_selected)
         notebook.add(frame, text=title)
         return tree
+
+    def _refresh_selected_asset_text(self, *_args) -> None:
+        """Keep the selectable view in sync with existing model/timing variables."""
+        widget = getattr(self, "selected_asset_text", None)
+        if widget is None:
+            return
+        description = self.info_var.get()
+        timing = self.load_timing_var.get()
+        content = description + ("\n\n" + timing if timing else "")
+        widget.configure(state=tk.NORMAL)
+        widget.delete("1.0", tk.END)
+        widget.insert("1.0", content)
+        widget.configure(state=tk.DISABLED)
+
+    @staticmethod
+    def _select_all_asset_text(event) -> str:
+        """Ctrl+A also works while the text widget is non-editable."""
+        event.widget.tag_add("sel", "1.0", "end-1c")
+        event.widget.mark_set("insert", "1.0")
+        event.widget.see("insert")
+        return "break"
+
+    def _copy_selected_asset_text(self, event) -> str:
+        """Copy the highlighted substring, never the entire asset by accident."""
+        try:
+            selected = event.widget.get("sel.first", "sel.last")
+        except tk.TclError:
+            return "break"
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(selected)
+            self.root.update_idletasks()
+        except tk.TclError:
+            pass
+        return "break"
 
     @staticmethod
     def _format_size(value: int) -> str:
@@ -605,6 +671,22 @@ class AssetBrowserApp:
         if getattr(self.current, "kind", None) == "model":
             self._show_model(self.current)
 
+    def _render_quality_scale(self) -> float:
+        """Controls raster pixel count, independently of geometry/texture LOD."""
+        choice = getattr(self, "render_quality_var", None)
+        if choice is None:
+            return 1.0  # compatibility with headless lightweight test views
+        return {
+            "Fast (60%)": 0.6,
+            "Balanced (80%)": 0.8,
+            "Quality (100%)": 1.0,
+        }.get(choice.get(), 1.0)
+
+    def _change_render_quality(self, _event=None) -> None:
+        """Redraw an already-parsed model, without rereading the source PBO."""
+        if self.current_model is not None:
+            self._redraw_current_model()
+
     def _selected_texture_mipmap(self) -> str:
         if not hasattr(self, "texture_mipmap_var"):
             return "auto"
@@ -683,7 +765,42 @@ class AssetBrowserApp:
             max(360, min(840, round(height * 1.25))),
         )
 
+    def _update_model_timing(
+        self, model, draw_seconds: float, texture_seconds: float = 0.0,
+        *, raster_seconds: float | None = None,
+    ) -> None:
+        """Separate CPU raster and Matplotlib plotting from texture preparation."""
+        if not hasattr(self, "load_timing_var"):
+            return
+        read = max(0.0, getattr(model, "read_seconds", 0.0))
+        mesh = max(0.0, getattr(model, "parse_seconds", 0.0))
+        texture = max(0.0, min(draw_seconds, texture_seconds))
+        preview = max(0.0, draw_seconds - texture)
+        note = (
+            " (decoded LOD cache)" if getattr(model, "preview_cache_hit", False)
+            else " (P3D RAM cache)" if getattr(model, "archive_cached", False)
+            else ""
+        )
+        details = (
+            f"Textures: {texture * 1000:.1f} ms  ·  Preview: {preview * 1000:.1f} ms"
+        )
+        if raster_seconds is not None:
+            # CPU raster includes the timed texture-loading work; subtract it
+            # once so all displayed stages add up to the reported total.
+            cpu = max(0.0, raster_seconds - texture)
+            plot = max(0.0, draw_seconds - raster_seconds)
+            details = (
+                f"Textures: {texture * 1000:.1f} ms  ·  CPU raster: {cpu * 1000:.1f} ms\n"
+                f"Matplotlib prep: {plot * 1000:.1f} ms"
+            )
+        self.load_timing_var.set(
+            f"P3D read: {read * 1000:.1f} ms{note}  ·  Mesh: {mesh * 1000:.1f} ms\n"
+            f"{details}\n"
+            f"Total: {(read + mesh + draw_seconds) * 1000:.1f} ms"
+        )
+
     def _draw_model(self, model) -> None:
+        draw_start = perf_counter()
         self.ax_preview.clear()
         if getattr(model, "render_mode", "") == "bounds only":
             # An Arma-era ModelInfo bounding box is useful for identification
@@ -713,6 +830,7 @@ class AssetBrowserApp:
                 " • bounds only, NOT model geometry"
             )
             self.canvas.draw_idle()
+            self._update_model_timing(model, perf_counter() - draw_start)
             return
         if not model.faces:
             points = model.points
@@ -721,8 +839,14 @@ class AssetBrowserApp:
                 self.ax_preview.set_aspect("equal", adjustable="box")
             self.ax_preview.set_title(f"{model.model_path} • vertex preview")
             self.canvas.draw_idle()
+            self._update_model_timing(model, perf_counter() - draw_start)
             return
         render_width, render_height = self._preview_render_size()
+        scale = self._render_quality_scale()
+        render_width = max(240, round(render_width * scale))
+        render_height = max(180, round(render_height * scale))
+        texture_timing: dict[str, float] = {}
+        raster_start = perf_counter()
         image, hits, misses = render_textured_model(
             model.points,
             model.faces,
@@ -736,7 +860,9 @@ class AssetBrowserApp:
             load_textures=not self.skip_textures_var.get(),
             mipmap_cache=getattr(self, "mipmap_cache", None),
             texture_mipmap=self._selected_texture_mipmap(),
+            texture_timing=texture_timing,
         )
+        raster_seconds = perf_counter() - raster_start
         # Downsampling remains filtered when the canvas is smaller than the
         # already screen-sized raster, avoiding shimmering brick patterns.
         self.ax_preview.imshow(image, interpolation="hanning", resample=True)
@@ -752,16 +878,26 @@ class AssetBrowserApp:
         self.ax_preview.axis("off")
         self.figure.tight_layout(pad=1.0)
         self.canvas.draw_idle()
+        self._update_model_timing(
+            model, perf_counter() - draw_start, texture_timing.get("seconds", 0.0),
+            raster_seconds=raster_seconds,
+        )
 
     def _show_texture(self, item: BrowserAsset) -> None:
         self._busy(f"Loading texture {item.path}…")
         try:
+            start = perf_counter()
             cache = getattr(self, "texture_preview_cache", None)
             mipmap = self._selected_texture_mipmap()
+            cached = (
+                cache is not None
+                and (item.source, item.path, mipmap) in getattr(cache, "_items", ())
+            )
             image = (
                 cache.get(item, self.catalogue, mipmap=mipmap) if cache is not None
                 else load_texture(item, self.catalogue, mipmap=mipmap)
             )
+            load_seconds = perf_counter() - start
             self.current_model = None
             self.ax_preview.clear()
             self.ax_preview.imshow(image, interpolation="nearest")
@@ -780,6 +916,14 @@ class AssetBrowserApp:
                 f"Decoded: {image.shape[1]} × {image.shape[0]}\n"
                 f"Indexed model users: {len(users):,}"
             )
+            if hasattr(self, "load_timing_var"):
+                total_seconds = perf_counter() - start
+                self.load_timing_var.set(
+                    f"Texture read/decode: {load_seconds * 1000:.1f} ms"
+                    + (" (RGBA cache)" if cached else "")
+                    + f"\nPreview/details: {(total_seconds - load_seconds) * 1000:.1f} ms"
+                    + f"\nTotal: {total_seconds * 1000:.1f} ms"
+                )
             self._unbusy(f"Texture loaded: {item.path}")
         except Exception as exc:
             self.current_model = None
@@ -800,8 +944,12 @@ class AssetBrowserApp:
         self.ax_preview.axis("off")
         self.canvas.draw_idle()
         self.info_var.set(f"{title}: {exc}")
+        if hasattr(self, "load_timing_var"):
+            self.load_timing_var.set("")
 
     def _show_empty_preview(self) -> None:
+        if hasattr(self, "load_timing_var"):
+            self.load_timing_var.set("Load timings appear after selecting an asset.")
         self.ax_preview.clear()
         self.ax_preview.text(
             0.5,

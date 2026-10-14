@@ -328,3 +328,227 @@ def test_texture_preview_cache_separates_embedded_mip_choices(monkeypatch) -> No
     assert cache.get(item, catalogue) is full
     assert cache.get(item, catalogue, mipmap="max:256") is smaller
     assert observed == ["auto", "max:256"]
+
+
+
+def test_browser_reuses_raw_p3d_for_new_lod_without_reopening_archive(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Selecting a new LOD must read the original PBO once, not twice."""
+    from cwr_worldgen.pbo import PboEntry, write_pbo
+    from cwr_worldgen import assets
+    from test_p3d_lod_selection import _mlod
+
+    archive = tmp_path / "models.ifa"
+    write_pbo(archive, (PboEntry("house.p3d", _mlod(((1.0, 6), (9.0, 3)))),))
+    catalogue = catalog.scan_catalogue((archive,), use_cache=False)
+    item, = catalogue.models
+    reads = []
+    actual_read = assets.read_asset_record_bytes
+
+    def counted(record):
+        reads.append(record.path)
+        return actual_read(record)
+
+    monkeypatch.setattr(assets, "read_asset_record_bytes", counted)
+    cache = catalog.ModelPreviewCache(max_models=3, raw_limit=1_000_000)
+    fast = cache.get(item, catalogue, lod_quality="fast")
+    assert fast.original_vertex_count == 3
+    assert not fast.archive_cached
+    assert fast.source_bytes is None
+    assert len(reads) == 1
+
+    detailed = cache.get(item, catalogue, lod_quality="lod:0")
+    assert detailed.original_vertex_count == 6
+    assert detailed.archive_cached
+    assert not detailed.preview_cache_hit
+    assert detailed.read_seconds == 0.0
+    assert detailed.parse_seconds >= 0
+    assert detailed.source_bytes is None
+    assert len(reads) == 1
+    assert len(cache._raw_items) == 1
+
+    repeat = cache.get(item, catalogue, lod_quality="fast")
+    assert repeat is fast
+    assert repeat.preview_cache_hit
+    assert repeat.read_seconds == 0.0
+    assert repeat.parse_seconds == 0.0
+    assert len(reads) == 1
+
+
+def test_browser_raw_p3d_cache_is_bounded_and_cleared_with_catalogue() -> None:
+    cache = catalog.ModelPreviewCache(raw_limit=7, max_raw_models=2)
+    a, b, c = (("models.pbo", f"{name}.p3d") for name in ("a", "b", "c"))
+    cache._remember_raw(a, b"first")
+    assert cache.raw_bytes_used == 5
+    cache._remember_raw(b, b"second")
+    assert a not in cache._raw_items
+    assert cache.raw_bytes_used == 6
+    cache._remember_raw(c, b"X" * 8)
+    assert c not in cache._raw_items
+    cache._remember_raw(b, b"one")
+    assert cache.raw_bytes_used == 3
+    cache.clear()
+    assert cache._raw_items == {}
+    assert cache.raw_bytes_used == 0
+
+
+def test_browser_model_load_timing_breakdown_identifies_each_cache_kind() -> None:
+    app = app_module.AssetBrowserApp.__new__(app_module.AssetBrowserApp)
+    captured = []
+    app.load_timing_var = SimpleNamespace(set=captured.append)
+    model = SimpleNamespace(
+        read_seconds=0.01, parse_seconds=0.02,
+        archive_cached=False, preview_cache_hit=False,
+    )
+    app._update_model_timing(model, 0.065, 0.035)
+    assert "P3D read: 10.0 ms" in captured[-1]
+    assert "Mesh: 20.0 ms" in captured[-1]
+    assert "Textures: 35.0 ms" in captured[-1]
+    assert "Preview: 30.0 ms" in captured[-1]
+    assert "Total: 95.0 ms" in captured[-1]
+
+    model.archive_cached = True
+    app._update_model_timing(model, 0.065, 0.035)
+    assert "P3D RAM cache" in captured[-1]
+
+    model.preview_cache_hit = True
+    app._update_model_timing(model, 0.065, 0.035)
+    assert "decoded LOD cache" in captured[-1]
+
+
+def test_browser_render_forwards_texture_load_timing_and_reports_it(
+    monkeypatch,
+) -> None:
+    app = app_module.AssetBrowserApp.__new__(app_module.AssetBrowserApp)
+    app.ax_preview = Mock()
+    app.figure = Mock()
+    app.canvas = Mock()
+    app.canvas.get_tk_widget.return_value.winfo_width.return_value = 640
+    app.canvas.get_tk_widget.return_value.winfo_height.return_value = 400
+    app.texture_resolver = object()
+    app.mipmap_cache = MipmapCache()
+    app.skip_textures_var = SimpleNamespace(get=lambda: False)
+    app.azim, app.elev, app.zoom = 35.0, 25.0, 1.0
+    app._mipmap_choices = {"Full (mip 0)": "auto"}
+    app.texture_mipmap_var = SimpleNamespace(get=lambda: "Full (mip 0)")
+    captured = []
+    app.load_timing_var = SimpleNamespace(set=captured.append)
+    passed = []
+
+    def renderer(*_args, **kwargs):
+        passed.append(kwargs)
+        kwargs["texture_timing"]["seconds"] = 0.001
+        return np.zeros((500, 800, 3), dtype=np.uint8), 1, 0
+
+    monkeypatch.setattr(app_module, "render_textured_model", renderer)
+    model = SimpleNamespace(
+        points=np.zeros((3, 3), dtype=np.float32),
+        faces=(object(),), source="models.pbo", model_path="house.p3d",
+    )
+    app._draw_model(model)
+    assert "texture_timing" in passed[0]
+    assert passed[0]["texture_mipmap"] == "auto"
+    assert "Textures:" in captured[-1]
+    assert "Total:" in captured[-1]
+
+
+def test_browser_standalone_texture_preview_shows_load_time_and_cache_hit() -> None:
+    app = app_module.AssetBrowserApp.__new__(app_module.AssetBrowserApp)
+    app._busy = Mock()
+    app._unbusy = Mock()
+    app.ax_preview = Mock()
+    app.figure = Mock()
+    app.canvas = Mock()
+    app.info_var = SimpleNamespace(set=Mock())
+    app._set_related_models = Mock()
+    app.catalogue = catalog.BrowserCatalogue((), (), {})
+    cache = catalog.TexturePreviewCache()
+    item = _asset("wall.paa", kind="texture")
+    image = np.ones((4, 4, 4), dtype=np.uint8)
+    cache._items[(item.source, item.path, "auto")] = image
+    app.texture_preview_cache = cache
+    app.texture_mipmap_var = SimpleNamespace(get=lambda: "Full (mip 0)")
+    app._mipmap_choices = {"Full (mip 0)": "auto"}
+    texts = []
+    app.load_timing_var = SimpleNamespace(set=texts.append)
+    app._show_texture(item)
+    assert "Texture read/decode:" in texts[-1]
+    assert "(RGBA cache)" in texts[-1]
+    assert "Preview/details:" in texts[-1]
+    assert "Total:" in texts[-1]
+
+
+
+@pytest.mark.parametrize(
+    ("label", "expected_width", "expected_height"),
+    [
+        ("Fast (60%)", 480, 300),
+        ("Balanced (80%)", 640, 400),
+        ("Quality (100%)", 800, 500),
+    ],
+)
+def test_browser_render_quality_scales_only_raster_resolution(
+    monkeypatch, label, expected_width, expected_height,
+) -> None:
+    app = app_module.AssetBrowserApp.__new__(app_module.AssetBrowserApp)
+    app.ax_preview = Mock()
+    app.figure = Mock()
+    app.canvas = Mock()
+    app.canvas.get_tk_widget.return_value.winfo_width.return_value = 640
+    app.canvas.get_tk_widget.return_value.winfo_height.return_value = 400
+    app.texture_resolver = object()
+    app.skip_textures_var = SimpleNamespace(get=lambda: True)
+    app.render_quality_var = SimpleNamespace(get=lambda: label)
+    app.azim, app.elev, app.zoom = 35.0, 25.0, 1.0
+    called = []
+
+    def rasterizer(*args, **kwargs):
+        called.append((kwargs["width"], kwargs["height"], len(args[1])))
+        return (
+            np.zeros((kwargs["height"], kwargs["width"], 3), dtype=np.uint8),
+            0, 0,
+        )
+
+    monkeypatch.setattr(app_module, "render_textured_model", rasterizer)
+    model = SimpleNamespace(
+        points=np.zeros((3, 3), dtype=np.float32),
+        faces=(object(),), source="models.pbo", model_path="house.p3d",
+    )
+    app._draw_model(model)
+    assert called == [(expected_width, expected_height, 1)]
+    assert app.ax_preview.imshow.call_args.kwargs["interpolation"] == "hanning"
+
+
+def test_browser_render_quality_change_reuses_current_mesh_without_rescan() -> None:
+    app = app_module.AssetBrowserApp.__new__(app_module.AssetBrowserApp)
+    app.render_quality_var = SimpleNamespace(get=lambda: "Fast (60%)")
+    app.current_model = object()
+    app._redraw_current_model = Mock()
+    app._scan_sources = Mock()
+    app._show_model = Mock()
+    assert app._render_quality_scale() == 0.6
+    app._change_render_quality()
+    app._redraw_current_model.assert_called_once_with()
+    app._scan_sources.assert_not_called()
+    app._show_model.assert_not_called()
+
+
+def test_browser_timing_splits_cpu_raster_and_matplotlib_prepare() -> None:
+    app = app_module.AssetBrowserApp.__new__(app_module.AssetBrowserApp)
+    captured = []
+    app.load_timing_var = SimpleNamespace(set=captured.append)
+    model = SimpleNamespace(
+        read_seconds=0.010, parse_seconds=0.020,
+        archive_cached=False, preview_cache_hit=False,
+    )
+    app._update_model_timing(
+        model, draw_seconds=0.100, texture_seconds=0.010,
+        raster_seconds=0.080,
+    )
+    assert "P3D read: 10.0 ms" in captured[-1]
+    assert "Mesh: 20.0 ms" in captured[-1]
+    assert "Textures: 10.0 ms" in captured[-1]
+    assert "CPU raster: 70.0 ms" in captured[-1]
+    assert "Matplotlib prep: 20.0 ms" in captured[-1]
+    assert "Total: 130.0 ms" in captured[-1]

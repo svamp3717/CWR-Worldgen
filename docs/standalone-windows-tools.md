@@ -79,6 +79,109 @@ and **Unchecked** means texture loading was skipped. Extra texture archives
 are deliberately not added to the model catalogue; the external status is
 updated when you add or clear them.
 
+### Copyable Selected asset details in the explorer
+
+The browser's **Selected asset** panel is a read-only, scrollable text view.
+Drag to highlight any model path, source archive, dimensions, texture
+information, or load-time values and press **Ctrl+C** to copy only that
+selection. **Ctrl+A** selects the entire readout. The existing **Copy asset
+path** button remains available for quickly copying just the in-game asset
+path. Text selection never changes a model, texture, or saved file.
+
+### Faster CPU-rendered 3D previews
+
+Both the **Model & Texture Browser** (in the Selected asset panel) and the
+**Model Categoriser** (in the View sidebar, below Texture mipmap) now offer
+a **Render quality** selector. This is independent from **Preview LOD**,
+texture mipmap choice, and the Skip textures option:
+
+- **Fast (60%)** (default in both tools): Rasterize at 60% of the adaptive preview
+  width and height (about 36% of the pixel workload), then upscale smoothly.
+- **Balanced (80%)**: Approximately 64% of the full pixel workload.
+- **Quality (100%)**: Retain the previous full preview resolution and sampling
+  behavior.
+
+Changing render quality redraws the same loaded model without touching the
+archive, model order, classification state, or chosen model/texture LOD. The
+categoriser retains all selected categories, placement, current model, and
+session progress; the startup render quality is Fast in both applications.
+
+The shared CPU rasterizer now computes coverage using broadcast coordinate
+vectors, tests depth only for triangle-covered pixels, and performs expensive
+UV interpolation and bilinear/trilinear sampling **only on visible fragments**.
+Transparent pixels keep their existing alpha-test behavior; the result still
+uses perspective-correct UVs, repeating texture coordinates, and the same
+sampling filters. The categoriser also benefits from the shared rasterizer
+and from its own selectable, reduced render resolution.
+
+The browser and categoriser model timing readouts both separate **Textures**
+(lookup/decode/pyramid), **CPU raster** (remaining CPU geometry/pixel work),
+and **Matplotlib prep** (synchronous plotting/figure setup). These sum with
+**P3D read** and **Mesh** to the reported **Total**. For bounds-only and
+vertex-only previews that skip CPU rasterization, the categoriser instead
+shows the combined **Preview** time. Matplotlib's deferred UI painting remains
+outside that total. Lower render resolution reduces CPU pixel workload, but
+neither the selected model LOD nor embedded texture mip changes automatically.
+
+### Explorer raw-model cache and load-time diagnostics
+
+The **P3D Model & Texture Browser** now has the same model/texture timing
+visibility as the categoriser, shown in its **Selected asset** panel:
+
+- **P3D read**, **Mesh**, **Textures**, **Preview**, and **Total** for 3D
+  model previews, including whether a LOD came from the decoded-mesh cache
+  or the raw **P3D RAM cache**.
+- **Texture read/decode**, **Preview/details**, and **Total** for standalone
+  PAA/PAC texture previews. Re-selecting an already decoded texture/mipmap
+  identifies the **RGBA cache** hit.
+
+The browser retains its existing 96 MiB (by default) decoded-mesh cache
+and adds a separate **64 MiB / four-model** raw P3D byte LRU. On first load
+the browser reads the archive only once and keeps recent P3D bytes inside
+that bounded cache. Selecting a previously unseen LOD can decode it from
+RAM rather than reopening the original PBO/IFA (including nested archives).
+Already-decoded LODs still use the faster existing mesh cache. Changing or
+clearing model sources invalidates **both** caches, while changing texture-only
+sources preserves the models but invalidates texture decodes and mip pyramids.
+
+Preview numbers are measured around synchronous parsing and drawing; deferred
+Matplotlib painting and related-asset indexing are outside the per-model total.
+Read/mesh numbers describe the most recent model selection, whereas texture and
+preview numbers are refreshed whenever the preview redraws.
+
+### Categoriser load-time diagnostics and faster LOD switching
+
+The **Model Categoriser** now displays a per-preview wall-clock breakdown in
+the **View** panel, directly below its LOD and texture mipmap settings:
+
+- **P3D read/scan:** Time to obtain the next model from the input archive
+  stream. For the first model, this can include archive header enumeration;
+  after a LOD change, a successful **RAM cache** hit reports zero reread time.
+- **Mesh:** Time spent indexing/decoding the P3D and preparing preview
+  geometry, separate from archive I/O.
+- **Textures:** Time spent resolving/loading textures, decoding the selected
+  embedded PAA/PAC mipmap, and preparing filtered texture levels. Previously
+  cached textures usually make this step much shorter.
+- **CPU raster:** Synchronous renderer time excluding the **Textures** stage.
+- **Matplotlib prep:** Time to prepare the preview plot and schedule a redraw;
+  Tk/Matplotlib deferred canvas painting is not included. For bounds-only
+  and vertex-only fallbacks, **Preview** reports the combined duration.
+- **Total:** Sum of the displayed model-read, mesh, and most recent preview
+  stages. When rotating or zooming, the read/mesh values still refer to the
+  loaded model; only the preview stages are newly measured.
+
+The categoriser keeps a **64 MiB bounded LRU** of recently scanned raw model
+bytes (up to four models). Changing the current P3D LOD can decode another mesh
+from that memory instead of reopening the containing PBO/IFA. The raw bytes are
+removed from the long-lived model list after entering the cache and the cache
+evicts older models. Models too large for the budget still use the archive
+reader. Browsing model order, categories, and saved JSON are unchanged.
+
+PAA/PAC decoding also stops parsing embedded mip headers as soon as the chosen
+level is found. Full-resolution selection no longer scans the entire mip chain,
+and explicitly selecting a small embedded mip only inspects the necessary
+headers before decoding it.
+
 ### Selecting embedded texture mipmaps
 
 Both P3D tools now offer a **Texture mipmap** dropdown independently of model

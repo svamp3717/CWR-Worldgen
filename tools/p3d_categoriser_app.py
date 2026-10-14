@@ -1,10 +1,12 @@
 """Tk/Matplotlib UI for browsing and categorising textured P3D models."""
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
 import sys
+from time import perf_counter
 from typing import Iterator, Sequence
 
 import tkinter as tk
@@ -103,6 +105,13 @@ class CategoriserApp:
         self.model_iter = model_iter
         self.texture_resolver = texture_resolver
         self.mipmap_cache = MipmapCache()
+        # A recent P3D is normally already in RAM after the model scan. Keep
+        # only a small, bounded cache so LOD changes don't reopen its archive.
+        self._raw_model_cache: OrderedDict[tuple[str, str], bytes] = OrderedDict()
+        self._raw_model_cache_bytes = 0
+        self._raw_model_cache_limit = 64 * 1024 * 1024
+        self._last_texture_seconds = 0.0
+        self._last_raster_seconds: float | None = None
         # Browsing more texture archives must not restart the model stream or
         # modify category JSON; keep its source list separate from the models.
         # Startup-selected texture archives remain removable with the normal
@@ -320,6 +329,17 @@ class CategoriserApp:
         )
         self.texture_mipmap_picker.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
         self.texture_mipmap_picker.bind("<<ComboboxSelected>>", self._change_texture_mipmap)
+        quality_row = ttk.Frame(side)
+        quality_row.pack(fill="x", pady=(2, 4))
+        ttk.Label(quality_row, text="Render quality:").pack(side=tk.LEFT)
+        self.render_quality_var = tk.StringVar(master=self.root, value="Fast (60%)")
+        self.render_quality_picker = ttk.Combobox(
+            quality_row, textvariable=self.render_quality_var,
+            values=("Fast (60%)", "Balanced (80%)", "Quality (100%)"),
+            state="readonly", width=20,
+        )
+        self.render_quality_picker.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
+        self.render_quality_picker.bind("<<ComboboxSelected>>", self._change_render_quality)
         row = ttk.Frame(side)
         row.pack(fill="x", pady=4)
         ttk.Button(row, text="↶ 15°", command=lambda: self._rotate(-15)).pack(side=tk.LEFT)
@@ -347,6 +367,11 @@ class CategoriserApp:
             side=tk.LEFT, padx=(5, 0)
         )
 
+        self.load_timing_var = tk.StringVar(master=self.root, value="Load timing appears after the first preview.")
+        ttk.Label(
+            side, textvariable=self.load_timing_var, wraplength=300,
+            justify=tk.LEFT,
+        ).pack(anchor="w", fill="x", pady=(3, 5))
         ttk.Separator(side, orient=tk.HORIZONTAL).pack(fill="x", pady=10)
         self.info_var = tk.StringVar(master=self.root, value="")
         self.texture_var = tk.StringVar(master=self.root, value="")
@@ -433,6 +458,36 @@ class CategoriserApp:
             f"{counter} • failures skipped: {len(self.failures):,}"
         )
 
+    def _remember_model_bytes(self, model: PreviewModel, data: bytes) -> None:
+        """Bound recent P3D bytes; do not retain raw data for every scanned model."""
+        cache = getattr(self, "_raw_model_cache", None)
+        if cache is None:
+            cache = OrderedDict()
+            self._raw_model_cache = cache
+            self._raw_model_cache_bytes = 0
+        budget = getattr(self, "_raw_model_cache_limit", 64 * 1024 * 1024)
+        key = (model.source, model.model_path)
+        previous = cache.pop(key, None)
+        if previous is not None:
+            self._raw_model_cache_bytes -= len(previous)
+        if len(data) > budget:
+            return
+        while cache and (len(cache) >= 4 or self._raw_model_cache_bytes + len(data) > budget):
+            _, evicted = cache.popitem(last=False)
+            self._raw_model_cache_bytes -= len(evicted)
+        cache[key] = data
+        self._raw_model_cache_bytes += len(data)
+
+    def _cached_model_bytes(self, model: PreviewModel) -> bytes | None:
+        cache = getattr(self, "_raw_model_cache", None)
+        if cache is None:
+            return None
+        key = (model.source, model.model_path)
+        data = cache.get(key)
+        if data is not None:
+            cache.move_to_end(key)
+        return data
+
     def _load_next(self) -> PreviewModel | None:
         while not self.exhausted:
             try:
@@ -443,6 +498,10 @@ class CategoriserApp:
             if isinstance(item, measure.ModelFailure):
                 self.failures.append(item)
                 continue
+            data = getattr(item, "source_bytes", None)
+            if data is not None:
+                self._remember_model_bytes(item, data)
+                item.source_bytes = None  # never accumulate raw bytes in self.models
             self.models.append(item)
             existing = self.state.get(item.model_path)
             if existing is not None:
@@ -511,9 +570,41 @@ class CategoriserApp:
         skip_textures = bool(self.skip_textures_var.get())
         self._busy("Rendering geometry..." if skip_textures else "Rendering textured model...")
         try:
+            self._last_texture_seconds = 0.0
+            self._last_raster_seconds = None  # bounds-only and vertex fallback
+            draw_start = perf_counter()
             self._draw_model(self.current)
+            elapsed = perf_counter() - draw_start
+            self._update_load_timing(self.current, elapsed)
         finally:
             self._unbusy()
+
+    def _update_load_timing(self, model: PreviewModel, draw_seconds: float) -> None:
+        """Display real wall-clock timings, not estimates or model sizes."""
+        if not hasattr(self, "load_timing_var"):
+            return
+        read = max(0.0, getattr(model, "read_seconds", 0.0))
+        parse = max(0.0, getattr(model, "parse_seconds", 0.0))
+        texture = min(draw_seconds, max(0.0, getattr(self, "_last_texture_seconds", 0.0)))
+        display = max(0.0, draw_seconds - texture)
+        cache_note = " (RAM cache)" if getattr(model, "archive_cached", False) else ""
+        stages = f"Textures: {texture * 1000:.1f} ms  ·  Preview: {display * 1000:.1f} ms"
+        raster = getattr(self, "_last_raster_seconds", None)
+        if raster is not None:
+            raster = max(0.0, min(draw_seconds, raster))
+            # Raster duration includes texture preparation; subtract it once
+            # so textures, CPU raster and plotting sum to total draw time.
+            cpu = max(0.0, raster - texture)
+            matplotlib = max(0.0, draw_seconds - raster)
+            stages = (
+                f"Textures: {texture * 1000:.1f} ms  ·  CPU raster: {cpu * 1000:.1f} ms\n"
+                f"Matplotlib prep: {matplotlib * 1000:.1f} ms"
+            )
+        self.load_timing_var.set(
+            f"P3D read/scan: {read * 1000:.1f} ms{cache_note}  ·  Mesh: {parse * 1000:.1f} ms\n"
+            f"{stages}\n"
+            f"Total: {(read + parse + draw_seconds) * 1000:.1f} ms"
+        )
 
     def next_model(self, *, mark_current: bool = True) -> None:
         if mark_current and self.current is not None:
@@ -583,6 +674,22 @@ class CategoriserApp:
             path=model.model_path, source=source, size=0, sha256=None,
         )
 
+    def _render_quality_scale(self) -> float:
+        """Raster resolution independent of selected model LOD/texture mipmap."""
+        choice = getattr(self, "render_quality_var", None)
+        if choice is None:
+            return 1.0  # headless test views without a UI keep legacy sizing
+        return {
+            "Fast (60%)": 0.6,
+            "Balanced (80%)": 0.8,
+            "Quality (100%)": 1.0,
+        }.get(choice.get(), 1.0)
+
+    def _change_render_quality(self, _event=None) -> None:
+        """Redraw the current model, never rescan or save classifications."""
+        if self.current is not None:
+            self._redraw()
+
     def _selected_texture_mipmap(self) -> str:
         if not hasattr(self, "texture_mipmap_var"):
             return "auto"
@@ -602,15 +709,25 @@ class CategoriserApp:
             return
         previous = self.current
         try:
-            data = world_assets.read_asset_record_bytes(
-                self._preview_asset_record(previous)
-            )
+            data = self._cached_model_bytes(previous)
+            cached = data is not None
+            read_start = perf_counter()
+            if data is None:
+                data = world_assets.read_asset_record_bytes(
+                    self._preview_asset_record(previous)
+                )
+                self._remember_model_bytes(previous, data)
+            read_seconds = perf_counter() - read_start if not cached else 0.0
+            parse_start = perf_counter()
             replacement = build_preview_model(
                 data, model_path=previous.model_path, source=previous.source,
                 lod_quality=quality,
                 max_points=getattr(self, "_max_preview_points", 25_000),
                 available_lods=getattr(previous, "available_lods", None),
             )
+            replacement.read_seconds = read_seconds
+            replacement.parse_seconds = perf_counter() - parse_start
+            replacement.archive_cached = cached
         except (OSError, ValueError, IndexError, OverflowError) as exc:
             self._sync_lod_picker(previous)
             if hasattr(self, "status_var"):
@@ -1095,6 +1212,11 @@ class CategoriserApp:
             return
 
         width, height = self._preview_render_size()
+        scale = self._render_quality_scale()
+        width = max(240, round(width * scale))
+        height = max(180, round(height * scale))
+        texture_timing: dict[str, float] = {}
+        raster_start = perf_counter()
         image, hits, misses = renderer(
             model.points,
             model.faces,
@@ -1108,7 +1230,10 @@ class CategoriserApp:
             load_textures=not self.skip_textures_var.get(),
             mipmap_cache=getattr(self, "mipmap_cache", None),
             texture_mipmap=self._selected_texture_mipmap(),
+            texture_timing=texture_timing,
         )
+        self._last_raster_seconds = perf_counter() - raster_start
+        self._last_texture_seconds = texture_timing.get("seconds", 0.0)
         self.ax_preview.imshow(image, interpolation="hanning", resample=True)
         if self.skip_textures_var.get():
             self.ax_preview.set_title(

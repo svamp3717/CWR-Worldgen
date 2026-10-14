@@ -191,3 +191,47 @@ def test_categoriser_cli_describes_multiple_engines_and_ifa_archives() -> None:
     assert "Arma" in help_text
     assert "IFA" in help_text
     assert "--texture-source" in help_text
+
+
+
+@pytest.mark.parametrize(
+    ("quality", "expected_size"),
+    (
+        ("Fast (60%)", (480, 300)),
+        ("Balanced (80%)", (640, 400)),
+        ("Quality (100%)", (800, 500)),
+    ),
+)
+def test_categoriser_quality_controls_raster_size_and_not_model_geometry(
+    quality: str, expected_size: tuple[int, int],
+) -> None:
+    app = _app_mock()
+    app.render_quality_var = SimpleNamespace(get=lambda: quality)
+    recorded = {}
+
+    def renderer(points, faces, _resolver, _source, **kwargs):
+        recorded.update(kwargs)
+        assert len(points) == 4
+        assert len(faces) == 2
+        kwargs["texture_timing"]["seconds"] = 0.001
+        return np.zeros((kwargs["height"], kwargs["width"], 3), dtype=np.uint8), 2, 0
+
+    model = SimpleNamespace(
+        points=np.zeros((4, 3), dtype=np.float32),
+        faces=(object(), object()),
+        source="models.ifa!house.p3d",
+    )
+    app._render_model(model, renderer=renderer)
+    assert (recorded["width"], recorded["height"]) == expected_size
+    assert recorded["texture_mipmap"] == "auto"
+    assert recorded["load_textures"] is True
+    assert app._last_raster_seconds >= 0.0
+    assert app._last_texture_seconds == 0.001
+    assert app.ax_preview.imshow.call_args.kwargs == {
+        "interpolation": "hanning", "resample": True,
+    }
+
+
+def test_categoriser_render_quality_missing_from_old_ui_means_full_resolution() -> None:
+    app = _app_mock()
+    assert app._render_quality_scale() == 1.0

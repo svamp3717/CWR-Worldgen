@@ -262,3 +262,81 @@ def test_categoriser_lod_switch_reads_correct_model_bytes_from_source(
     assert app.state[model_path].categories == ["Residential"]
     app.status_var.set.assert_not_called()
     app._show_model.assert_called_once()
+
+
+
+def test_preview_stream_reports_read_parse_times_and_passes_bytes_only_when_requested(
+    monkeypatch,
+) -> None:
+    raw = _mlod(((1.0, 6), (9.0, 3)))
+    monkeypatch.setattr(
+        preview.measure, "_iter_models",
+        lambda _inputs, _patterns: iter(((r"data\house.p3d", "models.ifa", raw),)),
+    )
+    first, = preview.preview_models((Path("models.ifa"),), (), 200, lod_quality="fast")
+    assert first.source_bytes is None
+    assert first.read_seconds >= 0
+    assert first.parse_seconds >= 0
+    retained, = preview.preview_models(
+        (Path("models.ifa"),), (), 200, lod_quality="fast",
+        retain_source_bytes=True,
+    )
+    assert retained.source_bytes is raw
+    assert retained.read_seconds >= 0
+    assert retained.parse_seconds >= 0
+
+
+def test_categoriser_switches_lod_using_scanned_bytes_without_archive_reopen(
+    monkeypatch,
+) -> None:
+    data = _mlod(((1.0, 6), (9.0, 3)))
+    original = preview.build_preview_model(
+        data, model_path="house.p3d", source="models.ifa!house.p3d",
+        lod_quality="fast",
+    )
+    original.source_bytes = data
+    app = categoriser.CategoriserApp.__new__(categoriser.CategoriserApp)
+    app.models = []
+    app.failures = []
+    app.state = {}
+    app.exhausted = False
+    app.model_iter = iter((original,))
+    app._raw_model_cache_limit = 1024 * 1024
+    assert app._load_next() is original
+    assert original.source_bytes is None
+    assert app._cached_model_bytes(original) is data
+
+    app.current = original
+    app.index = 0
+    app._lod_choices = {"LOD 1 (1)": "lod:0", "Fast (lowest)": "fast"}
+    app.preview_lod_var = SimpleNamespace(get=lambda: "LOD 1 (1)")
+    app._show_model = Mock(side_effect=lambda model: setattr(app, "current", model))
+    monkeypatch.setattr(
+        categoriser.world_assets, "read_asset_record_bytes",
+        Mock(side_effect=AssertionError("LOD change reread the PBO")),
+    )
+
+    app._change_preview_lod()
+    assert app.current.selected_lod_quality == "lod:0"
+    assert app.current.original_vertex_count == 6
+    assert app.current.archive_cached
+    assert app.current.read_seconds == 0
+    assert app.current.parse_seconds >= 0
+    assert len(app._raw_model_cache) == 1
+    assert app._raw_model_cache_bytes == len(data)
+
+
+def test_categoriser_raw_model_byte_cache_evicts_within_memory_budget() -> None:
+    app = categoriser.CategoriserApp.__new__(categoriser.CategoriserApp)
+    app._raw_model_cache_limit = 6
+    a = SimpleNamespace(source="a.pbo", model_path="one.p3d")
+    b = SimpleNamespace(source="a.pbo", model_path="two.p3d")
+    oversized = SimpleNamespace(source="a.pbo", model_path="three.p3d")
+    app._remember_model_bytes(a, b"first")
+    assert app._cached_model_bytes(a) == b"first"
+    app._remember_model_bytes(b, b"second")
+    assert app._cached_model_bytes(a) is None
+    assert app._cached_model_bytes(b) == b"second"
+    app._remember_model_bytes(oversized, b"x" * 7)
+    assert app._cached_model_bytes(oversized) is None
+    assert app._raw_model_cache_bytes == len(b"second")

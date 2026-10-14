@@ -469,3 +469,114 @@ def test_categoriser_texture_mip_change_redraws_without_model_rescan() -> None:
 def test_categoriser_texture_mip_defaults_to_full_for_older_test_views() -> None:
     app = ui.CategoriserApp.__new__(ui.CategoriserApp)
     assert app._selected_texture_mipmap() == "auto"
+
+
+
+def test_categoriser_displays_real_load_timing_breakdown() -> None:
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    app.load_timing_var = Var("")
+    app._last_texture_seconds = 0.035
+    current = SimpleNamespace(
+        read_seconds=0.010,
+        parse_seconds=0.020,
+        archive_cached=True,
+    )
+    app._update_load_timing(current, 0.065)
+    label = app.load_timing_var.get()
+    assert "P3D read/scan: 10.0 ms (RAM cache)" in label
+    assert "Mesh: 20.0 ms" in label
+    assert "Textures: 35.0 ms" in label
+    assert "Preview: 30.0 ms" in label
+    assert "Total: 95.0 ms" in label
+    assert "\n" in label
+
+
+def test_categoriser_redraw_populates_gui_timing_without_tampering_with_state() -> None:
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    app.current = SimpleNamespace(read_seconds=0.01, parse_seconds=0.02)
+    app.skip_textures_var = Var(False)
+    app.load_timing_var = Var("")
+    app._busy = Mock()
+    app._unbusy = Mock()
+    app._draw_model = Mock()
+    app.state = {"house.p3d": ui.Classification(["Residential"])}
+    existing = app.state["house.p3d"]
+    app._redraw()
+    assert "P3D read/scan" in app.load_timing_var.get()
+    assert "Total:" in app.load_timing_var.get()
+    app._draw_model.assert_called_once_with(app.current)
+    app._unbusy.assert_called_once()
+    assert app.state["house.p3d"] is existing
+
+
+
+def test_categoriser_render_quality_change_only_redraws_current_model() -> None:
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    app.current = model("building.p3d")
+    app.models = [app.current]
+    app.index = 0
+    app.render_quality_var = Var("Fast (60%)")
+    app._redraw = Mock()
+    app.model_iter = iter(())
+    old_iter = app.model_iter
+    app._change_preview_lod = Mock()
+    app.save_state = Mock()
+    app.state = {"building.p3d": ui.Classification(["Commercial"])}
+    previous_classification = app.state["building.p3d"]
+
+    assert app._render_quality_scale() == 0.6
+    app._change_render_quality()
+    app._redraw.assert_called_once_with()
+    assert app.current is app.models[0]
+    assert app.model_iter is old_iter
+    assert app.state["building.p3d"] is previous_classification
+    app.save_state.assert_not_called()
+    app._change_preview_lod.assert_not_called()
+    app.render_quality_var.set("Balanced (80%)")
+    assert app._render_quality_scale() == 0.8
+    app.render_quality_var.set("Quality (100%)")
+    assert app._render_quality_scale() == 1.0
+
+
+def test_categoriser_quality_change_with_no_model_is_ignored() -> None:
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    app.current = None
+    app._redraw = Mock()
+    app._change_render_quality()
+    app._redraw.assert_not_called()
+
+
+def test_categoriser_timings_split_cpu_raster_and_matplotlib() -> None:
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    app.load_timing_var = Var("")
+    app._last_texture_seconds = 0.010
+    app._last_raster_seconds = 0.080
+    current = SimpleNamespace(
+        read_seconds=0.010, parse_seconds=0.020, archive_cached=True,
+    )
+    app._update_load_timing(current, 0.100)
+    label = app.load_timing_var.get()
+    assert "P3D read/scan: 10.0 ms (RAM cache)" in label
+    assert "Mesh: 20.0 ms" in label
+    assert "Textures: 10.0 ms" in label
+    assert "CPU raster: 70.0 ms" in label
+    assert "Matplotlib prep: 20.0 ms" in label
+    assert "Total: 130.0 ms" in label
+
+
+def test_categoriser_redraw_resets_raster_stage_for_bounds_only() -> None:
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    app.current = SimpleNamespace(read_seconds=0.001, parse_seconds=0.002)
+    app.skip_textures_var = Var(True)
+    app.load_timing_var = Var("")
+    app._last_raster_seconds = 42.0
+    app._last_texture_seconds = 17.0
+    app._busy = Mock()
+    app._unbusy = Mock()
+    app._draw_model = Mock()  # model with no rasterizable faces
+    app._redraw()
+    label = app.load_timing_var.get()
+    assert "Preview:" in label
+    assert "CPU raster:" not in label
+    assert "Matplotlib prep:" not in label
+    assert "Textures: 0.0 ms" in label

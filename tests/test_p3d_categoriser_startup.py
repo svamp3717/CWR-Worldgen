@@ -236,7 +236,7 @@ def test_gui_texture_archives_do_not_extend_categoriser_model_scan(
     )
     monkeypatch.setattr(
         cli, "preview_models",
-        lambda inputs, includes, max_points, *, lod_quality: observed.append(
+        lambda inputs, includes, max_points, *, lod_quality, retain_source_bytes=False: observed.append(
             ("preview", tuple(inputs), lod_quality)
         ) or iter(()),
     )
