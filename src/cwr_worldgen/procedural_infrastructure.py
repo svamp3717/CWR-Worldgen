@@ -1724,7 +1724,7 @@ def _road_lods(
             # The old turn-only 40 mm drop buried the overlap tongue below
             # flat terrain: 35 mm road height - 40 mm drop = -5 mm. The
             # remaining corner gap appeared as a grass stripe. Keep a short
-            # seam-covering lip above the contact surface instead.
+            # seam-covering lip above terrain and below the Roadway contact plane.
             lowered_overlap=False,
             double_sided=True,
             overlap_rise=(
