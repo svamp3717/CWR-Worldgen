@@ -82,8 +82,14 @@ Generation uses deterministic seeds and stable processing rules so the same inpu
 This also makes it practical to adjust one part of a world and rebuild it without manually recreating the entire terrain.
 
 For faster repeat builds, leave the persistent build cache enabled and retain
-the selected build directory between runs. `--no-cache` bypasses the stage
-caches, `--cache-refresh` rebuilds matching cached stages, and reproducibility
+the selected build directory between runs. In the GUI, leave **Delete
+intermediates + build cache after build (slower rebuilds)** unchecked. This
+cleanup setting now defaults to **off** for new users because it deletes cached
+terrain, road, placement and asset work. The GUI persists previous choices, so
+anyone who enabled cleanup before must **uncheck it once** to preserve caches
+on subsequent builds. Opt back in to cleanup when disk space is more important
+than fast repeated builds. `--no-cache` bypasses the stage caches,
+`--cache-refresh` rebuilds matching cached stages, and reproducibility
 verification deliberately performs additional work. The generator also batches
 cache-fingerprint hashing for large elevation grids and avoids deep-copying
 terrain/material/road arrays that are not included in the final diagnostic
