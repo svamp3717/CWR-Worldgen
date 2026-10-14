@@ -57,8 +57,10 @@ the original donor P3D (e.g. from `O.pbo`) as well as the generated PBO.
 The supplied `wg_lundby5.pbo` already contains generated paved contact faces
 with `o\\road\\sil_new.paa`, and generated dirt faces with
 `o\\road\\ces_hned.paa`, matching the **styles recorded by its generator**.
-A separate scan of that PBO found 448 generated-road P3D variants matching
-those reported per-surface textures and flags. However, a geometry/terrain
+An independent full-face scan of that PBO found **448 generated-road P3D
+variants (66 paved, 119 dirt, 263 gravel) containing 2,876 usable Roadway
+faces; all 2,876 matched their recorded contact texture, face flags, and
+referenced point flags**, with zero mismatches. However, a geometry/terrain
 audit found that **501 of 1,373 placed paved pieces** have sampled Roadway
 points or cross-section midpoints over 5 mm below the bilinearly interpolated
 WRP terrain. That is a plausible *runtime ground-contact* issue distinct from
