@@ -18,7 +18,9 @@ import json
 from pathlib import Path
 import sys
 
-from cwr_worldgen.legacy_proxy_models import inspect_roadway_surface_style
+from cwr_worldgen.legacy_proxy_models import (
+    ProxyCloneError, inspect_roadway_surface_style,
+)
 from cwr_worldgen.pbo import read_pbo
 
 
@@ -54,6 +56,7 @@ def audit_pbo(path: Path) -> dict[str, object]:
     counts = {family: 0 for family in styles}
     problems: list[str] = []
     notes: list[str] = []
+    verified = 0
     for entry in entries:
         if not entry.name.replace("/", "\\").casefold().startswith("i\\"):
             continue
@@ -70,7 +73,7 @@ def audit_pbo(path: Path) -> dict[str, object]:
             continue
         try:
             contact = inspect_roadway_surface_style(entry.data)
-        except (ValueError, OSError) as exc:
+        except (ProxyCloneError, ValueError, OSError) as exc:
             problems.append(f"{entry.name}: unreadable Roadway LOD: {exc}")
             continue
         wanted = (
@@ -88,6 +91,8 @@ def audit_pbo(path: Path) -> dict[str, object]:
                 f"{entry.name}: Roadway does not match donor style: "
                 f"expected={wanted!r}, actual={actual!r}"
             )
+        else:
+            verified += 1
 
     for family, count in counts.items():
         if count:
@@ -102,7 +107,7 @@ def audit_pbo(path: Path) -> dict[str, object]:
     return {
         "pbo": str(path),
         "generated_road_models_by_family": counts,
-        "verified_models": sum(counts.values()) - len(problems),
+        "verified_models": verified,
         "mismatches": problems,
         "provenance_warnings": notes,
         "runtime_groundtype_verified": False,
