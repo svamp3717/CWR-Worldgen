@@ -102,10 +102,13 @@ GENERATED_PAVED_CURVE_BUCKETS = tuple(range(5, 50, 5))
 # itself and are better represented by another short generated piece.
 CUSTOM_ROAD_MAX_CURVE_DEGREES = 60
 GENERATED_PAVED_VISUAL_OVERLAP_METRES = 0.0
-# Curved generated paved turns retain the pre-junction-regression seam treatment
-# from terrtest39: tangent-aligned mouths plus a short lowered visual tongue.
-# Straight generated pieces remain square-ended for clean junction approaches.
+# Curved paved turns keep tangent-aligned mouths and a short overlapping skin.
+# The old 40 mm downward drop buried the outer 180 mm under the road's
+# 35 mm ground clearance (see the green cross-road seams). Instead lift only
+# the tiny overlap tip 5 mm to avoid z-fighting with the adjacent donor model.
+# Do not change the Roadway contact geometry or straight/junction mouths.
 GENERATED_PAVED_TURN_VISUAL_OVERLAP_METRES = 0.18
+GENERATED_PAVED_TURN_OVERLAP_RISE_METRES = 0.005
 # Generated T junctions use the same 6.25 m arm reach as the stock short-road
 # footprint, but rotate the branch arm to the mapped road heading instead of
 # forcing every junction into a square 90-degree stock cap.
@@ -684,8 +687,10 @@ def _road_ribbon_sections(
 
     Values are ``(left_x, left_z, right_x, right_z)``.  The nominal endpoints
     remain on the local Z axis, while curved variants bow sideways between them.
-    Short lowered overhangs hide the triangular cracks that otherwise appear
-    where independently rotated CWA road objects meet on a bend.
+    Curved paved turns extend a short tangent-aligned lip beyond their nominal
+    endpoints to cover the triangular cracks between rotated CWA road objects.
+    The paved lip must stay *above* the terrain; sinking it under the ground
+    exposes those cracks as visible grass bars.
     """
 
     half_length = length * 0.5
@@ -744,6 +749,7 @@ def _ribbon_lod(
     height: float,
     lowered_overlap: bool,
     double_sided: bool,
+    overlap_rise: float = 0.0,
     u_span_override: float | None = None,
     texture_scale_override: float | None = None,
     surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
@@ -763,8 +769,11 @@ def _ribbon_lod(
     last_index = len(sections) - 1
     for index, (lx, lz, rx, rz) in enumerate(sections):
         y = height
-        if lowered_overlap and index in {0, last_index}:
-            y -= GENERATED_GRAVEL_OVERLAP_DROP_METRES
+        if index in {0, last_index}:
+            if lowered_overlap:
+                y -= GENERATED_GRAVEL_OVERLAP_DROP_METRES
+            else:
+                y += overlap_rise
         points.extend(((lx, y, lz), (rx, y, rz)))
 
     faces: list[_Face] = []
@@ -1712,8 +1721,15 @@ def _road_lods(
             texture=texture,
             resolution=_VISUAL_LOD,
             height=GENERATED_GRAVEL_VISUAL_TOP_METRES,
-            lowered_overlap=paved_turn,
+            # The old turn-only 40 mm drop buried the overlap tongue below
+            # flat terrain: 35 mm road height - 40 mm drop = -5 mm. The
+            # remaining corner gap appeared as a grass stripe. Keep a short
+            # seam-covering lip above terrain and below the Roadway contact plane.
+            lowered_overlap=False,
             double_sided=True,
+            overlap_rise=(
+                GENERATED_PAVED_TURN_OVERLAP_RISE_METRES if paved_turn else 0.0
+            ),
             u_span_override=1.0,
             texture_scale_override=GENERATED_PAVED_TEXTURE_REPEAT_METRES,
             surface_style=surface_style,
@@ -2631,15 +2647,27 @@ class ProceduralInfrastructureLibrary:
                 and _paved_curve_degrees(key.subtype) != 0
             ):
                 model_cache_version = (
-                    "procedural-infrastructure-model-v23-tangent-paved-turn-seams"
+                    "procedural-infrastructure-model-v26-above-ground-paved-turn-seams"
                 )
             elif (
                 key.kind == "road"
                 and key.subtype.casefold().startswith("road_")
             ):
-                model_cache_version = (
-                    "procedural-infrastructure-model-v25-custom-road-ribbons"
-                )
+                # Only curved paved ribbons changed. Reuse existing custom
+                # dirt/gravel/straight/junction artifacts without extra work.
+                signature = _custom_road_signature(key.subtype)
+                if (
+                    signature is not None
+                    and signature[0] == "paved"
+                    and signature[1] != 0
+                ):
+                    model_cache_version = (
+                        "procedural-infrastructure-model-v27-custom-paved-seam-tips"
+                    )
+                else:
+                    model_cache_version = (
+                        "procedural-infrastructure-model-v25-custom-road-ribbons"
+                    )
             elif key.kind == "road":
                 model_cache_version = (
                     "procedural-infrastructure-model-v21-skew-paved-junction-seams"
