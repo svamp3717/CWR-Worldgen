@@ -2127,6 +2127,38 @@ def _write_infrastructure_asset_task(task: _InfrastructureAssetTask) -> tuple[di
         math.isclose(value, _ROADWAY_LOD, rel_tol=1e-6) for value in summary.resolutions
     ):
         raise ValueError(f"generated {task.key.kind} lost its Roadway LOD")
+
+    roadway_audit: dict[str, object] = {}
+    if task.key.kind == "road":
+        # The visual texture alone does not select CWA road groundtype. Verify
+        # the *serialized* Roadway contact faces, including the donor's exact
+        # texture and flags, after cached or newly generated models are written.
+        # Local import avoids a module initialization cycle with proxy models.
+        from .legacy_proxy_models import inspect_roadway_surface_style
+        contact = inspect_roadway_surface_style(task.destination.read_bytes())
+        expected_texture = _roadway_surface_texture(
+            task.texture, task.surface_style
+        )
+        expected_point = int(task.surface_style.roadway_point_flag)
+        expected_face = int(task.surface_style.roadway_face_flag)
+        if (
+            contact.texture_path.replace("/", "\\").casefold()
+            != expected_texture.replace("/", "\\").casefold()
+            or contact.point_flag != expected_point
+            or contact.face_flag != expected_face
+        ):
+            raise ValueError(
+                f"generated road {task.wire} did not preserve donor Roadway "
+                "contact metadata: "
+                f"expected {(expected_texture, expected_point, expected_face)!r}, "
+                f"written {(contact.texture_path, contact.point_flag, contact.face_flag)!r}"
+            )
+        roadway_audit = {
+            "roadway_contact_verified": True,
+            "roadway_texture": contact.texture_path,
+            "roadway_point_flag": f"0x{contact.point_flag & 0xFFFFFFFF:08x}",
+            "roadway_face_flag": f"0x{contact.face_flag & 0xFFFFFFFF:08x}",
+        }
     return ({
         "key": asdict(task.key),
         "model_path": task.wire,
@@ -2134,6 +2166,7 @@ def _write_infrastructure_asset_task(task: _InfrastructureAssetTask) -> tuple[di
         "usage_count": task.usage_count,
         "sha256": sha256(task.destination.read_bytes()).hexdigest(),
         "lod_resolutions": summary.resolutions,
+        **roadway_audit,
     }, hit)
 
 
