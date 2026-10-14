@@ -172,3 +172,111 @@ def test_texture_preparation_time_is_measured_separately_from_rasterization(
         width=32, height=32, load_textures=False, texture_timing=skipped,
     )
     assert skipped == {}
+
+
+
+def test_rasterizer_samples_only_covered_visible_fragment_pixels(monkeypatch) -> None:
+    """A large triangle bounding box must not trigger full-box RGBA sampling."""
+    monkeypatch.setattr(
+        render, "_project",
+        lambda *_args: np.array([
+            (4.0, 4.0, 1.0),
+            (123.0, 4.0, 1.0),
+            (4.0, 123.0, 1.0),
+        ]),
+    )
+    points, faces = _triangle()
+    count = []
+    original = render._sample_mipmapped
+
+    def tracked(levels, u, v, lod):
+        count.append(u.size)
+        assert u.ndim == v.ndim == 1
+        assert u.shape == v.shape
+        return original(levels, u, v, lod)
+
+    monkeypatch.setattr(render, "_sample_mipmapped", tracked)
+    image, hits, misses = render.render_textured_model(
+        points, faces, _Resolver(), "models.pbo", width=128, height=128,
+    )
+    assert (hits, misses) == (1, 0)
+    bbox_pixels = 120 * 120
+    covered_pixels = np.count_nonzero(image[:, :, 0] == 220)
+    assert 0 < count[0] < bbox_pixels * 0.6
+    assert count[0] == covered_pixels
+
+
+def test_opaque_front_triangle_occludes_behind_without_sampling_it(
+    monkeypatch,
+) -> None:
+    """Back-facing geometry must not decode or sample textures when hidden."""
+    monkeypatch.setattr(
+        render, "_project",
+        lambda *_args: np.array([
+            (5, 5, 1), (26, 5, 1), (15, 26, 1),
+            (5, 5, 2), (26, 5, 2), (15, 26, 2),
+        ], dtype=float),
+    )
+    points = np.zeros((6, 3), dtype=np.float32)
+    a = render.RenderFace((0, 1, 2), ((0, 0), (0, 0), (0, 0)), "front.paa")
+    b = render.RenderFace((3, 4, 5), ((0, 0), (0, 0), (0, 0)), "back.paa")
+
+    class ColourResolver:
+        def __init__(self):
+            self.calls = []
+
+        def load_rgba(self, path, source):
+            self.calls.append(path)
+            rgba = np.ones((4, 4, 4), dtype=np.uint8) * 255
+            rgba[:, :, :3] = (220, 35, 45) if path == "front.paa" else (0, 0, 200)
+            return rgba
+
+    resolver = ColourResolver()
+    image, hits, misses = render.render_textured_model(
+        points, (a, b), resolver, "models.pbo", width=32, height=32,
+    )
+    assert (hits, misses) == (1, 0)
+    assert resolver.calls == ["front.paa"]
+    assert tuple(image[12, 15]) == (220, 35, 45)
+
+
+def test_transparent_front_fragments_do_not_hide_opaque_background(
+    monkeypatch,
+) -> None:
+    """Alpha-masked near geometry should leave already-rendered background visible."""
+    monkeypatch.setattr(
+        render, "_project",
+        lambda *_args: np.array([
+            (5, 5, 2), (26, 5, 2), (15, 26, 2),
+            (5, 5, 1), (26, 5, 1), (15, 26, 1),
+        ], dtype=float),
+    )
+    points = np.zeros((6, 3), dtype=np.float32)
+    back = render.RenderFace((0, 1, 2), ((0, 0), (0, 0), (0, 0)), "back.paa")
+    front = render.RenderFace((3, 4, 5), ((0, 0), (0, 0), (0, 0)), "front.paa")
+
+    class TransparentResolver:
+        def load_rgba(self, path, _source):
+            rgba = np.zeros((4, 4, 4), dtype=np.uint8)
+            rgba[:, :, :3] = (0, 100, 255) if path == "back.paa" else (255, 0, 0)
+            rgba[:, :, 3] = 255 if path == "back.paa" else 0
+            return rgba
+
+    result, hits, misses = render.render_textured_model(
+        points, (back, front), TransparentResolver(),
+        "models.pbo", width=32, height=32,
+    )
+    assert (hits, misses) == (2, 0)
+    assert tuple(result[12, 15]) == (0, 100, 255)
+
+
+def test_small_visible_triangle_does_not_touch_bounding_box_corners(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(render, "_project", _visible_projection)
+    points, faces = _triangle()
+    image, _hits, _misses = render.render_textured_model(
+        points, faces, _Resolver(), "models.pbo", width=32, height=32,
+    )
+    assert tuple(image[6, 6]) == (220, 0, 0)
+    assert tuple(image[23, 24]) == (236, 236, 236)
