@@ -225,6 +225,91 @@ class LegacyProxyModelTests(unittest.TestCase):
         self.assertEqual(report["roadway_source_format"], "visual-fallback")
         self.assertEqual(report["roadway_texture_source"], "visual-fallback")
 
+    def test_generated_road_families_serialize_real_donor_contact_styles(self) -> None:
+        """Paved, dirt, gravel and junction contact cannot revert to visuals."""
+        fixtures = (
+            ("road_paved_w091_l0063", r"o\\road\\sil_new.paa",
+             r"stock\\asphalt_contact.paa"),
+            ("road_dirt_w035_l0063", r"o\\road\\ces_hned.paa",
+             r"stock\\earth_contact.paa"),
+            ("road_gravel_w046_l0063", r"addon\\gravel_visual.paa",
+             r"addon\\gravel_contact.paa"),
+            ("road_j3_paved_w091_h000_090_180", r"o\\road\\sil_new.paa",
+             r"stock\\asphalt_contact.paa"),
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            for subtype, visual_texture, contact_texture in fixtures:
+                with self.subTest(subtype=subtype):
+                    donor = _synthetic_road_odol(
+                        roadway_texture=contact_texture
+                    )
+                    style, report = generator._road_surface_style_from_donor(
+                        r"addon\\donor.p3d", visual_texture, donor
+                    )
+                    self.assertEqual(report["roadway_texture_source"], "donor-roadway-lod")
+                    key = infrastructure.InfrastructureModelKey(
+                        "road", subtype, 91, 63,
+                    )
+                    dest = Path(temp) / f"{subtype}.p3d"
+                    task = infrastructure._InfrastructureAssetTask(
+                        key=key,
+                        wire=rf"world\\i\\{subtype}.p3d",
+                        relative=f"i/{subtype}.p3d",
+                        destination=dest,
+                        texture=visual_texture,
+                        surface_style=style,
+                        cache_path=None,
+                        cache_enabled=False,
+                        cache_refresh=False,
+                        usage_count=1,
+                    )
+                    entry, hit = infrastructure._write_infrastructure_asset_task(task)
+                    self.assertFalse(hit)
+                    self.assertTrue(entry["roadway_contact_verified"])
+                    self.assertEqual(entry["roadway_texture"], contact_texture)
+                    self.assertEqual(entry["roadway_point_flag"], "0x000055aa")
+                    self.assertEqual(entry["roadway_face_flag"], "0x12345678")
+                    parsed = inspect_roadway_surface_style(dest.read_bytes())
+                    self.assertEqual(parsed.texture_path, contact_texture)
+                    self.assertEqual(parsed.point_flag, 0x55AA)
+                    self.assertEqual(parsed.face_flag, 0x12345678)
+
+    def test_generated_road_contact_audit_rejects_wrong_emitted_metadata(self) -> None:
+        """Do not silently package road models with the wrong driving surface."""
+        source = _synthetic_road_odol(roadway_texture=r"stock\\asphalt_contact.paa")
+        style, _ = generator._road_surface_style_from_donor(
+            r"stock\\sil25.p3d", r"stock\\visual.paa", source
+        )
+        original_writer = infrastructure.write_infrastructure_mlod
+
+        def write_without_donor_style(path, key, texture, *, road_surface_style):
+            return original_writer(
+                path, key, texture,
+                road_surface_style=infrastructure.RoadSurfaceStyle(),
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            task = infrastructure._InfrastructureAssetTask(
+                key=infrastructure.InfrastructureModelKey(
+                    "road", "road_paved_w091_l0063", 91, 63
+                ),
+                wire=r"world\\i\\road_paved_w091_l0063.p3d",
+                relative="i/road_paved_w091_l0063.p3d",
+                destination=Path(temp) / "bad.p3d",
+                texture=r"stock\\visual.paa",
+                surface_style=style,
+                cache_path=None,
+                cache_enabled=False,
+                cache_refresh=False,
+                usage_count=1,
+            )
+            with patch.object(
+                infrastructure, "write_infrastructure_mlod",
+                side_effect=write_without_donor_style,
+            ):
+                with self.assertRaisesRegex(ValueError, "did not preserve donor Roadway"):
+                    infrastructure._write_infrastructure_asset_task(task)
+
     def test_cwa_safe_clusters_reject_missing_proxy_source_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
