@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 import struct
 from hashlib import sha256
 from pathlib import Path
@@ -9,11 +10,15 @@ from cwr_worldgen.cache import (
     float_sequence_sha256, int_sequence_sha256, streaming_hash,
 )
 from cwr_worldgen.generator import (
+    _small_report_dict,
     _assemble_world_objects,
     _expand_cwa_generated_vegetation,
     _trusted_legacy_asset_paths,
 )
 from cwr_worldgen.model import WorldObject
+from cwr_worldgen.playability import (
+    RoadFitReport, TerrainGradeReport, TransitionReport,
+)
 from cwr_worldgen.osm import (
     BboxProjection, CompactOrientedRectangle, ObjectGenerationResult,
     _compact_support_polygon, _oriented_rectangle,
@@ -417,3 +422,60 @@ def test_chunked_terrain_hash_keeps_legacy_integer_overflow_semantics() -> None:
 
     with pytest.raises(struct.error):
         int_sequence_sha256([0] * 8_192 + [2**31])
+
+
+
+def test_large_world_report_compaction_preserves_existing_json_data() -> None:
+    road = RoadFitReport(
+        objects=(WorldObject(1, "world\\road.p3d", 1.0, 2.0, 3.0, 45.0),),
+        chain_count=1,
+        connection_count=3,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+    )
+    legacy_road = asdict(road)
+    legacy_road["objects"] = len(road.objects)
+    assert _small_report_dict(road, "objects") | {
+        "objects": len(road.objects),
+    } == legacy_road
+
+    grading = TerrainGradeReport(
+        elevations=(3.25, 4.5, 5.75),
+        changed_cells=2,
+        road_seed_cells=1,
+        building_pad_cells=0,
+        maximum_cut=0.5,
+        maximum_fill=0.25,
+        maximum_road_slope_before_percent=6.0,
+        maximum_road_slope_after_percent=2.0,
+        building_roughness_before=0.9,
+        building_roughness_after=0.5,
+    )
+    transitions = TransitionReport(indices=(1, 2, 3), shoreline_cells=1, softened_landuse_cells=2)
+    legacy_grading = asdict(grading)
+    legacy_grading.pop("elevations")
+    legacy_grading["transitions"] = asdict(transitions)
+    legacy_grading["transitions"].pop("indices")
+    compact = _small_report_dict(grading, "elevations")
+    compact["transitions"] = _small_report_dict(transitions, "indices")
+    assert compact == legacy_grading
+
+
+def test_compact_reports_never_deepcopy_omitted_heavy_arrays() -> None:
+    @dataclass(frozen=True)
+    class Nested:
+        count: int
+
+    @dataclass(frozen=True)
+    class Report:
+        heavy: tuple[object, ...]
+        nested: Nested
+
+    class RefuseCopy:
+        def __deepcopy__(self, memo):
+            raise AssertionError("Unneeded report array was deep-copied")
+
+    result = _small_report_dict(Report((RefuseCopy(),), Nested(7)), "heavy")
+    assert result == {"nested": {"count": 7}}
