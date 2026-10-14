@@ -15,10 +15,11 @@ are independent of its visible texture and rendering flags.
   junctions. Failure to parse the donor's visual LOD does not discard its
   independently readable Roadway LOD.
 - After writing or restoring a generated road P3D, the asset task **reads the
-  serialized Roadway LOD back** and compares its texture and flags with the
-  selected style. A mismatch fails the build rather than silently shipping a
-  different groundtype. The infrastructure manifest records
-  `roadway_contact_verified` and the written values.
+  serialized Roadway LOD back** and checks **every contact polygon's texture,
+  face flag, and referenced point flags**, not merely the most common face.
+  A mismatch fails the build rather than silently shipping a partial off-road
+  patch. The infrastructure manifest records `roadway_contact_verified`,
+  `roadway_faces_verified`, and the written values.
 - If no donor Roadway LOD could be inspected, existing visual-texture fallback
   behavior is retained for compatibility, but the donor report identifies it
   explicitly as `visual-fallback` rather than calling it verified.
@@ -35,9 +36,10 @@ Run from a source checkout (with Worldgen dependencies installed):
 python tools/audit_generated_road_groundtypes.py path/to/wg_mymap.pbo
 ```
 
-The report counts generated paved, dirt and gravel P3Ds and checks the actual
-packed Roadway LOD texture and flags against the embedded
-`i/road-donors.json`. A nonzero exit indicates mismatches; provenance warnings
+The report counts generated paved, dirt and gravel P3Ds and checks **every
+usable Roadway polygon** in the packed models against the embedded
+`i/road-donors.json`, including its referenced point flags. A nonzero exit
+indicates mismatches; provenance warnings
 identify surfaces whose style was borrowed or inferred rather than inspected
 from a readable donor. Checking the packed PBO also catches stale cached
 models or any difference between model generation and packaging.
@@ -67,3 +69,15 @@ grounding work, not further copying of the same donor flags.
 
 Neither these donor contact checks nor the PBO auditor alter generated road
 positions, curve directions, terrain heights, visuals, or post-build cleanup.
+
+
+## Runtime caveat confirmed on Lundby
+
+The packed contact faces already match their embedded donor styles; this
+integrity audit does not reclassify how the CWA engine drives on them. **In
+particular, an apparently paved P3D is not proof that the vehicle's wheels
+are making contact with its Roadway LOD.** Where the model's contact polygons
+are under the terrain, the terrain can be the contacted surface regardless
+of the texture on those buried faces. Correcting those locations requires
+a separately tested terrain/placement/contact-height change. This work does
+not alter roadway height or the road placement/seam fix from merged PR #63.
