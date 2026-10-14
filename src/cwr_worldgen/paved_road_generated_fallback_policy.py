@@ -347,7 +347,7 @@ def _generated_piece(
 
 
 _PAVED_CURVE_SIDE = re.compile(
-    r"^(?P<base>.*_)(?P<side>[lr])(?P<angle>\\d{2,3})\\.p3d$",
+    r"^(?P<base>.*_)(?P<side>[lr])(?P<angle>\d{2,3})\.p3d$",
     re.IGNORECASE,
 )
 
