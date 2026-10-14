@@ -477,3 +477,78 @@ def test_browser_standalone_texture_preview_shows_load_time_and_cache_hit() -> N
     assert "(RGBA cache)" in texts[-1]
     assert "Preview/details:" in texts[-1]
     assert "Total:" in texts[-1]
+
+
+
+@pytest.mark.parametrize(
+    ("label", "expected_width", "expected_height"),
+    [
+        ("Fast (60%)", 480, 300),
+        ("Balanced (80%)", 640, 400),
+        ("Quality (100%)", 800, 500),
+    ],
+)
+def test_browser_render_quality_scales_only_raster_resolution(
+    monkeypatch, label, expected_width, expected_height,
+) -> None:
+    app = app_module.AssetBrowserApp.__new__(app_module.AssetBrowserApp)
+    app.ax_preview = Mock()
+    app.figure = Mock()
+    app.canvas = Mock()
+    app.canvas.get_tk_widget.return_value.winfo_width.return_value = 640
+    app.canvas.get_tk_widget.return_value.winfo_height.return_value = 400
+    app.texture_resolver = object()
+    app.skip_textures_var = SimpleNamespace(get=lambda: True)
+    app.render_quality_var = SimpleNamespace(get=lambda: label)
+    app.azim, app.elev, app.zoom = 35.0, 25.0, 1.0
+    called = []
+
+    def rasterizer(*args, **kwargs):
+        called.append((kwargs["width"], kwargs["height"], len(args[1])))
+        return (
+            np.zeros((kwargs["height"], kwargs["width"], 3), dtype=np.uint8),
+            0, 0,
+        )
+
+    monkeypatch.setattr(app_module, "render_textured_model", rasterizer)
+    model = SimpleNamespace(
+        points=np.zeros((3, 3), dtype=np.float32),
+        faces=(object(),), source="models.pbo", model_path="house.p3d",
+    )
+    app._draw_model(model)
+    assert called == [(expected_width, expected_height, 1)]
+    assert app.ax_preview.imshow.call_args.kwargs["interpolation"] == "hanning"
+
+
+def test_browser_render_quality_change_reuses_current_mesh_without_rescan() -> None:
+    app = app_module.AssetBrowserApp.__new__(app_module.AssetBrowserApp)
+    app.render_quality_var = SimpleNamespace(get=lambda: "Fast (60%)")
+    app.current_model = object()
+    app._redraw_current_model = Mock()
+    app._scan_sources = Mock()
+    app._show_model = Mock()
+    assert app._render_quality_scale() == 0.6
+    app._change_render_quality()
+    app._redraw_current_model.assert_called_once_with()
+    app._scan_sources.assert_not_called()
+    app._show_model.assert_not_called()
+
+
+def test_browser_timing_splits_cpu_raster_and_matplotlib_prepare() -> None:
+    app = app_module.AssetBrowserApp.__new__(app_module.AssetBrowserApp)
+    captured = []
+    app.load_timing_var = SimpleNamespace(set=captured.append)
+    model = SimpleNamespace(
+        read_seconds=0.010, parse_seconds=0.020,
+        archive_cached=False, preview_cache_hit=False,
+    )
+    app._update_model_timing(
+        model, draw_seconds=0.100, texture_seconds=0.010,
+        raster_seconds=0.080,
+    )
+    assert "P3D read: 10.0 ms" in captured[-1]
+    assert "Mesh: 20.0 ms" in captured[-1]
+    assert "Textures: 10.0 ms" in captured[-1]
+    assert "CPU raster: 70.0 ms" in captured[-1]
+    assert "Matplotlib prep: 20.0 ms" in captured[-1]
+    assert "Total: 130.0 ms" in captured[-1]
