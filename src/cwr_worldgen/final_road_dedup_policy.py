@@ -1623,7 +1623,7 @@ def _align_final_paved_curve_handedness(report, spec):
                     cosine_turn = axis.ux * other.ux + axis.uz * other.uz
                     if cosine_turn < 0.5:  # heading difference > 60 degrees
                         continue
-                    candidates.append(other)
+                    candidates.append(other_index)
                     if len(candidates) > 1:
                         return None  # Ambiguous merge/intersection: do not alter
         return candidates[0] if candidates else None
@@ -1637,17 +1637,31 @@ def _align_final_paved_curve_handedness(report, spec):
         if match is None:
             continue
 
-        previous = unique_neighbor(index, previous=True)
-        following = unique_neighbor(index, previous=False)
+        previous_index = unique_neighbor(index, previous=True)
+        following_index = unique_neighbor(index, previous=False)
+        # Require a one-to-one connection *in both directions*. An ambiguous
+        # T junction may look unique from one arm but not from the other.
+        if (
+            previous_index is not None
+            and unique_neighbor(previous_index, previous=False) != index
+        ):
+            previous_index = None
+        if (
+            following_index is not None
+            and unique_neighbor(following_index, previous=True) != index
+        ):
+            following_index = None
         turns = []
         heading = math.degrees(math.atan2(axis.ux, axis.uz))
 
-        if previous is not None:
+        if previous_index is not None:
+            previous = axes[previous_index]
             before_heading = math.degrees(math.atan2(previous.ux, previous.uz))
             turn = (heading - before_heading + 180.0) % 360.0 - 180.0
             if 1.5 <= abs(turn) <= 60.0:
                 turns.append(turn)
-        if following is not None:
+        if following_index is not None:
+            following = axes[following_index]
             after_heading = math.degrees(math.atan2(following.ux, following.uz))
             turn = (after_heading - heading + 180.0) % 360.0 - 180.0
             if 1.5 <= abs(turn) <= 60.0:
