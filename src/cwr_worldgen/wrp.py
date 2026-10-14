@@ -12,7 +12,7 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
-from .model import WorldObject, encode_wire_path
+from .model import CrossSlopedRoadObject, WorldObject, encode_wire_path
 
 _RVW4_HEADER = struct.Struct("<4sii")
 _RVW4_OBJECT = struct.Struct("<12fi76s")
@@ -97,6 +97,12 @@ def _texture_grid_bytes(texture_indices: Sequence[int], maximum_index: int) -> b
 
 def _object_matrix_4x3_fast(obj: WorldObject) -> tuple[float, ...]:
     """Inline transform fast path used by the million-record WRP serializer."""
+
+    if isinstance(obj, CrossSlopedRoadObject):
+        # Roads are a small fraction of terrain objects. Preserve their exact
+        # pitch plus local-X cross-slope transform while keeping the standard
+        # million-object writer's original fast path byte-for-byte unchanged.
+        return obj.matrix_4x3()
 
     heading = math.radians(obj.heading_degrees)
     cosine_heading = math.cos(heading)
