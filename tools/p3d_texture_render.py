@@ -345,7 +345,7 @@ def render_textured_model(
                 np.array([178, 184, 190]) * shade, 0, 255
             ).astype(np.uint8)
             image[screen_y, screen_x] = colour
-            zbuf[screen_y, screen_x] = depth[mask]
+            zbuf[screen_y, screen_x] = depth
             continue
 
         hits += 1
