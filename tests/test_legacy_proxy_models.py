@@ -6,8 +6,12 @@ from hashlib import sha256
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from cwr_worldgen.assets import AssetRecord, canonical_asset_path
+from cwr_worldgen import generator
+from cwr_worldgen import procedural_infrastructure as infrastructure
+from cwr_worldgen.legacy_proxy_models import ProxyCloneError
 from cwr_worldgen.legacy_proxy_models import (
     inspect_roadway_surface_style,
     proxy_safe_model_path,
@@ -158,6 +162,68 @@ class LegacyProxyModelTests(unittest.TestCase):
         self.assertEqual(style.texture_path, "")
         self.assertEqual(style.point_flag, 0x55AA)
         self.assertEqual(style.face_flag, 0x12345678)
+
+    def test_blank_donor_roadway_surface_survives_generated_p3d(self) -> None:
+        """Untextured native contact faces must not become asphalt contact."""
+        model = r"o\road\sil25.p3d"
+        visual = r"o\road\sil_new.paa"
+        donor = _synthetic_road_odol(roadway_texture="")
+        style, report = generator._road_surface_style_from_donor(
+            model, visual, donor
+        )
+        self.assertEqual(style.roadway_texture, "")
+        self.assertEqual(style.roadway_point_flag, 0x55AA)
+        self.assertEqual(style.roadway_face_flag, 0x12345678)
+        self.assertEqual(report["roadway_inspected_texture"], "")
+        self.assertEqual(report["roadway_texture_source"], "donor-roadway-lod")
+
+        key = infrastructure.InfrastructureModelKey(
+            "road", "road_paved_w091_l0063", 91, 63,
+        )
+        visual_lod, _geometry, contact_lod, _land = (
+            infrastructure._road_lods(key, visual, style)
+        )
+        self.assertTrue(visual_lod.faces)
+        self.assertTrue(all(face.texture == visual for face in visual_lod.faces))
+        self.assertTrue(contact_lod.faces)
+        self.assertTrue(all(face.texture == "" for face in contact_lod.faces))
+        with tempfile.TemporaryDirectory() as temp:
+            generated = Path(temp) / "paved.p3d"
+            infrastructure.write_infrastructure_mlod(
+                generated, key, visual, road_surface_style=style
+            )
+            result = inspect_roadway_surface_style(generated.read_bytes())
+        self.assertEqual(result.texture_path, "")
+        self.assertEqual(result.point_flag, 0x55AA)
+        self.assertEqual(result.face_flag, 0x12345678)
+
+    def test_unreadable_visual_lod_does_not_erase_donor_roadway_metadata(self) -> None:
+        """Visual parsing errors must not suppress separately readable contact."""
+        donor = _synthetic_road_odol()
+        with patch.object(
+            generator, "inspect_visual_surface_style",
+            side_effect=ProxyCloneError("visual parse failed"),
+        ):
+            style, report = generator._road_surface_style_from_donor(
+                r"o\road\sil25.p3d", r"o\road\sil_new.paa", donor,
+            )
+        self.assertEqual(style.roadway_texture, r"o\road\contact.paa")
+        self.assertEqual(style.roadway_point_flag, 0x55AA)
+        self.assertEqual(style.roadway_face_flag, 0x12345678)
+        self.assertEqual(report["source_format"], None)
+        self.assertEqual(report["roadway_source_format"], "ODOL")
+        self.assertEqual(report["roadway_texture_source"], "donor-roadway-lod")
+
+    def test_missing_donor_contact_uses_explicit_visual_fallback(self) -> None:
+        visual = r"modroads\paved.paa"
+        style, report = generator._road_surface_style_from_donor(
+            r"modroads\paved.p3d", visual, None,
+        )
+        self.assertEqual(style.roadway_texture, visual)
+        self.assertEqual(style.roadway_point_flag, 0)
+        self.assertEqual(style.roadway_face_flag, 0)
+        self.assertEqual(report["roadway_source_format"], "visual-fallback")
+        self.assertEqual(report["roadway_texture_source"], "visual-fallback")
 
     def test_cwa_safe_clusters_reject_missing_proxy_source_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
