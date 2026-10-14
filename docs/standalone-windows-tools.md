@@ -88,6 +88,37 @@ selection. **Ctrl+A** selects the entire readout. The existing **Copy asset
 path** button remains available for quickly copying just the in-game asset
 path. Text selection never changes a model, texture, or saved file.
 
+### Faster CPU-rendered 3D previews
+
+The **Model & Texture Browser** now provides a **Render quality** selector
+in the Selected asset panel. It is independent from **Preview LOD**, texture
+mipmap choice, and the Skip textures option:
+
+- **Fast (60%)** (browser default): Rasterize at 60% of the adaptive preview
+  width and height (about 36% of the pixel workload), then upscale smoothly.
+- **Balanced (80%)**: Approximately 64% of the full pixel workload.
+- **Quality (100%)**: Retain the previous full preview resolution and sampling
+  behavior.
+
+Changing render quality redraws the same loaded model without touching the
+archive, model order, classification state, or chosen model/texture LOD.
+
+The shared CPU rasterizer now computes coverage using broadcast coordinate
+vectors, tests depth only for triangle-covered pixels, and performs expensive
+UV interpolation and bilinear/trilinear sampling **only on visible fragments**.
+Transparent pixels keep their existing alpha-test behavior; the result still
+uses perspective-correct UVs, repeating texture coordinates, and the same
+sampling filters. The optimisation also benefits the categoriser, which
+continues rendering at its existing resolution.
+
+The browser model timing readout separates **Textures** (lookup/decode/pyramid),
+**CPU raster** (remaining CPU geometry/pixel work), and **Matplotlib prep**
+(the synchronous plotting/figure setup). These categories sum with **P3D
+read** and **Mesh** to the reported **Total**. Matplotlib's deferred UI
+painting remains outside that total. Lower render resolution improves CPU
+pixel throughput, but neither the selected model LOD nor embedded texture mip
+changes automatically.
+
 ### Explorer raw-model cache and load-time diagnostics
 
 The **P3D Model & Texture Browser** now has the same model/texture timing
