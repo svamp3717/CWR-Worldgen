@@ -19,7 +19,8 @@ from pathlib import Path
 import sys
 
 from cwr_worldgen.legacy_proxy_models import (
-    ProxyCloneError, inspect_roadway_surface_style,
+    ProxyCloneError, inspect_roadway_face_styles,
+    inspect_roadway_surface_style,
 )
 from cwr_worldgen.pbo import read_pbo
 
@@ -73,6 +74,7 @@ def audit_pbo(path: Path) -> dict[str, object]:
             continue
         try:
             contact = inspect_roadway_surface_style(entry.data)
+            roadway_faces = inspect_roadway_face_styles(entry.data)
         except (ProxyCloneError, ValueError, OSError) as exc:
             problems.append(f"{entry.name}: unreadable Roadway LOD: {exc}")
             continue
@@ -86,10 +88,21 @@ def audit_pbo(path: Path) -> dict[str, object]:
             int(contact.point_flag),
             int(contact.face_flag),
         )
-        if actual != wanted:
+        mismatched_faces = [
+            index
+            for index, (texture, flags, points) in enumerate(roadway_faces)
+            if (
+                texture.replace("/", "\\").casefold() != wanted[0]
+                or flags != wanted[2]
+                or not points
+                or any(point_flag != wanted[1] for point_flag in points)
+            )
+        ]
+        if mismatched_faces or actual != wanted:
             problems.append(
-                f"{entry.name}: Roadway does not match donor style: "
-                f"expected={wanted!r}, actual={actual!r}"
+                f"{entry.name}: Roadway does not match donor style on "
+                f"faces {mismatched_faces[:12]!r}: expected={wanted!r}, "
+                f"dominant actual={actual!r}"
             )
         else:
             verified += 1
