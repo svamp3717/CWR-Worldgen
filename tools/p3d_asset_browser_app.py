@@ -216,16 +216,28 @@ class AssetBrowserApp:
         info_box = ttk.LabelFrame(details, text="Selected asset", padding=7)
         info_box.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         self.info_var = tk.StringVar(master=self.root, value="Nothing selected")
-        ttk.Label(info_box, textvariable=self.info_var, justify=tk.LEFT, wraplength=600).pack(
-            anchor="w", fill=tk.X
-        )
         self.load_timing_var = tk.StringVar(
             master=self.root, value="Load timings appear after selecting an asset.",
         )
-        ttk.Label(
-            info_box, textvariable=self.load_timing_var,
-            justify=tk.LEFT, wraplength=600,
-        ).pack(anchor="w", fill=tk.X, pady=(6, 3))
+        # Labels cannot be selected. Keep existing StringVars so all model,
+        # texture and timing updates feed one read-only, scrollable text view.
+        text_frame = ttk.Frame(info_box)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+        self.selected_asset_text = tk.Text(
+            text_frame, height=11, width=52, wrap=tk.WORD,
+            state=tk.DISABLED, font="TkDefaultFont",
+        )
+        text_scroll = ttk.Scrollbar(
+            text_frame, orient=tk.VERTICAL, command=self.selected_asset_text.yview,
+        )
+        self.selected_asset_text.configure(yscrollcommand=text_scroll.set)
+        self.selected_asset_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        text_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.selected_asset_text.bind("<Control-a>", self._select_all_asset_text)
+        self.selected_asset_text.bind("<Control-c>", self._copy_selected_asset_text)
+        self.info_var.trace_add("write", self._refresh_selected_asset_text)
+        self.load_timing_var.trace_add("write", self._refresh_selected_asset_text)
+        self._refresh_selected_asset_text()
         self.copy_path_button = ttk.Button(
             info_box,
             text="Copy asset path",
@@ -288,6 +300,41 @@ class AssetBrowserApp:
         tree.bind("<Double-1>", self._asset_selected)
         notebook.add(frame, text=title)
         return tree
+
+    def _refresh_selected_asset_text(self, *_args) -> None:
+        """Keep the selectable view in sync with existing model/timing variables."""
+        widget = getattr(self, "selected_asset_text", None)
+        if widget is None:
+            return
+        description = self.info_var.get()
+        timing = self.load_timing_var.get()
+        content = description + ("\n\n" + timing if timing else "")
+        widget.configure(state=tk.NORMAL)
+        widget.delete("1.0", tk.END)
+        widget.insert("1.0", content)
+        widget.configure(state=tk.DISABLED)
+
+    @staticmethod
+    def _select_all_asset_text(event) -> str:
+        """Ctrl+A also works while the text widget is non-editable."""
+        event.widget.tag_add("sel", "1.0", "end-1c")
+        event.widget.mark_set("insert", "1.0")
+        event.widget.see("insert")
+        return "break"
+
+    def _copy_selected_asset_text(self, event) -> str:
+        """Copy the highlighted substring, never the entire asset by accident."""
+        try:
+            selected = event.widget.get("sel.first", "sel.last")
+        except tk.TclError:
+            return "break"
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(selected)
+            self.root.update_idletasks()
+        except tk.TclError:
+            pass
+        return "break"
 
     @staticmethod
     def _format_size(value: int) -> str:
