@@ -2134,27 +2134,41 @@ def _write_infrastructure_asset_task(task: _InfrastructureAssetTask) -> tuple[di
         # the *serialized* Roadway contact faces, including the donor's exact
         # texture and flags, after cached or newly generated models are written.
         # Local import avoids a module initialization cycle with proxy models.
-        from .legacy_proxy_models import inspect_roadway_surface_style
-        contact = inspect_roadway_surface_style(task.destination.read_bytes())
+        from .legacy_proxy_models import (
+            inspect_roadway_face_styles,
+            inspect_roadway_surface_style,
+        )
+        written = task.destination.read_bytes()
+        contact = inspect_roadway_surface_style(written)
+        all_faces = inspect_roadway_face_styles(written)
         expected_texture = _roadway_surface_texture(
             task.texture, task.surface_style
         )
         expected_point = int(task.surface_style.roadway_point_flag)
         expected_face = int(task.surface_style.roadway_face_flag)
-        if (
-            contact.texture_path.replace("/", "\\").casefold()
-            != expected_texture.replace("/", "\\").casefold()
-            or contact.point_flag != expected_point
-            or contact.face_flag != expected_face
-        ):
+        expected_texture_key = expected_texture.replace("/", "\\").casefold()
+        mismatched_faces = [
+            index
+            for index, (texture, face_flag, point_flags)
+            in enumerate(all_faces)
+            if (
+                texture.replace("/", "\\").casefold() != expected_texture_key
+                or face_flag != expected_face
+                or not point_flags
+                or any(flag != expected_point for flag in point_flags)
+            )
+        ]
+        if mismatched_faces:
             raise ValueError(
                 f"generated road {task.wire} did not preserve donor Roadway "
-                "contact metadata: "
-                f"expected {(expected_texture, expected_point, expected_face)!r}, "
-                f"written {(contact.texture_path, contact.point_flag, contact.face_flag)!r}"
+                f"contact on faces {mismatched_faces[:12]!r}: expected "
+                f"{(expected_texture, expected_point, expected_face)!r}; "
+                f"dominant written metadata "
+                f"{(contact.texture_path, contact.point_flag, contact.face_flag)!r}"
             )
         roadway_audit = {
             "roadway_contact_verified": True,
+            "roadway_faces_verified": len(all_faces),
             "roadway_texture": contact.texture_path,
             "roadway_point_flag": f"0x{contact.point_flag & 0xFFFFFFFF:08x}",
             "roadway_face_flag": f"0x{contact.face_flag & 0xFFFFFFFF:08x}",
