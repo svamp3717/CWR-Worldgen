@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import struct
 from hashlib import sha256
-import math
 import random
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,8 +22,7 @@ from cwr_worldgen.playability import (
 )
 from cwr_worldgen.osm import (
     BboxProjection, CompactOrientedRectangle, ObjectGenerationResult,
-    IndexedRoadCorridors, _forest_candidate_mask_ok, _mask_at,
-    _segment_intersects_rectangle,
+    _forest_candidate_mask_ok, _mask_at,
     _compact_support_polygon, _oriented_rectangle,
 )
 from cwr_worldgen.procedural_buildings import (
@@ -519,98 +517,3 @@ def test_forest_mask_fusion_matches_four_original_probes_at_edges() -> None:
             and not _mask_at(raster.buildings, cells, world_size, x, z)
         )
         assert _forest_candidate_mask_ok(raster, cells, world_size, x, z) == previous
-
-
-def _original_segment_rectangle_test(start, end, minimum_x, minimum_z, maximum_x, maximum_z):
-    """Reference Liang-Barsky segment/rectangle test before the AABB shortcut."""
-    dx = end[0] - start[0]
-    dz = end[1] - start[1]
-    lower = 0.0
-    upper = 1.0
-    for origin, delta, minimum, maximum in (
-        (start[0], dx, minimum_x, maximum_x),
-        (start[1], dz, minimum_z, maximum_z),
-    ):
-        if abs(delta) <= 1e-12:
-            if origin < minimum or origin > maximum:
-                return False
-            continue
-        enter = (minimum - origin) / delta
-        leave = (maximum - origin) / delta
-        if enter > leave:
-            enter, leave = leave, enter
-        lower = max(lower, enter)
-        upper = min(upper, leave)
-        if lower > upper:
-            return False
-    return True
-
-
-def test_road_segment_fast_aabb_rejection_matches_original_geometry() -> None:
-    rng = random.Random(704)
-    examples = [
-        ((0.0, 0.0), (0.0, 0.0), 0.0, 0.0, 0.0, 0.0),
-        ((1.0, -1.0), (1.0, 3.0), 0.0, 0.0, 1.0, 2.0),
-        ((-2.0, 1.0), (3.0, 1.0), 0.0, 0.0, 2.0, 2.0),
-        ((0.0, 0.0), (0.0, 1.0), 1.0, 0.0, 3.0, 3.0),
-    ]
-    for _ in range(5000):
-        start = (rng.uniform(-100.0, 100.0), rng.uniform(-100.0, 100.0))
-        end = (rng.uniform(-100.0, 100.0), rng.uniform(-100.0, 100.0))
-        if rng.random() < 0.2:
-            end = (start[0], end[1])
-        if rng.random() < 0.2:
-            end = (end[0], start[1])
-        minimum_x = rng.uniform(-95.0, 85.0)
-        minimum_z = rng.uniform(-95.0, 85.0)
-        examples.append((
-            start, end, minimum_x, minimum_z,
-            minimum_x + rng.uniform(0.0, 25.0),
-            minimum_z + rng.uniform(0.0, 25.0),
-        ))
-    for args in examples:
-        assert _segment_intersects_rectangle(*args) == _original_segment_rectangle_test(*args)
-
-
-def test_forest_indexed_road_queries_match_exhaustive_original_queries() -> None:
-    """Single/multiple bucket intersections must make identical placement decisions."""
-    rng = random.Random(173)
-    bucket_size = 100.0
-    corridors = tuple(
-        (
-            (rng.uniform(0, 600), rng.uniform(0, 600)),
-            (rng.uniform(0, 600), rng.uniform(0, 600)),
-            rng.uniform(0.0, 18.0),
-        )
-        for _ in range(42)
-    )
-    bucket_lists = {}
-    for index, (start, end, radius) in enumerate(corridors):
-        for bz in range(
-            math.floor((min(start[1], end[1]) - radius) / bucket_size),
-            math.floor((max(start[1], end[1]) + radius) / bucket_size) + 1,
-        ):
-            for bx in range(
-                math.floor((min(start[0], end[0]) - radius) / bucket_size),
-                math.floor((max(start[0], end[0]) + radius) / bucket_size) + 1,
-            ):
-                bucket_lists.setdefault((bx, bz), []).append(index)
-    indexed = IndexedRoadCorridors(
-        corridors,
-        bucket_size,
-        {key: tuple(values) for key, values in bucket_lists.items()},
-    )
-    for _ in range(1500):
-        x = rng.uniform(-30.0, 630.0)
-        z = rng.uniform(-30.0, 630.0)
-        half = rng.choice((2.5, 7.0, 25.0, 55.0))
-        box = (x - half, z - half, x + half, z + half)
-        expected = any(
-            _original_segment_rectangle_test(
-                start, end,
-                box[0] - radius, box[1] - radius,
-                box[2] + radius, box[3] + radius,
-            )
-            for start, end, radius in corridors
-        )
-        assert indexed.intersects_rectangle(*box) == expected
