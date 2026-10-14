@@ -1698,17 +1698,18 @@ def _align_final_paved_curve_handedness(report, spec):
 # Pitched, *flat across their width* ribbons can therefore penetrate a sloping
 # WRP terrain on one side and lose their intended paved/dirt/gravel contact to
 # the terrain. Apply a bounded lateral slope to the already-finalized road
-# objects, leaving stock donor models and junctions at their native transforms.
+# objects, leaving stock donor models, dirt underlays, gravel and junctions
+# at their native transforms until each surface family has equivalent audits.
 _MAXIMUM_GENERATED_ROAD_LATERAL_SLOPE = 0.08
 
 
 def _ground_generated_roads_across_width(report, elevations, spec):
-    """Match generated road contact LODs to the terrain's local cross-slope.
+    """Bank generated paved-road contact across the local terrain slope.
 
-    Changes neither terrain nor the road centerline, longitudinal pitch, object
-    IDs, width, path or junction join geometry. All placements stay in their
-    original order. The pitch-preserving CrossSlopedRoadObject adds only a
-    local-X vertical gradient (banking), sampled from both road shoulders.
+    The original road centreline, pitch, footprint, model and ID are unchanged;
+    the visual and Roadway edges bank together. Existing dirt underlays, gravel,
+    junction caps and stock roads retain their original geometry. As this raises
+    and lowers edge heights, in-game seam validation remains necessary.
     """
     if not report.objects:
         return report
@@ -1723,7 +1724,7 @@ def _ground_generated_roads_across_width(report, elevations, spec):
         if (
             axis is None
             or axis.stock_model
-            or axis.family not in {"paved", "gravel", "ces"}
+            or axis.family != "paved"
             or axis.half_width <= 0.0
         ):
             continue
