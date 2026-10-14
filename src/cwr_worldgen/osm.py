@@ -10053,14 +10053,6 @@ def generate_world_objects(
                     ):
                         if len(accepted_candidates) >= hillside_target:
                             break
-                        tree_samples = _square_elevation_samples(
-                            elevations,
-                            spec.cells,
-                            spec.cell_size,
-                            tree_x,
-                            tree_z,
-                            hillside_footprint,
-                        )
                         if not (
                             _forest_candidate_mask_ok(
                                 raster, spec.cells, spec.world_size, tree_x, tree_z
@@ -10076,6 +10068,17 @@ def generate_world_objects(
                         ):
                             forest_hillside_candidate_rejections += 1
                             continue
+                        # Exact terrain support sampling is comparatively
+                        # expensive. Only run it after the candidate passes
+                        # both inexpensive raster and road-clearance checks.
+                        tree_samples = _square_elevation_samples(
+                            elevations,
+                            spec.cells,
+                            spec.cell_size,
+                            tree_x,
+                            tree_z,
+                            hillside_footprint,
+                        )
                         tree_relief = max(tree_samples) - min(tree_samples)
                         maximum_hillside_tree_relief = max(
                             maximum_hillside_tree_relief, tree_relief
