@@ -469,3 +469,41 @@ def test_categoriser_texture_mip_change_redraws_without_model_rescan() -> None:
 def test_categoriser_texture_mip_defaults_to_full_for_older_test_views() -> None:
     app = ui.CategoriserApp.__new__(ui.CategoriserApp)
     assert app._selected_texture_mipmap() == "auto"
+
+
+
+def test_categoriser_displays_real_load_timing_breakdown() -> None:
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    app.load_timing_var = Var("")
+    app._last_texture_seconds = 0.035
+    current = SimpleNamespace(
+        read_seconds=0.010,
+        parse_seconds=0.020,
+        archive_cached=True,
+    )
+    app._update_load_timing(current, 0.065)
+    label = app.load_timing_var.get()
+    assert "P3D read/scan: 10.0 ms (RAM cache)" in label
+    assert "Mesh: 20.0 ms" in label
+    assert "Textures: 35.0 ms" in label
+    assert "Preview: 30.0 ms" in label
+    assert "Total: 95.0 ms" in label
+    assert "\n" in label
+
+
+def test_categoriser_redraw_populates_gui_timing_without_tampering_with_state() -> None:
+    app = ui.CategoriserApp.__new__(ui.CategoriserApp)
+    app.current = SimpleNamespace(read_seconds=0.01, parse_seconds=0.02)
+    app.skip_textures_var = Var(False)
+    app.load_timing_var = Var("")
+    app._busy = Mock()
+    app._unbusy = Mock()
+    app._draw_model = Mock()
+    app.state = {"house.p3d": ui.Classification(["Residential"])}
+    existing = app.state["house.p3d"]
+    app._redraw()
+    assert "P3D read/scan" in app.load_timing_var.get()
+    assert "Total:" in app.load_timing_var.get()
+    app._draw_model.assert_called_once_with(app.current)
+    app._unbusy.assert_called_once()
+    assert app.state["house.p3d"] is existing
