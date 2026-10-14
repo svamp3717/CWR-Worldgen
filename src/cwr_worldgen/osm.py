@@ -1550,16 +1550,6 @@ def _segment_intersects_rectangle(
     maximum_z: float,
 ) -> bool:
     """Return whether a line segment intersects an axis-aligned rectangle."""
-    # Most forest/roadside queries miss within their coarse spatial bucket.
-    # Reject disjoint bounds before division-heavy segment clipping. Strict
-    # inequalities preserve touching endpoints and the existing semantics.
-    if (
-        max(start[0], end[0]) < minimum_x
-        or min(start[0], end[0]) > maximum_x
-        or max(start[1], end[1]) < minimum_z
-        or min(start[1], end[1]) > maximum_z
-    ):
-        return False
     dx = end[0] - start[0]
     dz = end[1] - start[1]
     lower = 0.0
@@ -1653,34 +1643,34 @@ class IndexedRoadCorridors(Sequence[RoadCorridor]):
         x1 = math.floor(maximum_x / bucket)
         z1 = math.floor(maximum_z / bucket)
 
-        # Avoid allocating a closure and generator for each single-bucket
-        # query. Only multi-bucket rectangles need a deduplication set.
-        corridors = self.corridors
-        buckets = self.buckets
+        def intersects(index: int) -> bool:
+            start, end, radius = self.corridors[index]
+            return _segment_intersects_rectangle(
+                start,
+                end,
+                minimum_x - radius,
+                minimum_z - radius,
+                maximum_x + radius,
+                maximum_z + radius,
+            )
+
+        # Forest placement performs this query hundreds of thousands of times.
+        # Most 50 m footprints fit inside one 100 m spatial bucket, so avoid
+        # allocating and sorting a temporary set for the overwhelmingly common
+        # case. For multi-bucket queries, test each newly-seen segment
+        # immediately so road hits can return early. Query order cannot affect
+        # the boolean result.
         if x0 == x1 and z0 == z1:
-            for index in buckets.get((x0, z0), ()):
-                start, end, radius = corridors[index]
-                if _segment_intersects_rectangle(
-                    start, end,
-                    minimum_x - radius, minimum_z - radius,
-                    maximum_x + radius, maximum_z + radius,
-                ):
-                    return True
-            return False
+            return any(intersects(index) for index in self.buckets.get((x0, z0), ()))
 
         seen: set[int] = set()
         for bz in range(z0, z1 + 1):
             for bx in range(x0, x1 + 1):
-                for index in buckets.get((bx, bz), ()):
+                for index in self.buckets.get((bx, bz), ()):
                     if index in seen:
                         continue
                     seen.add(index)
-                    start, end, radius = corridors[index]
-                    if _segment_intersects_rectangle(
-                        start, end,
-                        minimum_x - radius, minimum_z - radius,
-                        maximum_x + radius, maximum_z + radius,
-                    ):
+                    if intersects(index):
                         return True
         return False
 
