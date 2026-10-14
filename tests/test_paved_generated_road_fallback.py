@@ -938,3 +938,118 @@ def test_generated_paved_and_gravel_roads_use_native_render_metadata() -> None:
             face.texture == r"o\road\sil_new.paa"
             for face in roadway.faces
         )
+
+
+
+def _lundby_fitted_piece(
+    model_name: str, x: float, z: float, cosine: float, sine: float,
+):
+    """Recover a fitted chord from the actual wg_lundby4.wrp model transform."""
+    import re
+    match = re.search(r"_l(?P<length>\d{4})", model_name)
+    assert match is not None
+    length = int(match.group("length")) * 0.1
+    piece = playability._RoadPiece(
+        rf"wg_lundby4\i\{model_name}", length, int(round(length)),
+    )
+    start = (x - sine * length * 0.5, z - cosine * length * 0.5)
+    end = (x + sine * length * 0.5, z + cosine * length * 0.5)
+    return piece, start, end
+
+
+def _paved_join_side_displacements(first, second) -> tuple[float, float]:
+    """Measure the two transformed visual mouth corners, not just axes."""
+    def mouth(span, last):
+        piece, start, end = span
+        basename = piece.model_path.rsplit("\\", 1)[-1].removesuffix(".p3d")
+        key = infrastructure.InfrastructureModelKey(
+            "road", basename, 91, int(round(piece.length_metres * 10)),
+        )
+        visual, _geometry, _roadway, _land = infrastructure._road_lods(
+            key, r"o\road\sil_new.paa",
+        )
+        verts = visual.points[-2:] if last else visual.points[:2]
+        angle = math.atan2(end[0] - start[0], end[1] - start[1])
+        cos, sin = math.cos(angle), math.sin(angle)
+        cx, cz = (start[0] + end[0]) * .5, (start[1] + end[1]) * .5
+        return tuple(
+            (cx + cos * px + sin * pz, cz - sin * px + cos * pz)
+            for px, _py, pz in verts
+        )
+
+    previous_end = mouth(first, True)
+    following_start = mouth(second, False)
+    return tuple(
+        math.dist(previous_end[side], following_start[side])
+        for side in (0, 1)
+    )
+
+
+def test_lundby_center_curve_join_corrects_reversed_handedness() -> None:
+    """Actual PBO WRP objects 8040-8042 had 1.2/2.0 m side-to-side gaps.
+
+    The three original road_paved...r010 meshes bend opposite to the chain's
+    increasing +10-degree headings, despite nominal chord endpoints being
+    connected. Keep model positions and object/chord lengths unchanged.
+    """
+    spans = tuple(
+        _lundby_fitted_piece(*row)
+        for row in (
+            ("road_paved_w091_l0044_r010.p3d", 3203.5825195, 3174.0483398,
+             -0.373469085, -0.927628696),
+            ("road_paved_w091_l0044_r010.p3d", 3199.4294434, 3172.7841797,
+             -0.206711799, -0.978379607),
+            ("road_paved_w091_l0044_r010.p3d", 3195.1201172, 3172.2602539,
+             -0.033673681, -0.999406755),
+        )
+    )
+    from cwr_worldgen import paved_road_generated_fallback_policy as paved
+    old_gap = _paved_join_side_displacements(spans[0], spans[1])
+    assert min(old_gap) > 1.0
+    assert max(old_gap) > 1.8
+
+    corrected = paved._align_generated_paved_curve_handedness(spans)
+    assert all(
+        row[0].model_path.endswith("_l010.p3d") for row in corrected
+    )
+    assert tuple((row[1], row[2]) for row in corrected) == tuple(
+        (row[1], row[2]) for row in spans
+    )
+    for before, after in zip(spans, corrected):
+        assert before[0].length_metres == after[0].length_metres
+        assert before[0].nominal_length == after[0].nominal_length
+    for a, b in zip(corrected, corrected[1:]):
+        assert max(_paved_join_side_displacements(a, b)) < 0.55
+
+
+def test_lundby_correctly_handed_left_bend_keeps_original_right_curves() -> None:
+    """Do not globally swap curve signs: this different bend is already right."""
+    spans = tuple(
+        _lundby_fitted_piece(*row)
+        for row in (
+            ("road_paved_w091_l0063_r015.p3d", 3515.7480469, 3144.5410156,
+             0.737096667, -0.675768673),
+            ("road_paved_w091_l0063_r040.p3d", 3510.8764648, 3148.3103027,
+             0.469077617, -0.883152664),
+            ("road_paved_w091_l0063.p3d", 3505.0522461, 3150.3891602,
+             0.196146548, -0.980571866),
+        )
+    )
+    from cwr_worldgen import paved_road_generated_fallback_policy as paved
+    corrected = paved._align_generated_paved_curve_handedness(spans)
+    assert corrected == spans
+
+
+def test_paved_curve_handedness_requires_connected_unambiguous_neighbours() -> None:
+    from cwr_worldgen import paved_road_generated_fallback_policy as paved
+    pivot = _lundby_fitted_piece(
+        "road_paved_w091_l0044_r010.p3d", 3199.4294434, 3172.7841797,
+        -0.206711799, -0.978379607,
+    )
+    assert paved._align_generated_paved_curve_handedness((pivot,)) == (pivot,)
+    disconnected = _lundby_fitted_piece(
+        "road_paved_w091_l0044_r010.p3d", 1000.0, 1000.0, 1.0, 0.0,
+    )
+    assert paved._align_generated_paved_curve_handedness(
+        (pivot, disconnected)
+    ) == (pivot, disconnected)
