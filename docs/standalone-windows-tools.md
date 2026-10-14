@@ -79,6 +79,32 @@ and **Unchecked** means texture loading was skipped. Extra texture archives
 are deliberately not added to the model catalogue; the external status is
 updated when you add or clear them.
 
+### Explorer raw-model cache and load-time diagnostics
+
+The **P3D Model & Texture Browser** now has the same model/texture timing
+visibility as the categoriser, shown in its **Selected asset** panel:
+
+- **P3D read**, **Mesh**, **Textures**, **Preview**, and **Total** for 3D
+  model previews, including whether a LOD came from the decoded-mesh cache
+  or the raw **P3D RAM cache**.
+- **Texture read/decode**, **Preview/details**, and **Total** for standalone
+  PAA/PAC texture previews. Re-selecting an already decoded texture/mipmap
+  identifies the **RGBA cache** hit.
+
+The browser retains its existing 96 MiB (by default) decoded-mesh cache
+and adds a separate **64 MiB / four-model** raw P3D byte LRU. On first load
+the browser reads the archive only once and keeps recent P3D bytes inside
+that bounded cache. Selecting a previously unseen LOD can decode it from
+RAM rather than reopening the original PBO/IFA (including nested archives).
+Already-decoded LODs still use the faster existing mesh cache. Changing or
+clearing model sources invalidates **both** caches, while changing texture-only
+sources preserves the models but invalidates texture decodes and mip pyramids.
+
+Preview numbers are measured around synchronous parsing and drawing; deferred
+Matplotlib painting and related-asset indexing are outside the per-model total.
+Read/mesh numbers describe the most recent model selection, whereas texture and
+preview numbers are refreshed whenever the preview redraws.
+
 ### Categoriser load-time diagnostics and faster LOD switching
 
 The **Model Categoriser** now displays a per-preview wall-clock breakdown in
