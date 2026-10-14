@@ -576,3 +576,59 @@ def test_extra_texture_archive_change_refreshes_related_status_without_model_sca
     app._scan_sources.assert_not_called()
     assert app._draw_model.call_count == 2
     assert app.texture_resolver.inputs == (model_pbo,)
+
+
+
+def test_explorer_selected_asset_details_and_timing_share_selectable_readonly_text() -> None:
+    """The whole Selected asset readout can be mouse-selected and Ctrl+C copied."""
+    app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
+    app.info_var = _FakeVar("MODEL\nhouse.p3d\nSource: models.pbo")
+    app.load_timing_var = _FakeVar("P3D read: 3.0 ms\nTotal: 6.0 ms")
+    text = Mock()
+    app.selected_asset_text = text
+
+    app._refresh_selected_asset_text()
+    text.configure.assert_any_call(state=browser_app.tk.NORMAL)
+    text.configure.assert_any_call(state=browser_app.tk.DISABLED)
+    text.delete.assert_called_once_with("1.0", browser_app.tk.END)
+    text.insert.assert_called_once_with(
+        "1.0",
+        "MODEL\nhouse.p3d\nSource: models.pbo"
+        "\n\nP3D read: 3.0 ms\nTotal: 6.0 ms",
+    )
+    assert text.configure.call_args.kwargs == {"state": browser_app.tk.DISABLED}
+
+    # Source and timing values are updated independently in the real browser.
+    text.reset_mock()
+    app.info_var.set("TEXTURE\nwall.paa")
+    app.load_timing_var.set("Texture read/decode: 1.0 ms")
+    app._refresh_selected_asset_text()
+    text.insert.assert_called_once_with(
+        "1.0", "TEXTURE\nwall.paa\n\nTexture read/decode: 1.0 ms"
+    )
+
+
+def test_explorer_selected_asset_copy_copies_only_highlighted_selection() -> None:
+    app = browser_app.AssetBrowserApp.__new__(browser_app.AssetBrowserApp)
+    app.root = _FakeClipboardRoot()
+    text = Mock()
+    text.get.return_value = "models.pbo!house.p3d"
+    event = SimpleNamespace(widget=text)
+
+    assert app._copy_selected_asset_text(event) == "break"
+    text.get.assert_called_once_with("sel.first", "sel.last")
+    assert app.root.value == "models.pbo!house.p3d"
+
+    # Ctrl+C on an unselected (read-only) Text should do nothing.
+    text.get.side_effect = browser_app.tk.TclError("text has no selection")
+    assert app._copy_selected_asset_text(event) == "break"
+    assert app.root.value == "models.pbo!house.p3d"
+
+
+def test_explorer_selected_asset_ctrl_a_highlights_full_readout() -> None:
+    widget = Mock()
+    event = SimpleNamespace(widget=widget)
+    assert browser_app.AssetBrowserApp._select_all_asset_text(event) == "break"
+    widget.tag_add.assert_called_once_with("sel", "1.0", "end-1c")
+    widget.mark_set.assert_called_once_with("insert", "1.0")
+    widget.see.assert_called_once_with("insert")
