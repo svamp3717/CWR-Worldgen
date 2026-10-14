@@ -2604,9 +2604,21 @@ class ProceduralInfrastructureLibrary:
                 key.kind == "road"
                 and key.subtype.casefold().startswith("road_")
             ):
-                model_cache_version = (
-                    "procedural-infrastructure-model-v27-custom-paved-seam-tips"
-                )
+                # Only curved paved ribbons changed. Reuse existing custom
+                # dirt/gravel/straight/junction artifacts without extra work.
+                signature = _custom_road_signature(key.subtype)
+                if (
+                    signature is not None
+                    and signature[0] == "paved"
+                    and signature[1] != 0
+                ):
+                    model_cache_version = (
+                        "procedural-infrastructure-model-v27-custom-paved-seam-tips"
+                    )
+                else:
+                    model_cache_version = (
+                        "procedural-infrastructure-model-v25-custom-road-ribbons"
+                    )
             elif key.kind == "road":
                 model_cache_version = (
                     "procedural-infrastructure-model-v21-skew-paved-junction-seams"
