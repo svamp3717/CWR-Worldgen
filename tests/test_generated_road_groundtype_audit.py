@@ -14,7 +14,8 @@ from tools.audit_generated_road_groundtypes import audit_pbo
 
 
 def _fixture_pbo(
-    root: Path, *, corrupt_dirt: bool = False, no_gravel_donor: bool = False,
+    root: Path, *, corrupt_dirt: bool = False,
+    corrupt_one_dirt_face: bool = False, no_gravel_donor: bool = False,
 ) -> Path:
     surface_info = {
         "paved": {
@@ -70,7 +71,15 @@ def _fixture_pbo(
             r"roads\\visual.paa",
             road_surface_style=contact_style,
         )
-        entries.append(PboEntry(f"i/{subtype}.p3d", model.read_bytes()))
+        payload = model.read_bytes()
+        if family == "dirt" and corrupt_one_dirt_face:
+            # Alter only the LAST Roadway face texture. The dominant Roadway
+            # texture stays correct, so a majority-only check would miss this.
+            needle = texture.encode("ascii")
+            last = payload.rfind(needle)
+            assert last >= 0
+            payload = payload[:last] + b"x" + payload[last + 1:]
+        entries.append(PboEntry(f"i/{subtype}.p3d", payload))
     pbo = root / "generated.pbo"
     write_pbo(pbo, entries)
     return pbo
@@ -100,3 +109,12 @@ def test_archive_audit_distinguishes_borrowed_gravel_from_direct_donor(tmp_path)
     assert report["verified_models"] == 3
     assert any("gravel" in message and "borrowed-dirt-donor" in message
                for message in report["provenance_warnings"])
+
+
+
+def test_archive_audit_catches_one_bad_face_despite_correct_dominant_style(tmp_path):
+    report = audit_pbo(_fixture_pbo(tmp_path, corrupt_one_dirt_face=True))
+    assert report["verified_models"] == 2
+    assert len(report["mismatches"]) == 1
+    assert "road_dirt_w035_l0063" in report["mismatches"][0]
+    assert "faces" in report["mismatches"][0]
