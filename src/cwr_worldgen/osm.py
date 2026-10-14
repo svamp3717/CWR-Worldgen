@@ -1550,6 +1550,16 @@ def _segment_intersects_rectangle(
     maximum_z: float,
 ) -> bool:
     """Return whether a line segment intersects an axis-aligned rectangle."""
+    # Most forest/roadside queries miss within their coarse spatial bucket.
+    # Reject disjoint bounds before division-heavy segment clipping. Strict
+    # inequalities preserve touching endpoints and the existing semantics.
+    if (
+        max(start[0], end[0]) < minimum_x
+        or min(start[0], end[0]) > maximum_x
+        or max(start[1], end[1]) < minimum_z
+        or min(start[1], end[1]) > maximum_z
+    ):
+        return False
     dx = end[0] - start[0]
     dz = end[1] - start[1]
     lower = 0.0
@@ -1643,34 +1653,34 @@ class IndexedRoadCorridors(Sequence[RoadCorridor]):
         x1 = math.floor(maximum_x / bucket)
         z1 = math.floor(maximum_z / bucket)
 
-        def intersects(index: int) -> bool:
-            start, end, radius = self.corridors[index]
-            return _segment_intersects_rectangle(
-                start,
-                end,
-                minimum_x - radius,
-                minimum_z - radius,
-                maximum_x + radius,
-                maximum_z + radius,
-            )
-
-        # Forest placement performs this query hundreds of thousands of times.
-        # Most 50 m footprints fit inside one 100 m spatial bucket, so avoid
-        # allocating and sorting a temporary set for the overwhelmingly common
-        # case. For multi-bucket queries, test each newly-seen segment
-        # immediately so road hits can return early. Query order cannot affect
-        # the boolean result.
+        # Avoid allocating a closure and generator for each single-bucket
+        # query. Only multi-bucket rectangles need a deduplication set.
+        corridors = self.corridors
+        buckets = self.buckets
         if x0 == x1 and z0 == z1:
-            return any(intersects(index) for index in self.buckets.get((x0, z0), ()))
+            for index in buckets.get((x0, z0), ()):
+                start, end, radius = corridors[index]
+                if _segment_intersects_rectangle(
+                    start, end,
+                    minimum_x - radius, minimum_z - radius,
+                    maximum_x + radius, maximum_z + radius,
+                ):
+                    return True
+            return False
 
         seen: set[int] = set()
         for bz in range(z0, z1 + 1):
             for bx in range(x0, x1 + 1):
-                for index in self.buckets.get((bx, bz), ()):
+                for index in buckets.get((bx, bz), ()):
                     if index in seen:
                         continue
                     seen.add(index)
-                    if intersects(index):
+                    start, end, radius = corridors[index]
+                    if _segment_intersects_rectangle(
+                        start, end,
+                        minimum_x - radius, minimum_z - radius,
+                        maximum_x + radius, maximum_z + radius,
+                    ):
                         return True
         return False
 
@@ -4555,6 +4565,28 @@ def _mask_at(mask: Sequence[bool], cells: int, world_size: float, x: float, z: f
     cell_x = min(cells - 1, int(x / world_size * cells))
     cell_z = min(cells - 1, int(z / world_size * cells))
     return mask[cell_z * cells + cell_x]
+
+
+def _forest_candidate_mask_ok(
+    raster: OsmRaster, cells: int, world_size: float, x: float, z: float
+) -> bool:
+    """Check forest, water, road and building masks at one common cell index.
+
+    The roadside and hillside fallback can test several candidate trees per
+    rejected forest block. Preserve _mask_at's coordinate-to-cell conversion
+    and bounds, but avoid repeating it four times for each candidate.
+    """
+    if not (0 <= x < world_size and 0 <= z < world_size):
+        return False
+    cell_x = min(cells - 1, int(x / world_size * cells))
+    cell_z = min(cells - 1, int(z / world_size * cells))
+    index = cell_z * cells + cell_x
+    return bool(
+        raster.forest[index]
+        and not raster.water[index]
+        and not raster.roads[index]
+        and not raster.buildings[index]
+    )
 
 
 def _polygon_overlaps_mask(
