@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import struct
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -503,6 +504,37 @@ def test_custom_paved_turns_share_the_above_ground_contact_safe_seam() -> None:
         assert max(y for _x, y, _z in visual.points) < min(
             y for _x, y, _z in roadway.points
         )
+
+
+def test_written_paved_turn_p3d_contains_no_buried_visual_vertices(
+    tmp_path: Path,
+) -> None:
+    """Inspect the real SP3X byte stream, not just the in-memory LOD."""
+    key = infrastructure.InfrastructureModelKey(
+        "road", "road_paved_w091_l0063_r010", 91, 63,
+    )
+    path = tmp_path / "curved-paved.p3d"
+    infrastructure.write_infrastructure_mlod(
+        path, key, r"o\\road\\sil_new.paa",
+    )
+    raw = path.read_bytes()
+    assert raw[:4] == b"MLOD"
+    assert raw[12:16] == b"SP3X"
+    header_size = struct.unpack_from("<i", raw, 16)[0]
+    point_count = struct.unpack_from("<i", raw, 24)[0]
+    visual_start = 12 + header_size
+    y_values = tuple(
+        struct.unpack_from("<f", raw, visual_start + 16 * index + 4)[0]
+        for index in range(point_count)
+    )
+    assert len(y_values) > 4
+    assert min(y_values) >= infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES - 1e-7
+    assert math.isclose(
+        max(y_values),
+        infrastructure.GENERATED_GRAVEL_VISUAL_TOP_METRES
+        + infrastructure.GENERATED_PAVED_TURN_OVERLAP_RISE_METRES,
+        abs_tol=1e-7,
+    )
 
 
 def test_generated_paved_junction_overlap_stays_above_terrain() -> None:
