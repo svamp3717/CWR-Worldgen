@@ -21,6 +21,7 @@ from typing import Callable
 from . import generator as _generator
 from . import playability as _p
 from . import road_quality_policy as _quality
+from .model import CrossSlopedRoadObject, WorldObject
 
 _BUCKET_METRES = 25.0
 _MAXIMUM_AXIS_ANGLE_DEGREES = 6.0
@@ -1693,6 +1694,71 @@ def _align_final_paved_curve_handedness(report, spec):
     )
 
 
+# The nominal Roadway plane is only 1 cm above the generated road visual.
+# Pitched, *flat across their width* ribbons can therefore penetrate a sloping
+# WRP terrain on one side and lose their intended paved/dirt/gravel contact to
+# the terrain. Apply a bounded lateral slope to the already-finalized road
+# objects, leaving stock donor models and junctions at their native transforms.
+_MAXIMUM_GENERATED_ROAD_LATERAL_SLOPE = 0.08
+
+
+def _ground_generated_roads_across_width(report, elevations, spec):
+    """Match generated road contact LODs to the terrain's local cross-slope.
+
+    Changes neither terrain nor the road centerline, longitudinal pitch, object
+    IDs, width, path or junction join geometry. All placements stay in their
+    original order. The pitch-preserving CrossSlopedRoadObject adds only a
+    local-X vertical gradient (banking), sampled from both road shoulders.
+    """
+    if not report.objects:
+        return report
+    changed: dict[int, CrossSlopedRoadObject] = {}
+    cells = int(spec.cells)
+    cell_size = float(spec.cell_size)
+    for index, obj in enumerate(report.objects):
+        # Do not combine with an unrelated terrain-sheared transform.
+        if type(obj) is not WorldObject:
+            continue
+        axis = _road_axis(obj, index, spec)
+        if (
+            axis is None
+            or axis.stock_model
+            or axis.family not in {"paved", "gravel", "ces"}
+            or axis.half_width <= 0.0
+        ):
+            continue
+        # Local X points world-right (uz, -ux) along the fitted model heading.
+        dx = axis.uz * axis.half_width
+        dz = -axis.ux * axis.half_width
+        left_height = _p._sample_elevation(
+            elevations, cells, cell_size, obj.x - dx, obj.z - dz,
+        )
+        right_height = _p._sample_elevation(
+            elevations, cells, cell_size, obj.x + dx, obj.z + dz,
+        )
+        lateral_slope = (
+            (right_height - left_height) / (2.0 * axis.half_width)
+        )
+        if (
+            not math.isfinite(lateral_slope)
+            or abs(lateral_slope) < 1.0e-5
+            or abs(lateral_slope) > _MAXIMUM_GENERATED_ROAD_LATERAL_SLOPE
+        ):
+            continue
+        changed[index] = CrossSlopedRoadObject(
+            obj.object_id, obj.model_path, obj.x, obj.y, obj.z,
+            obj.heading_degrees, obj.pitch_degrees,
+            lateral_slope=lateral_slope,
+        )
+    if not changed:
+        return report
+    return replace(
+        report,
+        objects=tuple(changed.get(index, obj)
+                      for index, obj in enumerate(report.objects)),
+    )
+
+
 def install_final_road_dedup_policy() -> None:
     """Install the dedupe wrapper after every existing road fitting policy."""
     global _INSTALLED, _ORIGINAL_FIT
@@ -1726,7 +1792,10 @@ def install_final_road_dedup_policy() -> None:
             spec,
             progress_callback=progress_callback,
         )
-        return _align_final_paved_curve_handedness(deduplicated, spec)
+        aligned = _align_final_paved_curve_handedness(deduplicated, spec)
+        return _ground_generated_roads_across_width(
+            aligned, elevations, spec,
+        )
 
     _p.fit_road_objects = deduplicating_fit
     _generator.fit_road_objects = deduplicating_fit
