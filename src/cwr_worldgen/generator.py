@@ -1766,15 +1766,64 @@ def _roadway_groundtype_texture_for_donor(
     return str(visual_texture).replace("/", "\\").strip("\\"), "visual-fallback"
 
 
+def _odol_point_flag_to_mlod(flag: int) -> int:
+    """Translate ODOL point light/surface bits into OFP MLOD point flags.
+
+    Derived from Faguss/odol2mlod's convert_point_light_flags. ODOL's raw
+    0x13F is *not* a valid equivalent of MLOD's 0x1 on the stock paved road.
+    """
+    value = int(flag) & 0xFFFFFFFF
+    lighting = value >> 20
+    result = {0xC8: 0x10, 0xC9: 0x20, 0xCA: 0x80, 0xCB: 0x40}.get(lighting, 0)
+    if not result:
+        result = (value >> 4) & 0xFF0000
+    return (
+        result
+        | ((value >> 8) & 0xF)
+        | ((value >> 4) & 0x300)
+        | ((value >> 2) & 0x3000)
+    )
+
+
+def _odol_face_flag_to_mlod(flag: int) -> int:
+    """Translate ODOL rendering flags into OFP MLOD face flags."""
+    value = int(flag) & 0xFFFFFFFF
+    result = 0
+    if value & 0x40:
+        result |= 0x8
+    if value & 0x20:
+        result |= 0x10
+    if value & 0x04000000:
+        result |= 0x100
+    if value & 0x08000000:
+        result |= 0x200
+    if value & 0x20000000:
+        result |= 0x01000000
+    return result
+
+
+def _mlod_surface_flags(
+    source_format: str, point_flag: int, face_flag: int,
+) -> tuple[int, int]:
+    if source_format == "ODOL":
+        return (
+            _odol_point_flag_to_mlod(point_flag),
+            _odol_face_flag_to_mlod(face_flag),
+        )
+    # Native MLOD flags are already encoded for the target P3D format.
+    return int(point_flag), int(face_flag)
+
+
 def _roadway_groundtype_flags(
     texture_source: str,
     point_flag: int,
     face_flag: int,
+    *,
+    donor_format: str = "MLOD",
 ) -> tuple[int, int]:
-    """Preserve the donor's Roadway contact flags exactly."""
-
+    """Keep donor contact semantics while translating binary flag encoding."""
     _ = texture_source
-    return int(point_flag), int(face_flag)
+    return _mlod_surface_flags(donor_format, point_flag, face_flag)
 
 
 
@@ -1782,6 +1831,8 @@ def _road_surface_style_from_donor(
     donor_model: str,
     visual_texture: str,
     donor_bytes: bytes | None,
+    *,
+    preserve_visual_flags: bool = False,
 ) -> tuple[RoadSurfaceStyle, dict[str, object]]:
     """Inspect visual and contact LODs independently.
 
@@ -1805,15 +1856,28 @@ def _road_surface_style_from_donor(
             visual = inspect_visual_surface_style(
                 donor_bytes, texture_path=visual_texture,
             )
+            visual_point, visual_face = (
+                (int(visual.point_flag), int(visual.face_flag))
+                if preserve_visual_flags
+                else _mlod_surface_flags(
+                    visual.source_format, visual.point_flag, visual.face_flag,
+                )
+            )
             style = replace(
                 style,
-                point_flag=int(visual.point_flag),
-                face_flag=int(visual.face_flag),
+                point_flag=visual_point,
+                face_flag=visual_face,
             )
             report.update({
                 "source_format": visual.source_format,
-                "point_flag": f"0x{int(visual.point_flag) & 0xFFFFFFFF:08x}",
-                "face_flag": f"0x{int(visual.face_flag) & 0xFFFFFFFF:08x}",
+                "visual_flag_encoding": (
+                    "preserved-gravel-appearance" if preserve_visual_flags
+                    else "MLOD"
+                ),
+                "inspected_point_flag": f"0x{int(visual.point_flag) & 0xFFFFFFFF:08x}",
+                "inspected_face_flag": f"0x{int(visual.face_flag) & 0xFFFFFFFF:08x}",
+                "point_flag": f"0x{visual_point & 0xFFFFFFFF:08x}",
+                "face_flag": f"0x{visual_face & 0xFFFFFFFF:08x}",
             })
         except (OSError, ValueError, FileNotFoundError, ProxyCloneError):
             # Contact properties are independent of visual styling.
@@ -1826,6 +1890,7 @@ def _road_surface_style_from_donor(
             )
             point_flag, face_flag = _roadway_groundtype_flags(
                 texture_source, contact.point_flag, contact.face_flag,
+                donor_format=contact.source_format,
             )
             style = replace(
                 style,
@@ -1843,6 +1908,7 @@ def _road_surface_style_from_donor(
                     f"0x{int(contact.face_flag) & 0xFFFFFFFF:08x}"
                 ),
                 "roadway_texture_source": texture_source,
+                "roadway_flag_encoding": "MLOD",
                 "roadway_texture": roadway_texture,
                 "roadway_point_flag": f"0x{point_flag & 0xFFFFFFFF:08x}",
                 "roadway_face_flag": f"0x{face_flag & 0xFFFFFFFF:08x}",
@@ -4418,6 +4484,9 @@ def build_milestone4(
                     pass
             style, report_entry = _road_surface_style_from_donor(
                 donor_model, texture, donor_bytes,
+                # Gravel's existing visual rendering is already approved.
+                # Only correct its independent Roadway contact flags.
+                preserve_visual_flags=(surface == "gravel"),
             )
             road_surface_styles[surface] = style
             road_surface_style_report[surface] = report_entry

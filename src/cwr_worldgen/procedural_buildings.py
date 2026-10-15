@@ -7468,8 +7468,11 @@ def _write_tag(stream, name: str, payload: bytes) -> None:
     stream.write(payload)
 
 
-def _write_lod(stream, lod: _Lod) -> None:
-    stream.write(_SP3X_HEADER.pack(b"SP3X", 28, 1, len(lod.points), len(lod.normals), len(lod.faces), 0))
+def _write_lod(stream, lod: _Lod, *, sp3x_version: int = 1) -> None:
+    stream.write(_SP3X_HEADER.pack(
+        b"SP3X", 28, sp3x_version,
+        len(lod.points), len(lod.normals), len(lod.faces), 0,
+    ))
     if lod.point_flags and len(lod.point_flags) != len(lod.points):
         raise ValueError("MLOD point flag table must contain one value per point")
     for index, point in enumerate(lod.points):

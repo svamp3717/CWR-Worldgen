@@ -13,6 +13,7 @@ from cwr_worldgen import generator, procedural_infrastructure as infrastructure
 from cwr_worldgen.legacy_proxy_models import ProxyCloneError
 from cwr_worldgen.legacy_proxy_models import (
     inspect_roadway_surface_style,
+    VisualSurfaceStyle,
     proxy_safe_model_path,
     write_proxy_safe_visual_clone,
 )
@@ -162,6 +163,48 @@ class LegacyProxyModelTests(unittest.TestCase):
         self.assertEqual(style.point_flag, 0x55AA)
         self.assertEqual(style.face_flag, 0x12345678)
 
+    def test_odoldonor_flag_translation_matches_confirmed_stock_mlod_control(self) -> None:
+        # Values from stock sil6 ODOL, which was confirmed in-game after
+        # winding+flag conversion to MLOD. Preserve semantics, not bit patterns.
+        self.assertEqual(generator._odol_point_flag_to_mlod(0x13F), 0x1)
+        self.assertEqual(generator._odol_face_flag_to_mlod(0x2C102), 0)
+        self.assertEqual(generator._odol_face_flag_to_mlod(0x24102), 0)
+        self.assertEqual(
+            generator._roadway_groundtype_flags(
+                "donor-roadway-lod", 0x13F, 0x24102, donor_format="ODOL",
+            ),
+            (0x1, 0),
+        )
+        self.assertEqual(
+            generator._roadway_groundtype_flags(
+                "donor-roadway-lod", 0x13F, 0x24102, donor_format="MLOD",
+            ),
+            (0x13F, 0x24102),
+        )
+
+    def test_gravel_visual_flags_remain_unchanged_while_contact_is_converted(self) -> None:
+        donor = _synthetic_road_odol()
+        visual = VisualSurfaceStyle("ODOL", r"o\road\visual.paa", 0x13F, 0x24102)
+        # Isolate flag encoding even if the minimal synthetic donor cannot
+        # satisfy all of the independent visual-decoder preconditions.
+        with patch.object(generator, "inspect_visual_surface_style", return_value=visual):
+            paved, paved_report = generator._road_surface_style_from_donor(
+                r"o\road\sil25.p3d", r"o\road\visual.paa", donor,
+            )
+            gravel, gravel_report = generator._road_surface_style_from_donor(
+                r"o\road\asf25.p3d", r"o\road\visual.paa", donor,
+                preserve_visual_flags=True,
+            )
+        self.assertEqual(paved.point_flag, 0x1)
+        self.assertEqual(paved.face_flag, 0x0)
+        self.assertEqual(gravel.point_flag, 0x13F)
+        self.assertEqual(gravel.face_flag, 0x24102)
+        self.assertEqual(gravel.roadway_texture, paved.roadway_texture)
+        self.assertEqual(gravel.roadway_point_flag, paved.roadway_point_flag)
+        self.assertEqual(gravel.roadway_face_flag, paved.roadway_face_flag)
+        self.assertEqual(gravel_report["visual_flag_encoding"], "preserved-gravel-appearance")
+        self.assertEqual(paved_report["visual_flag_encoding"], "MLOD")
+
     def test_blank_donor_roadway_surface_survives_generated_p3d(self) -> None:
         """Untextured native contact faces must not become asphalt contact."""
         model = r"o\road\sil25.p3d"
@@ -171,8 +214,8 @@ class LegacyProxyModelTests(unittest.TestCase):
             model, visual, donor
         )
         self.assertEqual(style.roadway_texture, "")
-        self.assertEqual(style.roadway_point_flag, 0x55AA)
-        self.assertEqual(style.roadway_face_flag, 0x12345678)
+        self.assertEqual(style.roadway_point_flag, 0x1105)
+        self.assertEqual(style.roadway_face_flag, 0x18)
         self.assertEqual(report["roadway_inspected_texture"], "")
         self.assertEqual(report["roadway_texture_source"], "donor-roadway-lod")
 
@@ -193,8 +236,8 @@ class LegacyProxyModelTests(unittest.TestCase):
             )
             result = inspect_roadway_surface_style(generated.read_bytes())
         self.assertEqual(result.texture_path, "")
-        self.assertEqual(result.point_flag, 0x55AA)
-        self.assertEqual(result.face_flag, 0x12345678)
+        self.assertEqual(result.point_flag, 0x1105)
+        self.assertEqual(result.face_flag, 0x18)
 
     def test_unreadable_visual_lod_does_not_erase_donor_roadway_metadata(self) -> None:
         """Visual parsing errors must not suppress separately readable contact."""
@@ -207,8 +250,8 @@ class LegacyProxyModelTests(unittest.TestCase):
                 r"o\road\sil25.p3d", r"o\road\sil_new.paa", donor,
             )
         self.assertEqual(style.roadway_texture, r"o\road\contact.paa")
-        self.assertEqual(style.roadway_point_flag, 0x55AA)
-        self.assertEqual(style.roadway_face_flag, 0x12345678)
+        self.assertEqual(style.roadway_point_flag, 0x1105)
+        self.assertEqual(style.roadway_face_flag, 0x18)
         self.assertEqual(report["source_format"], None)
         self.assertEqual(report["roadway_source_format"], "ODOL")
         self.assertEqual(report["roadway_texture_source"], "donor-roadway-lod")
@@ -266,12 +309,12 @@ class LegacyProxyModelTests(unittest.TestCase):
                     self.assertFalse(hit)
                     self.assertTrue(entry["roadway_contact_verified"])
                     self.assertEqual(entry["roadway_texture"], contact_texture)
-                    self.assertEqual(entry["roadway_point_flag"], "0x000055aa")
-                    self.assertEqual(entry["roadway_face_flag"], "0x12345678")
+                    self.assertEqual(entry["roadway_point_flag"], "0x00001105")
+                    self.assertEqual(entry["roadway_face_flag"], "0x00000018")
                     parsed = inspect_roadway_surface_style(dest.read_bytes())
                     self.assertEqual(parsed.texture_path, contact_texture)
-                    self.assertEqual(parsed.point_flag, 0x55AA)
-                    self.assertEqual(parsed.face_flag, 0x12345678)
+                    self.assertEqual(parsed.point_flag, 0x1105)
+                    self.assertEqual(parsed.face_flag, 0x18)
 
     def test_generated_road_contact_audit_rejects_wrong_emitted_metadata(self) -> None:
         """Do not silently package road models with the wrong driving surface."""

@@ -1882,7 +1882,12 @@ def write_infrastructure_mlod(
     with path.open("wb") as stream:
         stream.write(_MLOD_HEADER.pack(b"MLOD", 1, 1, 0, len(lods)))
         for lod in lods:
-            _write_lod(stream, lod)
+            # Stock OFP ODOL->MLOD conversion writes SP3X version 0x99.
+            # Apply this only to generated roads, not unrelated assets.
+            _write_lod(
+                stream, lod,
+                sp3x_version=0x99 if key.kind == "road" else 1,
+            )
 
 
 def gravel_road_model_path(world_name: str, nominal_length: int = 25, curve_degrees: int = 0) -> str:
@@ -2686,6 +2691,9 @@ class ProceduralInfrastructureLibrary:
                 model_cache_version = (
                     "procedural-infrastructure-model-v5-osm-utilities"
                 )
+            if key.kind == "road":
+                # Do not restore old SP3X-v1 road models from the asset cache.
+                model_cache_version += "-sp3x99-odol-to-mlod-flags"
             asset_key = cache_key(
                 model_cache_version,
                 {
