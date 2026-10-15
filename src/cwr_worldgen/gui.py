@@ -719,7 +719,13 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     )
     for option, key in pairs:
         value = values.get(key)
-        if value not in (None, ""):
+        if value not in (None, "") or (
+            key in {"gravel_road_model", "gravel_road_curve_model"}
+            and key in values
+        ):
+            # Empty gravel fields explicitly opt into the procedural fallback.
+            # Without forwarding the empty argument, argparse would silently
+            # replace them with the new default asf stock donor pair.
             command.extend((option, str(value)))
 
     for root in values.get("asset_roots", []) or []:
