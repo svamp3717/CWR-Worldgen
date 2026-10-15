@@ -6,8 +6,11 @@ from hashlib import sha256
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from cwr_worldgen.assets import AssetRecord, canonical_asset_path
+from cwr_worldgen import generator, procedural_infrastructure as infrastructure
+from cwr_worldgen.legacy_proxy_models import ProxyCloneError
 from cwr_worldgen.legacy_proxy_models import (
     inspect_roadway_surface_style,
     proxy_safe_model_path,
@@ -158,6 +161,195 @@ class LegacyProxyModelTests(unittest.TestCase):
         self.assertEqual(style.texture_path, "")
         self.assertEqual(style.point_flag, 0x55AA)
         self.assertEqual(style.face_flag, 0x12345678)
+
+    def test_blank_donor_roadway_surface_survives_generated_p3d(self) -> None:
+        """Untextured native contact faces must not become asphalt contact."""
+        model = r"o\road\sil25.p3d"
+        visual = r"o\road\sil_new.paa"
+        donor = _synthetic_road_odol(roadway_texture="")
+        style, report = generator._road_surface_style_from_donor(
+            model, visual, donor
+        )
+        self.assertEqual(style.roadway_texture, "")
+        self.assertEqual(style.roadway_point_flag, 0x55AA)
+        self.assertEqual(style.roadway_face_flag, 0x12345678)
+        self.assertEqual(report["roadway_inspected_texture"], "")
+        self.assertEqual(report["roadway_texture_source"], "donor-roadway-lod")
+
+        key = infrastructure.InfrastructureModelKey(
+            "road", "road_paved_w091_l0063", 91, 63,
+        )
+        visual_lod, _geometry, contact_lod, _land = (
+            infrastructure._road_lods(key, visual, style)
+        )
+        self.assertTrue(visual_lod.faces)
+        self.assertTrue(all(face.texture == visual for face in visual_lod.faces))
+        self.assertTrue(contact_lod.faces)
+        self.assertTrue(all(face.texture == "" for face in contact_lod.faces))
+        with tempfile.TemporaryDirectory() as temp:
+            generated = Path(temp) / "paved.p3d"
+            infrastructure.write_infrastructure_mlod(
+                generated, key, visual, road_surface_style=style
+            )
+            result = inspect_roadway_surface_style(generated.read_bytes())
+        self.assertEqual(result.texture_path, "")
+        self.assertEqual(result.point_flag, 0x55AA)
+        self.assertEqual(result.face_flag, 0x12345678)
+
+    def test_unreadable_visual_lod_does_not_erase_donor_roadway_metadata(self) -> None:
+        """Visual parsing errors must not suppress separately readable contact."""
+        donor = _synthetic_road_odol()
+        with patch.object(
+            generator, "inspect_visual_surface_style",
+            side_effect=ProxyCloneError("visual parse failed"),
+        ):
+            style, report = generator._road_surface_style_from_donor(
+                r"o\road\sil25.p3d", r"o\road\sil_new.paa", donor,
+            )
+        self.assertEqual(style.roadway_texture, r"o\road\contact.paa")
+        self.assertEqual(style.roadway_point_flag, 0x55AA)
+        self.assertEqual(style.roadway_face_flag, 0x12345678)
+        self.assertEqual(report["source_format"], None)
+        self.assertEqual(report["roadway_source_format"], "ODOL")
+        self.assertEqual(report["roadway_texture_source"], "donor-roadway-lod")
+
+    def test_missing_donor_contact_uses_explicit_visual_fallback(self) -> None:
+        visual = r"modroads\paved.paa"
+        style, report = generator._road_surface_style_from_donor(
+            r"modroads\paved.p3d", visual, None,
+        )
+        self.assertEqual(style.roadway_texture, visual)
+        self.assertEqual(style.roadway_point_flag, 0)
+        self.assertEqual(style.roadway_face_flag, 0)
+        self.assertEqual(report["roadway_source_format"], "visual-fallback")
+        self.assertEqual(report["roadway_texture_source"], "visual-fallback")
+
+    def test_generated_road_families_serialize_real_donor_contact_styles(self) -> None:
+        """Paved, dirt, gravel and junction contact cannot revert to visuals."""
+        fixtures = (
+            ("road_paved_w091_l0063", r"o\\road\\sil_new.paa",
+             r"stock\\asphalt_contact.paa"),
+            ("road_dirt_w035_l0063", r"o\\road\\ces_hned.paa",
+             r"stock\\earth_contact.paa"),
+            ("road_gravel_w046_l0063", r"addon\\gravel_visual.paa",
+             r"addon\\gravel_contact.paa"),
+            ("road_j3_paved_w091_h000_090_180", r"o\\road\\sil_new.paa",
+             r"stock\\asphalt_contact.paa"),
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            for subtype, visual_texture, contact_texture in fixtures:
+                with self.subTest(subtype=subtype):
+                    donor = _synthetic_road_odol(
+                        roadway_texture=contact_texture
+                    )
+                    style, report = generator._road_surface_style_from_donor(
+                        r"addon\\donor.p3d", visual_texture, donor
+                    )
+                    self.assertEqual(report["roadway_texture_source"], "donor-roadway-lod")
+                    key = infrastructure.InfrastructureModelKey(
+                        "road", subtype, 91, 63,
+                    )
+                    dest = Path(temp) / f"{subtype}.p3d"
+                    task = infrastructure._InfrastructureAssetTask(
+                        key=key,
+                        wire=rf"world\\i\\{subtype}.p3d",
+                        relative=f"i/{subtype}.p3d",
+                        destination=dest,
+                        texture=visual_texture,
+                        surface_style=style,
+                        cache_path=None,
+                        cache_enabled=False,
+                        cache_refresh=False,
+                        usage_count=1,
+                    )
+                    entry, hit = infrastructure._write_infrastructure_asset_task(task)
+                    self.assertFalse(hit)
+                    self.assertTrue(entry["roadway_contact_verified"])
+                    self.assertEqual(entry["roadway_texture"], contact_texture)
+                    self.assertEqual(entry["roadway_point_flag"], "0x000055aa")
+                    self.assertEqual(entry["roadway_face_flag"], "0x12345678")
+                    parsed = inspect_roadway_surface_style(dest.read_bytes())
+                    self.assertEqual(parsed.texture_path, contact_texture)
+                    self.assertEqual(parsed.point_flag, 0x55AA)
+                    self.assertEqual(parsed.face_flag, 0x12345678)
+
+    def test_generated_road_contact_audit_rejects_wrong_emitted_metadata(self) -> None:
+        """Do not silently package road models with the wrong driving surface."""
+        source = _synthetic_road_odol(roadway_texture=r"stock\\asphalt_contact.paa")
+        style, _ = generator._road_surface_style_from_donor(
+            r"stock\\sil25.p3d", r"stock\\visual.paa", source
+        )
+        original_writer = infrastructure.write_infrastructure_mlod
+
+        def write_without_donor_style(path, key, texture, *, road_surface_style):
+            return original_writer(
+                path, key, texture,
+                road_surface_style=infrastructure.RoadSurfaceStyle(),
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            task = infrastructure._InfrastructureAssetTask(
+                key=infrastructure.InfrastructureModelKey(
+                    "road", "road_paved_w091_l0063", 91, 63
+                ),
+                wire=r"world\\i\\road_paved_w091_l0063.p3d",
+                relative="i/road_paved_w091_l0063.p3d",
+                destination=Path(temp) / "bad.p3d",
+                texture=r"stock\\visual.paa",
+                surface_style=style,
+                cache_path=None,
+                cache_enabled=False,
+                cache_refresh=False,
+                usage_count=1,
+            )
+            with patch.object(
+                infrastructure, "write_infrastructure_mlod",
+                side_effect=write_without_donor_style,
+            ):
+                with self.assertRaisesRegex(ValueError, "did not preserve donor Roadway"):
+                    infrastructure._write_infrastructure_asset_task(task)
+
+    def test_generated_road_audit_rejects_one_wrong_contact_face(self) -> None:
+        """A minority offroad patch must not evade a dominant-face audit."""
+        contact_texture = r"stock\\asphalt_contact.paa"
+        donor = _synthetic_road_odol(roadway_texture=contact_texture)
+        style, _report = generator._road_surface_style_from_donor(
+            r"stock\\sil25.p3d", r"stock\\visual.paa", donor
+        )
+        original_writer = infrastructure.write_infrastructure_mlod
+
+        def write_bad_last_face(path, key, texture, *, road_surface_style):
+            original_writer(
+                path, key, texture, road_surface_style=road_surface_style,
+            )
+            blob = path.read_bytes()
+            last = blob.rfind(contact_texture.encode("ascii"))
+            self.assertGreaterEqual(last, 0)
+            path.write_bytes(blob[:last] + b"x" + blob[last + 1:])
+
+        with tempfile.TemporaryDirectory() as temp:
+            task = infrastructure._InfrastructureAssetTask(
+                key=infrastructure.InfrastructureModelKey(
+                    "road", "road_paved_w091_l0063", 91, 63
+                ),
+                wire=r"world\\i\\road_paved_w091_l0063.p3d",
+                relative="i/road_paved_w091_l0063.p3d",
+                destination=Path(temp) / "partial-bad.p3d",
+                texture=r"stock\\visual.paa",
+                surface_style=style,
+                cache_path=None,
+                cache_enabled=False,
+                cache_refresh=False,
+                usage_count=1,
+            )
+            with patch.object(
+                infrastructure, "write_infrastructure_mlod",
+                side_effect=write_bad_last_face,
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "did not preserve donor Roadway contact on faces"
+                ):
+                    infrastructure._write_infrastructure_asset_task(task)
 
     def test_cwa_safe_clusters_reject_missing_proxy_source_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
