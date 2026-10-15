@@ -148,6 +148,7 @@ def _junction_spec(
         max_road_objects=10000,
         strict_assets=False,
         procedural_gravel_roads=procedural_gravel_roads,
+        gravel_road_model="", gravel_road_curve_model="",
         custom_road_shapes=custom_road_shapes,
     )
 
