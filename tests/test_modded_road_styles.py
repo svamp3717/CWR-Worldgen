@@ -2723,6 +2723,20 @@ def test_default_gravel_uses_stock_asf_donors_in_gui_cli_and_osm() -> None:
     ).model_path == r"o\road\asf6.p3d"
 
 
+def test_default_stock_asf_short_siblings_are_still_classified_as_gravel() -> None:
+    spec = SimpleNamespace(
+        name="asf_world",
+        gravel_road_model=r"o\road\asf25.p3d",
+        road_segment_length=25.0, custom_road_shapes=True,
+    )
+    pieces = (
+        playability._RoadPiece(r"o\road\asf12.p3d", 12.5, 12),
+        playability._RoadPiece(r"o\road\asf6.p3d", 6.25, 6),
+    )
+    assert fallback._chain_surface(pieces, spec) == "gravel"
+    assert fallback._eligible_chain(pieces, spec) == "gravel"
+
+
 def test_saved_legacy_blank_gravel_defaults_upgrade_without_overriding_mods() -> None:
     defaults = default_gui_values()
     legacy = defaults_with_recent_source(defaults, {
