@@ -124,12 +124,12 @@ def _add_road_model_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--gravel-road-model",
-        default="",
-        help="optional straight gravel donor P3D; blank keeps Worldgen's generated gravel family",
+        default=r"o\road\asf25.p3d",
+        help="stock gravel straight donor (default asf25); blank opts into generated gravel",
     )
     parser.add_argument(
         "--gravel-road-curve-model",
-        default="",
+        default=r"o\road\asf10 25.p3d",
         help="optional gravel curve donor P3D used as the generated-bend style reference",
     )
     parser.add_argument(
