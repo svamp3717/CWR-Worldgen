@@ -725,10 +725,13 @@ def test_generated_paved_asset_reuses_stock_texture_and_has_roadway_lod(
     assert not stale.exists()
     assert len(result.model_files) == 1
 
-    model_summary = infrastructure.inspect_mlod(
-        tmp_path / result.model_files[0]
-    )
+    model_file = tmp_path / result.model_files[0]
+    model_summary = infrastructure.inspect_mlod(model_file)
     assert stock_texture in model_summary.texture_paths
+    # Faguss/odol2mlod and the in-game stock control use SP3X 0x99.
+    binary = model_file.read_bytes()
+    assert binary[:4] == b"MLOD"
+    assert struct.unpack_from("<I", binary, 20)[0] == 0x99
 
     document = json.loads(
         (tmp_path / "infrastructure.json").read_text(encoding="utf-8")
