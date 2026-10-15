@@ -1016,6 +1016,7 @@ class RoadPieceFittingTests(unittest.TestCase):
 
     def test_gravel_surfaces_use_generated_gravel_road_family(self) -> None:
         spec = _Milestone9PlayabilitySpec(
+            gravel_road_model="", gravel_road_curve_model="",
             name="cwr_gravel",
             heightmap_path=Path("unused.png"),
             bbox=(0.0, 0.0, 1.0, 1.0),
@@ -1178,7 +1179,7 @@ class RoadPieceFittingTests(unittest.TestCase):
                 summary = inspect_mlod(root / relative)
                 self.assertGreaterEqual(len(summary.resolutions), 3)
 
-    def test_default_gravel_roads_use_generated_gravel_assets(self) -> None:
+    def test_explicit_procedural_gravel_roads_use_generated_gravel_assets(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 1000.0)
         road = OsmLineFeature(
             "way/gravel",
@@ -1192,6 +1193,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             roads=(road,),
         )
         spec = _Milestone9PlayabilitySpec(
+            gravel_road_model="", gravel_road_curve_model="",
             name="cwr_gravel_assets",
             heightmap_path=Path("unused.png"),
             bbox=(0.0, 0.0, 1.0, 1.0),
@@ -1371,7 +1373,7 @@ class RoadPieceFittingTests(unittest.TestCase):
         )
         self.assertLessEqual(visible_surface, centre_terrain + 1e-6)
 
-    def test_default_gravel_uses_generated_piece_family(self) -> None:
+    def test_opt_in_gravel_uses_generated_piece_family(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 1000.0)
         road = OsmLineFeature(
             "way/gravel-short-pieces",
@@ -1388,6 +1390,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             roads=(road,),
         )
         spec = _Milestone9PlayabilitySpec(
+            gravel_road_model="", gravel_road_curve_model="",
             name="cwr_gravel_short",
             heightmap_path=Path("unused.png"),
             bbox=(0.0, 0.0, 1.0, 1.0),
@@ -1449,6 +1452,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             roads=(asphalt, gravel), gravel_roads=(gravel,),
         )
         spec = _Milestone9PlayabilitySpec(
+            gravel_road_model="", gravel_road_curve_model="",
             heightmap_path=Path("unused.png"), bbox=(0.0, 0.0, 0.01, 0.01),
             cells=40, cell_size=25.0, strict_assets=False,
         )
@@ -1875,6 +1879,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             roads=roads, gravel_roads=roads,
         )
         spec = _Milestone9PlayabilitySpec(
+            gravel_road_model="", gravel_road_curve_model="",
             name="cwr_gravel_hub", heightmap_path=Path("unused.png"),
             bbox=(0.0, 0.0, 0.01, 0.01), cells=40, cell_size=25.0, strict_assets=False,
         )
@@ -1921,6 +1926,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             farmland=(), urban=(), roads=(road,), gravel_roads=(road,),
         )
         spec = _Milestone9PlayabilitySpec(
+            gravel_road_model="", gravel_road_curve_model="",
             name="cwr_curve_fit", heightmap_path=Path("unused.png"),
             bbox=(0.0, 0.0, 0.01, 0.01), cells=40, cell_size=25.0, strict_assets=False,
         )
