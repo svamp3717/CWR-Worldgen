@@ -853,6 +853,12 @@ def gravel_filler_piece(spec: object, nominal_length: int) -> _RoadPiece:
 
     configured = str(getattr(spec, "gravel_road_model", "") or "").strip()
     segment_length = float(getattr(spec, "road_segment_length", 25.0))
+    # The stock asf gravel default has real 12/6 m siblings. Use them for
+    # short connector repairs instead of emitting procedural gravel P3Ds.
+    if configured.replace("/", "\\").casefold() == r"o\road\asf25.p3d":
+        for piece in road_model_variants(configured, segment_length):
+            if int(piece.nominal_length) == int(nominal_length):
+                return piece
     if bool(getattr(spec, "custom_road_shapes", False)):
         width = (
             road_model_width_metres(configured)
@@ -1038,10 +1044,18 @@ def road_fitting_variants(
     Legacy fitting retains the historical sibling catalogue.
     """
 
+    default_stock_gravel = (
+        model_path.replace("/", "\\").casefold() == r"o\road\asf25.p3d"
+        and str(getattr(spec, "gravel_road_model", "") or "")
+        .replace("/", "\\").casefold() == r"o\road\asf25.p3d"
+    )
     return road_model_variants(
         model_path,
         float(getattr(spec, "road_segment_length", 25.0)),
-        donor_only=bool(getattr(spec, "custom_road_shapes", False)),
+        # The default asf family is already supplied by the original game.
+        # Allow its stock 12/6 m pieces instead of needlessly replacing every
+        # short gravel stretch with world-local generated geometry.
+        donor_only=bool(getattr(spec, "custom_road_shapes", False)) and not default_stock_gravel,
     )
 
 
