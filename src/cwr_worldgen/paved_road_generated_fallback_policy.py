@@ -54,12 +54,19 @@ def _configured_variants(spec: Any, attribute: str) -> set[str]:
     if not model:
         return set()
     configured_length = float(getattr(spec, "road_segment_length", 25.0))
+    stock_asf_gravel = (
+        attribute == "gravel_road_model"
+        and _canonical(model) == r"o\road\asf25.p3d"
+    )
     return {
         _canonical(piece.model_path)
         for piece in _p.road_model_variants(
             model,
             configured_length,
-            donor_only=bool(getattr(spec, "custom_road_shapes", False)),
+            donor_only=(
+                bool(getattr(spec, "custom_road_shapes", False))
+                and not stock_asf_gravel
+            ),
         )
     }
 
