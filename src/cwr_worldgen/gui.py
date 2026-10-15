@@ -517,11 +517,18 @@ def defaults_with_recent_source(
     ):
         if key not in state:
             continue
-        if key in {"gravel_road_model", "gravel_road_curve_model"} and not str(state[key]).strip():
-            # Old versions persisted empty default gravel fields. Adopt the
-            # new stock asf family instead of silently retaining generated
-            # gravel on existing GUI installations.
+        if key == "gravel_road_model" and not str(state[key]).strip():
+            # Before stock asf became the gravel default, the GUI persisted an
+            # empty straight donor. Migrate that old implicit default.
             continue
+        if key == "gravel_road_curve_model" and not str(state[key]).strip():
+            remembered_straight = str(
+                state.get("gravel_road_model", result.get("gravel_road_model", ""))
+            ).strip().replace("/", "\\").casefold()
+            if remembered_straight in {"", r"o\road\asf25.p3d"}:
+                # Adopt the matching asf curve only for stock/default gravel.
+                # A custom donor with no curve intentionally keeps its blank.
+                continue
         if key.endswith("_road_curve_model") and not str(state[key]).strip():
             straight_key = key.replace("_road_curve_model", "_road_model")
             remembered_straight = str(
