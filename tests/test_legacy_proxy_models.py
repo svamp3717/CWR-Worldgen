@@ -181,6 +181,25 @@ class LegacyProxyModelTests(unittest.TestCase):
             (0x13F, 0x24102),
         )
 
+    def test_gravel_visual_flags_remain_unchanged_while_contact_is_converted(self) -> None:
+        donor = _synthetic_road_odol()
+        paved, paved_report = generator._road_surface_style_from_donor(
+            r"o\\road\\sil25.p3d", r"o\\road\\visual.paa", donor,
+        )
+        gravel, gravel_report = generator._road_surface_style_from_donor(
+            r"o\\road\\asf25.p3d", r"o\\road\\visual.paa", donor,
+            preserve_visual_flags=True,
+        )
+        self.assertEqual(paved.point_flag, 0x1)
+        self.assertEqual(paved.face_flag, 0x0)
+        self.assertEqual(gravel.point_flag, 0x13F)
+        self.assertEqual(gravel.face_flag, 0x24102)
+        self.assertEqual(gravel.roadway_texture, paved.roadway_texture)
+        self.assertEqual(gravel.roadway_point_flag, paved.roadway_point_flag)
+        self.assertEqual(gravel.roadway_face_flag, paved.roadway_face_flag)
+        self.assertEqual(gravel_report["visual_flag_encoding"], "preserved-gravel-appearance")
+        self.assertEqual(paved_report["visual_flag_encoding"], "MLOD")
+
     def test_blank_donor_roadway_surface_survives_generated_p3d(self) -> None:
         """Untextured native contact faces must not become asphalt contact."""
         model = r"o\road\sil25.p3d"
