@@ -517,11 +517,20 @@ def defaults_with_recent_source(
     ):
         if key not in state:
             continue
-        if key == "gravel_road_model" and not str(state[key]).strip():
-            # Before stock asf became the gravel default, the GUI persisted an
-            # empty straight donor. Migrate that old implicit default.
+        if (
+            key == "gravel_road_model"
+            and not str(state[key]).strip()
+            and not state.get("gravel_stock_defaults_version")
+        ):
+            # Before stock asf became default, the GUI persisted an empty
+            # straight donor. Migrate legacy state only: an intentionally blank
+            # donor in a newer saved profile still opts into generated gravel.
             continue
-        if key == "gravel_road_curve_model" and not str(state[key]).strip():
+        if (
+            key == "gravel_road_curve_model"
+            and not str(state[key]).strip()
+            and not state.get("gravel_stock_defaults_version")
+        ):
             remembered_straight = str(
                 state.get("gravel_road_model", result.get("gravel_road_model", ""))
             ).strip().replace("/", "\\").casefold()
@@ -529,7 +538,14 @@ def defaults_with_recent_source(
                 # Adopt the matching asf curve only for stock/default gravel.
                 # A custom donor with no curve intentionally keeps its blank.
                 continue
-        if key.endswith("_road_curve_model") and not str(state[key]).strip():
+        if (
+            key.endswith("_road_curve_model")
+            and not str(state[key]).strip()
+            and not (
+                key == "gravel_road_curve_model"
+                and state.get("gravel_stock_defaults_version")
+            )
+        ):
             straight_key = key.replace("_road_curve_model", "_road_model")
             remembered_straight = str(
                 state.get(straight_key, result.get(straight_key, ""))
@@ -1317,6 +1333,7 @@ class WorldgenGui(tk.Tk):
             if key in self.vars
         }
         values["asset_roots"] = list(self.asset_roots)
+        values["gravel_stock_defaults_version"] = 1
         try:
             update_gui_state(self.state_path, values)
         except OSError:
