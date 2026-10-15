@@ -44,8 +44,8 @@ FROZEN_CLI_MARKER = "--cwr-cli"
 DEFAULT_ROAD_MODEL_VALUES: dict[str, str] = {
     "paved_road_model": r"o\road\sil25.p3d",
     "paved_road_curve_model": r"o\road\sil10 25.p3d",
-    "gravel_road_model": "",
-    "gravel_road_curve_model": "",
+    "gravel_road_model": r"o\road\asf25.p3d",
+    "gravel_road_curve_model": r"o\road\asf10 25.p3d",
     "dirt_road_model": r"o\road\ces25.p3d",
     "dirt_road_curve_model": r"o\road\ces10 25.p3d",
 }
@@ -516,6 +516,11 @@ def defaults_with_recent_source(
         "dirt_road_curve_model",
     ):
         if key not in state:
+            continue
+        if key in {"gravel_road_model", "gravel_road_curve_model"} and not str(state[key]).strip():
+            # Old versions persisted empty default gravel fields. Adopt the
+            # new stock asf family instead of silently retaining generated
+            # gravel on existing GUI installations.
             continue
         if key.endswith("_road_curve_model") and not str(state[key]).strip():
             straight_key = key.replace("_road_curve_model", "_road_model")
@@ -2271,7 +2276,7 @@ class WorldgenGui(tk.Tk):
             road_models, 2, "Paved curve P3D (optional)", "paved_road_curve_model", advanced=True
         )
         self._entry_row(
-            road_models, 3, "Gravel straight P3D (optional)", "gravel_road_model", advanced=True
+            road_models, 3, "Gravel straight P3D", "gravel_road_model", advanced=True
         )
         ttk.Button(
             road_models,
@@ -2279,7 +2284,7 @@ class WorldgenGui(tk.Tk):
             command=lambda: self._restore_road_defaults("gravel"),
         ).grid(row=3, column=2, padx=(6, 0), pady=4)
         self._entry_row(
-            road_models, 4, "Gravel curve P3D (optional)", "gravel_road_curve_model", advanced=True
+            road_models, 4, "Gravel curve P3D", "gravel_road_curve_model", advanced=True
         )
         self._entry_row(
             road_models, 5, "Dirt-track straight P3D", "dirt_road_model", advanced=True
