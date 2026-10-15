@@ -1563,8 +1563,8 @@ def test_gui_road_defaults_include_stock_curve_donors() -> None:
     values = default_gui_values()
     assert values["paved_road_model"] == r"o\road\sil25.p3d"
     assert values["paved_road_curve_model"] == r"o\road\sil10 25.p3d"
-    assert values["gravel_road_model"] == ""
-    assert values["gravel_road_curve_model"] == ""
+    assert values["gravel_road_model"] == r"o\road\asf25.p3d"
+    assert values["gravel_road_curve_model"] == r"o\road\asf10 25.p3d"
     assert values["dirt_road_model"] == r"o\road\ces25.p3d"
     assert values["dirt_road_curve_model"] == r"o\road\ces10 25.p3d"
 
@@ -1617,8 +1617,8 @@ def test_restore_road_defaults_resets_straight_and_curve_together() -> None:
     assert fake.vars["gravel_road_model"].get() == r"mods\gravel25.p3d"
 
     WorldgenGui._restore_road_defaults(fake, "gravel")
-    assert fake.vars["gravel_road_model"].get() == ""
-    assert fake.vars["gravel_road_curve_model"].get() == ""
+    assert fake.vars["gravel_road_model"].get() == r"o\road\asf25.p3d"
+    assert fake.vars["gravel_road_curve_model"].get() == r"o\road\asf10 25.p3d"
 
     WorldgenGui._restore_road_defaults(fake, "dirt")
     assert fake.vars["dirt_road_model"].get() == r"o\road\ces25.p3d"
@@ -2667,3 +2667,126 @@ def test_curve_path_cannot_bypass_straight_donor_validation(tmp_path: Path) -> N
 
     dimensions = generator._modded_road_model_dimensions(spec, {})
     assert playability._road_model_key(curve) not in dimensions
+
+
+
+def test_default_gravel_uses_stock_asf_donors_in_gui_cli_and_osm() -> None:
+    """Gravel must not silently map to generated dirt-contact models."""
+    from argparse import ArgumentParser
+    from cwr_worldgen.asset_mapping import default_osm_asset_mapping
+    from cwr_worldgen.model import PlayabilitySpec
+
+    parser = ArgumentParser()
+    cli._add_road_model_arguments(parser)
+    options = parser.parse_args([])
+    assert options.gravel_road_model == r"o\road\asf25.p3d"
+    assert options.gravel_road_curve_model == r"o\road\asf10 25.p3d"
+
+    defaults = default_gui_values()
+    assert defaults["gravel_road_model"] == options.gravel_road_model
+    assert defaults["gravel_road_curve_model"] == options.gravel_road_curve_model
+    assert PlayabilitySpec.__dataclass_fields__["gravel_road_model"].default == options.gravel_road_model
+    assert PlayabilitySpec.__dataclass_fields__["gravel_road_curve_model"].default == options.gravel_road_curve_model
+
+    spec = SimpleNamespace(
+        name="asf_world", gravel_road_model=options.gravel_road_model,
+        gravel_road_curve_model=options.gravel_road_curve_model,
+        paved_road_model=r"o\road\sil25.p3d",
+        dirt_road_model=r"o\road\ces25.p3d",
+        road_segment_length=25.0, custom_road_shapes=True,
+        procedural_gravel_roads=True, max_forest_objects=0,
+        barriers_enabled=False, bus_stops_enabled=False,
+    )
+    mapping = default_osm_asset_mapping(spec, 9)
+    gravel = next(rule for rule in mapping.rules if rule.rule_id == "road-gravel")
+    assert gravel.models == (
+        r"o\road\asf25.p3d", r"o\road\asf10 25.p3d"
+    )
+    assert not gravel.textures  # no world-local procedural gravel visual required
+    assert road_model_for_tags(
+        spec, {"highway": "service", "surface": "gravel"}
+    ) == r"o\road\asf25.p3d"
+    assert road_model_for_tags(
+        spec, {"highway": "service", "surface": "earth"}
+    ) == r"o\road\ces25.p3d"
+    assert road_model_for_tags(
+        spec, {"highway": "primary", "surface": "asphalt"}
+    ) == r"o\road\sil25.p3d"
+
+    stock_pieces = playability.road_fitting_variants(
+        spec, r"o\road\asf25.p3d"
+    )
+    assert stock_pieces[0].model_path == r"o\road\asf25.p3d"
+    assert any(piece.model_path == r"o\road\asf6.p3d" for piece in stock_pieces)
+    assert playability.gravel_filler_piece(
+        spec, 6
+    ).model_path == r"o\road\asf6.p3d"
+
+
+def test_default_stock_asf_short_siblings_are_still_classified_as_gravel() -> None:
+    spec = SimpleNamespace(
+        name="asf_world",
+        gravel_road_model=r"o\road\asf25.p3d",
+        road_segment_length=25.0, custom_road_shapes=True,
+    )
+    pieces = (
+        playability._RoadPiece(r"o\road\asf12.p3d", 12.5, 12),
+        playability._RoadPiece(r"o\road\asf6.p3d", 6.25, 6),
+    )
+    assert fallback._chain_surface(pieces, spec) == "gravel"
+    assert fallback._eligible_chain(pieces, spec) == "gravel"
+
+
+def test_saved_legacy_blank_gravel_defaults_upgrade_without_overriding_mods() -> None:
+    defaults = default_gui_values()
+    legacy = defaults_with_recent_source(defaults, {
+        "gravel_road_model": "", "gravel_road_curve_model": "",
+    })
+    assert legacy["gravel_road_model"] == r"o\road\asf25.p3d"
+    assert legacy["gravel_road_curve_model"] == r"o\road\asf10 25.p3d"
+
+    custom = defaults_with_recent_source(defaults, {
+        "gravel_road_model": r"myroads\pebble25.p3d",
+        "gravel_road_curve_model": "",
+    })
+    assert custom["gravel_road_model"] == r"myroads\pebble25.p3d"
+    assert custom["gravel_road_curve_model"] == ""
+
+
+def test_saved_explicit_blank_gravel_donor_stays_procedural_after_restart() -> None:
+    defaults = default_gui_values()
+    state = defaults_with_recent_source(defaults, {
+        "gravel_stock_defaults_version": 1,
+        "gravel_road_model": "", "gravel_road_curve_model": "",
+    })
+    assert state["gravel_road_model"] == ""
+    assert state["gravel_road_curve_model"] == ""
+    spec = SimpleNamespace(
+        name="generated_if_requested",
+        gravel_road_model="", gravel_road_curve_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        procedural_gravel_roads=True,
+    )
+    assert road_model_for_tags(
+        spec, {"highway": "service", "surface": "gravel"}
+    ).endswith(r"\i\gravel25.p3d")
+
+
+def test_gui_passes_explicit_blank_gravel_donor_options_to_cli() -> None:
+    values = default_gui_values()
+    values["gravel_road_model"] = ""
+    values["gravel_road_curve_model"] = ""
+    command = build_milestone9_command(values, python="python")
+    assert command[command.index("--gravel-road-model") + 1] == ""
+    assert command[command.index("--gravel-road-curve-model") + 1] == ""
+
+
+def test_stock_asf_default_retains_gravel_groundtype_without_dirt_borrowing() -> None:
+    from cwr_worldgen import generator
+    spec = SimpleNamespace(
+        gravel_road_model=r"o\road\asf25.p3d",
+        gravel_road_curve_model=r"o\road\asf10 25.p3d",
+        dirt_road_model=r"o\road\ces25.p3d",
+    )
+    assert generator._road_texture_donor(spec, "gravel") == r"o\road\asf25.p3d"
+    assert generator._road_style_donor(spec, "gravel") == r"o\road\asf10 25.p3d"

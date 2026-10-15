@@ -58,6 +58,7 @@ def test_short_aligned_gap_between_gravel_endpoints_gets_a_small_filler() -> Non
         max_road_objects=10000,
         strict_assets=False,
         procedural_gravel_roads=True,
+        gravel_road_model="", gravel_road_curve_model="",
     )
 
     report = playability.fit_road_objects(
@@ -137,6 +138,7 @@ def test_detached_gravel_endpoint_can_join_the_unused_arm_of_a_nearby_t_hub() ->
         max_road_objects=10000,
         strict_assets=False,
         procedural_gravel_roads=True,
+        gravel_road_model="", gravel_road_curve_model="",
     )
 
     report = playability.fit_road_objects(
@@ -191,6 +193,7 @@ def test_short_gravel_gap_repair_does_not_bridge_misaligned_dead_ends() -> None:
         max_road_objects=10000,
         strict_assets=False,
         procedural_gravel_roads=True,
+        gravel_road_model="", gravel_road_curve_model="",
     )
 
     report = playability.fit_road_objects(

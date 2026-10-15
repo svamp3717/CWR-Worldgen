@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 import json
 import tempfile
 import unittest
@@ -64,8 +65,9 @@ class OsmAssetMappingTests(unittest.TestCase):
         report = collect_osm_asset_requirements(self._dataset(), mapping)
         self.assertIn(r"o\misc\aut_z_st.p3d", report.selected_models)
         self.assertIn(r"o\hous\nahrobek1.p3d", report.selected_models)
-        self.assertIn(rf"{spec.name}\i\gravel25.p3d", report.selected_models)
-        self.assertIn(rf"{spec.name}\i\g.paa", report.selected_textures)
+        self.assertIn(r"o\road\asf25.p3d", report.selected_models)
+        self.assertIn(r"o\road\asf10 25.p3d", report.selected_models)
+        self.assertNotIn(rf"{spec.name}\i\g.paa", report.selected_textures)
         self.assertGreaterEqual(report.matched_feature_count, 3)
 
     def test_custom_mapping_merges_and_overrides_rules_by_id(self) -> None:
@@ -107,10 +109,20 @@ class OsmAssetMappingTests(unittest.TestCase):
         spec = self._spec()
         mapping = default_osm_asset_mapping(spec, 9)
         report = collect_osm_asset_requirements(dataset, mapping)
-        self.assertIn(rf"{spec.name}\i\gravel25.p3d", report.selected_models)
-        self.assertIn(rf"{spec.name}\i\g.paa", report.selected_textures)
+        self.assertIn(r"o\road\asf25.p3d", report.selected_models)
+        self.assertIn(r"o\road\asf10 25.p3d", report.selected_models)
+        self.assertNotIn(rf"{spec.name}\i\g.paa", report.selected_textures)
         matched = {match.rule_id for match in report.rule_matches}
         self.assertIn("road-gravel", matched)
+
+    def test_explicit_blank_gravel_donor_still_selects_procedural_fallback(self) -> None:
+        spec = replace(
+            self._spec(), gravel_road_model="", gravel_road_curve_model=""
+        )
+        mapping = default_osm_asset_mapping(spec, 9)
+        report = collect_osm_asset_requirements(self._dataset(), mapping)
+        self.assertIn(rf"{spec.name}\i\gravel25.p3d", report.selected_models)
+        self.assertIn(rf"{spec.name}\i\g.paa", report.selected_textures)
 
     def test_custom_mapping_can_replace_defaults(self) -> None:
         defaults = default_osm_asset_mapping(self._spec(), 9)

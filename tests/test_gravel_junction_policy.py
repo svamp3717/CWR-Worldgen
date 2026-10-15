@@ -77,6 +77,7 @@ def test_uploaded_lundby_gravel_node_is_not_promoted_to_junction() -> None:
         name="gravel_family", heightmap_path=Path("unused.png"), bbox=bbox,
         cells=128, cell_size=50.0, max_road_objects=10000,
         strict_assets=False, procedural_gravel_roads=True,
+        gravel_road_model="", gravel_road_curve_model="",
     )
     key = playability._road_node_key(centre)
     assert key not in road_quality._junction_geometry(dataset, projection, spec)

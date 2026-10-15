@@ -71,6 +71,32 @@ Road networks are generated from mapped road geometry and converted into OFP/CWA
 
 The generator handles paved, dirt and gravel roads, junctions and bridges while adapting the surrounding terrain to keep roads usable. Road grade, terrain adjustment, connection tolerances and related limits are configurable.
 
+**Default gravel donors:** Gravel-tagged OSM roads now prefer the stock
+`o\\road\\asf25.p3d` straight family with
+`o\\road\\asf10 25.p3d` as the selected curve-style donor, instead
+of defaulting to Worldgen's procedural gravel texture and ribbons. Regular
+stock straights and short repairs reuse available `asf` siblings; generated
+connectors/junctions remain available when necessary for fitting, and use the
+configured gravel donor's independent **Roadway LOD contact texture and face/
+point flags**. This is a donor-surface choice: the stock `asf` family may
+behave like asphalt rather than loose gravel. Paved roads use the selected
+paved donor, and dirt roads use the selected dirt donor, rather than a common
+fallback contact style.
+
+Worldgen checks each generated road P3D's **emitted Roadway faces** against
+the selected contact metadata before packing it, including after an asset-cache
+restore. The `road-donors.json` report distinguishes inspected donor contact
+data from a `visual-fallback` when source Roadway information is unavailable.
+Where the donor is unreadable, matching in-game surface physics cannot be
+guaranteed; add its PBO to the configured asset roots.
+
+**Existing GUI profiles:** Saved empty gravel donors from older releases
+migrate to the stock `asf` defaults, but explicitly selected modded donors
+are not replaced. Users who deliberately want procedural gravel may clear
+both gravel donor fields; the GUI remembers that choice. The CLI can likewise
+pass `--gravel-road-model "" --gravel-road-curve-model ""`.
+This does not change post-build cleanup behavior.
+
 Buildings and other objects are checked against the final road layout so that generated scenery does not simply occupy the same physical space because two datasets happened to disagree.
 
 ## Deterministic generation

@@ -352,8 +352,8 @@ class OsmSpec(HeightmapSpec):
     procedural_gravel_roads: bool = False
     paved_road_model: str = r"o\road\sil25.p3d"
     paved_road_curve_model: str = ""
-    gravel_road_model: str = ""
-    gravel_road_curve_model: str = ""
+    gravel_road_model: str = r"o\road\asf25.p3d"
+    gravel_road_curve_model: str = r"o\road\asf10 25.p3d"
     dirt_road_model: str = r"o\road\ces25.p3d"
     dirt_road_curve_model: str = ""
     generic_building_model: str = r"O\Hous\domek_sedy.p3d"

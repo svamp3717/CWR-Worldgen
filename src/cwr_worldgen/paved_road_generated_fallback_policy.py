@@ -54,12 +54,19 @@ def _configured_variants(spec: Any, attribute: str) -> set[str]:
     if not model:
         return set()
     configured_length = float(getattr(spec, "road_segment_length", 25.0))
+    stock_asf_gravel = (
+        attribute == "gravel_road_model"
+        and _canonical(model) == r"o\road\asf25.p3d"
+    )
     return {
         _canonical(piece.model_path)
         for piece in _p.road_model_variants(
             model,
             configured_length,
-            donor_only=bool(getattr(spec, "custom_road_shapes", False)),
+            donor_only=(
+                bool(getattr(spec, "custom_road_shapes", False))
+                and not stock_asf_gravel
+            ),
         )
     }
 
@@ -520,8 +527,15 @@ def _upgrade_stock_result(
         custom_shapes = bool(
             getattr(context.spec, "custom_road_shapes", False)
         )
+        default_stock_gravel = (
+            surface == "gravel"
+            and _canonical(
+                str(getattr(context.spec, "gravel_road_model", "") or "")
+            ) == r"o\road\asf25.p3d"
+        )
         custom_shape_needed = (
             custom_shapes
+            and not default_stock_gravel
             and (turn >= 2.0 or deviation >= 0.05)
         )
         if (

@@ -336,7 +336,19 @@ def default_osm_asset_mapping(spec: Any, milestone_number: int, *, global_textur
     dirt_highways = ("service", "track", "unclassified", "road")
     gravel_surfaces = ("gravel", "fine_gravel", "compacted", "pebblestone", "unpaved")
     dirt_surfaces = ("dirt", "earth", "ground", "mud", "sand")
-    if bool(getattr(spec, "procedural_gravel_roads", False)):
+    configured_gravel = str(getattr(spec, "gravel_road_model", "") or "").strip()
+    configured_gravel_curve = str(getattr(spec, "gravel_road_curve_model", "") or "").strip()
+    if configured_gravel:
+        # The configured stock/modded donor is authoritative, even when the
+        # legacy procedural gravel fallback switch remains enabled.
+        rules.append(_rule(
+            "road-gravel", ("gravel_roads",), {},
+            models=tuple(dict.fromkeys((configured_gravel, *(
+                (configured_gravel_curve,) if configured_gravel_curve else ()
+            )))),
+            geometry="line", description="Configured gravel straight and curve donors",
+        ))
+    elif bool(getattr(spec, "procedural_gravel_roads", False)):
         gravel_models = (
             (gravel_road_model_path(spec.name, 25),)
             if bool(getattr(spec, "custom_road_shapes", False))
