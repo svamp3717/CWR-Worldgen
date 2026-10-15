@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import struct
 from hashlib import sha256
+import random
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,6 +22,7 @@ from cwr_worldgen.playability import (
 )
 from cwr_worldgen.osm import (
     BboxProjection, CompactOrientedRectangle, ObjectGenerationResult,
+    _forest_candidate_mask_ok, _mask_at,
     _compact_support_polygon, _oriented_rectangle,
 )
 from cwr_worldgen.procedural_buildings import (
@@ -479,3 +481,39 @@ def test_compact_reports_never_deepcopy_omitted_heavy_arrays() -> None:
 
     result = _small_report_dict(Report((RefuseCopy(),), Nested(7)), "heavy")
     assert result == {"nested": {"count": 7}}
+
+
+
+def test_forest_mask_fusion_matches_four_original_probes_at_edges() -> None:
+    """The same trees pass mask checks as before, including clipped cell edges."""
+    rng = random.Random(1942)
+    cells, world_size = 64, 3200.0
+    length = cells * cells
+    raster = SimpleNamespace(
+        forest=tuple(rng.random() < 0.82 for _ in range(length)),
+        water=tuple(rng.random() < 0.14 for _ in range(length)),
+        roads=tuple(rng.random() < 0.20 for _ in range(length)),
+        buildings=tuple(rng.random() < 0.17 for _ in range(length)),
+    )
+    points = [
+        (-0.001, 100.0), (0.0, 0.0),
+        (0.0, world_size - 0.001),
+        (world_size - 0.001, world_size - 0.001),
+        (world_size, 100.0), (100.0, world_size),
+        (world_size + 1.0, world_size),
+    ]
+    points.extend(
+        (rng.uniform(-80.0, world_size + 80.0),
+         rng.uniform(-80.0, world_size + 80.0))
+        for _ in range(3000)
+    )
+    for x, z in points:
+        previous = (
+            0 <= x < world_size
+            and 0 <= z < world_size
+            and _mask_at(raster.forest, cells, world_size, x, z)
+            and not _mask_at(raster.water, cells, world_size, x, z)
+            and not _mask_at(raster.roads, cells, world_size, x, z)
+            and not _mask_at(raster.buildings, cells, world_size, x, z)
+        )
+        assert _forest_candidate_mask_ok(raster, cells, world_size, x, z) == previous

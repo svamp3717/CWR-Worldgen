@@ -4557,6 +4557,28 @@ def _mask_at(mask: Sequence[bool], cells: int, world_size: float, x: float, z: f
     return mask[cell_z * cells + cell_x]
 
 
+def _forest_candidate_mask_ok(
+    raster: OsmRaster, cells: int, world_size: float, x: float, z: float
+) -> bool:
+    """Check forest, water, road and building masks at one common cell index.
+
+    The roadside and hillside fallback can test several candidate trees per
+    rejected forest block. Preserve _mask_at's coordinate-to-cell conversion
+    and bounds, but avoid repeating it four times for each candidate.
+    """
+    if not (0 <= x < world_size and 0 <= z < world_size):
+        return False
+    cell_x = min(cells - 1, int(x / world_size * cells))
+    cell_z = min(cells - 1, int(z / world_size * cells))
+    index = cell_z * cells + cell_x
+    return bool(
+        raster.forest[index]
+        and not raster.water[index]
+        and not raster.roads[index]
+        and not raster.buildings[index]
+    )
+
+
 def _polygon_overlaps_mask(
     mask: Sequence[bool], cells: int, world_size: float, polygon: Sequence[PointXZ]
 ) -> bool:
@@ -9168,19 +9190,8 @@ def generate_world_objects(
                         ):
                             break
                         if not (
-                            0 <= tree_x < spec.world_size
-                            and 0 <= tree_z < spec.world_size
-                            and _mask_at(
-                                raster.forest, spec.cells, spec.world_size, tree_x, tree_z
-                            )
-                            and not _mask_at(
-                                raster.water, spec.cells, spec.world_size, tree_x, tree_z
-                            )
-                            and not _mask_at(
-                                raster.roads, spec.cells, spec.world_size, tree_x, tree_z
-                            )
-                            and not _mask_at(
-                                raster.buildings, spec.cells, spec.world_size, tree_x, tree_z
+                            _forest_candidate_mask_ok(
+                                raster, spec.cells, spec.world_size, tree_x, tree_z
                             )
                         ):
                             continue
@@ -9253,19 +9264,8 @@ def generate_world_objects(
                             ):
                                 continue
                             if not (
-                                0 <= bush_x < spec.world_size
-                                and 0 <= bush_z < spec.world_size
-                                and _mask_at(
-                                    raster.forest, spec.cells, spec.world_size, bush_x, bush_z
-                                )
-                                and not _mask_at(
-                                    raster.water, spec.cells, spec.world_size, bush_x, bush_z
-                                )
-                                and not _mask_at(
-                                    raster.roads, spec.cells, spec.world_size, bush_x, bush_z
-                                )
-                                and not _mask_at(
-                                    raster.buildings, spec.cells, spec.world_size, bush_x, bush_z
+                                _forest_candidate_mask_ok(
+                                    raster, spec.cells, spec.world_size, bush_x, bush_z
                                 )
                             ):
                                 continue
@@ -9560,12 +9560,9 @@ def generate_world_objects(
                         ):
                             break
                         if not (
-                            0 <= tree_x < spec.world_size
-                            and 0 <= tree_z < spec.world_size
-                            and _mask_at(raster.forest, spec.cells, spec.world_size, tree_x, tree_z)
-                            and not _mask_at(raster.water, spec.cells, spec.world_size, tree_x, tree_z)
-                            and not _mask_at(raster.roads, spec.cells, spec.world_size, tree_x, tree_z)
-                            and not _mask_at(raster.buildings, spec.cells, spec.world_size, tree_x, tree_z)
+                            _forest_candidate_mask_ok(
+                                raster, spec.cells, spec.world_size, tree_x, tree_z
+                            )
                         ):
                             continue
                         if forest_block_intersects_road_corridors(
@@ -9988,12 +9985,9 @@ def generate_world_objects(
                             ):
                                 break
                             if not (
-                                0 <= tree_x < spec.world_size
-                                and 0 <= tree_z < spec.world_size
-                                and _mask_at(raster.forest, spec.cells, spec.world_size, tree_x, tree_z)
-                                and not _mask_at(raster.water, spec.cells, spec.world_size, tree_x, tree_z)
-                                and not _mask_at(raster.roads, spec.cells, spec.world_size, tree_x, tree_z)
-                                and not _mask_at(raster.buildings, spec.cells, spec.world_size, tree_x, tree_z)
+                                _forest_candidate_mask_ok(
+                                    raster, spec.cells, spec.world_size, tree_x, tree_z
+                                )
                             ):
                                 continue
                             if forest_block_intersects_road_corridors(
@@ -10049,44 +10043,9 @@ def generate_world_objects(
                     ):
                         if len(accepted_candidates) >= hillside_target:
                             break
-                        tree_samples = _square_elevation_samples(
-                            elevations,
-                            spec.cells,
-                            spec.cell_size,
-                            tree_x,
-                            tree_z,
-                            hillside_footprint,
-                        )
                         if not (
-                            0 <= tree_x < spec.world_size
-                            and 0 <= tree_z < spec.world_size
-                            and _mask_at(
-                                raster.forest,
-                                spec.cells,
-                                spec.world_size,
-                                tree_x,
-                                tree_z,
-                            )
-                            and not _mask_at(
-                                raster.water,
-                                spec.cells,
-                                spec.world_size,
-                                tree_x,
-                                tree_z,
-                            )
-                            and not _mask_at(
-                                raster.roads,
-                                spec.cells,
-                                spec.world_size,
-                                tree_x,
-                                tree_z,
-                            )
-                            and not _mask_at(
-                                raster.buildings,
-                                spec.cells,
-                                spec.world_size,
-                                tree_x,
-                                tree_z,
+                            _forest_candidate_mask_ok(
+                                raster, spec.cells, spec.world_size, tree_x, tree_z
                             )
                         ):
                             forest_hillside_candidate_rejections += 1
@@ -10099,6 +10058,17 @@ def generate_world_objects(
                         ):
                             forest_hillside_candidate_rejections += 1
                             continue
+                        # Exact terrain support sampling is comparatively
+                        # expensive. Only run it after the candidate passes
+                        # both inexpensive raster and road-clearance checks.
+                        tree_samples = _square_elevation_samples(
+                            elevations,
+                            spec.cells,
+                            spec.cell_size,
+                            tree_x,
+                            tree_z,
+                            hillside_footprint,
+                        )
                         tree_relief = max(tree_samples) - min(tree_samples)
                         maximum_hillside_tree_relief = max(
                             maximum_hillside_tree_relief, tree_relief
