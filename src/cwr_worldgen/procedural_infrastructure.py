@@ -17,6 +17,7 @@ from shapely.ops import triangulate as shapely_triangulate, unary_union
 from .cache import cache_key, restore_or_create_file
 from .paa import inspect_paa, write_rgb_dxt1_paa, write_rgba_dxt1_paa
 from .parallel_assets import process_asset_tasks
+from .legacy_proxy_models import _read_mlod_surface_lods, inspect_roadway_surface_style
 from .procedural_buildings import (
     _Face,
     _Lod,
@@ -2143,13 +2144,65 @@ def _write_infrastructure_asset_task(task: _InfrastructureAssetTask) -> tuple[di
         math.isclose(value, _ROADWAY_LOD, rel_tol=1e-6) for value in summary.resolutions
     ):
         raise ValueError(f"generated {task.key.kind} lost its Roadway LOD")
+
+    payload = task.destination.read_bytes()
+    contact_report: dict[str, object] = {}
+    if task.key.kind == "road":
+        # A normal MLOD sanity check only verifies *presence* of a Roadway LOD.
+        # Verify its actual contact faces after writing/restoring the P3D so a
+        # procedural model cannot silently become grass/dirt while looking paved.
+        expected_texture = _roadway_surface_texture(
+            task.texture, task.surface_style,
+        ).replace("/", "\\").strip("\\")
+        expected_point_flag = int(task.surface_style.roadway_point_flag) & 0xFFFFFFFF
+        expected_face_flag = int(task.surface_style.roadway_face_flag) & 0xFFFFFFFF
+        actual = inspect_roadway_surface_style(payload)
+        if (
+            actual.texture_path.replace("/", "\\").strip("\\") != expected_texture
+            or (int(actual.point_flag) & 0xFFFFFFFF) != expected_point_flag
+            or (int(actual.face_flag) & 0xFFFFFFFF) != expected_face_flag
+        ):
+            raise ValueError(
+                f"generated road {task.wire} did not preserve donor Roadway "
+                "texture/point/face metadata"
+            )
+
+        lods, resolutions = _read_mlod_surface_lods(payload)
+        contact = next(
+            lod for lod, resolution in zip(lods, resolutions)
+            if math.isclose(resolution, _ROADWAY_LOD, rel_tol=1e-4, abs_tol=1e8)
+        )
+        usable_faces = tuple(
+            (texture, flag, indices)
+            for texture, flag, indices in contact.faces
+            if len(indices) in (3, 4)
+        )
+        if not usable_faces or any(
+            texture.replace("/", "\\").strip("\\") != expected_texture
+            or (int(flag) & 0xFFFFFFFF) != expected_face_flag
+            or any(
+                (int(contact.point_flags[index]) & 0xFFFFFFFF) != expected_point_flag
+                for index in indices
+            )
+            for texture, flag, indices in usable_faces
+        ):
+            raise ValueError(
+                f"generated road {task.wire} did not preserve donor Roadway contact on faces"
+            )
+        contact_report = {
+            "roadway_contact_verified": True,
+            "roadway_texture": expected_texture,
+            "roadway_point_flag": f"0x{expected_point_flag:08x}",
+            "roadway_face_flag": f"0x{expected_face_flag:08x}",
+        }
     return ({
         "key": asdict(task.key),
         "model_path": task.wire,
         "relative_path": task.relative,
         "usage_count": task.usage_count,
-        "sha256": sha256(task.destination.read_bytes()).hexdigest(),
+        "sha256": sha256(payload).hexdigest(),
         "lod_resolutions": summary.resolutions,
+        **contact_report,
     }, hit)
 
 
