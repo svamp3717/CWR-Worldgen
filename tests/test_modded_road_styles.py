@@ -2772,6 +2772,15 @@ def test_saved_explicit_blank_gravel_donor_stays_procedural_after_restart() -> N
     ).endswith(r"\i\gravel25.p3d")
 
 
+def test_gui_passes_explicit_blank_gravel_donor_options_to_cli() -> None:
+    values = default_gui_values()
+    values["gravel_road_model"] = ""
+    values["gravel_road_curve_model"] = ""
+    command = build_milestone9_command(values, python="python")
+    assert command[command.index("--gravel-road-model") + 1] == ""
+    assert command[command.index("--gravel-road-curve-model") + 1] == ""
+
+
 def test_stock_asf_default_retains_gravel_groundtype_without_dirt_borrowing() -> None:
     from cwr_worldgen import generator
     spec = SimpleNamespace(
