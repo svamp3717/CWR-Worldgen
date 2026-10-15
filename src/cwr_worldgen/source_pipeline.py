@@ -1469,8 +1469,8 @@ class Milestone5Spec:
     road_segment_length: float = 24.5
     paved_road_model: str = r"o\road\sil25.p3d"
     paved_road_curve_model: str = ""
-    gravel_road_model: str = ""
-    gravel_road_curve_model: str = ""
+    gravel_road_model: str = r"o\road\asf25.p3d"
+    gravel_road_curve_model: str = r"o\road\asf10 25.p3d"
     dirt_road_model: str = r"o\road\ces25.p3d"
     dirt_road_curve_model: str = ""
     max_road_objects: int = DEFAULT_MAX_ROAD_OBJECTS
