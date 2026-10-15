@@ -13,6 +13,7 @@ from cwr_worldgen import generator, procedural_infrastructure as infrastructure
 from cwr_worldgen.legacy_proxy_models import ProxyCloneError
 from cwr_worldgen.legacy_proxy_models import (
     inspect_roadway_surface_style,
+    VisualSurfaceStyle,
     proxy_safe_model_path,
     write_proxy_safe_visual_clone,
 )
@@ -183,13 +184,17 @@ class LegacyProxyModelTests(unittest.TestCase):
 
     def test_gravel_visual_flags_remain_unchanged_while_contact_is_converted(self) -> None:
         donor = _synthetic_road_odol()
-        paved, paved_report = generator._road_surface_style_from_donor(
-            r"o\\road\\sil25.p3d", r"o\\road\\visual.paa", donor,
-        )
-        gravel, gravel_report = generator._road_surface_style_from_donor(
-            r"o\\road\\asf25.p3d", r"o\\road\\visual.paa", donor,
-            preserve_visual_flags=True,
-        )
+        visual = VisualSurfaceStyle("ODOL", r"o\road\visual.paa", 0x13F, 0x24102)
+        # Isolate flag encoding even if the minimal synthetic donor cannot
+        # satisfy all of the independent visual-decoder preconditions.
+        with patch.object(generator, "inspect_visual_surface_style", return_value=visual):
+            paved, paved_report = generator._road_surface_style_from_donor(
+                r"o\road\sil25.p3d", r"o\road\visual.paa", donor,
+            )
+            gravel, gravel_report = generator._road_surface_style_from_donor(
+                r"o\road\asf25.p3d", r"o\road\visual.paa", donor,
+                preserve_visual_flags=True,
+            )
         self.assertEqual(paved.point_flag, 0x1)
         self.assertEqual(paved.face_flag, 0x0)
         self.assertEqual(gravel.point_flag, 0x13F)
