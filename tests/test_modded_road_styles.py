@@ -2739,6 +2739,25 @@ def test_saved_legacy_blank_gravel_defaults_upgrade_without_overriding_mods() ->
     assert custom["gravel_road_curve_model"] == ""
 
 
+def test_saved_explicit_blank_gravel_donor_stays_procedural_after_restart() -> None:
+    defaults = default_gui_values()
+    state = defaults_with_recent_source(defaults, {
+        "gravel_stock_defaults_version": 1,
+        "gravel_road_model": "", "gravel_road_curve_model": "",
+    })
+    assert state["gravel_road_model"] == ""
+    assert state["gravel_road_curve_model"] == ""
+    spec = SimpleNamespace(
+        name="generated_if_requested",
+        gravel_road_model="", gravel_road_curve_model="",
+        dirt_road_model=r"o\road\ces25.p3d",
+        procedural_gravel_roads=True,
+    )
+    assert road_model_for_tags(
+        spec, {"highway": "service", "surface": "gravel"}
+    ).endswith(r"\i\gravel25.p3d")
+
+
 def test_stock_asf_default_retains_gravel_groundtype_without_dirt_borrowing() -> None:
     from cwr_worldgen import generator
     spec = SimpleNamespace(
