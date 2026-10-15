@@ -520,8 +520,15 @@ def _upgrade_stock_result(
         custom_shapes = bool(
             getattr(context.spec, "custom_road_shapes", False)
         )
+        default_stock_gravel = (
+            surface == "gravel"
+            and _canonical(
+                str(getattr(context.spec, "gravel_road_model", "") or "")
+            ) == r"o\road\asf25.p3d"
+        )
         custom_shape_needed = (
             custom_shapes
+            and not default_stock_gravel
             and (turn >= 2.0 or deviation >= 0.05)
         )
         if (
