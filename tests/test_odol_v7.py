@@ -163,3 +163,35 @@ def test_corrupt_mlod_face_index_still_fails(point: int, normal: int) -> None:
     struct.pack_into("<ii", raw, corner_offset, point, normal)
     with pytest.raises(ValueError, match="face 0 corner 0 references"):
         odol_v7.read_mlod(bytes(raw))
+
+
+@pytest.mark.parametrize(
+    "polygon_native,interiors",
+    [(False, False), (False, True), (True, False), (True, True)],
+)
+def test_real_procedural_building_writer_binarizes_with_missing_normals(
+    tmp_path, polygon_native: bool, interiors: bool
+) -> None:
+    from cwr_worldgen.procedural_buildings import BuildingVariantKey, write_building_mlod
+
+    footprint = ((-5., -6.), (5., -6.), (5., 6.), (-5., 6.)) if polygon_native else ()
+    key = BuildingVariantKey(
+        "residential", "gable", 10., 12., 6.,
+        interiors=interiors, footprint_vertices=footprint,
+    )
+    path = tmp_path / "generated_house.p3d"
+    write_building_mlod(
+        path, key,
+        wall_texture=r"house\\d\\wall.paa",
+        roof_texture=r"house\\d\\roof.paa",
+    )
+    original = path.read_bytes()
+    lods = odol_v7.read_mlod(original)
+    assert any(
+        normal == -1
+        for lod in lods for _texture, _flags, vertices in lod.faces
+        for _point, normal, _u, _v in vertices
+    ), "regression fixture must exercise generated Geometry LOD no-normal faces"
+    odol_v7.binarize_building(path)
+    assert path.read_bytes().startswith(b"ODOL\\x07\\x00\\x00\\x00")
+    assert original.startswith(b"MLOD")
