@@ -311,9 +311,16 @@ def _write_lod(lod: _Lod) -> bytes:
         first.setdefault(point, index)
     output += _array("H", [first.get(i, 0) for i in range(len(lod.points))], compressed=True)
     output += _array("H", vertex_points, compressed=True)
-    # The in-memory Poly entries use 4-byte alignment. The stock sil25
-    # example has two 16-byte quad records, despite only 15 wire bytes each.
-    output += _pack("II", len(faces), 16 * len(faces))
+    # FaceArray::RawSize()/ShapeSection::beg/end are offsets in the
+    # *in-memory* CWA Poly stream, not bytes occupied by the ODOL wire face.
+    # On 32-bit CWA, PolyProperties is 8 bytes; PolyVertices occupies
+    # 2 bytes for the count plus 2 bytes per index. Thus triangles use
+    # 16 bytes and quads use 18. Assuming 16 for every quad causes section
+    # boundaries to drift and can select incorrect textures/material flags.
+    poly_offsets = [0]
+    for _texture, _special, indices in faces:
+        poly_offsets.append(poly_offsets[-1] + 8 + 2 * (1 + len(indices)))
+    output += _pack("II", len(faces), poly_offsets[-1])
     for texture, special, indices in faces:
         output += _pack("IhB", special, texture_names.index(texture) if texture else -1, len(indices))
         output += _pack("H" * len(indices), *indices)
@@ -321,11 +328,12 @@ def _write_lod(lod: _Lod) -> bytes:
     sections = []
     for i, (texture, special, _indices) in enumerate(faces):
         tex_index = texture_names.index(texture) if texture else -1
+        beg_offset, end_offset = poly_offsets[i], poly_offsets[i + 1]
         if sections and sections[-1][2:] == (0, tex_index, special):
             beg, _end, mat, tex, spec = sections[-1]
-            sections[-1] = (beg, (i + 1) * 16, mat, tex, spec)
+            sections[-1] = (beg, end_offset, mat, tex, spec)
         else:
-            sections.append((i * 16, (i + 1) * 16, 0, tex_index, special))
+            sections.append((beg_offset, end_offset, 0, tex_index, special))
     output += _pack("I", len(sections))
     for beg, end, mat, tex, special in sections:
         output += _pack("IIihI", beg, end, mat, tex, special)
