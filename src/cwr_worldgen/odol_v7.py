@@ -357,15 +357,18 @@ def mlod_to_odol(source: bytes) -> bytes:
 def binarize_building(path: Path) -> None:
     """Atomically replace an MLOD P3D with ODOL v7, or preserve original on error."""
     original = path.read_bytes()
-    odol = mlod_to_odol(original)
-    if odol[:8] != b"ODOL" + _pack("I", 7):
-        raise ValueError("invalid ODOL version")
-    # Independent decoder smoke test before the source file is replaced. This
-    # catches malformed headers, face/texture tables and broken LZSS streams.
-    from .legacy_proxy_models import inspect_visual_model_dimensions
-    report = inspect_visual_model_dimensions(odol)
-    if report.source_format != "ODOL" or report.width_metres <= 0:
-        raise ValueError("converted ODOL failed independent model inspection")
+    try:
+        odol = mlod_to_odol(original)
+        if odol[:8] != b"ODOL" + _pack("I", 7):
+            raise ValueError("invalid ODOL version")
+        # Independent decoder smoke test before the source file is replaced.
+        # This checks the first visual LOD, but it is not in-game validation.
+        from .legacy_proxy_models import inspect_visual_model_dimensions
+        report = inspect_visual_model_dimensions(odol)
+        if report.source_format != "ODOL" or report.width_metres <= 0:
+            raise ValueError("converted ODOL failed independent model inspection")
+    except (ValueError, IndexError, struct.error) as exc:
+        raise ValueError(f"Cannot binarize procedural building {path}: {exc}") from exc
     temporary = path.with_suffix(".odol.tmp")
     try:
         temporary.write_bytes(odol)
