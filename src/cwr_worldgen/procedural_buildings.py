@@ -9286,7 +9286,7 @@ class ProceduralBuildingLibrary:
             from .odol_v7 import binarize_building
             for asset in model_assets:
                 model_path = source_dir / asset.relative_path
-                binarize_building(model_path)
+                binarize_building(model_path, texture_root=source_dir)
             model_assets = [
                 replace(
                     asset,
