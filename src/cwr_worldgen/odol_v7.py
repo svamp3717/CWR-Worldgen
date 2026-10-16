@@ -105,7 +105,10 @@ def read_mlod(source: bytes) -> list[_Lod]:
             if nverts not in (3, 4):
                 raise ValueError("ODOL only supports triangles and quads")
             face_vertices = verts[:nverts]
-            if any(not (0 <= p < np and 0 <= n < nn) for p, n, _, _ in face_vertices):
+            if any(
+                not (0 <= p < np and (0 <= n < nn or (nn == 0 and n == 0)))
+                for p, n, _, _ in face_vertices
+            ):
                 raise ValueError("MLOD face references a missing point/normal")
             faces.append((texture, flag, face_vertices))
         if stream.take(4) != b"TAGG":
@@ -201,7 +204,7 @@ def _write_lod(lod: _Lod) -> bytes:
                 raise ValueError("ODOL vertex limit exceeded: 65535 vertices per LOD")
             x, y, z, raw_flag = lod.points[pi]
             verts.append((x, y, z))
-            normals.append(lod.normals[ni])
+            normals.append(lod.normals[ni] if lod.normals else (0., 0., 0.))
             uvs.append((u, v))
             flags.append(_point_flag(raw_flag))
             vertex_points.append(pi)
