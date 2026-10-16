@@ -191,18 +191,24 @@ def test_corrupt_mlod_face_index_still_fails(point: int, normal: int) -> None:
 
 
 @pytest.mark.parametrize(
-    "polygon_native,interiors",
-    [(False, False), (False, True), (True, False), (True, True)],
+    "polygon_native,interiors,second_storey",
+    [
+        (False, False, False), (False, True, False),
+        (True, False, False), (True, True, False),
+        (False, True, True), (True, True, True),
+    ],
 )
 def test_real_procedural_building_writer_binarizes_with_missing_normals(
-    tmp_path, polygon_native: bool, interiors: bool
+    tmp_path, polygon_native: bool, interiors: bool, second_storey: bool
 ) -> None:
     from cwr_worldgen.procedural_buildings import BuildingVariantKey, write_building_mlod
 
     footprint = ((-5., -6.), (5., -6.), (5., 6.), (-5., 6.)) if polygon_native else ()
     key = BuildingVariantKey(
-        "residential", "gable", 10., 12., 6.,
-        interiors=interiors, footprint_vertices=footprint,
+        "residential", "gable", 10., 12., 7.5 if second_storey else 6.,
+        interiors=interiors, second_storey=second_storey,
+        facade_storeys=2 if second_storey else 0,
+        footprint_vertices=footprint,
     )
     path = tmp_path / "generated_house.p3d"
     write_building_mlod(
