@@ -285,12 +285,12 @@ def _write_lod(lod: _Lod) -> bytes:
         selected_vertices = [i for i, point in enumerate(vertex_points) if point_weights[point]]
         output += _string(name)
         output += _array("H", face_ids, compressed=True)
-        output += _array("B", [255] * len(face_ids))
+        output += _array("B", [255] * len(face_ids), compressed=True)
         output += _array("I", [], compressed=True)
         output += _pack("B", 0)
         output += _array("I", [], compressed=True)
         output += _array("H", selected_vertices, compressed=True)
-        output += _array("B", [point_weights[vertex_points[i]] for i in selected_vertices])
+        output += _array("B", [point_weights[vertex_points[i]] for i in selected_vertices], compressed=True)
     output += _pack("I", len(lod.properties))
     for name, value in lod.properties:
         output += _string(name) + _string(value)
