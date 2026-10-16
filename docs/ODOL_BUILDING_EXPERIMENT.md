@@ -30,6 +30,10 @@ replaces the model within the temporary source tree before the PBO is packaged.
 - texture tables, aligned face records and contiguous draw sections
 - named selections, properties and Geometry/Mass/Memory/Roadway/Paths LOD indices
 - SSCompress-compatible LZSS streams (literal-only, with legacy checksum)
+- CWA model and LOD average colors, reconstructed from generated PAA AVGC
+  metadata and each MLOD face's 3D surface area (including top-facing area
+  for the separate `colorTop` field). House colors are no longer hardcoded
+  black or white on the in-game map.
 
 The writer uses documented structures and examples in the open source
 [CWR-CE engine](https://github.com/ofpisnotdead-com/CWR-CE), especially
