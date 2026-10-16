@@ -4054,6 +4054,7 @@ def build_milestone4(
             generate_interiors=bool(
                 getattr(spec, "procedural_building_interiors", False)
             ),
+            odol_buildings=bool(getattr(spec, "odol_buildings", False)),
             high_quality_textures=bool(
                 getattr(spec, "high_quality_building_textures", False)
             ),
@@ -4963,6 +4964,7 @@ def build_milestone4(
                 foundation_depth_quantum=building_library.foundation_depth_quantum,
                 church_plinth_height=building_library.church_plinth_height,
                 generate_interiors=building_library.generate_interiors,
+                odol_buildings=building_library.odol_buildings,
                 high_quality_textures=building_library.high_quality_textures,
                 texture_variants=building_library.texture_variants,
                 house_style_preset=building_library.house_style_preset,
