@@ -100,3 +100,7 @@ def test_python_flags_match_cwr_ce_clip_flags() -> None:
     assert odol_v7._point_flag(0) == 0x3F
     assert odol_v7._point_flag(1) == 0x13F
     assert odol_v7._point_flag(0x10) & 0xFF00000 == 200 * 0x100000
+
+
+def test_od ol_unused_placeholder() -> None:
+    pass
