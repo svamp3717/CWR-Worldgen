@@ -102,5 +102,22 @@ def test_python_flags_match_cwr_ce_clip_flags() -> None:
     assert odol_v7._point_flag(0x10) & 0xFF00000 == 200 * 0x100000
 
 
-def test_od ol_unused_placeholder() -> None:
-    pass
+def test_gui_advanced_checkbox_defaults_off_and_sets_cli_flag() -> None:
+    from cwr_worldgen.gui import default_gui_values, build_milestone9_command
+    values = default_gui_values()
+    assert values["odol_buildings"] is False
+    assert "--odol-buildings" not in build_milestone9_command(values, python="python")
+    values["odol_buildings"] = True
+    assert "--odol-buildings" in build_milestone9_command(values, python="python")
+
+
+def test_milestone9_cli_and_specs_accept_odol_buildings() -> None:
+    from cwr_worldgen.cli import _parser
+    from cwr_worldgen.milestone9 import Milestone9Spec, _Milestone9PlayabilitySpec
+    opts = _parser().parse_args([
+        "milestone9", "--source-dir", "dummy", "--output", "build/dummy",
+        "--odol-buildings",
+    ])
+    assert opts.odol_buildings is True
+    assert Milestone9Spec.__dataclass_fields__["odol_buildings"].default is False
+    assert _Milestone9PlayabilitySpec.__dataclass_fields__["odol_buildings"].default is False
