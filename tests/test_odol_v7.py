@@ -385,3 +385,76 @@ def test_odol_preserves_raised_building_origin_without_autocenter(tmp_path) -> N
         max(sum(component * component for component in p) ** 0.5 for p in authored_points)
     )
     assert metadata["color"] == 0xFF000000
+
+
+
+def test_odol_bakes_real_paa_average_color_instead_of_black(tmp_path) -> None:
+    from cwr_worldgen.paa import write_solid_dxt1_paa
+
+    addon = tmp_path / "wg_palette"
+    texture = addon / "t" / "brick.paa"
+    write_solid_dxt1_paa(texture, colour=(172, 77, 36))
+
+    # The MLOD fixture includes a textured visual LOD and Geometry LOD
+    # with map=house and autocenter=0, just like the real building writer.
+    source = bytearray(_mlod())
+    marker = b"o\\road\\sil_new.paa"
+    pos = source.index(marker)
+    source[pos:pos + 32] = b"wg_palette\\t\\brick.paa".ljust(32, b"\0")
+    path = addon / "g" / "building.p3d"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(source)
+    lods = odol_v7.read_mlod(bytes(source))
+
+    odol_v7.binarize_building(path, texture_root=addon)
+    converted = path.read_bytes()
+    assert converted[:8] == b"ODOL\x07\x00\x00\x00"
+    meta = _read_model_metadata(converted, lods)
+    assert meta["map_type"] == 4
+    assert meta["color"] == 0xFFAC4D24  # red=172, green=77, blue=36
+    assert meta["color_top"] == 0xFFAC4D24
+    assert meta["color"] != 0xFF000000
+
+    # The visual LOD color must also be baked, not merely the model header.
+    first_lod = odol_v7._write_lod(lods[0], color=meta["color"], color_top=meta["color_top"])
+    assert first_lod in converted
+
+
+def test_odol_map_color_weights_real_texture_avgs_by_face_area(tmp_path) -> None:
+    from cwr_worldgen.paa import write_solid_dxt1_paa
+
+    addon = tmp_path / "wg_paint"
+    write_solid_dxt1_paa(addon / "t" / "red.paa", colour=(255, 0, 0))
+    write_solid_dxt1_paa(addon / "t" / "blue.paa", colour=(0, 0, 255))
+    # Four square metres of red roof and one of blue, both visible from above.
+    lod = odol_v7._Lod(
+        resolution=1.,
+        points=[
+            (-1., 0., -1., 0), (1., 0., -1., 0),
+            (1., 0., 1., 0), (-1., 0., 1., 0),
+            (2., 0., 0., 0), (3., 0., 0., 0),
+            (3., 0., 1., 0), (2., 0., 1., 0),
+        ],
+        normals=[],
+        faces=[
+            ("wg_paint\\t\\red.paa", 0, [(i, -1, 0., 0.) for i in (0, 1, 2, 3)]),
+            ("wg_paint\\t\\blue.paa", 0, [(i, -1, 0., 0.) for i in (4, 5, 6, 7)]),
+        ],
+        selections=[], properties=[], mass=[],
+    )
+    packed, top = odol_v7._lod_colors(lod, addon)
+    assert packed == 0xFFCC0033  # (4 * red + 1 * blue) / 5
+    assert top == packed
+
+
+def test_odol_color_missing_texture_fails_without_overwriting_mlod(tmp_path) -> None:
+    source = bytearray(_mlod())
+    pos = source.index(b"o\\road\\sil_new.paa")
+    source[pos:pos + 32] = b"wg_missing\\t\\nowhere.paa".ljust(32, b"\0")
+    addon = tmp_path / "wg_missing"
+    addon.mkdir()
+    target = addon / "bad.p3d"
+    target.write_bytes(source)
+    with pytest.raises(ValueError, match="missing texture"):
+        odol_v7.binarize_building(target, texture_root=addon)
+    assert target.read_bytes() == source
