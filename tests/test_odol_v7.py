@@ -314,3 +314,74 @@ def test_odol_poly_face_offsets_are_16_for_triangles_and_18_for_quads() -> None:
         (0, 18), (18, 34), (34, 52),
     ]
     assert [texture for _start, _end, _mat, texture, _flags in sections] == [0, 1, 0]
+
+
+def _read_model_metadata(odol: bytes, source_lods: list[odol_v7._Lod]) -> dict:
+    """Read the v7 model tail by following its documented packed fields."""
+    offset = 12 + sum(len(odol_v7._write_lod(lod)) for lod in source_lods)
+    offset += len(source_lods) * 4  # LOD resolutions, float32 each
+    (special,) = struct.unpack_from("<i", odol, offset)
+    offset += 4
+    sphere, geom_sphere = struct.unpack_from("<ff", odol, offset)
+    offset += 8
+    offset += 12  # remarks, andHints, orHints
+    aiming = struct.unpack_from("<fff", odol, offset)
+    offset += 12
+    color, color_top = struct.unpack_from("<II", odol, offset)
+    offset += 8
+    (view_density,) = struct.unpack_from("<f", odol, offset)
+    offset += 4
+    bbmin = struct.unpack_from("<fff", odol, offset)
+    bbmax = struct.unpack_from("<fff", odol, offset + 12)
+    offset += 24
+    bbox_center = struct.unpack_from("<fff", odol, offset)
+    geom_center = struct.unpack_from("<fff", odol, offset + 12)
+    offset += 24
+    offset += 12 + 36  # center of mass + inverse inertia matrix
+    auto_center, lock_auto_center, occludes, occluded, animation = struct.unpack_from(
+        "<BBBBB", odol, offset,
+    )
+    offset += 5
+    (map_type,) = struct.unpack_from("<b", odol, offset)
+    return dict(
+        special=special, sphere=sphere, geom_sphere=geom_sphere, aiming=aiming,
+        color=color, color_top=color_top, view_density=view_density,
+        bbmin=bbmin, bbmax=bbmax, bbox_center=bbox_center,
+        geom_center=geom_center, auto_center=auto_center,
+        lock_auto_center=lock_auto_center, occludes=occludes,
+        occluded=occluded, animation=animation, map_type=map_type,
+    )
+
+
+def test_odol_autocenter_zero_and_black_footprint_are_serialized() -> None:
+    lods = odol_v7.read_mlod(_mlod())
+    metadata = _read_model_metadata(odol_v7.mlod_to_odol(_mlod()), lods)
+    assert metadata["auto_center"] == 0
+    assert metadata["bbox_center"] == pytest.approx((0., 0., 0.))
+    assert metadata["color"] == 0xFF000000
+    assert metadata["color_top"] == 0xFF000000
+    assert metadata["map_type"] == 4
+
+
+def test_odol_preserves_raised_building_origin_without_autocenter(tmp_path) -> None:
+    from cwr_worldgen.procedural_buildings import BuildingVariantKey, write_building_mlod
+
+    path = tmp_path / "height_regression.p3d"
+    write_building_mlod(
+        path, BuildingVariantKey("residential", "gable", 12., 16., 7.5, interiors=True,
+                                 second_storey=True, facade_storeys=2),
+        wall_texture=r"house\d\wall.paa",
+        roof_texture=r"house\d\roof.paa",
+    )
+    lods = odol_v7.read_mlod(path.read_bytes())
+    authored_points = [p[:3] for lod in lods for p in lod.points]
+    assert max(p[1] for p in authored_points) > 5.
+    assert odol_v7._model_property(lods, "autocenter") == "0"
+    result = odol_v7.mlod_to_odol(path.read_bytes())
+    metadata = _read_model_metadata(result, lods)
+    assert metadata["bbox_center"] == (0., 0., 0.)
+    assert metadata["auto_center"] == 0
+    assert metadata["sphere"] == pytest.approx(
+        max(sum(component * component for component in p) ** 0.5 for p in authored_points)
+    )
+    assert metadata["color"] == 0xFF000000
