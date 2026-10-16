@@ -132,7 +132,7 @@ def test_mlod_collision_missing_normal_sentinel_is_valid() -> None:
     # This is the same intentional -1 normal generated for polygon-native and
     # regular procedural building Geometry LODs; conversion must not reject it.
     result = odol_v7.mlod_to_odol(_mlod())
-    assert result.startswith(b"ODOL\\x07\\x00\\x00\\x00")
+    assert result.startswith(b"ODOL\x07\x00\x00\x00")
 
 
 def test_missing_normal_sentinel_does_not_select_last_normal() -> None:
@@ -182,8 +182,8 @@ def test_real_procedural_building_writer_binarizes_with_missing_normals(
     path = tmp_path / "generated_house.p3d"
     write_building_mlod(
         path, key,
-        wall_texture=r"house\\d\\wall.paa",
-        roof_texture=r"house\\d\\roof.paa",
+        wall_texture=r"house\d\wall.paa",
+        roof_texture=r"house\d\roof.paa",
     )
     original = path.read_bytes()
     lods = odol_v7.read_mlod(original)
@@ -193,5 +193,5 @@ def test_real_procedural_building_writer_binarizes_with_missing_normals(
         for _point, normal, _u, _v in vertices
     ), "regression fixture must exercise generated Geometry LOD no-normal faces"
     odol_v7.binarize_building(path)
-    assert path.read_bytes().startswith(b"ODOL\\x07\\x00\\x00\\x00")
+    assert path.read_bytes().startswith(b"ODOL\x07\x00\x00\x00")
     assert original.startswith(b"MLOD")
