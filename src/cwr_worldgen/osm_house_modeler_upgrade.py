@@ -618,7 +618,11 @@ def _append_details(
         for index in range(count):
             d0 = index * tread
             d1 = (index + 1) * tread
-            height = (index + 1) * max(0.10, foundation_depth / count)
+            # Index zero is closest to the entrance; its tread must be at
+            # the threshold (Y=0). The outermost step must be the lowest.
+            # Previously (index+1) made the staircase ascend away from the
+            # house, visually reversing the entrance stairs.
+            height = (count - index) * max(0.10, foundation_depth / count)
             center = (
                 anchor[0] + outward[0] * ((d0 + d1) * 0.5),
                 anchor[1] + outward[1] * ((d0 + d1) * 0.5),

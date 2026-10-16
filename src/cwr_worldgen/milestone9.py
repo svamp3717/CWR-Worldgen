@@ -530,6 +530,7 @@ class Milestone9Spec(Milestone8Spec):
     semantic_site_maximum_variants: int = 64
     pbo_backend: str = "auto"
     poseidon_tools_path: Path | None = None
+    odol_buildings: bool = False
     deploy_mod_dir: Path | None = None
 
     def validate(self) -> None:
@@ -785,6 +786,7 @@ class Milestone9Spec(Milestone8Spec):
 
 @dataclass(frozen=True, slots=True)
 class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
+    odol_buildings: bool = False
     include_minor_roads: bool = True
     procedural_gravel_roads: bool = True
     procedural_paved_road_fallback: bool = True
@@ -1510,6 +1512,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         world_edge_blend_cells=spec.world_edge_blend_cells,
         out_of_bounds_dem_path=raw_dem,
         procedural_buildings=spec.procedural_buildings,
+        odol_buildings=spec.odol_buildings,
         procedural_building_interiors=spec.procedural_building_interiors,
         high_quality_building_textures=spec.high_quality_building_textures,
         house_style_preset=spec.house_style_preset,

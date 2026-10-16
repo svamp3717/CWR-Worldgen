@@ -917,7 +917,10 @@ def install_stock_building_policy() -> None:
         def __new__(cls, *args, **kwargs):
             preset = str(kwargs.get("house_style_preset", "") or "").strip().casefold()
             if preset == STOCK_BUILDING_PRESET:
-                return StockBuildingLibrary(*args, **kwargs)
+                stock_kwargs = dict(kwargs)
+                # There is nothing to binarize for a stock-only preset.
+                stock_kwargs.pop("odol_buildings", None)
+                return StockBuildingLibrary(*args, **stock_kwargs)
             return original_library(*args, **kwargs)
 
     generator.ProceduralBuildingLibrary = BuildingLibraryFactory

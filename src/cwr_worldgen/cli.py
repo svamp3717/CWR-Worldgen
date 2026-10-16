@@ -283,6 +283,11 @@ def _add_procedural_building_arguments(parser: argparse.ArgumentParser) -> None:
         help="use optional 256px procedural building textures instead of the default legacy-style 128px textures",
     )
     parser.add_argument(
+        "--odol-buildings",
+        action="store_true",
+        help="EXPERIMENTAL: binarize procedural buildings to ODOL v7 with the Python exporter",
+    )
+    parser.add_argument(
         "--house-style-preset",
         "--building-preset",
         dest="house_style_preset",
@@ -1186,6 +1191,7 @@ def main(argv: list[str] | None = None) -> int:
                 building_width_quantum=args.building_width_quantum,
                 procedural_building_interiors=args.procedural_building_interiors,
                 high_quality_building_textures=args.high_quality_building_textures,
+                odol_buildings=args.odol_buildings,
                 house_style_preset=args.house_style_preset,
                 building_length_quantum=args.building_length_quantum,
                 building_height_quantum=args.building_height_quantum,

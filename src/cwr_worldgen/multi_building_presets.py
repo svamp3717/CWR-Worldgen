@@ -493,6 +493,7 @@ def _install_transport_and_factory() -> None:
                 return previous_factory(*args, **kwargs)
 
             stock_kwargs = dict(kwargs)
+            stock_kwargs.pop("odol_buildings", None)  # only procedural assets are binarized
             stock_kwargs["house_style_preset"] = stock_ext.encode_stock_building_presets(stock_ids)
             procedural_kwargs = dict(kwargs)
             procedural_kwargs["house_style_preset"] = _procedural_transport(procedural_ids)
