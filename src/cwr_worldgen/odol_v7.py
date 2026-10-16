@@ -346,6 +346,7 @@ def _paa_avgc(path: Path) -> tuple[int, int, int, int]:
     raise ValueError(f"missing/invalid AVGC color tag in {path}")
 
 
+@lru_cache(maxsize=16384)
 def _texture_average_rgba(texture: str, texture_root: Path) -> tuple[int, int, int, int]:
     if not texture:
         # CWA uses opaque white for faces without a bound texture.
