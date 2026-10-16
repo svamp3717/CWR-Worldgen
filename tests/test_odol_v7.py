@@ -220,3 +220,65 @@ def test_real_procedural_building_writer_binarizes_with_missing_normals(
     odol_v7.binarize_building(path)
     assert path.read_bytes().startswith(b"ODOL\x07\x00\x00\x00")
     assert original.startswith(b"MLOD")
+
+
+def test_odol_model_map_symbol_is_from_geometry_lod() -> None:
+    lods = odol_v7.read_mlod(_mlod())
+    assert odol_v7._map_type(lods) == 4  # CWA MapHouse
+    assert odol_v7.MAP_TYPES["building"] == 3
+    assert odol_v7.MAP_TYPES["hide"] == 22
+    odol = odol_v7.mlod_to_odol(_mlod())
+    geometry_mass_count = len(lods[1].mass)
+    # Trailing metadata layout: map_type:i8, mass count:u32,
+    # mass values:f32[count], four model floats, 12 LOD-index bytes.
+    map_offset = len(odol) - (1 + 4 + 4 * geometry_mass_count + 16 + 12)
+    assert struct.unpack_from("<b", odol, map_offset)[0] == 4
+    assert odol_v7._map_type([lods[0]]) == 22  # no map property => hidden
+    lods[1].properties = [("map", "building")]
+    assert odol_v7._map_type(lods) == 3
+
+
+def test_odol_poly_face_offsets_are_16_for_triangles_and_18_for_quads() -> None:
+    # Both CWA FaceArray::RawSize and render section begin/end offsets
+    # are based on PolyProperties(8 bytes) + PolyVertices(2 + n*2 bytes).
+    # Wire face record sizes are different and must not be used here.
+    from cwr_worldgen.legacy_proxy_models import _read_odol_array
+
+    quad_a = ("house\\d\\wall.paa", 0, [(0, 0, 0., 0.), (1, 0, 1., 0.),
+                                              (2, 0, 1., 1.), (3, 0, 0., 1.)])
+    tri = ("house\\d\\roof.paa", 0, [(0, 0, 0., 0.), (1, 0, 1., 0.),
+                                             (2, 0, 0.5, 1.)])
+    quad_b = ("house\\d\\wall.paa", 0, quad_a[2])
+    lod = odol_v7._Lod(
+        resolution=1.0,
+        points=[(-1., 0., -1., 0), (1., 0., -1., 0),
+                (1., 0., 1., 0), (-1., 0., 1., 0)],
+        normals=[(0., 1., 0.)],
+        faces=[quad_a, tri, quad_b],
+        selections=[], properties=[], mass=[],
+    )
+    stream = BytesIO(odol_v7._write_lod(lod))
+    def read_int() -> int:
+        return struct.unpack("<I", stream.read(4))[0]
+    for item_size in (4, 8, 12, 12):
+        count = read_int()
+        _read_odol_array(stream, count, item_size, "ODOL vertex array")
+    stream.seek(48, 1)  # hints (8) and bounds (40)
+    for _ in range(read_int()):
+        while stream.read(1) != b"\0":
+            pass
+    for _ in range(2):
+        count = read_int()
+        _read_odol_array(stream, count, 2, "ODOL edge indices")
+    face_count, allocated = struct.unpack("<II", stream.read(8))
+    assert (face_count, allocated) == (3, 18 + 16 + 18)
+    for _ in range(face_count):
+        _flags, _texture_index, count = struct.unpack("<IhB", stream.read(7))
+        stream.seek(2 * count, 1)
+    count = read_int()
+    assert count == 3
+    sections = [struct.unpack("<IIihI", stream.read(18)) for _ in range(count)]
+    assert [(begin, end) for begin, end, *_ in sections] == [
+        (0, 18), (18, 34), (34, 52),
+    ]
+    assert [texture for _start, _end, _mat, texture, _flags in sections] == [0, 1, 0]
