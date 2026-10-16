@@ -145,9 +145,10 @@ def test_missing_normal_sentinel_does_not_select_last_normal() -> None:
                         (2, -1, 1., 1.), (3, -1, 0., 1.)])],
         selections=[], properties=[], mass=[],
     )
-    # Offsets: flags[8], UVs[8], positions[8], normals[8].
+    # Array counts are u32; the zero-normal flags are uint32, UV pairs
+    # are 2 floats and positions/normals are 3 floats each.
     data = odol_v7._write_lod(lod)
-    normal_offset = 8 + (8 + 4 * 4) + (8 + 4 * 8) + (8 + 8 * 12)
+    normal_offset = (4 + 8 * 4) + (4 + 8 * 8) + (4 + 8 * 12) + 4
     # Four original points precede four per-face vertices.
     assert struct.unpack_from("<fff", data, normal_offset + 4 * 12) == (0., 0., 0.)
 
