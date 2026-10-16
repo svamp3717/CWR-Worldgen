@@ -218,8 +218,34 @@ def test_real_procedural_building_writer_binarizes_with_missing_normals(
         for _point, normal, _u, _v in vertices
     ), "regression fixture must exercise generated Geometry LOD no-normal faces"
     odol_v7.binarize_building(path)
-    assert path.read_bytes().startswith(b"ODOL\x07\x00\x00\x00")
+    converted = path.read_bytes()
+    assert converted.startswith(b"ODOL\x07\x00\x00\x00")
     assert original.startswith(b"MLOD")
+
+    # Ensure conversion neither rotates a stair/roof polygon nor assigns a
+    # different texture or UVs. ODOL winding can begin at a different corner,
+    # so compare all cyclic rotations of the vertex ring.
+    from cwr_worldgen.legacy_proxy_models import _read_odol_visual
+    visual, _land_count, _textures = _read_odol_visual(
+        converted, strip_land_deform=False,
+    )
+    source = lods[0]
+    assert len(visual.faces) == len(source.faces)
+    for (texture, _flags, corners), face in zip(source.faces, visual.faces):
+        assert texture == face.texture
+        authored = tuple((
+            *source.points[point][:3], u, v,
+        ) for point, _normal, u, v in corners)
+        reconstructed = tuple((
+            *visual.points[point], u, v,
+        ) for point, _normal, u, v in face.vertices)
+        assert any(
+            all(
+                original_corner == reconstructed[(i + offset) % len(authored)]
+                for i, original_corner in enumerate(authored)
+            )
+            for offset in range(len(authored))
+        ), f"ODOL face changed its 3D footprint or UV mapping: {texture}"
 
 
 def test_odol_model_map_symbol_is_from_geometry_lod() -> None:
