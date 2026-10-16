@@ -94,10 +94,15 @@ def test_odol_uv_lzss_switches_at_1024_bytes(count: int) -> None:
 
 
 def test_large_building_arrays_use_decodable_sscompress_stream() -> None:
+    from cwr_worldgen.legacy_proxy_models import _read_odol_surface_lods
+
     odol = odol_v7.mlod_to_odol(_mlod(many_faces=True))
     assert struct.unpack_from("<II", odol, 4) == (7, 3)
     report = inspect_visual_model_dimensions(odol)
     assert report.width_metres == pytest.approx(4.0)
+    lods, resolutions = _read_odol_surface_lods(odol)
+    assert len(lods) == len(resolutions) == 3
+    assert len(lods[0].faces) == 300
 
 
 def test_building_export_atomic_and_idempotent_failure(tmp_path) -> None:
