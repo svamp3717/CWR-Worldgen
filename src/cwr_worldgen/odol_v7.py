@@ -183,6 +183,15 @@ def _write_lod(lod: _Lod) -> bytes:
     normals: list[tuple[float, float, float]] = []
     flags: list[int] = []
     vertex_points: list[int] = []
+    # ODOL Memory, LandContact and selection-only LODs can have no faces.
+    # Preserve their unreferenced points rather than deriving all vertices from
+    # face corners, which would silently delete door axes and path endpoints.
+    for index, (x, y, z, flag) in enumerate(lod.points):
+        verts.append((x, y, z))
+        normals.append((0., 0., 0.))
+        uvs.append((0., 0.))
+        flags.append(_point_flag(flag))
+        vertex_points.append(index)
     faces = []
     texture_names = list(dict.fromkeys(t for t, _, _ in lod.faces if t))
     for texture, face_flag, corners in lod.faces:
@@ -218,11 +227,24 @@ def _write_lod(lod: _Lod) -> bytes:
         first.setdefault(point, index)
     output += _array("H", [first.get(i, 0) for i in range(len(lod.points))], compressed=True)
     output += _array("H", vertex_points, compressed=True)
-    output += _pack("II", len(faces), sum(7 + 2 * len(indices) for _, _, indices in faces))
+    # The in-memory Poly entries use 4-byte alignment. The stock sil25
+    # example has two 16-byte quad records, despite only 15 wire bytes each.
+    output += _pack("II", len(faces), 16 * len(faces))
     for texture, special, indices in faces:
         output += _pack("IhB", special, texture_names.index(texture) if texture else -1, len(indices))
         output += _pack("H" * len(indices), *indices)
-    output += _pack("I", 0)        # shape sections (none; may impact materials)
+    # Contiguous render sections are required by the OFP renderer.
+    sections = []
+    for i, (texture, special, _indices) in enumerate(faces):
+        tex_index = texture_names.index(texture) if texture else -1
+        if sections and sections[-1][2:] == (0, tex_index, special):
+            beg, _end, mat, tex, spec = sections[-1]
+            sections[-1] = (beg, (i + 1) * 16, mat, tex, spec)
+        else:
+            sections.append((i * 16, (i + 1) * 16, 0, tex_index, special))
+    output += _pack("I", len(sections))
+    for beg, end, mat, tex, special in sections:
+        output += _pack("IIihI", beg, end, mat, tex, special)
     output += _pack("I", len(lod.selections))
     for name, point_weights, face_flags in lod.selections:
         face_ids = [i for i, flag in enumerate(face_flags) if flag]
@@ -271,7 +293,10 @@ def mlod_to_odol(source: bytes) -> bytes:
     geometry_index = next(
         (i for i, lod in enumerate(lods) if math.isclose(lod.resolution, 1e13, rel_tol=1e-6)), None,
     )
-    payload += _array("f", lods[geometry_index].mass if geometry_index is not None else [])
+    payload += _array(
+        "f", lods[geometry_index].mass if geometry_index is not None else [],
+        compressed=True,
+    )
     payload += _pack("ffff", 0., 0., 0., 0.)
     indices = [-1] * 12
     for i, lod in enumerate(lods):
