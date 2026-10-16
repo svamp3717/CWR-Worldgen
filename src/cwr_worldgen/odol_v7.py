@@ -353,7 +353,7 @@ def _write_lod(lod: _Lod) -> bytes:
     for name, value in lod.properties:
         output += _string(name) + _string(value)
     output += _pack("I", 0)        # morph animation count
-    output += _pack("III", 0xFFFFFFFF, 0xFFFFFFFF, 0) # colors, special
+    output += _pack("III", 0xFF000000, 0xFF000000, 0) # PackedBlack, special
     output += _pack("I", 0)        # proxy count
     return bytes(output)
 
@@ -361,7 +361,24 @@ def _write_lod(lod: _Lod) -> bytes:
 def mlod_to_odol(source: bytes) -> bytes:
     lods = read_mlod(source)
     all_points = [p[:3] for lod in lods for p in lod.points]
-    low, high, center, radius = _bounds(all_points)
+    low, high, center, _radius_about_center = _bounds(all_points)
+    geometry_lod = next(
+        (lod for lod in lods if math.isclose(lod.resolution, 1e13, rel_tol=1e-6)),
+        None,
+    )
+    geometry_points = [p[:3] for p in geometry_lod.points] if geometry_lod else []
+    _, _, geometry_center, _ = _bounds(geometry_points or all_points)
+    geometry_min, geometry_max, _, _ = _bounds(geometry_points or all_points)
+    geometry_radius = math.dist(geometry_min, geometry_max) * 0.5
+    # These authored buildings carry autocenter=0 in their Geometry LOD.
+    # With that setting, the engine retains vertices relative to (0,0,0)
+    # and expects an ODOL boundingCenter of *zero*. Supplying the bbox
+    # midpoint as boundingCenter would shift the placed objects vertically,
+    # even though every serialized LOD vertex was perfectly positioned.
+    if _model_property(lods, "autocenter").strip() != "0":
+        raise ValueError("ODOL procedural buildings require Geometry LOD autocenter=0")
+    bounding_center = (0.0, 0.0, 0.0)
+    bounding_radius = max((math.dist(p, bounding_center) for p in all_points), default=0.0)
     payload = bytearray(b"ODOL")
     payload += _pack("II", 7, len(lods))
     for lod in lods:
@@ -370,13 +387,16 @@ def mlod_to_odol(source: bytes) -> bytes:
         payload += _pack("f", lod.resolution)
     # ODOL model metadata, according to CWR-CE ShapeFile.cpp and fixture.
     payload += _pack("i", 0)
-    payload += _pack("ff", radius, radius)
+    payload += _pack("ff", bounding_radius, geometry_radius)
     payload += _pack("iii", 0, 0, 0)
-    payload += _pack("fff", *center)
-    payload += _pack("II", 0xFFFFFFFF, 0xFFFFFFFF)
+    payload += _pack("fff", *geometry_center)
+    # CWA draws 2D map building footprints with model._color.
+    # PackedBlack is 0xff000000; opaque white made every house white.
+    payload += _pack("II", 0xFF000000, 0xFF000000)
     payload += _pack("f", 1.0)
     payload += _pack("fff", *low) + _pack("fff", *high)
-    payload += _pack("fff", *center) * 2
+    payload += _pack("fff", *bounding_center)
+    payload += _pack("fff", *geometry_center)
     payload += _pack("fff", 0., 0., 0.)
     payload += _pack("fffffffff", 1., 0., 0., 0., 1., 0., 0., 0., 1.)
     # MLOD properties such as map=house are evaluated by the engine when
@@ -387,11 +407,8 @@ def mlod_to_odol(source: bytes) -> bytes:
     payload += _pack("BBBBB", 0, 0, 0, 0, 1)
     payload += _pack("b", _map_type(lods))
     # Geometry mass: indexed by actual Geometry LOD point order.
-    geometry_index = next(
-        (i for i, lod in enumerate(lods) if math.isclose(lod.resolution, 1e13, rel_tol=1e-6)), None,
-    )
     payload += _array(
-        "f", lods[geometry_index].mass if geometry_index is not None else [],
+        "f", geometry_lod.mass if geometry_lod is not None else [],
         compressed=True,
     )
     payload += _pack("ffff", 0., 0., 0., 0.)
