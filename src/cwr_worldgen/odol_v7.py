@@ -156,11 +156,42 @@ def _bounds(points: list[tuple[float, float, float]]):
 
 
 def _point_flag(flag: int) -> int:
-    """CWA ODOL ClipFlags encoding corresponding to MLOD point surface bits."""
-    value = int(flag)
-    # The MLOD low nibble stores the surface class; ODOL material occupies
-    # bits 8..11. Higher rendering flags follow legacy conversion mapping.
-    return ((value & 0xF) << 8) | ((value & 0x300) << 4) | ((value & 0x3000) << 2) | ((value & 0xFF0000) << 4)
+    """Convert raw Oxygen MLOD POINT_* flags into CWA ODOL ClipFlags.
+
+    Matches CWR-CE MLODLoader::convertPointFlagsToClipFlags.
+    """
+    value = int(flag) & 0xFFFFFFFF
+    all_flags = 0x0F | 0xF0 | 0x300 | 0x3000 | 0xFF0000 | 0x0F000000
+    if value & ~all_flags:
+        value = 0
+    result = 0x3F  # ClipAll: clipping-plane flags are always present.
+    if value & 0x1:
+        result |= 0x100
+    elif value & 0x2:
+        result |= 0x200
+    elif value & 0x4:
+        result |= 0x400
+    elif value & 0x8:
+        result |= 0x800
+    if value & 0x100:
+        result |= 0x1000
+    elif value & 0x200:
+        result |= 0x2000
+    if value & 0x10:
+        result |= 200 * 0x100000  # MSShining
+    elif value & 0x40:
+        result |= 203 * 0x100000  # MSFullLighted
+    elif value & 0x80:
+        result |= 202 * 0x100000  # MSHalfLighted
+    elif value & 0x20:
+        result |= 201 * 0x100000  # MSInShadow
+    if value & 0x1000:
+        result |= 0x4000
+    elif value & 0x2000:
+        result |= 0x8000
+    if value & 0xFF0000:
+        result |= ((value >> 16) & 0xFF) * 0x100000
+    return result & 0xFFFFFFFF
 
 
 def _face_flag(flag: int) -> int:
