@@ -9198,7 +9198,7 @@ class ProceduralBuildingLibrary:
             relative = model_path.split("\\", 1)[1].replace("\\", "/")
             file_path = source_dir / relative
             asset_key = cache_key(
-                "procedural-building-model-v49-robust-polygon-roof-triangulation",
+                "procedural-building-model-v50-correct-exterior-stair-rise",
                 {
                     "world_name": self.world_name,
                     "variant": asdict(key),
