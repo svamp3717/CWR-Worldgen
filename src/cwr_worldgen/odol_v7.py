@@ -366,10 +366,19 @@ def binarize_building(path: Path) -> None:
             raise ValueError("invalid ODOL version")
         # Independent decoder smoke test before the source file is replaced.
         # This checks the first visual LOD, but it is not in-game validation.
-        from .legacy_proxy_models import inspect_visual_model_dimensions
+        from .legacy_proxy_models import (
+            _read_odol_surface_lods, inspect_visual_model_dimensions,
+        )
         report = inspect_visual_model_dimensions(odol)
         if report.source_format != "ODOL" or report.width_metres <= 0:
             raise ValueError("converted ODOL failed independent model inspection")
+        # Check every LOD's arrays, face records, sections and selections.
+        # Inspecting only the first visual LOD can miss format mistakes in
+        # collision, Memory, Paths or the distant visual LODs.
+        parsed_lods, resolutions = _read_odol_surface_lods(odol)
+        expected_lods = struct.unpack_from("<I", odol, 8)[0]
+        if len(parsed_lods) != expected_lods or len(resolutions) != expected_lods:
+            raise ValueError("converted ODOL LOD table is incomplete")
     except (ValueError, IndexError, struct.error) as exc:
         raise ValueError(f"Cannot binarize procedural building {path}: {exc}") from exc
     temporary = path.with_suffix(".odol.tmp")
