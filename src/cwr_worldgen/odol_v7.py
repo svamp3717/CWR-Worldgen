@@ -257,7 +257,10 @@ def _write_lod(lod: _Lod) -> bytes:
     bounds_points = [p[:3] for p in lod.points]
     low, high, center, radius = _bounds(bounds_points)
     output += _array("I", flags, compressed=True)
-    output += _array("ff", uvs)
+    # CWA Shape::SerializeBin uses TransferBinaryArray(_tex), which switches
+    # UV payloads to SSCompress LZSS at 1024 bytes (128 UV pairs). Leaving
+    # them raw desynchronizes the ODOL decoder on detailed buildings.
+    output += _array("ff", uvs, compressed=True)
     output += _array("fff", verts)
     output += _array("fff", normals)
     output += _pack("ii", 0, 0)       # per-LOD hints
