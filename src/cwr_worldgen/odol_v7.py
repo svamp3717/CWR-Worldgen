@@ -8,6 +8,7 @@ deliberately limited, opt-in writer: unsupported model features fail loudly.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import math
 import struct
 from pathlib import Path
@@ -254,7 +255,116 @@ def _face_flag(flag: int) -> int:
     return result
 
 
-def _write_lod(lod: _Lod) -> bytes:
+def _lod_colors(
+    lod: _Lod, texture_root: Path | None,
+) -> tuple[int, int]:
+    """Calculate Shape::_color and _colorTop as CWA does for source MLOD.
+
+    Shape::CalculateColor averages PAA texture colors weighted by polygon
+    surface area (and separately by positive Y projected area for colorTop).
+    A source MLOD has neither of these packed ODOL color fields.
+    """
+    if texture_root is None:
+        return (0xFF000000, 0xFF000000)
+
+    sum_rgb = [0.0, 0.0, 0.0]
+    sum_rgb_top = [0.0, 0.0, 0.0]
+    sum_alpha = sum_alpha_top = 0.0
+    area_total = area_top_total = 0.0
+    for texture, _flags, corners in lod.faces:
+        if len(corners) < 3:
+            continue
+        # CWA's MLOD loader reverses face winding before CalculateColor.
+        order = [corners[1], corners[0], *reversed(corners[2:])]
+        xyz = [lod.points[corner[0]][:3] for corner in order]
+        area = projected = 0.0
+        origin = xyz[0]
+        for i in range(2, len(xyz)):
+            a, b = xyz[i - 1], xyz[i]
+            ab = tuple(a[j] - origin[j] for j in range(3))
+            ac = tuple(b[j] - origin[j] for j in range(3))
+            cross = (
+                ab[1] * ac[2] - ab[2] * ac[1],
+                ab[2] * ac[0] - ab[0] * ac[2],
+                ab[0] * ac[1] - ab[1] * ac[0],
+            )
+            area += math.sqrt(sum(value * value for value in cross)) * 0.5
+            projected += max(0.0, cross[1]) * 0.5
+        if area <= 0.0:
+            continue
+
+        red, green, blue, alpha_byte = _texture_average_rgba(
+            texture, texture_root,
+        )
+        alpha = alpha_byte / 255.0
+        area_total += area
+        area_top_total += projected
+        weighted = area * alpha
+        weighted_top = projected * alpha
+        sum_alpha += weighted
+        sum_alpha_top += weighted_top
+        for channel, value in enumerate((red, green, blue)):
+            sum_rgb[channel] += value * weighted
+            sum_rgb_top[channel] += value * weighted_top
+
+    def packed(rgb: list[float], weighted_alpha: float, total: float) -> int:
+        if total <= 0.0 or weighted_alpha <= 0.0:
+            return 0xFF000000  # no contributing faces: engine's PackedBlack
+        channels = [
+            max(0, min(255, round(value / weighted_alpha)))
+            for value in rgb
+        ]
+        a = max(0, min(255, round(255.0 * weighted_alpha / total)))
+        return ((a << 24) | (channels[0] << 16)
+                | (channels[1] << 8) | channels[2])
+
+    return (
+        packed(sum_rgb, sum_alpha, area_total),
+        packed(sum_rgb_top, sum_alpha_top, area_top_total),
+    )
+
+
+@lru_cache(maxsize=8192)
+def _paa_avgc(path: Path) -> tuple[int, int, int, int]:
+    """Read PAA's existing BGRA AVGC tag, without decompressing every mip."""
+    data = path.read_bytes()
+    if len(data) < 2 or struct.unpack_from("<H", data)[0] not in (0xFF01,):
+        raise ValueError(f"not a supported CWA DXT1 PAA texture: {path}")
+    offset = 2
+    while data[offset:offset + 4] == b"GGAT":
+        if len(data) < offset + 12:
+            break
+        name = data[offset + 4:offset + 8]
+        length = struct.unpack_from("<I", data, offset + 8)[0]
+        offset += 12
+        if length > len(data) - offset:
+            break
+        if name == b"CGVA" and length == 4:
+            blue, green, red, alpha = data[offset:offset + 4]
+            return (red, green, blue, alpha)
+        offset += length
+    raise ValueError(f"missing/invalid AVGC color tag in {path}")
+
+
+def _texture_average_rgba(texture: str, texture_root: Path) -> tuple[int, int, int, int]:
+    if not texture:
+        # CWA uses opaque white for faces without a bound texture.
+        return (255, 255, 255, 255)
+    parts = texture.replace("/", "\\").strip("\\").split("\\")
+    if any(part in ("", ".", "..") or ":" in part for part in parts):
+        raise ValueError(f"unsafe CWA texture reference: {texture!r}")
+    root = texture_root
+    # Texture paths inside MLOD are addon-prefixed, e.g.
+    # wg_town\\b\\wall.paa. The source root is the addon folder.
+    if parts[0].casefold() == root.name.casefold():
+        parts = parts[1:]
+    candidate = root.joinpath(*parts)
+    if not candidate.is_file():
+        raise ValueError(f"cannot compute ODOL map color; missing texture {texture!r} at {candidate}")
+    return _paa_avgc(candidate)
+
+
+def _write_lod(lod: _Lod, *, color: int = 0xFF000000, color_top: int = 0xFF000000) -> bytes:
     output = bytearray()
     verts: list[tuple[float, float, float]] = []
     uvs: list[tuple[float, float]] = []
@@ -353,13 +463,14 @@ def _write_lod(lod: _Lod) -> bytes:
     for name, value in lod.properties:
         output += _string(name) + _string(value)
     output += _pack("I", 0)        # morph animation count
-    output += _pack("III", 0xFF000000, 0xFF000000, 0) # PackedBlack, special
+    output += _pack("III", color, color_top, 0)  # LOD's source-derived average colors
     output += _pack("I", 0)        # proxy count
     return bytes(output)
 
 
-def mlod_to_odol(source: bytes) -> bytes:
+def mlod_to_odol(source: bytes, *, texture_root: Path | None = None) -> bytes:
     lods = read_mlod(source)
+    lod_colors = [_lod_colors(lod, texture_root) for lod in lods]
     all_points = [p[:3] for lod in lods for p in lod.points]
     low, high, center, _radius_about_center = _bounds(all_points)
     geometry_lod = next(
@@ -381,8 +492,8 @@ def mlod_to_odol(source: bytes) -> bytes:
     bounding_radius = max((math.dist(p, bounding_center) for p in all_points), default=0.0)
     payload = bytearray(b"ODOL")
     payload += _pack("II", 7, len(lods))
-    for lod in lods:
-        payload += _write_lod(lod)
+    for lod, (color, color_top) in zip(lods, lod_colors):
+        payload += _write_lod(lod, color=color, color_top=color_top)
     for lod in lods:
         payload += _pack("f", lod.resolution)
     # ODOL model metadata, according to CWR-CE ShapeFile.cpp and fixture.
@@ -390,9 +501,10 @@ def mlod_to_odol(source: bytes) -> bytes:
     payload += _pack("ff", bounding_radius, geometry_radius)
     payload += _pack("iii", 0, 0, 0)
     payload += _pack("fff", *geometry_center)
-    # CWA draws 2D map building footprints with model._color.
-    # PackedBlack is 0xff000000; opaque white made every house white.
-    payload += _pack("II", 0xFF000000, 0xFF000000)
+    # CWA's model color is the first visual LOD's averaged texture color.
+    # This is what the in-game map uses for buildings/houses.
+    model_color, model_color_top = lod_colors[0]
+    payload += _pack("II", model_color, model_color_top)
     payload += _pack("f", 1.0)
     payload += _pack("fff", *low) + _pack("fff", *high)
     payload += _pack("fff", *bounding_center)
@@ -422,11 +534,11 @@ def mlod_to_odol(source: bytes) -> bytes:
     return bytes(payload)
 
 
-def binarize_building(path: Path) -> None:
+def binarize_building(path: Path, *, texture_root: Path | None = None) -> None:
     """Atomically replace an MLOD P3D with ODOL v7, or preserve original on error."""
     original = path.read_bytes()
     try:
-        odol = mlod_to_odol(original)
+        odol = mlod_to_odol(original, texture_root=texture_root)
         if odol[:8] != b"ODOL" + _pack("I", 7):
             raise ValueError("invalid ODOL version")
         # Independent decoder smoke test before the source file is replaced.
