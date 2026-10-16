@@ -382,7 +382,9 @@ def mlod_to_odol(source: bytes) -> bytes:
     # MLOD properties such as map=house are evaluated by the engine when
     # loading an editable model. ODOL is preprocessed, so the equivalent
     # MapType enum must be saved in the model header explicitly.
-    payload += _pack("BBBBB", 0, 0, 0, 0, 0)
+    # Keep allowAnimation enabled: interior door selections may be animated
+    # even when the point flags do not explicitly request land deformation.
+    payload += _pack("BBBBB", 0, 0, 0, 0, 1)
     payload += _pack("b", _map_type(lods))
     # Geometry mass: indexed by actual Geometry LOD point order.
     geometry_index = next(
