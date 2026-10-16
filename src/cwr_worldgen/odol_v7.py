@@ -348,6 +348,12 @@ def binarize_building(path: Path) -> None:
     odol = mlod_to_odol(original)
     if odol[:8] != b"ODOL" + _pack("I", 7):
         raise ValueError("invalid ODOL version")
+    # Independent decoder smoke test before the source file is replaced. This
+    # catches malformed headers, face/texture tables and broken LZSS streams.
+    from .legacy_proxy_models import inspect_visual_model_dimensions
+    report = inspect_visual_model_dimensions(odol)
+    if report.source_format != "ODOL" or report.width_metres <= 0:
+        raise ValueError("converted ODOL failed independent model inspection")
     temporary = path.with_suffix(".odol.tmp")
     try:
         temporary.write_bytes(odol)
