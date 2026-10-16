@@ -743,6 +743,7 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         "verify_regeneration": "--verify-regeneration",
         "procedural_building_interiors": "--procedural-building-interiors",
         "high_quality_building_textures": "--high-quality-building-textures",
+        "odol_buildings": "--odol-buildings",
         "forest_individual_objects_only": "--replace-forest-polygons-with-clusters",
         "haybales": "--haybales",
         "match_nearby_building_textures": "--match-nearby-building-textures",
@@ -1025,6 +1026,7 @@ def default_gui_values() -> dict[str, object]:
         "verify_regeneration": False,
         "procedural_building_interiors": False,
         "high_quality_building_textures": False,
+        "odol_buildings": False,
         "forest_individual_objects_only": False,
         "forest_clusters": True,
         "forest_severe_hill_fallback": True,
@@ -2397,6 +2399,7 @@ class WorldgenGui(tk.Tk):
         build_opts = ttk.LabelFrame(advanced.body, text="Build behavior", padding=10)
         build_opts.pack(fill="x", pady=(0, 10))
         option_values = (
+            ("Experimental: binarize procedural buildings as ODOL v7 (Python)", "odol_buildings"),
             ("Prefer reuse when output exists", "keep_output"),
             ("Refresh matching cache entries", "cache_refresh"),
             ("Disable all caches", "no_cache"),
