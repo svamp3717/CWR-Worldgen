@@ -73,6 +73,26 @@ def test_python_odol_writer_has_native_v7_header_and_preserves_lods() -> None:
     assert shape.length_metres == pytest.approx(6.0)
 
 
+@pytest.mark.parametrize("count", [0, 1, 127, 128, 129, 512])
+def test_odol_uv_lzss_switches_at_1024_bytes(count: int) -> None:
+    """Round-trip UV payloads through the existing independent CWA ODOL reader."""
+    from cwr_worldgen.legacy_proxy_models import _read_odol_array
+
+    uv = [((i % 29) / 13., (i % 37) / 17.) for i in range(count)]
+    raw = b"".join(struct.pack("<ff", *pair) for pair in uv)
+    wire = odol_v7._array("ff", uv, compressed=True)
+    stream = BytesIO(wire)
+    (actual_count,) = struct.unpack("<I", stream.read(4))
+    assert actual_count == count
+    assert _read_odol_array(stream, actual_count, 8, "ODOL UV coordinates") == raw
+    assert stream.tell() == len(wire)
+    if count < 128:
+        # Less than 1024 bytes is copied literally, without an LZSS header.
+        assert wire[4:] == raw
+    else:
+        assert wire[4:] != raw
+
+
 def test_large_building_arrays_use_decodable_sscompress_stream() -> None:
     odol = odol_v7.mlod_to_odol(_mlod(many_faces=True))
     assert struct.unpack_from("<II", odol, 4) == (7, 3)
