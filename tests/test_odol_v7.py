@@ -14,11 +14,11 @@ from cwr_worldgen.procedural_buildings import (
 )
 
 
-def _quad(texture: str, *, flags: int = 0) -> _Face:
+def _quad(texture: str, *, flags: int = 0, normal_index: int = 0) -> _Face:
     return _Face(
         texture,
-        ((0, 0, 0., 0.), (1, 0, 1., 0.),
-         (2, 0, 1., 1.), (3, 0, 0., 1.)),
+        ((0, normal_index, 0., 0.), (1, normal_index, 1., 0.),
+         (2, normal_index, 1., 1.), (3, normal_index, 0., 1.)),
         flags,
     )
 
@@ -41,7 +41,7 @@ def _mlod(*, many_faces: bool = False) -> bytes:
     # The model must survive a face-bearing Geometry LOD without normals,
     # plus a Memory LOD containing points without any visual faces.
     collision = _Lod(
-        points, (), (_quad(""),), 1e13,
+        points, (), (_quad("", normal_index=-1),), 1e13,
         selections=(
             _NamedSelection("component01", bytes([1, 1, 1, 1]), b"\x01"),
         ),
@@ -121,3 +121,44 @@ def test_milestone9_cli_and_specs_accept_odol_buildings() -> None:
     assert opts.odol_buildings is True
     assert Milestone9Spec.__dataclass_fields__["odol_buildings"].default is False
     assert _Milestone9PlayabilitySpec.__dataclass_fields__["odol_buildings"].default is False
+
+
+def test_mlod_collision_missing_normal_sentinel_is_valid() -> None:
+    lods = odol_v7.read_mlod(_mlod())
+    assert len(lods) == 3
+    geometry = lods[1]
+    assert not geometry.normals
+    assert geometry.faces[0][2][0][1] == -1
+    # This is the same intentional -1 normal generated for polygon-native and
+    # regular procedural building Geometry LODs; conversion must not reject it.
+    result = odol_v7.mlod_to_odol(_mlod())
+    assert result.startswith(b"ODOL\\x07\\x00\\x00\\x00")
+
+
+def test_missing_normal_sentinel_does_not_select_last_normal() -> None:
+    lod = odol_v7._Lod(
+        resolution=1.,
+        points=[(-1., 0., -1., 0), (1., 0., -1., 0),
+                (1., 0., 1., 0), (-1., 0., 1., 0)],
+        normals=[(0., 1., 0.)],
+        faces=[("", 0, [(0, -1, 0., 0.), (1, -1, 1., 0.),
+                        (2, -1, 1., 1.), (3, -1, 0., 1.)])],
+        selections=[], properties=[], mass=[],
+    )
+    # Offsets: flags[8], UVs[8], positions[8], normals[8].
+    data = odol_v7._write_lod(lod)
+    normal_offset = 8 + (8 + 4 * 4) + (8 + 4 * 8) + (8 + 8 * 12)
+    # Four original points precede four per-face vertices.
+    assert struct.unpack_from("<fff", data, normal_offset + 4 * 12) == (0., 0., 0.)
+
+
+@pytest.mark.parametrize("point,normal", [(4, -1), (-1, -1), (0, -2), (0, 1)])
+def test_corrupt_mlod_face_index_still_fails(point: int, normal: int) -> None:
+    raw = bytearray(_mlod())
+    # The first visual face begins after the 12-byte MLOD header,
+    # 28-byte SP3X header, four 16-byte points, one 12-byte normal,
+    # 32-byte texture name and four-byte corner count.
+    corner_offset = 12 + 28 + 4 * 16 + 12 + 32 + 4
+    struct.pack_into("<ii", raw, corner_offset, point, normal)
+    with pytest.raises(ValueError, match="face 0 corner 0 references"):
+        odol_v7.read_mlod(bytes(raw))
