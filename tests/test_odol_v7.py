@@ -46,7 +46,7 @@ def _mlod(*, many_faces: bool = False) -> bytes:
             _NamedSelection("component01", bytes([1, 1, 1, 1]), b"\x01"),
         ),
         mass_per_point=(100., 100., 100., 100.),
-        properties=(("map", "house"),),
+        properties=(("map", "house"), ("autocenter", "0")),
     )
     memory = _Lod(
         ((0., 0., 0.), (0., 1., 0.)), (), (), 1e15,
