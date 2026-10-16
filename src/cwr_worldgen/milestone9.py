@@ -786,6 +786,7 @@ class Milestone9Spec(Milestone8Spec):
 
 @dataclass(frozen=True, slots=True)
 class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
+    odol_buildings: bool = False
     include_minor_roads: bool = True
     procedural_gravel_roads: bool = True
     procedural_paved_road_fallback: bool = True
