@@ -88,7 +88,7 @@ def read_mlod(source: bytes) -> list[_Lod]:
     if magic != b"MLOD" or major != 1 or reserved or not 1 <= count <= 100:
         raise ValueError("expected OFP MLOD with valid header")
     lods: list[_Lod] = []
-    for _ in range(count):
+    for lod_index in range(count):
         signature, head_size, version, np, nn, nf, flags = stream.unpack("4s6I")
         if signature != b"SP3X" or head_size != 28 or version not in (1, 0x99):
             raise ValueError("unsupported MLOD SP3X header")
@@ -97,7 +97,7 @@ def read_mlod(source: bytes) -> list[_Lod]:
         points = [stream.unpack("fffI") for _ in range(np)]
         normals = [stream.unpack("fff") for _ in range(nn)]
         faces = []
-        for _ in range(nf):
+        for face_index in range(nf):
             texture = stream.take(32).split(b"\0", 1)[0].decode("ascii")
             (nverts,) = stream.unpack("I")
             verts = [stream.unpack("iiff") for _ in range(4)]
@@ -105,11 +105,20 @@ def read_mlod(source: bytes) -> list[_Lod]:
             if nverts not in (3, 4):
                 raise ValueError("ODOL only supports triangles and quads")
             face_vertices = verts[:nverts]
-            if any(
-                not (0 <= p < np and (0 <= n < nn or (nn == 0 and n == 0)))
-                for p, n, _, _ in face_vertices
-            ):
-                raise ValueError("MLOD face references a missing point/normal")
+            for corner_index, (point, normal, _u, _v) in enumerate(face_vertices):
+                if not 0 <= point < np:
+                    raise ValueError(
+                        f"MLOD LOD {lod_index} face {face_index} corner {corner_index} "
+                        f"references point {point} (point count {np})"
+                    )
+                # Worldgen deliberately writes -1 for faces without a normal,
+                # especially collision Geometry LODs. Other generated collision
+                # LODs use 0 even with an empty normals table.
+                if normal != -1 and not (0 <= normal < nn or (nn == 0 and normal == 0)):
+                    raise ValueError(
+                        f"MLOD LOD {lod_index} face {face_index} corner {corner_index} "
+                        f"references normal {normal} (normal count {nn})"
+                    )
             faces.append((texture, flag, face_vertices))
         if stream.take(4) != b"TAGG":
             raise ValueError("missing MLOD TAGG section")
@@ -235,7 +244,10 @@ def _write_lod(lod: _Lod) -> bytes:
                 raise ValueError("ODOL vertex limit exceeded: 65535 vertices per LOD")
             x, y, z, raw_flag = lod.points[pi]
             verts.append((x, y, z))
-            normals.append(lod.normals[ni] if lod.normals else (0., 0., 0.))
+            # A -1 MLOD normal is the intentional no-normal sentinel, not
+            # Python's "last element" indexing. Preserve its absence as a
+            # zero normal instead of accidentally inheriting another face's.
+            normals.append(lod.normals[ni] if ni >= 0 and lod.normals else (0., 0., 0.))
             uvs.append((u, v))
             flags.append(_point_flag(raw_flag))
             vertex_points.append(pi)
