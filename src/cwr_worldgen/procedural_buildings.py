@@ -7848,6 +7848,7 @@ class ProceduralBuildingLibrary:
         church_plinth_height: float = 0.0,
         generate_interiors: bool = False,
         high_quality_textures: bool = False,
+        odol_buildings: bool = False,
         texture_variants: int = DEFAULT_BUILDING_TEXTURE_VARIANTS,
         house_style_preset: str = HOUSE_STYLE_PRESET_AUTO,
         cache_dir: Path | None = None,
@@ -7874,6 +7875,7 @@ class ProceduralBuildingLibrary:
         self.church_plinth_height = max(0.0, float(church_plinth_height))
         self.generate_interiors = bool(generate_interiors)
         self.high_quality_textures = bool(high_quality_textures)
+        self.odol_buildings = bool(odol_buildings)
         self.texture_size = (
             HIGH_QUALITY_BUILDING_ASSET_TEXTURE_SIZE
             if self.high_quality_textures else BUILDING_ASSET_TEXTURE_SIZE
@@ -9277,6 +9279,22 @@ class ProceduralBuildingLibrary:
             self.cache_misses += int(not hit)
             model_assets.append(asset)
 
+        if self.odol_buildings:
+            # Binarize after the MLOD-only worker/cache stage. This intentionally
+            # leaves the established MLOD cache reusable and never poisons it
+            # with ODOL files that the MLOD inspector cannot read.
+            from .odol_v7 import binarize_building
+            for asset in model_assets:
+                model_path = source_dir / asset.relative_path
+                binarize_building(model_path)
+            model_assets = [
+                replace(
+                    asset,
+                    sha256=sha256((source_dir / asset.relative_path).read_bytes()).hexdigest(),
+                )
+                for asset in model_assets
+            ]
+
         placements = sum(self._usage.values())
         generated = len(model_assets)
         polygon_native_variants = sum(1 for key in selected if key.footprint_vertices)
@@ -9285,7 +9303,8 @@ class ProceduralBuildingLibrary:
         )
         document = {
             "schema": 18,
-            "generator": "cwr-worldgen procedural MLOD building library",
+            "generator": "cwr-worldgen procedural building library",
+            "model_format": "ODOL-v7" if self.odol_buildings else "MLOD",
             "region": self.region_identifier or "default",
             "detected_house_style_region": self.detected_house_style_identifier or "default",
             "house_style_region": self.house_style_identifier or self.region_identifier or "default",
@@ -9298,6 +9317,7 @@ class ProceduralBuildingLibrary:
                 "texture_variants_per_style": self.texture_variants,
                 "texture_size_px": self.texture_size,
                 "high_quality_textures": self.high_quality_textures,
+                "odol_buildings": self.odol_buildings,
                 "texture_variant_selection": "deterministic-building-tags-and-position",
                 "roof_pitch_degrees": self.roof_pitch_degrees,
                 "minimum_foundation_depth_m": self.foundation_depth,
