@@ -9303,8 +9303,12 @@ class ProceduralBuildingLibrary:
         )
         document = {
             "schema": 18,
-            "generator": "cwr-worldgen procedural building library",
-            "model_format": "ODOL-v7" if self.odol_buildings else "MLOD",
+            "generator": (
+                "cwr-worldgen procedural ODOL building library"
+                if self.odol_buildings
+                else "cwr-worldgen procedural MLOD building library"
+            ),
+            **({"model_format": "ODOL-v7"} if self.odol_buildings else {}),
             "region": self.region_identifier or "default",
             "detected_house_style_region": self.detected_house_style_identifier or "default",
             "house_style_region": self.house_style_identifier or self.region_identifier or "default",
@@ -9317,7 +9321,7 @@ class ProceduralBuildingLibrary:
                 "texture_variants_per_style": self.texture_variants,
                 "texture_size_px": self.texture_size,
                 "high_quality_textures": self.high_quality_textures,
-                "odol_buildings": self.odol_buildings,
+                **({"odol_buildings": True} if self.odol_buildings else {}),
                 "texture_variant_selection": "deterministic-building-tags-and-position",
                 "roof_pitch_degrees": self.roof_pitch_degrees,
                 "minimum_foundation_depth_m": self.foundation_depth,
