@@ -21,6 +21,41 @@ SPECIAL_LODS = {
     4.0e15: 10,     # Paths
 }
 
+# CWA MapType enum in CWR-CE's World/MapTypes.hpp. Unlike MLOD,
+# binarized ODOL needs this model-level value explicitly written.
+MAP_TYPES = {
+    "tree": 0, "small tree": 1, "bush": 2,
+    "building": 3, "house": 4,
+    "forest border": 5, "forest triangle": 6, "forest square": 7,
+    "church": 8, "chapel": 9, "cross": 10,
+    "rock": 11, "bunker": 12, "fortress": 13, "fountain": 14,
+    "view-tower": 15, "lighthouse": 16, "quay": 17,
+    "fuelstation": 18, "hospital": 19, "fence": 20, "wall": 21,
+    "hide": 22, "busstop": 23,
+}
+
+
+def _model_property(lods: list["_Lod"], key: str) -> str:
+    """CWA uses Geometry LOD properties before the first visual LOD."""
+    geom = next(
+        (lod for lod in lods if math.isclose(lod.resolution, 1e13, rel_tol=1e-6)),
+        None,
+    )
+    if geom is not None:
+        found = dict((name.casefold(), value) for name, value in geom.properties).get(key)
+        if found:
+            return found
+    if lods:
+        return dict((name.casefold(), value) for name, value in lods[0].properties).get(key, "")
+    return ""
+
+
+def _map_type(lods: list["_Lod"]) -> int:
+    value = _model_property(lods, "map").strip().casefold()
+    if value not in MAP_TYPES and value:
+        raise ValueError(f"unsupported CWA map classification {value!r}")
+    return MAP_TYPES.get(value, MAP_TYPES["hide"])
+
 
 def _pack(fmt: str, *args: object) -> bytes:
     return struct.pack("<" + fmt, *args)
@@ -336,8 +371,11 @@ def mlod_to_odol(source: bytes) -> bytes:
     payload += _pack("fff", *center) * 2
     payload += _pack("fff", 0., 0., 0.)
     payload += _pack("fffffffff", 1., 0., 0., 0., 1., 0., 0., 0., 1.)
-    payload += _pack("BBBBB", 0, 0, 0, 0, 1)
-    payload += _pack("b", 0)
+    # MLOD properties such as map=house are evaluated by the engine when
+    # loading an editable model. ODOL is preprocessed, so the equivalent
+    # MapType enum must be saved in the model header explicitly.
+    payload += _pack("BBBBB", 0, 0, 0, 0, 0)
+    payload += _pack("b", _map_type(lods))
     # Geometry mass: indexed by actual Geometry LOD point order.
     geometry_index = next(
         (i for i, lod in enumerate(lods) if math.isclose(lod.resolution, 1e13, rel_tol=1e-6)), None,
