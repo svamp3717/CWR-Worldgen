@@ -424,9 +424,19 @@ def binarize_building(path: Path) -> None:
         # Inspecting only the first visual LOD can miss format mistakes in
         # collision, Memory, Paths or the distant visual LODs.
         parsed_lods, resolutions = _read_odol_surface_lods(odol)
-        expected_lods = struct.unpack_from("<I", odol, 8)[0]
+        source_lods = read_mlod(original)
+        expected_lods = len(source_lods)
         if len(parsed_lods) != expected_lods or len(resolutions) != expected_lods:
             raise ValueError("converted ODOL LOD table is incomplete")
+        for index, (source_lod, target_lod) in enumerate(zip(source_lods, parsed_lods)):
+            # A structurally decodable ODOL can still silently lose a material
+            # reference. Check every face's texture against its MLOD donor.
+            source_textures = [tex for tex, _flags, _corners in source_lod.faces]
+            target_textures = [tex for tex, _flags, _indices in target_lod.faces]
+            if source_textures != target_textures:
+                raise ValueError(
+                    f"converted ODOL LOD {index} lost or reassigned face textures"
+                )
     except (ValueError, IndexError, struct.error) as exc:
         raise ValueError(f"Cannot binarize procedural building {path}: {exc}") from exc
     temporary = path.with_suffix(".odol.tmp")
