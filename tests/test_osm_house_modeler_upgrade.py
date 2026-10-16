@@ -185,3 +185,55 @@ def test_enterable_balconies_are_allowed_without_balcony_doors() -> None:
             break
     assert found is not None
     assert found.balcony_count >= 1
+
+
+def test_exterior_stairs_descend_away_from_rectangular_door(monkeypatch) -> None:
+    """The first step at the wall is highest, not the outermost step."""
+    key = _house(interiors=False)
+    stairs = []
+    original = upgrade._add_box
+
+    def record_box(*args, **kwargs):
+        if abs(kwargs["y0"] + 0.5) < 1e-6 and kwargs["y1"] <= 0:
+            stairs.append((kwargs["center"], kwargs["y1"], kwargs["axis_depth"]))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(upgrade, "_add_box", record_box)
+    pb._visual_lod(
+        key, "wall.paa", "roof.paa", 35., None, "foundation.paa", 0.5,
+    )
+    assert len(stairs) >= 2
+    assert stairs[0][1] == 0.
+    assert all(a[1] > b[1] for a, b in zip(stairs, stairs[1:]))
+    # Exterior front of a rectangular model is -Z.
+    assert all(a[0][1] > b[0][1] for a, b in zip(stairs, stairs[1:]))
+    assert all(depth == (0., -1.) for _center, _top, depth in stairs)
+
+
+def test_polygon_entrance_stairs_follow_selected_side_and_descend(monkeypatch) -> None:
+    """On a +X-facing doorway, steps travel out on +X, never on -Z."""
+    key = replace(
+        _house(interiors=False),
+        footprint_vertices=((-5., -7.), (5., -7.), (5., 7.), (-5., 7.)),
+        entrance_edge=1,
+        entrance_fraction=0.5,
+    )
+    stairs = []
+    original = upgrade._add_box
+
+    def record_box(*args, **kwargs):
+        if abs(kwargs["y0"] + 0.5) < 1e-6 and kwargs["y1"] <= 0:
+            stairs.append((kwargs["center"], kwargs["y1"], kwargs["axis_depth"]))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(upgrade, "_add_box", record_box)
+    pb._polygon_native_visual_lod(
+        key, "wall.paa", "roof.paa",
+        roof_pitch_degrees=35., foundation_texture="foundation.paa",
+        foundation_depth=0.5, plain_wall_texture="plain.paa",
+    )
+    assert len(stairs) >= 2
+    assert stairs[0][1] == 0.
+    assert all(a[1] > b[1] for a, b in zip(stairs, stairs[1:]))
+    assert all(a[0][0] < b[0][0] for a, b in zip(stairs, stairs[1:]))
+    assert all(depth == (1., -0.) for _center, _top, depth in stairs)
