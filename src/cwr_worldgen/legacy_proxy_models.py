@@ -644,6 +644,7 @@ class _SurfaceLodSummary:
     faces: tuple[tuple[str, int, tuple[int, ...]], ...]
     # Local-Y coordinates preserve Roadway LOD elevation for bridge donors.
     point_heights: tuple[float, ...] = ()
+    point_horizontal: tuple[tuple[float, float], ...] = ()
 
 
 def _skip_odol_compressed_array(
@@ -679,10 +680,12 @@ def _read_odol_surface_lod(
         point_count * _VEC3.size,
         f"ODOL LOD {lod_index} points",
     )
-    point_heights = tuple(
-        float(_VEC3.unpack_from(point_bytes, i * _VEC3.size)[1])
+    positions = tuple(
+        _VEC3.unpack_from(point_bytes, i * _VEC3.size)
         for i in range(point_count)
     )
+    point_heights = tuple(float(point[1]) for point in positions)
+    point_horizontal = tuple((float(point[0]), float(point[2])) for point in positions)
     normal_count = _read_u32(stream, f"ODOL LOD {lod_index} normal count")
     _read_exact(
         stream,
@@ -837,6 +840,7 @@ def _read_odol_surface_lod(
         textures=textures,
         faces=tuple(faces),
         point_heights=point_heights,
+        point_horizontal=point_horizontal,
     )
 
 
@@ -964,6 +968,7 @@ def _read_mlod_surface_lods(data: bytes) -> tuple[
             textures=tuple(sorted(textures)),
             faces=tuple(faces),
             point_heights=tuple(float(point[1]) for point in points),
+            point_horizontal=tuple((float(point[0]), float(point[2])) for point in points),
         ))
         resolutions.append(float(resolution))
     return tuple(lods), tuple(resolutions)
@@ -1040,11 +1045,22 @@ def inspect_roadway_surface_style(data: bytes) -> RoadwaySurfaceStyle:
     )
 
 
-def inspect_roadway_deck_height(data: bytes) -> float:
-    """Median local Y of referenced Roadway LOD face vertices.
+@dataclass(frozen=True, slots=True)
+class RoadwayDeckGeometry:
+    """Drivable local surface bounds and deck level for a straight bridge P3D."""
 
-    Unlike the highest visual vertex (often a railing), this measures the
-    in-game driving surface. Requires a drawable Roadway LOD in a legacy P3D.
+    local_y: float
+    span_x: float
+    span_z: float
+    centre_x: float
+    centre_z: float
+
+
+def inspect_roadway_deck_geometry(data: bytes) -> RoadwayDeckGeometry:
+    """Measure the *actual Roadway LOD*, not shorter decorative bridge rails.
+
+    Modules connect at drivable Roadway ends. Some stock bridges have a much
+    shorter named visual mesh; using visual dimensions would create wheel traps.
     """
     if data.startswith(b"ODOL"):
         lods, resolutions = _read_odol_surface_lods(data)
@@ -1055,28 +1071,42 @@ def inspect_roadway_deck_height(data: bytes) -> float:
     for lod, resolution in zip(lods, resolutions):
         if not math.isclose(float(resolution), 3.0e15, rel_tol=1.0e-4, abs_tol=1.0e8):
             continue
-        values = [
-            lod.point_heights[i]
-            for _texture, _flags, indices in lod.faces
-            if len(indices) in {3, 4}
-            for i in indices
-            if 0 <= i < len(lod.point_heights)
+        indices = [
+            index
+            for _texture, _flags, face_indices in lod.faces
+            if len(face_indices) in {3, 4}
+            for index in face_indices
+            if 0 <= index < len(lod.point_heights) and index < len(lod.point_horizontal)
         ]
-        values = [float(y) for y in values if math.isfinite(float(y))]
-        if not values:
-            raise ProxyCloneError("bridge donor Roadway LOD has no drawable vertex elevations")
-        values.sort()
-        # A non-planar Roadway LOD needs more advanced seam fitting than this
-        # straight, level modular-bridge mode provides.
-        low, high = values[0], values[-1]
+        if not indices:
+            raise ProxyCloneError("bridge donor Roadway LOD has no drawable faces")
+        ys = sorted(lod.point_heights[index] for index in indices)
+        xs = [lod.point_horizontal[index][0] for index in indices]
+        zs = [lod.point_horizontal[index][1] for index in indices]
+        if not all(math.isfinite(v) for v in (*ys, *xs, *zs)):
+            raise ProxyCloneError("bridge donor Roadway LOD contains non-finite coordinates")
+        low, high = ys[0], ys[-1]
         if high - low > 0.6:
             raise ProxyCloneError(
                 f"bridge donor Roadway LOD is not level ({high - low:.2f} m variation); "
                 "use a flat straight bridge module"
             )
-        n = len(values)
-        return values[n // 2] if n % 2 else (values[n // 2 - 1] + values[n // 2]) * 0.5
+        n = len(ys)
+        median_y = ys[n // 2] if n % 2 else (ys[n // 2 - 1] + ys[n // 2]) * 0.5
+        return RoadwayDeckGeometry(
+            local_y=median_y,
+            span_x=max(xs) - min(xs),
+            span_z=max(zs) - min(zs),
+            centre_x=(min(xs) + max(xs)) * 0.5,
+            centre_z=(min(zs) + max(zs)) * 0.5,
+        )
     raise ProxyCloneError("bridge donor has no Roadway LOD; vehicle-safe donor required")
+
+
+def inspect_roadway_deck_height(data: bytes) -> float:
+    """Backward-compatible Roadway surface local-Y measurement."""
+    return inspect_roadway_deck_geometry(data).local_y
+
 
 
 def inspect_visual_surface_style(
