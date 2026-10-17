@@ -72,7 +72,9 @@ class StockBridgeSpanPlan:
 
     @property
     def length(self) -> float:
-        return self.module_count * _STOCK_MODULE_SPACING_METRES
+        # The runtime also uses this plan for custom P3Ds whose Roadway join
+        # length differs from Nogova's hardcoded stock module spacing.
+        return math.dist(*self.points)
 
 
 class _StockBridgeSpecProxy:
