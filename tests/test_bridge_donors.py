@@ -40,9 +40,10 @@ def _lod(*, width: float, length: float, roadway_y: float, resolution: float) ->
 
 def _bridge_mlod(*, length: float = 24.0, width: float = 8.0,
                  deck_y: float = 1.5, has_roadway: bool = True,
+                 roadway_length: float | None = None,
                  warped: bool = False) -> bytes:
     visual = _lod(width=width, length=length, roadway_y=deck_y + 2.0, resolution=1.0)
-    roadway = _lod(width=width - 0.5, length=length,
+    roadway = _lod(width=width - 0.5, length=roadway_length or length,
                    roadway_y=deck_y, resolution=3.0e15)
     if warped:
         points = list(roadway.points)
@@ -77,7 +78,6 @@ def _donor_spec(pbo: Path, **changes) -> _Milestone9PlayabilitySpec:
         "ditch_grass_enabled": False,
         "barriers_enabled": False,
         "rural_vegetation_enabled": False,
-        "bridges_enabled": True,
     }
     values.update(changes)
     return _Milestone9PlayabilitySpec(**values)
@@ -91,7 +91,7 @@ def test_bridge_donor_measures_length_width_heading_and_roadway_deck(tmp_path: P
     assert donor.model == r"addonbridge\segment.p3d"
     assert donor.source_format == "MLOD"
     assert donor.length_metres == pytest.approx(24.0)
-    assert donor.width_metres == pytest.approx(8.0)
+    assert donor.width_metres == pytest.approx(7.5)
     assert donor.heading_offset_degrees == 0.0
     assert donor.roadway_local_y_metres == pytest.approx(1.5)
     assert len(donor.content_sha256) == 64
@@ -218,3 +218,14 @@ def test_bridge_donor_gui_cli_defaults_and_saved_overrides(tmp_path: Path):
     assert args.bridge_donor_model == selected["bridge_donor_model"]
     assert args.bridge_donor_length is None
     assert args.bridge_donor_deck_height is None
+
+
+def test_bridge_module_join_spacing_uses_roadway_not_shorter_visual_mesh(tmp_path: Path):
+    archive = tmp_path / "addonbridge.pbo"
+    write_pbo(archive, (PboEntry(
+        "segment.p3d", _bridge_mlod(length=24.0, roadway_length=42.0),
+    ),))
+    donor = configured_bridge_donor(_donor_spec(archive))
+    assert donor.length_metres == pytest.approx(42.0)
+    assert donor.roadway_centre_x == pytest.approx(0.0)
+    assert donor.roadway_centre_z == pytest.approx(0.0)
