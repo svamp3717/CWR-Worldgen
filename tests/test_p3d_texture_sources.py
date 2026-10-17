@@ -217,6 +217,29 @@ def test_arma_structures_and_oa_structures_e_sibling_pbo_lookup(tmp_path: Path) 
     assert resolver.indexed_all is False
 
 
+def test_dayz_dz_namespace_automatically_loads_sibling_texture_pbo(tmp_path: Path) -> None:
+    model_archive = tmp_path / "residential.pbo"
+    texture_archive = tmp_path / "structures.pbo"
+    generic_dz_archive = tmp_path / "dz.pbo"
+    _write_prefixed_pbo(
+        model_archive, r"dz\structures\residential",
+        {"house.p3d": b"placeholder"},
+    )
+    _write_prefixed_pbo(
+        texture_archive, r"dz\structures",
+        {r"data\wall_co.paa": b"dayz-paa-bytes"},
+    )
+    _write_pbo(generic_dz_archive, {"unrelated.paa": b"not-the-target"})
+    texture = r"dz\structures\data\wall_co.paa"
+    assert sibling_namespace_pbo(model_archive, texture) == texture_archive
+
+    resolver = TextureResolver([model_archive])
+    source = f"{model_archive}!dz\\structures\\residential\\house.p3d"
+    assert resolver.load_bytes(texture, source) == b"dayz-paa-bytes"
+    assert texture_archive.resolve() in resolver.auto_sibling_pbos
+    assert generic_dz_archive.resolve() not in resolver.auto_sibling_pbos
+
+
 def test_missing_sibling_does_not_return_incorrect_namespace_pbo(tmp_path: Path) -> None:
     source = tmp_path / "models.pbo"
     _write_pbo(source, {})

@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Scan OFP/CWA and Arma WRP files for P3D model dependencies.
+"""Scan OFP/CWA, Arma and DayZ WRP files for P3D model dependencies.
 
-The scanner accepts loose WRPs, PBOs and Iron Front IFA archives. 4WVR and unbinarized 8WVR objects
-are counted from their records. Binarized OPRW worlds use conservative P3D
-string discovery: those counts are model-name occurrences, NOT object counts.
+The scanner accepts loose WRPs, PBOs and Iron Front IFA archives.
+Unbinarized 4WVR, 8WVR and DayZ 0WZD objects are counted from their records.
+Binarized OPRW worlds use conservative P3D string discovery: those counts
+are model-name occurrences, NOT object placement counts.
 """
 from __future__ import annotations
 
@@ -47,6 +48,7 @@ GAME_STOCK_ROOTS = {
     "arma2": ("ca",),
     "arma2oa": ("ca", "ca_e"),
     "arma3": ("a3",),
+    "dayz": ("dz",),
     # Original 2012 Iron Front uses Arma 2 technology and LIB_ addons.
     # lib_* intentionally matches addon namespace segments, not full paths.
     "ironfront": ("lib", "lib_*", "ca", "ca_e"),
@@ -58,6 +60,7 @@ GAME_LABELS = {
     "Arma 2": "arma2",
     "Arma 2 OA": "arma2oa",
     "Arma 3": "arma3",
+    "DayZ Standalone": "dayz",
     "Iron Front": "ironfront",
 }
 
@@ -237,45 +240,47 @@ def _rvw4_model_counts(data: bytes) -> Counter[str] | None:
 
 
 def _8wvr_model_counts(data: bytes) -> Counter[str] | None:
-    """Count unbinarized Armed Assault (8WVR) object model paths exactly.
+    """Count unbinarized Arma 8WVR / DayZ 0WZD model paths exactly.
 
-    8WVR has separate terrain/texture grid sizes, a length-prefixed material
+    Both variants have terrain/texture grids, a length-prefixed material
     table (with a dummy entry zero), and length-prefixed object model names.
     A final zero-length model name terminates the object list.
     """
-    if data[:4] != b"8WVR":
+    magic = data[:4]
+    if magic not in (b"8WVR", b"0WZD"):
         return None
+    kind = magic.decode("ascii")
     if len(data) < _8WVR_HEADER.size:
-        raise ValueError("truncated 8WVR header")
+        raise ValueError(f"truncated {kind} header")
     _, texture_x, texture_y, terrain_x, terrain_y, cell_size = _8WVR_HEADER.unpack_from(data)
     if min(texture_x, texture_y, terrain_x, terrain_y) == 0 or not 0 < cell_size < 1e6:
-        raise ValueError("invalid 8WVR grid sizes or cell size")
+        raise ValueError(f"invalid {kind} grid sizes or cell size")
 
     cursor = _8WVR_HEADER.size + terrain_x * terrain_y * 4 + texture_x * texture_y * 2
     if cursor + 4 > len(data):
-        raise ValueError("truncated 8WVR terrain or material table")
+        raise ValueError(f"truncated {kind} terrain or material table")
     material_count = struct.unpack_from("<I", data, cursor)[0]
     cursor += 4
     if material_count == 0:
-        raise ValueError("invalid 8WVR material count")
+        raise ValueError(f"invalid {kind} material count")
     # The first material is an implicit dummy, without a name.
     for _ in range(1, material_count):
         while True:
             if cursor + 4 > len(data):
-                raise ValueError("truncated 8WVR material name")
+                raise ValueError(f"truncated {kind} material name")
             length = struct.unpack_from("<I", data, cursor)[0]
             cursor += 4
             if length == 0:
                 break
             if length > len(data) - cursor:
-                raise ValueError("truncated 8WVR material name")
+                raise ValueError(f"truncated {kind} material name")
             cursor += length
 
     counts: Counter[str] = Counter()
     terminated = False
     while cursor < len(data):
         if cursor + _8WVR_OBJECT_PREFIX.size > len(data):
-            raise ValueError("truncated 8WVR object record")
+            raise ValueError(f"truncated {kind} object record")
         values = _8WVR_OBJECT_PREFIX.unpack_from(data, cursor)
         cursor += _8WVR_OBJECT_PREFIX.size
         length = values[-1]
@@ -283,13 +288,13 @@ def _8wvr_model_counts(data: bytes) -> Counter[str] | None:
             terminated = True
             break
         if length > len(data) - cursor:
-            raise ValueError("truncated 8WVR object model name")
+            raise ValueError(f"truncated {kind} object model name")
         model = canonical_model_path(data[cursor : cursor + length].rstrip(b"\0").decode("latin-1"))
         cursor += length
         if model.endswith(".p3d"):
             counts[model] += 1
     if not terminated or cursor != len(data):
-        raise ValueError("missing or invalid 8WVR final dummy object")
+        raise ValueError(f"missing or invalid {kind} final dummy object")
     return counts
 
 
@@ -327,7 +332,7 @@ def scan_wrp_bytes(
     else:
         exact = _8wvr_model_counts(data)
         if exact is not None:
-            parser = "8WVR object records"
+            parser = "0WZD object records" if data[:4] == b"0WZD" else "8WVR object records"
         elif data[:4] == b"OPRW":
             parser = "OPRW P3D string occurrences"
         else:
@@ -366,7 +371,10 @@ def scan_dependencies(
 
     if suffix == ".wrp":
         wrp_names = (path.name,)
-        rows.extend(scan_wrp_bytes(path.read_bytes(), wrp_name=path.name, stock_roots=roots))
+        world_data = path.read_bytes()
+        rows.extend(scan_wrp_bytes(world_data, wrp_name=path.name, stock_roots=roots))
+        if game == "dayz" and world_data[:4] == b"OPRW":
+            warnings.append("DayZ OPRW: only embedded P3D string occurrences can be counted, not object placements")
         kind = "wrp"
     elif is_pbo_path(path) or path.name.casefold().endswith((".ifa", ".ifa.zst")):
         worlds = _pbo_wrp_entries(path)
@@ -376,6 +384,8 @@ def scan_dependencies(
         for name, data in worlds:
             try:
                 rows.extend(scan_wrp_bytes(data, wrp_name=name, stock_roots=roots))
+                if game == "dayz" and data[:4] == b"OPRW":
+                    warnings.append(f"{name}: OPRW scan counts P3D strings, not object placements")
             except ValueError as exc:
                 warnings.append(f"{name}: {exc}")
         kind = "ifa" if path.name.casefold().endswith((".ifa", ".ifa.zst")) else "pbo"
@@ -614,7 +624,7 @@ class ScannerGui:
         from tkinter import filedialog
 
         selected = filedialog.askopenfilename(
-            title="Choose WRP, PBO or Iron Front IFA",
+            title="Choose OFP / Arma / DayZ WRP, PBO or Iron Front IFA",
             filetypes=(("WRP / PBO / IFA", "*.wrp *.pbo *.pbo.zst *.ifa *.ifa.zst"), ("WRP", "*.wrp"), ("PBO / IFA", "*.pbo *.pbo.zst *.ifa *.ifa.zst"), ("All files", "*.*")),
         )
         if selected:
@@ -626,13 +636,14 @@ class ScannerGui:
             return
         path = Path(raw_path)
         roots = normalize_stock_roots((self.stock_var.get(),))
+        game = GAME_LABELS[self.game_var.get()]
         self.status_var.set("Scanning…")
-        worker = threading.Thread(target=self._scan_worker, args=(path, roots), daemon=True)
+        worker = threading.Thread(target=self._scan_worker, args=(path, roots, game), daemon=True)
         worker.start()
 
-    def _scan_worker(self, path: Path, roots: tuple[str, ...]) -> None:
+    def _scan_worker(self, path: Path, roots: tuple[str, ...], game: str = "cwa") -> None:
         try:
-            self._queue.put(("ok", scan_dependencies(path, stock_roots=roots)))
+            self._queue.put(("ok", scan_dependencies(path, stock_roots=roots, game=game)))
         except Exception as exc:  # GUI boundary: surface the error instead of crashing Tk.
             self._queue.put(("error", exc))
 
@@ -760,12 +771,12 @@ def gui_main(argv: Sequence[str] | None = None) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="cwr-wrp-mod-scan",
-        description="List mod P3D dependencies in OFP, Arma and Iron Front WRP/PBO/IFA archives.",
+        description="List P3D dependencies in OFP, Arma, DayZ and Iron Front WRP/PBO/IFA archives.",
     )
     parser.add_argument("input", nargs="?", type=Path, help="WRP file, PBO or Iron Front IFA archive containing WRP files")
     parser.add_argument(
         "--game", choices=tuple(GAME_STOCK_ROOTS), default="cwa",
-        help="Stock asset profile: cwa (default), arma1, arma1qg, arma2, arma2oa, arma3, ironfront",
+        help="Stock asset profile: cwa (default), arma1, arma1qg, arma2, arma2oa, arma3, dayz, ironfront",
     )
     parser.add_argument(
         "--stock-root",

@@ -49,6 +49,39 @@ it can also be used with CLI options such as:
 .\WRP-Mod-Dependency-Scanner.exe "C:\path\to\island.wrp" --json "dependencies.json"
 ```
 
+### DayZ Standalone support (asset tools only)
+
+All three standalone utilities can now be used with DayZ's PBO/P3D/WRP
+assets. **No changes are made to the CWR-Worldgen terrain generator.**
+
+- **Browse P3D Assets / Model Categoriser:** select DayZ model PBOs or loose
+  P3Ds as usual. Models from virtual `DZ\...` paths are identified as DayZ
+  assets, and the existing modern ODOL reader handles common DayZ ODOL
+  versions (v53/v54/v55). If an individual model's mesh cannot be decoded,
+  its bounding-box preview is shown rather than pretending the box is a mesh.
+- **Texture lookup:** a model referencing
+  `dz\structures\data\wall_co.paa` now prefers the sibling
+  `structures.pbo` over a generic `dz.pbo`, honoring PBO prefix properties.
+  Additional texture archives remain selectable manually.
+- **WRP Mod Dependency Scanner:** select **DayZ Standalone** in the Game
+  dropdown, or use `--game dayz` in the CLI. `DZ` is then treated as a
+  stock asset root. Unbinarized DayZ Terrain Builder `0WZD` WRPs are read
+  from their object records, so repeated P3Ds have real object counts.
+  Binarized `OPRW` WRPs use a conservative embedded-string scan instead.
+  Those counts are **string occurrences**, not object-placement counts, and
+  not all object dependencies are guaranteed discoverable.
+
+Example:
+
+```powershell
+.\WRP-Mod-Dependency-Scanner.exe "C:\DayZMaps\world.wrp" --game dayz --json "dayz-dependencies.json"
+```
+
+This is **read-only inspection and categorisation**, not DayZ terrain export
+or ODOL conversion. The automated tests use synthetic DayZ-compatible
+format fixtures; actual game archives and Windows executables still need
+smoke-testing against a legitimate DayZ installation.
+
 ### Choosing individual texture archives
 
 Both P3D tools can load **multiple individual texture PBO/IFA archives**

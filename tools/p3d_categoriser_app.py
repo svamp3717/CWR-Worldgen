@@ -20,6 +20,7 @@ from cwr_worldgen import assets as world_assets
 from p3d_preview_geometry import PreviewModel, build_preview_model
 from cwr_worldgen.pbo import is_pbo_path
 from p3d_texture_sources import TextureResolver
+from p3d_dayz import model_format_label
 from p3d_texture_io import MIPMAP_CHOICES
 from p3d_texture_render import MipmapCache, render_textured_model
 
@@ -755,7 +756,7 @@ class CategoriserApp:
         m = model.measurement
         placement_text = classification.placement or "Unspecified"
         self.info_var.set(
-            f"Format: {m.format} v{m.version}\n"
+            f"Format: {model_format_label(model.model_path, m.format, m.version)}\n"
             f"LOD: {m.lod}\n"
             f"Preview: {'bounds only' if model.render_mode == 'bounds only' else model.render_mode}\n"
             f"Vertices: {model.original_vertex_count:,}\n"
