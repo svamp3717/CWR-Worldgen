@@ -11259,13 +11259,20 @@ def generate_world_objects(
     # two overlapping road simulations across the same span.
     progress(66, "Placing bridge modules")
     if bool(getattr(spec, "bridges_enabled", False)):
+        from .bridge_donors import configured_bridge_donor
+        bridge_donor = configured_bridge_donor(spec)
         bridge_warning_threshold = max(0, int(getattr(spec, "maximum_bridge_objects", 1000)))
         bridge_limit = _advisory_object_limit(bridge_warning_threshold, enabled=advisory_limits)
-        procedural_bridges = bool(getattr(spec, "procedural_bridges", True))
+        # A selected donor takes precedence over both procedural and stock
+        # modes. Its measured Roadway length determines physical module spacing.
+        procedural_bridges = (
+            bool(getattr(spec, "procedural_bridges", True))
+            and bridge_donor is None
+        )
         module_length = (
-            max(3.0, float(getattr(spec, "bridge_module_length", 30.0)))
-            if procedural_bridges
-            else NOGOVA_BRIDGE_MODULE_LENGTH_METRES
+            bridge_donor.length_metres if bridge_donor is not None
+            else max(3.0, float(getattr(spec, "bridge_module_length", 30.0)))
+            if procedural_bridges else NOGOVA_BRIDGE_MODULE_LENGTH_METRES
         )
         for feature, points in zip(dataset.roads, projected_road_polylines(dataset, projection)):
             # A mapped bridge over waterway=ditch stays an ordinary road. The
@@ -11300,6 +11307,13 @@ def generate_world_objects(
                 bridge_rejections += 1
                 continue
             width = max(4.0, road_width_metres(feature.tags) + 1.4)
+            if (
+                bridge_donor is not None
+                and bridge_donor.width_metres < road_width_metres(feature.tags) - 0.2
+            ):
+                # A narrow bridge cannot safely substitute for the mapped road.
+                bridge_rejections += 1
+                continue
             deck_clearance = max(
                 MINIMUM_BRIDGE_TERRAIN_CLEARANCE_METRES,
                 float(getattr(spec, "bridge_deck_clearance", 1.25)),
@@ -11347,8 +11361,11 @@ def generate_world_objects(
             else:
                 generated_width = width
                 placement_chunks = chunks
-                model_lengths = (NOGOVA_BRIDGE_MODULE_LENGTH_METRES,) * len(chunks)
-                half_width = max(width * 0.5, NOGOVA_BRIDGE_HALF_WIDTH_METRES)
+                model_lengths = (module_length,) * len(chunks)
+                half_width = (
+                    max(width * 0.5, bridge_donor.width_metres * 0.5)
+                    if bridge_donor else max(width * 0.5, NOGOVA_BRIDGE_HALF_WIDTH_METRES)
+                )
                 vertical_depth = -NOGOVA_BRIDGE_LOWEST_POINT_METRES
 
             # Evaluate every complete rotated module footprint against both
@@ -11454,7 +11471,12 @@ def generate_world_objects(
                         deck_level,
                         float(spec.sea_level) + NOGOVA_BRIDGE_MINIMUM_WATER_DECK_METRES,
                     )
-                deck_start = deck_end = deck_level
+                # With a donor, world-object origin is offset from its real
+                # Roadway LOD plane, not from the visual railing or object base.
+                deck_start = deck_end = (
+                    deck_level - bridge_donor.roadway_local_y_metres
+                    if bridge_donor else deck_level
+                )
             travelled = 0.0
             bridge_plan: list[tuple[str, float, float, float, float, float]] = []
             chunk_count = len(placement_chunks)
@@ -11475,6 +11497,9 @@ def generate_world_objects(
                     model = infrastructure_library.bridge_model(
                         "single", generated_width, model_length
                     )
+                elif bridge_donor is not None:
+                    model = bridge_donor.model
+                    heading = (heading + bridge_donor.heading_offset_degrees) % 360.0
                 else:
                     model = NOGOVA_BRIDGE_MODEL
                 bridge_plan.append((model, x, y, z, heading, pitch))
