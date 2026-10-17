@@ -97,7 +97,7 @@ class StartupSelectionDialog:
         ttk.Label(
             frame,
             text=(
-                "Choose DayZ / Arma / OFP / Iron Front PBO or IFA archives, "
+                "Choose Take On Helicopters / DayZ / Arma / OFP / Iron Front archives, "
                 "or a folder of model files."
             ),
             wraplength=690,
@@ -248,7 +248,7 @@ class StartupSelectionDialog:
     def select_archives(self) -> None:
         paths = filedialog.askopenfilenames(
             parent=self.root,
-            title="Select DayZ / Arma / OFP model PBO / IFA archives",
+            title="Select Take On Helicopters / DayZ / Arma / OFP model archives",
             filetypes=(
                 ("PBO / IFA archives", "*.pbo *.ifa *.pbo.zst *.ifa.zst"),
                 ("PBO archives", "*.pbo *.pbo.zst"),
