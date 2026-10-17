@@ -396,8 +396,15 @@ def default_osm_asset_mapping(spec: Any, milestone_number: int, *, global_textur
         rules.append(_rule("hedges", ("barriers",), {"barrier": "hedge"}, models=tuple(getattr(spec, "stock_hedge_models", ())), geometry="line"))
         rules.append(_rule("stone-walls", ("barriers",), {"barrier": ("wall", "retaining_wall")}, models=tuple(getattr(spec, "stock_wall_models", ())), geometry="line"))
         metal_values = ("chain_link", "chainlink", "metal", "metal_bars", "wire", "wire_mesh", "welded_wire_mesh", "mesh")
-        rules.append(_rule("metal-fences-by-type", ("barriers",), {"barrier": "fence", "fence_type": metal_values}, models=tuple(getattr(spec, "stock_metal_fence_models", ())), geometry="line"))
-        rules.append(_rule("metal-fences-by-material", ("barriers",), {"barrier": "fence", "material": ("metal", "steel", "iron", "wire", "wire_mesh")}, models=tuple(getattr(spec, "stock_metal_fence_models", ())), geometry="line"))
+        metal_donor = str(getattr(spec, "metal_fence_donor_model", "") or "").strip().replace("/", "\\")
+        metal_models = ((metal_donor,) if metal_donor else tuple(getattr(spec, "stock_metal_fence_models", ())))
+        ordinary_donor = str(getattr(spec, "fence_donor_model", "") or "").strip().replace("/", "\\")
+        if ordinary_donor:
+            rules.append(_rule("ordinary-fence-donor", ("barriers",), {"barrier": "fence"},
+                exclude={"fence_type": metal_values, "material": ("metal", "steel", "iron", "wire", "wire_mesh")},
+                models=(ordinary_donor,), geometry="line"))
+        rules.append(_rule("metal-fences-by-type", ("barriers",), {"barrier": "fence", "fence_type": metal_values}, models=metal_models, geometry="line"))
+        rules.append(_rule("metal-fences-by-material", ("barriers",), {"barrier": "fence", "material": ("metal", "steel", "iron", "wire", "wire_mesh")}, models=metal_models, geometry="line"))
     if bool(getattr(spec, "bus_stops_enabled", False)):
         rules.append(_rule("bus-stop-signs", ("landmarks",), {"landmark": "bus_stop"}, models=(getattr(spec, "bus_stop_model", r"o\misc\aut_z_st.p3d"),), geometry="point"))
     if bool(getattr(spec, "cemeteries_enabled", False)):
