@@ -319,6 +319,54 @@ def test_dayz_binarized_wrp_reports_string_scan_limit(tmp_path: Path) -> None:
     assert all("string occurrences" in row.parser for row in result.rows)
 
 
+def test_take_on_helicopters_unbinarized_wrp_profile(tmp_path: Path) -> None:
+    wrp = tmp_path / "seattle.wrp"
+    _write_8wvr(
+        wrp,
+        (
+            r"HSim\structures_h\building.p3d",
+            r"HSim\structures_h\building.p3d",
+            r"othermod\tower.p3d",
+            r"ca\structures\house.p3d",
+        ),
+    )
+    result = scan_dependencies(wrp, game="tkoh")
+    assert result.stock_roots == ("hsim",)
+    assert result.unique_mod_models == 2
+    by_path = {row.model_path: row for row in result.rows}
+    assert by_path[r"hsim\structures_h\building.p3d"].is_stock
+    assert by_path[r"hsim\structures_h\building.p3d"].references == 2
+    assert by_path[r"hsim\structures_h\building.p3d"].parser == "8WVR object records"
+    assert {row.model_path for row in rows_for_display(result)} == {
+        r"ca\structures\house.p3d",
+        r"othermod\tower.p3d",
+    }
+    # Rearmed can use external Arma 2 data, without reclassifying it as
+    # part of the stock Take On Helicopters installation.
+    with_rearmed = scan_dependencies(wrp, game="tkoh", stock_roots=("hsim", "ca"))
+    assert with_rearmed.unique_mod_models == 1
+
+
+def test_take_on_helicopters_binarized_wrp_warning_and_pbo(tmp_path: Path) -> None:
+    data = b"OPRW" + struct.pack("<I", 25) + (
+        b"HSim\\air_h\\heli.p3d\0"
+        b"custom_air\\hanger.p3d\0"
+    )
+    wrp = tmp_path / "seattle-binarized.wrp"
+    wrp.write_bytes(data)
+    loose = scan_dependencies(wrp, game="tkoh")
+    assert loose.unique_mod_models == 1
+    assert any("not object placements" in msg for msg in loose.warnings)
+    assert all("string occurrences" in row.parser for row in loose.rows)
+
+    pbo = tmp_path / "world.pbo"
+    write_pbo(pbo, (PboEntry("seattle.wrp", data),))
+    archived = scan_dependencies(pbo, game="tkoh")
+    assert archived.wrp_count == 1
+    assert archived.unique_mod_models == 1
+    assert any("not object placements" in msg for msg in archived.warnings)
+
+
 def test_8wvr_truncated_record_is_rejected(tmp_path: Path) -> None:
     import pytest
 
