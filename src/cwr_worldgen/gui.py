@@ -2435,7 +2435,7 @@ class WorldgenGui(tk.Tk):
                 "Worldgen places the selected models directly along the fence line; "
                 "it does not resize meshes or generate fence geometry from a donor. "
                 "Leave length/rotation blank to inspect the selected P3D automatically; add its PBO/folder to Asset roots. "
-                "Overrides are optional. Blank model paths retain stock fences. Hedges and walls are unchanged."
+                "Overrides are optional. Blank model paths retain stock fences; walls and hedges have separate donors below."
             ),
             style="Hint.TLabel", wraplength=760,
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
