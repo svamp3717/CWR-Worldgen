@@ -24,9 +24,10 @@ class FenceDonorGeometry:
     width_metres: float
     heading_offset_degrees: float
     long_axis: str
+    minimum_y_metres: float = 0.0
 
 
-def inspect_fence_donor_geometry(data: bytes) -> FenceDonorGeometry:
+def inspect_fence_donor_geometry(data: bytes, *, allow_ambiguous: bool = False) -> FenceDonorGeometry:
     """Infer horizontal length/axis from the first visible P3D LOD.
 
     The mapped line heading is the direction of travel. A +Z-aligned P3D
@@ -47,8 +48,9 @@ def inspect_fence_donor_geometry(data: bytes) -> FenceDonorGeometry:
     if not points:
         raise ProxyCloneError("fence visual LOD contains no points")
     xs = [float(point[0]) for point in points]
+    ys = [float(point[1]) for point in points]
     zs = [float(point[2]) for point in points]
-    if not all(math.isfinite(v) for v in (*xs, *zs)):
+    if not all(math.isfinite(v) for v in (*xs, *ys, *zs)):
         raise ProxyCloneError("fence visual LOD contains non-finite positions")
     x_length = max(xs) - min(xs)
     z_length = max(zs) - min(zs)
@@ -57,7 +59,7 @@ def inspect_fence_donor_geometry(data: bytes) -> FenceDonorGeometry:
         raise ProxyCloneError(
             f"implausible visual fence length {length:.2f} m; specify overrides instead"
         )
-    if width >= length * 0.85:
+    if width >= length * 0.85 and not allow_ambiguous:
         raise ProxyCloneError(
             f"ambiguous fence axis (X={x_length:.2f} m, Z={z_length:.2f} m); "
             "supply explicit length and heading offset"
@@ -69,4 +71,5 @@ def inspect_fence_donor_geometry(data: bytes) -> FenceDonorGeometry:
         width_metres=width,
         heading_offset_degrees=90.0 if axis == "X" else 0.0,
         long_axis=axis,
+        minimum_y_metres=min(ys),
     )
