@@ -463,7 +463,7 @@ def increment_trailing_number(value: str) -> str:
 def defaults_with_recent_source(
     defaults: dict[str, object], state: Mapping[str, object]
 ) -> dict[str, object]:
-    """Prefer recent source/deployment paths and remembered GUI mapping settings."""
+    """Prefer recent paths and remembered GUI options over defaults."""
     result = dict(defaults)
     source_text = ""
     source_path: Path | None = None
@@ -480,6 +480,10 @@ def defaults_with_recent_source(
         result["fetch_source_dir"] = source_text
     if "deploy_to_mod_folder" in state:
         result["deploy_to_mod_folder"] = bool(state["deploy_to_mod_folder"])
+    # This experimental option is opt-in for new installs, but respect both
+    # checked and unchecked choices saved by the user on previous launches.
+    if type(state.get("odol_buildings")) is bool:
+        result["odol_buildings"] = state["odol_buildings"]
     deploy_text = str(state.get("last_deploy_mod_dir", "")).strip()
     deploy_path = Path(deploy_text).expanduser() if deploy_text else None
     if deploy_path is not None and deploy_path.is_dir():
@@ -1285,6 +1289,7 @@ class WorldgenGui(tk.Tk):
         self._set_defaults()
         self._install_appearance_state_persistence()
         self._install_road_asset_state_persistence()
+        self._install_odol_building_state_persistence()
         self._show_step(0)
         self.after(100, self._drain_output)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -1344,6 +1349,22 @@ class WorldgenGui(tk.Tk):
         values["gravel_stock_defaults_version"] = 1
         try:
             update_gui_state(self.state_path, values)
+        except OSError:
+            pass
+
+    def _install_odol_building_state_persistence(self) -> None:
+        variable = self.vars.get("odol_buildings")
+        if variable is not None:
+            variable.trace_add(
+                "write", lambda *_args: self._persist_odol_building_state()
+            )
+
+    def _persist_odol_building_state(self) -> None:
+        variable = self.vars.get("odol_buildings")
+        if variable is None:
+            return
+        try:
+            update_gui_state(self.state_path, {"odol_buildings": bool(variable.get())})
         except OSError:
             pass
 
@@ -3645,6 +3666,7 @@ class WorldgenGui(tk.Tk):
             return
         self._persist_appearance_state()
         self._persist_road_asset_state()
+        self._persist_odol_building_state()
         self._persist_osm_mapping_state()
         self._stop_process()
         self.destroy()

@@ -741,6 +741,61 @@ class GuiCommandTests(unittest.TestCase):
             self.assertEqual(state["ground_textures"], "everon")
             self.assertEqual(state["vegetation_style"], VEGETATION_MALDEN)
 
+    def test_odol_building_checkbox_persists_its_latest_selection(self) -> None:
+        class _BooleanValue:
+            def __init__(self) -> None:
+                self.value = False
+                self.on_write = None
+
+            def get(self) -> bool:
+                return self.value
+
+            def set(self, value: bool) -> None:
+                self.value = value
+                if self.on_write is not None:
+                    self.on_write()
+
+            def trace_add(self, mode: str, callback) -> None:
+                self.assert_mode(mode)
+                self.on_write = callback
+
+            @staticmethod
+            def assert_mode(mode: str) -> None:
+                assert mode == "write"
+
+        with TemporaryDirectory() as temporary:
+            state_path = Path(temporary) / "gui-state.json"
+            save_gui_state(state_path, {"ground_textures": "malden"})
+            gui = object.__new__(WorldgenGui)
+            gui.state_path = state_path
+            checkbox = _BooleanValue()
+            gui.vars = {"odol_buildings": checkbox}
+
+            # Setting the variable behaves like a user checking the Tk checkbox.
+            WorldgenGui._install_odol_building_state_persistence(gui)
+            checkbox.set(True)
+            state = load_gui_state(state_path)
+            self.assertIs(state["odol_buildings"], True)
+            self.assertEqual(state["ground_textures"], "malden")
+            restored = defaults_with_recent_source(default_gui_values(), state)
+            self.assertIs(restored["odol_buildings"], True)
+            self.assertIn("--odol-buildings", build_milestone9_command(restored, python="python"))
+
+            # Unchecking must also be persisted, without wiping other settings.
+            checkbox.set(False)
+            state = load_gui_state(state_path)
+            self.assertIs(state["odol_buildings"], False)
+            self.assertEqual(state["ground_textures"], "malden")
+            restored = defaults_with_recent_source(default_gui_values(), state)
+            self.assertIs(restored["odol_buildings"], False)
+            self.assertNotIn("--odol-buildings", build_milestone9_command(restored, python="python"))
+
+    def test_odol_building_persistence_defaults_off_without_valid_saved_boolean(self) -> None:
+        self.assertIs(default_gui_values()["odol_buildings"], False)
+        for old_state in ({}, {"odol_buildings": "true"}, {"odol_buildings": 1}):
+            restored = defaults_with_recent_source(default_gui_values(), old_state)
+            self.assertIs(restored["odol_buildings"], False)
+
     def test_gui_state_restores_remembered_building_preset_selection(self) -> None:
         defaults = defaults_with_recent_source(
             default_gui_values(),
