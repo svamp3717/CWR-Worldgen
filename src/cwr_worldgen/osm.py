@@ -8449,9 +8449,18 @@ def generate_world_objects(
 
     # Share the same ordinary fence donor between mapped, rural, and yard fences.
     custom_fence_donor = configured_fence_donor(spec)
-    custom_hedge_donor = configured_linear_donor(spec, "hedge_donor")
-    custom_wall_donor = configured_linear_donor(spec, "wall_donor")
-    custom_ditch_donor = configured_linear_donor(spec, "ditch_vegetation_donor")
+    custom_hedge_donor = (
+        configured_linear_donor(spec, "hedge_donor")
+        if getattr(spec, "barriers_enabled", False) else None
+    )
+    custom_wall_donor = (
+        configured_linear_donor(spec, "wall_donor")
+        if getattr(spec, "barriers_enabled", False) else None
+    )
+    custom_ditch_donor = (
+        configured_linear_donor(spec, "ditch_vegetation_donor")
+        if getattr(spec, "ditch_grass_enabled", False) else None
+    )
     progress(54, "Placing buildings")
     building_count = 0
     building_truncated = building_plans_truncated
@@ -8536,6 +8545,7 @@ def generate_world_objects(
             footprint: float = 0.8,
             clearance: float = 0.03,
             hedge_segment: tuple[PointXZ, PointXZ] | None = None,
+            hedge_donor: tuple[str, float, float, float, float] | None = None,
             line_segment: tuple[PointXZ, PointXZ] | None = None,
             allow_road_overlap: bool = False,
         ) -> bool:
@@ -8555,8 +8565,14 @@ def generate_world_objects(
                     elevations, spec.cells, spec.cell_size,
                     hedge_segment[0][0], hedge_segment[0][1],
                     hedge_segment[1][0], hedge_segment[1][1],
-                    model_path=model,
+                    model_path=None if hedge_donor else model,
+                    half_width=(
+                        max(0.1, hedge_donor[3] * 0.5)
+                        if hedge_donor else HEDGE_FOOTPRINT_HALF_WIDTH_METRES
+                    ),
                 )
+                if hedge_donor:
+                    y -= hedge_donor[4]
                 pitch = 0.0
             elif line_segment is not None:
                 y, pitch = _infrastructure_anchor(
@@ -8754,13 +8770,20 @@ def generate_world_objects(
             if stable_roll(identity + ":boundary") < 62:
                 hedge = stable_roll(identity + ":hedge") < 62
                 model = (
-                    STOCK_HEDGE_MODELS[stable_roll(identity + ":hedge-model", len(STOCK_HEDGE_MODELS))]
+                    (
+                        custom_hedge_donor[0] if custom_hedge_donor else
+                        STOCK_HEDGE_MODELS[stable_roll(identity + ":hedge-model", len(STOCK_HEDGE_MODELS))]
+                    )
                     if hedge else (
                         custom_fence_donor[0] if custom_fence_donor
                         else stock_farmland_fence_model(identity + ":fence-model")
                     )
                 )
-                yard_half_length = custom_fence_donor[1] / 2.0 if (custom_fence_donor and not hedge) else 2.4
+                yard_half_length = (
+                    custom_hedge_donor[1] / 2.0 if hedge and custom_hedge_donor
+                    else custom_fence_donor[1] / 2.0 if (custom_fence_donor and not hedge)
+                    else 2.4
+                )
                 for segment in (-1, 1):
                     sx = rear_x + right_x * segment * yard_half_length
                     sz = rear_z + right_z * segment * yard_half_length
@@ -8768,7 +8791,12 @@ def generate_world_objects(
                     start = (sx - right_x * end_half, sz - right_z * end_half)
                     end = (sx + right_x * end_half, sz + right_z * end_half)
                     if hedge:
-                        emit_prop(model, sx, sz, plan.heading_degrees + 90.0 + HEDGE_MODEL_HEADING_OFFSET_DEGREES, footprint=0.7, hedge_segment=(start, end))
+                        hedge_offset = custom_hedge_donor[2] if custom_hedge_donor else HEDGE_MODEL_HEADING_OFFSET_DEGREES
+                        emit_prop(
+                            model, sx, sz, plan.heading_degrees + 90.0 + hedge_offset,
+                            footprint=0.7, hedge_segment=(start, end),
+                            hedge_donor=custom_hedge_donor,
+                        )
                     else:
                         fence_offset = custom_fence_donor[2] if custom_fence_donor else FARMLAND_FENCE_HEADING_OFFSET_DEGREES
                         emit_prop(model, sx, sz, plan.heading_degrees + 90.0 + fence_offset, footprint=0.6, line_segment=(start, end))
