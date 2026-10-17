@@ -90,6 +90,27 @@ data from a `visual-fallback` when source Roadway information is unavailable.
 Where the donor is unreadable, matching in-game surface physics cannot be
 guaranteed; add its PBO to the configured asset roots.
 
+**Optional fence donor models:** Advanced generation settings now include two
+fence P3D donors: one for ordinary/wooden/rural fences and one for metal fences.
+Leave either model field blank to retain original OFP/CWA fences. Select a
+**virtual P3D path** (for example `sfp\wood\fence.p3d`) and add its PBO or
+directory under **Asset roots**. Do not enter a local PBO file path here.
+
+Worldgen places these P3Ds directly along mapped OSM fences, farmland
+boundaries and residential yards. It does **not** reshape donor meshes.
+Set the **length (metres)** and **rotation offset (degrees)** to match each
+donor's actual dimensions and axis; the default angle is 90°. Custom donor
+meshes may show gaps at bends or short ends. Hedges and walls are unchanged.
+
+CLI example:
+
+```powershell
+python -m cwr_worldgen milestone9 --source-dir source-data/map --output build/world --fence-donor-model "sfp\wood\fence.p3d" --fence-donor-length 4 --fence-donor-heading-offset 0
+```
+
+Fence donor settings are remembered between GUI launches using the same
+persistent preferences file as road donors.
+
 **Existing GUI profiles:** Saved empty gravel donors from older releases
 migrate to the stock `asf` defaults, but explicitly selected modded donors
 are not replaced. Users who deliberately want procedural gravel may clear
