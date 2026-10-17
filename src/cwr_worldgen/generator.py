@@ -3597,9 +3597,12 @@ def _load_nonroad_objects(
     fence_donor_layouts = (
         configured_fence_donor(spec),
         configured_fence_donor(spec, metal=True),
-        configured_linear_donor(spec, "wall_donor"),
-        configured_linear_donor(spec, "hedge_donor"),
-        configured_linear_donor(spec, "ditch_vegetation_donor"),
+        configured_linear_donor(spec, "wall_donor")
+        if getattr(spec, "barriers_enabled", False) else None,
+        configured_linear_donor(spec, "hedge_donor")
+        if getattr(spec, "barriers_enabled", False) else None,
+        configured_linear_donor(spec, "ditch_vegetation_donor")
+        if getattr(spec, "ditch_grass_enabled", False) else None,
     )
     payload = {
         "fence_donor_layouts": fence_donor_layouts,
