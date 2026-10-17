@@ -146,6 +146,8 @@ def test_nogova_seam_policy_does_not_replace_selected_custom_bridge():
     assert adapted.procedural_bridges is False
     assert adapted.bridge_module_length == 12.0
     with patch.object(
+        bridge_render_policy, "stock_bridge_span_plan", return_value=None,
+    ), patch.object(
         bridge_render_policy, "_ORIGINAL_EXTEND_BRIDGE_SPAN",
         return_value=((20.0, 20.0), (80.0, 20.0)),
     ) as original:
@@ -229,3 +231,20 @@ def test_bridge_module_join_spacing_uses_roadway_not_shorter_visual_mesh(tmp_pat
     assert donor.length_metres == pytest.approx(42.0)
     assert donor.roadway_centre_x == pytest.approx(0.0)
     assert donor.roadway_centre_z == pytest.approx(0.0)
+
+
+def test_wet_only_donor_corridor_uses_selected_module_spacing():
+    spec = SimpleNamespace(cells=8, cell_size=25.0, world_size=200.0, sea_level=0.0)
+    route = ((20.0, 100.0), (180.0, 100.0))
+    # A completely submerged corridor needs exactly four 40 m donors, but
+    # would need eight 20 m donors. The planner must not assume Nogova's size.
+    terrain = (-3.0,) * 64
+    wide = bridge_render_policy.stock_bridge_span_plan(
+        route, terrain, spec, module_spacing=40.0,
+    )
+    narrow = bridge_render_policy.stock_bridge_span_plan(
+        route, terrain, spec, module_spacing=20.0,
+    )
+    assert wide is not None and narrow is not None
+    assert wide.module_count == 4
+    assert narrow.module_count == 8
