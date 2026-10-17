@@ -2497,7 +2497,7 @@ class WorldgenGui(tk.Tk):
                 "Optional drivable P3D bridge module, overriding stock/procedural "
                 "bridge mode when selected. Add its PBO/folder to Asset roots. "
                 "Leave values blank to detect model length, alignment and Roadway LOD deck height. "
-                "Only straight, nearly level modules with a Roadway LOD are supported; "
+                "Straight modules with a Roadway LOD are supported, including mild pitch-correctable ramps; "
                 "no scaling or automatic end/corner pieces."
             ),
             style="Hint.TLabel", wraplength=760,
