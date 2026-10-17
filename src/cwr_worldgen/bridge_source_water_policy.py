@@ -394,10 +394,22 @@ def _source_aware_water_test(
     )
 
 
-def _mapped_water_stock_plan(points, elevations, spec):
-    """Create a minimal fixed-stock span when coarse terrain misses mapped water."""
+def _mapped_water_stock_plan(
+    points, elevations, spec, *, module_spacing: float | None = None,
+):
+    """Create a minimal span when coarse terrain misses mapped water.
 
-    plan = _ORIGINAL_STOCK_PLAN(points, elevations, spec)
+    The ordinary stock path keeps Nogova's measured length. Custom bridge
+    donors use their inspected Roadway join length in both terrain-based and
+    source-water fallback planning.
+    """
+
+    if module_spacing is None:
+        plan = _ORIGINAL_STOCK_PLAN(points, elevations, spec)
+    else:
+        plan = _ORIGINAL_STOCK_PLAN(
+            points, elevations, spec, module_spacing=module_spacing,
+        )
     if plan is not None:
         return plan
     interval = _source_mapped_water_interval(points)
@@ -430,7 +442,10 @@ def _mapped_water_stock_plan(points, elevations, spec):
         return None
     unit_x, unit_z = dx / wet_length, dz / wet_length
 
-    module_length = float(_bridge._STOCK_MODULE_SPACING_METRES)
+    module_length = (
+        float(_bridge._STOCK_MODULE_SPACING_METRES)
+        if module_spacing is None else float(module_spacing)
+    )
     module_count = max(1, int(math.ceil((wet_length - 1.0e-9) / module_length)))
     target_length = module_count * module_length
     half_target = target_length * 0.5

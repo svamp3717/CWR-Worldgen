@@ -11259,13 +11259,23 @@ def generate_world_objects(
     # two overlapping road simulations across the same span.
     progress(66, "Placing bridge modules")
     if bool(getattr(spec, "bridges_enabled", False)):
+        from .bridge_donors import configured_bridge_donor
+        bridge_donor = configured_bridge_donor(spec)
+        donor_narrow_crossings = 0
+        donor_width_rejections = 0
+        donor_placed_objects = 0
         bridge_warning_threshold = max(0, int(getattr(spec, "maximum_bridge_objects", 1000)))
         bridge_limit = _advisory_object_limit(bridge_warning_threshold, enabled=advisory_limits)
-        procedural_bridges = bool(getattr(spec, "procedural_bridges", True))
+        # A selected donor takes precedence over both procedural and stock
+        # modes. Its measured Roadway length determines physical module spacing.
+        procedural_bridges = (
+            bool(getattr(spec, "procedural_bridges", True))
+            and bridge_donor is None
+        )
         module_length = (
-            max(3.0, float(getattr(spec, "bridge_module_length", 30.0)))
-            if procedural_bridges
-            else NOGOVA_BRIDGE_MODULE_LENGTH_METRES
+            bridge_donor.length_metres if bridge_donor is not None
+            else max(3.0, float(getattr(spec, "bridge_module_length", 30.0)))
+            if procedural_bridges else NOGOVA_BRIDGE_MODULE_LENGTH_METRES
         )
         for feature, points in zip(dataset.roads, projected_road_polylines(dataset, projection)):
             # A mapped bridge over waterway=ditch stays an ordinary road. The
@@ -11300,6 +11310,25 @@ def generate_world_objects(
                 bridge_rejections += 1
                 continue
             width = max(4.0, road_width_metres(feature.tags) + 1.4)
+            if bridge_donor is not None:
+                mapped_width = road_width_metres(feature.tags)
+                bridge_roadway_width = bridge_donor.width_metres
+                # OSM highway classes describe the *ordinary approach*, not
+                # the narrowest permitted structure. Old logic discarded a 5 m
+                # bridge03 donor on every residential (6 m), tertiary (7 m),
+                # and secondary (9 m) bridge without mentioning why.
+                # Place a usable single-lane/narrow bridge instead of silently
+                # falling back to vanilla on most real mapped crossings.
+                minimum_drivable_width = (
+                    7.0 if feature.tags.get("highway") in {"motorway", "trunk"}
+                    else min(4.5, max(3.0, mapped_width))
+                )
+                if bridge_roadway_width + 0.01 < minimum_drivable_width:
+                    donor_width_rejections += 1
+                    bridge_rejections += 1
+                    continue
+                if bridge_roadway_width + 0.2 < mapped_width:
+                    donor_narrow_crossings += 1
             deck_clearance = max(
                 MINIMUM_BRIDGE_TERRAIN_CLEARANCE_METRES,
                 float(getattr(spec, "bridge_deck_clearance", 1.25)),
@@ -11347,8 +11376,11 @@ def generate_world_objects(
             else:
                 generated_width = width
                 placement_chunks = chunks
-                model_lengths = (NOGOVA_BRIDGE_MODULE_LENGTH_METRES,) * len(chunks)
-                half_width = max(width * 0.5, NOGOVA_BRIDGE_HALF_WIDTH_METRES)
+                model_lengths = (module_length,) * len(chunks)
+                half_width = (
+                    max(bridge_donor.width_metres * 0.5 + 0.75, 2.0)
+                    if bridge_donor else max(width * 0.5, NOGOVA_BRIDGE_HALF_WIDTH_METRES)
+                )
                 vertical_depth = -NOGOVA_BRIDGE_LOWEST_POINT_METRES
 
             # Evaluate every complete rotated module footprint against both
@@ -11454,7 +11486,12 @@ def generate_world_objects(
                         deck_level,
                         float(spec.sea_level) + NOGOVA_BRIDGE_MINIMUM_WATER_DECK_METRES,
                     )
-                deck_start = deck_end = deck_level
+                # With a donor, world-object origin is offset from its real
+                # Roadway LOD plane, not from the visual railing or object base.
+                deck_start = deck_end = (
+                    deck_level - bridge_donor.roadway_local_y_metres
+                    if bridge_donor else deck_level
+                )
             travelled = 0.0
             bridge_plan: list[tuple[str, float, float, float, float, float]] = []
             chunk_count = len(placement_chunks)
@@ -11475,6 +11512,23 @@ def generate_world_objects(
                     model = infrastructure_library.bridge_model(
                         "single", generated_width, model_length
                     )
+                elif bridge_donor is not None:
+                    model = bridge_donor.model
+                    heading = (heading + bridge_donor.heading_offset_degrees) % 360.0
+                    # A gently ramped donor can be pitched until its Roadway
+                    # endpoints share the same world Y. This is not permission
+                    # to repeat arbitrary sloped/twisted roadways: the P3D
+                    # inspector enforces pitch and residual-relief limits.
+                    pitch += bridge_donor.leveling_pitch_degrees
+                    # Account for the pitch rotation of the *elevated* roadway
+                    # origin, not just the horizontal P3D pivot. A model whose
+                    # roadway lives 9 m above the object origin shifts its
+                    # effective horizontal centre when pitched.
+                    radians = math.radians(heading)
+                    local_x = bridge_donor.roadway_centre_x
+                    local_z = bridge_donor.roadway_origin_z_after_pitch
+                    x -= local_x * math.cos(radians) + local_z * math.sin(radians)
+                    z += local_x * math.sin(radians) - local_z * math.cos(radians)
                 else:
                     model = NOGOVA_BRIDGE_MODEL
                 bridge_plan.append((model, x, y, z, heading, pitch))
@@ -11490,8 +11544,27 @@ def generate_world_objects(
                 ))
                 next_id += 1
                 bridge_objects += 1
+                if bridge_donor is not None:
+                    donor_placed_objects += 1
             if bridge_objects >= bridge_limit:
                 break
+
+        if bridge_donor is not None:
+            progress(
+                67,
+                f"Bridge donor {bridge_donor.model}: {donor_placed_objects} custom "
+                f"module(s) placed across {bridge_segments} eligible crossing(s); "
+                f"{donor_narrow_crossings} approach(es) narrowed to the "
+                f"{bridge_donor.width_metres:.2f} m Roadway, "
+                f"{donor_width_rejections} too-narrow model rejection(s), "
+                f"{bridge_rejections} total bridge rejection(s).",
+            )
+            if bridge_segments and not donor_placed_objects:
+                progress(
+                    67,
+                    "WARNING: No custom bridge modules were emitted; inspect "
+                    "bridge donor width, budget, and water-crossing diagnostics.",
+                )
 
     progress(67, "Placing meadow grass, rural vegetation, wetland reeds and rocks")
     # Structured rural vegetation reuses a small cluster library. Rows stay rows;

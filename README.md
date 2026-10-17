@@ -117,6 +117,51 @@ python -m cwr_worldgen milestone9 --source-dir source-data/map --output build/wo
 Fence donor settings are remembered between GUI launches using the same
 persistent preferences file as road donors.
 
+**Optional drivable bridge donor:** Under Advanced → Bridge module donor,
+select one virtual `.p3d` model from an addon PBO/folder in **Asset roots**.
+A configured model takes precedence over both stock Nogova and procedural
+bridge modes. Blank leaves the current bridge behavior unchanged.
+
+The generator inspects legacy MLOD or ODOL v6/v7 geometry and the model's
+**Roadway LOD**. It uses the Roadway LOD's actual join length, drivable width,
+local deck height and center offset to fit straight bridge modules across
+the wet crossing. This matters because visible bridge rails can be far shorter
+than the Roadway LOD. For modest ramped modules (such as
+`haus\\bridge03.p3d`), the inspector measures the elevation at each Roadway end
+and applies a small model pitch to level module joints. This can preserve a
+gentle internal crown/slope: it does not flatten or stretch the model geometry.
+The correction is capped at 3° and residual roadway unevenness at 0.75 m.
+Twisted/banked, sharply warped, ramped X-axis, or missing Roadway LODs are
+rejected. A donor's Roadway may be narrower than its mapped approach road:
+the inspected `bridge03.p3d` has a 5 m driving surface, which Worldgen can
+place on a wider ordinary residential/secondary approach as a narrow bridge.
+Modules must still have sufficient usable width (a narrow 5 m module is
+rejected for motorways/trunks). The generation log reports donor object
+counts, narrowed approaches and any width rejections so custom bridge
+models can no longer be silently skipped. Existing water/bank checks and
+bridge-object budgets still apply; Nogova-only seam repair is bypassed
+for custom models.
+
+**Game-side addon requirement:** Asset roots allow Worldgen to **inspect**
+your bridge P3D but do not automatically install its PBO into the game. To
+see `haus\\bridge03.p3d` in CWA, the actual `haus` addon containing the model
+and required textures must also be loaded in the game/mod installation.
+After generation, check the bridge-donor placement summary in the build log.
+Old cached builds with silently rejected donor modules are automatically
+invalidated by the updated bridge policy.
+
+Leave module length, rotation and Roadway local Y empty to auto-detect them.
+Override only if the authored geometry needs adjustment. Example:
+
+```powershell
+python -m cwr_worldgen milestone9 --source-dir source-data/map --output build/world --asset-root "C:\Mods\mybridges.pbo" --bridge-donor-model "mybridges\bridge_straight.p3d"
+```
+
+Donor bridge modules are placed **without stretching**. Curved sections,
+strongly sloped or uneven ramps, irregular collision models and elaborate
+start/end pieces still need custom modeling; visual geometry alone cannot
+certify in-game vehicle crossing. Test the finished bridge in CWA.
+
 **Wall, hedge and ditch vegetation donors:** Advanced generation settings also
 accept one P3D each for mapped stone/retaining walls, mapped hedges, and
 vegetation strips along mapped OSM ditches. All three are opt-in: blank

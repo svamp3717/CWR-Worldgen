@@ -642,6 +642,9 @@ class _SurfaceLodSummary:
     point_flags: tuple[int, ...]
     textures: tuple[str, ...]
     faces: tuple[tuple[str, int, tuple[int, ...]], ...]
+    # Local-Y coordinates preserve Roadway LOD elevation for bridge donors.
+    point_heights: tuple[float, ...] = ()
+    point_horizontal: tuple[tuple[float, float], ...] = ()
 
 
 def _skip_odol_compressed_array(
@@ -672,11 +675,17 @@ def _read_odol_surface_lod(
     _read_odol_array(stream, uv_count, 8, f"ODOL LOD {lod_index} UVs")
 
     point_count = _read_u32(stream, f"ODOL LOD {lod_index} point count")
-    _read_exact(
+    point_bytes = _read_exact(
         stream,
         point_count * _VEC3.size,
         f"ODOL LOD {lod_index} points",
     )
+    positions = tuple(
+        _VEC3.unpack_from(point_bytes, i * _VEC3.size)
+        for i in range(point_count)
+    )
+    point_heights = tuple(float(point[1]) for point in positions)
+    point_horizontal = tuple((float(point[0]), float(point[2])) for point in positions)
     normal_count = _read_u32(stream, f"ODOL LOD {lod_index} normal count")
     _read_exact(
         stream,
@@ -830,6 +839,8 @@ def _read_odol_surface_lod(
         point_flags=point_flags,
         textures=textures,
         faces=tuple(faces),
+        point_heights=point_heights,
+        point_horizontal=point_horizontal,
     )
 
 
@@ -956,6 +967,8 @@ def _read_mlod_surface_lods(data: bytes) -> tuple[
             point_flags=tuple(int(point[3]) & 0xFFFFFFFF for point in points),
             textures=tuple(sorted(textures)),
             faces=tuple(faces),
+            point_heights=tuple(float(point[1]) for point in points),
+            point_horizontal=tuple((float(point[0]), float(point[2])) for point in points),
         ))
         resolutions.append(float(resolution))
     return tuple(lods), tuple(resolutions)
@@ -1030,6 +1043,138 @@ def inspect_roadway_surface_style(data: bytes) -> RoadwaySurfaceStyle:
         lods[candidates[0]],
         source_format=source_format,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class RoadwayDeckGeometry:
+    """Drivable local surface bounds, center and safe end-leveling pitch."""
+
+    local_y: float
+    span_x: float
+    span_z: float
+    centre_x: float
+    centre_z: float
+    leveling_pitch_degrees: float = 0.0
+    leveled_local_y: float = 0.0
+    leveled_relief_metres: float = 0.0
+    roadway_end_difference_metres: float = 0.0
+
+
+def inspect_roadway_deck_geometry(data: bytes) -> RoadwayDeckGeometry:
+    """Measure the *actual Roadway LOD*, not shorter decorative bridge rails.
+
+    Modules connect at drivable Roadway ends. Some stock bridges have a much
+    shorter named visual mesh; using visual dimensions would create wheel traps.
+    """
+    if data.startswith(b"ODOL"):
+        lods, resolutions = _read_odol_surface_lods(data)
+    elif data.startswith(b"MLOD"):
+        lods, resolutions = _read_mlod_surface_lods(data)
+    else:
+        raise ProxyCloneError("bridge donor must be MLOD or legacy ODOL v6/v7")
+    for lod, resolution in zip(lods, resolutions):
+        if not math.isclose(float(resolution), 3.0e15, rel_tol=1.0e-4, abs_tol=1.0e8):
+            continue
+        indices = [
+            index
+            for _texture, _flags, face_indices in lod.faces
+            if len(face_indices) in {3, 4}
+            for index in face_indices
+            if 0 <= index < len(lod.point_heights) and index < len(lod.point_horizontal)
+        ]
+        if not indices:
+            raise ProxyCloneError("bridge donor Roadway LOD has no drawable faces")
+        ys = sorted(lod.point_heights[index] for index in indices)
+        xs = [lod.point_horizontal[index][0] for index in indices]
+        zs = [lod.point_horizontal[index][1] for index in indices]
+        if not all(math.isfinite(v) for v in (*ys, *xs, *zs)):
+            raise ProxyCloneError("bridge donor Roadway LOD contains non-finite coordinates")
+        low, high = ys[0], ys[-1]
+        n = len(ys)
+        median_y = ys[n // 2] if n % 2 else (ys[n // 2 - 1] + ys[n // 2]) * 0.5
+        span_x = max(xs) - min(xs)
+        span_z = max(zs) - min(zs)
+        centre_z = (min(zs) + max(zs)) * 0.5
+        pitch_degrees = 0.0
+        leveled_local_y = median_y
+        leveled_relief = high - low
+        end_difference = 0.0
+
+        # Many legacy bridge parts have a level approach at one end and a
+        # modest ramp at the other (haus\\bridge03.p3d is one example). A
+        # pitched module can level its *Roadway ends*, preserving safe joints
+        # between identical modules without altering or rescaling the mesh.
+        # WRP WorldObject.pitch_degrees rotates local +Z, not local X; ramped
+        # X-aligned Roadways would require roll and cannot use this correction.
+        if span_z > span_x:
+            start_z, end_z = min(zs), max(zs)
+            end_epsilon = max(1.0e-4, span_z * 1.0e-5)
+            start_heights = [
+                lod.point_heights[index]
+                for index in set(indices)
+                if abs(lod.point_horizontal[index][1] - start_z) <= end_epsilon
+            ]
+            end_heights = [
+                lod.point_heights[index]
+                for index in set(indices)
+                if abs(lod.point_horizontal[index][1] - end_z) <= end_epsilon
+            ]
+            if start_heights and end_heights:
+                start_y = sum(start_heights) / len(start_heights)
+                end_y = sum(end_heights) / len(end_heights)
+                # Side-to-side variation at an endpoint is a banked/twisted
+                # roadway. A single object pitch cannot correct its seams.
+                if max(start_heights) - min(start_heights) > 0.15 or max(end_heights) - min(end_heights) > 0.15:
+                    raise ProxyCloneError(
+                        "bridge donor Roadway LOD end is twisted/banked; "
+                        "cannot level repeated modules with pitch alone"
+                    )
+                end_difference = end_y - start_y
+                pitch_degrees = math.degrees(math.atan2(start_y - end_y, span_z))
+                pitch = math.radians(pitch_degrees)
+                corrected = [
+                    lod.point_heights[index] * math.cos(pitch)
+                    + lod.point_horizontal[index][1] * math.sin(pitch)
+                    for index in set(indices)
+                ]
+                leveled_relief = max(corrected) - min(corrected)
+                start_level = start_y * math.cos(pitch) + start_z * math.sin(pitch)
+                end_level = end_y * math.cos(pitch) + end_z * math.sin(pitch)
+                leveled_local_y = (start_level + end_level) * 0.5
+        elif high - low > 0.6:
+            raise ProxyCloneError(
+                "ramped X-aligned bridge Roadway needs roll, not supported by "
+                "the current pitch-only bridge placement"
+            )
+
+        if abs(pitch_degrees) > 3.0:
+            raise ProxyCloneError(
+                f"bridge donor Roadway slope needs {pitch_degrees:.2f}° of pitch; "
+                "maximum safe correction is 3°"
+            )
+        if leveled_relief > 0.75:
+            raise ProxyCloneError(
+                f"bridge donor Roadway remains uneven after end leveling "
+                f"({leveled_relief:.2f} m); use a straighter bridge module"
+            )
+        return RoadwayDeckGeometry(
+            local_y=median_y,
+            span_x=span_x,
+            span_z=span_z,
+            centre_x=(min(xs) + max(xs)) * 0.5,
+            centre_z=centre_z,
+            leveling_pitch_degrees=pitch_degrees,
+            leveled_local_y=leveled_local_y,
+            leveled_relief_metres=leveled_relief,
+            roadway_end_difference_metres=end_difference,
+        )
+    raise ProxyCloneError("bridge donor has no Roadway LOD; vehicle-safe donor required")
+
+
+def inspect_roadway_deck_height(data: bytes) -> float:
+    """Backward-compatible Roadway surface local-Y measurement."""
+    return inspect_roadway_deck_geometry(data).local_y
+
 
 
 def inspect_visual_surface_style(
