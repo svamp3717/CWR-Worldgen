@@ -625,7 +625,11 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--stock-bridges", action="store_false", dest="procedural_bridges", help="use the stock Nogova bridge module instead of procedural bridges")
     milestone9.set_defaults(procedural_bridges=True)
     milestone9.add_argument("--max-bridge-objects", type=int, default=1000, help="bridge-object warning threshold; exceeded values are logged and generation continues; 0 disables this category")
-    milestone9.add_argument("--bridge-module-length", type=float, default=30.0, help="target module length for procedural bridges; stock Nogova bridges remain fixed at 30 m")
+    milestone9.add_argument("--bridge-module-length", type=float, default=30.0, help="target module length for procedural bridges; stock Nogova bridges retain their fitted length")
+    milestone9.add_argument("--bridge-donor-model", default="", help="optional drivable bridge module P3D from Asset roots; overrides procedural/stock bridge mode")
+    milestone9.add_argument("--bridge-donor-length", type=float, default=None, help="optional donor span length override in metres, auto from P3D")
+    milestone9.add_argument("--bridge-donor-heading-offset", type=float, default=None, help="optional bridge alignment override in degrees, auto from P3D")
+    milestone9.add_argument("--bridge-donor-deck-height", type=float, default=None, help="optional driving surface local-Y override, auto from Roadway LOD")
     milestone9.add_argument("--bridge-deck-clearance", type=float, default=1.25, help="minimum procedural bridge roadway clearance above the highest terrain under the full span; default 1.25 m")
     milestone9.add_argument("--bridge-water-clearance", type=float, default=18.0, help="empty clearance above the global water plane beneath the lowest bridge geometry; values below the 18 m safety floor are raised to 18 m")
     milestone9.add_argument("--no-residential-infill", action="store_false", dest="residential_infill_enabled", help="disable deterministic fallback houses in completely empty residential OSM polygons")
@@ -1324,6 +1328,10 @@ def main(argv: list[str] | None = None) -> int:
                 procedural_bridges=args.procedural_bridges,
                 maximum_bridge_objects=args.max_bridge_objects,
                 bridge_module_length=args.bridge_module_length,
+                bridge_donor_model=args.bridge_donor_model,
+                bridge_donor_length=args.bridge_donor_length,
+                bridge_donor_heading_offset=args.bridge_donor_heading_offset,
+                bridge_donor_deck_height=args.bridge_donor_deck_height,
                 bridge_deck_clearance=args.bridge_deck_clearance,
                 bridge_water_clearance=args.bridge_water_clearance,
                 residential_infill_enabled=args.residential_infill_enabled,
