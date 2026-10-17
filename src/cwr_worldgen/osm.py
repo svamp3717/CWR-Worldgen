@@ -11500,6 +11500,14 @@ def generate_world_objects(
                 elif bridge_donor is not None:
                     model = bridge_donor.model
                     heading = (heading + bridge_donor.heading_offset_degrees) % 360.0
+                    # Put the measured centre of the drivable Roadway footprint
+                    # on the mapped bridge centreline even if the P3D origin
+                    # was authored off-centre.
+                    radians = math.radians(heading)
+                    local_x = bridge_donor.roadway_centre_x
+                    local_z = bridge_donor.roadway_centre_z
+                    x -= local_x * math.cos(radians) + local_z * math.sin(radians)
+                    z += local_x * math.sin(radians) - local_z * math.cos(radians)
                 else:
                     model = NOGOVA_BRIDGE_MODEL
                 bridge_plan.append((model, x, y, z, heading, pitch))
