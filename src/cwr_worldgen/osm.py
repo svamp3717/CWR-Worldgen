@@ -520,7 +520,7 @@ def stock_farmland_fence_model(
     return models[1 + (int.from_bytes(digest, "little") % (len(models) - 1))]
 
 
-def configured_fence_donor(spec: object, *, metal: bool = False) -> tuple[str, float] | None:
+def configured_fence_donor(spec: object, *, metal: bool = False) -> tuple[str, float, float] | None:
     """Return a selected P3D and its actual nominal segment length.
 
     These are direct model placements, not generated fence meshes. The caller
@@ -534,7 +534,10 @@ def configured_fence_donor(spec: object, *, metal: bool = False) -> tuple[str, f
     length = float(getattr(spec, f"{prefix}_length", 6.0 if metal else 5.0))
     if not math.isfinite(length) or length <= 0.0:
         raise ValueError(f"{prefix}_length must be positive and finite")
-    return model, length
+    heading = float(getattr(spec, f"{prefix}_heading_offset", 90.0))
+    if not math.isfinite(heading):
+        raise ValueError(f"{prefix}_heading_offset must be finite")
+    return model, length, heading
 
 
 def _rural_fence_segments_duplicate(
@@ -8697,7 +8700,8 @@ def generate_world_objects(
                     if hedge:
                         emit_prop(model, sx, sz, plan.heading_degrees + 90.0 + HEDGE_MODEL_HEADING_OFFSET_DEGREES, footprint=0.7, hedge_segment=(start, end))
                     else:
-                        emit_prop(model, sx, sz, plan.heading_degrees + 90.0 + FARMLAND_FENCE_HEADING_OFFSET_DEGREES, footprint=0.6, line_segment=(start, end))
+                        fence_offset = custom_fence_donor[2] if custom_fence_donor else FARMLAND_FENCE_HEADING_OFFSET_DEGREES
+                        emit_prop(model, sx, sz, plan.heading_degrees + 90.0 + fence_offset, footprint=0.6, line_segment=(start, end))
 
             tree_count = 1 + stable_roll(identity + ":tree-count", 3)
             for tree_index in range(tree_count):
@@ -10890,6 +10894,8 @@ def generate_world_objects(
                         if metal_fence
                         else FARMLAND_FENCE_HEADING_OFFSET_DEGREES
                     )
+                    if subtype == "fence" and selected_fence_donor is not None:
+                        heading_offset = selected_fence_donor[2]
                     placed_heading = (heading + heading_offset) % 360.0
                     shifted = offset_line_clear_of_roads(
                         dataset,
@@ -11067,7 +11073,7 @@ def generate_world_objects(
                                 x,
                                 y,
                                 z,
-                                (heading + FARMLAND_FENCE_HEADING_OFFSET_DEGREES) % 360.0,
+                                (heading + (custom_fence_donor[2] if custom_fence_donor else FARMLAND_FENCE_HEADING_OFFSET_DEGREES)) % 360.0,
                                 pitch_degrees=pitch,
                             )
                         )
