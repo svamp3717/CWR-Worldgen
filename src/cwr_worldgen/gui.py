@@ -524,6 +524,15 @@ def defaults_with_recent_source(
         "metal_fence_donor_model",
         "metal_fence_donor_length",
         "metal_fence_donor_heading_offset",
+        "wall_donor_model",
+        "wall_donor_length",
+        "wall_donor_heading_offset",
+        "hedge_donor_model",
+        "hedge_donor_length",
+        "hedge_donor_heading_offset",
+        "ditch_vegetation_donor_model",
+        "ditch_vegetation_donor_length",
+        "ditch_vegetation_donor_heading_offset",
     ):
         if key not in state:
             continue
@@ -692,6 +701,15 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         ("--metal-fence-donor-model", "metal_fence_donor_model"),
         ("--metal-fence-donor-length", "metal_fence_donor_length"),
         ("--metal-fence-donor-heading-offset", "metal_fence_donor_heading_offset"),
+        ("--wall-donor-model", "wall_donor_model"),
+        ("--wall-donor-length", "wall_donor_length"),
+        ("--wall-donor-heading-offset", "wall_donor_heading_offset"),
+        ("--hedge-donor-model", "hedge_donor_model"),
+        ("--hedge-donor-length", "hedge_donor_length"),
+        ("--hedge-donor-heading-offset", "hedge_donor_heading_offset"),
+        ("--ditch-vegetation-donor-model", "ditch_vegetation_donor_model"),
+        ("--ditch-vegetation-donor-length", "ditch_vegetation_donor_length"),
+        ("--ditch-vegetation-donor-heading-offset", "ditch_vegetation_donor_heading_offset"),
         ("--max-buildings", "max_buildings"),
         ("--building-ground-clearance", "building_ground_clearance"),
         ("--church-ground-clearance", "church_ground_clearance"),
@@ -1042,6 +1060,15 @@ def default_gui_values() -> dict[str, object]:
         "metal_fence_donor_model": "",
         "metal_fence_donor_length": "",
         "metal_fence_donor_heading_offset": "",
+        "wall_donor_model": "",
+        "wall_donor_length": "",
+        "wall_donor_heading_offset": "",
+        "hedge_donor_model": "",
+        "hedge_donor_length": "",
+        "hedge_donor_heading_offset": "",
+        "ditch_vegetation_donor_model": "",
+        "ditch_vegetation_donor_length": "",
+        "ditch_vegetation_donor_heading_offset": "",
         "cache_refresh": False,
         "no_cache": False,
         "normalization_refresh": False,
@@ -1348,6 +1375,15 @@ class WorldgenGui(tk.Tk):
             "metal_fence_donor_model",
             "metal_fence_donor_length",
             "metal_fence_donor_heading_offset",
+            "wall_donor_model",
+            "wall_donor_length",
+            "wall_donor_heading_offset",
+            "hedge_donor_model",
+            "hedge_donor_length",
+            "hedge_donor_heading_offset",
+            "ditch_vegetation_donor_model",
+            "ditch_vegetation_donor_length",
+            "ditch_vegetation_donor_heading_offset",
         ):
             variable = self.vars.get(key)
             if variable is not None:
@@ -1372,6 +1408,15 @@ class WorldgenGui(tk.Tk):
                 "metal_fence_donor_model",
                 "metal_fence_donor_length",
                 "metal_fence_donor_heading_offset",
+                "wall_donor_model",
+                "wall_donor_length",
+                "wall_donor_heading_offset",
+                "hedge_donor_model",
+                "hedge_donor_length",
+                "hedge_donor_heading_offset",
+                "ditch_vegetation_donor_model",
+                "ditch_vegetation_donor_length",
+                "ditch_vegetation_donor_heading_offset",
             )
             if key in self.vars
         }
@@ -2400,6 +2445,29 @@ class WorldgenGui(tk.Tk):
         self._entry_row(fence_models, 4, "Chain-link/metal fence P3D", "metal_fence_donor_model", advanced=True)
         self._entry_row(fence_models, 5, "Metal length (m, auto if blank)", "metal_fence_donor_length", advanced=True)
         self._entry_row(fence_models, 6, "Metal rotation (°, auto if blank)", "metal_fence_donor_heading_offset", advanced=True)
+
+        linear_donors = ttk.LabelFrame(advanced.body, text="Wall, hedge and ditch vegetation donors", padding=10)
+        linear_donors.pack(fill="x", pady=(0, 10))
+        ttk.Label(
+            linear_donors,
+            text=(
+                "Optional P3D replacements for mapped walls, hedges and ditch grass. "
+                "Add the PBO/folder to Asset roots. Leave length/rotation blank "
+                "to auto-measure accessible MLOD or ODOL v6/v7 geometry. "
+                "Blank model paths keep existing stock/procedural behavior. "
+                "Models are placed directly; no geometry scaling."
+            ),
+            style="Hint.TLabel", wraplength=760,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        self._entry_row(linear_donors, 1, "Wall P3D", "wall_donor_model", advanced=True)
+        self._entry_row(linear_donors, 2, "Wall length (m, blank=auto)", "wall_donor_length", advanced=True)
+        self._entry_row(linear_donors, 3, "Wall rotation (°, blank=auto)", "wall_donor_heading_offset", advanced=True)
+        self._entry_row(linear_donors, 4, "Hedge P3D", "hedge_donor_model", advanced=True)
+        self._entry_row(linear_donors, 5, "Hedge length (m, blank=auto)", "hedge_donor_length", advanced=True)
+        self._entry_row(linear_donors, 6, "Hedge rotation (°, blank=auto)", "hedge_donor_heading_offset", advanced=True)
+        self._entry_row(linear_donors, 7, "Ditch vegetation P3D", "ditch_vegetation_donor_model", advanced=True)
+        self._entry_row(linear_donors, 8, "Ditch vegetation length (m, blank=auto)", "ditch_vegetation_donor_length", advanced=True)
+        self._entry_row(linear_donors, 9, "Ditch vegetation rotation (°, blank=auto)", "ditch_vegetation_donor_heading_offset", advanced=True)
 
         tuning = ttk.LabelFrame(advanced.body, text="Limits and solver", padding=10)
         tuning.pack(fill="x", pady=(0, 10))
