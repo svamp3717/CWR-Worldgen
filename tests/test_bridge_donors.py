@@ -306,13 +306,16 @@ def test_mild_ramped_bridge_roadway_is_leveled_without_unsafe_module_steps(tmp_p
     assert start == pytest.approx(end, abs=0.002)
 
 
-def test_ramped_donor_bridge_is_emitted_with_compensating_pitch(tmp_path: Path):
+@pytest.mark.parametrize("highway", ("service", "residential", "tertiary", "secondary", "primary"))
+def test_ramped_donor_bridge_is_emitted_with_compensating_pitch(
+    tmp_path: Path, highway: str,
+):
     archive = tmp_path / "addonbridge.pbo"
     write_pbo(archive, (PboEntry("segment.p3d", _mild_ramped_bridge_mlod()),))
     spec = _donor_spec(archive)
     projection = osm.BboxProjection.create((0, 0, 1, 1), 200.0)
     bridge = osm.OsmLineFeature(
-        "way/ramped", {"highway": "service", "bridge": "yes", "width": "4.5"},
+        "way/ramped", {"highway": highway, "bridge": "yes", "width": "4.5"},
         tuple(projection.to_latlon(p) for p in ((20.0, 100.0), (180.0, 100.0))),
     )
     dataset = osm.OsmDataset(
@@ -324,13 +327,18 @@ def test_ramped_donor_bridge_is_emitted_with_compensating_pitch(tmp_path: Path):
         farmland=(False,) * 64, urban=(False,) * 64, roads=(False,) * 64,
         buildings=(False,) * 64, high_resolution=8, coastline_seed_count=0,
     )
+    progress_messages = []
     with patch.object(osm, "_road_needs_bridge_deck", return_value=True), patch.object(
         osm, "_extend_procedural_bridge_to_approach_plateaus",
         side_effect=lambda points, *_args, **_kwargs: points,
     ):
         result = osm.generate_world_objects(
-            dataset, projection, raster, (5.0,) * 64, spec, include_roads=False,
+            dataset, projection, raster, (5.0,) * 64, spec,
+            include_roads=False,
+            progress_callback=lambda percent, message: progress_messages.append(message),
         )
+    summary = [message for message in progress_messages if "custom module(s) placed" in message]
+    assert summary and "4 custom module(s)" in summary[-1]
     objects = [o for o in result.objects if o.model_path == spec.bridge_donor_model]
     assert len(objects) == 4
     assert all(o.pitch_degrees == pytest.approx(0.958, abs=0.03) for o in objects)
@@ -344,3 +352,36 @@ def test_ramped_bridge_rejects_heading_that_would_bank_roadway(tmp_path: Path):
         configured_bridge_donor(_donor_spec(
             archive, bridge_donor_heading_offset=90.0,
         ))
+
+
+def test_unsafe_motorway_bridge_is_rejected_with_explicit_width_diagnostic(tmp_path: Path):
+    archive = tmp_path / "addonbridge.pbo"
+    write_pbo(archive, (PboEntry("segment.p3d", _mild_ramped_bridge_mlod()),))
+    spec = _donor_spec(archive)
+    projection = osm.BboxProjection.create((0, 0, 1, 1), 200.0)
+    bridge = osm.OsmLineFeature(
+        "way/too-narrow", {"highway": "motorway", "bridge": "yes"},
+        tuple(projection.to_latlon(p) for p in ((20.0, 100.0), (180.0, 100.0))),
+    )
+    dataset = osm.OsmDataset(
+        source_generator="too-narrow-bridge", element_count=1,
+        coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(bridge,),
+    )
+    raster = osm.OsmRaster(
+        cells=8, water=(False,) * 64, forest=(False,) * 64,
+        farmland=(False,) * 64, urban=(False,) * 64, roads=(False,) * 64,
+        buildings=(False,) * 64, high_resolution=8, coastline_seed_count=0,
+    )
+    progress = []
+    with patch.object(osm, "_road_needs_bridge_deck", return_value=True), patch.object(
+        osm, "_extend_procedural_bridge_to_approach_plateaus",
+        side_effect=lambda points, *_args, **_kwargs: points,
+    ):
+        result = osm.generate_world_objects(
+            dataset, projection, raster, (5.0,) * 64, spec,
+            include_roads=False,
+            progress_callback=lambda _, message: progress.append(message),
+        )
+    assert result.bridge_objects == 0
+    assert any("1 too-narrow model rejection(s)" in msg for msg in progress)
+    assert any("WARNING: No custom bridge modules were emitted" in msg for msg in progress)
