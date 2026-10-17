@@ -520,34 +520,47 @@ def stock_farmland_fence_model(
     return models[1 + (int.from_bytes(digest, "little") % (len(models) - 1))]
 
 
-def configured_fence_donor(spec: object, *, metal: bool = False) -> tuple[str, float, float] | None:
-    """Select a fence donor, inspecting its visual LOD unless manually overridden.
+def configured_linear_donor(
+    spec: object, prefix: str,
+) -> tuple[str, float, float, float, float] | None:
+    """Resolve a selected line-based donor and its geometry for direct placement.
 
-    Empty model path retains the original CWA stock fence. Empty length or
-    rotation field requests automatic inference from the selected asset root.
+    Returns (virtual P3D, length, rotation, visual width, minimum local Y).
+    The last two measures enable hedge and ditch footprint/grounding support.
+    Existing fences retain their three-value compatibility wrapper below.
     """
-    prefix = "metal_fence_donor" if metal else "fence_donor"
+    if prefix not in {
+        "fence_donor", "metal_fence_donor", "wall_donor", "hedge_donor",
+        "ditch_vegetation_donor",
+    }:
+        raise ValueError(f"unknown linear donor category {prefix!r}")
     model = str(getattr(spec, f"{prefix}_model", "") or "").strip().replace("/", "\\")
     if not model:
         return None
-    length_override = getattr(spec, f"{prefix}_length", None)
-    angle_override = getattr(spec, f"{prefix}_heading_offset", None)
-    length = float(length_override) if length_override not in (None, "") else None
-    angle = float(angle_override) if angle_override not in (None, "") else None
-    if length is not None and (not math.isfinite(length) or length <= 0.0):
+    raw_length = getattr(spec, f"{prefix}_length", None)
+    raw_angle = getattr(spec, f"{prefix}_heading_offset", None)
+    length = float(raw_length) if raw_length not in (None, "") else None
+    angle = float(raw_angle) if raw_angle not in (None, "") else None
+    if length is not None and (not math.isfinite(length) or length <= 0):
         raise ValueError(f"{prefix}_length must be positive and finite")
     if angle is not None and not math.isfinite(angle):
         raise ValueError(f"{prefix}_heading_offset must be finite")
+
+    # With both overrides provided the asset can remain outside Asset roots,
+    # matching the original manual fence donor behavior. With automatic values
+    # the selected P3D must be readable to avoid speculative geometry.
+    width = 1.0
+    minimum_y = 0.0
     if length is None or angle is None:
         from .assets import canonical_asset_path, read_asset_record_bytes
         from .fast_asset_scan_policy import locate_assets_fast
         from .fence_donor_geometry import inspect_fence_donor_geometry
 
-        roots = tuple(Path(p) for p in (getattr(spec, "asset_roots", ()) or ()))
+        roots = tuple(Path(root) for root in getattr(spec, "asset_roots", ()) or ())
         if not roots:
             raise ValueError(
-                f"Cannot auto-measure fence donor {model!r} without Asset roots. "
-                "Add its PBO/folder to Asset roots or set length and rotation manually."
+                f"Cannot auto-measure {prefix} model {model!r} without Asset roots. "
+                "Add its PBO/folder or supply both length and rotation manually."
             )
         scan = locate_assets_fast(
             roots,
@@ -557,26 +570,41 @@ def configured_fence_donor(spec: object, *, metal: bool = False) -> tuple[str, f
             refresh=bool(getattr(spec, "cache_refresh", False)),
         )
         record = next(
-            (item for item in scan.records if item.path == canonical_asset_path(model)),
+            (entry for entry in scan.records if entry.path == canonical_asset_path(model)),
             None,
         )
         if record is None:
             raise ValueError(
-                f"Cannot auto-measure fence donor {model!r}: not found in Asset roots. "
-                "Add the containing PBO/folder or set length and rotation manually."
+                f"Cannot auto-measure {prefix} model {model!r}: not found in Asset roots. "
+                "Add its containing PBO/folder or set both dimensions manually."
             )
         try:
-            shape = inspect_fence_donor_geometry(read_asset_record_bytes(record))
+            geometry = inspect_fence_donor_geometry(
+                read_asset_record_bytes(record),
+                allow_ambiguous=prefix == "ditch_vegetation_donor",
+            )
         except (OSError, ValueError) as exc:
             raise ValueError(
-                f"Cannot auto-measure fence donor {model!r}: {exc}. "
-                "Enter length and rotation manually for unsupported or unusual P3Ds."
+                f"Cannot auto-measure {prefix} model {model!r}: {exc}. "
+                "Set length and rotation manually for unusual models."
             ) from exc
         if length is None:
-            length = shape.length_metres
+            length = geometry.length_metres
         if angle is None:
-            angle = shape.heading_offset_degrees
-    return model, length, angle
+            angle = geometry.heading_offset_degrees
+        width = geometry.width_metres
+        minimum_y = geometry.minimum_y_metres
+    return model, length, angle, width, minimum_y
+
+
+def configured_fence_donor(
+    spec: object, *, metal: bool = False,
+) -> tuple[str, float, float] | None:
+    """Legacy three-value fence-donor interface for existing placements."""
+    donor = configured_linear_donor(
+        spec, "metal_fence_donor" if metal else "fence_donor",
+    )
+    return donor[:3] if donor else None
 
 
 def _rural_fence_segments_duplicate(
@@ -8421,6 +8449,9 @@ def generate_world_objects(
 
     # Share the same ordinary fence donor between mapped, rural, and yard fences.
     custom_fence_donor = configured_fence_donor(spec)
+    custom_hedge_donor = configured_linear_donor(spec, "hedge_donor")
+    custom_wall_donor = configured_linear_donor(spec, "wall_donor")
+    custom_ditch_donor = configured_linear_donor(spec, "ditch_vegetation_donor")
     progress(54, "Placing buildings")
     building_count = 0
     building_truncated = building_plans_truncated
@@ -10778,7 +10809,10 @@ def generate_world_objects(
     if bool(getattr(spec, "ditch_grass_enabled", False)):
         ditch_warning_threshold = max(0, int(getattr(spec, "maximum_ditch_grass_objects", 2000)))
         ditch_limit = _advisory_object_limit(ditch_warning_threshold, enabled=advisory_limits)
-        ditch_spacing = max(6.0, float(getattr(spec, "ditch_grass_spacing", 18.0)))
+        ditch_spacing = (
+            max(0.25, custom_ditch_donor[1]) if custom_ditch_donor
+            else max(6.0, float(getattr(spec, "ditch_grass_spacing", 18.0)))
+        )
         ditch_trim = max(0.0, float(getattr(spec, "ditch_grass_endpoint_trim", 6.0)))
         ditch_maximum_relief = max(
             0.0, float(getattr(spec, "ditch_grass_maximum_relief", 18.0))
@@ -10799,6 +10833,47 @@ def generate_world_objects(
         ):
             if ditch_grass_objects >= ditch_limit:
                 break
+            if custom_ditch_donor is not None:
+                model, model_length, rotation, model_width, minimum_y = custom_ditch_donor
+                if not (0.0 <= x < spec.world_size and 0.0 <= z < spec.world_size):
+                    ditch_grass_rejections += 1
+                    continue
+                if (
+                    _mask_at(raster.water, spec.cells, spec.world_size, x, z)
+                    or _mask_at(raster.buildings, spec.cells, spec.world_size, x, z)
+                ):
+                    ditch_grass_rejections += 1
+                    continue
+                half_length = model_length * 0.5
+                radians = math.radians(heading)
+                dx, dz = math.sin(radians) * half_length, math.cos(radians) * half_length
+                footprint = _line_footprint_polygon(
+                    x - dx, z - dz, x + dx, z + dz,
+                    half_width=max(0.1, model_width * 0.5),
+                )
+                if (
+                    polygon_intersects_road_corridors(road_corridors, footprint, clearance=0.3)
+                    or _polygon_overlaps_mask(raster.buildings, spec.cells, spec.world_size, footprint)
+                ):
+                    ditch_grass_rejections += 1
+                    continue
+                minimum, maximum = _polygon_elevation_extrema(
+                    elevations, spec.cells, spec.cell_size, footprint,
+                )
+                relief = maximum - minimum
+                if relief > ditch_maximum_relief or relief > ditch_maximum_float:
+                    ditch_grass_rejections += 1
+                    continue
+                # Raise the model by its measured lowest visible vertex so
+                # negative/positive model origins do not bury the whole strip.
+                y = maximum - minimum_y + ditch_clearance
+                emit(WorldObject(
+                    next_id, model, x, y, z, (heading + rotation) % 360.0,
+                ))
+                next_id += 1
+                ditch_grass_objects += 1
+                ditch_grass_maximum_float = max(ditch_grass_maximum_float, relief)
+                continue
             digest = hashlib.blake2s(
                 f"{seed}:ditch-grass-variant:{key}".encode("utf-8"), digest_size=4
             ).digest()
@@ -10887,7 +10962,9 @@ def generate_world_objects(
                 stock_fence_model = selected_fence_donor[0]
             points = tuple(projection.to_world(point) for point in feature.points)
             fitted_length = (
-                STOCK_WALL_EFFECTIVE_LENGTH_METRES if subtype == "wall"
+                custom_wall_donor[1] if subtype == "wall" and custom_wall_donor
+                else STOCK_WALL_EFFECTIVE_LENGTH_METRES if subtype == "wall"
+                else custom_hedge_donor[1] if subtype == "hedge" and custom_hedge_donor
                 else selected_fence_donor[1] if selected_fence_donor is not None
                 else barrier_length
             )
@@ -10902,9 +10979,15 @@ def generate_world_objects(
                     continue
                 identity = f"{seed}:{feature.osm_key}:{chunk_index}"
                 if subtype == "hedge":
-                    model = stock_hedge_model(length, identity, stock_hedge_models)
+                    model = (
+                        custom_hedge_donor[0] if custom_hedge_donor else
+                        stock_hedge_model(length, identity, stock_hedge_models)
+                    )
                 elif subtype == "wall":
-                    model = stock_wall_model(identity, stock_wall_models)
+                    model = (
+                        custom_wall_donor[0] if custom_wall_donor else
+                        stock_wall_model(identity, stock_wall_models)
+                    )
                 else:
                     model = stock_fence_model
                 placed_x, placed_z = x, z
@@ -10916,7 +10999,11 @@ def generate_world_objects(
                     # turned intersections into scattered freestanding slabs. A
                     # road crossing now creates a clean entrance-sized omission
                     # while all unaffected chunks stay exactly on the OSM line.
-                    placed_heading = (heading + WALL_MODEL_HEADING_OFFSET_DEGREES) % 360.0
+                    wall_offset = (
+                        custom_wall_donor[2] if custom_wall_donor
+                        else WALL_MODEL_HEADING_OFFSET_DEGREES
+                    )
+                    placed_heading = (heading + wall_offset) % 360.0
                     if line_intersects_road_corridors(
                         road_corridors,
                         (x0, z0),
@@ -10933,6 +11020,8 @@ def generate_world_objects(
                         if metal_fence
                         else FARMLAND_FENCE_HEADING_OFFSET_DEGREES
                     )
+                    if subtype == "hedge" and custom_hedge_donor:
+                        heading_offset = custom_hedge_donor[2]
                     if subtype == "fence" and selected_fence_donor is not None:
                         heading_offset = selected_fence_donor[2]
                     placed_heading = (heading + heading_offset) % 360.0
@@ -10969,8 +11058,14 @@ def generate_world_objects(
                         placed_z0,
                         placed_x1,
                         placed_z1,
-                        model_path=model,
+                        model_path=None if custom_hedge_donor else model,
+                        half_width=(
+                            max(0.1, custom_hedge_donor[3] * 0.5)
+                            if custom_hedge_donor else HEDGE_FOOTPRINT_HALF_WIDTH_METRES
+                        ),
                     )
+                    if custom_hedge_donor:
+                        y -= custom_hedge_donor[4]
                     pitch = 0.0
                 else:
                     y, pitch = _infrastructure_anchor(
