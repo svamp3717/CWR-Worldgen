@@ -455,6 +455,11 @@ class Milestone9Spec(Milestone8Spec):
     barriers_enabled: bool = True
     maximum_barrier_objects: int = 4000
     barrier_segment_length: float = 6.0
+    # Optional direct-placement fence P3Ds. Empty selects the stock families.
+    fence_donor_model: str = ""
+    fence_donor_length: float = 5.0
+    metal_fence_donor_model: str = ""
+    metal_fence_donor_length: float = 6.0
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
@@ -598,6 +603,8 @@ class Milestone9Spec(Milestone8Spec):
             ("ditch grass spacing", self.ditch_grass_spacing),
             ("ditch grass maximum relief", self.ditch_grass_maximum_relief),
             ("barrier segment length", self.barrier_segment_length),
+            ("fence donor segment length", self.fence_donor_length),
+            ("metal fence donor segment length", self.metal_fence_donor_length),
             ("bridge module length", self.bridge_module_length),
             ("residential infill spacing", self.residential_infill_spacing),
             ("residential infill minimum area", self.residential_infill_minimum_area),
@@ -700,6 +707,19 @@ class Milestone9Spec(Milestone8Spec):
                 raise ValueError(f"{label} path must be ASCII") from exc
             if not encoded_model or len(encoded_model) > 75:
                 raise ValueError(f"{label} path must contain 1..75 ASCII bytes")
+        for label, model_path in (
+            ("fence donor", self.fence_donor_model),
+            ("metal fence donor", self.metal_fence_donor_model),
+        ):
+            model = str(model_path).strip().replace("/", "\\")
+            if not model:
+                continue
+            try:
+                encoded = model.encode("ascii")
+            except UnicodeEncodeError as exc:
+                raise ValueError(f"{label} P3D path must be ASCII") from exc
+            if len(encoded) > 75 or not model.casefold().endswith(".p3d") or "\\\\" in model:
+                raise ValueError(f"{label} must be a virtual .p3d path (up to 75 ASCII bytes)")
         for label, model_paths in (
             ("steep hill bush models", self.steep_hill_bush_models),
             ("forest roadside tree models", self.forest_roadside_tree_models),
@@ -883,6 +903,11 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     barriers_enabled: bool = True
     maximum_barrier_objects: int = 4000
     barrier_segment_length: float = 6.0
+    # Optional direct-placement fence P3Ds. Empty selects the stock families.
+    fence_donor_model: str = ""
+    fence_donor_length: float = 5.0
+    metal_fence_donor_model: str = ""
+    metal_fence_donor_length: float = 6.0
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
@@ -1400,6 +1425,10 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         barriers_enabled=spec.barriers_enabled,
         maximum_barrier_objects=spec.maximum_barrier_objects,
         barrier_segment_length=spec.barrier_segment_length,
+        fence_donor_model=spec.fence_donor_model,
+        fence_donor_length=spec.fence_donor_length,
+        metal_fence_donor_model=spec.metal_fence_donor_model,
+        metal_fence_donor_length=spec.metal_fence_donor_length,
         stock_hedge_models=spec.stock_hedge_models,
         stock_wall_models=spec.stock_wall_models,
         stock_metal_fence_models=spec.stock_metal_fence_models,
