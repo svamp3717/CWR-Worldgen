@@ -97,6 +97,18 @@ def configured_bridge_donor(spec: object) -> BridgeDonor | None:
         if overrides["heading_offset"] is not None
         else (90.0 if roadway.span_x > roadway.span_z else 0.0)
     )
+    # WRP object pitch follows the bridge model's local Z axis. A manual
+    # quarter-turn would turn a corrected longitudinal ramp into a sideways
+    # bank, even though the same pitch angle remains numerically valid.
+    if abs(roadway.leveling_pitch_degrees) > 0.01:
+        expected_angle = 90.0 if roadway.span_x > roadway.span_z else 0.0
+        deviation = (heading - expected_angle + 90.0) % 180.0 - 90.0
+        if abs(deviation) > 5.0:
+            raise ValueError(
+                f"Bridge donor {model!r} requires a longitudinal pitch correction; "
+                "its manual heading must preserve the measured Roadway axis "
+                "(0 or 180 degrees for Z-aligned ramps)"
+            )
     deck_y = (
         overrides["deck_height"]
         if overrides["deck_height"] is not None
