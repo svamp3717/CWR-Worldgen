@@ -20,7 +20,7 @@ from cwr_worldgen import assets as world_assets
 from p3d_preview_geometry import PreviewModel, build_preview_model
 from cwr_worldgen.pbo import is_pbo_path
 from p3d_texture_sources import TextureResolver
-from p3d_dayz import model_format_label
+from p3d_game_profiles import model_format_label
 from p3d_texture_io import MIPMAP_CHOICES
 from p3d_texture_render import MipmapCache, render_textured_model
 

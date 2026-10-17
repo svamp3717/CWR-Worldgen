@@ -240,6 +240,30 @@ def test_dayz_dz_namespace_automatically_loads_sibling_texture_pbo(tmp_path: Pat
     assert generic_dz_archive.resolve() not in resolver.auto_sibling_pbos
 
 
+def test_take_on_helicopters_sibling_texture_pbo_and_prefix(tmp_path: Path) -> None:
+    model_pbo = tmp_path / "air_h.pbo"
+    texture_pbo = tmp_path / "data_h.pbo"
+    generic_hsim = tmp_path / "hsim.pbo"
+    _write_prefixed_pbo(
+        model_pbo, r"HSim\air_h",
+        {"heli_medium.p3d": b"model"},
+    )
+    _write_prefixed_pbo(
+        texture_pbo, r"HSim\data_h",
+        {r"data\heli_ext_co.paa": b"toh-paa"},
+    )
+    _write_pbo(generic_hsim, {"unrelated.paa": b"wrong-archive"})
+    texture = r"HSim\data_h\data\heli_ext_co.paa"
+    assert sibling_namespace_pbo(model_pbo, texture) == texture_pbo
+    assert sibling_namespace_pbos(model_pbo, texture) == (texture_pbo, generic_hsim)
+
+    resolver = TextureResolver([model_pbo])
+    source = f"{model_pbo}!HSim\\air_h\\heli_medium.p3d"
+    assert resolver.load_bytes(texture, source) == b"toh-paa"
+    assert texture_pbo.resolve() in resolver.auto_sibling_pbos
+    assert generic_hsim.resolve() not in resolver.auto_sibling_pbos
+
+
 def test_missing_sibling_does_not_return_incorrect_namespace_pbo(tmp_path: Path) -> None:
     source = tmp_path / "models.pbo"
     _write_pbo(source, {})

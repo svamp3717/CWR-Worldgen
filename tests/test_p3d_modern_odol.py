@@ -17,6 +17,7 @@ if str(TOOLS) not in sys.path:
 import p3d_modern_odol as modern
 import p3d_preview_geometry as preview
 from p3d_dayz import is_dayz_model_path, model_format_label
+from p3d_game_profiles import is_take_on_helicopters_model_path
 
 
 def _modern_odol(
@@ -147,3 +148,22 @@ def test_dayz_models_keep_versions_and_are_labelled_by_namespace() -> None:
     assert is_dayz_model_path(r"DZ/gear/item.p3d")
     assert not is_dayz_model_path(r"a3\structures\house.p3d")
     assert model_format_label(r"mod\house.p3d", "ODOL", 54) == "ODOL v54"
+
+
+def test_take_on_helicopters_odol_v52_is_previewed_and_labelled() -> None:
+    data = _modern_odol(52)
+    model = preview.build_preview_model(
+        data, model_path=r"HSim\air_h\Heli_Medium01.p3d", source="fixture",
+    )
+    assert model.measurement.version == 52
+    assert model.measurement.lod == "model bounds only"
+    assert model_format_label(model.model_path, model.measurement.format, 52) == (
+        "Take On Helicopters asset (ODOL v52)"
+    )
+    assert is_take_on_helicopters_model_path(r"HSim\air_h\Heli_Medium01.p3d")
+    assert is_take_on_helicopters_model_path(r"hsim/air_us_h/heli.p3d")
+    assert not is_take_on_helicopters_model_path(r"hsim_mod\addon.p3d")
+    assert model_format_label(r"ca\air\heli.p3d", "ODOL", 52) == "ODOL v52"
+    assert model_format_label(r"DZ\gear\item.p3d", "ODOL", 54) == (
+        "DayZ asset (ODOL v54)"
+    )

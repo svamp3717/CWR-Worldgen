@@ -27,7 +27,7 @@ from p3d_asset_browser_catalog import (
 )
 from p3d_frozen_support import dismiss_splash
 from p3d_texture_sources import TextureResolver
-from p3d_dayz import model_format_label
+from p3d_game_profiles import model_format_label
 from p3d_texture_io import MIPMAP_CHOICES
 from p3d_texture_render import MipmapCache, render_textured_model
 from cwr_worldgen.pbo import is_pbo_path
@@ -107,7 +107,7 @@ class AssetBrowserApp:
 
         self.status_var = tk.StringVar(
             master=self.root,
-            value="Browse OFP / Arma / DayZ PBOs, IFAs, models and textures.",
+            value="Browse OFP / Arma / DayZ / Take On Helicopters PBOs and models.",
         )
         ttk.Label(toolbar, textvariable=self.status_var).pack(side=tk.RIGHT, padx=(12, 0))
         self.scan_progress = ttk.Progressbar(
@@ -388,7 +388,7 @@ class AssetBrowserApp:
             return
         values = filedialog.askopenfilenames(
             parent=self.root,
-            title="Select OFP / Arma / DayZ PBO or Iron Front IFA archive(s)",
+            title="Select OFP / Arma / DayZ / Take On Helicopters PBO or IFA archive(s)",
             filetypes=(
                 ("PBO / IFA archives", "*.pbo *.ifa *.pbo.zst *.ifa.zst"),
                 ("PBO archives", "*.pbo *.pbo.zst"),
