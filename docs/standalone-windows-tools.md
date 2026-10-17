@@ -82,6 +82,35 @@ or ODOL conversion. The automated tests use synthetic DayZ-compatible
 format fixtures; actual game archives and Windows executables still need
 smoke-testing against a legitimate DayZ installation.
 
+### Take On Helicopters support (asset tools only)
+
+The P3D Browser, P3D Categoriser and WRP scanner can inspect Take On
+Helicopters (TKOH) archives without modifying the CWR-Worldgen exporter.
+
+- **Browse P3D Assets / Model Categoriser:** select TKOH PBO archives or loose
+  P3D files in the normal picker. Models in the virtual `HSim\...` namespace
+  are labelled **Take On Helicopters asset**. The modern ODOL reader already
+  accepts the v52 header family; a model whose visual mesh cannot be decoded
+  falls back to a bounds-only preview. Version alone never identifies a game.
+- **Texture lookup:** an `HSim\data_h\data\heli_ext_co.paa` reference prefers
+  a sibling `data_h.pbo` (with its PBO prefix) over an unrelated `hsim.pbo`.
+  The usual manual texture-archive selection remains available.
+- **WRP scanner:** choose **Take On Helicopters** from the Game dropdown or
+  pass `--game tkoh`. The stock P3D namespace is `HSim`; optional Arma 2
+  Rearmed data such as `ca` are not implicitly marked stock. Override roots
+  using `--stock-root hsim --stock-root ca` if Rearmed is installed.
+  Unbinarized `8WVR` uses its existing exact object-record scanner; binarized
+  `OPRW` only reports embedded P3D string occurrences, not exact placements.
+
+Example:
+
+```powershell
+.\WRP-Mod-Dependency-Scanner.exe "C:\TKOH\world.wrp" --game tkoh --json "tkoh-dependencies.json"
+```
+
+Tests use synthetic files. Real TKOH PBOs, ODOL visual LODs and WRPs still need
+smoke-testing; these tools do not convert models or export TKOH worlds.
+
 ### Choosing individual texture archives
 
 Both P3D tools can load **multiple individual texture PBO/IFA archives**
