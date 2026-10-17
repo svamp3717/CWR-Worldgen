@@ -347,6 +347,15 @@ def test_take_on_helicopters_unbinarized_wrp_profile(tmp_path: Path) -> None:
     assert with_rearmed.unique_mod_models == 1
 
 
+def test_take_on_helicopters_gui_profile_sets_hsim_stock_root() -> None:
+    gui = ScannerGui.__new__(ScannerGui)
+    gui.game_var = Mock()
+    gui.stock_var = Mock()
+    gui.game_var.get.return_value = "Take On Helicopters"
+    gui._game_changed()
+    gui.stock_var.set.assert_called_once_with("hsim")
+
+
 def test_take_on_helicopters_binarized_wrp_warning_and_pbo(tmp_path: Path) -> None:
     data = b"OPRW" + struct.pack("<I", 25) + (
         b"HSim\\air_h\\heli.p3d\0"
