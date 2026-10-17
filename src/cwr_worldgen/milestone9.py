@@ -489,6 +489,11 @@ class Milestone9Spec(Milestone8Spec):
     procedural_bridges: bool = True
     maximum_bridge_objects: int = 1000
     bridge_module_length: float = 30.0
+    # Optional drivable P3D bridge module; geometry and Roadway LOD measured from Asset roots.
+    bridge_donor_model: str = ""
+    bridge_donor_length: float | None = None
+    bridge_donor_heading_offset: float | None = None
+    bridge_donor_deck_height: float | None = None
     bridge_deck_clearance: float = 1.25
     bridge_water_clearance: float = 18.0
     residential_infill_enabled: bool = True
@@ -719,6 +724,7 @@ class Milestone9Spec(Milestone8Spec):
         for label, length in (
             ("fence donor length", self.fence_donor_length),
             ("metal fence donor length", self.metal_fence_donor_length),
+            ("bridge donor length", self.bridge_donor_length),
             ("wall donor length", self.wall_donor_length),
             ("hedge donor length", self.hedge_donor_length),
             ("ditch vegetation donor length", self.ditch_vegetation_donor_length),
@@ -731,6 +737,8 @@ class Milestone9Spec(Milestone8Spec):
         for label, angle in (
             ("fence donor heading offset", self.fence_donor_heading_offset),
             ("metal fence donor heading offset", self.metal_fence_donor_heading_offset),
+            ("bridge donor heading offset", self.bridge_donor_heading_offset),
+            ("bridge donor deck height", self.bridge_donor_deck_height),
             ("wall donor heading offset", self.wall_donor_heading_offset),
             ("hedge donor heading offset", self.hedge_donor_heading_offset),
             ("ditch vegetation donor heading offset", self.ditch_vegetation_donor_heading_offset),
@@ -742,6 +750,7 @@ class Milestone9Spec(Milestone8Spec):
         for label, model_path in (
             ("fence donor", self.fence_donor_model),
             ("metal fence donor", self.metal_fence_donor_model),
+            ("bridge donor", self.bridge_donor_model),
             ("wall donor", self.wall_donor_model),
             ("hedge donor", self.hedge_donor_model),
             ("ditch vegetation donor", self.ditch_vegetation_donor_model),
@@ -972,6 +981,11 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     procedural_bridges: bool = True
     maximum_bridge_objects: int = 1000
     bridge_module_length: float = 30.0
+    # Optional drivable P3D bridge module; geometry and Roadway LOD measured from Asset roots.
+    bridge_donor_model: str = ""
+    bridge_donor_length: float | None = None
+    bridge_donor_heading_offset: float | None = None
+    bridge_donor_deck_height: float | None = None
     bridge_deck_clearance: float = 1.25
     bridge_water_clearance: float = 18.0
     residential_infill_enabled: bool = True
@@ -1504,6 +1518,10 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         procedural_bridges=spec.procedural_bridges,
         maximum_bridge_objects=spec.maximum_bridge_objects,
         bridge_module_length=spec.bridge_module_length,
+        bridge_donor_model=spec.bridge_donor_model,
+        bridge_donor_length=spec.bridge_donor_length,
+        bridge_donor_heading_offset=spec.bridge_donor_heading_offset,
+        bridge_donor_deck_height=spec.bridge_donor_deck_height,
         bridge_deck_clearance=spec.bridge_deck_clearance,
         bridge_water_clearance=spec.bridge_water_clearance,
         residential_infill_enabled=spec.residential_infill_enabled,
