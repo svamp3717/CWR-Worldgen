@@ -533,6 +533,10 @@ def defaults_with_recent_source(
         "ditch_vegetation_donor_model",
         "ditch_vegetation_donor_length",
         "ditch_vegetation_donor_heading_offset",
+        "bridge_donor_model",
+        "bridge_donor_length",
+        "bridge_donor_heading_offset",
+        "bridge_donor_deck_height",
     ):
         if key not in state:
             continue
@@ -710,6 +714,10 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         ("--ditch-vegetation-donor-model", "ditch_vegetation_donor_model"),
         ("--ditch-vegetation-donor-length", "ditch_vegetation_donor_length"),
         ("--ditch-vegetation-donor-heading-offset", "ditch_vegetation_donor_heading_offset"),
+        ("--bridge-donor-model", "bridge_donor_model"),
+        ("--bridge-donor-length", "bridge_donor_length"),
+        ("--bridge-donor-heading-offset", "bridge_donor_heading_offset"),
+        ("--bridge-donor-deck-height", "bridge_donor_deck_height"),
         ("--max-buildings", "max_buildings"),
         ("--building-ground-clearance", "building_ground_clearance"),
         ("--church-ground-clearance", "church_ground_clearance"),
@@ -1069,6 +1077,10 @@ def default_gui_values() -> dict[str, object]:
         "ditch_vegetation_donor_model": "",
         "ditch_vegetation_donor_length": "",
         "ditch_vegetation_donor_heading_offset": "",
+        "bridge_donor_model": "",
+        "bridge_donor_length": "",
+        "bridge_donor_heading_offset": "",
+        "bridge_donor_deck_height": "",
         "cache_refresh": False,
         "no_cache": False,
         "normalization_refresh": False,
@@ -1384,6 +1396,10 @@ class WorldgenGui(tk.Tk):
             "ditch_vegetation_donor_model",
             "ditch_vegetation_donor_length",
             "ditch_vegetation_donor_heading_offset",
+            "bridge_donor_model",
+            "bridge_donor_length",
+            "bridge_donor_heading_offset",
+            "bridge_donor_deck_height",
         ):
             variable = self.vars.get(key)
             if variable is not None:
@@ -1417,6 +1433,10 @@ class WorldgenGui(tk.Tk):
                 "ditch_vegetation_donor_model",
                 "ditch_vegetation_donor_length",
                 "ditch_vegetation_donor_heading_offset",
+                "bridge_donor_model",
+                "bridge_donor_length",
+                "bridge_donor_heading_offset",
+                "bridge_donor_deck_height",
             )
             if key in self.vars
         }
@@ -2468,6 +2488,24 @@ class WorldgenGui(tk.Tk):
         self._entry_row(linear_donors, 7, "Ditch vegetation P3D", "ditch_vegetation_donor_model", advanced=True)
         self._entry_row(linear_donors, 8, "Ditch vegetation length (m, blank=auto)", "ditch_vegetation_donor_length", advanced=True)
         self._entry_row(linear_donors, 9, "Ditch vegetation rotation (°, blank=auto)", "ditch_vegetation_donor_heading_offset", advanced=True)
+
+        bridge_donor_group = ttk.LabelFrame(advanced.body, text="Bridge module donor", padding=10)
+        bridge_donor_group.pack(fill="x", pady=(0, 10))
+        ttk.Label(
+            bridge_donor_group,
+            text=(
+                "Optional drivable P3D bridge module, overriding stock/procedural "
+                "bridge mode when selected. Add its PBO/folder to Asset roots. "
+                "Leave values blank to detect model length, alignment and Roadway LOD deck height. "
+                "Only straight, nearly level modules with a Roadway LOD are supported; "
+                "no scaling or automatic end/corner pieces."
+            ),
+            style="Hint.TLabel", wraplength=760,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        self._entry_row(bridge_donor_group, 1, "Bridge module P3D", "bridge_donor_model", advanced=True)
+        self._entry_row(bridge_donor_group, 2, "Module length (m; blank=auto)", "bridge_donor_length", advanced=True)
+        self._entry_row(bridge_donor_group, 3, "Rotation (°; blank=auto)", "bridge_donor_heading_offset", advanced=True)
+        self._entry_row(bridge_donor_group, 4, "Roadway local Y (m; blank=auto)", "bridge_donor_deck_height", advanced=True)
 
         tuning = ttk.LabelFrame(advanced.body, text="Limits and solver", padding=10)
         tuning.pack(fill="x", pady=(0, 10))
