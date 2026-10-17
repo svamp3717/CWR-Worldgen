@@ -36,7 +36,7 @@ def test_package_runtime_installs_complete_bridge_policy_chain() -> None:
 
     assert render_policy.stock_bridge_span_plan is runtime_policy._runtime_stock_bridge_span_plan
     assert source_water._ORIGINAL_STOCK_PLAN is water_clamp._ORIGINAL_STOCK_BRIDGE_SPAN_PLAN
-    assert build_cache.BUILD_CACHE_REVISION == "v11-authoritative-pre-fill-bridge-plan"
+    assert build_cache.BUILD_CACHE_REVISION == "v12-donor-bridge-narrow-spans"
 
 
 def test_runtime_planner_reuses_pre_fill_wet_plan() -> None:
