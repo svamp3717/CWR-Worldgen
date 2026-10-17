@@ -457,11 +457,11 @@ class Milestone9Spec(Milestone8Spec):
     barrier_segment_length: float = 6.0
     # Optional direct-placement fence P3Ds. Empty selects the stock families.
     fence_donor_model: str = ""
-    fence_donor_length: float = 5.0
-    fence_donor_heading_offset: float = 90.0
+    fence_donor_length: float | None = None
+    fence_donor_heading_offset: float | None = None
     metal_fence_donor_model: str = ""
-    metal_fence_donor_length: float = 6.0
-    metal_fence_donor_heading_offset: float = 90.0
+    metal_fence_donor_length: float | None = None
+    metal_fence_donor_heading_offset: float | None = None
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
@@ -605,8 +605,6 @@ class Milestone9Spec(Milestone8Spec):
             ("ditch grass spacing", self.ditch_grass_spacing),
             ("ditch grass maximum relief", self.ditch_grass_maximum_relief),
             ("barrier segment length", self.barrier_segment_length),
-            ("fence donor segment length", self.fence_donor_length),
-            ("metal fence donor segment length", self.metal_fence_donor_length),
             ("bridge module length", self.bridge_module_length),
             ("residential infill spacing", self.residential_infill_spacing),
             ("residential infill minimum area", self.residential_infill_minimum_area),
@@ -709,12 +707,23 @@ class Milestone9Spec(Milestone8Spec):
                 raise ValueError(f"{label} path must be ASCII") from exc
             if not encoded_model or len(encoded_model) > 75:
                 raise ValueError(f"{label} path must contain 1..75 ASCII bytes")
+        for label, length in (
+            ("fence donor length", self.fence_donor_length),
+            ("metal fence donor length", self.metal_fence_donor_length),
+        ):
+            if length is not None and (
+                not isinstance(length, (int, float))
+                or not math.isfinite(float(length)) or float(length) <= 0.0
+            ):
+                raise ValueError(f"{label} must be positive and finite or automatic")
         for label, angle in (
             ("fence donor heading offset", self.fence_donor_heading_offset),
             ("metal fence donor heading offset", self.metal_fence_donor_heading_offset),
         ):
-            if not isinstance(angle, (int, float)) or not math.isfinite(float(angle)):
-                raise ValueError(f"{label} must be finite")
+            if angle is not None and (
+                not isinstance(angle, (int, float)) or not math.isfinite(float(angle))
+            ):
+                raise ValueError(f"{label} must be finite or automatic")
         for label, model_path in (
             ("fence donor", self.fence_donor_model),
             ("metal fence donor", self.metal_fence_donor_model),
@@ -913,11 +922,11 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     barrier_segment_length: float = 6.0
     # Optional direct-placement fence P3Ds. Empty selects the stock families.
     fence_donor_model: str = ""
-    fence_donor_length: float = 5.0
-    fence_donor_heading_offset: float = 90.0
+    fence_donor_length: float | None = None
+    fence_donor_heading_offset: float | None = None
     metal_fence_donor_model: str = ""
-    metal_fence_donor_length: float = 6.0
-    metal_fence_donor_heading_offset: float = 90.0
+    metal_fence_donor_length: float | None = None
+    metal_fence_donor_heading_offset: float | None = None
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
