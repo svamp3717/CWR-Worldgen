@@ -2999,6 +2999,8 @@ _PLACEMENT_CACHE_FIELDS = (
     "forest_hillside_trees_per_block", "forest_hillside_tree_footprint",
     "forest_hillside_tree_maximum_relief",
     "barriers_enabled", "maximum_barrier_objects", "barrier_segment_length",
+    "fence_donor_model", "fence_donor_length", "fence_donor_heading_offset",
+    "metal_fence_donor_model", "metal_fence_donor_length", "metal_fence_donor_heading_offset",
     "stock_hedge_models", "stock_wall_models", "stock_metal_fence_models",
     "sidewalks_enabled", "maximum_sidewalk_objects", "sidewalk_width",
     "sidewalk_segment_length", "street_furniture_enabled",
@@ -3581,7 +3583,15 @@ def _load_nonroad_objects(
     progress_callback: Callable[[int, str], None] = report_progress,
 ):
     cache_dir, enabled, refresh = _cache_settings(spec)
+    # Keep the placement cache in sync if the PBO changes its fence geometry
+    # but the configured virtual donor path remains unchanged.
+    from .osm import configured_fence_donor
+    fence_donor_layouts = (
+        configured_fence_donor(spec),
+        configured_fence_donor(spec, metal=True),
+    )
     payload = {
+        "fence_donor_layouts": fence_donor_layouts,
         "terrain": terrain_key,
         "dataset": dataset_identity,
         "road_fingerprint": road_fingerprint,

@@ -520,6 +520,65 @@ def stock_farmland_fence_model(
     return models[1 + (int.from_bytes(digest, "little") % (len(models) - 1))]
 
 
+def configured_fence_donor(spec: object, *, metal: bool = False) -> tuple[str, float, float] | None:
+    """Select a fence donor, inspecting its visual LOD unless manually overridden.
+
+    Empty model path retains the original CWA stock fence. Empty length or
+    rotation field requests automatic inference from the selected asset root.
+    """
+    prefix = "metal_fence_donor" if metal else "fence_donor"
+    model = str(getattr(spec, f"{prefix}_model", "") or "").strip().replace("/", "\\")
+    if not model:
+        return None
+    length_override = getattr(spec, f"{prefix}_length", None)
+    angle_override = getattr(spec, f"{prefix}_heading_offset", None)
+    length = float(length_override) if length_override not in (None, "") else None
+    angle = float(angle_override) if angle_override not in (None, "") else None
+    if length is not None and (not math.isfinite(length) or length <= 0.0):
+        raise ValueError(f"{prefix}_length must be positive and finite")
+    if angle is not None and not math.isfinite(angle):
+        raise ValueError(f"{prefix}_heading_offset must be finite")
+    if length is None or angle is None:
+        from .assets import canonical_asset_path, read_asset_record_bytes
+        from .fast_asset_scan_policy import locate_assets_fast
+        from .fence_donor_geometry import inspect_fence_donor_geometry
+
+        roots = tuple(Path(p) for p in (getattr(spec, "asset_roots", ()) or ()))
+        if not roots:
+            raise ValueError(
+                f"Cannot auto-measure fence donor {model!r} without Asset roots. "
+                "Add its PBO/folder to Asset roots or set length and rotation manually."
+            )
+        scan = locate_assets_fast(
+            roots,
+            (model,),
+            cache_dir=getattr(spec, "cache_dir", None),
+            use_cache=bool(getattr(spec, "cache_enabled", True)),
+            refresh=bool(getattr(spec, "cache_refresh", False)),
+        )
+        record = next(
+            (item for item in scan.records if item.path == canonical_asset_path(model)),
+            None,
+        )
+        if record is None:
+            raise ValueError(
+                f"Cannot auto-measure fence donor {model!r}: not found in Asset roots. "
+                "Add the containing PBO/folder or set length and rotation manually."
+            )
+        try:
+            shape = inspect_fence_donor_geometry(read_asset_record_bytes(record))
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                f"Cannot auto-measure fence donor {model!r}: {exc}. "
+                "Enter length and rotation manually for unsupported or unusual P3Ds."
+            ) from exc
+        if length is None:
+            length = shape.length_metres
+        if angle is None:
+            angle = shape.heading_offset_degrees
+    return model, length, angle
+
+
 def _rural_fence_segments_duplicate(
     candidate: tuple[float, float, float, float],
     existing: tuple[float, float, float, float],
@@ -8360,6 +8419,8 @@ def generate_world_objects(
             street_furniture_objects += 1
             street_bus_shelter_objects += 1
 
+    # Share the same ordinary fence donor between mapped, rural, and yard fences.
+    custom_fence_donor = configured_fence_donor(spec)
     progress(54, "Placing buildings")
     building_count = 0
     building_truncated = building_plans_truncated
@@ -8379,7 +8440,7 @@ def generate_world_objects(
 
     # Settlement-detail pass.  Unlike the generic town/city streetscape above,
     # this layer also serves villages and hamlets with domestic/farm clutter.
-    # Every model is stock OFP/CWA; fences remain vanilla-only by construction.
+    # Most detail uses stock OFP/CWA P3Ds; selected fence donors also apply to yards.
     if street_furniture_enabled and street_furniture_objects < maximum_street_furniture_objects:
         settlement_seed = str(getattr(spec, "deterministic_seed", "cwr-worldgen"))
         building_supports = tuple(
@@ -8657,23 +8718,29 @@ def generate_world_objects(
             rear_x = plan.x - forward_x * (radius + 4.0)
             rear_z = plan.z - forward_z * (radius + 4.0)
 
-            # One boundary family per yard: hedge OR stock fence, never a mixed
+            # One boundary family per yard: hedge OR fence, never a mixed
             # little catalogue around the same property.
             if stable_roll(identity + ":boundary") < 62:
                 hedge = stable_roll(identity + ":hedge") < 62
                 model = (
                     STOCK_HEDGE_MODELS[stable_roll(identity + ":hedge-model", len(STOCK_HEDGE_MODELS))]
-                    if hedge else stock_farmland_fence_model(identity + ":fence-model")
+                    if hedge else (
+                        custom_fence_donor[0] if custom_fence_donor
+                        else stock_farmland_fence_model(identity + ":fence-model")
+                    )
                 )
+                yard_half_length = custom_fence_donor[1] / 2.0 if (custom_fence_donor and not hedge) else 2.4
                 for segment in (-1, 1):
-                    sx = rear_x + right_x * segment * 2.4
-                    sz = rear_z + right_z * segment * 2.4
-                    start = (sx - right_x * 2.3, sz - right_z * 2.3)
-                    end = (sx + right_x * 2.3, sz + right_z * 2.3)
+                    sx = rear_x + right_x * segment * yard_half_length
+                    sz = rear_z + right_z * segment * yard_half_length
+                    end_half = max(0.1, yard_half_length - 0.1)
+                    start = (sx - right_x * end_half, sz - right_z * end_half)
+                    end = (sx + right_x * end_half, sz + right_z * end_half)
                     if hedge:
                         emit_prop(model, sx, sz, plan.heading_degrees + 90.0 + HEDGE_MODEL_HEADING_OFFSET_DEGREES, footprint=0.7, hedge_segment=(start, end))
                     else:
-                        emit_prop(model, sx, sz, plan.heading_degrees + 90.0 + FARMLAND_FENCE_HEADING_OFFSET_DEGREES, footprint=0.6, line_segment=(start, end))
+                        fence_offset = custom_fence_donor[2] if custom_fence_donor else FARMLAND_FENCE_HEADING_OFFSET_DEGREES
+                        emit_prop(model, sx, sz, plan.heading_degrees + 90.0 + fence_offset, footprint=0.6, line_segment=(start, end))
 
             tree_count = 1 + stable_roll(identity + ":tree-count", 3)
             for tree_index in range(tree_count):
@@ -10793,13 +10860,13 @@ def generate_world_objects(
         stock_hedge_models = tuple(getattr(spec, "stock_hedge_models", STOCK_HEDGE_MODELS))
         stock_wall_models = tuple(getattr(spec, "stock_wall_models", STOCK_WALL_MODELS))
         stock_metal_fence_models = tuple(getattr(spec, "stock_metal_fence_models", STOCK_METAL_FENCE_MODELS))
+        custom_metal_fence_donor = configured_fence_donor(spec, metal=True)
         for feature in sorted(dataset.barriers, key=lambda item: item.osm_key):
             subtype = feature.tags.get("barrier", "fence").casefold()
             subtype = "wall" if subtype in {"wall", "retaining_wall"} else "hedge" if subtype == "hedge" else "fence"
             metal_fence = subtype == "fence" and osm_fence_is_metal(feature.tags)
-            # Every fence now uses a stock OFP/CWA model. Pick the non-metal
-            # fence family once per mapped feature so a single OSM fence never
-            # alternates between pasture and wire pieces from segment to segment.
+            # Pick a consistent fence family once per mapped feature, using
+            # a configured donor where provided or the original stock model.
             stock_fence_model = (
                 stock_metal_fence_model(
                     f"{seed}:mapped-fence-style:{feature.osm_key}",
@@ -10812,8 +10879,18 @@ def generate_world_objects(
                 if subtype == "fence"
                 else ""
             )
+            selected_fence_donor = (
+                (custom_metal_fence_donor if metal_fence else custom_fence_donor)
+                if subtype == "fence" else None
+            )
+            if selected_fence_donor is not None:
+                stock_fence_model = selected_fence_donor[0]
             points = tuple(projection.to_world(point) for point in feature.points)
-            fitted_length = STOCK_WALL_EFFECTIVE_LENGTH_METRES if subtype == "wall" else barrier_length
+            fitted_length = (
+                STOCK_WALL_EFFECTIVE_LENGTH_METRES if subtype == "wall"
+                else selected_fence_donor[1] if selected_fence_donor is not None
+                else barrier_length
+            )
             for chunk_index, (x, z, heading, length, x0, z0, x1, z1) in enumerate(_line_chunks(points, fitted_length)):
                 if barrier_objects >= barrier_limit:
                     break
@@ -10856,6 +10933,8 @@ def generate_world_objects(
                         if metal_fence
                         else FARMLAND_FENCE_HEADING_OFFSET_DEGREES
                     )
+                    if subtype == "fence" and selected_fence_donor is not None:
+                        heading_offset = selected_fence_donor[2]
                     placed_heading = (heading + heading_offset) % 360.0
                     shifted = offset_line_clear_of_roads(
                         dataset,
@@ -10916,9 +10995,8 @@ def generate_world_objects(
             if barrier_objects >= barrier_limit:
                 break
 
-        # Add a sparse, deterministic set of stock rural fences around whole
-        # farmland/meadow polygons. This deliberately uses only original OFP/CWA P3Ds;
-        # generated barrier meshes are reserved for explicitly mapped barriers.
+        # Add a sparse deterministic fence boundary around farmland/meadow
+        # polygons, using the configured ordinary donor or stock fence models.
         # Road intersections are omitted, naturally leaving gate-sized openings.
         if barrier_objects < barrier_limit:
             farmland_features = tuple(
@@ -10933,8 +11011,12 @@ def generate_world_objects(
             selected_farmland_fences = _selected_farmland_fence_field_keys(
                 farmland_features, seed, FARMLAND_FENCE_FIELD_PERCENT
             )
+            rural_segment_length = (
+                custom_fence_donor[1] if custom_fence_donor
+                else FARMLAND_FENCE_SEGMENT_LENGTH_METRES
+            )
             rural_fence_grid_size = max(
-                FARMLAND_FENCE_SEGMENT_LENGTH_METRES
+                rural_segment_length
                 + 2.0 * FARMLAND_FENCE_DUPLICATE_DISTANCE_METRES,
                 8.0,
             )
@@ -10948,8 +11030,11 @@ def generate_world_objects(
                 # Pick the stock fence family once for the whole field. Do not
                 # vary by segment: a perimeter is either rural/pasture fence or
                 # wire fence, never an accidental alternating catalogue demo.
-                field_fence_model = stock_farmland_fence_model(
-                    f"{seed}:farmland-fence-style:{feature.osm_key}"
+                field_fence_model = (
+                    custom_fence_donor[0] if custom_fence_donor
+                    else stock_farmland_fence_model(
+                        f"{seed}:farmland-fence-style:{feature.osm_key}"
+                    )
                 )
                 for polygon_index, polygon in enumerate(feature.polygons):
                     boundary = tuple(
@@ -10962,7 +11047,7 @@ def generate_world_objects(
                         continue
                     closed_boundary = boundary + (boundary[0],)
                     for chunk_index, (x, z, heading, _length, x0, z0, x1, z1) in enumerate(
-                        _line_chunks(closed_boundary, FARMLAND_FENCE_SEGMENT_LENGTH_METRES)
+                        _line_chunks(closed_boundary, rural_segment_length)
                     ):
                         if barrier_objects >= barrier_limit:
                             break
@@ -11027,7 +11112,7 @@ def generate_world_objects(
                                 x,
                                 y,
                                 z,
-                                (heading + FARMLAND_FENCE_HEADING_OFFSET_DEGREES) % 360.0,
+                                (heading + (custom_fence_donor[2] if custom_fence_donor else FARMLAND_FENCE_HEADING_OFFSET_DEGREES)) % 360.0,
                                 pitch_degrees=pitch,
                             )
                         )

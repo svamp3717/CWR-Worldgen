@@ -455,6 +455,13 @@ class Milestone9Spec(Milestone8Spec):
     barriers_enabled: bool = True
     maximum_barrier_objects: int = 4000
     barrier_segment_length: float = 6.0
+    # Optional direct-placement fence P3Ds. Empty selects the stock families.
+    fence_donor_model: str = ""
+    fence_donor_length: float | None = None
+    fence_donor_heading_offset: float | None = None
+    metal_fence_donor_model: str = ""
+    metal_fence_donor_length: float | None = None
+    metal_fence_donor_heading_offset: float | None = None
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
@@ -700,6 +707,36 @@ class Milestone9Spec(Milestone8Spec):
                 raise ValueError(f"{label} path must be ASCII") from exc
             if not encoded_model or len(encoded_model) > 75:
                 raise ValueError(f"{label} path must contain 1..75 ASCII bytes")
+        for label, length in (
+            ("fence donor length", self.fence_donor_length),
+            ("metal fence donor length", self.metal_fence_donor_length),
+        ):
+            if length is not None and (
+                not isinstance(length, (int, float))
+                or not math.isfinite(float(length)) or float(length) <= 0.0
+            ):
+                raise ValueError(f"{label} must be positive and finite or automatic")
+        for label, angle in (
+            ("fence donor heading offset", self.fence_donor_heading_offset),
+            ("metal fence donor heading offset", self.metal_fence_donor_heading_offset),
+        ):
+            if angle is not None and (
+                not isinstance(angle, (int, float)) or not math.isfinite(float(angle))
+            ):
+                raise ValueError(f"{label} must be finite or automatic")
+        for label, model_path in (
+            ("fence donor", self.fence_donor_model),
+            ("metal fence donor", self.metal_fence_donor_model),
+        ):
+            model = str(model_path).strip().replace("/", "\\")
+            if not model:
+                continue
+            try:
+                encoded = model.encode("ascii")
+            except UnicodeEncodeError as exc:
+                raise ValueError(f"{label} P3D path must be ASCII") from exc
+            if len(encoded) > 75 or not model.casefold().endswith(".p3d") or "\\\\" in model:
+                raise ValueError(f"{label} must be a virtual .p3d path (up to 75 ASCII bytes)")
         for label, model_paths in (
             ("steep hill bush models", self.steep_hill_bush_models),
             ("forest roadside tree models", self.forest_roadside_tree_models),
@@ -883,6 +920,13 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     barriers_enabled: bool = True
     maximum_barrier_objects: int = 4000
     barrier_segment_length: float = 6.0
+    # Optional direct-placement fence P3Ds. Empty selects the stock families.
+    fence_donor_model: str = ""
+    fence_donor_length: float | None = None
+    fence_donor_heading_offset: float | None = None
+    metal_fence_donor_model: str = ""
+    metal_fence_donor_length: float | None = None
+    metal_fence_donor_heading_offset: float | None = None
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
@@ -1400,6 +1444,12 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         barriers_enabled=spec.barriers_enabled,
         maximum_barrier_objects=spec.maximum_barrier_objects,
         barrier_segment_length=spec.barrier_segment_length,
+        fence_donor_model=spec.fence_donor_model,
+        fence_donor_length=spec.fence_donor_length,
+        fence_donor_heading_offset=spec.fence_donor_heading_offset,
+        metal_fence_donor_model=spec.metal_fence_donor_model,
+        metal_fence_donor_length=spec.metal_fence_donor_length,
+        metal_fence_donor_heading_offset=spec.metal_fence_donor_heading_offset,
         stock_hedge_models=spec.stock_hedge_models,
         stock_wall_models=spec.stock_wall_models,
         stock_metal_fence_models=spec.stock_metal_fence_models,
