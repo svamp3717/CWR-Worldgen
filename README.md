@@ -126,9 +126,14 @@ The generator inspects legacy MLOD or ODOL v6/v7 geometry and the model's
 **Roadway LOD**. It uses the Roadway LOD's actual join length, drivable width,
 local deck height and center offset to fit straight bridge modules across
 the wet crossing. This matters because visible bridge rails can be far shorter
-than the Roadway LOD. A donor without a valid, approximately flat Roadway LOD
-is rejected rather than pretending it can carry vehicles. The selected model
-must be wide enough for the mapped road. Existing water/bank checks and
+than the Roadway LOD. For modest ramped modules (such as
+`haus\\bridge03.p3d`), the inspector measures the elevation at each Roadway end
+and applies a small model pitch to level module joints. This can preserve a
+gentle internal crown/slope: it does not flatten or stretch the model geometry.
+The correction is capped at 3° and residual roadway unevenness at 0.75 m.
+Twisted/banked, sharply warped, ramped X-axis, or missing Roadway LODs are
+rejected. The selected model must be wide enough for the mapped road (the
+inspected `bridge03.p3d` has a 5 m roadway). Existing water/bank checks and
 bridge-object budgets still apply; the stock Nogova seam repair is bypassed
 for custom models.
 
@@ -140,9 +145,9 @@ python -m cwr_worldgen milestone9 --source-dir source-data/map --output build/wo
 ```
 
 Donor bridge modules are placed **without stretching**. Curved sections,
-ramps, unusually shaped or non-level Roadway LODs, irregular collision models
-and elaborate start/end pieces need custom modeling; visual geometry alone
-cannot certify in-game vehicle crossing. Test the finished bridge in CWA.
+strongly sloped or uneven ramps, irregular collision models and elaborate
+start/end pieces still need custom modeling; visual geometry alone cannot
+certify in-game vehicle crossing. Test the finished bridge in CWA.
 
 **Wall, hedge and ditch vegetation donors:** Advanced generation settings also
 accept one P3D each for mapped stone/retaining walls, mapped hedges, and
