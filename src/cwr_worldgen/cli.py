@@ -587,6 +587,10 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.set_defaults(barriers_enabled=True)
     milestone9.add_argument("--max-barrier-objects", type=int, default=4000, help="barrier-object warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--barrier-segment-length", type=float, default=6.0)
+    milestone9.add_argument("--fence-donor-model", default="", help="optional ordinary/rural fence P3D virtual path from asset roots; default uses stock fences")
+    milestone9.add_argument("--fence-donor-length", type=float, default=5.0, help="nominal length in metres of one ordinary fence donor P3D")
+    milestone9.add_argument("--metal-fence-donor-model", default="", help="optional chain-link/metal fence P3D virtual path from asset roots")
+    milestone9.add_argument("--metal-fence-donor-length", type=float, default=6.0, help="nominal length in metres of one metal fence donor P3D")
     milestone9.add_argument("--sidewalks", action="store_true", dest="sidewalks_enabled", help="reserved sidewalk option; sidewalk placement is temporarily disabled")
     milestone9.add_argument("--no-sidewalks", action="store_false", dest="sidewalks_enabled", help="keep sidewalk placement disabled (current default)")
     milestone9.set_defaults(sidewalks_enabled=False)
@@ -1279,6 +1283,10 @@ def main(argv: list[str] | None = None) -> int:
                 barriers_enabled=args.barriers_enabled,
                 maximum_barrier_objects=args.max_barrier_objects,
                 barrier_segment_length=args.barrier_segment_length,
+                fence_donor_model=args.fence_donor_model,
+                fence_donor_length=args.fence_donor_length,
+                metal_fence_donor_model=args.metal_fence_donor_model,
+                metal_fence_donor_length=args.metal_fence_donor_length,
                 sidewalks_enabled=args.sidewalks_enabled,
                 maximum_sidewalk_objects=args.max_sidewalk_objects,
                 sidewalk_width=args.sidewalk_width,
