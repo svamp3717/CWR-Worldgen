@@ -2494,6 +2494,10 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
             canonical_asset_path(str(path))
             for path in getattr(spec, "grave_models", ())
         )
+    if milestone_number >= 9 and bool(getattr(spec, "bridges_enabled", False)):
+        bridge_path = str(getattr(spec, "bridge_donor_model", "") or "").strip()
+        if bridge_path:
+            trusted.add(canonical_asset_path(bridge_path))
     if milestone_number >= 9 and bool(getattr(spec, "ditch_grass_enabled", False)):
         ditch_donor_path = str(getattr(spec, "ditch_vegetation_donor_model", "") or "").strip()
         if ditch_donor_path:
@@ -3016,6 +3020,8 @@ _PLACEMENT_CACHE_FIELDS = (
     "street_bench_every", "street_bin_every",
     "match_nearby_building_textures", "nearby_building_texture_match_distance",
     "bridges_enabled", "procedural_bridges", "maximum_bridge_objects", "bridge_module_length",
+    "bridge_donor_model", "bridge_donor_length",
+    "bridge_donor_heading_offset", "bridge_donor_deck_height",
     "bridge_deck_clearance", "bridge_water_clearance",
     "residential_infill_enabled", "maximum_residential_infill_buildings",
     "residential_infill_spacing", "residential_infill_minimum_area",
@@ -3594,6 +3600,7 @@ def _load_nonroad_objects(
     # Keep the placement cache in sync if the PBO changes its fence geometry
     # but the configured virtual donor path remains unchanged.
     from .osm import configured_fence_donor, configured_linear_donor
+    from .bridge_donors import configured_bridge_donor
     fence_donor_layouts = (
         configured_fence_donor(spec),
         configured_fence_donor(spec, metal=True),
@@ -3606,6 +3613,10 @@ def _load_nonroad_objects(
     )
     payload = {
         "fence_donor_layouts": fence_donor_layouts,
+        "bridge_donor": (
+            configured_bridge_donor(spec)
+            if bool(getattr(spec, "bridges_enabled", False)) else None
+        ),
         "terrain": terrain_key,
         "dataset": dataset_identity,
         "road_fingerprint": road_fingerprint,
