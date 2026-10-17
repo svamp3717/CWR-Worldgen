@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import io
+import struct
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -16,6 +18,9 @@ from cwr_worldgen.gui import (
     save_gui_state,
 )
 from cwr_worldgen.milestone9 import _Milestone9PlayabilitySpec
+from cwr_worldgen.fence_donor_geometry import inspect_fence_donor_geometry
+from cwr_worldgen.pbo import PboEntry, write_pbo
+from cwr_worldgen.procedural_buildings import _Face, _Lod, _MLOD_HEADER, _write_lod
 from cwr_worldgen.osm import (
     BboxProjection,
     GeoPolygon,
@@ -167,3 +172,131 @@ def test_fence_donor_gui_and_cli_settings_survive_restart(tmp_path: Path) -> Non
     assert args.fence_donor_length == 4.0
     assert args.metal_fence_donor_model == selected["metal_fence_donor_model"]
     assert args.metal_fence_donor_heading_offset == 180.0
+
+
+def _fence_mlod(*, long_axis: str, length: float, width: float = 0.22) -> bytes:
+    half_length, half_width = length / 2, width / 2
+    if long_axis == "X":
+        points = (
+            (-half_length, 0.0, -half_width),
+            (-half_length, 2.0, -half_width),
+            (half_length, 2.0, half_width),
+            (half_length, 0.0, half_width),
+        )
+    else:
+        points = (
+            (-half_width, 0.0, -half_length),
+            (-half_width, 2.0, half_length),
+            (half_width, 2.0, half_length),
+            (half_width, 0.0, -half_length),
+        )
+    lod = _Lod(
+        points, ((0.0, 1.0, 0.0),),
+        (_Face(
+            r"addon\fence.paa",
+            ((0, 0, 0.0, 0.0), (1, 0, 0.0, 1.0),
+             (2, 0, 1.0, 1.0), (3, 0, 1.0, 0.0)),
+            0,
+        ),),
+        1.0, properties=(("autocenter", "0"),), point_flags=(0,) * 4,
+    )
+    stream = io.BytesIO()
+    stream.write(_MLOD_HEADER.pack(b"MLOD", 1, 1, 0, 1))
+    _write_lod(stream, lod)
+    return stream.getvalue()
+
+
+def _fence_odol_v7() -> bytes:
+    points = ((-2.5, 0.0, -0.2), (2.5, 0.0, -0.2),
+              (2.5, 2.0, 0.2), (-2.5, 2.0, 0.2))
+    stream = io.BytesIO()
+    stream.write(b"ODOL")
+    stream.write(struct.pack("<II", 7, 1))
+    stream.write(struct.pack("<I", len(points)))
+    stream.write(b"\0" * (len(points) * 4))  # point flags
+    stream.write(struct.pack("<I", len(points)))
+    stream.write(b"\0" * (len(points) * 8))  # UVs
+    stream.write(struct.pack("<I", len(points)))
+    for xyz in points:
+        stream.write(struct.pack("<fff", *xyz))
+    stream.write(struct.pack("<I", len(points)))
+    stream.write(b"\0" * (len(points) * 12))  # normals
+    stream.write(b"\0" * 48)
+    stream.write(struct.pack("<I", 0))  # textures
+    stream.write(struct.pack("<I", 0))  # MLOD edge indices
+    stream.write(struct.pack("<I", 0))  # vertex edge indices
+    stream.write(struct.pack("<II", 0, 0))  # faces, section offset
+    return stream.getvalue()
+
+
+@pytest.mark.parametrize("axis,length,angle", [
+    ("X", 4.25, 90.0),
+    ("Z", 7.5, 0.0),
+])
+def test_auto_detects_fence_length_and_axis_from_mlod(
+    axis: str, length: float, angle: float,
+) -> None:
+    measurement = inspect_fence_donor_geometry(_fence_mlod(long_axis=axis, length=length))
+    assert measurement.source_format == "MLOD"
+    assert measurement.long_axis == axis
+    assert measurement.length_metres == pytest.approx(length)
+    assert measurement.heading_offset_degrees == angle
+
+
+def test_auto_detects_odol_v7_fence_axis() -> None:
+    measurement = inspect_fence_donor_geometry(_fence_odol_v7())
+    assert measurement.source_format == "ODOL"
+    assert measurement.length_metres == pytest.approx(5.0)
+    assert measurement.heading_offset_degrees == 90.0
+
+
+def test_pbo_fence_donor_automatically_supplies_length_and_rotation(tmp_path: Path) -> None:
+    pbo = tmp_path / "myfences.pbo"
+    write_pbo(pbo, (
+        PboEntry("post_rail.p3d", _fence_mlod(long_axis="Z", length=5.5)),
+        PboEntry("chain_mesh.p3d", _fence_mlod(long_axis="X", length=3.2)),
+    ))
+    spec = SimpleNamespace(
+        fence_donor_model=r"myfences\post_rail.p3d",
+        fence_donor_length=None, fence_donor_heading_offset=None,
+        metal_fence_donor_model=r"myfences\chain_mesh.p3d",
+        metal_fence_donor_length=None, metal_fence_donor_heading_offset=None,
+        asset_roots=(pbo,), cache_dir=None, cache_enabled=False,
+        cache_refresh=False,
+    )
+    assert configured_fence_donor(spec) == (spec.fence_donor_model, 5.5, 0.0)
+    measured_metal = configured_fence_donor(spec, metal=True)
+    assert measured_metal[0] == spec.metal_fence_donor_model
+    assert measured_metal[1] == pytest.approx(3.2)
+    assert measured_metal[2] == 90.0
+    spec.fence_donor_length = 6.0
+    assert configured_fence_donor(spec) == (spec.fence_donor_model, 6.0, 0.0)
+
+
+def test_auto_geometry_requires_readable_asset_and_unambiguous_axis() -> None:
+    with pytest.raises(ValueError, match="Asset roots"):
+        configured_fence_donor(SimpleNamespace(fence_donor_model=r"addon\fence.p3d"))
+    with pytest.raises(ValueError, match="ambiguous fence axis"):
+        inspect_fence_donor_geometry(_fence_mlod(long_axis="X", length=3, width=3))
+    with pytest.raises(ValueError, match="unsupported fence P3D format"):
+        inspect_fence_donor_geometry(b"aaaa")
+
+
+def test_empty_gui_fence_dimensions_use_auto_detection_flags(tmp_path: Path) -> None:
+    defaults = default_gui_values()
+    assert defaults["fence_donor_length"] == ""
+    assert defaults["fence_donor_heading_offset"] == ""
+    assert defaults["metal_fence_donor_length"] == ""
+    assert defaults["metal_fence_donor_heading_offset"] == ""
+    defaults["fence_donor_model"] = r"addon\segment.p3d"
+    command = build_milestone9_command(defaults, python="python")
+    assert "--fence-donor-model" in command
+    assert "--fence-donor-length" not in command
+    assert "--fence-donor-heading-offset" not in command
+    args = _parser().parse_args([
+        "milestone9", "--output", str(tmp_path / "world"),
+        "--source-dir", str(tmp_path / "sources"),
+        "--fence-donor-model", r"addon\segment.p3d",
+    ])
+    assert args.fence_donor_length is None
+    assert args.fence_donor_heading_offset is None
