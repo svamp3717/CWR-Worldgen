@@ -383,6 +383,21 @@ def test_table_sort_handles_all_columns_and_numeric_reference_counts() -> None:
     assert rows[1].references == 10  # Numeric, not lexicographic ordering.
 
 
+def test_dayz_gui_scan_worker_passes_selected_game_profile(tmp_path: Path) -> None:
+    import queue
+
+    wrp = tmp_path / "dayz-oprw.wrp"
+    wrp.write_bytes(b"OPRW\\x00dz\\\\plants\\\\tree.p3d\\x00")
+    gui = ScannerGui.__new__(ScannerGui)
+    gui._queue = queue.Queue()
+    gui._scan_worker(wrp, ("dz",), "dayz")
+    kind, result = gui._queue.get_nowait()
+    assert kind == "ok"
+    assert result.stock_roots == ("dz",)
+    assert result.unique_mod_models == 0
+    assert any("not object placements" in warning for warning in result.warnings)
+
+
 def test_gui_heading_click_toggles_direction_and_changes_column() -> None:
     gui = ScannerGui.__new__(ScannerGui)
     gui.tree = Mock()
