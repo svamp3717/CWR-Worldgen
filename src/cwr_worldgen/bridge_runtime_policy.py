@@ -26,10 +26,24 @@ from __future__ import annotations
 _INSTALLED = False
 
 
-def _runtime_stock_bridge_span_plan(points, elevations, spec):
-    """Reuse the pre-fill wet plan before considering post-fill terrain."""
+def _runtime_stock_bridge_span_plan(
+    points, elevations, spec, *, module_spacing: float | None = None,
+):
+    """Reuse the pre-fill stock plan, or fit a custom-length donor span.
+
+    The installed runtime wrapper replaces the original planner and must
+    retain the optional module_spacing keyword. Stock abutment cache entries
+    use Nogova's fixed module length and must not be reused for another P3D.
+    """
     from . import bridge_abutment_terrain_policy as _abutment
     from . import bridge_source_water_policy as _source
+
+    if module_spacing is not None:
+        # Go through source-water fallback, but bypass Nogova's pre-fill
+        # abutment cache and fixed 50.19 m spacing.
+        return _source._mapped_water_stock_plan(
+            points, elevations, spec, module_spacing=module_spacing,
+        )
 
     cached = _abutment._cached_bridge_plan(points, spec)
     if cached is None:
