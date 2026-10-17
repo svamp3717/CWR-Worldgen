@@ -273,9 +273,9 @@ def test_dayz_0wzd_scans_exact_object_records_and_stock_dz_roots(tmp_path: Path)
     data = _write_8wvr(
         tmp_path / "dayz.wrp",
         (
-            r"dz\\structures\\residential\\house.p3d",
-            r"my_dayz_mod\\hut.p3d",
-            r"my_dayz_mod\\hut.p3d",
+            r"dz\structures\residential\house.p3d",
+            r"my_dayz_mod\hut.p3d",
+            r"my_dayz_mod\hut.p3d",
         ),
     )
     dayz_data = b"0WZD" + data[4:]
@@ -285,24 +285,24 @@ def test_dayz_0wzd_scans_exact_object_records_and_stock_dz_roots(tmp_path: Path)
     result = scan_dependencies(wrp, game="dayz")
     rows = {row.model_path: row for row in result.rows}
     assert result.stock_roots == ("dz",)
-    assert rows[r"dz\\structures\\residential\\house.p3d"].is_stock is True
-    assert rows[r"my_dayz_mod\\hut.p3d"].is_stock is False
-    assert rows[r"my_dayz_mod\\hut.p3d"].references == 2
-    assert rows[r"my_dayz_mod\\hut.p3d"].parser == "0WZD object records"
+    assert rows[r"dz\structures\residential\house.p3d"].is_stock is True
+    assert rows[r"my_dayz_mod\hut.p3d"].is_stock is False
+    assert rows[r"my_dayz_mod\hut.p3d"].references == 2
+    assert rows[r"my_dayz_mod\hut.p3d"].parser == "0WZD object records"
     assert {row.model_path for row in rows_for_display(result)} == {
-        r"my_dayz_mod\\hut.p3d"
+        r"my_dayz_mod\hut.p3d"
     }
 
 
 def test_dayz_0wzd_in_pbo_and_malformed_0wzd(tmp_path: Path) -> None:
     import pytest
 
-    raw = _write_8wvr(tmp_path / "source.wrp", (r"dz\\plants\\tree.p3d",))
+    raw = _write_8wvr(tmp_path / "source.wrp", (r"dz\plants\tree.p3d",))
     data = b"0WZD" + raw[4:]
     pbo = tmp_path / "dayz-world.pbo"
-    write_pbo(pbo, (PboEntry(r"world\\dayz.wrp", data),))
+    write_pbo(pbo, (PboEntry(r"world\dayz.wrp", data),))
     result = scan_dependencies(pbo, game="dayz")
-    assert result.wrp_names == (r"world\\dayz.wrp",)
+    assert result.wrp_names == (r"world\dayz.wrp",)
     assert result.unique_models == 1
     assert result.unique_mod_models == 0
     assert result.rows[0].parser == "0WZD object records"
@@ -312,8 +312,8 @@ def test_dayz_0wzd_in_pbo_and_malformed_0wzd(tmp_path: Path) -> None:
 
 def test_dayz_binarized_wrp_reports_string_scan_limit(tmp_path: Path) -> None:
     wrp = tmp_path / "dayz-binarized.wrp"
-    wrp.write_bytes(b"OPRW" + b"\\\\dz\\\\structures\\\\house.p3d\\x00"
-                    + b"addon\\\\custom.p3d\\x00")
+    wrp.write_bytes(b"OPRW" + b"\\dz\\structures\\house.p3d\x00"
+                    + b"addon\\custom.p3d\x00")
     result = scan_dependencies(wrp, game="dayz")
     assert any("not object placements" in warning for warning in result.warnings)
     assert all("string occurrences" in row.parser for row in result.rows)
