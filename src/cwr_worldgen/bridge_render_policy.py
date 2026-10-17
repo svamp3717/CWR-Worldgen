@@ -224,6 +224,8 @@ def stock_bridge_span_plan(
     points: Sequence[tuple[float, float]],
     elevations,
     spec,
+    *,
+    module_spacing: float = _STOCK_MODULE_SPACING_METRES,
 ) -> StockBridgeSpanPlan | None:
     """Return the stock bridge footprint covering only actual below-sea terrain.
 
@@ -234,6 +236,9 @@ def stock_bridge_span_plan(
 
     if elevations is None or spec is None:
         return None
+    module_spacing = float(module_spacing)
+    if not math.isfinite(module_spacing) or module_spacing <= 0.0:
+        raise ValueError("bridge module spacing must be positive and finite")
     cleaned, cumulative = _polyline_measure(points)
     if len(cleaned) < 2 or cumulative[-1] <= 0.1:
         return None
@@ -291,16 +296,16 @@ def stock_bridge_span_plan(
     # Use the smallest whole number of stock modules that covers the wet chord.
     # Any unavoidable excess becomes a small land overhang instead of hundreds
     # of metres of bridge-tagged dry OSM approach.
-    tolerance = max(1.0e-6, _STOCK_MODULE_SPACING_METRES * 1.0e-9)
+    tolerance = max(1.0e-6, module_spacing * 1.0e-9)
     module_count = max(
         1,
         int(
             math.ceil(
-                (wet_length - tolerance) / _STOCK_MODULE_SPACING_METRES
+                (wet_length - tolerance) / module_spacing
             )
         ),
     )
-    target_length = module_count * _STOCK_MODULE_SPACING_METRES
+    target_length = module_count * module_spacing
     half_target = target_length * 0.5
     centre = (
         (wet_start[0] + wet_end[0]) * 0.5,
@@ -365,10 +370,20 @@ def _extend_stock_bridge_to_wet_span(
 ):
     """Replace plateau extension with a minimal wet-only stock bridge corridor."""
 
-    if (
-        bool(getattr(spec, "procedural_bridges", True))
-        or str(getattr(spec, "bridge_donor_model", "") or "").strip()
-    ):
+    if str(getattr(spec, "bridge_donor_model", "") or "").strip():
+        # Use the measured donor Roadway length for a wet-only corridor.
+        # Applying Nogova's fixed 50.19 m length here would defeat the donor.
+        donor_plan = stock_bridge_span_plan(
+            points, elevations, spec,
+            module_spacing=module_length,
+        )
+        if donor_plan is not None:
+            return donor_plan.points
+        return _ORIGINAL_EXTEND_BRIDGE_SPAN(
+            points, elevations, spec, module_length,
+            feature=feature, dataset=dataset, projection=projection, raster=raster,
+        )
+    if bool(getattr(spec, "procedural_bridges", True)):
         return _ORIGINAL_EXTEND_BRIDGE_SPAN(
             points,
             elevations,
