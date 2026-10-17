@@ -11500,12 +11500,18 @@ def generate_world_objects(
                 elif bridge_donor is not None:
                     model = bridge_donor.model
                     heading = (heading + bridge_donor.heading_offset_degrees) % 360.0
-                    # Put the measured centre of the drivable Roadway footprint
-                    # on the mapped bridge centreline even if the P3D origin
-                    # was authored off-centre.
+                    # A gently ramped donor can be pitched until its Roadway
+                    # endpoints share the same world Y. This is not permission
+                    # to repeat arbitrary sloped/twisted roadways: the P3D
+                    # inspector enforces pitch and residual-relief limits.
+                    pitch += bridge_donor.leveling_pitch_degrees
+                    # Account for the pitch rotation of the *elevated* roadway
+                    # origin, not just the horizontal P3D pivot. A model whose
+                    # roadway lives 9 m above the object origin shifts its
+                    # effective horizontal centre when pitched.
                     radians = math.radians(heading)
                     local_x = bridge_donor.roadway_centre_x
-                    local_z = bridge_donor.roadway_centre_z
+                    local_z = bridge_donor.roadway_origin_z_after_pitch
                     x -= local_x * math.cos(radians) + local_z * math.sin(radians)
                     z += local_x * math.sin(radians) - local_z * math.cos(radians)
                 else:
