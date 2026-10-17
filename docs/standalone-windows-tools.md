@@ -55,12 +55,12 @@ All three standalone utilities can now be used with DayZ's PBO/P3D/WRP
 assets. **No changes are made to the CWR-Worldgen terrain generator.**
 
 - **Browse P3D Assets / Model Categoriser:** select DayZ model PBOs or loose
-  P3Ds as usual. Models from virtual `DZ\\...` paths are identified as DayZ
+  P3Ds as usual. Models from virtual `DZ\...` paths are identified as DayZ
   assets, and the existing modern ODOL reader handles common DayZ ODOL
   versions (v53/v54/v55). If an individual model's mesh cannot be decoded,
   its bounding-box preview is shown rather than pretending the box is a mesh.
 - **Texture lookup:** a model referencing
-  `dz\\structures\\data\\wall_co.paa` now prefers the sibling
+  `dz\structures\data\wall_co.paa` now prefers the sibling
   `structures.pbo` over a generic `dz.pbo`, honoring PBO prefix properties.
   Additional texture archives remain selectable manually.
 - **WRP Mod Dependency Scanner:** select **DayZ Standalone** in the Game
@@ -74,7 +74,7 @@ assets. **No changes are made to the CWR-Worldgen terrain generator.**
 Example:
 
 ```powershell
-.\\WRP-Mod-Dependency-Scanner.exe "C:\\DayZMaps\\world.wrp" --game dayz --json "dayz-dependencies.json"
+.\WRP-Mod-Dependency-Scanner.exe "C:\DayZMaps\world.wrp" --game dayz --json "dayz-dependencies.json"
 ```
 
 This is **read-only inspection and categorisation**, not DayZ terrain export
