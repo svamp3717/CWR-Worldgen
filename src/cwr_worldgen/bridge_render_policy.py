@@ -92,6 +92,16 @@ class _StockBridgeSpecProxy:
 def _stock_bridge_spec(spec):
     """Return a stock-bridge spec whose cache identity includes real join length."""
 
+    # Selected donor bridge modules are not Nogova P3Ds. Do not run the
+    # Nogova-specific 50.19 m seam planner on their geometry. Still force the
+    # nonprocedural bridge road exclusion so donor Roadway LODs do not overlap
+    # ordinary road pieces under the span.
+    if str(getattr(spec, "bridge_donor_model", "") or "").strip():
+        if is_dataclass(spec):
+            return replace(spec, procedural_bridges=False)
+        proxy = _StockBridgeSpecProxy(spec)
+        proxy.bridge_module_length = float(getattr(spec, "bridge_module_length", 30.0))
+        return proxy
     procedural = bool(getattr(spec, "procedural_bridges", True))
     try:
         module_length = float(getattr(spec, "bridge_module_length", 0.0))
@@ -355,7 +365,10 @@ def _extend_stock_bridge_to_wet_span(
 ):
     """Replace plateau extension with a minimal wet-only stock bridge corridor."""
 
-    if bool(getattr(spec, "procedural_bridges", True)):
+    if (
+        bool(getattr(spec, "procedural_bridges", True))
+        or str(getattr(spec, "bridge_donor_model", "") or "").strip()
+    ):
         return _ORIGINAL_EXTEND_BRIDGE_SPAN(
             points,
             elevations,
