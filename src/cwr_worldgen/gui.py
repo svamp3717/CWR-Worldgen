@@ -520,8 +520,10 @@ def defaults_with_recent_source(
         "dirt_road_curve_model",
         "fence_donor_model",
         "fence_donor_length",
+        "fence_donor_heading_offset",
         "metal_fence_donor_model",
         "metal_fence_donor_length",
+        "metal_fence_donor_heading_offset",
     ):
         if key not in state:
             continue
@@ -686,8 +688,10 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         ("--dirt-road-curve-model", "dirt_road_curve_model"),
         ("--fence-donor-model", "fence_donor_model"),
         ("--fence-donor-length", "fence_donor_length"),
+        ("--fence-donor-heading-offset", "fence_donor_heading_offset"),
         ("--metal-fence-donor-model", "metal_fence_donor_model"),
         ("--metal-fence-donor-length", "metal_fence_donor_length"),
+        ("--metal-fence-donor-heading-offset", "metal_fence_donor_heading_offset"),
         ("--max-buildings", "max_buildings"),
         ("--building-ground-clearance", "building_ground_clearance"),
         ("--church-ground-clearance", "church_ground_clearance"),
@@ -1034,8 +1038,10 @@ def default_gui_values() -> dict[str, object]:
         **DEFAULT_ROAD_MODEL_VALUES,
         "fence_donor_model": "",
         "fence_donor_length": "5",
+        "fence_donor_heading_offset": "90",
         "metal_fence_donor_model": "",
         "metal_fence_donor_length": "6",
+        "metal_fence_donor_heading_offset": "90",
         "cache_refresh": False,
         "no_cache": False,
         "normalization_refresh": False,
@@ -1338,8 +1344,10 @@ class WorldgenGui(tk.Tk):
             "dirt_road_curve_model",
             "fence_donor_model",
             "fence_donor_length",
+            "fence_donor_heading_offset",
             "metal_fence_donor_model",
             "metal_fence_donor_length",
+            "metal_fence_donor_heading_offset",
         ):
             variable = self.vars.get(key)
             if variable is not None:
@@ -1360,8 +1368,10 @@ class WorldgenGui(tk.Tk):
                 "dirt_road_curve_model",
                 "fence_donor_model",
                 "fence_donor_length",
+                "fence_donor_heading_offset",
                 "metal_fence_donor_model",
                 "metal_fence_donor_length",
+                "metal_fence_donor_heading_offset",
             )
             if key in self.vars
         }
@@ -2386,8 +2396,10 @@ class WorldgenGui(tk.Tk):
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
         self._entry_row(fence_models, 1, "Ordinary/rural fence P3D", "fence_donor_model", advanced=True)
         self._entry_row(fence_models, 2, "Fence segment length (m)", "fence_donor_length", advanced=True)
-        self._entry_row(fence_models, 3, "Chain-link/metal fence P3D", "metal_fence_donor_model", advanced=True)
-        self._entry_row(fence_models, 4, "Metal segment length (m)", "metal_fence_donor_length", advanced=True)
+        self._entry_row(fence_models, 3, "Fence rotation (degrees)", "fence_donor_heading_offset", advanced=True)
+        self._entry_row(fence_models, 4, "Chain-link/metal fence P3D", "metal_fence_donor_model", advanced=True)
+        self._entry_row(fence_models, 5, "Metal segment length (m)", "metal_fence_donor_length", advanced=True)
+        self._entry_row(fence_models, 6, "Metal rotation (degrees)", "metal_fence_donor_heading_offset", advanced=True)
 
         tuning = ttk.LabelFrame(advanced.body, text="Limits and solver", padding=10)
         tuning.pack(fill="x", pady=(0, 10))
