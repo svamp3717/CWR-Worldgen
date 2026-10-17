@@ -24,6 +24,10 @@ class BridgeDonor:
     content_sha256: str
     roadway_centre_x: float = 0.0
     roadway_centre_z: float = 0.0
+    leveling_pitch_degrees: float = 0.0
+    roadway_origin_z_after_pitch: float = 0.0
+    roadway_end_difference_metres: float = 0.0
+    leveled_relief_metres: float = 0.0
 
 
 def configured_bridge_donor(spec: object) -> BridgeDonor | None:
@@ -96,7 +100,7 @@ def configured_bridge_donor(spec: object) -> BridgeDonor | None:
     deck_y = (
         overrides["deck_height"]
         if overrides["deck_height"] is not None
-        else roadway.local_y
+        else roadway.leveled_local_y
     )
     if not 2.0 <= length <= 200.0:
         raise ValueError(f"Bridge module length {length:.2f} m is outside 2..200 m")
@@ -115,4 +119,11 @@ def configured_bridge_donor(spec: object) -> BridgeDonor | None:
         content_sha256=hashlib.sha256(data).hexdigest(),
         roadway_centre_x=roadway.centre_x,
         roadway_centre_z=roadway.centre_z,
+        leveling_pitch_degrees=roadway.leveling_pitch_degrees,
+        roadway_origin_z_after_pitch=(
+            roadway.centre_z * math.cos(math.radians(roadway.leveling_pitch_degrees))
+            - roadway.local_y * math.sin(math.radians(roadway.leveling_pitch_degrees))
+        ),
+        roadway_end_difference_metres=roadway.roadway_end_difference_metres,
+        leveled_relief_metres=roadway.leveled_relief_metres,
     )
