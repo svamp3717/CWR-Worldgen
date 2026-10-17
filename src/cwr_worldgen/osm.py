@@ -521,23 +521,62 @@ def stock_farmland_fence_model(
 
 
 def configured_fence_donor(spec: object, *, metal: bool = False) -> tuple[str, float, float] | None:
-    """Return a selected P3D and its actual nominal segment length.
+    """Select a fence donor, inspecting its visual LOD unless manually overridden.
 
-    These are direct model placements, not generated fence meshes. The caller
-    uses this length for line subdivision so a 4 m donor is not spaced as if
-    it were a stock 6 m model.
+    Empty model path retains the original CWA stock fence. Empty length or
+    rotation field requests automatic inference from the selected asset root.
     """
     prefix = "metal_fence_donor" if metal else "fence_donor"
     model = str(getattr(spec, f"{prefix}_model", "") or "").strip().replace("/", "\\")
     if not model:
         return None
-    length = float(getattr(spec, f"{prefix}_length", 6.0 if metal else 5.0))
-    if not math.isfinite(length) or length <= 0.0:
+    length_override = getattr(spec, f"{prefix}_length", None)
+    angle_override = getattr(spec, f"{prefix}_heading_offset", None)
+    length = float(length_override) if length_override not in (None, "") else None
+    angle = float(angle_override) if angle_override not in (None, "") else None
+    if length is not None and (not math.isfinite(length) or length <= 0.0):
         raise ValueError(f"{prefix}_length must be positive and finite")
-    heading = float(getattr(spec, f"{prefix}_heading_offset", 90.0))
-    if not math.isfinite(heading):
+    if angle is not None and not math.isfinite(angle):
         raise ValueError(f"{prefix}_heading_offset must be finite")
-    return model, length, heading
+    if length is None or angle is None:
+        from .assets import canonical_asset_path, read_asset_record_bytes
+        from .fast_asset_scan_policy import locate_assets_fast
+        from .fence_donor_geometry import inspect_fence_donor_geometry
+
+        roots = tuple(Path(p) for p in (getattr(spec, "asset_roots", ()) or ()))
+        if not roots:
+            raise ValueError(
+                f"Cannot auto-measure fence donor {model!r} without Asset roots. "
+                "Add its PBO/folder to Asset roots or set length and rotation manually."
+            )
+        scan = locate_assets_fast(
+            roots,
+            (model,),
+            cache_dir=getattr(spec, "cache_dir", None),
+            use_cache=bool(getattr(spec, "cache_enabled", True)),
+            refresh=bool(getattr(spec, "cache_refresh", False)),
+        )
+        record = next(
+            (item for item in scan.records if item.path == canonical_asset_path(model)),
+            None,
+        )
+        if record is None:
+            raise ValueError(
+                f"Cannot auto-measure fence donor {model!r}: not found in Asset roots. "
+                "Add the containing PBO/folder or set length and rotation manually."
+            )
+        try:
+            shape = inspect_fence_donor_geometry(read_asset_record_bytes(record))
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                f"Cannot auto-measure fence donor {model!r}: {exc}. "
+                "Enter length and rotation manually for unsupported or unusual P3Ds."
+            ) from exc
+        if length is None:
+            length = shape.length_metres
+        if angle is None:
+            angle = shape.heading_offset_degrees
+    return model, length, angle
 
 
 def _rural_fence_segments_duplicate(
