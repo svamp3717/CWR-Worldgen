@@ -1047,13 +1047,17 @@ def inspect_roadway_surface_style(data: bytes) -> RoadwaySurfaceStyle:
 
 @dataclass(frozen=True, slots=True)
 class RoadwayDeckGeometry:
-    """Drivable local surface bounds and deck level for a straight bridge P3D."""
+    """Drivable local surface bounds, center and safe end-leveling pitch."""
 
     local_y: float
     span_x: float
     span_z: float
     centre_x: float
     centre_z: float
+    leveling_pitch_degrees: float = 0.0
+    leveled_local_y: float = 0.0
+    leveled_relief_metres: float = 0.0
+    roadway_end_difference_metres: float = 0.0
 
 
 def inspect_roadway_deck_geometry(data: bytes) -> RoadwayDeckGeometry:
@@ -1086,19 +1090,83 @@ def inspect_roadway_deck_geometry(data: bytes) -> RoadwayDeckGeometry:
         if not all(math.isfinite(v) for v in (*ys, *xs, *zs)):
             raise ProxyCloneError("bridge donor Roadway LOD contains non-finite coordinates")
         low, high = ys[0], ys[-1]
-        if high - low > 0.6:
-            raise ProxyCloneError(
-                f"bridge donor Roadway LOD is not level ({high - low:.2f} m variation); "
-                "use a flat straight bridge module"
-            )
         n = len(ys)
         median_y = ys[n // 2] if n % 2 else (ys[n // 2 - 1] + ys[n // 2]) * 0.5
+        span_x = max(xs) - min(xs)
+        span_z = max(zs) - min(zs)
+        centre_z = (min(zs) + max(zs)) * 0.5
+        pitch_degrees = 0.0
+        leveled_local_y = median_y
+        leveled_relief = high - low
+        end_difference = 0.0
+
+        # Many legacy bridge parts have a level approach at one end and a
+        # modest ramp at the other (haus\\bridge03.p3d is one example). A
+        # pitched module can level its *Roadway ends*, preserving safe joints
+        # between identical modules without altering or rescaling the mesh.
+        # WRP WorldObject.pitch_degrees rotates local +Z, not local X; ramped
+        # X-aligned Roadways would require roll and cannot use this correction.
+        if span_z > span_x:
+            start_z, end_z = min(zs), max(zs)
+            end_epsilon = max(1.0e-4, span_z * 1.0e-5)
+            start_heights = [
+                lod.point_heights[index]
+                for index in set(indices)
+                if abs(lod.point_horizontal[index][1] - start_z) <= end_epsilon
+            ]
+            end_heights = [
+                lod.point_heights[index]
+                for index in set(indices)
+                if abs(lod.point_horizontal[index][1] - end_z) <= end_epsilon
+            ]
+            if start_heights and end_heights:
+                start_y = sum(start_heights) / len(start_heights)
+                end_y = sum(end_heights) / len(end_heights)
+                # Side-to-side variation at an endpoint is a banked/twisted
+                # roadway. A single object pitch cannot correct its seams.
+                if max(start_heights) - min(start_heights) > 0.15 or max(end_heights) - min(end_heights) > 0.15:
+                    raise ProxyCloneError(
+                        "bridge donor Roadway LOD end is twisted/banked; "
+                        "cannot level repeated modules with pitch alone"
+                    )
+                end_difference = end_y - start_y
+                pitch_degrees = math.degrees(math.atan2(start_y - end_y, span_z))
+                pitch = math.radians(pitch_degrees)
+                corrected = [
+                    lod.point_heights[index] * math.cos(pitch)
+                    + lod.point_horizontal[index][1] * math.sin(pitch)
+                    for index in set(indices)
+                ]
+                leveled_relief = max(corrected) - min(corrected)
+                start_level = start_y * math.cos(pitch) + start_z * math.sin(pitch)
+                end_level = end_y * math.cos(pitch) + end_z * math.sin(pitch)
+                leveled_local_y = (start_level + end_level) * 0.5
+        elif high - low > 0.6:
+            raise ProxyCloneError(
+                "ramped X-aligned bridge Roadway needs roll, not supported by "
+                "the current pitch-only bridge placement"
+            )
+
+        if abs(pitch_degrees) > 3.0:
+            raise ProxyCloneError(
+                f"bridge donor Roadway slope needs {pitch_degrees:.2f}° of pitch; "
+                "maximum safe correction is 3°"
+            )
+        if leveled_relief > 0.75:
+            raise ProxyCloneError(
+                f"bridge donor Roadway remains uneven after end leveling "
+                f"({leveled_relief:.2f} m); use a straighter bridge module"
+            )
         return RoadwayDeckGeometry(
             local_y=median_y,
-            span_x=max(xs) - min(xs),
-            span_z=max(zs) - min(zs),
+            span_x=span_x,
+            span_z=span_z,
             centre_x=(min(xs) + max(xs)) * 0.5,
-            centre_z=(min(zs) + max(zs)) * 0.5,
+            centre_z=centre_z,
+            leveling_pitch_degrees=pitch_degrees,
+            leveled_local_y=leveled_local_y,
+            leveled_relief_metres=leveled_relief,
+            roadway_end_difference_metres=end_difference,
         )
     raise ProxyCloneError("bridge donor has no Roadway LOD; vehicle-safe donor required")
 
