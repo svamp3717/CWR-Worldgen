@@ -1037,11 +1037,11 @@ def default_gui_values() -> dict[str, object]:
         "include_minor_roads": True,
         **DEFAULT_ROAD_MODEL_VALUES,
         "fence_donor_model": "",
-        "fence_donor_length": "5",
-        "fence_donor_heading_offset": "90",
+        "fence_donor_length": "",
+        "fence_donor_heading_offset": "",
         "metal_fence_donor_model": "",
-        "metal_fence_donor_length": "6",
-        "metal_fence_donor_heading_offset": "90",
+        "metal_fence_donor_length": "",
+        "metal_fence_donor_heading_offset": "",
         "cache_refresh": False,
         "no_cache": False,
         "normalization_refresh": False,
@@ -2389,17 +2389,17 @@ class WorldgenGui(tk.Tk):
                 "Optional P3D segments for OSM fences and farmland boundaries. "
                 "Worldgen places the selected models directly along the fence line; "
                 "it does not resize meshes or generate fence geometry from a donor. "
-                "Match the segment length to each P3D, and add its PBO or folder under Asset roots. "
-                "Blank model paths retain the stock OFP fences. Hedges and walls are unchanged."
+                "Leave length/rotation blank to inspect the selected P3D automatically; add its PBO/folder to Asset roots. "
+                "Overrides are optional. Blank model paths retain stock fences. Hedges and walls are unchanged."
             ),
             style="Hint.TLabel", wraplength=760,
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
         self._entry_row(fence_models, 1, "Ordinary/rural fence P3D", "fence_donor_model", advanced=True)
-        self._entry_row(fence_models, 2, "Fence segment length (m)", "fence_donor_length", advanced=True)
-        self._entry_row(fence_models, 3, "Fence rotation (degrees)", "fence_donor_heading_offset", advanced=True)
+        self._entry_row(fence_models, 2, "Fence length (m, auto if blank)", "fence_donor_length", advanced=True)
+        self._entry_row(fence_models, 3, "Fence rotation (°, auto if blank)", "fence_donor_heading_offset", advanced=True)
         self._entry_row(fence_models, 4, "Chain-link/metal fence P3D", "metal_fence_donor_model", advanced=True)
-        self._entry_row(fence_models, 5, "Metal segment length (m)", "metal_fence_donor_length", advanced=True)
-        self._entry_row(fence_models, 6, "Metal rotation (degrees)", "metal_fence_donor_heading_offset", advanced=True)
+        self._entry_row(fence_models, 5, "Metal length (m, auto if blank)", "metal_fence_donor_length", advanced=True)
+        self._entry_row(fence_models, 6, "Metal rotation (°, auto if blank)", "metal_fence_donor_heading_offset", advanced=True)
 
         tuning = ttk.LabelFrame(advanced.body, text="Limits and solver", padding=10)
         tuning.pack(fill="x", pady=(0, 10))
