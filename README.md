@@ -117,6 +117,33 @@ python -m cwr_worldgen milestone9 --source-dir source-data/map --output build/wo
 Fence donor settings are remembered between GUI launches using the same
 persistent preferences file as road donors.
 
+**Optional drivable bridge donor:** Under Advanced → Bridge module donor,
+select one virtual `.p3d` model from an addon PBO/folder in **Asset roots**.
+A configured model takes precedence over both stock Nogova and procedural
+bridge modes. Blank leaves the current bridge behavior unchanged.
+
+The generator inspects legacy MLOD or ODOL v6/v7 geometry and the model's
+**Roadway LOD**. It uses the Roadway LOD's actual join length, drivable width,
+local deck height and center offset to fit straight bridge modules across
+the wet crossing. This matters because visible bridge rails can be far shorter
+than the Roadway LOD. A donor without a valid, approximately flat Roadway LOD
+is rejected rather than pretending it can carry vehicles. The selected model
+must be wide enough for the mapped road. Existing water/bank checks and
+bridge-object budgets still apply; the stock Nogova seam repair is bypassed
+for custom models.
+
+Leave module length, rotation and Roadway local Y empty to auto-detect them.
+Override only if the authored geometry needs adjustment. Example:
+
+```powershell
+python -m cwr_worldgen milestone9 --source-dir source-data/map --output build/world --asset-root "C:\Mods\mybridges.pbo" --bridge-donor-model "mybridges\bridge_straight.p3d"
+```
+
+Donor bridge modules are placed **without stretching**. Curved sections,
+ramps, unusually shaped or non-level Roadway LODs, irregular collision models
+and elaborate start/end pieces need custom modeling; visual geometry alone
+cannot certify in-game vehicle crossing. Test the finished bridge in CWA.
+
 **Wall, hedge and ditch vegetation donors:** Advanced generation settings also
 accept one P3D each for mapped stone/retaining walls, mapped hedges, and
 vegetation strips along mapped OSM ditches. All three are opt-in: blank
