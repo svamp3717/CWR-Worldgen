@@ -10,7 +10,7 @@ from pathlib import Path
 from .assets import canonical_asset_path, read_asset_record_bytes
 from .fast_asset_scan_policy import locate_assets_fast
 from .fence_donor_geometry import inspect_fence_donor_geometry
-from .legacy_proxy_models import ProxyCloneError, inspect_roadway_deck_height
+from .legacy_proxy_models import ProxyCloneError, inspect_roadway_deck_geometry
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +22,8 @@ class BridgeDonor:
     roadway_local_y_metres: float
     source_format: str
     content_sha256: str
+    roadway_centre_x: float = 0.0
+    roadway_centre_z: float = 0.0
 
 
 def configured_bridge_donor(spec: object) -> BridgeDonor | None:
@@ -74,34 +76,43 @@ def configured_bridge_donor(spec: object) -> BridgeDonor | None:
         )
     try:
         data = read_asset_record_bytes(record)
-        dimensions = inspect_fence_donor_geometry(data)
-        deck_height = inspect_roadway_deck_height(data)
+        dimensions = inspect_fence_donor_geometry(data, allow_ambiguous=True)
+        roadway = inspect_roadway_deck_geometry(data)
     except (OSError, ValueError, ProxyCloneError) as exc:
         raise ValueError(f"Cannot inspect bridge donor {model!r}: {exc}") from exc
-    length = overrides["length"] if overrides["length"] is not None else dimensions.length_metres
+    roadway_length = max(roadway.span_x, roadway.span_z)
+    roadway_width = min(roadway.span_x, roadway.span_z)
+    if roadway_width >= roadway_length * 0.85:
+        raise ValueError(
+            f"Bridge donor {model!r} has no clear straight Roadway axis "
+            f"({roadway.span_x:.2f} x {roadway.span_z:.2f} m)"
+        )
+    length = overrides["length"] if overrides["length"] is not None else roadway_length
     heading = (
         overrides["heading_offset"]
         if overrides["heading_offset"] is not None
-        else dimensions.heading_offset_degrees
+        else (90.0 if roadway.span_x > roadway.span_z else 0.0)
     )
     deck_y = (
         overrides["deck_height"]
         if overrides["deck_height"] is not None
-        else deck_height
+        else roadway.local_y
     )
     if not 2.0 <= length <= 200.0:
         raise ValueError(f"Bridge module length {length:.2f} m is outside 2..200 m")
-    if dimensions.width_metres < 2.0:
+    if roadway_width < 2.0:
         raise ValueError(
-            f"Bridge donor {model!r} is only {dimensions.width_metres:.2f} m wide; "
+            f"Bridge donor {model!r} Roadway is only {roadway_width:.2f} m wide; "
             "select a drivable bridge module"
         )
     return BridgeDonor(
         model=model,
         length_metres=length,
-        width_metres=dimensions.width_metres,
+        width_metres=roadway_width,
         heading_offset_degrees=heading,
         roadway_local_y_metres=deck_y,
         source_format=dimensions.source_format,
         content_sha256=hashlib.sha256(data).hexdigest(),
+        roadway_centre_x=roadway.centre_x,
+        roadway_centre_z=roadway.centre_z,
     )
