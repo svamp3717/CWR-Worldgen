@@ -132,10 +132,23 @@ and applies a small model pitch to level module joints. This can preserve a
 gentle internal crown/slope: it does not flatten or stretch the model geometry.
 The correction is capped at 3° and residual roadway unevenness at 0.75 m.
 Twisted/banked, sharply warped, ramped X-axis, or missing Roadway LODs are
-rejected. The selected model must be wide enough for the mapped road (the
-inspected `bridge03.p3d` has a 5 m roadway). Existing water/bank checks and
-bridge-object budgets still apply; the stock Nogova seam repair is bypassed
+rejected. A donor's Roadway may be narrower than its mapped approach road:
+the inspected `bridge03.p3d` has a 5 m driving surface, which Worldgen can
+place on a wider ordinary residential/secondary approach as a narrow bridge.
+Modules must still have sufficient usable width (a narrow 5 m module is
+rejected for motorways/trunks). The generation log reports donor object
+counts, narrowed approaches and any width rejections so custom bridge
+models can no longer be silently skipped. Existing water/bank checks and
+bridge-object budgets still apply; Nogova-only seam repair is bypassed
 for custom models.
+
+**Game-side addon requirement:** Asset roots allow Worldgen to **inspect**
+your bridge P3D but do not automatically install its PBO into the game. To
+see `haus\\bridge03.p3d` in CWA, the actual `haus` addon containing the model
+and required textures must also be loaded in the game/mod installation.
+After generation, check the bridge-donor placement summary in the build log.
+Old cached builds with silently rejected donor modules are automatically
+invalidated by the updated bridge policy.
 
 Leave module length, rotation and Roadway local Y empty to auto-detect them.
 Override only if the authored geometry needs adjustment. Example:
