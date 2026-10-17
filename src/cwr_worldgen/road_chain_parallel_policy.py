@@ -465,7 +465,10 @@ def _fit_stock_piece_road_objects_parallel(
             continue
         if (
             bool(getattr(spec, "bridges_enabled", True))
-            and not bool(getattr(spec, "procedural_bridges", True))
+            and (
+                not bool(getattr(spec, "procedural_bridges", True))
+                or bool(str(getattr(spec, "bridge_donor_model", "") or "").strip())
+            )
             and _playability._road_is_explicit_bridge(feature.tags)
             and not _playability.road_bridge_crosses_ditch_only(
                 feature, dataset, projection
