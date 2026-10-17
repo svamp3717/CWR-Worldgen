@@ -16,6 +16,7 @@ if str(TOOLS) not in sys.path:
 
 import p3d_modern_odol as modern
 import p3d_preview_geometry as preview
+from p3d_dayz import is_dayz_model_path, model_format_label
 
 
 def _modern_odol(
@@ -40,7 +41,7 @@ def _modern_odol(
     return bytes(out)
 
 
-@pytest.mark.parametrize("version", [40, 43, 47, 48, 49, 50, 52, 56, 58, 60, 64, 69, 73, 74, 75])
+@pytest.mark.parametrize("version", [40, 43, 47, 48, 49, 50, 52, 53, 54, 55, 56, 58, 60, 64, 69, 73, 74, 75])
 def test_modern_odol_bounds_support_arma_versions(version: int) -> None:
     data = _modern_odol(version)
     bounds = modern.read_model_bounds(data)
@@ -130,3 +131,19 @@ def test_browser_draws_modern_odol_wireframe_without_mesh_render(monkeypatch) ->
     zoomed = app.ax_preview.set_xlim.call_args.args[1]
     assert zoomed == pytest.approx(baseline / 2)
     assert app.canvas.draw_idle.call_count == 2
+
+
+def test_dayz_models_keep_versions_and_are_labelled_by_namespace() -> None:
+    for version in (53, 54, 55):
+        data = _modern_odol(version)
+        model = preview.build_preview_model(
+            data, model_path=r"dz\\structures\\house.p3d", source="fixture",
+        )
+        assert model.measurement.version == version
+        assert model.measurement.lod == "model bounds only"
+        assert model_format_label(model.model_path, model.measurement.format, version) == (
+            f"DayZ asset (ODOL v{version})"
+        )
+    assert is_dayz_model_path(r"DZ/gear/item.p3d")
+    assert not is_dayz_model_path(r"a3\\structures\\house.p3d")
+    assert model_format_label(r"mod\\house.p3d", "ODOL", 54) == "ODOL v54"
