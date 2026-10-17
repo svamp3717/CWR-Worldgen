@@ -137,7 +137,7 @@ def test_dayz_models_keep_versions_and_are_labelled_by_namespace() -> None:
     for version in (53, 54, 55):
         data = _modern_odol(version)
         model = preview.build_preview_model(
-            data, model_path=r"dz\\structures\\house.p3d", source="fixture",
+            data, model_path=r"dz\structures\house.p3d", source="fixture",
         )
         assert model.measurement.version == version
         assert model.measurement.lod == "model bounds only"
@@ -145,5 +145,5 @@ def test_dayz_models_keep_versions_and_are_labelled_by_namespace() -> None:
             f"DayZ asset (ODOL v{version})"
         )
     assert is_dayz_model_path(r"DZ/gear/item.p3d")
-    assert not is_dayz_model_path(r"a3\\structures\\house.p3d")
-    assert model_format_label(r"mod\\house.p3d", "ODOL", 54) == "ODOL v54"
+    assert not is_dayz_model_path(r"a3\structures\house.p3d")
+    assert model_format_label(r"mod\house.p3d", "ODOL", 54) == "ODOL v54"
