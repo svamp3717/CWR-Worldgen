@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import io
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -112,7 +113,7 @@ def test_bridge_donor_can_override_length_rotation_and_deck_height(tmp_path: Pat
 
 @pytest.mark.parametrize("payload,error", [
     (_bridge_mlod(has_roadway=False), "no Roadway LOD"),
-    (_bridge_mlod(warped=True), "not level"),
+    (_bridge_mlod(warped=True), "twisted/banked"),
     (b"not-a-P3D", "unsupported fence P3D format"),
 ])
 def test_bridge_donor_rejects_undrivable_or_unreadable_models(
@@ -248,3 +249,89 @@ def test_wet_only_donor_corridor_uses_selected_module_spacing():
     assert wide is not None and narrow is not None
     assert wide.module_count == 4
     assert narrow.module_count == 8
+
+
+def _mild_ramped_bridge_mlod() -> bytes:
+    """Small untextured fixture modeled on real haus/bridge03 Roadway points.
+
+    This fixture contains measured *coordinates*, not the copyrighted donor
+    model or its original visual geometry/textures.
+    """
+    from cwr_worldgen.procedural_buildings import _Lod, _Face
+    positions = (
+        (-2.5, 9.3266, 2.0861), (2.5, 9.3266, 2.0861),
+        (-2.5, 8.4520, 27.6652), (2.5, 8.4520, 27.6652),
+        (-2.5, 9.3595, -22.9139), (2.5, 9.3595, -22.9139),
+        (-2.5, 9.3595, 2.0861), (2.5, 9.3595, 2.0861),
+        (-2.5, 9.2936, -23.1666), (2.5, 9.2936, -23.1666),
+        (-2.5, 8.4176, 29.2377), (2.5, 8.4176, 29.2377),
+    )
+    faces = (
+        (3, 2, 0, 1), (7, 6, 4, 5), (4, 8, 9, 5),
+        (10, 2, 3, 11),
+    )
+    road = _Lod(
+        positions, ((0.0, 1.0, 0.0),),
+        tuple(_Face(
+            "",
+            tuple((i, 0, 0.0, 0.0) for i in face), 0,
+        ) for face in faces),
+        3.0e15,
+        properties=(("autocenter", "0"),),
+        point_flags=(0,) * len(positions),
+    )
+    visual = _lod(width=5.0, length=50.0, roadway_y=9.3, resolution=1.0)
+    stream = io.BytesIO()
+    stream.write(_MLOD_HEADER.pack(b"MLOD", 1, 1, 0, 2))
+    _write_lod(stream, visual)
+    _write_lod(stream, road)
+    return stream.getvalue()
+
+
+def test_mild_ramped_bridge_roadway_is_leveled_without_unsafe_module_steps(tmp_path: Path):
+    archive = tmp_path / "addonbridge.pbo"
+    write_pbo(archive, (PboEntry("segment.p3d", _mild_ramped_bridge_mlod()),))
+    donor = configured_bridge_donor(_donor_spec(archive))
+    assert donor is not None
+    assert donor.length_metres == pytest.approx(52.4043, abs=0.01)
+    assert donor.width_metres == pytest.approx(5.0)
+    assert donor.roadway_end_difference_metres == pytest.approx(-0.876, abs=0.01)
+    assert donor.leveling_pitch_degrees == pytest.approx(0.958, abs=0.02)
+    assert donor.roadway_local_y_metres == pytest.approx(8.905, abs=0.03)
+    assert donor.leveled_relief_metres < 0.55
+    # At the seam both modules present the same Roadway endpoint elevation.
+    pitch = math.radians(donor.leveling_pitch_degrees)
+    start = 9.2936 * math.cos(pitch) - 23.1666 * math.sin(pitch)
+    end = 8.4176 * math.cos(pitch) + 29.2377 * math.sin(pitch)
+    assert start == pytest.approx(end, abs=0.002)
+
+
+def test_ramped_donor_bridge_is_emitted_with_compensating_pitch(tmp_path: Path):
+    archive = tmp_path / "addonbridge.pbo"
+    write_pbo(archive, (PboEntry("segment.p3d", _mild_ramped_bridge_mlod()),))
+    spec = _donor_spec(archive)
+    projection = osm.BboxProjection.create((0, 0, 1, 1), 200.0)
+    bridge = osm.OsmLineFeature(
+        "way/ramped", {"highway": "service", "bridge": "yes", "width": "4.5"},
+        tuple(projection.to_latlon(p) for p in ((20.0, 100.0), (180.0, 100.0))),
+    )
+    dataset = osm.OsmDataset(
+        source_generator="ramped-bridge", element_count=1,
+        coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(bridge,),
+    )
+    raster = osm.OsmRaster(
+        cells=8, water=(False,) * 64, forest=(False,) * 64,
+        farmland=(False,) * 64, urban=(False,) * 64, roads=(False,) * 64,
+        buildings=(False,) * 64, high_resolution=8, coastline_seed_count=0,
+    )
+    with patch.object(osm, "_road_needs_bridge_deck", return_value=True), patch.object(
+        osm, "_extend_procedural_bridge_to_approach_plateaus",
+        side_effect=lambda points, *_args, **_kwargs: points,
+    ):
+        result = osm.generate_world_objects(
+            dataset, projection, raster, (5.0,) * 64, spec, include_roads=False,
+        )
+    objects = [o for o in result.objects if o.model_path == spec.bridge_donor_model]
+    assert len(objects) == 4
+    assert all(o.pitch_degrees == pytest.approx(0.958, abs=0.03) for o in objects)
+    assert all(o.y + configured_bridge_donor(spec).roadway_local_y_metres == pytest.approx(5.035, abs=0.03) for o in objects)
