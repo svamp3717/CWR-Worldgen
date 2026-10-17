@@ -10882,6 +10882,7 @@ def generate_world_objects(
                 if (
                     polygon_intersects_road_corridors(road_corridors, footprint, clearance=0.3)
                     or _polygon_overlaps_mask(raster.buildings, spec.cells, spec.world_size, footprint)
+                    or _polygon_overlaps_mask(raster.water, spec.cells, spec.world_size, footprint)
                 ):
                     ditch_grass_rejections += 1
                     continue
@@ -11108,6 +11109,8 @@ def generate_world_objects(
                     if abs(pitch) > 38.0:
                         barrier_rejections += 1
                         continue
+                    if subtype == "wall" and custom_wall_donor:
+                        y -= custom_wall_donor[4]
                 placed_pitch = pitch
                 emit(WorldObject(next_id, model, placed_x, y, placed_z, placed_heading, pitch_degrees=placed_pitch))
                 next_id += 1
