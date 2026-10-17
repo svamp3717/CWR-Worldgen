@@ -21,11 +21,12 @@ def sibling_namespace_pbos(
     *,
     available_pbos: Sequence[Path] | None = None,
 ) -> tuple[Path, ...]:
-    r"""Find sibling PBOs for CWA and Arma texture namespaces.
+    r"""Find sibling PBOs for CWA, Arma and DayZ texture namespaces.
 
     CWA data\foo.pac commonly lives in Data.pbo, whereas Arma/DayZ textures
-    such as ca\structures\data\foo.paa live in Structures.pbo. Try the addon
-    component before broad ca / a3 so that an unrelated CA.pbo doesn't
+    such as ca\structures\data\foo.paa and dz\structures\data\foo.paa
+    live in Structures.pbo. Try the addon component before the broad
+    ca / a3 / dz root so that an unrelated root-level PBO doesn't
     prevent finding the correct archive.
     """
     segments = _canonical(texture_path).split("\\")
