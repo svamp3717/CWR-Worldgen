@@ -413,6 +413,14 @@ def default_osm_asset_mapping(spec: Any, milestone_number: int, *, global_textur
         ditch_donor = str(getattr(spec, "ditch_vegetation_donor_model", "") or "").strip().replace("/", "\\")
         if ditch_donor:
             rules.append(_rule("ditch-vegetation-donor", ("watercourses",), {"waterway": "ditch"}, models=(ditch_donor,), geometry="line"))
+    if bool(getattr(spec, "bridges_enabled", False)):
+        bridge_donor = str(getattr(spec, "bridge_donor_model", "") or "").strip().replace("/", "\\")
+        if bridge_donor:
+            rules.append(_rule(
+                "bridge-module-donor", ("roads",), {"bridge": ("yes", "true", "1")},
+                models=(bridge_donor,), geometry="line",
+                description="Configured drivable bridge-module P3D",
+            ))
     if bool(getattr(spec, "bus_stops_enabled", False)):
         rules.append(_rule("bus-stop-signs", ("landmarks",), {"landmark": "bus_stop"}, models=(getattr(spec, "bus_stop_model", r"o\misc\aut_z_st.p3d"),), geometry="point"))
     if bool(getattr(spec, "cemeteries_enabled", False)):
