@@ -11261,6 +11261,9 @@ def generate_world_objects(
     if bool(getattr(spec, "bridges_enabled", False)):
         from .bridge_donors import configured_bridge_donor
         bridge_donor = configured_bridge_donor(spec)
+        donor_narrow_crossings = 0
+        donor_width_rejections = 0
+        donor_placed_objects = 0
         bridge_warning_threshold = max(0, int(getattr(spec, "maximum_bridge_objects", 1000)))
         bridge_limit = _advisory_object_limit(bridge_warning_threshold, enabled=advisory_limits)
         # A selected donor takes precedence over both procedural and stock
@@ -11307,13 +11310,25 @@ def generate_world_objects(
                 bridge_rejections += 1
                 continue
             width = max(4.0, road_width_metres(feature.tags) + 1.4)
-            if (
-                bridge_donor is not None
-                and bridge_donor.width_metres < road_width_metres(feature.tags) - 0.2
-            ):
-                # A narrow bridge cannot safely substitute for the mapped road.
-                bridge_rejections += 1
-                continue
+            if bridge_donor is not None:
+                mapped_width = road_width_metres(feature.tags)
+                bridge_roadway_width = bridge_donor.width_metres
+                # OSM highway classes describe the *ordinary approach*, not
+                # the narrowest permitted structure. Old logic discarded a 5 m
+                # bridge03 donor on every residential (6 m), tertiary (7 m),
+                # and secondary (9 m) bridge without mentioning why.
+                # Place a usable single-lane/narrow bridge instead of silently
+                # falling back to vanilla on most real mapped crossings.
+                minimum_drivable_width = (
+                    7.0 if feature.tags.get("highway") in {"motorway", "trunk"}
+                    else min(4.5, max(3.0, mapped_width))
+                )
+                if bridge_roadway_width + 0.01 < minimum_drivable_width:
+                    donor_width_rejections += 1
+                    bridge_rejections += 1
+                    continue
+                if bridge_roadway_width + 0.2 < mapped_width:
+                    donor_narrow_crossings += 1
             deck_clearance = max(
                 MINIMUM_BRIDGE_TERRAIN_CLEARANCE_METRES,
                 float(getattr(spec, "bridge_deck_clearance", 1.25)),
@@ -11363,7 +11378,7 @@ def generate_world_objects(
                 placement_chunks = chunks
                 model_lengths = (module_length,) * len(chunks)
                 half_width = (
-                    max(width * 0.5, bridge_donor.width_metres * 0.5)
+                    max(bridge_donor.width_metres * 0.5 + 0.75, 2.0)
                     if bridge_donor else max(width * 0.5, NOGOVA_BRIDGE_HALF_WIDTH_METRES)
                 )
                 vertical_depth = -NOGOVA_BRIDGE_LOWEST_POINT_METRES
@@ -11529,8 +11544,27 @@ def generate_world_objects(
                 ))
                 next_id += 1
                 bridge_objects += 1
+                if bridge_donor is not None:
+                    donor_placed_objects += 1
             if bridge_objects >= bridge_limit:
                 break
+
+        if bridge_donor is not None:
+            progress(
+                67,
+                f"Bridge donor {bridge_donor.model}: {donor_placed_objects} custom "
+                f"module(s) placed across {bridge_segments} eligible crossing(s); "
+                f"{donor_narrow_crossings} approach(es) narrowed to the "
+                f"{bridge_donor.width_metres:.2f} m Roadway, "
+                f"{donor_width_rejections} too-narrow model rejection(s), "
+                f"{bridge_rejections} total bridge rejection(s).",
+            )
+            if bridge_segments and not donor_placed_objects:
+                progress(
+                    67,
+                    "WARNING: No custom bridge modules were emitted; inspect "
+                    "bridge donor width, budget, and water-crossing diagnostics.",
+                )
 
     progress(67, "Placing meadow grass, rural vegetation, wetland reeds and rocks")
     # Structured rural vegetation reuses a small cluster library. Rows stay rows;
