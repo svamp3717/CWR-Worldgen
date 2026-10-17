@@ -335,3 +335,12 @@ def test_ramped_donor_bridge_is_emitted_with_compensating_pitch(tmp_path: Path):
     assert len(objects) == 4
     assert all(o.pitch_degrees == pytest.approx(0.958, abs=0.03) for o in objects)
     assert all(o.y + configured_bridge_donor(spec).roadway_local_y_metres == pytest.approx(5.035, abs=0.03) for o in objects)
+
+
+def test_ramped_bridge_rejects_heading_that_would_bank_roadway(tmp_path: Path):
+    archive = tmp_path / "addonbridge.pbo"
+    write_pbo(archive, (PboEntry("segment.p3d", _mild_ramped_bridge_mlod()),))
+    with pytest.raises(ValueError, match="manual heading"):
+        configured_bridge_donor(_donor_spec(
+            archive, bridge_donor_heading_offset=90.0,
+        ))
