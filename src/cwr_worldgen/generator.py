@@ -2999,6 +2999,8 @@ _PLACEMENT_CACHE_FIELDS = (
     "forest_hillside_trees_per_block", "forest_hillside_tree_footprint",
     "forest_hillside_tree_maximum_relief",
     "barriers_enabled", "maximum_barrier_objects", "barrier_segment_length",
+    "fence_donor_model", "fence_donor_length", "fence_donor_heading_offset",
+    "metal_fence_donor_model", "metal_fence_donor_length", "metal_fence_donor_heading_offset",
     "stock_hedge_models", "stock_wall_models", "stock_metal_fence_models",
     "sidewalks_enabled", "maximum_sidewalk_objects", "sidewalk_width",
     "sidewalk_segment_length", "street_furniture_enabled",
