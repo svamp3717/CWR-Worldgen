@@ -98,14 +98,20 @@ directory under **Asset roots**. Do not enter a local PBO file path here.
 
 Worldgen places these P3Ds directly along mapped OSM fences, farmland
 boundaries and residential yards. It does **not** reshape donor meshes.
-Set the **length (metres)** and **rotation offset (degrees)** to match each
-donor's actual dimensions and axis; the default angle is 90°. Custom donor
-meshes may show gaps at bends or short ends. Hedges and walls are unchanged.
+**Leave length and rotation blank:** the generator reads the first visual LOD
+of the selected P3D from Asset roots, measures its longest horizontal
+(X/Z) dimension, and infers alignment (long X: 90°; long Z: 0°).
+This supports OFP/CWA MLOD and ODOL v6/v7 models. The two numeric inputs are
+optional overrides for diagonal, unusual or unsupported meshes. An ambiguous
+or unreadable model produces an explanatory error instead of silently
+guessing. Origin/pivot offsets and curved fence geometry cannot be inferred
+reliably from a rectangular bounding box, so donor meshes can still show gaps
+at bends or short ends. Hedges and walls are unchanged.
 
 CLI example:
 
 ```powershell
-python -m cwr_worldgen milestone9 --source-dir source-data/map --output build/world --fence-donor-model "sfp\wood\fence.p3d" --fence-donor-length 4 --fence-donor-heading-offset 0
+python -m cwr_worldgen milestone9 --source-dir source-data/map --output build/world --asset-root "C:\Mods\sfp.pbo" --fence-donor-model "sfp\wood\fence.p3d"
 ```
 
 Fence donor settings are remembered between GUI launches using the same
