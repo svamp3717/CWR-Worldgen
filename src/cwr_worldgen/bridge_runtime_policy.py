@@ -97,5 +97,5 @@ def install_bridge_runtime_policy() -> None:
     # approach was graded against. Use a fresh namespace so old placement/cache
     # state cannot retain the previous post-fill endpoint shift.
     from . import build_cache_policy as _build_cache
-    _build_cache.BUILD_CACHE_REVISION = "v11-authoritative-pre-fill-bridge-plan"
+    _build_cache.BUILD_CACHE_REVISION = "v12-donor-bridge-narrow-spans"
     _INSTALLED = True
