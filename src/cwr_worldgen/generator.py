@@ -3626,7 +3626,13 @@ def _load_nonroad_objects(
         "starting_object_id": starting_object_id,
         "spec": _spec_fields(spec, _PLACEMENT_CACHE_FIELDS),
     }
-    key = cache_key("nonroad-object-placement-v98-stock-nogova-leaf-pairs", payload)
+    placement_cache_namespace = "nonroad-object-placement-v98-stock-nogova-leaf-pairs"
+    if str(getattr(spec, "bridge_donor_model", "") or "").strip():
+        # A prior build can have cached an empty custom bridge population
+        # because the donor was silently rejected for normal OSM road widths.
+        # Do not reuse that placement after correcting the narrow-span policy.
+        placement_cache_namespace += "-bridge-donor-narrow-spans-v2"
+    key = cache_key(placement_cache_namespace, payload)
     path = cache_dir / "placements" / f"{key}.pickle" if cache_dir is not None else None
 
     def produce():
