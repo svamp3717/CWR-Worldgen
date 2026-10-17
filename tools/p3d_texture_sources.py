@@ -1,6 +1,6 @@
 """Texture-source discovery for P3D previews.
 
-Adds OFP/CWA and Arma-friendly sibling PBO discovery on top of the base texture resolver.
+Adds OFP/CWA, Arma and DayZ sibling PBO discovery on top of the base texture resolver.
 A model in Data3D.pbo can, for example, reference ``data\\foo.pac``; in that case
 we automatically try Data.pbo next to Data3D.pbo before falling back to the
 configured texture search inputs.
@@ -23,7 +23,7 @@ def sibling_namespace_pbos(
 ) -> tuple[Path, ...]:
     r"""Find sibling PBOs for CWA and Arma texture namespaces.
 
-    CWA data\foo.pac commonly lives in Data.pbo, whereas Arma textures
+    CWA data\foo.pac commonly lives in Data.pbo, whereas Arma/DayZ textures
     such as ca\structures\data\foo.paa live in Structures.pbo. Try the addon
     component before broad ca / a3 so that an unrelated CA.pbo doesn't
     prevent finding the correct archive.
@@ -32,7 +32,7 @@ def sibling_namespace_pbos(
     if len(segments) < 2:
         return ()
     names = [segments[0]]
-    if len(segments) >= 3 and segments[0] in {"ca", "a3", "ca_e"}:
+    if len(segments) >= 3 and segments[0] in {"ca", "a3", "ca_e", "dz"}:
         names.insert(0, segments[1])
     names = list(dict.fromkeys(name for name in names if name not in {"", ".", ".."}))
 
