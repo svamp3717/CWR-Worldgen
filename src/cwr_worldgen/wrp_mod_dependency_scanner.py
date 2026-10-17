@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Scan OFP/CWA, Arma and DayZ WRP files for P3D model dependencies.
+"""Scan OFP/CWA, Arma, DayZ and Take On Helicopters WRP model dependencies.
 
 The scanner accepts loose WRPs, PBOs and Iron Front IFA archives.
 Unbinarized 4WVR, 8WVR and DayZ 0WZD objects are counted from their records.
@@ -49,6 +49,9 @@ GAME_STOCK_ROOTS = {
     "arma2oa": ("ca", "ca_e"),
     "arma3": ("a3",),
     "dayz": ("dz",),
+    # Take On Helicopters uses HSim for stock content. Rearmed's optional
+    # Arma 2 data roots can be added with --stock-root when installed.
+    "tkoh": ("hsim",),
     # Original 2012 Iron Front uses Arma 2 technology and LIB_ addons.
     # lib_* intentionally matches addon namespace segments, not full paths.
     "ironfront": ("lib", "lib_*", "ca", "ca_e"),
@@ -61,6 +64,7 @@ GAME_LABELS = {
     "Arma 2 OA": "arma2oa",
     "Arma 3": "arma3",
     "DayZ Standalone": "dayz",
+    "Take On Helicopters": "tkoh",
     "Iron Front": "ironfront",
 }
 
@@ -373,8 +377,8 @@ def scan_dependencies(
         wrp_names = (path.name,)
         world_data = path.read_bytes()
         rows.extend(scan_wrp_bytes(world_data, wrp_name=path.name, stock_roots=roots))
-        if game == "dayz" and world_data[:4] == b"OPRW":
-            warnings.append("DayZ OPRW: only embedded P3D string occurrences can be counted, not object placements")
+        if game in {"dayz", "tkoh"} and world_data[:4] == b"OPRW":
+            warnings.append(f"{game.upper()} OPRW: only embedded P3D string occurrences can be counted, not object placements")
         kind = "wrp"
     elif is_pbo_path(path) or path.name.casefold().endswith((".ifa", ".ifa.zst")):
         worlds = _pbo_wrp_entries(path)
@@ -384,7 +388,7 @@ def scan_dependencies(
         for name, data in worlds:
             try:
                 rows.extend(scan_wrp_bytes(data, wrp_name=name, stock_roots=roots))
-                if game == "dayz" and data[:4] == b"OPRW":
+                if game in {"dayz", "tkoh"} and data[:4] == b"OPRW":
                     warnings.append(f"{name}: OPRW scan counts P3D strings, not object placements")
             except ValueError as exc:
                 warnings.append(f"{name}: {exc}")
@@ -624,7 +628,7 @@ class ScannerGui:
         from tkinter import filedialog
 
         selected = filedialog.askopenfilename(
-            title="Choose OFP / Arma / DayZ WRP, PBO or Iron Front IFA",
+            title="Choose OFP / Arma / DayZ / Take On Helicopters WRP, PBO or IFA",
             filetypes=(("WRP / PBO / IFA", "*.wrp *.pbo *.pbo.zst *.ifa *.ifa.zst"), ("WRP", "*.wrp"), ("PBO / IFA", "*.pbo *.pbo.zst *.ifa *.ifa.zst"), ("All files", "*.*")),
         )
         if selected:
@@ -771,12 +775,12 @@ def gui_main(argv: Sequence[str] | None = None) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="cwr-wrp-mod-scan",
-        description="List P3D dependencies in OFP, Arma, DayZ and Iron Front WRP/PBO/IFA archives.",
+        description="List P3D dependencies in OFP, Arma, DayZ, Take On Helicopters and Iron Front archives.",
     )
     parser.add_argument("input", nargs="?", type=Path, help="WRP file, PBO or Iron Front IFA archive containing WRP files")
     parser.add_argument(
         "--game", choices=tuple(GAME_STOCK_ROOTS), default="cwa",
-        help="Stock asset profile: cwa (default), arma1, arma1qg, arma2, arma2oa, arma3, dayz, ironfront",
+        help="Stock asset profile: cwa (default), arma1, arma1qg, arma2, arma2oa, arma3, dayz, tkoh, ironfront",
     )
     parser.add_argument(
         "--stock-root",
