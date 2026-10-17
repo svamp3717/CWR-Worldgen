@@ -387,7 +387,7 @@ def test_dayz_gui_scan_worker_passes_selected_game_profile(tmp_path: Path) -> No
     import queue
 
     wrp = tmp_path / "dayz-oprw.wrp"
-    wrp.write_bytes(b"OPRW\\x00dz\\\\plants\\\\tree.p3d\\x00")
+    wrp.write_bytes(b"OPRW\\0dz\\\\plants\\\\tree.p3d\\0")
     gui = ScannerGui.__new__(ScannerGui)
     gui._queue = queue.Queue()
     gui._scan_worker(wrp, ("dz",), "dayz")
