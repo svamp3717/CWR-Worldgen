@@ -462,6 +462,15 @@ class Milestone9Spec(Milestone8Spec):
     metal_fence_donor_model: str = ""
     metal_fence_donor_length: float | None = None
     metal_fence_donor_heading_offset: float | None = None
+    wall_donor_model: str = ""
+    wall_donor_length: float | None = None
+    wall_donor_heading_offset: float | None = None
+    hedge_donor_model: str = ""
+    hedge_donor_length: float | None = None
+    hedge_donor_heading_offset: float | None = None
+    ditch_vegetation_donor_model: str = ""
+    ditch_vegetation_donor_length: float | None = None
+    ditch_vegetation_donor_heading_offset: float | None = None
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
@@ -710,6 +719,9 @@ class Milestone9Spec(Milestone8Spec):
         for label, length in (
             ("fence donor length", self.fence_donor_length),
             ("metal fence donor length", self.metal_fence_donor_length),
+            ("wall donor length", self.wall_donor_length),
+            ("hedge donor length", self.hedge_donor_length),
+            ("ditch vegetation donor length", self.ditch_vegetation_donor_length),
         ):
             if length is not None and (
                 not isinstance(length, (int, float))
@@ -719,6 +731,9 @@ class Milestone9Spec(Milestone8Spec):
         for label, angle in (
             ("fence donor heading offset", self.fence_donor_heading_offset),
             ("metal fence donor heading offset", self.metal_fence_donor_heading_offset),
+            ("wall donor heading offset", self.wall_donor_heading_offset),
+            ("hedge donor heading offset", self.hedge_donor_heading_offset),
+            ("ditch vegetation donor heading offset", self.ditch_vegetation_donor_heading_offset),
         ):
             if angle is not None and (
                 not isinstance(angle, (int, float)) or not math.isfinite(float(angle))
@@ -727,6 +742,9 @@ class Milestone9Spec(Milestone8Spec):
         for label, model_path in (
             ("fence donor", self.fence_donor_model),
             ("metal fence donor", self.metal_fence_donor_model),
+            ("wall donor", self.wall_donor_model),
+            ("hedge donor", self.hedge_donor_model),
+            ("ditch vegetation donor", self.ditch_vegetation_donor_model),
         ):
             model = str(model_path).strip().replace("/", "\\")
             if not model:
@@ -927,6 +945,15 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     metal_fence_donor_model: str = ""
     metal_fence_donor_length: float | None = None
     metal_fence_donor_heading_offset: float | None = None
+    wall_donor_model: str = ""
+    wall_donor_length: float | None = None
+    wall_donor_heading_offset: float | None = None
+    hedge_donor_model: str = ""
+    hedge_donor_length: float | None = None
+    hedge_donor_heading_offset: float | None = None
+    ditch_vegetation_donor_model: str = ""
+    ditch_vegetation_donor_length: float | None = None
+    ditch_vegetation_donor_heading_offset: float | None = None
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
@@ -1450,6 +1477,15 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         metal_fence_donor_model=spec.metal_fence_donor_model,
         metal_fence_donor_length=spec.metal_fence_donor_length,
         metal_fence_donor_heading_offset=spec.metal_fence_donor_heading_offset,
+        wall_donor_model=spec.wall_donor_model,
+        wall_donor_length=spec.wall_donor_length,
+        wall_donor_heading_offset=spec.wall_donor_heading_offset,
+        hedge_donor_model=spec.hedge_donor_model,
+        hedge_donor_length=spec.hedge_donor_length,
+        hedge_donor_heading_offset=spec.hedge_donor_heading_offset,
+        ditch_vegetation_donor_model=spec.ditch_vegetation_donor_model,
+        ditch_vegetation_donor_length=spec.ditch_vegetation_donor_length,
+        ditch_vegetation_donor_heading_offset=spec.ditch_vegetation_donor_heading_offset,
         stock_hedge_models=spec.stock_hedge_models,
         stock_wall_models=spec.stock_wall_models,
         stock_metal_fence_models=spec.stock_metal_fence_models,
