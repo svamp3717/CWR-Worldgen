@@ -3583,7 +3583,15 @@ def _load_nonroad_objects(
     progress_callback: Callable[[int, str], None] = report_progress,
 ):
     cache_dir, enabled, refresh = _cache_settings(spec)
+    # Keep the placement cache in sync if the PBO changes its fence geometry
+    # but the configured virtual donor path remains unchanged.
+    from .osm import configured_fence_donor
+    fence_donor_layouts = (
+        configured_fence_donor(spec),
+        configured_fence_donor(spec, metal=True),
+    )
     payload = {
+        "fence_donor_layouts": fence_donor_layouts,
         "terrain": terrain_key,
         "dataset": dataset_identity,
         "road_fingerprint": road_fingerprint,
