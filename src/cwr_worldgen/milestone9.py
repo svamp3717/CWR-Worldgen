@@ -458,8 +458,10 @@ class Milestone9Spec(Milestone8Spec):
     # Optional direct-placement fence P3Ds. Empty selects the stock families.
     fence_donor_model: str = ""
     fence_donor_length: float = 5.0
+    fence_donor_heading_offset: float = 90.0
     metal_fence_donor_model: str = ""
     metal_fence_donor_length: float = 6.0
+    metal_fence_donor_heading_offset: float = 90.0
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
@@ -707,6 +709,12 @@ class Milestone9Spec(Milestone8Spec):
                 raise ValueError(f"{label} path must be ASCII") from exc
             if not encoded_model or len(encoded_model) > 75:
                 raise ValueError(f"{label} path must contain 1..75 ASCII bytes")
+        for label, angle in (
+            ("fence donor heading offset", self.fence_donor_heading_offset),
+            ("metal fence donor heading offset", self.metal_fence_donor_heading_offset),
+        ):
+            if not isinstance(angle, (int, float)) or not math.isfinite(float(angle)):
+                raise ValueError(f"{label} must be finite")
         for label, model_path in (
             ("fence donor", self.fence_donor_model),
             ("metal fence donor", self.metal_fence_donor_model),
@@ -906,8 +914,10 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     # Optional direct-placement fence P3Ds. Empty selects the stock families.
     fence_donor_model: str = ""
     fence_donor_length: float = 5.0
+    fence_donor_heading_offset: float = 90.0
     metal_fence_donor_model: str = ""
     metal_fence_donor_length: float = 6.0
+    metal_fence_donor_heading_offset: float = 90.0
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
@@ -1427,8 +1437,10 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         barrier_segment_length=spec.barrier_segment_length,
         fence_donor_model=spec.fence_donor_model,
         fence_donor_length=spec.fence_donor_length,
+        fence_donor_heading_offset=spec.fence_donor_heading_offset,
         metal_fence_donor_model=spec.metal_fence_donor_model,
         metal_fence_donor_length=spec.metal_fence_donor_length,
+        metal_fence_donor_heading_offset=spec.metal_fence_donor_heading_offset,
         stock_hedge_models=spec.stock_hedge_models,
         stock_wall_models=spec.stock_wall_models,
         stock_metal_fence_models=spec.stock_metal_fence_models,
