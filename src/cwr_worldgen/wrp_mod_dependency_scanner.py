@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Scan OFP/CWA, Arma and DayZ WRP files for P3D model dependencies.
 
-The scanner accepts loose WRPs, PBOs and Iron Front IFA archives. 4WVR and unbinarized 8WVR objects
-and DayZ 0WZD are counted from their records. Binarized OPRW worlds use conservative P3D
-string discovery: those counts are model-name occurrences, NOT object counts.
+The scanner accepts loose WRPs, PBOs and Iron Front IFA archives.
+Unbinarized 4WVR, 8WVR and DayZ 0WZD objects are counted from their records.
+Binarized OPRW worlds use conservative P3D string discovery: those counts
+are model-name occurrences, NOT object placement counts.
 """
 from __future__ import annotations
 
@@ -635,13 +636,14 @@ class ScannerGui:
             return
         path = Path(raw_path)
         roots = normalize_stock_roots((self.stock_var.get(),))
+        game = GAME_LABELS[self.game_var.get()]
         self.status_var.set("Scanning…")
-        worker = threading.Thread(target=self._scan_worker, args=(path, roots), daemon=True)
+        worker = threading.Thread(target=self._scan_worker, args=(path, roots, game), daemon=True)
         worker.start()
 
-    def _scan_worker(self, path: Path, roots: tuple[str, ...]) -> None:
+    def _scan_worker(self, path: Path, roots: tuple[str, ...], game: str = "cwa") -> None:
         try:
-            self._queue.put(("ok", scan_dependencies(path, stock_roots=roots)))
+            self._queue.put(("ok", scan_dependencies(path, stock_roots=roots, game=game)))
         except Exception as exc:  # GUI boundary: surface the error instead of crashing Tk.
             self._queue.put(("error", exc))
 
@@ -769,12 +771,12 @@ def gui_main(argv: Sequence[str] | None = None) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="cwr-wrp-mod-scan",
-        description="List mod P3D dependencies in OFP, Arma and Iron Front WRP/PBO/IFA archives.",
+        description="List P3D dependencies in OFP, Arma, DayZ and Iron Front WRP/PBO/IFA archives.",
     )
     parser.add_argument("input", nargs="?", type=Path, help="WRP file, PBO or Iron Front IFA archive containing WRP files")
     parser.add_argument(
         "--game", choices=tuple(GAME_STOCK_ROOTS), default="cwa",
-        help="Stock asset profile: cwa (default), arma1, arma1qg, arma2, arma2oa, arma3, ironfront",
+        help="Stock asset profile: cwa (default), arma1, arma1qg, arma2, arma2oa, arma3, dayz, ironfront",
     )
     parser.add_argument(
         "--stock-root",
