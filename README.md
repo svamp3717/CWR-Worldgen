@@ -117,6 +117,31 @@ python -m cwr_worldgen milestone9 --source-dir source-data/map --output build/wo
 Fence donor settings are remembered between GUI launches using the same
 persistent preferences file as road donors.
 
+**Wall, hedge and ditch vegetation donors:** Advanced generation settings also
+accept one P3D each for mapped stone/retaining walls, mapped hedges, and
+vegetation strips along mapped OSM ditches. All three are opt-in: blank
+model paths leave stock walls/hedges and generated ditch grass unchanged.
+
+Like fence donors, supply a virtual P3D path, add the model PBO or folder to
+**Asset roots**, and leave length and rotation empty to measure the first
+visual LOD automatically (legacy MLOD and ODOL v6/v7). The longer horizontal
+axis is used to align straight pieces. Wall and hedge measurements determine
+segment spacing; ditch strip length sets candidate spacing along the mapped
+ditch. Ditch vegetation places the donor object directly, subject to road,
+building and slope/float checks. Hedge grounding uses the model's measured
+visual width and lowest vertex where inspection succeeds.
+
+Example CLI flags:
+
+```powershell
+--wall-donor-model "addon\walls\stone.p3d" --hedge-donor-model "addon\hedges\thick.p3d" --ditch-vegetation-donor-model "addon\grass\reed_strip.p3d"
+```
+
+All length/rotation flags are optional manual overrides, for example
+`--hedge-donor-length 5 --hedge-donor-heading-offset 0`.
+These are direct placements, not stretched/generated meshes. A bounding
+box cannot guarantee correct connectors, pivots or rounded bends.
+
 **Existing GUI profiles:** Saved empty gravel donors from older releases
 migrate to the stock `asf` defaults, but explicitly selected modded donors
 are not replaced. Users who deliberately want procedural gravel may clear

@@ -2494,6 +2494,10 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
             canonical_asset_path(str(path))
             for path in getattr(spec, "grave_models", ())
         )
+    if milestone_number >= 9 and bool(getattr(spec, "ditch_grass_enabled", False)):
+        ditch_donor_path = str(getattr(spec, "ditch_vegetation_donor_model", "") or "").strip()
+        if ditch_donor_path:
+            trusted.add(canonical_asset_path(ditch_donor_path))
     if milestone_number >= 9 and bool(getattr(spec, "barriers_enabled", False)):
         trusted.update(
             canonical_asset_path(str(path))
@@ -2501,6 +2505,7 @@ def _trusted_legacy_asset_paths(spec: PlayabilitySpec, milestone_number: int) ->
                 *getattr(spec, "stock_hedge_models", ()),
                 *getattr(spec, "stock_wall_models", ()),
                 *getattr(spec, "stock_metal_fence_models", ()),
+                *(str(getattr(spec, f"{kind}_model", "") or "") for kind in ("wall_donor", "hedge_donor")),
                 *STOCK_FARMLAND_FENCE_MODELS,
             )
         )
@@ -3001,6 +3006,9 @@ _PLACEMENT_CACHE_FIELDS = (
     "barriers_enabled", "maximum_barrier_objects", "barrier_segment_length",
     "fence_donor_model", "fence_donor_length", "fence_donor_heading_offset",
     "metal_fence_donor_model", "metal_fence_donor_length", "metal_fence_donor_heading_offset",
+    "wall_donor_model", "wall_donor_length", "wall_donor_heading_offset",
+    "hedge_donor_model", "hedge_donor_length", "hedge_donor_heading_offset",
+    "ditch_vegetation_donor_model", "ditch_vegetation_donor_length", "ditch_vegetation_donor_heading_offset",
     "stock_hedge_models", "stock_wall_models", "stock_metal_fence_models",
     "sidewalks_enabled", "maximum_sidewalk_objects", "sidewalk_width",
     "sidewalk_segment_length", "street_furniture_enabled",
@@ -3585,10 +3593,16 @@ def _load_nonroad_objects(
     cache_dir, enabled, refresh = _cache_settings(spec)
     # Keep the placement cache in sync if the PBO changes its fence geometry
     # but the configured virtual donor path remains unchanged.
-    from .osm import configured_fence_donor
+    from .osm import configured_fence_donor, configured_linear_donor
     fence_donor_layouts = (
         configured_fence_donor(spec),
         configured_fence_donor(spec, metal=True),
+        configured_linear_donor(spec, "wall_donor")
+        if getattr(spec, "barriers_enabled", False) else None,
+        configured_linear_donor(spec, "hedge_donor")
+        if getattr(spec, "barriers_enabled", False) else None,
+        configured_linear_donor(spec, "ditch_vegetation_donor")
+        if getattr(spec, "ditch_grass_enabled", False) else None,
     )
     payload = {
         "fence_donor_layouts": fence_donor_layouts,

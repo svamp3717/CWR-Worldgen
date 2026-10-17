@@ -593,6 +593,15 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--metal-fence-donor-model", default="", help="optional chain-link/metal fence P3D virtual path from asset roots")
     milestone9.add_argument("--metal-fence-donor-length", type=float, default=None, help="optional metal fence length override in metres (auto from P3D by default)")
     milestone9.add_argument("--metal-fence-donor-heading-offset", type=float, default=None, help="optional metal fence rotation override (auto from P3D X/Z axis by default)")
+    milestone9.add_argument("--wall-donor-model", default="", help="optional wall virtual P3D path from Asset roots")
+    milestone9.add_argument("--wall-donor-length", type=float, default=None, help="optional model length override in metres (auto from P3D by default)")
+    milestone9.add_argument("--wall-donor-heading-offset", type=float, default=None, help="optional model rotation override (auto from P3D by default)")
+    milestone9.add_argument("--hedge-donor-model", default="", help="optional hedge virtual P3D path from Asset roots")
+    milestone9.add_argument("--hedge-donor-length", type=float, default=None, help="optional model length override in metres (auto from P3D by default)")
+    milestone9.add_argument("--hedge-donor-heading-offset", type=float, default=None, help="optional model rotation override (auto from P3D by default)")
+    milestone9.add_argument("--ditch-vegetation-donor-model", default="", help="optional ditch vegetation virtual P3D path from Asset roots")
+    milestone9.add_argument("--ditch-vegetation-donor-length", type=float, default=None, help="optional model length override in metres (auto from P3D by default)")
+    milestone9.add_argument("--ditch-vegetation-donor-heading-offset", type=float, default=None, help="optional model rotation override (auto from P3D by default)")
     milestone9.add_argument("--sidewalks", action="store_true", dest="sidewalks_enabled", help="reserved sidewalk option; sidewalk placement is temporarily disabled")
     milestone9.add_argument("--no-sidewalks", action="store_false", dest="sidewalks_enabled", help="keep sidewalk placement disabled (current default)")
     milestone9.set_defaults(sidewalks_enabled=False)
@@ -1291,6 +1300,15 @@ def main(argv: list[str] | None = None) -> int:
                 metal_fence_donor_model=args.metal_fence_donor_model,
                 metal_fence_donor_length=args.metal_fence_donor_length,
                 metal_fence_donor_heading_offset=args.metal_fence_donor_heading_offset,
+                wall_donor_model=args.wall_donor_model,
+                wall_donor_length=args.wall_donor_length,
+                wall_donor_heading_offset=args.wall_donor_heading_offset,
+                hedge_donor_model=args.hedge_donor_model,
+                hedge_donor_length=args.hedge_donor_length,
+                hedge_donor_heading_offset=args.hedge_donor_heading_offset,
+                ditch_vegetation_donor_model=args.ditch_vegetation_donor_model,
+                ditch_vegetation_donor_length=args.ditch_vegetation_donor_length,
+                ditch_vegetation_donor_heading_offset=args.ditch_vegetation_donor_heading_offset,
                 sidewalks_enabled=args.sidewalks_enabled,
                 maximum_sidewalk_objects=args.max_sidewalk_objects,
                 sidewalk_width=args.sidewalk_width,
