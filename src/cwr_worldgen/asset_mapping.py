@@ -393,8 +393,12 @@ def default_osm_asset_mapping(spec: Any, milestone_number: int, *, global_textur
             "primary-forest", ("forests",), {}, models=(getattr(spec, "forest_tree_model", r"data3d\les_su_ctver_pruhozi.p3d"),), geometry="polygon",
         ))
     if bool(getattr(spec, "barriers_enabled", milestone_number >= 9)):
-        rules.append(_rule("hedges", ("barriers",), {"barrier": "hedge"}, models=tuple(getattr(spec, "stock_hedge_models", ())), geometry="line"))
-        rules.append(_rule("stone-walls", ("barriers",), {"barrier": ("wall", "retaining_wall")}, models=tuple(getattr(spec, "stock_wall_models", ())), geometry="line"))
+        hedge_donor = str(getattr(spec, "hedge_donor_model", "") or "").strip().replace("/", "\\")
+        hedge_models = (hedge_donor,) if hedge_donor else tuple(getattr(spec, "stock_hedge_models", ()))
+        rules.append(_rule("hedges", ("barriers",), {"barrier": "hedge"}, models=hedge_models, geometry="line"))
+        wall_donor = str(getattr(spec, "wall_donor_model", "") or "").strip().replace("/", "\\")
+        wall_models = (wall_donor,) if wall_donor else tuple(getattr(spec, "stock_wall_models", ()))
+        rules.append(_rule("stone-walls", ("barriers",), {"barrier": ("wall", "retaining_wall")}, models=wall_models, geometry="line"))
         metal_values = ("chain_link", "chainlink", "metal", "metal_bars", "wire", "wire_mesh", "welded_wire_mesh", "mesh")
         metal_donor = str(getattr(spec, "metal_fence_donor_model", "") or "").strip().replace("/", "\\")
         metal_models = ((metal_donor,) if metal_donor else tuple(getattr(spec, "stock_metal_fence_models", ())))
@@ -405,6 +409,10 @@ def default_osm_asset_mapping(spec: Any, milestone_number: int, *, global_textur
                 models=(ordinary_donor,), geometry="line"))
         rules.append(_rule("metal-fences-by-type", ("barriers",), {"barrier": "fence", "fence_type": metal_values}, models=metal_models, geometry="line"))
         rules.append(_rule("metal-fences-by-material", ("barriers",), {"barrier": "fence", "material": ("metal", "steel", "iron", "wire", "wire_mesh")}, models=metal_models, geometry="line"))
+    if bool(getattr(spec, "ditch_grass_enabled", False)):
+        ditch_donor = str(getattr(spec, "ditch_vegetation_donor_model", "") or "").strip().replace("/", "\\")
+        if ditch_donor:
+            rules.append(_rule("ditch-vegetation-donor", ("watercourses",), {"waterway": "ditch"}, models=(ditch_donor,), geometry="line"))
     if bool(getattr(spec, "bus_stops_enabled", False)):
         rules.append(_rule("bus-stop-signs", ("landmarks",), {"landmark": "bus_stop"}, models=(getattr(spec, "bus_stop_model", r"o\misc\aut_z_st.p3d"),), geometry="point"))
     if bool(getattr(spec, "cemeteries_enabled", False)):
