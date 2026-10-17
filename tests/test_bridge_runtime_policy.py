@@ -87,3 +87,68 @@ def test_runtime_planner_matches_final_component_corridor_to_pre_fill_plan() -> 
 
     assert resolved is plan
     assert resolved.module_count == 3
+
+
+def test_installed_bridge_runtime_accepts_donor_module_spacing() -> None:
+    """The real build replaces the planner; donor fitting must survive that wrapper."""
+    spec = SimpleNamespace(
+        cells=8, cell_size=25.0, world_size=200.0, sea_level=0.0,
+        bridge_donor_model=r"haus\bridge03.p3d",
+    )
+    source = ((20.0, 100.0), (180.0, 100.0))
+    underwater = (-3.0,) * 64
+
+    with (
+        patch.object(
+            abutment, "_cached_bridge_plan",
+            side_effect=AssertionError("stock bridge cache must not affect donor"),
+        ),
+        patch.object(
+            abutment, "_cached_bridge_plan_for_corridor",
+            side_effect=AssertionError("stock corridor cache must not affect donor"),
+        ),
+    ):
+        # This is the precise call path that raised TypeError in the user's
+        # build: _extend_stock_bridge_to_wet_span -> runtime planner.
+        corridor = render_policy._extend_stock_bridge_to_wet_span(
+            source, underwater, spec, 40.0,
+        )
+        plan = runtime_policy._runtime_stock_bridge_span_plan(
+            source, underwater, spec, module_spacing=40.0,
+        )
+
+    assert plan is not None
+    assert plan.module_count == 4
+    assert plan.length == 160.0
+    assert corridor == plan.points
+
+
+def test_source_water_fallback_respects_custom_donor_spacing() -> None:
+    """Mapped-water fallback must not silently revert to Nogova's 50.19 m."""
+    spec = SimpleNamespace(
+        cells=8, cell_size=25.0, world_size=200.0, sea_level=0.0,
+        road_width=5.0,
+    )
+    corridor = ((20.0, 100.0), (180.0, 100.0))
+    with (
+        patch.object(
+            source_water, "_ORIGINAL_STOCK_PLAN",
+            side_effect=lambda points, elevations, spec, **kw: None,
+        ) as original_plan,
+        patch.object(
+            source_water, "_source_mapped_water_interval",
+            return_value=(50.0, 110.0),
+        ),
+        patch.object(
+            source_water, "_mapped_water_is_representable",
+            return_value=True,
+        ),
+    ):
+        plan = source_water._mapped_water_stock_plan(
+            corridor, (), spec, module_spacing=40.0,
+        )
+
+    assert original_plan.call_args.kwargs["module_spacing"] == 40.0
+    assert plan is not None
+    assert plan.module_count == 2
+    assert plan.length == 80.0
