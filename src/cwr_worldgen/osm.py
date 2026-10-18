@@ -1548,18 +1548,25 @@ def _sidewalk_sides(tags: Mapping[str, str], *, inferred: bool) -> tuple[int, ..
     right = tags.get("sidewalk:right", "").strip().casefold()
     negative = {"no", "none", "separate"}
     positive = {"yes", "designated"}
-    if value in negative and left not in positive and right not in positive:
-        return ()
-    sides: list[int] = []
-    if value in {"left"} or left in positive:
-        sides.append(-1)
-    if value in {"right"} or right in positive:
-        sides.append(1)
-    if value in {"both", "yes"}:
-        return (-1, 1)
-    if sides:
-        return tuple(sides)
-    return (-1, 1) if inferred else ()
+    # Per-side tags take priority over the combined tag, including explicit
+    # exclusions (a separately mapped footway must not be duplicated).
+    if value in {"left", "right"}:
+        selected = {-1} if value == "left" else {1}
+    elif value in {"both", "yes"}:
+        selected = {-1, 1}
+    elif value in negative:
+        selected = set()
+    else:
+        selected = {-1, 1} if inferred else set()
+    if left in negative:
+        selected.discard(-1)
+    elif left in positive:
+        selected.add(-1)
+    if right in negative:
+        selected.discard(1)
+    elif right in positive:
+        selected.add(1)
+    return tuple(side for side in (-1, 1) if side in selected)
 
 
 def _stock_street_light_model(tags: Mapping[str, str], identity: str) -> str:
@@ -8203,9 +8210,6 @@ def generate_world_objects(
             if not _urban_detail_road_eligible(feature.tags):
                 continue
             highway = feature.tags.get("highway", "").casefold()
-            explicit_sidewalk = any(
-                key in feature.tags for key in ("sidewalk", "sidewalk:left", "sidewalk:right")
-            )
             # Dirt/gravel streets only receive sidewalks when OSM explicitly
             # says they exist. This avoids paving rural tracks merely because a
             # coarse residential landuse polygon happens to cover them.
