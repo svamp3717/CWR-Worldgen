@@ -84,6 +84,9 @@ def test_footprint_obeys_orientation_origin_and_original_scaling() -> None:
     assert scaled[2] == pytest.approx((116.0, 202.0))
     assert footprint_contains(scaled, 110.0, 200.0)
     assert not footprint_contains(scaled, 120.0, 200.0)
+    line = footprint_corners(ModelBounds(0, 0, -5, 5), 100, 200, 0)
+    assert not footprint_contains(line, 5000, 5000)
+    assert not footprint_contains(line, 100, 200)
 
 
 def _pbo(path: Path, name: str, payload: bytes) -> None:
