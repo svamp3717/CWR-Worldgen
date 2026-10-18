@@ -60,12 +60,13 @@ jobs:
             throw "Splash image was not generated"
           }
 
-      - name: Generate non-topmost splash specification
+      - name: Generate visible, automatically unpinned splash specification
         shell: pwsh
         run: |
           pyi-makespec `
             --onefile `
             --splash "build/splash/${{ matrix.name }}.png" `
+            --splash-center active `
             ${{ matrix.mode }} `
             --paths tools `
             --paths src `
