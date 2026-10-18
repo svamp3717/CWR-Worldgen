@@ -32,12 +32,23 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[sources]" pyinstaller
 
+      - name: Verify splash artwork
+        run: python -m unittest discover -s tests -p test_pyinstaller_splash.py -v
+
+      - name: Generate forest-green Worldgen loading screen
+        run: |
+          python tools/generate_pyinstaller_splash.py \
+            --name CWR-Worldgen \
+            --output build/splash/CWR-Worldgen.png
+          test -s build/splash/CWR-Worldgen.png
+
       - name: Build Linux executable
         run: |
           python -m PyInstaller \
             --noconfirm \
             --clean \
             --onefile \
+            --splash "build/splash/CWR-Worldgen.png" \
             --name "CWR-Worldgen" \
             --collect-all cwr_worldgen \
             --collect-all dem_stitcher \

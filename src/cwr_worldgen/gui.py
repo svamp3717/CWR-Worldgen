@@ -3809,6 +3809,19 @@ def main(argv: list[str] | None = None) -> int:
     except tk.TclError as exc:
         print(f"error: could not start GUI: {exc}", file=sys.stderr)
         return 1
+    if bool(getattr(sys, "frozen", False)):
+        # Let Tk finish arranging the GUI before dismissing the PyInstaller
+        # extraction splash. Otherwise it remains above a fully loaded app.
+        app.update_idletasks()
+        try:
+            import pyi_splash
+        except ImportError:
+            pass  # Loose-file builds and unsupported platforms may have no splash.
+        else:
+            try:
+                pyi_splash.close()
+            except (OSError, RuntimeError):
+                pass  # A bootloader splash may already have closed itself.
     app.mainloop()
     return 0
 
