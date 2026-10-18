@@ -522,7 +522,12 @@ def _build_stitch_road_index(
                 else:
                     for bx in range(x0, x1 + 1):
                         for bz in range(z0, z1 + 1):
-                            buckets.setdefault((bx, bz), array("I")).append(object_index)
+                            key = (bx, bz)
+                            bucket = buckets.get(key)
+                            if bucket is None:
+                                bucket = array("I")
+                                buckets[key] = bucket
+                            bucket.append(object_index)
                 indexed += 1
         if progress_callback is not None and (
             offset % interval == 0 or offset == total
@@ -544,12 +549,8 @@ def _stitch_candidate_indices(index: _StitchRoadIndex, plan) -> tuple[int, ...]:
     3 m therefore cannot exclude a road which the original pass could change.
     """
     radius = max(
-        float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES),
-        (
-            math.dist(plan.point, arm.connector.point)
-            for arm in plan.arms
-        ),
-        default=float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES),
+        (float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES),)
+        + tuple(math.dist(plan.point, arm.connector.point) for arm in plan.arms)
     ) + 3.0
     px, pz = plan.point
     ids = set(index.oversized)
