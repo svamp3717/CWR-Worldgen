@@ -123,7 +123,7 @@ files such as .png/.jpg. Missing or unsupported textures retain their
 existing slot colour, so gaps are visible.
 
 The preview loads only the visible area, with bounded decoded texture
-caching. It does not read PBO archives directly, resolve custom texture
+caching. It does not resolve custom texture
 coordinate transforms or reproduce every in-engine terrain blending effect.
 
 ## Zoom controls and mouse-pointer shortcuts
@@ -187,3 +187,34 @@ a visible outline.
 
 This option is off by default so large-world overview navigation retains
 its original lightweight fixed-size object markers.
+
+## Multiple asset folders and PBO archives
+
+Use **Add folder…** under **Texture / model folders** as many times as needed
+to select multiple directories. The native folder dialog selects one folder
+per invocation; every new selection is appended rather than replacing the
+existing set. The selectable list displays the complete paths. Use **Remove**
+to delete highlighted entries (Ctrl/Shift for multiple selections), or
+**Clear** to deselect all directories.
+
+Use **Add PBOs…** to select several PBOs in one dialog and add more in later
+sessions. Previous archives remain selected. The adjacent list supports
+the same **Remove** and **Clear** controls. Rebuilding the archive index
+runs in the background and leaves the previous selection intact if loading
+a new archive fails. Models and terrain images share the same source lists.
+
+Asset precedence is deliberate: the **most recently added loose folder**
+containing a matching virtual path wins; loose files take precedence over
+PBO archive members. If no matching loose file exists, the **last selected
+PBO** containing that path wins. Removal reveals the earlier matching file.
+Duplicate folder and archive paths are ignored.
+
+For example, a virtual model path `o\\buildings\\house.p3d` is looked up
+under `<selected folder>/o/buildings/house.p3d`. A selected directory should
+be the **parent** of the virtual namespace (`o` in this example), not the
+namespace subdirectory itself.
+
+Changing the selection invalidates affected decoded-image and footprint
+caches. No world objects are regenerated or moved, and the WRP source is not
+modified. Actual textures and model-size footprints continue to load only
+the required visible assets.
