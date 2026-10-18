@@ -15,6 +15,8 @@ import numpy as np
 from PIL import Image
 
 from .pbo_textures import PboTextures
+from .asset_sources import roots
+from typing import Sequence
 
 _PAA_FORMATS = {0xFF01: 1, 0xFF05: 3}  # DXT1, DXT5
 _MAX_TEX_BYTES = 32 * 1024 * 1024
@@ -111,9 +113,15 @@ def clear_archive_texture_cache() -> None:
     _pbo_image_tile.cache_clear()
 
 
+def clear_loose_texture_cache() -> None:
+    """Discard cached tiles when folders are added or removed."""
+    _image_tile.cache_clear()
+
+
 def render_real_textures(
     slots: np.ndarray, x: np.ndarray, z: np.ndarray,
-    texture_paths: tuple[str, ...], asset_root: Path | str | None,
+    texture_paths: tuple[str, ...],
+    asset_root: Path | str | Sequence[Path | str] | None,
     fallback: np.ndarray, cell_size: float,
     *, archives: PboTextures | None = None,
 ) -> tuple[np.ndarray, int]:
@@ -122,19 +130,25 @@ def render_real_textures(
     Inputs are only viewport-sized. The renderer never allocates an image
     with the world's full dimensions. Missing assets keep the fallback colour.
     """
-    if asset_root is None and archives is None:
+    search_roots = roots(asset_root)
+    if not search_roots and archives is None:
         return fallback, 0
     if slots.shape != fallback.shape[:2]:
         raise ValueError("texture and fallback preview dimensions differ")
     output = fallback.copy()
     loaded = 0
-    root = str(Path(asset_root).resolve()) if asset_root is not None else None
     valid = (slots >= 0) & (slots < len(texture_paths))
     for slot in np.unique(slots[valid]):
         path = texture_paths[int(slot)]
         if not path:
             continue
-        tile = _image_tile(root, path) if root is not None else None
+        # Most recently added loose directory takes priority, including over
+        # archives. No full-directory indexing or eager texture decoding.
+        tile = None
+        for root in reversed(search_roots):
+            tile = _image_tile(str(root), path)
+            if tile is not None:
+                break
         if tile is None and archives is not None:
             tile = _pbo_image_tile(archives, path)
         if tile is None:
