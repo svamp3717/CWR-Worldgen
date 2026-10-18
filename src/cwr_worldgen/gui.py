@@ -3816,7 +3816,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             import pyi_splash
         except ImportError:
-            pass  # Windows loose builds and frozen Linux/macOS have no splash.
+            pass  # Loose-file builds and unsupported platforms may have no splash.
         else:
             try:
                 pyi_splash.close()
