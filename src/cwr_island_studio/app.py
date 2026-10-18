@@ -91,9 +91,18 @@ class IslandStudio:
         body = ttk.Panedwindow(self.root, orient="horizontal")
         body.pack(fill="both", expand=True)
         canvas_frame = ttk.Frame(body)
-        side = ttk.Frame(body, padding=12, width=270)
+        sidebar = ttk.Frame(body, width=280)
         body.add(canvas_frame, weight=5)
-        body.add(side, weight=0)
+        body.add(sidebar, weight=0)
+        side_canvas = tk.Canvas(sidebar, borderwidth=0, highlightthickness=0, width=266)
+        side_scroll = ttk.Scrollbar(sidebar, orient="vertical", command=side_canvas.yview)
+        side_canvas.configure(yscrollcommand=side_scroll.set)
+        side_scroll.pack(side="right", fill="y")
+        side_canvas.pack(side="left", fill="both", expand=True)
+        side = ttk.Frame(side_canvas, padding=12)
+        side_window = side_canvas.create_window((0, 0), window=side, anchor="nw")
+        side.bind("<Configure>", lambda _e: side_canvas.configure(scrollregion=side_canvas.bbox("all")))
+        side_canvas.bind("<Configure>", lambda e: side_canvas.itemconfigure(side_window, width=e.width))
         self.canvas = tk.Canvas(
             canvas_frame, background="#23352b",
             borderwidth=0, highlightthickness=0,
@@ -398,7 +407,7 @@ class IslandStudio:
                             )
                     except ValueError:
                         pass
-        except (ValueError, OSError) as exc:
+        except Exception as exc:
             self.status.set(f"Preview error: {exc}")
 
     def _choose_texture_root(self) -> None:
