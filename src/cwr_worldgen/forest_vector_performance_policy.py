@@ -206,6 +206,25 @@ def _proxy_tree_flags(variant_name: str, models: tuple[str, ...]) -> tuple[bool,
     return tuple(_osm._forest_proxy_is_tree(model) for model in models)
 
 
+@lru_cache(maxsize=128)
+def _proxy_layout_vectors(
+    layout: tuple[tuple[str, float, float, float, float], ...],
+) -> tuple[np.ndarray, np.ndarray, tuple[str, ...]]:
+    """Reuse immutable model-local coordinates across thousands of clusters."""
+    xs = np.fromiter((item[1] for item in layout), dtype=np.float64)
+    zs = np.fromiter((item[2] for item in layout), dtype=np.float64)
+    xs.flags.writeable = False
+    zs.flags.writeable = False
+    return xs, zs, tuple(str(item[0]) for item in layout)
+
+
+@lru_cache(maxsize=128)
+def _proxy_tree_flag_array(variant_name: str, models: tuple[str, ...]) -> np.ndarray:
+    flags = np.asarray(_proxy_tree_flags(variant_name, models), dtype=np.bool_)
+    flags.flags.writeable = False
+    return flags
+
+
 def _triangle_bounds_batch(
     elevations: Sequence[float],
     cells: int,
@@ -296,27 +315,13 @@ def _vector_place_cluster_at(
         ):
             return None
 
-    if avoid_roads and _osm.forest_block_intersects_road_corridors(
-        road_corridors,
-        x,
-        z,
-        block_size=max(variant.width_m, variant.length_m) + 2.0 * margin,
-    ):
-        return None
-
-    minimum, maximum = _osm._polygon_elevation_extrema(
-        elevations, cells, cell_size, polygon
-    )
-    relief = maximum - minimum
-    if relief > min(max(0.0, maximum_relief), variant.maximum_relief_m):
-        return None
-
+    # The forest/water/road/building masks are independent of terrain support.
+    # Reject invalid proxy locations before expensive road-corridor and
+    # polygon-elevation queries. Keep all original predicates and transforms.
     layout = tuple(variant.proxy_layout)
     if not layout:
         return None
-    local_x = np.fromiter((item[1] for item in layout), dtype=np.float64)
-    local_z = np.fromiter((item[2] for item in layout), dtype=np.float64)
-    models = tuple(str(item[0]) for item in layout)
+    local_x, local_z, models = _proxy_layout_vectors(layout)
     angle = math.radians(heading)
     width_x, width_z = math.cos(angle), -math.sin(angle)
     length_x, length_z = math.sin(angle), math.cos(angle)
@@ -343,6 +348,21 @@ def _vector_place_cluster_at(
         | np.asarray(raster.buildings, dtype=np.bool_)[indices]
     )
     if bool(np.any(blocked)):
+        return None
+
+    if avoid_roads and _osm.forest_block_intersects_road_corridors(
+        road_corridors,
+        x,
+        z,
+        block_size=max(variant.width_m, variant.length_m) + 2.0 * margin,
+    ):
+        return None
+
+    minimum, maximum = _osm._polygon_elevation_extrema(
+        elevations, cells, cell_size, polygon
+    )
+    relief = maximum - minimum
+    if relief > min(max(0.0, maximum_relief), variant.maximum_relief_m):
         return None
 
     model_y = grade * (local_x if variant.slope_axis == "width" else local_z)
@@ -378,7 +398,7 @@ def _vector_place_cluster_at(
             return None
         anchor, burial, floating = fitted
 
-    flags = np.asarray(_proxy_tree_flags(variant.name, models), dtype=np.bool_)
+    flags = _proxy_tree_flag_array(variant.name, models)
     proxy_float = np.maximum(0.0, anchor + model_y - lower_ground)
     tree_count = int(np.count_nonzero(flags))
     bush_count = len(flags) - tree_count

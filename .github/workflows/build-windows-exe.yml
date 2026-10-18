@@ -26,7 +26,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[sources]" pyinstaller
+          python -m pip install ".[sources]" pyinstaller pytest
 
       - name: Verify splash rendering and PyInstaller configuration
         shell: pwsh
@@ -35,6 +35,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Splash artwork tests failed" }
           python -m unittest discover -s tests -p test_tool_splash_spec.py -v
           if ($LASTEXITCODE -ne 0) { throw "Splash specification tests failed" }
+
+      - name: Verify junction and vegetation performance regressions
+        shell: pwsh
+        run: |
+          python -m pytest -q `
+            tests/test_paved_junction_stitch_index.py `
+            tests/test_paved_junction_fallback_policy.py `
+            tests/test_forest_vector_performance_policy.py `
+            tests/test_object_placement_performance_policy.py `
+            tests/test_vegetation_pass_performance.py
+          if ($LASTEXITCODE -ne 0) { throw "Junction or vegetation regression tests failed" }
 
       - name: Generate forest-green Worldgen loading screen
         shell: pwsh

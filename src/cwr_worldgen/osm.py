@@ -4476,10 +4476,15 @@ def _forest_border_candidates(
     spacing: float,
     inset: float,
     seed: str,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[tuple[str, float, float, float], ...]:
     candidates: list[tuple[str, float, float, float]] = []
     spacing = max(4.0, spacing)
     inset = max(0.5, inset)
+    scanned_edges = 0
+    last_report = time.perf_counter()
+    if progress_callback is not None:
+        progress_callback("Sampling mapped forest boundaries (starting)")
     for feature in sorted(dataset.forests, key=lambda item: item.osm_key):
         for polygon_index, polygon in enumerate(feature.polygons):
             outer = tuple(projection.to_world(point) for point in polygon.outer)
@@ -4498,6 +4503,15 @@ def _forest_border_candidates(
                 if len(ring) < 3:
                     continue
                 for edge_index, (start, end) in enumerate(zip(ring, ring[1:] + ring[:1])):
+                    scanned_edges += 1
+                    if progress_callback is not None and scanned_edges % 128 == 0:
+                        now = time.perf_counter()
+                        if now - last_report >= 3.0:
+                            progress_callback(
+                                "Sampling mapped forest boundaries "
+                                f"({scanned_edges:,} edges; {len(candidates):,} candidates)"
+                            )
+                            last_report = now
                     dx = end[0] - start[0]
                     dz = end[1] - start[1]
                     length = math.hypot(dx, dz)
@@ -4528,6 +4542,11 @@ def _forest_border_candidates(
                         candidates.append((key, centre_x, centre_z, heading))
     # Stable feature ordering plus a seeded tie key avoids dependence on the
     # source parser's incidental polygon order.
+    if progress_callback is not None:
+        progress_callback(
+            "Sorting forest-border candidates "
+            f"({len(candidates):,} candidates from {scanned_edges:,} edges)"
+        )
     return tuple(sorted(
         candidates,
         key=lambda item: (
@@ -10601,6 +10620,10 @@ def generate_world_objects(
                         rocky_forest_rejections += 1
 
         progress(62, "Placing forest undergrowth across forest interiors")
+        undergrowth_started = time.perf_counter()
+        undergrowth_examined = 0
+        undergrowth_total = 0
+        undergrowth_at_start = forest_undergrowth_objects
         # Dense reusable undergrowth islands fill the complete forest interior.
         # A deterministic modular walk distributes capped placement over the
         # whole world instead of exhausting a row-major allowance in one corner.
@@ -10616,10 +10639,30 @@ def generate_world_objects(
             undergrowth_maximum_float = max(0.0, float(getattr(spec, "forest_undergrowth_maximum_float", 0.8)))
             undergrowth_clearance = float(getattr(spec, "forest_undergrowth_ground_clearance", 0.03))
             undergrowth_columns = max(1, int(math.ceil(spec.world_size / undergrowth_spacing)))
+            undergrowth_total = undergrowth_columns * undergrowth_columns
+            undergrowth_interval = max(1, undergrowth_total // 50)
+            undergrowth_last_update = undergrowth_started
             undergrowth_placeable_index = 0
             for grid_index in _distributed_grid_indices(undergrowth_columns, seed, "forest-undergrowth"):
                 if forest_undergrowth_objects >= undergrowth_limit:
                     break
+                undergrowth_examined += 1
+                if (
+                    undergrowth_examined == 1
+                    or undergrowth_examined % undergrowth_interval == 0
+                    or (
+                        undergrowth_examined % 256 == 0
+                        and time.perf_counter() - undergrowth_last_update >= 5.0
+                    )
+                ):
+                    undergrowth_last_update = time.perf_counter()
+                    progress(
+                        62,
+                        "Placing forest undergrowth "
+                        f"({undergrowth_examined:,}/{undergrowth_total:,} candidates; "
+                        f"{forest_undergrowth_objects - undergrowth_at_start:,} added; "
+                        f"{undergrowth_last_update - undergrowth_started:.1f}s)",
+                    )
                 undergrowth_row, undergrowth_column = divmod(grid_index, undergrowth_columns)
                 jitter = hashlib.blake2s(
                     f"{seed}:forest-undergrowth:{undergrowth_column}:{undergrowth_row}".encode("utf-8"),
@@ -10670,7 +10713,18 @@ def generate_world_objects(
                 maximum_forest_burial = max(maximum_forest_burial, burial)
                 maximum_forest_float = max(maximum_forest_float, floating)
 
+        progress(
+            62,
+            "Forest undergrowth complete "
+            f"({undergrowth_examined:,}/{undergrowth_total:,} candidates; "
+            f"{forest_undergrowth_objects - undergrowth_at_start:,} added; "
+            f"{time.perf_counter() - undergrowth_started:.1f}s)",
+        )
         progress(63, "Adding stock bushes to steep forested hills")
+        bush_started = time.perf_counter()
+        bush_examined = 0
+        bush_total = 0
+        bushes_at_start = steep_hill_bush_objects
         if bool(getattr(spec, "steep_hill_bushes_enabled", False)):
             bush_warning_threshold = max(0, int(getattr(spec, "maximum_steep_hill_bush_objects", 80000)))
             bush_limit = _advisory_object_limit(bush_warning_threshold, enabled=advisory_limits)
@@ -10681,9 +10735,29 @@ def generate_world_objects(
             bush_clearance = float(getattr(spec, "steep_hill_bush_ground_clearance", 0.03))
             bush_models = tuple(getattr(spec, "steep_hill_bush_models", (r"data3d\ker listnac.p3d", r"data3d\ker pichlavej.p3d", r"data3d\ker deravej.p3d")))
             bush_columns = max(1, int(math.ceil(spec.world_size / bush_spacing)))
+            bush_total = bush_columns * bush_columns
+            bush_interval = max(1, bush_total // 50)
+            bush_last_update = bush_started
             for grid_index in _distributed_grid_indices(bush_columns, seed, "steep-hill-bushes"):
                 if steep_hill_bush_objects >= bush_limit:
                     break
+                bush_examined += 1
+                if (
+                    bush_examined == 1
+                    or bush_examined % bush_interval == 0
+                    or (
+                        bush_examined % 256 == 0
+                        and time.perf_counter() - bush_last_update >= 5.0
+                    )
+                ):
+                    bush_last_update = time.perf_counter()
+                    progress(
+                        63,
+                        "Placing steep-hill bushes "
+                        f"({bush_examined:,}/{bush_total:,} candidates; "
+                        f"{steep_hill_bush_objects - bushes_at_start:,} added; "
+                        f"{bush_last_update - bush_started:.1f}s)",
+                    )
                 bush_row, bush_column = divmod(grid_index, bush_columns)
                 digest = hashlib.blake2s(
                     f"{seed}:steep-hill-bush:{bush_column}:{bush_row}".encode("utf-8"), digest_size=8
@@ -10692,12 +10766,18 @@ def generate_world_objects(
                 jitter_z = (int.from_bytes(digest[2:4], "little") / 65535.0 - 0.5) * bush_spacing * 0.55
                 bush_x = min(spec.world_size - 0.001, max(0.0, (bush_column + 0.5) * bush_spacing + jitter_x))
                 bush_z = min(spec.world_size - 0.001, max(0.0, (bush_row + 0.5) * bush_spacing + jitter_z))
-                if not _mask_at(raster.forest, spec.cells, spec.world_size, bush_x, bush_z):
+                # All four masks use the same raster cell. Avoid repeated
+                # coordinate conversions for each candidate without changing
+                # rejection counters or any placement criteria.
+                mask_x = min(spec.cells - 1, int(bush_x / spec.world_size * spec.cells))
+                mask_z = min(spec.cells - 1, int(bush_z / spec.world_size * spec.cells))
+                mask_index = mask_z * spec.cells + mask_x
+                if not raster.forest[mask_index]:
                     continue
                 if (
-                    _mask_at(raster.water, spec.cells, spec.world_size, bush_x, bush_z)
-                    or _mask_at(raster.roads, spec.cells, spec.world_size, bush_x, bush_z)
-                    or _mask_at(raster.buildings, spec.cells, spec.world_size, bush_x, bush_z)
+                    raster.water[mask_index]
+                    or raster.roads[mask_index]
+                    or raster.buildings[mask_index]
                 ):
                     steep_hill_bush_rejections += 1
                     continue
@@ -10708,13 +10788,18 @@ def generate_world_objects(
                 if slope_degrees < bush_minimum_slope:
                     continue
                 bush_footprint = 4.0
+                # Road overlap is independent of terrain, so reject those
+                # candidates before spending time sampling square elevations.
+                if forest_block_intersects_road_corridors(
+                    road_corridors, bush_x, bush_z, block_size=bush_footprint
+                ):
+                    steep_hill_bush_rejections += 1
+                    continue
                 bush_supports = _square_elevation_samples(
                     elevations, spec.cells, spec.cell_size, bush_x, bush_z, bush_footprint
                 )
                 bush_relief = max(bush_supports) - min(bush_supports)
-                if bush_relief > bush_maximum_relief or forest_block_intersects_road_corridors(
-                    road_corridors, bush_x, bush_z, block_size=bush_footprint
-                ):
+                if bush_relief > bush_maximum_relief:
                     steep_hill_bush_rejections += 1
                     continue
                 bush_point_supports = _triangle_elevation_bounds(
@@ -10739,7 +10824,18 @@ def generate_world_objects(
                 next_id += 1
                 steep_hill_bush_objects += 1
 
+        progress(
+            63,
+            "Steep-hill bushes complete "
+            f"({bush_examined:,}/{bush_total:,} candidates; "
+            f"{steep_hill_bush_objects - bushes_at_start:,} added; "
+            f"{time.perf_counter() - bush_started:.1f}s)",
+        )
         progress(64, "Softening forest borders")
+        border_started = time.perf_counter()
+        border_examined = 0
+        border_total = 0
+        border_at_start = forest_border_objects
         # Nogova-style soft borders are a separate sparse pass along actual OSM
         # forest boundaries. They use reusable proxy clusters, not rows of WRP trees.
         if (
@@ -10760,13 +10856,35 @@ def generate_world_objects(
             border_maximum_float = max(
                 0.0, float(getattr(spec, "forest_border_maximum_float", 1.0))
             )
-            for key, x, z, heading in _forest_border_candidates(
+            border_candidates = _forest_border_candidates(
                 dataset,
                 projection,
                 spacing=border_spacing,
                 inset=border_inset,
                 seed=seed,
-            ):
+                progress_callback=lambda message: progress(64, message),
+            )
+            border_total = len(border_candidates)
+            border_interval = max(1, border_total // 50)
+            border_last_update = time.perf_counter()
+            for key, x, z, heading in border_candidates:
+                border_examined += 1
+                if (
+                    border_examined == 1
+                    or border_examined % border_interval == 0
+                    or (
+                        border_examined % 256 == 0
+                        and time.perf_counter() - border_last_update >= 5.0
+                    )
+                ):
+                    border_last_update = time.perf_counter()
+                    progress(
+                        64,
+                        "Softening forest borders "
+                        f"({border_examined:,}/{border_total:,} candidates; "
+                        f"{forest_border_objects - border_at_start:,} added; "
+                        f"{border_last_update - border_started:.1f}s)",
+                    )
                 if not forest_point_inside_edge_guard(x, z, max(16.0, forest_world_edge_margin * 0.75)):
                     forest_border_rejections += 1
                     continue
@@ -10830,6 +10948,14 @@ def generate_world_objects(
                 )
                 maximum_forest_burial = max(maximum_forest_burial, burial)
                 maximum_forest_float = max(maximum_forest_float, floating)
+
+        progress(
+            64,
+            "Forest-border softening complete "
+            f"({border_examined:,}/{border_total:,} candidates; "
+            f"{forest_border_objects - border_at_start:,} added; "
+            f"{time.perf_counter() - border_started:.1f}s)",
+        )
 
     progress(64, "Placing ditch vegetation")
     # Tall grass follows explicitly mapped OSM ditches. It has its own budget so
