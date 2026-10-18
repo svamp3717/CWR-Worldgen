@@ -38,12 +38,24 @@ screen closes when the GUI is ready (or before a command-line WRP scan starts).
 This gives visible feedback without introducing an artificial delay. It does
 not make the one-file extraction faster. The splash is an experimental
 Windows-supported PyInstaller feature and needs a Windows desktop to display.
+The Windows build generates a PyInstaller spec and sets
+`Splash(always_on_top=False)`, so these loading screens can be covered by
+other applications rather than staying above every desktop window. The
+categoriser's internal loading dialogs remain associated with its own window.
 On the WRP splash, only **WRP** is white; **MOD DEPENDENCY SCANNER** and the
 other on-screen labels use the amber accent.
 
 The categoriser and asset browser open directly as GUI applications. The WRP
 scanner opens its GUI when run without arguments but keeps a console window so
 it can also be used with CLI options such as:
+
+**Model and texture format details:** The P3D Browser's selectable *Selected
+asset* panel shows each model's ODOL/MLOD type, stored version, visual and
+special LOD counts, and PAA/PAC references. Selecting a texture also shows
+its actual stored PAA/PAC pixel encoding (for example DXT1, DXT5, ARGB or
+palette-indexed), any LZO layer, original pixel dimensions and embedded
+mipmap sizes. The preview resolution is listed separately and can change
+without changing the source texture's format.
 
 ```powershell
 .\WRP-Mod-Dependency-Scanner.exe "C:\path\to\island.wrp" --json "dependencies.json"
