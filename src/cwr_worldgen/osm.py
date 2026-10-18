@@ -111,10 +111,10 @@ KOLGUJEV_FOREST_T1_OFFSET = (2.1133, 2.0981)
 KOLGUJEV_FOREST_T2_OFFSET = (-0.4591, -1.6689)
 KOLGUJEV_FOREST_MAXIMUM_SHEAR = 0.60
 
-# Urban-detail assets. Keep this layer vanilla-only: every model below ships
-# with OFP/Cold War Assault. The base game does not provide a modern modular
-# narrow sidewalk kit, so ``Nam_dlazba`` (the stock cobbled-square pavement
-# object) is tiled along suitable road edges instead of generating new P3Ds.
+# Street furniture uses only original OFP/CWA assets. The large stock
+# cobbled-square pavement model is retained for compatibility, but city
+# sidewalks now use correctly sized procedural slabs from the infrastructure
+# library instead of placing plaza tiles over road edges.
 STOCK_SIDEWALK_MODELS: tuple[str, ...] = (r"O\Hous\Nam_dlazba.p3d",)
 STOCK_STREET_LIGHT_MODELS: tuple[str, ...] = (
     r"data3d\lampazel.p3d",
