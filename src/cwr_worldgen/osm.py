@@ -10641,18 +10641,27 @@ def generate_world_objects(
             undergrowth_columns = max(1, int(math.ceil(spec.world_size / undergrowth_spacing)))
             undergrowth_total = undergrowth_columns * undergrowth_columns
             undergrowth_interval = max(1, undergrowth_total // 50)
+            undergrowth_last_update = undergrowth_started
             undergrowth_placeable_index = 0
             for grid_index in _distributed_grid_indices(undergrowth_columns, seed, "forest-undergrowth"):
                 if forest_undergrowth_objects >= undergrowth_limit:
                     break
                 undergrowth_examined += 1
-                if undergrowth_examined == 1 or undergrowth_examined % undergrowth_interval == 0:
+                if (
+                    undergrowth_examined == 1
+                    or undergrowth_examined % undergrowth_interval == 0
+                    or (
+                        undergrowth_examined % 256 == 0
+                        and time.perf_counter() - undergrowth_last_update >= 5.0
+                    )
+                ):
+                    undergrowth_last_update = time.perf_counter()
                     progress(
                         62,
                         "Placing forest undergrowth "
                         f"({undergrowth_examined:,}/{undergrowth_total:,} candidates; "
                         f"{forest_undergrowth_objects - undergrowth_at_start:,} added; "
-                        f"{time.perf_counter() - undergrowth_started:.1f}s)",
+                        f"{undergrowth_last_update - undergrowth_started:.1f}s)",
                     )
                 undergrowth_row, undergrowth_column = divmod(grid_index, undergrowth_columns)
                 jitter = hashlib.blake2s(
@@ -10728,17 +10737,26 @@ def generate_world_objects(
             bush_columns = max(1, int(math.ceil(spec.world_size / bush_spacing)))
             bush_total = bush_columns * bush_columns
             bush_interval = max(1, bush_total // 50)
+            bush_last_update = bush_started
             for grid_index in _distributed_grid_indices(bush_columns, seed, "steep-hill-bushes"):
                 if steep_hill_bush_objects >= bush_limit:
                     break
                 bush_examined += 1
-                if bush_examined == 1 or bush_examined % bush_interval == 0:
+                if (
+                    bush_examined == 1
+                    or bush_examined % bush_interval == 0
+                    or (
+                        bush_examined % 256 == 0
+                        and time.perf_counter() - bush_last_update >= 5.0
+                    )
+                ):
+                    bush_last_update = time.perf_counter()
                     progress(
                         63,
                         "Placing steep-hill bushes "
                         f"({bush_examined:,}/{bush_total:,} candidates; "
                         f"{steep_hill_bush_objects - bushes_at_start:,} added; "
-                        f"{time.perf_counter() - bush_started:.1f}s)",
+                        f"{bush_last_update - bush_started:.1f}s)",
                     )
                 bush_row, bush_column = divmod(grid_index, bush_columns)
                 digest = hashlib.blake2s(
@@ -10848,15 +10866,24 @@ def generate_world_objects(
             )
             border_total = len(border_candidates)
             border_interval = max(1, border_total // 50)
+            border_last_update = time.perf_counter()
             for key, x, z, heading in border_candidates:
                 border_examined += 1
-                if border_examined == 1 or border_examined % border_interval == 0:
+                if (
+                    border_examined == 1
+                    or border_examined % border_interval == 0
+                    or (
+                        border_examined % 256 == 0
+                        and time.perf_counter() - border_last_update >= 5.0
+                    )
+                ):
+                    border_last_update = time.perf_counter()
                     progress(
                         64,
                         "Softening forest borders "
                         f"({border_examined:,}/{border_total:,} candidates; "
                         f"{forest_border_objects - border_at_start:,} added; "
-                        f"{time.perf_counter() - border_started:.1f}s)",
+                        f"{border_last_update - border_started:.1f}s)",
                     )
                 if not forest_point_inside_edge_guard(x, z, max(16.0, forest_world_edge_margin * 0.75)):
                     forest_border_rejections += 1
