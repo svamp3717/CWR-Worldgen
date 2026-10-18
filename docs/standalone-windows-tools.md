@@ -39,11 +39,13 @@ This gives visible feedback without introducing an artificial delay. It does
 not make the one-file extraction faster. The splash is an experimental
 Windows-supported PyInstaller feature and needs a Windows desktop to display.
 The Windows build configures PyInstaller's splash to appear on the monitor
-under the mouse cursor, briefly raises it at startup, and automatically clears
-its always-on-top attribute after 1.5 seconds. This keeps the loading screen
-visible when launched without preventing other applications from covering it
-during a long extraction. The categoriser's internal loading dialogs remain
-associated with its own window.
+under the mouse cursor, with its own **Windows taskbar button** and a standard
+non-resizable title bar (required for a reliably taskbar-visible Tk window).
+It briefly appears in front at startup, then releases always-on-top after
+1.5 seconds. You can switch to other applications and click the taskbar button
+to return to the loading screen. The splash closes when the tool opens, so its
+temporary taskbar entry disappears. The categoriser's internal loading dialogs
+remain associated with its own window.
 On the WRP splash, only **WRP** is white; **MOD DEPENDENCY SCANNER** and the
 other on-screen labels use the amber accent.
 
