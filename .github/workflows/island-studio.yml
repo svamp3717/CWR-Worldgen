@@ -13,6 +13,12 @@ on:
       - ".github/workflows/island-studio.yml"
       - "pyproject.toml"
   workflow_dispatch:
+    inputs:
+      build_windows_exe:
+        description: "Build the standalone Windows executable (manual opt-in)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -39,7 +45,8 @@ jobs:
           python -m pytest -q tests/test_island_studio.py tests/test_island_studio_layers.py
 
   windows:
-    name: Package Windows editor
+    name: Package Windows editor (manual opt-in only)
+    if: github.event_name == 'workflow_dispatch' && inputs.build_windows_exe == true
     needs: validate
     runs-on: windows-latest
     timeout-minutes: 30
