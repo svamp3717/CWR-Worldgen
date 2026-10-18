@@ -23,7 +23,7 @@ def disable_splash_always_on_top(source: str) -> str:
     call = calls[0]
     # The generated target closes on an unindented line. Limit edits to this
     # target instead of changing another topmost option elsewhere in the spec.
-    close = re.search(r"(?m)^\s*\)[ \t]*$", source[call.end():])
+    close = re.search(r"(?m)^[ \t]*\)[ \t]*$", source[call.end():])
     if close is None:
         raise ValueError("could not locate end of PyInstaller Splash() target")
     end = call.end() + close.start()
@@ -34,7 +34,9 @@ def disable_splash_always_on_top(source: str) -> str:
     if existing:
         target = _TOPMOST.sub(r"\g<indent>always_on_top=False,", target, count=1)
     else:
-        target = "\n" + call.group("indent") + "    always_on_top=False," + target
+        # Splash() takes its image path as a positional argument. Put this
+        # option *after* it (and after the other generated keyword arguments).
+        target = target.rstrip("\n") + "\n" + call.group("indent") + "    always_on_top=False,\n"
     return source[:call.end()] + target + source[end:]
 
 
