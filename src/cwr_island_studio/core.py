@@ -47,6 +47,12 @@ class MapObject:
     y: float
     z: float
     heading: float
+    # Horizontal components of the original WRP 3x3 transform matrix.
+    # These preserve model scale, rotation, and local shear in map previews.
+    basis_xx: float = 1.0
+    basis_xz: float = 0.0
+    basis_zx: float = 0.0
+    basis_zz: float = 1.0
 
 
 class IslandDocument:
@@ -184,6 +190,7 @@ class IslandDocument:
         return MapObject(
             index, values[12], model,
             values[9], values[10], values[11], heading,
+            values[0], values[6], values[2], values[8],
         )
 
     def move_object(
