@@ -2,9 +2,11 @@
 """Restore ordinary road geometry when a stock paved junction cannot be fitted."""
 from __future__ import annotations
 
-from dataclasses import replace
+from array import array
+from dataclasses import dataclass, replace
 import math
 import re
+import time
 
 from . import generator as _generator
 from . import paved_junction_policy as _paved
@@ -463,11 +465,107 @@ def _install_generated_hub_caps(
     return replace(report, objects=tuple(objects))
 
 
+# A generated hub needs only nearby road segments, but a long straight road
+# can cross the connector even when its midpoint is far away. Index actual
+# segment bounding boxes instead of just object centres to keep seam behavior.
+_STITCH_BUCKET_METRES = 64.0
+_STITCH_MAX_BUCKETS_PER_ROAD = 256
+
+
+@dataclass(slots=True)
+class _StitchRoadIndex:
+    buckets: dict[tuple[int, int], array]
+    oversized: tuple[int, ...]
+    indexed_roads: int
+
+
+def _stitch_bucket(value: float) -> int:
+    return math.floor(float(value) / _STITCH_BUCKET_METRES)
+
+
+def _build_stitch_road_index(
+    report, spec, progress_callback=None,
+) -> _StitchRoadIndex:
+    """Index one report's paved road axes, preserving original object indices.
+
+    Each road's bounding box covers every connector it could intersect; very
+    long roads go into a small global overflow list instead of allocating an
+    unbounded number of grid buckets.
+    """
+    buckets: dict[tuple[int, int], array] = {}
+    oversized: list[int] = []
+    cap_count = int(report.junction_cap_objects)
+    total = max(0, len(report.objects) - cap_count)
+    interval = max(1, total // 50)
+    indexed = 0
+    if progress_callback is not None:
+        progress_callback(
+            99, f"Indexing generated paved-junction seams (0/{total:,} roads)"
+        )
+
+    for offset, object_index in enumerate(
+        range(cap_count, len(report.objects)), start=1
+    ):
+        obj = report.objects[object_index]
+        family = _paved._family(obj.model_path)
+        generated_road = _pi.is_generated_paved_road_model(obj.model_path)
+        if generated_road or (family is not None and _paved._kind(family) == "paved"):
+            axis = _generated_paved_axis(obj, spec)
+            if axis is not None:
+                x0 = _stitch_bucket(min(axis[0][0], axis[1][0]))
+                x1 = _stitch_bucket(max(axis[0][0], axis[1][0]))
+                z0 = _stitch_bucket(min(axis[0][1], axis[1][1]))
+                z1 = _stitch_bucket(max(axis[0][1], axis[1][1]))
+                count = (x1 - x0 + 1) * (z1 - z0 + 1)
+                if count > _STITCH_MAX_BUCKETS_PER_ROAD:
+                    oversized.append(object_index)
+                else:
+                    for bx in range(x0, x1 + 1):
+                        for bz in range(z0, z1 + 1):
+                            buckets.setdefault((bx, bz), array("I")).append(object_index)
+                indexed += 1
+        if progress_callback is not None and (
+            offset % interval == 0 or offset == total
+        ):
+            progress_callback(
+                99,
+                "Indexing generated paved-junction seams "
+                f"({offset:,}/{total:,} roads; {indexed:,} paved candidates)",
+            )
+    return _StitchRoadIndex(buckets, tuple(oversized), indexed)
+
+
+def _stitch_candidate_indices(index: _StitchRoadIndex, plan) -> tuple[int, ...]:
+    """Return every possibly touching road, in original road-list order.
+
+    The old narrow phase admits an endpoint up to 3 m from a connector, or
+    a segment crossing it within 1.5 m. Stale pieces can have endpoints up to
+    three metres beyond the hub radius. Bounding each connector and the hub by
+    3 m therefore cannot exclude a road which the original pass could change.
+    """
+    radius = max(
+        float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES),
+        (
+            math.dist(plan.point, arm.connector.point)
+            for arm in plan.arms
+        ),
+        default=float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES),
+    ) + 3.0
+    px, pz = plan.point
+    ids = set(index.oversized)
+    for bx in range(_stitch_bucket(px - radius), _stitch_bucket(px + radius) + 1):
+        for bz in range(_stitch_bucket(pz - radius), _stitch_bucket(pz + radius) + 1):
+            ids.update(index.buckets.get((bx, bz), ()))
+    return tuple(sorted(ids))
+
+
 def _stitch_generated_hub_approaches(
     report,
     plans,
     elevations,
     spec,
+    *,
+    progress_callback=None,
 ):
     """Make generated paved hubs own the terminal approach seam.
 
@@ -487,22 +585,32 @@ def _stitch_generated_hub_approaches(
     if not generated_plans or not report.objects:
         return report
 
+    started = time.perf_counter()
+    road_index = _build_stitch_road_index(report, spec, progress_callback)
+    if progress_callback is not None:
+        progress_callback(
+            99,
+            "Generated paved-junction seam index ready "
+            f"({road_index.indexed_roads:,} paved roads; "
+            f"{time.perf_counter() - started:.1f}s)",
+        )
     remove_ids: set[int] = set()
     replacements: dict[int, object] = {}
     used_ids: set[int] = set()
     radius = float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES)
+    total_plans = len(generated_plans)
+    interval = max(1, total_plans // 50)
+    if progress_callback is not None:
+        progress_callback(
+            99, f"Stitching generated paved junctions (0/{total_plans:,})"
+        )
 
-    for plan in generated_plans:
+    for plan_index, plan in enumerate(generated_plans, start=1):
         candidates = []
-        for obj in report.objects[report.junction_cap_objects:]:
+        # Sorted object-list indices preserve the old selection and tie order.
+        for object_index in _stitch_candidate_indices(road_index, plan):
+            obj = report.objects[object_index]
             if int(obj.object_id) in used_ids:
-                continue
-            family = _paved._family(obj.model_path)
-            generated_road = _pi.is_generated_paved_road_model(obj.model_path)
-            if (
-                not generated_road
-                and (family is None or _paved._kind(family) != "paved")
-            ):
                 continue
             axis = _generated_paved_axis(obj, spec)
             if axis is None:
@@ -634,6 +742,25 @@ def _stitch_generated_hub_approaches(
                 vertical_offset=_p._STOCK_ROAD_VERTICAL_OFFSET_METRES,
             )
 
+        if progress_callback is not None and (
+            plan_index % interval == 0 or plan_index == total_plans
+        ):
+            progress_callback(
+                99,
+                "Stitching generated paved junctions "
+                f"({plan_index:,}/{total_plans:,}; "
+                f"{len(replacements):,} adjusted; "
+                f"{len(remove_ids):,} removed)",
+            )
+
+    if progress_callback is not None:
+        progress_callback(
+            99,
+            "Generated paved-junction stitching complete "
+            f"({total_plans:,} hubs; {len(replacements):,} adjusted; "
+            f"{len(remove_ids):,} removed; "
+            f"{time.perf_counter() - started:.1f}s)",
+        )
     if not remove_ids and not replacements:
         return report
     return replace(
@@ -700,6 +827,7 @@ def _fit(
             plans,
             elevations,
             spec,
+        progress_callback=progress_callback,
         )
         successful_keys = _successful_plan_keys(
             report, plans, spec=spec, progress_callback=progress_callback
@@ -825,6 +953,7 @@ def _fit(
                 generated_fallbacks,
                 elevations,
                 spec,
+            progress_callback=progress_callback,
             )
             generated_success = _successful_plan_keys(
                 generated_fit,
@@ -882,6 +1011,7 @@ def _fit(
                 plans,
                 elevations,
                 spec,
+            progress_callback=progress_callback,
             )
             if not active:
                 return base_report
@@ -930,6 +1060,7 @@ def _fit(
             plans,
             elevations,
             spec,
+        progress_callback=progress_callback,
         )
     finally:
         if planning is not None and session_token is not None:
