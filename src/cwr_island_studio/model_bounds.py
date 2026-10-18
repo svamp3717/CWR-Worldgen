@@ -17,6 +17,8 @@ import numpy as np
 
 from .pbo_textures import PboTextures, decode_lzss_stream
 from .textures import _safe_relative
+from .asset_sources import roots
+from typing import Sequence
 
 _MAX_POINTS = 1_000_000
 _MAX_MODEL_BYTES = 32 * 1024 * 1024
@@ -120,7 +122,8 @@ def read_model_bounds(data: bytes) -> ModelBounds:
 
 
 def load_model_bounds(
-    virtual_path: str, root: Path | str | None,
+    virtual_path: str,
+    root: Path | str | Sequence[Path | str] | None,
     archives: PboTextures | None,
 ) -> ModelBounds | None:
     """Resolve and measure a loose P3D or selected PBO member if supported."""
@@ -128,14 +131,14 @@ def load_model_bounds(
     if relative is None or relative.suffix.casefold() != ".p3d":
         return None
     data: bytes | None = None
-    if root is not None:
-        base = Path(root).resolve()
+    for base in reversed(roots(root)):
         candidate = base / relative
         try:
             if candidate.is_file() and candidate.stat().st_size <= _MAX_MODEL_BYTES:
                 data = candidate.read_bytes()
+                break
         except OSError:
-            pass
+            continue
     if data is None and archives is not None:
         try:
             data = archives.read_model(virtual_path)
