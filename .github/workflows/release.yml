@@ -80,14 +80,32 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[sources]" pyinstaller
 
-      - name: Build Windows executable
+      - name: Verify splash rendering and PyInstaller configuration
         shell: pwsh
         run: |
-          python -m PyInstaller `
-            --noconfirm `
-            --clean `
+          python -m unittest discover -s tests -p test_pyinstaller_splash.py -v
+          if ($LASTEXITCODE -ne 0) { throw "Splash artwork tests failed" }
+          python -m unittest discover -s tests -p test_tool_splash_spec.py -v
+          if ($LASTEXITCODE -ne 0) { throw "Splash specification tests failed" }
+
+      - name: Generate forest-green Worldgen loading screen
+        shell: pwsh
+        run: |
+          python tools/generate_pyinstaller_splash.py `
+            --name "CWR-Worldgen" `
+            --output "build/splash/CWR-Worldgen.png"
+          if ($LASTEXITCODE -ne 0) { throw "Worldgen splash generation failed" }
+
+      - name: Generate taskbar-visible Worldgen splash specification
+        shell: pwsh
+        run: |
+          pyi-makespec `
             --onefile `
             --windowed `
+            --splash "build/splash/CWR-Worldgen.png" `
+            --splash-center active `
+            --paths tools `
+            --paths src `
             --name "CWR-Worldgen" `
             --collect-all cwr_worldgen `
             --collect-all dem_stitcher `
@@ -95,6 +113,18 @@ jobs:
             --collect-all pyarrow `
             --collect-all duckdb `
             tools/pyinstaller_gui_entry.py
+          if ($LASTEXITCODE -ne 0) { throw "Worldgen spec generation failed" }
+          python tools/configure_tool_splash_spec.py "CWR-Worldgen.spec"
+          if ($LASTEXITCODE -ne 0) { throw "Worldgen splash setup failed" }
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            "CWR-Worldgen.spec"
+          if ($LASTEXITCODE -ne 0) { throw "Windows EXE build failed" }
 
       - name: Verify Windows executable
         shell: pwsh
