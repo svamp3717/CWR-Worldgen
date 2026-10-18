@@ -74,11 +74,10 @@ jobs:
             --collect-all rasterio `
             --collect-all pyarrow `
             --collect-all duckdb `
-            --specpath "build/spec" `
             --name "${{ matrix.name }}" `
             "${{ matrix.script }}"
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller spec generation failed" }
-          python tools/configure_tool_splash_spec.py "build/spec/${{ matrix.name }}.spec"
+          python tools/configure_tool_splash_spec.py "${{ matrix.name }}.spec"
           if ($LASTEXITCODE -ne 0) { throw "Splash configuration failed" }
 
       - name: Build Windows executable
@@ -89,7 +88,7 @@ jobs:
             --clean `
             --distpath dist `
             --workpath "build/work/${{ matrix.name }}" `
-            "build/spec/${{ matrix.name }}.spec"
+            "${{ matrix.name }}.spec"
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
 
       - name: Verify executable and CLI help
