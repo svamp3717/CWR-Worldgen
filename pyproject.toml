@@ -22,11 +22,13 @@ sources = [
 ]
 
 [project.scripts]
+cwr-island-studio = "cwr_island_studio.app:main"
 cwr-worldgen = "cwr_worldgen.cli:main"
 cwr-road-inspector = "cwr_worldgen.road_inspector:main"
 cwr-wrp-mod-scan = "cwr_worldgen.wrp_mod_dependency_scanner:main"
 
 [project.gui-scripts]
+cwr-island-studio-gui = "cwr_island_studio.app:main"
 cwr-worldgen-gui = "cwr_worldgen.gui_entry:main"
 cwr-wrp-mod-scan-gui = "cwr_worldgen.wrp_mod_dependency_scanner:gui_main"
 
