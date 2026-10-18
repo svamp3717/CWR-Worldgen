@@ -548,10 +548,12 @@ def _stitch_candidate_indices(index: _StitchRoadIndex, plan) -> tuple[int, ...]:
     three metres beyond the hub radius. Bounding each connector and the hub by
     3 m therefore cannot exclude a road which the original pass could change.
     """
-    radius = max(
-        (float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES),)
-        + tuple(math.dist(plan.point, arm.connector.point) for arm in plan.arms)
-    ) + 3.0
+    # max(iterable, default=...) and max(a, b) are different overloads;
+    # avoid mixing them (the original version crashed on the first hub).
+    radius = float(_pi.GENERATED_PAVED_JUNCTION_ARM_EXTENT_METRES)
+    for arm in plan.arms:
+        radius = max(radius, math.dist(plan.point, arm.connector.point))
+    radius += 3.0
     px, pz = plan.point
     ids = set(index.oversized)
     for bx in range(_stitch_bucket(px - radius), _stitch_bucket(px + radius) + 1):
