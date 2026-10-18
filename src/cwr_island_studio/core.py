@@ -19,6 +19,8 @@ from typing import Callable
 
 import numpy as np
 
+from .roads import is_road_model
+
 _HEADER = struct.Struct("<4sii")
 _OBJECT = struct.Struct("<12fi76s")
 _TEXTURE_SLOTS = 512
@@ -125,6 +127,7 @@ class IslandDocument:
         self._index_order: np.ndarray | None = None
         self._index_keys: np.ndarray | None = None
         self._index_columns: int = 0
+        self._road_mask: np.ndarray | None = None
         self._last_object_id: int | None = None
 
     @property
@@ -144,7 +147,7 @@ class IslandDocument:
 
     def close(self) -> None:
         # NumPy memory-map views must be dropped before closing the mapping.
-        self._index_order = self._index_keys = None
+        self._index_order = self._index_keys = self._road_mask = None
         self._records = self._raw_records = None
         self.heights = self.textures = None
         if getattr(self, "_map", None) is not None:
@@ -314,15 +317,27 @@ class IslandDocument:
         self._index_keys = keys[order]
         self._index_order = order.astype(np.int32 if self.object_count < 2_147_483_647 else np.int64)
         self._index_columns = cols
+        # Decoding object paths is deferred until background indexing. Keep
+        # only one boolean per original object, not Python road objects.
+        self._road_mask = np.fromiter(
+            (is_road_model(value) for value in self._records["model"]),
+            dtype=np.bool_, count=self.object_count,
+        )
 
     def visible_objects(
         self, left: float, top: float, right: float, bottom: float,
-        *, limit: int = 3500,
+        *, limit: int = 3500, roads_only: bool = False,
     ) -> tuple[MapObject, ...]:
         if limit <= 0:
             return ()
         transforms = self._records["transform"]
-        if self._index_order is None or self._index_keys is None:
+        # Wide overview views can span thousands of buckets. A vectorized
+        # full scan is cheaper than issuing tens of thousands of searches.
+        bucket_span = (
+            max(0, math.floor(bottom / _BUCKET_METRES) - max(0, math.floor(top / _BUCKET_METRES)) + 1)
+            * max(0, math.floor(right / _BUCKET_METRES) - max(0, math.floor(left / _BUCKET_METRES)) + 1)
+        )
+        if self._index_order is None or self._index_keys is None or bucket_span > 4096:
             # Before the background index finishes, avoid a million-object
             # Python loop. This masked scan is vectorized and has bounded output.
             hits = np.flatnonzero(
@@ -346,6 +361,8 @@ class IslandDocument:
                     (transforms[hits, 9] >= left) & (transforms[hits, 9] <= right)
                     & (transforms[hits, 11] >= top) & (transforms[hits, 11] <= bottom)
                 ]
+        if roads_only and self._road_mask is not None and len(hits):
+            hits = hits[self._road_mask[hits]]
         # Avoid rendering tens of thousands of Tk objects per frame.
         if len(hits) > limit:
             hits = hits[::max(1, math.ceil(len(hits) / limit))][:limit]
@@ -354,61 +371,79 @@ class IslandDocument:
         for index in hits:
             i = int(index)
             if i not in self.deleted and i not in overrides:
-                result.append(self.object_at(i))
+                obj = self.object_at(i)
+                if not roads_only or is_road_model(obj.model_path):
+                    result.append(obj)
         for i in (*sorted(overrides), *range(self.object_count, self.object_count + len(self.added))):
             if i in self.deleted:
                 continue
             obj = self.object_at(i)
             if left <= obj.x <= right and top <= obj.z <= bottom:
-                result.append(obj)
+                if not roads_only or is_road_model(obj.model_path):
+                    result.append(obj)
         return tuple(result[:limit])
+
+    def sample_viewport(
+        self, left: float, top: float, right: float, bottom: float,
+        width: int, height: int, *, textures: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Sample only current viewport pixels, applying sparse edits."""
+        width = max(1, min(1600, int(width)))
+        height = max(1, min(1200, int(height)))
+        world_x = np.linspace(left, right, width, endpoint=False)
+        world_z = np.linspace(top, bottom, height, endpoint=False)
+        columns = np.clip((world_x / self.cell_size).astype(np.int64), 0, self.width - 1)
+        rows = np.clip((world_z / self.cell_size).astype(np.int64), 0, self.height - 1)
+        source = self.textures if textures else self.heights
+        sampled = source[np.ix_(rows, columns)].astype(np.int32)
+        patches = self.texture_edits if textures else self.height_edits
+        if patches:
+            keys = np.fromiter(patches, dtype=np.int64)
+            values = np.fromiter(patches.values(), dtype=np.int32)
+            order = np.argsort(keys)
+            keys, values = keys[order], values[order]
+            pixels = (rows[:, None] * self.width + columns[None, :]).ravel()
+            locations = np.searchsorted(keys, pixels)
+            present = locations < len(keys)
+            present[present] = keys[locations[present]] == pixels[present]
+            sampled.ravel()[present] = values[locations[present]]
+        return sampled, world_x, world_z
 
     def viewport(
         self, left: float, top: float, right: float, bottom: float,
         width: int, height: int, *, textures: bool = False,
+        water_level: float = 0.0,
     ) -> np.ndarray:
-        """Render only screen-sized samples; never expand a whole-world image."""
-        width = max(1, min(1600, int(width)))
-        height = max(1, min(1200, int(height)))
-        columns = np.clip(
-            (np.linspace(left, right, width, endpoint=False) / self.cell_size).astype(np.int64),
-            0, self.width - 1,
+        """Render height-shaded terrain (with water) or texture-slot colours."""
+        sampled, _, _ = self.sample_viewport(
+            left, top, right, bottom, width, height, textures=textures,
         )
-        rows = np.clip(
-            (np.linspace(top, bottom, height, endpoint=False) / self.cell_size).astype(np.int64),
-            0, self.height - 1,
-        )
-        raster = self.textures if textures else self.heights
-        sampled = raster[np.ix_(rows, columns)].astype(np.int32)
-        patches = self.texture_edits if textures else self.height_edits
-        if patches:
-            edits = np.fromiter(patches, dtype=np.int64)
-            vals = np.fromiter(patches.values(), dtype=np.int32)
-            sort = np.argsort(edits)
-            edits, vals = edits[sort], vals[sort]
-            pixel_keys = rows[:, None] * self.width + columns[None, :]
-            found = np.searchsorted(edits, pixel_keys.ravel())
-            matches = found < len(edits)
-            matches[matches] = edits[found[matches]] == pixel_keys.ravel()[matches]
-            sampled.ravel()[matches] = vals[found[matches]]
         if textures:
-            # Distinct stable slot colours make painted surfaces inspectable.
             ids = sampled.astype(np.uint32)
             return np.stack((
                 (52 + (ids * 57 + 32) % 150).astype(np.uint8),
                 (72 + (ids * 41 + 77) % 135).astype(np.uint8),
                 (48 + (ids * 71 + 11) % 140).astype(np.uint8),
             ), axis=-1)
+        if not math.isfinite(water_level):
+            raise ValueError("water level must be finite")
         terrain = sampled.astype(np.float32) * self.height_scale
-        slope_x = np.gradient(terrain, axis=1) if width > 1 else np.zeros_like(terrain)
-        slope_z = np.gradient(terrain, axis=0) if height > 1 else np.zeros_like(terrain)
+        slope_x = np.gradient(terrain, axis=1) if terrain.shape[1] > 1 else np.zeros_like(terrain)
+        slope_z = np.gradient(terrain, axis=0) if terrain.shape[0] > 1 else np.zeros_like(terrain)
         shadow = np.clip(145 + (slope_x - slope_z) * 1.25, 45, 230)
         green = np.clip(105 + terrain * 0.18 + shadow * 0.37, 32, 235)
-        return np.stack((
+        rgb = np.stack((
             np.clip(green * 0.64, 0, 255).astype(np.uint8),
             np.clip(green * 1.04, 0, 255).astype(np.uint8),
             np.clip(green * 0.67, 0, 255).astype(np.uint8),
         ), axis=-1)
+        water = terrain <= water_level
+        if np.any(water):
+            depth = np.clip(water_level - terrain, 0.0, 100.0)
+            rgb[water, 0] = (27 + 0.13 * depth[water]).astype(np.uint8)
+            rgb[water, 1] = (85 + 0.13 * depth[water]).astype(np.uint8)
+            rgb[water, 2] = (147 + 0.33 * depth[water]).astype(np.uint8)
+        return rgb
 
     def export(self, destination: Path | str, progress: Callable[[str], None] | None = None) -> Path:
         """Write a new file atomically, retaining original object transforms.
