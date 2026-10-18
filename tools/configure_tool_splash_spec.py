@@ -16,8 +16,8 @@ _SPLASH_CALL = re.compile(r"(?m)^(?P<indent>[ \t]*)splash[ \t]*=[ \t]*Splash\([ 
 _TOPMOST = re.compile(r"(?m)^(?P<indent>[ \t]*)always_on_top[ \t]*=[ \t]*(?:True|False)[ \t]*,")
 
 
-def disable_splash_always_on_top(source: str) -> str:
-    """Return a modified spec; refuse nonstandard files rather than silently skip."""
+def configure_splash_visibility(source: str) -> str:
+    """Enable a visible startup splash that relinquishes topmost promptly."""
     calls = list(_SPLASH_CALL.finditer(source))
     if len(calls) != 1:
         raise ValueError(f"expected one PyInstaller splash target, found {len(calls)}")
@@ -46,7 +46,7 @@ def disable_splash_always_on_top(source: str) -> str:
     setup = (
         "from PyInstaller.building import splash_templates as _cwr_splash_templates\n"
         "_cwr_splash_templates.raise_window += "
-        "'\\nafter 1500 {wm attributes . -topmost 0}\\n'\n\n"
+        "'\\nafter 1500 {wm attributes . -topmost 0; raise .}\\n'\n\n"
     )
     if "_cwr_splash_templates.raise_window" not in source:
         source = source[:call.start()] + setup + source[call.start():]
@@ -65,7 +65,7 @@ def main() -> int:
     arguments = parser.parse_args()
     spec = arguments.spec
     original = spec.read_text(encoding="utf-8")
-    modified = disable_splash_always_on_top(original)
+    modified = configure_splash_visibility(original)
     spec.write_text(modified, encoding="utf-8")
     print(f"Configured visible, auto-unpinned loading screen: {spec}")
     return 0
