@@ -162,3 +162,28 @@ game archives into the map's output folder.
 Source updates trigger validation tests only. Windows EXE packaging is
 **manual opt-in** using the `build_windows_exe` workflow input and is
 not performed automatically when this branch receives commits.
+
+## True-size world object markers
+
+In the **View** sidebar, enable **Show objects at model size** while
+**Show world objects** is enabled. Visible objects with readable P3D
+geometry then appear as outline rectangles of their model's real first-LOD
+horizontal extents in world metres. The preview keeps the actual model
+origin and each object's stored WRP horizontal rotation, scale and shear
+instead of centring a guessed rectangle at the object position.
+
+The editor uses the previously selected **texture assets folder** for loose
+`.p3d` files and **selected PBOs** for archived models. There is no need
+to extract entire archives. Model measurements load in small background
+batches only for visible object types, and stay cached while browsing.
+The original map and assets remain unchanged.
+
+The first version measures OFP/CWA-era MLOD/SP3X and ODOL v6/v7 first
+visual LODs. Unsupported or missing models continue to appear as regular
+dots, and very small outlines collapse to dots at far zoom levels. These
+are **2D visual bounding footprints**, not exact mesh silhouettes,
+collision bounds or full 3D views. Object selection supports clicks inside
+a visible outline.
+
+This option is off by default so large-world overview navigation retains
+its original lightweight fixed-size object markers.
