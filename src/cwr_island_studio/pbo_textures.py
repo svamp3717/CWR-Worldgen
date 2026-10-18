@@ -110,11 +110,10 @@ def _scan(path: Path, archive_stem: str) -> dict[str, TextureMember]:
     return result
 
 
-def _lzss_decode(data: bytes, expected: int) -> bytes:
-    """Decode BIS-style compressed PBO members with an additive checksum."""
+def decode_lzss_stream(stream: io.BytesIO, expected: int) -> bytes:
+    """Decode exactly one compressed array, leaving following bytes untouched."""
     if not 0 < expected <= _MAX_MEMBER:
-        raise ValueError("compressed texture exceeds preview size limit")
-    stream = io.BytesIO(data)
+        raise ValueError("compressed entry exceeds preview size limit")
     window = bytearray(b" ") * 4096
     result = bytearray(expected)
     at = output_at = 0
@@ -149,9 +148,15 @@ def _lzss_decode(data: bytes, expected: int) -> bytes:
     checksum = stream.read(4)
     if len(checksum) != 4 or struct.unpack("<I", checksum)[0] != sum(result) & 0xFFFFFFFF:
         raise ValueError("compressed texture checksum mismatch")
+    return bytes(result)
+
+
+def _lzss_decode(data: bytes, expected: int) -> bytes:
+    stream = io.BytesIO(data)
+    decoded = decode_lzss_stream(stream, expected)
     if stream.read(1):
         raise ValueError("unexpected compressed texture trailer")
-    return bytes(result)
+    return decoded
 
 
 def _read_member(member: TextureMember) -> bytes:
