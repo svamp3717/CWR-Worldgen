@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -50,8 +51,14 @@ def _spec():
     )
 
 
+@dataclass(frozen=True)
+class _Report:
+    objects: tuple
+    junction_cap_objects: int = 0
+
+
 def _report(objects, cap_count: int = 0):
-    return SimpleNamespace(objects=tuple(objects), junction_cap_objects=cap_count)
+    return _Report(tuple(objects), cap_count)
 
 
 def test_indexed_stitch_matches_unpruned_original_order_and_seam_geometry() -> None:
