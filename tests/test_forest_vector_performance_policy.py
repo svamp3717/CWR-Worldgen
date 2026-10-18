@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
@@ -168,6 +169,57 @@ def test_vector_cluster_grounding_matches_previous_optimized_result() -> None:
     assert actual[5] == expected[5]
     for actual_value, expected_value in zip(actual[1:5] + actual[6:], expected[1:5] + expected[6:]):
         assert np.isclose(actual_value, expected_value, rtol=0.0, atol=1.0e-9)
+
+
+def test_proxy_layout_arrays_are_cached_and_read_only() -> None:
+    variant = FOREST_UNDERGROWTH_VARIANTS[0]
+    perf._proxy_layout_vectors.cache_clear()
+    first = perf._proxy_layout_vectors(variant.proxy_layout)
+    second = perf._proxy_layout_vectors(tuple(variant.proxy_layout))
+    assert first is second
+    assert perf._proxy_layout_vectors.cache_info().hits >= 1
+    assert not first[0].flags.writeable
+    assert not first[1].flags.writeable
+    assert tuple(first[0].tolist()) == tuple(proxy[1] for proxy in variant.proxy_layout)
+    assert tuple(first[1].tolist()) == tuple(proxy[2] for proxy in variant.proxy_layout)
+
+    flags = perf._proxy_tree_flag_array(variant.name, first[2])
+    assert flags is perf._proxy_tree_flag_array(variant.name, first[2])
+    assert not flags.flags.writeable
+
+
+def test_mask_rejected_undergrowth_skips_road_and_elevation_work() -> None:
+    cells = 8
+    total = cells * cells
+    spec = SimpleNamespace(
+        world_size=cells * 25.0, cells=cells, cell_size=25.0,
+        name="perf_world", forest_cluster_footprint_margin=0.75,
+        forest_low_anchor=False,
+    )
+    elevations = tuple(float(i // cells) * 0.15 for i in range(total))
+    variant = FOREST_UNDERGROWTH_VARIANTS[0]
+    base = dict(
+        variant=variant, elevations=elevations, spec=spec,
+        road_corridors=(), x=100.0, z=100.0, heading=30.0,
+        require_forest=True, minimum_forest_fraction=0.8,
+        maximum_relief=20.0, maximum_burial=0.8,
+        maximum_float=0.8, clearance=0.03,
+    )
+    for forest, water in ((False, False), (True, True)):
+        raster = SimpleNamespace(
+            forest=(forest,) * total, water=(water,) * total,
+            roads=(False,) * total, buildings=(False,) * total,
+        )
+        kwargs = dict(base, raster=raster)
+        assert perf._ORIGINAL_PLACE_CLUSTER(**kwargs) is None
+        with patch.object(
+            osm, "forest_block_intersects_road_corridors",
+            side_effect=AssertionError("road check must be skipped"),
+        ), patch.object(
+            osm, "_polygon_elevation_extrema",
+            side_effect=AssertionError("terrain check must be skipped"),
+        ):
+            assert perf._vector_place_cluster_at(**kwargs) is None
 
 
 def test_vector_forest_policy_is_live_under_multicore_cache() -> None:
