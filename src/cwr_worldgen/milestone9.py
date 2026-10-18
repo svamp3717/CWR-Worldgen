@@ -474,7 +474,7 @@ class Milestone9Spec(Milestone8Spec):
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
-    sidewalks_enabled: bool = False
+    sidewalks_enabled: bool = True
     maximum_sidewalk_objects: int = 30000
     sidewalk_width: float = 1.8
     sidewalk_segment_length: float = 5.0
@@ -957,7 +957,7 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     stock_hedge_models: tuple[str, ...] = STOCK_HEDGE_MODELS
     stock_wall_models: tuple[str, ...] = STOCK_WALL_MODELS
     stock_metal_fence_models: tuple[str, ...] = STOCK_METAL_FENCE_MODELS
-    sidewalks_enabled: bool = False
+    sidewalks_enabled: bool = True
     maximum_sidewalk_objects: int = 30000
     sidewalk_width: float = 1.8
     sidewalk_segment_length: float = 5.0
