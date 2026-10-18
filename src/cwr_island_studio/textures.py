@@ -14,6 +14,8 @@ import struct
 import numpy as np
 from PIL import Image
 
+from .pbo_textures import PboTextures
+
 _PAA_FORMATS = {0xFF01: 1, 0xFF05: 3}  # DXT1, DXT5
 _MAX_TEX_BYTES = 32 * 1024 * 1024
 
@@ -84,29 +86,57 @@ def _image_tile(root: str, virtual_path: str) -> np.ndarray | None:
         return None
 
 
+@lru_cache(maxsize=128)
+def _pbo_image_tile(archives: PboTextures, virtual_path: str) -> np.ndarray | None:
+    try:
+        data = archives.read(virtual_path)
+        if data is None:
+            return None
+        if virtual_path.casefold().endswith(".paa"):
+            image = decode_paa_preview(data)
+        else:
+            with Image.open(io.BytesIO(data)) as source:
+                image = source.convert("RGB")
+        if max(image.size) > 128:
+            image.thumbnail((128, 128), Image.Resampling.BILINEAR)
+        tile = np.asarray(image, dtype=np.uint8).copy()
+        tile.flags.writeable = False
+        return tile
+    except (ValueError, OSError, SyntaxError):
+        return None
+
+
+def clear_archive_texture_cache() -> None:
+    """Drop decoded tiles before replacing or closing selected archives."""
+    _pbo_image_tile.cache_clear()
+
+
 def render_real_textures(
     slots: np.ndarray, x: np.ndarray, z: np.ndarray,
     texture_paths: tuple[str, ...], asset_root: Path | str | None,
     fallback: np.ndarray, cell_size: float,
+    *, archives: PboTextures | None = None,
 ) -> tuple[np.ndarray, int]:
     """Apply available actual texture pixels over a slot-colour viewport.
 
     Inputs are only viewport-sized. The renderer never allocates an image
     with the world's full dimensions. Missing assets keep the fallback colour.
     """
-    if asset_root is None:
+    if asset_root is None and archives is None:
         return fallback, 0
     if slots.shape != fallback.shape[:2]:
         raise ValueError("texture and fallback preview dimensions differ")
     output = fallback.copy()
     loaded = 0
-    root = str(Path(asset_root).resolve())
+    root = str(Path(asset_root).resolve()) if asset_root is not None else None
     valid = (slots >= 0) & (slots < len(texture_paths))
     for slot in np.unique(slots[valid]):
         path = texture_paths[int(slot)]
         if not path:
             continue
-        tile = _image_tile(root, path)
+        tile = _image_tile(root, path) if root is not None else None
+        if tile is None and archives is not None:
+            tile = _pbo_image_tile(archives, path)
         if tile is None:
             continue
         rows, cols = np.nonzero(slots == slot)
