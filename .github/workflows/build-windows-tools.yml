@@ -47,6 +47,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -p test_p3d_frozen_support.py -v
           python -m unittest discover -s tests -p test_pyinstaller_splash.py -v
+          python -m unittest discover -s tests -p test_tool_splash_spec.py -v
 
       - name: Generate tool loading screen
         shell: pwsh
@@ -59,14 +60,13 @@ jobs:
             throw "Splash image was not generated"
           }
 
-      - name: Build Windows executable
+      - name: Generate visible, automatically unpinned splash specification
         shell: pwsh
         run: |
-          python -m PyInstaller `
-            --noconfirm `
-            --clean `
+          pyi-makespec `
             --onefile `
             --splash "build/splash/${{ matrix.name }}.png" `
+            --splash-center active `
             ${{ matrix.mode }} `
             --paths tools `
             --paths src `
@@ -77,6 +77,19 @@ jobs:
             --collect-all duckdb `
             --name "${{ matrix.name }}" `
             "${{ matrix.script }}"
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller spec generation failed" }
+          python tools/configure_tool_splash_spec.py "${{ matrix.name }}.spec"
+          if ($LASTEXITCODE -ne 0) { throw "Splash configuration failed" }
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --distpath dist `
+            --workpath "build/work/${{ matrix.name }}" `
+            "${{ matrix.name }}.spec"
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
 
       - name: Verify executable and CLI help

@@ -20,7 +20,7 @@ from p3d_asset_browser_catalog import (
     TexturePreviewCache,
     filter_assets,
     load_model,
-    load_texture,
+    load_texture_with_format,
     model_texture_paths,
     scan_catalogue,
     texture_users,
@@ -724,11 +724,29 @@ class AssetBrowserApp:
             )
             self._set_related_textures(texture_paths)
             m = model.measurement
+            storage = (
+                "ODOL (binarized game model)" if m.format == "ODOL"
+                else "MLOD (unbinarized model)" if m.format.startswith("MLOD")
+                else m.format
+            )
+            lods = getattr(model, "available_lods", ())
+            if lods:
+                visual = sum(bool(lod.visual) for lod in lods)
+                lod_readout = (
+                    f"{len(lods)} ({visual} visual, {len(lods) - visual} special)"
+                )
+            else:
+                lod_readout = "Unavailable"
+            paa_count = sum(path.casefold().endswith(".paa") for path in texture_paths)
+            pac_count = sum(path.casefold().endswith(".pac") for path in texture_paths)
             self.info_var.set(
                 f"MODEL\n{item.path}\n\n"
                 f"Source: {item.source}\n"
                 f"Size: {self._format_size(item.size)}\n"
                 f"Format: {model_format_label(item.path, m.format, m.version)}\n"
+                f"Storage: {storage}\n"
+                f"LOD records: {lod_readout}\n"
+                f"Texture references: {paa_count} PAA, {pac_count} PAC\n"
                 f"Dimensions: {m.width_m:.2f} × {m.length_m:.2f} × {m.height_m:.2f} m\n"
                 f"Textures referenced: {len(texture_paths):,}"
                 + (
@@ -895,9 +913,10 @@ class AssetBrowserApp:
                 cache is not None
                 and (item.source, item.path, mipmap) in getattr(cache, "_items", ())
             )
-            image = (
-                cache.get(item, self.catalogue, mipmap=mipmap) if cache is not None
-                else load_texture(item, self.catalogue, mipmap=mipmap)
+            image, format_info = (
+                cache.get(item, self.catalogue, mipmap=mipmap, with_format=True)
+                if cache is not None
+                else load_texture_with_format(item, self.catalogue, mipmap=mipmap)
             )
             load_seconds = perf_counter() - start
             self.current_model = None
@@ -915,7 +934,12 @@ class AssetBrowserApp:
                 f"TEXTURE\n{item.path}\n\n"
                 f"Source: {item.source}\n"
                 f"Size: {self._format_size(item.size)}\n"
-                f"Decoded: {image.shape[1]} × {image.shape[0]}\n"
+                + (
+                    format_info.readout() + "\n"
+                    if format_info is not None
+                    else "Format details: unavailable\n"
+                )
+                + f"Preview mip: {image.shape[1]} × {image.shape[0]}\n"
                 f"Indexed model users: {len(users):,}"
             )
             if hasattr(self, "load_timing_var"):

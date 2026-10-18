@@ -76,6 +76,40 @@ class PaaMip:
 
 
 @dataclass(frozen=True, slots=True)
+class PaaFormatInfo:
+    """Stored texture metadata, independent of the selected preview mip."""
+
+    container: str
+    encoding: str
+    compression: str
+    size: tuple[int, int]
+    mip_sizes: tuple[tuple[int, int], ...]
+    palette_entries: int
+    inferred_encoding: bool = False
+
+    def readout(self) -> str:
+        width, height = self.size
+        levels = ", ".join(f"{w}×{h}" for w, h in self.mip_sizes[:5])
+        if len(self.mip_sizes) > 5:
+            levels += ", …"
+        extra = (
+            f"\nPalette: {self.palette_entries} colours"
+            if self.palette_entries else ""
+        )
+        warning = (
+            "\nHeader: legacy format inferred (unrecognized format code)"
+            if self.inferred_encoding else ""
+        )
+        return (
+            f"Format: {self.container} / {self.encoding}\n"
+            f"Compression: {self.compression}\n"
+            f"Stored resolution: {width} × {height}\n"
+            f"Mipmaps: {len(self.mip_sizes)} ({levels})"
+            + extra + warning
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class PBOAssetRef:
     pbo_path: Path
     offset: int
@@ -899,6 +933,36 @@ def list_paa_mips(data: bytes, *, is_paa: bool = True) -> tuple[tuple[int, int],
     """Return the dimensions of the stored mip levels, not rescaled previews."""
     _kind, _palette, mips = _paa_mip_directory(data, is_paa=is_paa)
     return tuple((mip.width, mip.height) for mip in mips)
+
+
+def inspect_paa_format(data: bytes, *, is_paa: bool = True) -> PaaFormatInfo:
+    """Read pixel encoding, storage compression and full embedded mip chain.
+
+    This reuses the same directory parser as the image decoder, so modern LZO
+    and older palette-based assets report their stored format accurately.
+    """
+    encoding, palette, mips = _paa_mip_directory(data, is_paa=is_paa)
+    format_code = int.from_bytes(data[:2], "little") if len(data) >= 2 else None
+    inferred = format_code not in _PAA_FORMATS
+    if encoding.startswith("DXT"):
+        compression = f"{encoding} blocks"
+    elif encoding in {"ARGB4444", "ARGB1555", "AI88"}:
+        compression = "LZW"
+    elif encoding == "ARGB8888":
+        compression = "Uncompressed"
+    else:
+        compression = "LZW" if any(mip.lzw_p8 for mip in mips) else "Indexed palette"
+    if any(mip.lzo for mip in mips):
+        compression += " + LZO"
+    return PaaFormatInfo(
+        container="PAA" if is_paa else "PAC",
+        encoding=encoding,
+        compression=compression,
+        size=(mips[0].width, mips[0].height),
+        mip_sizes=tuple((mip.width, mip.height) for mip in mips),
+        palette_entries=len(palette),
+        inferred_encoding=inferred,
+    )
 
 
 def decode_paa(

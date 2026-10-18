@@ -13,7 +13,7 @@ import numpy as np
 from cwr_worldgen import assets
 from cwr_worldgen.pbo import is_pbo_path
 import p3d_preview_geometry as preview
-from p3d_texture_io import decode_paa
+from p3d_texture_io import PaaFormatInfo, decode_paa, inspect_paa_format
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,6 +249,24 @@ def load_texture(
     )
 
 
+def load_texture_with_format(
+    item: BrowserAsset, catalogue: BrowserCatalogue, *, mipmap: str = "auto",
+) -> tuple[np.ndarray, PaaFormatInfo | None]:
+    """Load pixels and stored-format information from one archive read."""
+    if item.kind != "texture":
+        raise ValueError(f"not a texture asset: {item.path}")
+    data = assets.read_asset_record_bytes(catalogue.record_for(item))
+    image = decode_paa(
+        data, is_paa=item.path.casefold().endswith(".paa"), mipmap=mipmap,
+    )
+    try:
+        info = inspect_paa_format(data, is_paa=item.path.casefold().endswith(".paa"))
+    except ValueError:
+        # A damaged trailing mip chain must not discard a readable preview.
+        info = None
+    return image, info
+
+
 class TexturePreviewCache:
     """Bounded decoded-RGBA LRU for repeatedly visited standalone textures."""
 
@@ -259,33 +277,57 @@ class TexturePreviewCache:
             tuple[str, str, str], np.ndarray
         ] = OrderedDict()
         self.bytes_used = 0
+        self._formats: dict[tuple[str, str, str], PaaFormatInfo | None] = {}
 
     def clear(self) -> None:
         self._items.clear()
+        self._formats.clear()
         self.bytes_used = 0
 
     def get(
         self, item: BrowserAsset, catalogue: BrowserCatalogue,
-        *, mipmap: str = "auto",
-    ) -> np.ndarray:
+        *, mipmap: str = "auto", with_format: bool = False,
+    ) -> np.ndarray | tuple[np.ndarray, PaaFormatInfo | None]:
         key = (item.source, item.path, mipmap)
         if key in self._items:
             self._items.move_to_end(key)
-            return self._items[key]
-        image = (
-            load_texture(item, catalogue) if mipmap == "auto"
-            else load_texture(item, catalogue, mipmap=mipmap)
-        )
+            image = self._items[key]
+            if not with_format:
+                return image
+            if key not in self._formats:
+                try:
+                    data = assets.read_asset_record_bytes(catalogue.record_for(item))
+                    self._formats[key] = inspect_paa_format(
+                        data, is_paa=item.path.casefold().endswith(".paa"),
+                    )
+                except (KeyError, OSError, ValueError):
+                    # Cached preview pixels can be valid even when metadata
+                    # or a catalogue record is no longer available.
+                    self._formats[key] = None
+            return image, self._formats[key]
+        if with_format:
+            image, format_info = load_texture_with_format(
+                item, catalogue, mipmap=mipmap,
+            )
+        else:
+            image = (
+                load_texture(item, catalogue) if mipmap == "auto"
+                else load_texture(item, catalogue, mipmap=mipmap)
+            )
+            format_info = None
         if self.max_images and image.nbytes <= self.max_bytes:
             while self._items and (
                 len(self._items) >= self.max_images
                 or self.bytes_used + image.nbytes > self.max_bytes
             ):
-                _, old = self._items.popitem(last=False)
+                evicted, old = self._items.popitem(last=False)
+                self._formats.pop(evicted, None)
                 self.bytes_used -= old.nbytes
             self._items[key] = image
+            if with_format:
+                self._formats[key] = format_info
             self.bytes_used += image.nbytes
-        return image
+        return (image, format_info) if with_format else image
 
 
 def model_texture_paths(
