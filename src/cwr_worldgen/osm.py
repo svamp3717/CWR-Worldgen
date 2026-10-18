@@ -190,7 +190,6 @@ SETTLEMENT_DETAIL_MINIMUM_SEPARATION_METRES = 3.5
 SIDEWALK_DEFAULT_WIDTH_METRES = 1.8
 SIDEWALK_DEFAULT_SEGMENT_LENGTH_METRES = 5.0
 SIDEWALK_CURB_GAP_METRES = 0.12
-SIDEWALKS_TEMPORARILY_DISABLED = True
 STREET_FURNITURE_MINIMUM_SEPARATION_METRES = 7.0
 STREET_FURNITURE_GROUND_CLEARANCE_METRES = 0.04
 # Keep stock settlement/town props fully outside the drivable carriageway, with
@@ -8049,9 +8048,8 @@ def generate_world_objects(
         if road_truncated:
             break
 
-    # Urban-detail pass: stock OFP/CWA pavement and street furniture only.
-    # Sidewalks remain disabled; furniture is allowed in mapped towns/cities and
-    # explicit landuse=residential areas, but not generic village/rural roads.
+    # City/town paved sidewalks and stock OFP/CWA street furniture.
+    # Infer sidewalks only in mapped built-up areas, not on rural roads.
     sidewalk_objects = 0
     street_furniture_objects = 0
     street_light_objects = 0
@@ -8062,10 +8060,7 @@ def generate_world_objects(
     street_bus_shelter_objects = 0
     street_tree_objects = 0
     urban_detail_rejections = 0
-    sidewalks_enabled = (
-        bool(getattr(spec, "sidewalks_enabled", False))
-        and not SIDEWALKS_TEMPORARILY_DISABLED
-    )
+    sidewalks_enabled = bool(getattr(spec, "sidewalks_enabled", False))
     street_furniture_enabled = bool(getattr(spec, "street_furniture_enabled", False))
     sidewalk_warning_threshold = max(0, int(getattr(spec, "maximum_sidewalk_objects", 30000)))
     street_furniture_warning_threshold = max(0, int(getattr(spec, "maximum_street_furniture_objects", 12000)))
@@ -8078,7 +8073,7 @@ def generate_world_objects(
     street_bin_every = max(1, int(getattr(spec, "street_bin_every", 6)))
     street_furniture_road_corridors = (
         _project_vehicle_road_corridors(dataset, projection)
-        if street_furniture_enabled else None
+        if sidewalks_enabled or street_furniture_enabled else None
     )
 
     def street_detail_clear_of_roads(
@@ -8219,9 +8214,13 @@ def generate_world_objects(
 
             if sidewalks_enabled and sidewalk_objects < maximum_sidewalk_objects:
                 for chunk_index, (x, z, heading, length, x0, z0, x1, z1) in enumerate(
-                    _line_chunks(points, sidewalk_segment_length)
+                    _line_chunks(points, sidewalk_segment_length, endpoint_trim=0.6)
                 ):
-                    inferred = urban_detail_position(x, z) and surface_allows_inference and highway != "service"
+                    # Even explicitly tagged sidewalks belong to built-up areas
+                    # in this pass; village and rural detail remain unchanged.
+                    if not furniture_position(x, z):
+                        continue
+                    inferred = surface_allows_inference and highway != "service"
                     sides = _sidewalk_sides(feature.tags, inferred=inferred)
                     if not sides:
                         continue
@@ -8250,17 +8249,27 @@ def generate_world_objects(
                         ):
                             urban_detail_rejections += 1
                             continue
+                        # Avoid crossing another vehicle road at intersections;
+                        # a small curb gap keeps the slab clear of its own road.
+                        if (
+                            street_furniture_road_corridors
+                            and line_intersects_road_corridors(
+                                street_furniture_road_corridors,
+                                (sx0, sz0), (sx1, sz1),
+                                clearance=sidewalk_width * 0.5 + 0.02,
+                            )
+                        ):
+                            urban_detail_rejections += 1
+                            continue
                         y, pitch = _infrastructure_anchor(
-                            elevations, spec.cells, spec.cell_size, sx0, sz0, sx1, sz1, clearance=0.0
+                            elevations, spec.cells, spec.cell_size, sx0, sz0, sx1, sz1, clearance=0.04
                         )
                         if abs(pitch) > 28.0:
                             urban_detail_rejections += 1
                             continue
-                        # Vanilla-only sidewalk: tile the stock cobbled-square
-                        # pavement object along the road edge. It cannot be scaled,
-                        # so width/segment settings control spacing/offset rather
-                        # than generating a bespoke mesh.
-                        model = STOCK_SIDEWALK_MODELS[0]
+                        # Use a correctly sized generated slab. The stock
+                        # Nam_dlazba plaza tile is much too wide for a sidewalk.
+                        model = infrastructure_library.sidewalk_model(sidewalk_width, length)
                         emit(WorldObject(next_id, model, sx, y, sz, heading, pitch_degrees=pitch))
                         next_id += 1
                         sidewalk_objects += 1
