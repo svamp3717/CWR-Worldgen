@@ -16,6 +16,7 @@ from PIL import Image, ImageTk
 from .core import IslandDocument, MapObject
 from .roads import is_road_model, plan_straight_road, road_segment
 from .navigation import zoom_around
+from .model_bounds import ModelBounds, load_model_bounds, footprint_corners, footprint_contains
 from .pbo_textures import PboTextures
 from .textures import clear_archive_texture_cache, render_real_textures
 from importlib.metadata import PackageNotFoundError, version
@@ -39,6 +40,10 @@ class IslandStudio:
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="island-studio")
         self._messages: queue.Queue[tuple[str, object]] = queue.Queue()
         self._index_future: Future | None = None
+        self._model_future: Future | None = None
+        self._model_bounds: dict[str, ModelBounds | None] = {}
+        self._model_stamp = 0
+        self._waiting_pbos: PboTextures | None = None
         self._busy = False
         self._render_pending = False
         self._image: ImageTk.PhotoImage | None = None
@@ -57,6 +62,7 @@ class IslandStudio:
         self.layer = tk.StringVar(value="Elevation")
         self.tool = tk.StringVar(value="Select")
         self.show_objects = tk.BooleanVar(value=True)
+        self.show_model_footprints = tk.BooleanVar(value=False)
         self.show_roads = tk.BooleanVar(value=True)
         self.water_level = tk.StringVar(value="0")
         self.asset_root: Path | None = None
@@ -139,6 +145,14 @@ class IslandStudio:
             side, text="Show world objects", variable=self.show_objects,
             command=self._queue_draw,
         ).pack(anchor="w")
+        ttk.Checkbutton(
+            side, text="Show objects at model size", variable=self.show_model_footprints,
+            command=self._queue_draw,
+        ).pack(anchor="w")
+        ttk.Label(
+            side, text="Uses model geometry from selected PBOs or loose assets; "
+                       "unknown models stay as dots.", wraplength=230,
+        ).pack(anchor="w", pady=(0, 4))
         ttk.Checkbutton(
             side, text="Show roads as lines", variable=self.show_roads,
             command=self._queue_draw,
@@ -287,19 +301,12 @@ class IslandStudio:
                 elif kind == "saving":
                     self.status.set(str(value))
                 elif kind == "pbos":
-                    self._loading_pbos = False
-                    clear_archive_texture_cache()
-                    if self.pbo_textures is not None:
-                        self.pbo_textures.close()
-                    self.pbo_textures = value
-                    self.pbo_label.set(
-                        f"{len(value.archives):,} PBOs; {len(value.members):,} indexed textures"
-                    )
-                    self.status.set(
-                        f"Texture archives ready: {len(value.members):,} indexed paths. "
-                        "Choose Actual textures to preview."
-                    )
-                    self._queue_draw()
+                    # A model-bounds worker may still be reading the old PBO.
+                    # Swap the archive only after it has finished.
+                    if self._model_future is not None and not self._model_future.done():
+                        self._waiting_pbos = value
+                    else:
+                        self._install_pbos(value)
                 elif kind == "pbo_error":
                     self._loading_pbos = False
                     self.status.set(f"PBO selection failed: {value}")
@@ -323,7 +330,69 @@ class IslandStudio:
                     )
                 self._queue_draw()
             self._index_future = None
+        if self._model_future is not None and self._model_future.done():
+            try:
+                stamp, results = self._model_future.result()
+                if stamp == self._model_stamp:
+                    self._model_bounds.update(results)
+            except Exception as exc:
+                self.status.set(f"Some model footprints were unavailable: {exc}")
+            self._model_future = None
+            if self._waiting_pbos is not None:
+                pending = self._waiting_pbos
+                self._waiting_pbos = None
+                self._install_pbos(pending)
+            self._queue_draw()
         self.root.after(150, self._poll)
+
+    def _model_key(self, path: str) -> str:
+        return path.replace("/", "\\").strip("\\").casefold()
+
+    def _reset_model_bounds(self) -> None:
+        self._model_stamp += 1
+        self._model_bounds.clear()
+
+    def _install_pbos(self, archives: PboTextures) -> None:
+        self._loading_pbos = False
+        self._reset_model_bounds()
+        clear_archive_texture_cache()
+        if self.pbo_textures is not None:
+            self.pbo_textures.close()
+        self.pbo_textures = archives
+        self.pbo_label.set(
+            f"{len(archives.archives):,} PBOs; {len(archives.members):,} textures; "
+            f"{len(archives.models):,} models"
+        )
+        self.status.set("PBO model geometry available for scaled markers.")
+        self._queue_draw()
+
+    def _request_model_bounds(self, objects: tuple[MapObject, ...]) -> None:
+        if self._model_future is not None or self._loading_pbos:
+            return
+        if self.asset_root is None and self.pbo_textures is None:
+            return
+        names: dict[str, str] = {}
+        for obj in objects:
+            key = self._model_key(obj.model_path)
+            if key not in self._model_bounds and key not in names:
+                names[key] = obj.model_path
+            if len(names) >= 48:
+                break
+        if not names:
+            return
+        stamp = self._model_stamp
+        folder, archives = self.asset_root, self.pbo_textures
+
+        def measure() -> tuple[int, dict[str, ModelBounds | None]]:
+            found: dict[str, ModelBounds | None] = {}
+            for key, virtual_path in names.items():
+                try:
+                    found[key] = load_model_bounds(virtual_path, folder, archives)
+                except (OSError, ValueError):
+                    found[key] = None
+            return stamp, found
+
+        self._model_future = self._executor.submit(measure)
 
     def _fit(self) -> None:
         if not self.document:
@@ -410,10 +479,28 @@ class IslandStudio:
                 self._visible = self.document.visible_objects(
                     left, top, right, bottom, limit=2700,
                 )
+                scaled = self.show_model_footprints.get()
+                if scaled:
+                    self._request_model_bounds(self._visible)
                 for obj in self._visible:
                     sx, sz = self._to_screen(obj.x, obj.z)
                     selected = obj.index == self.selected
                     colour = "#ffcf6d" if selected else "#e9ece2"
+                    bounds = self._model_bounds.get(self._model_key(obj.model_path)) if scaled else None
+                    if bounds is not None:
+                        corners = footprint_corners(
+                            bounds, obj.x, obj.z, obj.heading,
+                            basis=(obj.basis_xx, obj.basis_xz, obj.basis_zx, obj.basis_zz),
+                        )
+                        screen = [self._to_screen(*point) for point in corners]
+                        xs = [point[0] for point in screen]
+                        zs = [point[1] for point in screen]
+                        if max(max(xs) - min(xs), max(zs) - min(zs)) >= 2:
+                            self.canvas.create_polygon(
+                                *(value for point in screen for value in point),
+                                outline=colour, fill="", width=2 if selected else 1,
+                            )
+                            continue
                     radius = 5 if selected else 1.65
                     self.canvas.create_oval(
                         sx - radius, sz - radius, sx + radius, sz + radius,
@@ -453,6 +540,7 @@ class IslandStudio:
         folder = filedialog.askdirectory(title="Choose extracted game texture assets folder")
         if folder:
             self.asset_root = Path(folder)
+            self._reset_model_bounds()
             self.texture_folder_label.set(f"Texture folder: {self.asset_root.name}")
             self._queue_draw()
 
@@ -484,9 +572,10 @@ class IslandStudio:
         self._executor.submit(index)
 
     def _clear_pbos(self) -> None:
-        if self._loading_pbos:
-            self.status.set("Wait for PBO indexing to complete before clearing")
+        if self._loading_pbos or (self._model_future is not None and not self._model_future.done()):
+            self.status.set("Wait for archive or model indexing to complete before clearing")
             return
+        self._reset_model_bounds()
         clear_archive_texture_cache()
         if self.pbo_textures is not None:
             self.pbo_textures.close()
@@ -620,9 +709,21 @@ class IslandStudio:
         if mode == "Select":
             nearest = None
             distance = 12 ** 2
+            world_x, world_z = self._to_world(event.x, event.y)
             for obj in self._visible:
                 sx, sz = self._to_screen(obj.x, obj.z)
                 d2 = (event.x - sx) ** 2 + (event.y - sz) ** 2
+                bounds = (
+                    self._model_bounds.get(self._model_key(obj.model_path))
+                    if self.show_model_footprints.get() else None
+                )
+                if bounds is not None and footprint_contains(
+                    footprint_corners(
+                        bounds, obj.x, obj.z, obj.heading,
+                        basis=(obj.basis_xx, obj.basis_xz, obj.basis_zx, obj.basis_zz),
+                    ), world_x, world_z,
+                ):
+                    d2 = min(d2, 1.0)
                 if d2 < distance:
                     distance, nearest = d2, obj
             if nearest:
@@ -774,6 +875,11 @@ class IslandStudio:
             return
         if self._index_future and not self._index_future.done():
             self._index_future.result()
+        if self._model_future and not self._model_future.done():
+            self._model_future.result()
+        if self._waiting_pbos is not None:
+            self._waiting_pbos.close()
+            self._waiting_pbos = None
         if self.document:
             self.document.close()
         clear_archive_texture_cache()
