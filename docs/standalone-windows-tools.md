@@ -38,10 +38,12 @@ screen closes when the GUI is ready (or before a command-line WRP scan starts).
 This gives visible feedback without introducing an artificial delay. It does
 not make the one-file extraction faster. The splash is an experimental
 Windows-supported PyInstaller feature and needs a Windows desktop to display.
-The Windows build generates a PyInstaller spec and sets
-`Splash(always_on_top=False)`, so these loading screens can be covered by
-other applications rather than staying above every desktop window. The
-categoriser's internal loading dialogs remain associated with its own window.
+The Windows build configures PyInstaller's splash to appear on the monitor
+under the mouse cursor, briefly raises it at startup, and automatically clears
+its always-on-top attribute after 1.5 seconds. This keeps the loading screen
+visible when launched without preventing other applications from covering it
+during a long extraction. The categoriser's internal loading dialogs remain
+associated with its own window.
 On the WRP splash, only **WRP** is white; **MOD DEPENDENCY SCANNER** and the
 other on-screen labels use the amber accent.
 
