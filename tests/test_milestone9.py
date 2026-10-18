@@ -531,8 +531,8 @@ class SurfacePassTests(unittest.TestCase):
         self.assertEqual(paths[MATERIAL_INDEX["c"]], grass)
         self.assertFalse(any(path.startswith(world_name + r"\data") for path in paths))
 
-    def test_sidewalks_are_disabled_by_default(self) -> None:
-        self.assertFalse(Milestone9Spec(source_dir=Path("unused")).sidewalks_enabled)
+    def test_sidewalks_are_enabled_by_default(self) -> None:
+        self.assertTrue(Milestone9Spec(source_dir=Path("unused")).sidewalks_enabled)
 
     def test_malden_forest_profile_resolves_original_cwc_vegetation_defaults(self) -> None:
         spec = Milestone9Spec(source_dir=Path("unused"), forest_profile="malden")
@@ -4749,7 +4749,7 @@ class NearbyBuildingTextureTests(unittest.TestCase):
 
 
 class InfrastructureAndRuralTests(unittest.TestCase):
-    def test_sidewalks_are_temporarily_disabled_but_town_city_furniture_remains(self) -> None:
+    def test_city_sidewalks_and_town_city_furniture(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
         road = OsmLineFeature(
             "way/urban-road", {"highway": "residential"},
@@ -4787,7 +4787,9 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             dataset, projection, raster, (5.0,) * 64, spec, include_roads=False,
             building_placement_plans=(),
         )
-        self.assertEqual(result.sidewalk_objects, 0)
+        self.assertGreater(result.sidewalk_objects, 0)
+        sidewalk_models = [obj.model_path for obj in result.objects if "\\i\\sw_w" in obj.model_path]
+        self.assertEqual(len(sidewalk_models), result.sidewalk_objects)
         self.assertFalse(any(obj.model_path in STOCK_SIDEWALK_MODELS for obj in result.objects))
         self.assertGreater(result.street_light_objects, 0)
         self.assertGreater(result.street_furniture_objects, result.street_light_objects)
@@ -4807,7 +4809,7 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             STOCK_STREET_TREE_MODELS,
             STOCK_SETTLEMENT_DETAIL_MODELS,
         )
-        self.assertTrue(all(obj.model_path in allowed for obj in result.objects))
+        self.assertTrue(all(obj.model_path in allowed or "\\i\\sw_w" in obj.model_path for obj in result.objects))
 
     def test_street_furniture_is_inferred_in_residential_landuse(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
@@ -4923,8 +4925,8 @@ class InfrastructureAndRuralTests(unittest.TestCase):
             dataset, projection, raster, (5.0,) * 64, spec, include_roads=False,
             building_placement_plans=(),
         )
-        # Sidewalks remain disabled and the generic city-lamp pass stays out of
-        # villages, but the settlement-detail layer adds sparse stock utility poles.
+        # Sidewalks and city lamps stay out of villages, while the settlement
+        # detail layer can still add sparse stock utility poles.
         self.assertEqual(result.sidewalk_objects, 0)
         self.assertEqual(result.street_light_objects, 0)
         self.assertGreater(result.street_furniture_objects, 0)
