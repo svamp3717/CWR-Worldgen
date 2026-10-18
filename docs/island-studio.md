@@ -20,9 +20,9 @@ Or open an island directly:
 
     cwr-island-studio /path/to/island.wrp
 
-On Windows, the Island Studio validation and Windows build workflow creates
-a CWR-Island-Studio-Windows artifact containing CWR-Island-Studio.exe.
-The tool is not bundled with the generator executable.
+The Island Studio workflow runs tests on source changes. A dedicated Windows
+executable can be built separately on request, using the manual workflow
+option. The tool is not bundled with the generator executable.
 
 ## Workflow
 
@@ -125,3 +125,40 @@ existing slot colour, so gaps are visible.
 The preview loads only the visible area, with bounded decoded texture
 caching. It does not read PBO archives directly, resolve custom texture
 coordinate transforms or reproduce every in-engine terrain blending effect.
+
+## Zoom controls and mouse-pointer shortcuts
+
+Use the **+** and **−** buttons next to Fit map, the mouse wheel, or the
+`+` / `-` keys (also `=`, numeric keypad +/−, and Ctrl+plus/minus).
+All methods zoom toward the mouse pointer while it is over the viewport,
+keeping the same map location beneath the cursor. When the pointer is outside
+the map, the buttons and keyboard shortcuts zoom around the map centre.
+Shortcuts are suppressed while editing a text field.
+
+## Select PBOs for real texture previews
+
+Choose **Select texture PBOs…** to select one or more loose `.pbo` or
+`.pbo.zst` archives. Also accepted: `.ifa` and `.ifa.zst`. Archive headers
+are indexed in a background task; images are decoded *only if needed* by
+the current **Actual textures** viewport. Archives with a declared PBO
+`prefix` use that namespace, otherwise the archive filename is the
+namespace. If several selected archives supply the same virtual texture
+path, the last archive wins. Use **Clear selected PBOs** to release the
+indexes and cached preview tiles.
+
+You can combine selected archives with a loose texture folder. A loose
+file is preferred when both sources contain the same virtual path, and
+missing or unsupported images stay visibly rendered as slot colours.
+This version supports ordinary first-level texture members, including
+DXT1/DXT5 PAA. Nested archives inside a PBO are not indexed. Whole-file
+Zstandard-wrapped archives are temporarily unpacked to a scratch file
+for random-access indexing, then deleted when the selection is cleared.
+
+PBO selection is read-only. The tool does not modify, repack or extract
+game archives into the map's output folder.
+
+## Builds
+
+Source updates trigger validation tests only. Windows EXE packaging is
+**manual opt-in** using the `build_windows_exe` workflow input and is
+not performed automatically when this branch receives commits.
