@@ -8182,9 +8182,12 @@ def generate_world_objects(
     def furniture_position(x: float, z: float) -> bool:
         return town_city_position(x, z) or residential_position(x, z)
 
-    def urban_detail_position(x: float, z: float) -> bool:
-        return furniture_position(x, z) or _mask_at(
-            raster.urban, spec.cells, spec.world_size, x, z
+    def sidewalk_position(x: float, z: float) -> bool:
+        # Explicit villages/hamlets remain rural even when they have mapped
+        # residential landuse. Unlabelled residential blocks are supported.
+        kind = settlement_kind_at(x, z)
+        return kind in {"town", "city"} or (
+            kind == "residential" and residential_position(x, z)
         )
 
     lamp_grid_size = STREET_FURNITURE_MINIMUM_SEPARATION_METRES
@@ -8222,7 +8225,7 @@ def generate_world_objects(
                 ):
                     # Even explicitly tagged sidewalks belong to built-up areas
                     # in this pass; village and rural detail remain unchanged.
-                    if not furniture_position(x, z):
+                    if not sidewalk_position(x, z):
                         continue
                     inferred = surface_allows_inference and highway != "service"
                     sides = _sidewalk_sides(feature.tags, inferred=inferred)
