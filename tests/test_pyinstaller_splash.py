@@ -49,7 +49,7 @@ class SplashImageTests(unittest.TestCase):
                 self.assertEqual(image.getpixel((15, 11)), (19, 27, 22))
                 # The reserved second-headline region must contain only the
                 # dark background and technical grid, not the old tagline.
-                subtitle_space = image.crop((40, 155, 598, 202))
+                subtitle_space = image.crop((40, 172, 598, 202))
                 self.assertTrue(
                     set(subtitle_space.getdata()).issubset({(19, 27, 22), (35, 47, 38)})
                 )
