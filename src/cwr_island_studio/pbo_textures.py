@@ -103,7 +103,7 @@ def _scan(path: Path, archive_stem: str) -> dict[str, TextureMember]:
         except ValueError:
             offset += size
             continue
-        if clean.endswith((".paa", ".pac", ".png", ".jpg", ".jpeg", ".webp")):
+        if clean.endswith((".paa", ".pac", ".png", ".jpg", ".jpeg", ".webp", ".p3d")):
             if packing in (0, _LZSS):
                 result[clean] = TextureMember(path, offset, size, original_size, packing)
         offset += size
@@ -173,6 +173,7 @@ class PboTextures:
     def __init__(self, paths: Sequence[Path | str]) -> None:
         self._temp = tempfile.TemporaryDirectory(prefix="cwr-island-pbos-")
         self.members: dict[str, TextureMember] = {}
+        self.models: dict[str, TextureMember] = {}
         self.archives: tuple[Path, ...] = tuple(Path(p).resolve() for p in paths)
         try:
             for index, original in enumerate(self.archives):
@@ -188,7 +189,11 @@ class PboTextures:
                 for suffix in (".zst", ".pbo", ".ifa"):
                     if name.lower().endswith(suffix):
                         name = name[:-len(suffix)]
-                self.members.update(_scan(path, name))
+                for virtual, member in _scan(path, name).items():
+                    if virtual.endswith(".p3d"):
+                        self.models[virtual] = member
+                    else:
+                        self.members[virtual] = member
         except BaseException:
             self.close()
             raise
@@ -200,6 +205,15 @@ class PboTextures:
             return None
         return None if member is None else _read_member(member)
 
+    def read_model(self, virtual_path: str) -> bytes | None:
+        """Read a P3D member lazily, with the same compressed-size limits."""
+        try:
+            member = self.models.get(canonical_path(virtual_path))
+        except ValueError:
+            return None
+        return None if member is None else _read_member(member)
+
     def close(self) -> None:
         self.members.clear()
+        self.models.clear()
         self._temp.cleanup()
