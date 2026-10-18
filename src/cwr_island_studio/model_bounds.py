@@ -151,12 +151,16 @@ def load_model_bounds(
 
 def footprint_corners(
     bounds: ModelBounds, x: float, z: float, heading: float,
+    *, basis: tuple[float, float, float, float] | None = None,
 ) -> tuple[tuple[float, float], ...]:
-    """Project the local X/Z bounding rectangle using the WRP yaw convention."""
-    angle = math.radians(heading)
-    co, si = math.cos(angle), math.sin(angle)
+    """Project the origin-relative bounds with the object's actual WRP basis."""
+    if basis is None:
+        angle = math.radians(heading)
+        co, si = math.cos(angle), math.sin(angle)
+        basis = (co, si, -si, co)
+    xx, xz, zx, zz = basis
     return tuple(
-        (x + co * lx + si * lz, z - si * lx + co * lz)
+        (x + xx * lx + xz * lz, z + zx * lx + zz * lz)
         for lx, lz in (
             (bounds.min_x, bounds.min_z),
             (bounds.max_x, bounds.min_z),
@@ -164,3 +168,16 @@ def footprint_corners(
             (bounds.min_x, bounds.max_z),
         )
     )
+
+
+def footprint_contains(
+    corners: tuple[tuple[float, float], ...],
+    x: float, z: float,
+) -> bool:
+    """Hit-test the rotated four-corner preview rectangle."""
+    crosses = [
+        (corners[(i + 1) % 4][0] - corners[i][0]) * (z - corners[i][1])
+        - (corners[(i + 1) % 4][1] - corners[i][1]) * (x - corners[i][0])
+        for i in range(4)
+    ]
+    return min(crosses) >= -1e-7 or max(crosses) <= 1e-7
