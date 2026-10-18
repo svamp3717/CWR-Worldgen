@@ -20,7 +20,6 @@ from p3d_asset_browser_catalog import (
     TexturePreviewCache,
     filter_assets,
     load_model,
-    load_texture,
     load_texture_with_format,
     model_texture_paths,
     scan_catalogue,
