@@ -342,6 +342,8 @@ class IslandStudio:
                         self._install_pbos(value)
                 elif kind == "pbo_error":
                     self._loading_pbos = False
+                    # Leave the previous, working PBO set selected on failure.
+                    self._refresh_source_lists()
                     self.status.set(f"PBO selection failed: {value}")
                     messagebox.showerror("Texture PBOs", str(value))
                 elif kind == "error":
