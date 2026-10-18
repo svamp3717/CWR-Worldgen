@@ -18,7 +18,8 @@ from .roads import is_road_model, plan_straight_road, road_segment
 from .navigation import zoom_around
 from .model_bounds import ModelBounds, load_model_bounds, footprint_corners, footprint_contains
 from .pbo_textures import PboTextures
-from .textures import clear_archive_texture_cache, render_real_textures
+from .asset_sources import append_unique, remove_selected
+from .textures import clear_archive_texture_cache, clear_loose_texture_cache, render_real_textures
 from importlib.metadata import PackageNotFoundError, version
 
 try:
@@ -65,11 +66,12 @@ class IslandStudio:
         self.show_model_footprints = tk.BooleanVar(value=False)
         self.show_roads = tk.BooleanVar(value=True)
         self.water_level = tk.StringVar(value="0")
-        self.asset_root: Path | None = None
+        self.asset_roots: tuple[Path, ...] = ()
+        self.selected_pbos: tuple[Path, ...] = ()
         self.pbo_textures: PboTextures | None = None
         self._loading_pbos = False
-        self.texture_folder_label = tk.StringVar(value="Texture folder: not selected")
-        self.pbo_label = tk.StringVar(value="PBO textures: none selected")
+        self.texture_folder_label = tk.StringVar(value="No texture/model folders selected")
+        self.pbo_label = tk.StringVar(value="No PBO archives selected")
         self.road_model = tk.StringVar(value=r"o\road\sil25.p3d")
         self.brush_radius = tk.StringVar(value="75")
         self.brush_strength = tk.StringVar(value="1")
@@ -162,13 +164,44 @@ class IslandStudio:
         water_entry.pack(fill="x", pady=(0, 4))
         water_entry.bind("<Return>", lambda _e: self._queue_draw())
         water_entry.bind("<FocusOut>", lambda _e: self._queue_draw())
-        ttk.Button(
-            side, text="Choose texture assets folder", command=self._choose_texture_root,
-        ).pack(fill="x", pady=(4, 2))
-        ttk.Label(side, textvariable=self.texture_folder_label, wraplength=230).pack(anchor="w", pady=(0, 4))
-        ttk.Button(side, text="Select texture PBOs…", command=self._choose_pbos).pack(fill="x", pady=(4, 2))
-        ttk.Button(side, text="Clear selected PBOs", command=self._clear_pbos).pack(fill="x", pady=(2, 4))
-        ttk.Label(side, textvariable=self.pbo_label, wraplength=230).pack(anchor="w", pady=(0, 8))
+        ttk.Label(side, text="Texture / model folders").pack(anchor="w", pady=(7, 2))
+        self.folder_list = tk.Listbox(
+            side, height=4, selectmode="extended", exportselection=False,
+        )
+        self.folder_list.pack(fill="x", pady=(0, 3))
+        folder_buttons = ttk.Frame(side)
+        folder_buttons.pack(fill="x")
+        ttk.Button(folder_buttons, text="Add folder…", command=self._choose_texture_root).pack(
+            side="left", fill="x", expand=True,
+        )
+        ttk.Button(folder_buttons, text="Remove", command=self._remove_folders).pack(
+            side="left", padx=(4, 0),
+        )
+        ttk.Button(folder_buttons, text="Clear", command=self._clear_folders).pack(
+            side="left", padx=(4, 0),
+        )
+        ttk.Label(side, textvariable=self.texture_folder_label, wraplength=230).pack(
+            anchor="w", pady=(3, 6),
+        )
+        ttk.Label(side, text="PBO archives (textures and models)").pack(anchor="w", pady=(3, 2))
+        self.pbo_list = tk.Listbox(
+            side, height=4, selectmode="extended", exportselection=False,
+        )
+        self.pbo_list.pack(fill="x", pady=(0, 3))
+        archive_buttons = ttk.Frame(side)
+        archive_buttons.pack(fill="x")
+        ttk.Button(archive_buttons, text="Add PBOs…", command=self._choose_pbos).pack(
+            side="left", fill="x", expand=True,
+        )
+        ttk.Button(archive_buttons, text="Remove", command=self._remove_pbos).pack(
+            side="left", padx=(4, 0),
+        )
+        ttk.Button(archive_buttons, text="Clear", command=self._clear_pbos).pack(
+            side="left", padx=(4, 0),
+        )
+        ttk.Label(side, textvariable=self.pbo_label, wraplength=230).pack(
+            anchor="w", pady=(3, 8),
+        )
         ttk.Separator(side).pack(fill="x", pady=(4, 9))
 
         ttk.Label(side, text="Edit tool", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
@@ -359,6 +392,8 @@ class IslandStudio:
         if self.pbo_textures is not None:
             self.pbo_textures.close()
         self.pbo_textures = archives
+        self.selected_pbos = archives.archives
+        self._refresh_source_lists()
         self.pbo_label.set(
             f"{len(archives.archives):,} PBOs; {len(archives.members):,} textures; "
             f"{len(archives.models):,} models"
@@ -369,7 +404,7 @@ class IslandStudio:
     def _request_model_bounds(self, objects: tuple[MapObject, ...]) -> None:
         if self._model_future is not None or self._loading_pbos:
             return
-        if self.asset_root is None and self.pbo_textures is None:
+        if not self.asset_roots and self.pbo_textures is None:
             return
         names: dict[str, str] = {}
         for obj in objects:
@@ -381,13 +416,13 @@ class IslandStudio:
         if not names:
             return
         stamp = self._model_stamp
-        folder, archives = self.asset_root, self.pbo_textures
+        folders, archives = self.asset_roots, self.pbo_textures
 
         def measure() -> tuple[int, dict[str, ModelBounds | None]]:
             found: dict[str, ModelBounds | None] = {}
             for key, virtual_path in names.items():
                 try:
-                    found[key] = load_model_bounds(virtual_path, folder, archives)
+                    found[key] = load_model_bounds(virtual_path, folders, archives)
                 except (OSError, ValueError):
                     found[key] = None
             return stamp, found
@@ -441,10 +476,10 @@ class IslandStudio:
                 )
                 pixels, loaded = render_real_textures(
                     slots, x, z, self.document.texture_paths,
-                    self.asset_root, fallback, self.document.cell_size,
+                    self.asset_roots, fallback, self.document.cell_size,
                     archives=self.pbo_textures,
                 )
-                if self.asset_root is None and self.pbo_textures is None:
+                if not self.asset_roots and self.pbo_textures is None:
                     self.status.set("Choose a texture folder or PBOs to show real images")
                 elif loaded == 0:
                     self.status.set("No matching texture files found; showing texture-slot colours")
@@ -536,31 +571,75 @@ class IslandStudio:
         except Exception as exc:
             self.status.set(f"Preview error: {exc}")
 
-    def _choose_texture_root(self) -> None:
-        folder = filedialog.askdirectory(title="Choose extracted game texture assets folder")
-        if folder:
-            self.asset_root = Path(folder)
-            self._reset_model_bounds()
-            self.texture_folder_label.set(f"Texture folder: {self.asset_root.name}")
-            self._queue_draw()
-
-    def _choose_pbos(self) -> None:
-        if self._loading_pbos:
-            return
-        chosen = filedialog.askopenfilenames(
-            title="Select one or more game texture PBOs",
-            filetypes=[
-                ("Game archives", "*.pbo *.pbo.zst *.ifa *.ifa.zst"),
-                ("PBO archives", "*.pbo"),
-                ("All files", "*.*"),
-            ],
+    def _refresh_source_lists(self) -> None:
+        self.folder_list.delete(0, "end")
+        for folder in self.asset_roots:
+            self.folder_list.insert("end", str(folder))
+        self.texture_folder_label.set(
+            f"{len(self.asset_roots)} selected folders. Last added takes priority."
+            if self.asset_roots else "No texture/model folders selected"
         )
-        if not chosen:
+        self.pbo_list.delete(0, "end")
+        for archive in self.selected_pbos:
+            self.pbo_list.insert("end", str(archive))
+        if not self._loading_pbos:
+            self.pbo_label.set(
+                f"{len(self.selected_pbos)} PBOs selected. Last added takes priority."
+                if self.selected_pbos else "No PBO archives selected"
+            )
+
+    def _set_folders(self, folders: tuple[Path, ...]) -> None:
+        if folders == self.asset_roots:
             return
+        self.asset_roots = folders
+        self._reset_model_bounds()
+        clear_loose_texture_cache()
+        self._refresh_source_lists()
+        self.status.set(
+            f"{len(folders)} texture/model folders selected. "
+            "Loose folders take precedence over PBO archives."
+        )
+        self._queue_draw()
+
+    def _choose_texture_root(self) -> None:
+        # Tk's standard folder picker selects one directory at a time; every
+        # selection appends, allowing as many directories as needed.
+        folder = filedialog.askdirectory(title="Add a texture or model folder")
+        if folder:
+            self._set_folders(append_unique(self.asset_roots, (folder,)))
+
+    def _remove_folders(self) -> None:
+        selected = self.folder_list.curselection()
+        if selected:
+            self._set_folders(remove_selected(self.asset_roots, selected))
+
+    def _clear_folders(self) -> None:
+        self._set_folders(())
+
+    def _schedule_pbos(self, paths: tuple[Path, ...]) -> None:
+        if self._loading_pbos:
+            self.status.set("Wait for current PBO indexing to finish")
+            return
+        if paths == self.selected_pbos:
+            return
+        if not paths:
+            if self._model_future is not None and not self._model_future.done():
+                self.status.set("Wait for model measurement to finish before clearing PBOs")
+                return
+            self._reset_model_bounds()
+            clear_archive_texture_cache()
+            if self.pbo_textures is not None:
+                self.pbo_textures.close()
+            self.pbo_textures = None
+            self.selected_pbos = ()
+            self._refresh_source_lists()
+            self.status.set("All PBO archives deselected")
+            self._queue_draw()
+            return
+
         self._loading_pbos = True
-        paths = tuple(Path(path) for path in chosen)
-        self.pbo_label.set(f"Indexing {len(paths)} archive(s)…")
-        self.status.set("Reading PBO texture tables in the background…")
+        self.pbo_label.set(f"Indexing {len(paths)} selected PBOs…")
+        self.status.set("Reading selected PBO headers in the background…")
 
         def index() -> None:
             try:
@@ -571,17 +650,27 @@ class IslandStudio:
 
         self._executor.submit(index)
 
-    def _clear_pbos(self) -> None:
-        if self._loading_pbos or (self._model_future is not None and not self._model_future.done()):
-            self.status.set("Wait for archive or model indexing to complete before clearing")
+    def _choose_pbos(self) -> None:
+        if self._loading_pbos:
             return
-        self._reset_model_bounds()
-        clear_archive_texture_cache()
-        if self.pbo_textures is not None:
-            self.pbo_textures.close()
-        self.pbo_textures = None
-        self.pbo_label.set("PBO textures: none selected")
-        self._queue_draw()
+        chosen = filedialog.askopenfilenames(
+            title="Add texture or model PBO archives",
+            filetypes=[
+                ("Game archives", "*.pbo *.pbo.zst *.ifa *.ifa.zst"),
+                ("PBO archives", "*.pbo"),
+                ("All files", "*.*"),
+            ],
+        )
+        if chosen:
+            self._schedule_pbos(append_unique(self.selected_pbos, chosen))
+
+    def _remove_pbos(self) -> None:
+        selected = self.pbo_list.curselection()
+        if selected:
+            self._schedule_pbos(remove_selected(self.selected_pbos, selected))
+
+    def _clear_pbos(self) -> None:
+        self._schedule_pbos(())
 
     def _mouse_move(self, event: tk.Event) -> None:
         if self._road_anchor is not None and self.tool.get() == "Draw road line":
