@@ -132,7 +132,7 @@ class SplashSpecTests(unittest.TestCase):
 
         try:
             spec = configure_splash_visibility(
-                "splash = Splash(\\n    'splash.png',\\n)\\n",
+                "splash = Splash(\n    'splash.png',\n)\n",
                 title="Windows Splash Loading",
             )
             exec(spec, {"Splash": capture_splash})
