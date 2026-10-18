@@ -4476,10 +4476,15 @@ def _forest_border_candidates(
     spacing: float,
     inset: float,
     seed: str,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[tuple[str, float, float, float], ...]:
     candidates: list[tuple[str, float, float, float]] = []
     spacing = max(4.0, spacing)
     inset = max(0.5, inset)
+    scanned_edges = 0
+    last_report = time.perf_counter()
+    if progress_callback is not None:
+        progress_callback("Sampling mapped forest boundaries (starting)")
     for feature in sorted(dataset.forests, key=lambda item: item.osm_key):
         for polygon_index, polygon in enumerate(feature.polygons):
             outer = tuple(projection.to_world(point) for point in polygon.outer)
@@ -4498,6 +4503,15 @@ def _forest_border_candidates(
                 if len(ring) < 3:
                     continue
                 for edge_index, (start, end) in enumerate(zip(ring, ring[1:] + ring[:1])):
+                    scanned_edges += 1
+                    if progress_callback is not None and scanned_edges % 128 == 0:
+                        now = time.perf_counter()
+                        if now - last_report >= 3.0:
+                            progress_callback(
+                                "Sampling mapped forest boundaries "
+                                f"({scanned_edges:,} edges; {len(candidates):,} candidates)"
+                            )
+                            last_report = now
                     dx = end[0] - start[0]
                     dz = end[1] - start[1]
                     length = math.hypot(dx, dz)
@@ -4528,6 +4542,11 @@ def _forest_border_candidates(
                         candidates.append((key, centre_x, centre_z, heading))
     # Stable feature ordering plus a seeded tie key avoids dependence on the
     # source parser's incidental polygon order.
+    if progress_callback is not None:
+        progress_callback(
+            "Sorting forest-border candidates "
+            f"({len(candidates):,} candidates from {scanned_edges:,} edges)"
+        )
     return tuple(sorted(
         candidates,
         key=lambda item: (
@@ -10795,6 +10814,10 @@ def generate_world_objects(
             f"{time.perf_counter() - bush_started:.1f}s)",
         )
         progress(64, "Softening forest borders")
+        border_started = time.perf_counter()
+        border_examined = 0
+        border_total = 0
+        border_at_start = forest_border_objects
         # Nogova-style soft borders are a separate sparse pass along actual OSM
         # forest boundaries. They use reusable proxy clusters, not rows of WRP trees.
         if (
@@ -10815,13 +10838,26 @@ def generate_world_objects(
             border_maximum_float = max(
                 0.0, float(getattr(spec, "forest_border_maximum_float", 1.0))
             )
-            for key, x, z, heading in _forest_border_candidates(
+            border_candidates = _forest_border_candidates(
                 dataset,
                 projection,
                 spacing=border_spacing,
                 inset=border_inset,
                 seed=seed,
-            ):
+                progress_callback=lambda message: progress(64, message),
+            )
+            border_total = len(border_candidates)
+            border_interval = max(1, border_total // 50)
+            for key, x, z, heading in border_candidates:
+                border_examined += 1
+                if border_examined == 1 or border_examined % border_interval == 0:
+                    progress(
+                        64,
+                        "Softening forest borders "
+                        f"({border_examined:,}/{border_total:,} candidates; "
+                        f"{forest_border_objects - border_at_start:,} added; "
+                        f"{time.perf_counter() - border_started:.1f}s)",
+                    )
                 if not forest_point_inside_edge_guard(x, z, max(16.0, forest_world_edge_margin * 0.75)):
                     forest_border_rejections += 1
                     continue
@@ -10885,6 +10921,14 @@ def generate_world_objects(
                 )
                 maximum_forest_burial = max(maximum_forest_burial, burial)
                 maximum_forest_float = max(maximum_forest_float, floating)
+
+        progress(
+            64,
+            "Forest-border softening complete "
+            f"({border_examined:,}/{border_total:,} candidates; "
+            f"{forest_border_objects - border_at_start:,} added; "
+            f"{time.perf_counter() - border_started:.1f}s)",
+        )
 
     progress(64, "Placing ditch vegetation")
     # Tall grass follows explicitly mapped OSM ditches. It has its own budget so
