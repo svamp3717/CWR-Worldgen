@@ -1,4 +1,4 @@
-"""Ensure Windows asset-tool bootloader splashes stay visible but not pinned."""
+"""Verify the Windows PyInstaller splash is visible in the taskbar."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,17 +25,29 @@ class SplashSpecTests(unittest.TestCase):
         "exe = EXE(pyz, a.scripts, splash, splash.binaries)\n"
     )
 
-    def test_initially_visible_then_unpins_and_keeps_splash_build(self) -> None:
-        updated = configure_splash_visibility(self._SPEC)
+    def test_generates_managed_splash_and_preserves_build_inputs(self) -> None:
+        updated = configure_splash_visibility(
+            self._SPEC, title="Browse P3D Assets - Loading",
+        )
         self.assertIn("    always_on_top=True,", updated)
         self.assertIn("    'build/splash/Browse-P3D-Assets.png',", updated)
         self.assertIn("exe = EXE(pyz, a.scripts, splash, splash.binaries)", updated)
-        self.assertLess(updated.index("_cwr_splash_templates.raise_window"), updated.index("splash = Splash"))
-        self.assertIn("after 1500 {wm attributes . -topmost 0; raise .}", updated)
+        self.assertIn("'wm overrideredirect . 0'", updated)
+        self.assertIn("wm title . {Browse P3D Assets - Loading}", updated)
+        self.assertIn("wm resizable . 0 0", updated)
+        self.assertIn("wm protocol . WM_DELETE_WINDOW {}", updated)
+        self.assertIn("after 1500 {wm attributes . -topmost 0}", updated)
+        self.assertLess(
+            updated.index("_cwr_splash_templates.position_window_on_top"),
+            updated.index("splash = Splash"),
+        )
         compile(updated, "test.spec", "exec")
-        self.assertEqual(configure_splash_visibility(updated), updated)
+        self.assertEqual(
+            configure_splash_visibility(updated, title="Browse P3D Assets - Loading"),
+            updated,
+        )
 
-    def test_replaces_explicit_non_topmost_setting(self) -> None:
+    def test_non_topmost_option_is_restored_for_initial_visibility(self) -> None:
         source = self._SPEC.replace(
             "    binaries=a.binaries,", "    always_on_top=False,\n    binaries=a.binaries,"
         )
@@ -44,20 +56,24 @@ class SplashSpecTests(unittest.TestCase):
         self.assertNotIn("always_on_top=False", updated)
         self.assertEqual(updated.count("always_on_top="), 1)
 
-    def test_generated_spec_changes_actual_splash_tcl_template(self) -> None:
-        # No PyInstaller dependency in the unit-test environment. Emulate the
-        # stable public Splash spec and its internal bootloader Tcl template.
+    def test_generated_spec_changes_actual_tcl_template(self) -> None:
         pyinstaller = ModuleType("PyInstaller")
         building = ModuleType("PyInstaller.building")
         templates = ModuleType("PyInstaller.building.splash_templates")
         templates.raise_window = "raise .\n"
+        templates.position_window_on_top = (
+            "wm overrideredirect . 1\n"
+            "wm geometry . +0+0\n"
+            "wm attributes . -topmost 1\n"
+        )
         building.splash_templates = templates
         pyinstaller.building = building
         captured: dict[str, object] = {}
 
         def splash(*_args, **kwargs):
             captured["kwargs"] = kwargs
-            captured["tcl"] = templates.raise_window
+            captured["window_tcl"] = templates.position_window_on_top
+            captured["raise_tcl"] = templates.raise_window
 
         minimal_spec = "splash = Splash(\n    'splash.png',\n)\n"
         with patch.dict(sys.modules, {
@@ -65,14 +81,42 @@ class SplashSpecTests(unittest.TestCase):
             "PyInstaller.building": building,
             "PyInstaller.building.splash_templates": templates,
         }):
-            exec(configure_splash_visibility(minimal_spec), {"Splash": splash})
+            exec(configure_splash_visibility(minimal_spec, title="P3D Browser Loading"), {
+                "Splash": splash,
+            })
         self.assertEqual(captured["kwargs"], {"always_on_top": True})
+        self.assertIn("wm overrideredirect . 0", captured["window_tcl"])
+        self.assertNotIn("wm overrideredirect . 1", captured["window_tcl"])
         self.assertEqual(
-            captured["tcl"],
-            "raise .\n\nafter 1500 {wm attributes . -topmost 0; raise .}\n",
+            captured["raise_tcl"],
+            "raise .\n"
+            "\nwm title . {P3D Browser Loading}\n"
+            "wm resizable . 0 0\n"
+            "wm protocol . WM_DELETE_WINDOW {}\n"
+            "after 1500 {wm attributes . -topmost 0}\n",
         )
 
-    def test_rejects_spec_without_one_splash_target(self) -> None:
+    def test_fails_clearly_when_pyinstaller_changes_splash_template(self) -> None:
+        pyinstaller = ModuleType("PyInstaller")
+        building = ModuleType("PyInstaller.building")
+        templates = ModuleType("PyInstaller.building.splash_templates")
+        templates.raise_window = "raise .\n"
+        templates.position_window_on_top = "unsupported new window script"
+        building.splash_templates = templates
+        pyinstaller.building = building
+        minimal_spec = "splash = Splash(\n    'splash.png',\n)\n"
+        with patch.dict(sys.modules, {
+            "PyInstaller": pyinstaller,
+            "PyInstaller.building": building,
+            "PyInstaller.building.splash_templates": templates,
+        }):
+            with self.assertRaisesRegex(RuntimeError, "template has changed"):
+                exec(configure_splash_visibility(minimal_spec), {"Splash": lambda *a, **k: None})
+
+    def test_rejects_bad_titles_and_ambiguous_specs(self) -> None:
+        for title in ("", "bad } title", "bad\n title"):
+            with self.assertRaisesRegex(ValueError, "title"):
+                configure_splash_visibility(self._SPEC, title=title)
         with self.assertRaisesRegex(ValueError, "expected one"):
             configure_splash_visibility("a = Analysis([])\n")
         with self.assertRaisesRegex(ValueError, "expected one"):
