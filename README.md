@@ -71,6 +71,18 @@ Road networks are generated from mapped road geometry and converted into OFP/CWA
 
 The generator handles paved, dirt and gravel roads, junctions and bridges while adapting the surrounding terrain to keep roads usable. Road grade, terrain adjustment, connection tolerances and related limits are configurable.
 
+**City and town sidewalks (milestone 9):** Mapped city/town roads and
+`landuse=residential` streets receive fitted, walkable paved slabs on both
+sides by default. OpenStreetMap `sidewalk=left/right/both/no` and
+`sidewalk:left/right` override inferred sides. Gravel and dirt roads require
+an explicit sidewalk tag, and village/rural roads are not inferred. Sidewalk
+slabs are generated as correctly sized world-local P3Ds and bundled with their
+paving texture, instead of stretching a stock plaza model along the road.
+Bridge/tunnel roads, water, building cells and road junction conflicts are
+skipped. Use `--no-sidewalks` to disable this pass, or tune
+`--sidewalk-width`, `--sidewalk-segment-length`, and
+`--max-sidewalk-objects` when building large cities.
+
 **Default gravel donors:** Gravel-tagged OSM roads now prefer the stock
 `o\\road\\asf25.p3d` straight family with
 `o\\road\\asf10 25.p3d` as the selected curve-style donor, instead
