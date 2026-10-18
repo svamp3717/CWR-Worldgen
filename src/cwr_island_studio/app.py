@@ -14,6 +14,8 @@ from typing import Callable
 from PIL import Image, ImageTk
 
 from .core import IslandDocument, MapObject
+from .roads import is_road_model, plan_straight_road, road_segment
+from .textures import render_real_textures
 from importlib.metadata import PackageNotFoundError, version
 
 try:
@@ -45,12 +47,19 @@ class IslandStudio:
         self.zoom = 1.0
         self._pan_origin: tuple[int, int, float, float] | None = None
         self._last_brush: tuple[int, int] | None = None
+        self._road_anchor: tuple[float, float] | None = None
+        self._road_cursor: tuple[float, float] | None = None
 
         self.cell_size = tk.StringVar(value="50")
         self.height_scale = tk.StringVar(value="1")
         self.layer = tk.StringVar(value="Elevation")
         self.tool = tk.StringVar(value="Select")
         self.show_objects = tk.BooleanVar(value=True)
+        self.show_roads = tk.BooleanVar(value=True)
+        self.water_level = tk.StringVar(value="0")
+        self.asset_root: Path | None = None
+        self.texture_folder_label = tk.StringVar(value="Texture folder: not selected")
+        self.road_model = tk.StringVar(value=r"o\road\sil25.p3d")
         self.brush_radius = tk.StringVar(value="75")
         self.brush_strength = tk.StringVar(value="1")
         self.paint_slot = tk.StringVar(value="0")
@@ -101,22 +110,38 @@ class IslandStudio:
         self.canvas.bind("<B2-Motion>", self._pan_move)
         self.canvas.bind("<ButtonPress-1>", self._left_click)
         self.canvas.bind("<B1-Motion>", self._left_drag)
+        self.canvas.bind("<Motion>", self._mouse_move)
+        self.canvas.bind("<Escape>", lambda _e: self._cancel_road())
 
         ttk.Label(side, text="View", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
         ttk.Combobox(
             side, textvariable=self.layer,
-            state="readonly", values=("Elevation", "Texture slots"),
+            state="readonly", values=("Elevation", "Texture slots", "Actual textures", "Road preview"),
         ).pack(fill="x", pady=(4, 7))
         self.layer.trace_add("write", lambda *_: self._queue_draw())
         ttk.Checkbutton(
             side, text="Show world objects", variable=self.show_objects,
             command=self._queue_draw,
-        ).pack(anchor="w", pady=(0, 13))
+        ).pack(anchor="w")
+        ttk.Checkbutton(
+            side, text="Show roads as lines", variable=self.show_roads,
+            command=self._queue_draw,
+        ).pack(anchor="w", pady=(0, 4))
+        ttk.Label(side, text="Water level, metres").pack(anchor="w")
+        water_entry = ttk.Entry(side, textvariable=self.water_level, width=8)
+        water_entry.pack(fill="x", pady=(0, 4))
+        water_entry.bind("<Return>", lambda _e: self._queue_draw())
+        water_entry.bind("<FocusOut>", lambda _e: self._queue_draw())
+        ttk.Button(
+            side, text="Choose texture assets folder", command=self._choose_texture_root,
+        ).pack(fill="x", pady=(4, 2))
+        ttk.Label(side, textvariable=self.texture_folder_label, wraplength=230).pack(anchor="w", pady=(0, 8))
+        ttk.Separator(side).pack(fill="x", pady=(4, 9))
 
         ttk.Label(side, text="Edit tool", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
         ttk.Combobox(
             side, textvariable=self.tool, state="readonly",
-            values=("Select", "Raise terrain", "Lower terrain", "Paint texture"),
+            values=("Select", "Raise terrain", "Lower terrain", "Paint texture", "Draw road line", "Erase road"),
         ).pack(fill="x", pady=(4, 7))
         for label, var in (
             ("Brush radius, metres", self.brush_radius),
@@ -126,6 +151,14 @@ class IslandStudio:
             ttk.Label(side, text=label).pack(anchor="w", pady=(3, 0))
             ttk.Entry(side, textvariable=var).pack(fill="x", pady=(0, 4))
 
+        ttk.Label(side, text="Straight road model").pack(anchor="w", pady=(8, 0))
+        ttk.Combobox(
+            side, textvariable=self.road_model,
+            values=(r"o\road\sil25.p3d", r"o\road\asf25.p3d",
+                    r"o\road\ces25.p3d", r"o\road\kos25.p3d",
+                    r"o\road\sil12.p3d", r"o\road\sil6.p3d"),
+        ).pack(fill="x")
+        ttk.Label(side, text="Road: click start/end; Esc cancels", wraplength=230).pack(anchor="w", pady=(2, 0))
         ttk.Separator(side, orient="horizontal").pack(fill="x", pady=13)
         ttk.Label(side, text="Selected object", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
         for label, var in (
@@ -202,6 +235,8 @@ class IslandStudio:
             self.document.close()
         self.document = doc
         self.selected = None
+        self._road_anchor = None
+        self._road_cursor = None
         self._busy = False
         self.metadata.set(
             f"{doc.width:,}×{doc.height:,}  |  {doc.object_count:,} objects"
@@ -280,14 +315,49 @@ class IslandStudio:
             return
         left, top, right, bottom = self._extent()
         try:
-            pixels = self.document.viewport(
-                left, top, right, bottom, width, height,
-                textures=self.layer.get() == "Texture slots",
-            )
+            view = self.layer.get()
+            if view == "Actual textures":
+                fallback = self.document.viewport(
+                    left, top, right, bottom, width, height, textures=True,
+                )
+                slots, x, z = self.document.sample_viewport(
+                    left, top, right, bottom, width, height, textures=True,
+                )
+                pixels, loaded = render_real_textures(
+                    slots, x, z, self.document.texture_paths,
+                    self.asset_root, fallback, self.document.cell_size,
+                )
+                if self.asset_root is None:
+                    self.status.set("Choose a texture assets folder to show real texture images")
+                elif loaded == 0:
+                    self.status.set("No matching loose images found; showing texture-slot colours")
+            else:
+                pixels = self.document.viewport(
+                    left, top, right, bottom, width, height,
+                    textures=view == "Texture slots",
+                    water_level=self._num(self.water_level, "Water level"),
+                )
             image = Image.fromarray(pixels, "RGB")
             self._image = ImageTk.PhotoImage(image, master=self.canvas)
             self.canvas.delete("all")
             self.canvas.create_image(0, 0, anchor="nw", image=self._image)
+            if self.show_roads.get() or view == "Road preview":
+                for obj in self.document.visible_objects(
+                    left, top, right, bottom, limit=3200, roads_only=True,
+                ):
+                    segment = road_segment(obj.x, obj.z, obj.heading, obj.model_path)
+                    if segment is None:
+                        sx, sz = self._to_screen(obj.x, obj.z)
+                        self.canvas.create_oval(sx - 2.5, sz - 2.5, sx + 2.5, sz + 2.5,
+                                                fill="#ed974a", outline="")
+                    else:
+                        a, b = segment
+                        x0, z0 = self._to_screen(*a)
+                        x1, z1 = self._to_screen(*b)
+                        self.canvas.create_line(
+                            x0, z0, x1, z1, fill="#ed974a",
+                            width=max(2, min(5, self.zoom * 3)),
+                        )
             if self.show_objects.get():
                 self._visible = self.document.visible_objects(
                     left, top, right, bottom, limit=2700,
@@ -303,8 +373,90 @@ class IslandStudio:
                     )
             else:
                 self._visible = ()
-        except Exception as exc:
+            if self._road_anchor is not None:
+                first = self._to_screen(*self._road_anchor)
+                self.canvas.create_oval(
+                    first[0] - 4, first[1] - 4, first[0] + 4, first[1] + 4,
+                    outline="#ffe18b", width=2,
+                )
+                if self._road_cursor is not None:
+                    second = self._to_screen(*self._road_cursor)
+                    self.canvas.create_line(
+                        *first, *second, fill="#ffe18b", dash=(6, 4), width=2,
+                    )
+                    try:
+                        planned = plan_straight_road(
+                            self._road_anchor, self._road_cursor, self.road_model.get(),
+                            maximum_pieces=10000,
+                        )
+                        for placement in planned[:250]:
+                            centre = self._to_screen(placement.x, placement.z)
+                            self.canvas.create_oval(
+                                centre[0] - 2, centre[1] - 2,
+                                centre[0] + 2, centre[1] + 2,
+                                fill="#f9f0a1", outline="",
+                            )
+                    except ValueError:
+                        pass
+        except (ValueError, OSError) as exc:
             self.status.set(f"Preview error: {exc}")
+
+    def _choose_texture_root(self) -> None:
+        folder = filedialog.askdirectory(title="Choose extracted game texture assets folder")
+        if folder:
+            self.asset_root = Path(folder)
+            self.texture_folder_label.set(f"Texture folder: {self.asset_root.name}")
+            self._queue_draw()
+
+    def _mouse_move(self, event: tk.Event) -> None:
+        if self._road_anchor is not None and self.tool.get() == "Draw road line":
+            self._road_cursor = self._to_world(event.x, event.y)
+            self._queue_draw()
+
+    def _cancel_road(self) -> None:
+        self._road_anchor = self._road_cursor = None
+        self.status.set("Road stroke cancelled")
+        self._queue_draw()
+
+    def _road_action(self, position: tuple[float, float], mode: str) -> None:
+        if self.document is None:
+            return
+        x, z = position
+        if mode == "Erase road":
+            roads = self.document.visible_objects(
+                x - 25, z - 25, x + 25, z + 25,
+                limit=4000, roads_only=True,
+            )
+            nearest = min(roads, key=lambda r: (r.x - x) ** 2 + (r.z - z) ** 2,
+                          default=None)
+            if nearest is not None and math.hypot(nearest.x - x, nearest.z - z) <= 15:
+                self.document.delete_object(nearest.index)
+                self.status.set(f"Removed road object ID {nearest.object_id}")
+                self._queue_draw()
+            return
+        if self._road_anchor is None:
+            self._road_anchor = position
+            self._road_cursor = position
+            self.status.set("Road start set. Move to preview, then click the end point.")
+            self._queue_draw()
+            return
+        try:
+            placed = plan_straight_road(
+                self._road_anchor, position, self.road_model.get(),
+            )
+            for piece in placed:
+                col = min(self.document.width - 1, max(0, int(piece.x / self.document.cell_size)))
+                row = min(self.document.height - 1, max(0, int(piece.z / self.document.cell_size)))
+                y = self.document.terrain_at(col, row)
+                self.document.add_object(
+                    self.road_model.get(), x=piece.x, y=y, z=piece.z,
+                    heading=piece.heading,
+                )
+            self.status.set(f"Placed {len(placed):,} straight road pieces (unsaved)")
+            self._road_anchor = self._road_cursor = None
+            self._queue_draw()
+        except (ValueError, OverflowError) as exc:
+            self.status.set(str(exc))
 
     def _to_screen(self, x: float, z: float) -> tuple[float, float]:
         return (x - self.view_x) * self.zoom, (z - self.view_z) * self.zoom
@@ -343,13 +495,18 @@ class IslandStudio:
         self._left_action(event)
 
     def _left_drag(self, event: tk.Event) -> None:
-        if self.tool.get() != "Select":
+        if self.tool.get() in ("Raise terrain", "Lower terrain", "Paint texture"):
             self._left_action(event)
 
     def _left_action(self, event: tk.Event) -> None:
         if not self.document or self._busy:
             return
         mode = self.tool.get()
+        if mode in ("Draw road line", "Erase road"):
+            position = self._to_world(event.x, event.y)
+            if 0 <= position[0] < self.document.world_width and 0 <= position[1] < self.document.world_height:
+                self._road_action(position, mode)
+            return
         if mode == "Select":
             nearest = None
             distance = 12 ** 2
