@@ -828,7 +828,7 @@ def _fit(
             plans,
             elevations,
             spec,
-        progress_callback=progress_callback,
+            progress_callback=progress_callback,
         )
         successful_keys = _successful_plan_keys(
             report, plans, spec=spec, progress_callback=progress_callback
@@ -954,7 +954,7 @@ def _fit(
                 generated_fallbacks,
                 elevations,
                 spec,
-            progress_callback=progress_callback,
+                progress_callback=progress_callback,
             )
             generated_success = _successful_plan_keys(
                 generated_fit,
@@ -1012,7 +1012,7 @@ def _fit(
                 plans,
                 elevations,
                 spec,
-            progress_callback=progress_callback,
+                progress_callback=progress_callback,
             )
             if not active:
                 return base_report
@@ -1061,7 +1061,7 @@ def _fit(
             plans,
             elevations,
             spec,
-        progress_callback=progress_callback,
+            progress_callback=progress_callback,
         )
     finally:
         if planning is not None and session_token is not None:
