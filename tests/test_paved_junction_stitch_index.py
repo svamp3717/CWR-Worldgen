@@ -134,6 +134,27 @@ def test_oversized_axis_fallback_stays_searchable() -> None:
     assert fallback._stitch_candidate_indices(index, plan) == (0,)
 
 
+def test_stitch_radius_supports_multiple_connectors_and_no_connectors() -> None:
+    """Regression: never pass default= to max() with multiple arguments."""
+    near = _road(10, r"o\\road\\sil6.p3d", 0.0, _RADIUS + 3.1)
+    remote_arm = _road(11, r"o\\road\\sil6.p3d", 0.0, 128.0)
+    index = fallback._build_stitch_road_index(
+        _report((near, remote_arm)), _spec()
+    )
+    plan = SimpleNamespace(
+        point=(0.0, 0.0),
+        arms=(
+            SimpleNamespace(connector=SimpleNamespace(point=(0.0, _RADIUS))),
+            SimpleNamespace(connector=SimpleNamespace(point=(0.0, 128.0))),
+        ),
+    )
+    assert fallback._stitch_candidate_indices(index, plan) == (0, 1)
+
+    # There may be no arms in low-level callers; the hub extent still applies.
+    empty = SimpleNamespace(point=(0.0, 0.0), arms=())
+    assert fallback._stitch_candidate_indices(index, empty) == (0,)
+
+
 def test_large_map_queries_only_visit_nearby_roads() -> None:
     plan = _plan((0.0, 0.0))
     nearby = _road(2, r"o\road\sil6.p3d", 0.0, _RADIUS + 3.1)
