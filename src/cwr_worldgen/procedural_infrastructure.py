@@ -380,6 +380,7 @@ _TEXTURE_FILE_STEMS = {
     "power_pole": "up",
     "power_tower": "ut",
     "water_tower": "uw",
+    "sidewalk": "sw",
 }
 
 
@@ -398,6 +399,7 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         "gravel_junction": (126, 119, 103),
         "dirt": (112, 91, 60),
         "paved": (69, 70, 68),
+        "sidewalk": (145, 142, 135),
         "power_pole": (116, 102, 78),
         "power_tower": (118, 120, 119),
         "water_tower": (142, 148, 151),
@@ -435,6 +437,12 @@ def _texture_image(kind: str, size: int = 128) -> Image.Image:
         return create_gravel_junction_texture_image(size)
     elif kind == "dirt":
         return create_dirt_road_texture_image(size)
+    elif kind == "sidewalk":
+        # Fine, low-contrast rectangular paving blocks for pedestrian slabs.
+        for y in range(0, size, 24):
+            draw.line((0, y, size, y), fill=(115, 113, 108), width=2)
+            for x in range((y // 24 % 2) * 24, size, 48):
+                draw.line((x, y, x, min(size, y + 24)), fill=(120, 117, 111), width=2)
     elif kind == "paved":
         # Keep fallback pavement deliberately plain. Stock road P3Ds remain the
         # preferred visible asset; this texture only covers geometry for which
@@ -503,6 +511,29 @@ def _geometry_from_boxes(boxes: tuple[tuple[float, float, float, float, float, f
     mass = tuple(max(20.0, 2500.0 / max(1, len(points))) for _ in points)
     properties = (("map", map_value),) if map_value else ()
     return _Lod(tuple(points), (), tuple(faces), _GEOMETRY_LOD, mass, selections, properties)
+
+
+def _sidewalk_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
+    """Narrow, walkable paving slab with real dimensions, not a stock plaza tile."""
+    half_width = key.width_m * 0.5
+    half_length = key.length_m * 0.5
+    slab = (-half_width, half_width, -0.04, 0.12, -half_length, half_length)
+    points: list[tuple[float, float, float]] = []
+    faces: list[_Face] = []
+    _append_box(
+        points, faces, x0=slab[0], x1=slab[1], y0=slab[2],
+        y1=slab[3], z0=slab[4], z1=slab[5], texture=texture,
+    )
+    visual = _Lod(
+        tuple(points), ((0.0, 1.0, 0.0),), tuple(faces), _VISUAL_LOD,
+        properties=(("autocenter", "0"),),
+    )
+    geometry = _geometry_from_boxes((slab,))
+    land = _Lod((
+        (-half_width, 0.0, -half_length), (half_width, 0.0, -half_length),
+        (half_width, 0.0, half_length), (-half_width, 0.0, half_length),
+    ), (), (), _LAND_CONTACT_LOD)
+    return visual, geometry, land
 
 
 def _barrier_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
@@ -1872,6 +1903,8 @@ def write_infrastructure_mlod(
         lods = _bridge_lods(key, texture_path)
     elif key.kind == "road":
         lods = _road_lods(key, texture_path, road_surface_style)
+    elif key.kind == "sidewalk":
+        lods = _sidewalk_lods(key, texture_path)
     elif key.kind == "rock":
         lods = _rock_lods(key, texture_path)
     elif key.kind == "utility":
@@ -2231,6 +2264,7 @@ def _infrastructure_texture_kind(key: InfrastructureModelKey) -> str:
 
 
 class ProceduralInfrastructureLibrary:
+    _SIDEWALK_PATTERN = re.compile(r"^sw_w(?P<width>\d{3})_l(?P<length>\d{4})\.p3d$", re.IGNORECASE)
     _PATTERN = re.compile(r"^(bar|br|rock)_([a-z0-9_]+)_w(\d+)_l(\d+)\.p3d$", re.IGNORECASE)
     _GRAVEL_PATTERN = re.compile(r"^gravel(25|12|6|3)(?:_[lr](?:05|10|15|20|30|45))?\.p3d$", re.IGNORECASE)
     _GRAVEL_JUNCTION_PATTERN = re.compile(r"^gravel_j([34])\.p3d$", re.IGNORECASE)
@@ -2301,12 +2335,24 @@ class ProceduralInfrastructureLibrary:
         self._usage: Counter[InfrastructureModelKey] = Counter()
 
     def model_path(self, key: InfrastructureModelKey) -> str:
+        if key.kind == "sidewalk":
+            return rf"{self.world_name}\i\sw_w{key.width_dm:03d}_l{key.length_dm:04d}.p3d"
         if key.kind == "road":
             return rf"{self.world_name}\i\{key.subtype}.p3d"
         if key.kind == "utility":
             return utility_model_path(self.world_name, key.subtype)
         prefix = {"barrier": "bar", "bridge": "br", "rock": "rock"}[key.kind]
         return rf"{self.world_name}\i\{prefix}_{key.subtype}_w{key.width_dm:03d}_l{key.length_dm:03d}.p3d"
+
+    def sidewalk_model(self, width_m: float, length_m: float) -> str:
+        """Register one reusable, width/length-fitted sidewalk slab."""
+        key = InfrastructureModelKey(
+            "sidewalk", "paving",
+            max(8, min(999, int(round(width_m * 10.0)))),
+            max(10, min(9999, int(round(length_m * 10.0)))),
+        )
+        self._usage[key] += 1
+        return self.model_path(key)
 
     def barrier_model(self, subtype: str, length_m: float = 6.0) -> str:
         if subtype.casefold() == "fence":
@@ -2351,6 +2397,13 @@ class ProceduralInfrastructureLibrary:
         if not self.is_generated_model(model_path):
             return
         filename = model_path.rsplit("\\", 1)[-1]
+        sidewalk_match = self._SIDEWALK_PATTERN.fullmatch(filename)
+        if sidewalk_match:
+            self._usage[InfrastructureModelKey(
+                "sidewalk", "paving", int(sidewalk_match.group("width")),
+                int(sidewalk_match.group("length")),
+            )] += count
+            return
         junction_match = self._GRAVEL_JUNCTION_PATTERN.fullmatch(filename)
         if junction_match:
             degree = int(junction_match.group(1))
@@ -2683,6 +2736,8 @@ class ProceduralInfrastructureLibrary:
                 model_cache_version = (
                     "procedural-infrastructure-model-v21-skew-paved-junction-seams"
                 )
+            elif key.kind == "sidewalk":
+                model_cache_version = "procedural-infrastructure-model-v1-city-pavement-slab"
             elif key.kind == "bridge":
                 model_cache_version = (
                     "procedural-infrastructure-model-v17-single-span-segmented-collision"
