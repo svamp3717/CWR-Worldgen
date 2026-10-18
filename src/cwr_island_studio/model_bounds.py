@@ -175,6 +175,14 @@ def footprint_contains(
     x: float, z: float,
 ) -> bool:
     """Hit-test the rotated four-corner preview rectangle."""
+    # A line-like or point-like LOD has no selectable polygon area.
+    first, second, third = corners[:3]
+    area = (
+        (second[0] - first[0]) * (third[1] - first[1])
+        - (second[1] - first[1]) * (third[0] - first[0])
+    )
+    if abs(area) <= 1e-9:
+        return False
     crosses = [
         (corners[(i + 1) % 4][0] - corners[i][0]) * (z - corners[i][1])
         - (corners[(i + 1) % 4][1] - corners[i][1]) * (x - corners[i][0])
