@@ -1,8 +1,9 @@
-"""Make PyInstaller's one-file tool splash window non-topmost.
+"""Show the Windows bootloader splash first, then let other apps cover it.
 
-PyInstaller's --splash flag generates a Splash() target with the default
-always_on_top=True. This build-time adjustment keeps the progress window but
-allows users to switch to other applications during a long extraction.
+A splash created *without* topmost starts behind the active application on
+some Windows desktops (and lacks a taskbar button because it is borderless).
+Keep PyInstaller's normal topmost startup long enough to make the image
+visible, then let Tcl clear that attribute in the splash's own event loop.
 """
 from __future__ import annotations
 
@@ -32,11 +33,29 @@ def disable_splash_always_on_top(source: str) -> str:
     if len(existing) > 1:
         raise ValueError("multiple Splash always_on_top options")
     if existing:
-        target = _TOPMOST.sub(r"\g<indent>always_on_top=False,", target, count=1)
+        target = _TOPMOST.sub(r"\g<indent>always_on_top=True,", target, count=1)
     else:
-        # Splash() takes its image path as a positional argument. Put this
-        # option *after* it (and after the other generated keyword arguments).
-        target = target.rstrip("\n") + "\n" + call.group("indent") + "    always_on_top=False,\n"
+        # Splash() takes its image path as a positional argument. Put the
+        # option after positional and generated keyword arguments.
+        target = target.rstrip("\n") + "\n" + call.group("indent") + "    always_on_top=True,\n"
+
+    # PyInstaller/building/splash_templates.py adds raise_window to its Tcl
+    # bootloader splash script. Inserting a Tk callback there brings the window
+    # to the foreground reliably at startup, but removes TOPMOST 1.5 seconds
+    # later without waiting for the Python child process to start.
+    setup = (
+        "from PyInstaller.building import splash_templates as _cwr_splash_templates\n"
+        "_cwr_splash_templates.raise_window += "
+        "'\\nafter 1500 {wm attributes . -topmost 0}\\n'\n\n"
+    )
+    if "_cwr_splash_templates.raise_window" not in source:
+        source = source[:call.start()] + setup + source[call.start():]
+        # Recompute the source offsets after inserting the setup.
+        call = _SPLASH_CALL.search(source)
+        assert call is not None
+        close = re.search(r"(?m)^[ \t]*\)[ \t]*$", source[call.end():])
+        assert close is not None
+        end = call.end() + close.start()
     return source[:call.end()] + target + source[end:]
 
 
@@ -48,7 +67,7 @@ def main() -> int:
     original = spec.read_text(encoding="utf-8")
     modified = disable_splash_always_on_top(original)
     spec.write_text(modified, encoding="utf-8")
-    print(f"Configured non-topmost loading screen: {spec}")
+    print(f"Configured visible, auto-unpinned loading screen: {spec}")
     return 0
 
 
