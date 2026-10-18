@@ -9,6 +9,7 @@ on:
       - "src/cwr_island_studio/**"
       - "tests/test_island_studio.py"
       - "tests/test_island_studio_layers.py"
+      - "tests/test_island_studio_navigation_pbos.py"
       - "tools/island_studio_entry.py"
       - ".github/workflows/island-studio.yml"
       - "pyproject.toml"
@@ -42,7 +43,7 @@ jobs:
           python -m compileall -q src/cwr_island_studio tools/island_studio_entry.py
       - name: Test sparse editing and large-world indexes
         run: |
-          python -m pytest -q tests/test_island_studio.py tests/test_island_studio_layers.py
+          python -m pytest -q tests/test_island_studio.py tests/test_island_studio_layers.py tests/test_island_studio_navigation_pbos.py
 
   windows:
     name: Package Windows editor (manual opt-in only)
@@ -63,7 +64,7 @@ jobs:
       - name: Test Windows binary editing
         shell: pwsh
         run: |
-          python -m pytest -q tests/test_island_studio.py tests/test_island_studio_layers.py
+          python -m pytest -q tests/test_island_studio.py tests/test_island_studio_layers.py tests/test_island_studio_navigation_pbos.py
           if ($LASTEXITCODE -ne 0) { throw "Island Studio tests failed" }
       - name: Create standalone executable
         shell: pwsh
