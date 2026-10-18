@@ -15,7 +15,9 @@ from PIL import Image, ImageTk
 
 from .core import IslandDocument, MapObject
 from .roads import is_road_model, plan_straight_road, road_segment
-from .textures import render_real_textures
+from .navigation import zoom_around
+from .pbo_textures import PboTextures
+from .textures import clear_archive_texture_cache, render_real_textures
 from importlib.metadata import PackageNotFoundError, version
 
 try:
@@ -58,7 +60,10 @@ class IslandStudio:
         self.show_roads = tk.BooleanVar(value=True)
         self.water_level = tk.StringVar(value="0")
         self.asset_root: Path | None = None
+        self.pbo_textures: PboTextures | None = None
+        self._loading_pbos = False
         self.texture_folder_label = tk.StringVar(value="Texture folder: not selected")
+        self.pbo_label = tk.StringVar(value="PBO textures: none selected")
         self.road_model = tk.StringVar(value=r"o\road\sil25.p3d")
         self.brush_radius = tk.StringVar(value="75")
         self.brush_strength = tk.StringVar(value="1")
@@ -82,6 +87,8 @@ class IslandStudio:
         ttk.Button(header, text="Open WRP", command=self._open_dialog).pack(side="left", padx=3)
         ttk.Button(header, text="Save As", command=self._save_dialog).pack(side="left", padx=3)
         ttk.Button(header, text="Fit map", command=self._fit).pack(side="left", padx=3)
+        ttk.Button(header, text="−", width=3, command=lambda: self._zoom_button(0.8)).pack(side="left", padx=(12, 2))
+        ttk.Button(header, text="+", width=3, command=lambda: self._zoom_button(1.25)).pack(side="left", padx=2)
         ttk.Label(header, text="Grid metres").pack(side="left", padx=(20, 2))
         ttk.Entry(header, textvariable=self.cell_size, width=6).pack(side="left")
         ttk.Label(header, text="Height scale").pack(side="left", padx=(13, 2))
@@ -144,7 +151,10 @@ class IslandStudio:
         ttk.Button(
             side, text="Choose texture assets folder", command=self._choose_texture_root,
         ).pack(fill="x", pady=(4, 2))
-        ttk.Label(side, textvariable=self.texture_folder_label, wraplength=230).pack(anchor="w", pady=(0, 8))
+        ttk.Label(side, textvariable=self.texture_folder_label, wraplength=230).pack(anchor="w", pady=(0, 4))
+        ttk.Button(side, text="Select texture PBOs…", command=self._choose_pbos).pack(fill="x", pady=(4, 2))
+        ttk.Button(side, text="Clear selected PBOs", command=self._clear_pbos).pack(fill="x", pady=(2, 4))
+        ttk.Label(side, textvariable=self.pbo_label, wraplength=230).pack(anchor="w", pady=(0, 8))
         ttk.Separator(side).pack(fill="x", pady=(4, 9))
 
         ttk.Label(side, text="Edit tool", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
@@ -186,10 +196,20 @@ class IslandStudio:
         footer = ttk.Frame(self.root, padding=(8, 5))
         footer.pack(fill="x")
         ttk.Label(footer, textvariable=self.status).pack(side="left")
-        ttk.Label(footer, text="Wheel: zoom   Right-drag: pan   Left-click: select / paint").pack(side="right")
+        ttk.Label(footer, text="+ / −: pointer zoom   Wheel: zoom   Right-drag: pan").pack(side="right")
         self.root.bind("<Control-o>", lambda _e: self._open_dialog())
         self.root.bind("<Control-Shift-S>", lambda _e: self._save_dialog())
         self.root.bind("<Control-s>", lambda _e: self._save_dialog())
+        # Keep text entry usable for negative coordinates and numeric settings.
+        for sequence, factor in (
+            ("<KeyPress-plus>", 1.25), ("<KeyPress-equal>", 1.25),
+            ("<KeyPress-minus>", 0.8), ("<KeyPress-underscore>", 0.8),
+            ("<KP_Add>", 1.25), ("<KP_Subtract>", 0.8),
+            ("<Control-plus>", 1.25), ("<Control-equal>", 1.25),
+            ("<Control-minus>", 0.8), ("<Control-KP_Add>", 1.25),
+            ("<Control-KP_Subtract>", 0.8),
+        ):
+            self.root.bind(sequence, lambda event, amount=factor: self._zoom_hotkey(event, amount))
 
     def _num(self, value: tk.StringVar, name: str) -> float:
         try:
@@ -266,6 +286,24 @@ class IslandStudio:
                     self.status.set(f"Exported successfully: {value}")
                 elif kind == "saving":
                     self.status.set(str(value))
+                elif kind == "pbos":
+                    self._loading_pbos = False
+                    clear_archive_texture_cache()
+                    if self.pbo_textures is not None:
+                        self.pbo_textures.close()
+                    self.pbo_textures = value
+                    self.pbo_label.set(
+                        f"{len(value.archives):,} PBOs; {len(value.members):,} indexed textures"
+                    )
+                    self.status.set(
+                        f"Texture archives ready: {len(value.members):,} indexed paths. "
+                        "Choose Actual textures to preview."
+                    )
+                    self._queue_draw()
+                elif kind == "pbo_error":
+                    self._loading_pbos = False
+                    self.status.set(f"PBO selection failed: {value}")
+                    messagebox.showerror("Texture PBOs", str(value))
                 elif kind == "error":
                     self._busy = False
                     self.status.set(str(value))
@@ -335,11 +373,12 @@ class IslandStudio:
                 pixels, loaded = render_real_textures(
                     slots, x, z, self.document.texture_paths,
                     self.asset_root, fallback, self.document.cell_size,
+                    archives=self.pbo_textures,
                 )
-                if self.asset_root is None:
-                    self.status.set("Choose a texture assets folder to show real texture images")
+                if self.asset_root is None and self.pbo_textures is None:
+                    self.status.set("Choose a texture folder or PBOs to show real images")
                 elif loaded == 0:
-                    self.status.set("No matching loose images found; showing texture-slot colours")
+                    self.status.set("No matching texture files found; showing texture-slot colours")
             else:
                 pixels = self.document.viewport(
                     left, top, right, bottom, width, height,
@@ -417,6 +456,44 @@ class IslandStudio:
             self.texture_folder_label.set(f"Texture folder: {self.asset_root.name}")
             self._queue_draw()
 
+    def _choose_pbos(self) -> None:
+        if self._loading_pbos:
+            return
+        chosen = filedialog.askopenfilenames(
+            title="Select one or more game texture PBOs",
+            filetypes=[
+                ("Game archives", "*.pbo *.pbo.zst *.ifa *.ifa.zst"),
+                ("PBO archives", "*.pbo"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not chosen:
+            return
+        self._loading_pbos = True
+        paths = tuple(Path(path) for path in chosen)
+        self.pbo_label.set(f"Indexing {len(paths)} archive(s)…")
+        self.status.set("Reading PBO texture tables in the background…")
+
+        def index() -> None:
+            try:
+                archives = PboTextures(paths)
+                self._messages.put(("pbos", archives))
+            except Exception as exc:
+                self._messages.put(("pbo_error", str(exc)))
+
+        self._executor.submit(index)
+
+    def _clear_pbos(self) -> None:
+        if self._loading_pbos:
+            self.status.set("Wait for PBO indexing to complete before clearing")
+            return
+        clear_archive_texture_cache()
+        if self.pbo_textures is not None:
+            self.pbo_textures.close()
+        self.pbo_textures = None
+        self.pbo_label.set("PBO textures: none selected")
+        self._queue_draw()
+
     def _mouse_move(self, event: tk.Event) -> None:
         if self._road_anchor is not None and self.tool.get() == "Draw road line":
             self._road_cursor = self._to_world(event.x, event.y)
@@ -473,17 +550,41 @@ class IslandStudio:
     def _to_world(self, sx: float, sz: float) -> tuple[float, float]:
         return self.view_x + sx / self.zoom, self.view_z + sz / self.zoom
 
-    def _zoom_at(self, event: tk.Event, factor: float) -> None:
+    def _zoom_at_point(self, x: float, y: float, factor: float) -> None:
         if not self.document:
             return
-        wx, wz = self._to_world(event.x, event.y)
         fitted = min(
             max(1, self.canvas.winfo_width()) / self.document.world_width,
             max(1, self.canvas.winfo_height()) / self.document.world_height,
         )
-        self.zoom = min(max(self.zoom * factor, fitted * 0.35), 8.0)
-        self.view_x, self.view_z = wx - event.x / self.zoom, wz - event.y / self.zoom
+        self.view_x, self.view_z, self.zoom = zoom_around(
+            self.view_x, self.view_z, self.zoom,
+            x, y, factor, fitted * 0.35, 8.0,
+        )
         self._queue_draw()
+
+    def _pointer_canvas_point(self) -> tuple[float, float]:
+        px, py = self.root.winfo_pointerxy()
+        x = px - self.canvas.winfo_rootx()
+        y = py - self.canvas.winfo_rooty()
+        if not (0 <= x < self.canvas.winfo_width() and
+                0 <= y < self.canvas.winfo_height()):
+            x = self.canvas.winfo_width() / 2
+            y = self.canvas.winfo_height() / 2
+        return x, y
+
+    def _zoom_button(self, factor: float) -> None:
+        self._zoom_at_point(*self._pointer_canvas_point(), factor)
+
+    def _zoom_hotkey(self, event: tk.Event, factor: float) -> str | None:
+        focused = self.root.focus_get()
+        if isinstance(focused, (tk.Entry, ttk.Entry, ttk.Combobox, tk.Text, ttk.Spinbox)):
+            return None
+        self._zoom_button(factor)
+        return "break"
+
+    def _zoom_at(self, event: tk.Event, factor: float) -> None:
+        self._zoom_at_point(event.x, event.y, factor)
 
     def _wheel(self, event: tk.Event) -> None:
         self._zoom_at(event, 1.25 if event.delta > 0 else 0.8)
@@ -661,6 +762,9 @@ class IslandStudio:
         self._executor.submit(task)
 
     def _shutdown(self) -> None:
+        if self._loading_pbos:
+            messagebox.showwarning("Loading PBOs", "Wait for texture archive indexing to finish.")
+            return
         if self._busy:
             messagebox.showwarning("Working", "Wait for the current read or export to finish.")
             return
@@ -672,6 +776,10 @@ class IslandStudio:
             self._index_future.result()
         if self.document:
             self.document.close()
+        clear_archive_texture_cache()
+        if self.pbo_textures is not None:
+            self.pbo_textures.close()
+            self.pbo_textures = None
         self._executor.shutdown(wait=False)
         self.root.destroy()
 
