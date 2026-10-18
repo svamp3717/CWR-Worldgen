@@ -113,6 +113,37 @@ class SplashSpecTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "template has changed"):
                 exec(configure_splash_visibility(minimal_spec), {"Splash": lambda *a, **k: None})
 
+    def test_installed_pyinstaller_template_uses_managed_window(self) -> None:
+        # CI installs PyInstaller before running this test. With the real
+        # package available, also exercise its current template module instead
+        # of relying solely on our lightweight fake.
+        try:
+            from PyInstaller.building import splash_templates
+        except ImportError:
+            self.skipTest("PyInstaller not installed")
+        original_window = splash_templates.position_window_on_top
+        original_raise = splash_templates.raise_window
+        captured = {}
+
+        def capture_splash(*_args, **kwargs):
+            captured["kwargs"] = kwargs
+            captured["window"] = splash_templates.position_window_on_top
+            captured["raise"] = splash_templates.raise_window
+
+        try:
+            spec = configure_splash_visibility(
+                "splash = Splash(\\n    'splash.png',\\n)\\n",
+                title="Windows Splash Loading",
+            )
+            exec(spec, {"Splash": capture_splash})
+            self.assertEqual(captured["kwargs"], {"always_on_top": True})
+            self.assertIn("wm overrideredirect . 0", captured["window"])
+            self.assertIn("wm title . {Windows Splash Loading}", captured["raise"])
+            self.assertIn("after 1500 {wm attributes . -topmost 0}", captured["raise"])
+        finally:
+            splash_templates.position_window_on_top = original_window
+            splash_templates.raise_window = original_raise
+
     def test_rejects_bad_titles_and_ambiguous_specs(self) -> None:
         for title in ("", "bad } title", "bad\n title"):
             with self.assertRaisesRegex(ValueError, "title"):
