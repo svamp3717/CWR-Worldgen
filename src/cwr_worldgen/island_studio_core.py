@@ -201,8 +201,8 @@ class IslandDocument:
                 # Rotate basis vectors around the world up axis. Preserve
                 # all Y components, including terrain shear and object tilt.
                 for start in (0, 3, 6):
-                    vx, vz = struct.unpack_from("<fxx", raw, start * 4)[0], 0.0
-                    # unpack both float32 components at their true offsets.
+                    # Unpack the original horizontal components before
+                    # replacing them; preserve the vertical components.
                     vx = struct.unpack_from("<f", raw, start * 4)[0]
                     vz = struct.unpack_from("<f", raw, (start + 2) * 4)[0]
                     struct.pack_into("<f", raw, start * 4, cosine * vx + sine * vz)
@@ -400,8 +400,8 @@ class IslandDocument:
                 (48 + (ids * 71 + 11) % 140).astype(np.uint8),
             ), axis=-1)
         terrain = sampled.astype(np.float32) * self.height_scale
-        slope_x = np.gradient(terrain, axis=1)
-        slope_z = np.gradient(terrain, axis=0)
+        slope_x = np.gradient(terrain, axis=1) if width > 1 else np.zeros_like(terrain)
+        slope_z = np.gradient(terrain, axis=0) if height > 1 else np.zeros_like(terrain)
         shadow = np.clip(145 + (slope_x - slope_z) * 1.25, 45, 230)
         green = np.clip(105 + terrain * 0.18 + shadow * 0.37, 32, 235)
         return np.stack((
