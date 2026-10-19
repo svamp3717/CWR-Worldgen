@@ -14,6 +14,7 @@ from typing import Callable
 from PIL import Image, ImageTk
 
 from .core import IslandDocument, MapObject
+from .cursor_info import cursor_readout
 from .roads import is_road_model, plan_straight_road, road_segment
 from .navigation import zoom_around
 from .model_bounds import ModelBounds, load_model_bounds, footprint_corners, footprint_contains
@@ -55,6 +56,7 @@ class IslandStudio:
         self.zoom = 1.0
         self._pan_origin: tuple[int, int, float, float] | None = None
         self._last_brush: tuple[int, int] | None = None
+        self._hover_screen: tuple[float, float] | None = None
         self._road_anchor: tuple[float, float] | None = None
         self._road_cursor: tuple[float, float] | None = None
 
@@ -83,6 +85,7 @@ class IslandStudio:
         self.obj_heading = tk.StringVar(value="0")
         self.metadata = tk.StringVar(value="Open a loose 4WVR .wrp island to start")
         self.status = tk.StringVar(value="Ready. The source file will not be modified.")
+        self.cursor_info = tk.StringVar(value="")
         self._build()
         self.root.protocol("WM_DELETE_WINDOW", self._shutdown)
         self.root.after(120, self._poll)
@@ -135,6 +138,8 @@ class IslandStudio:
         self.canvas.bind("<ButtonPress-1>", self._left_click)
         self.canvas.bind("<B1-Motion>", self._left_drag)
         self.canvas.bind("<Motion>", self._mouse_move)
+        self.canvas.bind("<Leave>", self._mouse_leave)
+        self.canvas.bind("<Enter>", lambda event: self._update_hover(event.x, event.y))
         self.canvas.bind("<Escape>", lambda _e: self._cancel_road())
 
         ttk.Label(side, text="View", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
@@ -142,7 +147,7 @@ class IslandStudio:
             side, textvariable=self.layer,
             state="readonly", values=("Elevation", "Texture slots", "Actual textures", "Road preview"),
         ).pack(fill="x", pady=(4, 7))
-        self.layer.trace_add("write", lambda *_: self._queue_draw())
+        self.layer.trace_add("write", lambda *_: self._layer_changed())
         ttk.Checkbutton(
             side, text="Show world objects", variable=self.show_objects,
             command=self._queue_draw,
@@ -243,7 +248,10 @@ class IslandStudio:
         footer = ttk.Frame(self.root, padding=(8, 5))
         footer.pack(fill="x")
         ttk.Label(footer, textvariable=self.status).pack(side="left")
-        ttk.Label(footer, text="+ / −: pointer zoom   Wheel: zoom   Right-drag: pan").pack(side="right")
+        ttk.Label(footer, textvariable=self.cursor_info, anchor="e").pack(side="right", padx=(12, 2))
+        ttk.Label(
+            footer, text="+ / −: zoom   Wheel: zoom   Right-drag: pan",
+        ).pack(side="bottom", anchor="e")
         self.root.bind("<Control-o>", lambda _e: self._open_dialog())
         self.root.bind("<Control-Shift-S>", lambda _e: self._save_dialog())
         self.root.bind("<Control-s>", lambda _e: self._save_dialog())
@@ -311,6 +319,7 @@ class IslandStudio:
             self.document.close()
         self.document = doc
         self.selected = None
+        self.cursor_info.set("")
         self._road_anchor = None
         self._road_cursor = None
         self._busy = False
@@ -442,6 +451,7 @@ class IslandStudio:
         ) * 0.96
         self.view_x = -(width / self.zoom - self.document.world_width) / 2
         self.view_z = -(height / self.zoom - self.document.world_height) / 2
+        self._refresh_hover()
         self._queue_draw()
 
     def _queue_draw(self) -> None:
@@ -674,7 +684,27 @@ class IslandStudio:
     def _clear_pbos(self) -> None:
         self._schedule_pbos(())
 
+    def _layer_changed(self) -> None:
+        self._refresh_hover()
+        self._queue_draw()
+
+    def _update_hover(self, screen_x: float, screen_z: float) -> None:
+        self._hover_screen = (screen_x, screen_z)
+        self._refresh_hover()
+
+    def _refresh_hover(self) -> None:
+        if self._hover_screen is None or self.document is None:
+            self.cursor_info.set("")
+            return
+        x, z = self._to_world(*self._hover_screen)
+        self.cursor_info.set(cursor_readout(self.document, x, z, self.layer.get()))
+
+    def _mouse_leave(self, _event: tk.Event) -> None:
+        self._hover_screen = None
+        self.cursor_info.set("")
+
     def _mouse_move(self, event: tk.Event) -> None:
+        self._update_hover(event.x, event.y)
         if self._road_anchor is not None and self.tool.get() == "Draw road line":
             self._road_cursor = self._to_world(event.x, event.y)
             self._queue_draw()
@@ -741,6 +771,7 @@ class IslandStudio:
             self.view_x, self.view_z, self.zoom,
             x, y, factor, fitted * 0.35, 8.0,
         )
+        self._refresh_hover()
         self._queue_draw()
 
     def _pointer_canvas_point(self) -> tuple[float, float]:
@@ -778,6 +809,7 @@ class IslandStudio:
         x, y, vx, vz = self._pan_origin
         self.view_x = vx - (event.x - x) / self.zoom
         self.view_z = vz - (event.y - y) / self.zoom
+        self._update_hover(event.x, event.y)
         self._queue_draw()
 
     def _left_click(self, event: tk.Event) -> None:
@@ -850,6 +882,7 @@ class IslandStudio:
                 raise_metres=change, texture=texture,
             )
             self.status.set(f"{mode}: {count:,} terrain points touched (unsaved)")
+            self._update_hover(event.x, event.y)
             self._queue_draw()
         except ValueError as exc:
             self.status.set(str(exc))
