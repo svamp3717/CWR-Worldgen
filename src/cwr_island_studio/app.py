@@ -8,7 +8,7 @@ from pathlib import Path
 import math
 import queue
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Callable
 
 from PIL import Image, ImageTk
@@ -17,7 +17,7 @@ from .core import IslandDocument, MapObject
 from .object_layers import is_forest_model, object_marker_mode
 from .cursor_info import cursor_readout
 from .roads import is_road_model, plan_straight_road, road_segment
-from .navigation import pan_with_arrow, zoom_around
+from .navigation import center_on_position, pan_with_arrow, parse_game_position, zoom_around
 from .model_bounds import ModelBounds, load_model_bounds, footprint_corners, footprint_contains
 from .pbo_textures import PboTextures
 from .pbo_worlds import PboWorldArchive
@@ -104,6 +104,7 @@ class IslandStudio:
         self.metadata = tk.StringVar(value="Open a WRP or an island from a PBO to start")
         self.status = tk.StringVar(value="Ready. The source file will not be modified.")
         self.cursor_info = tk.StringVar(value="")
+        self._last_game_position: str | None = None
         self._build()
         self._update_edit_access()
         self.root.protocol("WM_DELETE_WINDOW", self._shutdown)
@@ -123,6 +124,9 @@ class IslandStudio:
         )
         self.readonly_toggle.pack(side="left", padx=(8, 4))
         ttk.Button(header, text="Fit map", command=self._fit).pack(side="left", padx=3)
+        ttk.Button(header, text="Go to Position", command=self._go_to_position_dialog).pack(
+            side="left", padx=(7, 3),
+        )
         ttk.Button(header, text="−", width=3, command=lambda: self._zoom_button(0.8)).pack(side="left", padx=(12, 2))
         ttk.Button(header, text="+", width=3, command=lambda: self._zoom_button(1.25)).pack(side="left", padx=2)
         ttk.Label(header, text="Grid metres").pack(side="left", padx=(20, 2))
@@ -297,6 +301,7 @@ class IslandStudio:
         self.root.bind("<Control-o>", lambda _e: self._open_dialog())
         self.root.bind("<Control-Shift-S>", lambda _e: self._save_dialog())
         self.root.bind("<Control-s>", lambda _e: self._save_dialog())
+        self.root.bind("<Control-g>", lambda _e: self._go_to_position_dialog())
         # Keep text entry usable for negative coordinates and numeric settings.
         for sequence, factor in (
             ("<KeyPress-plus>", 1.25), ("<KeyPress-equal>", 1.25),
@@ -312,6 +317,53 @@ class IslandStudio:
                 f"<{direction}>",
                 lambda event, key=direction: self._pan_hotkey(event, key),
             )
+
+    def _go_to_position_dialog(self) -> None:
+        """Navigate to an in-game position in both loose and archived maps."""
+        if self.document is None or self._busy:
+            return
+        if self._last_game_position is None:
+            left, top, right, bottom = self._extent()
+            initial = f"[{(left + right) / 2:.1f}, {(top + bottom) / 2:.1f}, 0]"
+        else:
+            initial = self._last_game_position
+        pasted = simpledialog.askstring(
+            "Go to Position",
+            "Paste coordinates from the game console:\n"
+            "[X, Y, altitude] or X, Y\n"
+            "Game Y is north/south; altitude is ignored in this 2D view.",
+            initialvalue=initial,
+            parent=self.root,
+        )
+        if pasted is not None:
+            self._go_to_position(pasted)
+
+    def _go_to_position(self, value: str) -> None:
+        doc = self.document
+        if doc is None or self._busy:
+            return
+        try:
+            game_x, game_y, _altitude = parse_game_position(value)
+            if not (0 <= game_x < doc.world_width and
+                    0 <= game_y < doc.world_height):
+                raise ValueError(
+                    f"Position is outside the island (X 0–{doc.world_width:g}, "
+                    f"Y 0–{doc.world_height:g} metres)"
+                )
+            new_x, new_z = center_on_position(
+                game_x, game_y, max(1, self.canvas.winfo_width()),
+                max(1, self.canvas.winfo_height()), self.zoom,
+            )
+        except ValueError as exc:
+            messagebox.showerror("Invalid game position", str(exc))
+            return
+        self.view_x, self.view_z = new_x, new_z
+        self._last_game_position = value.strip()
+        self._refresh_hover()
+        self._queue_draw()
+        self.status.set(
+            f"Map centered at game X {game_x:,.2f}, Y {game_y:,.2f} m"
+        )
 
     def _num(self, value: tk.StringVar, name: str) -> float:
         try:
