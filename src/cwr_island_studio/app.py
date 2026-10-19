@@ -456,10 +456,18 @@ class IslandStudio:
 
         self._executor.submit(inspect)
 
-    def _select_archive_member(self, archive: PboWorldArchive) -> str | None:
+    def _select_archive_member(
+        self, archive: PboWorldArchive, cell_size: float, height_scale: float,
+    ) -> None:
+        """Choose a map without nesting a blocking Tk wait_window event loop."""
         names = sorted(archive.members, key=str.casefold)
         if len(names) == 1:
-            return names[0]
+            self._open_archive_member(archive, names[0], cell_size, height_scale)
+            return
+        self.status.set(
+            f"Found {len(names):,} WRP entries in {archive.path.name}. "
+            "Choose an island from the separate window."
+        )
         dialog = tk.Toplevel(self.root)
         dialog.title("Choose a WRP from the PBO")
         dialog.geometry("550x380")
@@ -472,22 +480,37 @@ class IslandStudio:
         for name in names:
             selection.insert("end", name)
         selection.selection_set(0)
-        picked: list[str] = []
+        selected = False
+
+        def close_dialog() -> None:
+            dialog.destroy()
+            if not selected:
+                archive.close()
+                if not self._closing:
+                    self._busy = False
+                    self.status.set("Archive opening cancelled")
 
         def accept(_event=None) -> None:
+            nonlocal selected
             indices = selection.curselection()
-            if indices:
-                picked.append(names[int(indices[0])])
+            if not indices:
+                return
+            selected = True
+            member = names[int(indices[0])]
             dialog.destroy()
+            if self._closing:
+                archive.close()
+                return
+            self._open_archive_member(archive, member, cell_size, height_scale)
 
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x")
         ttk.Button(buttons, text="Open read-only", command=accept).pack(side="right", padx=4)
-        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right")
+        ttk.Button(buttons, text="Cancel", command=close_dialog).pack(side="right")
         selection.bind("<Double-Button-1>", accept)
-        dialog.grab_set()
-        self.root.wait_window(dialog)
-        return picked[0] if picked else None
+        dialog.protocol("WM_DELETE_WINDOW", close_dialog)
+        dialog.lift()
+        selection.focus_set()
 
     def _open_archive_member(
         self, archive: PboWorldArchive, member: str,
@@ -656,15 +679,7 @@ class IslandStudio:
                 elif kind == "archive_catalog":
                     archive, cell_size, height_scale = value
                     try:
-                        member = self._select_archive_member(archive)
-                        if member is None:
-                            archive.close()
-                            self._busy = False
-                            self.status.set("Archive opening cancelled")
-                        else:
-                            self._open_archive_member(
-                                archive, member, cell_size, height_scale,
-                            )
+                        self._select_archive_member(archive, cell_size, height_scale)
                     except Exception as exc:
                         archive.close()
                         self._busy = False
