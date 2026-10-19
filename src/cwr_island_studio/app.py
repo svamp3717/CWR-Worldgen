@@ -564,8 +564,11 @@ class IslandStudio:
         doc = self.document
         if doc is None:
             return
-        suffix = " | READ-ONLY PBO" if doc.read_only_forced else (
-            " | READ-ONLY" if doc.read_only else ""
+        suffix = (
+            f" | OPRW v{doc.oprw_version} | READ-ONLY"
+            if hasattr(doc, "oprw_version")
+            else " | READ-ONLY PBO" if doc.read_only_forced
+            else " | READ-ONLY" if doc.read_only else ""
         )
         self.metadata.set(
             f"{doc.width:,}×{doc.height:,} | {doc.object_count:,} objects" + suffix
@@ -727,7 +730,9 @@ class IslandStudio:
                 if self.document:
                     self.status.set(
                         f"Ready: {self.document.object_count:,} objects indexed. "
-                        ("Read-only WRP from PBO. Viewing and inspection only."
+                        (f"Binarized OPRW v{self.document.oprw_version}. Viewing and inspection only."
+                         if hasattr(self.document, "oprw_version")
+                         else "Read-only WRP from PBO. Viewing and inspection only."
                          if self.document.read_only_forced
                          else "Read-only protection enabled. Uncheck to edit."
                          if self.document.read_only
