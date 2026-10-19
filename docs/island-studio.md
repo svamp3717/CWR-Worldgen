@@ -66,8 +66,9 @@ It supports terrain height samples, texture-slot IDs, and object positions,
 heading and model paths. It does not yet offer advanced transform controls,
 a full road editor, 3D scene rendering, texture-image decoding or undo/redo.
 
-Open a loose, unbinarized 4WVR WRP. Binarized OPRW, 8WVR and direct PBO/IFA
-archive editing are not supported. Extract a WRP from an archive first.
+Open a loose, unbinarized 4WVR WRP for editing, or open a read-only
+4WVR WRP from a selected PBO/IFA archive. Binarized OPRW and 8WVR
+formats are not supported. PBO archives are never repacked or edited.
 Memory availability and the target game engine impose practical limits beyond
 the file reader's terrain-size handling.
 
@@ -273,3 +274,32 @@ operations and while a text entry, dropdown, list or similar editable
 widget has keyboard focus, so entering coordinates and choosing assets
 continues to work normally. The arrow keys follow the same unclamped
 navigation behavior as right-button map dragging.
+
+## Open an island directly from a PBO (read-only)
+
+Choose **Open PBO WRP** in the toolbar and select a .pbo, .pbo.zst,
+.ifa or .ifa.zst archive. The reader scans only the archive index first
+and, if several WRP members exist, presents a list so you can choose an
+island to inspect. This operates independently of **Add PBOs…**, which
+indexes texture images and 3D models.
+
+The selected WRP is staged to a temporary file and memory-mapped using
+the normal large-world reader. It supports stored and legacy BIS LZSS
+compressed WRP entries, plus whole-file Zstandard-wrapped archives.
+Staging uses chunked I/O rather than loading the entire WRP into RAM.
+Allow enough disk space for the extracted WRP and, with Zstandard-wrapped
+archives, a temporary copy of the unpacked PBO. Temporary files are
+removed when the document is closed or replaced.
+
+**Archive WRPs open strictly read-only.** Terrain, texture, road and
+object editing controls and Save As are disabled. Map navigation,
+hover readouts, object selection, model footprints, road preview and
+forest overlays remain available. The title identifies both the PBO
+and selected member. Open a normal loose WRP to return to editable mode.
+
+The selected PBO is never written to or repacked. Invalid compressed
+entries, unsupported WRP formats and absent WRP members are rejected.
+Only unbinarized 4WVR worlds are supported in this version.
+
+Normal commits run tests only. Windows EXE packaging remains manual
+opt-in and is not part of this change.
