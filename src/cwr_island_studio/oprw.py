@@ -287,6 +287,36 @@ class OprwIslandDocument(IslandDocument):
             sampled = self.heights[np.ix_(rows, columns)].astype(np.float32)
         return sampled, world_x, world_z
 
+    def _category_filter(self, hits: np.ndarray, *, forest: bool) -> np.ndarray:
+        """Apply model-table metadata overrides without a placement-wide scan."""
+        mask = self._forest_mask if forest else self._road_mask
+        if mask is not None:
+            selected = mask[hits].copy()
+        else:
+            predicate = is_forest_model if forest else is_road_model
+            selected = np.fromiter(
+                (predicate(self.model_names[int(self._records["model"][int(index)])])
+                 for index in hits),
+                dtype=np.bool_, count=len(hits),
+            )
+        categories = getattr(self, "_model_categories", {})
+        if categories:
+            # OPRW stores one model-table index per placement, so resolving
+            # metadata against model types is much cheaper than per-object paths.
+            positive = []
+            negative = []
+            for index, path in enumerate(self.model_names):
+                override = categories.get(self._model_key(path))
+                if override is not None:
+                    (positive if (override.forest if forest else override.road)
+                     else negative).append(index)
+            models = self._records["model"][hits]
+            if positive:
+                selected |= np.isin(models, positive)
+            if negative:
+                selected &= ~np.isin(models, negative)
+        return hits[selected]
+
     def build_object_index(
         self, cancel_event: threading.Event | None = None,
     ) -> None:
