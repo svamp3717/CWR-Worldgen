@@ -14,6 +14,7 @@ from typing import Callable
 from PIL import Image, ImageTk
 
 from .core import IslandDocument, MapObject
+from .object_layers import is_forest_model, object_marker_mode
 from .cursor_info import cursor_readout
 from .roads import is_road_model, plan_straight_road, road_segment
 from .navigation import zoom_around
@@ -66,6 +67,7 @@ class IslandStudio:
         self.tool = tk.StringVar(value="Select")
         self.show_objects = tk.BooleanVar(value=True)
         self.show_model_footprints = tk.BooleanVar(value=False)
+        self.show_forests = tk.BooleanVar(value=False)
         self.show_roads = tk.BooleanVar(value=True)
         self.water_level = tk.StringVar(value="0")
         self.asset_roots: tuple[Path, ...] = ()
@@ -156,9 +158,15 @@ class IslandStudio:
             side, text="Show objects at model size", variable=self.show_model_footprints,
             command=self._queue_draw,
         ).pack(anchor="w")
+        ttk.Checkbutton(
+            side, text="Show forests (green overlay)", variable=self.show_forests,
+            command=self._queue_draw,
+        ).pack(anchor="w")
         ttk.Label(
-            side, text="Uses model geometry from selected PBOs or loose assets; "
-                       "unknown models stay as dots.", wraplength=230,
+            side, text="Footprints work without object dots. Forests show "
+                       "tree and forest model placements from the WRP. "
+                       "Missing model sizes stay as dots only when dots or "
+                       "forests are enabled.", wraplength=230,
         ).pack(anchor="w", pady=(0, 4))
         ttk.Checkbutton(
             side, text="Show roads as lines", variable=self.show_roads,
@@ -522,39 +530,97 @@ class IslandStudio:
                             x0, z0, x1, z1, fill="#ed974a",
                             width=max(2, min(5, self.zoom * 3)),
                         )
-            if self.show_objects.get():
-                self._visible = self.document.visible_objects(
+            # These controls are independent: hiding generic dots must not
+            # hide true-size outlines or the optional forest overlay.
+            show_dots = self.show_objects.get()
+            show_real = self.show_model_footprints.get()
+            show_forests = self.show_forests.get()
+            normal = (
+                self.document.visible_objects(
                     left, top, right, bottom, limit=2700,
                 )
-                scaled = self.show_model_footprints.get()
-                if scaled:
-                    self._request_model_bounds(self._visible)
-                for obj in self._visible:
-                    sx, sz = self._to_screen(obj.x, obj.z)
-                    selected = obj.index == self.selected
-                    colour = "#ffcf6d" if selected else "#e9ece2"
-                    bounds = self._model_bounds.get(self._model_key(obj.model_path)) if scaled else None
-                    if bounds is not None:
-                        corners = footprint_corners(
-                            bounds, obj.x, obj.z, obj.heading,
-                            basis=(obj.basis_xx, obj.basis_xz, obj.basis_zx, obj.basis_zz),
-                        )
-                        screen = [self._to_screen(*point) for point in corners]
-                        xs = [point[0] for point in screen]
-                        zs = [point[1] for point in screen]
-                        if max(max(xs) - min(xs), max(zs) - min(zs)) >= 2:
-                            self.canvas.create_polygon(
-                                *(value for point in screen for value in point),
-                                outline=colour, fill="", width=2 if selected else 1,
-                            )
-                            continue
+                if show_dots or show_real else ()
+            )
+            forest = (
+                self.document.visible_objects(
+                    left, top, right, bottom, limit=2600, forest_only=True,
+                )
+                if show_forests else ()
+            )
+            # Selection covers every object displayed by either layer.
+            self._visible = tuple({
+                obj.index: obj for obj in (*normal, *forest)
+            }.values())
+            if show_real or show_forests:
+                self._request_model_bounds(self._visible)
+
+            # Forest blocks and individual vegetation are shown in green.
+            # This is a WRP-object overlay, not reconstructed OSM polygons.
+            for obj in forest:
+                sx, sz = self._to_screen(obj.x, obj.z)
+                selected = obj.index == self.selected
+                bounds = self._model_bounds.get(self._model_key(obj.model_path))
+                corners = None
+                extent = 0.0
+                if bounds is not None:
+                    corners = footprint_corners(
+                        bounds, obj.x, obj.z, obj.heading,
+                        basis=(obj.basis_xx, obj.basis_xz, obj.basis_zx, obj.basis_zz),
+                    )
+                    screen = [self._to_screen(*point) for point in corners]
+                    extent = max(
+                        max(p[0] for p in screen) - min(p[0] for p in screen),
+                        max(p[1] for p in screen) - min(p[1] for p in screen),
+                    )
+                if corners is not None and extent >= 2.0:
+                    self.canvas.create_polygon(
+                        *(v for point in screen for v in point),
+                        fill="", outline="#65df92" if selected else "#328b51",
+                        width=2 if selected else 1,
+                    )
+                else:
+                    size = 5 if selected else 2.5
+                    self.canvas.create_oval(
+                        sx - size, sz - size, sx + size, sz + size,
+                        fill="#65df92" if selected else "#37874d",
+                        outline="",
+                    )
+
+            for obj in normal:
+                # Forest objects already have their own green markers.
+                if show_forests and is_forest_model(obj.model_path):
+                    continue
+                sx, sz = self._to_screen(obj.x, obj.z)
+                selected = obj.index == self.selected
+                colour = "#ffcf6d" if selected else "#e9ece2"
+                bounds = (
+                    self._model_bounds.get(self._model_key(obj.model_path))
+                    if show_real else None
+                )
+                corners = None
+                extent = 0.0
+                if bounds is not None:
+                    corners = footprint_corners(
+                        bounds, obj.x, obj.z, obj.heading,
+                        basis=(obj.basis_xx, obj.basis_xz, obj.basis_zx, obj.basis_zz),
+                    )
+                    screen = [self._to_screen(*point) for point in corners]
+                    extent = max(
+                        max(p[0] for p in screen) - min(p[0] for p in screen),
+                        max(p[1] for p in screen) - min(p[1] for p in screen),
+                    )
+                mode = object_marker_mode(show_dots, show_real, bounds is not None, extent)
+                if mode == "footprint":
+                    self.canvas.create_polygon(
+                        *(v for point in screen for v in point),
+                        outline=colour, fill="", width=2 if selected else 1,
+                    )
+                elif mode == "dot":
                     radius = 5 if selected else 1.65
                     self.canvas.create_oval(
                         sx - radius, sz - radius, sx + radius, sz + radius,
                         outline=colour, fill=colour,
                     )
-            else:
-                self._visible = ()
             if self._road_anchor is not None:
                 first = self._to_screen(*self._road_anchor)
                 self.canvas.create_oval(
