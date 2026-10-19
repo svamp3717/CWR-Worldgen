@@ -1,7 +1,9 @@
 """One Open World picker routes loose RVW4 maps and PBO/IFA containers."""
 from __future__ import annotations
 
+from concurrent.futures import Future
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 import struct
 import tkinter as tk
@@ -186,3 +188,110 @@ def test_multi_world_picker_returns_without_waiting_for_dialog(
     actions["Open read-only"]()
     assert destroyed == [True]
     assert opened == [(archive, r"worlds\a.wrp", 50.0, 1.0)]
+
+
+
+def test_open_second_pbo_retires_first_without_waiting_for_its_index(
+    tmp_path: Path,
+) -> None:
+    """No Tk or old mmap operation may block the second archive scan."""
+    previous_closed = threading.Event()
+    old_cancel = threading.Event()
+    pending_index = Future()
+    status: list[str] = []
+    cleared: list[str] = []
+    tasks: list[object] = []
+
+    class PreviousWorld:
+        changed = False
+
+        def close(self) -> None:
+            previous_closed.set()
+
+    editor = SimpleNamespace(
+        _busy=False,
+        document=PreviousWorld(),
+        _index_future=pending_index,
+        _index_cancel=old_cancel,
+        _model_stamp=0,
+        _model_bounds={"stale": object()},
+        selected=3,
+        _visible=(object(),),
+        _image=object(),
+        canvas=SimpleNamespace(delete=cleared.append),
+        metadata=SimpleNamespace(set=lambda _v: None),
+        status=SimpleNamespace(set=status.append),
+        _update_edit_access=lambda: None,
+        _reset_model_bounds=lambda: None,
+        _num=lambda _v, name: 50.0 if name == "Grid metres" else 1.0,
+        cell_size=object(),
+        height_scale=object(),
+        _archive_cancel=threading.Event(),
+        _messages=SimpleNamespace(put=lambda _msg: None),
+        _executor=SimpleNamespace(submit=lambda job: tasks.append(job)),
+    )
+    editor._retire_current_world = lambda: IslandStudio._retire_current_world(editor)
+    world = tmp_path / "second.pbo"
+    IslandStudio._open_pbo_path(editor, world)
+
+    assert old_cancel.is_set()
+    assert editor.document is None
+    assert editor._index_future is None
+    assert editor._index_cancel is None
+    assert editor._visible == ()
+    assert editor.selected is None
+    assert cleared == ["all"]
+    assert not previous_closed.is_set()
+    assert len(tasks) == 1
+    assert status[-1] == f"Indexing WRP entries in {world.name}…"
+
+    # Finishing the old index must only close the *old* document.
+    pending_index.set_result(None)
+    assert previous_closed.wait(timeout=2.0)
+    assert editor.document is None
+    assert status[-1] == f"Indexing WRP entries in {world.name}…"
+
+
+def test_open_second_loose_world_retires_first_before_new_loader(
+    tmp_path: Path,
+) -> None:
+    old_cancel = threading.Event()
+    pending_index = Future()
+    closed = threading.Event()
+    tasks: list[object] = []
+    statuses: list[str] = []
+
+    class PreviousWorld:
+        changed = False
+
+        def close(self) -> None:
+            closed.set()
+
+    editor = SimpleNamespace(
+        _busy=False,
+        document=PreviousWorld(),
+        _index_future=pending_index,
+        _index_cancel=old_cancel,
+        _model_bounds={},
+        selected=None,
+        _visible=(),
+        _image=None,
+        canvas=SimpleNamespace(delete=lambda _v: None),
+        metadata=SimpleNamespace(set=lambda _v: None),
+        status=SimpleNamespace(set=statuses.append),
+        _update_edit_access=lambda: None,
+        _reset_model_bounds=lambda: None,
+        _num=lambda _v, name: 50.0 if name == "Grid metres" else 1.0,
+        cell_size=object(),
+        height_scale=object(),
+        _executor=SimpleNamespace(submit=lambda job: tasks.append(job)),
+    )
+    editor._retire_current_world = lambda: IslandStudio._retire_current_world(editor)
+    IslandStudio.open_path(editor, tmp_path / "another.wrp")
+    assert editor.document is None
+    assert old_cancel.is_set()
+    assert not closed.is_set()
+    assert len(tasks) == 1
+    pending_index.set_result(None)
+    assert closed.wait(timeout=2.0)
+    assert statuses[-1] == "Opening another.wrp…"
