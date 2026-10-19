@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Read-only, bounded-memory RVW4 loading from selected PBO/IFA archives.
+"""Read-only, bounded-memory 4WVR/OPRW loading from selected PBO/IFA archives.
 
 The archive and its entries are never modified. Members are extracted to a
-temporary directory and mapped using the ordinary IslandDocument reader;
+temporary directory and mapped by the format-specific Island Studio reader;
 no complete island needs to fit in Python memory.
 """
 from __future__ import annotations
@@ -189,13 +189,9 @@ class PboWorldArchive:
         self._check_cancel()
         with destination.open("rb") as stream:
             magic = stream.read(4)
-        if magic != b"4WVR":
-            # On Windows unlinking a file inside its own open context fails
-            # with WinError 32 and hides the actual unsupported-format error.
-            # The owning PboWorldArchive cleans up the staged file on failure.
+        if magic not in (b"4WVR", b"OPRW"):
             raise ValueError(
-                f"Unsupported WRP format ({magic!r}): "
-                "Island Studio currently opens only unbinarized 4WVR worlds"
+                f"Unsupported WRP format ({magic!r}): expected 4WVR or OPRW"
             )
         return destination
 
@@ -204,13 +200,13 @@ class PboWorldArchive:
         height_scale: float = 1.0,
     ):
         """Return an IslandDocument which owns this temporary archive source."""
-        from .core import IslandDocument
+        from .oprw import open_island_document
 
         try:
             filename = self.extract(member_name)
-            document = IslandDocument(
+            document = open_island_document(
                 filename, cell_size=cell_size, height_scale=height_scale,
-                read_only=True,
+                read_only=True, cancel_event=self._cancel_event,
             )
             document.source_label = f"{self.path.name} / {member_name}"
             document._archive_owner = self
