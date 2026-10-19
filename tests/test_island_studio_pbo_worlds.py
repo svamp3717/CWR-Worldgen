@@ -214,3 +214,139 @@ def test_readonly_and_editable_toolbar_states() -> None:
     assert editor.edit_tool_combo.state == "readonly"
     assert all(b.state == "normal" for b in buttons)
     assert all(e.state == "normal" for e in entries)
+
+
+
+def _fake_editor(document):
+    """Exercise actual GUI read-only callbacks without a graphical display."""
+    class Widget:
+        def __init__(self):
+            self.state = "normal"
+        def configure(self, *, state):
+            self.state = state
+
+    class Var:
+        def __init__(self, value=None):
+            self.value = value
+        def set(self, value):
+            self.value = value
+        def get(self):
+            return self.value
+
+    names = []
+    editor = SimpleNamespace(
+        document=document,
+        _busy=False, _road_anchor=None, _road_cursor=None,
+        _index_future=None, _model_future=None,
+        selected=None, cursor_info=Var(""),
+        readonly_checked=Var(True), readonly_toggle=Widget(),
+        save_button=Widget(), edit_tool_combo=Widget(),
+        edit_road_combo=Widget(), tool=Var("Paint texture"),
+        _edit_buttons=[Widget(), Widget()], _edit_entries=[Widget()],
+        status=Var(""), metadata=Var(""), root=SimpleNamespace(
+            title=lambda text: names.append(text),
+        ),
+        _queue_draw=lambda: None,
+        _fit=lambda: None,
+        _executor=SimpleNamespace(submit=lambda fn: "not-started-test-future"),
+    )
+    editor._update_edit_access = lambda: IslandStudio._update_edit_access(editor)
+    editor._update_document_label = lambda: IslandStudio._update_document_label(editor)
+    return editor, names
+
+
+def test_loose_wrp_opens_with_readonly_checked_by_default(tmp_path: Path) -> None:
+    path = tmp_path / "safe-default.wrp"
+    path.write_bytes(wrp())
+    with IslandDocument(path) as doc:
+        editor, titles = _fake_editor(None)
+        editor._busy = True
+        IslandStudio._accept_document(editor, doc)
+        assert editor.document is doc
+        assert doc.read_only and not doc.read_only_forced
+        assert editor.readonly_checked.get() is True
+        assert editor.readonly_toggle.state == "normal"
+        assert editor.save_button.state == "disabled"
+        assert editor.tool.get() == "Select"
+        assert titles[-1].endswith("[read-only]")
+        assert "READ-ONLY" in editor.metadata.get()
+        with pytest.raises(PermissionError, match="read-only"):
+            doc.paint(25, 25, radius=0, texture=1)
+
+
+def test_loose_wrp_checkbox_disables_mutations_and_can_restore_editing(tmp_path: Path) -> None:
+    path = tmp_path / "editable.wrp"
+    original = wrp()
+    path.write_bytes(original)
+    with IslandDocument(path) as doc:
+        editor, titles = _fake_editor(doc)
+        assert not doc.read_only and not doc.read_only_forced
+        editor.readonly_checked.set(True)
+        IslandStudio._toggle_read_only(editor)
+        assert doc.read_only
+        assert editor.save_button.state == "disabled"
+        assert editor.readonly_toggle.state == "normal"
+        assert "[read-only]" in titles[-1]
+        for modify in (
+            lambda: doc.move_object(0, x=1, y=2, z=3),
+            lambda: doc.set_model(0, "another.p3d"),
+            lambda: doc.add_object("another.p3d", x=1, y=1, z=1),
+            lambda: doc.delete_object(0),
+            lambda: doc.paint(0, 0, radius=1, texture=2),
+            lambda: doc.export(tmp_path / "should-not-export.wrp"),
+        ):
+            with pytest.raises(PermissionError, match="read-only"):
+                modify()
+        assert not (tmp_path / "should-not-export.wrp").exists()
+        editor.readonly_checked.set(False)
+        IslandStudio._toggle_read_only(editor)
+        assert not doc.read_only
+        assert editor.save_button.state == "normal"
+        assert editor.edit_tool_combo.state == "readonly"
+        assert not titles[-1].endswith("[read-only]")
+        doc.paint(0, 0, radius=1, texture=1)
+        assert doc.changed
+        editor.readonly_checked.set(True)
+        IslandStudio._toggle_read_only(editor)
+        assert doc.changed
+        with pytest.raises(PermissionError, match="read-only"):
+            doc.export(tmp_path / "protected.wrp")
+        editor.readonly_checked.set(False)
+        IslandStudio._toggle_read_only(editor)
+        doc.export(tmp_path / "allowed.wrp")
+    assert path.read_bytes() == original
+    assert (tmp_path / "allowed.wrp").is_file()
+
+
+def test_pbo_readonly_cannot_be_unchecked_in_gui_or_engine(tmp_path: Path) -> None:
+    source = tmp_path / "locked.wrp"
+    source.write_bytes(wrp())
+    with IslandDocument(source, read_only=True) as doc:
+        assert doc.read_only and doc.read_only_forced
+        with pytest.raises(PermissionError, match="must remain read-only"):
+            doc.read_only = False
+        editor, _titles = _fake_editor(doc)
+        editor.readonly_checked.set(False)
+        IslandStudio._toggle_read_only(editor)
+        assert doc.read_only
+        assert editor.readonly_checked.get() is True
+        assert editor.readonly_toggle.state == "disabled"
+        assert editor.save_button.state == "disabled"
+        with pytest.raises(PermissionError, match="read-only"):
+            doc.delete_object(0)
+
+
+def test_readonly_checkbox_reverts_while_loading_or_exporting(tmp_path: Path) -> None:
+    path = tmp_path / "busy.wrp"
+    path.write_bytes(wrp())
+    with IslandDocument(path) as doc:
+        editor, _titles = _fake_editor(doc)
+        editor._busy = True
+        editor.readonly_checked.set(True)
+        IslandStudio._toggle_read_only(editor)
+        assert not doc.read_only
+        assert editor.readonly_checked.get() is False
+        assert editor.readonly_toggle.state == "disabled"
+        editor._busy = False
+        editor._update_edit_access()
+        assert editor.readonly_toggle.state == "normal"
