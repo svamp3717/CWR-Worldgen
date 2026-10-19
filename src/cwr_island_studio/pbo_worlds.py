@@ -188,9 +188,15 @@ class PboWorldArchive:
                 _copy_exact(source, target, member.stored_size, self._cancel_event)
         self._check_cancel()
         with destination.open("rb") as stream:
-            if stream.read(4) != b"4WVR":
-                destination.unlink(missing_ok=True)
-                raise ValueError("Selected WRP is not an unbinarized 4WVR world")
+            magic = stream.read(4)
+        if magic != b"4WVR":
+            # On Windows unlinking a file inside its own open context fails
+            # with WinError 32 and hides the actual unsupported-format error.
+            # The owning PboWorldArchive cleans up the staged file on failure.
+            raise ValueError(
+                f"Unsupported WRP format ({magic!r}): "
+                "Island Studio currently opens only unbinarized 4WVR worlds"
+            )
         return destination
 
     def open_world(
