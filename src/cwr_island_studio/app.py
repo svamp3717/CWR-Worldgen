@@ -102,6 +102,7 @@ class IslandStudio:
         self._closing = False
         self._messages: queue.Queue[tuple[str, object]] = queue.Queue()
         self._index_future: Future | None = None
+        self._index_cancel: threading.Event | None = None
         self._model_future: Future | None = None
         self._model_bounds: dict[str, ModelBounds | None] = {}
         self._model_stamp = 0
@@ -422,6 +423,51 @@ class IslandStudio:
         except ValueError as exc:
             raise ValueError(f"{name} must be a finite number") from exc
 
+    def _retire_current_world(self) -> None:
+        """Detach the old map before loading another one.
+
+        The old object-index worker may still hold mmap views. Cancelling
+        indexing and retiring its document after that worker finishes prevents
+        Windows file locks and races with the Tk drawing thread. Cleanup must
+        never block the UI.
+        """
+        previous = self.document
+        if previous is None:
+            return
+        index_future = self._index_future
+        if self._index_cancel is not None:
+            self._index_cancel.set()
+        self._index_future = None
+        self._index_cancel = None
+        self.document = None
+        self._reset_model_bounds()
+        self.selected = None
+        self._visible = ()
+        self._image = None
+        self.canvas.delete("all")
+        self.metadata.set("Opening world…")
+        self._update_edit_access()
+
+        def release(_future: Future | None = None) -> None:
+            # A Future callback is sometimes invoked immediately on the
+            # caller's thread if it just completed. Always close elsewhere.
+            def close_document() -> None:
+                try:
+                    previous.close()
+                except Exception as exc:
+                    self._messages.put(("cleanup_error", str(exc)))
+
+            threading.Thread(
+                target=close_document,
+                name="island-studio-old-world-cleanup",
+                daemon=True,
+            ).start()
+
+        if index_future is not None and not index_future.done():
+            index_future.add_done_callback(release)
+        else:
+            release()
+
     def _open_pbo_path(self, path: Path) -> None:
         if self._busy:
             return
@@ -440,6 +486,7 @@ class IslandStudio:
             messagebox.showerror("Invalid map settings", str(exc))
             return
         self._busy = True
+        self._retire_current_world()
         self._archive_cancel = threading.Event()
         cancel_event = self._archive_cancel
         self.status.set(f"Indexing WRP entries in {Path(path).name}…")
@@ -637,6 +684,7 @@ class IslandStudio:
             messagebox.showerror("Invalid map settings", str(exc))
             return
         self._busy = True
+        self._retire_current_world()
         self.status.set(f"Opening {path.name}…")
         def load() -> None:
             try:
@@ -650,14 +698,7 @@ class IslandStudio:
 
     def _accept_document(self, doc: IslandDocument) -> None:
         if self.document:
-            previous = self.document
-            if self._index_future is not None and not self._index_future.done():
-                # Never block Tk while the previous world's index is being built.
-                self._index_future.add_done_callback(
-                    lambda _future, old=previous: old.close()
-                )
-            else:
-                previous.close()
+            self._retire_current_world()
         self.document = doc
         # Loose WRPs start protected by default; the user can deliberately
         # uncheck Read-only. An archived WRP is permanently protected.
@@ -677,7 +718,11 @@ class IslandStudio:
             if doc.read_only_forced
             else "Loose WRP opened read-only. Uncheck Read-only to edit. Building object index…"
         )
-        self._index_future = self._executor.submit(doc.build_object_index)
+        self._index_cancel = threading.Event()
+        cancel_event = self._index_cancel
+        self._index_future = self._executor.submit(
+            lambda: doc.build_object_index(cancel_event=cancel_event)
+        )
 
     def _poll(self) -> None:
         if self._closing:
@@ -689,6 +734,9 @@ class IslandStudio:
                     self._accept_document(value)
                 elif kind == "archive_progress":
                     self.status.set(str(value))
+                elif kind == "cleanup_error":
+                    # A retired world must never interrupt the new world's load.
+                    pass
                 elif kind == "archive_catalog":
                     archive, cell_size, height_scale = value
                     try:
@@ -724,6 +772,8 @@ class IslandStudio:
         if self._index_future is not None and self._index_future.done():
             try:
                 self._index_future.result()
+            except CancelledError:
+                pass
             except Exception as exc:
                 self.status.set(f"Object index unavailable: {exc}")
             else:
@@ -740,6 +790,7 @@ class IslandStudio:
                     )
                 self._queue_draw()
             self._index_future = None
+            self._index_cancel = None
         if self._model_future is not None and self._model_future.done():
             try:
                 stamp, results = self._model_future.result()
@@ -1447,6 +1498,8 @@ class IslandStudio:
             return
         self._closing = True
         self._archive_cancel.set()
+        if getattr(self, "_index_cancel", None) is not None:
+            self._index_cancel.set()
         # Cancelling queued jobs and detaching running daemon workers allows
         # Quit to close immediately, even during PBO/WRP indexing.
         self._executor.shutdown(wait=False, cancel_futures=True)
