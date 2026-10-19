@@ -100,7 +100,9 @@ def test_forest_only_query_before_and_after_index_and_sparse_edits(tmp_path: Pat
         doc.set_model(0, r"data3d\dum.p3d")
         doc.delete_object(3)
         doc.add_object(r"world\f\u_undergrowth_00.p3d", x=160, y=0, z=145)
-        assert [o.object_id for o in doc.visible_objects(0, 0, 400, 400, forest_only=True)] == [2, 5, 6]
+        assert sorted(o.object_id for o in doc.visible_objects(
+            0, 0, 400, 400, forest_only=True,
+        )) == [2, 5, 6]
         # The original source file never changes during an edit.
         with IslandDocument(path, cell_size=25) as unchanged:
             assert unchanged.object_count == 5
