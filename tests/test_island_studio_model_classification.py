@@ -131,3 +131,65 @@ def test_oprw_metadata_uses_model_table_and_not_placement_names(tmp_path: Path) 
         assert [x.object_id for x in doc.visible_objects(
             0, 0, 200, 200, forest_only=True,
         )] == [2]
+
+
+
+def test_metadata_worker_populates_overlays_without_ui_blocking(tmp_path: Path) -> None:
+    import queue
+    from concurrent.futures import Future
+    from types import SimpleNamespace
+    from cwr_island_studio.app import IslandStudio
+
+    folder = tmp_path / "models"
+    target = folder / "custom" / "mystery_road.p3d"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(model(geometry=(("class", "road"),)))
+    source = tmp_path / "world.wrp"
+    world(source)
+
+    def completed(fn):
+        future = Future()
+        future.set_result(fn())
+        return future
+
+    with open_island_document(source) as doc:
+        doc.build_object_index()
+        scheduled = []
+        messages = queue.Queue()
+        fake = SimpleNamespace(
+            _model_future=None,
+            _loading_pbos=False,
+            asset_roots=(folder,),
+            pbo_textures=None,
+            _model_bounds={},
+            _model_categories={},
+            _model_stamp=0,
+            _executor=SimpleNamespace(submit=completed),
+            _model_key=lambda path: IslandStudio._model_key(fake, path),
+            _index_future=None,
+            _waiting_pbos=None,
+            _closing=False,
+            _messages=messages,
+            document=doc,
+            root=SimpleNamespace(after=lambda ms, cb: scheduled.append((ms, cb))),
+            _queue_draw=lambda: None,
+        )
+        # Production runs this on a daemon worker; this fake executor
+        # evaluates synchronously to make the test deterministic.
+        before = doc.visible_objects(0, 0, 200, 200, roads_only=True)
+        assert [item.object_id for item in before] == [3]
+        IslandStudio._request_model_bounds(
+            fake, doc.visible_objects(0, 0, 200, 200),
+        )
+        assert fake._model_future is not None
+        IslandStudio._poll(fake)
+        assert fake._model_future is None
+        assert fake._model_categories[r"custom\mystery_road.p3d"] == ModelCategory(road=True)
+        after = doc.visible_objects(0, 0, 200, 200, roads_only=True)
+        assert [item.object_id for item in after] == [1, 3]
+        assert scheduled and scheduled[-1][0] == 150
+        IslandStudio._reset_model_bounds(fake)
+        assert fake._model_categories == {}
+        assert [item.object_id for item in doc.visible_objects(
+            0, 0, 200, 200, roads_only=True,
+        )] == [3]
