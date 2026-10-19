@@ -275,6 +275,25 @@ widget has keyboard focus, so entering coordinates and choosing assets
 continues to work normally. The arrow keys follow the same unclamped
 navigation behavior as right-button map dragging.
 
+## Read-only protection for loose and archived WRPs
+
+The **Read-only** checkbox in the top toolbar is enabled by default whenever
+you open a loose WRP. While checked, Island Studio allows viewing, terrain
+and texture inspection, object selection, navigation, road previews, forest
+overlays and model-size footprints, but disables painting, road placement,
+object modification and Save As. Uncheck **Read-only** deliberately when you
+want to edit a loose map; the checkbox and editing controls react immediately.
+This is a safeguard against accidental changes, not a file permissions change.
+Saving a loose edited WRP still uses Save As and preserves the source file.
+
+You can re-check it at any time. Pending unsaved changes are retained in
+memory, but cannot be exported or modified until the checkbox is unchecked.
+Loading another loose WRP returns to the safer checked default.
+
+For a WRP opened from a PBO/IFA archive, **Read-only is permanently checked
+and disabled**. There is no GUI or document-API override that allows
+editing or exporting an archived document.
+
 ## Open an island directly from a PBO (read-only)
 
 Choose **Open PBO WRP** in the toolbar and select a .pbo, .pbo.zst,
@@ -291,7 +310,7 @@ Allow enough disk space for the extracted WRP and, with Zstandard-wrapped
 archives, a temporary copy of the unpacked PBO. Temporary files are
 removed when the document is closed or replaced.
 
-**Archive WRPs open strictly read-only.** Terrain, texture, road and
+**Archive WRPs open strictly read-only, and their Read-only checkbox cannot be cleared.** Terrain, texture, road and
 object editing controls and Save As are disabled. Map navigation,
 hover readouts, object selection, model footprints, road preview and
 forest overlays remain available. The title identifies both the PBO
