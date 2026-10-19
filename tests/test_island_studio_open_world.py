@@ -4,6 +4,7 @@ from __future__ import annotations
 from concurrent.futures import Future
 from pathlib import Path
 import threading
+import queue
 from types import SimpleNamespace
 import struct
 import tkinter as tk
@@ -295,3 +296,39 @@ def test_open_second_loose_world_retires_first_before_new_loader(
     pending_index.set_result(None)
     assert closed.wait(timeout=2.0)
     assert statuses[-1] == "Opening another.wrp…"
+
+
+def test_completed_index_keeps_gui_polling_so_second_archive_can_open() -> None:
+    """An index-finished status must not crash Tk's recurring event loop."""
+    future = Future()
+    future.set_result(None)
+    messages: queue.Queue = queue.Queue()
+    scheduled: list[tuple[int, object]] = []
+    statuses: list[str] = []
+    opened: list[tuple[object, float, float]] = []
+    editor = SimpleNamespace(
+        _closing=False,
+        _messages=messages,
+        _index_future=future,
+        _index_cancel=threading.Event(),
+        _model_future=None,
+        document=SimpleNamespace(
+            object_count=5, read_only_forced=True, read_only=True,
+        ),
+        _queue_draw=lambda: None,
+        status=SimpleNamespace(set=statuses.append),
+        root=SimpleNamespace(after=lambda ms, callback: scheduled.append((ms, callback))),
+        _select_archive_member=lambda archive, grid, scale: opened.append(
+            (archive, grid, scale)
+        ),
+    )
+    IslandStudio._poll(editor)
+    assert scheduled and scheduled[-1][0] == 150
+    assert statuses[-1].startswith("Ready: 5 objects indexed.")
+    assert editor._index_future is None
+    archive = object()
+    messages.put(("archive_catalog", (archive, 50.0, 1.0)))
+    # The follow-up callback must still be alive after indexing the first WRP.
+    scheduled[-1][1]()
+    assert opened == [(archive, 50.0, 1.0)]
+    assert len(scheduled) == 2
