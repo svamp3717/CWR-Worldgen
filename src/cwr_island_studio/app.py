@@ -17,7 +17,7 @@ from .core import IslandDocument, MapObject
 from .object_layers import is_forest_model, object_marker_mode
 from .cursor_info import cursor_readout
 from .roads import is_road_model, plan_straight_road, road_segment
-from .navigation import zoom_around
+from .navigation import pan_with_arrow, zoom_around
 from .model_bounds import ModelBounds, load_model_bounds, footprint_corners, footprint_contains
 from .pbo_textures import PboTextures
 from .asset_sources import append_unique, remove_selected
@@ -258,7 +258,7 @@ class IslandStudio:
         ttk.Label(footer, textvariable=self.status).pack(side="left")
         ttk.Label(footer, textvariable=self.cursor_info, anchor="e").pack(side="right", padx=(12, 2))
         ttk.Label(
-            footer, text="+ / −: zoom   Wheel: zoom   Right-drag: pan",
+            footer, text="Arrows: pan   Shift+arrows: faster   + / −: zoom   Right-drag: pan",
         ).pack(side="bottom", anchor="e")
         self.root.bind("<Control-o>", lambda _e: self._open_dialog())
         self.root.bind("<Control-Shift-S>", lambda _e: self._save_dialog())
@@ -273,6 +273,11 @@ class IslandStudio:
             ("<Control-KP_Subtract>", 0.8),
         ):
             self.root.bind(sequence, lambda event, amount=factor: self._zoom_hotkey(event, amount))
+        for direction in ("Left", "Right", "Up", "Down"):
+            self.root.bind(
+                f"<{direction}>",
+                lambda event, key=direction: self._pan_hotkey(event, key),
+            )
 
     def _num(self, value: tk.StringVar, name: str) -> float:
         try:
@@ -863,6 +868,26 @@ class IslandStudio:
         if isinstance(focused, (tk.Entry, ttk.Entry, ttk.Combobox, tk.Text, ttk.Spinbox)):
             return None
         self._zoom_button(factor)
+        return "break"
+
+    def _pan_hotkey(self, event: tk.Event, direction: str) -> str | None:
+        """Pan unless a focused editor control needs its own arrow keys."""
+        if self.document is None or self._busy:
+            return None
+        focused = self.root.focus_get()
+        if isinstance(focused, (
+            tk.Entry, ttk.Entry, ttk.Combobox, tk.Text, tk.Listbox,
+            tk.Spinbox, ttk.Spinbox, tk.Scale, ttk.Scale,
+            ttk.Treeview, tk.Scrollbar, ttk.Scrollbar,
+        )):
+            return None
+        shift_held = bool(event.state & 0x0001)
+        self.view_x, self.view_z = pan_with_arrow(
+            self.view_x, self.view_z, self.zoom, direction,
+            fast=shift_held,
+        )
+        self._refresh_hover()
+        self._queue_draw()
         return "break"
 
     def _zoom_at(self, event: tk.Event, factor: float) -> None:
