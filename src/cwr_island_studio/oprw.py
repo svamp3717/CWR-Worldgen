@@ -68,6 +68,9 @@ def _read_packed(
     """
     if not 0 < expected <= _MAX_CELLS * 4:
         raise ValueError(f"invalid OPRW {label} size")
+    # Poseidon SerializeBinStream writes arrays below 1024 bytes directly.
+    if expected < 1024:
+        return _exact(stream, expected, label)
     output = bytearray(expected)
     dictionary = bytearray(b" " * 4096)
     write_at = dict_at = 0
