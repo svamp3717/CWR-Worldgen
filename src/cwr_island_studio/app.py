@@ -486,7 +486,8 @@ class IslandStudio:
             messagebox.showerror("Invalid map settings", str(exc))
             return
         self._busy = True
-        self._retire_current_world()
+        if self.document is not None:
+            self._retire_current_world()
         self._archive_cancel = threading.Event()
         cancel_event = self._archive_cancel
         self.status.set(f"Indexing WRP entries in {Path(path).name}…")
@@ -684,7 +685,8 @@ class IslandStudio:
             messagebox.showerror("Invalid map settings", str(exc))
             return
         self._busy = True
-        self._retire_current_world()
+        if self.document is not None:
+            self._retire_current_world()
         self.status.set(f"Opening {path.name}…")
         def load() -> None:
             try:
