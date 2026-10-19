@@ -68,8 +68,12 @@ class IslandDocument:
     def __init__(
         self, path: Path | str, *, cell_size: float = 50.0,
         height_scale: float = 1.0,
+        read_only: bool = False,
     ) -> None:
         self.path = Path(path).resolve()
+        self.read_only = bool(read_only)
+        self.source_label = self.path.name
+        self._archive_owner = None
         if not math.isfinite(cell_size) or cell_size <= 0:
             raise ValueError("cell size must be positive and finite")
         if not math.isfinite(height_scale) or height_scale <= 0:
@@ -153,6 +157,10 @@ class IslandDocument:
             or self.deleted or self.added
         )
 
+    def _require_writable(self) -> None:
+        if self.read_only:
+            raise PermissionError("Archived WRP is read-only; no editing or exporting is allowed")
+
     def close(self) -> None:
         # NumPy memory-map views must be dropped before closing the mapping.
         self._index_order = self._index_keys = self._road_mask = self._forest_mask = None
@@ -164,6 +172,9 @@ class IslandDocument:
         if getattr(self, "_file", None) is not None:
             self._file.close()
             self._file = None
+        if self._archive_owner is not None:
+            owner, self._archive_owner = self._archive_owner, None
+            owner.close()
 
     def __enter__(self) -> "IslandDocument":
         return self
@@ -199,6 +210,7 @@ class IslandDocument:
         self, index: int, *, x: float, y: float, z: float,
         heading: float | None = None,
     ) -> None:
+        self._require_writable()
         if not all(math.isfinite(v) for v in (x, y, z)):
             raise ValueError("object coordinates must be finite")
         old = self.object_at(index)
@@ -225,6 +237,7 @@ class IslandDocument:
             self.record_edits[index] = bytes(raw)
 
     def set_model(self, index: int, model_path: str) -> None:
+        self._require_writable()
         data = model_path.encode("ascii", errors="strict")
         if not data or len(data) > 75 or b"\0" in data:
             raise ValueError("model path must be 1 to 75 ASCII bytes")
@@ -239,6 +252,7 @@ class IslandDocument:
         self, model_path: str, *, x: float, y: float, z: float,
         heading: float = 0.0,
     ) -> int:
+        self._require_writable()
         encoded = model_path.encode("ascii", "strict")
         if not encoded or len(encoded) > 75 or b"\0" in encoded:
             raise ValueError("model path must be 1 to 75 ASCII bytes")
@@ -261,6 +275,7 @@ class IslandDocument:
         return index
 
     def delete_object(self, index: int) -> None:
+        self._require_writable()
         self._record(index)
         self.deleted.add(index)
         self.record_edits.pop(index, None)
@@ -281,6 +296,7 @@ class IslandDocument:
         self, x: float, z: float, *, radius: float,
         raise_metres: float = 0.0, texture: int | None = None,
     ) -> int:
+        self._require_writable()
         if radius < 0 or not math.isfinite(radius) or not math.isfinite(raise_metres):
             raise ValueError("invalid terrain brush")
         if texture is not None and not 0 <= texture < _TEXTURE_SLOTS:
@@ -474,6 +490,7 @@ class IslandDocument:
         Most edits use a fast copy-and-patch path. Deletions use sequential
         copying of surviving record spans, not per-object Python packing.
         """
+        self._require_writable()
         destination = Path(destination).resolve()
         if destination == self.path:
             raise ValueError("the source map is read-only; use a different output filename")
