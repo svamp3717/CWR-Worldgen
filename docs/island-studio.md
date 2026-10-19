@@ -235,3 +235,26 @@ panning, zooming and view switching, and clears when the pointer leaves the
 map. This lookup reads only a single terrain or texture sample; it does not
 re-render terrain, decode a texture, or load a model on pointer movement.
 The ordinary build, save and selection messages remain in their own area.
+
+## Show forests independently of other object markers
+
+Select **Show forests (green overlay)** in the View sidebar to highlight
+forest blocks, generated forest clusters, trees, and common vegetation models
+recorded in the WRP. This can be enabled while **Show world objects** is off.
+Forest markers are green; models whose first visual P3D LOD can be measured
+show shaded green 2D footprints and other forestry assets show green dots.
+The overlay reads WRP forest/vegetation objects, **not** original OSM forest
+polygons. It is a placement preview and may not reproduce a model's full
+in-game canopy, proxies, or collision geometry. The view uses a compact
+background classification mask and a bounded visible-object query.
+
+**Show objects at model size** is now independent of **Show world objects**.
+Turning off ordinary white object dots while leaving model size enabled
+keeps genuine model footprint outlines visible. If an asset is missing,
+unsupported, or smaller than two screen pixels at the current zoom, no
+generic fallback dot is drawn unless **Show world objects** is turned on.
+The forest overlay retains its own green fallback dots when enabled.
+The viewer does not invent dimensions for unmeasured models.
+
+The two overlays can be combined with road previews or either terrain
+background. The map source and exported object positions are unchanged.
