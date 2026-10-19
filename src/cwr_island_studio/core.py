@@ -23,6 +23,7 @@ import numpy as np
 
 from .roads import is_road_model
 from .object_layers import is_forest_model
+from .model_classification import ModelCategory
 
 _HEADER = struct.Struct("<4sii")
 _OBJECT = struct.Struct("<12fi76s")
@@ -155,6 +156,7 @@ class IslandDocument:
         self._index_columns: int = 0
         self._road_mask: np.ndarray | None = None
         self._forest_mask: np.ndarray | None = None
+        self._model_categories: dict[str, ModelCategory] = {}
         self._last_object_id: int | None = None
 
     @property
@@ -392,6 +394,60 @@ class IslandDocument:
         self._forest_mask = classify(is_forest_model)
         check_cancel()
 
+    @staticmethod
+    def _model_key(path: str) -> str:
+        return path.replace("/", "\\\\").strip("\\\\").casefold()
+
+    def set_model_categories(self, categories: dict[str, ModelCategory]) -> None:
+        """Apply P3D metadata resolved asynchronously from selected assets.
+
+        Never reopen a model or scan all WRP objects on Tk's drawing thread.
+        Metadata is keyed by model *name*, rather than one entry per placement.
+        """
+        if not hasattr(self, "_model_categories"):
+            self._model_categories = {}
+        self._model_categories.update({
+            self._model_key(path): info for path, info in categories.items()
+        })
+        if not hasattr(self, "_model_aliases"):
+            self._model_aliases = {}
+        for path in categories:
+            key = self._model_key(path)
+            self._model_aliases[key] = (*self._model_aliases.get(key, ()), path)
+
+    def _category_matches(self, model_path: str, *, forest: bool) -> bool:
+        category = getattr(self, "_model_categories", {}).get(self._model_key(model_path))
+        if category is not None:
+            return category.forest if forest else category.road
+        return is_forest_model(model_path) if forest else is_road_model(model_path)
+
+    def _category_filter(self, hits: np.ndarray, *, forest: bool) -> np.ndarray:
+        mask = self._forest_mask if forest else self._road_mask
+        if mask is not None:
+            selected = mask[hits].copy()
+        else:
+            selected = np.fromiter(
+                (self._category_matches(self._records["model"][int(i)].decode("ascii", "replace"),
+                                        forest=forest) for i in hits),
+                dtype=np.bool_, count=len(hits),
+            )
+        categories = getattr(self, "_model_categories", {})
+        if not categories or not len(hits):
+            return hits[selected]
+        models = self._records["model"][hits]
+        # Overrides are rare and apply only to unique P3D names measured from
+        # the viewport. Compare vectorized bytes, never create Python objects
+        # for the entire placement table.
+        for path, info in categories.items():
+            wanted = info.forest if forest else info.road
+            # A path may be normalized differently from its original WRP case.
+            # Resolve from original paths via the small alias table below.
+            for raw in getattr(self, "_model_aliases", {}).get(path, (path,)):
+                matching = models == raw.encode("latin-1", "replace")
+                if bool(np.any(matching)):
+                    selected[matching] = wanted
+        return hits[selected]
+
     def visible_objects(
         self, left: float, top: float, right: float, bottom: float,
         *, limit: int = 3500, roads_only: bool = False,
@@ -432,10 +488,10 @@ class IslandDocument:
                     (transforms[hits, 9] >= left) & (transforms[hits, 9] <= right)
                     & (transforms[hits, 11] >= top) & (transforms[hits, 11] <= bottom)
                 ]
-        if roads_only and self._road_mask is not None and len(hits):
-            hits = hits[self._road_mask[hits]]
-        if forest_only and self._forest_mask is not None and len(hits):
-            hits = hits[self._forest_mask[hits]]
+        if roads_only and len(hits):
+            hits = self._category_filter(hits, forest=False)
+        if forest_only and len(hits):
+            hits = self._category_filter(hits, forest=True)
         # Avoid rendering tens of thousands of Tk objects per frame.
         if len(hits) > limit:
             hits = hits[::max(1, math.ceil(len(hits) / limit))][:limit]
@@ -445,8 +501,8 @@ class IslandDocument:
             i = int(index)
             if i not in self.deleted and i not in overrides:
                 obj = self.object_at(i)
-                if (not roads_only or is_road_model(obj.model_path)) and (
-                    not forest_only or is_forest_model(obj.model_path)
+                if (not roads_only or self._category_matches(obj.model_path, forest=False)) and (
+                    not forest_only or self._category_matches(obj.model_path, forest=True)
                 ):
                     result.append(obj)
         for i in (*sorted(overrides), *range(self.object_count, self.object_count + len(self.added))):
