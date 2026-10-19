@@ -547,6 +547,7 @@ class Milestone9Spec(Milestone8Spec):
     pbo_backend: str = "auto"
     poseidon_tools_path: Path | None = None
     odol_buildings: bool = False
+    binarize_world: bool = False
     deploy_mod_dir: Path | None = None
 
     def validate(self) -> None:
@@ -1225,6 +1226,12 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
     )
     report_progress(1, "Source bundle validated; preparing normalized geometry")
     source = source_validation.bundle
+    if spec.binarize_world and abs(source.cell_size - 50.0) > 0.00001:
+        raise ValueError(
+            "Experimental OPRW v3 binarization requires a 50 m source grid: "
+            "CWR-CE currently forces binarized LandGrid=50, so a different "
+            "grid would change the size and object alignment of your island"
+        )
     normalization = normalize_source_bundle(
         NormalizationSpec(
             source_dir=source.root,
@@ -1660,6 +1667,32 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
     if result.overview_map_path:
         shutil.copyfile(result.overview_map_path, runtime_root / "OVERVIEW-MAP.png")
 
+    binarized_wrp: Path | None = None
+    if spec.binarize_world:
+        from .pbo import pack_directory
+        from .wrp_binarize import binarize_rvw4
+        import os
+
+        report_progress(99, "Binarizing WRP to OPRW v3 for the game archive")
+        binarized_wrp = result.output_dir / f"{spec.name}.binarized.wrp"
+        binarize_rvw4(
+            result.wrp_path, binarized_wrp,
+            height_scale=spec.height_scale,
+        )
+        # Repack the game PBO with OPRW, but keep its source directory and
+        # reproducibility artifacts in the editable, unbinarized 4WVR format.
+        backup = result.output_dir / f".{spec.name}.4wvr-pack-backup"
+        os.replace(result.wrp_path, backup)
+        try:
+            shutil.copyfile(binarized_wrp, result.wrp_path)
+            pack_directory(
+                result.source_dir, result.pbo_path,
+                backend=spec.pbo_backend,
+                poseidon_tools_path=spec.poseidon_tools_path,
+            )
+        finally:
+            os.replace(backup, result.wrp_path)
+
     deployment: dict[str, Any] | None = None
     if spec.deploy_mod_dir is not None:
         report_progress(99, f"Deploying world PBO, terrain ReadMe, and menu intro into {spec.deploy_mod_dir}")
@@ -1679,6 +1712,13 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
     build_manifest["milestone"] = 9
     build_manifest["generator"] = GENERATOR_VERSION
     build_manifest["deployment"] = deployment
+    build_manifest["world_binarization"] = {
+        "enabled": spec.binarize_world,
+        "format": "OPRW v3" if spec.binarize_world else "4WVR",
+        "source_wrp": str(result.wrp_path),
+        "binarized_wrp": str(binarized_wrp) if binarized_wrp else None,
+        "note": "Experimental; CWR-CE requires 50 m LandGrid for OPRW v3.",
+    }
     build_manifest["source_bundle"] = {
         "manifest_sha256": source.fingerprint,
         "bbox_south_west_north_east": list(source.bbox),
