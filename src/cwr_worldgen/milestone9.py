@@ -1669,29 +1669,19 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
 
     binarized_wrp: Path | None = None
     if spec.binarize_world:
-        from .pbo import pack_directory
-        from .wrp_binarize import binarize_rvw4
-        import os
+        from .wrp_binarize import binarize_rvw4, repack_game_pbo_with_oprw
 
         report_progress(99, "Binarizing WRP to OPRW v3 for the game archive")
         binarized_wrp = result.output_dir / f"{spec.name}.binarized.wrp"
         binarize_rvw4(
-            result.wrp_path, binarized_wrp,
-            height_scale=spec.height_scale,
+            result.wrp_path, binarized_wrp, height_scale=spec.height_scale,
         )
-        # Repack the game PBO with OPRW, but keep its source directory and
-        # reproducibility artifacts in the editable, unbinarized 4WVR format.
-        backup = result.output_dir / f".{spec.name}.4wvr-pack-backup"
-        os.replace(result.wrp_path, backup)
-        try:
-            shutil.copyfile(binarized_wrp, result.wrp_path)
-            pack_directory(
-                result.source_dir, result.pbo_path,
-                backend=spec.pbo_backend,
-                poseidon_tools_path=spec.poseidon_tools_path,
-            )
-        finally:
-            os.replace(backup, result.wrp_path)
+        repack_game_pbo_with_oprw(
+            result.source_dir, result.wrp_path,
+            binarized_wrp, result.pbo_path,
+            backend=spec.pbo_backend,
+            poseidon_tools_path=spec.poseidon_tools_path,
+        )
 
     deployment: dict[str, Any] | None = None
     if spec.deploy_mod_dir is not None:
