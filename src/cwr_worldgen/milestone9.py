@@ -1217,6 +1217,30 @@ def _resolve_overture_buildings_geojson(
     return fetch_overture_buildings_geojson(bbox, output, refresh=spec.cache_refresh)
 
 
+def _binarize_generated_world(
+    result: BuildResult, spec: Milestone9Spec,
+    playability: _Milestone9PlayabilitySpec,
+) -> Path:
+    """Binarize the emitted WRP using its actual 4WVR elevation scale.
+
+    Milestone9Spec is a configuration wrapper, not the terrain writer spec.
+    4WVR heights are encoded with playability.height_scale (0.05 m/unit).
+    Keep conversion and repacking in one testable post-build operation.
+    """
+    from .wrp_binarize import binarize_rvw4, repack_game_pbo_with_oprw
+
+    binarized = result.output_dir / f"{spec.name}.binarized.wrp"
+    binarize_rvw4(
+        result.wrp_path, binarized, height_scale=playability.height_scale,
+    )
+    repack_game_pbo_with_oprw(
+        result.source_dir, result.wrp_path, binarized, result.pbo_path,
+        backend=spec.pbo_backend,
+        poseidon_tools_path=spec.poseidon_tools_path,
+    )
+    return binarized
+
+
 def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = True) -> BuildResult:
     spec.validate()
     report_progress(0, "Validating Milestone 9 source bundle")
@@ -1669,19 +1693,8 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
 
     binarized_wrp: Path | None = None
     if spec.binarize_world:
-        from .wrp_binarize import binarize_rvw4, repack_game_pbo_with_oprw
-
         report_progress(99, "Binarizing WRP to OPRW v3 for the game archive")
-        binarized_wrp = result.output_dir / f"{spec.name}.binarized.wrp"
-        binarize_rvw4(
-            result.wrp_path, binarized_wrp, height_scale=playability.height_scale,
-        )
-        repack_game_pbo_with_oprw(
-            result.source_dir, result.wrp_path,
-            binarized_wrp, result.pbo_path,
-            backend=spec.pbo_backend,
-            poseidon_tools_path=spec.poseidon_tools_path,
-        )
+        binarized_wrp = _binarize_generated_world(result, spec, playability)
 
     deployment: dict[str, Any] | None = None
     if spec.deploy_mod_dir is not None:
