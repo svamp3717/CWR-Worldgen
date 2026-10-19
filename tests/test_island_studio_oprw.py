@@ -1,7 +1,9 @@
 """Synthetic OFP OPRW v2/v3 test worlds with independently packed grids."""
 from __future__ import annotations
 
+from concurrent.futures import CancelledError
 from pathlib import Path
+import threading
 import struct
 
 import numpy as np
@@ -159,3 +161,16 @@ def test_reject_invalid_packed_data_and_invalid_model_index(tmp_path: Path) -> N
     filename.write_bytes(data)
     with pytest.raises(ValueError, match="model index"):
         open_island_document(filename)
+
+
+def test_oprw_index_cancellation_before_build_does_not_complete(
+    tmp_path: Path,
+) -> None:
+    world = tmp_path / "cancel.wrp"
+    world.write_bytes(make_oprw(version=3))
+    event = threading.Event()
+    with open_island_document(world) as doc:
+        event.set()
+        with pytest.raises(CancelledError):
+            doc.build_object_index(cancel_event=event)
+        assert doc._index_order is None
