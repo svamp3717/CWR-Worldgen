@@ -20,6 +20,7 @@ from .roads import is_road_model, plan_straight_road, road_segment
 from .navigation import pan_with_arrow, zoom_around
 from .model_bounds import ModelBounds, load_model_bounds, footprint_corners, footprint_contains
 from .pbo_textures import PboTextures
+from .pbo_worlds import PboWorldArchive
 from .asset_sources import append_unique, remove_selected
 from .textures import clear_archive_texture_cache, clear_loose_texture_cache, render_real_textures
 from importlib.metadata import PackageNotFoundError, version
@@ -48,6 +49,9 @@ class IslandStudio:
         self._model_stamp = 0
         self._waiting_pbos: PboTextures | None = None
         self._busy = False
+        self._edit_buttons: list[ttk.Button] = []
+        self._edit_entries: list[ttk.Entry] = []
+
         self._render_pending = False
         self._image: ImageTk.PhotoImage | None = None
         self._visible: tuple[MapObject, ...] = ()
@@ -98,7 +102,9 @@ class IslandStudio:
         header = ttk.Frame(self.root, padding=(9, 7))
         header.pack(fill="x")
         ttk.Button(header, text="Open WRP", command=self._open_dialog).pack(side="left", padx=3)
-        ttk.Button(header, text="Save As", command=self._save_dialog).pack(side="left", padx=3)
+        ttk.Button(header, text="Open PBO WRP", command=self._open_pbo_dialog).pack(side="left", padx=3)
+        self.save_button = ttk.Button(header, text="Save As", command=self._save_dialog)
+        self.save_button.pack(side="left", padx=3)
         ttk.Button(header, text="Fit map", command=self._fit).pack(side="left", padx=3)
         ttk.Button(header, text="−", width=3, command=lambda: self._zoom_button(0.8)).pack(side="left", padx=(12, 2))
         ttk.Button(header, text="+", width=3, command=lambda: self._zoom_button(1.25)).pack(side="left", padx=2)
@@ -218,25 +224,29 @@ class IslandStudio:
         ttk.Separator(side).pack(fill="x", pady=(4, 9))
 
         ttk.Label(side, text="Edit tool", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
-        ttk.Combobox(
+        self.edit_tool_combo = ttk.Combobox(
             side, textvariable=self.tool, state="readonly",
             values=("Select", "Raise terrain", "Lower terrain", "Paint texture", "Draw road line", "Erase road"),
-        ).pack(fill="x", pady=(4, 7))
+        )
+        self.edit_tool_combo.pack(fill="x", pady=(4, 7))
         for label, var in (
             ("Brush radius, metres", self.brush_radius),
             ("Elevation step, metres", self.brush_strength),
             ("Texture slot (0–511)", self.paint_slot),
         ):
             ttk.Label(side, text=label).pack(anchor="w", pady=(3, 0))
-            ttk.Entry(side, textvariable=var).pack(fill="x", pady=(0, 4))
+            entry = ttk.Entry(side, textvariable=var)
+            entry.pack(fill="x", pady=(0, 4))
+            self._edit_entries.append(entry)
 
         ttk.Label(side, text="Straight road model").pack(anchor="w", pady=(8, 0))
-        ttk.Combobox(
+        self.edit_road_combo = ttk.Combobox(
             side, textvariable=self.road_model,
             values=(r"o\road\sil25.p3d", r"o\road\asf25.p3d",
                     r"o\road\ces25.p3d", r"o\road\kos25.p3d",
                     r"o\road\sil12.p3d", r"o\road\sil6.p3d"),
-        ).pack(fill="x")
+        )
+        self.edit_road_combo.pack(fill="x")
         ttk.Label(side, text="Road: click start/end; Esc cancels", wraplength=230).pack(anchor="w", pady=(2, 0))
         ttk.Separator(side, orient="horizontal").pack(fill="x", pady=13)
         ttk.Label(side, text="Selected object", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
@@ -248,10 +258,17 @@ class IslandStudio:
             ("Heading (degrees)", self.obj_heading),
         ):
             ttk.Label(side, text=label).pack(anchor="w", pady=(4, 0))
-            ttk.Entry(side, textvariable=var).pack(fill="x", pady=(0, 2))
-        ttk.Button(side, text="Apply object changes", command=self._apply_object).pack(fill="x", pady=(10, 3))
-        ttk.Button(side, text="Add object at map centre", command=self._add_object).pack(fill="x", pady=3)
-        ttk.Button(side, text="Remove selected object", command=self._remove_object).pack(fill="x", pady=3)
+            entry = ttk.Entry(side, textvariable=var)
+            entry.pack(fill="x", pady=(0, 2))
+            self._edit_entries.append(entry)
+        for label, callback, pad in (
+            ("Apply object changes", self._apply_object, (10, 3)),
+            ("Add object at map centre", self._add_object, (3, 3)),
+            ("Remove selected object", self._remove_object, (3, 3)),
+        ):
+            button = ttk.Button(side, text=label, command=callback)
+            button.pack(fill="x", pady=pad)
+            self._edit_buttons.append(button)
 
         footer = ttk.Frame(self.root, padding=(8, 5))
         footer.pack(fill="x")
@@ -287,6 +304,107 @@ class IslandStudio:
             return number
         except ValueError as exc:
             raise ValueError(f"{name} must be a finite number") from exc
+
+    def _open_pbo_dialog(self) -> None:
+        if self._busy:
+            return
+        if self.document is not None and self.document.changed:
+            if not messagebox.askyesno(
+                "Discard pending edits?",
+                "Opening an archive will discard unsaved edits. Continue?",
+            ):
+                return
+        path = filedialog.askopenfilename(
+            title="Open a read-only island from a PBO",
+            filetypes=[
+                ("Game archives", "*.pbo *.pbo.zst *.ifa *.ifa.zst"),
+                ("PBO archives", "*.pbo"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        try:
+            cell_size = self._num(self.cell_size, "Grid metres")
+            height_scale = self._num(self.height_scale, "Height scale")
+            if cell_size <= 0 or height_scale <= 0:
+                raise ValueError("Grid metres and height scale must be positive")
+        except ValueError as exc:
+            messagebox.showerror("Invalid map settings", str(exc))
+            return
+        self._busy = True
+        self.status.set(f"Indexing WRP entries in {Path(path).name}…")
+
+        def inspect() -> None:
+            try:
+                archive = PboWorldArchive(Path(path))
+                self._messages.put(("archive_catalog", (archive, cell_size, height_scale)))
+            except Exception as exc:
+                self._messages.put(("error", str(exc)))
+
+        self._executor.submit(inspect)
+
+    def _select_archive_member(self, archive: PboWorldArchive) -> str | None:
+        names = sorted(archive.members, key=str.casefold)
+        if len(names) == 1:
+            return names[0]
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Choose a WRP from the PBO")
+        dialog.geometry("550x380")
+        dialog.transient(self.root)
+        frame = ttk.Frame(dialog, padding=10)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text=f"{len(names)} WRP files found. Select one to view read-only:").pack(anchor="w")
+        selection = tk.Listbox(frame, exportselection=False)
+        selection.pack(fill="both", expand=True, pady=8)
+        for name in names:
+            selection.insert("end", name)
+        selection.selection_set(0)
+        picked: list[str] = []
+
+        def accept(_event=None) -> None:
+            indices = selection.curselection()
+            if indices:
+                picked.append(names[int(indices[0])])
+            dialog.destroy()
+
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x")
+        ttk.Button(buttons, text="Open read-only", command=accept).pack(side="right", padx=4)
+        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right")
+        selection.bind("<Double-Button-1>", accept)
+        dialog.grab_set()
+        self.root.wait_window(dialog)
+        return picked[0] if picked else None
+
+    def _open_archive_member(
+        self, archive: PboWorldArchive, member: str,
+        cell_size: float, height_scale: float,
+    ) -> None:
+        self.status.set(f"Loading read-only island {member}…")
+
+        def load() -> None:
+            try:
+                doc = archive.open_world(
+                    member, cell_size=cell_size, height_scale=height_scale,
+                )
+                self._messages.put(("open", doc))
+            except Exception as exc:
+                self._messages.put(("error", str(exc)))
+
+        self._executor.submit(load)
+
+    def _update_edit_access(self) -> None:
+        locked = self.document is not None and self.document.read_only
+        self.save_button.configure(state="disabled" if locked else "normal")
+        self.edit_tool_combo.configure(state="disabled" if locked else "readonly")
+        self.edit_road_combo.configure(state="disabled" if locked else "normal")
+        if locked:
+            self.tool.set("Select")
+        for button in self._edit_buttons:
+            button.configure(state="disabled" if locked else "normal")
+        for entry in self._edit_entries:
+            entry.configure(state="readonly" if locked else "normal")
 
     def _open_dialog(self) -> None:
         if self._busy:
@@ -331,17 +449,23 @@ class IslandStudio:
         if self.document:
             self.document.close()
         self.document = doc
+        self._update_edit_access()
         self.selected = None
         self.cursor_info.set("")
         self._road_anchor = None
         self._road_cursor = None
         self._busy = False
         self.metadata.set(
-            f"{doc.width:,}×{doc.height:,}  |  {doc.object_count:,} objects"
+            f"{doc.width:,}×{doc.height:,} | {doc.object_count:,} objects"
+            + (" | READ-ONLY PBO" if doc.read_only else "")
         )
-        self.root.title(f"CWR Island Studio | {doc.path.name}")
+        self.root.title(f"CWR Island Studio | {doc.source_label}"
+                        + (" [read-only]" if doc.read_only else ""))
         self._fit()
-        self.status.set("Map ready. Building the background object index…")
+        self.status.set(
+            "Read-only WRP ready. Building object index…"
+            if doc.read_only else "Map ready. Building the background object index…"
+        )
         self._index_future = self._executor.submit(doc.build_object_index)
 
     def _poll(self) -> None:
@@ -350,6 +474,22 @@ class IslandStudio:
                 kind, value = self._messages.get_nowait()
                 if kind == "open":
                     self._accept_document(value)
+                elif kind == "archive_catalog":
+                    archive, cell_size, height_scale = value
+                    try:
+                        member = self._select_archive_member(archive)
+                        if member is None:
+                            archive.close()
+                            self._busy = False
+                            self.status.set("Archive opening cancelled")
+                        else:
+                            self._open_archive_member(
+                                archive, member, cell_size, height_scale,
+                            )
+                    except Exception as exc:
+                        archive.close()
+                        self._busy = False
+                        messagebox.showerror("Archive WRP", str(exc))
                 elif kind == "saved":
                     self._busy = False
                     self.status.set(f"Exported successfully: {value}")
@@ -383,7 +523,9 @@ class IslandStudio:
                 if self.document:
                     self.status.set(
                         f"Ready: {self.document.object_count:,} objects indexed. "
-                        "Edits stay in memory until Save As."
+                        ("Read-only WRP from PBO. Viewing and inspection only."
+                         if self.document.read_only
+                         else "Edits stay in memory until Save As.")
                     )
                 self._queue_draw()
             self._index_future = None
@@ -791,7 +933,7 @@ class IslandStudio:
         self._queue_draw()
 
     def _road_action(self, position: tuple[float, float], mode: str) -> None:
-        if self.document is None:
+        if self.document is None or self.document.read_only:
             return
         x, z = position
         if mode == "Erase road":
@@ -920,6 +1062,8 @@ class IslandStudio:
         if not self.document or self._busy:
             return
         mode = self.tool.get()
+        if self.document.read_only and mode != "Select":
+            return
         if mode in ("Draw road line", "Erase road"):
             position = self._to_world(event.x, event.y)
             if 0 <= position[0] < self.document.world_width and 0 <= position[1] < self.document.world_height:
@@ -997,7 +1141,7 @@ class IslandStudio:
         self._queue_draw()
 
     def _apply_object(self) -> None:
-        if not self.document or self.selected is None or self._busy:
+        if not self.document or self.document.read_only or self.selected is None or self._busy:
             return
         try:
             obj = self.document.object_at(self.selected)
@@ -1019,7 +1163,7 @@ class IslandStudio:
         self._queue_draw()
 
     def _add_object(self) -> None:
-        if not self.document or self._busy:
+        if not self.document or self.document.read_only or self._busy:
             return
         left, top, right, bottom = self._extent()
         x = min(self.document.world_width - 0.001, max(0.0, (left + right) / 2))
@@ -1038,7 +1182,7 @@ class IslandStudio:
         self._select(index)
 
     def _remove_object(self) -> None:
-        if not self.document or self.selected is None or self._busy:
+        if not self.document or self.document.read_only or self.selected is None or self._busy:
             return
         try:
             self.document.delete_object(self.selected)
@@ -1050,7 +1194,7 @@ class IslandStudio:
         self._queue_draw()
 
     def _save_dialog(self) -> None:
-        if not self.document or self._busy:
+        if not self.document or self.document.read_only or self._busy:
             return
         default = self.document.path.with_name(self.document.path.stem + "_edited.wrp")
         chosen = filedialog.asksaveasfilename(
