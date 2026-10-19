@@ -415,6 +415,11 @@ class IslandDocument:
             key = self._model_key(path)
             self._model_aliases[key] = (*self._model_aliases.get(key, ()), path)
 
+    def clear_model_categories(self) -> None:
+        """Forget P3D classifications when model folders or PBOs change."""
+        self._model_categories = {}
+        self._model_aliases = {}
+
     def _category_matches(self, model_path: str, *, forest: bool) -> bool:
         category = getattr(self, "_model_categories", {}).get(self._model_key(model_path))
         if category is not None:
