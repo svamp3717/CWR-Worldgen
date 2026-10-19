@@ -329,6 +329,30 @@ command line uses the same format detection. Asset PBO selection remains
 separate because it is used for texture and model lookups, not for choosing
 the world being viewed.
 
+## World grid sizes and optional map labels
+
+The **Grid fallback (m)** field defaults to 50 m and remains a manual
+override. With **Auto LandGrid** enabled (default), Island Studio looks for
+the matching `CfgWorlds >> world_name >> landGrid` setting in a nearby
+`config.cpp` for a loose WRP, or `config.cpp` embedded in the opened
+PBO/IFA. The config setting is used for unbinarized 4WVR only. Binarized
+OFP/CWA OPRW 2/3 defaults to 50 m for the current CWR-CE engine, and the
+fallback field can still override it. The WRP itself does not contain
+the corresponding `CfgWorlds` setting.
+
+**Show place names (config.cpp)** overlays any matching `CfgWorlds >>
+world_name >> Names` entries onto the canvas. Map place labels are optional;
+the editor is not guaranteed to find them in a loose or packaged WRP alone.
+This reader handles source `config.cpp`; it cannot decompile packed
+`config.bin` game configs. Labels are not saved into the WRP and do not
+change the terrain. Visible label count is capped to keep navigation smooth.
+
+An unchanged, uncompressed PBO directory is cached between opens, so loading
+a second WRP from the same archive does not reindex the same directory.
+Switching islands detaches the old document, cancels old background indexing
+and closes it asynchronously once its indexer finishes. This does not modify
+either world or block Quit.
+
 ## Open an island directly from a PBO (read-only)
 
 Choose **Open World** in the toolbar and select a .pbo, .pbo.zst,
