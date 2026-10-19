@@ -71,7 +71,10 @@ class IslandDocument:
         read_only: bool = False,
     ) -> None:
         self.path = Path(path).resolve()
-        self.read_only = bool(read_only)
+        # PBO worlds are intrinsically read-only. The UI may additionally
+        # lock a loose WRP, but must never unlock an archived source.
+        self._read_only_forced = bool(read_only)
+        self._read_only = bool(read_only)
         self.source_label = self.path.name
         self._archive_owner = None
         if not math.isfinite(cell_size) or cell_size <= 0:
@@ -157,9 +160,24 @@ class IslandDocument:
             or self.deleted or self.added
         )
 
+    @property
+    def read_only(self) -> bool:
+        return self._read_only
+
+    @read_only.setter
+    def read_only(self, value: bool) -> None:
+        if self._read_only_forced and not value:
+            raise PermissionError("Archived WRP must remain read-only")
+        self._read_only = bool(value)
+
+    @property
+    def read_only_forced(self) -> bool:
+        """True for archived sources that cannot be unlocked for editing."""
+        return self._read_only_forced
+
     def _require_writable(self) -> None:
         if self.read_only:
-            raise PermissionError("Archived WRP is read-only; no editing or exporting is allowed")
+            raise PermissionError("WRP is read-only; uncheck Read-only to edit a loose WRP")
 
     def close(self) -> None:
         # NumPy memory-map views must be dropped before closing the mapping.
