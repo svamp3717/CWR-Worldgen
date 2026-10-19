@@ -66,9 +66,10 @@ It supports terrain height samples, texture-slot IDs, and object positions,
 heading and model paths. It does not yet offer advanced transform controls,
 a full road editor, 3D scene rendering, texture-image decoding or undo/redo.
 
-Open a loose, unbinarized 4WVR WRP for editing, or open a read-only
-4WVR WRP from a selected PBO/IFA archive. Binarized OPRW and 8WVR
-formats are not supported. PBO archives are never repacked or edited.
+Open an unbinarized 4WVR WRP for editing, or inspect binarized OFP/CWA
+OPRW version 2 or 3 worlds read-only, either loose or inside a PBO/IFA.
+OPRW 17+ (Arma/Elite) and 8WVR are not supported by this viewer.
+PBO archives are never repacked or edited.
 Memory availability and the target game engine impose practical limits beyond
 the file reader's terrain-size handling.
 
@@ -321,7 +322,7 @@ editing or exporting an archived document.
 
 Use the single **Open World** toolbar button or **Ctrl+O** to select either
 a loose `.wrp` or a `.pbo`, `.ifa`, `.pbo.zst`, or `.ifa.zst` archive.
-A loose WRP opens with the optional Read-only checkbox checked by default;
+A loose 4WVR opens with the optional Read-only checkbox checked by default;
 an archived WRP remains permanently read-only. An archive containing more
 than one WRP prompts you to choose a member. Opening a file passed on the
 command line uses the same format detection. Asset PBO selection remains
@@ -336,8 +337,10 @@ and, if several WRP members exist, presents a list so you can choose an
 island to inspect. This operates independently of **Add PBOs…**, which
 indexes texture images and 3D models.
 
-The selected WRP is staged to a temporary file and memory-mapped using
-the normal large-world reader. It supports stored and legacy BIS LZSS
+The selected WRP is staged to a temporary file. Unbinarized 4WVR is
+memory-mapped normally; OFP/CWA OPRW 2/3 is read-only with independent
+packed-grid decoding, floating-point elevations and compact memory-mapped
+object placements. The archive loader supports stored and legacy BIS LZSS
 compressed WRP entries, plus whole-file Zstandard-wrapped archives.
 Staging uses chunked I/O rather than loading the entire WRP into RAM.
 Allow enough disk space for the extracted WRP and, with Zstandard-wrapped
@@ -352,7 +355,10 @@ and selected member. Use **Open World** and choose a loose .wrp to return to the
 
 The selected PBO is never written to or repacked. Invalid compressed
 entries, unsupported WRP formats and absent WRP members are rejected.
-Only unbinarized 4WVR worlds are supported in this version.
+Unbinarized 4WVR worlds remain editable when loaded as loose files;
+binarized OPRW 2/3 worlds are view-only even when loaded loose. The OPRW
+reader uses the original OFP model tables rather than expanding objects to
+4WVR. More recent OPRW versions are rejected with their version number.
 
 Normal commits run tests only. Windows EXE packaging remains manual
 opt-in and is not part of this change.
