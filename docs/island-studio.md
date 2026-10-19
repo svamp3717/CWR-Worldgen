@@ -87,6 +87,31 @@ model and position changes, object deletion and insertion, spatial index
 queries, malformed files and a 90,000-object input. GitHub Actions validates
 the editor on Linux and Windows and packages a separate Windows executable.
 
+## Model-aware road and forest recognition
+
+Island Studio starts with the built-in stock and generated-model filename
+rules. When you select **Texture / model folders** or **PBO archives**,
+it also inspects visible P3D model metadata in the background. MLOD
+`#Property#` metadata (`map=road`, `class=road`, `map=tree`,
+`class=bushsoft`, `map=forest square`, etc.) and OFP/CWA ODOL v6/v7
+properties and model MapType values can identify custom assets even when
+their filenames give no clue. The same classification powers the **Show
+roads as lines**, **Road preview**, **Show forests (green overlay)** and
+road-only selection/erase filters for both 4WVR and read-only OPRW.
+
+Metadata on an unrelated model overrides misleading filename patterns; an
+unreadable model or one lacking relevant properties falls back to filename
+recognition. Model reads are lazy, limited in size and performed off the UI
+thread; the overlay fills in as metadata finishes loading. Changing folders
+or PBO selections invalidates these classifications automatically. This is
+not a polygonal OSM forest/road reconstruction.
+
+A model identified as a road without a known stock/generated straight segment
+length is displayed as an orange **dot**, not an invented road line.
+Classification does not infer road length or geometry from map metadata.
+Modern Arma ODOL versions and assets available only in unselected archives
+are not decoded.
+
 ## Roads as a separate editing layer
 
 Road pieces are WRP **world objects**, not ground texture colours. Enable
