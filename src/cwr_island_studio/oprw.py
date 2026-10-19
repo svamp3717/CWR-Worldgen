@@ -252,6 +252,13 @@ class OprwIslandDocument(IslandDocument):
             raise IndexError((column, row))
         return float(self.heights[row, column]) * self.height_scale
 
+    def texture_at(self, column: int, row: int) -> int:
+        if not 0 <= column < self.width or not 0 <= row < self.height:
+            raise IndexError((column, row))
+        layer_col = min(self.layer_width - 1, column * self.layer_width // self.width)
+        layer_row = min(self.layer_height - 1, row * self.layer_height // self.height)
+        return int(self.textures[layer_row, layer_col])
+
     def sample_viewport(
         self, left: float, top: float, right: float, bottom: float,
         width: int, height: int, *, textures: bool = False,
