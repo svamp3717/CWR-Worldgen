@@ -4,7 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 import struct
-from tkinter import filedialog, messagebox
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
 
 import pytest
 
@@ -111,3 +112,77 @@ def test_unsupported_file_surfaces_error_without_trying_archive(
     assert len(errors) == 1
     assert errors[0][0] == "Unsupported world file"
     assert not archive_calls
+
+
+def test_multi_world_picker_returns_without_waiting_for_dialog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actions: dict[str, object] = {}
+    opened: list[tuple] = []
+    status: list[str] = []
+    destroyed: list[bool] = []
+
+    class Widget:
+        def __init__(self, *_args, **kwargs):
+            if "command" in kwargs:
+                actions[kwargs["text"]] = kwargs["command"]
+
+        def pack(self, **_kwargs):
+            pass
+
+    class Listbox(Widget):
+        def insert(self, *_args):
+            pass
+
+        def selection_set(self, _index):
+            pass
+
+        def curselection(self):
+            return (0,)
+
+        def bind(self, *_args):
+            pass
+
+        def focus_set(self):
+            pass
+
+    class Dialog(Widget):
+        def title(self, _value):
+            pass
+
+        def geometry(self, _value):
+            pass
+
+        def transient(self, _root):
+            pass
+
+        def protocol(self, *_args):
+            pass
+
+        def lift(self):
+            pass
+
+        def destroy(self):
+            destroyed.append(True)
+
+    monkeypatch.setattr(tk, "Toplevel", Dialog)
+    monkeypatch.setattr(tk, "Listbox", Listbox)
+    monkeypatch.setattr(ttk, "Frame", Widget)
+    monkeypatch.setattr(ttk, "Label", Widget)
+    monkeypatch.setattr(ttk, "Button", Widget)
+
+    archive = SimpleNamespace(
+        path=Path("worlds.pbo"),
+        members={r"worlds\a.wrp": object(), r"worlds\b.wrp": object()},
+    )
+    editor = SimpleNamespace(
+        root=object(), _closing=False, _busy=True,
+        status=SimpleNamespace(set=status.append),
+        _open_archive_member=lambda *args: opened.append(args),
+    )
+    IslandStudio._select_archive_member(editor, archive, 50.0, 1.0)
+    assert not opened
+    assert "Found 2 WRP entries" in status[-1]
+    actions["Open read-only"]()
+    assert destroyed == [True]
+    assert opened == [(archive, r"worlds\a.wrp", 50.0, 1.0)]
