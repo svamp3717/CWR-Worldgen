@@ -1500,7 +1500,9 @@ class IslandStudio:
             return
         self._closing = True
         self._archive_cancel.set()
-        if getattr(self, "_index_cancel", None) is not None:
+        if self.document is not None:
+            self._retire_current_world()
+        elif getattr(self, "_index_cancel", None) is not None:
             self._index_cancel.set()
         # Cancelling queued jobs and detaching running daemon workers allows
         # Quit to close immediately, even during PBO/WRP indexing.
@@ -1508,8 +1510,8 @@ class IslandStudio:
         if self._waiting_pbos is not None:
             self._waiting_pbos.close()
             self._waiting_pbos = None
-        if self.document and (self._index_future is None or self._index_future.done()):
-            self.document.close()
+        # World cleanup is scheduled by _retire_current_world without
+        # waiting for a still-running indexer or blocking Windows file removal.
         clear_archive_texture_cache()
         if self.pbo_textures is not None and (
             self._model_future is None or self._model_future.done()
