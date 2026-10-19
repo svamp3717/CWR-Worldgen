@@ -22,6 +22,7 @@ from .cursor_info import cursor_readout
 from .roads import is_road_model, plan_straight_road, road_segment
 from .navigation import center_on_position, pan_with_arrow, parse_game_position, zoom_around
 from .model_bounds import ModelBounds, load_model_bounds, footprint_corners, footprint_contains
+from .model_classification import ModelCategory, load_p3d_category
 from .pbo_textures import PboTextures
 from .pbo_worlds import PboWorldArchive
 from .asset_sources import append_unique, remove_selected
@@ -106,6 +107,7 @@ class IslandStudio:
         self._index_cancel: threading.Event | None = None
         self._model_future: Future | None = None
         self._model_bounds: dict[str, ModelBounds | None] = {}
+        self._model_categories: dict[str, ModelCategory | None] = {}
         self._model_stamp = 0
         self._waiting_pbos: PboTextures | None = None
         self._busy = False
@@ -735,6 +737,11 @@ class IslandStudio:
         if self.document:
             self._retire_current_world()
         self.document = doc
+        if hasattr(doc, "set_model_categories"):
+            doc.set_model_categories({
+                path: info for path, info in self._model_categories.items()
+                if info is not None
+            })
         self._map_locations = tuple(getattr(doc, "map_locations", ()))
         # Loose WRPs start protected by default; the user can deliberately
         # uncheck Read-only. An archived WRP is permanently protected.
@@ -831,9 +838,17 @@ class IslandStudio:
             self._index_cancel = None
         if self._model_future is not None and self._model_future.done():
             try:
-                stamp, results = self._model_future.result()
+                metadata_result = self._model_future.result()
+                stamp, results = metadata_result[:2]
+                categories = metadata_result[2] if len(metadata_result) > 2 else {}
                 if stamp == self._model_stamp:
                     self._model_bounds.update(results)
+                    self._model_categories.update(categories)
+                    if self.document is not None and hasattr(self.document, "set_model_categories"):
+                        self.document.set_model_categories({
+                            key: info for key, info in categories.items()
+                            if info is not None
+                        })
             except Exception as exc:
                 self.status.set(f"Some model footprints were unavailable: {exc}")
             self._model_future = None
@@ -851,6 +866,7 @@ class IslandStudio:
     def _reset_model_bounds(self) -> None:
         self._model_stamp += 1
         self._model_bounds.clear()
+        self._model_categories.clear()
 
     def _install_pbos(self, archives: PboTextures) -> None:
         self._loading_pbos = False
@@ -885,14 +901,20 @@ class IslandStudio:
         stamp = self._model_stamp
         folders, archives = self.asset_roots, self.pbo_textures
 
-        def measure() -> tuple[int, dict[str, ModelBounds | None]]:
+        def measure() -> tuple[
+            int, dict[str, ModelBounds | None],
+            dict[str, ModelCategory | None],
+        ]:
             found: dict[str, ModelBounds | None] = {}
+            categories: dict[str, ModelCategory | None] = {}
             for key, virtual_path in names.items():
                 try:
                     found[key] = load_model_bounds(virtual_path, folders, archives)
+                    categories[virtual_path] = load_p3d_category(virtual_path, folders, archives)
                 except (OSError, ValueError):
                     found[key] = None
-            return stamp, found
+                    categories[virtual_path] = None
+            return stamp, found, categories
 
         self._model_future = self._executor.submit(measure)
 
@@ -961,6 +983,15 @@ class IslandStudio:
             self._image = ImageTk.PhotoImage(image, master=self.canvas)
             self.canvas.delete("all")
             self.canvas.create_image(0, 0, anchor="nw", image=self._image)
+            # Classify viewport model types in the background even when only
+            # the road/forest overlay is enabled and generic object dots are off.
+            # Cache misses never block Tk's drawing loop.
+            if (self.show_roads.get() or self.show_forests.get()
+                    or self.show_model_footprints.get()):
+                if self.asset_roots or self.pbo_textures is not None:
+                    self._request_model_bounds(self.document.visible_objects(
+                        left, top, right, bottom, limit=2600,
+                    ))
             if self.show_roads.get() or view == "Road preview":
                 for obj in self.document.visible_objects(
                     left, top, right, bottom, limit=3200, roads_only=True,
@@ -1038,7 +1069,7 @@ class IslandStudio:
 
             for obj in normal:
                 # Forest objects already have their own green markers.
-                if show_forests and is_forest_model(obj.model_path):
+                if show_forests and self.document._category_matches(obj.model_path, forest=True):
                     continue
                 sx, sz = self._to_screen(obj.x, obj.z)
                 selected = obj.index == self.selected
