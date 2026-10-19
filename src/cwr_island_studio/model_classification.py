@@ -78,7 +78,7 @@ def _skip(stream: io.BytesIO, size: int) -> None:
 
 def _cstring(stream: io.BytesIO) -> str:
     start = stream.tell()
-    end = stream.getbuffer().obj.find(b"\x00", start, min(start + 1024, len(stream.getbuffer())))
+    end = stream.getvalue().find(b"\x00", start, min(start + 1024, len(stream.getbuffer())))
     if end < 0:
         raise ValueError("unterminated P3D property")
     stream.seek(end + 1)
