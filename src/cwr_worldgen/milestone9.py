@@ -1674,7 +1674,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         report_progress(99, "Binarizing WRP to OPRW v3 for the game archive")
         binarized_wrp = result.output_dir / f"{spec.name}.binarized.wrp"
         binarize_rvw4(
-            result.wrp_path, binarized_wrp, height_scale=spec.height_scale,
+            result.wrp_path, binarized_wrp, height_scale=playability.height_scale,
         )
         repack_game_pbo_with_oprw(
             result.source_dir, result.wrp_path,
