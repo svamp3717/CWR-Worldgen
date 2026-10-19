@@ -163,3 +163,52 @@ def test_advanced_checkbox_flows_through_gui_command_without_default_enabling() 
     assert "--binarize-world" not in argv
     defaults["binarize_world"] = True
     assert "--binarize-world" in build_milestone9_command(defaults, python="python")
+
+
+def test_binarize_world_option_is_saved_and_restored(tmp_path: Path) -> None:
+    from cwr_worldgen.gui import (
+        WorldgenGui, default_gui_values, defaults_with_recent_source,
+        load_gui_state, save_gui_state,
+    )
+
+    class Checkbox:
+        def __init__(self):
+            self.value = False
+            self.callbacks = []
+        def get(self):
+            return self.value
+        def set(self, value):
+            self.value = value
+            for callback in self.callbacks:
+                callback()
+        def trace_add(self, mode, callback):
+            self.callbacks.append(callback)
+
+    state_path = tmp_path / "state.json"
+    save_gui_state(state_path, {"ground_textures": "malden"})
+    gui = object.__new__(WorldgenGui)
+    gui.state_path = state_path
+    checkbox = Checkbox()
+    gui.vars = {"binarize_world": checkbox}
+    WorldgenGui._install_binarized_world_state_persistence(gui)
+    checkbox.set(True)
+    assert load_gui_state(state_path)["binarize_world"] is True
+    restored = defaults_with_recent_source(default_gui_values(), load_gui_state(state_path))
+    assert restored["binarize_world"] is True
+    checkbox.set(False)
+    assert load_gui_state(state_path)["binarize_world"] is False
+    assert load_gui_state(state_path)["ground_textures"] == "malden"
+
+
+def test_binarize_world_cli_accepts_advanced_command_option() -> None:
+    from cwr_worldgen.gui import build_milestone9_command, default_gui_values
+    from cwr_worldgen.cli import _parser
+    values = default_gui_values()
+    values.update({
+        "source_dir": "source", "output": "build",
+        "name": "island", "display_name": "Island",
+        "binarize_world": True,
+    })
+    argv = build_milestone9_command(values, python="python")
+    parsed = _parser().parse_args(argv[argv.index("milestone9"):])
+    assert parsed.binarize_world is True
