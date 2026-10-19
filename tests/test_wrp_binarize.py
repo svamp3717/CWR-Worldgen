@@ -93,3 +93,73 @@ def test_literal_and_repeated_sscompress_blocks_are_readable(tmp_path: Path) -> 
     # Repeating four-byte patterns uses a different reference distance.
     raw = (b"ABCD" * 2048)
     assert _read_packed(io.BytesIO(_packed(raw)), len(raw), "grid") == raw
+
+
+def test_repacked_game_pbo_contains_oprw_but_source_stays_rvw4(
+    tmp_path: Path,
+) -> None:
+    from cwr_worldgen.pbo import pack_directory, read_pbo
+    from cwr_worldgen.wrp_binarize import repack_game_pbo_with_oprw
+
+    source_dir = tmp_path / "source" / "island"
+    source_dir.mkdir(parents=True)
+    source_wrp = source_dir / "island.wrp"
+    source_config = source_dir / "config.cpp"
+    source_config.write_text("class CfgWorlds { class island {}; };")
+    _source(source_wrp)
+    editable = source_wrp.read_bytes()
+    game_pbo = tmp_path / "island.pbo"
+    pack_directory(source_dir, game_pbo, backend="python")
+    assert game_pbo.read_bytes().count(b"4WVR") >= 1
+
+    binary = tmp_path / "island.binarized.wrp"
+    binarize_rvw4(source_wrp, binary, height_scale=0.5)
+    repack_game_pbo_with_oprw(
+        source_dir, source_wrp, binary, game_pbo, backend="python",
+    )
+    assert source_wrp.read_bytes() == editable
+    entries = {e.name.replace("\\", "/").casefold(): e.data for e in read_pbo(game_pbo)}
+    assert entries["island.wrp"][:8] == b"OPRW\x03\x00\x00\x00"
+    assert entries["config.cpp"] == source_config.read_bytes()
+    assert binary.read_bytes() == entries["island.wrp"]
+
+
+def test_failed_repack_restores_previous_game_pbo_and_editable_world(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import cwr_worldgen.pbo as pack_module
+    from cwr_worldgen.wrp_binarize import repack_game_pbo_with_oprw
+
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    source_wrp = source_dir / "world.wrp"
+    _source(source_wrp)
+    original = source_wrp.read_bytes()
+    game_pbo = tmp_path / "game.pbo"
+    game_pbo.write_bytes(b"previous game archive")
+    binary = tmp_path / "new.wrp"
+    binarize_rvw4(source_wrp, binary, height_scale=0.5)
+
+    def fail_pack(*_args, **_kwargs):
+        raise RuntimeError("simulated pack failure")
+
+    monkeypatch.setattr(pack_module, "pack_directory", fail_pack)
+    with pytest.raises(RuntimeError, match="simulated"):
+        repack_game_pbo_with_oprw(source_dir, source_wrp, binary, game_pbo)
+    assert source_wrp.read_bytes() == original
+    assert game_pbo.read_bytes() == b"previous game archive"
+    assert not list(tmp_path.glob(".wrp-binarize-*"))
+
+
+def test_advanced_checkbox_flows_through_gui_command_without_default_enabling() -> None:
+    from cwr_worldgen.gui import default_gui_values, build_milestone9_command
+    defaults = default_gui_values()
+    assert defaults["binarize_world"] is False
+    defaults.update({
+        "source_dir": "source", "output": "output",
+        "name": "island", "display_name": "Island",
+    })
+    argv = build_milestone9_command(defaults, python="python")
+    assert "--binarize-world" not in argv
+    defaults["binarize_world"] = True
+    assert "--binarize-world" in build_milestone9_command(defaults, python="python")
