@@ -53,8 +53,13 @@ class TextureMember:
     packing: int
 
 
-def _scan(path: Path, archive_stem: str) -> dict[str, TextureMember]:
-    """Read the PBO header and record offsets without extracting member data."""
+def _scan(
+    path: Path, archive_stem: str,
+    *, extensions: tuple[str, ...] = (
+        ".paa", ".pac", ".png", ".jpg", ".jpeg", ".webp", ".p3d",
+    ),
+) -> dict[str, TextureMember]:
+    """Read the PBO header, indexing requested member types without extraction."""
     records: list[tuple[str, int, int, int]] = []
     prefix = ""
     with path.open("rb") as source:
@@ -103,7 +108,7 @@ def _scan(path: Path, archive_stem: str) -> dict[str, TextureMember]:
         except ValueError:
             offset += size
             continue
-        if clean.endswith((".paa", ".pac", ".png", ".jpg", ".jpeg", ".webp", ".p3d")):
+        if clean.endswith(extensions):
             if packing in (0, _LZSS):
                 result[clean] = TextureMember(path, offset, size, original_size, packing)
         offset += size
