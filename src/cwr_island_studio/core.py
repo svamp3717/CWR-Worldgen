@@ -435,17 +435,27 @@ class IslandDocument:
         if not categories or not len(hits):
             return hits[selected]
         models = self._records["model"][hits]
-        # Overrides are rare and apply only to unique P3D names measured from
-        # the viewport. Compare vectorized bytes, never create Python objects
-        # for the entire placement table.
+        # Merge all positive / negative metadata hits in just two vectorized
+        # membership tests. Large WRPs may contain millions of placements:
+        # scanning every one once per P3D would stall Tk's render loop.
+        positive: set[bytes] = set()
+        negative: set[bytes] = set()
+        aliases = getattr(self, "_model_aliases", {})
         for path, info in categories.items():
             wanted = info.forest if forest else info.road
-            # A path may be normalized differently from its original WRP case.
-            # Resolve from original paths via the small alias table below.
-            for raw in getattr(self, "_model_aliases", {}).get(path, (path,)):
-                matching = models == raw.encode("latin-1", "replace")
-                if bool(np.any(matching)):
-                    selected[matching] = wanted
+            bucket = positive if wanted else negative
+            for raw in aliases.get(path, (path,)):
+                bucket.add(raw.encode("ascii", "replace"))
+        if positive:
+            selected |= np.isin(
+                models, np.asarray(sorted(positive), dtype=models.dtype),
+                kind="sort",
+            )
+        if negative:
+            selected &= ~np.isin(
+                models, np.asarray(sorted(negative), dtype=models.dtype),
+                kind="sort",
+            )
         return hits[selected]
 
     def visible_objects(
