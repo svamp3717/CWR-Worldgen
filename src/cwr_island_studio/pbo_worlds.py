@@ -13,6 +13,7 @@ from concurrent.futures import CancelledError
 import threading
 import struct
 import tempfile
+import time
 from typing import BinaryIO
 
 import zstandard as zstd
@@ -213,9 +214,31 @@ class PboWorldArchive:
             raise
 
     def close(self) -> None:
-        if not self._closed:
-            self._closed = True
-            self._temporary.cleanup()
+        if self._closed:
+            return
+        self._closed = True
+        temporary = self._temporary
+        try:
+            temporary.cleanup()
+        except PermissionError:
+            # Windows can temporarily lock a newly extracted WRP (for example
+            # while a scanner or an mmap reader still has it open). Do not
+            # replace the original WRP parsing error with WinError 32, or
+            # block the Tk event loop when the user closes the application.
+            def retry_cleanup() -> None:
+                for delay in (0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0):
+                    time.sleep(delay)
+                    try:
+                        temporary.cleanup()
+                        return
+                    except PermissionError:
+                        continue
+
+            threading.Thread(
+                target=retry_cleanup,
+                daemon=True,
+                name="island-studio-temp-cleanup",
+            ).start()
 
 
 class _LimitedReader:
