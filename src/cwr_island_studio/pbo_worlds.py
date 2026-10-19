@@ -215,6 +215,12 @@ class PboWorldArchive:
         if self._cancel_event is not None and self._cancel_event.is_set():
             raise CancelledError()
 
+    def __enter__(self) -> "PboWorldArchive":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
     def extract(self, member_name: str) -> Path:
         self._check_cancel()
         if self._closed:
