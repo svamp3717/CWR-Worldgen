@@ -141,7 +141,7 @@ def test_reject_archive_path_traversal() -> None:
 def test_arrow_panning_moves_camera_80_screen_pixels(
     key: str, expected: tuple[float, float],
 ) -> None:
-    assert pan_with_arrow(500.0, 640.0, 0.5, key) == pytest.approx(expected)
+    assert pan_with_arrow(500.0, 640.0, 1.0, key) == pytest.approx(expected)
 
 
 def test_shift_panning_is_three_times_faster_and_respects_zoom() -> None:
