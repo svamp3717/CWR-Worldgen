@@ -292,6 +292,57 @@ def _stable_grid_fraction(seed: str, feature_id: str, label: str, cells: int) ->
     return value.astype(np.float64) / float(np.iinfo(np.uint64).max)
 
 
+def _field_patch_noise(
+    x: np.ndarray, z: np.ndarray, *, spacing: int, seed: int,
+) -> np.ndarray:
+    """Smooth, feature-seeded 2D variation over the selected farmland cells.
+
+    Allocate random corner values only within the field bounding box, not for
+    every world cell or for every OSM field. Coordinates are in world-grid
+    space so the pattern remains continuous across a feature's interior.
+    """
+    left = int(x.min()) // spacing
+    top = int(z.min()) // spacing
+    right = int(x.max()) // spacing + 1
+    bottom = int(z.max()) // spacing + 1
+    rng = np.random.default_rng(seed)
+    anchors = rng.random((bottom - top + 1, right - left + 1), dtype=np.float32)
+    grid_x = x // spacing - left
+    grid_z = z // spacing - top
+    weight_x = (x % spacing).astype(np.float32) / spacing
+    weight_z = (z % spacing).astype(np.float32) / spacing
+    # Smoothstep avoids sharp straight transitions between tile-sized regions.
+    weight_x *= weight_x * (3.0 - 2.0 * weight_x)
+    weight_z *= weight_z * (3.0 - 2.0 * weight_z)
+    upper = anchors[grid_z, grid_x] * (1.0 - weight_x) + anchors[grid_z, grid_x + 1] * weight_x
+    lower = anchors[grid_z + 1, grid_x] * (1.0 - weight_x) + anchors[grid_z + 1, grid_x + 1] * weight_x
+    return upper * (1.0 - weight_z) + lower * weight_z
+
+
+def _farmland_patch_light(
+    x: np.ndarray, z: np.ndarray, *, width: int, seed: str, feature_id: str,
+) -> np.ndarray:
+    """Irregular, connected light/dark fields instead of directional stripes.
+
+    The original strip-width setting now controls characteristic patch size.
+    Multi-scale value noise produces broad clumps with organically irregular
+    edges. OSM feature boundaries are still handled by the calling code.
+    """
+    if x.size == 0:
+        return np.empty(0, dtype=np.bool_)
+    width = max(1, int(width))
+    broad = _field_patch_noise(
+        x, z, spacing=max(3, width * 2),
+        seed=_stable_u32(seed, feature_id, "field-broad-patches"),
+    )
+    detail = _field_patch_noise(
+        x, z, spacing=max(2, width),
+        seed=_stable_u32(seed, feature_id, "field-small-patches"),
+    )
+    bias = (_stable_u32(seed, feature_id, "field-material-bias") / 0xFFFFFFFF - 0.5) * 0.10
+    return 0.72 * broad + 0.28 * detail >= (0.50 + bias)
+
+
 def _feature_boundary_mask(grid: np.ndarray) -> np.ndarray:
     """Vectorized equivalent of :func:`_feature_boundary` for a whole grid."""
     selected = grid != 0
@@ -780,10 +831,8 @@ def build_surface_pass(
             )
             reference_cells += 1
 
-    # Farmland subdivisions. Work feature-by-feature so orientation/phase hashing
-    # occurs once per OSM field rather than once per cell.
-    x_grid = np.tile(np.arange(cells, dtype=np.int32), cells)
-    z_grid = np.repeat(np.arange(cells, dtype=np.int32), cells)
+    # Break mapped fields into reproducible irregular, contiguous patches,
+    # rather than alternating lines along an x/z/diagonal axis.
     farmland_boundary = _feature_boundary_mask(farmland_grid_np.reshape((cells, cells))).reshape(-1)
     farmland_valid = (
         (farmland_grid_np > 0)
@@ -802,19 +851,15 @@ def build_surface_pass(
         interior = selected & (~farmland_boundary)
         if not np.any(interior):
             continue
-        orientation = _stable_u32(seed, feature_id, "field-orientation") % 4
-        if orientation == 0:
-            coordinate = x_grid
-        elif orientation == 1:
-            coordinate = z_grid
-        elif orientation == 2:
-            coordinate = x_grid + z_grid
-        else:
-            coordinate = x_grid - z_grid
-        phase = _stable_u32(seed, feature_id, "field-phase") % max(1, field_width * 2)
-        stripe_even = ((coordinate + phase) // max(1, field_width)) % 2 == 0
-        result[interior & stripe_even] = MATERIAL_INDEX["a"]
-        result[interior & (~stripe_even)] = MATERIAL_INDEX["b"]
+        selected_indices = np.flatnonzero(interior)
+        patch_light = _farmland_patch_light(
+            (selected_indices % cells).astype(np.int32),
+            (selected_indices // cells).astype(np.int32),
+            width=field_width, seed=seed, feature_id=feature_id,
+        )
+        result[selected_indices] = np.where(
+            patch_light, MATERIAL_INDEX["a"], MATERIAL_INDEX["b"]
+        )
 
     # Forest interior and ground-edge band.
     forest_inside_np = np.asarray(forest_inside_distance, dtype=np.int32)
