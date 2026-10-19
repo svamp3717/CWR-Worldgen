@@ -16,6 +16,7 @@ on:
       - "tests/test_island_studio_forest_layers.py"
       - "tests/test_island_studio_pbo_worlds.py"
       - "tests/test_island_studio_oprw.py"
+      - "tests/test_island_studio_world_metadata.py"
       - "tests/test_island_studio_open_world.py"
       - "tests/test_island_studio_go_to_position.py"
       - "tools/island_studio_entry.py"
@@ -51,7 +52,7 @@ jobs:
           python -m compileall -q src/cwr_island_studio tools/island_studio_entry.py
       - name: Test sparse editing and large-world indexes
         run: |
-          python -m pytest -q tests/test_island_studio.py tests/test_island_studio_layers.py tests/test_island_studio_navigation_pbos.py tests/test_island_studio_model_bounds.py tests/test_island_studio_sources.py tests/test_island_studio_cursor.py tests/test_island_studio_forest_layers.py tests/test_island_studio_pbo_worlds.py tests/test_island_studio_oprw.py tests/test_island_studio_open_world.py tests/test_island_studio_go_to_position.py
+          python -m pytest -q tests/test_island_studio.py tests/test_island_studio_layers.py tests/test_island_studio_navigation_pbos.py tests/test_island_studio_model_bounds.py tests/test_island_studio_sources.py tests/test_island_studio_cursor.py tests/test_island_studio_forest_layers.py tests/test_island_studio_pbo_worlds.py tests/test_island_studio_oprw.py tests/test_island_studio_world_metadata.py tests/test_island_studio_open_world.py tests/test_island_studio_go_to_position.py
 
   windows:
     name: Package Windows editor (manual opt-in only)
@@ -72,7 +73,7 @@ jobs:
       - name: Test Windows binary editing
         shell: pwsh
         run: |
-          python -m pytest -q tests/test_island_studio.py tests/test_island_studio_layers.py tests/test_island_studio_navigation_pbos.py tests/test_island_studio_model_bounds.py tests/test_island_studio_sources.py tests/test_island_studio_cursor.py tests/test_island_studio_forest_layers.py tests/test_island_studio_pbo_worlds.py tests/test_island_studio_oprw.py tests/test_island_studio_open_world.py tests/test_island_studio_go_to_position.py
+          python -m pytest -q tests/test_island_studio.py tests/test_island_studio_layers.py tests/test_island_studio_navigation_pbos.py tests/test_island_studio_model_bounds.py tests/test_island_studio_sources.py tests/test_island_studio_cursor.py tests/test_island_studio_forest_layers.py tests/test_island_studio_pbo_worlds.py tests/test_island_studio_oprw.py tests/test_island_studio_world_metadata.py tests/test_island_studio_open_world.py tests/test_island_studio_go_to_position.py
           if ($LASTEXITCODE -ne 0) { throw "Island Studio tests failed" }
       - name: Create standalone executable
         shell: pwsh
