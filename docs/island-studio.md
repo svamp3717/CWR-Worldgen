@@ -218,3 +218,20 @@ Changing the selection invalidates affected decoded-image and footprint
 caches. No world objects are regenerated or moved, and the WRP source is not
 modified. Actual textures and model-size footprints continue to load only
 the required visible assets.
+
+## Hover readouts for elevation and textures
+
+The bottom status area includes a separate live cursor readout while the
+pointer is over the map. In **Elevation** view it shows world X/Z coordinates
+and the height sample in metres, using the configured **Height scale**.
+In **Texture slots** and **Actual textures** views it shows the terrain
+texture-slot number and the name stored in the WRP texture table, for example
+`Texture 1: o\\data\\rock.paa`. Unnamed or invalid slots are marked
+`(unnamed)`. **Road preview** continues to show coordinates alone.
+
+The readout uses the exact grid cell underneath the pointer and includes
+unsaved height and texture brush edits. It changes on mouse movement,
+panning, zooming and view switching, and clears when the pointer leaves the
+map. This lookup reads only a single terrain or texture sample; it does not
+re-render terrain, decode a texture, or load a model on pointer movement.
+The ordinary build, save and selection messages remain in their own area.
