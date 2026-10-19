@@ -185,20 +185,31 @@ def test_readonly_and_editable_toolbar_states() -> None:
 
     buttons, entries = [Widget(), Widget()], [Widget(), Widget()]
     editor = SimpleNamespace(
-        document=SimpleNamespace(read_only=True),
-        save_button=Widget(), edit_tool_combo=Widget(),
-        edit_road_combo=Widget(), tool=Var(),
+        document=SimpleNamespace(read_only=True, read_only_forced=True),
+        save_button=Widget(), readonly_toggle=Widget(), readonly_checked=Var(),
+        edit_tool_combo=Widget(), edit_road_combo=Widget(), tool=Var(),
+        _busy=False,
         _edit_buttons=buttons, _edit_entries=entries,
     )
     IslandStudio._update_edit_access(editor)
     assert editor.tool.value == "Select"
+    assert editor.readonly_checked.value is True
+    assert editor.readonly_toggle.state == "disabled"
     assert editor.save_button.state == "disabled"
     assert editor.edit_tool_combo.state == "disabled"
     assert all(b.state == "disabled" for b in buttons)
     assert all(e.state == "readonly" for e in entries)
 
-    editor.document = SimpleNamespace(read_only=False)
+    editor.document = SimpleNamespace(read_only=True, read_only_forced=False)
     IslandStudio._update_edit_access(editor)
+    assert editor.readonly_checked.value is True
+    assert editor.readonly_toggle.state == "normal"
+    assert editor.save_button.state == "disabled"
+
+    editor.document = SimpleNamespace(read_only=False, read_only_forced=False)
+    IslandStudio._update_edit_access(editor)
+    assert editor.readonly_checked.value is False
+    assert editor.readonly_toggle.state == "normal"
     assert editor.save_button.state == "normal"
     assert editor.edit_tool_combo.state == "readonly"
     assert all(b.state == "normal" for b in buttons)
