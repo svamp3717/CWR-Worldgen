@@ -8,7 +8,9 @@ no complete island needs to fit in Python memory.
 from __future__ import annotations
 
 from pathlib import Path
-import shutil
+from collections.abc import Callable
+from concurrent.futures import CancelledError
+import threading
 import struct
 import tempfile
 from typing import BinaryIO
@@ -23,9 +25,14 @@ _COPY_CHUNK = 1024 * 1024
 _MAX_WORLD_BYTES = 32 * 1024**3
 
 
-def _copy_exact(source: BinaryIO, target: BinaryIO, count: int) -> None:
+def _copy_exact(
+    source: BinaryIO, target: BinaryIO, count: int,
+    cancel_event: threading.Event | None = None,
+) -> None:
     remaining = count
     while remaining:
+        if cancel_event is not None and cancel_event.is_set():
+            raise CancelledError()
         chunk = source.read(min(_COPY_CHUNK, remaining))
         if not chunk:
             raise ValueError("truncated WRP member in PBO")
@@ -33,7 +40,10 @@ def _copy_exact(source: BinaryIO, target: BinaryIO, count: int) -> None:
         remaining -= len(chunk)
 
 
-def _decode_lzss_world(source: BinaryIO, target: BinaryIO, expected: int) -> None:
+def _decode_lzss_world(
+    source: BinaryIO, target: BinaryIO, expected: int,
+    cancel_event: threading.Event | None = None,
+) -> None:
     """Decode legacy PBO LZSS into fixed-size output buffers, not RAM."""
     if not 0 < expected <= _MAX_WORLD_BYTES:
         raise ValueError("WRP uncompressed size is invalid or too large")
@@ -47,12 +57,16 @@ def _decode_lzss_world(source: BinaryIO, target: BinaryIO, expected: int) -> Non
         at = (at + 1) & 4095
         output.append(value)
         written += 1
+        if written % (64 * 1024) == 0 and cancel_event is not None and cancel_event.is_set():
+            raise CancelledError()
         checksum = (checksum + value) & 0xFFFFFFFF
         if len(output) >= _COPY_CHUNK:
             target.write(output)
             output.clear()
 
     while written < expected:
+        if cancel_event is not None and cancel_event.is_set():
+            raise CancelledError()
         flags_raw = source.read(1)
         if not flags_raw:
             raise ValueError("truncated compressed WRP flags")
@@ -88,35 +102,68 @@ def _decode_lzss_world(source: BinaryIO, target: BinaryIO, expected: int) -> Non
 class PboWorldArchive:
     """A selectable list of WRP entries in one archive, with owned temp files."""
 
-    def __init__(self, source: Path | str) -> None:
+    def __init__(
+        self, source: Path | str, *,
+        progress: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
         self.path = Path(source).resolve()
+        self._cancel_event = cancel_event
+        report = progress or (lambda _message: None)
         self._temporary = tempfile.TemporaryDirectory(prefix="cwr-island-wrp-")
         self._closed = False
         try:
+            self._check_cancel()
             archive = self.path
             with archive.open("rb") as stream:
                 wrapped = stream.read(4) == _ZSTD_MAGIC
             if wrapped:
+                report(f"Unpacking compressed archive {self.path.name}…")
                 archive = Path(self._temporary.name) / "container.pbo"
                 with self.path.open("rb") as source_file, archive.open("wb") as target:
                     with zstd.ZstdDecompressor().stream_reader(
                         source_file, read_across_frames=True,
                     ) as decoder:
-                        shutil.copyfileobj(decoder, target, _COPY_CHUNK)
+                        reported = 0
+                        while True:
+                            self._check_cancel()
+                            chunk = decoder.read(_COPY_CHUNK)
+                            if not chunk:
+                                break
+                            target.write(chunk)
+                            if target.tell() - reported >= 64 * _COPY_CHUNK:
+                                reported = target.tell()
+                                report(
+                                    f"Unpacking {self.path.name}: "
+                                    f"{reported // _COPY_CHUNK:,} MiB…"
+                                )
+            self._check_cancel()
+            report(f"Reading PBO directory in {self.path.name}…")
             stem = self.path.name
             for suffix in (".zst", ".pbo", ".ifa"):
                 if stem.casefold().endswith(suffix):
                     stem = stem[:-len(suffix)]
             self.members: dict[str, TextureMember] = _scan(
                 archive, stem, extensions=(".wrp",),
+                cancel_event=self._cancel_event,
+                on_progress=lambda count: report(
+                    f"Indexing WRP entries in {self.path.name}: "
+                    f"{count:,} directory entries scanned…"
+                ),
             )
+            self._check_cancel()
             if not self.members:
                 raise ValueError("No .wrp files were found in this archive")
         except BaseException:
             self.close()
             raise
 
+    def _check_cancel(self) -> None:
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise CancelledError()
+
     def extract(self, member_name: str) -> Path:
+        self._check_cancel()
         if self._closed:
             raise RuntimeError("PBO archive has already been closed")
         member = self.members[member_name]
@@ -133,9 +180,12 @@ class PboWorldArchive:
             if member.packing == _LZSS:
                 # Prevent decompression from reading the next PBO member.
                 with _LimitedReader(source, member.stored_size) as limited:
-                    _decode_lzss_world(limited, target, expected)
+                    _decode_lzss_world(
+                        limited, target, expected, self._cancel_event,
+                    )
             else:
-                _copy_exact(source, target, member.stored_size)
+                _copy_exact(source, target, member.stored_size, self._cancel_event)
+        self._check_cancel()
         with destination.open("rb") as stream:
             if stream.read(4) != b"4WVR":
                 destination.unlink(missing_ok=True)
