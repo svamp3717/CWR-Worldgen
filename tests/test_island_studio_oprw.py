@@ -15,7 +15,9 @@ from cwr_island_studio.pbo_worlds import PboWorldArchive
 
 
 def packed(raw: bytes) -> bytes:
-    """Encode a valid literal-only OFP LZSS packed block plus checksum."""
+    """Encode the Poseidon small-raw / large-SSCompress wire convention."""
+    if len(raw) < 1024:
+        return raw
     output = bytearray()
     for start in range(0, len(raw), 8):
         chunk = raw[start:start + 8]
