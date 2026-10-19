@@ -212,3 +212,45 @@ def test_binarize_world_cli_accepts_advanced_command_option() -> None:
     argv = build_milestone9_command(values, python="python")
     parsed = _parser().parse_args(argv[argv.index("milestone9"):])
     assert parsed.binarize_world is True
+
+
+
+def test_milestone9_postbuild_binarization_uses_playability_height_scale(
+    tmp_path: Path,
+) -> None:
+    """Regress the AttributeError after a completed Milestone 9 generation."""
+    from types import SimpleNamespace
+    from cwr_worldgen.milestone9 import Milestone9Spec, _binarize_generated_world
+    from cwr_worldgen.pbo import pack_directory, read_pbo
+
+    world_dir = tmp_path / "source" / "testworld"
+    world_dir.mkdir(parents=True)
+    original_wrp = world_dir / "testworld.wrp"
+    write_rvw4(
+        original_wrp, 16, 16, [3.25] * (16 * 16), [1] * (16 * 16),
+        [r"testworld\data\d.paa", r"testworld\data\g.paa"],
+        [WorldObject(100, r"data3d\strom.p3d", 40, 3.25, 80)],
+        height_scale=0.05,
+    )
+    original_bytes = original_wrp.read_bytes()
+    game_pbo = tmp_path / "testworld.pbo"
+    pack_directory(world_dir, game_pbo, backend="python")
+
+    # The top-level Milestone9Spec intentionally has no height_scale. It
+    # must be sourced from the playability spec that wrote the 4WVR.
+    spec = Milestone9Spec(name="testworld", binarize_world=True, pbo_backend="python")
+    assert not hasattr(spec, "height_scale")
+    stage = SimpleNamespace(
+        output_dir=tmp_path, source_dir=world_dir,
+        wrp_path=original_wrp, pbo_path=game_pbo,
+    )
+    playability = SimpleNamespace(height_scale=0.05)
+    binary = _binarize_generated_world(stage, spec, playability)
+
+    assert binary.exists()
+    assert original_wrp.read_bytes() == original_bytes
+    with open_island_document(binary) as document:
+        assert document.terrain_at(0, 0) == pytest.approx(3.25)
+        assert document.object_count == 1
+    packed = {item.name: item.data for item in read_pbo(game_pbo)}
+    assert packed["testworld.wrp"] == binary.read_bytes()
