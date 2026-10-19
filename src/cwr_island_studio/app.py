@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import CancelledError, Future
+import threading
 from pathlib import Path
 import math
 import queue
@@ -41,6 +42,45 @@ def world_source_kind(path: Path | str) -> str:
     raise ValueError("Choose a .wrp, .pbo, .ifa, .pbo.zst or .ifa.zst file")
 
 
+class _DaemonExecutor:
+    """Short-lived GUI tasks must not keep the process alive after Quit."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._closed = False
+        self._futures: list[Future] = []
+
+    def submit(self, function: Callable[[], object]) -> Future:
+        future: Future = Future()
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Background executor has shut down")
+            self._futures.append(future)
+
+        def run() -> None:
+            if not future.set_running_or_notify_cancel():
+                return
+            try:
+                result = function()
+            except BaseException as exc:
+                future.set_exception(exc)
+            else:
+                future.set_result(result)
+
+        threading.Thread(target=run, name="island-studio-worker", daemon=True).start()
+        return future
+
+    def shutdown(self, *, wait: bool = False, cancel_futures: bool = False) -> None:
+        with self._lock:
+            self._closed = True
+            pending = self._futures
+            self._futures = []
+        if cancel_futures:
+            for future in pending:
+                future.cancel()
+        # Active threads are daemon threads; Quit never joins running I/O.
+
+
 class IslandStudio:
     """Viewport-centred editor with bounded rendering and background I/O."""
 
@@ -51,7 +91,9 @@ class IslandStudio:
         self.root.minsize(870, 560)
         self.root.configure(background="#18251d")
         self.document: IslandDocument | None = None
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="island-studio")
+        self._executor = _DaemonExecutor()
+        self._archive_cancel = threading.Event()
+        self._closing = False
         self._messages: queue.Queue[tuple[str, object]] = queue.Queue()
         self._index_future: Future | None = None
         self._model_future: Future | None = None
@@ -392,14 +434,25 @@ class IslandStudio:
             messagebox.showerror("Invalid map settings", str(exc))
             return
         self._busy = True
+        self._archive_cancel = threading.Event()
+        cancel_event = self._archive_cancel
         self.status.set(f"Indexing WRP entries in {Path(path).name}…")
 
         def inspect() -> None:
             try:
-                archive = PboWorldArchive(Path(path))
+                archive = PboWorldArchive(
+                    Path(path), cancel_event=cancel_event,
+                    progress=lambda message: self._messages.put(("archive_progress", message)),
+                )
+                if cancel_event.is_set():
+                    archive.close()
+                    return
                 self._messages.put(("archive_catalog", (archive, cell_size, height_scale)))
+            except CancelledError:
+                pass
             except Exception as exc:
-                self._messages.put(("error", str(exc)))
+                if not cancel_event.is_set():
+                    self._messages.put(("error", str(exc)))
 
         self._executor.submit(inspect)
 
@@ -447,9 +500,15 @@ class IslandStudio:
                 doc = archive.open_world(
                     member, cell_size=cell_size, height_scale=height_scale,
                 )
+                if self._archive_cancel.is_set():
+                    doc.close()
+                    return
                 self._messages.put(("open", doc))
+            except CancelledError:
+                pass
             except Exception as exc:
-                self._messages.put(("error", str(exc)))
+                if not self._archive_cancel.is_set():
+                    self._messages.put(("error", str(exc)))
 
         self._executor.submit(load)
 
@@ -556,10 +615,15 @@ class IslandStudio:
         self._executor.submit(load)
 
     def _accept_document(self, doc: IslandDocument) -> None:
-        if self._index_future is not None and not self._index_future.done():
-            self._index_future.result()
         if self.document:
-            self.document.close()
+            previous = self.document
+            if self._index_future is not None and not self._index_future.done():
+                # Never block Tk while the previous world's index is being built.
+                self._index_future.add_done_callback(
+                    lambda _future, old=previous: old.close()
+                )
+            else:
+                previous.close()
         self.document = doc
         # Loose WRPs start protected by default; the user can deliberately
         # uncheck Read-only. An archived WRP is permanently protected.
@@ -580,11 +644,15 @@ class IslandStudio:
         self._index_future = self._executor.submit(doc.build_object_index)
 
     def _poll(self) -> None:
+        if self._closing:
+            return
         try:
             while True:
                 kind, value = self._messages.get_nowait()
                 if kind == "open":
                     self._accept_document(value)
+                elif kind == "archive_progress":
+                    self.status.set(str(value))
                 elif kind == "archive_catalog":
                     archive, cell_size, height_scale = value
                     try:
@@ -655,7 +723,8 @@ class IslandStudio:
                 self._waiting_pbos = None
                 self._install_pbos(pending)
             self._queue_draw()
-        self.root.after(150, self._poll)
+        if not self._closing:
+            self.root.after(150, self._poll)
 
     def _model_key(self, path: str) -> str:
         return path.replace("/", "\\").strip("\\").casefold()
@@ -1340,30 +1409,28 @@ class IslandStudio:
         self._executor.submit(task)
 
     def _shutdown(self) -> None:
-        if self._loading_pbos:
-            messagebox.showwarning("Loading PBOs", "Wait for texture archive indexing to finish.")
-            return
-        if self._busy:
-            messagebox.showwarning("Working", "Wait for the current read or export to finish.")
+        if self._closing:
             return
         if self.document and self.document.changed and not messagebox.askyesno(
             "Unsaved edits", "Close without exporting your edits?",
         ):
             return
-        if self._index_future and not self._index_future.done():
-            self._index_future.result()
-        if self._model_future and not self._model_future.done():
-            self._model_future.result()
+        self._closing = True
+        self._archive_cancel.set()
+        # Cancelling queued jobs and detaching running daemon workers allows
+        # Quit to close immediately, even during PBO/WRP indexing.
+        self._executor.shutdown(wait=False, cancel_futures=True)
         if self._waiting_pbos is not None:
             self._waiting_pbos.close()
             self._waiting_pbos = None
-        if self.document:
+        if self.document and (self._index_future is None or self._index_future.done()):
             self.document.close()
         clear_archive_texture_cache()
-        if self.pbo_textures is not None:
+        if self.pbo_textures is not None and (
+            self._model_future is None or self._model_future.done()
+        ):
             self.pbo_textures.close()
             self.pbo_textures = None
-        self._executor.shutdown(wait=False)
         self.root.destroy()
 
 
