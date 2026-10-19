@@ -128,9 +128,19 @@ class IslandDocument:
                 for i in range(_TEXTURE_SLOTS)
             )
         except BaseException:
-            if hasattr(self, "_map"):
-                self._map.close()
-            self._file.close()
+            # A partially parsed document may already own NumPy views of the
+            # mapping. Drop every view before releasing the mmap and handle.
+            # In particular, never let a cleanup failure replace the original
+            # invalid/truncated WRP exception.
+            self._records = self._raw_records = None
+            self.heights = self.textures = None
+            try:
+                mapped = getattr(self, "_map", None)
+                if mapped is not None:
+                    mapped.close()
+                    self._map = None
+            finally:
+                self._file.close()
             raise
 
         self.height_edits: dict[int, int] = {}
