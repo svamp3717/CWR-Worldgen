@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import io
 import struct
+import threading
+from concurrent.futures import CancelledError
+from tkinter import messagebox
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -351,3 +354,69 @@ def test_readonly_checkbox_reverts_while_loading_or_exporting(tmp_path: Path) ->
         editor._busy = False
         editor._update_edit_access()
         assert editor.readonly_toggle.state == "normal"
+
+
+def test_wrp_directory_scan_reports_progress_and_is_cancellable(tmp_path: Path) -> None:
+    source = tmp_path / "directory.pbo"
+    members = tuple((f"assets\\entry{i:04}.txt", b"x", False) for i in range(1100))
+    make_pbo(source, members + (("maps\\island.wrp", wrp(), False),))
+    messages: list[str] = []
+    archive = PboWorldArchive(source, progress=messages.append)
+    try:
+        assert list(archive.members) == [r"directory\maps\island.wrp"]
+        assert any("512 directory entries" in message for message in messages)
+        assert any("1,101 directory entries" in message for message in messages)
+    finally:
+        archive.close()
+
+    cancel = threading.Event()
+
+    def stop_at_first_batch(message: str) -> None:
+        if "512 directory entries" in message:
+            cancel.set()
+
+    with pytest.raises(CancelledError):
+        PboWorldArchive(source, progress=stop_at_first_batch, cancel_event=cancel)
+
+
+def test_wrapped_wrp_scan_cancels_after_unpacked_phase(tmp_path: Path) -> None:
+    source = tmp_path / "source.pbo"
+    make_pbo(source, (("island.wrp", wrp(), False),))
+    wrapped = tmp_path / "source.pbo.zst"
+    wrapped.write_bytes(zstd.ZstdCompressor().compress(source.read_bytes()))
+    phases: list[str] = []
+    cancel = threading.Event()
+
+    def progress(message: str) -> None:
+        phases.append(message)
+        if message.startswith("Reading PBO directory"):
+            cancel.set()
+
+    with pytest.raises(CancelledError):
+        PboWorldArchive(wrapped, progress=progress, cancel_event=cancel)
+    assert any(message.startswith("Unpacking compressed archive") for message in phases)
+    assert any(message.startswith("Reading PBO directory") for message in phases)
+
+
+def test_quit_during_pbo_indexing_never_shows_wait_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destroyed: list[bool] = []
+    shutdown_calls: list[dict] = []
+    cancel = threading.Event()
+    monkeypatch.setattr(
+        messagebox, "showwarning",
+        lambda *_args, **_kwargs: pytest.fail("Quit must not show a wait warning"),
+    )
+    editor = SimpleNamespace(
+        _closing=False, _busy=True, _loading_pbos=True,
+        _archive_cancel=cancel,
+        document=None, _index_future=None, _model_future=None,
+        _waiting_pbos=None, pbo_textures=None,
+        _executor=SimpleNamespace(shutdown=lambda **kwargs: shutdown_calls.append(kwargs)),
+        root=SimpleNamespace(destroy=lambda: destroyed.append(True)),
+    )
+    IslandStudio._shutdown(editor)
+    assert editor._closing and cancel.is_set()
+    assert destroyed == [True]
+    assert shutdown_calls == [{"wait": False, "cancel_futures": True}]
