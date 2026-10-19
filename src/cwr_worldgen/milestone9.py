@@ -563,7 +563,7 @@ class Milestone9Spec(Milestone8Spec):
             ("sand shoreline cells", self.surface_shoreline_sand_cells),
             ("surface transition cells", self.surface_transition_cells),
             ("forest-edge cells", self.surface_forest_edge_cells),
-            ("farmland strip cells", self.surface_farmland_strip_cells),
+            ("farmland patch size cells", self.surface_farmland_strip_cells),
         ):
             if not isinstance(value, int) or value < 0 or value > 32:
                 raise ValueError(f"{label} must be an integer within 0..32")
