@@ -739,7 +739,7 @@ class IslandStudio:
         self.document = doc
         if hasattr(doc, "set_model_categories"):
             doc.set_model_categories({
-                path: info for path, info in self._model_categories.items()
+                path: info for path, info in getattr(self, "_model_categories", {}).items()
                 if info is not None
             })
         self._map_locations = tuple(getattr(doc, "map_locations", ()))
