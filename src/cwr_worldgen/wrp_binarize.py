@@ -109,6 +109,8 @@ def binarize_rvw4(source: Path, target: Path, *, height_scale: float = 1.0) -> i
         if raw_indices.size:
             highest = max(highest, int(np.max(raw_indices)))
         texture_names = slots[:highest + 1]
+        # Do not hold exported NumPy views when closing the source mmap.
+        del raw_indices
 
         # First pass: shared model table instead of 76-byte names per object.
         model_ids: dict[bytes, int] = {}
