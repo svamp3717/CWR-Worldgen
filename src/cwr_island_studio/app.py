@@ -15,6 +15,7 @@ from typing import Callable
 from PIL import Image, ImageTk
 
 from .core import IslandDocument, MapObject
+from .oprw import open_island_document
 from .object_layers import is_forest_model, object_marker_mode
 from .cursor_info import cursor_readout
 from .roads import is_road_model, plan_straight_road, road_segment
@@ -636,7 +637,9 @@ class IslandStudio:
         self.status.set(f"Opening {path.name}…")
         def load() -> None:
             try:
-                doc = IslandDocument(path, cell_size=cell_size, height_scale=height_scale)
+                doc = open_island_document(
+                    path, cell_size=cell_size, height_scale=height_scale,
+                )
                 self._messages.put(("open", doc))
             except Exception as exc:
                 self._messages.put(("error", str(exc)))
@@ -665,7 +668,9 @@ class IslandStudio:
         self._update_document_label()
         self._fit()
         self.status.set(
-            "PBO WRP opened read-only. Building object index…"
+            "Binarized OPRW opened read-only. Building object index…"
+            if hasattr(doc, "oprw_version")
+            else "PBO WRP opened read-only. Building object index…"
             if doc.read_only_forced
             else "Loose WRP opened read-only. Uncheck Read-only to edit. Building object index…"
         )
