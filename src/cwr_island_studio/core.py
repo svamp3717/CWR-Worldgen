@@ -20,6 +20,7 @@ from typing import Callable
 import numpy as np
 
 from .roads import is_road_model
+from .object_layers import is_forest_model
 
 _HEADER = struct.Struct("<4sii")
 _OBJECT = struct.Struct("<12fi76s")
@@ -134,6 +135,7 @@ class IslandDocument:
         self._index_keys: np.ndarray | None = None
         self._index_columns: int = 0
         self._road_mask: np.ndarray | None = None
+        self._forest_mask: np.ndarray | None = None
         self._last_object_id: int | None = None
 
     @property
@@ -153,7 +155,7 @@ class IslandDocument:
 
     def close(self) -> None:
         # NumPy memory-map views must be dropped before closing the mapping.
-        self._index_order = self._index_keys = self._road_mask = None
+        self._index_order = self._index_keys = self._road_mask = self._forest_mask = None
         self._records = self._raw_records = None
         self.heights = self.textures = None
         if getattr(self, "_map", None) is not None:
@@ -330,11 +332,19 @@ class IslandDocument:
             (is_road_model(value) for value in self._records["model"]),
             dtype=np.bool_, count=self.object_count,
         )
+        # Classify just once in the background rather than on every pan.
+        self._forest_mask = np.fromiter(
+            (is_forest_model(value) for value in self._records["model"]),
+            dtype=np.bool_, count=self.object_count,
+        )
 
     def visible_objects(
         self, left: float, top: float, right: float, bottom: float,
         *, limit: int = 3500, roads_only: bool = False,
+        forest_only: bool = False,
     ) -> tuple[MapObject, ...]:
+        if roads_only and forest_only:
+            raise ValueError("choose either roads_only or forest_only")
         if limit <= 0:
             return ()
         transforms = self._records["transform"]
@@ -370,6 +380,8 @@ class IslandDocument:
                 ]
         if roads_only and self._road_mask is not None and len(hits):
             hits = hits[self._road_mask[hits]]
+        if forest_only and self._forest_mask is not None and len(hits):
+            hits = hits[self._forest_mask[hits]]
         # Avoid rendering tens of thousands of Tk objects per frame.
         if len(hits) > limit:
             hits = hits[::max(1, math.ceil(len(hits) / limit))][:limit]
@@ -379,14 +391,18 @@ class IslandDocument:
             i = int(index)
             if i not in self.deleted and i not in overrides:
                 obj = self.object_at(i)
-                if not roads_only or is_road_model(obj.model_path):
+                if (not roads_only or is_road_model(obj.model_path)) and (
+                    not forest_only or is_forest_model(obj.model_path)
+                ):
                     result.append(obj)
         for i in (*sorted(overrides), *range(self.object_count, self.object_count + len(self.added))):
             if i in self.deleted:
                 continue
             obj = self.object_at(i)
             if left <= obj.x <= right and top <= obj.z <= bottom:
-                if not roads_only or is_road_model(obj.model_path):
+                if (not roads_only or is_road_model(obj.model_path)) and (
+                    not forest_only or is_forest_model(obj.model_path)
+                ):
                     result.append(obj)
         return tuple(result[:limit])
 
