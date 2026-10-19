@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import struct
 import threading
+import time
 from concurrent.futures import CancelledError
 from tkinter import messagebox
 from pathlib import Path
@@ -420,3 +421,31 @@ def test_quit_during_pbo_indexing_never_shows_wait_warning(
     assert editor._closing and cancel.is_set()
     assert destroyed == [True]
     assert shutdown_calls == [{"wait": False, "cancel_futures": True}]
+
+
+def test_locked_temp_cleanup_preserves_original_invalid_world_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "bad-world.pbo"
+    # Pass the 4WVR magic check but fail the full terrain/table validation.
+    make_pbo(source, (("broken.wrp", b"4WVR" + struct.pack("<ii", 16, 16), False),))
+    archive = PboWorldArchive(source)
+    temp_path = Path(archive._temporary.name)
+    cleanup = archive._temporary.cleanup
+    cleanup_calls = 0
+
+    def temporary_windows_lock() -> None:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+        if cleanup_calls == 1:
+            raise PermissionError(13, "file is being used by another process")
+        cleanup()
+
+    monkeypatch.setattr(archive._temporary, "cleanup", temporary_windows_lock)
+    with pytest.raises(ValueError, match="truncated terrain or texture table"):
+        archive.open_world(r"bad-world\broken.wrp")
+    deadline = time.monotonic() + 2.0
+    while temp_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not temp_path.exists()
+    assert cleanup_calls >= 2
