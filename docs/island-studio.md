@@ -294,9 +294,20 @@ For a WRP opened from a PBO/IFA archive, **Read-only is permanently checked
 and disabled**. There is no GUI or document-API override that allows
 editing or exporting an archived document.
 
+## One Open World button for WRP and PBO archives
+
+Use the single **Open World** toolbar button or **Ctrl+O** to select either
+a loose `.wrp` or a `.pbo`, `.ifa`, `.pbo.zst`, or `.ifa.zst` archive.
+A loose WRP opens with the optional Read-only checkbox checked by default;
+an archived WRP remains permanently read-only. An archive containing more
+than one WRP prompts you to choose a member. Opening a file passed on the
+command line uses the same format detection. Asset PBO selection remains
+separate because it is used for texture and model lookups, not for choosing
+the world being viewed.
+
 ## Open an island directly from a PBO (read-only)
 
-Choose **Open PBO WRP** in the toolbar and select a .pbo, .pbo.zst,
+Choose **Open World** in the toolbar and select a .pbo, .pbo.zst,
 .ifa or .ifa.zst archive. The reader scans only the archive index first
 and, if several WRP members exist, presents a list so you can choose an
 island to inspect. This operates independently of **Add PBOs…**, which
@@ -314,7 +325,7 @@ removed when the document is closed or replaced.
 object editing controls and Save As are disabled. Map navigation,
 hover readouts, object selection, model footprints, road preview and
 forest overlays remain available. The title identifies both the PBO
-and selected member. Open a normal loose WRP to return to editable mode.
+and selected member. Use **Open World** and choose a loose .wrp to return to the optionally editable mode.
 
 The selected PBO is never written to or repacked. Invalid compressed
 entries, unsupported WRP formats and absent WRP members are rejected.
