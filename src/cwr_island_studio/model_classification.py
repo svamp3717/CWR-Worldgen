@@ -48,8 +48,10 @@ def _classify_properties(properties: dict[str, str]) -> ModelCategory | None:
         return ModelCategory(forest=True)
     if map_type in _MAP_ROAD or object_class in _CLASS_ROAD:
         return ModelCategory(road=True)
-    # An explicitly unrelated map/class classification rules out both types.
-    if map_type or object_class:
+    # MapHide suppresses the 2D game-map icon. It does not mean the
+    # underlying model is not a road or vegetation object. For example,
+    # generated roads use map=hide plus class=road in another LOD.
+    if map_type and map_type != "hide" or object_class:
         return ModelCategory()
     return None
 
