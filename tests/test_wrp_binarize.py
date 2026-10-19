@@ -238,7 +238,10 @@ def test_milestone9_postbuild_binarization_uses_playability_height_scale(
 
     # The top-level Milestone9Spec intentionally has no height_scale. It
     # must be sourced from the playability spec that wrote the 4WVR.
-    spec = Milestone9Spec(name="testworld", binarize_world=True, pbo_backend="python")
+    spec = Milestone9Spec(
+        source_dir=world_dir, name="testworld",
+        binarize_world=True, pbo_backend="python",
+    )
     assert not hasattr(spec, "height_scale")
     stage = SimpleNamespace(
         output_dir=tmp_path, source_dir=world_dir,
