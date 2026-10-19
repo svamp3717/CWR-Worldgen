@@ -1,7 +1,9 @@
 """Regression tests for the standalone, large-world RVW4 island editor."""
 from __future__ import annotations
 
+from concurrent.futures import CancelledError
 from pathlib import Path
+import threading
 import math
 import struct
 
@@ -214,3 +216,16 @@ def test_large_object_stream_indexes_without_materializing_python_objects(tmp_pa
         visible = doc.visible_objects(900, 900, 1100, 1100, limit=250)
         assert 0 < len(visible) <= 250
         assert all(o.x == 1000.0 for o in visible)
+
+
+def test_rvw4_index_cancellation_before_build_does_not_complete(
+    tmp_path: Path,
+) -> None:
+    world = tmp_path / "cancel.wrp"
+    make_world(world)
+    event = threading.Event()
+    with IslandDocument(world) as doc:
+        event.set()
+        with pytest.raises(CancelledError):
+            doc.build_object_index(cancel_event=event)
+        assert doc._index_order is None
