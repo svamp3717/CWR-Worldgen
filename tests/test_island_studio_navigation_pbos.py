@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 import io
 import struct
+import tkinter as tk
 
 import numpy as np
 import pytest
 from PIL import Image
 import zstandard as zstd
 
-from cwr_island_studio.navigation import zoom_around
+from cwr_island_studio.navigation import pan_with_arrow, zoom_around
+from cwr_island_studio.app import IslandStudio
 from cwr_island_studio.pbo_textures import PboTextures, canonical_path
 from cwr_island_studio.textures import (
     _pbo_image_tile, clear_archive_texture_cache, render_real_textures,
@@ -123,3 +126,78 @@ def test_reject_archive_path_traversal() -> None:
     for unsafe in (r"..\evil.png", r".\evil.png", r"c:\win.png", r"a\\b.png"):
         with pytest.raises(ValueError):
             canonical_path(unsafe)
+
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    (
+        ("Left", (420.0, 640.0)),
+        ("Right", (580.0, 640.0)),
+        ("Up", (500.0, 560.0)),
+        ("Down", (500.0, 720.0)),
+    ),
+)
+def test_arrow_panning_moves_camera_80_screen_pixels(
+    key: str, expected: tuple[float, float],
+) -> None:
+    assert pan_with_arrow(500.0, 640.0, 0.5, key) == pytest.approx(expected)
+
+
+def test_shift_panning_is_three_times_faster_and_respects_zoom() -> None:
+    assert pan_with_arrow(500, 640, 0.5, "Right", fast=True) == (980, 640)
+    assert pan_with_arrow(500, 640, 2.0, "Right") == (540, 640)
+    assert pan_with_arrow(500, 640, 2.0, "Up", fast=True) == (500, 520)
+    left, top = pan_with_arrow(500, 640, 0.5, "Down")
+    assert pan_with_arrow(left, top, 0.5, "Up") == (500, 640)
+
+
+def test_pan_math_rejects_invalid_input() -> None:
+    for direction in ("North", "", "right"):
+        with pytest.raises(ValueError, match="unsupported pan"):
+            pan_with_arrow(0, 0, 1, direction)
+    with pytest.raises(ValueError, match="positive"):
+        pan_with_arrow(0, 0, 0, "Right")
+    with pytest.raises(ValueError, match="finite"):
+        pan_with_arrow(0, float("inf"), 1, "Right")
+
+
+def test_pan_hotkey_updates_hover_and_render_once() -> None:
+    notifications = []
+    editor = SimpleNamespace(
+        document=object(), _busy=False,
+        root=SimpleNamespace(focus_get=lambda: None),
+        view_x=200.0, view_z=400.0, zoom=2.0,
+        _refresh_hover=lambda: notifications.append("hover"),
+        _queue_draw=lambda: notifications.append("draw"),
+    )
+    event = SimpleNamespace(state=0x0001)
+    assert IslandStudio._pan_hotkey(editor, event, "Left") == "break"
+    assert (editor.view_x, editor.view_z) == (80.0, 400.0)
+    assert notifications == ["hover", "draw"]
+    # No loaded document, or a busy export, should not navigate.
+    editor.document = None
+    assert IslandStudio._pan_hotkey(editor, event, "Right") is None
+    assert notifications == ["hover", "draw"]
+    editor.document = object()
+    editor._busy = True
+    assert IslandStudio._pan_hotkey(editor, event, "Right") is None
+
+
+def test_arrow_keys_do_not_override_text_and_list_navigation() -> None:
+    # Tk widgets can be type-checked without constructing a graphical root.
+    # This avoids requiring a display server for GitHub Linux validation.
+    for focused in (tk.Entry.__new__(tk.Entry), tk.Listbox.__new__(tk.Listbox)):
+        notifications = []
+        editor = SimpleNamespace(
+            document=object(), _busy=False,
+            root=SimpleNamespace(focus_get=lambda item=focused: item),
+            view_x=100.0, view_z=100.0, zoom=1.0,
+            _refresh_hover=lambda: notifications.append("hover"),
+            _queue_draw=lambda: notifications.append("draw"),
+        )
+        assert IslandStudio._pan_hotkey(
+            editor, SimpleNamespace(state=0), "Down",
+        ) is None
+        assert (editor.view_x, editor.view_z) == (100.0, 100.0)
+        assert not notifications
