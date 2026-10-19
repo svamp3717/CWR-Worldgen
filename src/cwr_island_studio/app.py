@@ -69,6 +69,8 @@ class IslandStudio:
         self.height_scale = tk.StringVar(value="1")
         self.layer = tk.StringVar(value="Elevation")
         self.tool = tk.StringVar(value="Select")
+        # View a newly opened loose world safely until editing is requested.
+        self.readonly_checked = tk.BooleanVar(value=True)
         self.show_objects = tk.BooleanVar(value=True)
         self.show_model_footprints = tk.BooleanVar(value=False)
         self.show_forests = tk.BooleanVar(value=False)
@@ -93,6 +95,7 @@ class IslandStudio:
         self.status = tk.StringVar(value="Ready. The source file will not be modified.")
         self.cursor_info = tk.StringVar(value="")
         self._build()
+        self._update_edit_access()
         self.root.protocol("WM_DELETE_WINDOW", self._shutdown)
         self.root.after(120, self._poll)
         if initial_path:
@@ -105,6 +108,11 @@ class IslandStudio:
         ttk.Button(header, text="Open PBO WRP", command=self._open_pbo_dialog).pack(side="left", padx=3)
         self.save_button = ttk.Button(header, text="Save As", command=self._save_dialog)
         self.save_button.pack(side="left", padx=3)
+        self.readonly_toggle = ttk.Checkbutton(
+            header, text="Read-only", variable=self.readonly_checked,
+            command=self._toggle_read_only,
+        )
+        self.readonly_toggle.pack(side="left", padx=(8, 4))
         ttk.Button(header, text="Fit map", command=self._fit).pack(side="left", padx=3)
         ttk.Button(header, text="−", width=3, command=lambda: self._zoom_button(0.8)).pack(side="left", padx=(12, 2))
         ttk.Button(header, text="+", width=3, command=lambda: self._zoom_button(1.25)).pack(side="left", padx=2)
@@ -395,16 +403,56 @@ class IslandStudio:
         self._executor.submit(load)
 
     def _update_edit_access(self) -> None:
-        locked = self.document is not None and self.document.read_only
+        doc = self.document
+        locked = doc is None or doc.read_only
+        forced = bool(doc is not None and doc.read_only_forced)
+        self.readonly_checked.set(doc.read_only if doc is not None else True)
+        self.readonly_toggle.configure(
+            state="disabled" if forced or doc is None or self._busy else "normal",
+        )
         self.save_button.configure(state="disabled" if locked else "normal")
         self.edit_tool_combo.configure(state="disabled" if locked else "readonly")
         self.edit_road_combo.configure(state="disabled" if locked else "normal")
         if locked:
             self.tool.set("Select")
+            self._road_anchor = self._road_cursor = None
         for button in self._edit_buttons:
             button.configure(state="disabled" if locked else "normal")
         for entry in self._edit_entries:
             entry.configure(state="readonly" if locked else "normal")
+
+    def _update_document_label(self) -> None:
+        doc = self.document
+        if doc is None:
+            return
+        suffix = " | READ-ONLY PBO" if doc.read_only_forced else (
+            " | READ-ONLY" if doc.read_only else ""
+        )
+        self.metadata.set(
+            f"{doc.width:,}×{doc.height:,} | {doc.object_count:,} objects" + suffix
+        )
+        self.root.title(
+            f"CWR Island Studio | {doc.source_label}"
+            + (" [read-only]" if doc.read_only else "")
+        )
+
+    def _toggle_read_only(self) -> None:
+        """Lock/unlock loose maps; PBO worlds can never be unlocked."""
+        doc = self.document
+        if doc is None or self._busy or doc.read_only_forced:
+            self._update_edit_access()
+            return
+        doc.read_only = bool(self.readonly_checked.get())
+        self._update_edit_access()
+        self._update_document_label()
+        if doc.read_only:
+            self.status.set(
+                "Read-only enabled. Editing and Save As disabled."
+                + (" Unsaved edits are retained." if doc.changed else "")
+            )
+        else:
+            self.status.set("Editing enabled for loose WRP. Save As preserves the source.")
+        self._queue_draw()
 
     def _open_dialog(self) -> None:
         if self._busy:
@@ -449,22 +497,21 @@ class IslandStudio:
         if self.document:
             self.document.close()
         self.document = doc
-        self._update_edit_access()
+        # Loose WRPs start protected by default; the user can deliberately
+        # uncheck Read-only. An archived WRP is permanently protected.
+        doc.read_only = True
         self.selected = None
         self.cursor_info.set("")
         self._road_anchor = None
         self._road_cursor = None
         self._busy = False
-        self.metadata.set(
-            f"{doc.width:,}×{doc.height:,} | {doc.object_count:,} objects"
-            + (" | READ-ONLY PBO" if doc.read_only else "")
-        )
-        self.root.title(f"CWR Island Studio | {doc.source_label}"
-                        + (" [read-only]" if doc.read_only else ""))
+        self._update_edit_access()
+        self._update_document_label()
         self._fit()
         self.status.set(
-            "Read-only WRP ready. Building object index…"
-            if doc.read_only else "Map ready. Building the background object index…"
+            "PBO WRP opened read-only. Building object index…"
+            if doc.read_only_forced
+            else "Loose WRP opened read-only. Uncheck Read-only to edit. Building object index…"
         )
         self._index_future = self._executor.submit(doc.build_object_index)
 
@@ -524,8 +571,10 @@ class IslandStudio:
                     self.status.set(
                         f"Ready: {self.document.object_count:,} objects indexed. "
                         ("Read-only WRP from PBO. Viewing and inspection only."
+                         if self.document.read_only_forced
+                         else "Read-only protection enabled. Uncheck to edit."
                          if self.document.read_only
-                         else "Edits stay in memory until Save As.")
+                         else "Editing enabled. Save As preserves the original WRP.")
                     )
                 self._queue_draw()
             self._index_future = None
