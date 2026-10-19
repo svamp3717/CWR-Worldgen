@@ -258,3 +258,18 @@ The viewer does not invent dimensions for unmeasured models.
 
 The two overlays can be combined with road previews or either terrain
 background. The map source and exported object positions are unchanged.
+
+## Arrow-key map navigation
+
+Use the keyboard **Left**, **Right**, **Up**, and **Down** arrows to pan
+the map in the indicated direction. Each press advances the viewport by
+80 screen pixels at the current zoom level. Hold **Shift** with an arrow
+to move three times as far, useful for crossing large islands quickly.
+Holding an arrow lets the operating system's key repeat continue moving.
+
+Panning updates the terrain/texture readout beneath the pointer and requests
+only the normal viewport redraw. Arrow navigation is disabled during file
+operations and while a text entry, dropdown, list or similar editable
+widget has keyboard focus, so entering coordinates and choosing assets
+continues to work normally. The arrow keys follow the same unclamped
+navigation behavior as right-button map dragging.
