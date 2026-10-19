@@ -10,6 +10,7 @@ import pytest
 import zstandard as zstd
 
 from cwr_island_studio.app import IslandStudio
+from cwr_island_studio.core import IslandDocument
 from cwr_island_studio.pbo_worlds import PboWorldArchive
 
 _ENTRY = struct.Struct("<IIIII")
