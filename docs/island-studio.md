@@ -27,7 +27,7 @@ option. The tool is not bundled with the generator executable.
 ## Workflow
 
 1. Set Grid metres and Height scale to the values used to generate the map,
-   then select Open WRP. The 4WVR header encodes neither scale value.
+   then select Open World. The 4WVR header encodes neither scale value.
 2. Use the wheel to zoom and right-drag to pan. Choose Elevation or Texture
    slots. Slot colours are index visualizations, not decoded .paa textures.
 3. Select a world object to edit its model path, X/Y/Z position and heading.
@@ -274,6 +274,29 @@ operations and while a text entry, dropdown, list or similar editable
 widget has keyboard focus, so entering coordinates and choosing assets
 continues to work normally. The arrow keys follow the same unclamped
 navigation behavior as right-button map dragging.
+
+## Go to in-game console position
+
+Click **Go to Position** beside Fit map, or press **Ctrl+G**, and paste
+the coordinates returned by the Operation Flashpoint / Cold War Assault
+console, for example:
+
+    [1234.5, 5678.25, 42]
+
+The game array is **[X, Y, altitude]**: X is east/west, Y is north/south,
+and the final number is height. Island Studio's WRP viewport calls the
+north/south axis Z internally. The dialog correctly maps the game's second
+coordinate (Y) to that map axis; the third value (height) is ignored because
+the viewport is top-down. You can also enter \`1234.5, 5678.25\`, space-
+separated \`1234.5 5678.25\`, or \`Position: [1234.5, 5678.25, 42]\`.
+This is a text coordinate input, not code execution.
+
+The camera moves so the given horizontal position is at the **centre
+of the viewport**. It keeps the current zoom level and updates the
+terrain-height or texture-name cursor readout. Coordinates outside the
+opened island or with invalid values produce an error without moving
+the camera. The action is usable for both loose WRPs and permanently
+read-only PBO islands. It never moves, paints or modifies any map objects.
 
 ## Read-only protection for loose and archived WRPs
 
