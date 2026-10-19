@@ -322,7 +322,8 @@ def test_completed_index_keeps_gui_polling_so_second_archive_can_open() -> None:
             (archive, grid, scale)
         ),
     )
-    IslandStudio._poll(editor)
+    editor._poll = lambda: IslandStudio._poll(editor)
+    editor._poll()
     assert scheduled and scheduled[-1][0] == 150
     assert statuses[-1].startswith("Ready: 5 objects indexed.")
     assert editor._index_future is None
