@@ -8,6 +8,9 @@ to temporary disk storage, avoiding any eager decoding of texture members.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from concurrent.futures import CancelledError
+from collections.abc import Callable
+import threading
 from pathlib import Path
 import io
 import shutil
@@ -58,12 +61,16 @@ def _scan(
     *, extensions: tuple[str, ...] = (
         ".paa", ".pac", ".png", ".jpg", ".jpeg", ".webp", ".p3d",
     ),
+    cancel_event: threading.Event | None = None,
+    on_progress: Callable[[int], None] | None = None,
 ) -> dict[str, TextureMember]:
     """Read the PBO header, indexing requested member types without extraction."""
     records: list[tuple[str, int, int, int]] = []
     prefix = ""
     with path.open("rb") as source:
         while True:
+            if len(records) % 512 == 0 and cancel_event is not None and cancel_event.is_set():
+                raise CancelledError()
             name = _cstring(source)
             fields = source.read(_ENTRY.size)
             if len(fields) != _ENTRY.size:
@@ -87,6 +94,10 @@ def _scan(
                     raise ValueError("unsupported PBO header extension")
                 break
             records.append((name, packing, original_size, size))
+            if on_progress is not None and len(records) % 512 == 0:
+                on_progress(len(records))
+        if on_progress is not None:
+            on_progress(len(records))
         start = source.tell()
         source.seek(0, 2)
         end = source.tell()
@@ -96,7 +107,9 @@ def _scan(
     prefix = prefix.strip("\\/")
     result: dict[str, TextureMember] = {}
     offset = start
-    for name, packing, original_size, size in records:
+    for index, (name, packing, original_size, size) in enumerate(records):
+        if index % 512 == 0 and cancel_event is not None and cancel_event.is_set():
+            raise CancelledError()
         if size < 0 or offset + size > end:
             raise ValueError("truncated PBO member data")
         try:
