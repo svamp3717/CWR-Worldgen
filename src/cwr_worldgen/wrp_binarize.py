@@ -173,3 +173,49 @@ def binarize_rvw4(source: Path, target: Path, *, height_scale: float = 1.0) -> i
                 except FileNotFoundError:
                     pass
     return object_count
+
+
+def repack_game_pbo_with_oprw(
+    source_dir: Path,
+    source_wrp: Path,
+    binarized_wrp: Path,
+    pbo_path: Path,
+    *, backend: str = "auto",
+    poseidon_tools_path: Path | None = None,
+) -> None:
+    """Repack runtime PBO atomically without changing the editable 4WVR.
+
+    Stage both the original WRP and replacement PBO outside the packed source
+    directory, restore the source file even when packing fails, and replace
+    the final game PBO only after the pack succeeds.
+    """
+    import shutil
+    from .pbo import pack_directory
+
+    source_dir = Path(source_dir)
+    source_wrp = Path(source_wrp)
+    binarized_wrp = Path(binarized_wrp)
+    pbo_path = Path(pbo_path)
+    if source_wrp.parent.resolve() != source_dir.resolve():
+        raise ValueError("WRP must live in the packed source directory")
+    with binarized_wrp.open("rb") as stream:
+        if stream.read(8) != b"OPRW\x03\x00\x00\x00":
+            raise ValueError("binarized world is not OFP/CWA OPRW v3")
+    # The work directory must not appear in source_dir, or it would be
+    # accidentally included in the output archive.
+    with tempfile.TemporaryDirectory(
+        dir=source_dir.parent, prefix=".wrp-binarize-",
+    ) as work_dir:
+        work = Path(work_dir)
+        original_backup = work / "original-4wvr.wrp"
+        pending_pbo = work / pbo_path.name
+        os.replace(source_wrp, original_backup)
+        try:
+            shutil.copyfile(binarized_wrp, source_wrp)
+            pack_directory(
+                source_dir, pending_pbo, backend=backend,
+                poseidon_tools_path=poseidon_tools_path,
+            )
+        finally:
+            os.replace(original_backup, source_wrp)
+        os.replace(pending_pbo, pbo_path)
