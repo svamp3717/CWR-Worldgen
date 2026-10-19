@@ -3308,7 +3308,7 @@ def _load_surface_pipeline(
         "colour_reference": file_snapshot(getattr(spec, "surface_colour_reference_path", None)),
         "spec": _spec_fields(spec, _SURFACE_CACHE_FIELDS),
     }
-    key = cache_key("surface-pipeline-v11-vectorized-material-pass", payload)
+    key = cache_key("surface-pipeline-v12-clustered-farmland-patches", payload)
     path = cache_dir / "surfaces" / f"{key}.pickle" if cache_dir is not None else None
     if progress_callback is not None:
         progress_callback(0, "Checking surface-mask cache")
