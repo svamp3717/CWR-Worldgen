@@ -583,12 +583,14 @@ class IslandStudio:
         cell_size: float, height_scale: float,
     ) -> None:
         self.status.set(f"Loading read-only island {member}…")
+        # Tk variables must be read on the UI thread, not inside a worker.
+        auto_grid = bool(self.auto_grid.get()) if hasattr(self, "auto_grid") else True
 
         def load() -> None:
             try:
                 doc = archive.open_world(
                     member, cell_size=cell_size, height_scale=height_scale,
-                    auto_grid=bool(self.auto_grid.get()) if hasattr(self, "auto_grid") else True,
+                    auto_grid=auto_grid,
                 )
                 if self._archive_cancel.is_set():
                     doc.close()
@@ -708,13 +710,15 @@ class IslandStudio:
         if self.document is not None:
             self._retire_current_world()
         self.status.set(f"Opening {path.name}…")
+        # Tk StringVar/BooleanVar reads from a daemon thread can deadlock
+        # while another world is opening or the window is closing.
+        auto_grid = bool(self.auto_grid.get()) if hasattr(self, "auto_grid") else True
         def load() -> None:
             try:
                 metadata = load_loose_world_metadata(path)
                 with path.open("rb") as source:
                     magic = source.read(4)
-                auto = bool(self.auto_grid.get()) if hasattr(self, "auto_grid") else True
-                use_config = auto and magic == b"4WVR" and metadata.land_grid is not None
+                use_config = auto_grid and magic == b"4WVR" and metadata.land_grid is not None
                 doc = open_island_document(
                     path,
                     cell_size=metadata.land_grid if use_config else cell_size,
@@ -760,7 +764,9 @@ class IslandStudio:
         if self._closing:
             return
         try:
-            while True:
+            # Bound work per tick; a huge PBO directory can produce hundreds
+            # of progress events and must not monopolize Tk's event loop.
+            for _ in range(80):
                 kind, value = self._messages.get_nowait()
                 if kind == "open":
                     self._accept_document(value)
