@@ -493,6 +493,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     milestone9.add_argument("--source-dir", type=Path, required=True)
     milestone9.add_argument(
+        "--binarize-world", action="store_true",
+        help=("EXPERIMENTAL: convert generated 4WVR to OPRW v3 in the game PBO "
+              "and preserve editable 4WVR source; requires 50 m terrain cells"),
+    )
+    milestone9.add_argument(
         "--deploy-mod-dir",
         type=Path,
         help="copy the generated world PBO, terrain ReadMe, and required menu intro into this existing mod folder without creating another @mod directory",
@@ -1207,6 +1212,7 @@ def main(argv: list[str] | None = None) -> int:
                 procedural_building_interiors=args.procedural_building_interiors,
                 high_quality_building_textures=args.high_quality_building_textures,
                 odol_buildings=args.odol_buildings,
+                binarize_world=args.binarize_world,
                 house_style_preset=args.house_style_preset,
                 building_length_quantum=args.building_length_quantum,
                 building_height_quantum=args.building_height_quantum,
