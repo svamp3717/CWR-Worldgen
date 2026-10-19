@@ -7,6 +7,7 @@ patches only edited records, preserving unknown matrix components verbatim.
 """
 from __future__ import annotations
 
+from concurrent.futures import CancelledError
 from dataclasses import dataclass
 from pathlib import Path
 import math
@@ -15,6 +16,7 @@ import os
 import shutil
 import struct
 import tempfile
+import threading
 from typing import Callable
 
 import numpy as np
@@ -353,11 +355,15 @@ class IslandDocument:
                 changed += 1
         return changed
 
-    def build_object_index(self) -> None:
-        """Build a compact, vectorized spatial index without decoding models.
+    def build_object_index(
+        self, cancel_event: threading.Event | None = None,
+    ) -> None:
+        """Build a compact index with cooperative cancellation on world changes."""
+        def check_cancel() -> None:
+            if cancel_event is not None and cancel_event.is_set():
+                raise CancelledError()
 
-        This can run on a worker thread after the terrain preview is visible.
-        """
+        check_cancel()
         cols = max(1, math.ceil(self.world_width / _BUCKET_METRES))
         transforms = self._records["transform"]
         x = transforms[:, 9]
@@ -367,20 +373,24 @@ class IslandDocument:
         iz = np.maximum(0, np.floor(z / _BUCKET_METRES)).astype(np.int64)
         keys = np.where(valid, iz * cols + ix, np.iinfo(np.int64).max)
         order = np.argsort(keys, kind="stable")
+        check_cancel()
         self._index_keys = keys[order]
         self._index_order = order.astype(np.int32 if self.object_count < 2_147_483_647 else np.int64)
         self._index_columns = cols
-        # Decoding object paths is deferred until background indexing. Keep
-        # only one boolean per original object, not Python road objects.
-        self._road_mask = np.fromiter(
-            (is_road_model(value) for value in self._records["model"]),
-            dtype=np.bool_, count=self.object_count,
-        )
-        # Classify just once in the background rather than on every pan.
-        self._forest_mask = np.fromiter(
-            (is_forest_model(value) for value in self._records["model"]),
-            dtype=np.bool_, count=self.object_count,
-        )
+        # Decode model names without materializing a Python object per record.
+        # Large maps can spend seconds here, so check cancellation per batch.
+        def classify(predicate) -> np.ndarray:
+            def values():
+                for index, name in enumerate(self._records["model"]):
+                    if index % 4096 == 0:
+                        check_cancel()
+                    yield predicate(name)
+            return np.fromiter(values(), dtype=np.bool_, count=self.object_count)
+
+        self._road_mask = classify(is_road_model)
+        check_cancel()
+        self._forest_mask = classify(is_forest_model)
+        check_cancel()
 
     def visible_objects(
         self, left: float, top: float, right: float, bottom: float,
