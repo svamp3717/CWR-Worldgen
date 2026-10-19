@@ -152,8 +152,8 @@ def test_reject_later_oprw_versions_without_guessing_offsets(tmp_path: Path) -> 
 
 def test_reject_invalid_packed_data_and_invalid_model_index(tmp_path: Path) -> None:
     filename = tmp_path / "bad.wrp"
-    data = bytearray(make_oprw())
-    data[25] ^= 1  # tamper packed grid checksum or payload
+    data = bytearray(make_oprw(map_size=(16, 16), layer_size=(16, 16)))
+    data[25] ^= 1  # corrupt the first compressed grid's payload byte
     filename.write_bytes(data)
     with pytest.raises(ValueError, match="checksum"):
         open_island_document(filename)
