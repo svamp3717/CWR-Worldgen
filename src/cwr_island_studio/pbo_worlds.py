@@ -8,6 +8,8 @@ no complete island needs to fit in Python memory.
 from __future__ import annotations
 
 from pathlib import Path
+from collections import OrderedDict
+import io
 from collections.abc import Callable
 from concurrent.futures import CancelledError
 import threading
@@ -18,12 +20,57 @@ from typing import BinaryIO
 
 import zstandard as zstd
 
+from .world_metadata import WorldMetadata, parse_world_config
 from .pbo_textures import (
     TextureMember, _LZSS, _ZSTD_MAGIC, _scan,
 )
 
 _COPY_CHUNK = 1024 * 1024
 _MAX_WORLD_BYTES = 32 * 1024**3
+_MAX_CONFIG_BYTES = 4 * 1024 * 1024
+# Uncompressed archives have stable offsets. Reusing their headers avoids
+# repeated full PBO directory scans when switching between islands.
+_DIRECTORY_LOCK = threading.Lock()
+_DIRECTORY_CACHE: OrderedDict[
+    tuple[Path, int, int], dict[str, TextureMember]
+] = OrderedDict()
+_DIRECTORY_CACHE_LIMIT = 8
+
+
+def _archive_directory(
+    path: Path, stem: str, *, cancel_event: threading.Event | None,
+    progress: Callable[[str], None],
+    cacheable: bool,
+) -> dict[str, TextureMember]:
+    key = None
+    if cacheable:
+        stat = path.stat()
+        key = (path, stat.st_size, stat.st_mtime_ns)
+        with _DIRECTORY_LOCK:
+            cached = _DIRECTORY_CACHE.get(key)
+            if cached is not None:
+                _DIRECTORY_CACHE.move_to_end(key)
+                progress(f"Reusing WRP directory for {path.name}…")
+                return dict(cached)
+    found = _scan(
+        path, stem, extensions=(".wrp", ".cpp"),
+        cancel_event=cancel_event,
+        on_progress=lambda count: progress(
+            f"Indexing WRP entries in {path.name}: "
+            f"{count:,} directory entries scanned…"
+        ),
+    )
+    if key is not None and not (cancel_event and cancel_event.is_set()):
+        with _DIRECTORY_LOCK:
+            for old_key in list(_DIRECTORY_CACHE):
+                if old_key[0] == path and old_key != key:
+                    del _DIRECTORY_CACHE[old_key]
+            _DIRECTORY_CACHE[key] = dict(found)
+            _DIRECTORY_CACHE.move_to_end(key)
+            while len(_DIRECTORY_CACHE) > _DIRECTORY_CACHE_LIMIT:
+                _DIRECTORY_CACHE.popitem(last=False)
+    return found
+
 
 
 def _copy_exact(
@@ -144,14 +191,19 @@ class PboWorldArchive:
             for suffix in (".zst", ".pbo", ".ifa"):
                 if stem.casefold().endswith(suffix):
                     stem = stem[:-len(suffix)]
-            self.members: dict[str, TextureMember] = _scan(
-                archive, stem, extensions=(".wrp",),
-                cancel_event=self._cancel_event,
-                on_progress=lambda count: report(
-                    f"Indexing WRP entries in {self.path.name}: "
-                    f"{count:,} directory entries scanned…"
-                ),
+            all_members = _archive_directory(
+                archive, stem, cancel_event=self._cancel_event,
+                progress=report, cacheable=not wrapped,
             )
+            self._configs = {
+                name: value for name, value in all_members.items()
+                if name.casefold().endswith("config.cpp")
+                and name.replace("/", "\\").casefold().split("\\")[-1] == "config.cpp"
+            }
+            self.members: dict[str, TextureMember] = {
+                name: value for name, value in all_members.items()
+                if name.casefold().endswith(".wrp")
+            }
             self._check_cancel()
             if not self.members:
                 raise ValueError("No .wrp files were found in this archive")
@@ -195,18 +247,66 @@ class PboWorldArchive:
             )
         return destination
 
+    def world_metadata(self, member_name: str) -> WorldMetadata:
+        """Read matching config.cpp from the same PBO, if present."""
+        name = Path(member_name.replace("\\", "/")).stem
+        for config_name, member in self._configs.items():
+            expected = (
+                member.original_size if member.packing == _LZSS
+                else member.stored_size
+            )
+            if not 0 < expected <= _MAX_CONFIG_BYTES:
+                continue
+            try:
+                with member.path.open("rb") as source:
+                    source.seek(member.offset)
+                    if member.packing == _LZSS:
+                        target = io.BytesIO()
+                        with _LimitedReader(source, member.stored_size) as limited:
+                            _decode_lzss_world(
+                                limited, target, expected, self._cancel_event,
+                            )
+                        payload = target.getvalue()
+                    elif member.packing == 0:
+                        payload = source.read(expected)
+                    else:
+                        continue
+                meta = parse_world_config(
+                    payload, name,
+                    label=f"{self.path.name} / {config_name}",
+                )
+                if meta.source:
+                    return meta
+            except (OSError, ValueError):
+                continue
+        return WorldMetadata()
+
     def open_world(
         self, member_name: str, *, cell_size: float = 50.0,
-        height_scale: float = 1.0,
+        height_scale: float = 1.0, auto_grid: bool = True,
     ):
         """Return an IslandDocument which owns this temporary archive source."""
         from .oprw import open_island_document
 
         try:
             filename = self.extract(member_name)
+            with filename.open("rb") as reader:
+                magic = reader.read(4)
+            metadata = self.world_metadata(member_name)
+            grid = (
+                metadata.land_grid
+                if auto_grid and magic == b"4WVR" and metadata.land_grid is not None
+                else cell_size
+            )
             document = open_island_document(
-                filename, cell_size=cell_size, height_scale=height_scale,
+                filename, cell_size=grid, height_scale=height_scale,
                 read_only=True, cancel_event=self._cancel_event,
+            )
+            document.map_locations = metadata.locations
+            document.grid_source = (
+                metadata.source
+                if auto_grid and magic == b"4WVR" and metadata.land_grid is not None
+                else "manual/default (50 m for CWA OPRW)"
             )
             document.source_label = f"{self.path.name} / {member_name}"
             document._archive_owner = self
