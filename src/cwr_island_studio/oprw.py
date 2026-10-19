@@ -284,8 +284,15 @@ class OprwIslandDocument(IslandDocument):
             sampled = self.heights[np.ix_(rows, columns)].astype(np.float32)
         return sampled, world_x, world_z
 
-    def build_object_index(self) -> None:
-        """Spatially index compressed object placements without expanding models."""
+    def build_object_index(
+        self, cancel_event: threading.Event | None = None,
+    ) -> None:
+        """Spatially index compact OPRW object placements, cancellably."""
+        def check_cancel() -> None:
+            if cancel_event is not None and cancel_event.is_set():
+                raise CancelledError()
+
+        check_cancel()
         transforms = self._records["transform"]
         columns = max(1, math.ceil(self.world_width / _BUCKET_METRES))
         x, z = transforms[:, 9], transforms[:, 11]
@@ -294,20 +301,27 @@ class OprwIslandDocument(IslandDocument):
         iz = np.maximum(0, np.floor(z / _BUCKET_METRES)).astype(np.int64)
         keys = np.where(valid, iz * columns + ix, np.iinfo(np.int64).max)
         order = np.argsort(keys, kind="stable")
+        check_cancel()
         self._index_keys = keys[order]
         self._index_order = order.astype(
             np.int32 if self.object_count < 2_147_483_647 else np.int64,
         )
         self._index_columns = columns
         models = self._records["model"]
-        road_types = np.asarray(
-            [is_road_model(name) for name in self.model_names], dtype=np.bool_,
-        )
-        forest_types = np.asarray(
-            [is_forest_model(name) for name in self.model_names], dtype=np.bool_,
-        )
+        def classify(predicate) -> np.ndarray:
+            flags = np.empty(len(self.model_names), dtype=np.bool_)
+            for index, model in enumerate(self.model_names):
+                if index % 4096 == 0:
+                    check_cancel()
+                flags[index] = predicate(model)
+            return flags
+
+        road_types = classify(is_road_model)
+        forest_types = classify(is_forest_model)
+        check_cancel()
         self._road_mask = road_types[models]
         self._forest_mask = forest_types[models]
+        check_cancel()
 
 
 def open_island_document(
