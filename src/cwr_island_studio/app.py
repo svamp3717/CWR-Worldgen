@@ -818,7 +818,7 @@ class IslandStudio:
                 if self.document:
                     self.status.set(
                         f"Ready: {self.document.object_count:,} objects indexed. "
-                        (f"Binarized OPRW v{self.document.oprw_version}. Viewing and inspection only."
+                        + (f"Binarized OPRW v{self.document.oprw_version}. Viewing and inspection only."
                          if hasattr(self.document, "oprw_version")
                          else "Read-only WRP from PBO. Viewing and inspection only."
                          if self.document.read_only_forced
