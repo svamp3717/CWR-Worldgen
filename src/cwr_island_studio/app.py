@@ -16,6 +16,7 @@ from PIL import Image, ImageTk
 
 from .core import IslandDocument, MapObject
 from .oprw import open_island_document
+from .world_metadata import load_loose_world_metadata, MapLocation
 from .object_layers import is_forest_model, object_marker_mode
 from .cursor_info import cursor_readout
 from .roads import is_road_model, plan_straight_road, road_segment
@@ -115,6 +116,7 @@ class IslandStudio:
         self._image: ImageTk.PhotoImage | None = None
         self._visible: tuple[MapObject, ...] = ()
         self.selected: int | None = None
+        self._map_locations: tuple[MapLocation, ...] = ()
         self.view_x = 0.0
         self.view_z = 0.0
         self.zoom = 1.0
@@ -125,6 +127,8 @@ class IslandStudio:
         self._road_cursor: tuple[float, float] | None = None
 
         self.cell_size = tk.StringVar(value="50")
+        self.auto_grid = tk.BooleanVar(value=True)
+        self.show_locations = tk.BooleanVar(value=True)
         self.height_scale = tk.StringVar(value="1")
         self.layer = tk.StringVar(value="Elevation")
         self.tool = tk.StringVar(value="Select")
@@ -178,8 +182,11 @@ class IslandStudio:
         )
         ttk.Button(header, text="−", width=3, command=lambda: self._zoom_button(0.8)).pack(side="left", padx=(12, 2))
         ttk.Button(header, text="+", width=3, command=lambda: self._zoom_button(1.25)).pack(side="left", padx=2)
-        ttk.Label(header, text="Grid metres").pack(side="left", padx=(20, 2))
+        ttk.Label(header, text="Grid fallback (m)").pack(side="left", padx=(12, 2))
         ttk.Entry(header, textvariable=self.cell_size, width=6).pack(side="left")
+        ttk.Checkbutton(
+            header, text="Auto LandGrid", variable=self.auto_grid,
+        ).pack(side="left", padx=(4, 0))
         ttk.Label(header, text="Height scale").pack(side="left", padx=(13, 2))
         ttk.Entry(header, textvariable=self.height_scale, width=6).pack(side="left")
         ttk.Label(header, textvariable=self.metadata).pack(side="right", padx=8)
@@ -246,6 +253,10 @@ class IslandStudio:
         ).pack(anchor="w", pady=(0, 4))
         ttk.Checkbutton(
             side, text="Show roads as lines", variable=self.show_roads,
+            command=self._queue_draw,
+        ).pack(anchor="w", pady=(0, 4))
+        ttk.Checkbutton(
+            side, text="Show place names (config.cpp)", variable=self.show_locations,
             command=self._queue_draw,
         ).pack(anchor="w", pady=(0, 4))
         ttk.Label(side, text="Water level, metres").pack(anchor="w")
@@ -440,6 +451,7 @@ class IslandStudio:
         self._index_future = None
         self._index_cancel = None
         self.document = None
+        self._map_locations = ()
         self._reset_model_bounds()
         self.selected = None
         self._visible = ()
@@ -576,6 +588,7 @@ class IslandStudio:
             try:
                 doc = archive.open_world(
                     member, cell_size=cell_size, height_scale=height_scale,
+                    auto_grid=bool(self.auto_grid.get()) if hasattr(self, "auto_grid") else True,
                 )
                 if self._archive_cancel.is_set():
                     doc.close()
@@ -618,8 +631,15 @@ class IslandStudio:
             else " | READ-ONLY PBO" if doc.read_only_forced
             else " | READ-ONLY" if doc.read_only else ""
         )
+        grid_note = f" | {doc.cell_size:g} m/cell"
+        if getattr(doc, "grid_source", "manual/default") not in ("manual/default", "manual/default (50 m for CWA OPRW)"):
+            grid_note += " (config)"
+        labels = len(getattr(doc, "map_locations", ()))
+        if labels:
+            grid_note += f" | {labels:,} places"
         self.metadata.set(
-            f"{doc.width:,}×{doc.height:,} | {doc.object_count:,} objects" + suffix
+            f"{doc.width:,}×{doc.height:,} | {doc.object_count:,} objects"
+            + suffix + grid_note
         )
         self.root.title(
             f"CWR Island Studio | {doc.source_label}"
@@ -690,9 +710,18 @@ class IslandStudio:
         self.status.set(f"Opening {path.name}…")
         def load() -> None:
             try:
+                metadata = load_loose_world_metadata(path)
+                with path.open("rb") as source:
+                    magic = source.read(4)
+                auto = bool(self.auto_grid.get()) if hasattr(self, "auto_grid") else True
+                use_config = auto and magic == b"4WVR" and metadata.land_grid is not None
                 doc = open_island_document(
-                    path, cell_size=cell_size, height_scale=height_scale,
+                    path,
+                    cell_size=metadata.land_grid if use_config else cell_size,
+                    height_scale=height_scale,
                 )
+                doc.map_locations = metadata.locations
+                doc.grid_source = metadata.source if use_config else "manual/default"
                 self._messages.put(("open", doc))
             except Exception as exc:
                 self._messages.put(("error", str(exc)))
@@ -702,6 +731,7 @@ class IslandStudio:
         if self.document:
             self._retire_current_world()
         self.document = doc
+        self._map_locations = tuple(getattr(doc, "map_locations", ()))
         # Loose WRPs start protected by default; the user can deliberately
         # uncheck Read-only. An archived WRP is permanently protected.
         doc.read_only = True
@@ -1038,6 +1068,35 @@ class IslandStudio:
                         outline=colour, fill=colour,
                     )
             self._visible = tuple(selectable.values())
+            if getattr(self, "show_locations", None) is not None and self.show_locations.get():
+                # The places are CfgWorlds names, not WRP object records.
+                occupied: set[tuple[int, int]] = set()
+                printed = 0
+                for place in self._map_locations:
+                    if not (left <= place.x <= right and top <= place.z <= bottom):
+                        continue
+                    sx, sz = self._to_screen(place.x, place.z)
+                    tile = (int(sx // 105), int(sz // 21))
+                    if tile in occupied:
+                        continue
+                    occupied.add(tile)
+                    self.canvas.create_oval(
+                        sx - 2, sz - 2, sx + 2, sz + 2,
+                        fill="#fff2af", outline="#18251d",
+                    )
+                    self.canvas.create_text(
+                        sx + 6 + 1, sz - 8 + 1, text=place.name,
+                        anchor="sw", fill="#15221c",
+                        font=("TkDefaultFont", 9, "bold"),
+                    )
+                    self.canvas.create_text(
+                        sx + 6, sz - 8, text=place.name,
+                        anchor="sw", fill="#fff5cb",
+                        font=("TkDefaultFont", 9, "bold"),
+                    )
+                    printed += 1
+                    if printed >= 125:
+                        break
             if self._road_anchor is not None:
                 first = self._to_screen(*self._road_anchor)
                 self.canvas.create_oval(
