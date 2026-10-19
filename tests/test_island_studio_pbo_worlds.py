@@ -449,3 +449,23 @@ def test_locked_temp_cleanup_preserves_original_invalid_world_error(
         time.sleep(0.01)
     assert not temp_path.exists()
     assert cleanup_calls >= 2
+
+
+def test_unsupported_wrp_magic_does_not_unlink_an_open_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "binarized.pbo"
+    make_pbo(source, (("island.wrp", b"OPRW" + bytes(80), False),))
+    archive = PboWorldArchive(source)
+    temp_path = Path(archive._temporary.name)
+    original_unlink = Path.unlink
+
+    def reject_selected_world_unlink(self: Path, *args, **kwargs) -> None:
+        if self.name == "selected-world.wrp":
+            raise AssertionError("The extracted WRP must be closed before cleanup")
+        return original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", reject_selected_world_unlink)
+    with pytest.raises(ValueError, match="Unsupported WRP format.*OPRW"):
+        archive.open_world(r"binarized\island.wrp")
+    assert not temp_path.exists()
