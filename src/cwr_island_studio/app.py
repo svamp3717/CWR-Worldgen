@@ -548,11 +548,12 @@ class IslandStudio:
                 if show_forests else ()
             )
             # Selection covers every object displayed by either layer.
-            self._visible = tuple({
+            candidates = tuple({
                 obj.index: obj for obj in (*normal, *forest)
             }.values())
             if show_real or show_forests:
-                self._request_model_bounds(self._visible)
+                self._request_model_bounds(candidates)
+            selectable = {obj.index: obj for obj in forest}
 
             # Forest blocks and individual vegetation are shown in green.
             # This is a WRP-object overlay, not reconstructed OSM polygons.
@@ -575,7 +576,8 @@ class IslandStudio:
                 if corners is not None and extent >= 2.0:
                     self.canvas.create_polygon(
                         *(v for point in screen for v in point),
-                        fill="", outline="#65df92" if selected else "#328b51",
+                        fill="#37784d", stipple="gray75",
+                        outline="#65df92" if selected else "#328b51",
                         width=2 if selected else 1,
                     )
                 else:
@@ -611,18 +613,20 @@ class IslandStudio:
                     )
                 mode = object_marker_mode(show_dots, show_real, bounds is not None, extent)
                 if mode == "footprint":
+                    selectable[obj.index] = obj
                     self.canvas.create_polygon(
                         *(v for point in screen for v in point),
                         outline=colour, fill="", width=2 if selected else 1,
                     )
                 elif mode == "dot":
+                    selectable[obj.index] = obj
                     radius = 5 if selected else 1.65
                     self.canvas.create_oval(
                         sx - radius, sz - radius, sx + radius, sz + radius,
                         outline=colour, fill=colour,
                     )
-            if self._road_anchor is not None:
-                first = self._to_screen(*self._road_anchor)
+            self._visible = tuple(selectable.values())
+            if self._road_anchor is not None:                first = self._to_screen(*self._road_anchor)
                 self.canvas.create_oval(
                     first[0] - 4, first[1] - 4, first[0] + 4, first[1] + 4,
                     outline="#ffe18b", width=2,
