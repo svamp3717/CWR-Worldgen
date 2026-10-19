@@ -48,14 +48,15 @@ class _DaemonExecutor:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._closed = False
-        self._futures: list[Future] = []
+        self._futures: set[Future] = set()
 
     def submit(self, function: Callable[[], object]) -> Future:
         future: Future = Future()
         with self._lock:
             if self._closed:
                 raise RuntimeError("Background executor has shut down")
-            self._futures.append(future)
+            self._futures.add(future)
+        future.add_done_callback(self._forget)
 
         def run() -> None:
             if not future.set_running_or_notify_cancel():
@@ -70,11 +71,15 @@ class _DaemonExecutor:
         threading.Thread(target=run, name="island-studio-worker", daemon=True).start()
         return future
 
+    def _forget(self, future: Future) -> None:
+        with self._lock:
+            self._futures.discard(future)
+
     def shutdown(self, *, wait: bool = False, cancel_futures: bool = False) -> None:
         with self._lock:
             self._closed = True
-            pending = self._futures
-            self._futures = []
+            pending = tuple(self._futures)
+            self._futures.clear()
         if cancel_futures:
             for future in pending:
                 future.cancel()
