@@ -867,6 +867,8 @@ class IslandStudio:
         self._model_stamp += 1
         self._model_bounds.clear()
         self._model_categories.clear()
+        if self.document is not None and hasattr(self.document, "clear_model_categories"):
+            self.document.clear_model_categories()
 
     def _install_pbos(self, archives: PboTextures) -> None:
         self._loading_pbos = False
