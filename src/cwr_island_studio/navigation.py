@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 
 
 def zoom_around(
@@ -48,3 +49,56 @@ def pan_with_arrow(
     dx, dz = vectors[direction]
     distance = step_pixels * (3 if fast else 1) / zoom
     return left + dx * distance, top + dz * distance
+
+
+def parse_game_position(raw: str) -> tuple[float, float, float | None]:
+    """Parse OFP/CWA console positions in [X, Y, altitude] order.
+
+    The in-game Y axis is the map's north/south direction. Internally the
+    RVW4 editor displays that direction as Z, with Y reserved for elevation.
+    Accept the exact getPos array or two horizontal numbers; altitude is
+    parsed for validation but does not affect a top-down camera.
+    """
+    text = raw.strip()
+    text = re.sub(r"^(?:position|pos|getpos\s+[a-z_]\w*)\s*[:=]\s*",
+                  "", text, flags=re.IGNORECASE)
+    if (text.startswith("[") and text.endswith("]")) or (
+        text.startswith("{") and text.endswith("}")
+    ):
+        text = text[1:-1].strip()
+    elif any(character in text for character in "[]{}"):
+        raise ValueError("Use [X, Y, altitude] or X, Y")
+    components = (
+        [part.strip() for part in text.split(",")]
+        if "," in text else text.split()
+    )
+    if len(components) not in (2, 3) or any(not part for part in components):
+        raise ValueError("Enter [X, Y, altitude] from the game console, or X, Y")
+    try:
+        values = tuple(float(part) for part in components)
+    except ValueError as exc:
+        raise ValueError("Coordinates must be numeric metres") from exc
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("Coordinates must be finite numbers")
+    return values[0], values[1], values[2] if len(values) == 3 else None
+
+
+def center_on_position(
+    game_x: float, game_y: float, canvas_width: float,
+    canvas_height: float, zoom: float,
+) -> tuple[float, float]:
+    """Center the viewport on in-game X/Y without changing the zoom.
+
+    World X is east/west and in-game Y is north/south (the editor's Z).
+    The third console coordinate, if provided, is height and is ignored.
+    """
+    if not all(math.isfinite(value) for value in (
+        game_x, game_y, canvas_width, canvas_height, zoom,
+    )):
+        raise ValueError("Position and viewport parameters must be finite")
+    if canvas_width <= 0 or canvas_height <= 0 or zoom <= 0:
+        raise ValueError("Viewport dimensions and zoom must be positive")
+    return (
+        game_x - canvas_width / (2 * zoom),
+        game_y - canvas_height / (2 * zoom),
+    )
