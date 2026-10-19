@@ -626,7 +626,8 @@ class IslandStudio:
                         outline=colour, fill=colour,
                     )
             self._visible = tuple(selectable.values())
-            if self._road_anchor is not None:                first = self._to_screen(*self._road_anchor)
+            if self._road_anchor is not None:
+                first = self._to_screen(*self._road_anchor)
                 self.canvas.create_oval(
                     first[0] - 4, first[1] - 4, first[0] + 4, first[1] + 4,
                     outline="#ffe18b", width=2,
