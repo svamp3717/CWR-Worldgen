@@ -156,7 +156,7 @@ def test_empty_and_unsupported_archived_map_rejected(tmp_path: Path) -> None:
     make_pbo(invalid, (("broken.wrp", b"OPRW" + bytes(40), False),))
     archive = PboWorldArchive(invalid)
     temp = Path(archive._temporary.name)
-    with pytest.raises(ValueError, match="4WVR"):
+    with pytest.raises(ValueError, match="OPRW version 0"):
         archive.open_world(r"invalid\broken.wrp")
     assert not temp.exists()
 
@@ -370,6 +370,10 @@ def test_wrp_directory_scan_reports_progress_and_is_cancellable(tmp_path: Path) 
     finally:
         archive.close()
 
+    # Deliberately force a cold scan: this test verifies cancellation while
+    # scanning, rather than the new fast path that reuses a completed index.
+    from cwr_island_studio import pbo_worlds
+    pbo_worlds._DIRECTORY_CACHE.clear()
     cancel = threading.Event()
 
     def stop_at_first_batch(message: str) -> None:
@@ -455,7 +459,7 @@ def test_unsupported_wrp_magic_does_not_unlink_an_open_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = tmp_path / "binarized.pbo"
-    make_pbo(source, (("island.wrp", b"OPRW" + bytes(80), False),))
+    make_pbo(source, (("island.wrp", b"BAD!" + bytes(80), False),))
     archive = PboWorldArchive(source)
     temp_path = Path(archive._temporary.name)
     original_unlink = Path.unlink
@@ -466,6 +470,6 @@ def test_unsupported_wrp_magic_does_not_unlink_an_open_file(
         return original_unlink(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", reject_selected_world_unlink)
-    with pytest.raises(ValueError, match="Unsupported WRP format.*OPRW"):
+    with pytest.raises(ValueError, match="Unsupported WRP format.*BAD!"):
         archive.open_world(r"binarized\island.wrp")
     assert not temp_path.exists()
