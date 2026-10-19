@@ -182,7 +182,8 @@ def test_metadata_worker_populates_overlays_without_ui_blocking(tmp_path: Path) 
             fake, doc.visible_objects(0, 0, 200, 200),
         )
         assert fake._model_future is not None
-        IslandStudio._poll(fake)
+        fake._poll = lambda: IslandStudio._poll(fake)
+        fake._poll()
         assert fake._model_future is None
         assert fake._model_categories[r"custom\mystery_road.p3d"] == ModelCategory(road=True)
         after = doc.visible_objects(0, 0, 200, 200, roads_only=True)
