@@ -325,7 +325,7 @@ def _add_surface_pass_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--surface-sand-shore-cells", type=int, default=2, help="dry sand shoreline band width in terrain cells")
     parser.add_argument("--surface-transition-cells", type=int, default=2, help="outer deterministic material-dither width in terrain cells")
     parser.add_argument("--surface-forest-edge-cells", type=int, default=1, help="forest-edge ground band width in terrain cells")
-    parser.add_argument("--surface-farmland-strip-cells", type=int, default=4, help="deterministic field subdivision stripe width")
+    parser.add_argument("--surface-farmland-strip-cells", type=int, default=4, help="typical width in cells of seeded, irregular farmland material patches (legacy option name)")
     parser.add_argument("--surface-road-shoulder", type=float, default=5.0, help="paved-road shoulder width in metres")
     parser.add_argument("--surface-dirt-blend", type=float, default=6.0, help="dirt-road blend width in metres")
     parser.add_argument("--surface-steep-slope", type=float, default=38.0, help="steep rock/scree threshold in degrees")
