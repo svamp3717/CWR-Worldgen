@@ -31,6 +31,16 @@ except PackageNotFoundError:
     __version__ = "dev"
 
 
+def world_source_kind(path: Path | str) -> str:
+    """Identify a loose WRP or PBO/IFA container without opening its contents."""
+    name = str(path).casefold()
+    if name.endswith(".wrp"):
+        return "wrp"
+    if name.endswith((".pbo", ".ifa", ".pbo.zst", ".ifa.zst")):
+        return "archive"
+    raise ValueError("Choose a .wrp, .pbo, .ifa, .pbo.zst or .ifa.zst file")
+
+
 class IslandStudio:
     """Viewport-centred editor with bounded rendering and background I/O."""
 
@@ -91,7 +101,7 @@ class IslandStudio:
         self.obj_y = tk.StringVar(value="0")
         self.obj_z = tk.StringVar(value="0")
         self.obj_heading = tk.StringVar(value="0")
-        self.metadata = tk.StringVar(value="Open a loose 4WVR .wrp island to start")
+        self.metadata = tk.StringVar(value="Open a WRP or an island from a PBO to start")
         self.status = tk.StringVar(value="Ready. The source file will not be modified.")
         self.cursor_info = tk.StringVar(value="")
         self._build()
@@ -104,8 +114,7 @@ class IslandStudio:
     def _build(self) -> None:
         header = ttk.Frame(self.root, padding=(9, 7))
         header.pack(fill="x")
-        ttk.Button(header, text="Open WRP", command=self._open_dialog).pack(side="left", padx=3)
-        ttk.Button(header, text="Open PBO WRP", command=self._open_pbo_dialog).pack(side="left", padx=3)
+        ttk.Button(header, text="Open World", command=self._open_dialog).pack(side="left", padx=3)
         self.save_button = ttk.Button(header, text="Save As", command=self._save_dialog)
         self.save_button.pack(side="left", padx=3)
         self.readonly_toggle = ttk.Checkbutton(
@@ -313,25 +322,15 @@ class IslandStudio:
         except ValueError as exc:
             raise ValueError(f"{name} must be a finite number") from exc
 
-    def _open_pbo_dialog(self) -> None:
+    def _open_pbo_path(self, path: Path) -> None:
         if self._busy:
             return
         if self.document is not None and self.document.changed:
             if not messagebox.askyesno(
                 "Discard pending edits?",
-                "Opening an archive will discard unsaved edits. Continue?",
+                "Opening another world will discard unsaved edits. Continue?",
             ):
                 return
-        path = filedialog.askopenfilename(
-            title="Open a read-only island from a PBO",
-            filetypes=[
-                ("Game archives", "*.pbo *.pbo.zst *.ifa *.ifa.zst"),
-                ("PBO archives", "*.pbo"),
-                ("All files", "*.*"),
-            ],
-        )
-        if not path:
-            return
         try:
             cell_size = self._num(self.cell_size, "Grid metres")
             height_scale = self._num(self.height_scale, "Height scale")
@@ -458,14 +457,27 @@ class IslandStudio:
         if self._busy:
             return
         chosen = filedialog.askopenfilename(
-            title="Open an island WRP",
-            filetypes=[("RVW4 worlds", "*.wrp"), ("All files", "*.*")],
+            title="Open a world from WRP or PBO",
+            filetypes=[
+                ("World files", "*.wrp *.pbo *.ifa *.pbo.zst *.ifa.zst"),
+                ("Loose WRP", "*.wrp"),
+                ("PBO / IFA archives", "*.pbo *.ifa *.pbo.zst *.ifa.zst"),
+                ("All files", "*.*"),
+            ],
         )
         if chosen:
             self.open_path(Path(chosen))
 
     def open_path(self, path: Path) -> None:
         if self._busy:
+            return
+        try:
+            kind = world_source_kind(path)
+        except ValueError as exc:
+            messagebox.showerror("Unsupported world file", str(exc))
+            return
+        if kind == "archive":
+            self._open_pbo_path(path)
             return
         if self.document and self.document.changed:
             if not messagebox.askyesno(
@@ -1305,7 +1317,7 @@ class IslandStudio:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Fast large-world RVW4 island editor")
-    parser.add_argument("wrp", nargs="?", type=Path, help="optional .wrp file to open")
+    parser.add_argument("wrp", nargs="?", type=Path, help="optional .wrp, .pbo or .ifa file to open")
     args = parser.parse_args(argv)
     root = tk.Tk()
     IslandStudio(root, args.wrp)
