@@ -158,3 +158,132 @@ def test_corrupt_rap_offsets_and_oversized_strings_do_not_crash() -> None:
         pass
     else:
         raise AssertionError("invalid RAP pointer must fail")
+
+
+
+def _ofp_rap(source: dict) -> bytes:
+    """Independent OFP/Resistance version-4 contiguous RAP writer."""
+    out = bytearray(b"\x00raP\x04\x00\x00")
+    strings: dict[str, int] = {}
+
+    def index(value: str) -> None:
+        if value in strings:
+            out.extend(struct.pack("<H", strings[value]) + b"\0")
+        else:
+            position = len(strings)
+            strings[value] = position
+            out.extend(struct.pack("<H", position) + value.encode("latin-1") + b"\0")
+
+    def cstr(value: str) -> None:
+        out.extend(value.encode("latin-1") + b"\0")
+
+    def scalar(value: object) -> None:
+        if isinstance(value, str):
+            out.append(0)
+            index(value)
+        elif isinstance(value, float):
+            out.append(1)
+            out.extend(struct.pack("<f", value))
+        else:
+            out.append(2)
+            out.extend(struct.pack("<i", value))
+
+    def array(values: list) -> None:
+        out.append(len(values))
+        for value in values:
+            if isinstance(value, list):
+                out.append(3)
+                array(value)
+            else:
+                scalar(value)
+
+    def body(entries: dict) -> None:
+        out.append(len(entries))
+        for name, item in entries.items():
+            if isinstance(item, tuple) and item[0] == "class":
+                out.append(0)
+                index(name)
+                cstr(item[2] if len(item) > 2 else "")
+                body(item[1])
+            elif isinstance(item, list):
+                out.append(2)
+                index(name)
+                array(item)
+            else:
+                out.append(1)
+                # scalar packet type before indexed variable name
+                if isinstance(item, str):
+                    out.append(0)
+                    index(name)
+                    index(item)
+                elif isinstance(item, float):
+                    out.append(1)
+                    index(name)
+                    out.extend(struct.pack("<f", item))
+                else:
+                    out.append(2)
+                    index(name)
+                    out.extend(struct.pack("<i", item))
+
+    out.append(0)
+    index("config.bin")
+    cstr("")
+    body(source)
+    return bytes(out)
+
+
+def test_real_cwa_style_version4_indexed_rap_world_config() -> None:
+    config = _ofp_rap({
+        "CfgPatches": ("class", {
+            "other": ("class", {"value": 55, "unused": ["misc", 12]}),
+        }),
+        "CfgWorlds": ("class", {
+            "CWRBase": ("class", {"LandGrid": 25}),
+            "island": ("class", {
+                "Names": ("class", {
+                    "TownA": ("class", {
+                        "name": "Elm Village",
+                        "position": [112.5, 87.0, 30],
+                    }),
+                    "TownB": ("class", {
+                        "name": "Elm Village",
+                        "position": [140, 180],
+                    }),
+                }),
+            }, "CWRBase"),
+        }),
+    })
+    assert config[:7] == b"\x00raP\x04\x00\x00"
+    metadata = parse_world_config(config, "island", label="config.bin")
+    assert metadata.land_grid == 25
+    assert metadata.source == "config.bin"
+    assert [(p.name, p.x, p.z) for p in metadata.locations] == [
+        ("Elm Village", 112.5, 87.0),
+        ("Elm Village", 140.0, 180.0),
+    ]
+    assert parse_world_config(config, "notthere").source == ""
+
+
+def test_ofp_binary_config_applies_to_loose_and_embedded_pbo_worlds(
+    tmp_path: Path,
+) -> None:
+    cfg = _ofp_rap({
+        "CfgWorlds": ("class", {
+            "island": ("class", {
+                "LandGrid": 33.0,
+                "Names": ("class", {
+                    "P": ("class", {"name": "Town", "position": [5, 7]}),
+                }),
+            }),
+        }),
+    })
+    loose = tmp_path / "island.wrp"
+    loose.write_bytes(wrp())
+    (tmp_path / "config.bin").write_bytes(cfg)
+    assert load_loose_world_metadata(loose).land_grid == 33.0
+    archive_file = tmp_path / "archive.pbo"
+    pbo(archive_file, [("config.bin", cfg), ("island.wrp", wrp())])
+    with PboWorldArchive(archive_file) as archive:
+        with archive.open_world("archive\island.wrp") as world:
+            assert world.cell_size == 33
+            assert world.map_locations[0].name == "Town"
