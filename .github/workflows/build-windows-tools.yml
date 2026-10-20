@@ -25,6 +25,9 @@ jobs:
           - name: WRP-Mod-Dependency-Scanner
             script: tools/wrp_mod_dependency_scanner.py
             mode: --console
+          - name: CWR-Island-Studio
+            script: tools/island_studio_entry.py
+            mode: --windowed
 
     steps:
       - name: Check out repository
