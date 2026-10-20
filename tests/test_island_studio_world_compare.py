@@ -10,7 +10,7 @@ from cwr_island_studio.oprw import open_island_document
 from cwr_island_studio.world_compare import compare_worlds
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.wrp import write_rvw4
-from cwr_worldgen.wrp_binarize import binarize_rvw4
+from cwr_worldgen.wrp_binarize import CWA_RVW4_HEIGHT_SCALE, binarize_rvw4
 
 
 def make_world(
@@ -57,9 +57,12 @@ def test_4wvr_oprw_round_trip_has_no_terrain_object_or_texture_changes(
     loose = tmp_path / "island.wrp"
     binary = tmp_path / "island.binary.wrp"
     make_world(loose)
-    binarize_rvw4(loose, binary, height_scale=0.05)
+    binarize_rvw4(loose, binary)
     before = loose.read_bytes()
-    with open_island_document(loose, height_scale=0.05) as reference:
+    # Compare game-visible metres, not Worldgen's 0.05 writer quantization.
+    with open_island_document(
+        loose, height_scale=CWA_RVW4_HEIGHT_SCALE,
+    ) as reference:
         with open_island_document(binary, height_scale=0.05) as candidate:
             report = compare_worlds(reference, candidate)
             assert report.terrain_changes == 0
