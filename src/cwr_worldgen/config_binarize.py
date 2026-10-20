@@ -70,7 +70,7 @@ class _Parser:
 
     def _ident(self) -> str:
         value = self._take()
-        if _IDENT.fullmatch(value) is None:
+        if _IDENTIFIER.fullmatch(value) is None:
             raise ValueError(f"expected config identifier, got {value!r}")
         return value
 
