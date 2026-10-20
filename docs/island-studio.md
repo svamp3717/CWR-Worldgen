@@ -375,15 +375,52 @@ the corresponding `CfgWorlds` setting.
 **Show place names (config.cpp)** overlays any matching `CfgWorlds >>
 world_name >> Names` entries onto the canvas. Map place labels are optional;
 the editor is not guaranteed to find them in a loose or packaged WRP alone.
-This reader handles source `config.cpp`; it cannot decompile packed
-`config.bin` game configs. Labels are not saved into the WRP and do not
-change the terrain. Visible label count is capped to keep navigation smooth.
+Island Studio also reads binarized `config.bin` when present, including
+original OFP/CWA version-4 RAP indexed strings and the later offset-based
+RAP layout. The reader only extracts matching `CfgWorlds` metadata: it
+does not decompile or rewrite game configs. Local CfgWorlds inheritance is
+supported, but inherited definitions supplied by **other** addons cannot
+be reconstructed from a single PBO. Labels are not saved into the WRP;
+visible label count is capped for smooth navigation.
 
 An unchanged, uncompressed PBO directory is cached between opens, so loading
 a second WRP from the same archive does not reindex the same directory.
 Switching islands detaches the old document, cancels old background indexing
 and closes it asynchronously once its indexer finishes. This does not modify
 either world or block Quit.
+
+## Compare two WRP worlds (read-only)
+
+Open the first WRP or WRP-in-PBO normally, then choose **Compare World**
+in the top toolbar. Select a second loose `.wrp` or `.pbo`/`.ifa`
+(including compressed archives). If the archive contains several WRP files,
+choose the comparison member. The first world remains open in the editor;
+the second is loaded read-only on a background worker and closed after the
+comparison. Neither input is modified.
+
+A report shows:
+
+- Differences in terrain elevation samples (1 cm tolerance) and the
+  maximum vertical difference, using each document's height scale.
+- Differences in terrain texture indices and named texture-table paths.
+- Missing/extra unique object IDs, objects moved by more than 1 cm,
+  changed 3×3 rotations/scales, and changed P3D paths.
+- Ambiguous repeated object IDs, which the tool intentionally does *not*
+  pair as if the matches were reliable.
+
+The results window lists up to **300** sample positions across changed
+terrain, textures and objects. Double-click a difference, or use **Go to
+selected difference**, to center the main map on that coordinate. A
+world's object-record order does not affect matching. Comparison also
+works when one world is `4WVR` and the other is OFP/CWA `OPRW` v2/v3.
+
+Set the correct **Height scale** and **Grid fallback (m)** before comparing
+loose worlds. CWA `4WVR` itself doesn't encode physical grid or vertical
+scale; a matching world config can provide `LandGrid`, not the height scale.
+Two differently sized terrain grids are reported as *not directly
+comparable* rather than resampled. The report compares WRP data, not
+unsaved edits, special OPRW geography/sound arrays, P3D mesh differences,
+or actual in-game rendering. The second world is never opened for editing.
 
 ## Open an island directly from a PBO (read-only)
 
