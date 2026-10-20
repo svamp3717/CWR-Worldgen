@@ -65,7 +65,7 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
   build-tools:
-    name: Build the three Windows asset tools
+    name: Build the four Windows asset tools
     needs: prepare-release
     uses: ./.github/workflows/build-windows-tools.yml
     permissions:
@@ -87,11 +87,11 @@ jobs:
           path: release-assets
           merge-multiple: true
 
-      - name: Verify all three release assets
+      - name: Verify all four release assets
         shell: bash
         run: |
           set -euo pipefail
-          for tool in Categorise-P3D-Models Browse-P3D-Assets WRP-Mod-Dependency-Scanner; do
+          for tool in Categorise-P3D-Models Browse-P3D-Assets WRP-Mod-Dependency-Scanner CWR-Island-Studio; do
             test -s "release-assets/$tool.exe" || {
               echo "Missing or empty release-assets/$tool.exe" >&2
               exit 1
@@ -111,8 +111,9 @@ jobs:
             "release-assets/Categorise-P3D-Models.exe" \
             "release-assets/Browse-P3D-Assets.exe" \
             "release-assets/WRP-Mod-Dependency-Scanner.exe" \
+            "release-assets/CWR-Island-Studio.exe" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "CWR Worldgen Asset Tools $VERSION" \
-            --notes "Standalone Windows P3D model categoriser, P3D asset browser, and WRP mod dependency scanner. Includes PyInstaller loading screens." \
+            --notes "Standalone Windows P3D model categoriser, P3D asset browser, WRP mod dependency scanner, and CWR Island Studio WRP editor. Includes PyInstaller loading screens." \
             --latest=false
