@@ -42,7 +42,9 @@ def test_indexed_vegetation_filter_matches_previous_filter() -> None:
 
 
 def test_indexed_vegetation_audit_matches_previous_audit() -> None:
-    objects = _objects()
+    objects = (*_objects(), WorldObject(
+        5, r"data3d\str smrk.p3d", 35.0, 4.5, 35.0, 0.0,
+    ))
     cells = 8
     elevations = (5.0,) * (cells * cells)
     spec = SimpleNamespace(
@@ -60,6 +62,8 @@ def test_indexed_vegetation_audit_matches_previous_audit() -> None:
     expected = perf._ORIGINAL_VEGETATION_AUDIT(objects, elevations, spec)
     actual = perf._indexed_vegetation_grounding_audit(objects, elevations, spec)
     assert actual == expected
+    assert actual[0] == 3
+    assert actual[3] == 1  # The fifth object is buried 0.5 m on flat terrain.
 
 
 def test_shared_object_index_policy_is_live() -> None:
