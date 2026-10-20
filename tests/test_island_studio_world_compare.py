@@ -36,12 +36,19 @@ def make_world(
     if reorder:
         items.reverse()
     if duplicate:
-        items.append(WorldObject(11, r"data3d\ker.p3d", 130, 0, 80))
+        items.append(WorldObject(13, r"data3d\ker.p3d", 130, 0, 80))
     write_rvw4(
         path, 8, 8, heights, textures,
         [r"landtext\main.pac", r"data\sand.paa"],
         items, height_scale=0.05,
     )
+    if duplicate:
+        import struct
+        # The generator intentionally prohibits duplicate IDs. Patch the
+        # fourth record on disk to emulate a real-world malformed WRP.
+        raw = bytearray(path.read_bytes())
+        struct.pack_into("<i", raw, 12 + 64 * 4 + 512 * 32 + 3 * 128 + 48, 11)
+        path.write_bytes(raw)
 
 
 def test_4wvr_oprw_round_trip_has_no_terrain_object_or_texture_changes(
