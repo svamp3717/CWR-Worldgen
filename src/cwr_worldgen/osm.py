@@ -3734,30 +3734,29 @@ def _non_buried_vegetation_fit(
 
 
 def _rooted_tree_fit(
-    supports: Sequence[float], *, root_sink: float, maximum_burial: float
+    supports: Sequence[float], *, root_sink: float, maximum_burial: float,
+    maximum_float: float = 0.15, clearance: float = 0.0,
 ) -> tuple[float, float] | None:
-    """Ground a tree root conservatively without creating a visible air gap.
+    """Fit a tree root to both possible terrain triangles without hiding its trunk.
 
-    4WVR stores only the four corner elevations of a terrain quad, not an
-    explicit diagonal.  The two possible rendered triangle surfaces can differ
-    substantially on a saddle/steep cell.  Treating a tree like a rigid building
-    and lifting it above *both* surfaces rejects most useful hillside positions.
-
-    Trees are point-like and tolerate a modest amount of trunk burial much
-    better than any floating root.  Anchor at the lower possible surface, sink
-    the root a few centimetres, and reject only when the alternate surface would
-    bury more than ``maximum_burial``.  This guarantees zero positive root float
-    whichever terrain diagonal the engine chooses.
+    CWA does not record the quad diagonal in 4WVR.  Anchor to the *higher*
+    possible surface instead of the lower one: the old placement could bury
+    a tree by the full diagonal-height difference plus an extra root sink.
+    Reject points where the alternate surface would leave too much air under
+    the root.  Explicit root sinking remains possible, but is zero by default.
     """
 
     if not supports:
         raise ValueError("tree grounding requires at least one support")
     lower = min(float(value) for value in supports)
     upper = max(float(value) for value in supports)
-    sink = max(0.0, float(root_sink))
-    anchor = lower - sink
+    anchor = upper + max(0.0, float(clearance)) - max(0.0, float(root_sink))
     burial = max(0.0, upper - anchor)
-    if burial > max(0.0, float(maximum_burial)) + 1.0e-9:
+    floating = max(0.0, anchor - lower)
+    if (
+        burial > max(0.0, float(maximum_burial)) + 1.0e-9
+        or floating > max(0.0, float(maximum_float)) + 1.0e-9
+    ):
         return None
     return anchor, burial
 
@@ -3902,6 +3901,7 @@ def _audit_vegetation_grounding(
     cell_size = float(getattr(spec, "cell_size"))
     world_name = str(getattr(spec, "name", "cwr_world"))
     tree_limit = max(0.0, float(getattr(spec, "forest_single_tree_maximum_float", 0.15)))
+    tree_burial_limit = max(0.0, float(getattr(spec, "forest_single_tree_root_sink", 0.0)))
     cluster_tree_limit = max(0.0, float(getattr(spec, "forest_cluster_tree_maximum_float", 0.20)))
     cluster_bush_limit = max(0.0, float(getattr(spec, "forest_cluster_bush_maximum_float", 0.60)))
     individual_models = {value.casefold() for value in OSM_INDIVIDUAL_TREE_MODELS}
@@ -3942,12 +3942,16 @@ def _audit_vegetation_grounding(
             folded_model_cache[obj.model_path] = model
         if model.startswith("data3d\\str") or model in individual_models:
             tree_objects += 1
-            minimum_ground, _maximum_ground = _triangle_elevation_bounds(
+            minimum_ground, maximum_ground = _triangle_elevation_bounds(
                 elevations, cells, cell_size, obj.x, obj.z
             )
             floating = max(0.0, obj.y - minimum_ground)
+            burial = max(0.0, maximum_ground - obj.y)
             maximum_tree_float = max(maximum_tree_float, floating)
-            violations += int(floating > tree_limit + 1.0e-6)
+            violations += int(
+                floating > tree_limit + 1.0e-6
+                or burial > tree_burial_limit + 1.0e-6
+            )
     return tree_objects, cluster_trees, cluster_bushes, violations, maximum_tree_float, maximum_bush_float
 
 def _place_cluster_at(
@@ -9089,7 +9093,7 @@ def generate_world_objects(
     )
     individual_tree_root_sink = max(
         0.0,
-        float(getattr(spec, "forest_single_tree_root_sink", 0.05)),
+        float(getattr(spec, "forest_single_tree_root_sink", 0.0)),
     )
     individual_tree_maximum_burial = max(
         0.0,
@@ -9372,6 +9376,7 @@ def generate_world_objects(
                             ),
                             root_sink=individual_tree_root_sink,
                             maximum_burial=individual_tree_maximum_burial,
+                            maximum_float=individual_tree_maximum_float,
                         )
                         if tree_fit is None:
                             continue
@@ -9741,6 +9746,7 @@ def generate_world_objects(
                             ),
                             root_sink=individual_tree_root_sink,
                             maximum_burial=individual_tree_maximum_burial,
+                            maximum_float=individual_tree_maximum_float,
                         )
                         if tree_fit is None:
                             continue
@@ -10154,6 +10160,7 @@ def generate_world_objects(
                                 ),
                                 root_sink=individual_tree_root_sink,
                                 maximum_burial=individual_tree_maximum_burial,
+                                maximum_float=individual_tree_maximum_float,
                             )
                             if tree_fit is None:
                                 continue
@@ -10231,6 +10238,7 @@ def generate_world_objects(
                             ),
                             root_sink=individual_tree_root_sink,
                             maximum_burial=individual_tree_maximum_burial,
+                            maximum_float=individual_tree_maximum_float,
                         )
                         if tree_fit is None:
                             forest_hillside_candidate_rejections += 1
@@ -10386,6 +10394,7 @@ def generate_world_objects(
                     ),
                     root_sink=individual_tree_root_sink,
                     maximum_burial=individual_tree_maximum_burial,
+                    maximum_float=individual_tree_maximum_float,
                 )
                 if tree_fit is None:
                     continue
@@ -10470,6 +10479,7 @@ def generate_world_objects(
                         ),
                         root_sink=individual_tree_root_sink,
                         maximum_burial=individual_tree_maximum_burial,
+                        maximum_float=individual_tree_maximum_float,
                     )
                     if tree_fit is None:
                         continue
@@ -12006,8 +12016,10 @@ def generate_world_objects(
             _triangle_elevation_bounds(
                 elevations, spec.cells, spec.cell_size, x, z
             ),
-            root_sink=max(individual_tree_root_sink, mapped_tree_clearance),
+            root_sink=individual_tree_root_sink,
+            clearance=mapped_tree_clearance,
             maximum_burial=individual_tree_maximum_burial,
+            maximum_float=individual_tree_maximum_float,
         )
         if tree_fit is None:
             mapped_tree_rejections += 1
