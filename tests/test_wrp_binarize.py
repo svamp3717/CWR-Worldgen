@@ -56,17 +56,15 @@ def test_binarize_generated_rvw4_oprw_v3_round_trip(tmp_path: Path) -> None:
             doc.export(tmp_path / "no.wrp")
 
 
-def test_binarize_uses_cwa_game_4wvr_scale_not_writer_scale(tmp_path: Path) -> None:
-    """CWR-CE always multiplies 4WVR height samples by 0.045 metres.
+def test_optional_library_conversion_respects_legacy_005_writer_scale(tmp_path: Path) -> None:
+    """The retained low-level OPRW utility uses this branch's 0.05 scale.
 
-    Simulate a legacy Worldgen file written with the old 0.05 quantizer.
-    Passing that obsolete scale to the OPRW converter would raise positive
-    ground 11.1% while leaving tree Y unchanged (sunk trees). New Worldgen
-    output instead quantizes at the engine's fixed 0.045 scale.
+    Milestone9 has no world-binarization option; this library-level API
+    remains for importing/testing WRP files in Island Studio.
     """
     source = tmp_path / "same_seed.wrp"
     binary = tmp_path / "same_seed.binarized.wrp"
-    assert CWA_RVW4_HEIGHT_SCALE == pytest.approx(0.03 * 1.5)
+    assert CWA_RVW4_HEIGHT_SCALE == pytest.approx(0.05)
     tree = WorldObject(999, r"data3d\\str_fikovnik.p3d", 75, 20.0, 75)
     write_rvw4(
         source, 16, 16, [20.0] * 256, [0] * 256,
@@ -74,12 +72,12 @@ def test_binarize_uses_cwa_game_4wvr_scale_not_writer_scale(tmp_path: Path) -> N
     )
     raw_sample = struct.unpack_from("<h", source.read_bytes(), 12)[0]
     assert raw_sample == 400
-    assert binarize_rvw4(source, binary) == 1  # use engine-correct default
+    assert binarize_rvw4(source, binary) == 1
     with open_island_document(binary) as doc:
         assert doc.terrain_at(0, 0) == pytest.approx(
             raw_sample * CWA_RVW4_HEIGHT_SCALE, abs=1e-5,
         )
-        assert doc.terrain_at(0, 0) == pytest.approx(18.0)
+        assert doc.terrain_at(0, 0) == pytest.approx(20.0)
         assert doc.object_at(0).y == pytest.approx(20.0)
         assert doc.object_at(0).object_id == 999
 
@@ -128,15 +126,14 @@ def test_slope_and_coast_heights_ground_objects_identically_in_both_formats(
     """CWA sees the same signed terrain and grounded objects in 4WVR and OPRW.
 
     A non-flat grid catches unit conversion bugs that flat-ground tests can
-    miss. Read against the engine's fixed 0.045 m/int16 contract rather than
-    passing through the scale chosen by the converter itself.
+    miss. This branch preserves the original 0.05-unit Worldgen writer.
     """
     from cwr_island_studio.world_compare import compare_worlds
     from cwr_worldgen.model import WorldSpec
     from cwr_worldgen.wrp import quantize_elevations
 
     scale = WorldSpec(profile="cwr-ce").height_scale
-    assert scale == pytest.approx(0.045)
+    assert scale == pytest.approx(0.05)
     cells = 16
     grid_metres = 50.0
     raw_units = [
@@ -187,7 +184,7 @@ def test_slope_and_coast_heights_ground_objects_identically_in_both_formats(
     ) as packed:
         for row in range(cells):
             for column in range(cells):
-                engine_height = raw_units[row * cells + column] * 0.045
+                engine_height = raw_units[row * cells + column] * scale
                 assert loose.terrain_at(column, row) == pytest.approx(
                     engine_height, abs=1e-5,
                 )
@@ -196,7 +193,7 @@ def test_slope_and_coast_heights_ground_objects_identically_in_both_formats(
                 )
 
         for index, (column, row, _model, _pitch) in enumerate(anchors):
-            engine_height = raw_units[row * cells + column] * 0.045
+            engine_height = raw_units[row * cells + column] * scale
             assert loose.object_at(index).y == pytest.approx(
                 engine_height, abs=1e-5,
             )
@@ -305,112 +302,69 @@ def test_failed_repack_restores_previous_game_pbo_and_editable_world(
     assert not list(tmp_path.glob(".wrp-binarize-*"))
 
 
-def test_advanced_checkbox_flows_through_gui_command_without_default_enabling() -> None:
+def test_wrp_binarize_is_absent_from_generation_options() -> None:
+    """No GUI flag, CLI flag, or Milestone9 setting can reenable OPRW export."""
     from cwr_worldgen.gui import default_gui_values, build_milestone9_command
+    from cwr_worldgen.cli import _parser
+    from cwr_worldgen.milestone9 import Milestone9Spec
+
     defaults = default_gui_values()
-    assert defaults["binarize_world"] is False
+    assert "binarize_world" not in defaults
+    assert not hasattr(Milestone9Spec, "binarize_world")
     defaults.update({
         "source_dir": "source", "output": "output",
         "name": "island", "display_name": "Island",
+        "binarize_world": True,  # stale saved preference must have no effect
     })
-    argv = build_milestone9_command(defaults, python="python")
-    assert "--binarize-world" not in argv
-    defaults["binarize_world"] = True
-    assert "--binarize-world" in build_milestone9_command(defaults, python="python")
+    command = build_milestone9_command(defaults, python="python")
+    assert "--binarize-world" not in command
+    with pytest.raises(SystemExit):
+        _parser().parse_args([
+            "milestone9", "--source-dir", "source", "--binarize-world",
+        ])
 
 
-def test_binarize_world_option_is_saved_and_restored(tmp_path: Path) -> None:
-    from cwr_worldgen.gui import (
-        WorldgenGui, default_gui_values, defaults_with_recent_source,
-        load_gui_state, save_gui_state,
+def test_legacy_world_height_scale_and_config_binarization_are_independent() -> None:
+    from cwr_worldgen.model import HeightmapSpec, WorldSpec
+    from cwr_worldgen.gui import default_gui_values
+    from cwr_worldgen.milestone9 import Milestone9Spec
+
+    assert WorldSpec().height_scale == pytest.approx(0.05)
+    assert HeightmapSpec().height_scale == pytest.approx(0.05)
+    assert default_gui_values()["binarize_config"] is False
+    assert Milestone9Spec.binarize_config is False
+
+
+def test_loose_wrp_survives_optional_config_bin_packaging(tmp_path: Path) -> None:
+    """config.bin affects only config.cpp, never the 4WVR terrain file."""
+    from cwr_worldgen.config_binarize import (
+        binarize_config, pack_binarized_runtime_pbo,
     )
+    from cwr_worldgen.pbo import read_pbo
 
-    class Checkbox:
-        def __init__(self):
-            self.value = False
-            self.callbacks = []
-        def get(self):
-            return self.value
-        def set(self, value):
-            self.value = value
-            for callback in self.callbacks:
-                callback()
-        def trace_add(self, mode, callback):
-            self.callbacks.append(callback)
-
-    state_path = tmp_path / "state.json"
-    save_gui_state(state_path, {"ground_textures": "malden"})
-    gui = object.__new__(WorldgenGui)
-    gui.state_path = state_path
-    checkbox = Checkbox()
-    gui.vars = {"binarize_world": checkbox}
-    WorldgenGui._install_binarized_world_state_persistence(gui)
-    checkbox.set(True)
-    assert load_gui_state(state_path)["binarize_world"] is True
-    restored = defaults_with_recent_source(default_gui_values(), load_gui_state(state_path))
-    assert restored["binarize_world"] is True
-    checkbox.set(False)
-    assert load_gui_state(state_path)["binarize_world"] is False
-    assert load_gui_state(state_path)["ground_textures"] == "malden"
-
-
-def test_binarize_world_cli_accepts_advanced_command_option() -> None:
-    from cwr_worldgen.gui import build_milestone9_command, default_gui_values
-    from cwr_worldgen.cli import _parser
-    values = default_gui_values()
-    values.update({
-        "source_dir": "source", "output": "build",
-        "name": "island", "display_name": "Island",
-        "binarize_world": True,
-    })
-    argv = build_milestone9_command(values, python="python")
-    parsed = _parser().parse_args(argv[argv.index("milestone9"):])
-    assert parsed.binarize_world is True
-
-
-
-def test_milestone9_postbuild_binarization_uses_cwa_engine_height_scale(
-    tmp_path: Path,
-) -> None:
-    """Regress the AttributeError after a completed Milestone 9 generation."""
-    from types import SimpleNamespace
-    from cwr_worldgen.milestone9 import Milestone9Spec, _binarize_generated_world
-    from cwr_worldgen.pbo import pack_directory, read_pbo
-
-    world_dir = tmp_path / "source" / "testworld"
-    world_dir.mkdir(parents=True)
-    original_wrp = world_dir / "testworld.wrp"
+    source_dir = tmp_path / "island"
+    source_dir.mkdir()
+    source_wrp = source_dir / "island.wrp"
+    config = source_dir / "config.cpp"
+    config.write_text(
+        'class CfgWorlds { class island { worldName = "island\\\\island.wrp"; }; };',
+        encoding="utf-8",
+    )
     write_rvw4(
-        original_wrp, 16, 16, [3.25] * (16 * 16), [1] * (16 * 16),
-        [r"testworld\data\d.paa", r"testworld\data\g.paa"],
-        [WorldObject(100, r"data3d\strom.p3d", 40, 3.25, 80)],
+        source_wrp, 4, 4, [9.0] * 16, [0] * 16,
+        [r"landtext\\main.paa"],
+        (WorldObject(1, r"data3d\\str smrk.p3d", 50, 9.0, 50),),
         height_scale=0.05,
     )
-    original_bytes = original_wrp.read_bytes()
-    game_pbo = tmp_path / "testworld.pbo"
-    pack_directory(world_dir, game_pbo, backend="python")
-
-    # The top-level Milestone9Spec intentionally has no height_scale.
-    # CWA's *runtime* 4WVR scale is fixed at 0.045, even though Worldgen
-    # quantizes height samples using playability.height_scale (0.05).
-    spec = Milestone9Spec(
-        source_dir=world_dir, name="testworld",
-        binarize_world=True, pbo_backend="python",
+    original = source_wrp.read_bytes()
+    assert original[:4] == b"4WVR"
+    binary_config = binarize_config(config, tmp_path / "config.bin")
+    pbo = tmp_path / "island.pbo"
+    pack_binarized_runtime_pbo(
+        source_dir, config, binary_config, pbo, backend="python",
     )
-    assert not hasattr(spec, "height_scale")
-    stage = SimpleNamespace(
-        output_dir=tmp_path, source_dir=world_dir,
-        wrp_path=original_wrp, pbo_path=game_pbo,
-    )
-    playability = SimpleNamespace(height_scale=0.05)
-    binary = _binarize_generated_world(stage, spec, playability)
-
-    assert binary.exists()
-    assert original_wrp.read_bytes() == original_bytes
-    with open_island_document(binary) as document:
-        # 3.25 / 0.05 = 65 raw 4WVR units; the game loads them as 65×0.045.
-        assert document.terrain_at(0, 0) == pytest.approx(2.925)
-        assert document.object_at(0).y == pytest.approx(3.25)
-        assert document.object_count == 1
-    packed = {item.name: item.data for item in read_pbo(game_pbo)}
-    assert packed["testworld.wrp"] == binary.read_bytes()
+    entries = {entry.name: entry.data for entry in read_pbo(pbo)}
+    assert entries["island.wrp"] == original
+    assert "config.bin" in entries
+    assert "config.cpp" not in entries
+    assert source_wrp.read_bytes() == original
