@@ -127,8 +127,13 @@ def compare_worlds(
         for row in range(0, reference.height, 256):
             cancelled()
             end = min(reference.height, row + 256)
-            a = np.asarray(reference.heights[row:end], dtype=np.float64) * reference.height_scale
-            b = np.asarray(candidate.heights[row:end], dtype=np.float64) * candidate.height_scale
+            # OPRW stores physical metre heights directly; its GUI height-scale
+            # entry must not accidentally rescale those floats. 4WVR stores
+            # int16 samples whose scale is supplied by the user.
+            scale_a = 1.0 if hasattr(reference, "oprw_version") else reference.height_scale
+            scale_b = 1.0 if hasattr(candidate, "oprw_version") else candidate.height_scale
+            a = np.asarray(reference.heights[row:end], dtype=np.float64) * scale_a
+            b = np.asarray(candidate.heights[row:end], dtype=np.float64) * scale_b
             diff = np.abs(a - b)
             changed = diff > _ELEVATION_TOLERANCE
             terrain_changes += int(np.count_nonzero(changed))
@@ -176,8 +181,10 @@ def compare_worlds(
     ambiguous = int(np.sum(counts_a[counts_a > 1]) + np.sum(counts_b[counts_b > 1]))
     unique_ids_a = unique_a[counts_a == 1]
     unique_ids_b = unique_b[counts_b == 1]
-    only_a = int(np.count_nonzero(~np.isin(unique_a, unique_b)))
-    only_b = int(np.count_nonzero(~np.isin(unique_b, unique_a)))
+    missing_a = np.setdiff1d(unique_a, unique_b, assume_unique=True)
+    missing_b = np.setdiff1d(unique_b, unique_a, assume_unique=True)
+    only_a = len(missing_a)
+    only_b = len(missing_b)
     cancelled()
 
     ids_common = np.intersect1d(unique_ids_a, unique_ids_b, assume_unique=True)
@@ -185,6 +192,18 @@ def compare_worlds(
     pos_b = np.argsort(ids_b, kind="stable")
     indexes_a = pos_a[np.searchsorted(ids_a[pos_a], ids_common)]
     indexes_b = pos_b[np.searchsorted(ids_b[pos_b], ids_common)]
+    # Report sample locations for objects present in only one file too.
+    for label, missing, ids, order, document in (
+        ("Reference only", missing_a, ids_a, pos_a, reference),
+        ("Candidate only", missing_b, ids_b, pos_b, candidate),
+    ):
+        if len(markers) >= max_markers:
+            break
+        for object_id in missing[:max_markers-len(markers)]:
+            record_index = order[np.searchsorted(ids[order], object_id)]
+            record = document._records["transform"][record_index]
+            mark("Missing object", record[9], record[11],
+                 f"{label}: object ID {int(object_id)}")
     cancelled()
 
     trans_a = reference._records["transform"]
