@@ -12,7 +12,9 @@ import math
 from pathlib import Path
 import re
 
-_MAX_CONFIG_BYTES = 4 * 1024 * 1024
+from .rap_config import parse_rap_world
+
+_MAX_CONFIG_BYTES = 16 * 1024 * 1024
 _MAX_LOCATIONS = 5000
 _NUM = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 _CLASS = re.compile(r"\bclass\s+([A-Za-z_]\w*)\b[^;{}]*\{", re.I)
@@ -86,6 +88,17 @@ def parse_world_config(
     if isinstance(source, bytes):
         if len(source) > _MAX_CONFIG_BYTES:
             return WorldMetadata()
+        if source.startswith(b"\\x00raP"):
+            try:
+                result = parse_rap_world(source, world_name)
+            except ValueError:
+                return WorldMetadata()
+            if result is None:
+                return WorldMetadata()
+            grid, locations = result
+            return WorldMetadata(
+                grid, tuple(MapLocation(*place) for place in locations), label,
+            )
         source = source.decode("latin-1", "replace")
     if len(source) > _MAX_CONFIG_BYTES:
         return WorldMetadata()
@@ -119,8 +132,14 @@ def parse_world_config(
 
 
 def load_loose_world_metadata(world: Path) -> WorldMetadata:
-    # Prefer the config beside the WRP, as emitted by CWR Worldgen.
-    for candidate in (world.parent / "config.cpp", world.parent.parent / "config.cpp"):
+    # Source configs take precedence when both formats exist, matching
+    # CWA addon loading. Read RAP content by its signature, not extension.
+    candidates = tuple(
+        base / name
+        for base in (world.parent, world.parent.parent)
+        for name in ("config.cpp", "config.bin")
+    )
+    for candidate in candidates:
         try:
             if candidate.stat().st_size <= _MAX_CONFIG_BYTES:
                 metadata = parse_world_config(
