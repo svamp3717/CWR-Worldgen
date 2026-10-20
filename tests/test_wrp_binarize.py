@@ -263,6 +263,43 @@ def test_offvertex_tree_root_stays_above_both_engine_terrain_formats(
         assert report.moved_objects == 0, report.report()
 
 
+def test_forest_origin_audit_reports_buried_trees_with_engine_heights_in_both_formats(
+    tmp_path: Path,
+) -> None:
+    """Find buried 4WVR/OPRW tree origins, not just floating trees."""
+    from tools.audit_forest_float import audit
+
+    source = tmp_path / "forest_4wvr.wrp"
+    binary = tmp_path / "forest_oprw.wrp"
+    height = 9.0
+    models = (
+        r"data3d\\str smrk_medium.p3d",
+        r"data3d\\str smrk vysoky.p3d",
+    )
+    write_rvw4(
+        source, 16, 16, [height] * 256, [0] * 256,
+        [r"landtext\\pi.pac"],
+        (
+            WorldObject(1, models[0], 125.0, height - 0.9, 125.0),
+            WorldObject(2, models[1], 175.0, height + 0.4, 175.0),
+        ), height_scale=CWA_RVW4_HEIGHT_SCALE,
+    )
+    binarize_rvw4(source, binary)
+
+    for world in (source, binary):
+        rows = audit(world, cell_size=50.0)
+        assert len(rows) == 2
+        # Descending burial puts the buried tree first.
+        assert rows[0]["object_id"] == 1
+        assert rows[0]["terrain_high"] == pytest.approx(height)
+        assert rows[0]["terrain_low"] == pytest.approx(height)
+        assert rows[0]["estimated_burial"] == pytest.approx(0.9, abs=1e-5)
+        assert rows[0]["estimated_float"] == 0.0
+        assert rows[1]["object_id"] == 2
+        assert rows[1]["estimated_burial"] == 0.0
+        assert rows[1]["estimated_float"] == pytest.approx(0.4, abs=1e-5)
+
+
 def test_binarization_supports_large_compressed_grids(tmp_path: Path) -> None:
     source = tmp_path / "large.wrp"
     target = tmp_path / "large.oprw.wrp"
