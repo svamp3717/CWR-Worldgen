@@ -60,7 +60,7 @@ def test_4wvr_oprw_round_trip_has_no_terrain_object_or_texture_changes(
     binarize_rvw4(loose, binary, height_scale=0.05)
     before = loose.read_bytes()
     with open_island_document(loose, height_scale=0.05) as reference:
-        with open_island_document(binary, height_scale=1.0) as candidate:
+        with open_island_document(binary, height_scale=0.05) as candidate:
             report = compare_worlds(reference, candidate)
             assert report.terrain_changes == 0
             assert report.max_height_difference == pytest.approx(0, abs=0.001)
@@ -94,6 +94,7 @@ def test_reports_terrain_texture_model_object_movements_and_missing_ids(
     assert result.unique_ids_reference_only == 1
     assert result.unique_ids_candidate_only == 1
     assert set(p.category for p in result.positions) >= {"Terrain", "Texture", "Object"}
+    assert any(p.category == "Missing object" for p in result.positions)
 
 
 def test_object_order_is_irrelevant_and_duplicate_ids_reported(
