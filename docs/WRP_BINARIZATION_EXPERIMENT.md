@@ -46,3 +46,12 @@ files are left unbinarized, so Island Studio can still edit the generated WRP.
 
 The option is separate from **binarize procedural buildings as ODOL v7**.
 Enabling one does not enable the other.
+
+## Separate config.cpp binarization
+
+The same Advanced **Build behavior** section also has an independent
+**Experimental: binarize addon config.cpp as CWA RAP v4 config.bin**
+checkbox. It works with or without WRP binarization, preserves editable
+`config.cpp` outside the game PBO, and avoids duplicate PBO repacks when
+both switches are enabled. See
+[CONFIG_BINARIZATION_EXPERIMENT.md](CONFIG_BINARIZATION_EXPERIMENT.md).
