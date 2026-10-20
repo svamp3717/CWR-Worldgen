@@ -24,6 +24,12 @@ _MAX_CELLS = 2048 * 2048
 _TEXTURE_TABLE_BYTES = 512 * 32
 _MIN_COMPRESS_SIZE = 1024
 
+# CWR-CE Landscape::LoadData decodes 4WVR shorts using LANDDATA_SCALE
+# (0.03f * 1.5f), irrespective of Worldgen's heightmap writer scale.
+# OPRW stores absolute heights in metres: use the GAME scale so objects
+# occupy the same relative position in both runtime WRP formats.
+CWA_RVW4_HEIGHT_SCALE = 0.045
+
 
 def _packed(raw: bytes) -> bytes:
     """Emit Poseidon SSCompress-compatible distance tokens and checksum.
@@ -71,11 +77,16 @@ def _packed(raw: bytes) -> bytes:
     return bytes(result)
 
 
-def binarize_rvw4(source: Path, target: Path, *, height_scale: float = 1.0) -> int:
-    """Write an OPRW v3 world, retaining source; return placement count.
+def binarize_rvw4(
+    source: Path, target: Path, *, height_scale: float = CWA_RVW4_HEIGHT_SCALE,
+) -> int:
+    """Write OPRW v3 from 4WVR, retaining the original.
 
-    The generated 4WVR has 16-bit elevations with a separate scale from its
-    source configuration. OPRW stores metre heights as float32 instead.
+    CWR-CE decodes 4WVR int16 terrain at a fixed 0.045 metres per sample
+    (LANDDATA_SCALE), regardless of the scale used when Worldgen originally
+    quantized the heights. OPRW stores physical metre heights as float32.
+    Explicit overrides are available for research, but standard conversion
+    must use the engine's 0.045 scale to prevent objects sinking into hills.
     """
     if not np.isfinite(height_scale) or height_scale <= 0:
         raise ValueError("height_scale must be positive and finite")
