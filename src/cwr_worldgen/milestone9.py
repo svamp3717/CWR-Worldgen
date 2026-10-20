@@ -549,10 +549,15 @@ class Milestone9Spec(Milestone8Spec):
     odol_buildings: bool = False
     binarize_world: bool = False
     binarize_config: bool = False
+    world_seed: str = ""
     deploy_mod_dir: Path | None = None
 
     def validate(self) -> None:
         Milestone8Spec.validate(self)
+        if not isinstance(self.world_seed, str):
+            raise ValueError("world seed must be text (numbers are accepted as text)")
+        if len(self.world_seed) > 128 or any(ord(c) < 32 or ord(c) == 127 for c in self.world_seed):
+            raise ValueError("world seed must be at most 128 characters, without control characters")
         if self.surface_ground_mode not in {"milestone8", "milestone9"}:
             raise ValueError("surface ground mode must be milestone8 or milestone9")
         if self.forest_profile not in {"everon", "kolgujev", "malden", "vietnam"}:
@@ -1617,7 +1622,11 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         cache_enabled=spec.cache_enabled,
         cache_refresh=spec.cache_refresh,
         town_name_limit=spec.town_name_limit,
-        deterministic_seed=f"milestone9:{normalization.normalized_fingerprint}",
+        deterministic_seed=(
+            spec.world_seed.strip()
+            if spec.world_seed.strip()
+            else f"milestone9:{normalization.normalized_fingerprint}"
+        ),
         verify_regeneration=spec.verify_regeneration,
         major_road_grade_percent=spec.major_road_grade_percent,
         shoreline_transition_cells=spec.shoreline_transition_cells,
@@ -1790,6 +1799,12 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         "priority_order": terrain_report.get("priority_order", []),
         "cut_volume_m3": terrain_report.get("total_cut_volume_m3", 0.0),
         "fill_volume_m3": terrain_report.get("total_fill_volume_m3", 0.0),
+    }
+    build_manifest["world_seed"] = {
+        "mode": "manual" if spec.world_seed.strip() else "automatic",
+        "requested": spec.world_seed.strip() or None,
+        "effective": playability.deterministic_seed,
+        "note": "Controls seeded placement/surface variation. Packaging options do not change the seed.",
     }
     build_manifest["surface_visual_pass"] = {
         **surface_report,
