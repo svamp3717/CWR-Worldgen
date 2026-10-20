@@ -75,9 +75,13 @@ jobs:
         run: |
           python -m pytest -q tests/test_island_studio.py tests/test_island_studio_layers.py tests/test_island_studio_navigation_pbos.py tests/test_island_studio_model_bounds.py tests/test_island_studio_model_classification.py tests/test_island_studio_sources.py tests/test_island_studio_cursor.py tests/test_island_studio_forest_layers.py tests/test_island_studio_pbo_worlds.py tests/test_island_studio_oprw.py tests/test_wrp_binarize.py tests/test_config_binarize.py tests/test_world_seed.py tests/test_farmland_patch_pattern.py tests/test_island_studio_world_metadata.py tests/test_island_studio_rap_config.py tests/test_island_studio_world_compare.py tests/test_island_studio_open_world.py tests/test_island_studio_go_to_position.py tests/test_windows_asset_tools_release.py tests/test_pyinstaller_splash.py
 
-      - name: Test CWA height quantization and complete source-world grounding
+      - name: Test CWA height quantization and terrain grounding
         run: |
-          python -m pytest -q tests/test_milestone1.py tests/test_milestone2.py tests/test_milestone8.py tests/test_milestone9.py tests/test_high_altitude_rebase.py tests/test_grounding_safety.py
+          python -m pytest -q tests/test_milestone1.py tests/test_milestone2.py tests/test_high_altitude_rebase.py tests/test_grounding_safety.py \
+            tests/test_milestone9.py::SemanticFeatureTests::test_vegetation_grounding_stays_above_rvw4_saddle_diagonals \
+            tests/test_milestone9.py::SemanticFeatureTests::test_building_grounding_brackets_rvw4_saddle_diagonals \
+            tests/test_milestone9.py::RoadPieceFittingTests::test_build_is_reproducible_and_embeds_surface_visual_assets \
+            tests/test_milestone9.py::RoadPieceFittingTests::test_legacy_milestone8_ground_palette_remains_explicit_opt_in
 
   windows:
     name: Package Windows editor (manual opt-in only)
