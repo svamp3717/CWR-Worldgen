@@ -73,8 +73,6 @@ def _direct_vegetation(model_path: str, spec: object, configured: set[str]) -> b
     basename = normalized.rsplit("\\", 1)[-1]
     if "les_" in basename or basename.startswith(("les ", "les-")):
         return False
-    if normalized.startswith((canonical_asset_path(str(getattr(spec, "name", "")) + r"\f\"),)):
-        return False
     return _is_tree_or_bush(model_path, spec, configured)
 
 
