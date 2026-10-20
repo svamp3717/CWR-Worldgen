@@ -134,7 +134,7 @@ class IslandStudio:
         self.cell_size = tk.StringVar(value="50")
         self.auto_grid = tk.BooleanVar(value=True)
         self.show_locations = tk.BooleanVar(value=True)
-        self.height_scale = tk.StringVar(value="1")
+        self.height_scale = tk.StringVar(value="0.045")
         self.layer = tk.StringVar(value="Elevation")
         self.tool = tk.StringVar(value="Select")
         # View a newly opened loose world safely until editing is requested.
@@ -192,7 +192,7 @@ class IslandStudio:
         ttk.Checkbutton(
             header, text="Auto LandGrid", variable=self.auto_grid,
         ).pack(side="left", padx=(4, 0))
-        ttk.Label(header, text="Height scale").pack(side="left", padx=(13, 2))
+        ttk.Label(header, text="4WVR height scale").pack(side="left", padx=(13, 2))
         ttk.Entry(header, textvariable=self.height_scale, width=6).pack(side="left")
         self._build_utilities(header)
         ttk.Label(header, textvariable=self.metadata).pack(side="right", padx=8)
@@ -626,7 +626,7 @@ class IslandStudio:
             try:
                 doc = archive.open_world(
                     member, cell_size=cell_size, height_scale=height_scale,
-                    auto_grid=auto_grid,
+                    auto_grid=auto_grid, cwa_runtime_scale=True,
                 )
                 if self._archive_cancel.is_set():
                     doc.close()
@@ -769,6 +769,7 @@ class IslandStudio:
                     with open_island_document(
                         path, cell_size=effective_grid,
                         height_scale=scale, read_only=True,
+                        cwa_runtime_scale=True,
                     ) as other:
                         if not cancel.is_set():
                             report = compare_worlds(
@@ -842,6 +843,7 @@ class IslandStudio:
             try:
                 with archive.open_world(
                     member, cell_size=grid, height_scale=scale, auto_grid=auto,
+                    cwa_runtime_scale=True,
                 ) as other:
                     if not cancel.is_set():
                         result = compare_worlds(
@@ -949,6 +951,7 @@ class IslandStudio:
                     path,
                     cell_size=metadata.land_grid if use_config else cell_size,
                     height_scale=height_scale,
+                    cwa_runtime_scale=True,
                 )
                 doc.map_locations = metadata.locations
                 doc.grid_source = metadata.source if use_config else "manual/default"
