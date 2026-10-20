@@ -83,6 +83,44 @@ def test_binarize_uses_cwa_game_4wvr_scale_not_writer_scale(tmp_path: Path) -> N
         assert doc.object_at(0).object_id == 999
 
 
+def test_generated_world_specs_keep_trees_on_game_ground_in_both_formats(
+    tmp_path: Path,
+) -> None:
+    """All generator milestones use the same CWA 4WVR terrain unit as OPRW."""
+    from cwr_worldgen.model import HeightmapSpec, WorldSpec
+    from cwr_island_studio.world_compare import compare_worlds
+
+    world = WorldSpec(profile="cwr-ce")
+    raster = HeightmapSpec(heightmap_path=tmp_path / "height.png")
+    assert world.height_scale == raster.height_scale == CWA_RVW4_HEIGHT_SCALE
+
+    source = tmp_path / "test.wrp"
+    output = tmp_path / "test.oprw"
+    y = 9.0  # 200 units at the actual game height scale
+    write_rvw4(
+        source, 16, 16, [y] * (16 * 16), [0] * (16 * 16),
+        [r"landtext\\main.paa"],
+        [
+            WorldObject(13, r"data3d\\strom.p3d", 150, y, 200),
+            WorldObject(14, r"o\\road\\sil25.p3d", 400, y, 450),
+        ], height_scale=world.height_scale,
+    )
+    assert struct.unpack_from("<h", source.read_bytes(), 12)[0] == 200
+    binarize_rvw4(source, output)
+    with open_island_document(
+        source, height_scale=world.height_scale,
+    ) as editable, open_island_document(
+        output, height_scale=world.height_scale, cwa_runtime_scale=True,
+    ) as runtime:
+        assert editable.terrain_at(3, 5) == pytest.approx(y)
+        assert runtime.terrain_at(3, 5) == pytest.approx(y)
+        assert editable.object_at(0).y == runtime.object_at(0).y == pytest.approx(y)
+        report = compare_worlds(editable, runtime)
+        assert report.terrain_changes == 0, report.report()
+        assert report.moved_objects == 0, report.report()
+        assert report.rotated_or_scaled_objects == 0, report.report()
+
+
 def test_binarization_supports_large_compressed_grids(tmp_path: Path) -> None:
     source = tmp_path / "large.wrp"
     target = tmp_path / "large.oprw.wrp"
