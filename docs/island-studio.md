@@ -391,8 +391,8 @@ either world or block Quit.
 
 ## Compare two WRP worlds (read-only)
 
-Open the first WRP or WRP-in-PBO normally, then choose **Compare World**
-in the top toolbar. Select a second loose `.wrp` or `.pbo`/`.ifa`
+Open the first WRP or WRP-in-PBO normally, then open the right-hand
+**Utilities** section and choose **Compare World…**. Select a second loose `.wrp` or `.pbo`/`.ifa`
 (including compressed archives). If the archive contains several WRP files,
 choose the comparison member. The first world remains open in the editor;
 the second is loaded read-only on a background worker and closed after the
