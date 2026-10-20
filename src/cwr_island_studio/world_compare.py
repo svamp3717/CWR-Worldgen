@@ -51,7 +51,7 @@ class WorldComparison:
 
     def report(self) -> str:
         def quantity(value: int | None) -> str:
-            return "N/A (grid dimensions differ)" if value is None else f"{value:,}"
+            return "N/A (grid dimensions or spacing differ)" if value is None else f"{value:,}"
         return (
             f"REFERENCE: {self.reference}\n"
             f"CANDIDATE: {self.candidate}\n\n"
@@ -121,7 +121,11 @@ def compare_worlds(
     maximum_height: float | None = None
     texture_changes: int | None = None
 
-    if dims_a == dims_b:
+    aligned = (
+        dims_a == dims_b
+        and abs(reference.cell_size - candidate.cell_size) < 1e-6
+    )
+    if aligned:
         terrain_changes = 0
         maximum_height = 0.0
         for row in range(0, reference.height, 256):
@@ -148,7 +152,7 @@ def compare_worlds(
 
     ta = reference.textures
     tb = candidate.textures
-    if ta.shape == tb.shape:
+    if aligned and ta.shape == tb.shape:
         texture_changes = 0
         layer_height, layer_width = ta.shape
         for row in range(0, layer_height, 256):
