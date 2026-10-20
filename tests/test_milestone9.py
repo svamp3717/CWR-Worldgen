@@ -2525,7 +2525,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             )
             self.assertTrue(proxy_names)
             self.assertFalse(generated_summary.texture_paths)
-            wrp = inspect_rvw4(result.wrp_path, height_scale=0.05)
+            wrp = inspect_rvw4(result.wrp_path, height_scale=spec.height_scale)
             self.assertTrue(any(path.startswith(r"cwr_m9_clusters\f\u_") for path in wrp.object_models))
             stock_ground = {
                 r"Eden\tn.paa", r"Eden\zbh.paa", r"Eden\bak\bah.pac",
@@ -2615,7 +2615,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             config = entries["config.cpp"].decode("ascii")
             self.assertIn(r"\cwr_m9_test\data\icon.paa", config)
 
-            wrp = inspect_rvw4(first.wrp_path, height_scale=0.05)
+            wrp = inspect_rvw4(first.wrp_path, height_scale=spec.height_scale)
             self.assertEqual(
                 set(wrp.texture_paths),
                 {rf"{spec.name}\data\d.paa", *(rf"{spec.name}\data\{material.code}.paa" for material in MILESTONE9_MATERIALS)},
@@ -2727,7 +2727,7 @@ class RoadPieceFittingTests(unittest.TestCase):
             )
             for code in milestone9_only_codes:
                 self.assertNotIn(rf"data\{code}.paa", entries)
-            wrp = inspect_rvw4(result.wrp_path, height_scale=0.05)
+            wrp = inspect_rvw4(result.wrp_path, height_scale=spec.height_scale)
             self.assertEqual(len(set(wrp.texture_paths)), len(OSM_MATERIALS) + 1)
             report = json.loads(result.surface_report_path.read_text(encoding="utf-8"))
             self.assertEqual(report["ground_application_mode"], "milestone8")
