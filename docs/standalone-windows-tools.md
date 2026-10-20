@@ -9,17 +9,18 @@ CWR-Worldgen executable:
 | `Categorise-P3D-Models-Windows` | `Categorise-P3D-Models.exe` | Review and categorise P3D models, saving a JSON catalogue |
 | `Browse-P3D-Assets-Windows` | `Browse-P3D-Assets.exe` | Browse P3D models and PAA/PAC textures |
 | `WRP-Mod-Dependency-Scanner-Windows` | `WRP-Mod-Dependency-Scanner.exe` | Scan WRPs, PBOs or IFAs for model dependencies |
+| `CWR-Island-Studio-Windows` | `CWR-Island-Studio.exe` | View and edit unbinarized CWA WRP terrain/objects and inspect binarized OFP/CWA worlds |
 
 ## Downloading a build
 
 Both Windows tool workflows are **manual-only**. Neither starts on commits,
 pull requests, or tags. Once merged into `main`, choose one:
 
-- **Actions → Build Windows Asset Tools → Run workflow:** build all three
+- **Actions → Build Windows Asset Tools → Run workflow:** build all four
   executables and download them from that run's **Artifacts** section.
   Artifacts are retained for 14 days.
 - **Actions → Build and Publish Windows Asset Tools → Run workflow:** build all
-  three tools and publish them as downloads on a separate GitHub Release,
+  four tools and publish them as downloads on a separate GitHub Release,
   with a `tools-v<project version>` tag by default. An optional
   `release_tag` input (for example `tools-v0.9.262-patch1`) lets you
   choose a unique tag. Publishing requires `main`, and refuses to reuse an
@@ -30,9 +31,13 @@ or mark the tools release as the repository's latest release. No build or
 release action is started automatically.
 
 The programs package their Python runtime and dependencies. The input game
-files are **not** bundled; select your own P3D/WRP/PBO/IFA files.
+files are **not** bundled; select your own P3D/WRP/PBO/IFA files. The Windows
+tools workflow can run from a feature branch for testing, but the separate
+`tools-v...` release publisher deliberately requires `main` and is never
+automatically triggered. See [Island Studio](island-studio.md) for editing
+limits and model/texture source selection.
 
-All three executables show a branded loading screen **during PyInstaller
+All four executables show a branded loading screen **during PyInstaller
 one-file extraction** and while their startup Python imports finish. The
 screen closes when the GUI is ready (or before a command-line WRP scan starts).
 This gives visible feedback without introducing an artificial delay. It does
@@ -49,7 +54,9 @@ remain associated with its own window.
 On the WRP splash, only **WRP** is white; **MOD DEPENDENCY SCANNER** and the
 other on-screen labels use the amber accent.
 
-The categoriser and asset browser open directly as GUI applications. The WRP
+The categoriser, asset browser, and Island Studio open directly as GUI
+applications. Island Studio shares their branded startup splash and is packaged
+as its own Windows executable, not merged into `CWR-Worldgen.exe`. The WRP
 scanner opens its GUI when run without arguments but keeps a console window so
 it can also be used with CLI options such as:
 
