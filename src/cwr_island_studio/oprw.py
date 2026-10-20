@@ -361,14 +361,21 @@ def open_island_document(
     path: Path | str, *, cell_size: float = 50.0,
     height_scale: float = 1.0, read_only: bool = False,
     cancel_event: threading.Event | None = None,
+    cwa_runtime_scale: bool = False,
 ) -> IslandDocument:
-    """Dispatch a loose or extracted WRP based on its signature."""
+    """Dispatch by signature; optional game-accurate GUI scaling.
+
+    In CWR-CE, OPRW stores float heights in metres, while 4WVR needs
+    the user's supplied (normally 0.045) int16-unit height scale.
+    Library callers retain the old explicit scaling behavior by default.
+    """
     filename = Path(path)
     with filename.open("rb") as stream:
         magic = stream.read(4)
     if magic == b"OPRW":
         return OprwIslandDocument(
-            filename, cell_size=cell_size, height_scale=height_scale,
+            filename, cell_size=cell_size,
+            height_scale=1.0 if cwa_runtime_scale else height_scale,
             cancel_event=cancel_event,
         )
     if magic == b"4WVR":
