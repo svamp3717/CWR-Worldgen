@@ -122,6 +122,167 @@ class _Rap:
             self._active.discard(offset)
 
 
+class _OFP:
+    """Original CWA RAP: version 4, indexed strings, contiguous class bodies.
+
+    Reference: PMC Editing Wiki 'OFP raP File Format'. New-style RAP uses
+    offsets instead and is handled by _Rap above.
+    """
+
+    def __init__(self, data: bytes) -> None:
+        if not 8 <= len(data) <= _MAX_CONFIG or data[:7] != b"\\x00raP\\x04\\x00\\x00":
+            raise ValueError("not an OFP/CWA RAP configuration")
+        self.data = data
+        self.pos = 7
+        self.names: dict[int, str] = {}
+        self.processed = 0
+
+    def take(self, count: int) -> bytes:
+        end = self.pos + count
+        if count < 0 or end > len(self.data):
+            raise ValueError("truncated OFP RAP value")
+        result = self.data[self.pos:end]
+        self.pos = end
+        return result
+
+    def byte(self) -> int:
+        return self.take(1)[0]
+
+    def count(self) -> int:
+        result = self.byte()
+        previous = result
+        shift = 7
+        while previous & 0x80:
+            previous = self.byte()
+            result += (previous - 1) << shift
+            shift += 7
+            if shift > 35:
+                raise ValueError("invalid OFP RAP integer")
+        if not 0 <= result <= _MAX_ENTRIES:
+            raise ValueError("implausible OFP RAP packet count")
+        return result
+
+    def string(self) -> str:
+        stop = self.data.find(b"\\0", self.pos, min(len(self.data), self.pos + _MAX_STRING + 1))
+        if stop < 0:
+            raise ValueError("invalid OFP RAP string")
+        value = self.data[self.pos:stop].decode("latin-1", "replace")
+        self.pos = stop + 1
+        return value
+
+    def indexed(self) -> str:
+        index = struct.unpack("<H", self.take(2))[0]
+        value = self.string()
+        if value:
+            self.names[index] = value
+            return value
+        if index not in self.names:
+            raise ValueError("undefined OFP RAP indexed string")
+        return self.names[index]
+
+    def scalar(self, tag: int) -> str | float | int:
+        if tag == 0:
+            return self.indexed()
+        if tag == 1:
+            return struct.unpack("<f", self.take(4))[0]
+        if tag == 2:
+            return struct.unpack("<i", self.take(4))[0]
+        raise ValueError("unknown OFP RAP scalar type")
+
+    def array(self, depth: int) -> tuple[object, ...]:
+        if depth > _MAX_DEPTH:
+            raise ValueError("deeply nested OFP RAP array")
+        result: list[object] = []
+        for _ in range(self.count()):
+            tag = self.byte()
+            result.append(self.array(depth + 1) if tag == 3 else self.scalar(tag))
+        return tuple(result)
+
+    def body(self, depth: int) -> dict[str, object]:
+        if depth > _MAX_DEPTH:
+            raise ValueError("deeply nested OFP RAP class")
+        result: dict[str, object] = {}
+        for _ in range(self.count()):
+            self.processed += 1
+            if self.processed > 200000:
+                raise ValueError("too many OFP RAP entries")
+            tag = self.byte()
+            if tag == 0:
+                name = self.indexed().casefold()
+                base = self.string()
+                children = self.body(depth + 1)
+                result[name] = ("class", base, children)
+            elif tag == 1:
+                subtype = self.byte()
+                name = self.indexed().casefold()
+                result[name] = self.scalar(subtype)
+            elif tag == 2:
+                name = self.indexed().casefold()
+                result[name] = self.array(depth + 1)
+            else:
+                raise ValueError("unsupported OFP RAP packet type")
+        return result
+
+
+def _parse_ofp_world(
+    source: bytes, world_name: str,
+) -> tuple[float | None, tuple[tuple[str, float, float], ...]] | None:
+    rap = _OFP(source)
+    if rap.byte() != 0:
+        raise ValueError("missing OFP RAP root class")
+    rap.indexed()  # the implicit filename class
+    rap.string()   # root's inherited class name
+    root = rap.body(0)
+    cfg = root.get("cfgworlds")
+    if not isinstance(cfg, tuple) or cfg[0] != "class":
+        return None
+    worlds = cfg[2]
+    entry = worlds.get(world_name.casefold())
+    if not isinstance(entry, tuple) or entry[0] != "class":
+        return None
+    all_fields: dict[str, object] = {}
+    seen: set[str] = set()
+    for _ in range(_MAX_DEPTH):
+        if entry[1].casefold() in seen:
+            raise ValueError("cyclic OFP RAP inheritance")
+        all_fields = {**entry[2], **all_fields}
+        parent = entry[1].casefold()
+        if not parent:
+            break
+        seen.add(parent)
+        entry = worlds.get(parent)
+        if not isinstance(entry, tuple) or entry[0] != "class":
+            break
+    grid = all_fields.get("landgrid")
+    try:
+        land_grid = float(grid) if grid is not None else None
+        if land_grid is not None and not (math.isfinite(land_grid) and 0 < land_grid <= 10000):
+            land_grid = None
+    except (ValueError, TypeError, OverflowError):
+        land_grid = None
+    names = all_fields.get("names")
+    locations: list[tuple[str, float, float]] = []
+    if isinstance(names, tuple) and names[0] == "class":
+        for item in names[2].values():
+            if not isinstance(item, tuple) or item[0] != "class":
+                continue
+            name = item[2].get("name")
+            position = item[2].get("position")
+            if not isinstance(name, str) or not 0 < len(name) <= 160:
+                continue
+            if not isinstance(position, tuple) or len(position) < 2:
+                continue
+            try:
+                x, z = float(position[0]), float(position[1])
+            except (ValueError, TypeError, OverflowError):
+                continue
+            if math.isfinite(x) and math.isfinite(z):
+                locations.append((name, x, z))
+            if len(locations) >= _MAX_LOCATIONS:
+                break
+    return land_grid, tuple(locations)
+
+
 def parse_rap_world(
     source: bytes, world_name: str,
 ) -> tuple[float | None, tuple[tuple[str, float, float], ...]] | None:
@@ -129,6 +290,8 @@ def parse_rap_world(
 
     A corrupt config is rejected by ValueError, not silently treated as text.
     """
+    if source[:7] == b"\\x00raP\\x04\\x00\\x00":
+        return _parse_ofp_world(source, world_name)
     rap = _Rap(source)
     _base, root = rap.body(16)
     worlds = root.get("cfgworlds")
