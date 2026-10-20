@@ -2926,7 +2926,7 @@ def _spec_fields(spec: object, names: tuple[str, ...]) -> dict[str, object]:
 
 
 _TERRAIN_CACHE_FIELDS = (
-    "cells", "cell_size", "bbox", "sea_level", "water_depth", "beach_height",
+    "cells", "cell_size", "height_scale", "bbox", "sea_level", "water_depth", "beach_height",
     "coastline_blend_cells", "include_minor_roads", "maximum_road_grade_percent",
     "major_road_grade_percent", "road_grade_radius", "building_grade_radius",
     "maximum_grade_adjustment", "shoreline_transition_cells", "lake_shore_smoothing_cells",
