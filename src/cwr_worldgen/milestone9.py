@@ -1249,6 +1249,15 @@ def _binarize_generated_world(
     return binarized
 
 
+def resolve_world_seed(spec: Milestone9Spec, normalized_fingerprint: str) -> str:
+    """Select a packaging-independent seed for procedural placements/surfaces.
+
+    A blank manual field preserves the original normalized-source default.
+    The seed itself is not salted with WRP, config or ODOL packaging settings.
+    """
+    return spec.world_seed.strip() or f"milestone9:{normalized_fingerprint}"
+
+
 def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = True) -> BuildResult:
     spec.validate()
     report_progress(0, "Validating Milestone 9 source bundle")
@@ -1622,11 +1631,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         cache_enabled=spec.cache_enabled,
         cache_refresh=spec.cache_refresh,
         town_name_limit=spec.town_name_limit,
-        deterministic_seed=(
-            spec.world_seed.strip()
-            if spec.world_seed.strip()
-            else f"milestone9:{normalization.normalized_fingerprint}"
-        ),
+        deterministic_seed=resolve_world_seed(spec, normalization.normalized_fingerprint),
         verify_regeneration=spec.verify_regeneration,
         major_road_grade_percent=spec.major_road_grade_percent,
         shoreline_transition_cells=spec.shoreline_transition_cells,
