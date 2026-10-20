@@ -43,7 +43,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[sources]" matplotlib pyinstaller
+          python -m pip install ".[sources]" matplotlib pyinstaller pytest
 
       - name: Verify windowed startup helper
         shell: pwsh
@@ -51,6 +51,17 @@ jobs:
           python -m unittest discover -s tests -p test_p3d_frozen_support.py -v
           python -m unittest discover -s tests -p test_pyinstaller_splash.py -v
           python -m unittest discover -s tests -p test_tool_splash_spec.py -v
+
+      - name: Verify Island Studio WRP and metadata regressions
+        if: matrix.name == 'CWR-Island-Studio'
+        shell: pwsh
+        run: |
+          python -m pytest -q `
+            tests/test_island_studio.py `
+            tests/test_island_studio_oprw.py `
+            tests/test_island_studio_model_classification.py `
+            tests/test_island_studio_open_world.py
+          if ($LASTEXITCODE -ne 0) { throw "Island Studio regression tests failed" }
 
       - name: Generate tool loading screen
         shell: pwsh
