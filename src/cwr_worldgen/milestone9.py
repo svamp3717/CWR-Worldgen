@@ -1230,10 +1230,9 @@ def _binarize_generated_world(
 ) -> Path:
     """Binarize 4WVR while preserving the terrain seen by CWR-CE.
 
-    4WVR is *always* decoded by the game with LANDDATA_SCALE=0.045 m/unit.
-    Although Worldgen quantizes source terrain using playability.height_scale
-    (normally 0.05), using that writer scale for OPRW raises game terrain
-    relative to all unchanged tree and building positions.
+    Both Worldgen's 4WVR quantizer and CWR-CE's runtime decoder now use
+    LANDDATA_SCALE=0.045 m/unit. OPRW terrain floats must use the same
+    physical heights or otherwise objects will sink or float.
     """
     from .wrp_binarize import (
         CWA_RVW4_HEIGHT_SCALE, binarize_rvw4, repack_game_pbo_with_oprw,
