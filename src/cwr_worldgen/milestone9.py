@@ -430,11 +430,10 @@ class Milestone9Spec(Milestone8Spec):
     forest_single_tree_spacing: float = 45.0
     forest_single_tree_footprint: float = 2.0
     forest_single_tree_maximum_relief: float = 8.0
-    # Trees are point-like objects. Prefer a slightly buried root over rejecting
-    # most hill placements because the unbinarized terrain format does not store
-    # an explicit quad diagonal. The burial cap prevents absurd trunk loss while
-    # still allowing trees to hug steep terrain without floating.
-    forest_single_tree_root_sink: float = 0.05
+    # Do not bury tree trunks to disguise ambiguous terrain quad diagonals.
+    # Reject placements that would float visibly on either rendered diagonal;
+    # explicit root sinking remains opt-in for custom tree models.
+    forest_single_tree_root_sink: float = 0.0
     forest_single_tree_maximum_burial: float = 1.50
     forest_single_tree_maximum_float: float = 0.15
     forest_gap_infill_enabled: bool = True
@@ -920,11 +919,10 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     forest_single_tree_spacing: float = 45.0
     forest_single_tree_footprint: float = 2.0
     forest_single_tree_maximum_relief: float = 8.0
-    # Trees are point-like objects. Prefer a slightly buried root over rejecting
-    # most hill placements because the unbinarized terrain format does not store
-    # an explicit quad diagonal. The burial cap prevents absurd trunk loss while
-    # still allowing trees to hug steep terrain without floating.
-    forest_single_tree_root_sink: float = 0.05
+    # Do not bury tree trunks to disguise ambiguous terrain quad diagonals.
+    # Reject placements that would float visibly on either rendered diagonal;
+    # explicit root sinking remains opt-in for custom tree models.
+    forest_single_tree_root_sink: float = 0.0
     forest_single_tree_maximum_burial: float = 1.50
     forest_single_tree_maximum_float: float = 0.15
     forest_gap_infill_enabled: bool = True
