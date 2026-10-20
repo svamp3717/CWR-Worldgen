@@ -273,8 +273,8 @@ def test_forest_origin_audit_reports_buried_trees_with_engine_heights_in_both_fo
     binary = tmp_path / "forest_oprw.wrp"
     height = 9.0
     models = (
-        r"data3d\\str smrk_medium.p3d",
-        r"data3d\\str smrk vysoky.p3d",
+        r"data3d\str smrk_medium.p3d",
+        r"data3d\str smrk vysoky.p3d",
     )
     write_rvw4(
         source, 16, 16, [height] * 256, [0] * 256,
