@@ -33,13 +33,14 @@ files are left unbinarized, so Island Studio can still edit the generated WRP.
 * This experimental writer preserves **game-visible** terrain heights,
   texture-slot selection, texture names, world dimensions, object IDs, model
   paths and transforms. CWR-CE always loads 4WVR short elevations using
-  `LANDDATA_SCALE = 0.045` metres/unit, while Worldgen historically quantizes
-  height samples with 0.05 metres/unit. The OPRW converter now uses the
-  **engine's 0.045 scale**, not the writer's 0.05 scale, so the physical
-  terrain height matches the unbinarized WRP. Previously, positive terrain
-  was raised by 11.1% and individual trees could appear buried because their
-  object Y positions were not moved. This mismatch was isolated by comparing
-  `wg_comptest` original/OPRW/4WVR worlds in CWR-CE.
+  `LANDDATA_SCALE = 0.045` metres/unit. Both Worldgen's current
+  **terrain quantizer** and the OPRW converter now share this engine constant.
+  Object grounding, roads, buildings, vegetation and surface calculations
+  therefore use the physical heights the game actually loads. Older Worldgen
+  versions quantized source terrain at 0.05 metres/unit and wrote OPRW
+  terrain at 0.05 metres/unit; that raised positive binarized hills by
+  11.1% relative to 4WVR and could bury individual trees. The discrepancy
+  was isolated using `wg_comptest` in CWR-CE.
 * Source `4WVR` files do **not** contain OPRW's serialized geography, random,
   or sound maps. The converter fills these with zeros. This may affect ambient
   sounds, vegetation/water-related terrain flags, or other engine systems
@@ -51,6 +52,30 @@ files are left unbinarized, so Island Studio can still edit the generated WRP.
 * The conversion is tested using independent WRP readers and synthetic
   terrain/object fixtures. Test a complete generated island in CWR-CE before
   shipping a release built with this option.
+
+## Migration: rebuilding old worlds
+
+The generator's WRP-height scale changed from **0.05 to 0.045 metres per
+int16 unit** to match CWR-CE's 4WVR decoder. Rebuild your world **from the
+original source bundle** to apply this consistently to terrain elevations,
+terrain fitting and object placements. Do not replace just the WRP inside
+an old output: previously placed object Y positions and generated road
+and building grades belong to the old terrain solution.
+
+This is an intentional change to output WRP bytes, **even with the same
+manual seed**. The old 4WVR was effectively 10% vertically compressed in
+the game relative to Worldgen's internal terrain. The new version preserves
+the intended physical elevations; source objects are regenerated to match.
+The terrain-solution cache now keys on the game height scale to avoid
+reusing old computed terrain plans. There is no need to manually adjust
+tree root-sink offsets or object heights.
+
+Height limits are determined by signed int16 units times 0.045, or
+approximately **-1474.56 to +1474.515 metres** relative to the encoded
+datum. High-altitude source terrains may require automatic datum rebasing.
+
+Island Studio's 4WVR height-scale field defaults to 0.045. OPRW
+always contains metre heights and is displayed at unit scale in the GUI.
 
 The option is separate from **binarize procedural buildings as ODOL v7**.
 Enabling one does not enable the other.
