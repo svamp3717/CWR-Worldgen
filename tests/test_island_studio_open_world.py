@@ -333,3 +333,48 @@ def test_completed_index_keeps_gui_polling_so_second_archive_can_open() -> None:
     scheduled[-1][1]()
     assert opened == [(archive, 50.0, 1.0)]
     assert len(scheduled) == 2
+
+
+def test_compare_world_is_in_sidebar_utilities_not_main_toolbar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retain the comparison action while uncluttering the map toolbar."""
+    import inspect
+
+    widgets: list[dict[str, object]] = []
+
+    class Widget:
+        def __init__(self, parent, **options):
+            self.parent = parent
+            self.options = options
+            self.layout = None
+            widgets.append({"parent": parent, "options": options, "widget": self})
+
+        def pack(self, **options):
+            self.layout = options
+
+    monkeypatch.setattr(ttk, "LabelFrame", Widget)
+    monkeypatch.setattr(ttk, "Button", Widget)
+    monkeypatch.setattr(ttk, "Label", Widget)
+
+    called = []
+    fake = SimpleNamespace(_compare_dialog=lambda: called.append("compare"))
+    parent = object()
+    IslandStudio._build_utilities(fake, parent)
+
+    frames = [item for item in widgets if item["options"].get("text") == "Utilities"]
+    assert len(frames) == 1
+    assert frames[0]["parent"] is parent
+    section = frames[0]["widget"]
+    buttons = [
+        item for item in widgets
+        if item["parent"] is section and item["options"].get("text") == "Compare World…"
+    ]
+    assert len(buttons) == 1
+    assert buttons[0]["widget"].layout["fill"] == "x"
+    buttons[0]["options"]["command"]()
+    assert called == ["compare"]
+
+    build_source = inspect.getsource(IslandStudio._build)
+    assert "self._build_utilities(side)" in build_source
+    assert 'ttk.Button(header, text="Compare World"' not in build_source
