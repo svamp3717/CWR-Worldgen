@@ -210,6 +210,59 @@ def test_slope_and_coast_heights_ground_objects_identically_in_both_formats(
         assert report.rotated_or_scaled_objects == 0, report.report()
 
 
+def test_offvertex_tree_root_stays_above_both_engine_terrain_formats(
+    tmp_path: Path,
+) -> None:
+    """A saddle quad must not bury an off-vertex tree in either game format."""
+    from cwr_worldgen.osm import _rooted_tree_fit, _triangle_elevation_bounds
+    from cwr_island_studio.world_compare import compare_worlds
+
+    cells = 16
+    size = 50.0
+    scale = CWA_RVW4_HEIGHT_SCALE
+    elevations = [9.0] * (cells * cells)
+    # An ambiguous saddle: the alternate quad triangulations have different
+    # heights at its centre, despite identical four engine terrain vertices.
+    elevations[7 * cells + 6] = 9.09
+    tree_x, tree_z = 5.5 * size, 6.5 * size
+    bounds = _triangle_elevation_bounds(elevations, cells, size, tree_x, tree_z)
+    assert bounds[1] > bounds[0]
+    fitted = _rooted_tree_fit(
+        bounds, root_sink=0.0, maximum_burial=0.0, maximum_float=0.15,
+    )
+    assert fitted is not None
+    tree_y, burial = fitted
+    assert burial == 0.0
+    assert tree_y >= bounds[1]
+
+    source = tmp_path / "safe_tree.wrp"
+    packed = tmp_path / "safe_tree.oprw"
+    write_rvw4(
+        source, cells, cells, elevations, [0] * (cells * cells),
+        [r"landtext\\pi.pac"],
+        [WorldObject(1, r"data3d\\str smrk_medium.p3d", tree_x, tree_y, tree_z)],
+        height_scale=scale,
+    )
+    assert binarize_rvw4(source, packed) == 1
+    with open_island_document(
+        source, cell_size=size, height_scale=scale, cwa_runtime_scale=True,
+    ) as loose, open_island_document(
+        packed, cell_size=size, height_scale=scale, cwa_runtime_scale=True,
+    ) as optimized:
+        for document in (loose, optimized):
+            game_heights = tuple(
+                document.terrain_at(col, row)
+                for row in range(cells) for col in range(cells)
+            )
+            _minimum, maximum = _triangle_elevation_bounds(
+                game_heights, cells, size, tree_x, tree_z,
+            )
+            assert document.object_at(0).y >= maximum - 1.0e-5
+        report = compare_worlds(loose, optimized)
+        assert report.terrain_changes == 0, report.report()
+        assert report.moved_objects == 0, report.report()
+
+
 def test_binarization_supports_large_compressed_grids(tmp_path: Path) -> None:
     source = tmp_path / "large.wrp"
     target = tmp_path / "large.oprw.wrp"
