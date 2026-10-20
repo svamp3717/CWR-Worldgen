@@ -1753,15 +1753,15 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
     build_manifest["config_binarization"] = {
         "enabled": spec.binarize_config,
         "format": "CWA RAP v4" if spec.binarize_config else "config.cpp",
-        "source_config": str(result.source_dir / "config.cpp"),
-        "binarized_config": str(binarized_config) if binarized_config else None,
+        "source_config": str((result.source_dir / "config.cpp").relative_to(result.output_dir)),
+        "binarized_config": str(binarized_config.relative_to(result.output_dir)) if binarized_config else None,
         "note": "config.cpp remains editable; only config.bin is packaged in the game PBO.",
     }
     build_manifest["world_binarization"] = {
         "enabled": spec.binarize_world,
         "format": "OPRW v3" if spec.binarize_world else "4WVR",
-        "source_wrp": str(result.wrp_path),
-        "binarized_wrp": str(binarized_wrp) if binarized_wrp else None,
+        "source_wrp": str(result.wrp_path.relative_to(result.output_dir)),
+        "binarized_wrp": str(binarized_wrp.relative_to(result.output_dir)) if binarized_wrp else None,
         "note": "Experimental; CWR-CE requires 50 m LandGrid for OPRW v3.",
     }
     build_manifest["source_bundle"] = {
