@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Report CWA forest/tree objects whose WRP anchors sit above terrain supports.
+"""Report trees/forest objects whose *serialized origins* disagree with terrain.
 
-This is a placement diagnostic, not a renderer emulator.  It can identify the
-WRP object IDs and X/Z coordinates with the largest terrain-fit gap.  A forest
-P3D may still contain internally elevated geometry/proxies, so a visually flying
-tree with a small WRP gap points back at the model rather than its WRP anchor.
+Both 4WVR and OPRW are supported. The diagnostic compares game-scaled
+terrain to the WRP object origin, which can expose misplaced roots but is not
+a renderer emulator. CWR-CE may recenter or terrain-deform tree model geometry
+after loading, and stock forest blocks have their own model-specific pivots.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import math
 from pathlib import Path
 import re
 import struct
+import tempfile
 
 from cwr_worldgen.osm import (
     _oriented_footprint_elevation_samples,
@@ -22,17 +23,19 @@ from cwr_worldgen.osm import (
     _triangle_elevation_bounds,
 )
 from cwr_worldgen.pbo import is_pbo_path, read_pbo
+from cwr_worldgen.model import CWA_RVW4_HEIGHT_SCALE
+from cwr_island_studio.oprw import open_island_document
 
 _RVW4_HEADER = struct.Struct("<4sii")
 _RVW4_OBJECT = struct.Struct("<12fi76s")
-_HEIGHT_SCALE_METRES = 0.05
+_HEIGHT_SCALE_METRES = CWA_RVW4_HEIGHT_SCALE
 
 
 def _classify_tree_model(model: str) -> str | None:
     folded = model.replace("/", "\\").casefold()
     if not folded.endswith(".p3d"):
         return None
-    if "les" in folded and "ctver" in folded:
+    if "les" in folded and ("ctver" in folded or "les_nw_" in folded):
         return "forest_square"
     if "les" in folded and "trojuhelnik" in folded:
         return "forest_triangle"
@@ -62,6 +65,26 @@ def _read_source(path: Path, cell_size_override: float | None) -> tuple[bytes, f
 
 
 def _parse_wrp(data: bytes) -> tuple[int, tuple[float, ...], list[tuple[int, str, float, float, float, float]]]:
+    if data[:4] == b"OPRW":
+        # Island Studio's OPRW reader already decodes v2/v3 compression and
+        # float height samples in *metres*. No height multiplier applies.
+        with tempfile.TemporaryDirectory(prefix="cwr-forest-audit-") as folder:
+            path = Path(folder) / "world.wrp"
+            path.write_bytes(data)
+            with open_island_document(path, cwa_runtime_scale=True) as document:
+                if document.width != document.height:
+                    raise ValueError("expected a square OPRW world")
+                heights = tuple(
+                    document.terrain_at(x, z)
+                    for z in range(document.height) for x in range(document.width)
+                )
+                placements = []
+                for i in range(document.object_count):
+                    obj = document.object_at(i)
+                    placements.append(
+                        (obj.object_id, obj.model_path, obj.x, obj.y, obj.z, obj.heading)
+                    )
+                return document.width, heights, placements
     stream = io.BytesIO(data)
     raw_header = stream.read(_RVW4_HEADER.size)
     if len(raw_header) != _RVW4_HEADER.size:
@@ -144,10 +167,11 @@ def audit(
                 "terrain_low": terrain_low,
                 "terrain_high": terrain_high,
                 "estimated_float": max(0.0, y - terrain_low),
+                "estimated_burial": max(0.0, terrain_high - y),
                 "heading": heading,
             }
         )
-    rows.sort(key=lambda row: (-float(row["estimated_float"]), int(row["object_id"])))
+    rows.sort(key=lambda row: (-float(row["estimated_burial"]), int(row["object_id"])))
     return rows
 
 
@@ -155,7 +179,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="generated world PBO or loose WRP")
     parser.add_argument("--csv", type=Path, help="output CSV path")
-    parser.add_argument("--threshold", type=float, default=0.5, help="float gap to count as suspicious (default: 0.5 m)")
+    parser.add_argument("--threshold", type=float, default=0.5, help="vertical origin gap to flag in either direction (default: 0.5 m)")
     parser.add_argument("--cell-size", type=float, help="terrain cell size for loose WRP or override")
     parser.add_argument("--square-footprint", type=float, default=50.0)
     parser.add_argument("--triangle-footprint", type=float, default=35.0)
@@ -167,28 +191,38 @@ def main() -> int:
         square_footprint=args.square_footprint,
         triangle_footprint=args.triangle_footprint,
     )
-    suspicious = [row for row in rows if float(row["estimated_float"]) > args.threshold + 1.0e-4]
+    buried = [
+        row for row in rows
+        if float(row["estimated_burial"]) > args.threshold + 1.0e-4
+    ]
+    floating = [
+        row for row in rows
+        if float(row["estimated_float"]) > args.threshold + 1.0e-4
+    ]
     output = args.csv or args.source.with_name(args.source.stem + "_forest_float_audit.csv")
     output.parent.mkdir(parents=True, exist_ok=True)
     fields = (
         "object_id", "category", "model", "x", "z", "object_y",
-        "terrain_low", "terrain_high", "estimated_float", "heading",
+        "terrain_low", "terrain_high", "estimated_float", "estimated_burial", "heading",
     )
     with output.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
 
-    maximum = float(rows[0]["estimated_float"]) if rows else 0.0
+    maximum_burial = max((float(row["estimated_burial"]) for row in rows), default=0.0)
+    maximum_float = max((float(row["estimated_float"]) for row in rows), default=0.0)
     print(f"tree/forest objects audited: {len(rows)}")
-    print(f"maximum estimated float: {maximum:.3f} m")
-    print(f"objects above {args.threshold:.3f} m: {len(suspicious)}")
+    print(f"maximum estimated origin burial: {maximum_burial:.3f} m")
+    print(f"maximum estimated origin float: {maximum_float:.3f} m")
+    print(f"origins buried > {args.threshold:.3f} m: {len(buried)}")
+    print(f"origins floating > {args.threshold:.3f} m: {len(floating)}")
     print(f"CSV: {output}")
     if rows:
-        print("highest candidates:")
+        print("most buried origins (not actual model root depth):")
         for row in rows[:10]:
             print(
-                f"  id={row['object_id']} float={float(row['estimated_float']):.3f}m "
+                f"  id={row['object_id']} origin-burial={float(row['estimated_burial']):.3f}m "
                 f"x={float(row['x']):.1f} z={float(row['z']):.1f} {row['model']}"
             )
     return 0
