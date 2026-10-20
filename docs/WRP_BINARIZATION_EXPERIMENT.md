@@ -30,8 +30,16 @@ files are left unbinarized, so Island Studio can still edit the generated WRP.
   `CfgWorlds.LandGrid`. Enabling this on a 25 m world would scale the island
   incorrectly, so the builder refuses it before doing expensive generation.
 * Output targets **CWA OPRW v3** only. It does not produce ArmA-era OPRW.
-* This experimental writer preserves terrain heights, texture-slot selection,
-  texture names, world dimensions, object IDs, model paths and transforms.
+* This experimental writer preserves **game-visible** terrain heights,
+  texture-slot selection, texture names, world dimensions, object IDs, model
+  paths and transforms. CWR-CE always loads 4WVR short elevations using
+  `LANDDATA_SCALE = 0.045` metres/unit, while Worldgen historically quantizes
+  height samples with 0.05 metres/unit. The OPRW converter now uses the
+  **engine's 0.045 scale**, not the writer's 0.05 scale, so the physical
+  terrain height matches the unbinarized WRP. Previously, positive terrain
+  was raised by 11.1% and individual trees could appear buried because their
+  object Y positions were not moved. This mismatch was isolated by comparing
+  `wg_comptest` original/OPRW/4WVR worlds in CWR-CE.
 * Source `4WVR` files do **not** contain OPRW's serialized geography, random,
   or sound maps. The converter fills these with zeros. This may affect ambient
   sounds, vegetation/water-related terrain flags, or other engine systems
