@@ -293,6 +293,7 @@ class PboWorldArchive:
     def open_world(
         self, member_name: str, *, cell_size: float = 50.0,
         height_scale: float = 1.0, auto_grid: bool = True,
+        cwa_runtime_scale: bool = False,
     ):
         """Return an IslandDocument which owns this temporary archive source."""
         from .oprw import open_island_document
@@ -310,6 +311,7 @@ class PboWorldArchive:
             document = open_island_document(
                 filename, cell_size=grid, height_scale=height_scale,
                 read_only=True, cancel_event=self._cancel_event,
+                cwa_runtime_scale=cwa_runtime_scale,
             )
             document.map_locations = metadata.locations
             document.grid_source = (
