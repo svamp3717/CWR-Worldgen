@@ -27,7 +27,7 @@ from .pbo_textures import (
 
 _COPY_CHUNK = 1024 * 1024
 _MAX_WORLD_BYTES = 32 * 1024**3
-_MAX_CONFIG_BYTES = 4 * 1024 * 1024
+_MAX_CONFIG_BYTES = 16 * 1024 * 1024
 # Uncompressed archives have stable offsets. Reusing their headers avoids
 # repeated full PBO directory scans when switching between islands.
 _DIRECTORY_LOCK = threading.Lock()
@@ -53,7 +53,7 @@ def _archive_directory(
                 progress(f"Reusing WRP directory for {path.name}…")
                 return dict(cached)
     found = _scan(
-        path, stem, extensions=(".wrp", ".cpp"),
+        path, stem, extensions=(".wrp", ".cpp", ".bin"),
         cancel_event=cancel_event,
         on_progress=lambda count: progress(
             f"Indexing WRP entries in {path.name}: "
@@ -197,8 +197,8 @@ class PboWorldArchive:
             )
             self._configs = {
                 name: value for name, value in all_members.items()
-                if name.casefold().endswith("config.cpp")
-                and name.replace("/", "\\").casefold().split("\\")[-1] == "config.cpp"
+                if name.replace("/", "\\").casefold().split("\\")[-1]
+                in ("config.cpp", "config.bin")
             }
             self.members: dict[str, TextureMember] = {
                 name: value for name, value in all_members.items()
@@ -256,7 +256,10 @@ class PboWorldArchive:
     def world_metadata(self, member_name: str) -> WorldMetadata:
         """Read matching config.cpp from the same PBO, if present."""
         name = Path(member_name.replace("\\", "/")).stem
-        for config_name, member in self._configs.items():
+        for config_name, member in sorted(
+            self._configs.items(),
+            key=lambda item: (0 if item[0].casefold().endswith(".cpp") else 1, item[0].casefold()),
+        ):
             expected = (
                 member.original_size if member.packing == _LZSS
                 else member.stored_size
