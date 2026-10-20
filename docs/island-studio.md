@@ -33,8 +33,10 @@ The editor is **not** embedded in the CWR-Worldgen executable.
 
 ## Workflow
 
-1. Set Grid metres and Height scale to the values used to generate the map,
-   then select Open World. The 4WVR header encodes neither scale value.
+1. Set Grid metres and 4WVR height scale (default **0.045 metres per unit**
+   for CWR-CE), then select Open World. The 4WVR header encodes neither value.
+   OPRW terrain heights are already in metres and Island Studio displays them
+   at unit scale, independently of the 4WVR scale field.
 2. Use the wheel to zoom and right-drag to pan. Choose Elevation or Texture
    slots. Slot colours are index visualizations, not decoded .paa textures.
 3. Select a world object to edit its model path, X/Y/Z position and heading.
@@ -415,9 +417,10 @@ selected difference**, to center the main map on that coordinate. A
 world's object-record order does not affect matching. Comparison also
 works when one world is `4WVR` and the other is OFP/CWA `OPRW` v2/v3.
 
-Set the correct **Height scale** and **Grid fallback (m)** before comparing
-loose worlds. CWA `4WVR` itself doesn't encode physical grid or vertical
-scale; a matching world config can provide `LandGrid`, not the height scale.
+Set the correct **4WVR height scale** (normally 0.045) and **Grid fallback
+(m)** before comparing loose worlds. CWA `4WVR` doesn't encode physical grid
+or vertical scale; a matching world config can provide `LandGrid`. OPRW
+already stores metre elevations and is always displayed at scale 1.0.
 Two differently sized terrain grids are reported as *not directly
 comparable* rather than resampled. The report compares WRP data, not
 unsaved edits, special OPRW geography/sound arrays, P3D mesh differences,
