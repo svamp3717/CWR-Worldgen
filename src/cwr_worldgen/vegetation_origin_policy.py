@@ -7,8 +7,8 @@ CWA ODOL tree/bush vertices are authored about the model's bounding centre.
 Worldgen placement routines emit terrain-height Y values, which are root heights,
 whereas WRP ObjectCreate expects the model centre in its transform.  This affects
 house-yard fruit trees, street trees, standalone forests and CWA-flattened field
-bushes equally.  Infer the offset from the *actual* installed ODOL P3D instead
-of assuming every stock tree is the same height.
+bushes equally. Use measured P3D geometry when available, but fall back to
+CWR-CE's own model-aware ground snapping without requiring game files locally.
 """
 
 from dataclasses import dataclass, replace
@@ -28,11 +28,20 @@ from .vegetation_clearance_policy import (
 
 _VEC3 = struct.Struct("<fff")
 
+# CWR-CE Landscape::ObjectCreate() moves a model down when its authored
+# origin (object PositionModelToWorld(-shape->BoundingCenter())) starts
+# above SurfaceY(). Giving stock vegetation a substantial positive WRP Y
+# ensures the game grounds it using its OWN loaded P3D, not a guessed pivot.
+# Raw WRP editors which do not emulate ObjectCreate() will see this bias.
+RUNTIME_SNAP_BIAS_METRES = 128.0
+
 
 @dataclass(frozen=True, slots=True)
 class VegetationOriginReport:
     lifted_objects: int
     lifted_models: int
+    measured_models: int
+    runtime_snap_models: tuple[str, ...]
     unavailable_models: tuple[str, ...]
     unreadable_models: tuple[str, ...]
 
@@ -84,7 +93,7 @@ def vegetation_origin_lifts(
     records: Sequence[AssetRecord],
     spec: object,
 ) -> tuple[dict[str, float], VegetationOriginReport]:
-    """Measure one source P3D per directly placed vegetation model."""
+    """Prefer measured model pivots, otherwise use CWR-CE runtime grounding."""
     configured = _configured_vegetation_models(spec)
     models: dict[str, str] = {}
     for obj in objects:
@@ -95,28 +104,36 @@ def vegetation_origin_lifts(
     lifts: dict[str, float] = {}
     unavailable: list[str] = []
     unreadable: list[str] = []
+    runtime_snap: list[str] = []
+    measured = 0
     for key, original in sorted(models.items()):
         record = available.get(key)
         if record is None:
             unavailable.append(original)
+            runtime_snap.append(original)
+            lifts[key] = RUNTIME_SNAP_BIAS_METRES
             continue
         try:
             lift = _odol_visual_base_offset(read_asset_record_bytes(record))
         except (ValueError, OSError, ProxyCloneError) as exc:
             unreadable.append(f"{original}: {exc}")
+            runtime_snap.append(original)
+            lifts[key] = RUNTIME_SNAP_BIAS_METRES
             continue
+        measured += 1
         if lift > 0.01:
             lifts[key] = lift
     lifted = sum(1 for obj in objects if canonical_asset_path(obj.model_path) in lifts)
     return lifts, VegetationOriginReport(
-        lifted, len(lifts), tuple(unavailable), tuple(unreadable)
+        lifted, len(lifts), measured, tuple(runtime_snap),
+        tuple(unavailable), tuple(unreadable)
     )
 
 
 def apply_vegetation_origin_lifts(
     objects: Sequence[WorldObject], lifts: Mapping[str, float],
 ) -> tuple[WorldObject, ...]:
-    """Shift WRP model centres up; the terrain-root fitter is unchanged."""
+    """Shift model centres or defer final grounding to CWR-CE ObjectCreate()."""
     if not lifts:
         return tuple(objects)
     return tuple(
