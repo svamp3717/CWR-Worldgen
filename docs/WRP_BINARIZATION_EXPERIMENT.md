@@ -55,3 +55,28 @@ checkbox. It works with or without WRP binarization, preserves editable
 `config.cpp` outside the game PBO, and avoids duplicate PBO repacks when
 both switches are enabled. See
 [CONFIG_BINARIZATION_EXPERIMENT.md](CONFIG_BINARIZATION_EXPERIMENT.md).
+
+## Matching generation across packaging variants
+
+In **Advanced generation, cache and PBO settings → Build behavior**, enter an
+optional **Manual world seed (blank = automatic)**. For example, `314159`.
+The same seed and the same normalized source data, island identity, terrain
+parameters and procedural settings reproduce seeded tree, forest, fence,
+undergrowth and surface decisions, regardless of whether you package the
+runtime as editable 4WVR, experimental OPRW v3, or with RAP `config.bin`
+and/or ODOL buildings. Packaging-only switches do not salt the seed.
+
+CLI: `--world-seed 314159` on `milestone9`. The field is saved with the
+GUI preferences and the effective seed is recorded under `world_seed` in
+`build-manifest.json`. Leave it empty to retain the previous, automatically
+derived `milestone9:<normalized-source-fingerprint>` seed. Both numeric and
+text seeds are accepted (up to 128 characters, no control characters).
+
+**Scope:** a seed controls procedural choices, not the imported geography,
+heightmap, object placement rules, terrain grading parameters, P3D model
+availability or engine runtime behavior. Different source data, configuration
+options, Worldgen versions or island identity may still produce different
+WRP files. In particular, a matching seed does **not** fix OPRW-only
+vegetation grounding or rendering differences: those require separate
+binarizer/engine checks. Compare the original loose 4WVR outputs or use
+Island Studio's **Compare World** report to verify alignment.
