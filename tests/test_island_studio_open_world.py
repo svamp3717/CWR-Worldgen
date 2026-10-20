@@ -335,46 +335,63 @@ def test_completed_index_keeps_gui_polling_so_second_archive_can_open() -> None:
     assert len(scheduled) == 2
 
 
-def test_compare_world_is_in_sidebar_utilities_not_main_toolbar(
+def test_compare_world_in_top_right_utilities_dropdown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Retain the comparison action while uncluttering the map toolbar."""
+    """Utilities is a real dropdown anchored to the rightmost toolbar edge."""
     import inspect
 
-    widgets: list[dict[str, object]] = []
+    widgets: list[object] = []
+    menus: list[object] = []
 
-    class Widget:
+    class Menubutton:
         def __init__(self, parent, **options):
             self.parent = parent
             self.options = options
+            self.menu = None
             self.layout = None
-            widgets.append({"parent": parent, "options": options, "widget": self})
+            widgets.append(self)
+
+        def configure(self, **options):
+            self.menu = options.get("menu")
 
         def pack(self, **options):
             self.layout = options
 
-    monkeypatch.setattr(ttk, "LabelFrame", Widget)
-    monkeypatch.setattr(ttk, "Button", Widget)
-    monkeypatch.setattr(ttk, "Label", Widget)
+    class Menu:
+        def __init__(self, parent, **options):
+            self.parent = parent
+            self.options = options
+            self.items = []
+            menus.append(self)
+
+        def add_command(self, **options):
+            self.items.append(options)
+
+    monkeypatch.setattr(ttk, "Menubutton", Menubutton)
+    monkeypatch.setattr(tk, "Menu", Menu)
 
     called = []
-    fake = SimpleNamespace(_compare_dialog=lambda: called.append("compare"))
-    parent = object()
-    IslandStudio._build_utilities(fake, parent)
+    editor = SimpleNamespace(_compare_dialog=lambda: called.append("compare"))
+    header = object()
+    IslandStudio._build_utilities(editor, header)
 
-    frames = [item for item in widgets if item["options"].get("text") == "Utilities"]
-    assert len(frames) == 1
-    assert frames[0]["parent"] is parent
-    section = frames[0]["widget"]
-    buttons = [
-        item for item in widgets
-        if item["parent"] is section and item["options"].get("text") == "Compare World…"
-    ]
-    assert len(buttons) == 1
-    assert buttons[0]["widget"].layout["fill"] == "x"
-    buttons[0]["options"]["command"]()
+    assert len(widgets) == len(menus) == 1
+    button, menu = widgets[0], menus[0]
+    assert button.parent is header
+    assert button.options["text"].startswith("Utilities")
+    assert button.layout["side"] == "right"
+    assert button.menu is menu
+    assert menu.parent is button
+    assert menu.options["tearoff"] is False
+    assert [item["label"] for item in menu.items] == ["Compare World…"]
+    menu.items[0]["command"]()
     assert called == ["compare"]
 
     build_source = inspect.getsource(IslandStudio._build)
-    assert "self._build_utilities(side)" in build_source
+    assert "self._build_utilities(header)" in build_source
+    assert "self._build_utilities(side)" not in build_source
+    assert build_source.index("self._build_utilities(header)") < build_source.index(
+        'ttk.Label(header, textvariable=self.metadata).pack(side="right"'
+    )
     assert 'ttk.Button(header, text="Compare World"' not in build_source
