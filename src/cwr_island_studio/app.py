@@ -17,6 +17,7 @@ from PIL import Image, ImageTk
 from .core import IslandDocument, MapObject
 from .oprw import open_island_document
 from .world_metadata import load_loose_world_metadata, MapLocation
+from .world_compare import WorldComparison, compare_worlds
 from .object_layers import is_forest_model, object_marker_mode
 from .cursor_info import cursor_readout
 from .roads import is_road_model, plan_straight_road, road_segment
@@ -104,6 +105,8 @@ class IslandStudio:
         self._closing = False
         self._messages: queue.Queue[tuple[str, object]] = queue.Queue()
         self._index_future: Future | None = None
+        self._comparison_future: Future | None = None
+        self._comparison_cancel = threading.Event()
         self._index_cancel: threading.Event | None = None
         self._model_future: Future | None = None
         self._model_bounds: dict[str, ModelBounds | None] = {}
@@ -171,6 +174,7 @@ class IslandStudio:
         header = ttk.Frame(self.root, padding=(9, 7))
         header.pack(fill="x")
         ttk.Button(header, text="Open World", command=self._open_dialog).pack(side="left", padx=3)
+        ttk.Button(header, text="Compare World", command=self._compare_dialog).pack(side="left", padx=3)
         self.save_button = ttk.Button(header, text="Save As", command=self._save_dialog)
         self.save_button.pack(side="left", padx=3)
         self.readonly_toggle = ttk.Checkbutton(
@@ -448,6 +452,9 @@ class IslandStudio:
         if previous is None:
             return
         index_future = self._index_future
+        comparison_future = getattr(self, "_comparison_future", None)
+        if getattr(self, "_comparison_cancel", None) is not None:
+            self._comparison_cancel.set()
         if self._index_cancel is not None:
             self._index_cancel.set()
         self._index_future = None
@@ -477,8 +484,24 @@ class IslandStudio:
                 daemon=True,
             ).start()
 
-        if index_future is not None and not index_future.done():
-            index_future.add_done_callback(release)
+        waiting = [
+            future for future in (index_future, comparison_future)
+            if future is not None and not future.done()
+        ]
+        if waiting:
+            # Both workers may hold views of the current mmap. Wait for both
+            # before closing it, without blocking the Tk event loop.
+            guard = threading.Lock()
+            remaining = len(waiting)
+
+            def complete(_future: Future) -> None:
+                nonlocal remaining
+                with guard:
+                    remaining -= 1
+                    if remaining == 0:
+                        release()
+            for future in waiting:
+                future.add_done_callback(complete)
         else:
             release()
 
@@ -668,6 +691,196 @@ class IslandStudio:
             self.status.set("Editing enabled for loose WRP. Save As preserves the source.")
         self._queue_draw()
 
+    def _compare_dialog(self) -> None:
+        """Compare the loaded world against a loose WRP or PBO/IFA entry."""
+        if self.document is None or self._busy:
+            return
+        selected = filedialog.askopenfilename(
+            title="Compare current world against another WRP or PBO",
+            filetypes=[
+                ("Worlds and archives", "*.wrp *.pbo *.ifa *.pbo.zst *.ifa.zst"),
+                ("WRP worlds", "*.wrp"),
+                ("PBO / IFA archives", "*.pbo *.ifa *.pbo.zst *.ifa.zst"),
+                ("All files", "*.*"),
+            ],
+        )
+        if selected:
+            self._compare_path(Path(selected))
+
+    def _compare_path(self, path: Path) -> None:
+        if self.document is None or self._busy:
+            return
+        try:
+            kind = world_source_kind(path)
+            grid = self._num(self.cell_size, "Grid metres")
+            scale = self._num(self.height_scale, "Height scale")
+            if grid <= 0 or scale <= 0:
+                raise ValueError("Grid and height scale must be positive")
+        except ValueError as exc:
+            messagebox.showerror("Compare WRP", str(exc))
+            return
+        self._busy = True
+        self._comparison_cancel = threading.Event()
+        cancel = self._comparison_cancel
+        auto = bool(self.auto_grid.get()) if hasattr(self, "auto_grid") else True
+        if kind == "archive":
+            self.status.set(f"Reading comparison archive {path.name}…")
+
+            def inspect() -> None:
+                try:
+                    archive = PboWorldArchive(
+                        path, cancel_event=cancel,
+                        progress=lambda message: self._messages.put(("archive_progress", message)),
+                    )
+                    if cancel.is_set():
+                        archive.close()
+                    else:
+                        self._messages.put(("compare_catalog", (archive, grid, scale, auto)))
+                except CancelledError:
+                    pass
+                except Exception as exc:
+                    if not cancel.is_set():
+                        self._messages.put(("compare_error", str(exc)))
+
+            self._comparison_future = self._executor.submit(inspect)
+        else:
+            self.status.set(f"Comparing against {path.name}…")
+
+            def compare() -> None:
+                try:
+                    metadata = load_loose_world_metadata(path)
+                    with path.open("rb") as stream:
+                        is_rvw4 = stream.read(4) == b"4WVR"
+                    effective_grid = (
+                        metadata.land_grid if auto and is_rvw4
+                        and metadata.land_grid is not None else grid
+                    )
+                    with open_island_document(
+                        path, cell_size=effective_grid,
+                        height_scale=scale, read_only=True,
+                    ) as other:
+                        if not cancel.is_set():
+                            report = compare_worlds(
+                                self.document, other, cancel=cancel.is_set,
+                            )
+                            if not cancel.is_set():
+                                self._messages.put(("comparison", report))
+                except CancelledError:
+                    pass
+                except Exception as exc:
+                    if not cancel.is_set():
+                        self._messages.put(("compare_error", str(exc)))
+
+            self._comparison_future = self._executor.submit(compare)
+
+    def _select_comparison_member(
+        self, archive: PboWorldArchive, grid: float, scale: float,
+        auto: bool,
+    ) -> None:
+        names = sorted(archive.members, key=str.casefold)
+        if len(names) == 1:
+            self._compare_archive_member(archive, names[0], grid, scale, auto)
+            return
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Choose comparison WRP")
+        dialog.geometry("580x390")
+        dialog.transient(self.root)
+        frame = ttk.Frame(dialog, padding=10)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Choose the comparison island (current world stays open):").pack(anchor="w")
+        selection = tk.Listbox(frame, exportselection=False)
+        selection.pack(fill="both", expand=True, pady=8)
+        for name in names:
+            selection.insert("end", name)
+        selection.selection_set(0)
+        accepted = False
+
+        def close() -> None:
+            dialog.destroy()
+            if not accepted:
+                archive.close()
+                self._comparison_cancel.set()
+                self._comparison_future = None
+                self._busy = False
+                self.status.set("World comparison cancelled")
+
+        def accept(_event=None) -> None:
+            nonlocal accepted
+            chosen = selection.curselection()
+            if not chosen:
+                return
+            accepted = True
+            dialog.destroy()
+            self._compare_archive_member(archive, names[int(chosen[0])], grid, scale, auto)
+
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x")
+        ttk.Button(buttons, text="Compare", command=accept).pack(side="right", padx=4)
+        ttk.Button(buttons, text="Cancel", command=close).pack(side="right")
+        selection.bind("<Double-Button-1>", accept)
+        dialog.protocol("WM_DELETE_WINDOW", close)
+
+    def _compare_archive_member(
+        self, archive: PboWorldArchive, member: str, grid: float,
+        scale: float, auto: bool,
+    ) -> None:
+        cancel = self._comparison_cancel
+        self.status.set(f"Comparing against {archive.path.name} / {member}…")
+
+        def compare() -> None:
+            try:
+                with archive.open_world(
+                    member, cell_size=grid, height_scale=scale, auto_grid=auto,
+                ) as other:
+                    if not cancel.is_set():
+                        result = compare_worlds(
+                            self.document, other, cancel=cancel.is_set,
+                        )
+                        if not cancel.is_set():
+                            self._messages.put(("comparison", result))
+            except CancelledError:
+                archive.close()
+            except Exception as exc:
+                archive.close()
+                if not cancel.is_set():
+                    self._messages.put(("compare_error", str(exc)))
+
+        self._comparison_future = self._executor.submit(compare)
+
+    def _show_comparison(self, result: WorldComparison) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("WRP comparison (read-only)")
+        dialog.geometry("810x675")
+        dialog.transient(self.root)
+        frame = ttk.Frame(dialog, padding=12)
+        frame.pack(fill="both", expand=True)
+        report = tk.Text(frame, height=19, wrap="word", font=("Consolas", 10))
+        report.pack(fill="x")
+        report.insert("1.0", result.report())
+        report.configure(state="disabled")
+        ttk.Label(
+            frame, text="Sample differences (up to 300). Double-click to jump to a location:",
+        ).pack(anchor="w", pady=(10, 2))
+        points = tk.Listbox(frame, exportselection=False)
+        points.pack(fill="both", expand=True)
+        for point in result.positions:
+            points.insert(
+                "end", f"{point.category}: X {point.x:.1f} / Y {point.z:.1f}"
+                f"  {point.description}",
+            )
+
+        def jump(_event=None) -> None:
+            selected = points.curselection()
+            if selected:
+                point = result.positions[int(selected[0])]
+                self._go_to_position(f"{point.x}, {point.z}")
+
+        actions = ttk.Frame(frame)
+        actions.pack(fill="x", pady=(8, 0))
+        ttk.Button(actions, text="Go to selected difference", command=jump).pack(side="left")
+        ttk.Button(actions, text="Close", command=dialog.destroy).pack(side="right")
+        points.bind("<Double-Button-1>", jump)
+
     def _open_dialog(self) -> None:
         if self._busy:
             return
@@ -782,6 +995,26 @@ class IslandStudio:
                 elif kind == "cleanup_error":
                     # A retired world must never interrupt the new world's load.
                     pass
+                elif kind == "comparison":
+                    self._busy = False
+                    self._comparison_future = None
+                    self.status.set("WRP comparison complete (no files modified)")
+                    self._show_comparison(value)
+                elif kind == "compare_error":
+                    self._busy = False
+                    self._comparison_future = None
+                    self.status.set(f"WRP comparison failed: {value}")
+                    messagebox.showerror("WRP comparison", str(value))
+                elif kind == "compare_catalog":
+                    archive, cell_size, height_scale, auto = value
+                    try:
+                        self._select_comparison_member(
+                            archive, cell_size, height_scale, auto,
+                        )
+                    except Exception as exc:
+                        archive.close()
+                        self._busy = False
+                        messagebox.showerror("WRP comparison", str(exc))
                 elif kind == "archive_catalog":
                     archive, cell_size, height_scale = value
                     try:
@@ -1598,6 +1831,8 @@ class IslandStudio:
             return
         self._closing = True
         self._archive_cancel.set()
+        if hasattr(self, "_comparison_cancel"):
+            self._comparison_cancel.set()
         if self.document is not None:
             self._retire_current_world()
         elif getattr(self, "_index_cancel", None) is not None:
