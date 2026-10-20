@@ -493,6 +493,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     milestone9.add_argument("--source-dir", type=Path, required=True)
     milestone9.add_argument(
+        "--world-seed", default="",
+        help=("optional manual generation seed for reproducible trees, fences, "
+              "vegetation and surface variations across packaging modes; "
+              "blank uses the normalized-source fingerprint"),
+    )
+    milestone9.add_argument(
         "--binarize-world", action="store_true",
         help=("EXPERIMENTAL: convert generated 4WVR to OPRW v3 in the game PBO "
               "and preserve editable 4WVR source; requires 50 m terrain cells"),
@@ -1155,6 +1161,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "milestone9":
             spec = Milestone9Spec(
                 source_dir=args.source_dir,
+                world_seed=args.world_seed,
                 name=args.name,
                 display_name=args.display_name,
                 profile=args.profile,
