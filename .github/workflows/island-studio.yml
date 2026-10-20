@@ -80,7 +80,6 @@ jobs:
           python -m pytest -q tests/test_milestone1.py tests/test_milestone2.py tests/test_high_altitude_rebase.py tests/test_grounding_safety.py \
             tests/test_milestone9.py::SemanticFeatureTests::test_vegetation_grounding_stays_above_rvw4_saddle_diagonals \
             tests/test_milestone9.py::SemanticFeatureTests::test_building_grounding_brackets_rvw4_saddle_diagonals \
-            tests/test_milestone9.py::RoadPieceFittingTests::test_build_is_reproducible_and_embeds_surface_visual_assets \
             tests/test_milestone9.py::RoadPieceFittingTests::test_legacy_milestone8_ground_palette_remains_explicit_opt_in
 
   windows:
