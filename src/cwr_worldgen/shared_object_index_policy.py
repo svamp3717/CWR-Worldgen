@@ -320,6 +320,9 @@ def _indexed_vegetation_grounding_audit(objects, elevations, spec):
     tree_limit = max(
         0.0, float(getattr(spec, "forest_single_tree_maximum_float", 0.15))
     )
+    tree_burial_limit = max(
+        0.0, float(getattr(spec, "forest_single_tree_root_sink", 0.0))
+    )
     cluster_tree_limit = max(
         0.0, float(getattr(spec, "forest_cluster_tree_maximum_float", 0.20))
     )
@@ -383,12 +386,16 @@ def _indexed_vegetation_grounding_audit(objects, elevations, spec):
         tree_objects += len(indices)
         for object_index_value in indices:
             obj = owner[object_index_value]
-            minimum_ground, _maximum_ground = _osm._triangle_elevation_bounds(
+            minimum_ground, maximum_ground = _osm._triangle_elevation_bounds(
                 elevations, cells, cell_size, obj.x, obj.z
             )
             floating = max(0.0, obj.y - minimum_ground)
+            burial = max(0.0, maximum_ground - obj.y)
             maximum_tree_float = max(maximum_tree_float, floating)
-            violations += int(floating > tree_limit + 1.0e-6)
+            violations += int(
+                floating > tree_limit + 1.0e-6
+                or burial > tree_burial_limit + 1.0e-6
+            )
 
     return (
         tree_objects,
