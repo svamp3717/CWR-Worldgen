@@ -20,6 +20,8 @@ from cwr_worldgen.osm import (
     _selected_farmland_fence_field_keys,
 )
 from cwr_island_studio.oprw import open_island_document
+from cwr_island_studio.world_compare import compare_worlds
+from cwr_worldgen.pbo import read_pbo
 
 
 def test_blank_seed_keeps_automatic_fingerprint_and_manual_seed_ignores_packaging(
@@ -143,7 +145,9 @@ def test_generation_seed_and_editable_wrp_do_not_change_with_binarized_packaging
     )
     assert editable.wrp_path.read_bytes() == packed.wrp_path.read_bytes()
     assert editable.pbo_path.read_bytes() != packed.pbo_path.read_bytes()
-    with open_island_document(editable.wrp_path) as document:
+    with open_island_document(
+        editable.wrp_path, height_scale=spec.height_scale,
+    ) as document:
         assert document.object_count > 0
     for result in (editable, packed):
         manifest = json.loads(result.manifest_path.read_text())
@@ -151,5 +155,25 @@ def test_generation_seed_and_editable_wrp_do_not_change_with_binarized_packaging
         assert manifest["world_seed"]["requested"] == "314159"
         assert manifest["world_seed"]["effective"] == "314159"
         assert manifest["surface_visual_pass"]["deterministic_seed"] == "314159"
-    with open_island_document(packed.wrp_path) as document:
-        assert document.object_count > 0
+    # Inspect the *actual* game archive, not only the editable source WRP.
+    # The CWA loader reads 4WVR as 0.045 m/unit and OPRW as float metres.
+    # Trees, roads, buildings, and every other placed object must match
+    # exactly across packaging, with zero terrain-height differences.
+    members = {item.name: item.data for item in read_pbo(packed.pbo_path)}
+    packed_wrp = next(
+        value for name, value in members.items()
+        if name.casefold().endswith(".wrp")
+    )
+    assert packed_wrp[:4] == b"OPRW"
+    game_wrp = tmp_path / "game-oprw.wrp"
+    game_wrp.write_bytes(packed_wrp)
+    with open_island_document(
+        editable.wrp_path, height_scale=spec.height_scale,
+    ) as editable_world, open_island_document(game_wrp) as runtime_world:
+        comparison = compare_worlds(editable_world, runtime_world)
+        assert comparison.terrain_changes == 0, comparison.report()
+        assert comparison.max_height_difference < 0.0001
+        assert comparison.moved_objects == 0, comparison.report()
+        assert comparison.rotated_or_scaled_objects == 0, comparison.report()
+        assert comparison.changed_models == 0, comparison.report()
+        assert runtime_world.object_count == editable_world.object_count
