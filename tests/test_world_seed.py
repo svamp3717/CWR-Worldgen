@@ -15,6 +15,7 @@ from cwr_worldgen.gui import (
     defaults_with_recent_source, load_gui_state,
 )
 from cwr_worldgen.milestone9 import Milestone9Spec, build_milestone9, resolve_world_seed
+from cwr_worldgen.model import CWA_RVW4_HEIGHT_SCALE
 from cwr_worldgen.osm import (
     BboxProjection, _forest_single_tree_candidates,
     _selected_farmland_fence_field_keys,
@@ -146,7 +147,7 @@ def test_generation_seed_and_editable_wrp_do_not_change_with_binarized_packaging
     assert editable.wrp_path.read_bytes() == packed.wrp_path.read_bytes()
     assert editable.pbo_path.read_bytes() != packed.pbo_path.read_bytes()
     with open_island_document(
-        editable.wrp_path, height_scale=spec.height_scale,
+        editable.wrp_path, height_scale=CWA_RVW4_HEIGHT_SCALE,
     ) as document:
         assert document.object_count > 0
     for result in (editable, packed):
@@ -168,7 +169,7 @@ def test_generation_seed_and_editable_wrp_do_not_change_with_binarized_packaging
     game_wrp = tmp_path / "game-oprw.wrp"
     game_wrp.write_bytes(packed_wrp)
     with open_island_document(
-        editable.wrp_path, height_scale=spec.height_scale,
+        editable.wrp_path, height_scale=CWA_RVW4_HEIGHT_SCALE,
     ) as editable_world, open_island_document(game_wrp) as runtime_world:
         comparison = compare_worlds(editable_world, runtime_world)
         assert comparison.terrain_changes == 0, comparison.report()
