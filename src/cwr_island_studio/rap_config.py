@@ -258,11 +258,11 @@ class _CwaNative(_OFP):
 
 
 def _parse_ofp_world(
-    source: bytes, world_name: str,
+    source: bytes, world_name: str, *, legacy: bool = False,
 ) -> tuple[float | None, tuple[tuple[str, float, float], ...]] | None:
     rap = (
         _CwaNative(source)
-        if source[:8] == b"\x00raP\x04\x00\x00\x00"
+        if not legacy and source[:8] == b"\x00raP\x04\x00\x00\x00"
         else _OFP(source)
     )
     if isinstance(rap, _CwaNative):
@@ -333,7 +333,17 @@ def parse_rap_world(
     A corrupt config is rejected by ValueError, not silently treated as text.
     """
     if source[:7] == b"\x00raP\x04\x00\x00":
-        return _parse_ofp_world(source, world_name)
+        # The legacy synthetic index-u16 layout starts with an implicit
+        # root-class token at byte 7, also zero. Try the real CWA v4 reader
+        # first and fall back only for compatibility with those files.
+        if source[:8] == b"\x00raP\x04\x00\x00\x00":
+            try:
+                actual = _parse_ofp_world(source, world_name)
+                if actual is not None:
+                    return actual
+            except ValueError:
+                pass
+        return _parse_ofp_world(source, world_name, legacy=True)
     rap = _Rap(source)
     _base, root = rap.body(16)
     worlds = root.get("cfgworlds")
