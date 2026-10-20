@@ -95,7 +95,7 @@ def test_generated_world_specs_keep_trees_on_game_ground_in_both_formats(
 
     source = tmp_path / "test.wrp"
     output = tmp_path / "test.oprw"
-    y = 9.0  # 200 units at the actual game height scale
+    y = 9.0  # 180 units at the restored original 0.05 writer scale
     write_rvw4(
         source, 16, 16, [y] * (16 * 16), [0] * (16 * 16),
         [r"landtext\\main.paa"],
@@ -104,7 +104,7 @@ def test_generated_world_specs_keep_trees_on_game_ground_in_both_formats(
             WorldObject(14, r"o\\road\\sil25.p3d", 400, y, 450),
         ], height_scale=world.height_scale,
     )
-    assert struct.unpack_from("<h", source.read_bytes(), 12)[0] == 200
+    assert struct.unpack_from("<h", source.read_bytes(), 12)[0] == 180
     binarize_rvw4(source, output)
     with open_island_document(
         source, height_scale=world.height_scale,
@@ -332,7 +332,7 @@ def test_legacy_world_height_scale_and_config_binarization_are_independent() -> 
     assert WorldSpec().height_scale == pytest.approx(0.05)
     assert HeightmapSpec(heightmap_path=Path("test.png")).height_scale == pytest.approx(0.05)
     assert default_gui_values()["binarize_config"] is False
-    assert Milestone9Spec.binarize_config is False
+    assert Milestone9Spec(source_dir=Path("source")).binarize_config is False
 
 
 def test_loose_wrp_survives_optional_config_bin_packaging(tmp_path: Path) -> None:
