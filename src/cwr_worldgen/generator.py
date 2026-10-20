@@ -31,6 +31,9 @@ from .legacy_proxy_models import (
     inspect_visual_surface_style,
     inspect_roadway_surface_style,
 )
+from .vegetation_origin_policy import (
+    vegetation_origin_lifts, apply_vegetation_origin_lifts,
+)
 from .assets import (
     AssetRecord,
     canonical_asset_path,
@@ -4641,6 +4644,43 @@ def build_milestone4(
             f"trusted legacy assets={trusted_legacy_assets}"
         )
 
+    # P3D vegetation vertices are often centred about the model, not the root.
+    # Placement stages compute a terrain-root Y; convert it to the stock ODOL
+    # model-centre Y before serializing either 4WVR or OPRW. All direct stock
+    # vegetation paths are covered here, including CWA-flattened forest/field
+    # bushes, mapped trees, and house-yard fruit trees.
+    vegetation_lifts, vegetation_origin_report = vegetation_origin_lifts(
+        all_objects, asset_scan.records, spec,
+    )
+    if vegetation_lifts:
+        all_objects = apply_vegetation_origin_lifts(all_objects, vegetation_lifts)
+        generated = replace(generated, objects=all_objects)
+        report_progress(
+            83, "Grounded {:,} direct trees/bushes from {} stock model pivots".format(
+                vegetation_origin_report.lifted_objects,
+                vegetation_origin_report.lifted_models,
+            ),
+        )
+    if vegetation_origin_report.unavailable_models:
+        report_progress(
+            83, "WARNING: {} vegetation models have no scanned P3D geometry; "
+            "supply the installed game PBOs through --asset-root to ground "
+            "their model centres".format(
+                len(vegetation_origin_report.unavailable_models),
+            ),
+        )
+    if vegetation_origin_report.unreadable_models:
+        report_progress(
+            83, "WARNING: {} vegetation models lack supported ODOL v6/v7 "
+            "geometry; model-centre corrections were skipped".format(
+                len(vegetation_origin_report.unreadable_models),
+            ),
+        )
+    _write_json(
+        output_dir / "vegetation-origin-grounding.json",
+        asdict(vegetation_origin_report),
+    )
+
     if forest_cluster_library is not None:
         report_progress(83, "Generating procedural forest cluster assets")
         forest_cluster_generation = forest_cluster_library.write_assets(
@@ -5096,6 +5136,7 @@ def build_milestone4(
         repeat_objects = _assemble_world_objects(
             repeat_roads.objects, repeat_nonroads, repeat_semantic.objects, renumber=False
         )
+        repeat_objects = apply_vegetation_origin_lifts(repeat_objects, vegetation_lifts)
         repeat_fingerprint = _generation_fingerprint(
             spec,
             repeat_elevations,
