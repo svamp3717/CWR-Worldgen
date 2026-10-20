@@ -117,7 +117,7 @@ def test_milestone9_forest_defaults_prefer_ground_contact_and_small_models() -> 
     assert spec.forest_maximum_block_relief == 3.0
     assert spec.forest_everon_steep_maximum_relief == 8.0
     assert spec.forest_polygon_sink_fraction == 0.0
-    assert spec.forest_single_tree_root_sink == 0.05
+    assert spec.forest_single_tree_root_sink == 0.0
     assert spec.forest_single_tree_maximum_burial == 1.50
     assert spec.forest_single_tree_maximum_float == 0.15
     assert spec.forest_gap_infill_enabled
@@ -263,15 +263,62 @@ def test_final_vegetation_audit_detects_floating_individual_tree() -> None:
     assert maximum_tree_float >= 0.49
 
 
-def test_rooted_tree_fit_buries_root_instead_of_rejecting_terrain_diagonal_gap() -> None:
-    fit = _rooted_tree_fit((10.0, 10.8), root_sink=0.05, maximum_burial=1.50)
+def test_final_vegetation_audit_detects_buried_individual_tree() -> None:
+    spec = SimpleNamespace(
+        cells=4,
+        cell_size=25.0,
+        name="audit_world",
+        forest_single_tree_root_sink=0.0,
+        forest_single_tree_maximum_float=0.15,
+        forest_cluster_tree_maximum_float=0.20,
+        forest_cluster_bush_maximum_float=0.60,
+        forest_single_tree_model=r"data3d\str smrk_medium.p3d",
+        forest_hillside_tree_model=r"data3d\str smrk_medium.p3d",
+        forest_roadside_tree_model=r"data3d\str smrk_medium.p3d",
+        forest_roadside_tree_models=(r"data3d\str smrk_medium.p3d",),
+    )
+    below_ground = WorldObject(
+        1, r"data3d\str smrk_medium.p3d", 25.0, 9.5, 25.0,
+    )
+    result = _audit_vegetation_grounding(
+        (below_ground,), (10.0,) * 16, spec,
+    )
+    assert result[0] == 1
+    assert result[3] == 1
+    assert result[4] == 0.0  # A float-only audit would miss this.
+
+
+def test_rooted_tree_fit_keeps_roots_above_both_terrain_diagonals() -> None:
+    fit = _rooted_tree_fit(
+        (10.0, 10.10), root_sink=0.0,
+        maximum_burial=1.50, maximum_float=0.15,
+    )
     assert fit is not None
     anchor, burial = fit
-    assert anchor == 9.95
-    assert abs(burial - 0.85) < 1.0e-9
-    # The same surface ambiguity is rejected when it would require an absurdly
-    # deep trunk burial.
-    assert _rooted_tree_fit((10.0, 12.0), root_sink=0.05, maximum_burial=1.0) is None
+    assert abs(anchor - 10.10) < 1.0e-9
+    assert burial == 0.0
+
+    # Reject the formerly accepted 0.85 m trunk burial on a saddle quad:
+    # 10.8 m is the upper surface and 10.0 m is the lower surface.
+    assert _rooted_tree_fit(
+        (10.0, 10.8), root_sink=0.05,
+        maximum_burial=1.50, maximum_float=0.15,
+    ) is None
+
+    # Mapped OSM trees use positive ground clearance, never extra sinking.
+    assert _rooted_tree_fit(
+        (10.0, 10.0), root_sink=0.0, maximum_burial=1.50,
+        clearance=0.04, maximum_float=0.15,
+    ) == (10.04, 0.0)
+
+    # Intentional custom root sinking remains available, with a burial cap.
+    fit = _rooted_tree_fit(
+        (10.0, 10.0), root_sink=0.05,
+        maximum_burial=0.10, maximum_float=0.15,
+    )
+    assert fit is not None
+    assert abs(fit[0] - 9.95) < 1.0e-9
+    assert abs(fit[1] - 0.05) < 1.0e-9
 
 
 def test_nogova_leaf_forests_use_stock_paired_sheared_blocks() -> None:
