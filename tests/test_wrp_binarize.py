@@ -59,9 +59,10 @@ def test_binarize_generated_rvw4_oprw_v3_round_trip(tmp_path: Path) -> None:
 def test_binarize_uses_cwa_game_4wvr_scale_not_writer_scale(tmp_path: Path) -> None:
     """CWR-CE always multiplies 4WVR height samples by 0.045 metres.
 
-    Worldgen writes samples using its 0.05 height quantizer, but passing
-    0.05 to the OPRW converter makes positive ground 11.1% too high while
-    keeping each individual tree's absolute Y unchanged (sunk trees).
+    Simulate a legacy Worldgen file written with the old 0.05 quantizer.
+    Passing that obsolete scale to the OPRW converter would raise positive
+    ground 11.1% while leaving tree Y unchanged (sunk trees). New Worldgen
+    output instead quantizes at the engine's fixed 0.045 scale.
     """
     source = tmp_path / "same_seed.wrp"
     binary = tmp_path / "same_seed.binarized.wrp"
@@ -116,6 +117,94 @@ def test_generated_world_specs_keep_trees_on_game_ground_in_both_formats(
         assert runtime.terrain_at(3, 5) == pytest.approx(y)
         assert editable.object_at(0).y == runtime.object_at(0).y == pytest.approx(y)
         report = compare_worlds(editable, runtime)
+        assert report.terrain_changes == 0, report.report()
+        assert report.moved_objects == 0, report.report()
+        assert report.rotated_or_scaled_objects == 0, report.report()
+
+
+def test_slope_and_coast_heights_ground_objects_identically_in_both_formats(
+    tmp_path: Path,
+) -> None:
+    """CWA sees the same signed terrain and grounded objects in 4WVR and OPRW.
+
+    A non-flat grid catches unit conversion bugs that flat-ground tests can
+    miss. Read against the engine's fixed 0.045 m/int16 contract rather than
+    passing through the scale chosen by the converter itself.
+    """
+    from cwr_island_studio.world_compare import compare_worlds
+    from cwr_worldgen.model import WorldSpec
+    from cwr_worldgen.wrp import quantize_elevations
+
+    scale = WorldSpec(profile="cwr-ce").height_scale
+    assert scale == pytest.approx(0.045)
+    cells = 16
+    grid_metres = 50.0
+    raw_units = [
+        -440 + 70 * row + 13 * column
+        for row in range(cells) for column in range(cells)
+    ]
+    metres = [unit * scale for unit in raw_units]
+    assert min(metres) < 0 < max(metres)
+    assert quantize_elevations(metres, scale) == pytest.approx(metres)
+
+    # Different heights and slopes, with tree, road, building and fence
+    # anchors coinciding with known terrain vertices.
+    anchors = [
+        (4, 7, r"data3d\strom.p3d", 0.0),
+        (8, 10, r"o\road\sil25.p3d", 7.0),
+        (13, 12, r"data3d\house.p3d", 0.0),
+        (0, 10, r"data3d\fence.p3d", 0.0),
+    ]
+    objects = [
+        WorldObject(
+            400 + index, model, column * grid_metres,
+            metres[row * cells + column], row * grid_metres,
+            pitch_degrees=pitch,
+        )
+        for index, (column, row, model, pitch) in enumerate(anchors)
+    ]
+
+    source = tmp_path / "sloped.wrp"
+    binary = tmp_path / "sloped.oprw"
+    write_rvw4(
+        source, cells, cells, metres, [0] * (cells * cells),
+        [r"landtext\pi.pac"], objects, height_scale=scale,
+    )
+    raw_file = source.read_bytes()
+    assert [
+        struct.unpack_from("<h", raw_file, 12 + index * 2)[0]
+        for index in range(cells * cells)
+    ] == raw_units
+
+    assert binarize_rvw4(source, binary) == len(objects)
+    assert source.read_bytes() == raw_file
+    with open_island_document(
+        source, cell_size=grid_metres, height_scale=scale,
+        cwa_runtime_scale=True,
+    ) as loose, open_island_document(
+        binary, cell_size=grid_metres, height_scale=scale,
+        cwa_runtime_scale=True,
+    ) as packed:
+        for row in range(cells):
+            for column in range(cells):
+                engine_height = raw_units[row * cells + column] * 0.045
+                assert loose.terrain_at(column, row) == pytest.approx(
+                    engine_height, abs=1e-5,
+                )
+                assert packed.terrain_at(column, row) == pytest.approx(
+                    engine_height, abs=1e-5,
+                )
+
+        for index, (column, row, _model, _pitch) in enumerate(anchors):
+            engine_height = raw_units[row * cells + column] * 0.045
+            assert loose.object_at(index).y == pytest.approx(
+                engine_height, abs=1e-5,
+            )
+            assert packed.object_at(index).y == pytest.approx(
+                engine_height, abs=1e-5,
+            )
+
+        report = compare_worlds(loose, packed)
         assert report.terrain_changes == 0, report.report()
         assert report.moved_objects == 0, report.report()
         assert report.rotated_or_scaled_objects == 0, report.report()
