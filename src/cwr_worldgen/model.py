@@ -6,6 +6,11 @@ from pathlib import Path
 import math
 import re
 
+# CWR-CE Landscape::LoadData uses LANDDATA_SCALE = (0.03f * 1.5f)
+# when decoding 4WVR int16 terrain. OPRW float heights are already metres.
+# This is an engine wire-format contract, not a configurable export setting.
+CWA_RVW4_HEIGHT_SCALE = 0.045
+
 DEFAULT_MAX_ROAD_OBJECTS = 1_024_000
 DEFAULT_MAX_BUILDINGS = 1_000_000
 DEFAULT_MAX_FOREST_OBJECTS = 500_000
@@ -185,10 +190,9 @@ class WorldSpec:
 
     @property
     def height_scale(self) -> float:
-        # 4WVR stores signed 16-bit height units at a fixed 0.05 metres per
-        # unit.  The content profile changes assets/configuration, not this
-        # on-disk terrain contract.
-        return 0.05
+        # 4WVR stores int16 height units at the fixed CWA engine scale.
+        # Content profiles only change assets/configuration.
+        return CWA_RVW4_HEIGHT_SCALE
 
     @property
     def terrain_texture_path(self) -> str:
@@ -256,7 +260,7 @@ class HeightmapSpec:
 
     @property
     def height_scale(self) -> float:
-        return 0.05
+        return CWA_RVW4_HEIGHT_SCALE
 
     def terrain_texture_path(self, code: str) -> str:
         return rf"{self.name}\data\{code}.paa"
