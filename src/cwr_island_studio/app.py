@@ -174,7 +174,6 @@ class IslandStudio:
         header = ttk.Frame(self.root, padding=(9, 7))
         header.pack(fill="x")
         ttk.Button(header, text="Open World", command=self._open_dialog).pack(side="left", padx=3)
-        ttk.Button(header, text="Compare World", command=self._compare_dialog).pack(side="left", padx=3)
         self.save_button = ttk.Button(header, text="Save As", command=self._save_dialog)
         self.save_button.pack(side="left", padx=3)
         self.readonly_toggle = ttk.Checkbutton(
@@ -308,6 +307,7 @@ class IslandStudio:
         ttk.Label(side, textvariable=self.pbo_label, wraplength=230).pack(
             anchor="w", pady=(3, 8),
         )
+        self._build_utilities(side)
         ttk.Separator(side).pack(fill="x", pady=(4, 9))
 
         ttk.Label(side, text="Edit tool", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
@@ -383,6 +383,19 @@ class IslandStudio:
                 f"<{direction}>",
                 lambda event, key=direction: self._pan_hotkey(event, key),
             )
+
+    def _build_utilities(self, parent: ttk.Frame) -> None:
+        """Keep diagnostics together instead of crowding the map toolbar."""
+        utilities = ttk.LabelFrame(parent, text="Utilities", padding=8)
+        utilities.pack(fill="x", pady=(4, 6))
+        ttk.Button(
+            utilities, text="Compare World…", command=self._compare_dialog,
+        ).pack(fill="x")
+        ttk.Label(
+            utilities,
+            text="Compare this island with another WRP or a world in a PBO/IFA.",
+            wraplength=215,
+        ).pack(anchor="w", pady=(4, 0))
 
     def _go_to_position_dialog(self) -> None:
         """Navigate to an in-game position in both loose and archived maps."""
