@@ -194,6 +194,7 @@ class IslandStudio:
         ).pack(side="left", padx=(4, 0))
         ttk.Label(header, text="Height scale").pack(side="left", padx=(13, 2))
         ttk.Entry(header, textvariable=self.height_scale, width=6).pack(side="left")
+        self._build_utilities(header)
         ttk.Label(header, textvariable=self.metadata).pack(side="right", padx=8)
 
         body = ttk.Panedwindow(self.root, orient="horizontal")
@@ -307,7 +308,6 @@ class IslandStudio:
         ttk.Label(side, textvariable=self.pbo_label, wraplength=230).pack(
             anchor="w", pady=(3, 8),
         )
-        self._build_utilities(side)
         ttk.Separator(side).pack(fill="x", pady=(4, 9))
 
         ttk.Label(side, text="Edit tool", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
@@ -384,18 +384,16 @@ class IslandStudio:
                 lambda event, key=direction: self._pan_hotkey(event, key),
             )
 
-    def _build_utilities(self, parent: ttk.Frame) -> None:
-        """Keep diagnostics together instead of crowding the map toolbar."""
-        utilities = ttk.LabelFrame(parent, text="Utilities", padding=8)
-        utilities.pack(fill="x", pady=(4, 6))
-        ttk.Button(
-            utilities, text="Compare World…", command=self._compare_dialog,
-        ).pack(fill="x")
-        ttk.Label(
-            utilities,
-            text="Compare this island with another WRP or a world in a PBO/IFA.",
-            wraplength=215,
-        ).pack(anchor="w", pady=(4, 0))
+    def _build_utilities(self, header: ttk.Frame) -> None:
+        """Top-right dropdown for diagnostics and future utility actions."""
+        self.utilities_button = ttk.Menubutton(header, text="Utilities ▾")
+        self.utilities_menu = tk.Menu(self.utilities_button, tearoff=False)
+        self.utilities_menu.add_command(
+            label="Compare World…", command=self._compare_dialog,
+        )
+        self.utilities_button.configure(menu=self.utilities_menu)
+        # Pack before the metadata, so Utilities stays at the rightmost edge.
+        self.utilities_button.pack(side="right", padx=(8, 3))
 
     def _go_to_position_dialog(self) -> None:
         """Navigate to an in-game position in both loose and archived maps."""
