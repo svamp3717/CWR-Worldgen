@@ -235,3 +235,17 @@ def test_gui_compare_a_world_in_pbo_without_replacing_current_world(
         assert reports[0].reference_objects == 3
         assert fake.document is reference
         assert fake._busy is False
+
+
+
+def test_matching_grid_resolution_does_not_hide_different_physical_spacing(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "island.wrp"
+    make_world(source)
+    with open_island_document(source, cell_size=25, height_scale=0.05) as left:
+        with open_island_document(source, cell_size=50, height_scale=0.05) as right:
+            report = compare_worlds(left, right)
+    assert report.terrain_changes is None
+    assert report.texture_changes is None
+    assert "spacing differ" in report.report()
