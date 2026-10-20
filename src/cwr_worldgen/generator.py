@@ -20,7 +20,7 @@ from .cache import (
 )
 from .images import HeightmapLoadResult, load_heightmap, load_material_mask
 from .fast_asset_scan_policy import locate_assets_fast
-from .model import ConstraintPlayabilitySpec, HeightmapSpec, OsmSpec, PlayabilitySpec, WorldObject, WorldSpec
+from .model import CWA_RVW4_HEIGHT_SCALE, ConstraintPlayabilitySpec, HeightmapSpec, OsmSpec, PlayabilitySpec, WorldObject, WorldSpec
 from .paa import inspect_paa, write_rgb_dxt1_paa, write_solid_dxt1_paa
 from .pbo import PboPackResult, pack_directory, pack_directory_cached, read_pbo
 from ._version import GENERATOR_VERSION
@@ -871,7 +871,7 @@ def _validate_milestone3(
     ))
     checks.append((
         "Terrain and object grounding use the WRP vertex contract",
-        loaded.runtime_grid == "game-terrain-vertices" and spec.height_scale == 0.05,
+        loaded.runtime_grid == "game-terrain-vertices" and spec.height_scale == CWA_RVW4_HEIGHT_SCALE,
         (
             f"source={loaded.source_grid}, runtime={loaded.runtime_grid}, "
             f"legacy conversion={loaded.legacy_centre_to_vertex_conversion}, "
@@ -2557,7 +2557,7 @@ def _validate_milestone4(
     ))
     checks.append((
         "Terrain and object grounding use the WRP vertex contract",
-        loaded.runtime_grid == "game-terrain-vertices" and spec.height_scale == 0.05,
+        loaded.runtime_grid == "game-terrain-vertices" and spec.height_scale == CWA_RVW4_HEIGHT_SCALE,
         (
             f"source={loaded.source_grid}, runtime={loaded.runtime_grid}, "
             f"legacy conversion={loaded.legacy_centre_to_vertex_conversion}, "
