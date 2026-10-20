@@ -88,7 +88,7 @@ def parse_world_config(
     if isinstance(source, bytes):
         if len(source) > _MAX_CONFIG_BYTES:
             return WorldMetadata()
-        if source.startswith(b"\\x00raP"):
+        if source.startswith(b"\x00raP"):
             try:
                 result = parse_rap_world(source, world_name)
             except ValueError:
