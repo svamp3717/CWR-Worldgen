@@ -8,7 +8,7 @@ import pytest
 
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.wrp import write_rvw4
-from cwr_worldgen.wrp_binarize import _packed, binarize_rvw4
+from cwr_worldgen.wrp_binarize import CWA_RVW4_HEIGHT_SCALE, _packed, binarize_rvw4
 from cwr_island_studio.oprw import OprwIslandDocument, open_island_document
 
 
@@ -54,6 +54,33 @@ def test_binarize_generated_rvw4_oprw_v3_round_trip(tmp_path: Path) -> None:
         assert doc.object_count == 3
         with pytest.raises(PermissionError):
             doc.export(tmp_path / "no.wrp")
+
+
+def test_binarize_uses_cwa_game_4wvr_scale_not_writer_scale(tmp_path: Path) -> None:
+    """CWR-CE always multiplies 4WVR height samples by 0.045 metres.
+
+    Worldgen writes samples using its 0.05 height quantizer, but passing
+    0.05 to the OPRW converter makes positive ground 11.1% too high while
+    keeping each individual tree's absolute Y unchanged (sunk trees).
+    """
+    source = tmp_path / "same_seed.wrp"
+    binary = tmp_path / "same_seed.binarized.wrp"
+    assert CWA_RVW4_HEIGHT_SCALE == pytest.approx(0.03 * 1.5)
+    tree = WorldObject(999, r"data3d\\str_fikovnik.p3d", 75, 20.0, 75)
+    write_rvw4(
+        source, 16, 16, [20.0] * 256, [0] * 256,
+        [r"landtext\\pi.pac"], [tree], height_scale=0.05,
+    )
+    raw_sample = struct.unpack_from("<h", source.read_bytes(), 12)[0]
+    assert raw_sample == 400
+    assert binarize_rvw4(source, binary) == 1  # use engine-correct default
+    with open_island_document(binary) as doc:
+        assert doc.terrain_at(0, 0) == pytest.approx(
+            raw_sample * CWA_RVW4_HEIGHT_SCALE, abs=1e-5,
+        )
+        assert doc.terrain_at(0, 0) == pytest.approx(18.0)
+        assert doc.object_at(0).y == pytest.approx(20.0)
+        assert doc.object_at(0).object_id == 999
 
 
 def test_binarization_supports_large_compressed_grids(tmp_path: Path) -> None:
@@ -215,7 +242,7 @@ def test_binarize_world_cli_accepts_advanced_command_option() -> None:
 
 
 
-def test_milestone9_postbuild_binarization_uses_playability_height_scale(
+def test_milestone9_postbuild_binarization_uses_cwa_engine_height_scale(
     tmp_path: Path,
 ) -> None:
     """Regress the AttributeError after a completed Milestone 9 generation."""
@@ -236,8 +263,9 @@ def test_milestone9_postbuild_binarization_uses_playability_height_scale(
     game_pbo = tmp_path / "testworld.pbo"
     pack_directory(world_dir, game_pbo, backend="python")
 
-    # The top-level Milestone9Spec intentionally has no height_scale. It
-    # must be sourced from the playability spec that wrote the 4WVR.
+    # The top-level Milestone9Spec intentionally has no height_scale.
+    # CWA's *runtime* 4WVR scale is fixed at 0.045, even though Worldgen
+    # quantizes height samples using playability.height_scale (0.05).
     spec = Milestone9Spec(
         source_dir=world_dir, name="testworld",
         binarize_world=True, pbo_backend="python",
@@ -253,7 +281,9 @@ def test_milestone9_postbuild_binarization_uses_playability_height_scale(
     assert binary.exists()
     assert original_wrp.read_bytes() == original_bytes
     with open_island_document(binary) as document:
-        assert document.terrain_at(0, 0) == pytest.approx(3.25)
+        # 3.25 / 0.05 = 65 raw 4WVR units; the game loads them as 65×0.045.
+        assert document.terrain_at(0, 0) == pytest.approx(2.925)
+        assert document.object_at(0).y == pytest.approx(3.25)
         assert document.object_count == 1
     packed = {item.name: item.data for item in read_pbo(game_pbo)}
     assert packed["testworld.wrp"] == binary.read_bytes()
