@@ -20,9 +20,16 @@ Or open an island directly:
 
     cwr-island-studio /path/to/island.wrp
 
-The Island Studio workflow runs tests on source changes. A dedicated Windows
-executable can be built separately on request, using the manual workflow
-option. The tool is not bundled with the generator executable.
+The Island Studio workflow runs tests on source changes. To download a
+standalone Windows executable, use the manually triggered
+[Build Windows Asset Tools](../.github/workflows/build-windows-tools.yml)
+workflow. It now builds `CWR-Island-Studio.exe` alongside the WRP dependency
+scanner, P3D categoriser and P3D browser. The companion
+[Build and Publish Windows Asset Tools](../.github/workflows/build-and-publish-windows-tools.yml)
+workflow also includes Island Studio in the same manually published
+`tools-v...` GitHub Release (only from `main`, after merging). The separate
+Island Studio workflow retains its optional individual Windows build.
+The editor is **not** embedded in the CWR-Worldgen executable.
 
 ## Workflow
 
