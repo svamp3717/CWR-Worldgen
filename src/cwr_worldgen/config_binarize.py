@@ -285,19 +285,42 @@ def binarize_config(source: Path, destination: Path) -> Path:
     binary = binarize_config_text(original)
     # Require that the binary really loads and preserves CfgWorlds landmarks.
     # This also verifies compatibility with Island Studio's RAP reader.
-    generated = re.search(r"\bclass\s+CfgWorlds\s*\{.*?\bclass\s+([A-Za-z_]\w*)\s*:", original, re.S)
-    if generated:
-        world_name = generated.group(1)
-        # First inherited world is often Intro, not the generated island.
-        classes = re.findall(r"\bclass\s+([A-Za-z_]\w*)\s*:\s*[A-Za-z_]\w*\s*\{", original)
-        if classes:
-            world_name = classes[-1]
+    tree = parse_cpp_config(original)
+    cfgworlds = next(
+        (entry for entry in tree
+         if isinstance(entry, ConfigClass) and entry.name.casefold() == "cfgworlds"),
+        None,
+    )
+    if cfgworlds is None:
+        raise ValueError("config.cpp has no CfgWorlds class")
+    # Verify *every* world with a worldName assignment, even if the config
+    # also defines Land_* classes under CfgVehicles.
+    for item in cfgworlds.entries:
+        if not isinstance(item, ConfigClass):
+            continue
+        fields = {
+            entry[1].casefold(): entry[2] for entry in item.entries
+            if isinstance(entry, tuple)
+        }
+        if "worldname" not in fields:
+            continue
         try:
-            metadata = parse_rap_world(binary, world_name)
+            metadata = parse_rap_world(binary, item.name)
         except ValueError as exc:
             raise ValueError("RAP output could not be decoded after binarization") from exc
         if metadata is None:
-            raise ValueError(f"RAP output is missing world {world_name}")
+            raise ValueError(f"RAP output is missing world {item.name}")
+        grid = fields.get("landgrid")
+        if grid is not None and (metadata[0] is None or
+                                 abs(float(grid) - metadata[0]) > 0.0001):
+            raise ValueError(f"RAP output changed LandGrid for {item.name}")
+        names = next(
+            (entry for entry in item.entries
+             if isinstance(entry, ConfigClass) and entry.name.casefold() == "names"),
+            None,
+        )
+        if names is not None and len(metadata[1]) != len(names.entries):
+            raise ValueError(f"RAP output lost location names for {item.name}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     tmp_path: str | None = None
     try:
@@ -335,9 +358,14 @@ def pack_binarized_runtime_pbo(
         with binarized_wrp.open("rb") as reader:
             if reader.read(8) != b"OPRW\x03\x00\x00\x00":
                 raise ValueError("expected OPRW v3 WRP")
-    source_wrp = source_dir / (binarized_wrp.name.replace(".binarized", "") if binarized_wrp else "")
-    if binarized_wrp and not source_wrp.is_file():
+    source_wrp = (
+        source_dir / binarized_wrp.name.replace(".binarized.wrp", ".wrp")
+        if binarized_wrp is not None else None
+    )
+    if binarized_wrp and (source_wrp is None or not source_wrp.is_file()):
         raise ValueError("generated 4WVR source WRP is missing")
+    if (source_dir / "config.bin").exists():
+        raise ValueError("config.bin already exists in the source directory; refusing to overwrite it")
     with tempfile.TemporaryDirectory(dir=source_dir.parent, prefix=".cfg-binarize-") as scratch:
         work = Path(scratch)
         saved_config = work / "editable-config.cpp"
