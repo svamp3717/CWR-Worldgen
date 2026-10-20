@@ -488,6 +488,8 @@ def defaults_with_recent_source(
         result["binarize_world"] = state["binarize_world"]
     if type(state.get("binarize_config")) is bool:
         result["binarize_config"] = state["binarize_config"]
+    if isinstance(state.get("world_seed"), str):
+        result["world_seed"] = state["world_seed"]
     deploy_text = str(state.get("last_deploy_mod_dir", "")).strip()
     deploy_path = Path(deploy_text).expanduser() if deploy_text else None
     if deploy_path is not None and deploy_path.is_dir():
@@ -669,6 +671,7 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     ))
     pairs = (
         ("--source-dir", "source_dir"),
+        ("--world-seed", "world_seed"),
         ("--output", "output"),
         ("--name", "name"),
         ("--display-name", "display_name"),
@@ -1084,6 +1087,7 @@ def default_gui_values() -> dict[str, object]:
         "odol_buildings": False,
         "binarize_world": False,
         "binarize_config": False,
+        "world_seed": "",
         "forest_individual_objects_only": False,
         "forest_clusters": True,
         "forest_severe_hill_fallback": True,
@@ -1345,6 +1349,7 @@ class WorldgenGui(tk.Tk):
         self._install_odol_building_state_persistence()
         self._install_binarized_world_state_persistence()
         self._install_binarized_config_state_persistence()
+        self._install_world_seed_persistence()
         self._show_step(0)
         self.after(100, self._drain_output)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -1482,6 +1487,20 @@ class WorldgenGui(tk.Tk):
             return
         try:
             update_gui_state(self.state_path, {"binarize_config": bool(variable.get())})
+        except OSError:
+            pass
+
+    def _install_world_seed_persistence(self) -> None:
+        variable = self.vars.get("world_seed")
+        if variable is not None:
+            variable.trace_add("write", lambda *_args: self._persist_world_seed())
+
+    def _persist_world_seed(self) -> None:
+        variable = self.vars.get("world_seed")
+        if variable is None:
+            return
+        try:
+            update_gui_state(self.state_path, {"world_seed": str(variable.get())})
         except OSError:
             pass
 
@@ -2595,6 +2614,26 @@ class WorldgenGui(tk.Tk):
             self._register_advanced_setting(
                 key, check, normal_style="TCheckbutton", changed_style="AdvancedChanged.TCheckbutton"
             )
+
+        seed_row = ttk.Frame(build_opts)
+        seed_row.grid(row=(len(option_values) + 1) // 2, column=0, columnspan=2,
+                      sticky="ew", pady=(10, 3))
+        seed_label = ttk.Label(seed_row, text="Manual world seed (blank = automatic)")
+        seed_label.pack(side="left", padx=(0, 12))
+        self._register_advanced_setting(
+            "world_seed", seed_label, normal_style="TLabel",
+            changed_style="AdvancedChanged.TLabel",
+        )
+        ttk.Entry(
+            seed_row, textvariable=self._var("world_seed", ""), width=30,
+        ).pack(side="left")
+        ttk.Label(
+            build_opts,
+            text="Use the same seed and source/options to reproduce trees, fences and vegetation. "
+                 "WRP / ODOL / config binarization settings do not change the seed.",
+            style="Hint.TLabel", wraplength=780,
+        ).grid(row=(len(option_values) + 1) // 2 + 1, column=0,
+               columnspan=2, sticky="w", pady=(1, 8))
 
         pbo = ttk.LabelFrame(advanced.body, text="PBO and CLI", padding=10)
         pbo.pack(fill="x")
