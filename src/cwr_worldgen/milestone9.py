@@ -548,6 +548,7 @@ class Milestone9Spec(Milestone8Spec):
     poseidon_tools_path: Path | None = None
     odol_buildings: bool = False
     binarize_world: bool = False
+    binarize_config: bool = False
     deploy_mod_dir: Path | None = None
 
     def validate(self) -> None:
@@ -1220,6 +1221,7 @@ def _resolve_overture_buildings_geojson(
 def _binarize_generated_world(
     result: BuildResult, spec: Milestone9Spec,
     playability: _Milestone9PlayabilitySpec,
+    *, repack: bool = True,
 ) -> Path:
     """Binarize the emitted WRP using its actual 4WVR elevation scale.
 
@@ -1233,11 +1235,12 @@ def _binarize_generated_world(
     binarize_rvw4(
         result.wrp_path, binarized, height_scale=playability.height_scale,
     )
-    repack_game_pbo_with_oprw(
-        result.source_dir, result.wrp_path, binarized, result.pbo_path,
-        backend=spec.pbo_backend,
-        poseidon_tools_path=spec.poseidon_tools_path,
-    )
+    if repack:
+        repack_game_pbo_with_oprw(
+            result.source_dir, result.wrp_path, binarized, result.pbo_path,
+            backend=spec.pbo_backend,
+            poseidon_tools_path=spec.poseidon_tools_path,
+        )
     return binarized
 
 
@@ -1692,9 +1695,25 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         shutil.copyfile(result.overview_map_path, runtime_root / "OVERVIEW-MAP.png")
 
     binarized_wrp: Path | None = None
+    binarized_config: Path | None = None
     if spec.binarize_world:
         report_progress(99, "Binarizing WRP to OPRW v3 for the game archive")
-        binarized_wrp = _binarize_generated_world(result, spec, playability)
+        binarized_wrp = _binarize_generated_world(
+            result, spec, playability, repack=not spec.binarize_config,
+        )
+    if spec.binarize_config:
+        from .config_binarize import binarize_config, pack_binarized_runtime_pbo
+
+        report_progress(99, "Binarizing config.cpp to CWA RAP v4 config.bin")
+        binarized_config = result.output_dir / f"{spec.name}.config.bin"
+        binarize_config(result.source_dir / "config.cpp", binarized_config)
+        report_progress(99, "Packing game PBO with config.bin")
+        pack_binarized_runtime_pbo(
+            result.source_dir, result.source_dir / "config.cpp",
+            binarized_config, result.pbo_path,
+            binarized_wrp=binarized_wrp,
+            backend=spec.pbo_backend, poseidon_tools_path=spec.poseidon_tools_path,
+        )
 
     deployment: dict[str, Any] | None = None
     if spec.deploy_mod_dir is not None:
@@ -1715,6 +1734,13 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
     build_manifest["milestone"] = 9
     build_manifest["generator"] = GENERATOR_VERSION
     build_manifest["deployment"] = deployment
+    build_manifest["config_binarization"] = {
+        "enabled": spec.binarize_config,
+        "format": "CWA RAP v4" if spec.binarize_config else "config.cpp",
+        "source_config": str(result.source_dir / "config.cpp"),
+        "binarized_config": str(binarized_config) if binarized_config else None,
+        "note": "config.cpp remains editable; only config.bin is packaged in the game PBO.",
+    }
     build_manifest["world_binarization"] = {
         "enabled": spec.binarize_world,
         "format": "OPRW v3" if spec.binarize_world else "4WVR",
