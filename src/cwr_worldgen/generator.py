@@ -4644,11 +4644,12 @@ def build_milestone4(
             f"trusted legacy assets={trusted_legacy_assets}"
         )
 
-    # P3D vegetation vertices are often centred about the model, not the root.
-    # Placement stages compute a terrain-root Y; convert it to the stock ODOL
-    # model-centre Y before serializing either 4WVR or OPRW. All direct stock
-    # vegetation paths are covered here, including CWA-flattened forest/field
-    # bushes, mapped trees, and house-yard fruit trees.
+    # Direct stock trees/bushes are authored about P3D model centres, while
+    # all placement stages compute terrain-root heights. Prefer a measured
+    # centre offset when geometry is available; otherwise write an import
+    # bias that CWR-CE ObjectCreate will remove using its loaded model centre.
+    # This does NOT require game P3Ds in Worldgen's asset roots, and applies
+    # identically to 4WVR and OPRW serialization.
     vegetation_lifts, vegetation_origin_report = vegetation_origin_lifts(
         all_objects, asset_scan.records, spec,
     )
@@ -4656,24 +4657,18 @@ def build_milestone4(
         all_objects = apply_vegetation_origin_lifts(all_objects, vegetation_lifts)
         generated = replace(generated, objects=all_objects)
         report_progress(
-            83, "Grounded {:,} direct trees/bushes from {} stock model pivots".format(
+            83, "Corrected {:,} direct trees/bushes ({} measured models, "
+            "{} runtime-snapped models)".format(
                 vegetation_origin_report.lifted_objects,
-                vegetation_origin_report.lifted_models,
+                vegetation_origin_report.measured_models,
+                len(vegetation_origin_report.runtime_snap_models),
             ),
         )
-    if vegetation_origin_report.unavailable_models:
+    if vegetation_origin_report.runtime_snap_models:
         report_progress(
-            83, "WARNING: {} vegetation models have no scanned P3D geometry; "
-            "supply the installed game PBOs through --asset-root to ground "
-            "their model centres".format(
-                len(vegetation_origin_report.unavailable_models),
-            ),
-        )
-    if vegetation_origin_report.unreadable_models:
-        report_progress(
-            83, "WARNING: {} vegetation models lack supported ODOL v6/v7 "
-            "geometry; model-centre corrections were skipped".format(
-                len(vegetation_origin_report.unreadable_models),
+            83, "Applied CWR-CE runtime grounding to {} vegetation models "
+            "without requiring their P3D source files".format(
+                len(vegetation_origin_report.runtime_snap_models),
             ),
         )
     _write_json(
