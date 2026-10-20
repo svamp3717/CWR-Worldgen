@@ -224,14 +224,56 @@ class _OFP:
         return result
 
 
+class _CwaNative(_OFP):
+    """Exact CWR-CE ParamFile v4 wire layout, with shared varint string pool."""
+
+    def __init__(self, source: bytes) -> None:
+        super().__init__(source)
+        if source[:8] != b"\x00raP\x04\x00\x00\x00":
+            raise ValueError("not CWA ParamFile binary v4")
+        self.pos = 8
+
+    def count(self) -> int:
+        result = 0
+        shift = 0
+        for _ in range(5):
+            byte = self.byte()
+            result |= (byte & 0x7F) << shift
+            if not byte & 0x80:
+                if result > _MAX_ENTRIES:
+                    raise ValueError("CWA RAP entry count too large")
+                return result
+            shift += 7
+        raise ValueError("invalid CWA RAP varint")
+
+    def indexed(self) -> str:
+        index = self.count()
+        if index < len(self.names):
+            return self.names[index]
+        if index != len(self.names):
+            raise ValueError("invalid CWA RAP string table index")
+        name = self.string()
+        self.names[index] = name
+        return name
+
+
 def _parse_ofp_world(
     source: bytes, world_name: str,
 ) -> tuple[float | None, tuple[tuple[str, float, float], ...]] | None:
-    rap = _OFP(source)
-    if rap.byte() != 0:
+    rap = (
+        _CwaNative(source)
+        if source[:8] == b"\x00raP\x04\x00\x00\x00"
+        else _OFP(source)
+    )
+    if isinstance(rap, _CwaNative):
+        # Real CWA root has name(index) + base(C-string) directly.
+        rap.indexed()
+        rap.string()
+    elif rap.byte() != 0:
         raise ValueError("missing OFP RAP root class")
-    rap.indexed()  # the implicit filename class
-    rap.string()   # root's inherited class name
+    if not isinstance(rap, _CwaNative):
+        rap.indexed()  # legacy synthetic root class token
+        rap.string()
     root = rap.body(0)
     cfg = root.get("cfgworlds")
     if not isinstance(cfg, tuple) or cfg[0] != "class":
