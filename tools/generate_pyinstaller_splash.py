@@ -24,6 +24,9 @@ TOOLS: dict[str, tuple[str, str, tuple[int, int, int]]] = {
     "WRP-Mod-Dependency-Scanner": (
         "WRP", "MOD DEPENDENCY SCANNER", (250, 186, 101),
     ),
+    "CWR-Island-Studio": (
+        "ISLAND", "STUDIO", (144, 196, 125),
+    ),
 }
 
 
