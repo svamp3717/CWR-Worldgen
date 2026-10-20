@@ -486,6 +486,8 @@ def defaults_with_recent_source(
         result["odol_buildings"] = state["odol_buildings"]
     if type(state.get("binarize_world")) is bool:
         result["binarize_world"] = state["binarize_world"]
+    if type(state.get("binarize_config")) is bool:
+        result["binarize_config"] = state["binarize_config"]
     deploy_text = str(state.get("last_deploy_mod_dir", "")).strip()
     deploy_path = Path(deploy_text).expanduser() if deploy_text else None
     if deploy_path is not None and deploy_path.is_dir():
@@ -781,6 +783,7 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         "high_quality_building_textures": "--high-quality-building-textures",
         "odol_buildings": "--odol-buildings",
         "binarize_world": "--binarize-world",
+        "binarize_config": "--binarize-config",
         "forest_individual_objects_only": "--replace-forest-polygons-with-clusters",
         "haybales": "--haybales",
         "match_nearby_building_textures": "--match-nearby-building-textures",
@@ -1080,6 +1083,7 @@ def default_gui_values() -> dict[str, object]:
         "high_quality_building_textures": False,
         "odol_buildings": False,
         "binarize_world": False,
+        "binarize_config": False,
         "forest_individual_objects_only": False,
         "forest_clusters": True,
         "forest_severe_hill_fallback": True,
@@ -1340,6 +1344,7 @@ class WorldgenGui(tk.Tk):
         self._install_road_asset_state_persistence()
         self._install_odol_building_state_persistence()
         self._install_binarized_world_state_persistence()
+        self._install_binarized_config_state_persistence()
         self._show_step(0)
         self.after(100, self._drain_output)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -1461,6 +1466,22 @@ class WorldgenGui(tk.Tk):
             return
         try:
             update_gui_state(self.state_path, {"binarize_world": bool(variable.get())})
+        except OSError:
+            pass
+
+    def _install_binarized_config_state_persistence(self) -> None:
+        variable = self.vars.get("binarize_config")
+        if variable is not None:
+            variable.trace_add(
+                "write", lambda *_args: self._persist_binarized_config_state()
+            )
+
+    def _persist_binarized_config_state(self) -> None:
+        variable = self.vars.get("binarize_config")
+        if variable is None:
+            return
+        try:
+            update_gui_state(self.state_path, {"binarize_config": bool(variable.get())})
         except OSError:
             pass
 
@@ -2561,6 +2582,7 @@ class WorldgenGui(tk.Tk):
         option_values = (
             ("Experimental: binarize procedural buildings as ODOL v7 (Python)", "odol_buildings"),
             ("Experimental: binarize generated world as OPRW v3 (50 m grid only)", "binarize_world"),
+            ("Experimental: binarize addon config.cpp as CWA RAP v4 config.bin", "binarize_config"),
             ("Prefer reuse when output exists", "keep_output"),
             ("Refresh matching cache entries", "cache_refresh"),
             ("Disable all caches", "no_cache"),
