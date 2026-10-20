@@ -130,7 +130,7 @@ class _OFP:
     """
 
     def __init__(self, data: bytes) -> None:
-        if not 8 <= len(data) <= _MAX_CONFIG or data[:7] != b"\\x00raP\\x04\\x00\\x00":
+        if not 8 <= len(data) <= _MAX_CONFIG or data[:7] != b"\x00raP\x04\x00\x00":
             raise ValueError("not an OFP/CWA RAP configuration")
         self.data = data
         self.pos = 7
@@ -163,7 +163,7 @@ class _OFP:
         return result
 
     def string(self) -> str:
-        stop = self.data.find(b"\\0", self.pos, min(len(self.data), self.pos + _MAX_STRING + 1))
+        stop = self.data.find(b"\0", self.pos, min(len(self.data), self.pos + _MAX_STRING + 1))
         if stop < 0:
             raise ValueError("invalid OFP RAP string")
         value = self.data[self.pos:stop].decode("latin-1", "replace")
@@ -290,7 +290,7 @@ def parse_rap_world(
 
     A corrupt config is rejected by ValueError, not silently treated as text.
     """
-    if source[:7] == b"\\x00raP\\x04\\x00\\x00":
+    if source[:7] == b"\x00raP\x04\x00\x00":
         return _parse_ofp_world(source, world_name)
     rap = _Rap(source)
     _base, root = rap.body(16)
