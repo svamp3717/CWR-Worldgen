@@ -1,4 +1,4 @@
-"""Manual generation seed: reproducible world placements across PBO formats."""
+"""Manual generation seed: reproducible world placements with optional RAP config.bin."""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -34,14 +34,12 @@ def test_blank_seed_keeps_automatic_fingerprint_and_manual_seed_ignores_packagin
     manual = replace(source, world_seed="  314159  ")
     assert resolve_world_seed(manual, "abc123") == "314159"
     assert resolve_world_seed(manual, "def456") == "314159"
-    for wrp in (False, True):
-        for config in (False, True):
-            for odol in (False, True):
-                mode = replace(
-                    manual, binarize_world=wrp, binarize_config=config,
-                    odol_buildings=odol,
-                )
-                assert resolve_world_seed(mode, "abc123") == "314159"
+    for config in (False, True):
+        for odol in (False, True):
+            mode = replace(
+                manual, binarize_config=config, odol_buildings=odol,
+            )
+            assert resolve_world_seed(mode, "abc123") == "314159"
     for invalid in ("x" * 129, "bad\nseed", "hello\tworld"):
         with pytest.raises(ValueError, match="seed"):
             replace(source, world_seed=invalid).validate()
@@ -119,11 +117,11 @@ def test_gui_seed_is_optional_persisted_and_forwarded_to_cli(tmp_path: Path) -> 
     assert load_gui_state(gui.state_path)["world_seed"] == ""
 
 
-def test_generation_seed_and_editable_wrp_do_not_change_with_binarized_packaging(
+def test_generation_seed_and_loose_wrp_are_unchanged_by_config_bin(
     tmp_path: Path,
 ) -> None:
-    # A small real frozen source includes roads, water, forests, buildings.
-    # Generates twice with the same seed but different game PBO formats.
+    # Verify a real island build retains identical 4WVR world data
+    # whether runtime packaging uses config.cpp or RAP config.bin.
     import test_milestone8 as milestone8_tests
 
     source = milestone8_tests.Milestone8BuildTests()._source(tmp_path / "source")
@@ -141,11 +139,11 @@ def test_generation_seed_and_editable_wrp_do_not_change_with_binarized_packaging
     )
     editable = build_milestone9(tmp_path / "editable", spec)
     packed = build_milestone9(
-        tmp_path / "binarized",
-        replace(spec, binarize_world=True, binarize_config=True),
+        tmp_path / "config_bin", replace(spec, binarize_config=True),
     )
     assert editable.wrp_path.read_bytes() == packed.wrp_path.read_bytes()
     assert editable.pbo_path.read_bytes() != packed.pbo_path.read_bytes()
+    assert editable.wrp_path.read_bytes()[:4] == b"4WVR"
     with open_island_document(
         editable.wrp_path, height_scale=CWA_RVW4_HEIGHT_SCALE,
     ) as document:
@@ -156,24 +154,26 @@ def test_generation_seed_and_editable_wrp_do_not_change_with_binarized_packaging
         assert manifest["world_seed"]["requested"] == "314159"
         assert manifest["world_seed"]["effective"] == "314159"
         assert manifest["surface_visual_pass"]["deterministic_seed"] == "314159"
-    # Inspect the *actual* game archive, not only the editable source WRP.
-    # The CWA loader reads 4WVR as 0.045 m/unit and OPRW as float metres.
-    # Trees, roads, buildings, and every other placed object must match
-    # exactly across packaging, with zero terrain-height differences.
-    members = {item.name: item.data for item in read_pbo(packed.pbo_path)}
-    packed_wrp = next(
-        value for name, value in members.items()
-        if name.casefold().endswith(".wrp")
-    )
-    assert packed_wrp[:4] == b"OPRW"
-    game_wrp = tmp_path / "game-oprw.wrp"
+        assert manifest["world_binarization"]["enabled"] is False
+        assert manifest["world_binarization"]["format"] == "4WVR"
+
+    # The actual deployed PBO must retain the original unbinarized WRP.
+    members = {item.name.casefold(): item.data for item in read_pbo(packed.pbo_path)}
+    packed_wrp = next(value for name, value in members.items() if name.endswith(".wrp"))
+    assert packed_wrp[:4] == b"4WVR"
+    assert packed_wrp == packed.wrp_path.read_bytes()
+    assert "config.bin" in members
+    assert "config.cpp" not in members
+
+    game_wrp = tmp_path / "game-loose.wrp"
     game_wrp.write_bytes(packed_wrp)
     with open_island_document(
         editable.wrp_path, height_scale=CWA_RVW4_HEIGHT_SCALE,
-    ) as editable_world, open_island_document(game_wrp) as runtime_world:
+    ) as editable_world, open_island_document(
+        game_wrp, height_scale=CWA_RVW4_HEIGHT_SCALE,
+    ) as runtime_world:
         comparison = compare_worlds(editable_world, runtime_world)
         assert comparison.terrain_changes == 0, comparison.report()
-        assert comparison.max_height_difference < 0.0001
         assert comparison.moved_objects == 0, comparison.report()
         assert comparison.rotated_or_scaled_objects == 0, comparison.report()
         assert comparison.changed_models == 0, comparison.report()
