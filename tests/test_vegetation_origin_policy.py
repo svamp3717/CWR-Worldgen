@@ -11,6 +11,7 @@ from cwr_worldgen.assets import AssetRecord
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.vegetation_origin_policy import (
     _odol_visual_base_offset,
+    RUNTIME_SNAP_BIAS_METRES,
     apply_vegetation_origin_lifts,
     vegetation_origin_lifts,
 )
@@ -61,6 +62,8 @@ def test_single_trees_yard_fruit_and_field_bushes_share_pivot_lift(
     transformed = apply_vegetation_origin_lifts(objects, lifts)
     assert report.lifted_objects == 4
     assert report.lifted_models == 4
+    assert report.measured_models == 4
+    assert not report.runtime_snap_models
     assert not report.unavailable_models
     assert not report.unreadable_models
     for index, obj in enumerate(transformed[:4]):
@@ -71,12 +74,26 @@ def test_single_trees_yard_fruit_and_field_bushes_share_pivot_lift(
     assert transformed[4:] == objects[4:]
 
 
-def test_missing_asset_is_reported_instead_of_guessing_tree_height() -> None:
+def test_missing_asset_uses_builtin_cwr_ce_ground_snap_without_p3ds() -> None:
     obj = WorldObject(1, r"data3d\hrusen.p3d", 30, 4.0, 30)
     lifts, report = vegetation_origin_lifts((obj,), (), SimpleNamespace(name="world"))
-    assert not lifts
+    assert lifts[obj.model_path] == RUNTIME_SNAP_BIAS_METRES
+    assert report.runtime_snap_models == (obj.model_path,)
     assert report.unavailable_models == (obj.model_path,)
-    assert apply_vegetation_origin_lifts((obj,), lifts) == (obj,)
+    adjusted = apply_vegetation_origin_lifts((obj,), lifts)
+    assert adjusted[0].y == 4.0 + RUNTIME_SNAP_BIAS_METRES
+    assert adjusted[0].object_id == obj.object_id
+
+    # Landscape::ObjectCreate moves the object's centre down by the amount
+    # its original model zero (centre minus bounding centre) exceeds terrain.
+    # This is the engine's actual placement calculation, with different
+    # stock models requiring different centring. No P3D read is needed.
+    for bounding_center_y in (0.0, 1.5, 7.0, 25.0):
+        above = (adjusted[0].y - bounding_center_y) - 4.0
+        assert above > 0
+        engine_centre_y = adjusted[0].y - above
+        engine_original_zero_y = engine_centre_y - bounding_center_y
+        assert engine_original_zero_y == pytest.approx(4.0)
 
 
 def test_broken_odol_is_not_used_for_placement(tmp_path: Path) -> None:
@@ -86,5 +103,58 @@ def test_broken_odol_is_not_used_for_placement(tmp_path: Path) -> None:
     obj = WorldObject(1, model, 0, 0, 0)
     record = AssetRecord(model, str(source), source.stat().st_size, None)
     lifts, report = vegetation_origin_lifts((obj,), (record,), SimpleNamespace(name="world"))
-    assert not lifts
+    assert lifts[model] == RUNTIME_SNAP_BIAS_METRES
+    assert report.runtime_snap_models == (model,)
     assert report.unreadable_models
+
+
+def test_no_p3d_assets_cover_house_street_forest_and_bush_models() -> None:
+    model_paths = (
+        r"data3d\jablon.p3d",
+        r"data3d\hrusen.p3d",
+        r"o\tree\Javor01.p3d",
+        r"data3d\str smrk_medium.p3d",
+        r"data3d\ker listnac.p3d",
+        r"data3d\ker pichlavej.p3d",
+    )
+    objects = tuple(
+        WorldObject(i + 1, path, i * 10.0, 9.0, 20.0)
+        for i, path in enumerate(model_paths)
+    )
+    lifts, report = vegetation_origin_lifts(
+        objects, (), SimpleNamespace(name="world")
+    )
+    assert report.lifted_models == len(model_paths)
+    assert report.lifted_objects == len(model_paths)
+    assert report.measured_models == 0
+    assert len(report.runtime_snap_models) == len(model_paths)
+    assert all(value == RUNTIME_SNAP_BIAS_METRES for value in lifts.values())
+    assert all(
+        new.y == pytest.approx(old.y + RUNTIME_SNAP_BIAS_METRES)
+        for old, new in zip(objects, apply_vegetation_origin_lifts(objects, lifts))
+    )
+
+
+def test_runtime_ground_snap_survives_rvw4_to_oprw_binarization(tmp_path: Path) -> None:
+    from cwr_worldgen.wrp import write_rvw4
+    from cwr_worldgen.wrp_binarize import binarize_rvw4
+    from cwr_island_studio.oprw import open_island_document
+
+    original = WorldObject(5, r"data3d\ker listnac.p3d", 100.0, 9.0, 100.0)
+    lifts, _ = vegetation_origin_lifts((original,), (), SimpleNamespace(name="world"))
+    translated = apply_vegetation_origin_lifts((original,), lifts)[0]
+    input_path = tmp_path / "vegetation.wrp"
+    output_path = tmp_path / "vegetation.oprw"
+    write_rvw4(
+        input_path, 16, 16, [9.0] * 256, [0] * 256,
+        [r"landtext\main.paa"], (translated,), height_scale=0.045,
+    )
+    assert binarize_rvw4(input_path, output_path) == 1
+    with open_island_document(input_path, height_scale=0.045) as loose:
+        assert loose.object_at(0).y == pytest.approx(
+            9.0 + RUNTIME_SNAP_BIAS_METRES
+        )
+    with open_island_document(output_path, cwa_runtime_scale=True) as packed:
+        assert packed.object_at(0).y == pytest.approx(
+            9.0 + RUNTIME_SNAP_BIAS_METRES
+        )
