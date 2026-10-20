@@ -330,7 +330,7 @@ def test_legacy_world_height_scale_and_config_binarization_are_independent() -> 
     from cwr_worldgen.milestone9 import Milestone9Spec
 
     assert WorldSpec().height_scale == pytest.approx(0.05)
-    assert HeightmapSpec().height_scale == pytest.approx(0.05)
+    assert HeightmapSpec(heightmap_path=Path("test.png")).height_scale == pytest.approx(0.05)
     assert default_gui_values()["binarize_config"] is False
     assert Milestone9Spec.binarize_config is False
 
