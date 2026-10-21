@@ -2568,6 +2568,9 @@ def _validate_milestone4(
             material_indices, raster.forest, original_paths,
             width=spec.cells, profile=_ground_texture_profile(spec),
             forest_material=forest_id, forest_edge_material=edge_id,
+            blendable_exterior_materials=tuple(
+                i for i, item in enumerate(material_types) if item.code in {"g", "h", "j"}
+            ),
             enabled=True,
         )
         expected_texture_paths.update(expanded_paths)
@@ -4689,6 +4692,9 @@ def build_milestone4(
             material_indices, raster.forest, texture_table_paths,
             width=spec.cells, profile=_ground_texture_profile(spec),
             forest_material=forest_material, forest_edge_material=edge_material,
+            blendable_exterior_materials=tuple(
+                i for i, item in enumerate(materials) if item.code in {"g", "h", "j"}
+            ),
             enabled=True,
         )
     surface_texture_cache_hit = False
@@ -5167,6 +5173,9 @@ def build_milestone4(
                 width=spec.cells, profile=_ground_texture_profile(spec),
                 forest_material=repeat_forest_material,
                 forest_edge_material=repeat_edge_material,
+                blendable_exterior_materials=tuple(
+                    i for i, item in enumerate(materials) if item.code in {"g", "h", "j"}
+                ),
                 enabled=True,
             )
         write_rvw4(

@@ -234,6 +234,70 @@ def test_directional_stock_forest_blends_match_original_island(
     assert len(expanded) > len(paths)
 
 
+
+
+def test_nogova_border_apron_matches_t1_without_repainting_protected_land() -> None:
+    """A j1/t1 transition should meet t1, not unrelated grass or farmland."""
+    forest, material, base_paths = _forest_rect_world("nogova")
+    dry_grass = MATERIAL_INDEX["h"]
+    farmland = MATERIAL_INDEX["a"]
+    paved_road = MATERIAL_INDEX["p"]
+    material[~forest] = dry_grass
+    material[4, 7] = farmland
+    material[1, 3] = paved_road
+
+    base_grass_path = base_paths[dry_grass + 1]
+    assert "trava2.paa" in base_grass_path
+    t1_path = base_paths[MATERIAL_INDEX["e"] + 1]
+
+    paths, indices = apply_stock_forest_border_blends(
+        material.ravel(), forest.ravel(), base_paths,
+        width=9, profile="nogova",
+        forest_material=MATERIAL_INDEX["f"],
+        forest_edge_material=MATERIAL_INDEX["e"],
+        blendable_exterior_materials=(
+            MATERIAL_INDEX["g"], dry_grass, MATERIAL_INDEX["j"],
+        ),
+        enabled=True,
+    )
+    mapped = np.asarray(indices).reshape(9, 9)
+    # Only ordinary ground immediately outside a forest transition is t1.
+    for row, col in ((4, 1), (1, 4), (7, 4)):
+        assert paths[int(mapped[row, col])] == t1_path
+    # Never overwrite farmland, roads or distant ordinary terrain.
+    assert paths[int(mapped[4, 7])] == base_paths[farmland + 1]
+    assert paths[int(mapped[1, 3])] == base_paths[paved_road + 1]
+    assert paths[int(mapped[0, 0])] == base_grass_path
+    # Forest edge art remains directionally identical to original Nogova.
+    assert paths[int(mapped[4, 2])] == STRAIGHT_BORDERS["nogova"][0]
+    assert paths[int(mapped[4, 6])] == STRAIGHT_BORDERS["nogova"][1]
+
+    without_paths, without_indices = apply_stock_forest_border_blends(
+        material.ravel(), forest.ravel(), base_paths,
+        width=9, profile="nogova",
+        forest_material=MATERIAL_INDEX["f"],
+        forest_edge_material=MATERIAL_INDEX["e"],
+        enabled=True,
+    )
+    without = np.asarray(without_indices).reshape(9, 9)
+    assert without_paths[int(without[4, 1])] == base_grass_path
+    assert without_paths[int(without[4, 2])] == STRAIGHT_BORDERS["nogova"][0]
+
+
+def test_nogova_apron_requires_a_real_assigned_blend() -> None:
+    forest, material, paths = _forest_rect_world("nogova")
+    material[~forest] = MATERIAL_INDEX["h"]
+    result, slots = apply_stock_forest_border_blends(
+        material.ravel(), forest.ravel(), paths, width=9,
+        profile="nogova", forest_material=MATERIAL_INDEX["f"],
+        forest_edge_material=MATERIAL_INDEX["e"],
+        blendable_exterior_materials=(MATERIAL_INDEX["h"],),
+        maximum_texture_slots=len(paths), enabled=True,
+    )
+    assert result == tuple(paths)
+    actual = np.asarray(slots).reshape(9, 9)
+    assert actual[4, 1] == MATERIAL_INDEX["h"] + 1
+
 def test_only_verified_source_texture_names_are_ever_emitted() -> None:
     for profile, family in STOCK_FOREST_BLEND_FAMILIES.items():
         valid_masks = family[4]

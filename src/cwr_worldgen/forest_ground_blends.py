@@ -75,6 +75,7 @@ def apply_stock_forest_border_blends(
     forest_edge_material: int | None,
     enabled: bool = False,
     maximum_texture_slots: int = 512,
+    blendable_exterior_materials: Sequence[int] = (),
 ) -> tuple[tuple[str, ...], list[int]]:
     """Build an expanded WRP texture table and exact per-cell texture slots.
 
@@ -87,7 +88,9 @@ def apply_stock_forest_border_blends(
     from object locations. Verified quadrant paths are appended only if used.
     Missing stock diagonal assets fall back to a verified one-quadrant-nearest
     blend; never emit a guessed path. An exhausted WRP slot table falls back
-    to the original semantic texture slot.
+    to the original semantic texture slot. For Nogova, optionally align nearby
+    caller-approved ordinary grass tiles to the t1 exterior of these blends,
+    without altering farmland, roads, water or other protected materials.
     """
     paths = list(base_texture_paths)
     indices = np.asarray(material_indices, dtype=np.int32).reshape(-1)
@@ -120,6 +123,7 @@ def apply_stock_forest_border_blends(
         return tuple(paths), slots.tolist()
 
     possible = STOCK_FOREST_BLEND_FAMILIES[profile.casefold()][4]
+    assigned_blends = np.zeros((height, width), dtype=np.bool_)
     for mask in sorted(int(v) for v in np.unique(masks[requested])):
         output_mask = mask
         if output_mask not in possible:
@@ -143,5 +147,34 @@ def apply_stock_forest_border_blends(
             paths.append(path)
         else:
             continue
-        current[requested & (masks == mask)] = slot
+        assigned = requested & (masks == mask)
+        current[assigned] = slot
+        assigned_blends |= assigned
+
+    # Nogova stock j1 borders blend into t1. They cannot meet trava2/trava3
+    # without an abrupt, rotation-looking seam. Align only a one-cell strip
+    # of approved non-forest grass/park cells on the exterior of real blends.
+    if (profile.casefold() == "nogova" and blendable_exterior_materials
+            and np.any(assigned_blends)):
+        namespace, _forest, background, _extension, _masks = STOCK_FOREST_BLEND_FAMILIES["nogova"]
+        backslash = chr(92)
+        target = f"{namespace}{backslash}{background}.paa".casefold()
+
+        def canonical(path: str) -> str:
+            return str(path).replace("/", backslash).replace(backslash * 2, backslash).casefold()
+
+        background_slot = next(
+            (index for index, path in enumerate(paths) if canonical(path) == target),
+            None,
+        )
+        if background_slot is not None:
+            apron = np.zeros((height, width), dtype=np.bool_)
+            # Bits: 1=NE, 2=NW, 4=SE, 8=SW. Only a blend tile's
+            # outside-facing edges can create an exterior transition band.
+            apron[:, :-1] |= assigned_blends[:, 1:] & ((masks[:, 1:] & 10) != 10)
+            apron[:, 1:] |= assigned_blends[:, :-1] & ((masks[:, :-1] & 5) != 5)
+            apron[:-1, :] |= assigned_blends[1:, :] & ((masks[1:, :] & 12) != 12)
+            apron[1:, :] |= assigned_blends[:-1, :] & ((masks[:-1, :] & 3) != 3)
+            safe = np.isin(material, tuple(blendable_exterior_materials))
+            current[apron & safe & ~candidate] = background_slot
     return tuple(paths), slots.tolist()
