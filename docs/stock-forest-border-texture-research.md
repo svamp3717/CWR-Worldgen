@@ -10,11 +10,11 @@ WRP texture paths and directional neighbor counts.
 directional four-quadrant blend tiles. The names consist of four two-character
 base names. The original WRP texture-location maps establish where each
 filename is used, but they do NOT prove how the artwork is oriented within
-the file. Rechecking the actual PAC artwork in Island Studio alongside
-`wg_foresttest5.pbo` shows Nogova's displayed quadrants are rotated 180
-degrees relative to the original filename interpretation. Worldgen's
-geographic mask remains NE/NW/SE/SW, but the Nogova filename mask must
-be reversed. WRP texture-grid rows increase northward.
+the file. Rechecking the actual artwork in Island Studio against generated WRPs
+shows **both Nogova PAC and Everon PAA forest blends display corners
+rotated 180 degrees** relative to their names. Worldgen continues to use
+NE/NW/SE/SW geographic masks, but reverses filename masks for those two
+stock artwork families. WRP texture-grid rows still increase northward.
 
 | World | Solid forest floor | Distinct used forest-containing blend paths | Cells using blends | Dominant adjacent ground |
 | --- | --- | ---: | ---: | --- |
@@ -34,7 +34,7 @@ actually occur in the source islands.
 | World | West edge (forest east) | East edge (forest west) | North edge (forest south) | South edge (forest north) |
 | --- | --- | --- | --- | --- |
 | Nogova | `o\\t1j1t1j1.pac` | `o\\j1t1j1t1.pac` | `o\\j1j1t1t1.pac` | `o\\t1t1j1j1.pac` |
-| Everon | `eden\\pltnpltn.paa` | `eden\\tnpltnpl.paa` | `eden\\tntnplpl.paa` | `eden\\plpltntn.paa` |
+| Everon | `eden\\tnpltnpl.paa` | `eden\\pltnpltn.paa` | `eden\\plpltntn.paa` | `eden\\tntnplpl.paa` |
 | Malden | `abel\\pbttpbtt.pac` | `abel\\ttpbttpb.pac` | `abel\\ttttpbpb.pac` | `abel\\pbpbtttt.pac` |
 | Kolgujev/Cain | `cain\\u2j9u2j9.paa` | `cain\\j9u2j9u2.paa` | `cain\\j9j9u2u2.paa` | `cain\\u2u2j9j9.paa` |
 
@@ -58,6 +58,31 @@ the intrinsic orientation of the stock PAC art.
 **Worldgen now converts the requested geographic mask to the opposite
 Nogova filename mask.** Island Studio continues to render all stock and
 generated ground texture artwork identically; the original WRP is unchanged.
+
+## Confirmed Everon PAA artwork orientation (generated test 9)
+
+In the `wg_foresttest9.pbo` Island Studio screenshot, the same 180-degree
+mismatch appears in Everon's `eden\\pl/tn` quartet textures. By
+locating the 2×2 sports-pitch overlay to align screenshot pixels with
+WRP cells, then sampling 55 unobscured Everon blend cells, comparing
+each tile's four forest-colored corners with its eight possible
+orientations gave:
+
+- Original filename interpretation: **32.7%** correctly classified corners.
+- 180-degree opposite filename interpretation: **95.5%** correctly
+  classified corners, the best of the eight transforms.
+
+The original Everon texture table lacks filename quadrant mask 9
+(NE+SW). With its artwork rotated 180 degrees, the unavailable
+**geographic** mask is 6 (NW+SE). Shared-corner placement removes a
+shared SE vertex if that configuration appears, rather than emitting
+an absent stock PAA or drawing a mismatched fallback.
+
+This changes **only Worldgen's Everon filename selection**. The uniform
+Island Studio renderer, existing Everon texture assets, and Nogova
+filename selection remain unchanged. Tan farmland squares in the
+screenshot come separately from `Eden\\zbh.paa` and are outside
+this forest-border correction.
 
 ## Implications for the optional forest-undergrowth checkbox
 
@@ -86,5 +111,7 @@ generated ground texture artwork identically; the original WRP is unchanged.
    not yet selected automatically. Do not conflate the first implementation
    with full restoration of every multi-terrain transition in the originals.
 
-Only texture **names and grid adjacency data** were examined. The original
-PAA/PAC artwork is not included or redistributed.
+Original island texture **names and grid adjacency data** establish
+verified source paths; screenshots of stock artwork in Island Studio
+also establish the Nogova and Everon visible corner orientation. The
+original PAA/PAC artwork is not included or redistributed.

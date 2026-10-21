@@ -172,16 +172,16 @@ def test_written_4wvr_contains_forest_floor_and_edge_stock_slots(tmp_path) -> No
 
 
 # Directions refer to visible artwork, not raw filename token order.
-# Nogova's PAC quadrants display 180 degrees opposite their named positions;
-# the other stock palettes retain their existing filename mapping.
+# Nogova's PAC and Everon's PAA quadrants display 180 degrees opposite
+# their named positions; Malden and Kolgujev retain literal naming.
 STRAIGHT_BORDERS = {
     "nogova": (
         r"o\t1j1t1j1.pac", r"o\j1t1j1t1.pac",
         r"o\j1j1t1t1.pac", r"o\t1t1j1j1.pac",
     ),
     "everon": (
-        r"eden\pltnpltn.paa", r"eden\tnpltnpl.paa",
-        r"eden\tntnplpl.paa", r"eden\plpltntn.paa",
+        r"eden\tnpltnpl.paa", r"eden\pltnpltn.paa",
+        r"eden\plpltntn.paa", r"eden\tntnplpl.paa",
     ),
     "malden": (
         r"abel\pbttpbtt.pac", r"abel\ttpbttpb.pac",
@@ -355,8 +355,8 @@ def test_nogova_stock_blend_names_match_visible_artwork() -> None:
     assert len({
         stock_forest_blend_path("nogova", mask) for mask in range(1, 15)
     }) == 14
-    # The other stock texture profiles retain their previous mappings.
-    for profile in ("everon", "malden", "kolgujev"):
+    # The nonrotated stock texture profiles retain their previous mappings.
+    for profile in ("malden", "kolgujev"):
         namespace, forest, ground, ext, valid_masks = STOCK_FOREST_BLEND_FAMILIES[profile]
         for mask in valid_masks:
             literal = "".join(
@@ -367,6 +367,26 @@ def test_nogova_stock_blend_names_match_visible_artwork() -> None:
                 f"{namespace}\{literal}.{ext}"
             )
 
+
+
+def test_everon_filename_orientation_matches_stock_artwork() -> None:
+    """Everon's stock PAA forest corners display opposite named corners."""
+    displayed_to_source = {
+        1: r"eden\tntntnpl.paa",  # NE uses source SW
+        2: r"eden\tntnpltn.paa",  # NW uses source SE
+        4: r"eden\tnpltntn.paa",  # SE uses source NW
+        8: r"eden\pltntntn.paa",  # SW uses source NE
+        3: r"eden\tntnplpl.paa",  # northern edge
+        5: r"eden\tnpltnpl.paa",  # eastern edge
+        10: r"eden\pltnpltn.paa", # western edge
+        12: r"eden\plpltntn.paa", # southern edge
+        9: r"eden\tnplpltn.paa",  # stock filename mask 6 exists
+    }
+    for mask, path in displayed_to_source.items():
+        assert stock_forest_blend_path("everon", mask) == path
+    # Source WRP lacks filename NE+SW (9): in geographic coordinates
+    # that is NW+SE (mask 6), after the 180-degree orientation correction.
+    assert stock_forest_blend_path("everon", 6) is None
 
 
 def test_nogova_protected_ground_has_no_exposed_forest_corner_seams() -> None:
@@ -462,9 +482,15 @@ def test_everon_shared_corners_preserve_farms_roads_and_continuity() -> None:
                 and len(name) == 12 and "pl" in name):
             return 0
         stem = name[:8]
-        return sum(
+        named = sum(
             1 << corner for corner in range(4)
             if stem[2 * corner:2 * corner + 2] == "pl"
+        )
+        # Everon's stock image has its forest corners rotated 180 degrees
+        # relative to the filename token order.
+        return (
+            ((named & 1) << 3) | ((named & 2) << 1)
+            | ((named & 4) >> 1) | ((named & 8) >> 3)
         )
 
     masks = np.asarray([
@@ -472,7 +498,7 @@ def test_everon_shared_corners_preserve_farms_roads_and_continuity() -> None:
         for row in range(9)
     ], dtype=np.uint8)
     assert np.count_nonzero((masks > 0) & (masks < 15)) > 0
-    assert not np.any(masks == 9), "Everon has no verified NE+SW diagonal"
+    assert not np.any(masks == 6), "Everon has no verified geographic NW+SE diagonal"
     for row in range(9):
         for col in range(9):
             mask = int(masks[row, col])
@@ -487,21 +513,21 @@ def test_everon_shared_corners_preserve_farms_roads_and_continuity() -> None:
 
 
 def test_everon_missing_diagonal_is_resolved_by_shared_vertices() -> None:
-    """Never invent Everon's missing mask-9 texture or leave a corner seam."""
+    """Never invent Everon's missing geographic mask-6 or leave a seam."""
     from cwr_worldgen.forest_ground_blends import _consistent_stock_masks
 
-    forest = np.asarray([
+    forest = np.rot90(np.asarray([
         [0, 0, 0, 1],
         [1, 1, 0, 0],
         [1, 0, 1, 0],
         [0, 1, 1, 0],
-    ], dtype=np.bool_)
+    ], dtype=np.bool_), 1)
     plain = _consistent_stock_masks(forest, np.ones_like(forest))
-    assert np.any(plain == 9)
+    assert np.any(plain == 6)
     corrected = _consistent_stock_masks(
-        forest, np.ones_like(forest), missing_masks=frozenset({9}),
+        forest, np.ones_like(forest), missing_masks=frozenset({6}),
     )
-    assert not np.any(corrected == 9)
+    assert not np.any(corrected == 6)
     for row in range(4):
         for col in range(4):
             mask = int(corrected[row, col])
@@ -521,11 +547,19 @@ def test_only_verified_source_texture_names_are_ever_emitted() -> None:
         assert len(valid_masks) == {"nogova":14, "everon":13, "malden":12, "kolgujev":14}[profile]
         for mask in range(1, 15):
             path = stock_forest_blend_path(profile, mask)
-            assert (path is not None) == (mask in valid_masks)
+            # valid_masks describe original WRP filename masks, which
+            # differ from geographic masks on Everon and Nogova.
+            file_mask = (
+                ((mask & 1) << 3) | ((mask & 2) << 1)
+                | ((mask & 4) >> 1) | ((mask & 8) >> 3)
+                if profile in {"nogova", "everon"} else mask
+            )
+            assert (path is not None) == (file_mask in valid_masks)
         # Two uncommon diagonal masks do not exist in source Malden/Everon.
         assert stock_forest_blend_path("malden", 6) is None
         assert stock_forest_blend_path("malden", 9) is None
-        assert stock_forest_blend_path("everon", 9) is None
+        assert stock_forest_blend_path("everon", 6) is None
+        assert stock_forest_blend_path("everon", 9) is not None
     assert stock_forest_blend_path("nogova", 15) is None
 
 
