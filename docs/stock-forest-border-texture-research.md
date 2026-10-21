@@ -73,10 +73,10 @@ orientations gave:
   classified corners, the best of the eight transforms.
 
 The original Everon texture table lacks filename quadrant mask 9
-(NE+SW). With its artwork rotated 180 degrees, the unavailable
-**geographic** mask is 6 (NW+SE). Shared-corner placement removes a
-shared SE vertex if that configuration appears, rather than emitting
-an absent stock PAA or drawing a mismatched fallback.
+(NE+SW). **A 180-degree rotation leaves both diagonal masks unchanged**,
+so the unavailable geographic mask is also 9 (NE+SW). Shared-corner
+placement clears the shared SW vertex if that configuration appears,
+rather than emitting an absent stock PAA or drawing a mismatched fallback.
 
 This changes **only Worldgen's Everon filename selection**. The uniform
 Island Studio renderer, existing Everon texture assets, and Nogova

@@ -364,7 +364,7 @@ def test_nogova_stock_blend_names_match_visible_artwork() -> None:
                 for corner in range(4)
             )
             assert stock_forest_blend_path(profile, mask) == (
-                f"{namespace}\{literal}.{ext}"
+                f"{namespace}{chr(92)}{literal}.{ext}"
             )
 
 
@@ -380,13 +380,13 @@ def test_everon_filename_orientation_matches_stock_artwork() -> None:
         5: r"eden\tnpltnpl.paa",  # eastern edge
         10: r"eden\pltnpltn.paa", # western edge
         12: r"eden\plpltntn.paa", # southern edge
-        9: r"eden\tnplpltn.paa",  # stock filename mask 6 exists
+        6: r"eden\tnplpltn.paa",  # both diagonal masks are 180-degree invariant
     }
     for mask, path in displayed_to_source.items():
         assert stock_forest_blend_path("everon", mask) == path
-    # Source WRP lacks filename NE+SW (9): in geographic coordinates
-    # that is NW+SE (mask 6), after the 180-degree orientation correction.
-    assert stock_forest_blend_path("everon", 6) is None
+    # A half-turn preserves each diagonal mask: Everon's missing filename
+    # NE+SW (9) is also the missing geographic NE+SW (9).
+    assert stock_forest_blend_path("everon", 9) is None
 
 
 def test_nogova_protected_ground_has_no_exposed_forest_corner_seams() -> None:
@@ -498,7 +498,7 @@ def test_everon_shared_corners_preserve_farms_roads_and_continuity() -> None:
         for row in range(9)
     ], dtype=np.uint8)
     assert np.count_nonzero((masks > 0) & (masks < 15)) > 0
-    assert not np.any(masks == 6), "Everon has no verified geographic NW+SE diagonal"
+    assert not np.any(masks == 9), "Everon has no verified NE+SW diagonal"
     for row in range(9):
         for col in range(9):
             mask = int(masks[row, col])
@@ -513,21 +513,21 @@ def test_everon_shared_corners_preserve_farms_roads_and_continuity() -> None:
 
 
 def test_everon_missing_diagonal_is_resolved_by_shared_vertices() -> None:
-    """Never invent Everon's missing geographic mask-6 or leave a seam."""
+    """Never invent Everon's missing geographic mask-9 or leave a seam."""
     from cwr_worldgen.forest_ground_blends import _consistent_stock_masks
 
-    forest = np.rot90(np.asarray([
+    forest = np.asarray([
         [0, 0, 0, 1],
         [1, 1, 0, 0],
         [1, 0, 1, 0],
         [0, 1, 1, 0],
-    ], dtype=np.bool_), 1)
+    ], dtype=np.bool_)
     plain = _consistent_stock_masks(forest, np.ones_like(forest))
-    assert np.any(plain == 6)
+    assert np.any(plain == 9)
     corrected = _consistent_stock_masks(
-        forest, np.ones_like(forest), missing_masks=frozenset({6}),
+        forest, np.ones_like(forest), missing_masks=frozenset({9}),
     )
-    assert not np.any(corrected == 6)
+    assert not np.any(corrected == 9)
     for row in range(4):
         for col in range(4):
             mask = int(corrected[row, col])
@@ -558,8 +558,8 @@ def test_only_verified_source_texture_names_are_ever_emitted() -> None:
         # Two uncommon diagonal masks do not exist in source Malden/Everon.
         assert stock_forest_blend_path("malden", 6) is None
         assert stock_forest_blend_path("malden", 9) is None
-        assert stock_forest_blend_path("everon", 6) is None
-        assert stock_forest_blend_path("everon", 9) is not None
+        assert stock_forest_blend_path("everon", 9) is None
+        assert stock_forest_blend_path("everon", 6) is not None
     assert stock_forest_blend_path("nogova", 15) is None
 
 

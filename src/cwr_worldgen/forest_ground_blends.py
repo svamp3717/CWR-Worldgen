@@ -15,8 +15,8 @@ import numpy as np
 # (virtual namespace, forest code, ordinary grass code, blend extension,
 #  verified FILENAME quadrant masks in the original WRP texture table).
 # Geographic and filename mask bit order: 1=NE, 2=NW, 4=SE, 8=SW.
-# Everon's missing filename mask 9 corresponds to geographic mask 6
-# because its actual displayed artwork is rotated 180 degrees.
+# Everon's missing filename diagonal mask 9 remains geographic mask 9,
+# because a 180-degree rotation leaves the two diagonal masks unchanged.
 STOCK_FOREST_BLEND_FAMILIES: dict[str, tuple[str, str, str, str, frozenset[int]]] = {
     "nogova": ("o", "j1", "t1", "pac", frozenset(range(1, 15))),
     "everon": ("eden", "pl", "tn", "paa", frozenset(set(range(1, 15)) - {9})),
@@ -95,8 +95,8 @@ def _consistent_stock_masks(
     A protected water, farmland, road or urban cell must retain its source
     ground texture. Its corners must therefore remain nonforest, even when
     neighbouring forest cells would otherwise draw forest into it. Everon's
-    stock filenames omit diagonal mask 9, which is geographic mask 6 after
-    its artwork's 180-degree rotation. Clear one shared corner rather than
+    stock filenames omit diagonal mask 9, which remains geographic mask 9
+    after the 180-degree rotation. Clear one shared corner rather than
     fabricate that texture or introduce a seam.
     """
     original = _quadrants(forest)
@@ -127,14 +127,10 @@ def _consistent_stock_masks(
         missing = np.isin(masks, tuple(missing_masks))
         if not np.any(missing):
             return masks
-        if not missing_masks.issubset({6, 9}):
+        if not missing_masks.issubset({9}):
             raise ValueError("unsupported missing stock forest corner masks")
-        if 6 in missing_masks:
-            row, col = np.nonzero(masks == 6)  # NW + SE forest
-            vertices[row, col + 1] = False  # SE vertex
-        if 9 in missing_masks:
-            row, col = np.nonzero(masks == 9)  # NE + SW forest
-            vertices[row, col] = False  # SW vertex
+        row, col = np.nonzero(missing)  # NE + SW forest
+        vertices[row, col] = False  # SW shared vertex
 
 
 def apply_stock_forest_border_blends(
@@ -197,7 +193,7 @@ def apply_stock_forest_border_blends(
             material, tuple(blendable_exterior_materials)
         )
         editable = candidate | editable_exterior
-        missing_masks = frozenset({6}) if profile_key == "everon" else frozenset()
+        missing_masks = frozenset({9}) if profile_key == "everon" else frozenset()
         masks = _consistent_stock_masks(
             forest, editable, missing_masks=missing_masks,
         )
