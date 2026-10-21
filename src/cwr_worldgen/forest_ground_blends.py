@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Verified OFP/CWA forest-floor quadrant blends for the stock ground presets.
 
-Four two-letter components are in SW, SE, NW, NE quadrant order.  The
+Four two-letter components are in NE, NW, SE, SW quadrant order.  The
 original island WRP texture-location atlases establish both the names and
 their orientation. Do not synthesize absent diagonal texture assets.
 """
@@ -13,7 +13,7 @@ import numpy as np
 
 # (virtual namespace, forest code, ordinary grass code, blend extension,
 #  verified quadrant masks in the source WRP texture table).
-# Bit order: 1=SW, 2=SE, 4=NW, 8=NE.
+# Bit order: 1=NE, 2=NW, 4=SE, 8=SW.
 STOCK_FOREST_BLEND_FAMILIES: dict[str, tuple[str, str, str, str, frozenset[int]]] = {
     "nogova": ("o", "j1", "t1", "pac", frozenset(range(1, 15))),
     "everon": ("eden", "pl", "tn", "paa", frozenset(set(range(1, 15)) - {9})),
@@ -38,7 +38,7 @@ def stock_forest_blend_path(profile: str, quadrant_mask: int) -> str | None:
 
 
 def _quadrants(forest: np.ndarray) -> np.ndarray:
-    """Select forest cover at a ground cell's SW,SE,NW,NE quadrants.
+    """Select forest cover at a ground cell's NE,NW,SE,SW quadrants.
 
     Raster rows increase northward, unlike north-up image pixels. Each corner
     looks at four neighbouring land-use samples; >=3 forest samples means
@@ -57,10 +57,10 @@ def _quadrants(forest: np.ndarray) -> np.ndarray:
     nw = p[2:, :-2]
     ne = p[2:, 2:]
     return (
-        (centre + south + west + sw >= 3).astype(np.uint8)
-        | ((centre + south + east + se >= 3).astype(np.uint8) << 1)
-        | ((centre + north + west + nw >= 3).astype(np.uint8) << 2)
-        | ((centre + north + east + ne >= 3).astype(np.uint8) << 3)
+        (centre + north + east + ne >= 3).astype(np.uint8)
+        | ((centre + north + west + nw >= 3).astype(np.uint8) << 1)
+        | ((centre + south + east + se >= 3).astype(np.uint8) << 2)
+        | ((centre + south + west + sw >= 3).astype(np.uint8) << 3)
     )
 
 
