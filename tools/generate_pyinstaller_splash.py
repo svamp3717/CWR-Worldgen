@@ -25,7 +25,7 @@ TOOLS: dict[str, tuple[str, str, tuple[int, int, int]]] = {
         "WRP", "MOD DEPENDENCY SCANNER", (250, 186, 101),
     ),
     "CWR-Island-Studio": (
-        "ISLAND", "STUDIO", (144, 196, 125),
+        "ISLAND STUDIO", "", (144, 196, 125),
     ),
 }
 
@@ -115,8 +115,13 @@ def render_splash(name: str, destination: Path) -> None:
         font=_font(13, bold=True),
     )
 
-    draw.text((40, 98), title, font=_font(35, bold=True), fill=(244, 248, 252))
-    draw.text((40, 150), subtitle, font=_font(25, bold=True), fill=accent)
+    if name == "CWR-Island-Studio":
+        # Both words share one headline, in pure white. Other tools retain
+        # their existing two-line title / coloured subtitle layout.
+        draw.text((40, 119), title, font=_font(35, bold=True), fill=(255, 255, 255))
+    else:
+        draw.text((40, 98), title, font=_font(35, bold=True), fill=(244, 248, 252))
+        draw.text((40, 150), subtitle, font=_font(25, bold=True), fill=accent)
     draw.line((40, 209, 598, 209), fill=(61, 80, 96), width=1)
 
     draw.text(
