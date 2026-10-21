@@ -18,6 +18,7 @@ from cwr_worldgen.surface_pass import (
     build_surface_pass, surface_texture_wire_paths, external_surface_texture_paths,
 )
 from cwr_worldgen.terrain import stock_forest_undergrowth_paths
+from cwr_worldgen.wrp import inspect_rvw4, write_rvw4
 
 
 STOCK = {
@@ -140,3 +141,26 @@ def test_forest_classification_has_interior_and_boundary_cells() -> None:
     assert STOCK["nogova"][0] == surface_texture_wire_paths(
         "example", "nogova", forest_undergrowth_textures=True,
     )[MATERIAL_INDEX["f"]]
+
+
+
+def test_written_4wvr_contains_forest_floor_and_edge_stock_slots(tmp_path) -> None:
+    # The WRP contains true texture paths, not just a preview override.
+    spec = SimpleNamespace(
+        name="world", ground_texture_profile="nogova",
+        surface_pass_enabled=True, surface_ground_mode="milestone9",
+        forest_undergrowth_textures=True,
+    )
+    ground_paths = _ground_texture_paths(spec)
+    floor_slot = MATERIAL_INDEX["f"] + 1
+    edge_slot = MATERIAL_INDEX["e"] + 1
+    slots = [floor_slot, edge_slot, floor_slot, edge_slot] * 4
+    wrp = tmp_path / "undergrowth.wrp"
+    write_rvw4(
+        wrp, 4, 4, [10.0] * 16, slots,
+        [r"world\data\d.paa", *ground_paths], (),
+        height_scale=0.05,
+    )
+    inspected = inspect_rvw4(wrp, height_scale=0.05)
+    assert inspected.texture_slots[floor_slot] == r"o\j1.paa"
+    assert inspected.texture_slots[edge_slot] == r"o\j2.paa"
