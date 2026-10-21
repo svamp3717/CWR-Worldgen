@@ -62,6 +62,7 @@ jobs:
             tests/test_island_studio_orientation.py `
             tests/test_island_studio_splash.py `
             tests/test_island_studio_oprw.py `
+            tests/test_island_studio_texture_location_export.py `
             tests/test_island_studio_model_classification.py `
             tests/test_island_studio_open_world.py
           if ($LASTEXITCODE -ne 0) { throw "Island Studio regression tests failed" }
