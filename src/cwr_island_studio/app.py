@@ -148,6 +148,7 @@ class IslandStudio:
         self.asset_roots: tuple[Path, ...] = ()
         self.selected_pbos: tuple[Path, ...] = ()
         self.pbo_textures: PboTextures | None = None
+        self._texture_issues: dict[str, str] = {}
         self._loading_pbos = False
         self.texture_folder_label = tk.StringVar(value="No texture/model folders selected")
         self.pbo_label = tk.StringVar(value="No PBO archives selected")
@@ -307,8 +308,12 @@ class IslandStudio:
             side="left", padx=(4, 0),
         )
         ttk.Label(side, textvariable=self.pbo_label, wraplength=230).pack(
-            anchor="w", pady=(3, 8),
+            anchor="w", pady=(3, 4),
         )
+        ttk.Button(
+            side, text="Missing texture details…",
+            command=self._show_texture_issues,
+        ).pack(anchor="w", pady=(0, 8))
         ttk.Separator(side).pack(fill="x", pady=(4, 9))
 
         ttk.Label(side, text="Edit tool", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
@@ -1213,6 +1218,7 @@ class IslandStudio:
         try:
             view = self.layer.get()
             if view == "Actual textures":
+                diagnostics: dict[str, str] = {}
                 fallback = self.document.viewport(
                     left, top, right, bottom, width, height, textures=True,
                 )
@@ -1222,13 +1228,22 @@ class IslandStudio:
                 pixels, loaded = render_real_textures(
                     slots, x, z, self.document.texture_paths,
                     self.asset_roots, fallback, self.document.cell_size,
-                    archives=self.pbo_textures,
+                    archives=self.pbo_textures, diagnostics=diagnostics,
                 )
+                self._texture_issues = diagnostics
                 if not self.asset_roots and self.pbo_textures is None:
                     self.status.set("Choose a texture folder or PBOs to show real images")
-                elif loaded == 0:
-                    self.status.set("No matching texture files found; showing texture-slot colours")
+                elif diagnostics:
+                    missing = sum(reason == "missing" for reason in diagnostics.values())
+                    unreadable = len(diagnostics) - missing
+                    example = next(iter(diagnostics))
+                    self.status.set(
+                        f"Actual textures: {loaded} loaded, {missing} missing, "
+                        f"{unreadable} unreadable. Example: {example}. "
+                        "Use Missing texture details…"
+                    )
             else:
+                self._texture_issues = {}
                 pixels = self.document.viewport(
                     left, top, right, bottom, width, height,
                     textures=view == "Texture slots",
@@ -1517,6 +1532,44 @@ class IslandStudio:
 
     def _clear_pbos(self) -> None:
         self._schedule_pbos(())
+
+    def _show_texture_issues(self) -> None:
+        """Explain which visible WRP textures still need assets or decoding."""
+        issues = getattr(self, "_texture_issues", {})
+        if not issues:
+            messagebox.showinfo(
+                "Actual texture diagnostics",
+                "No unresolved texture slots in the last Actual textures view. "
+                "Switch to Actual textures if this view has not been sampled yet.",
+                parent=self.root,
+            )
+            return
+        missing = sum(reason == "missing" for reason in issues.values())
+        unreadable = len(issues) - missing
+        lines = [
+            f"{missing} missing paths; {unreadable} files present but unreadable.",
+            "",
+            "Missing paths: add the matching texture PBO or parent asset folder.",
+            "Unreadable: the file exists but is invalid or uses an unsupported format.",
+            "WRP paths are shown below (hover over a terrain cell to see its slot):",
+            "",
+        ]
+        lines.extend(
+            f"{reason.upper():10} {name}"
+            for name, reason in sorted(issues.items(), key=lambda item: item[0].casefold())
+        )
+        # A scrollable window keeps long OPRW texture tables inspectable.
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Missing / unreadable textures")
+        dialog.geometry("760x460")
+        text = tk.Text(dialog, wrap="none", font=("Consolas", 10))
+        scrollbar = ttk.Scrollbar(dialog, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        text.pack(fill="both", expand=True)
+        text.insert("1.0", "\n".join(lines))
+        text.configure(state="disabled")
+
 
     def _layer_changed(self) -> None:
         self._refresh_hover()
