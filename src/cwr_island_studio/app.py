@@ -1242,6 +1242,8 @@ class IslandStudio:
                         f"{unreadable} unreadable. Example: {example}. "
                         "Use Missing texture details…"
                     )
+                else:
+                    self.status.set(f"Actual textures: {loaded} visible texture slots loaded")
             else:
                 self._texture_issues = {}
                 pixels = self.document.viewport(
