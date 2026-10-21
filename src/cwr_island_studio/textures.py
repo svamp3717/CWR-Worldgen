@@ -198,18 +198,22 @@ def render_real_textures(
         if not path:
             continue
         candidates = _texture_candidates(path)
-        # Prefer the exact WRP name across all sources. Only then try its
-        # opposite .paa/.pac suffix. Loose assets outrank the PBO selection.
+        # Honor original source priority: newest loose root first, then PBOs.
+        # Within each source prefer the exact WRP name before trying its
+        # alternative .paa/.pac extension.
         tile = None
-        for candidate in candidates:
-            for root in reversed(search_roots):
+        for root in reversed(search_roots):
+            for candidate in candidates:
                 tile = _image_tile(str(root), candidate)
                 if tile is not None:
                     break
-            if tile is None and archives is not None:
-                tile = _pbo_image_tile(archives, candidate)
             if tile is not None:
                 break
+        if tile is None and archives is not None:
+            for candidate in candidates:
+                tile = _pbo_image_tile(archives, candidate)
+                if tile is not None:
+                    break
         if tile is None:
             if diagnostics is not None:
                 diagnostics[path] = (
