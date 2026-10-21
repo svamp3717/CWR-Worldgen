@@ -165,3 +165,33 @@ def test_loose_sources_have_precedence_over_selected_archives(tmp_path: Path) ->
         clear_archive_texture_cache()
         clear_loose_texture_cache()
         archives.close()
+
+
+def test_actual_textures_keep_north_up_quadrants(tmp_path: Path) -> None:
+    """A directional tile must render north-up without mirroring east/west."""
+    tile = Image.new("RGB", (2, 2))
+    # Source image rows run top-to-bottom: NW, NE, SW, SE.
+    tile.putdata((
+        (255, 0, 0), (0, 255, 0),
+        (0, 0, 255), (255, 255, 0),
+    ))
+    tile.save(tmp_path / "quadrants.png")
+    # Viewport rows descend geographically from north to south. The last
+    # sample lies exactly on the southern gridline to guard against wrapping.
+    slots = np.zeros((3, 2), dtype=np.int32)
+    fallback = np.full((3, 2, 3), 17, dtype=np.uint8)
+    expected = np.asarray([
+        [[255, 0, 0], [0, 255, 0]],
+        [[0, 0, 255], [255, 255, 0]],
+        [[0, 0, 255], [255, 255, 0]],
+    ], dtype=np.uint8)
+    try:
+        actual, loaded = render_real_textures(
+            slots, np.array([12.5, 37.5]),
+            np.array([37.5, 12.5, 0.0]),
+            ("quadrants.png",), tmp_path, fallback, 50.0,
+        )
+        assert loaded == 1
+        np.testing.assert_array_equal(actual, expected)
+    finally:
+        clear_loose_texture_cache()

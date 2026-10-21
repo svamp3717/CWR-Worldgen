@@ -260,7 +260,10 @@ def render_real_textures(
         tx = np.mod(x[cols] / cell_size, 1.0)
         tz = np.mod(z[rows] / cell_size, 1.0)
         cx = np.minimum(tile.shape[1] - 1, (tx * tile.shape[1]).astype(np.intp))
-        cz = np.minimum(tile.shape[0] - 1, (tz * tile.shape[0]).astype(np.intp))
+        # WRP Z increases northward, but image row 0 is the north/top edge.
+        # Reverse only the within-cell vertical coordinate; keep east/west intact.
+        # Clamping keeps samples on a cell's south edge at the bottom of its tile.
+        cz = np.minimum(tile.shape[0] - 1, ((1.0 - tz) * tile.shape[0]).astype(np.intp))
         output[rows, cols] = tile[cz, cx]
         loaded += 1
     return output, loaded
