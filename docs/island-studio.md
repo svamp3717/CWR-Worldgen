@@ -154,9 +154,10 @@ Choose **Actual textures** and supply a **texture assets folder** to display
 real images referenced by the WRP texture table. The folder should contain
 an extracted loose-file tree matching the virtual texture paths, for example
 an asset at o/data/grass.paa for the texture table entry o\\data\\grass.paa.
-Supported formats currently include DXT1/DXT5 .paa and ordinary image
-files such as .png/.jpg. Missing or unsupported textures retain their
-existing slot colour, so gaps are visible.
+Supported formats include DXT1/DXT5 .paa, original OFP/CWA paletted
+.pac terrain textures (including RLE and legacy LZW compression), and
+ordinary image files such as .png/.jpg. Missing or unsupported textures
+retain their existing slot colour, so gaps are visible.
 
 The preview loads only the visible area, with bounded decoded texture
 caching. It does not resolve custom texture
@@ -185,8 +186,21 @@ indexes and cached preview tiles.
 You can combine selected archives with a loose texture folder. A loose
 file is preferred when both sources contain the same virtual path, and
 missing or unsupported images stay visibly rendered as slot colours.
+OFP/CWA worlds can refer to a .pac texture that is actually stored as .paa
+(or the reverse); Island Studio tries the alternate extension after the
+literal WRP name, retaining loose-asset priority.
+
+If individual terrain cells remain brightly coloured, click **Missing
+texture details…** below the PBO selector. The list shows exactly which WRP
+texture paths are **MISSING** (no matching loose file or selected PBO
+member) and which are **UNREADABLE** (a file exists but its decoding failed).
+Adding a PBO is not the same as loading all game textures: the list makes
+it possible to identify which namespaces and other archives are needed.
+These diagnostics are based on the current **Actual textures** viewport;
+move or zoom the map to inspect another area.
+
 This version supports ordinary first-level texture members, including
-DXT1/DXT5 PAA. Nested archives inside a PBO are not indexed. Whole-file
+DXT1/DXT5 PAA and original paletted PAC textures. Nested archives inside a PBO are not indexed. Whole-file
 Zstandard-wrapped archives are temporarily unpacked to a scratch file
 for random-access indexing, then deleted when the selection is cleared.
 
