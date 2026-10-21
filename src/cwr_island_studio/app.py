@@ -1891,10 +1891,19 @@ class IslandStudio:
         doc = self.document
         archive = getattr(doc, "_archive_owner", None)
         source = getattr(archive, "path", doc.path)
+        # Archive members are extracted as selected-world.wrp. Prefer the
+        # original member name from source_label, not that temporary file.
+        source_name = str(getattr(doc, "source_label", "") or "")
+        member_name = source_name.rsplit(" / ", 1)[-1].replace("\\", "/").rsplit("/", 1)[-1]
+        island_name = Path(member_name).stem if member_name.lower().endswith(".wrp") else doc.path.stem
+        island_name = "".join(
+            "_" if ord(char) < 32 or char in '<>"\\/|?*:' else char
+            for char in island_name
+        ).strip(" .") or "island"
         chosen = filedialog.asksaveasfilename(
             title="Export texture location map and path data (ZIP)",
             initialdir=str(Path(source).parent),
-            initialfile=f"{doc.path.stem}_texture_map.zip",
+            initialfile=f"{island_name}.zip",
             defaultextension=".zip",
             filetypes=[("Texture location atlas (ZIP)", "*.zip")],
         )
