@@ -8,6 +8,7 @@ import threading
 from pathlib import Path
 import math
 import queue
+import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Callable
@@ -1868,12 +1869,28 @@ class IslandStudio:
         self.root.destroy()
 
 
+def _dismiss_bootloader_splash(root: tk.Tk) -> None:
+    """Release PyInstaller's splash after the Island Studio window is built."""
+    if not getattr(sys, "frozen", False):
+        return
+    root.update_idletasks()
+    try:
+        import pyi_splash
+    except ImportError:
+        return  # Normal Python and non-splash executable builds.
+    try:
+        pyi_splash.close()
+    except (OSError, RuntimeError):
+        pass  # A splash that has already closed must not block the editor.
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Fast large-world RVW4 island editor")
     parser.add_argument("wrp", nargs="?", type=Path, help="optional .wrp, .pbo or .ifa file to open")
     args = parser.parse_args(argv)
     root = tk.Tk()
     IslandStudio(root, args.wrp)
+    _dismiss_bootloader_splash(root)
     root.mainloop()
     return 0
 
