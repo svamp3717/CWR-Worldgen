@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - "src/cwr_worldgen/terrain.py"
+      - "src/cwr_worldgen/forest_ground_blends.py"
       - "src/cwr_worldgen/surface_pass.py"
       - "src/cwr_worldgen/generator.py"
       - "src/cwr_worldgen/milestone9.py"
