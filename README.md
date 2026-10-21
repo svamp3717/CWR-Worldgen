@@ -61,6 +61,27 @@ Terrain appearance is independent from vegetation appearance.
 
 Ground textures can use several classic OFP/CWA terrain styles, including Nogova, Kolgujev, Malden and Everon, as well as generated or desert terrain materials. Terrain textures can also be disabled entirely when an unpainted WRP is desired.
 
+**Optional stock forest undergrowth textures:** In **Common choices**, turn on
+**Stock forest undergrowth ground textures (incl. forest edges)** to paint OSM
+forest interiors and their edge/border band with a stock forest-floor tile.
+The checkbox is off by default and does not control the separate 3D
+**Forest undergrowth** vegetation option. It follows **Ground textures**, not
+the selected vegetation profile:
+
+| Ground texture preset | Forest floor | Forest edge/border |
+| --- | --- | --- |
+| Nogova | `o\\j1.paa` | `o\\j2.paa` (candidate, verify in O.pbo) |
+| Everon | `eden\\pl.paa` | `eden\\pl.paa` |
+| Malden | `abel\\pb.paa` | `abel\\pb.paa` |
+| Kolgujev/Cain | `cain\\u2.paa` | `cain\\u2.paa` |
+
+Only forest and forest-edge ground-texture paths change; beaches, roads,
+farmland, grassland and object placement retain their normal settings.
+Generated, desert and untextured terrain profiles ignore the option.
+CLI equivalent: `--forest-undergrowth-textures`. These paths reference
+original game texture assets and are **not** copied into the generated PBO.
+
+
 Vegetation can likewise use different game styles independently of the terrain texture set. Forest blocks, individual trees, undergrowth, rural vegetation, meadow grass, wetland reeds and related vegetation systems can be configured separately or disabled with the **None** vegetation preset.
 
 This makes it possible, for example, to use Nogova ground textures with Everon vegetation, or generate a terrain with no vegetation or painted terrain textures at all.
