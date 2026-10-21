@@ -28,6 +28,7 @@ _MAX_TEX_BYTES = 32 * 1024 * 1024
 # Generated pitch/runway/surface PAA files are already world-aligned in
 # south-to-north pixel row order and must never be rotated along with them.
 FOREST_BORDER_ORIENTATIONS = (
+    "Auto (stock artwork)",
     "North up",
     "90 clockwise",
     "180",
@@ -39,23 +40,33 @@ FOREST_BORDER_ORIENTATIONS = (
 )
 
 
-def _is_stock_forest_border(path: str) -> bool:
+def _stock_forest_components(path: str) -> tuple[str, tuple[str, ...]] | None:
+    """Recognize stock quartets named NE, NW, SE, SW, including mixed ground.
+
+    Original Nogova also has j1/b1 and j1/s2 boundaries, not just j1/t1.
+    """
     normalized = path.replace("\\", "/").casefold()
+    while "//" in normalized:
+        normalized = normalized.replace("//", "/")
     namespace, sep, filename = normalized.rpartition("/")
     if not sep:
-        return False
+        return None
     stem, dot, extension = filename.rpartition(".")
-    if not dot or len(stem) != 8:
-        return False
-    for family in STOCK_FOREST_BLEND_FAMILIES.values():
-        source_namespace, forest, ground, suffix, _available = family
-        if namespace != source_namespace or extension != suffix:
+    if not dot or extension not in {"paa", "pac"} or len(stem) != 8:
+        return None
+    for source_namespace, forest, _ground, _suffix, _masks in STOCK_FOREST_BLEND_FAMILIES.values():
+        if namespace != source_namespace:
             continue
-        quarters = tuple(stem[index:index + 2] for index in range(0, 8, 2))
-        return all(part in {forest, ground} for part in quarters) and (
-            forest in quarters and ground in quarters
-        )
-    return False
+        parts = tuple(stem[i:i + 2] for i in range(0, 8, 2))
+        if forest in parts and any(p != forest for p in parts) and all(
+            len(p) == 2 and p.isascii() and p.isalnum() for p in parts
+        ):
+            return namespace, parts
+    return None
+
+
+def _is_stock_forest_border(path: str) -> bool:
+    return _stock_forest_components(path) is not None
 
 
 def _orient_stock_border(tile: np.ndarray, orientation: str) -> np.ndarray:
@@ -165,6 +176,8 @@ def decode_pac_preview(data: bytes) -> Image.Image:
 
 def _safe_relative(path: str) -> Path | None:
     normalized = path.replace("\\", "/").lstrip("/")
+    while "//" in normalized:
+        normalized = normalized.replace("//", "/")
     pieces = normalized.split("/")
     if not pieces or any(part in {"", ".", ".."} or ":" in part for part in pieces):
         return None
@@ -254,14 +267,84 @@ def _pbo_image_tile(archives: PboTextures, virtual_path: str) -> np.ndarray | No
         return None
 
 
+def _resolve_tile(
+    path: str, search_roots: tuple[Path, ...], archives: PboTextures | None,
+) -> np.ndarray | None:
+    """Resolve the exact WRP path before trying its alternate extension."""
+    candidates = _texture_candidates(path)
+    for root in reversed(search_roots):
+        for candidate in candidates:
+            tile = _image_tile(str(root), candidate)
+            if tile is not None:
+                return tile
+    if archives is not None:
+        for candidate in candidates:
+            tile = _pbo_image_tile(archives, candidate)
+            if tile is not None:
+                return tile
+    return None
+
+
+def _corner_means(tile: np.ndarray) -> np.ndarray:
+    height, width = tile.shape[:2]
+    dy, dx = max(1, height // 5), max(1, width // 5)
+    return np.asarray((
+        tile[:dy, :dx].mean(axis=(0, 1)),       # NW
+        tile[:dy, -dx:].mean(axis=(0, 1)),      # NE
+        tile[-dy:, :dx].mean(axis=(0, 1)),      # SW
+        tile[-dy:, -dx:].mean(axis=(0, 1)),     # SE
+    ), dtype=np.float64)
+
+
+@lru_cache(maxsize=512)
+def _auto_stock_border_orientation(
+    path: str, search_roots: tuple[Path, ...], archives: PboTextures | None,
+) -> str:
+    """Match stock quartet corners with their real source material colours.
+
+    The names give NE/NW/SE/SW materials, but the PAC/PAA storage orientation
+    must be checked against the decoded artwork, not assumed from WRP rows.
+    """
+    decoded = _stock_forest_components(path)
+    if decoded is None:
+        return "North up"
+    namespace, parts = decoded
+    tile = _resolve_tile(path, search_roots, archives)
+    if tile is None:
+        return "North up"
+
+    colours: dict[str, np.ndarray] = {}
+    for part in set(parts):
+        base = _resolve_tile(rf"{namespace}\\{part}.paa", search_roots, archives)
+        if base is None:
+            return "North up"
+        colours[part] = np.asarray(base, dtype=np.float64).mean(axis=(0, 1))
+    if max(float(np.linalg.norm(a - b)) for a in colours.values()
+           for b in colours.values()) < 10.0:
+        return "North up"
+
+    ne, nw, se, sw = parts
+    expected = np.asarray([colours[p] for p in (nw, ne, sw, se)])
+    best_name, best_score = "North up", float("inf")
+    for orientation in FOREST_BORDER_ORIENTATIONS[1:]:
+        candidate = _orient_stock_border(tile, orientation)
+        difference = _corner_means(candidate) - expected
+        score = float(np.sum(difference * difference))
+        if score < best_score:
+            best_name, best_score = orientation, score
+    return best_name
+
+
 def clear_archive_texture_cache() -> None:
     """Drop decoded tiles before replacing or closing selected archives."""
     _pbo_image_tile.cache_clear()
+    _auto_stock_border_orientation.cache_clear()
 
 
 def clear_loose_texture_cache() -> None:
     """Discard cached tiles when folders are added or removed."""
     _image_tile.cache_clear()
+    _auto_stock_border_orientation.cache_clear()
 
 
 def render_real_textures(
@@ -291,22 +374,7 @@ def render_real_textures(
         if not path:
             continue
         candidates = _texture_candidates(path)
-        # Honor original source priority: newest loose root first, then PBOs.
-        # Within each source prefer the exact WRP name before trying its
-        # alternative .paa/.pac extension.
-        tile = None
-        for root in reversed(search_roots):
-            for candidate in candidates:
-                tile = _image_tile(str(root), candidate)
-                if tile is not None:
-                    break
-            if tile is not None:
-                break
-        if tile is None and archives is not None:
-            for candidate in candidates:
-                tile = _pbo_image_tile(archives, candidate)
-                if tile is not None:
-                    break
+        tile = _resolve_tile(path, search_roots, archives)
         if tile is None:
             if diagnostics is not None:
                 diagnostics[path] = (
@@ -316,7 +384,12 @@ def render_real_textures(
             continue
         stock_border = _is_stock_forest_border(path)
         if stock_border:
-            tile = _orient_stock_border(tile, forest_border_orientation)
+            orientation = (
+                _auto_stock_border_orientation(path, search_roots, archives)
+                if forest_border_orientation == "Auto (stock artwork)"
+                else forest_border_orientation
+            )
+            tile = _orient_stock_border(tile, orientation)
         rows, cols = np.nonzero(slots == slot)
         tx = np.mod(x[cols] / cell_size, 1.0)
         tz = np.mod(z[rows] / cell_size, 1.0)

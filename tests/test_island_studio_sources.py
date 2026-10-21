@@ -225,3 +225,58 @@ def test_stock_forest_quadrants_can_rotate_without_rotating_generated_tiles(
     assert rotated[:, 0].tolist() == [[0, 0, 255], [255, 255, 0]]
     # Second column belongs to generated sports overlay and never rotates.
     assert rotated[:, 1].tolist() == original[:, 1].tolist()
+
+
+def test_stock_nogova_mixed_border_orientation_calibrates_from_base_tiles(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Original Nogova uses more quartet types than only j1/t1."""
+    import cwr_island_studio.textures as texture_module
+
+    brown = np.array([73, 52, 31], dtype=np.uint8)  # j1 forest
+    green = np.array([114, 132, 79], dtype=np.uint8)  # b1 exterior
+    correct = np.empty((12, 12, 3), dtype=np.uint8)
+    correct[:] = green
+    correct[:6, 6:] = brown  # NE forest, other quadrants exterior.
+    stock_path = r"o\j1b1b1b1.pac"
+    rotated_original = np.rot90(correct, 1).copy()
+
+    def load(_root: str, path: str):
+        lookup = path.replace("/", "\\").casefold()
+        if lookup == stock_path:
+            return rotated_original
+        if lookup == r"o\j1.paa":
+            return np.full((12, 12, 3), brown, dtype=np.uint8)
+        if lookup == r"o\b1.paa":
+            return np.full((12, 12, 3), green, dtype=np.uint8)
+        return None
+
+    monkeypatch.setattr(texture_module, "_image_tile", load)
+    texture_module._auto_stock_border_orientation.cache_clear()
+    assert texture_module._is_stock_forest_border(stock_path)
+    assert texture_module._is_stock_forest_border(r"o\j1j1s2s2.pac")
+    assert not texture_module._is_stock_forest_border(r"o\j1.paa")
+    assert not texture_module._is_stock_forest_border(r"example\\sp000.paa")
+    assert texture_module._auto_stock_border_orientation(
+        stock_path, (tmp_path,), None
+    ) == "90 clockwise"
+
+    x = np.array([3.0, 9.0])
+    z = np.array([9.0, 3.0])
+    slots = np.zeros((2, 2), dtype=np.int32)
+    fallback = np.zeros((2, 2, 3), dtype=np.uint8)
+    actual, loaded = render_real_textures(
+        slots, x, z, (stock_path,), tmp_path, fallback, 12.0,
+        forest_border_orientation="Auto (stock artwork)",
+    )
+    assert loaded == 1
+    np.testing.assert_array_equal(actual, [
+        [green, brown],
+        [green, green],
+    ])
+    manual, _ = render_real_textures(
+        slots, x, z, (stock_path,), tmp_path, fallback, 12.0,
+        forest_border_orientation="North up",
+    )
+    assert not np.array_equal(manual, actual)
+    texture_module._auto_stock_border_orientation.cache_clear()
