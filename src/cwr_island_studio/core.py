@@ -540,6 +540,11 @@ class IslandDocument:
         height = max(1, min(1200, int(height)))
         world_x = np.linspace(left, right, width, endpoint=False)
         world_z = np.linspace(top, bottom, height, endpoint=False)
+        if top > bottom:
+            # Island Studio displays geographic north at the top, opposite
+            # the raw WRP south-to-north row order. Sample pixel centres on
+            # descending views so both edge rows appear exactly once.
+            world_z -= (top - bottom) / (2 * height)
         columns = np.clip((world_x / self.cell_size).astype(np.int64), 0, self.width - 1)
         rows = np.clip((world_z / self.cell_size).astype(np.int64), 0, self.height - 1)
         source = self.textures if textures else self.heights
