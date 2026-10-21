@@ -122,3 +122,107 @@ def test_untrusted_pac_paths_do_not_escape_asset_roots(tmp_path: Path) -> None:
     )
     assert loaded == 0
     np.testing.assert_array_equal(result, fallback)
+
+
+def _dxt1_paa(red: bool = True) -> bytes:
+    colour = 0xF800 if red else 0x07E0
+    payload = struct.pack("<HHI", colour, colour, 0)
+    return (
+        struct.pack("<H", 0xFF01) + struct.pack("<H", 0)
+        + struct.pack("<HH", 4, 4) + len(payload).to_bytes(3, "little")
+        + payload + struct.pack("<HH", 0, 0)
+    )
+
+
+def test_typed_dxt_pac_uses_same_decoder_as_paa() -> None:
+    # Not every .pac has the original P8 palette header.
+    from cwr_island_studio.textures import decode_paa_preview
+    pac = _dxt1_paa()
+    assert decode_pac_preview(pac).getpixel((0, 0)) == (255, 0, 0)
+    assert decode_paa_preview(pac).getpixel((0, 0)) == (255, 0, 0)
+
+
+@pytest.mark.parametrize("wrp_suffix,archive_suffix", [
+    (".pac", ".paa"), (".paa", ".pac"),
+])
+def test_pbo_texture_extension_alias_resolves_both_ways(
+    tmp_path: Path, wrp_suffix: str, archive_suffix: str,
+) -> None:
+    archive = tmp_path / "eden.pbo"
+    raw = _pac() if archive_suffix == ".pac" else _dxt1_paa()
+    _pbo(archive, "bak/grass" + archive_suffix, raw)
+    reader = PboTextures((archive,))
+    try:
+        fallback = np.full((1, 1, 3), 27, dtype=np.uint8)
+        diagnostics = {}
+        pixels, count = render_real_textures(
+            np.zeros((1, 1), dtype=np.int32),
+            np.array([0]), np.array([0]),
+            ("eden\\bak\\grass" + wrp_suffix,),
+            None, fallback, 4.0, archives=reader,
+            diagnostics=diagnostics,
+        )
+        assert count == 1 and diagnostics == {}
+        assert pixels[0, 0].tolist() == [255, 0, 0]
+    finally:
+        clear_archive_texture_cache()
+        reader.close()
+
+
+def test_newest_loose_asset_wins_over_pbo_even_with_extension_alias(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "eden.pbo"
+    _pbo(archive, r"bak\\field.pac", _pac())
+    directory = tmp_path / "loose" / "eden" / "bak"
+    directory.mkdir(parents=True)
+    (directory / "field.paa").write_bytes(_dxt1_paa(red=False))
+    reader = PboTextures((archive,))
+    try:
+        result, count = render_real_textures(
+            np.zeros((1, 1), dtype=np.int32),
+            np.array([0]), np.array([0]), (r"eden\\bak\\field.pac",),
+            tmp_path / "loose", np.zeros((1, 1, 3), dtype=np.uint8),
+            4.0, archives=reader,
+        )
+        assert count == 1
+        assert result[0, 0].tolist() == [0, 255, 0]
+    finally:
+        clear_loose_texture_cache()
+        clear_archive_texture_cache()
+        reader.close()
+
+
+def test_texture_diagnostics_distinguish_missing_from_undecodable(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "unreadable.pac").write_bytes(b"broken")
+    paths = ("unreadable.pac", "missing.pac")
+    fallback = np.full((1, 2, 3), 42, dtype=np.uint8)
+    diagnostics = {}
+    try:
+        result, count = render_real_textures(
+            np.array([[0, 1]], dtype=np.int32),
+            np.array([0, 4]), np.array([0]), paths,
+            tmp_path, fallback, 4.0, diagnostics=diagnostics,
+        )
+        assert count == 0
+        np.testing.assert_array_equal(result, fallback)
+        assert diagnostics == {
+            "unreadable.pac": "unreadable", "missing.pac": "missing",
+        }
+    finally:
+        clear_loose_texture_cache()
+
+
+def test_missing_texture_is_diagnosed_even_without_selected_assets() -> None:
+    diagnostics = {}
+    fallback = np.full((1, 1, 3), 12, dtype=np.uint8)
+    result, count = render_real_textures(
+        np.zeros((1, 1), dtype=np.int32),
+        np.array([0]), np.array([0]), ("o\\missing.pac",),
+        None, fallback, 4.0, diagnostics=diagnostics,
+    )
+    assert count == 0
+    assert diagnostics == {"o\\missing.pac": "missing"}
+    np.testing.assert_array_equal(result, fallback)
