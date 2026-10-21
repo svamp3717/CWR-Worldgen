@@ -82,14 +82,18 @@ def _quadrants(forest: np.ndarray) -> np.ndarray:
     )
 
 
-def _consistent_nogova_masks(
-    forest: np.ndarray, editable: np.ndarray,
+def _consistent_stock_masks(
+    forest: np.ndarray, editable: np.ndarray, *,
+    missing_masks: frozenset[int] = frozenset(),
 ) -> np.ndarray:
     """Derive all forest corners once, shared by four adjacent WRP cells.
 
     A protected water, farmland, road or urban cell must retain its source
     ground texture. Its corners must therefore remain nonforest, even when
-    neighbouring forest cells would otherwise draw a j1 edge into it.
+    neighbouring forest cells would otherwise draw forest into it. For
+    Everon, the source WRP omits the NE+SW diagonal (mask 9): remove that
+    corner from the shared lattice rather than emitting an unverified path
+    or selecting a discontinuous neighbouring tile.
     """
     original = _quadrants(forest)
     height, width = forest.shape
@@ -107,12 +111,23 @@ def _consistent_nogova_masks(
     blocked[:-1, :-1] |= protected
     vertices &= ~blocked
 
-    return (
-        vertices[1:, 1:].astype(np.uint8)
-        | (vertices[1:, :-1].astype(np.uint8) << 1)
-        | (vertices[:-1, 1:].astype(np.uint8) << 2)
-        | (vertices[:-1, :-1].astype(np.uint8) << 3)
-    )
+    while True:
+        masks = (
+            vertices[1:, 1:].astype(np.uint8)
+            | (vertices[1:, :-1].astype(np.uint8) << 1)
+            | (vertices[:-1, 1:].astype(np.uint8) << 2)
+            | (vertices[:-1, :-1].astype(np.uint8) << 3)
+        )
+        # Source Everon does not supply a diagonally opposed (NE+SW)
+        # transition. Clear the SW vertex for those cells, updating every
+        # adjacent quadrant together so shared corners still agree.
+        missing = np.isin(masks, tuple(missing_masks))
+        if not np.any(missing):
+            return masks
+        if not missing_masks.issubset({9}):
+            raise ValueError("unsupported missing stock forest corner masks")
+        row, col = np.nonzero(missing)
+        vertices[row, col] = False
 
 
 def apply_stock_forest_border_blends(
@@ -140,8 +155,8 @@ def apply_stock_forest_border_blends(
     from object locations. Verified quadrant paths are appended only if used.
     Missing stock diagonal assets fall back to a verified one-quadrant-nearest
     blend; never emit a guessed path. An exhausted WRP slot table falls back
-    to the original semantic texture slot. Nogova can optionally derive a
-    consistent forest-corner lattice across grass and forest tiles, suppressing
+    to the original semantic texture slot. Nogova and Everon can derive a
+    shared forest-corner lattice across grass and forest tiles, suppressing
     forest corners shared with protected farmland, roads and water.
     """
     paths = list(base_texture_paths)
@@ -163,16 +178,21 @@ def apply_stock_forest_border_blends(
     forest &= candidate
     current = slots.reshape(height, width)
     profile_key = profile.casefold()
-    # Nogova has every j1/t1 quartet, so a single WRP corner lattice can
-    # describe forest edges across both forest cells and ordinary grass.
-    # Never allow its forest artwork to intrude into protected terrain.
-    use_shared_corners = profile_key == "nogova" and bool(blendable_exterior_materials)
+    # Nogova and Everon both require consistent corners across forest and
+    # ordinary grass. Keep the existing stock orientation for each profile.
+    # Never allow the forest artwork to intrude into protected terrain.
+    use_shared_corners = (
+        profile_key in {"nogova", "everon"} and bool(blendable_exterior_materials)
+    )
     if use_shared_corners:
         editable_exterior = (~candidate) & np.isin(
             material, tuple(blendable_exterior_materials)
         )
         editable = candidate | editable_exterior
-        masks = _consistent_nogova_masks(forest, editable)
+        missing_masks = frozenset({9}) if profile_key == "everon" else frozenset()
+        masks = _consistent_stock_masks(
+            forest, editable, missing_masks=missing_masks,
+        )
         namespace, _forest_code, background, _ext, _possible = STOCK_FOREST_BLEND_FAMILIES[profile_key]
         backslash = chr(92)
         background_name = f"{namespace}{backslash}{background}.paa".casefold()

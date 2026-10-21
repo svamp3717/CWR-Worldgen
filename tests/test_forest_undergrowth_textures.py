@@ -427,6 +427,94 @@ def test_nogova_protected_ground_has_no_exposed_forest_corner_seams() -> None:
                 assert bool(here & 2) == bool(north & 8), (row, col, "NW/SW")
 
 
+
+def test_everon_shared_corners_preserve_farms_roads_and_continuity() -> None:
+    """Everon's stock pl/tn transition must meet at each shared WRP corner."""
+    forest, material, original_paths = _forest_rect_world("everon")
+    material[4, 2] = MATERIAL_INDEX["h"]
+    material[3, 4] = MATERIAL_INDEX["g"]
+    material[4, 7] = MATERIAL_INDEX["a"]
+    material[2, 3] = MATERIAL_INDEX["p"]
+    material[6, 6] = MATERIAL_INDEX["u"]
+    protected = ((4, 7), (2, 3), (6, 6))
+    protected_paths = {
+        (row, col): original_paths[int(material[row, col]) + 1]
+        for row, col in protected
+    }
+    paths, slots = apply_stock_forest_border_blends(
+        material.ravel(), forest.ravel(), original_paths, width=9,
+        profile="everon", forest_material=MATERIAL_INDEX["f"],
+        forest_edge_material=MATERIAL_INDEX["e"],
+        blendable_exterior_materials=(
+            MATERIAL_INDEX["g"], MATERIAL_INDEX["h"], MATERIAL_INDEX["j"],
+        ), enabled=True,
+    )
+    grid = np.asarray(slots, dtype=np.int32).reshape(9, 9)
+    for (row, col), path in protected_paths.items():
+        assert paths[int(grid[row, col])] == path
+
+    def visible_mask(row: int, col: int) -> int:
+        path = paths[int(grid[row, col])].replace(chr(92), "/").casefold()
+        name = path.split("/")[-1]
+        if path == "eden/pl.paa":
+            return 15
+        if not (path.startswith("eden/") and name.endswith(".paa")
+                and len(name) == 12 and "pl" in name):
+            return 0
+        stem = name[:8]
+        return sum(
+            1 << corner for corner in range(4)
+            if stem[2 * corner:2 * corner + 2] == "pl"
+        )
+
+    masks = np.asarray([
+        [visible_mask(row, col) for col in range(9)]
+        for row in range(9)
+    ], dtype=np.uint8)
+    assert np.count_nonzero((masks > 0) & (masks < 15)) > 0
+    assert not np.any(masks == 9), "Everon has no verified NE+SW diagonal"
+    for row in range(9):
+        for col in range(9):
+            mask = int(masks[row, col])
+            if col + 1 < 9:
+                east = int(masks[row, col + 1])
+                assert bool(mask & 1) == bool(east & 2), (row, col, "NE/NW")
+                assert bool(mask & 4) == bool(east & 8), (row, col, "SE/SW")
+            if row + 1 < 9:
+                north = int(masks[row + 1, col])
+                assert bool(mask & 1) == bool(north & 4), (row, col, "NE/SE")
+                assert bool(mask & 2) == bool(north & 8), (row, col, "NW/SW")
+
+
+def test_everon_missing_diagonal_is_resolved_by_shared_vertices() -> None:
+    """Never invent Everon's missing mask-9 texture or leave a corner seam."""
+    from cwr_worldgen.forest_ground_blends import _consistent_stock_masks
+
+    forest = np.asarray([
+        [0, 0, 0, 1],
+        [1, 1, 0, 0],
+        [1, 0, 1, 0],
+        [0, 1, 1, 0],
+    ], dtype=np.bool_)
+    plain = _consistent_stock_masks(forest, np.ones_like(forest))
+    assert np.any(plain == 9)
+    corrected = _consistent_stock_masks(
+        forest, np.ones_like(forest), missing_masks=frozenset({9}),
+    )
+    assert not np.any(corrected == 9)
+    for row in range(4):
+        for col in range(4):
+            mask = int(corrected[row, col])
+            if col + 1 < 4:
+                east = int(corrected[row, col + 1])
+                assert bool(mask & 1) == bool(east & 2)
+                assert bool(mask & 4) == bool(east & 8)
+            if row + 1 < 4:
+                north = int(corrected[row + 1, col])
+                assert bool(mask & 1) == bool(north & 4)
+                assert bool(mask & 2) == bool(north & 8)
+
+
 def test_only_verified_source_texture_names_are_ever_emitted() -> None:
     for profile, family in STOCK_FOREST_BLEND_FAMILIES.items():
         valid_masks = family[4]
