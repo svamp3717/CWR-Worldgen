@@ -173,7 +173,7 @@ def test_newest_loose_asset_wins_over_pbo_even_with_extension_alias(
     tmp_path: Path,
 ) -> None:
     archive = tmp_path / "eden.pbo"
-    _pbo(archive, r"bak\\field.pac", _pac())
+    _pbo(archive, r"bak\field.pac", _pac())
     directory = tmp_path / "loose" / "eden" / "bak"
     directory.mkdir(parents=True)
     (directory / "field.paa").write_bytes(_dxt1_paa(red=False))
@@ -181,7 +181,7 @@ def test_newest_loose_asset_wins_over_pbo_even_with_extension_alias(
     try:
         result, count = render_real_textures(
             np.zeros((1, 1), dtype=np.int32),
-            np.array([0]), np.array([0]), (r"eden\\bak\\field.pac",),
+            np.array([0]), np.array([0]), (r"eden\bak\field.pac",),
             tmp_path / "loose", np.zeros((1, 1, 3), dtype=np.uint8),
             4.0, archives=reader,
         )
