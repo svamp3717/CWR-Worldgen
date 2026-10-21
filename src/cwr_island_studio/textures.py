@@ -315,7 +315,7 @@ def _auto_stock_border_orientation(
 
     colours: dict[str, np.ndarray] = {}
     for part in set(parts):
-        base = _resolve_tile(rf"{namespace}\\{part}.paa", search_roots, archives)
+        base = _resolve_tile(rf"{namespace}\{part}.paa", search_roots, archives)
         if base is None:
             return "North up"
         colours[part] = np.asarray(base, dtype=np.float64).mean(axis=(0, 1))
