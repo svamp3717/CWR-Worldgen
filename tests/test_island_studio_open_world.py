@@ -372,7 +372,10 @@ def test_compare_world_in_top_right_utilities_dropdown(
     monkeypatch.setattr(tk, "Menu", Menu)
 
     called = []
-    editor = SimpleNamespace(_compare_dialog=lambda: called.append("compare"))
+    editor = SimpleNamespace(
+        _compare_dialog=lambda: called.append("compare"),
+        _export_texture_location_map=lambda: called.append("atlas"),
+    )
     header = object()
     IslandStudio._build_utilities(editor, header)
 
@@ -384,9 +387,12 @@ def test_compare_world_in_top_right_utilities_dropdown(
     assert button.menu is menu
     assert menu.parent is button
     assert menu.options["tearoff"] is False
-    assert [item["label"] for item in menu.items] == ["Compare World…"]
+    assert [item["label"] for item in menu.items] == [
+        "Compare World…", "Export Texture Location Map…",
+    ]
     menu.items[0]["command"]()
-    assert called == ["compare"]
+    menu.items[1]["command"]()
+    assert called == ["compare", "atlas"]
 
     build_source = inspect.getsource(IslandStudio._build)
     assert "self._build_utilities(header)" in build_source
