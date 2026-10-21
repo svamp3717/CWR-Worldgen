@@ -223,7 +223,7 @@ def test_directional_stock_forest_blends_match_original_island(
     south = expanded[int(image[2, 4])]
     assert (west, east, north, south) == straight
     # Every corner cell uses a verified path with exactly one forest corner.
-    for row, col, mask in ((2, 2, 8), (2, 6, 4), (6, 2, 2), (6, 6, 1)):
+    for row, col, mask in ((2, 2, 1), (2, 6, 2), (6, 2, 4), (6, 6, 8)):
         assert expanded[int(image[row, col])] == stock_forest_blend_path(profile, mask)
     assert expanded[int(image[4, 4])] == STOCK[profile][0]
     assert expanded[int(image[0, 0])] == paths[MATERIAL_INDEX["g"] + 1]
