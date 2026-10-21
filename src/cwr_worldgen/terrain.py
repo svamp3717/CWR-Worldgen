@@ -98,6 +98,23 @@ STOCK_GROUND_TEXTURES: dict[str, dict[str, str]] = {
 
 GROUND_TEXTURE_PROFILES = ("nogova", "kolgujev", "malden", "everon", "generated", "desert", "none")
 
+# Optional stock forest-floor tiles, keyed by the *ground* texture selector.
+# Keep this separate from the forest-object/vegetation style choice. Nogova
+# has a dedicated edge tile; the other supplied profiles use their forest
+# floor tile for both interior and border-band cells.
+STOCK_FOREST_UNDERGROWTH_TEXTURES: dict[str, tuple[str, str]] = {
+    "nogova": (r"o\j1.paa", r"o\j2.paa"),
+    "everon": (r"eden\pl.paa", r"eden\pl.paa"),
+    "malden": (r"abel\pb.paa", r"abel\pb.paa"),
+    "kolgujev": (r"cain\u2.paa", r"cain\u2.paa"),
+}
+
+
+def stock_forest_undergrowth_paths(profile: str, enabled: bool = False) -> tuple[str, str] | None:
+    """Return forest interior/edge textures, or None when not requested."""
+    return STOCK_FOREST_UNDERGROWTH_TEXTURES.get(profile.casefold()) if enabled else None
+
+
 
 MALDEN_MATERIAL_COLOURS: dict[str, tuple[int, int, int]] = {
     # Preview/fallback colours for classic Malden. Runtime ground references
