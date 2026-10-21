@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Verified OFP/CWA forest-floor quadrant blends for the stock ground presets.
 
-Four two-letter components are in NE, NW, SE, SW quadrant order.  The
-original island WRP texture-location atlases establish both the names and
-their orientation. Do not synthesize absent diagonal texture assets.
+Worldgen uses NE, NW, SE, SW mask bit order. Stock Nogova PAC artwork
+renders the opposite (180-degree) corners, so select its file names with
+the reversed mask. Other island palettes retain their original mapping.
+Do not synthesize absent diagonal texture assets.
 """
 from __future__ import annotations
 
@@ -22,14 +23,31 @@ STOCK_FOREST_BLEND_FAMILIES: dict[str, tuple[str, str, str, str, frozenset[int]]
 }
 
 
+def _nogova_filename_mask(world_mask: int) -> int:
+    """Rotate geographic NE/NW/SE/SW forest corners for stock Nogova PAC art.
+
+    Original Nogova PAC quartets show the *opposite* displayed corner from
+    their named position in Island Studio's correct shared texture renderer.
+    Flip both axes in the filename mask, never the terrain artwork or WRP.
+    """
+    return (
+        ((world_mask & 1) << 3)
+        | ((world_mask & 2) << 1)
+        | ((world_mask & 4) >> 1)
+        | ((world_mask & 8) >> 3)
+    )
+
+
 def stock_forest_blend_path(profile: str, quadrant_mask: int) -> str | None:
-    """Return only a path verified in the matching original island's WRP."""
+    """Return only a verified path whose visible corners match the WRP."""
     family = STOCK_FOREST_BLEND_FAMILIES.get(profile.casefold())
     if family is None:
         return None
     namespace, forest, grass, extension, valid_masks = family
     if quadrant_mask not in valid_masks:
         return None
+    if profile.casefold() == "nogova":
+        quadrant_mask = _nogova_filename_mask(quadrant_mask)
     components = "".join(
         forest if quadrant_mask & (1 << quadrant) else grass
         for quadrant in range(4)

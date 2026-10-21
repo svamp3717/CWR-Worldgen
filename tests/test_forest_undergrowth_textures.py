@@ -171,12 +171,13 @@ def test_written_4wvr_contains_forest_floor_and_edge_stock_slots(tmp_path) -> No
     assert inspected.texture_slots[edge_slot] == r"o\t1.paa"
 
 
-# The four names below are direct matches to original Island Studio atlas
-# exports and establish the SW/SE/NW/NE quadrant orientation.
+# Directions refer to visible artwork, not raw filename token order.
+# Nogova's PAC quadrants display 180 degrees opposite their named positions;
+# the other stock palettes retain their existing filename mapping.
 STRAIGHT_BORDERS = {
     "nogova": (
-        r"o\j1t1j1t1.pac", r"o\t1j1t1j1.pac",
-        r"o\t1t1j1j1.pac", r"o\j1j1t1t1.pac",
+        r"o\t1j1t1j1.pac", r"o\j1t1j1t1.pac",
+        r"o\j1j1t1t1.pac", r"o\t1t1j1j1.pac",
     ),
     "everon": (
         r"eden\pltnpltn.paa", r"eden\tnpltnpl.paa",
@@ -298,8 +299,13 @@ def test_nogova_exterior_blend_preserves_shared_corner_orientation() -> None:
             return 15
         if name.endswith(".pac") and len(name) == 12:
             stem = name[:8]
-            return sum(1 << corner for corner in range(4)
-                       if stem[2 * corner:2 * corner + 2] == "j1")
+            named_mask = sum(1 << corner for corner in range(4)
+                             if stem[2 * corner:2 * corner + 2] == "j1")
+            # The stock Nogova PAC artwork displays opposite named corners.
+            return (
+                ((named_mask & 1) << 3) | ((named_mask & 2) << 1)
+                | ((named_mask & 4) >> 1) | ((named_mask & 8) >> 3)
+            )
         return 0
 
     # Two bits along each shared edge must agree with the adjacent cell.
@@ -329,6 +335,37 @@ def test_nogova_exterior_blends_require_a_real_assigned_border() -> None:
     assert result == tuple(paths)
     actual = np.asarray(slots).reshape(9, 9)
     assert actual[4, 1] == MATERIAL_INDEX["h"] + 1
+
+
+
+def test_nogova_stock_blend_names_match_visible_artwork() -> None:
+    """The PAC's image corners are opposite its literal quartet name."""
+    visible_corner_to_filename = {
+        1: r"o\t1t1t1j1.pac",  # NE forest displayed by SW token
+        2: r"o\t1t1j1t1.pac",  # NW forest displayed by SE token
+        4: r"o\t1j1t1t1.pac",  # SE forest displayed by NW token
+        8: r"o\j1t1t1t1.pac",  # SW forest displayed by NE token
+        3: r"o\t1t1j1j1.pac",  # forest to north
+        5: r"o\t1j1t1j1.pac",  # forest to east
+        10: r"o\j1t1j1t1.pac", # forest to west
+        12: r"o\j1j1t1t1.pac", # forest to south
+    }
+    for mask, expected_path in visible_corner_to_filename.items():
+        assert stock_forest_blend_path("nogova", mask) == expected_path
+    assert len({
+        stock_forest_blend_path("nogova", mask) for mask in range(1, 15)
+    }) == 14
+    # The other stock texture profiles retain their previous mappings.
+    for profile in ("everon", "malden", "kolgujev"):
+        namespace, forest, ground, ext, valid_masks = STOCK_FOREST_BLEND_FAMILIES[profile]
+        for mask in valid_masks:
+            literal = "".join(
+                forest if mask & (1 << corner) else ground
+                for corner in range(4)
+            )
+            assert stock_forest_blend_path(profile, mask) == (
+                f"{namespace}\{literal}.{ext}"
+            )
 
 
 def test_only_verified_source_texture_names_are_ever_emitted() -> None:

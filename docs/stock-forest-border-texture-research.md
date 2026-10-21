@@ -8,10 +8,13 @@ WRP texture paths and directional neighbor counts.
 
 **Key discovery: forest borders are not a single ground texture.** They are
 directional four-quadrant blend tiles. The names consist of four two-character
-base names (in **NE, NW, SE, SW** order). This order is supported by the
-original maps' neighbor locations: for example, a texture with forest
-components in positions two and four (NW and SW) borders solid forest to
-its west. WRP texture-grid rows increase northward.
+base names. The original WRP texture-location maps establish where each
+filename is used, but they do NOT prove how the artwork is oriented within
+the file. Rechecking the actual PAC artwork in Island Studio alongside
+`wg_foresttest5.pbo` shows Nogova's displayed quadrants are rotated 180
+degrees relative to the original filename interpretation. Worldgen's
+geographic mask remains NE/NW/SE/SW, but the Nogova filename mask must
+be reversed. WRP texture-grid rows increase northward.
 
 | World | Solid forest floor | Distinct used forest-containing blend paths | Cells using blends | Dominant adjacent ground |
 | --- | --- | ---: | ---: | --- |
@@ -30,7 +33,7 @@ actually occur in the source islands.
 
 | World | West edge (forest east) | East edge (forest west) | North edge (forest south) | South edge (forest north) |
 | --- | --- | --- | --- | --- |
-| Nogova | `o\\j1t1j1t1.pac` | `o\\t1j1t1j1.pac` | `o\\t1t1j1j1.pac` | `o\\j1j1t1t1.pac` |
+| Nogova | `o\\t1j1t1j1.pac` | `o\\j1t1j1t1.pac` | `o\\j1j1t1t1.pac` | `o\\t1t1j1j1.pac` |
 | Everon | `eden\\pltnpltn.paa` | `eden\\tnpltnpl.paa` | `eden\\tntnplpl.paa` | `eden\\plpltntn.paa` |
 | Malden | `abel\\pbttpbtt.pac` | `abel\\ttpbttpb.pac` | `abel\\ttttpbpb.pac` | `abel\\pbpbtttt.pac` |
 | Kolgujev/Cain | `cain\\u2j9u2j9.paa` | `cain\\j9u2j9u2.paa` | `cain\\j9j9u2u2.paa` | `cain\\u2u2j9j9.paa` |
@@ -41,6 +44,20 @@ just the four straight-edge examples. For example, Nogova has
 ground. The most common Everon forest blends are
 `eden\\pltnpltn.paa`, `eden\\tnpltnpl.paa`,
 `eden\\plpltntn.paa`, and `eden\\tntnplpl.paa`.
+
+## Confirmed Nogova PAC artwork orientation (generated test 5)
+
+The Island Studio viewport showed `o\\j1j1t1t1.pac` with its
+forest-colored half to the **south**, not north; and
+`o\\j1t1j1t1.pac` with forest toward the **west**, not east.
+Quadrant-color comparisons of the uploaded WRP against the actual screenshot
+favored a 180-degree transform over all other square symmetries. The earlier
+table, based only on filenames and adjacency, was insufficient to establish
+the intrinsic orientation of the stock PAC art.
+
+**Worldgen now converts the requested geographic mask to the opposite
+Nogova filename mask.** Island Studio continues to render all stock and
+generated ground texture artwork identically; the original WRP is unchanged.
 
 ## Implications for the optional forest-undergrowth checkbox
 
