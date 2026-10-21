@@ -53,7 +53,9 @@ Fit map returns to the complete island.
 
 Open a loose `4WVR` map, or an original `OPRW` (also supported directly
 from a PBO/IFA). Choose **Utilities → Export Texture Location Map…** and
-save a `.zip`. The export is non-destructive and works even when the WRP is
+save a `.zip`. The suggested filename is **the island name** (for example,
+`Nogova.wrp` gives `Nogova.zip`), including maps opened from an archive.
+The export is non-destructive and works even when the WRP is
 read-only. No external texture images/PBO selection is necessary: it maps
 the *original paths recorded in the WRP*.
 
