@@ -236,22 +236,26 @@ def test_directional_stock_forest_blends_match_original_island(
 
 
 
-def test_nogova_border_apron_matches_t1_without_repainting_protected_land() -> None:
-    """A j1/t1 transition should meet t1, not unrelated grass or farmland."""
-    forest, material, base_paths = _forest_rect_world("nogova")
+def test_nogova_exterior_blend_fills_an_exposed_forest_corner() -> None:
+    """A grass gap next to j1 must receive the matching quartet, not plain t1."""
+    forest, material, initial = _forest_rect_world("nogova")
     dry_grass = MATERIAL_INDEX["h"]
     farmland = MATERIAL_INDEX["a"]
     paved_road = MATERIAL_INDEX["p"]
-    material[~forest] = dry_grass
+    # Punch an ordinary-grass hole through the west side of forest coverage.
+    # Old behavior left a solid j1 cell facing an unblended trava2 cell.
+    material[4, 2] = dry_grass
     material[4, 7] = farmland
     material[1, 3] = paved_road
-
-    base_grass_path = base_paths[dry_grass + 1]
-    assert "trava2.paa" in base_grass_path
-    t1_path = base_paths[MATERIAL_INDEX["e"] + 1]
+    baseline, baseline_slots = apply_stock_forest_border_blends(
+        material.ravel(), forest.ravel(), initial,
+        width=9, profile="nogova", forest_material=MATERIAL_INDEX["f"],
+        forest_edge_material=MATERIAL_INDEX["e"], enabled=True,
+    )
+    assert baseline[int(np.asarray(baseline_slots).reshape(9, 9)[4, 2])] == initial[dry_grass + 1]
 
     paths, indices = apply_stock_forest_border_blends(
-        material.ravel(), forest.ravel(), base_paths,
+        material.ravel(), forest.ravel(), initial,
         width=9, profile="nogova",
         forest_material=MATERIAL_INDEX["f"],
         forest_edge_material=MATERIAL_INDEX["e"],
@@ -260,31 +264,58 @@ def test_nogova_border_apron_matches_t1_without_repainting_protected_land() -> N
         ),
         enabled=True,
     )
-    mapped = np.asarray(indices).reshape(9, 9)
-    # Only ordinary ground immediately outside a forest transition is t1.
-    for row, col in ((4, 1), (1, 4), (7, 4)):
-        assert paths[int(mapped[row, col])] == t1_path
-    # Never overwrite farmland, roads or distant ordinary terrain.
-    assert paths[int(mapped[4, 7])] == base_paths[farmland + 1]
-    assert paths[int(mapped[1, 3])] == base_paths[paved_road + 1]
-    assert paths[int(mapped[0, 0])] == base_grass_path
-    # Forest edge art remains directionally identical to original Nogova.
-    assert paths[int(mapped[4, 2])] == STRAIGHT_BORDERS["nogova"][0]
-    assert paths[int(mapped[4, 6])] == STRAIGHT_BORDERS["nogova"][1]
+    image = np.asarray(indices).reshape((9, 9))
+    # The same WEST boundary quartet used elsewhere on this source forest.
+    assert paths[int(image[4, 2])] == STRAIGHT_BORDERS["nogova"][0]
+    # Keep the native straight-border direction for all other forest edges.
+    assert paths[int(image[4, 6])] == STRAIGHT_BORDERS["nogova"][1]
+    assert paths[int(image[6, 4])] == STRAIGHT_BORDERS["nogova"][2]
+    # Distant grass, farmland and roads must not be overwritten.
+    assert paths[int(image[4, 1])] == initial[dry_grass + 1]
+    assert paths[int(image[0, 0])] == initial[MATERIAL_INDEX["g"] + 1]
+    assert paths[int(image[4, 7])] == initial[farmland + 1]
+    assert paths[int(image[1, 3])] == initial[paved_road + 1]
+    assert tuple(paths[:len(initial)]) == tuple(initial)
 
-    without_paths, without_indices = apply_stock_forest_border_blends(
-        material.ravel(), forest.ravel(), base_paths,
-        width=9, profile="nogova",
-        forest_material=MATERIAL_INDEX["f"],
+
+def test_nogova_exterior_blend_preserves_shared_corner_orientation() -> None:
+    """New quarter-blends must meet original borders in WRP cell coordinates."""
+    forest, material, initial = _forest_rect_world("nogova")
+    material[4, 2] = MATERIAL_INDEX["h"]
+    paths, indices = apply_stock_forest_border_blends(
+        material.ravel(), forest.ravel(), initial, width=9,
+        profile="nogova", forest_material=MATERIAL_INDEX["f"],
         forest_edge_material=MATERIAL_INDEX["e"],
+        blendable_exterior_materials=(MATERIAL_INDEX["h"],),
         enabled=True,
     )
-    without = np.asarray(without_indices).reshape(9, 9)
-    assert without_paths[int(without[4, 1])] == base_grass_path
-    assert without_paths[int(without[4, 2])] == STRAIGHT_BORDERS["nogova"][0]
+    image = np.asarray(indices, dtype=int).reshape(9, 9)
+
+    def quadrant_mask(row: int, col: int) -> int:
+        name = paths[int(image[row, col])].replace("/", "\\").split("\\")[-1]
+        if name == "j1.paa":
+            return 15
+        if name.endswith(".pac") and len(name) == 12:
+            stem = name[:8]
+            return sum(1 << corner for corner in range(4)
+                       if stem[2 * corner:2 * corner + 2] == "j1")
+        return 0
+
+    # Two bits along each shared edge must agree with the adjacent cell.
+    for row in range(9):
+        for col in range(9):
+            here = quadrant_mask(row, col)
+            if col + 1 < 9:
+                east = quadrant_mask(row, col + 1)
+                assert bool(here & 1) == bool(east & 2)
+                assert bool(here & 4) == bool(east & 8)
+            if row + 1 < 9:
+                north = quadrant_mask(row + 1, col)
+                assert bool(here & 1) == bool(north & 4)
+                assert bool(here & 2) == bool(north & 8)
 
 
-def test_nogova_apron_requires_a_real_assigned_blend() -> None:
+def test_nogova_exterior_blends_require_a_real_assigned_border() -> None:
     forest, material, paths = _forest_rect_world("nogova")
     material[~forest] = MATERIAL_INDEX["h"]
     result, slots = apply_stock_forest_border_blends(
@@ -297,6 +328,7 @@ def test_nogova_apron_requires_a_real_assigned_blend() -> None:
     assert result == tuple(paths)
     actual = np.asarray(slots).reshape(9, 9)
     assert actual[4, 1] == MATERIAL_INDEX["h"] + 1
+
 
 def test_only_verified_source_texture_names_are_ever_emitted() -> None:
     for profile, family in STOCK_FOREST_BLEND_FAMILIES.items():
