@@ -91,6 +91,7 @@ from .terrain import (
     material_colour_for_profile,
 )
 from .wrp import inspect_rvw4, quantize_elevations, quantize_height, write_rvw4
+from .forest_ground_blends import apply_stock_forest_border_blends
 from .surface_pass import (
     MILESTONE9_MATERIALS,
     STOCK_SURFACE_TEXTURES,
@@ -2558,6 +2559,18 @@ def _validate_milestone4(
     materials = _material_definitions(spec)
     counts = material_counts(material_indices, len(materials))
     expected_texture_paths = {spec.dummy_texture_path, *_ground_texture_paths(spec)}
+    if getattr(spec, "forest_undergrowth_textures", False):
+        original_paths = (spec.dummy_texture_path, *_ground_texture_paths(spec))
+        material_types = _material_definitions(spec)
+        forest_id = next(index for index, item in enumerate(material_types) if item.code == "f")
+        edge_id = next((index for index, item in enumerate(material_types) if item.code == "e"), None)
+        expanded_paths, _ = apply_stock_forest_border_blends(
+            material_indices, raster.forest, original_paths,
+            width=spec.cells, profile=_ground_texture_profile(spec),
+            forest_material=forest_id, forest_edge_material=edge_id,
+            enabled=True,
+        )
+        expected_texture_paths.update(expanded_paths)
     checks.append((
         "WRP terrain texture profile",
         set(summary.texture_paths) == expected_texture_paths,
@@ -4665,6 +4678,19 @@ def build_milestone4(
     report_progress(84, "Preparing terrain texture table")
     texture_table_paths = [spec.dummy_texture_path, *ground_texture_paths]
     wrp_texture_indices = [index + 1 for index in material_indices]
+    if bool(getattr(spec, "forest_undergrowth_textures", False)):
+        forest_material = next(
+            index for index, material in enumerate(materials) if material.code == "f"
+        )
+        edge_material = next(
+            (index for index, material in enumerate(materials) if material.code == "e"), None
+        )
+        texture_table_paths, wrp_texture_indices = apply_stock_forest_border_blends(
+            material_indices, raster.forest, texture_table_paths,
+            width=spec.cells, profile=_ground_texture_profile(spec),
+            forest_material=forest_material, forest_edge_material=edge_material,
+            enabled=True,
+        )
     surface_texture_cache_hit = False
     surface_texture_cache_path: str | None = None
     if _surface_ground_enabled(spec) and _ground_texture_profile(spec) != "none":
@@ -4737,6 +4763,10 @@ def build_milestone4(
             for index, material in enumerate(materials)
         }
         surface_manifest["wrp_texture_paths"] = list(ground_texture_paths)
+        if bool(getattr(spec, "forest_undergrowth_textures", False)):
+            surface_manifest["wrp_forest_border_blend_paths"] = list(
+                texture_table_paths[1 + len(ground_texture_paths):]
+            )
         active_material_index = {material.code: index for index, material in enumerate(materials)}
         rocky_index = active_material_index.get("k", active_material_index.get("r", 0))
         surface_manifest["rocky_forest_texture_path"] = ground_texture_paths[rocky_index]
@@ -5122,13 +5152,30 @@ def build_milestone4(
         temp_source = temp_dir / spec.name
         temp_wrp = temp_source / f"{spec.name}.wrp"
         temp_source.mkdir(parents=True, exist_ok=True)
+        repeat_texture_paths = texture_table_paths
+        repeat_texture_indices = [index + 1 for index in repeat_material_indices]
+        if bool(getattr(spec, "forest_undergrowth_textures", False)):
+            repeat_forest_material = next(
+                index for index, material in enumerate(materials) if material.code == "f"
+            )
+            repeat_edge_material = next(
+                (index for index, material in enumerate(materials) if material.code == "e"), None
+            )
+            repeat_texture_paths, repeat_texture_indices = apply_stock_forest_border_blends(
+                repeat_material_indices, raster.forest,
+                [spec.dummy_texture_path, *ground_texture_paths],
+                width=spec.cells, profile=_ground_texture_profile(spec),
+                forest_material=repeat_forest_material,
+                forest_edge_material=repeat_edge_material,
+                enabled=True,
+            )
         write_rvw4(
             temp_wrp,
             spec.cells,
             spec.cells,
             repeat_elevations,
-            [index + 1 for index in repeat_material_indices],
-            texture_table_paths,
+            repeat_texture_indices,
+            repeat_texture_paths,
             repeat_objects,
             height_scale=spec.height_scale,
             renumber_object_ids=True,
