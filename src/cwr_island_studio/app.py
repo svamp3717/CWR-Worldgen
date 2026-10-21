@@ -28,10 +28,7 @@ from .model_classification import ModelCategory, load_p3d_category
 from .pbo_textures import PboTextures
 from .pbo_worlds import PboWorldArchive
 from .asset_sources import append_unique, remove_selected
-from .textures import (
-    FOREST_BORDER_ORIENTATIONS,
-    clear_archive_texture_cache, clear_loose_texture_cache, render_real_textures,
-)
+from .textures import clear_archive_texture_cache, clear_loose_texture_cache, render_real_textures
 from .texture_location_export import export_texture_location_atlas
 from importlib.metadata import PackageNotFoundError, version
 
@@ -141,7 +138,6 @@ class IslandStudio:
         self.show_locations = tk.BooleanVar(value=True)
         self.height_scale = tk.StringVar(value="0.045")
         self.layer = tk.StringVar(value="Elevation")
-        self.forest_border_orientation = tk.StringVar(value=FOREST_BORDER_ORIENTATIONS[0])
         self.tool = tk.StringVar(value="Select")
         # View a newly opened loose world safely until editing is requested.
         self.readonly_checked = tk.BooleanVar(value=True)
@@ -246,16 +242,6 @@ class IslandStudio:
             state="readonly", values=("Elevation", "Texture slots", "Actual textures", "Road preview"),
         ).pack(fill="x", pady=(4, 7))
         self.layer.trace_add("write", lambda *_: self._layer_changed())
-        ttk.Label(side, text="Forest border preview orientation").pack(anchor="w")
-        ttk.Combobox(
-            side, textvariable=self.forest_border_orientation,
-            state="readonly", values=FOREST_BORDER_ORIENTATIONS,
-        ).pack(fill="x", pady=(2, 3))
-        self.forest_border_orientation.trace_add("write", lambda *_: self._queue_draw())
-        ttk.Label(
-            side, text="Only affects stock forest blend textures in Actual textures. "
-                       "The WRP is unchanged.", wraplength=230,
-        ).pack(anchor="w", pady=(0, 6))
         ttk.Checkbutton(
             side, text="Show world objects", variable=self.show_objects,
             command=self._queue_draw,
@@ -1257,7 +1243,6 @@ class IslandStudio:
                     slots, x, z, self.document.texture_paths,
                     self.asset_roots, fallback, self.document.cell_size,
                     archives=self.pbo_textures, diagnostics=diagnostics,
-                    forest_border_orientation=self.forest_border_orientation.get(),
                 )
                 self._texture_issues = diagnostics
                 if not self.asset_roots and self.pbo_textures is None:

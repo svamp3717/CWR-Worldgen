@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Sequence
 import io
 import struct
 
@@ -16,79 +17,11 @@ from PIL import Image
 
 from .pbo_textures import PboTextures, canonical_path
 from .asset_sources import roots
-from cwr_worldgen.forest_ground_blends import STOCK_FOREST_BLEND_FAMILIES
-from typing import Sequence
 
 _PAA_FORMATS = {0xFF01: 1, 0xFF02: 2, 0xFF03: 2, 0xFF04: 3, 0xFF05: 3}
 _RAW_FORMATS = {0x4444, 0x1555, 0x8888, 0x8080}
 _MAX_DECODE_PIXELS = 8 * 1024 * 1024
 _MAX_TEX_BYTES = 32 * 1024 * 1024
-
-# Only the original stock directional forest transitions use this selector.
-# Generated pitch/runway/surface PAA files are already world-aligned in
-# south-to-north pixel row order and must never be rotated along with them.
-FOREST_BORDER_ORIENTATIONS = (
-    "Auto (stock artwork)",
-    "North up",
-    "90 clockwise",
-    "180",
-    "90 counterclockwise",
-    "Mirror east/west",
-    "Mirror north/south",
-    "Transpose",
-    "Anti-transpose",
-)
-
-
-def _stock_forest_components(path: str) -> tuple[str, tuple[str, ...]] | None:
-    """Recognize stock quartets named NE, NW, SE, SW, including mixed ground.
-
-    Original Nogova also has j1/b1 and j1/s2 boundaries, not just j1/t1.
-    """
-    normalized = path.replace("\\", "/").casefold()
-    while "//" in normalized:
-        normalized = normalized.replace("//", "/")
-    namespace, sep, filename = normalized.rpartition("/")
-    if not sep:
-        return None
-    stem, dot, extension = filename.rpartition(".")
-    if not dot or extension not in {"paa", "pac"} or len(stem) != 8:
-        return None
-    for source_namespace, forest, _ground, _suffix, _masks in STOCK_FOREST_BLEND_FAMILIES.values():
-        if namespace != source_namespace:
-            continue
-        parts = tuple(stem[i:i + 2] for i in range(0, 8, 2))
-        if forest in parts and any(p != forest for p in parts) and all(
-            len(p) == 2 and p.isascii() and p.isalnum() for p in parts
-        ):
-            return namespace, parts
-    return None
-
-
-def _is_stock_forest_border(path: str) -> bool:
-    return _stock_forest_components(path) is not None
-
-
-def _orient_stock_border(tile: np.ndarray, orientation: str) -> np.ndarray:
-    """Rotate/mirror only the rendered tile; WRP indices are not edited."""
-    if orientation == "North up":
-        return tile
-    if orientation == "90 clockwise":
-        return np.rot90(tile, -1)
-    if orientation == "180":
-        return np.rot90(tile, 2)
-    if orientation == "90 counterclockwise":
-        return np.rot90(tile, 1)
-    if orientation == "Mirror east/west":
-        return np.fliplr(tile)
-    if orientation == "Mirror north/south":
-        return np.flipud(tile)
-    if orientation == "Transpose":
-        return np.transpose(tile, (1, 0, 2))
-    if orientation == "Anti-transpose":
-        return np.fliplr(np.flipud(np.transpose(tile, (1, 0, 2))))
-    raise ValueError(f"unknown forest border preview orientation: {orientation}")
-
 
 def decode_paa_preview(data: bytes) -> Image.Image:
     if len(data) < 4 or len(data) > _MAX_TEX_BYTES:
@@ -285,72 +218,14 @@ def _resolve_tile(
     return None
 
 
-def _corner_means(tile: np.ndarray) -> np.ndarray:
-    height, width = tile.shape[:2]
-    dy, dx = max(1, height // 5), max(1, width // 5)
-    return np.asarray((
-        tile[:dy, :dx].mean(axis=(0, 1)),       # NW
-        tile[:dy, -dx:].mean(axis=(0, 1)),      # NE
-        tile[-dy:, :dx].mean(axis=(0, 1)),      # SW
-        tile[-dy:, -dx:].mean(axis=(0, 1)),     # SE
-    ), dtype=np.float64)
-
-
-@lru_cache(maxsize=512)
-def _auto_stock_border_orientation(
-    path: str, search_roots: tuple[Path, ...], archives: PboTextures | None,
-) -> str:
-    """Match stock quartet corners with their real source material colours.
-
-    The names give NE/NW/SE/SW materials, but the PAC/PAA storage orientation
-    must be checked against the decoded artwork, not assumed from WRP rows.
-    """
-    decoded = _stock_forest_components(path)
-    if decoded is None:
-        return "North up"
-    namespace, parts = decoded
-    if namespace == "o":
-        # The original Nogova atlas is south-first when decoded. The viewer's
-        # north-up stock sampler reverses those rows, so its user-verified
-        # correct preview is Mirror north/south. Keep the manual selector
-        # available and do not change other stock islands or generated tiles.
-        return "Mirror north/south"
-    tile = _resolve_tile(path, search_roots, archives)
-    if tile is None:
-        return "North up"
-
-    colours: dict[str, np.ndarray] = {}
-    for part in set(parts):
-        base = _resolve_tile(rf"{namespace}\{part}.paa", search_roots, archives)
-        if base is None:
-            return "North up"
-        colours[part] = np.asarray(base, dtype=np.float64).mean(axis=(0, 1))
-    if max(float(np.linalg.norm(a - b)) for a in colours.values()
-           for b in colours.values()) < 10.0:
-        return "North up"
-
-    ne, nw, se, sw = parts
-    expected = np.asarray([colours[p] for p in (nw, ne, sw, se)])
-    best_name, best_score = "North up", float("inf")
-    for orientation in FOREST_BORDER_ORIENTATIONS[1:]:
-        candidate = _orient_stock_border(tile, orientation)
-        difference = _corner_means(candidate) - expected
-        score = float(np.sum(difference * difference))
-        if score < best_score:
-            best_name, best_score = orientation, score
-    return best_name
-
-
 def clear_archive_texture_cache() -> None:
     """Drop decoded tiles before replacing or closing selected archives."""
     _pbo_image_tile.cache_clear()
-    _auto_stock_border_orientation.cache_clear()
 
 
 def clear_loose_texture_cache() -> None:
     """Discard cached tiles when folders are added or removed."""
     _image_tile.cache_clear()
-    _auto_stock_border_orientation.cache_clear()
 
 
 def render_real_textures(
@@ -360,7 +235,6 @@ def render_real_textures(
     fallback: np.ndarray, cell_size: float,
     *, archives: PboTextures | None = None,
     diagnostics: dict[str, str] | None = None,
-    forest_border_orientation: str = "North up",
 ) -> tuple[np.ndarray, int]:
     """Apply available actual texture pixels over a slot-colour viewport.
 
@@ -368,8 +242,6 @@ def render_real_textures(
     with the world's full dimensions. Missing assets keep the fallback colour.
     """
     search_roots = roots(asset_root)
-    if forest_border_orientation not in FOREST_BORDER_ORIENTATIONS:
-        raise ValueError("invalid forest border preview orientation")
     if slots.shape != fallback.shape[:2]:
         raise ValueError("texture and fallback preview dimensions differ")
     output = fallback.copy()
@@ -388,27 +260,14 @@ def render_real_textures(
                     else "missing"
                 )
             continue
-        stock_border = _is_stock_forest_border(path)
-        if stock_border:
-            orientation = (
-                _auto_stock_border_orientation(path, search_roots, archives)
-                if forest_border_orientation == "Auto (stock artwork)"
-                else forest_border_orientation
-            )
-            tile = _orient_stock_border(tile, orientation)
         rows, cols = np.nonzero(slots == slot)
         tx = np.mod(x[cols] / cell_size, 1.0)
         tz = np.mod(z[rows] / cell_size, 1.0)
         cx = np.minimum(tile.shape[1] - 1, (tx * tile.shape[1]).astype(np.intp))
-        if stock_border:
-            # Original stock quadrant blends are inspected with north at the
-            # top of the decoded tile, independent of the selected rotation.
-            cz = np.minimum(tile.shape[0] - 1, ((1.0 - tz) * tile.shape[0]).astype(np.intp))
-        else:
-            # Generated sports/road/runway images are authored with pixel row 0
-            # at the SOUTH edge (see sports_pitch_surface_policy._render_pitch_cell).
-            # Flipping those in the viewer breaks cross-cell field markings.
-            cz = np.minimum(tile.shape[0] - 1, (tz * tile.shape[0]).astype(np.intp))
+        # A decoded texture's first image row maps to the south edge of its
+        # WRP cell. Apply this world-Z sampling consistently to stock PAC/PAA
+        # and Worldgen-generated terrain textures.
+        cz = np.minimum(tile.shape[0] - 1, (tz * tile.shape[0]).astype(np.intp))
         output[rows, cols] = tile[cz, cx]
         loaded += 1
     return output, loaded
