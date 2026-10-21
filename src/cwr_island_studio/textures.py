@@ -309,6 +309,12 @@ def _auto_stock_border_orientation(
     if decoded is None:
         return "North up"
     namespace, parts = decoded
+    if namespace == "o":
+        # The original Nogova atlas is south-first when decoded. The viewer's
+        # north-up stock sampler reverses those rows, so its user-verified
+        # correct preview is Mirror north/south. Keep the manual selector
+        # available and do not change other stock islands or generated tiles.
+        return "Mirror north/south"
     tile = _resolve_tile(path, search_roots, archives)
     if tile is None:
         return "North up"

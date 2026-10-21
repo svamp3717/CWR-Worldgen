@@ -239,12 +239,14 @@ def test_stock_nogova_mixed_border_orientation_calibrates_from_base_tiles(
     correct[:] = green
     correct[:6, 6:] = brown  # NE forest, other quadrants exterior.
     stock_path = r"o\j1b1b1b1.pac"
-    rotated_original = np.rot90(correct, 1).copy()
+    # The stock PAC is vertically inverted relative to the preview's north-up
+    # image pixels; the user confirmed the mirror in original Nogova.
+    mirrored_original = np.flipud(correct).copy()
 
     def load(_root: str, path: str):
         lookup = path.replace("/", "\\").casefold()
         if lookup == stock_path:
-            return rotated_original
+            return mirrored_original
         if lookup == r"o\j1.paa":
             return np.full((12, 12, 3), brown, dtype=np.uint8)
         if lookup == r"o\b1.paa":
@@ -259,7 +261,7 @@ def test_stock_nogova_mixed_border_orientation_calibrates_from_base_tiles(
     assert not texture_module._is_stock_forest_border(r"example\\sp000.paa")
     assert texture_module._auto_stock_border_orientation(
         stock_path, (tmp_path,), None
-    ) == "90 clockwise"
+    ) == "Mirror north/south"
 
     x = np.array([3.0, 9.0])
     z = np.array([9.0, 3.0])
