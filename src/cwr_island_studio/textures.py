@@ -16,12 +16,67 @@ from PIL import Image
 
 from .pbo_textures import PboTextures, canonical_path
 from .asset_sources import roots
+from cwr_worldgen.forest_ground_blends import STOCK_FOREST_BLEND_FAMILIES
 from typing import Sequence
 
 _PAA_FORMATS = {0xFF01: 1, 0xFF02: 2, 0xFF03: 2, 0xFF04: 3, 0xFF05: 3}
 _RAW_FORMATS = {0x4444, 0x1555, 0x8888, 0x8080}
 _MAX_DECODE_PIXELS = 8 * 1024 * 1024
 _MAX_TEX_BYTES = 32 * 1024 * 1024
+
+# Only the original stock directional forest transitions use this selector.
+# Generated pitch/runway/surface PAA files are already world-aligned in
+# south-to-north pixel row order and must never be rotated along with them.
+FOREST_BORDER_ORIENTATIONS = (
+    "North up",
+    "90 clockwise",
+    "180",
+    "90 counterclockwise",
+    "Mirror east/west",
+    "Mirror north/south",
+    "Transpose",
+    "Anti-transpose",
+)
+
+
+def _is_stock_forest_border(path: str) -> bool:
+    normalized = path.replace("\\", "/").casefold()
+    namespace, sep, filename = normalized.rpartition("/")
+    if not sep:
+        return False
+    stem, dot, extension = filename.rpartition(".")
+    if not dot or len(stem) != 8:
+        return False
+    for family in STOCK_FOREST_BLEND_FAMILIES.values():
+        source_namespace, forest, ground, suffix, _available = family
+        if namespace != source_namespace or extension != suffix:
+            continue
+        quarters = tuple(stem[index:index + 2] for index in range(0, 8, 2))
+        return all(part in {forest, ground} for part in quarters) and (
+            forest in quarters and ground in quarters
+        )
+    return False
+
+
+def _orient_stock_border(tile: np.ndarray, orientation: str) -> np.ndarray:
+    """Rotate/mirror only the rendered tile; WRP indices are not edited."""
+    if orientation == "North up":
+        return tile
+    if orientation == "90 clockwise":
+        return np.rot90(tile, -1)
+    if orientation == "180":
+        return np.rot90(tile, 2)
+    if orientation == "90 counterclockwise":
+        return np.rot90(tile, 1)
+    if orientation == "Mirror east/west":
+        return np.fliplr(tile)
+    if orientation == "Mirror north/south":
+        return np.flipud(tile)
+    if orientation == "Transpose":
+        return np.transpose(tile, (1, 0, 2))
+    if orientation == "Anti-transpose":
+        return np.fliplr(np.flipud(np.transpose(tile, (1, 0, 2))))
+    raise ValueError(f"unknown forest border preview orientation: {orientation}")
 
 
 def decode_paa_preview(data: bytes) -> Image.Image:
@@ -216,6 +271,7 @@ def render_real_textures(
     fallback: np.ndarray, cell_size: float,
     *, archives: PboTextures | None = None,
     diagnostics: dict[str, str] | None = None,
+    forest_border_orientation: str = "North up",
 ) -> tuple[np.ndarray, int]:
     """Apply available actual texture pixels over a slot-colour viewport.
 
@@ -223,6 +279,8 @@ def render_real_textures(
     with the world's full dimensions. Missing assets keep the fallback colour.
     """
     search_roots = roots(asset_root)
+    if forest_border_orientation not in FOREST_BORDER_ORIENTATIONS:
+        raise ValueError("invalid forest border preview orientation")
     if slots.shape != fallback.shape[:2]:
         raise ValueError("texture and fallback preview dimensions differ")
     output = fallback.copy()
@@ -256,14 +314,22 @@ def render_real_textures(
                     else "missing"
                 )
             continue
+        stock_border = _is_stock_forest_border(path)
+        if stock_border:
+            tile = _orient_stock_border(tile, forest_border_orientation)
         rows, cols = np.nonzero(slots == slot)
         tx = np.mod(x[cols] / cell_size, 1.0)
         tz = np.mod(z[rows] / cell_size, 1.0)
         cx = np.minimum(tile.shape[1] - 1, (tx * tile.shape[1]).astype(np.intp))
-        # WRP Z increases northward, but image row 0 is the north/top edge.
-        # Reverse only the within-cell vertical coordinate; keep east/west intact.
-        # Clamping keeps samples on a cell's south edge at the bottom of its tile.
-        cz = np.minimum(tile.shape[0] - 1, ((1.0 - tz) * tile.shape[0]).astype(np.intp))
+        if stock_border:
+            # Original stock quadrant blends are inspected with north at the
+            # top of the decoded tile, independent of the selected rotation.
+            cz = np.minimum(tile.shape[0] - 1, ((1.0 - tz) * tile.shape[0]).astype(np.intp))
+        else:
+            # Generated sports/road/runway images are authored with pixel row 0
+            # at the SOUTH edge (see sports_pitch_surface_policy._render_pitch_cell).
+            # Flipping those in the viewer breaks cross-cell field markings.
+            cz = np.minimum(tile.shape[0] - 1, (tz * tile.shape[0]).astype(np.intp))
         output[rows, cols] = tile[cz, cx]
         loaded += 1
     return output, loaded

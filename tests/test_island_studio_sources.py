@@ -167,31 +167,61 @@ def test_loose_sources_have_precedence_over_selected_archives(tmp_path: Path) ->
         archives.close()
 
 
-def test_actual_textures_keep_north_up_quadrants(tmp_path: Path) -> None:
-    """A directional tile must render north-up without mirroring east/west."""
+def test_generated_world_aligned_tile_uses_south_first_pixel_rows(tmp_path: Path) -> None:
+    """Generated pitch PAA artwork starts at world-south, not image-north."""
     tile = Image.new("RGB", (2, 2))
-    # Source image rows run top-to-bottom: NW, NE, SW, SE.
+    # A Worldgen pitch has south-west/south-east in its first image row.
     tile.putdata((
-        (255, 0, 0), (0, 255, 0),
         (0, 0, 255), (255, 255, 0),
+        (255, 0, 0), (0, 255, 0),
     ))
-    tile.save(tmp_path / "quadrants.png")
-    # Viewport rows descend geographically from north to south. The last
-    # sample lies exactly on the southern gridline to guard against wrapping.
+    tile.save(tmp_path / "pitch.png")
     slots = np.zeros((3, 2), dtype=np.int32)
     fallback = np.full((3, 2, 3), 17, dtype=np.uint8)
-    expected = np.asarray([
-        [[255, 0, 0], [0, 255, 0]],
-        [[0, 0, 255], [255, 255, 0]],
-        [[0, 0, 255], [255, 255, 0]],
-    ], dtype=np.uint8)
     try:
         actual, loaded = render_real_textures(
-            slots, np.array([12.5, 37.5]),
-            np.array([37.5, 12.5, 0.0]),
-            ("quadrants.png",), tmp_path, fallback, 50.0,
+            slots, np.array([12.5, 37.5]), np.array([37.5, 12.5, 0.0]),
+            ("pitch.png",), tmp_path, fallback, 50.0,
         )
         assert loaded == 1
-        np.testing.assert_array_equal(actual, expected)
+        np.testing.assert_array_equal(actual, [
+            [[255, 0, 0], [0, 255, 0]],
+            [[0, 0, 255], [255, 255, 0]],
+            [[0, 0, 255], [255, 255, 0]],
+        ])
     finally:
         clear_loose_texture_cache()
+
+
+def test_stock_forest_quadrants_can_rotate_without_rotating_generated_tiles(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    import cwr_island_studio.textures as texture_module
+
+    northup_tile = np.array([
+        [[255, 0, 0], [0, 255, 0]],
+        [[0, 0, 255], [255, 255, 0]],
+    ], dtype=np.uint8)
+    monkeypatch.setattr(texture_module, "_image_tile", lambda *_: northup_tile)
+    slots = np.array([[0, 1], [0, 1]], dtype=np.int32)
+    x = np.array([12.5, 37.5])
+    z = np.array([37.5, 12.5])
+    fallback = np.zeros((2, 2, 3), dtype=np.uint8)
+    paths = (r"o\\j1t1j1t1.pac", r"example\\sp000.paa")
+    assert texture_module._is_stock_forest_border(paths[0])
+    assert not texture_module._is_stock_forest_border(paths[1])
+    assert not texture_module._is_stock_forest_border(r"o\\j1.paa")
+
+    original, count = render_real_textures(
+        slots, x, z, paths, tmp_path, fallback, 50.0,
+    )
+    rotated, rotated_count = render_real_textures(
+        slots, x, z, paths, tmp_path, fallback, 50.0,
+        forest_border_orientation="90 clockwise",
+    )
+    assert count == rotated_count == 2
+    # First column is the forest blend: its sampled north/south corners rotate.
+    assert original[:, 0].tolist() == [[255, 0, 0], [0, 0, 255]]
+    assert rotated[:, 0].tolist() == [[0, 0, 255], [255, 255, 0]]
+    # Second column belongs to generated sports overlay and never rotates.
+    assert rotated[:, 1].tolist() == original[:, 1].tolist()
