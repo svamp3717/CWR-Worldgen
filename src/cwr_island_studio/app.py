@@ -429,7 +429,8 @@ class IslandStudio:
                     f"Y 0–{doc.world_height:g} metres)"
                 )
             new_x, new_z = center_on_position(
-                game_x, game_y, max(1, self.canvas.winfo_width()),
+                game_x, doc.world_height - game_y,
+                max(1, self.canvas.winfo_width()),
                 max(1, self.canvas.winfo_height()), self.zoom,
             )
         except ValueError as exc:
@@ -1191,10 +1192,14 @@ class IslandStudio:
     def _extent(self) -> tuple[float, float, float, float]:
         width = max(1, self.canvas.winfo_width())
         height = max(1, self.canvas.winfo_height())
+        # Display coordinates grow downward from the *north* edge, but WRP
+        # object Z and OSM latitude grow northward. Return north-to-south
+        # terrain sampling bounds; keep WRP coordinates untouched.
+        north = self.document.world_height - self.view_z
         return (
-            self.view_x, self.view_z,
+            self.view_x, north,
             self.view_x + width / self.zoom,
-            self.view_z + height / self.zoom,
+            north - height / self.zoom,
         )
 
     def _draw(self) -> None:
@@ -1240,11 +1245,11 @@ class IslandStudio:
                     or self.show_model_footprints.get()):
                 if self.asset_roots or self.pbo_textures is not None:
                     self._request_model_bounds(self.document.visible_objects(
-                        left, top, right, bottom, limit=2600,
+                        left, bottom, right, top, limit=2600,
                     ))
             if self.show_roads.get() or view == "Road preview":
                 for obj in self.document.visible_objects(
-                    left, top, right, bottom, limit=3200, roads_only=True,
+                    left, bottom, right, top, limit=3200, roads_only=True,
                 ):
                     segment = road_segment(obj.x, obj.z, obj.heading, obj.model_path)
                     if segment is None:
@@ -1266,13 +1271,13 @@ class IslandStudio:
             show_forests = self.show_forests.get()
             normal = (
                 self.document.visible_objects(
-                    left, top, right, bottom, limit=2700,
+                    left, bottom, right, top, limit=2700,
                 )
                 if show_dots or show_real else ()
             )
             forest = (
                 self.document.visible_objects(
-                    left, top, right, bottom, limit=2600, forest_only=True,
+                    left, bottom, right, top, limit=2600, forest_only=True,
                 )
                 if show_forests else ()
             )
@@ -1360,7 +1365,7 @@ class IslandStudio:
                 occupied: set[tuple[int, int]] = set()
                 printed = 0
                 for place in self._map_locations:
-                    if not (left <= place.x <= right and top <= place.z <= bottom):
+                    if not (left <= place.x <= right and bottom <= place.z <= top):
                         continue
                     sx, sz = self._to_screen(place.x, place.z)
                     tile = (int(sx // 105), int(sz // 21))
@@ -1584,10 +1589,16 @@ class IslandStudio:
             self.status.set(str(exc))
 
     def _to_screen(self, x: float, z: float) -> tuple[float, float]:
-        return (x - self.view_x) * self.zoom, (z - self.view_z) * self.zoom
+        return (
+            (x - self.view_x) * self.zoom,
+            (self.document.world_height - z - self.view_z) * self.zoom,
+        )
 
     def _to_world(self, sx: float, sz: float) -> tuple[float, float]:
-        return self.view_x + sx / self.zoom, self.view_z + sz / self.zoom
+        return (
+            self.view_x + sx / self.zoom,
+            self.document.world_height - self.view_z - sz / self.zoom,
+        )
 
     def _zoom_at_point(self, x: float, y: float, factor: float) -> None:
         if not self.document:
