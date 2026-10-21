@@ -75,6 +75,22 @@ class SplashImageTests(unittest.TestCase):
                 self.assertNotIn(white, image.crop((0, 149, 640, 360)).getdata())
                 self.assertNotIn(white, image.crop((35, 29, 200, 70)).getdata())
 
+    def test_island_studio_name_is_single_white_headline(self) -> None:
+        name = "CWR-Island-Studio"
+        self.assertEqual(TOOLS[name][:2], ("ISLAND STUDIO", ""))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "island-studio.png"
+            render_splash(name, path)
+            with Image.open(path) as image:
+                # All title glyphs are on one row, in pure white, and the
+                # former green STUDIO subtitle is absent.
+                white = (255, 255, 255)
+                upper_title = image.crop((40, 110, 605, 165))
+                self.assertIn(white, upper_title.getdata())
+                subtitle_row = image.crop((40, 170, 605, 202))
+                self.assertNotIn(white, subtitle_row.getdata())
+                self.assertNotIn(TOOLS[name][2], subtitle_row.getdata())
+
     def test_refuses_unknown_tool(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "unknown standalone tool"):
