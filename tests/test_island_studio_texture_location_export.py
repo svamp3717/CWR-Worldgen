@@ -196,7 +196,11 @@ def test_gui_utility_exports_without_unchecking_read_only(
         IslandStudio._export_texture_location_map(editor)
         assert dest.exists()
         assert editor._busy
-        assert [messages.get_nowait()[0], messages.get_nowait()[0]][-1] == "texture_map_exported"
+        received = []
+        while not messages.empty():
+            received.append(messages.get_nowait()[0])
+        assert received[0] == "texture_map_progress"
+        assert received[-1] == "texture_map_exported"
         assert dialogs[0]["filetypes"][0][1] == "*.zip"
     assert source.exists()
 
