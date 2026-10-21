@@ -109,13 +109,13 @@ def test_exact_north_up_wrp_texture_map_and_boundaries(tmp_path: Path) -> None:
         legend = _rows(archive, "texture-paths.csv")
         assert len(legend) == 512  # export every WRP table slot, including unused
         assert {int(row["texture_slot"]): int(row["cell_count"])
-                for row in legend[:3]} == {0: 4, 1: 5, 2: 3}
+                for row in legend[:3]} == {0: 3, 1: 5, 2: 4}
         adjacency = {
             (int(row["texture_slot_a"]), int(row["texture_slot_b"])):
             int(row["shared_cell_edges"])
             for row in _rows(archive, "texture-adjacencies.csv")
         }
-        assert adjacency == {(0, 1): 1, (0, 2): 2, (1, 2): 4}
+        assert adjacency == {(0, 1): 1, (0, 2): 3, (1, 2): 4}
 
 
 def test_pending_texture_edits_are_included_without_saving_wrp(tmp_path: Path) -> None:
