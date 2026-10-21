@@ -18,14 +18,19 @@ from cwr_worldgen.surface_pass import (
     build_surface_pass, surface_texture_wire_paths, external_surface_texture_paths,
 )
 from cwr_worldgen.terrain import stock_forest_undergrowth_paths
+from cwr_worldgen.forest_ground_blends import (
+    STOCK_FOREST_BLEND_FAMILIES,
+    apply_stock_forest_border_blends,
+    stock_forest_blend_path,
+)
 from cwr_worldgen.wrp import inspect_rvw4, write_rvw4
 
 
 STOCK = {
-    "nogova": (r"o\j1.paa", r"o\j2.paa"),
-    "everon": (r"eden\pl.paa", r"eden\pl.paa"),
-    "malden": (r"abel\pb.paa", r"abel\pb.paa"),
-    "kolgujev": (r"cain\u2.paa", r"cain\u2.paa"),
+    "nogova": (r"o\j1.paa", r"o\t1.paa"),
+    "everon": (r"eden\pl.paa", r"eden\tn.paa"),
+    "malden": (r"abel\pb.paa", r"abel\tt.paa"),
+    "kolgujev": (r"cain\u2.paa", r"cain\j9.paa"),
 }
 
 
@@ -163,4 +168,136 @@ def test_written_4wvr_contains_forest_floor_and_edge_stock_slots(tmp_path) -> No
     )
     inspected = inspect_rvw4(wrp, height_scale=0.05)
     assert inspected.texture_slots[floor_slot] == r"o\j1.paa"
-    assert inspected.texture_slots[edge_slot] == r"o\j2.paa"
+    assert inspected.texture_slots[edge_slot] == r"o\t1.paa"
+
+
+# The four names below are direct matches to original Island Studio atlas
+# exports and establish the SW/SE/NW/NE quadrant orientation.
+STRAIGHT_BORDERS = {
+    "nogova": (
+        r"o\j1t1j1t1.pac", r"o\t1j1t1j1.pac",
+        r"o\t1t1j1j1.pac", r"o\j1j1t1t1.pac",
+    ),
+    "everon": (
+        r"eden\pltnpltn.paa", r"eden\tnpltnpl.paa",
+        r"eden\tntnplpl.paa", r"eden\plpltntn.paa",
+    ),
+    "malden": (
+        r"abel\pbttpbtt.pac", r"abel\ttpbttpb.pac",
+        r"abel\ttttpbpb.pac", r"abel\pbpbtttt.pac",
+    ),
+    "kolgujev": (
+        r"cain\u2j9u2j9.paa", r"cain\j9u2j9u2.paa",
+        r"cain\j9j9u2u2.paa", r"cain\u2u2j9j9.paa",
+    ),
+}
+
+
+def _forest_rect_world(profile: str):
+    size = 9
+    forest = np.zeros((size, size), dtype=np.bool_)
+    forest[2:7, 2:7] = True
+    ground = np.full((size, size), MATERIAL_INDEX["g"], dtype=np.int32)
+    ground[2:7, 2:7] = MATERIAL_INDEX["e"]
+    ground[3:6, 3:6] = MATERIAL_INDEX["f"]
+    before = [r"world\data\d.paa", *surface_texture_wire_paths(
+        "world", profile, forest_undergrowth_textures=True,
+    )]
+    return forest, ground, before
+
+
+@pytest.mark.parametrize("profile,straight", STRAIGHT_BORDERS.items())
+def test_directional_stock_forest_blends_match_original_island(
+    profile: str, straight: tuple[str, str, str, str],
+) -> None:
+    forest, terrain, paths = _forest_rect_world(profile)
+    expanded, indices = apply_stock_forest_border_blends(
+        terrain.ravel(), forest.ravel(), paths, width=9,
+        profile=profile, forest_material=MATERIAL_INDEX["f"],
+        forest_edge_material=MATERIAL_INDEX["e"], enabled=True,
+    )
+    image = np.asarray(indices).reshape((9, 9))
+    west = expanded[int(image[4, 2])]
+    east = expanded[int(image[4, 6])]
+    north = expanded[int(image[6, 4])]
+    south = expanded[int(image[2, 4])]
+    assert (west, east, north, south) == straight
+    # Every corner cell uses a verified path with exactly one forest corner.
+    for row, col, mask in ((2, 2, 8), (2, 6, 4), (6, 2, 2), (6, 6, 1)):
+        assert expanded[int(image[row, col])] == stock_forest_blend_path(profile, mask)
+    assert expanded[int(image[4, 4])] == STOCK[profile][0]
+    assert expanded[int(image[0, 0])] == paths[MATERIAL_INDEX["g"] + 1]
+    # Geometry/material classifications and existing base texture slots survive.
+    assert np.count_nonzero(terrain == MATERIAL_INDEX["e"]) == 16
+    assert tuple(expanded[:len(paths)]) == tuple(paths)
+    assert len(expanded) <= 512
+    assert len(expanded) > len(paths)
+
+
+def test_only_verified_source_texture_names_are_ever_emitted() -> None:
+    for profile, family in STOCK_FOREST_BLEND_FAMILIES.items():
+        valid_masks = family[4]
+        assert len(valid_masks) == {"nogova":14, "everon":13, "malden":12, "kolgujev":14}[profile]
+        for mask in range(1, 15):
+            path = stock_forest_blend_path(profile, mask)
+            assert (path is not None) == (mask in valid_masks)
+        # Two uncommon diagonal masks do not exist in source Malden/Everon.
+        assert stock_forest_blend_path("malden", 6) is None
+        assert stock_forest_blend_path("malden", 9) is None
+        assert stock_forest_blend_path("everon", 9) is None
+    assert stock_forest_blend_path("nogova", 15) is None
+
+
+def test_turned_off_forests_leave_original_wrp_indices_untouched() -> None:
+    mask, material, paths = _forest_rect_world("nogova")
+    result, slots = apply_stock_forest_border_blends(
+        material.ravel(), mask.ravel(), paths,
+        width=9, profile="nogova", forest_material=MATERIAL_INDEX["f"],
+        forest_edge_material=MATERIAL_INDEX["e"], enabled=False,
+    )
+    assert result == tuple(paths)
+    assert slots == (material.ravel() + 1).tolist()
+
+
+def test_empty_forest_and_stock_wrp_slot_budget_do_not_generate_fake_paths() -> None:
+    forest, material, paths = _forest_rect_world("everon")
+    no_forest, empty_indices = apply_stock_forest_border_blends(
+        np.full(81, MATERIAL_INDEX["g"], dtype=np.int32),
+        np.zeros(81, dtype=np.bool_), paths, width=9,
+        profile="everon", forest_material=MATERIAL_INDEX["f"],
+        forest_edge_material=MATERIAL_INDEX["e"], enabled=True,
+    )
+    assert no_forest == tuple(paths)
+    assert set(empty_indices) == {MATERIAL_INDEX["g"] + 1}
+    full, result = apply_stock_forest_border_blends(
+        material.ravel(), forest.ravel(), paths, width=9,
+        profile="everon", forest_material=MATERIAL_INDEX["f"],
+        forest_edge_material=MATERIAL_INDEX["e"], enabled=True,
+        maximum_texture_slots=len(paths),
+    )
+    assert full == tuple(paths)
+    assert max(result) < len(paths)
+    with pytest.raises(ValueError, match="dimensions"):
+        apply_stock_forest_border_blends(
+            material.ravel(), forest.ravel()[:-1], paths,
+            width=9, profile="everon", forest_material=MATERIAL_INDEX["f"],
+            forest_edge_material=MATERIAL_INDEX["e"], enabled=True,
+        )
+
+
+def test_written_wrp_contains_real_directional_forest_border_paths(tmp_path) -> None:
+    forest, material, initial = _forest_rect_world("nogova")
+    paths, slots = apply_stock_forest_border_blends(
+        material.ravel(), forest.ravel(), initial, width=9,
+        profile="nogova", forest_material=MATERIAL_INDEX["f"],
+        forest_edge_material=MATERIAL_INDEX["e"], enabled=True,
+    )
+    world = tmp_path / "forest_edges.wrp"
+    write_rvw4(
+        world, 9, 9, [50.0] * 81, slots, paths, (),
+        height_scale=0.05,
+    )
+    with_world = inspect_rvw4(world, height_scale=0.05)
+    for sample in STRAIGHT_BORDERS["nogova"]:
+        assert sample in with_world.texture_slots
+    assert r"o\j2.paa" not in with_world.texture_slots
