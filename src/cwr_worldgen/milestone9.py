@@ -363,6 +363,7 @@ class Milestone9Spec(Milestone8Spec):
     surface_overview_size: int = 1024
     surface_texture_size: int = 512
     surface_ground_mode: str = "milestone9"
+    forest_undergrowth_textures: bool = False
     forest_profile: str = "everon"
     # Optional safety mode. The field name is retained for 0.9.252 CLI/config
     # compatibility, but the mode now disables only the rigid stock square/triangle
@@ -1048,6 +1049,7 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     surface_overview_size: int = 1024
     surface_texture_size: int = 512
     surface_ground_mode: str = "milestone9"
+    forest_undergrowth_textures: bool = False
 
 
 def _sha256(path: Path) -> str:
@@ -1635,6 +1637,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         building_foundation_safety=spec.building_foundation_safety,
         building_maximum_pad_relief=spec.building_maximum_pad_relief,
         ground_texture_profile=spec.ground_texture_profile,
+        forest_undergrowth_textures=spec.forest_undergrowth_textures,
         surface_pass_enabled=True,
         surface_shoreline_wet_cells=spec.surface_shoreline_wet_cells,
         surface_shoreline_sand_cells=spec.surface_shoreline_sand_cells,
@@ -1777,6 +1780,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         "overview_map": result.overview_map_path.name if result.overview_map_path else None,
         "world_icon": rf"{spec.name}\data\icon.paa",
         "ground_texture_profile": spec.ground_texture_profile,
+        "forest_undergrowth_textures": spec.forest_undergrowth_textures,
         "ground_application_mode": spec.surface_ground_mode,
         "colour_reference": str(reference_path) if reference_path else None,
         "colour_reference_sha256": _sha256(reference_path) if reference_path else None,
