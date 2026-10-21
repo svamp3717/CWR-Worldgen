@@ -63,23 +63,31 @@ Ground textures can use several classic OFP/CWA terrain styles, including Nogova
 
 **Optional stock forest undergrowth textures:** In **Common choices**, turn on
 **Stock forest undergrowth ground textures (incl. forest edges)** to paint OSM
-forest interiors and their edge/border band with a stock forest-floor tile.
+forest interiors with their original stock forest-floor texture, and
+automatically choose **directional border and corner blend textures**.
 The checkbox is off by default and does not control the separate 3D
 **Forest undergrowth** vegetation option. It follows **Ground textures**, not
 the selected vegetation profile:
 
-| Ground texture preset | Forest floor | Forest edge/border |
-| --- | --- | --- |
-| Nogova | `o\\j1.paa` | `o\\j2.paa` (candidate, verify in O.pbo) |
-| Everon | `eden\\pl.paa` | `eden\\pl.paa` |
-| Malden | `abel\\pb.paa` | `abel\\pb.paa` |
-| Kolgujev/Cain | `cain\\u2.paa` | `cain\\u2.paa` |
+| Ground texture preset | Forest floor | Example west-edge blend | Ordinary edge fallback |
+| --- | --- | --- | --- |
+| Nogova | `o\\j1.paa` | `o\\j1t1j1t1.pac` | `o\\t1.paa` |
+| Everon | `eden\\pl.paa` | `eden\\pltnpltn.paa` | `eden\\tn.paa` |
+| Malden | `abel\\pb.paa` | `abel\\pbttpbtt.pac` | `abel\\tt.paa` |
+| Kolgujev/Cain | `cain\\u2.paa` | `cain\\u2j9u2j9.paa` | `cain\\j9.paa` |
 
-Only forest and forest-edge ground-texture paths change; beaches, roads,
-farmland, grassland and object placement retain their normal settings.
-Generated, desert and untextured terrain profiles ignore the option.
-CLI equivalent: `--forest-undergrowth-textures`. These paths reference
-original game texture assets and are **not** copied into the generated PBO.
+The four two-letter parts of a blend filename describe its NE, NW, SE and
+SW quadrants. Worldgen inspects the OSM forest shape and chooses a verified
+stock path at each forest-edge cell, including corners. Everon and Malden
+lack a few diagonal combinations in their original texture tables: Worldgen
+substitutes a verified nearby blend rather than inventing a filename.
+See [the original-island analysis](docs/stock-forest-border-texture-research.md).
+
+Only forest/edge texture slots change; beaches, roads, farmland, grassland,
+vegetation objects, and terrain heights keep their normal settings.
+Generated, desert and untextured profiles ignore the option.
+CLI equivalent: `--forest-undergrowth-textures`. Original game texture
+artwork is **not** copied into the generated PBO.
 
 
 Vegetation can likewise use different game styles independently of the terrain texture set. Forest blocks, individual trees, undergrowth, rural vegetation, meadow grass, wetland reeds and related vegetation systems can be configured separately or disabled with the **None** vegetation preset.
