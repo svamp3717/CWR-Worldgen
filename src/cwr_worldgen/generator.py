@@ -86,6 +86,7 @@ from .terrain import (
     choose_spawn,
     classify_materials,
     ground_texture_path,
+    stock_forest_undergrowth_paths,
     material_counts,
     material_colour_for_profile,
 )
@@ -2075,9 +2076,17 @@ def _material_definitions(spec: PlayabilitySpec):
 
 def _ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
     profile = _ground_texture_profile(spec)
+    enabled = bool(getattr(spec, "forest_undergrowth_textures", False))
     if _surface_ground_enabled(spec):
-        return surface_texture_wire_paths(spec.name, profile)
-    return tuple(ground_texture_path(spec.name, material.code, profile) for material in OSM_MATERIALS)
+        return surface_texture_wire_paths(
+            spec.name, profile, forest_undergrowth_textures=enabled,
+        )
+    floor = stock_forest_undergrowth_paths(profile, enabled)
+    return tuple(
+        floor[0] if floor is not None and material.code == "f"
+        else ground_texture_path(spec.name, material.code, profile)
+        for material in OSM_MATERIALS
+    )
 
 
 def _external_ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
@@ -2088,7 +2097,11 @@ def _external_ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
     if profile == "malden":
         return ()
     if _surface_ground_enabled(spec):
-        return external_surface_texture_paths(profile)
+        return external_surface_texture_paths(
+            profile, forest_undergrowth_textures=bool(
+                getattr(spec, "forest_undergrowth_textures", False)
+            ),
+        )
     return _ground_texture_paths(spec) if profile in {"everon", "nogova"} else ()
 
 
