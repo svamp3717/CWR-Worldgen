@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw
 from ._version import __version__
 from .cache import CACHE_SCHEMA_VERSION, atomic_write_bytes, cache_key, streaming_hash
 from .building_semantics import is_actual_church
+from .fence_openings import fence_opening_chunk_indices
 from .model import OsmSpec, TerrainShearedWorldObject, WorldObject
 from .network import (
     OVERPASS_RATE_LIMIT_BACKOFF_SECONDS,
@@ -8803,7 +8804,17 @@ def generate_world_objects(
                     else custom_fence_donor[1] / 2.0 if (custom_fence_donor and not hedge)
                     else 2.4
                 )
+                # Make some of the otherwise continuous two-panel backyard
+                # fences passable. Skip one complete piece, never place an
+                # invisible colliding "gate" P3D into its space.
+                yard_opening_side = (
+                    (-1 if stable_roll(identity + ":opening-side", 2) == 0 else 1)
+                    if not hedge and stable_roll(identity + ":opening", 100) < 65
+                    else 0
+                )
                 for segment in (-1, 1):
+                    if segment == yard_opening_side:
+                        continue
                     sx = rear_x + right_x * segment * yard_half_length
                     sz = rear_z + right_z * segment * yard_half_length
                     end_half = max(0.1, yard_half_length - 0.1)
@@ -11123,7 +11134,17 @@ def generate_world_objects(
                 else selected_fence_donor[1] if selected_fence_donor is not None
                 else barrier_length
             )
-            for chunk_index, (x, z, heading, length, x0, z0, x1, z1) in enumerate(_line_chunks(points, fitted_length)):
+            mapped_chunks = _line_chunks(points, fitted_length)
+            mapped_openings = (
+                fence_opening_chunk_indices(
+                    mapped_chunks, f"{seed}:mapped-fence-opening:{feature.osm_key}"
+                )
+                if subtype == "fence" else frozenset()
+            )
+            for chunk_index, (x, z, heading, length, x0, z0, x1, z1) in enumerate(mapped_chunks):
+                if chunk_index in mapped_openings:
+                    # This chunk's absence is a physical, collision-free gap.
+                    continue
                 if barrier_objects >= barrier_limit:
                     break
                 if not (0 <= x < spec.world_size and 0 <= z < spec.world_size):
@@ -11298,9 +11319,16 @@ def generate_world_objects(
                     if area < FARMLAND_FENCE_MINIMUM_FIELD_AREA_M2:
                         continue
                     closed_boundary = boundary + (boundary[0],)
+                    rural_chunks = _line_chunks(closed_boundary, rural_segment_length)
+                    rural_openings = fence_opening_chunk_indices(
+                        rural_chunks,
+                        f"{seed}:farmland-fence-opening:{feature.osm_key}:{polygon_index}",
+                    )
                     for chunk_index, (x, z, heading, _length, x0, z0, x1, z1) in enumerate(
-                        _line_chunks(closed_boundary, rural_segment_length)
+                        rural_chunks
                     ):
+                        if chunk_index in rural_openings:
+                            continue
                         if barrier_objects >= barrier_limit:
                             break
                         if not (0.0 <= x < spec.world_size and 0.0 <= z < spec.world_size):
