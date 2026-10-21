@@ -707,6 +707,10 @@ def _parser() -> argparse.ArgumentParser:
         help="Milestone 9 ground palette: Nogova transition preset (default), stock Kolgujev/Cain textures, stock Malden/Abel textures, stock Everon/Eden, desert stock textures, or fully generated colours",
     )
     milestone9.add_argument(
+        "--forest-undergrowth-textures", action="store_true",
+        help="Optional classic forest-floor textures, including a Nogova forest-edge tile; independent of vegetation objects",
+    )
+    milestone9.add_argument(
         "--pbo-backend",
         choices=("auto", "python", "poseidon"),
         default="auto",
@@ -1386,6 +1390,7 @@ def main(argv: list[str] | None = None) -> int:
                 semantic_site_maximum_relief=args.semantic_site_max_relief,
                 semantic_site_maximum_variants=args.semantic_site_max_variants,
                 ground_texture_profile=args.ground_textures,
+                forest_undergrowth_textures=args.forest_undergrowth_textures,
                 surface_shoreline_wet_cells=args.surface_wet_shore_cells,
                 surface_shoreline_sand_cells=args.surface_sand_shore_cells,
                 surface_transition_cells=args.surface_transition_cells,
