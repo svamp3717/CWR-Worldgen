@@ -19,6 +19,8 @@ from .asset_sources import roots
 from typing import Sequence
 
 _PAA_FORMATS = {0xFF01: 1, 0xFF02: 2, 0xFF03: 2, 0xFF04: 3, 0xFF05: 3}
+_RAW_FORMATS = {0x4444, 0x1555, 0x8888, 0x8080}
+_MAX_DECODE_PIXELS = 8 * 1024 * 1024
 _MAX_TEX_BYTES = 32 * 1024 * 1024
 
 
@@ -26,8 +28,8 @@ def decode_paa_preview(data: bytes) -> Image.Image:
     if len(data) < 4 or len(data) > _MAX_TEX_BYTES:
         raise ValueError("invalid texture size")
     magic = struct.unpack_from("<H", data)[0]
-    if magic not in _PAA_FORMATS:
-        raise ValueError("unsupported PAA compression")
+    if magic not in _PAA_FORMATS and magic not in _RAW_FORMATS:
+        raise ValueError("unsupported PAA/PAC image format")
     cursor = 2
     while data[cursor:cursor + 4] == b"GGAT":
         if cursor + 12 > len(data):
@@ -45,14 +47,47 @@ def decode_paa_preview(data: bytes) -> Image.Image:
     width, height = struct.unpack_from("<HH", data, cursor)
     length = int.from_bytes(data[cursor + 4:cursor + 7], "little")
     cursor += 7
-    if not (4 <= width <= 8192 and 4 <= height <= 8192):
+    if not (1 <= width <= 8192 and 1 <= height <= 8192):
         raise ValueError("invalid PAA dimensions")
+    if width * height > _MAX_DECODE_PIXELS:
+        raise ValueError("texture exceeds decoded-pixel limit")
     if length > _MAX_TEX_BYTES or cursor + length > len(data):
         raise ValueError("truncated PAA image")
-    return Image.frombytes(
-        "RGBA", (width, height), data[cursor:cursor + length],
-        "bcn", _PAA_FORMATS[magic],
-    ).convert("RGB")
+    if magic in _PAA_FORMATS:
+        return Image.frombytes(
+            "RGBA", (width, height), data[cursor:cursor + length],
+            "bcn", _PAA_FORMATS[magic],
+        ).convert("RGB")
+    if magic == 0x8888:
+        needed = width * height * 4
+        if length < needed:
+            raise ValueError("truncated ARGB8888 texture")
+        bgra = np.frombuffer(
+            data, dtype=np.uint8, count=needed, offset=cursor,
+        ).reshape((height, width, 4))
+        return Image.fromarray(bgra[:, :, [2, 1, 0]].copy(), mode="RGB")
+
+    # Reuse the same checked LZW/LZSS decoder used for original Worldgen PAC
+    # ground textures. Older PAA/PAC ARGB4444/ARGB1555 images use it as well.
+    from cwr_worldgen.runway_exact_background_policy import _decode_pac_lzw
+
+    raw = _decode_pac_lzw(io.BytesIO(data[cursor:]), width * height * 2)
+    words = np.frombuffer(raw, dtype="<u2").copy()
+    if magic == 0x8080:  # AI88 uses a packed intensity/alpha encoding.
+        intensity = words & 0x00F0
+        words = (words & 0xF000) | (intensity << 4) | intensity | (intensity >> 4)
+    if magic in {0x4444, 0x8080}:
+        rgb = np.stack(
+            [((words >> shift) & 15).astype(np.uint8) * 17
+             for shift in (8, 4, 0)], axis=-1,
+        ).reshape((height, width, 3))
+    else:
+        rgb = np.stack(
+            [((words >> shift) & 31).astype(np.uint8)
+             for shift in (10, 5, 0)], axis=-1,
+        ).reshape((height, width, 3))
+        rgb = (rgb.astype(np.uint16) * 255 // 31).astype(np.uint8)
+    return Image.fromarray(rgb, mode="RGB")
 
 
 def decode_pac_preview(data: bytes) -> Image.Image:
@@ -66,7 +101,7 @@ def decode_pac_preview(data: bytes) -> Image.Image:
         raise ValueError("invalid PAC texture size")
     # Some assets carry a typed DXT PAA header despite having a .pac name.
     # Keep those decodable instead of treating 0xFF01 as a palette count.
-    if struct.unpack_from("<H", data)[0] in _PAA_FORMATS:
+    if struct.unpack_from("<H", data)[0] in _PAA_FORMATS | _RAW_FORMATS:
         return decode_paa_preview(data)
     from cwr_worldgen.runway_exact_background_policy import _decode_paletted_pac
 
