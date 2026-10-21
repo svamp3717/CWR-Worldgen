@@ -50,23 +50,25 @@ def fence_opening_chunk_indices(
         # contain fence pieces so the gap reads as a passage, not an ending.
         if _angle_difference(chunks[start - 1][2], chunks[start][2]) > 7.0:
             continue
-        end = start
-        while end < len(chunks) - 1 and (
-            end == start or _angle_difference(chunks[end - 1][2], chunks[end][2]) <= 7.0
-        ) and cumulative[end + 1] - cumulative[start] < minimum_width - 1e-6:
+        end = start  # Exclusive index, so end - start is piece count.
+        while end < len(chunks) - 1:
+            if end > start and _angle_difference(
+                chunks[end - 1][2], chunks[end][2]
+            ) > 7.0:
+                break
             end += 1
-        if end >= len(chunks) - 1:
-            continue
-        width = cumulative[end + 1] - cumulative[start]
+            if cumulative[end] - cumulative[start] >= minimum_width - 1e-6:
+                break
+        width = cumulative[end] - cumulative[start]
         if width < minimum_width - 1e-6:
             continue
-        if _angle_difference(chunks[end][2], chunks[end + 1][2]) > 7.0:
+        if _angle_difference(chunks[end - 1][2], chunks[end][2]) > 7.0:
             continue
-        middle = (cumulative[start] + cumulative[end + 1]) / 2.0
+        middle = (cumulative[start] + cumulative[end]) / 2.0
         rank = hashlib.blake2s(
             f"{identity}:opening:{start}:{end}".encode("utf-8"), digest_size=8
         ).digest()
-        candidates.append((rank, start, end, middle))
+        candidates.append((rank, start, end - 1, middle))
     if not candidates:
         return frozenset()
 
@@ -79,9 +81,10 @@ def fence_opening_chunk_indices(
     )
     for _rank, start, end, middle in sorted(candidates):
         if any(
-            min(abs(middle - previous), total - abs(middle - previous))
-            if closed else abs(middle - previous)
-            < FENCE_OPENING_MINIMUM_SEPARATION_METRES
+            (
+                min(abs(middle - previous), total - abs(middle - previous))
+                if closed else abs(middle - previous)
+            ) < FENCE_OPENING_MINIMUM_SEPARATION_METRES
             for _first, _last, previous in chosen
         ):
             continue
