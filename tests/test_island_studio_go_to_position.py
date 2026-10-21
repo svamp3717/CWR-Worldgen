@@ -86,7 +86,8 @@ def test_go_to_position_uses_game_y_as_map_north_and_preserves_zoom(
     IslandStudio._go_to_position(editor, "[1234.5, 5678.25, 140]")
     assert editor.zoom == 0.5
     assert editor.view_x == pytest.approx(234.5)
-    assert editor.view_z == pytest.approx(4878.25)
+    # View Z is screen-down distance from the north edge, not in-game Y.
+    assert editor.view_z == pytest.approx(3521.75)
     assert editor._last_game_position == "[1234.5, 5678.25, 140]"
     assert actions == ["hover", "draw"]
     assert editor.status.value == "Map centered at game X 1,234.50, Y 5,678.25 m"

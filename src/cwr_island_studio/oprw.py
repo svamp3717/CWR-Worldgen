@@ -270,6 +270,11 @@ class OprwIslandDocument(IslandDocument):
         height = max(1, min(1200, int(height)))
         world_x = np.linspace(left, right, width, endpoint=False)
         world_z = np.linspace(top, bottom, height, endpoint=False)
+        if top > bottom:
+            # Island Studio displays geographic north at the top, opposite
+            # the raw WRP south-to-north row order. Sample pixel centres on
+            # descending views so both edge rows appear exactly once.
+            world_z -= (top - bottom) / (2 * height)
         if textures:
             # Layer and terrain dimensions can differ in Resistance OPRW.
             columns = np.clip(
