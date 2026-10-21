@@ -547,7 +547,6 @@ class Milestone9Spec(Milestone8Spec):
     pbo_backend: str = "auto"
     poseidon_tools_path: Path | None = None
     odol_buildings: bool = False
-    binarize_world: bool = False
     binarize_config: bool = False
     world_seed: str = ""
     deploy_mod_dir: Path | None = None
@@ -1223,34 +1222,6 @@ def _resolve_overture_buildings_geojson(
     return fetch_overture_buildings_geojson(bbox, output, refresh=spec.cache_refresh)
 
 
-def _binarize_generated_world(
-    result: BuildResult, spec: Milestone9Spec,
-    playability: _Milestone9PlayabilitySpec,
-    *, repack: bool = True,
-) -> Path:
-    """Binarize 4WVR while preserving the terrain seen by CWR-CE.
-
-    Both Worldgen's 4WVR quantizer and CWR-CE's runtime decoder now use
-    LANDDATA_SCALE=0.045 m/unit. OPRW terrain floats must use the same
-    physical heights or otherwise objects will sink or float.
-    """
-    from .wrp_binarize import (
-        CWA_RVW4_HEIGHT_SCALE, binarize_rvw4, repack_game_pbo_with_oprw,
-    )
-
-    binarized = result.output_dir / f"{spec.name}.binarized.wrp"
-    binarize_rvw4(
-        result.wrp_path, binarized, height_scale=CWA_RVW4_HEIGHT_SCALE,
-    )
-    if repack:
-        repack_game_pbo_with_oprw(
-            result.source_dir, result.wrp_path, binarized, result.pbo_path,
-            backend=spec.pbo_backend,
-            poseidon_tools_path=spec.poseidon_tools_path,
-        )
-    return binarized
-
-
 def resolve_world_seed(spec: Milestone9Spec, normalized_fingerprint: str) -> str:
     """Select a packaging-independent seed for procedural placements/surfaces.
 
@@ -1269,12 +1240,6 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
     )
     report_progress(1, "Source bundle validated; preparing normalized geometry")
     source = source_validation.bundle
-    if spec.binarize_world and abs(source.cell_size - 50.0) > 0.00001:
-        raise ValueError(
-            "Experimental OPRW v3 binarization requires a 50 m source grid: "
-            "CWR-CE currently forces binarized LandGrid=50, so a different "
-            "grid would change the size and object alignment of your island"
-        )
     normalization = normalize_source_bundle(
         NormalizationSpec(
             source_dir=source.root,
@@ -1710,13 +1675,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
     if result.overview_map_path:
         shutil.copyfile(result.overview_map_path, runtime_root / "OVERVIEW-MAP.png")
 
-    binarized_wrp: Path | None = None
     binarized_config: Path | None = None
-    if spec.binarize_world:
-        report_progress(99, "Binarizing WRP to OPRW v3 for the game archive")
-        binarized_wrp = _binarize_generated_world(
-            result, spec, playability, repack=not spec.binarize_config,
-        )
     if spec.binarize_config:
         from .config_binarize import binarize_config, pack_binarized_runtime_pbo
 
@@ -1727,7 +1686,6 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         pack_binarized_runtime_pbo(
             result.source_dir, result.source_dir / "config.cpp",
             binarized_config, result.pbo_path,
-            binarized_wrp=binarized_wrp,
             backend=spec.pbo_backend, poseidon_tools_path=spec.poseidon_tools_path,
         )
 
@@ -1758,11 +1716,11 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         "note": "config.cpp remains editable; only config.bin is packaged in the game PBO.",
     }
     build_manifest["world_binarization"] = {
-        "enabled": spec.binarize_world,
-        "format": "OPRW v3" if spec.binarize_world else "4WVR",
+        "enabled": False,
+        "format": "4WVR",
         "source_wrp": str(result.wrp_path.relative_to(result.output_dir)),
-        "binarized_wrp": str(binarized_wrp.relative_to(result.output_dir)) if binarized_wrp else None,
-        "note": "Experimental; CWR-CE requires 50 m LandGrid for OPRW v3.",
+        "binarized_wrp": None,
+        "note": "Loose 4WVR only; WRP binarization is intentionally unavailable.",
     }
     build_manifest["source_bundle"] = {
         "manifest_sha256": source.fingerprint,

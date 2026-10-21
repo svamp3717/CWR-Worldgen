@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/large-world-island-studio-20261018
+      - feature/large-world-loose-wrp-studio-config-bin-20261020
   pull_request:
     paths:
       - "src/cwr_island_studio/**"

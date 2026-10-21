@@ -499,11 +499,6 @@ def _parser() -> argparse.ArgumentParser:
               "blank uses the normalized-source fingerprint"),
     )
     milestone9.add_argument(
-        "--binarize-world", action="store_true",
-        help=("EXPERIMENTAL: convert generated 4WVR to OPRW v3 in the game PBO "
-              "and preserve editable 4WVR source; requires 50 m terrain cells"),
-    )
-    milestone9.add_argument(
         "--binarize-config", action="store_true",
         help=("EXPERIMENTAL: rapify generated config.cpp to OFP/CWA RAP v4 "
               "config.bin in game PBO; keep editable config.cpp in sources"),
@@ -1224,7 +1219,6 @@ def main(argv: list[str] | None = None) -> int:
                 procedural_building_interiors=args.procedural_building_interiors,
                 high_quality_building_textures=args.high_quality_building_textures,
                 odol_buildings=args.odol_buildings,
-                binarize_world=args.binarize_world,
                 binarize_config=args.binarize_config,
                 house_style_preset=args.house_style_preset,
                 building_length_quantum=args.building_length_quantum,

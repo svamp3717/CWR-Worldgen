@@ -79,10 +79,11 @@ def binarize_rvw4(
 ) -> int:
     """Write OPRW v3 from 4WVR, retaining the original.
 
-    CWR-CE decodes 4WVR int16 terrain at a fixed 0.045 metres per sample
-    (LANDDATA_SCALE). Worldgen uses the same scale for quantization and
-    object grounding. OPRW stores physical metre heights as float32.
-    Explicit overrides remain available for compatibility tests.
+    This optional low-level converter is not a Milestone9 generation mode;
+    the loose-WRP compatibility branch retains the legacy 0.05 writer scale.
+    CWR-CE may interpret external 4WVR samples with a different runtime
+    scale. Callers converting externally sourced files can supply an explicit
+    height_scale override. OPRW stores physical metres as float32.
     """
     if not np.isfinite(height_scale) or height_scale <= 0:
         raise ValueError("height_scale must be positive and finite")
