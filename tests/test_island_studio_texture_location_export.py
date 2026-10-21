@@ -202,7 +202,41 @@ def test_gui_utility_exports_without_unchecking_read_only(
         assert received[0] == "texture_map_progress"
         assert received[-1] == "texture_map_exported"
         assert dialogs[0]["filetypes"][0][1] == "*.zip"
+        assert dialogs[0]["initialfile"] == "readonly.zip"
     assert source.exists()
+
+
+@pytest.mark.parametrize(
+    ("source_label", "expected"),
+    [
+        ("Nogova.wrp", "Nogova.zip"),
+        (r"Everon.pbo / eden\\maps\\everon.wrp", "everon.zip"),
+        (r"Data\\Islands\\Malden.wrp", "Malden.zip"),
+        ("cain.wrp", "cain.zip"),
+        ("addon.pbo / maps/forest<edge>.wrp", "forest_edge_.zip"),
+    ],
+)
+def test_export_dialog_names_zip_after_original_island_not_temp_wrp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    source_label: str, expected: str,
+) -> None:
+    extracted = tmp_path / "selected-world.wrp"
+    _world(extracted)
+    with IslandDocument(extracted, read_only=True) as doc:
+        doc.source_label = source_label
+        doc._archive_owner = SimpleNamespace(
+            path=tmp_path / "islands.pbo", close=lambda: None,
+        )
+        calls: list[dict] = []
+        monkeypatch.setattr(
+            "cwr_island_studio.app.filedialog.asksaveasfilename",
+            lambda **kwargs: calls.append(kwargs) or "",
+        )
+        editor = SimpleNamespace(document=doc, _busy=False)
+        IslandStudio._export_texture_location_map(editor)
+        assert len(calls) == 1
+        assert calls[0]["initialfile"] == expected
+        assert calls[0]["initialdir"] == str(tmp_path)
 
 
 def test_gui_cancel_and_busy_conditions_do_not_export(
