@@ -368,6 +368,65 @@ def test_nogova_stock_blend_names_match_visible_artwork() -> None:
             )
 
 
+
+def test_nogova_protected_ground_has_no_exposed_forest_corner_seams() -> None:
+    """Forest/grass blends must share corners even beside roads and farmland."""
+    forest, material, paths = _forest_rect_world("nogova")
+    # Include holes through the forest plus protected land abutting its edges.
+    material[4, 2] = MATERIAL_INDEX["h"]
+    material[3, 4] = MATERIAL_INDEX["g"]
+    material[4, 7] = MATERIAL_INDEX["a"]
+    material[2, 3] = MATERIAL_INDEX["p"]
+    material[6, 6] = MATERIAL_INDEX["u"]
+    protected = ((4, 7), (2, 3), (6, 6))
+    original_protected = {
+        (row, col): paths[int(material[row, col]) + 1]
+        for row, col in protected
+    }
+
+    expanded, slots = apply_stock_forest_border_blends(
+        material.ravel(), forest.ravel(), paths, width=9, profile="nogova",
+        forest_material=MATERIAL_INDEX["f"],
+        forest_edge_material=MATERIAL_INDEX["e"],
+        blendable_exterior_materials=(
+            MATERIAL_INDEX["g"], MATERIAL_INDEX["h"], MATERIAL_INDEX["j"],
+        ),
+        enabled=True,
+    )
+    image = np.asarray(slots).reshape((9, 9))
+    for (row, col), original in original_protected.items():
+        assert expanded[int(image[row, col])] == original
+
+    def visible_forest_mask(row: int, col: int) -> int:
+        name = expanded[int(image[row, col])].replace(chr(92), "/").split("/")[-1]
+        if name == "j1.paa":
+            return 15
+        if not (name.endswith(".pac") and len(name) == 12):
+            return 0
+        filename_bits = sum(
+            1 << k for k in range(4)
+            if name[2*k:2*k+2] == "j1"
+        )
+        return (
+            ((filename_bits & 1) << 3)
+            | ((filename_bits & 2) << 1)
+            | ((filename_bits & 4) >> 1)
+            | ((filename_bits & 8) >> 3)
+        )
+
+    for row in range(9):
+        for col in range(9):
+            here = visible_forest_mask(row, col)
+            if col < 8:
+                east = visible_forest_mask(row, col + 1)
+                assert bool(here & 1) == bool(east & 2), (row, col, "NE/NW")
+                assert bool(here & 4) == bool(east & 8), (row, col, "SE/SW")
+            if row < 8:
+                north = visible_forest_mask(row + 1, col)
+                assert bool(here & 1) == bool(north & 4), (row, col, "NE/SE")
+                assert bool(here & 2) == bool(north & 8), (row, col, "NW/SW")
+
+
 def test_only_verified_source_texture_names_are_ever_emitted() -> None:
     for profile, family in STOCK_FOREST_BLEND_FAMILIES.items():
         valid_masks = family[4]
