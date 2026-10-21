@@ -226,3 +226,41 @@ def test_missing_texture_is_diagnosed_even_without_selected_assets() -> None:
     assert count == 0
     assert diagnostics == {"o\\missing.pac": "missing"}
     np.testing.assert_array_equal(result, fallback)
+
+
+def _typed_texture(format_code: int, colour: str) -> bytes:
+    """Create a 4x4 typed texture in either packed LZW or raw BGRA form."""
+    if format_code == 0x8888:
+        pixel = bytes((0, 0, 255, 255)) if colour == "red" else bytes((0, 255, 0, 255))
+        payload = pixel * 16
+    else:
+        word = {
+            (0x4444, "red"): 0xFF00, (0x4444, "green"): 0xF0F0,
+            (0x1555, "red"): 0xFC00, (0x1555, "green"): 0x83E0,
+        }[(format_code, colour)]
+        pixels = struct.pack("<H", word) * 16
+        payload = b"".join(
+            bytes((0xFF,)) + pixels[i:i + 8]
+            for i in range(0, len(pixels), 8)
+        )
+        payload += struct.pack(
+            "<i", sum(b if b < 128 else b - 256 for b in pixels),
+        )
+    return (
+        struct.pack("<HHHH", format_code, 0, 4, 4)
+        + len(payload).to_bytes(3, "little") + payload
+        + struct.pack("<HH", 0, 0)
+    )
+
+
+@pytest.mark.parametrize("format_code", (0x4444, 0x1555, 0x8888))
+@pytest.mark.parametrize("colour, expected", [
+    ("red", (255, 0, 0)), ("green", (0, 255, 0)),
+])
+def test_classic_argb_texture_formats_render_without_slot_colours(
+    format_code: int, colour: str, expected: tuple[int, int, int],
+) -> None:
+    from cwr_island_studio.textures import decode_paa_preview
+    data = _typed_texture(format_code, colour)
+    assert decode_paa_preview(data).getpixel((0, 0)) == expected
+    assert decode_pac_preview(data).getpixel((0, 0)) == expected
