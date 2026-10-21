@@ -1368,7 +1368,7 @@ class Milestone8BuildTests(unittest.TestCase):
             self.assertTrue(any(name.startswith(r"d\w") and name.endswith(".paa") for name in entries))
             self.assertTrue(any(name.startswith(r"d\r") and name.endswith(".paa") for name in entries))
 
-            wrp = inspect_rvw4(first.wrp_path, height_scale=0.05)
+            wrp = inspect_rvw4(first.wrp_path, height_scale=spec.height_scale)
             self.assertIn(model_path, wrp.object_models)
             self.assertEqual(
                 set(wrp.texture_paths),
@@ -1406,7 +1406,7 @@ class Milestone8BuildTests(unittest.TestCase):
                 strict_assets=True,
             )
             result = build_milestone8(root / "build", spec)
-            wrp = inspect_rvw4(result.wrp_path, height_scale=0.05)
+            wrp = inspect_rvw4(result.wrp_path, height_scale=spec.height_scale)
             self.assertIn(r"o\road\sil25.p3d", {path.casefold() for path in wrp.object_models})
             self.assertIn(r"o\road\ces25.p3d", {path.casefold() for path in wrp.object_models})
 

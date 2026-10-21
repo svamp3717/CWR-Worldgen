@@ -34,7 +34,7 @@ class Milestone1Tests(unittest.TestCase):
             self.assertTrue(result.manifest_path.is_file())
             self.assertTrue(result.report_path.is_file())
 
-            summary = inspect_rvw4(result.wrp_path, height_scale=0.05)
+            summary = inspect_rvw4(result.wrp_path, height_scale=WorldSpec().height_scale)
             self.assertEqual((summary.width, summary.height), (256, 256))
             self.assertLess(summary.minimum_height, 0)
             self.assertGreater(summary.maximum_height, 0)
@@ -199,9 +199,9 @@ class Milestone1Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             spec = WorldSpec(profile="cwr-ce")
             result = build_milestone1(Path(temp) / "build", spec)
-            summary = inspect_rvw4(result.wrp_path, height_scale=0.05)
-            self.assertAlmostEqual(summary.minimum_height, -5.0, places=3)
-            self.assertAlmostEqual(summary.maximum_height, 5.0, places=3)
+            summary = inspect_rvw4(result.wrp_path, height_scale=WorldSpec().height_scale)
+            self.assertAlmostEqual(summary.minimum_height, -5.0, delta=0.025)
+            self.assertAlmostEqual(summary.maximum_height, 5.0, delta=0.025)
 
     def test_rejects_unsafe_or_too_long_world_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

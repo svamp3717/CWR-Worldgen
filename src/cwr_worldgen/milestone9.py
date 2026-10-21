@@ -547,10 +547,16 @@ class Milestone9Spec(Milestone8Spec):
     pbo_backend: str = "auto"
     poseidon_tools_path: Path | None = None
     odol_buildings: bool = False
+    binarize_config: bool = False
+    world_seed: str = ""
     deploy_mod_dir: Path | None = None
 
     def validate(self) -> None:
         Milestone8Spec.validate(self)
+        if not isinstance(self.world_seed, str):
+            raise ValueError("world seed must be text (numbers are accepted as text)")
+        if len(self.world_seed) > 128 or any(ord(c) < 32 or ord(c) == 127 for c in self.world_seed):
+            raise ValueError("world seed must be at most 128 characters, without control characters")
         if self.surface_ground_mode not in {"milestone8", "milestone9"}:
             raise ValueError("surface ground mode must be milestone8 or milestone9")
         if self.forest_profile not in {"everon", "kolgujev", "malden", "vietnam"}:
@@ -562,7 +568,7 @@ class Milestone9Spec(Milestone8Spec):
             ("sand shoreline cells", self.surface_shoreline_sand_cells),
             ("surface transition cells", self.surface_transition_cells),
             ("forest-edge cells", self.surface_forest_edge_cells),
-            ("farmland strip cells", self.surface_farmland_strip_cells),
+            ("farmland patch size cells", self.surface_farmland_strip_cells),
         ):
             if not isinstance(value, int) or value < 0 or value > 32:
                 raise ValueError(f"{label} must be an integer within 0..32")
@@ -1216,6 +1222,15 @@ def _resolve_overture_buildings_geojson(
     return fetch_overture_buildings_geojson(bbox, output, refresh=spec.cache_refresh)
 
 
+def resolve_world_seed(spec: Milestone9Spec, normalized_fingerprint: str) -> str:
+    """Select a packaging-independent seed for procedural placements/surfaces.
+
+    A blank manual field preserves the original normalized-source default.
+    The seed itself is not salted with WRP, config or ODOL packaging settings.
+    """
+    return spec.world_seed.strip() or f"milestone9:{normalized_fingerprint}"
+
+
 def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = True) -> BuildResult:
     spec.validate()
     report_progress(0, "Validating Milestone 9 source bundle")
@@ -1583,7 +1598,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         cache_enabled=spec.cache_enabled,
         cache_refresh=spec.cache_refresh,
         town_name_limit=spec.town_name_limit,
-        deterministic_seed=f"milestone9:{normalization.normalized_fingerprint}",
+        deterministic_seed=resolve_world_seed(spec, normalization.normalized_fingerprint),
         verify_regeneration=spec.verify_regeneration,
         major_road_grade_percent=spec.major_road_grade_percent,
         shoreline_transition_cells=spec.shoreline_transition_cells,
@@ -1660,6 +1675,20 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
     if result.overview_map_path:
         shutil.copyfile(result.overview_map_path, runtime_root / "OVERVIEW-MAP.png")
 
+    binarized_config: Path | None = None
+    if spec.binarize_config:
+        from .config_binarize import binarize_config, pack_binarized_runtime_pbo
+
+        report_progress(99, "Binarizing config.cpp to CWA RAP v4 config.bin")
+        binarized_config = result.output_dir / f"{spec.name}.config.bin"
+        binarize_config(result.source_dir / "config.cpp", binarized_config)
+        report_progress(99, "Packing game PBO with config.bin")
+        pack_binarized_runtime_pbo(
+            result.source_dir, result.source_dir / "config.cpp",
+            binarized_config, result.pbo_path,
+            backend=spec.pbo_backend, poseidon_tools_path=spec.poseidon_tools_path,
+        )
+
     deployment: dict[str, Any] | None = None
     if spec.deploy_mod_dir is not None:
         report_progress(99, f"Deploying world PBO, terrain ReadMe, and menu intro into {spec.deploy_mod_dir}")
@@ -1679,6 +1708,20 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
     build_manifest["milestone"] = 9
     build_manifest["generator"] = GENERATOR_VERSION
     build_manifest["deployment"] = deployment
+    build_manifest["config_binarization"] = {
+        "enabled": spec.binarize_config,
+        "format": "CWA RAP v4" if spec.binarize_config else "config.cpp",
+        "source_config": str((result.source_dir / "config.cpp").relative_to(result.output_dir)),
+        "binarized_config": str(binarized_config.relative_to(result.output_dir)) if binarized_config else None,
+        "note": "config.cpp remains editable; only config.bin is packaged in the game PBO.",
+    }
+    build_manifest["world_binarization"] = {
+        "enabled": False,
+        "format": "4WVR",
+        "source_wrp": str(result.wrp_path.relative_to(result.output_dir)),
+        "binarized_wrp": None,
+        "note": "Loose 4WVR only; WRP binarization is intentionally unavailable.",
+    }
     build_manifest["source_bundle"] = {
         "manifest_sha256": source.fingerprint,
         "bbox_south_west_north_east": list(source.bbox),
@@ -1721,6 +1764,12 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         "priority_order": terrain_report.get("priority_order", []),
         "cut_volume_m3": terrain_report.get("total_cut_volume_m3", 0.0),
         "fill_volume_m3": terrain_report.get("total_fill_volume_m3", 0.0),
+    }
+    build_manifest["world_seed"] = {
+        "mode": "manual" if spec.world_seed.strip() else "automatic",
+        "requested": spec.world_seed.strip() or None,
+        "effective": playability.deterministic_seed,
+        "note": "Controls seeded placement/surface variation. Packaging options do not change the seed.",
     }
     build_manifest["surface_visual_pass"] = {
         **surface_report,

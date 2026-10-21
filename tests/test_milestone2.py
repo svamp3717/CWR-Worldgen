@@ -68,7 +68,7 @@ class Milestone2Tests(unittest.TestCase):
             spec = HeightmapSpec(heightmap_path=heightmap, cells=128)
             result = build_milestone2(root / "build", spec)
 
-            summary = inspect_rvw4(result.wrp_path, height_scale=0.05)
+            summary = inspect_rvw4(result.wrp_path, height_scale=spec.height_scale)
             self.assertEqual((summary.width, summary.height), (128, 128))
             self.assertLess(summary.minimum_height, 0)
             self.assertGreater(summary.maximum_height, 100)
@@ -160,7 +160,7 @@ class Milestone2Tests(unittest.TestCase):
                 rock_height=80.0,
             )
             result = build_milestone2(root / "build", spec)
-            summary = inspect_rvw4(result.wrp_path, height_scale=0.05)
+            summary = inspect_rvw4(result.wrp_path, height_scale=spec.height_scale)
             self.assertAlmostEqual(summary.minimum_height, -5.0, delta=0.1)
             self.assertAlmostEqual(summary.maximum_height, 100.0, delta=0.1)
             manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))

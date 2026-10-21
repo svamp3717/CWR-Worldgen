@@ -325,7 +325,7 @@ def _add_surface_pass_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--surface-sand-shore-cells", type=int, default=2, help="dry sand shoreline band width in terrain cells")
     parser.add_argument("--surface-transition-cells", type=int, default=2, help="outer deterministic material-dither width in terrain cells")
     parser.add_argument("--surface-forest-edge-cells", type=int, default=1, help="forest-edge ground band width in terrain cells")
-    parser.add_argument("--surface-farmland-strip-cells", type=int, default=4, help="deterministic field subdivision stripe width")
+    parser.add_argument("--surface-farmland-strip-cells", type=int, default=4, help="typical width in cells of seeded, irregular farmland material patches (legacy option name)")
     parser.add_argument("--surface-road-shoulder", type=float, default=5.0, help="paved-road shoulder width in metres")
     parser.add_argument("--surface-dirt-blend", type=float, default=6.0, help="dirt-road blend width in metres")
     parser.add_argument("--surface-steep-slope", type=float, default=38.0, help="steep rock/scree threshold in degrees")
@@ -492,6 +492,17 @@ def _parser() -> argparse.ArgumentParser:
         milestone9, default_name="cwr_milestone9", default_display_name="CWR Milestone 9", include_grid=False
     )
     milestone9.add_argument("--source-dir", type=Path, required=True)
+    milestone9.add_argument(
+        "--world-seed", default="",
+        help=("optional manual generation seed for reproducible trees, fences, "
+              "vegetation and surface variations across packaging modes; "
+              "blank uses the normalized-source fingerprint"),
+    )
+    milestone9.add_argument(
+        "--binarize-config", action="store_true",
+        help=("EXPERIMENTAL: rapify generated config.cpp to OFP/CWA RAP v4 "
+              "config.bin in game PBO; keep editable config.cpp in sources"),
+    )
     milestone9.add_argument(
         "--deploy-mod-dir",
         type=Path,
@@ -1145,6 +1156,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "milestone9":
             spec = Milestone9Spec(
                 source_dir=args.source_dir,
+                world_seed=args.world_seed,
                 name=args.name,
                 display_name=args.display_name,
                 profile=args.profile,
@@ -1207,6 +1219,7 @@ def main(argv: list[str] | None = None) -> int:
                 procedural_building_interiors=args.procedural_building_interiors,
                 high_quality_building_textures=args.high_quality_building_textures,
                 odol_buildings=args.odol_buildings,
+                binarize_config=args.binarize_config,
                 house_style_preset=args.house_style_preset,
                 building_length_quantum=args.building_length_quantum,
                 building_height_quantum=args.building_height_quantum,

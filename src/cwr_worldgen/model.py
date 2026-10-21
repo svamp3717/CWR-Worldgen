@@ -6,6 +6,11 @@ from pathlib import Path
 import math
 import re
 
+# Preserve the original Worldgen 4WVR integer height quantization.
+# This loose-WRP branch deliberately does NOT include the later 0.045
+# change introduced for experimental OPRW export.
+CWA_RVW4_HEIGHT_SCALE = 0.05
+
 DEFAULT_MAX_ROAD_OBJECTS = 1_024_000
 DEFAULT_MAX_BUILDINGS = 1_000_000
 DEFAULT_MAX_FOREST_OBJECTS = 500_000
@@ -185,10 +190,9 @@ class WorldSpec:
 
     @property
     def height_scale(self) -> float:
-        # 4WVR stores signed 16-bit height units at a fixed 0.05 metres per
-        # unit.  The content profile changes assets/configuration, not this
-        # on-disk terrain contract.
-        return 0.05
+        # Preserve the legacy Worldgen 4WVR quantizer independently of
+        # optional texture/content profiles.
+        return CWA_RVW4_HEIGHT_SCALE
 
     @property
     def terrain_texture_path(self) -> str:
@@ -256,7 +260,7 @@ class HeightmapSpec:
 
     @property
     def height_scale(self) -> float:
-        return 0.05
+        return CWA_RVW4_HEIGHT_SCALE
 
     def terrain_texture_path(self, code: str) -> str:
         return rf"{self.name}\data\{code}.paa"

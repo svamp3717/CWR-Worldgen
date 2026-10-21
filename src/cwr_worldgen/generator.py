@@ -20,7 +20,7 @@ from .cache import (
 )
 from .images import HeightmapLoadResult, load_heightmap, load_material_mask
 from .fast_asset_scan_policy import locate_assets_fast
-from .model import ConstraintPlayabilitySpec, HeightmapSpec, OsmSpec, PlayabilitySpec, WorldObject, WorldSpec
+from .model import CWA_RVW4_HEIGHT_SCALE, ConstraintPlayabilitySpec, HeightmapSpec, OsmSpec, PlayabilitySpec, WorldObject, WorldSpec
 from .paa import inspect_paa, write_rgb_dxt1_paa, write_solid_dxt1_paa
 from .pbo import PboPackResult, pack_directory, pack_directory_cached, read_pbo
 from ._version import GENERATOR_VERSION
@@ -871,7 +871,7 @@ def _validate_milestone3(
     ))
     checks.append((
         "Terrain and object grounding use the WRP vertex contract",
-        loaded.runtime_grid == "game-terrain-vertices" and spec.height_scale == 0.05,
+        loaded.runtime_grid == "game-terrain-vertices" and spec.height_scale == CWA_RVW4_HEIGHT_SCALE,
         (
             f"source={loaded.source_grid}, runtime={loaded.runtime_grid}, "
             f"legacy conversion={loaded.legacy_centre_to_vertex_conversion}, "
@@ -2557,7 +2557,7 @@ def _validate_milestone4(
     ))
     checks.append((
         "Terrain and object grounding use the WRP vertex contract",
-        loaded.runtime_grid == "game-terrain-vertices" and spec.height_scale == 0.05,
+        loaded.runtime_grid == "game-terrain-vertices" and spec.height_scale == CWA_RVW4_HEIGHT_SCALE,
         (
             f"source={loaded.source_grid}, runtime={loaded.runtime_grid}, "
             f"legacy conversion={loaded.legacy_centre_to_vertex_conversion}, "
@@ -2926,7 +2926,7 @@ def _spec_fields(spec: object, names: tuple[str, ...]) -> dict[str, object]:
 
 
 _TERRAIN_CACHE_FIELDS = (
-    "cells", "cell_size", "bbox", "sea_level", "water_depth", "beach_height",
+    "cells", "cell_size", "height_scale", "bbox", "sea_level", "water_depth", "beach_height",
     "coastline_blend_cells", "include_minor_roads", "maximum_road_grade_percent",
     "major_road_grade_percent", "road_grade_radius", "building_grade_radius",
     "maximum_grade_adjustment", "shoreline_transition_cells", "lake_shore_smoothing_cells",
@@ -3308,7 +3308,7 @@ def _load_surface_pipeline(
         "colour_reference": file_snapshot(getattr(spec, "surface_colour_reference_path", None)),
         "spec": _spec_fields(spec, _SURFACE_CACHE_FIELDS),
     }
-    key = cache_key("surface-pipeline-v11-vectorized-material-pass", payload)
+    key = cache_key("surface-pipeline-v12-clustered-farmland-patches", payload)
     path = cache_dir / "surfaces" / f"{key}.pickle" if cache_dir is not None else None
     if progress_callback is not None:
         progress_callback(0, "Checking surface-mask cache")

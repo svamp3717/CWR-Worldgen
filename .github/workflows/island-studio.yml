@@ -1,0 +1,116 @@
+name: Island Studio validation and Windows build
+
+on:
+  push:
+    branches:
+      - feature/large-world-island-studio-20261018
+      - feature/large-world-loose-wrp-studio-config-bin-20261020
+  pull_request:
+    paths:
+      - "src/cwr_island_studio/**"
+      - "src/cwr_worldgen/model.py"
+      - "src/cwr_worldgen/wrp.py"
+      - "src/cwr_worldgen/wrp_binarize.py"
+      - "src/cwr_worldgen/generator.py"
+      - "src/cwr_worldgen/milestone9.py"
+      - "tests/test_milestone1.py"
+      - "tests/test_milestone2.py"
+      - "tests/test_milestone8.py"
+      - "tests/test_milestone9.py"
+      - "tests/test_high_altitude_rebase.py"
+      - "tests/test_island_studio.py"
+      - "tests/test_island_studio_layers.py"
+      - "tests/test_island_studio_navigation_pbos.py"
+      - "tests/test_island_studio_model_bounds.py"
+      - "tests/test_island_studio_model_classification.py"
+      - "tests/test_island_studio_sources.py"
+      - "tests/test_island_studio_cursor.py"
+      - "tests/test_island_studio_forest_layers.py"
+      - "tests/test_island_studio_pbo_worlds.py"
+      - "tests/test_island_studio_oprw.py"
+      - "tests/test_wrp_binarize.py"
+      - "tests/test_config_binarize.py"
+      - "tests/test_world_seed.py"
+      - "tests/test_farmland_patch_pattern.py"
+      - "tests/test_island_studio_world_metadata.py"
+      - "tests/test_island_studio_rap_config.py"
+      - "tests/test_island_studio_world_compare.py"
+      - "tests/test_island_studio_open_world.py"
+      - "tests/test_island_studio_go_to_position.py"
+      - "tools/island_studio_entry.py"
+      - ".github/workflows/island-studio.yml"
+      - ".github/workflows/build-windows-tools.yml"
+      - ".github/workflows/build-and-publish-windows-tools.yml"
+      - "tools/generate_pyinstaller_splash.py"
+      - "tests/test_windows_asset_tools_release.py"
+      - "pyproject.toml"
+  workflow_dispatch:
+    inputs:
+      build_windows_exe:
+        description: "Build the standalone Windows executable (manual opt-in)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate large-world editor
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime and test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Check Python syntax
+        run: |
+          python -m compileall -q src/cwr_island_studio tools/island_studio_entry.py
+      - name: Test sparse editing and large-world indexes
+        run: |
+          python -m pytest -q tests/test_island_studio.py tests/test_island_studio_layers.py tests/test_island_studio_navigation_pbos.py tests/test_island_studio_model_bounds.py tests/test_island_studio_model_classification.py tests/test_island_studio_sources.py tests/test_island_studio_cursor.py tests/test_island_studio_forest_layers.py tests/test_island_studio_pbo_worlds.py tests/test_island_studio_oprw.py tests/test_wrp_binarize.py tests/test_config_binarize.py tests/test_world_seed.py tests/test_farmland_patch_pattern.py tests/test_island_studio_world_metadata.py tests/test_island_studio_rap_config.py tests/test_island_studio_world_compare.py tests/test_island_studio_open_world.py tests/test_island_studio_go_to_position.py tests/test_windows_asset_tools_release.py tests/test_pyinstaller_splash.py
+
+      - name: Test CWA height quantization and terrain grounding
+        run: |
+          python -m pytest -q tests/test_milestone1.py tests/test_milestone2.py tests/test_high_altitude_rebase.py tests/test_grounding_safety.py \
+            tests/test_milestone9.py::SemanticFeatureTests::test_vegetation_grounding_stays_above_rvw4_saddle_diagonals \
+            tests/test_milestone9.py::SemanticFeatureTests::test_building_grounding_brackets_rvw4_saddle_diagonals \
+            tests/test_milestone9.py::RoadPieceFittingTests::test_legacy_milestone8_ground_palette_remains_explicit_opt_in
+
+  windows:
+    name: Package Windows editor (manual opt-in only)
+    if: github.event_name == 'workflow_dispatch' && inputs.build_windows_exe == true
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pytest pyinstaller
+      - name: Test Windows binary editing
+        shell: pwsh
+        run: |
+          python -m pytest -q tests/test_island_studio.py tests/test_island_studio_layers.py tests/test_island_studio_navigation_pbos.py tests/test_island_studio_model_bounds.py tests/test_island_studio_model_classification.py tests/test_island_studio_sources.py tests/test_island_studio_cursor.py tests/test_island_studio_forest_layers.py tests/test_island_studio_pbo_worlds.py tests/test_island_studio_oprw.py tests/test_wrp_binarize.py tests/test_config_binarize.py tests/test_world_seed.py tests/test_farmland_patch_pattern.py tests/test_island_studio_world_metadata.py tests/test_island_studio_rap_config.py tests/test_island_studio_world_compare.py tests/test_island_studio_open_world.py tests/test_island_studio_go_to_position.py tests/test_windows_asset_tools_release.py tests/test_pyinstaller_splash.py
+          if ($LASTEXITCODE -ne 0) { throw "Island Studio tests failed" }
+      - name: Create standalone executable
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name "CWR-Island-Studio" tools/island_studio_entry.py
+          if ($LASTEXITCODE -ne 0) { throw "Packaging failed" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CWR-Island-Studio-Windows
+          path: dist/CWR-Island-Studio.exe
+          if-no-files-found: error
