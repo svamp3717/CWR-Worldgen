@@ -8,8 +8,10 @@ WRP texture paths and directional neighbor counts.
 
 **Key discovery: forest borders are not a single ground texture.** They are
 directional four-quadrant blend tiles. The names consist of four two-character
-base names (in **SW, SE, NW, NE** order). This ordering is corroborated by the
-actual neighbor locations in the exported texture grid.
+base names (in **NE, NW, SE, SW** order). This order is supported by the
+original maps' neighbor locations: for example, a texture with forest
+components in positions two and four (NW and SW) borders solid forest to
+its west. WRP texture-grid rows increase northward.
 
 | World | Solid forest floor | Distinct used forest-containing blend paths | Cells using blends | Dominant adjacent ground |
 | --- | --- | ---: | ---: | --- |
@@ -20,12 +22,13 @@ actual neighbor locations in the exported texture grid.
 
 ## Straight borders against each island's dominant surrounding terrain
 
-"Forest to west" means the **solid forest cell directly west** of the
-transition is the named forest-floor texture. The other compass directions
-follow the same convention. All of these named blend paths appear and are
-actively used in their respective exported source WRP.
+"West edge" means the transition is on the western edge of the forest,
+with **solid forest immediately east** of the transition cell. In contrast,
+the eastern edge has solid forest to its west. The north edge has forest
+south of it; the south edge has forest north of it. All names below
+actually occur in the source islands.
 
-| World | Forest to west | Forest to east | Forest to north | Forest to south |
+| World | West edge (forest east) | East edge (forest west) | North edge (forest south) | South edge (forest north) |
 | --- | --- | --- | --- | --- |
 | Nogova | `o\\j1t1j1t1.pac` | `o\\t1j1t1j1.pac` | `o\\t1t1j1j1.pac` | `o\\j1j1t1t1.pac` |
 | Everon | `eden\\pltnpltn.paa` | `eden\\tnpltnpl.paa` | `eden\\tntnplpl.paa` | `eden\\plpltntn.paa` |
@@ -56,8 +59,15 @@ ground. The most common Everon forest blends are
    orientation appears in every source WRP. Avoid inventing an asset path
    without source/asset confirmation; fall back conservatively.
 5. Keep this feature **opt-in** and independent of 3D forest undergrowth.
-   Current PR implementation using one fixed `e` path is incomplete for
-   authentic stock edge blending.
+   The implementation now assigns verified directional stock quartet blends
+   per cell, including corners, based on the OSM forest raster. It preserves
+   nonforest materials, adjusts the WRP texture table, and uses a verified
+   nearest-quadrant blend if a rare diagonal has no matching stock tile.
+6. These families use the dominant exterior land tile (`t1`, `tn`,
+   `tt`, or `j9`). More complex stock transitions against alternate
+   ground such as Nogova `b1` or Cain `t9` are documented here but are
+   not yet selected automatically. Do not conflate the first implementation
+   with full restoration of every multi-terrain transition in the originals.
 
 Only texture **names and grid adjacency data** were examined. The original
 PAA/PAC artwork is not included or redistributed.
