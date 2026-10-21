@@ -55,6 +55,20 @@ def decode_paa_preview(data: bytes) -> Image.Image:
     ).convert("RGB")
 
 
+def decode_pac_preview(data: bytes) -> Image.Image:
+    """Decode legacy OFP/CWA paletted PAC terrain textures.
+
+    Reuse the PAC RLE/LZW decoder already used for original island textures
+    by the Worldgen pipeline. Keeping it inside the installed cwr_worldgen
+    package also works in standalone PyInstaller builds (no tools/ import).
+    """
+    if len(data) < 9 or len(data) > _MAX_TEX_BYTES:
+        raise ValueError("invalid PAC texture size")
+    from cwr_worldgen.runway_exact_background_policy import _decode_paletted_pac
+
+    return _decode_paletted_pac(data)
+
+
 def _safe_relative(path: str) -> Path | None:
     normalized = path.replace("\\", "/").lstrip("/")
     pieces = normalized.split("/")
@@ -74,8 +88,11 @@ def _image_tile(root: str, virtual_path: str) -> np.ndarray | None:
     if not target.is_file():
         return None
     try:
-        if target.suffix.casefold() == ".paa":
+        suffix = target.suffix.casefold()
+        if suffix == ".paa":
             image = decode_paa_preview(target.read_bytes())
+        elif suffix == ".pac":
+            image = decode_pac_preview(target.read_bytes())
         else:
             with Image.open(target) as img:
                 image = img.convert("RGB")
@@ -94,8 +111,11 @@ def _pbo_image_tile(archives: PboTextures, virtual_path: str) -> np.ndarray | No
         data = archives.read(virtual_path)
         if data is None:
             return None
-        if virtual_path.casefold().endswith(".paa"):
+        suffix = Path(virtual_path).suffix.casefold()
+        if suffix == ".paa":
             image = decode_paa_preview(data)
+        elif suffix == ".pac":
+            image = decode_pac_preview(data)
         else:
             with Image.open(io.BytesIO(data)) as source:
                 image = source.convert("RGB")
