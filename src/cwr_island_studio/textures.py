@@ -101,7 +101,7 @@ def decode_pac_preview(data: bytes) -> Image.Image:
         raise ValueError("invalid PAC texture size")
     # Some assets carry a typed DXT PAA header despite having a .pac name.
     # Keep those decodable instead of treating 0xFF01 as a palette count.
-    if struct.unpack_from("<H", data)[0] in _PAA_FORMATS | _RAW_FORMATS:
+    if struct.unpack_from("<H", data)[0] in (*_PAA_FORMATS, *_RAW_FORMATS):
         return decode_paa_preview(data)
     from cwr_worldgen.runway_exact_background_policy import _decode_paletted_pac
 
