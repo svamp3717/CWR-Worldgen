@@ -108,6 +108,17 @@ guessing. Origin/pivot offsets and curved fence geometry cannot be inferred
 reliably from a rectangular bounding box, so donor meshes can still show gaps
 at bends or short ends. Hedges and walls are unchanged.
 
+**Traversable fence openings:** Worldgen now leaves seeded, walk-through
+entrances in mapped OSM fences and selected fenced farmland perimeters. The
+locations look random but remain reproducible with the same world seed and
+OSM data. Boundaries at least 18 m long are eligible; long fences receive
+roughly one gap per 120 m, with openings at least 5 m wide. The generator
+removes complete fence panels and leaves their collision geometry out of
+the WRP, rather than inserting a locked gate or a fake visual hole. Some
+residential yard fences also omit one panel. Existing road/track crossings
+continue to remain open. Custom fence donors participate automatically;
+walls and hedges are not modified.
+
 CLI example:
 
 ```powershell

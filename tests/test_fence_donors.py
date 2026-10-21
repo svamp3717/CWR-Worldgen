@@ -30,7 +30,10 @@ from cwr_worldgen.osm import (
     OsmRaster,
     configured_fence_donor,
     generate_world_objects,
+    _line_chunks,
 )
+from cwr_worldgen.fence_openings import fence_opening_chunk_indices
+
 
 
 def _scene(*, barriers=(), farmland=()):
@@ -123,6 +126,56 @@ def test_farmland_boundaries_use_ordinary_donor_instead_of_stock() -> None:
         )
     fences = [o for o in result.objects if o.model_path == spec.fence_donor_model]
     assert fences
+    assert result.fence_objects == len(fences)
+
+
+def test_mapped_fence_openings_remove_entire_custom_donor_panels() -> None:
+    projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+    way = OsmLineFeature(
+        "way/traversable", {"barrier": "fence", "material": "wood"},
+        tuple(projection.to_latlon(point) for point in ((10.0, 100.0), (190.0, 100.0))),
+    )
+    projection, dataset, raster, spec = _scene(barriers=(way,))
+    result = generate_world_objects(
+        dataset, projection, raster, (2.0,) * 64, spec, include_roads=False,
+    )
+    all_chunks = _line_chunks(((10.0, 100.0), (190.0, 100.0)), 4.0)
+    indices = fence_opening_chunk_indices(
+        all_chunks, f"{spec.deterministic_seed}:mapped-fence-opening:way/traversable",
+    )
+    expected_x = [chunk[0] for index, chunk in enumerate(all_chunks) if index not in indices]
+    placed_x = [o.x for o in result.objects if o.model_path == spec.fence_donor_model]
+    assert indices, "the 180 m perimeter needs a walking entrance"
+    assert placed_x == pytest.approx(expected_x)
+    assert result.fence_objects == len(placed_x)
+    assert len(placed_x) == len(all_chunks) - len(indices)
+
+
+def test_farmland_polygon_has_seeded_gaps_without_overlapping_panels() -> None:
+    projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+    corners = (
+        (20.0, 20.0), (180.0, 20.0), (180.0, 180.0),
+        (20.0, 180.0), (20.0, 20.0),
+    )
+    farmland = OsmPolygonFeature(
+        "way/open-field", {"landuse": "farmland"},
+        (GeoPolygon(tuple(projection.to_latlon(pt) for pt in corners)),),
+    )
+    projection, dataset, raster, spec = _scene(farmland=(farmland,))
+    with patch(
+        "cwr_worldgen.osm._selected_farmland_fence_field_keys",
+        return_value={"way/open-field"},
+    ):
+        result = generate_world_objects(
+            dataset, projection, raster, (2.0,) * 64, spec, include_roads=False,
+        )
+    chunks = _line_chunks(corners, spec.fence_donor_length)
+    indices = fence_opening_chunk_indices(
+        chunks, f"{spec.deterministic_seed}:farmland-fence-opening:way/open-field:0",
+    )
+    fences = [o for o in result.objects if o.model_path == spec.fence_donor_model]
+    assert indices and len(indices) >= 2
+    assert len(fences) == len(chunks) - len(indices)
     assert result.fence_objects == len(fences)
 
 

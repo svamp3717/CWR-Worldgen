@@ -1,0 +1,43 @@
+name: Validate traversable fence openings
+
+on:
+  push:
+    branches:
+      - feature/random-traversable-fence-openings-20261021
+  pull_request:
+    paths:
+      - "src/cwr_worldgen/fence_openings.py"
+      - "src/cwr_worldgen/osm.py"
+      - "tests/test_fence_openings.py"
+      - "tests/test_fence_donors.py"
+      - ".github/workflows/fence-openings.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fence-openings:
+    name: Seeded fence opening and donor regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Verify fence and donor placement
+        run: |
+          python -m pytest -q \
+            tests/test_fence_openings.py \
+            tests/test_fence_donors.py::test_mapped_regular_and_metal_fences_use_distinct_donors_and_lengths \
+            tests/test_fence_donors.py::test_mapped_fence_openings_remove_entire_custom_donor_panels \
+            tests/test_fence_donors.py::test_farmland_boundaries_use_ordinary_donor_instead_of_stock \
+            tests/test_fence_donors.py::test_farmland_polygon_has_seeded_gaps_without_overlapping_panels
+      - name: Verify repeatable world builds and rural fields
+        run: |
+          python -m pytest -q tests/test_world_seed.py tests/test_farmland_patch_pattern.py
