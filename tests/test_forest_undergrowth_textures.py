@@ -245,6 +245,7 @@ def test_nogova_exterior_blend_fills_an_exposed_forest_corner() -> None:
     # Punch an ordinary-grass hole through the west side of forest coverage.
     # Old behavior left a solid j1 cell facing an unblended trava2 cell.
     material[4, 2] = dry_grass
+    material[4, 1] = dry_grass  # untouched exterior tile
     material[4, 7] = farmland
     material[1, 3] = paved_road
     baseline, baseline_slots = apply_stock_forest_border_blends(
