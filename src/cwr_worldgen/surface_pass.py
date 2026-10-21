@@ -25,7 +25,7 @@ from .osm import (
 )
 from .paa import write_rgb_dxt1_paa
 from .procedural_infrastructure import create_gravel_road_texture_image
-from .terrain import MaterialDefinition, NOGOVA_GROUND_TEXTURE_CYCLE
+from .terrain import MaterialDefinition, NOGOVA_GROUND_TEXTURE_CYCLE, stock_forest_undergrowth_paths
 
 
 @dataclass(frozen=True, slots=True)
@@ -1022,21 +1022,29 @@ def build_surface_pass(
     )
 
 
-def surface_texture_wire_paths(world_name: str, profile: str) -> tuple[str, ...]:
+def surface_texture_wire_paths(
+    world_name: str, profile: str, *,
+    forest_undergrowth_textures: bool = False,
+) -> tuple[str, ...]:
     if profile not in {"generated", "everon", "nogova", "kolgujev", "malden", "desert", "none"}:
         raise ValueError("ground texture profile must be nogova, kolgujev, malden, everon, desert, generated or none")
     if profile == "none":
         return ("",) * len(MILESTONE9_MATERIALS)
     paths: list[str] = []
     stock_paths = STOCK_SURFACE_TEXTURES.get(profile, {})
+    forest_tiles = stock_forest_undergrowth_paths(profile, forest_undergrowth_textures)
     for material in MILESTONE9_MATERIALS:
-        if material.code in stock_paths:
+        if forest_tiles is not None and material.code in {"f", "e"}:
+            paths.append(forest_tiles[0 if material.code == "f" else 1])
+        elif material.code in stock_paths:
             paths.append(stock_paths[material.code])
         else:
             paths.append(rf"{world_name}\data\{material.code}.paa")
     return tuple(paths)
 
-def external_surface_texture_paths(profile: str) -> tuple[str, ...]:
+def external_surface_texture_paths(
+    profile: str, *, forest_undergrowth_textures: bool = False,
+) -> tuple[str, ...]:
     # Malden's literal Abel paths come from the stock WRP and are intentionally
     # trusted without asset discovery.  They belong in the generated WRP texture
     # table, not in Worldgen's external-asset validation list.
@@ -1045,8 +1053,11 @@ def external_surface_texture_paths(profile: str) -> tuple[str, ...]:
     stock_paths = STOCK_SURFACE_TEXTURES.get(profile)
     if stock_paths is None:
         return ()
+    forest_tiles = stock_forest_undergrowth_paths(profile, forest_undergrowth_textures)
     return tuple(
-        stock_paths[material.code]
+        forest_tiles[0 if material.code == "f" else 1]
+        if forest_tiles is not None and material.code in {"f", "e"}
+        else stock_paths[material.code]
         for material in MILESTONE9_MATERIALS
         if material.code in stock_paths
     )
