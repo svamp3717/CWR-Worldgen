@@ -171,9 +171,9 @@ def test_written_4wvr_contains_forest_floor_and_edge_stock_slots(tmp_path) -> No
     assert inspected.texture_slots[edge_slot] == r"o\t1.paa"
 
 
-# Directions refer to visible artwork, not raw filename token order.
-# Nogova's PAC and Everon's PAA quadrants display 180 degrees opposite
-# their named positions; Malden and Kolgujev retain literal naming.
+# All four classic stock-island presets now use a 180-degree filename
+# mapping for their NE/NW/SE/SW geographic forest masks. Nogova and
+# Everon have been visually confirmed; Abel and Cain require field testing.
 STRAIGHT_BORDERS = {
     "nogova": (
         r"o\t1j1t1j1.pac", r"o\j1t1j1t1.pac",
@@ -184,12 +184,12 @@ STRAIGHT_BORDERS = {
         r"eden\plpltntn.paa", r"eden\tntnplpl.paa",
     ),
     "malden": (
-        r"abel\pbttpbtt.pac", r"abel\ttpbttpb.pac",
-        r"abel\ttttpbpb.pac", r"abel\pbpbtttt.pac",
+        r"abel\ttpbttpb.pac", r"abel\pbttpbtt.pac",
+        r"abel\pbpbtttt.pac", r"abel\ttttpbpb.pac",
     ),
     "kolgujev": (
-        r"cain\u2j9u2j9.paa", r"cain\j9u2j9u2.paa",
-        r"cain\j9j9u2u2.paa", r"cain\u2u2j9j9.paa",
+        r"cain\j9u2j9u2.paa", r"cain\u2j9u2j9.paa",
+        r"cain\u2u2j9j9.paa", r"cain\j9j9u2u2.paa",
     ),
 }
 
@@ -355,15 +355,20 @@ def test_nogova_stock_blend_names_match_visible_artwork() -> None:
     assert len({
         stock_forest_blend_path("nogova", mask) for mask in range(1, 15)
     }) == 14
-    # The nonrotated stock texture profiles retain their previous mappings.
-    for profile in ("malden", "kolgujev"):
+    # The same filename transform applies to Abel and Cain. Check each
+    # verified original filename by its opposite geographic corner mask.
+    for profile in ("everon", "malden", "kolgujev"):
         namespace, forest, ground, ext, valid_masks = STOCK_FOREST_BLEND_FAMILIES[profile]
-        for mask in valid_masks:
+        for source_mask in valid_masks:
+            geo_mask = (
+                ((source_mask & 1) << 3) | ((source_mask & 2) << 1)
+                | ((source_mask & 4) >> 1) | ((source_mask & 8) >> 3)
+            )
             literal = "".join(
-                forest if mask & (1 << corner) else ground
+                forest if source_mask & (1 << corner) else ground
                 for corner in range(4)
             )
-            assert stock_forest_blend_path(profile, mask) == (
+            assert stock_forest_blend_path(profile, geo_mask) == (
                 f"{namespace}{chr(92)}{literal}.{ext}"
             )
 
@@ -541,6 +546,111 @@ def test_everon_missing_diagonal_is_resolved_by_shared_vertices() -> None:
                 assert bool(mask & 2) == bool(north & 8)
 
 
+
+@pytest.mark.parametrize(
+    "profile,namespace,forest_code,ground_code,extension,missing",
+    (
+        ("malden", "abel", "pb", "tt", "pac", frozenset({6, 9})),
+        ("kolgujev", "cain", "u2", "j9", "paa", frozenset()),
+    ),
+)
+def test_abel_cain_shared_corners_keep_protected_surfaces_and_join(
+    profile: str, namespace: str, forest_code: str, ground_code: str,
+    extension: str, missing: frozenset[int],
+) -> None:
+    """A shared corner cannot be forest on one side and ground on the other."""
+    forest, material, original_paths = _forest_rect_world(profile)
+    material[4, 2] = MATERIAL_INDEX["h"]  # ordinary grass hole
+    material[3, 4] = MATERIAL_INDEX["g"]  # another permitted opening
+    material[4, 7] = MATERIAL_INDEX["a"]  # farmland protected
+    material[2, 3] = MATERIAL_INDEX["p"]  # paved road protected
+    material[6, 6] = MATERIAL_INDEX["u"]  # urban protected
+    protected = ((4, 7), (2, 3), (6, 6))
+    material_slots = {
+        (row, col): int(material[row, col]) + 1 for row, col in protected
+    }
+    paths, slots = apply_stock_forest_border_blends(
+        material.ravel(), forest.ravel(), original_paths, width=9,
+        profile=profile, forest_material=MATERIAL_INDEX["f"],
+        forest_edge_material=MATERIAL_INDEX["e"],
+        blendable_exterior_materials=(
+            MATERIAL_INDEX["g"], MATERIAL_INDEX["h"], MATERIAL_INDEX["j"],
+        ), enabled=True,
+    )
+    assert tuple(paths[:len(original_paths)]) == tuple(original_paths)
+    grid = np.asarray(slots, dtype=np.int32).reshape(9, 9)
+    for (row, col), original_slot in material_slots.items():
+        assert int(grid[row, col]) == original_slot
+
+    def visible_mask(row: int, col: int) -> int:
+        value = paths[int(grid[row, col])].replace(chr(92), "/").casefold()
+        root, sep, name = value.rpartition("/")
+        if not sep or root != namespace:
+            return 0
+        if name == f"{forest_code}.paa":
+            return 15
+        suffix = f".{extension}"
+        if not name.endswith(suffix) or len(name) != 8 + len(suffix):
+            return 0
+        parts = [name[i:i + 2] for i in range(0, 8, 2)]
+        assert set(parts).issubset({forest_code, ground_code})
+        filename_mask = sum(1 << i for i, p in enumerate(parts) if p == forest_code)
+        return (
+            ((filename_mask & 1) << 3) | ((filename_mask & 2) << 1)
+            | ((filename_mask & 4) >> 1) | ((filename_mask & 8) >> 3)
+        )
+
+    masks = np.asarray([
+        [visible_mask(row, col) for col in range(9)]
+        for row in range(9)
+    ], dtype=np.uint8)
+    assert np.any((masks > 0) & (masks < 15))
+    assert not any(np.any(masks == mask) for mask in missing)
+    for row in range(9):
+        for col in range(9):
+            m = int(masks[row, col])
+            if col < 8:
+                eastern = int(masks[row, col + 1])
+                assert bool(m & 1) == bool(eastern & 2), (profile, row, col, "NE/NW")
+                assert bool(m & 4) == bool(eastern & 8), (profile, row, col, "SE/SW")
+            if row < 8:
+                northern = int(masks[row + 1, col])
+                assert bool(m & 1) == bool(northern & 4), (profile, row, col, "NE/SE")
+                assert bool(m & 2) == bool(northern & 8), (profile, row, col, "NW/SW")
+
+
+def test_abel_two_missing_diagonals_use_one_shared_corner_grid() -> None:
+    """Both absent Malden diagonal variants are replaced without edge seams."""
+    from cwr_worldgen.forest_ground_blends import _consistent_stock_masks
+
+    raster = np.asarray([
+        [1, 0, 1, 0, 1, 1],
+        [1, 1, 0, 0, 1, 0],
+        [0, 0, 0, 1, 1, 0],
+        [1, 0, 0, 1, 0, 0],
+        [1, 1, 1, 0, 1, 0],
+        [0, 0, 1, 1, 0, 0],
+    ], dtype=np.bool_)
+    unadjusted = _consistent_stock_masks(raster, np.ones_like(raster))
+    assert np.any(unadjusted == 6) and np.any(unadjusted == 9)
+
+    adjusted = _consistent_stock_masks(
+        raster, np.ones_like(raster), missing_masks=frozenset({6, 9}),
+    )
+    assert not np.any(np.isin(adjusted, (6, 9)))
+    for row in range(6):
+        for col in range(6):
+            m = int(adjusted[row, col])
+            if col < 5:
+                east = int(adjusted[row, col + 1])
+                assert bool(m & 1) == bool(east & 2)
+                assert bool(m & 4) == bool(east & 8)
+            if row < 5:
+                north = int(adjusted[row + 1, col])
+                assert bool(m & 1) == bool(north & 4)
+                assert bool(m & 2) == bool(north & 8)
+
+
 def test_only_verified_source_texture_names_are_ever_emitted() -> None:
     for profile, family in STOCK_FOREST_BLEND_FAMILIES.items():
         valid_masks = family[4]
@@ -552,7 +662,7 @@ def test_only_verified_source_texture_names_are_ever_emitted() -> None:
             file_mask = (
                 ((mask & 1) << 3) | ((mask & 2) << 1)
                 | ((mask & 4) >> 1) | ((mask & 8) >> 3)
-                if profile in {"nogova", "everon"} else mask
+                if profile in STOCK_FOREST_BLEND_FAMILIES else mask
             )
             assert (path is not None) == (file_mask in valid_masks)
         # Two uncommon diagonal masks do not exist in source Malden/Everon.

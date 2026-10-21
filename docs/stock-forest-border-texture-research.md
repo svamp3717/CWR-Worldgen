@@ -13,8 +13,10 @@ filename is used, but they do NOT prove how the artwork is oriented within
 the file. Rechecking the actual artwork in Island Studio against generated WRPs
 shows **both Nogova PAC and Everon PAA forest blends display corners
 rotated 180 degrees** relative to their names. Worldgen continues to use
-NE/NW/SE/SW geographic masks, but reverses filename masks for those two
-stock artwork families. WRP texture-grid rows still increase northward.
+NE/NW/SE/SW geographic masks, and now applies the same opposite-corner
+filename selection to all four stock presets. The Abel/Cain extension follows
+the common stock-quartet convention but needs visual confirmation using the
+actual Malden and Kolgujev texture assets. WRP rows increase northward.
 
 | World | Solid forest floor | Distinct used forest-containing blend paths | Cells using blends | Dominant adjacent ground |
 | --- | --- | ---: | ---: | --- |
@@ -35,8 +37,8 @@ actually occur in the source islands.
 | --- | --- | --- | --- | --- |
 | Nogova | `o\\t1j1t1j1.pac` | `o\\j1t1j1t1.pac` | `o\\j1j1t1t1.pac` | `o\\t1t1j1j1.pac` |
 | Everon | `eden\\tnpltnpl.paa` | `eden\\pltnpltn.paa` | `eden\\plpltntn.paa` | `eden\\tntnplpl.paa` |
-| Malden | `abel\\pbttpbtt.pac` | `abel\\ttpbttpb.pac` | `abel\\ttttpbpb.pac` | `abel\\pbpbtttt.pac` |
-| Kolgujev/Cain | `cain\\u2j9u2j9.paa` | `cain\\j9u2j9u2.paa` | `cain\\j9j9u2u2.paa` | `cain\\u2u2j9j9.paa` |
+| Malden | `abel\\ttpbttpb.pac` | `abel\\pbttpbtt.pac` | `abel\\pbpbtttt.pac` | `abel\\ttttpbpb.pac` |
+| Kolgujev/Cain | `cain\\j9u2j9u2.paa` | `cain\\u2j9u2j9.paa` | `cain\\u2u2j9j9.paa` | `cain\\j9j9u2u2.paa` |
 
 There are also **corner, diagonal and multi-terrain transitions**, not
 just the four straight-edge examples. For example, Nogova has
@@ -84,6 +86,23 @@ filename selection remain unchanged. Tan farmland squares in the
 screenshot come separately from `Eden\\zbh.paa` and are outside
 this forest-border correction.
 
+## Abel (Malden) and Cain (Kolgujev) implementation
+
+Worldgen now applies the same **180-degree filename-mask transform** and
+**shared geographic corner grid** to both remaining classic presets.
+
+- **Abel:** Uses verified `abel\\pb/tt` PAC quartets. Stock filename
+  diagonals **6 and 9** are absent, so the grid removes one shared vertex
+  for each unsupported configuration, updating all adjacent cells together.
+- **Cain:** Uses verified `cain\\u2/j9` PAA quartets. All fourteen
+  partial masks exist, so no diagonal fallback is necessary.
+
+The shared-corner grid never overwrites protected semantic materials (water,
+roads, farmland or urban cells). The artwork's 180-degree orientation for
+Abel and Cain is **provisional**, inferred from the two visually validated
+island families and their common naming convention. The original Abel/Cain
+terrain should still be used to check rendering before calling it confirmed.
+
 ## Implications for the optional forest-undergrowth checkbox
 
 1. **The provisional `o\\j2.paa` forest-border path must not be treated
@@ -113,5 +132,6 @@ this forest-border correction.
 
 Original island texture **names and grid adjacency data** establish
 verified source paths; screenshots of stock artwork in Island Studio
-also establish the Nogova and Everon visible corner orientation. The
-original PAA/PAC artwork is not included or redistributed.
+confirm the Nogova and Everon visible corner orientation. Abel/Cain
+rendering awaits matching screenshots or source-asset verification.
+The original PAA/PAC artwork is not included or redistributed.

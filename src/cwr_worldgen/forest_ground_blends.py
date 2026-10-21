@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Verified OFP/CWA forest-floor quadrant blends for the stock ground presets.
 
-Worldgen uses NE, NW, SE, SW geographic mask bits. Stock Nogova PAC and
-Everon PAA forest-border artwork display the opposite (180-degree) corners
-from their filenames; select those paths with the reversed mask. Malden
-and Kolgujev retain their previous mapping. Never synthesize absent assets.
+Worldgen uses NE, NW, SE, SW geographic mask bits. The corrected Nogova
+and Everon stock artwork needs a 180-degree filename-mask transform.
+Apply the same stock-quartet mapping to Abel/Malden and Cain/Kolgujev,
+with independent visual verification still needed for those two islands.
+Never synthesize absent assets.
 """
 from __future__ import annotations
 
@@ -28,9 +29,9 @@ STOCK_FOREST_BLEND_FAMILIES: dict[str, tuple[str, str, str, str, frozenset[int]]
 def _opposite_filename_mask(world_mask: int) -> int:
     """Map geographic quadrants to opposite named stock-artwork quadrants.
 
-    Both Nogova PAC and Everon PAA forest blends display the opposite
-    corner from their filename when sampled correctly by Island Studio.
-    Change only filename selection, not WRP coordinates or image pixels.
+    Nogova PAC and Everon PAA artwork establish this 180-degree layout;
+    Abel PAC and Cain PAA share the stock quartet convention. Change
+    filename selection only, never WRP coordinates or texture pixels.
     """
     return (
         ((world_mask & 1) << 3)
@@ -46,10 +47,10 @@ def stock_forest_blend_path(profile: str, quadrant_mask: int) -> str | None:
     if family is None:
         return None
     namespace, forest, grass, extension, valid_masks = family
-    if profile.casefold() in {"nogova", "everon"}:
+    if profile.casefold() in STOCK_FOREST_BLEND_FAMILIES:
         quadrant_mask = _opposite_filename_mask(quadrant_mask)
-    # Validate the actual FILENAME mask after the orientation mapping:
-    # Everon's absent file 9 is missing geographic mask 6, not 9.
+    # Validate the FILENAME mask after the orientation mapping. A
+    # half-turn preserves both opposed diagonal masks 6 and 9.
     if quadrant_mask not in valid_masks:
         return None
     components = "".join(
@@ -94,10 +95,10 @@ def _consistent_stock_masks(
 
     A protected water, farmland, road or urban cell must retain its source
     ground texture. Its corners must therefore remain nonforest, even when
-    neighbouring forest cells would otherwise draw forest into it. Everon's
-    stock filenames omit diagonal mask 9, which remains geographic mask 9
-    after the 180-degree rotation. Clear one shared corner rather than
-    fabricate that texture or introduce a seam.
+    neighbouring forest cells would otherwise draw forest into it. Everon
+    lacks diagonal 9, and Abel lacks both diagonals 6 and 9. Each missing
+    case must be resolved at a SHARED vertex, not independently per cell,
+    so that all four neighbouring tiles remain corner-consistent.
     """
     original = _quadrants(forest)
     height, width = forest.shape
@@ -127,10 +128,16 @@ def _consistent_stock_masks(
         missing = np.isin(masks, tuple(missing_masks))
         if not np.any(missing):
             return masks
-        if not missing_masks.issubset({9}):
+        if not missing_masks.issubset({6, 9}):
             raise ValueError("unsupported missing stock forest corner masks")
-        row, col = np.nonzero(missing)  # NE + SW forest
-        vertices[row, col] = False  # SW shared vertex
+        if 6 in missing_masks:
+            # Mask 6 = NW + SE. Remove its SE shared vertex.
+            row, col = np.nonzero(masks == 6)
+            vertices[row, col + 1] = False
+        if 9 in missing_masks:
+            # Mask 9 = NE + SW. Remove its SW shared vertex.
+            row, col = np.nonzero(masks == 9)
+            vertices[row, col] = False
 
 
 def apply_stock_forest_border_blends(
@@ -151,15 +158,15 @@ def apply_stock_forest_border_blends(
     base_texture_paths includes slot zero (the dummy), followed by one texture
     per semantic material. With the option off it is byte-for-byte compatible
     with the pre-existing material+1 index mapping. With the option on, forest
-    and edge cells may change; Nogova additionally uses explicitly approved
-    adjacent ordinary-grass materials for continuous stock transitions.
+    and edge cells may change; every supported stock-island preset can also
+    use explicitly approved adjacent ordinary-grass materials for continuity.
 
     Forest polygon boundaries are taken from the OSM forest raster, not guessed
     from object locations. Verified quadrant paths are appended only if used.
     Missing stock diagonal assets fall back to a verified one-quadrant-nearest
     blend; never emit a guessed path. An exhausted WRP slot table falls back
-    to the original semantic texture slot. Nogova and Everon can derive a
-    shared forest-corner lattice across grass and forest tiles, suppressing
+    to the original semantic texture slot. All four stock presets can derive
+    a shared forest-corner lattice across grass and forest tiles, suppressing
     forest corners shared with protected farmland, roads and water.
     """
     paths = list(base_texture_paths)
@@ -181,19 +188,19 @@ def apply_stock_forest_border_blends(
     forest &= candidate
     current = slots.reshape(height, width)
     profile_key = profile.casefold()
-    # Nogova and Everon both require consistent corners across forest and
-    # ordinary grass. Their stock file names are independently oriented
-    # in stock_forest_blend_path without modifying these geographic masks.
-    # Never allow the forest artwork to intrude into protected terrain.
-    use_shared_corners = (
-        profile_key in {"nogova", "everon"} and bool(blendable_exterior_materials)
-    )
+    # All original stock islands require consistent corners across forest
+    # and ordinary grass. The filename transform is independent of these
+    # geographic masks. Do not paint protected semantic materials.
+    use_shared_corners = bool(blendable_exterior_materials)
     if use_shared_corners:
         editable_exterior = (~candidate) & np.isin(
             material, tuple(blendable_exterior_materials)
         )
         editable = candidate | editable_exterior
-        missing_masks = frozenset({9}) if profile_key == "everon" else frozenset()
+        missing_masks = frozenset(
+            mask for mask in range(1, 15)
+            if stock_forest_blend_path(profile_key, mask) is None
+        )
         masks = _consistent_stock_masks(
             forest, editable, missing_masks=missing_masks,
         )
@@ -215,7 +222,7 @@ def apply_stock_forest_border_blends(
             # A forest-classified cell may have lost all forest corners beside
             # protected ground. Do not leave its original solid forest tile.
             current[candidate & (masks == 0)] = background_slot
-            # The corresponding fully forested tiles use the stock j1 floor.
+            # The corresponding fully forested tiles use the stock forest floor.
             current[editable & (masks == 15)] = forest_material + 1
             requested = editable & (masks > 0) & (masks < 15)
 
