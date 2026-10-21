@@ -15,7 +15,7 @@ from cwr_worldgen.osm import (
 )
 from cwr_worldgen.surface_pass import (
     MATERIAL_INDEX, MILESTONE9_MATERIALS,
-    build_surface_pass, surface_texture_wire_paths,
+    build_surface_pass, surface_texture_wire_paths, external_surface_texture_paths,
 )
 from cwr_worldgen.terrain import stock_forest_undergrowth_paths
 
@@ -46,9 +46,17 @@ def test_stock_forest_ground_interior_and_edge_paths(profile: str, expected: tup
     )
     assert _ground_texture_paths(spec) == after
     if profile != "malden":
-        assert set(expected).issubset(_external_ground_texture_paths(spec))
+        # The original surface palette lists all used stock paths. The
+        # production asset-scan optimization separately selects only one
+        # representative texture, so do not test that narrow scan as a
+        # reflection of the WRP texture table.
+        assert set(expected).issubset(external_surface_texture_paths(
+            profile, forest_undergrowth_textures=True,
+        ))
     else:
-        assert _external_ground_texture_paths(spec) == ()
+        assert external_surface_texture_paths(
+            profile, forest_undergrowth_textures=True,
+        ) == ()
 
 
 def test_stock_floor_disabled_or_unsupported_profile_is_unchanged() -> None:
@@ -59,8 +67,8 @@ def test_stock_floor_disabled_or_unsupported_profile_is_unchanged() -> None:
             assert surface_texture_wire_paths(
                 "example", profile, forest_undergrowth_textures=True,
             ) == baseline
-    assert Milestone9Spec.forest_undergrowth_textures is False
-    assert _Milestone9PlayabilitySpec.forest_undergrowth_textures is False
+    assert Milestone9Spec.__dataclass_fields__["forest_undergrowth_textures"].default is False
+    assert _Milestone9PlayabilitySpec.__dataclass_fields__["forest_undergrowth_textures"].default is False
 
 
 def test_legacy_ground_mapping_only_changes_forest_interior() -> None:
