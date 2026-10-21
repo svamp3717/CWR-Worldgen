@@ -6,10 +6,8 @@ does not access or require ground texture artwork, PBOs, or editable worlds.
 from __future__ import annotations
 
 from collections import Counter
-import base64
 import colorsys
 import csv
-from html import escape
 import io
 import json
 from pathlib import Path
@@ -51,67 +49,6 @@ def _encoded_png(pixels: np.ndarray) -> bytes:
     result = io.BytesIO()
     Image.fromarray(pixels, mode="RGB").save(result, format="PNG", optimize=True)
     return result.getvalue()
-
-
-def _html_viewer(
-    title: str, preview_png: bytes, id_png: bytes, texture_paths: dict[int, str],
-    width: int, height: int, step_x: float, step_z: float,
-) -> str:
-    preview = base64.b64encode(preview_png).decode("ascii")
-    ids = base64.b64encode(id_png).decode("ascii")
-    # WRP texture strings are untrusted. Escape characters that might break
-    # out of the inline JSON script element.
-    paths_json = json.dumps(
-        {str(k): v for k, v in texture_paths.items()}, ensure_ascii=True,
-    ).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<title>Island Studio texture atlas: {escape(title)}</title>
-<style>
-body {{font:15px system-ui,sans-serif;background:#1b2224;color:#f3f3f3;margin:16px}}
-#map {{display:block;max-width:100%;image-rendering:pixelated;cursor:crosshair;border:1px solid #65736a}}
-#info {{margin:12px 0;padding:8px;background:#303b3d;white-space:pre-wrap}}
-small {{color:#b8c7c4}}
-</style></head><body>
-<h2>Texture locations: {escape(title)}</h2>
-<p><small>North is up; east is right. Each coloured pixel is exactly one texture-layer cell.
-Hover or click for the in-game world position and original WRP texture path.
-No internet connection required.</small></p>
-<div id="info" role="status">Move the pointer over the map.</div>
-<img id="map" width="{width}" height="{height}" alt="Colour-coded map of WRP ground texture slots"
-src="data:image/png;base64,{preview}">
-<script>
-"use strict";
-const paths = {paths_json};
-const width = {width}, height = {height};
-const stepX = {step_x!r}, stepZ = {step_z!r};
-const ids = new Image();
-ids.src = "data:image/png;base64,{ids}";
-const canvas = document.createElement("canvas");
-canvas.width = width; canvas.height = height;
-const ctx = canvas.getContext("2d", {{willReadFrequently:true}});
-ids.onload = () => ctx.drawImage(ids,0,0);
-const map = document.getElementById("map");
-const info = document.getElementById("info");
-function inspect(event) {{
-  if (!ids.complete || !ids.naturalWidth) return;
-  const rect = map.getBoundingClientRect();
-  const x = Math.min(width-1, Math.max(0, Math.floor((event.clientX-rect.left)*width/rect.width)));
-  const northRow = Math.min(height-1, Math.max(0, Math.floor((event.clientY-rect.top)*height/rect.height)));
-  const rgba = ctx.getImageData(x,northRow,1,1).data;
-  let slot = (rgba[0]<<16)|(rgba[1]<<8)|rgba[2];
-  if (slot >= 8388608) slot -= 16777216;
-  const z = height-1-northRow;
-  const path = paths[String(slot)] || "(blank, reserved or invalid texture slot)";
-  info.textContent = "Texture slot: " + slot + "\\nPath: " + path
-    + "\\nTexture cell (X, Z): " + x + ", " + z
-    + "\\nWorld centre (X, Z metres): "
-    + ((x+0.5)*stepX).toFixed(2) + ", " + ((z+0.5)*stepZ).toFixed(2);
-}}
-map.addEventListener("mousemove", inspect);
-map.addEventListener("click", inspect);
-</script></body></html>
-"""
 
 
 def export_texture_location_atlas(
@@ -255,15 +192,8 @@ def export_texture_location_atlas(
                 "sparse_pending_texture_edits_included": bool(overlays),
             }
             archive.writestr("metadata.json", json.dumps(meta, indent=2, ensure_ascii=False))
-            archive.writestr(
-                "texture-map.html",
-                _html_viewer(doc.source_label, preview_png, id_png,
-                             {slot: _path_for(paths, slot) for slot in all_slots},
-                             width, height, step_x, step_z),
-            )
             archive.writestr("README.txt", (
                 "Island Studio ground texture atlas, north up; east right.\n"
-                "Open texture-map.html in a browser and hover/click cells to read original paths and game X/Z.\n"
                 "texture-map.png: colour-coded image with one pixel per texture-layer cell.\n"
                 "texture-ids.png: EXACT texture slot ID at every cell (signed 24-bit R/G/B).\n"
                 "texture-paths.csv: complete WRP texture table and counts; zero means unused.\n"
