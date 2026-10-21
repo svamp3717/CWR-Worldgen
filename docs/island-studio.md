@@ -49,6 +49,49 @@ The editor is **not** embedded in the CWR-Worldgen executable.
 
 Fit map returns to the complete island.
 
+## Export texture location map for forest-edge analysis
+
+Open a loose `4WVR` map, or an original `OPRW` (also supported directly
+from a PBO/IFA). Choose **Utilities → Export Texture Location Map…** and
+save a `.zip`. The export is non-destructive and works even when the WRP is
+read-only. No external texture images/PBO selection is necessary: it maps
+the *original paths recorded in the WRP*.
+
+The ZIP contains:
+
+- `texture-map.png`: **north-up** categorical texture-slot map, one pixel
+  per texture-layer cell. Each ID has a distinct stable display colour.
+- `texture-ids.png`: lossless slot-ID map; combine the 3 RGB bytes into
+  an integer, subtracting 16,777,216 for signed negative values.
+- `texture-paths.csv`: complete WRP texture table, including unused paths,
+  with per-path use counts and bounds.
+- `texture-runs.csv`: **exact positions** for every ground texture. Each
+  line covers an inclusive run of adjacent same-texture cells, with X/Z
+  cell indices and in-game coordinate bounds in metres.
+- `texture-adjacencies.csv`: pairs of touching texture paths and the
+  number of shared grid edges. Forest border tiles often occur between
+  the prevalent forest interior slot and surrounding grass textures.
+- `metadata.json`: source, true texture-grid dimensions and world scale,
+  coordinate/orientation metadata, original texture table, edit-state.
+- `README.txt`: brief data dictionary and directions.
+
+There is no separate HTML viewer because Island Studio already provides
+the interactive map. The export includes the complete source layer rather
+than sampling pixels from the current zoom level. `OPRW` terrain and
+texture-layer grid dimensions can differ, so the export uses the **real
+texture grid** and derives each texture cell's dimensions from the map's
+world width and height. Pixel (0,0) is northwest; in-game X increases east
+and Z increases north. The exporter includes pending `4WVR` texture paint
+edits without writing them to the original WRP.
+
+For forest-border research, inspect `texture-adjacencies.csv` first,
+then use `texture-runs.csv` and the PNG to isolate transitions around
+forest polygons. You can also upload the complete ZIP to an analysis
+conversation. The ZIP itself contains paths/locations, **not** any
+copyrighted stock PAC/PAA artwork. The exporter limits atlases to
+20 million texture cells to avoid exhausting memory.
+
+
 ## Why loading scales well
 
 - Terrain and fixed-size object records are read-only memory-mapped NumPy
