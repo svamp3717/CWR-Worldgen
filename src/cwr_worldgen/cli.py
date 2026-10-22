@@ -709,8 +709,14 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument("--worldgen-debug-layers", action="store_true",
                             help="write a compressed Worldgen debug companion NPZ beside the build output")
     milestone9.add_argument(
-        "--forest-undergrowth-textures", action="store_true",
-        help="Optional classic forest-floor textures, including a Nogova forest-edge tile; independent of vegetation objects",
+        "--forest-undergrowth-textures",
+        action="store_true", default=True,
+        help="Use stock forest-floor and directional border textures (default)",
+    )
+    milestone9.add_argument(
+        "--no-forest-undergrowth-textures",
+        action="store_false", dest="forest_undergrowth_textures",
+        help="Disable stock forest-floor textures and directional borders",
     )
     milestone9.add_argument(
         "--pbo-backend",

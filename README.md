@@ -61,11 +61,11 @@ Terrain appearance is independent from vegetation appearance.
 
 Ground textures can use several classic OFP/CWA terrain styles, including Nogova, Kolgujev, Malden and Everon, as well as generated or desert terrain materials. Terrain textures can also be disabled entirely when an unpainted WRP is desired.
 
-**Optional stock forest undergrowth textures:** In **Common choices**, turn on
-**Stock forest undergrowth ground textures (incl. forest edges)** to paint OSM
-forest interiors with their original stock forest-floor texture, and
-automatically choose **directional border and corner blend textures**.
-The checkbox is off by default and does not control the separate 3D
+**Stock forest undergrowth textures (on by default):** In **Common choices**,
+**Stock forest undergrowth ground textures (incl. forest edges)** paints OSM
+forest interiors with their original stock forest-floor texture and
+automatically chooses **directional border and corner blend textures**.
+The checkbox is on by default and does not control the separate 3D
 **Forest undergrowth** vegetation option. It follows **Ground textures**, not
 the selected vegetation profile:
 
@@ -83,11 +83,19 @@ lack a few diagonal combinations in their original texture tables: Worldgen
 substitutes a verified nearby blend rather than inventing a filename.
 See [the original-island analysis](docs/stock-forest-border-texture-research.md).
 
-Only forest/edge texture slots change; beaches, roads, farmland, grassland,
-vegetation objects, and terrain heights keep their normal settings.
-Generated, desert and untextured profiles ignore the option.
-CLI equivalent: `--forest-undergrowth-textures`. Original game texture
-artwork is **not** copied into the generated PBO.
+Compatible ordinary grass cells immediately adjoining forest transitions can
+also receive the appropriate verified stock blend. Protected roads, farmland,
+water and urban surfaces, vegetation objects, and terrain heights remain intact.
+Generated, desert and untextured profiles ignore the option. On the CLI,
+the feature is enabled by default; use `--no-forest-undergrowth-textures` to
+disable it or `--forest-undergrowth-textures` to enable explicitly.
+
+**Malden and Kolgujev beach handling:** These two stock ground-texture
+presets do not assign separate dry beach/sand classes. Dry shoreline and
+mapped beach/sand areas use the same ordinary ground as the rest of the
+island (`abel\\tt.paa` or `cain\\j9.paa`). Other ground-texture presets
+retain their existing shoreline materials.
+Original game texture artwork is **not** copied into the generated PBO.
 
 
 Vegetation can likewise use different game styles independently of the terrain texture set. Forest blocks, individual trees, undergrowth, rural vegetation, meadow grass, wetland reeds and related vegetation systems can be configured separately or disabled with the **None** vegetation preset.

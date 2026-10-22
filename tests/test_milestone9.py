@@ -337,6 +337,48 @@ class SurfacePassTests(unittest.TestCase):
         for code in "wqsghrkfeabcuipodtvjx":
             self.assertIn(code, MATERIAL_INDEX)
 
+    def test_malden_kolgujev_remove_dry_beach_but_keep_water(self) -> None:
+        """Abel/Cain have no dedicated beach tile: dry coasts use their land."""
+
+        dataset, projection = self._dataset()
+        ring = tuple(projection.to_latlon(point) for point in (
+            (600, 200), (700, 200), (700, 300), (600, 300), (600, 200)
+        ))
+        beach = OsmPolygonFeature(
+            "way/beach", {"natural": "beach", "surface_kind": "beach"},
+            (GeoPolygon(ring),),
+        )
+        dataset = replace(dataset, surface_areas=(*dataset.surface_areas, beach))
+        raster = rasterize_osm(dataset, projection, cells=32, include_minor_roads=True)
+        heights = [60.0] * (32 * 32)
+        for i, water in enumerate(raster.water):
+            if water:
+                heights[i] = -0.2
+        slopes = [4.0] * len(heights)
+        base = vars(self._spec("malden-no-beach"))
+
+        classic_reports = {
+            preset: build_surface_pass(
+                dataset, projection, raster, heights, slopes,
+                SimpleNamespace(**base, ground_texture_profile=preset),
+            )
+            for preset in ("malden", "kolgujev")
+        }
+        everon = build_surface_pass(
+            dataset, projection, raster, heights, slopes,
+            SimpleNamespace(**base, ground_texture_profile="everon"),
+        )
+        for preset, classic in classic_reports.items():
+            assert classic.dry_shoreline_cells == 0, preset
+            assert classic.mapped_sand_cells == 0, preset
+            assert MATERIAL_INDEX["s"] not in classic.indices, preset
+            assert MATERIAL_INDEX["x"] not in classic.indices, preset
+            assert classic.wet_shoreline_cells > 0, preset
+            assert MATERIAL_INDEX["w"] in classic.indices, preset
+        assert everon.dry_shoreline_cells > 0
+        assert everon.mapped_sand_cells > 0
+        assert MATERIAL_INDEX["x"] in everon.indices
+
     def test_explicit_osm_surfaces_and_aeroways_override_broad_landuse(self) -> None:
         dataset, projection = self._dataset()
 

@@ -1,4 +1,4 @@
-"""Opt-in stock forest-floor textures, separate from 3D forest undergrowth."""
+"""Default-on stock forest-floor textures, separate from 3D forest undergrowth."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -73,8 +73,8 @@ def test_stock_floor_disabled_or_unsupported_profile_is_unchanged() -> None:
             assert surface_texture_wire_paths(
                 "example", profile, forest_undergrowth_textures=True,
             ) == baseline
-    assert Milestone9Spec.__dataclass_fields__["forest_undergrowth_textures"].default is False
-    assert _Milestone9PlayabilitySpec.__dataclass_fields__["forest_undergrowth_textures"].default is False
+    assert Milestone9Spec.__dataclass_fields__["forest_undergrowth_textures"].default is True
+    assert _Milestone9PlayabilitySpec.__dataclass_fields__["forest_undergrowth_textures"].default is True
 
 
 def test_legacy_ground_mapping_only_changes_forest_interior() -> None:
@@ -95,24 +95,26 @@ def test_legacy_ground_mapping_only_changes_forest_interior() -> None:
 
 def test_common_choices_checkbox_goes_through_gui_and_cli() -> None:
     values = default_gui_values()
-    assert values["forest_undergrowth_textures"] is False
+    assert values["forest_undergrowth_textures"] is True
     values.update(
         source_dir="source-data/map", output="build/map",
         name="cwr_example", display_name="Example",
     )
-    disabled = build_milestone9_command(values, python="python")
-    assert "--forest-undergrowth-textures" not in disabled
-    values["forest_undergrowth_textures"] = True
     enabled = build_milestone9_command(values, python="python")
     assert enabled.count("--forest-undergrowth-textures") == 1
-    options = _parser().parse_args([
-        "milestone9", "--source-dir", "input", "--output", "output",
-        "--forest-undergrowth-textures",
-    ])
-    assert options.forest_undergrowth_textures is True
-    options_off = _parser().parse_args([
-        "milestone9", "--source-dir", "input", "--output", "output",
-    ])
+    assert "--no-forest-undergrowth-textures" not in enabled
+
+    values["forest_undergrowth_textures"] = False
+    disabled = build_milestone9_command(values, python="python")
+    assert "--forest-undergrowth-textures" not in disabled
+    assert disabled.count("--no-forest-undergrowth-textures") == 1
+
+    base = ["milestone9", "--source-dir", "input", "--output", "output"]
+    options_default = _parser().parse_args(base)
+    assert options_default.forest_undergrowth_textures is True
+    options_on = _parser().parse_args(base + ["--forest-undergrowth-textures"])
+    assert options_on.forest_undergrowth_textures is True
+    options_off = _parser().parse_args(base + ["--no-forest-undergrowth-textures"])
     assert options_off.forest_undergrowth_textures is False
 
 

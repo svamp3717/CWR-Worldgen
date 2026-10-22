@@ -363,7 +363,7 @@ class Milestone9Spec(Milestone8Spec):
     surface_overview_size: int = 1024
     surface_texture_size: int = 512
     surface_ground_mode: str = "milestone9"
-    forest_undergrowth_textures: bool = False
+    forest_undergrowth_textures: bool = True
     debug_layers: bool = False
     forest_profile: str = "everon"
     # Optional safety mode. The field name is retained for 0.9.252 CLI/config
@@ -1050,7 +1050,7 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     surface_overview_size: int = 1024
     surface_texture_size: int = 512
     surface_ground_mode: str = "milestone9"
-    forest_undergrowth_textures: bool = False
+    forest_undergrowth_textures: bool = True
 
 
 def _sha256(path: Path) -> str:

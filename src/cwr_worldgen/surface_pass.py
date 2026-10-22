@@ -174,7 +174,8 @@ MATERIAL_INDEX: Mapping[str, int] = {
 MALDEN_SURFACE_COLOURS: Mapping[str, tuple[int, int, int]] = {
     "w": (48, 73, 91),
     "q": (124, 111, 82),
-    "s": (184, 162, 109),
+    # Malden uses ordinary grass all along dry coastlines; no beach class.
+    "s": (109, 118, 70),
     "g": (109, 118, 70),
     "h": (132, 126, 77),
     "r": (110, 105, 96),
@@ -195,7 +196,7 @@ MALDEN_SURFACE_COLOURS: Mapping[str, tuple[int, int, int]] = {
     "v": (100, 94, 80),
     "j": (111, 127, 73),
     "y": (111, 133, 78),
-    "x": (190, 169, 111),
+    "x": (109, 118, 70),
 }
 
 DESERT_SURFACE_COLOURS: Mapping[str, tuple[int, int, int]] = {
@@ -986,6 +987,17 @@ def build_surface_pass(
     result[dirt_centres] = MATERIAL_INDEX["d"]
     result[paved_centres] = MATERIAL_INDEX["p"]
     result[water_np] = MATERIAL_INDEX["w"]
+    # Malden/Abel and Kolgujev/Cain use one ordinary dry-land texture, not a
+    # distinct beach texture. Remap both generated shoreline sand and OSM
+    # beach/sand classes to ordinary grass. Preserve wet water-edge behaviour
+    # and leave the other ground palettes' shoreline classifications alone.
+    if str(getattr(spec, "ground_texture_profile", "")).casefold() in {
+        "malden", "kolgujev",
+    }:
+        dry_beach = (result == MATERIAL_INDEX["s"]) | (result == MATERIAL_INDEX["x"])
+        result[dry_beach] = MATERIAL_INDEX["g"]
+        dry_count = 0
+        mapped_sand_count = 0
     paved_count = int(np.count_nonzero((~water_np) & paved_np))
     dirt_count = int(np.count_nonzero((~water_np) & (~paved_np) & dirt_np))
     gravel_count = int(np.count_nonzero((~water_np) & (~paved_np) & (~dirt_np) & gravel_np))

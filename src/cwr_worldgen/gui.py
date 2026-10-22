@@ -793,6 +793,10 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     for key, option in flags.items():
         if bool(values.get(key, False)):
             command.append(option)
+    # The CLI now defaults to stock forest floors on. Preserve the ability
+    # to opt out via the GUI, including for saved profiles with False.
+    if not bool(values.get("forest_undergrowth_textures", True)):
+        command.append("--no-forest-undergrowth-textures")
     bus_stop_signs = values.get("bus_stop_signs", values.get("bus_stops"))
     if bus_stop_signs is True:
         command.append("--bus-stop-signs")
@@ -1051,7 +1055,7 @@ def default_gui_values() -> dict[str, object]:
         "vegetation_style": VEGETATION_EVERON,
         "house_style_preset": HOUSE_STYLE_AUTO_LABEL,
         "ground_textures": "nogova",
-        "forest_undergrowth_textures": False,
+        "forest_undergrowth_textures": True,
         "debug_layers": False,
         "forest_profile": "everon",
         "strict_assets": False,
@@ -2362,7 +2366,7 @@ class WorldgenGui(tk.Tk):
             ("Higher-quality building textures (256 px)", "high_quality_building_textures", False),
             ("Match nearby same-shape town/city building textures", "match_nearby_building_textures", False),
             ("Forest undergrowth", "forest_undergrowth", True),
-            ("Stock forest undergrowth ground textures (incl. forest edges)", "forest_undergrowth_textures", False),
+            ("Stock forest undergrowth ground textures (incl. forest edges)", "forest_undergrowth_textures", True),
             ("Fences, walls and hedges", "barriers", True),
             ("Stock urban pavement / sidewalks (disabled for now)", "sidewalks", False),
             ("Settlement + residential-area street furniture", "street_furniture", True),

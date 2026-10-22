@@ -119,7 +119,7 @@ MALDEN_MATERIAL_COLOURS: dict[str, tuple[int, int, int]] = {
     # Preview/fallback colours for classic Malden. Runtime ground references
     # use the stock Abel texture namespace directly.
     "w": (48, 73, 91),
-    "s": (184, 162, 109),
+    "s": (109, 118, 70),
     "g": (109, 118, 70),
     "r": (110, 105, 96),
     "f": (64, 86, 48),
