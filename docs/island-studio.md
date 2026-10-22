@@ -552,3 +552,6 @@ it differs from the elevation grid. The status line confirms what was copied.
 Unnamed texture cells and empty hover targets are not copied; the existing
 clipboard contents remain intact. Shortcuts do not act while focus is in a
 text entry, and neither shortcut selects or edits a world object.
+
+Both copy shortcuts are shown in Island Studio's bottom shortcut bar next
+to the pan and zoom hints, in a separate row below status/cursor details.
