@@ -7,7 +7,7 @@ no guessed dimensions or entire-world model decoding are required.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import io
 import math
@@ -30,6 +30,11 @@ class ModelBounds:
     max_x: float
     min_z: float
     max_z: float
+    # First visual LOD's projected, simplified convex hull. Keep legacy
+    # rectangular bounds in equality comparisons and for missing geometry.
+    outline: tuple[tuple[float, float], ...] = field(
+        default=(), compare=False, repr=False,
+    )
 
     @property
     def width(self) -> float:
@@ -53,6 +58,59 @@ def _u32(stream: io.BytesIO) -> int:
     return struct.unpack("<I", _exact(stream, 4))[0]
 
 
+
+def _projected_outline(points: np.ndarray) -> tuple[tuple[float, float], ...]:
+    """A small, convex top-down outline of the first visual LOD's X/Z points.
+
+    Sampling limits expensive hull construction on very dense models. Preserve
+    the four axis extrema when sampling so the outline stays in the measured
+    footprint. This is a silhouette approximation, not a game collision mesh.
+    """
+    projected = points[:, (0, 2)]
+    if len(projected) > 8192:
+        indices = np.linspace(0, len(projected) - 1, 8192, dtype=np.intp)
+        extrema = [
+            int(np.argmin(projected[:, axis])) for axis in (0, 1)
+        ] + [
+            int(np.argmax(projected[:, axis])) for axis in (0, 1)
+        ]
+        projected = projected[np.concatenate((indices, extrema))]
+    positions = sorted({(float(x), float(z)) for x, z in projected})
+    if len(positions) < 3:
+        return ()
+
+    def cross(
+        a: tuple[float, float], b: tuple[float, float],
+        c: tuple[float, float],
+    ) -> float:
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+    lower: list[tuple[float, float]] = []
+    for point in positions:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+    upper: list[tuple[float, float]] = []
+    for point in reversed(positions):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+    hull = lower[:-1] + upper[:-1]
+    if len(hull) > 48:
+        # Preserve the outer support silhouette using no more than 48 Tk
+        # vertices; thousands of visible objects must remain inexpensive.
+        picked: set[int] = set()
+        for index in range(48):
+            theta = math.tau * index / 48
+            co, si = math.cos(theta), math.sin(theta)
+            picked.add(max(
+                range(len(hull)),
+                key=lambda i: hull[i][0] * co + hull[i][1] * si,
+            ))
+        hull = [hull[i] for i in sorted(picked)]
+    return tuple(hull) if len(hull) >= 3 else ()
+
+
 def _vertices_bounds(points: np.ndarray) -> ModelBounds:
     if len(points) == 0:
         raise ValueError("model contains no vertices")
@@ -60,8 +118,10 @@ def _vertices_bounds(points: np.ndarray) -> ModelBounds:
     zs = points[:, 2]
     if not bool(np.all(np.isfinite(xs)) and np.all(np.isfinite(zs))):
         raise ValueError("non-finite model bounds")
-    bounds = ModelBounds(float(xs.min()), float(xs.max()),
-                         float(zs.min()), float(zs.max()))
+    bounds = ModelBounds(
+        float(xs.min()), float(xs.max()), float(zs.min()), float(zs.max()),
+        outline=_projected_outline(points),
+    )
     if bounds.width < 0 or bounds.length < 0:
         raise ValueError("invalid model bounds")
     return bounds
@@ -173,12 +233,36 @@ def footprint_corners(
     )
 
 
+
+def footprint_outline(
+    bounds: ModelBounds, x: float, z: float, heading: float,
+    *, basis: tuple[float, float, float, float] | None = None,
+) -> tuple[tuple[float, float], ...]:
+    """Transform actual top-down P3D outline by the original WRP X/Z basis.
+
+    Unsupported or degenerate models use their old origin-relative rectangle.
+    """
+    if len(bounds.outline) < 3:
+        return footprint_corners(bounds, x, z, heading, basis=basis)
+    if basis is None:
+        angle = math.radians(heading)
+        co, si = math.cos(angle), math.sin(angle)
+        basis = (co, si, -si, co)
+    xx, xz, zx, zz = basis
+    return tuple(
+        (x + xx * lx + xz * lz, z + zx * lx + zz * lz)
+        for lx, lz in bounds.outline
+    )
+
+
 def footprint_contains(
     corners: tuple[tuple[float, float], ...],
     x: float, z: float,
 ) -> bool:
     """Hit-test the rotated four-corner preview rectangle."""
     # A line-like or point-like LOD has no selectable polygon area.
+    if len(corners) < 3:
+        return False
     first, second, third = corners[:3]
     area = (
         (second[0] - first[0]) * (third[1] - first[1])
