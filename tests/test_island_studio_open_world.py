@@ -390,14 +390,14 @@ def test_compare_world_in_top_right_utilities_dropdown(
     assert menu.parent is button
     assert menu.options["tearoff"] is False
     assert [item["label"] for item in menu.items] == [
-        "Compare World…", "Export Texture Location Map…",
-        "Load Worldgen Debug Layers…", "Export Object Locations…",
+        "Compare World…", "Load Worldgen Debug Layers…",
+        "Export Texture Location Map…", "Export Object Locations…",
     ]
     menu.items[0]["command"]()
     menu.items[1]["command"]()
     menu.items[2]["command"]()
     menu.items[3]["command"]()
-    assert called == ["compare", "atlas", "debug", "objects"]
+    assert called == ["compare", "debug", "atlas", "objects"]
 
     build_source = inspect.getsource(IslandStudio._build)
     assert "self._build_utilities(header)" in build_source
