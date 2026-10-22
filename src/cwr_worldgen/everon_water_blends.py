@@ -59,6 +59,17 @@ def everon_shore_blend_path(
     return rf"eden\{stem}.paa" if stem in _EVERON_SHORE_QUARTETS else None
 
 
+def is_everon_water_blend_path(path: str) -> bool:
+    """True only for a literal directional quartet from original eden.wrp."""
+    normalized = path.replace("/", "\\").casefold()
+    prefix = "eden\\"
+    suffix = ".paa"
+    return (
+        normalized.startswith(prefix) and normalized.endswith(suffix)
+        and normalized[len(prefix):-len(suffix)] in _EVERON_SHORE_QUARTETS
+    )
+
+
 def apply_everon_water_borders(
     texture_paths: Sequence[str],
     texture_slots: Sequence[int],
