@@ -199,18 +199,24 @@ def test_copy_model_and_texture_paths_with_distinct_hotkeys(tmp_path: Path) -> N
         bound = {call.args[0]: call.args[1] for call in editor.root.bind.call_args_list}
         assert set(bound) == {
             "<Control-Shift-KeyPress-M>", "<Control-Shift-KeyPress-T>",
+            "<Control-Shift-KeyPress-C>",
         }
         assert bound["<Control-Shift-KeyPress-M>"](event) == "break"
         assert editor.root.clipboard_append.call_args.args == (
             r"data3d\custom_building.p3d",
         )
-        assert "Copied model path" in editor.status.set.call_args.args[0]
+        assert "Copied model" in editor.status.set.call_args.args[0]
         assert bound["<Control-Shift-KeyPress-T>"](event) == "break"
         assert editor.root.clipboard_append.call_args.args == (
             r"o\data\rock.paa",
         )
-        assert "Copied texture path" in editor.status.set.call_args.args[0]
-        assert editor.root.clipboard_clear.call_count == 2
+        assert "Copied texture" in editor.status.set.call_args.args[0]
+        assert bound["<Control-Shift-KeyPress-C>"](event) == "break"
+        assert editor.root.clipboard_append.call_args.args == (
+            "player setPos [30.000, 3.000, 0]",
+        )
+        assert "Copied coords:" in editor.status.set.call_args.args[0]
+        assert editor.root.clipboard_clear.call_count == 3
 
 
 def test_copy_respects_empty_hover_and_does_not_clear_clipboard(tmp_path: Path) -> None:
@@ -237,6 +243,16 @@ def test_copy_respects_empty_hover_and_does_not_clear_clipboard(tmp_path: Path) 
         assert app.IslandStudio._copy_under_cursor(editor, event, "texture") == "break"
         editor.root.clipboard_clear.assert_not_called()
         assert "No named texture" in editor.status.set.call_args.args[0]
+        # Coordinates are independent of whether the texture has a name.
+        assert app.IslandStudio._copy_under_cursor(editor, event, "coords") == "break"
+        assert editor.root.clipboard_append.call_args.args == (
+            "player setPos [52.000, 1.000, 0]",
+        )
+        editor.root.clipboard_clear.reset_mock()
+
+        editor._hover_screen = None
+        assert app.IslandStudio._copy_under_cursor(editor, event, "coords") == "break"
+        editor.root.clipboard_clear.assert_not_called()
 
 
 def test_copy_keeps_keyboard_focus_and_reports_clipboard_errors(
@@ -268,7 +284,7 @@ def test_copy_keeps_keyboard_focus_and_reports_clipboard_errors(
         editor.root.focus_get.return_value = None
         editor.root.clipboard_append.side_effect = app.tk.TclError("clipboard busy")
         assert app.IslandStudio._copy_under_cursor(editor, event, "model") == "break"
-        assert "Could not copy model path" in editor.status.set.call_args.args[0]
+        assert "Could not copy model" in editor.status.set.call_args.args[0]
 
 
 def test_copy_texture_matches_oprw_layer_cell_not_terrain_vertex(tmp_path: Path) -> None:
@@ -285,4 +301,18 @@ def test_copy_texture_matches_oprw_layer_cell_not_terrain_vertex(tmp_path: Path)
         assert texture_under_cursor(world, 80, 20) == (1, r"o\data\grass.paa")
         assert r"Texture 1: o\data\grass.paa" in cursor_readout(
             world, 80, 20, "Actual textures",
+        )
+
+
+def test_copy_game_coords_uses_pointer_not_selected_object(tmp_path: Path) -> None:
+    source = tmp_path / "cursor.wrp"
+    _world(source)
+    with IslandDocument(source, cell_size=25.0) as world:
+        editor = _clipboard_editor(world)
+        editor._hover_targets = ()
+        editor._to_world = lambda sx, sy: (72.375, 45.125)
+        event = SimpleNamespace(widget=editor.root)
+        assert app.IslandStudio._copy_under_cursor(editor, event, "coords") == "break"
+        assert editor.root.clipboard_append.call_args.args == (
+            "player setPos [72.375, 45.125, 0]",
         )
