@@ -29,6 +29,7 @@ from .pbo_textures import PboTextures
 from .pbo_worlds import PboWorldArchive
 from .asset_sources import append_unique, remove_selected
 from .textures import clear_archive_texture_cache, clear_loose_texture_cache, render_real_textures
+from .shorelines import highlight_shoreline
 from .texture_location_export import export_texture_location_atlas
 from .object_location_export import export_object_location_atlas
 from .export_naming import island_export_stem
@@ -138,6 +139,7 @@ class IslandStudio:
         self.cell_size = tk.StringVar(value="50")
         self.auto_grid = tk.BooleanVar(value=True)
         self.show_locations = tk.BooleanVar(value=True)
+        self.show_shorelines = tk.BooleanVar(value=True)
         self.height_scale = tk.StringVar(value="0.045")
         self.layer = tk.StringVar(value="Elevation")
         self.tool = tk.StringVar(value="Select")
@@ -275,6 +277,10 @@ class IslandStudio:
         water_entry.pack(fill="x", pady=(0, 4))
         water_entry.bind("<Return>", lambda _e: self._queue_draw())
         water_entry.bind("<FocusOut>", lambda _e: self._queue_draw())
+        ttk.Checkbutton(
+            side, text="Highlight shoreline (Elevation only)",
+            variable=self.show_shorelines, command=self._queue_draw,
+        ).pack(anchor="w", pady=(0, 4))
         ttk.Label(side, text="Texture / model folders").pack(anchor="w", pady=(7, 2))
         self.folder_list = tk.Listbox(
             side, height=4, selectmode="extended", exportselection=False,
@@ -1275,11 +1281,23 @@ class IslandStudio:
                     self.status.set(f"Actual textures: {loaded} visible texture slots loaded")
             else:
                 self._texture_issues = {}
+                water_level = self._num(self.water_level, "Water level")
                 pixels = self.document.viewport(
                     left, top, right, bottom, width, height,
                     textures=view == "Texture slots",
-                    water_level=self._num(self.water_level, "Water level"),
+                    water_level=water_level,
                 )
+                if (view == "Elevation"
+                        and getattr(self, "show_shorelines", None) is not None
+                        and self.show_shorelines.get()):
+                    heights, _, _ = self.document.sample_viewport(
+                        left, top, right, bottom,
+                        pixels.shape[1], pixels.shape[0],
+                    )
+                    pixels = highlight_shoreline(
+                        pixels, heights, water_level=water_level,
+                        height_scale=self.document.height_scale,
+                    )
             image = Image.fromarray(pixels, "RGB")
             self._image = ImageTk.PhotoImage(image, master=self.canvas)
             self.canvas.delete("all")
@@ -1460,6 +1478,18 @@ class IslandStudio:
                             )
                     except ValueError:
                         pass
+
+            # World boundary stays visible in EVERY mode, independent of
+            # the water level, zoom, selected texture and overlay toggles.
+            # Draw LAST so objects, roads and map labels cannot hide it.
+            west, north = self._to_screen(0.0, self.document.world_height)
+            east, south = self._to_screen(self.document.world_width, 0.0)
+            self.canvas.create_rectangle(
+                west, north, east, south, outline="#13252b", width=6,
+            )
+            self.canvas.create_rectangle(
+                west, north, east, south, outline="#fff0aa", width=2,
+            )
         except Exception as exc:
             self.status.set(f"Preview error: {exc}")
 
