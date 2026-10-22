@@ -1,4 +1,4 @@
-"""Shorelines are optional on Elevation; the world frame is always shown."""
+"""Shorelines are optional in every view; the world frame is always shown."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -65,7 +65,7 @@ def test_shoreline_scales_heights_and_does_not_draw_world_edges() -> None:
 
 
 @pytest.mark.parametrize("mode", ("Elevation", "Texture slots", "Road preview", "Actual textures"))
-def test_world_frame_always_visible_and_shoreline_only_on_elevation(
+def test_world_frame_always_visible_and_shoreline_toggle_in_every_view(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
 ) -> None:
     source = tmp_path / "test.wrp"
@@ -81,7 +81,7 @@ def test_world_frame_always_visible_and_shoreline_only_on_elevation(
         editor.zoom = 1.0
         editor._render_pending = True
         editor.layer = SimpleNamespace(get=lambda: mode)
-        editor.water_level = SimpleNamespace(get=lambda: "0")
+        editor.water_level = SimpleNamespace(get=lambda: "3.5")
         editor.show_shorelines = SimpleNamespace(get=lambda: True)
         editor.show_roads = SimpleNamespace(get=lambda: False)
         editor.show_forests = SimpleNamespace(get=lambda: False)
@@ -112,7 +112,7 @@ def test_world_frame_always_visible_and_shoreline_only_on_elevation(
         monkeypatch.setattr(app, "highlight_shoreline", track)
         app.IslandStudio._draw(editor)
 
-        assert calls == ([0.0] if mode == "Elevation" else [])
+        assert calls == [3.5]
         assert editor.status.set.call_args is None or not str(
             editor.status.set.call_args.args[0]
         ).startswith("Preview error:")
@@ -134,3 +134,21 @@ def test_world_frame_always_visible_and_shoreline_only_on_elevation(
         rectangles = editor.canvas.create_rectangle.call_args_list
         assert len(rectangles) == 2
         assert rectangles[0].args == pytest.approx((-40, -100, 760, 700))
+
+
+def test_utilities_menu_groups_export_actions(monkeypatch: pytest.MonkeyPatch) -> None:
+    editor = object.__new__(app.IslandStudio)
+    menu = Mock()
+    button = Mock()
+    monkeypatch.setattr(app.ttk, "Menubutton", lambda *_a, **_kw: button)
+    monkeypatch.setattr(app.tk, "Menu", lambda *_a, **_kw: menu)
+
+    app.IslandStudio._build_utilities(editor, Mock())
+
+    labels = [call.kwargs["label"] for call in menu.add_command.call_args_list]
+    assert labels == [
+        "Compare World…",
+        "Load Worldgen Debug Layers…",
+        "Export Texture Location Map…",
+        "Export Object Locations…",
+    ]
