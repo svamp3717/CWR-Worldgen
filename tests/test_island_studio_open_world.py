@@ -375,6 +375,7 @@ def test_compare_world_in_top_right_utilities_dropdown(
     editor = SimpleNamespace(
         _compare_dialog=lambda: called.append("compare"),
         _export_texture_location_map=lambda: called.append("atlas"),
+        _export_object_location_map=lambda: called.append("objects"),
     )
     header = object()
     IslandStudio._build_utilities(editor, header)
@@ -389,10 +390,12 @@ def test_compare_world_in_top_right_utilities_dropdown(
     assert menu.options["tearoff"] is False
     assert [item["label"] for item in menu.items] == [
         "Compare World…", "Export Texture Location Map…",
+        "Export Object Locations…",
     ]
     menu.items[0]["command"]()
     menu.items[1]["command"]()
-    assert called == ["compare", "atlas"]
+    menu.items[2]["command"]()
+    assert called == ["compare", "atlas", "objects"]
 
     build_source = inspect.getsource(IslandStudio._build)
     assert "self._build_utilities(header)" in build_source
