@@ -124,11 +124,11 @@ class WorldgenDebugLayers:
     def sample(self, key: str, x: float, z: float) -> int | None:
         if key not in self.rasters:
             return None
+        if not (0 <= x < self.metadata["width"] * self.metadata["cell_size"]
+                and 0 <= z < self.metadata["height"] * self.metadata["cell_size"]):
+            return None
         col = int(x / self.metadata["cell_size"])
         row = int(z / self.metadata["cell_size"])
-        if not (0 <= col < self.metadata["width"]
-                and 0 <= row < self.metadata["height"]):
-            return None
         return int(self.rasters[key][row, col])
 
     def composite(
