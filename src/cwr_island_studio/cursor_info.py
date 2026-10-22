@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, field
+from typing import Sequence
 
-from .core import IslandDocument
+from .core import IslandDocument, MapObject
+from .model_bounds import footprint_contains
 
 
 def cursor_readout(
@@ -34,3 +37,87 @@ def cursor_readout(
         )
         return f"{position}  |  Texture {slot}: {name or '(unnamed)'}"
     return position
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectHoverTarget:
+    """The screen-space geometry that was actually rendered for an object."""
+
+    obj: MapObject
+    sx: float
+    sy: float
+    kind: str = "marker"  # marker, segment, or outline
+    points: tuple[tuple[float, float], ...] = ()
+    bounds: tuple[float, float, float, float] | None = field(
+        default=None, init=False, repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        if self.points:
+            xs, ys = zip(*self.points)
+            object.__setattr__(
+                self, "bounds", (min(xs), min(ys), max(xs), max(ys)),
+            )
+
+
+def object_under_cursor(
+    targets: Sequence[ObjectHoverTarget], sx: float, sy: float,
+    *, marker_radius: float = 7.0, segment_radius: float = 5.0,
+) -> MapObject | None:
+    """Find the visible object under the pointer without scanning the WRP.
+
+    The draw loop captures at most a few thousand visible model shapes.
+    Check their screen geometry, preferring nearby visible markers or road
+    strokes to large overlapping polygons. No P3D decoding happens on hover.
+    """
+    if not math.isfinite(sx) or not math.isfinite(sy):
+        return None
+    best: MapObject | None = None
+    best_score = (math.inf, math.inf, math.inf)
+    for target in targets:
+        dx, dy = target.sx - sx, target.sy - sy
+        origin_distance = dx * dx + dy * dy
+        if target.kind == "marker":
+            if origin_distance > marker_radius * marker_radius:
+                continue
+            score = (0, origin_distance, target.obj.index)
+        else:
+            box = target.bounds
+            radius = segment_radius if target.kind == "segment" else 0.0
+            if box is None or not (
+                box[0] - radius <= sx <= box[2] + radius
+                and box[1] - radius <= sy <= box[3] + radius
+            ):
+                continue
+            if target.kind == "outline":
+                if not footprint_contains(target.points, sx, sy):
+                    continue
+                score = (1, origin_distance, target.obj.index)
+            elif target.kind == "segment" and len(target.points) == 2:
+                (ax, ay), (bx, by) = target.points
+                length_sq = (bx - ax) ** 2 + (by - ay) ** 2
+                t = max(0.0, min(
+                    1.0, ((sx - ax) * (bx - ax) + (sy - ay) * (by - ay)) / length_sq,
+                )) if length_sq else 0.0
+                distance_sq = (sx - ax - t * (bx - ax)) ** 2 + (
+                    sy - ay - t * (by - ay)
+                ) ** 2
+                if distance_sq > segment_radius * segment_radius:
+                    continue
+                score = (0, distance_sq, target.obj.index)
+            else:
+                continue
+        if score < best_score:
+            best_score, best = score, target.obj
+    return best
+
+
+def object_cursor_readout(obj: MapObject | None) -> str:
+    """Identify the model and its exact placement without changing selection."""
+    if obj is None:
+        return ""
+    return (
+        f"Object ID {obj.object_id:,} (record {obj.index:,}): {obj.model_path}  "
+        f"|  Origin X {obj.x:,.1f}, Y {obj.y:,.1f}, Z {obj.z:,.1f} m  "
+        f"|  Heading {obj.heading:.1f}°"
+    )
