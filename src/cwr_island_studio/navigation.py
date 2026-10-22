@@ -102,3 +102,14 @@ def center_on_position(
         game_x - canvas_width / (2 * zoom),
         game_y - canvas_height / (2 * zoom),
     )
+
+
+def game_console_teleport_command(x: float, z: float) -> str:
+    """Return an OFP/CWA console teleport command for Island Studio's X/Z.
+
+    Game getPos/setPos uses [east X, north Y, height], whereas WRP stores
+    north as Z. Zero height places the player at ground level.
+    """
+    if not (math.isfinite(x) and math.isfinite(z)):
+        raise ValueError("Map coordinates must be finite")
+    return f"player setPos [{x:.3f}, {z:.3f}, 0]"
