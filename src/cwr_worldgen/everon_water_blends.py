@@ -1,13 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Everon's original water/sand/grass ground transitions.
+"""Verified Everon ps sandy ground to tn grass transitions.
 
-The original eden.wrp texture atlas (256x256 at 50 m) confirms the three
-base tiles ps (underwater), sz (shore) and tn (land), plus the directional
-four-quadrant tiles below. A 180-degree filename-to-world transformation
-gives zero discontinuous shared corners over 227,376 comparisons against
-the stock export; unrotated names give 16,825 mismatches.
-
-Only literal stock WRP paths are emitted. No original art is repackaged.
+The original Eden WRP texture-path table contains thirteen ps/tn direction
+tiles. sz.paa is stone artwork, not sand; this preset therefore uses ps as
+the beach/seabed base and tn as land, without introducing sz or guessed PAAs.
+A 180-degree filename rotation matches original geographic quadrants.
 """
 from __future__ import annotations
 
@@ -15,29 +12,15 @@ from collections.abc import Sequence
 
 import numpy as np
 
-# Base paths in sea-to-land order. Textures are loaded from the game's Eden PBO.
-_EVERON_SHORE_BASE = (
-    r"eden\ps.paa",
-    r"eden\sz.paa",
-    r"eden\tn.paa",
-)
-_CODES = ("ps", "sz", "tn")
+# Both wet and dry shore (as well as underwater) use sandy ps, not stone sz.
+_EVERON_SHORE_BASE = (r"eden\ps.paa", r"eden\tn.paa")
+_CODES = ("ps", "tn")
 
-# The EXACT two- and three-material quartet filenames in the supplied
-# original Eden WRP texture-location export. Do not manufacture missing
-# combinations: the original table is not a complete 3**4 permutation set.
+# Exactly the thirteen ps/tn quartets present in the user's eden.wrp export.
+# Geographic NE+SW land diagonal (mask 9) is absent; never invent a PAA.
 _EVERON_SHORE_QUARTETS = frozenset("""
-pspspssz pspspstn pspsszps pspsszsz pspssztn pspstnps pspstnsz
-pspstntn psszpsps psszpssz psszpstn psszszps psszszsz psszsztn
-pssztnsz pssztntn pstnpsps pstnpssz pstnpstn pstnszps pstnszsz
-pstnsztn pstntnps pstntnsz pstntntn szpspsps szpspssz szpsszps
-szpsszsz szpssztn szpstnps szpstnsz szpstntn szszpsps szszpssz
-szszpstn szszszps szszsztn szsztnps szsztnsz szsztntn sztnpsps
-sztnpssz sztnpstn sztnszps sztnszsz sztnsztn sztntnps sztntnsz
-sztntntn tnpspsps tnpspssz tnpsszps tnpsszsz tnpstnps tnpstnsz
-tnpstntn tnszpsps tnszpssz tnszpstn tnszszps tnszszsz tnszsztn
-tnsztnps tnsztnsz tnsztntn tntnpsps tntnpssz tntnpstn tntnszps
-tntnszsz tntnsztn tntntnps tntntnsz
+pstntnps pspstntn pstntntn tntnpsps pspspstn pstnpstn pstnpsps
+tntnpstn tnpstntn tntntnps tnpstnps tnpspsps pspstnps
 """.split())
 
 
@@ -51,7 +34,7 @@ def everon_shore_blend_path(
     returns None instead of silently referencing a non-existent asset.
     """
     corners = (north_east, north_west, south_east, south_west)
-    if any(code not in (0, 1, 2) for code in corners):
+    if any(code not in (0, 1) for code in corners):
         return None
     if len(set(corners)) == 1:
         return _EVERON_SHORE_BASE[corners[0]]
@@ -70,6 +53,24 @@ def is_everon_water_blend_path(path: str) -> bool:
     )
 
 
+def _resolve_missing_ps_tn_diagonal(vertices: np.ndarray) -> None:
+    """Resolve missing NE+SW grass diagonal without breaking shared corners.
+
+    Eden has 13/14 binary quartet paths: only geographic mask 9 is missing.
+    Remove the SW grass vertex from such a cell, updating the same vertex for
+    its neighbours. Removal is monotone and terminates even for patterns of
+    multiple adjacent missing diagonals.
+    """
+    while True:
+        ne, nw = vertices[1:, 1:], vertices[1:, :-1]
+        se, sw = vertices[:-1, 1:], vertices[:-1, :-1]
+        missing = (ne == 1) & (nw == 0) & (se == 0) & (sw == 1)
+        if not np.any(missing):
+            return
+        rows, cols = np.nonzero(missing)
+        vertices[rows, cols] = 0
+
+
 def apply_everon_water_borders(
     texture_paths: Sequence[str],
     texture_slots: Sequence[int],
@@ -77,7 +78,7 @@ def apply_everon_water_borders(
     width: int,
     maximum_texture_slots: int = 512,
 ) -> tuple[tuple[str, ...], list[int]]:
-    """Blend existing ps/sz/tn cells with shared, north-up shoreline corners.
+    """Blend ps sand and tn grass with shared north-up shoreline corners.
 
     This runs after optional forest blends, so forest/road/farmland artwork
     remains untouched. A vertex next to protected ground is left alone; any
@@ -105,25 +106,24 @@ def apply_everon_water_borders(
     if not np.any(centres == 0):
         return tuple(paths), flat.tolist()  # No sea or underwater ground.
 
-    # At every shared vertex, inspect the four touching tile centres once.
-    # The vote gives each vertex a single material, so adjoining quarter
-    # tiles are always continuous. For ties, favour shore then dry ground
-    # over the seabed, preventing water bleed past the real land boundary.
-    # Outside-map neighbours do not vote; protected interiors do not blend.
+    # Each vertex belongs to all adjoining 50-metre tiles. In a two-versus-two
+    # tie the geographic grass corner wins, putting the gradual border
+    # on the ps-facing cell instead of flooding inland grass.
     padded = np.pad(centres, 1, constant_values=-2)
     neighbours = (
         padded[:-1, :-1], padded[:-1, 1:],
         padded[1:, :-1], padded[1:, 1:],
     )
     protected = np.logical_or.reduce(tuple(a == -1 for a in neighbours))
-    priorities = (0, 2, 1)
+    priorities = (0, 1)
     scores = np.stack([
         sum((piece == code).astype(np.int8) for piece in neighbours) * 4
         + priorities[code]
-        for code in range(3)
+        for code in range(2)
     ])
     vertices = np.argmax(scores, axis=0).astype(np.int8)
     vertices[protected] = -1
+    _resolve_missing_ps_tn_diagonal(vertices)
     ne, nw = vertices[1:, 1:], vertices[1:, :-1]
     se, sw = vertices[:-1, 1:], vertices[:-1, :-1]
 
@@ -145,9 +145,9 @@ def apply_everon_water_borders(
 
     code_grid = (
         np.maximum(ne, 0).astype(np.int32)
-        + 3 * np.maximum(nw, 0).astype(np.int32)
-        + 9 * np.maximum(se, 0).astype(np.int32)
-        + 27 * np.maximum(sw, 0).astype(np.int32)
+        + 2 * np.maximum(nw, 0).astype(np.int32)
+        + 4 * np.maximum(se, 0).astype(np.int32)
+        + 8 * np.maximum(sw, 0).astype(np.int32)
     )
     result = original.copy()
     path_slots = {
@@ -158,8 +158,8 @@ def apply_everon_water_borders(
         code = key
         quadrants = []
         for _ in range(4):
-            quadrants.append(code % 3)
-            code //= 3
+            quadrants.append(code % 2)
+            code //= 2
         path = everon_shore_blend_path(*quadrants)
         if path is None:
             continue
