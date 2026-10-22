@@ -59,7 +59,7 @@ def test_stock_water_quartet_artwork_uses_opposite_filename_corners() -> None:
     assert everon_shore_blend_path(1, 1, 0, 0) == r"eden\pspsszsz.paa"
     assert everon_shore_blend_path(0, 0, 0, 0) == r"eden\ps.paa"
     assert everon_shore_blend_path(2, 2, 2, 2) == r"eden\tn.paa"
-    assert everon_shore_blend_path(0, 2, 0, 2) is None  # missing diagonal
+    assert everon_shore_blend_path(2, 0, 0, 2) is None  # absent stock quartet
     assert everon_shore_blend_path(0, 1, 2, 2) is not None
     assert everon_shore_blend_path(-1, 1, 1, 1) is None
 
