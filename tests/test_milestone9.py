@@ -369,14 +369,25 @@ class SurfacePassTests(unittest.TestCase):
             SimpleNamespace(**base, ground_texture_profile="everon"),
         )
         for preset, classic in classic_reports.items():
+            # Real water stays water. Every shoreline class on LAND must be
+            # absent, including the formerly overlooked wet 'q' strip.
+            assert classic.wet_shoreline_cells == 0, preset
             assert classic.dry_shoreline_cells == 0, preset
+            assert classic.shoreline_cells == 0, preset
             assert classic.mapped_sand_cells == 0, preset
-            assert MATERIAL_INDEX["s"] not in classic.indices, preset
-            assert MATERIAL_INDEX["x"] not in classic.indices, preset
-            assert classic.wet_shoreline_cells > 0, preset
+            for code in ("q", "s", "x"):
+                assert MATERIAL_INDEX[code] not in classic.indices, (preset, code)
             assert MATERIAL_INDEX["w"] in classic.indices, preset
+            paths = surface_texture_wire_paths("classic", preset)
+            ordinary = paths[MATERIAL_INDEX["g"]]
+            for code in ("q", "s", "x"):
+                assert paths[MATERIAL_INDEX[code]] == ordinary, (preset, code)
+            assert paths[MATERIAL_INDEX["w"]] != ordinary, preset
+        # Do not strip beach / shoreline classes from other terrain presets.
+        assert everon.wet_shoreline_cells > 0
         assert everon.dry_shoreline_cells > 0
         assert everon.mapped_sand_cells > 0
+        assert MATERIAL_INDEX["q"] in everon.indices
         assert MATERIAL_INDEX["x"] in everon.indices
 
     def test_explicit_osm_surfaces_and_aeroways_override_broad_landuse(self) -> None:

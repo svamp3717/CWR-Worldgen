@@ -91,10 +91,11 @@ the feature is enabled by default; use `--no-forest-undergrowth-textures` to
 disable it or `--forest-undergrowth-textures` to enable explicitly.
 
 **Malden and Kolgujev beach handling:** These two stock ground-texture
-presets do not assign separate dry beach/sand classes. Dry shoreline and
-mapped beach/sand areas use the same ordinary ground as the rest of the
-island (`abel\\tt.paa` or `cain\\j9.paa`). Other ground-texture presets
-retain their existing shoreline materials.
+presets use ordinary ground for **all land-side coastal bands**, including
+wet shoreline, dry sand, and OSM mapped beach/sand areas. Those cells use
+`abel\\tt.paa` or `cain\\j9.paa`; actual underwater cells retain their
+sea-floor texture. Other ground-texture presets retain their existing
+shoreline materials.
 Original game texture artwork is **not** copied into the generated PBO.
 
 

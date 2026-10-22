@@ -120,7 +120,7 @@ _MALDEN_DIRT_TEXTURE = r"abel\bah.paa"
 # The semantic classes still drive placement; only their WRP ground tile is shared.
 MALDEN_SURFACE_TEXTURES: dict[str, str] = {
     "w": _MALDEN_SEA_TEXTURE,
-    "q": _MALDEN_SEA_TEXTURE,
+    "q": _MALDEN_LAND_TEXTURE,
     "s": _MALDEN_LAND_TEXTURE,
     "g": _MALDEN_LAND_TEXTURE,
     "h": _MALDEN_LAND_TEXTURE,
@@ -153,7 +153,7 @@ _KOLGUJEV_LAND_TEXTURE = r"cain\j9.paa"
 KOLGUJEV_SURFACE_TEXTURES: dict[str, str] = {
     material.code: (
         _KOLGUJEV_SEA_TEXTURE
-        if material.code in {"w", "q"}
+        if material.code == "w"
         else _KOLGUJEV_LAND_TEXTURE
     )
     for material in MILESTONE9_MATERIALS
@@ -173,7 +173,7 @@ MATERIAL_INDEX: Mapping[str, int] = {
 
 MALDEN_SURFACE_COLOURS: Mapping[str, tuple[int, int, int]] = {
     "w": (48, 73, 91),
-    "q": (124, 111, 82),
+    "q": (109, 118, 70),
     # Malden uses ordinary grass all along dry coastlines; no beach class.
     "s": (109, 118, 70),
     "g": (109, 118, 70),
@@ -987,15 +987,22 @@ def build_surface_pass(
     result[dirt_centres] = MATERIAL_INDEX["d"]
     result[paved_centres] = MATERIAL_INDEX["p"]
     result[water_np] = MATERIAL_INDEX["w"]
-    # Malden/Abel and Kolgujev/Cain use one ordinary dry-land texture, not a
-    # distinct beach texture. Remap both generated shoreline sand and OSM
-    # beach/sand classes to ordinary grass. Preserve wet water-edge behaviour
-    # and leave the other ground palettes' shoreline classifications alone.
+    # Malden/Abel and Kolgujev/Cain have no separate shoreline ground
+    # artwork. Their wet ('q'), dry sand ('s') and mapped beach ('x')
+    # classes must ALL become ordinary grass on land. Leaving 'q' on a
+    # coastal cell assigned the sea-floor texture and caused a visible
+    # one-cell beach-looking ring even after sand was removed.
+    # Preserve actual underwater 'w' cells and other stock presets.
     if str(getattr(spec, "ground_texture_profile", "")).casefold() in {
         "malden", "kolgujev",
     }:
-        dry_beach = (result == MATERIAL_INDEX["s"]) | (result == MATERIAL_INDEX["x"])
-        result[dry_beach] = MATERIAL_INDEX["g"]
+        shoreline = np.isin(
+            result, (
+                MATERIAL_INDEX["q"], MATERIAL_INDEX["s"], MATERIAL_INDEX["x"],
+            ),
+        )
+        result[shoreline] = MATERIAL_INDEX["g"]
+        wet_count = 0
         dry_count = 0
         mapped_sand_count = 0
     paved_count = int(np.count_nonzero((~water_np) & paved_np))
