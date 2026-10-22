@@ -10,7 +10,7 @@ from cwr_worldgen import generator
 from cwr_worldgen.everon_water_blends import (
     _EVERON_SHORE_QUARTETS,
     apply_everon_water_borders,
-    everon_shore_blend_path,
+    everon_shore_blend_path, is_everon_water_blend_path,
 )
 from cwr_worldgen.surface_pass import MATERIAL_INDEX, STOCK_SURFACE_TEXTURES
 from cwr_worldgen.terrain import STOCK_GROUND_TEXTURES
@@ -169,3 +169,11 @@ def test_other_stock_profiles_keep_existing_unchanged_texture_table() -> None:
         )
         assert paths == (spec.dummy_texture_path, *generator._ground_texture_paths(spec))
         assert slots == [MATERIAL_INDEX["w"] + 1] * len(mats)
+
+
+def test_water_border_manifest_paths_are_not_misreported_as_forest() -> None:
+    assert is_everon_water_blend_path(r"eden\psszpssz.paa")
+    assert is_everon_water_blend_path(r"EDEN\SZTNSZTN.PAA")
+    assert not is_everon_water_blend_path(r"eden\pltnpltn.paa")
+    assert not is_everon_water_blend_path(r"eden\ps.paa")
+    assert not is_everon_water_blend_path(r"o\psszpssz.paa")
