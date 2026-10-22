@@ -12,6 +12,7 @@ import re
 import shutil
 from typing import Callable, Sequence
 
+import numpy as np
 from PIL import Image
 
 from .cache import (
