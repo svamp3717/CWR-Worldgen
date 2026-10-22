@@ -1,40 +1,27 @@
-# Everon sandy ps-to-grass tn shoreline borders
+# Everon underwater-only `ps` textures
 
-## Why the texture changed
+The Everon Classic preset uses the original `eden\\ps.paa` ground
+texture **only where final WRP elevation is at or below the configured
+sea level**. The texture is not painted on exposed beaches or dry
+shoreline cells. This restriction uses the world height samples, rather than
+the OSM water raster or an unreliable `w` material category.
 
-The original Eden WRP export (`everon_textures.zip`) contains a 256 × 256,
-50-metre ground-texture grid with the original game texture paths.
-However, the WRP names alone do not establish the artwork's appearance.
-The previously selected `eden\sz.paa` is **stone**, not sandy shore.
-
-The Everon Classic preset now uses:
-
-| Surface | Actual game texture |
+| Location | Everon ground texture |
 | --- | --- |
-| Water / sandy seabed | `eden\ps.paa` |
-| Wet shoreline / dry beach / mapped beach | `eden\ps.paa` |
-| Ordinary inland grass | `eden\tn.paa` |
+| Submerged terrain | `eden\\ps.paa` |
+| Submerged boundary against land | Original directional `ps`/`tn` quartet, on the **underwater cell only** |
+| Above-water beach / shore / grass | `eden\\tn.paa` |
+| Roads, forest, farmland, rock | Existing protected ground tiles |
 
-The original WRP has **13 actual ps/tn directional quartet assets**.
-These follow the coastline's boundary between sand and grass rather than
-painting a stone-colored ring. The geographic mask is rotated 180 degrees
-relative to the original filename order. Examples:
+Everon's 13 verified directional `ps`/`tn` PAA filenames come from the
+original `eden.wrp` texture export. Geographic filename orientation is
+rotated 180 degrees. Each shared vertex touching dry ordinary ground uses
+the `tn` corner, allowing the underwater blended cell to meet an
+unmodified `tn` dry cell. Unsupported diagonal combinations are resolved
+at shared vertices without inventing a missing PAA.
 
-- Sand west and grass east: `eden\pstnpstn.paa`
-- Grass west and sand east: `eden\tnpstnps.paa`
-- Sand south and grass north: `eden\pspstntn.paa`
-
-The one unavailable original ps/tn diagonal (NE+SW grass, mask 9)
-is resolved by modifying a *shared* SW vertex in all adjacent cells,
-not by inventing a filename or leaving mismatched corners.
-
-## Scope
-
-This applies to both legacy and Milestone 9 **Everon** ground-texture
-presets. The border compositor runs after forest blends and keeps roads,
-farmland, rock and forest ground protected. Original game artwork is not
-redistributed, and only WRP-confirmed paths may be referenced.
-The generated world keeps its own coast shape, sea elevations and object
-placement; other island ground presets are unchanged.
-
-The relevant regression tests live in `tests/test_everon_water_blends.py`.
+This rule is applied in legacy and Milestone 9 Everon texture palettes
+through the common WRP texture-table compositor, including validation and
+deterministic regeneration. Water heights, coast shapes, gameplay objects
+and all other island texture presets remain unchanged. No game artwork is
+repackaged into the generated island.
