@@ -116,9 +116,11 @@ def test_editor_overlays_follow_same_north_up_terrain_view(
         editor.pbo_textures = None
         editor._map_locations = ()
         editor.selected = None
+        editor._road_anchor = editor._road_cursor = None
         editor._model_bounds = {}
         monkeypatch.setattr(app.ImageTk, "PhotoImage", lambda *_a, **_kw: object())
         app.IslandStudio._draw(editor)
+        editor.status.set.assert_not_called()
         assert len(editor._visible) == 2
         assert len(editor._hover_targets) == 2
         assert {item.obj.index for item in editor._hover_targets} == {0, 1}
