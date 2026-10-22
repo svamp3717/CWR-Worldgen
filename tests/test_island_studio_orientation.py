@@ -120,6 +120,9 @@ def test_editor_overlays_follow_same_north_up_terrain_view(
         monkeypatch.setattr(app.ImageTk, "PhotoImage", lambda *_a, **_kw: object())
         app.IslandStudio._draw(editor)
         assert len(editor._visible) == 2
+        assert len(editor._hover_targets) == 2
+        assert {item.obj.index for item in editor._hover_targets} == {0, 1}
+        assert all(item.kind == "marker" for item in editor._hover_targets)
         markers = editor.canvas.create_oval.call_args_list
         centres = sorted(
             ((call.args[0] + call.args[2]) / 2,
@@ -173,6 +176,9 @@ def test_road_overlay_uses_p3d_outline_before_straight_line_fallback(
         assert polygon is not None
         assert polygon.args == pytest.approx((150, 150, 170, 150, 150, 140))
         assert polygon.kwargs["outline"] == "#ed974a"
+        assert len(editor._hover_targets) == 1
+        assert editor._hover_targets[0].kind == "outline"
+        assert editor._hover_targets[0].points == ((150, 150), (170, 150), (150, 140))
         editor.canvas.create_line.assert_not_called()
         assert not editor.status.set.called
 
@@ -182,4 +188,6 @@ def test_road_overlay_uses_p3d_outline_before_straight_line_fallback(
         app.IslandStudio._draw(editor)
         editor.canvas.create_polygon.assert_not_called()
         editor.canvas.create_line.assert_called_once()
+        assert len(editor._hover_targets) == 1
+        assert editor._hover_targets[0].kind == "segment"
         assert not editor.status.set.called
