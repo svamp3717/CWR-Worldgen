@@ -65,11 +65,13 @@ def test_source_wrps_verify_original_water_ground_and_directional_paths(
 
     assert stock_water_blend_path(profile, 0, 0, 0, 0) == family.water_path
     assert stock_water_blend_path(profile, 1, 1, 1, 1) == family.land_path
+    # 180-degree filename transform: geographic NE land / NW sea /
+    # SE land / SW sea is written as sea-land-sea-land in original WRP.
     assert stock_water_blend_path(profile, 1, 0, 1, 0) == (
-        f"{namespace}\\{grass}{sea}{grass}{sea}.{ext}"
+        f"{namespace}\\{sea}{grass}{sea}{grass}.{ext}"
     )
     assert stock_water_blend_path(profile, 0, 1, 0, 1) == (
-        f"{namespace}\\{sea}{grass}{sea}{grass}.{ext}"
+        f"{namespace}\\{grass}{sea}{grass}{sea}.{ext}"
     )
     assert stock_water_blend_path(profile, 3, 0, 0, 1) is None
     assert is_stock_water_blend_path(
