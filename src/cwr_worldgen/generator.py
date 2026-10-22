@@ -92,6 +92,7 @@ from .terrain import (
 )
 from .wrp import inspect_rvw4, quantize_elevations, quantize_height, write_rvw4
 from .forest_ground_blends import apply_stock_forest_border_blends
+from .everon_water_blends import apply_everon_water_borders
 from .debug_layers import write_worldgen_debug_layers
 from cwr_island_studio.object_layers import is_forest_model
 from .surface_pass import (
@@ -2092,6 +2093,48 @@ def _ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
     )
 
 
+
+def _stock_ground_texture_table(
+    spec: PlayabilitySpec,
+    material_indices: Sequence[int],
+    raster: OsmRaster,
+    materials: Sequence,
+) -> tuple[tuple[str, ...], list[int]]:
+    """Compose WRP ground slots once for export, validation and repeat builds.
+
+    Apply optional forest outlines first, then the Everon shoreline tile
+    family. The latter reads final texture paths so it cannot overwrite
+    protected forest, farmland, road, or generated surface imagery.
+    """
+    paths: Sequence[str] = (spec.dummy_texture_path, *_ground_texture_paths(spec))
+    indices = [int(index) + 1 for index in material_indices]
+    profile = _ground_texture_profile(spec)
+    if bool(getattr(spec, "forest_undergrowth_textures", False)):
+        forest_material = next(
+            index for index, material in enumerate(materials)
+            if material.code == "f"
+        )
+        edge_material = next(
+            (index for index, material in enumerate(materials)
+             if material.code == "e"), None,
+        )
+        paths, indices = apply_stock_forest_border_blends(
+            material_indices, raster.forest, paths,
+            width=spec.cells, profile=profile,
+            forest_material=forest_material, forest_edge_material=edge_material,
+            blendable_exterior_materials=tuple(
+                i for i, item in enumerate(materials)
+                if item.code in {"g", "h", "j"}
+            ),
+            enabled=True,
+        )
+    if profile == "everon":
+        paths, indices = apply_everon_water_borders(
+            paths, indices, width=spec.cells,
+        )
+    return tuple(paths), indices
+
+
 def _external_ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
     profile = _ground_texture_profile(spec)
     # Malden Classic writes stock Abel paths directly into the WRP and assumes
@@ -2560,22 +2603,10 @@ def _validate_milestone4(
     summary = inspect_rvw4(result.wrp_path, height_scale=spec.height_scale)
     materials = _material_definitions(spec)
     counts = material_counts(material_indices, len(materials))
-    expected_texture_paths = {spec.dummy_texture_path, *_ground_texture_paths(spec)}
-    if getattr(spec, "forest_undergrowth_textures", False):
-        original_paths = (spec.dummy_texture_path, *_ground_texture_paths(spec))
-        material_types = _material_definitions(spec)
-        forest_id = next(index for index, item in enumerate(material_types) if item.code == "f")
-        edge_id = next((index for index, item in enumerate(material_types) if item.code == "e"), None)
-        expanded_paths, _ = apply_stock_forest_border_blends(
-            material_indices, raster.forest, original_paths,
-            width=spec.cells, profile=_ground_texture_profile(spec),
-            forest_material=forest_id, forest_edge_material=edge_id,
-            blendable_exterior_materials=tuple(
-                i for i, item in enumerate(material_types) if item.code in {"g", "h", "j"}
-            ),
-            enabled=True,
-        )
-        expected_texture_paths.update(expanded_paths)
+    expected_texture_paths, _ = _stock_ground_texture_table(
+        spec, material_indices, raster, materials,
+    )
+    expected_texture_paths = set(expected_texture_paths)
     checks.append((
         "WRP terrain texture profile",
         set(summary.texture_paths) == expected_texture_paths,
@@ -4684,24 +4715,9 @@ def build_milestone4(
         )
 
     report_progress(84, "Preparing terrain texture table")
-    texture_table_paths = [spec.dummy_texture_path, *ground_texture_paths]
-    wrp_texture_indices = [index + 1 for index in material_indices]
-    if bool(getattr(spec, "forest_undergrowth_textures", False)):
-        forest_material = next(
-            index for index, material in enumerate(materials) if material.code == "f"
-        )
-        edge_material = next(
-            (index for index, material in enumerate(materials) if material.code == "e"), None
-        )
-        texture_table_paths, wrp_texture_indices = apply_stock_forest_border_blends(
-            material_indices, raster.forest, texture_table_paths,
-            width=spec.cells, profile=_ground_texture_profile(spec),
-            forest_material=forest_material, forest_edge_material=edge_material,
-            blendable_exterior_materials=tuple(
-                i for i, item in enumerate(materials) if item.code in {"g", "h", "j"}
-            ),
-            enabled=True,
-        )
+    texture_table_paths, wrp_texture_indices = _stock_ground_texture_table(
+        spec, material_indices, raster, materials,
+    )
     surface_texture_cache_hit = False
     surface_texture_cache_path: str | None = None
     if _surface_ground_enabled(spec) and _ground_texture_profile(spec) != "none":
@@ -5178,26 +5194,9 @@ def build_milestone4(
         temp_source = temp_dir / spec.name
         temp_wrp = temp_source / f"{spec.name}.wrp"
         temp_source.mkdir(parents=True, exist_ok=True)
-        repeat_texture_paths = texture_table_paths
-        repeat_texture_indices = [index + 1 for index in repeat_material_indices]
-        if bool(getattr(spec, "forest_undergrowth_textures", False)):
-            repeat_forest_material = next(
-                index for index, material in enumerate(materials) if material.code == "f"
-            )
-            repeat_edge_material = next(
-                (index for index, material in enumerate(materials) if material.code == "e"), None
-            )
-            repeat_texture_paths, repeat_texture_indices = apply_stock_forest_border_blends(
-                repeat_material_indices, raster.forest,
-                [spec.dummy_texture_path, *ground_texture_paths],
-                width=spec.cells, profile=_ground_texture_profile(spec),
-                forest_material=repeat_forest_material,
-                forest_edge_material=repeat_edge_material,
-                blendable_exterior_materials=tuple(
-                    i for i, item in enumerate(materials) if item.code in {"g", "h", "j"}
-                ),
-                enabled=True,
-            )
+        repeat_texture_paths, repeat_texture_indices = _stock_ground_texture_table(
+            spec, repeat_material_indices, raster, materials,
+        )
         write_rvw4(
             temp_wrp,
             spec.cells,
