@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""On-demand first-LOD horizontal bounds for native 4WVR object markers.
+"""On-demand first-LOD ground-plane outlines for Island Studio previews.
 
-Only models actually visible in the map viewport are measured. The supported
-MLOD/SP3X and OFP/CWA ODOL v6/v7 layouts provide origin-relative X/Z bounds;
-no guessed dimensions or entire-world model decoding are required.
+Only models visible in the viewport are measured. Supported MLOD/SP3X and
+OFP/CWA ODOL v6/v7 supply origin-relative X/Z vertices for compact convex
+outlines, with rectangular bounds retained as a safe fallback.
 """
 from __future__ import annotations
 
@@ -259,7 +259,7 @@ def footprint_contains(
     corners: tuple[tuple[float, float], ...],
     x: float, z: float,
 ) -> bool:
-    """Hit-test the rotated four-corner preview rectangle."""
+    """Hit-test a convex projected outline or legacy four-corner rectangle."""
     # A line-like or point-like LOD has no selectable polygon area.
     if len(corners) < 3:
         return False
