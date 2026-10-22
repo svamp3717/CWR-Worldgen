@@ -29,7 +29,13 @@ from .pbo_textures import PboTextures
 from .pbo_worlds import PboWorldArchive
 from .asset_sources import append_unique, remove_selected
 from .textures import clear_archive_texture_cache, clear_loose_texture_cache, render_real_textures
+from .shorelines import highlight_shoreline
+from cwr_worldgen.debug_layers import (
+    WorldgenDebugLayers, find_worldgen_debug_layers, load_worldgen_debug_layers,
+)
 from .texture_location_export import export_texture_location_atlas
+from .object_location_export import export_object_location_atlas
+from .export_naming import island_export_stem
 from importlib.metadata import PackageNotFoundError, version
 
 try:
@@ -136,8 +142,11 @@ class IslandStudio:
         self.cell_size = tk.StringVar(value="50")
         self.auto_grid = tk.BooleanVar(value=True)
         self.show_locations = tk.BooleanVar(value=True)
+        self.show_shorelines = tk.BooleanVar(value=True)
         self.height_scale = tk.StringVar(value="0.045")
         self.layer = tk.StringVar(value="Elevation")
+        self.debug_layer = tk.StringVar(value="Off")
+        self.debug_data: WorldgenDebugLayers | None = None
         self.tool = tk.StringVar(value="Select")
         # View a newly opened loose world safely until editing is requested.
         self.readonly_checked = tk.BooleanVar(value=True)
@@ -242,6 +251,16 @@ class IslandStudio:
             state="readonly", values=("Elevation", "Texture slots", "Actual textures", "Road preview"),
         ).pack(fill="x", pady=(4, 7))
         self.layer.trace_add("write", lambda *_: self._layer_changed())
+        ttk.Label(side, text="Worldgen debug overlay").pack(anchor="w")
+        self.debug_combo = ttk.Combobox(
+            side, textvariable=self.debug_layer, state="readonly", values=("Off",),
+        )
+        self.debug_combo.pack(fill="x", pady=(3, 2))
+        self.debug_layer.trace_add("write", lambda *_: self._queue_draw())
+        ttk.Button(side, text="Load Worldgen debug layers…",
+                   command=self._load_worldgen_debug_dialog).pack(
+            fill="x", pady=(0, 7),
+        )
         ttk.Checkbutton(
             side, text="Show world objects", variable=self.show_objects,
             command=self._queue_draw,
@@ -273,6 +292,10 @@ class IslandStudio:
         water_entry.pack(fill="x", pady=(0, 4))
         water_entry.bind("<Return>", lambda _e: self._queue_draw())
         water_entry.bind("<FocusOut>", lambda _e: self._queue_draw())
+        ttk.Checkbutton(
+            side, text="Highlight shoreline (Elevation only)",
+            variable=self.show_shorelines, command=self._queue_draw,
+        ).pack(anchor="w", pady=(0, 4))
         ttk.Label(side, text="Texture / model folders").pack(anchor="w", pady=(7, 2))
         self.folder_list = tk.Listbox(
             side, height=4, selectmode="extended", exportselection=False,
@@ -401,6 +424,14 @@ class IslandStudio:
         self.utilities_menu.add_command(
             label="Export Texture Location Map…",
             command=self._export_texture_location_map,
+        )
+        self.utilities_menu.add_command(
+            label="Load Worldgen Debug Layers…",
+            command=self._load_worldgen_debug_dialog,
+        )
+        self.utilities_menu.add_command(
+            label="Export Object Locations…",
+            command=self._export_object_location_map,
         )
         self.utilities_button.configure(menu=self.utilities_menu)
         # Pack before the metadata, so Utilities stays at the rightmost edge.
@@ -972,10 +1003,54 @@ class IslandStudio:
                 self._messages.put(("error", str(exc)))
         self._executor.submit(load)
 
+    def _load_worldgen_debug_dialog(self) -> None:
+        if self.document is None or self._busy:
+            return
+        chosen = filedialog.askopenfilename(
+            title="Open Worldgen debug layers for this WRP",
+            filetypes=[("Worldgen debug layers", "*.npz")],
+        )
+        if not chosen:
+            return
+        try:
+            self._attach_worldgen_debug(Path(chosen))
+        except (ValueError, OSError, KeyError) as exc:
+            messagebox.showerror("Worldgen Debug Layers", str(exc))
+
+    def _attach_worldgen_debug(self, path: Path) -> None:
+        doc = self.document
+        if doc is None:
+            raise ValueError("Open a world before loading Worldgen debug layers")
+        debug = load_worldgen_debug_layers(
+            path, world_width=doc.world_width, world_height=doc.world_height,
+            wrp_path=doc.path,
+        )
+        self.debug_data = debug
+        self.debug_combo.configure(values=("Off", *debug.choices))
+        self.debug_layer.set("OSM forest")
+        self.status.set(f"Worldgen debug layers loaded: {path.name}")
+        self._queue_draw()
+
     def _accept_document(self, doc: IslandDocument) -> None:
         if self.document:
             self._retire_current_world()
         self.document = doc
+        self.debug_data = None
+        if getattr(self, "debug_layer", None) is not None:
+            self.debug_layer.set("Off")
+        if getattr(self, "debug_combo", None) is not None:
+            self.debug_combo.configure(values=("Off",))
+        # Source WRP is normally output/source/name/name.wrp, and the PBO
+        # is output/@mod/Addons/name.pbo. Both can find the opt-in sidecar
+        # at output/name-worldgen-debug.npz, without including it in the PBO.
+        archive = getattr(doc, "_archive_owner", None)
+        source = Path(getattr(archive, "path", doc.path))
+        debug_path = find_worldgen_debug_layers(source, source.stem)
+        if debug_path is not None and getattr(self, "debug_combo", None) is not None:
+            try:
+                self._attach_worldgen_debug(debug_path)
+            except (ValueError, OSError, KeyError):
+                self.debug_data = None
         if hasattr(doc, "set_model_categories"):
             doc.set_model_categories({
                 path: info for path, info in getattr(self, "_model_categories", {}).items()
@@ -1060,6 +1135,15 @@ class IslandStudio:
                     self.status.set(f"Texture map export failed: {value}")
                     messagebox.showerror("Texture location map", str(value))
                 elif kind == "texture_map_progress":
+                    self.status.set(str(value))
+                elif kind == "object_map_exported":
+                    self._busy = False
+                    self.status.set(f"Object locations exported: {value}")
+                elif kind == "object_map_error":
+                    self._busy = False
+                    self.status.set(f"Object export failed: {value}")
+                    messagebox.showerror("Object location export", str(value))
+                elif kind == "object_map_progress":
                     self.status.set(str(value))
                 elif kind == "saving":
                     self.status.set(str(value))
@@ -1260,11 +1344,34 @@ class IslandStudio:
                     self.status.set(f"Actual textures: {loaded} visible texture slots loaded")
             else:
                 self._texture_issues = {}
+                water_level = self._num(self.water_level, "Water level")
                 pixels = self.document.viewport(
                     left, top, right, bottom, width, height,
                     textures=view == "Texture slots",
-                    water_level=self._num(self.water_level, "Water level"),
+                    water_level=water_level,
                 )
+                if (view == "Elevation"
+                        and getattr(self, "show_shorelines", None) is not None
+                        and self.show_shorelines.get()):
+                    heights, _, _ = self.document.sample_viewport(
+                        left, top, right, bottom,
+                        pixels.shape[1], pixels.shape[0],
+                    )
+                    pixels = highlight_shoreline(
+                        pixels, heights, water_level=water_level,
+                        height_scale=self.document.height_scale,
+                    )
+            selected_debug = (
+                self.debug_layer.get() if getattr(self, "debug_layer", None)
+                is not None else "Off"
+            )
+            debug = getattr(self, "debug_data", None)
+            if debug is not None and selected_debug != "Off":
+                key = debug.name_key(selected_debug)
+                if key is not None:
+                    pixels = debug.composite(
+                        pixels, key, left=left, top=top, right=right, bottom=bottom,
+                    )
             image = Image.fromarray(pixels, "RGB")
             self._image = ImageTk.PhotoImage(image, master=self.canvas)
             self.canvas.delete("all")
@@ -1445,6 +1552,18 @@ class IslandStudio:
                             )
                     except ValueError:
                         pass
+
+            # World boundary stays visible in EVERY mode, independent of
+            # the water level, zoom, selected texture and overlay toggles.
+            # Draw LAST so objects, roads and map labels cannot hide it.
+            west, north = self._to_screen(0.0, self.document.world_height)
+            east, south = self._to_screen(self.document.world_width, 0.0)
+            self.canvas.create_rectangle(
+                west, north, east, south, outline="#13252b", width=6,
+            )
+            self.canvas.create_rectangle(
+                west, north, east, south, outline="#fff0aa", width=2,
+            )
         except Exception as exc:
             self.status.set(f"Preview error: {exc}")
 
@@ -1600,7 +1719,22 @@ class IslandStudio:
             self.cursor_info.set("")
             return
         x, z = self._to_world(*self._hover_screen)
-        self.cursor_info.set(cursor_readout(self.document, x, z, self.layer.get()))
+        message = cursor_readout(self.document, x, z, self.layer.get())
+        debug = getattr(self, "debug_data", None)
+        selected = (self.debug_layer.get() if getattr(self, "debug_layer", None)
+                    is not None else "Off")
+        if debug is not None and selected != "Off":
+            key = debug.name_key(selected)
+            if key is not None:
+                value = debug.sample(key, x, z)
+                if value is not None:
+                    if key in {"semantic_base", "semantic_final"}:
+                        materials = debug.metadata["materials"]
+                        code = materials[value]["code"] if value < len(materials) else "?"
+                        message += f" | Worldgen {selected}: {code} ({value})"
+                    else:
+                        message += f" | Worldgen {selected}: {value}"
+        self.cursor_info.set(message)
 
     def _mouse_leave(self, _event: tk.Event) -> None:
         self._hover_screen = None
@@ -1891,19 +2025,11 @@ class IslandStudio:
         doc = self.document
         archive = getattr(doc, "_archive_owner", None)
         source = getattr(archive, "path", doc.path)
-        # Archive members are extracted as selected-world.wrp. Prefer the
-        # original member name from source_label, not that temporary file.
-        source_name = str(getattr(doc, "source_label", "") or "")
-        member_name = source_name.rsplit(" / ", 1)[-1].replace("\\", "/").rsplit("/", 1)[-1]
-        island_name = Path(member_name).stem if member_name.lower().endswith(".wrp") else doc.path.stem
-        island_name = "".join(
-            "_" if ord(char) < 32 or char in '<>"\\/|?*:' else char
-            for char in island_name
-        ).strip(" .") or "island"
+        island_name = island_export_stem(doc)
         chosen = filedialog.asksaveasfilename(
             title="Export texture location map and path data (ZIP)",
             initialdir=str(Path(source).parent),
-            initialfile=f"{island_name}.zip",
+            initialfile=f"{island_name}_textures.zip",
             defaultextension=".zip",
             filetypes=[("Texture location atlas (ZIP)", "*.zip")],
         )
@@ -1928,6 +2054,45 @@ class IslandStudio:
                 self._messages.put(("texture_map_exported", str(result)))
             except Exception as exc:
                 self._messages.put(("texture_map_error", str(exc)))
+
+        self._executor.submit(task)
+
+    def _export_object_location_map(self) -> None:
+        """Export each WRP object's model, coordinates and north-up density."""
+        if self.document is None or self._busy:
+            return
+        doc = self.document
+        archive = getattr(doc, "_archive_owner", None)
+        source = getattr(archive, "path", doc.path)
+        island_name = island_export_stem(doc)
+        chosen = filedialog.asksaveasfilename(
+            title="Export object locations and models (ZIP)",
+            initialdir=str(Path(source).parent),
+            initialfile=f"{island_name}_objects.zip",
+            defaultextension=".zip",
+            filetypes=[("Object location atlas (ZIP)", "*.zip")],
+        )
+        if not chosen:
+            return
+        destination = Path(chosen).resolve()
+        if destination.exists() and not messagebox.askyesno(
+            "Overwrite object export?", f"Replace the existing object atlas?\\n{destination}",
+        ):
+            return
+        self._busy = True
+        self.status.set("Exporting world object locations…")
+
+        def task() -> None:
+            try:
+                result = export_object_location_atlas(
+                    doc, destination,
+                    progress=lambda message: self._messages.put(
+                        ("object_map_progress", message),
+                    ),
+                )
+                self._messages.put(("object_map_exported", str(result)))
+            except Exception as exc:
+                self._messages.put(("object_map_error", str(exc)))
 
         self._executor.submit(task)
 

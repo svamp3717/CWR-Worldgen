@@ -706,6 +706,18 @@ def _parser() -> argparse.ArgumentParser:
         default="nogova",
         help="Milestone 9 ground palette: Nogova transition preset (default), stock Kolgujev/Cain textures, stock Malden/Abel textures, stock Everon/Eden, desert stock textures, or fully generated colours",
     )
+    milestone9.add_argument("--worldgen-debug-layers", action="store_true",
+                            help="write a compressed Worldgen debug companion NPZ beside the build output")
+    milestone9.add_argument(
+        "--forest-undergrowth-textures",
+        action="store_true", default=True,
+        help="Use stock forest-floor and directional border textures (default)",
+    )
+    milestone9.add_argument(
+        "--no-forest-undergrowth-textures",
+        action="store_false", dest="forest_undergrowth_textures",
+        help="Disable stock forest-floor textures and directional borders",
+    )
     milestone9.add_argument(
         "--pbo-backend",
         choices=("auto", "python", "poseidon"),
@@ -1386,6 +1398,8 @@ def main(argv: list[str] | None = None) -> int:
                 semantic_site_maximum_relief=args.semantic_site_max_relief,
                 semantic_site_maximum_variants=args.semantic_site_max_variants,
                 ground_texture_profile=args.ground_textures,
+                forest_undergrowth_textures=args.forest_undergrowth_textures,
+                debug_layers=args.worldgen_debug_layers,
                 surface_shoreline_wet_cells=args.surface_wet_shore_cells,
                 surface_shoreline_sand_cells=args.surface_sand_shore_cells,
                 surface_transition_cells=args.surface_transition_cells,

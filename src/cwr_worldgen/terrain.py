@@ -62,7 +62,7 @@ NOGOVA_GROUND_TEXTURES.update({
 # Ordinary terrain references need no package scan; the shared overlay compositor
 # may open only the selected main background tile (abel\tt.paa), as for Everon.
 MALDEN_GROUND_TEXTURES: dict[str, str] = {
-    "w": r"abel\pi.paa",
+    "w": r"abel\tt.paa",
     "s": r"abel\tt.paa",
     "g": r"abel\tt.paa",
     "r": r"abel\tt.paa",
@@ -75,11 +75,11 @@ MALDEN_GROUND_TEXTURES: dict[str, str] = {
 # Kolgujev/Cain uses one main dry-land texture in generated worlds so OSM
 # semantic masks do not produce large farmland, forest or mountain colour blocks.
 # The classifications still drive object placement; only their visible ground tile
-# is unified. Water keeps the stock Cain sea tile.
-_KOLGUJEV_SEA_TEXTURE = r"cain\l4.paa"
+# is unified. Underwater terrain uses the same ordinary ground as Nogova;
+# water is still water semantically and its height is not changed.
 _KOLGUJEV_MAIN_LAND_TEXTURE = r"cain\j9.paa"
 KOLGUJEV_GROUND_TEXTURES: dict[str, str] = {
-    "w": _KOLGUJEV_SEA_TEXTURE,
+    "w": _KOLGUJEV_MAIN_LAND_TEXTURE,
     "s": _KOLGUJEV_MAIN_LAND_TEXTURE,
     "g": _KOLGUJEV_MAIN_LAND_TEXTURE,
     "r": _KOLGUJEV_MAIN_LAND_TEXTURE,
@@ -98,12 +98,28 @@ STOCK_GROUND_TEXTURES: dict[str, dict[str, str]] = {
 
 GROUND_TEXTURE_PROFILES = ("nogova", "kolgujev", "malden", "everon", "generated", "desert", "none")
 
+# (forest floor, ordinary ground fallback for boundary cells). The *real*
+# transitions are per-cell, verified quadrant blends in forest_ground_blends.
+# Never use a fictional single "forest border" texture such as o\\j2.paa.
+STOCK_FOREST_UNDERGROWTH_TEXTURES: dict[str, tuple[str, str]] = {
+    "nogova": (r"o\j1.paa", r"o\t1.paa"),
+    "everon": (r"eden\pl.paa", r"eden\tn.paa"),
+    "malden": (r"abel\pb.paa", r"abel\tt.paa"),
+    "kolgujev": (r"cain\u2.paa", r"cain\j9.paa"),
+}
+
+
+def stock_forest_undergrowth_paths(profile: str, enabled: bool = False) -> tuple[str, str] | None:
+    """Return forest interior/edge textures, or None when not requested."""
+    return STOCK_FOREST_UNDERGROWTH_TEXTURES.get(profile.casefold()) if enabled else None
+
+
 
 MALDEN_MATERIAL_COLOURS: dict[str, tuple[int, int, int]] = {
     # Preview/fallback colours for classic Malden. Runtime ground references
     # use the stock Abel texture namespace directly.
     "w": (48, 73, 91),
-    "s": (184, 162, 109),
+    "s": (109, 118, 70),
     "g": (109, 118, 70),
     "r": (110, 105, 96),
     "f": (64, 86, 48),

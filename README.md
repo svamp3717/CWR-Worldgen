@@ -61,6 +61,46 @@ Terrain appearance is independent from vegetation appearance.
 
 Ground textures can use several classic OFP/CWA terrain styles, including Nogova, Kolgujev, Malden and Everon, as well as generated or desert terrain materials. Terrain textures can also be disabled entirely when an unpainted WRP is desired.
 
+**Stock forest undergrowth textures (on by default):** In **Common choices**,
+**Stock forest undergrowth ground textures (incl. forest edges)** paints OSM
+forest interiors with their original stock forest-floor texture and
+automatically chooses **directional border and corner blend textures**.
+The checkbox is on by default and does not control the separate 3D
+**Forest undergrowth** vegetation option. It follows **Ground textures**, not
+the selected vegetation profile:
+
+| Ground texture preset | Forest floor | Example west-edge blend | Ordinary edge fallback |
+| --- | --- | --- | --- |
+| Nogova | `o\\j1.paa` | `o\\j1t1j1t1.pac` | `o\\t1.paa` |
+| Everon | `eden\\pl.paa` | `eden\\pltnpltn.paa` | `eden\\tn.paa` |
+| Malden | `abel\\pb.paa` | `abel\\pbttpbtt.pac` | `abel\\tt.paa` |
+| Kolgujev/Cain | `cain\\u2.paa` | `cain\\u2j9u2j9.paa` | `cain\\j9.paa` |
+
+The four two-letter parts of a blend filename describe its NE, NW, SE and
+SW quadrants. Worldgen inspects the OSM forest shape and chooses a verified
+stock path at each forest-edge cell, including corners. Everon and Malden
+lack a few diagonal combinations in their original texture tables: Worldgen
+substitutes a verified nearby blend rather than inventing a filename.
+See [the original-island analysis](docs/stock-forest-border-texture-research.md).
+
+Compatible ordinary grass cells immediately adjoining forest transitions can
+also receive the appropriate verified stock blend. Protected roads, farmland,
+water and urban surfaces, vegetation objects, and terrain heights remain intact.
+Generated, desert and untextured profiles ignore the option. On the CLI,
+the feature is enabled by default; use `--no-forest-undergrowth-textures` to
+disable it or `--forest-undergrowth-textures` to enable explicitly.
+
+**Malden and Kolgujev beach handling:** These two stock ground-texture
+presets use ordinary ground for **every terrain cell, including underwater**,
+following Nogova's approach of keeping water classification separate from
+the selected ground artwork. Malden uses `abel\\tt.paa` and Kolgujev uses
+`cain\\j9.paa` for underwater terrain as well as wet shorelines, dry sand
+and OSM mapped beach/sand. Sea-level, water masks, and terrain elevations
+are not changed. Other ground-texture presets retain their existing
+shoreline and underwater materials.
+Original game texture artwork is **not** copied into the generated PBO.
+
+
 Vegetation can likewise use different game styles independently of the terrain texture set. Forest blocks, individual trees, undergrowth, rural vegetation, meadow grass, wetland reeds and related vegetation systems can be configured separately or disabled with the **None** vegetation preset.
 
 This makes it possible, for example, to use Nogova ground textures with Everon vegetation, or generate a terrain with no vegetation or painted terrain textures at all.

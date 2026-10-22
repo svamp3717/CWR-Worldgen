@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Sequence
 import io
 import struct
 
@@ -16,13 +17,11 @@ from PIL import Image
 
 from .pbo_textures import PboTextures, canonical_path
 from .asset_sources import roots
-from typing import Sequence
 
 _PAA_FORMATS = {0xFF01: 1, 0xFF02: 2, 0xFF03: 2, 0xFF04: 3, 0xFF05: 3}
 _RAW_FORMATS = {0x4444, 0x1555, 0x8888, 0x8080}
 _MAX_DECODE_PIXELS = 8 * 1024 * 1024
 _MAX_TEX_BYTES = 32 * 1024 * 1024
-
 
 def decode_paa_preview(data: bytes) -> Image.Image:
     if len(data) < 4 or len(data) > _MAX_TEX_BYTES:
@@ -110,6 +109,8 @@ def decode_pac_preview(data: bytes) -> Image.Image:
 
 def _safe_relative(path: str) -> Path | None:
     normalized = path.replace("\\", "/").lstrip("/")
+    while "//" in normalized:
+        normalized = normalized.replace("//", "/")
     pieces = normalized.split("/")
     if not pieces or any(part in {"", ".", ".."} or ":" in part for part in pieces):
         return None
@@ -199,6 +200,24 @@ def _pbo_image_tile(archives: PboTextures, virtual_path: str) -> np.ndarray | No
         return None
 
 
+def _resolve_tile(
+    path: str, search_roots: tuple[Path, ...], archives: PboTextures | None,
+) -> np.ndarray | None:
+    """Resolve the exact WRP path before trying its alternate extension."""
+    candidates = _texture_candidates(path)
+    for root in reversed(search_roots):
+        for candidate in candidates:
+            tile = _image_tile(str(root), candidate)
+            if tile is not None:
+                return tile
+    if archives is not None:
+        for candidate in candidates:
+            tile = _pbo_image_tile(archives, candidate)
+            if tile is not None:
+                return tile
+    return None
+
+
 def clear_archive_texture_cache() -> None:
     """Drop decoded tiles before replacing or closing selected archives."""
     _pbo_image_tile.cache_clear()
@@ -233,22 +252,7 @@ def render_real_textures(
         if not path:
             continue
         candidates = _texture_candidates(path)
-        # Honor original source priority: newest loose root first, then PBOs.
-        # Within each source prefer the exact WRP name before trying its
-        # alternative .paa/.pac extension.
-        tile = None
-        for root in reversed(search_roots):
-            for candidate in candidates:
-                tile = _image_tile(str(root), candidate)
-                if tile is not None:
-                    break
-            if tile is not None:
-                break
-        if tile is None and archives is not None:
-            for candidate in candidates:
-                tile = _pbo_image_tile(archives, candidate)
-                if tile is not None:
-                    break
+        tile = _resolve_tile(path, search_roots, archives)
         if tile is None:
             if diagnostics is not None:
                 diagnostics[path] = (
@@ -260,6 +264,9 @@ def render_real_textures(
         tx = np.mod(x[cols] / cell_size, 1.0)
         tz = np.mod(z[rows] / cell_size, 1.0)
         cx = np.minimum(tile.shape[1] - 1, (tx * tile.shape[1]).astype(np.intp))
+        # A decoded texture's first image row maps to the south edge of its
+        # WRP cell. Apply this world-Z sampling consistently to stock PAC/PAA
+        # and Worldgen-generated terrain textures.
         cz = np.minimum(tile.shape[0] - 1, (tz * tile.shape[0]).astype(np.intp))
         output[rows, cols] = tile[cz, cx]
         loaded += 1

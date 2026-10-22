@@ -165,3 +165,65 @@ def test_loose_sources_have_precedence_over_selected_archives(tmp_path: Path) ->
         clear_archive_texture_cache()
         clear_loose_texture_cache()
         archives.close()
+
+
+def test_generated_world_aligned_tile_uses_south_first_pixel_rows(tmp_path: Path) -> None:
+    """Generated pitch PAA artwork starts at world-south, not image-north."""
+    tile = Image.new("RGB", (2, 2))
+    # A Worldgen pitch has south-west/south-east in its first image row.
+    tile.putdata((
+        (0, 0, 255), (255, 255, 0),
+        (255, 0, 0), (0, 255, 0),
+    ))
+    tile.save(tmp_path / "pitch.png")
+    slots = np.zeros((3, 2), dtype=np.int32)
+    fallback = np.full((3, 2, 3), 17, dtype=np.uint8)
+    try:
+        actual, loaded = render_real_textures(
+            slots, np.array([12.5, 37.5]), np.array([37.5, 12.5, 0.0]),
+            ("pitch.png",), tmp_path, fallback, 50.0,
+        )
+        assert loaded == 1
+        np.testing.assert_array_equal(actual, [
+            [[255, 0, 0], [0, 255, 0]],
+            [[0, 0, 255], [255, 255, 0]],
+            [[0, 0, 255], [255, 255, 0]],
+        ])
+    finally:
+        clear_loose_texture_cache()
+
+
+def test_stock_and_generated_textures_share_world_z_orientation(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Every terrain slot samples the exact same pixels regardless of its name."""
+    import cwr_island_studio.textures as texture_module
+
+    # Source row zero is the SOUTH side of a WRP cell.
+    tile = np.asarray([
+        [[0, 0, 255], [255, 255, 0]],  # SW, SE
+        [[255, 0, 0], [0, 255, 0]],  # NW, NE
+    ], dtype=np.uint8)
+    monkeypatch.setattr(texture_module, "_image_tile", lambda *_: tile)
+    x = np.array([12.5, 37.5])
+    z = np.array([37.5, 12.5, 0.0])
+    slots = np.zeros((3, 2), dtype=np.int32)
+    fallback = np.zeros((3, 2, 3), dtype=np.uint8)
+    expected = np.asarray([
+        [[255, 0, 0], [0, 255, 0]],  # north
+        [[0, 0, 255], [255, 255, 0]],  # south
+        [[0, 0, 255], [255, 255, 0]],  # exact south cell boundary
+    ], dtype=np.uint8)
+
+    for path in (
+        r"o\j1t1j1t1.pac",  # stock Nogova forest transition
+        r"o\j1b1b1b1.pac",  # stock mixed ground transition
+        r"eden\pltnpltn.paa",  # Everon stock forest transition
+        r"o\t1.paa",  # ordinary stock grass
+        r"pitchworld\sp000.paa",  # generated football pitch
+    ):
+        actual, loaded = render_real_textures(
+            slots, x, z, (path,), tmp_path, fallback, 50.0,
+        )
+        assert loaded == 1, path
+        np.testing.assert_array_equal(actual, expected, err_msg=path)

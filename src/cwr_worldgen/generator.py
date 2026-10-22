@@ -86,10 +86,14 @@ from .terrain import (
     choose_spawn,
     classify_materials,
     ground_texture_path,
+    stock_forest_undergrowth_paths,
     material_counts,
     material_colour_for_profile,
 )
 from .wrp import inspect_rvw4, quantize_elevations, quantize_height, write_rvw4
+from .forest_ground_blends import apply_stock_forest_border_blends
+from .debug_layers import write_worldgen_debug_layers
+from cwr_island_studio.object_layers import is_forest_model
 from .surface_pass import (
     MILESTONE9_MATERIALS,
     STOCK_SURFACE_TEXTURES,
@@ -2075,9 +2079,17 @@ def _material_definitions(spec: PlayabilitySpec):
 
 def _ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
     profile = _ground_texture_profile(spec)
+    enabled = bool(getattr(spec, "forest_undergrowth_textures", False))
     if _surface_ground_enabled(spec):
-        return surface_texture_wire_paths(spec.name, profile)
-    return tuple(ground_texture_path(spec.name, material.code, profile) for material in OSM_MATERIALS)
+        return surface_texture_wire_paths(
+            spec.name, profile, forest_undergrowth_textures=enabled,
+        )
+    floor = stock_forest_undergrowth_paths(profile, enabled)
+    return tuple(
+        floor[0] if floor is not None and material.code == "f"
+        else ground_texture_path(spec.name, material.code, profile)
+        for material in OSM_MATERIALS
+    )
 
 
 def _external_ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
@@ -2088,7 +2100,11 @@ def _external_ground_texture_paths(spec: PlayabilitySpec) -> tuple[str, ...]:
     if profile == "malden":
         return ()
     if _surface_ground_enabled(spec):
-        return external_surface_texture_paths(profile)
+        return external_surface_texture_paths(
+            profile, forest_undergrowth_textures=bool(
+                getattr(spec, "forest_undergrowth_textures", False)
+            ),
+        )
     return _ground_texture_paths(spec) if profile in {"everon", "nogova"} else ()
 
 
@@ -2545,6 +2561,21 @@ def _validate_milestone4(
     materials = _material_definitions(spec)
     counts = material_counts(material_indices, len(materials))
     expected_texture_paths = {spec.dummy_texture_path, *_ground_texture_paths(spec)}
+    if getattr(spec, "forest_undergrowth_textures", False):
+        original_paths = (spec.dummy_texture_path, *_ground_texture_paths(spec))
+        material_types = _material_definitions(spec)
+        forest_id = next(index for index, item in enumerate(material_types) if item.code == "f")
+        edge_id = next((index for index, item in enumerate(material_types) if item.code == "e"), None)
+        expanded_paths, _ = apply_stock_forest_border_blends(
+            material_indices, raster.forest, original_paths,
+            width=spec.cells, profile=_ground_texture_profile(spec),
+            forest_material=forest_id, forest_edge_material=edge_id,
+            blendable_exterior_materials=tuple(
+                i for i, item in enumerate(material_types) if item.code in {"g", "h", "j"}
+            ),
+            enabled=True,
+        )
+        expected_texture_paths.update(expanded_paths)
     checks.append((
         "WRP terrain texture profile",
         set(summary.texture_paths) == expected_texture_paths,
@@ -4652,6 +4683,22 @@ def build_milestone4(
     report_progress(84, "Preparing terrain texture table")
     texture_table_paths = [spec.dummy_texture_path, *ground_texture_paths]
     wrp_texture_indices = [index + 1 for index in material_indices]
+    if bool(getattr(spec, "forest_undergrowth_textures", False)):
+        forest_material = next(
+            index for index, material in enumerate(materials) if material.code == "f"
+        )
+        edge_material = next(
+            (index for index, material in enumerate(materials) if material.code == "e"), None
+        )
+        texture_table_paths, wrp_texture_indices = apply_stock_forest_border_blends(
+            material_indices, raster.forest, texture_table_paths,
+            width=spec.cells, profile=_ground_texture_profile(spec),
+            forest_material=forest_material, forest_edge_material=edge_material,
+            blendable_exterior_materials=tuple(
+                i for i, item in enumerate(materials) if item.code in {"g", "h", "j"}
+            ),
+            enabled=True,
+        )
     surface_texture_cache_hit = False
     surface_texture_cache_path: str | None = None
     if _surface_ground_enabled(spec) and _ground_texture_profile(spec) != "none":
@@ -4711,6 +4758,21 @@ def build_milestone4(
         renumber_object_ids=True,
     )
 
+    debug_layers_path: Path | None = None
+    if bool(getattr(spec, "debug_layers", False)):
+        report_progress(86, "Exporting Worldgen diagnostic layers for Island Studio")
+        debug_layers_path = output_dir / f"{spec.name}-worldgen-debug.npz"
+        write_worldgen_debug_layers(
+            debug_layers_path, wrp_path=wrp_path, world_name=spec.name,
+            cells=spec.cells, cell_size=spec.cell_size, raster=raster,
+            base_material=base_material_indices,
+            final_material=material_indices,
+            wrp_slots=wrp_texture_indices, materials=materials,
+            forest_objects=(
+                obj for obj in all_objects if is_forest_model(obj.model_path)
+            ),
+        )
+
     surface_manifest: dict[str, object] | None = None
     overview_cache_hit = False
     overview_cache_path: str | None = None
@@ -4724,6 +4786,10 @@ def build_milestone4(
             for index, material in enumerate(materials)
         }
         surface_manifest["wrp_texture_paths"] = list(ground_texture_paths)
+        if bool(getattr(spec, "forest_undergrowth_textures", False)):
+            surface_manifest["wrp_forest_border_blend_paths"] = list(
+                texture_table_paths[1 + len(ground_texture_paths):]
+            )
         active_material_index = {material.code: index for index, material in enumerate(materials)}
         rocky_index = active_material_index.get("k", active_material_index.get("r", 0))
         surface_manifest["rocky_forest_texture_path"] = ground_texture_paths[rocky_index]
@@ -5109,13 +5175,33 @@ def build_milestone4(
         temp_source = temp_dir / spec.name
         temp_wrp = temp_source / f"{spec.name}.wrp"
         temp_source.mkdir(parents=True, exist_ok=True)
+        repeat_texture_paths = texture_table_paths
+        repeat_texture_indices = [index + 1 for index in repeat_material_indices]
+        if bool(getattr(spec, "forest_undergrowth_textures", False)):
+            repeat_forest_material = next(
+                index for index, material in enumerate(materials) if material.code == "f"
+            )
+            repeat_edge_material = next(
+                (index for index, material in enumerate(materials) if material.code == "e"), None
+            )
+            repeat_texture_paths, repeat_texture_indices = apply_stock_forest_border_blends(
+                repeat_material_indices, raster.forest,
+                [spec.dummy_texture_path, *ground_texture_paths],
+                width=spec.cells, profile=_ground_texture_profile(spec),
+                forest_material=repeat_forest_material,
+                forest_edge_material=repeat_edge_material,
+                blendable_exterior_materials=tuple(
+                    i for i, item in enumerate(materials) if item.code in {"g", "h", "j"}
+                ),
+                enabled=True,
+            )
         write_rvw4(
             temp_wrp,
             spec.cells,
             spec.cells,
             repeat_elevations,
-            [index + 1 for index in repeat_material_indices],
-            texture_table_paths,
+            repeat_texture_indices,
+            repeat_texture_paths,
             repeat_objects,
             height_scale=spec.height_scale,
             renumber_object_ids=True,
@@ -5601,6 +5687,8 @@ def build_milestone4(
             "height-preview.png": _sha256(height_preview_path),
             "material-preview.png": _sha256(material_preview_path),
             "osm-geography-preview.png": _sha256(osm_preview_path),
+            **({f"{spec.name}-worldgen-debug.npz": _sha256(debug_layers_path)}
+               if debug_layers_path is not None else {}),
             **({
                 "meadow-grass-placement.png": _sha256(meadow_grass_preview_path)
             } if meadow_grass_preview_path is not None else {}),
