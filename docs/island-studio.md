@@ -527,3 +527,16 @@ reader uses the original OFP model tables rather than expanding objects to
 
 Normal commits run tests only. Windows EXE packaging remains manual
 opt-in and is not part of this change.
+
+
+## Hover object inspector
+
+Move the pointer over a visible object marker, model-size silhouette or road
+overlay. A second footer line shows the exact P3D model path, object ID,
+record index, original placement coordinates and heading. The normal terrain
+height or texture slot/path remains visible in the first line. The inspector
+uses the geometry that Island Studio just rendered and does not scan all WRP
+objects or read P3Ds on every mouse move. Small markers have a 7-pixel hover
+radius; road centre lines have a 5-pixel radius; model silhouettes use
+polygon hit-testing. Hidden objects are not hover targets, and leaving the
+viewport clears the readout. Inspecting an object does not select or edit it.
