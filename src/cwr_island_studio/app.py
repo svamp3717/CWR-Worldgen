@@ -293,7 +293,7 @@ class IslandStudio:
         water_entry.bind("<Return>", lambda _e: self._queue_draw())
         water_entry.bind("<FocusOut>", lambda _e: self._queue_draw())
         ttk.Checkbutton(
-            side, text="Highlight shoreline (Elevation only)",
+            side, text="Highlight shoreline (all views)",
             variable=self.show_shorelines, command=self._queue_draw,
         ).pack(anchor="w", pady=(0, 4))
         ttk.Label(side, text="Texture / model folders").pack(anchor="w", pady=(7, 2))
@@ -422,12 +422,12 @@ class IslandStudio:
             label="Compare World…", command=self._compare_dialog,
         )
         self.utilities_menu.add_command(
-            label="Export Texture Location Map…",
-            command=self._export_texture_location_map,
-        )
-        self.utilities_menu.add_command(
             label="Load Worldgen Debug Layers…",
             command=self._load_worldgen_debug_dialog,
+        )
+        self.utilities_menu.add_command(
+            label="Export Texture Location Map…",
+            command=self._export_texture_location_map,
         )
         self.utilities_menu.add_command(
             label="Export Object Locations…",
@@ -1315,10 +1315,12 @@ class IslandStudio:
         left, top, right, bottom = self._extent()
         try:
             view = self.layer.get()
+            water_level = self._num(self.water_level, "Water level")
             if view == "Actual textures":
                 diagnostics: dict[str, str] = {}
                 fallback = self.document.viewport(
-                    left, top, right, bottom, width, height, textures=True,
+                    left, top, right, bottom, width, height,
+                    textures=True, water_level=water_level,
                 )
                 slots, x, z = self.document.sample_viewport(
                     left, top, right, bottom, width, height, textures=True,
@@ -1344,23 +1346,23 @@ class IslandStudio:
                     self.status.set(f"Actual textures: {loaded} visible texture slots loaded")
             else:
                 self._texture_issues = {}
-                water_level = self._num(self.water_level, "Water level")
                 pixels = self.document.viewport(
                     left, top, right, bottom, width, height,
                     textures=view == "Texture slots",
                     water_level=water_level,
                 )
-                if (view == "Elevation"
-                        and getattr(self, "show_shorelines", None) is not None
-                        and self.show_shorelines.get()):
-                    heights, _, _ = self.document.sample_viewport(
-                        left, top, right, bottom,
-                        pixels.shape[1], pixels.shape[0],
-                    )
-                    pixels = highlight_shoreline(
-                        pixels, heights, water_level=water_level,
-                        height_scale=self.document.height_scale,
-                    )
+            # Shoreline is a read-only overlay on the finished preview, so
+            # it works for elevation, slot colors, real textures and roads.
+            if (getattr(self, "show_shorelines", None) is not None
+                    and self.show_shorelines.get()):
+                heights, _, _ = self.document.sample_viewport(
+                    left, top, right, bottom,
+                    pixels.shape[1], pixels.shape[0],
+                )
+                pixels = highlight_shoreline(
+                    pixels, heights, water_level=water_level,
+                    height_scale=self.document.height_scale,
+                )
             selected_debug = (
                 self.debug_layer.get() if getattr(self, "debug_layer", None)
                 is not None else "Off"
