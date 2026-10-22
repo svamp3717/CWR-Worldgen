@@ -25,7 +25,10 @@ from .cursor_info import (
     object_under_cursor, object_cursor_readout,
 )
 from .roads import is_road_model, plan_straight_road, road_segment
-from .navigation import center_on_position, pan_with_arrow, parse_game_position, zoom_around
+from .navigation import (
+    center_on_position, pan_with_arrow, parse_game_position,
+    zoom_around, game_console_teleport_command,
+)
 from .model_bounds import ModelBounds, load_model_bounds, footprint_outline, footprint_contains
 from .model_classification import ModelCategory, load_p3d_category
 from .pbo_textures import PboTextures
@@ -407,7 +410,7 @@ class IslandStudio:
             footer,
             text="Arrows: pan   Shift+arrows: faster   + / −: zoom   "
                  "Right-drag: pan   Ctrl+Shift+M: copy model   "
-                 "Ctrl+Shift+T: copy texture",
+                 "Ctrl+Shift+T: copy texture   Ctrl+Shift+C: copy game coords",
         ).pack(anchor="e", pady=(3, 0))
         self.root.bind("<Control-o>", lambda _e: self._open_dialog())
         self.root.bind("<Control-Shift-S>", lambda _e: self._save_dialog())
@@ -441,9 +444,13 @@ class IslandStudio:
             "<Control-Shift-KeyPress-T>",
             lambda event: self._copy_under_cursor(event, "texture"),
         )
+        self.root.bind(
+            "<Control-Shift-KeyPress-C>",
+            lambda event: self._copy_under_cursor(event, "coords"),
+        )
 
     def _copy_under_cursor(self, event: tk.Event, kind: str) -> str | None:
-        """Copy the exact model or texture path without selecting/editing it."""
+        """Copy the hovered model, texture, or game-console teleport command."""
         # Never intercept keyboard shortcuts while typing in an entry.
         focused = self.root.focus_get()
         # Read-only View / Tool comboboxes subclass ttk.Entry, but shouldn't
@@ -478,6 +485,8 @@ class IslandStudio:
                 self.status.set("No named texture under cursor to copy.")
                 return "break"
             path = texture[1]
+        elif kind == "coords":
+            path = game_console_teleport_command(x, z)
         else:
             raise ValueError(f"unknown clipboard target: {kind}")
 
@@ -485,9 +494,9 @@ class IslandStudio:
             self.root.clipboard_clear()
             self.root.clipboard_append(path)
         except tk.TclError as exc:
-            self.status.set(f"Could not copy {kind} path: {exc}")
+            self.status.set(f"Could not copy {kind}: {exc}")
             return "break"
-        self.status.set(f"Copied {kind} path: {path}")
+        self.status.set(f"Copied {kind}: {path}")
         return "break"
 
     def _build_utilities(self, header: ttk.Frame) -> None:
