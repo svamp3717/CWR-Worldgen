@@ -91,11 +91,13 @@ the feature is enabled by default; use `--no-forest-undergrowth-textures` to
 disable it or `--forest-undergrowth-textures` to enable explicitly.
 
 **Malden and Kolgujev beach handling:** These two stock ground-texture
-presets use ordinary ground for **all land-side coastal bands**, including
-wet shoreline, dry sand, and OSM mapped beach/sand areas. Those cells use
-`abel\\tt.paa` or `cain\\j9.paa`; actual underwater cells retain their
-sea-floor texture. Other ground-texture presets retain their existing
-shoreline materials.
+presets use ordinary ground for **every terrain cell, including underwater**,
+following Nogova's approach of keeping water classification separate from
+the selected ground artwork. Malden uses `abel\\tt.paa` and Kolgujev uses
+`cain\\j9.paa` for underwater terrain as well as wet shorelines, dry sand
+and OSM mapped beach/sand. Sea-level, water masks, and terrain elevations
+are not changed. Other ground-texture presets retain their existing
+shoreline and underwater materials.
 Original game texture artwork is **not** copied into the generated PBO.
 
 

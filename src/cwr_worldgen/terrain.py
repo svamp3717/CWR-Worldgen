@@ -62,7 +62,7 @@ NOGOVA_GROUND_TEXTURES.update({
 # Ordinary terrain references need no package scan; the shared overlay compositor
 # may open only the selected main background tile (abel\tt.paa), as for Everon.
 MALDEN_GROUND_TEXTURES: dict[str, str] = {
-    "w": r"abel\pi.paa",
+    "w": r"abel\tt.paa",
     "s": r"abel\tt.paa",
     "g": r"abel\tt.paa",
     "r": r"abel\tt.paa",
@@ -75,11 +75,11 @@ MALDEN_GROUND_TEXTURES: dict[str, str] = {
 # Kolgujev/Cain uses one main dry-land texture in generated worlds so OSM
 # semantic masks do not produce large farmland, forest or mountain colour blocks.
 # The classifications still drive object placement; only their visible ground tile
-# is unified. Water keeps the stock Cain sea tile.
-_KOLGUJEV_SEA_TEXTURE = r"cain\l4.paa"
+# is unified. Underwater terrain uses the same ordinary ground as Nogova;
+# water is still water semantically and its height is not changed.
 _KOLGUJEV_MAIN_LAND_TEXTURE = r"cain\j9.paa"
 KOLGUJEV_GROUND_TEXTURES: dict[str, str] = {
-    "w": _KOLGUJEV_SEA_TEXTURE,
+    "w": _KOLGUJEV_MAIN_LAND_TEXTURE,
     "s": _KOLGUJEV_MAIN_LAND_TEXTURE,
     "g": _KOLGUJEV_MAIN_LAND_TEXTURE,
     "r": _KOLGUJEV_MAIN_LAND_TEXTURE,

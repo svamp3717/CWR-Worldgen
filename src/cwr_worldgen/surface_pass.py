@@ -111,15 +111,15 @@ NOGOVA_SURFACE_TEXTURES.update({
 # Those ordinary palette paths are trusted literals. The shared overlay pipeline
 # may load only the selected preset's main background texture (abel\tt.paa), just
 # as it loads Everon's selected background texture.
-_MALDEN_SEA_TEXTURE = r"abel\pi.paa"
 _MALDEN_LAND_TEXTURE = r"abel\tt.paa"
 _MALDEN_DIRT_TEXTURE = r"abel\bah.paa"
 # The stock WRP's abel\sh.paa is a steep/mountain-looking terrain tile, not a
-# safe generic shoreline texture. Generated Malden therefore keeps shoreline,
-# mapped beach, rock/scree and forest semantics on the default abel\tt.paa tile.
+# safe generic shoreline texture. Generated Malden therefore keeps underwater
+# seabed, shoreline, mapped beach, rock/scree and forest texture slots on
+# abel\tt.paa, just as Nogova uses ordinary ground below its water surface.
 # The semantic classes still drive placement; only their WRP ground tile is shared.
 MALDEN_SURFACE_TEXTURES: dict[str, str] = {
-    "w": _MALDEN_SEA_TEXTURE,
+    "w": _MALDEN_LAND_TEXTURE,
     "q": _MALDEN_LAND_TEXTURE,
     "s": _MALDEN_LAND_TEXTURE,
     "g": _MALDEN_LAND_TEXTURE,
@@ -146,16 +146,11 @@ MALDEN_SURFACE_TEXTURES: dict[str, str] = {
 # Keep generated Kolgujev visually coherent by using the island's main Cain
 # land tile for every dry semantic class. Forest/farmland/rock classifications
 # still affect object and gameplay placement, but they do not swap in bright
-# forest, lowland or mountain tiles. This mirrors the cleaner single-background
-# treatment used by the other classic profiles.
-_KOLGUJEV_SEA_TEXTURE = r"cain\l4.paa"
+# forest, lowland or mountain tiles. Underwater seabed also shares the
+# ordinary land texture, as in the Nogova preset; its water semantics remain.
 _KOLGUJEV_LAND_TEXTURE = r"cain\j9.paa"
 KOLGUJEV_SURFACE_TEXTURES: dict[str, str] = {
-    material.code: (
-        _KOLGUJEV_SEA_TEXTURE
-        if material.code == "w"
-        else _KOLGUJEV_LAND_TEXTURE
-    )
+    material.code: _KOLGUJEV_LAND_TEXTURE
     for material in MILESTONE9_MATERIALS
 }
 
@@ -992,7 +987,9 @@ def build_surface_pass(
     # classes must ALL become ordinary grass on land. Leaving 'q' on a
     # coastal cell assigned the sea-floor texture and caused a visible
     # one-cell beach-looking ring even after sand was removed.
-    # Preserve actual underwater 'w' cells and other stock presets.
+    # Keep actual water cells classified as 'w' for game and elevation
+    # behavior. On Abel/Cain their *texture* is the same ordinary land tile
+    # as 'g', just like the Nogova preset. Other presets are unchanged.
     if str(getattr(spec, "ground_texture_profile", "")).casefold() in {
         "malden", "kolgujev",
     }:

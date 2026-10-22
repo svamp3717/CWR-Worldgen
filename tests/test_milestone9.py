@@ -382,7 +382,9 @@ class SurfacePassTests(unittest.TestCase):
             ordinary = paths[MATERIAL_INDEX["g"]]
             for code in ("q", "s", "x"):
                 assert paths[MATERIAL_INDEX[code]] == ordinary, (preset, code)
-            assert paths[MATERIAL_INDEX["w"]] != ordinary, preset
+            # Water stays classified as water, but its WRP texture is the
+            # same ground artwork as the rest of the island.
+            assert paths[MATERIAL_INDEX["w"]] == ordinary, preset
         # Do not strip beach / shoreline classes from other terrain presets.
         assert everon.wet_shoreline_cells > 0
         assert everon.dry_shoreline_cells > 0
@@ -563,7 +565,6 @@ class SurfacePassTests(unittest.TestCase):
         self.assertEqual(
             set(paths),
             {
-                r"abel\pi.paa",
                 r"abel\tt.paa",
                 r"abel\bah.paa",
             },
@@ -574,7 +575,7 @@ class SurfacePassTests(unittest.TestCase):
         self.assertEqual(grass, r"abel\tt.paa")
         self.assertEqual(paths[MATERIAL_INDEX["f"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["e"]], grass)
-        self.assertEqual(paths[MATERIAL_INDEX["w"]], r"abel\pi.paa")
+        self.assertEqual(paths[MATERIAL_INDEX["w"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["s"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["x"]], grass)
         self.assertEqual(paths[MATERIAL_INDEX["r"]], grass)
@@ -690,12 +691,12 @@ class SurfacePassTests(unittest.TestCase):
 
     def test_kolgujev_surface_profile_uses_stock_cain_roles(self) -> None:
         paths = surface_texture_wire_paths("cwr_cain", "kolgujev")
-        self.assertEqual(paths[MATERIAL_INDEX["w"]], r"cain\l4.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["g"]], r"cain\j9.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["s"]], r"cain\t9.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["f"]], r"cain\u2.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["r"]], r"cain\k5.paa")
-        self.assertEqual(paths[MATERIAL_INDEX["k"]], r"cain\k5.paa")
+        # Terrain materials still have separate semantic roles, but all
+        # normal ground, including underwater, uses Cain's stock j9 tile.
+        for material in MILESTONE9_MATERIALS:
+            self.assertEqual(
+                paths[MATERIAL_INDEX[material.code]], r"cain\j9.paa"
+            )
         self.assertTrue(all(path.casefold().startswith("cain\\") for path in paths))
 
     def test_desert_profile_is_packaged_without_changing_everon_paths(self) -> None:
