@@ -9,7 +9,7 @@ import pytest
 
 from cwr_island_studio.model_bounds import (
     ModelBounds, read_model_bounds, load_model_bounds,
-    footprint_corners, footprint_contains,
+    footprint_corners, footprint_outline, footprint_contains,
 )
 from cwr_island_studio.pbo_textures import PboTextures
 
@@ -123,3 +123,41 @@ def test_loose_models_and_unsupported_formats_keep_safe_fallback(tmp_path: Path)
     assert load_model_bounds(r"..\data3d\house.p3d", tmp_path, None) is None
     target.write_bytes(b"UNKN" + b"\0" * 32)
     assert load_model_bounds(r"data3d\house.p3d", tmp_path, None) is None
+
+
+@pytest.mark.parametrize("payload_factory", [_mlod, _odol])
+def test_visual_lod_outline_is_tighter_than_bounding_rectangle(payload_factory) -> None:
+    triangle = ((0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (0.0, 0.0, 10.0))
+    bounds = read_model_bounds(payload_factory(triangle))
+    assert bounds == ModelBounds(0.0, 10.0, 0.0, 10.0)
+    outline = footprint_outline(bounds, 100, 200, 0)
+    assert len(outline) == 3
+    assert footprint_contains(outline, 102, 202)
+    assert not footprint_contains(outline, 109, 209)
+    assert footprint_contains(footprint_corners(bounds, 100, 200, 0), 109, 209)
+    transformed = footprint_outline(
+        bounds, 100, 200, 0, basis=(2.0, 0.0, 0.0, 0.5),
+    )
+    assert set(transformed) == {
+        (100.0, 200.0), (120.0, 200.0), (100.0, 205.0),
+    }
+
+
+def test_many_visual_vertices_create_bounded_outline() -> None:
+    import numpy as np
+
+    angles = np.linspace(0, math.tau, 16000, endpoint=False)
+    ring = np.column_stack((
+        np.cos(angles) * 12,
+        np.zeros(len(angles)),
+        np.sin(angles) * 7,
+    )).astype(np.float32)
+    # Use the actual vertex helper so synthetic MLODs need not be huge.
+    from cwr_island_studio.model_bounds import _vertices_bounds
+    result = _vertices_bounds(ring)
+    assert 3 <= len(result.outline) <= 48
+    assert result.width == pytest.approx(24, abs=0.01)
+    assert result.length == pytest.approx(14, abs=0.01)
+    assert footprint_outline(ModelBounds(-1, 1, -2, 2), 0, 0, 0) == (
+        (-1, -2), (1, -2), (1, 2), (-1, 2),
+    )

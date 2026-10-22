@@ -8,7 +8,9 @@ from tkinter import messagebox, simpledialog
 import pytest
 
 from cwr_island_studio.app import IslandStudio
-from cwr_island_studio.navigation import center_on_position, parse_game_position
+from cwr_island_studio.navigation import (
+    center_on_position, parse_game_position, game_console_teleport_command,
+)
 
 
 @pytest.mark.parametrize(
@@ -141,3 +143,30 @@ def test_go_to_position_dialog_cancel_and_unloaded_map(
     editor.document = None
     IslandStudio._go_to_position_dialog(editor)
     assert actions == []
+
+
+@pytest.mark.parametrize(
+    ("x", "z", "expected"),
+    [
+        (4250.0, 6150.0, "player setPos [4250.000, 6150.000, 0]"),
+        (1234.56789, 5678.25, "player setPos [1234.568, 5678.250, 0]"),
+        (0.0, 9999.999, "player setPos [0.000, 9999.999, 0]"),
+    ],
+)
+def test_console_teleport_matches_game_xy_convention(
+    x: float, z: float, expected: str,
+) -> None:
+    command = game_console_teleport_command(x, z)
+    assert command == expected
+    # Round-trip the getPos-compatible coordinates in the command.
+    assert parse_game_position(command.split("setPos", 1)[1].strip()) == pytest.approx(
+        (float(f"{x:.3f}"), float(f"{z:.3f}"), 0.0),
+    )
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])
+def test_console_teleport_rejects_nonfinite_coordinates(bad: float) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        game_console_teleport_command(bad, 100)
+    with pytest.raises(ValueError, match="finite"):
+        game_console_teleport_command(100, bad)

@@ -160,19 +160,28 @@ thread; the overlay fills in as metadata finishes loading. Changing folders
 or PBO selections invalidates these classifications automatically. This is
 not a polygonal OSM forest/road reconstruction.
 
-A model identified as a road without a known stock/generated straight segment
-length is displayed as an orange **dot**, not an invented road line.
-Classification does not infer road length or geometry from map metadata.
+When a supported MLOD/SP3X or CWA ODOL v6/v7 P3D is available, Island
+Studio projects its first visual LOD's actual X/Z vertices into a bounded,
+top-down convex silhouette. The original object transform (including
+orientation, scale and shear) applies to the outline and selection hit-test.
+This is more faithful than a rectangular size marker, but concavities, holes,
+occlusion and in-engine model blending cannot be reproduced in 2D.
+
+For roads with loaded geometry, the orange overlay follows the model's
+projected outline instead of inventing a straight segment. Without supported
+geometry, known straight roads retain approximate centre lines and unknown
+road models remain dots. No object positions or saved WRP bytes are altered.
 Modern Arma ODOL versions and assets available only in unselected archives
 are not decoded.
 
 ## Roads as a separate editing layer
 
 Road pieces are WRP **world objects**, not ground texture colours. Enable
-**Show roads as lines** or choose the **Road preview** view to see road-centre
-lines over the map. Known stock straight pieces display their approximate
-footprint; unrecognized road models appear as small orange markers. This is
-a 2D preview, not the complete game model or collision mesh.
+**Show roads as lines** or choose the **Road preview** view to see road model
+outlines over the map when the selected PBOs or loose model files include
+readable P3Ds. Otherwise, known straight pieces display approximate centre
+lines and unrecognized road models appear as orange markers. This is a
+2D visual outline, not the complete game model or collision mesh.
 
 Choose **Draw road line**, select a compatible straight road model and click
 the starting point. Move the cursor to preview the path; click the endpoint
@@ -518,3 +527,39 @@ reader uses the original OFP model tables rather than expanding objects to
 
 Normal commits run tests only. Windows EXE packaging remains manual
 opt-in and is not part of this change.
+
+
+## Hover object inspector
+
+Move the pointer over a visible object marker, model-size silhouette or road
+overlay. A second footer line shows the exact P3D model path, object ID,
+record index, original placement coordinates and heading. The normal terrain
+height or texture slot/path remains visible in the first line. The inspector
+uses the geometry that Island Studio just rendered and does not scan all WRP
+objects or read P3Ds on every mouse move. Small markers have a 7-pixel hover
+radius; road centre lines have a 5-pixel radius; model silhouettes use
+polygon hit-testing. Hidden objects are not hover targets, and leaving the
+viewport clears the readout. Inspecting an object does not select or edit it.
+
+
+## Clipboard shortcuts for hovered assets
+
+Hover a visible object outline or marker and press **Ctrl+Shift+M** to copy
+its exact P3D model path to the system clipboard. Press **Ctrl+Shift+T**
+to copy the original WRP texture path beneath the cursor, in any map view
+mode. The texture shortcut uses the actual OPRW texture-layer grid even if
+it differs from the elevation grid. The status line confirms what was copied.
+Unnamed texture cells and empty hover targets are not copied; the existing
+clipboard contents remain intact. Shortcuts do not act while focus is in a
+text entry, and neither shortcut selects or edits a world object.
+
+The three copy shortcuts are shown in Island Studio's bottom shortcut bar
+next to the pan and zoom hints, in a separate row below status/cursor details.
+
+Hover anywhere over the map and press **Ctrl+Shift+C** to copy a complete,
+ready-to-paste OFP/CWA game-console teleport command, for example
+`player setPos [4250.000, 6150.000, 0]`. This command moves the local
+player to the pointer's map location at ground level. The editor's X/Z
+coordinates map to the game's horizontal X/Y; the third component is height
+above ground (0). This works in every view and does not require an object
+or named texture under the cursor. Nothing is copied outside the map.
