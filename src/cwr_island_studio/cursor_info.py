@@ -30,13 +30,40 @@ def cursor_readout(
         height = document.terrain_at(column, row)
         return f"{position}  |  Height {height:,.2f} m"
     if layer in ("Texture slots", "Actual textures"):
-        slot = document.texture_at(column, row)
-        name = (
-            document.texture_paths[slot]
-            if 0 <= slot < len(document.texture_paths) else ""
-        )
-        return f"{position}  |  Texture {slot}: {name or '(unnamed)'}"
+        texture = texture_under_cursor(document, x, z)
+        if texture is not None:
+            slot, name = texture
+            return f"{position}  |  Texture {slot}: {name or '(unnamed)'}"
     return position
+
+
+def texture_under_cursor(
+    document: IslandDocument, x: float, z: float,
+) -> tuple[int, str] | None:
+    """Return the texture slot and original WRP path at a world position.
+
+    OPRW texture layers can be a different size from the elevation grid.
+    Sample their own grid directly, as the actual-texture viewport does.
+    """
+    if not (math.isfinite(x) and math.isfinite(z)):
+        return None
+    if not (0 <= x < document.world_width and 0 <= z < document.world_height):
+        return None
+    if hasattr(document, "layer_width") and hasattr(document, "layer_height"):
+        col = min(document.layer_width - 1,
+                  int(x / document.world_width * document.layer_width))
+        row = min(document.layer_height - 1,
+                  int(z / document.world_height * document.layer_height))
+        slot = int(document.textures[row, col])
+    else:
+        col = min(document.width - 1, int(x / document.cell_size))
+        row = min(document.height - 1, int(z / document.cell_size))
+        slot = document.texture_at(col, row)
+    path = (
+        document.texture_paths[slot]
+        if 0 <= slot < len(document.texture_paths) else ""
+    )
+    return slot, path
 
 
 @dataclass(frozen=True, slots=True)
