@@ -32,8 +32,10 @@ OSM_MATERIALS: tuple[MaterialDefinition, ...] = DEFAULT_MATERIALS + (
 # expanded Milestone 9 palette supplies the additional rock and field variants;
 # this legacy table uses the first texture from each of those families.
 EVERON_GROUND_TEXTURES: dict[str, str] = {
-    "w": r"Eden\tn.paa",
-    "s": r"Eden\bak\bah.pac",
+    # Original eden.wrp paints the underwater ground with ps and the
+    # beach/water transition with sz, not the ordinary tn grass.
+    "w": r"Eden\ps.paa",
+    "s": r"Eden\sz.paa",
     "g": r"Eden\tn.paa",
     "r": r"o\l1.paa",
     "f": r"Eden\tn.paa",
