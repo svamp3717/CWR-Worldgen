@@ -1,68 +1,40 @@
-# Original Everon (Eden) water-ground borders
+# Everon sandy ps-to-grass tn shoreline borders
 
-## Source evidence
+## Why the texture changed
 
-The user's Island Studio export of **the original `eden.wrp`** contains
-`texture-ids.png`, `texture-paths.csv`, `texture-runs.csv`,
-`texture-adjacencies.csv` and `metadata.json`. The texture-layer raster
-is **256 × 256 cells**, **50 m per cell**, world width **12,800 m**,
-south-to-north game Z. The ZIP is a research input and is not packaged into
-Worldgen or redistributed with this repository.
+The original Eden WRP export (`everon_textures.zip`) contains a 256 × 256,
+50-metre ground-texture grid with the original game texture paths.
+However, the WRP names alone do not establish the artwork's appearance.
+The previously selected `eden\sz.paa` is **stone**, not sandy shore.
 
-| Original ground texture | Used cells | Meaning in the coastline |
-| --- | ---: | --- |
-| `eden\ps.paa` | 42,634 | Offshore/underwater seabed |
-| `eden\sz.paa` | 1,500 | Sandy shore |
-| `eden\tn.paa` | 9,115 | Main inland grass |
+The Everon Classic preset now uses:
 
-The export also names **74 distinct directional shoreline quartet tiles**:
+| Surface | Actual game texture |
+| --- | --- |
+| Water / sandy seabed | `eden\ps.paa` |
+| Wet shoreline / dry beach / mapped beach | `eden\ps.paa` |
+| Ordinary inland grass | `eden\tn.paa` |
 
-- **14** containing both `ps` and `sz`
-- **14** containing both `sz` and `tn`
-- **13** containing both `ps` and `tn`
-- **33** containing all three codes
+The original WRP has **13 actual ps/tn directional quartet assets**.
+These follow the coastline's boundary between sand and grass rather than
+painting a stone-colored ring. The geographic mask is rotated 180 degrees
+relative to the original filename order. Examples:
 
-The one absent `ps/tn` quartet is not guessed. Every selected directional
-path is checked against the original WRP path table before being added to a
-new WRP. Original texture artwork is loaded from the installed game archives.
+- Sand west and grass east: `eden\pstnpstn.paa`
+- Grass west and sand east: `eden\tnpstnps.paa`
+- Sand south and grass north: `eden\pspstntn.paa`
 
-## Corner orientation, verified using original WRP cell placement
+The one unavailable original ps/tn diagonal (NE+SW grass, mask 9)
+is resolved by modifying a *shared* SW vertex in all adjacent cells,
+not by inventing a filename or leaving mismatched corners.
 
-A quartet filename encodes its four graphic regions in nominal
-NE/NW/SE/SW order, but the geographic corners rendered by the stock artwork
-are rotated **180°** relative to that text.
+## Scope
 
-Checking all adjoining original Eden texture cells with a supported
-`ps/sz/tn` texture against the geographic corner arrangement yielded:
+This applies to both legacy and Milestone 9 **Everon** ground-texture
+presets. The border compositor runs after forest blends and keeps roads,
+farmland, rock and forest ground protected. Original game artwork is not
+redistributed, and only WRP-confirmed paths may be referenced.
+The generated world keeps its own coast shape, sea elevations and object
+placement; other island ground presets are unchanged.
 
-| Filename interpretation | Shared-corner mismatches |
-| --- | ---: |
-| Unrotated | 16,825 / 227,376 |
-| **180° rotation** | **0 / 227,376** |
-
-For example, geographic water on a tile's west side and sand on its east
-side corresponds to **`eden\psszpssz.paa`**, while geographic sand
-west and grass east corresponds to **`eden\sztnsztn.paa`**.
-
-## Generator integration and limitations
-
-The Everon preset now uses `ps` for water, `sz` for wet/dry
-shoreline and mapped beaches, and `tn` for ordinary ground. This applies
-to the legacy and Milestone 9 semantic palettes.
-
-When writing the WRP, Worldgen assigns a *single shared material per corner*
-from the neighboring eligible tiles, then selects the stock quartet whose
-artwork displays those four geographic corners. It runs after the optional
-forest-border overlay and does not alter existing special textures such as
-forest floor, road underlays, rock and farmland. Unknown quartets, protected
-corner intersections and exhausted WRP texture tables keep their original
-cells instead of constructing unsafe filenames.
-
-The generated coast still follows the **generated world's own shoreline**.
-This recreates Everon's ground-texture *family and border orientation*, not
-the physical shoreline outline or texture-placement coordinates of original
-Everon. Sea-level heights, water masks and object placements are unchanged.
-
-The tests in `tests/test_everon_water_blends.py` cover the exported stock
-filenames, directional edges, seam-free adjacent tiles, protected land
-materials and 4WVR texture table output.
+The relevant regression tests live in `tests/test_everon_water_blends.py`.
