@@ -20,7 +20,10 @@ from .oprw import open_island_document
 from .world_metadata import load_loose_world_metadata, MapLocation
 from .world_compare import WorldComparison, compare_worlds
 from .object_layers import is_forest_model, object_marker_mode
-from .cursor_info import cursor_readout, ObjectHoverTarget, object_under_cursor, object_cursor_readout
+from .cursor_info import (
+    cursor_readout, texture_under_cursor, ObjectHoverTarget,
+    object_under_cursor, object_cursor_readout,
+)
 from .roads import is_road_model, plan_straight_road, road_segment
 from .navigation import center_on_position, pan_with_arrow, parse_game_position, zoom_around
 from .model_bounds import ModelBounds, load_model_bounds, footprint_outline, footprint_contains
@@ -397,12 +400,14 @@ class IslandStudio:
         ttk.Label(cursor_panel, textvariable=self.cursor_info, anchor="e").pack(anchor="e")
         ttk.Label(cursor_panel, textvariable=self.object_cursor_info, anchor="e").pack(anchor="e")
         ttk.Label(
-            footer, text="Arrows: pan   Shift+arrows: faster   + / −: zoom   Right-drag: pan",
+            footer, text="Arrows: pan   Shift+arrows: faster   + / −: zoom   Right-drag: pan   "
+                         "Ctrl+Shift+M/T: copy model/texture",
         ).pack(side="bottom", anchor="e")
         self.root.bind("<Control-o>", lambda _e: self._open_dialog())
         self.root.bind("<Control-Shift-S>", lambda _e: self._save_dialog())
         self.root.bind("<Control-s>", lambda _e: self._save_dialog())
         self.root.bind("<Control-g>", lambda _e: self._go_to_position_dialog())
+        self._bind_copy_hotkeys()
         # Keep text entry usable for negative coordinates and numeric settings.
         for sequence, factor in (
             ("<KeyPress-plus>", 1.25), ("<KeyPress-equal>", 1.25),
@@ -418,6 +423,61 @@ class IslandStudio:
                 f"<{direction}>",
                 lambda event, key=direction: self._pan_hotkey(event, key),
             )
+
+
+    def _bind_copy_hotkeys(self) -> None:
+        """Bind independent clipboard shortcuts for the hovered WRP assets."""
+        self.root.bind(
+            "<Control-Shift-KeyPress-M>",
+            lambda event: self._copy_under_cursor(event, "model"),
+        )
+        self.root.bind(
+            "<Control-Shift-KeyPress-T>",
+            lambda event: self._copy_under_cursor(event, "texture"),
+        )
+
+    def _copy_under_cursor(self, event: tk.Event, kind: str) -> str | None:
+        """Copy the exact model or texture path without selecting/editing it."""
+        # Never intercept keyboard shortcuts while typing in an entry.
+        focused = self.root.focus_get()
+        if isinstance(focused, (tk.Entry, ttk.Entry, ttk.Combobox, tk.Text, ttk.Spinbox)):
+            return None
+
+        document = self.document
+        hover = getattr(self, "_hover_screen", None)
+        if document is None or hover is None:
+            self.status.set("Move the pointer over the map before copying.")
+            return "break"
+        x, z = self._to_world(*hover)
+        if not (math.isfinite(x) and math.isfinite(z)
+                and 0 <= x < document.world_width
+                and 0 <= z < document.world_height):
+            self.status.set("Move the pointer inside the map before copying.")
+            return "break"
+
+        if kind == "model":
+            obj = object_under_cursor(getattr(self, "_hover_targets", ()), *hover)
+            if obj is None or not obj.model_path:
+                self.status.set("No visible model under cursor to copy.")
+                return "break"
+            path = obj.model_path
+        elif kind == "texture":
+            texture = texture_under_cursor(document, x, z)
+            if texture is None or not texture[1]:
+                self.status.set("No named texture under cursor to copy.")
+                return "break"
+            path = texture[1]
+        else:
+            raise ValueError(f"unknown clipboard target: {kind}")
+
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(path)
+        except tk.TclError as exc:
+            self.status.set(f"Could not copy {kind} path: {exc}")
+            return "break"
+        self.status.set(f"Copied {kind} path: {path}")
+        return "break"
 
     def _build_utilities(self, header: ttk.Frame) -> None:
         """Top-right dropdown for diagnostics and future utility actions."""
