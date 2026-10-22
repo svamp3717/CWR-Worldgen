@@ -175,18 +175,18 @@ def test_hover_outside_map_does_not_show_object(tmp_path: Path) -> None:
         assert fake.object_cursor_info.set.call_args.args == ("",)
 
 
-def _clipboard_editor(world: IslandDocument) -> SimpleNamespace:
-    root = Mock()
-    root.focus_get.return_value = None
-    obj = _object(8, 30, 3, r"data3d\\custom_building.p3d")
-    return SimpleNamespace(
-        document=world,
-        root=root,
-        status=Mock(),
-        _hover_screen=(30.0, 97.0),
-        _hover_targets=(ObjectHoverTarget(obj, 30.0, 97.0),),
-        _to_world=lambda sx, sy: (sx, 100.0 - sy),
-    )
+def _clipboard_editor(world: IslandDocument) -> app.IslandStudio:
+    editor = object.__new__(app.IslandStudio)
+    editor.document = world
+    editor.root = Mock()
+    editor.root.focus_get.return_value = None
+    editor.status = Mock()
+    editor._hover_screen = (30.0, 97.0)
+    editor._hover_targets = (ObjectHoverTarget(
+        _object(8, 30, 3, r"data3d\custom_building.p3d"), 30.0, 97.0,
+    ),)
+    editor._to_world = lambda sx, sy: (sx, 100.0 - sy)
+    return editor
 
 
 def test_copy_model_and_texture_paths_with_distinct_hotkeys(tmp_path: Path) -> None:
@@ -202,12 +202,12 @@ def test_copy_model_and_texture_paths_with_distinct_hotkeys(tmp_path: Path) -> N
         }
         assert bound["<Control-Shift-KeyPress-M>"](event) == "break"
         assert editor.root.clipboard_append.call_args.args == (
-            r"data3d\\custom_building.p3d",
+            r"data3d\custom_building.p3d",
         )
         assert "Copied model path" in editor.status.set.call_args.args[0]
         assert bound["<Control-Shift-KeyPress-T>"](event) == "break"
         assert editor.root.clipboard_append.call_args.args == (
-            r"o\\data\\rock.paa",
+            r"o\data\rock.paa",
         )
         assert "Copied texture path" in editor.status.set.call_args.args[0]
         assert editor.root.clipboard_clear.call_count == 2
@@ -268,7 +268,7 @@ def test_copy_texture_matches_oprw_layer_cell_not_terrain_vertex(tmp_path: Path)
     with open_island_document(source, cell_size=50.0) as world:
         # The texture boundary is X=75, not the terrain vertex at X=100.
         assert world.texture_at(1, 0) == 0
-        assert texture_under_cursor(world, 80, 20) == (1, r"o\\data\\grass.paa")
-        assert r"Texture 1: o\\data\\grass.paa" in cursor_readout(
+        assert texture_under_cursor(world, 80, 20) == (1, r"o\data\grass.paa")
+        assert r"Texture 1: o\data\grass.paa" in cursor_readout(
             world, 80, 20, "Actual textures",
         )
