@@ -251,6 +251,13 @@ def test_copy_keeps_keyboard_focus_and_reports_clipboard_errors(
         assert app.IslandStudio._copy_under_cursor(editor, event, "model") is None
         editor.root.clipboard_append.assert_not_called()
 
+        # Read-only comboboxes can retain keyboard focus after changing views.
+        editor.root.focus_get.return_value = Mock(spec=app.ttk.Combobox)
+        assert app.IslandStudio._copy_under_cursor(editor, event, "model") == "break"
+        assert editor.root.clipboard_append.call_args.args == (
+            r"data3d\custom_building.p3d",
+        )
+
         editor.root.focus_get.return_value = None
         editor.root.clipboard_append.side_effect = app.tk.TclError("clipboard busy")
         assert app.IslandStudio._copy_under_cursor(editor, event, "model") == "break"
