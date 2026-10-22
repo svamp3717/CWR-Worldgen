@@ -177,7 +177,7 @@ are not decoded.
 ## Roads as a separate editing layer
 
 Road pieces are WRP **world objects**, not ground texture colours. Enable
-**Show roads as lines** or choose the **Road preview** view to see road-centre
+**Show roads as lines** or choose the **Road preview** view to see road model
 outlines over the map when the selected PBOs or loose model files include
 readable P3Ds. Otherwise, known straight pieces display approximate centre
 lines and unrecognized road models appear as orange markers. This is a
