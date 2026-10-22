@@ -2099,6 +2099,8 @@ def _stock_ground_texture_table(
     material_indices: Sequence[int],
     raster: OsmRaster,
     materials: Sequence,
+    *,
+    elevations: Sequence[float] | None = None,
 ) -> tuple[tuple[str, ...], list[int]]:
     """Compose WRP ground slots once for export, validation and repeat builds.
 
@@ -2129,8 +2131,14 @@ def _stock_ground_texture_table(
             enabled=True,
         )
     if profile == "everon":
+        if elevations is None:
+            raise ValueError("Everon underwater textures require final WRP elevations")
+        heights = np.asarray(elevations, dtype=np.float64).reshape(-1)
+        if heights.size != len(indices) or not np.all(np.isfinite(heights)):
+            raise ValueError("Everon WRP elevations have invalid dimensions or values")
         paths, indices = apply_everon_water_borders(
             paths, indices, width=spec.cells,
+            underwater_mask=(heights <= float(spec.sea_level)),
         )
     return tuple(paths), indices
 
@@ -2604,7 +2612,7 @@ def _validate_milestone4(
     materials = _material_definitions(spec)
     counts = material_counts(material_indices, len(materials))
     expected_texture_paths, _ = _stock_ground_texture_table(
-        spec, material_indices, raster, materials,
+        spec, material_indices, raster, materials, elevations=elevations,
     )
     expected_texture_paths = set(expected_texture_paths)
     checks.append((
@@ -4716,7 +4724,7 @@ def build_milestone4(
 
     report_progress(84, "Preparing terrain texture table")
     texture_table_paths, wrp_texture_indices = _stock_ground_texture_table(
-        spec, material_indices, raster, materials,
+        spec, material_indices, raster, materials, elevations=elevations,
     )
     surface_texture_cache_hit = False
     surface_texture_cache_path: str | None = None
@@ -5203,6 +5211,7 @@ def build_milestone4(
         temp_source.mkdir(parents=True, exist_ok=True)
         repeat_texture_paths, repeat_texture_indices = _stock_ground_texture_table(
             spec, repeat_material_indices, raster, materials,
+            elevations=repeat_elevations,
         )
         write_rvw4(
             temp_wrp,
