@@ -20,7 +20,7 @@ from .oprw import open_island_document
 from .world_metadata import load_loose_world_metadata, MapLocation
 from .world_compare import WorldComparison, compare_worlds
 from .object_layers import is_forest_model, object_marker_mode
-from .cursor_info import cursor_readout
+from .cursor_info import cursor_readout, ObjectHoverTarget, object_under_cursor, object_cursor_readout
 from .roads import is_road_model, plan_straight_road, road_segment
 from .navigation import center_on_position, pan_with_arrow, parse_game_position, zoom_around
 from .model_bounds import ModelBounds, load_model_bounds, footprint_outline, footprint_contains
@@ -128,6 +128,7 @@ class IslandStudio:
         self._render_pending = False
         self._image: ImageTk.PhotoImage | None = None
         self._visible: tuple[MapObject, ...] = ()
+        self._hover_targets: tuple[ObjectHoverTarget, ...] = ()
         self.selected: int | None = None
         self._map_locations: tuple[MapLocation, ...] = ()
         self.view_x = 0.0
@@ -174,6 +175,7 @@ class IslandStudio:
         self.metadata = tk.StringVar(value="Open a WRP or an island from a PBO to start")
         self.status = tk.StringVar(value="Ready. The source file will not be modified.")
         self.cursor_info = tk.StringVar(value="")
+        self.object_cursor_info = tk.StringVar(value="")
         self._last_game_position: str | None = None
         self._build()
         self._update_edit_access()
@@ -390,7 +392,10 @@ class IslandStudio:
         footer = ttk.Frame(self.root, padding=(8, 5))
         footer.pack(fill="x")
         ttk.Label(footer, textvariable=self.status).pack(side="left")
-        ttk.Label(footer, textvariable=self.cursor_info, anchor="e").pack(side="right", padx=(12, 2))
+        cursor_panel = ttk.Frame(footer)
+        cursor_panel.pack(side="right", padx=(12, 2))
+        ttk.Label(cursor_panel, textvariable=self.cursor_info, anchor="e").pack(anchor="e")
+        ttk.Label(cursor_panel, textvariable=self.object_cursor_info, anchor="e").pack(anchor="e")
         ttk.Label(
             footer, text="Arrows: pan   Shift+arrows: faster   + / −: zoom   Right-drag: pan",
         ).pack(side="bottom", anchor="e")
@@ -518,6 +523,7 @@ class IslandStudio:
         self._reset_model_bounds()
         self.selected = None
         self._visible = ()
+        self._hover_targets = ()
         self._image = None
         self.canvas.delete("all")
         self.metadata.set("Opening world…")
@@ -1307,6 +1313,7 @@ class IslandStudio:
 
     def _draw(self) -> None:
         self._render_pending = False
+        self._hover_targets = ()
         if not self.document:
             return
         width, height = self.canvas.winfo_width(), self.canvas.winfo_height()
@@ -1378,6 +1385,21 @@ class IslandStudio:
             self._image = ImageTk.PhotoImage(image, master=self.canvas)
             self.canvas.delete("all")
             self.canvas.create_image(0, 0, anchor="nw", image=self._image)
+            # Store only objects actually drawn. Mouse motion examines these
+            # bounded, screen-space targets rather than rescanning the WRP.
+            hover_targets: dict[int, ObjectHoverTarget] = {}
+
+            def track_hover(
+                obj: MapObject, kind: str = "marker",
+                points: tuple[tuple[float, float], ...] = (),
+            ) -> None:
+                sx, sy = self._to_screen(obj.x, obj.z)
+                item = ObjectHoverTarget(obj, sx, sy, kind, points)
+                previous = hover_targets.get(obj.index)
+                rank = {"marker": 0, "segment": 1, "outline": 2}
+                if previous is None or rank[kind] >= rank[previous.kind]:
+                    hover_targets[obj.index] = item
+
             # Classify viewport model types in the background even when only
             # the road/forest overlay is enabled and generic object dots are off.
             # Cache misses never block Tk's drawing loop.
@@ -1410,12 +1432,14 @@ class IslandStudio:
                                 *(v for point in screen for v in point),
                                 fill="", outline="#ed974a", width=2,
                             )
+                            track_hover(obj, "outline", tuple(screen))
                             continue
                     segment = road_segment(obj.x, obj.z, obj.heading, obj.model_path)
                     if segment is None:
                         sx, sz = self._to_screen(obj.x, obj.z)
                         self.canvas.create_oval(sx - 2.5, sz - 2.5, sx + 2.5, sz + 2.5,
                                                 fill="#ed974a", outline="")
+                        track_hover(obj)
                     else:
                         a, b = segment
                         x0, z0 = self._to_screen(*a)
@@ -1424,6 +1448,7 @@ class IslandStudio:
                             x0, z0, x1, z1, fill="#ed974a",
                             width=max(2, min(5, self.zoom * 3)),
                         )
+                        track_hover(obj, "segment", ((x0, z0), (x1, z1)))
             # These controls are independent: hiding generic dots must not
             # hide true-size outlines or the optional forest overlay.
             show_dots = self.show_objects.get()
@@ -1474,6 +1499,7 @@ class IslandStudio:
                         outline="#65df92" if selected else "#328b51",
                         width=2 if selected else 1,
                     )
+                    track_hover(obj, "outline", tuple(screen))
                 else:
                     size = 5 if selected else 2.5
                     self.canvas.create_oval(
@@ -1481,6 +1507,7 @@ class IslandStudio:
                         fill="#65df92" if selected else "#37874d",
                         outline="",
                     )
+                    track_hover(obj)
 
             for obj in normal:
                 # Forest objects already have their own green markers.
@@ -1512,6 +1539,7 @@ class IslandStudio:
                         *(v for point in screen for v in point),
                         outline=colour, fill="", width=2 if selected else 1,
                     )
+                    track_hover(obj, "outline", tuple(screen))
                 elif mode == "dot":
                     selectable[obj.index] = obj
                     radius = 5 if selected else 1.65
@@ -1519,6 +1547,7 @@ class IslandStudio:
                         sx - radius, sz - radius, sx + radius, sz + radius,
                         outline=colour, fill=colour,
                     )
+                    track_hover(obj)
             self._visible = tuple(selectable.values())
             if getattr(self, "show_locations", None) is not None and self.show_locations.get():
                 # The places are CfgWorlds names, not WRP object records.
@@ -1586,6 +1615,9 @@ class IslandStudio:
             self.canvas.create_rectangle(
                 west, north, east, south, outline="#fff0aa", width=2,
             )
+            self._hover_targets = tuple(hover_targets.values())
+            if getattr(self, "object_cursor_info", None) is not None:
+                self._refresh_hover()
         except Exception as exc:
             self.status.set(f"Preview error: {exc}")
 
@@ -1739,6 +1771,8 @@ class IslandStudio:
     def _refresh_hover(self) -> None:
         if self._hover_screen is None or self.document is None:
             self.cursor_info.set("")
+            if getattr(self, "object_cursor_info", None) is not None:
+                self.object_cursor_info.set("")
             return
         x, z = self._to_world(*self._hover_screen)
         message = cursor_readout(self.document, x, z, self.layer.get())
@@ -1757,10 +1791,20 @@ class IslandStudio:
                     else:
                         message += f" | Worldgen {selected}: {value}"
         self.cursor_info.set(message)
+        if getattr(self, "object_cursor_info", None) is not None:
+            obj = (
+                object_under_cursor(
+                    getattr(self, "_hover_targets", ()), *self._hover_screen,
+                )
+                if message != "Outside map" else None
+            )
+            self.object_cursor_info.set(object_cursor_readout(obj))
 
     def _mouse_leave(self, _event: tk.Event) -> None:
         self._hover_screen = None
         self.cursor_info.set("")
+        if getattr(self, "object_cursor_info", None) is not None:
+            self.object_cursor_info.set("")
 
     def _mouse_move(self, event: tk.Event) -> None:
         self._update_hover(event.x, event.y)
