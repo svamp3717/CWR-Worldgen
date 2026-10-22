@@ -91,6 +91,7 @@ from cwr_worldgen.osm import (
     CHURCH_EXTRA_GROUND_CLEARANCE_METRES,
     BUILDING_TERRAIN_EDGE_MARGIN_METRES,
     OSM_INDIVIDUAL_TREE_MODELS,
+    EVERON_FOREST_ORIGIN_LIFT_METRES,
     NOGOVA_LEAF_INDIVIDUAL_TREE_MODELS,
     NOGOVA_PINE_INDIVIDUAL_TREE_MODELS,
     STOCK_HEDGE_MODELS,
@@ -119,7 +120,7 @@ from cwr_worldgen.osm import (
     STOCK_METAL_FENCE_MODELS,
     STOCK_WALL_MODELS,
 )
-from cwr_worldgen.model import CWA_RVW4_HEIGHT_SCALE, WorldObject
+from cwr_worldgen.model import CWA_RVW4_HEIGHT_SCALE, TerrainShearedWorldObject, WorldObject
 from cwr_worldgen.paa import inspect_paa, write_rgb_dxt1_paa
 from cwr_worldgen.pbo import read_pbo
 from cwr_worldgen.playability import (
@@ -2169,7 +2170,13 @@ class RoadPieceFittingTests(unittest.TestCase):
         self.assertEqual(flat.forest_everon_steep_objects, 0)
         self.assertEqual(flat.forest_cluster_objects, 0)
         self.assertTrue(all(obj.model_path == spec.forest_tree_model for obj in flat.objects))
-        self.assertTrue(all(abs(obj.y - spec.forest_ground_clearance) < 1e-6 for obj in flat.objects))
+        # Everon's default Data3D T1 square is exactly the Cain stock P3D:
+        # its child tree roots sit ~11.7 m below the WRP object origin.
+        self.assertTrue(all(
+            isinstance(obj, TerrainShearedWorldObject)
+            and abs(obj.y - EVERON_FOREST_ORIGIN_LIFT_METRES) < 1e-6
+            for obj in flat.objects
+        ))
 
         gentle_heights = tuple(float(x) for _z in range(4) for x in range(4))
         gentle = generate_world_objects(
@@ -2205,6 +2212,80 @@ class RoadPieceFittingTests(unittest.TestCase):
             dataset, projection, raster, steep_heights, spec, include_roads=False
         )
         self.assertEqual(steep.objects, repeated.objects)
+
+    def test_everon_stock_forest_origin_is_not_ground_level(self) -> None:
+        """Stock T1 and triangle proxies need Cain's calibrated +11.7m origin."""
+        projection = BboxProjection.create((0, 0, 1, 1), 100.0)
+        dataset = OsmDataset(
+            source_generator="everon-proxy-pivots", element_count=0,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(),
+        )
+        raster = OsmRaster(
+            cells=4, water=(False,) * 16, forest=(True,) * 16,
+            farmland=(False,) * 16, urban=(False,) * 16,
+            roads=(False,) * 16, buildings=(False,) * 16,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="cwr_everon_pivots", heightmap_path=Path("unused.png"),
+            bbox=(0, 0, 1, 1), cells=4, cell_size=25.0,
+            forest_profile="everon", forest_tree_spacing=50.0,
+            max_road_objects=0, max_buildings=0, max_forest_objects=4,
+            forest_maximum_block_relief=2.5,
+            forest_everon_steep_maximum_relief=4.0,
+            forest_severe_hill_fallback=False,
+            forest_undergrowth_enabled=False, forest_single_tree_enabled=False,
+            forest_border_enabled=False, steep_hill_bushes_enabled=False,
+            ditch_grass_enabled=False, rural_vegetation_enabled=False,
+            strict_assets=False,
+        )
+        base_elevations = (20.0,) * 16
+        flat = generate_world_objects(
+            dataset, projection, raster, base_elevations,
+            spec, include_roads=False,
+        )
+        self.assertEqual(flat.forest_block_objects, 4)
+        for obj in flat.objects:
+            self.assertIsInstance(obj, TerrainShearedWorldObject)
+            self.assertAlmostEqual(
+                obj.y, 20.0 + EVERON_FOREST_ORIGIN_LIFT_METRES,
+                places=5,
+            )
+            self.assertAlmostEqual(obj.terrain_shear_x, 0.0, places=5)
+            self.assertAlmostEqual(obj.terrain_shear_z, 0.0, places=5)
+
+        slope_elevations = tuple(
+            20.0 + float(col * 3) for _row in range(4) for col in range(4)
+        )
+        hillside = generate_world_objects(
+            dataset, projection, raster, slope_elevations,
+            spec, include_roads=False,
+        )
+        self.assertEqual(hillside.forest_everon_steep_objects, 4)
+        for obj in hillside.objects:
+            self.assertIsInstance(obj, TerrainShearedWorldObject)
+            sample = _sample_elevation(
+                slope_elevations, spec.cells, spec.cell_size, obj.x, obj.z
+            )
+            self.assertAlmostEqual(
+                obj.y - sample, EVERON_FOREST_ORIGIN_LIFT_METRES,
+                places=5,
+            )
+            self.assertGreater(abs(obj.terrain_shear_x), 0.01)
+
+        # User-selected custom block assets have their own pivots. They must
+        # continue using the ordinary near-ground terrain-fit placement.
+        custom = generate_world_objects(
+            dataset, projection, raster, base_elevations,
+            replace(spec, forest_tree_model=r"data3d\\custom_ground_block.p3d"),
+            include_roads=False,
+        )
+        self.assertEqual(custom.forest_block_objects, 4)
+        self.assertTrue(all(
+            obj.y < 23.0 and not isinstance(obj, TerrainShearedWorldObject)
+            for obj in custom.objects
+        ))
+
 
     def test_no_forest_polygon_mode_replaces_stock_blocks_with_cluster_tiles(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 100.0)

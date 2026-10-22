@@ -1,0 +1,36 @@
+name: Everon stock forest grounding regression
+
+on:
+  push:
+    branches:
+      - fix/everon-vegetation-grounding-20261022
+  pull_request:
+    paths:
+      - "src/cwr_worldgen/osm.py"
+      - "tests/test_milestone9.py"
+      - ".github/workflows/everon-forest-grounding.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  grounding:
+    name: Verify Everon stock forest pivots and terrain fits
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Worldgen and pytest
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Test Everon square and triangle forest grounding
+        run: |
+          python -m pytest -q tests/test_milestone9.py -k 'everon_stock_forest_origin_is_not_ground_level or milestone9_forest_ladder_uses_terrain_fit_and_reusable_clusters or no_forest_polygon_mode_replaces_stock_blocks_with_cluster_tiles or everon_forests_gain_extra_single_trees'
+      - name: Check forest geometry and WRP serialization
+        run: |
+          python -m pytest -q tests/test_forest_undergrowth_textures.py tests/test_procedural_forests.py

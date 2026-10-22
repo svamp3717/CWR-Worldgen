@@ -112,6 +112,14 @@ KOLGUJEV_FOREST_T1_OFFSET = (2.1133, 2.0981)
 KOLGUJEV_FOREST_T2_OFFSET = (-0.4591, -1.6689)
 KOLGUJEV_FOREST_MAXIMUM_SHEAR = 0.60
 
+# Everon defaults to the EXACT same Data3D T1 forest P3D as Kolgujev.
+# That P3D's local tree/root geometry is around 11.7 m below its object
+# origin. Cain's stock WRP calibration therefore applies to Everon's T1
+# square and matching Data3D triangle. Placing either at terrain height
+# buries most of the trees despite passing an origin-only terrain audit.
+EVERON_FOREST_ORIGIN_LIFT_METRES = KOLGUJEV_FOREST_ORIGIN_LIFT_METRES
+EVERON_FOREST_MAXIMUM_SHEAR = KOLGUJEV_FOREST_MAXIMUM_SHEAR
+
 # Urban-detail assets. Keep this layer vanilla-only: every model below ships
 # with OFP/Cold War Assault. The base game does not provide a modern modular
 # narrow sidewalk kit, so ``Nam_dlazba`` (the stock cobbled-square pavement
@@ -9098,6 +9106,11 @@ def generate_world_objects(
         and active_forest_model == KOLGUJEV_FOREST_BLOCK_MODEL.casefold()
         and not forest_polygon_models_disabled
     )
+    everon_stock_forest = (
+        forest_profile == "everon"
+        and active_forest_model == KOLGUJEV_FOREST_BLOCK_MODEL.casefold()
+        and not forest_polygon_models_disabled
+    )
     individual_tree_root_sink = max(
         0.0,
         float(getattr(spec, "forest_single_tree_root_sink", 0.05)),
@@ -9796,7 +9809,32 @@ def generate_world_objects(
                 relief = maximum_height - minimum_height
                 maximum_forest_relief = max(maximum_forest_relief, relief)
 
-                if not low_anchor:
+                # The stock Everon T1 square shares Cain's P3D pivot, so
+                # fit its embedded tree roots using Cain's calibrated +11.7 m
+                # vertical origin and an upright, terrain-sheared transform.
+                # A generic WorldObject at ground Y buries the entire model.
+                # Keep the normal terrain-fit ladder for custom P3Ds.
+                if everon_stock_forest and relief <= maximum_allowed_relief:
+                    stock_gradient_x, stock_gradient_z = _local_terrain_gradient(
+                        elevations, spec.cells, spec.cell_size, x, z,
+                    )
+                    if math.hypot(stock_gradient_x, stock_gradient_z) <= EVERON_FOREST_MAXIMUM_SHEAR:
+                        stock_y = centre_height + EVERON_FOREST_ORIGIN_LIFT_METRES
+                        emit(
+                            TerrainShearedWorldObject(
+                                next_id, spec.forest_tree_model,
+                                x, stock_y, z, heading, 0.0,
+                                terrain_shear_x=stock_gradient_x,
+                                terrain_shear_z=stock_gradient_z,
+                            )
+                        )
+                        next_id += 1
+                        forest_count += 1
+                        forest_block_objects += 1
+                        mark_accepted_forest(x, z, spacing * 0.58)
+                        continue
+
+                if not low_anchor and not everon_stock_forest:
                     support_height = maximum_height
                     maximum_forest_grounding_raise = max(
                         maximum_forest_grounding_raise, support_height - centre_height
@@ -9824,7 +9862,7 @@ def generate_world_objects(
                         maximum_burial=block_maximum_burial,
                         maximum_float=block_maximum_float,
                     )
-                    if relief <= maximum_allowed_relief
+                    if not everon_stock_forest and relief <= maximum_allowed_relief
                     else None
                 )
                 if block_fit is not None:
@@ -9884,26 +9922,44 @@ def generate_world_objects(
                             and steep_relief > severe_fallback_relief
                         )
                     )
+                    stock_everon_triangle = (
+                        everon_stock_forest
+                        and everon_steep_model.replace("/", "\\").casefold()
+                        == KOLGUJEV_FOREST_TRIANGLE_MODEL.casefold()
+                    )
                     steep_fit = (
-                        _terrain_fit_anchor(
+                        (
+                            _sample_elevation(
+                                elevations, spec.cells, spec.cell_size, x, z
+                            ) + EVERON_FOREST_ORIGIN_LIFT_METRES,
+                            0.0, 0.0,
+                        )
+                        if stock_everon_triangle
+                        else _terrain_fit_anchor(
                             steep_supports,
                             clearance=spec.forest_ground_clearance,
                             maximum_burial=everon_steep_maximum_burial,
                             maximum_float=everon_steep_maximum_float,
                         )
-                        if (
-                            everon_steep_model
-                            and not triangle_blocked_by_road
-                            and steep_relief <= everon_steep_maximum_relief
+                    ) if (
+                        everon_steep_model
+                        and not triangle_blocked_by_road
+                        and steep_relief <= everon_steep_maximum_relief
+                        and (
+                            not stock_everon_triangle
+                            or math.hypot(gradient_x, gradient_z)
+                            <= EVERON_FOREST_MAXIMUM_SHEAR
                         )
-                        else None
-                    )
+                    ) else None
                     if steep_fit is not None:
                         base_anchor, burial, floating = steep_fit
+                        # The stock P3D has its OWN lifted origin and upright
+                        # proxy trunks; do not apply generic polygon sinking.
                         sink_depth = (
                             steep_relief * polygon_sink_fraction
                             if (
-                                severe_fallback_enabled
+                                not stock_everon_triangle
+                                and severe_fallback_enabled
                                 and polygon_sink_fraction > 0.0
                                 and steep_relief > 1.0e-9
                             )
@@ -9912,11 +9968,21 @@ def generate_world_objects(
                         anchor = base_anchor - sink_depth
                         burial += sink_depth
                         floating = max(0.0, floating - sink_depth)
-                        emit(
-                            WorldObject(
-                                next_id, everon_steep_model, x, anchor, z, heading
+                        if stock_everon_triangle:
+                            emit(
+                                TerrainShearedWorldObject(
+                                    next_id, everon_steep_model,
+                                    x, anchor, z, heading, 0.0,
+                                    terrain_shear_x=gradient_x,
+                                    terrain_shear_z=gradient_z,
+                                )
                             )
-                        )
+                        else:
+                            emit(
+                                WorldObject(
+                                    next_id, everon_steep_model, x, anchor, z, heading
+                                )
+                            )
                         next_id += 1
                         forest_count += 1
                         forest_everon_steep_objects += 1
