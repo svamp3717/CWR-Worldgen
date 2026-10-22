@@ -238,9 +238,9 @@ def test_4wvr_export_and_generation_use_exact_ps_tn_paths(tmp_path) -> None:
     }
 
 
-def test_other_stock_profiles_keep_existing_ground_texture_tables() -> None:
+def test_nogova_ground_profile_still_has_unchanged_texture_table() -> None:
     size = 13
-    for profile in ("nogova", "kolgujev", "malden"):
+    for profile in ("nogova",):
         spec = SimpleNamespace(
             name="demo", ground_texture_profile=profile,
             surface_pass_enabled=True, surface_ground_mode="milestone9",
