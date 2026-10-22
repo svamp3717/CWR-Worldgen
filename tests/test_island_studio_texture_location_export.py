@@ -202,18 +202,18 @@ def test_gui_utility_exports_without_unchecking_read_only(
         assert received[0] == "texture_map_progress"
         assert received[-1] == "texture_map_exported"
         assert dialogs[0]["filetypes"][0][1] == "*.zip"
-        assert dialogs[0]["initialfile"] == "readonly.zip"
+        assert dialogs[0]["initialfile"] == "nogova_textures.zip"
     assert source.exists()
 
 
 @pytest.mark.parametrize(
     ("source_label", "expected"),
     [
-        ("Nogova.wrp", "Nogova.zip"),
-        (r"Everon.pbo / eden\\maps\\everon.wrp", "everon.zip"),
-        (r"Data\\Islands\\Malden.wrp", "Malden.zip"),
-        ("cain.wrp", "cain.zip"),
-        ("addon.pbo / maps/forest<edge>.wrp", "forest_edge_.zip"),
+        ("Nogova.wrp", "nogova_textures.zip"),
+        (r"Everon.pbo / eden\\maps\\everon.wrp", "everon_textures.zip"),
+        (r"Data\\Islands\\Malden.wrp", "malden_textures.zip"),
+        ("cain.wrp", "kolgujev_textures.zip"),
+        ("addon.pbo / maps/forest<edge>.wrp", "nogova_textures.zip"),
     ],
 )
 def test_export_dialog_names_zip_after_original_island_not_temp_wrp(

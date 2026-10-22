@@ -30,6 +30,8 @@ from .pbo_worlds import PboWorldArchive
 from .asset_sources import append_unique, remove_selected
 from .textures import clear_archive_texture_cache, clear_loose_texture_cache, render_real_textures
 from .texture_location_export import export_texture_location_atlas
+from .object_location_export import export_object_location_atlas
+from .export_naming import island_export_stem
 from importlib.metadata import PackageNotFoundError, version
 
 try:
@@ -401,6 +403,10 @@ class IslandStudio:
         self.utilities_menu.add_command(
             label="Export Texture Location Map…",
             command=self._export_texture_location_map,
+        )
+        self.utilities_menu.add_command(
+            label="Export Object Locations…",
+            command=self._export_object_location_map,
         )
         self.utilities_button.configure(menu=self.utilities_menu)
         # Pack before the metadata, so Utilities stays at the rightmost edge.
@@ -1060,6 +1066,15 @@ class IslandStudio:
                     self.status.set(f"Texture map export failed: {value}")
                     messagebox.showerror("Texture location map", str(value))
                 elif kind == "texture_map_progress":
+                    self.status.set(str(value))
+                elif kind == "object_map_exported":
+                    self._busy = False
+                    self.status.set(f"Object locations exported: {value}")
+                elif kind == "object_map_error":
+                    self._busy = False
+                    self.status.set(f"Object export failed: {value}")
+                    messagebox.showerror("Object location export", str(value))
+                elif kind == "object_map_progress":
                     self.status.set(str(value))
                 elif kind == "saving":
                     self.status.set(str(value))
@@ -1891,19 +1906,11 @@ class IslandStudio:
         doc = self.document
         archive = getattr(doc, "_archive_owner", None)
         source = getattr(archive, "path", doc.path)
-        # Archive members are extracted as selected-world.wrp. Prefer the
-        # original member name from source_label, not that temporary file.
-        source_name = str(getattr(doc, "source_label", "") or "")
-        member_name = source_name.rsplit(" / ", 1)[-1].replace("\\", "/").rsplit("/", 1)[-1]
-        island_name = Path(member_name).stem if member_name.lower().endswith(".wrp") else doc.path.stem
-        island_name = "".join(
-            "_" if ord(char) < 32 or char in '<>"\\/|?*:' else char
-            for char in island_name
-        ).strip(" .") or "island"
+        island_name = island_export_stem(doc)
         chosen = filedialog.asksaveasfilename(
             title="Export texture location map and path data (ZIP)",
             initialdir=str(Path(source).parent),
-            initialfile=f"{island_name}.zip",
+            initialfile=f"{island_name}_textures.zip",
             defaultextension=".zip",
             filetypes=[("Texture location atlas (ZIP)", "*.zip")],
         )
@@ -1928,6 +1935,45 @@ class IslandStudio:
                 self._messages.put(("texture_map_exported", str(result)))
             except Exception as exc:
                 self._messages.put(("texture_map_error", str(exc)))
+
+        self._executor.submit(task)
+
+    def _export_object_location_map(self) -> None:
+        """Export each WRP object's model, coordinates and north-up density."""
+        if self.document is None or self._busy:
+            return
+        doc = self.document
+        archive = getattr(doc, "_archive_owner", None)
+        source = getattr(archive, "path", doc.path)
+        island_name = island_export_stem(doc)
+        chosen = filedialog.asksaveasfilename(
+            title="Export object locations and models (ZIP)",
+            initialdir=str(Path(source).parent),
+            initialfile=f"{island_name}_objects.zip",
+            defaultextension=".zip",
+            filetypes=[("Object location atlas (ZIP)", "*.zip")],
+        )
+        if not chosen:
+            return
+        destination = Path(chosen).resolve()
+        if destination.exists() and not messagebox.askyesno(
+            "Overwrite object export?", f"Replace the existing object atlas?\\n{destination}",
+        ):
+            return
+        self._busy = True
+        self.status.set("Exporting world object locations…")
+
+        def task() -> None:
+            try:
+                result = export_object_location_atlas(
+                    doc, destination,
+                    progress=lambda message: self._messages.put(
+                        ("object_map_progress", message),
+                    ),
+                )
+                self._messages.put(("object_map_exported", str(result)))
+            except Exception as exc:
+                self._messages.put(("object_map_error", str(exc)))
 
         self._executor.submit(task)
 
