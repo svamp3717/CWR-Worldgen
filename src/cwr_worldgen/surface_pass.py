@@ -116,13 +116,11 @@ NOGOVA_SURFACE_TEXTURES.update({
 # as it loads Everon's selected background texture.
 _MALDEN_LAND_TEXTURE = r"abel\tt.paa"
 _MALDEN_DIRT_TEXTURE = r"abel\bah.paa"
-# The stock WRP's abel\sh.paa is a steep/mountain-looking terrain tile, not a
-# safe generic shoreline texture. Generated Malden therefore keeps underwater
-# seabed, shoreline, mapped beach, rock/scree and forest texture slots on
-# abel\tt.paa, just as Nogova uses ordinary ground below its water surface.
-# The semantic classes still drive placement; only their WRP ground tile is shared.
+# The original abel.wrp uses pi as offshore seabed and tt as dry grass.
+# Directional pi/tt textures are placed on submerged ground only; above-water
+# beaches, forests, and rocks retain the existing standard tt ground.
 MALDEN_SURFACE_TEXTURES: dict[str, str] = {
-    "w": _MALDEN_LAND_TEXTURE,
+    "w": r"abel\pi.paa",
     "q": _MALDEN_LAND_TEXTURE,
     "s": _MALDEN_LAND_TEXTURE,
     "g": _MALDEN_LAND_TEXTURE,
@@ -149,11 +147,14 @@ MALDEN_SURFACE_TEXTURES: dict[str, str] = {
 # Keep generated Kolgujev visually coherent by using the island's main Cain
 # land tile for every dry semantic class. Forest/farmland/rock classifications
 # still affect object and gameplay placement, but they do not swap in bright
-# forest, lowland or mountain tiles. Underwater seabed also shares the
-# ordinary land texture, as in the Nogova preset; its water semantics remain.
+# forest, lowland or mountain tiles. Original cain.wrp uses l4 for its
+# underwater seabed and j9 for ordinary land; the border pass connects them
+# using verified stock l4/j9 directional textures on submerged cells only.
 _KOLGUJEV_LAND_TEXTURE = r"cain\j9.paa"
 KOLGUJEV_SURFACE_TEXTURES: dict[str, str] = {
-    material.code: _KOLGUJEV_LAND_TEXTURE
+    material.code: (
+        r"cain\l4.paa" if material.code == "w" else _KOLGUJEV_LAND_TEXTURE
+    )
     for material in MILESTONE9_MATERIALS
 }
 
