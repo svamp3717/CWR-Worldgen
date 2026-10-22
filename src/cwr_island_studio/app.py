@@ -301,11 +301,6 @@ class IslandStudio:
             side, text="Highlight shoreline (all views)",
             variable=self.show_shorelines, command=self._queue_draw,
         ).pack(anchor="w", pady=(0, 4))
-        ttk.Label(
-            side, text="Hover + Ctrl+Shift+M: copy model path\n"
-                       "Hover + Ctrl+Shift+T: copy texture path",
-            wraplength=230,
-        ).pack(anchor="w", pady=(0, 5))
         ttk.Label(side, text="Texture / model folders").pack(anchor="w", pady=(7, 2))
         self.folder_list = tk.Listbox(
             side, height=4, selectmode="extended", exportselection=False,
@@ -399,14 +394,21 @@ class IslandStudio:
 
         footer = ttk.Frame(self.root, padding=(8, 5))
         footer.pack(fill="x")
-        ttk.Label(footer, textvariable=self.status).pack(side="left")
-        cursor_panel = ttk.Frame(footer)
+        readout_row = ttk.Frame(footer)
+        readout_row.pack(fill="x")
+        ttk.Label(readout_row, textvariable=self.status).pack(side="left")
+        cursor_panel = ttk.Frame(readout_row)
         cursor_panel.pack(side="right", padx=(12, 2))
         ttk.Label(cursor_panel, textvariable=self.cursor_info, anchor="e").pack(anchor="e")
         ttk.Label(cursor_panel, textvariable=self.object_cursor_info, anchor="e").pack(anchor="e")
+        # Dedicated bottom row keeps hotkey hints visible even when the
+        # status and cursor readouts become long.
         ttk.Label(
-            footer, text="Arrows: pan   Shift+arrows: faster   + / −: zoom   Right-drag: pan",
-        ).pack(side="bottom", anchor="e")
+            footer,
+            text="Arrows: pan   Shift+arrows: faster   + / −: zoom   "
+                 "Right-drag: pan   Ctrl+Shift+M: copy model   "
+                 "Ctrl+Shift+T: copy texture",
+        ).pack(anchor="e", pady=(3, 0))
         self.root.bind("<Control-o>", lambda _e: self._open_dialog())
         self.root.bind("<Control-Shift-S>", lambda _e: self._save_dialog())
         self.root.bind("<Control-s>", lambda _e: self._save_dialog())
