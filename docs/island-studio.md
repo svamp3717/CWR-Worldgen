@@ -540,3 +540,15 @@ objects or read P3Ds on every mouse move. Small markers have a 7-pixel hover
 radius; road centre lines have a 5-pixel radius; model silhouettes use
 polygon hit-testing. Hidden objects are not hover targets, and leaving the
 viewport clears the readout. Inspecting an object does not select or edit it.
+
+
+## Clipboard shortcuts for hovered assets
+
+Hover a visible object outline or marker and press **Ctrl+Shift+M** to copy
+its exact P3D model path to the system clipboard. Press **Ctrl+Shift+T**
+to copy the original WRP texture path beneath the cursor, in any map view
+mode. The texture shortcut uses the actual OPRW texture-layer grid even if
+it differs from the elevation grid. The status line confirms what was copied.
+Unnamed texture cells and empty hover targets are not copied; the existing
+clipboard contents remain intact. Shortcuts do not act while focus is in a
+text entry, and neither shortcut selects or edits a world object.
