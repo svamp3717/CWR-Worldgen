@@ -79,13 +79,17 @@ def test_shared_vertex_resolution_removes_unavailable_diagonal() -> None:
     # Eden. Fix the vertex lattice, not just the name for that cell.
     vertices = np.array([[1, 0], [0, 1]], dtype=np.int8)
     _resolve_missing_ps_tn_diagonal(vertices)
-    np.testing.assert_array_equal(vertices, np.array([[0, 0], [0, 1]]))
+    # Resolving an absent source filename may expand grass, but must
+    # NEVER introduce a ps corner next to dry terrain.
+    np.testing.assert_array_equal(vertices, np.array([[1, 0], [1, 1]]))
     two = np.array([
         [1, 0, 1],
         [0, 1, 0],
         [1, 0, 1],
     ], dtype=np.int8)
+    before = two.copy()
     _resolve_missing_ps_tn_diagonal(two)
+    assert np.all(two[before == 1] == 1)
     ne, nw = two[1:, 1:], two[1:, :-1]
     se, sw = two[:-1, 1:], two[:-1, :-1]
     assert not np.any((ne == 1) & (nw == 0) & (se == 0) & (sw == 1))
@@ -159,7 +163,10 @@ def test_farmland_is_preserved_and_single_tile_water_survives() -> None:
         paths, isolated.ravel(), width=13,
         underwater_mask=(isolated == 1).ravel(),
     )
-    assert texture_slots[6 * 13 + 6] == 1
+    # A lone submerged 50-metre ps tile with four dry-grass corners
+    # cannot be blended seamlessly with any original ps/tn quartet.
+    # The only continuous stock tile is tn (terrain remains underwater).
+    assert texture_slots[6 * 13 + 6] == 2
 
 
 def test_no_invented_textures_and_slot_budget() -> None:
@@ -284,7 +291,9 @@ def test_dry_water_semantic_and_above_water_ps_are_never_painted() -> None:
     _, dry_slots = apply_everon_water_borders(
         paths, one.ravel(), width=13, underwater_mask=np.zeros(169, dtype=bool),
     )
-    assert underwater_slots[6 * 13 + 6] == 1
+    # All four corners of this one-cell underwater area touch tn,
+    # so there is no stock blend that retains ps without hard edges.
+    assert underwater_slots[6 * 13 + 6] == 2
     assert dry_slots[6 * 13 + 6] == 2
 
 
@@ -317,3 +326,68 @@ def test_generator_uses_configured_sea_level_and_requires_final_elevations() -> 
                 texture = paths[int(result[row, col])].casefold()
                 assert texture != r"eden\ps.paa"
                 assert not is_everon_water_blend_path(texture)
+
+
+def test_isolated_underwater_squares_fall_back_to_seamless_grass() -> None:
+    """Screenshot regression: no square ps stamps in a thin coastline."""
+    paths, cells = _shore(width=17)
+    cells[:, :] = 2
+    # Irregular submerged islands alongside a thin 1-cell-wide inlet.
+    cells[4, 5] = 1
+    cells[9, 11] = 1
+    cells[5:10, 7] = 1
+    wet = cells == 1
+    expanded, texture_slots = apply_everon_water_borders(
+        paths, cells.ravel(), width=17, underwater_mask=wet.ravel(),
+    )
+    output = np.asarray(texture_slots).reshape(cells.shape)
+    assert all(expanded[int(output[r, c])] == r"eden\tn.paa"
+               for r, c in ((4, 5), (9, 11), (7, 7)))
+    # Do not place any stock ps/tn blend over the grass-dry cells.
+    for row, col in np.argwhere(~wet):
+        assert expanded[int(output[row, col])] == r"eden\tn.paa"
+    # Water semantics/elevation are independent of the ground tile.
+    assert int(wet.sum()) == 7
+
+
+def test_narrow_two_cell_water_strip_has_borders_on_both_sides() -> None:
+    """A sub-100m inlet must not have rectangular ps end-cap artefacts."""
+    paths, cells = _shore(width=17)
+    cells[:, :] = 2
+    cells[3:14, 6:8] = 1
+    wet = cells == 1
+    expanded, texture_slots = apply_everon_water_borders(
+        paths, cells.ravel(), width=17, underwater_mask=wet.ravel(),
+    )
+    output = np.asarray(texture_slots).reshape((17, 17))
+    assert expanded[int(output[8, 6])] == r"eden\tnpstnps.paa"
+    assert expanded[int(output[8, 7])] == r"eden\pstnpstn.paa"
+    # The wet edge cells use the verified original PAA family.
+    for row, col in np.argwhere(wet):
+        path = expanded[int(output[row, col])]
+        assert path in {r"eden\ps.paa", r"eden\tn.paa"} or is_everon_water_blend_path(path)
+    # Verify shared edge corners for every wet/grass tile, not just that
+    # the paths happen to exist in the original Eden archive.
+    tiles = [[_corners(expanded[int(slot)]) for slot in row] for row in output]
+    for row in range(1, 15):
+        for col in range(1, 15):
+            this = tiles[row][col]
+            east, north = tiles[row][col + 1], tiles[row + 1][col]
+            assert (this[0], this[2]) == (east[1], east[3])
+            assert (this[0], this[1]) == (north[2], north[3])
+
+
+def test_ps_border_along_protected_farmland_avoids_full_ps_square() -> None:
+    paths, cells = _shore()
+    # Farmland lies exactly on a water/grass corner.
+    cells[6, 3] = 3
+    expanded, slots = apply_everon_water_borders(
+        paths, cells.ravel(), width=13, underwater_mask=(cells == 1).ravel(),
+    )
+    output = np.asarray(slots).reshape(cells.shape)
+    assert expanded[int(output[6, 3])] == r"eden\zbh.paa"
+    adjacent = expanded[int(output[6, 2])]
+    # Adjacent underwater texture must fade towards land, rather than
+    # skipping blending because it touches a protected vertex.
+    assert adjacent != r"eden\ps.paa"
+    assert adjacent == r"eden\tn.paa" or is_everon_water_blend_path(adjacent)
