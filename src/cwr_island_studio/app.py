@@ -444,7 +444,9 @@ class IslandStudio:
         """Copy the exact model or texture path without selecting/editing it."""
         # Never intercept keyboard shortcuts while typing in an entry.
         focused = self.root.focus_get()
-        if isinstance(focused, (tk.Entry, ttk.Entry, ttk.Combobox, tk.Text, ttk.Spinbox)):
+        # Read-only View / Tool combos retain focus after choosing a mode.
+        # Let users hover the map and copy without first clicking the canvas.
+        if isinstance(focused, (tk.Entry, ttk.Entry, tk.Text, ttk.Spinbox)):
             return None
 
         document = self.document
