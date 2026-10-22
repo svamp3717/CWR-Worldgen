@@ -91,7 +91,8 @@ def _base_texture_table(profile: str = "everon") -> tuple[str, ...]:
 
 def test_kolgujev_uses_one_main_cain_land_tile() -> None:
     paths = surface_pass.surface_texture_wire_paths("wg_kolgujev", "kolgujev")
-    water_codes = {"w", "q"}
+    # Wet shore q is on LAND and must not reuse the Cain underwater tile.
+    water_codes = {"w"}
 
     for material in surface_pass.MILESTONE9_MATERIALS:
         expected = r"cain\l4.paa" if material.code in water_codes else r"cain\j9.paa"
