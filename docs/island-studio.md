@@ -553,5 +553,13 @@ Unnamed texture cells and empty hover targets are not copied; the existing
 clipboard contents remain intact. Shortcuts do not act while focus is in a
 text entry, and neither shortcut selects or edits a world object.
 
-Both copy shortcuts are shown in Island Studio's bottom shortcut bar next
-to the pan and zoom hints, in a separate row below status/cursor details.
+The three copy shortcuts are shown in Island Studio's bottom shortcut bar
+next to the pan and zoom hints, in a separate row below status/cursor details.
+
+Hover anywhere over the map and press **Ctrl+Shift+C** to copy a complete,
+ready-to-paste OFP/CWA game-console teleport command, for example
+`player setPos [4250.000, 6150.000, 0]`. This command moves the local
+player to the pointer's map location at ground level. The editor's X/Z
+coordinates map to the game's horizontal X/Y; the third component is height
+above ground (0). This works in every view and does not require an object
+or named texture under the cursor. Nothing is copied outside the map.
