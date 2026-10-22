@@ -364,6 +364,7 @@ class Milestone9Spec(Milestone8Spec):
     surface_texture_size: int = 512
     surface_ground_mode: str = "milestone9"
     forest_undergrowth_textures: bool = False
+    debug_layers: bool = False
     forest_profile: str = "everon"
     # Optional safety mode. The field name is retained for 0.9.252 CLI/config
     # compatibility, but the mode now disables only the rigid stock square/triangle
@@ -1638,6 +1639,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         building_maximum_pad_relief=spec.building_maximum_pad_relief,
         ground_texture_profile=spec.ground_texture_profile,
         forest_undergrowth_textures=spec.forest_undergrowth_textures,
+        debug_layers=spec.debug_layers,
         surface_pass_enabled=True,
         surface_shoreline_wet_cells=spec.surface_shoreline_wet_cells,
         surface_shoreline_sand_cells=spec.surface_shoreline_sand_cells,

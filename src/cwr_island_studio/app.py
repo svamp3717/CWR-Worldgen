@@ -30,6 +30,9 @@ from .pbo_worlds import PboWorldArchive
 from .asset_sources import append_unique, remove_selected
 from .textures import clear_archive_texture_cache, clear_loose_texture_cache, render_real_textures
 from .shorelines import highlight_shoreline
+from cwr_worldgen.debug_layers import (
+    WorldgenDebugLayers, find_worldgen_debug_layers, load_worldgen_debug_layers,
+)
 from .texture_location_export import export_texture_location_atlas
 from .object_location_export import export_object_location_atlas
 from .export_naming import island_export_stem
@@ -142,6 +145,8 @@ class IslandStudio:
         self.show_shorelines = tk.BooleanVar(value=True)
         self.height_scale = tk.StringVar(value="0.045")
         self.layer = tk.StringVar(value="Elevation")
+        self.debug_layer = tk.StringVar(value="Off")
+        self.debug_data: WorldgenDebugLayers | None = None
         self.tool = tk.StringVar(value="Select")
         # View a newly opened loose world safely until editing is requested.
         self.readonly_checked = tk.BooleanVar(value=True)
@@ -246,6 +251,16 @@ class IslandStudio:
             state="readonly", values=("Elevation", "Texture slots", "Actual textures", "Road preview"),
         ).pack(fill="x", pady=(4, 7))
         self.layer.trace_add("write", lambda *_: self._layer_changed())
+        ttk.Label(side, text="Worldgen debug overlay").pack(anchor="w")
+        self.debug_combo = ttk.Combobox(
+            side, textvariable=self.debug_layer, state="readonly", values=("Off",),
+        )
+        self.debug_combo.pack(fill="x", pady=(3, 2))
+        self.debug_layer.trace_add("write", lambda *_: self._queue_draw())
+        ttk.Button(side, text="Load Worldgen debug layers…",
+                   command=self._load_worldgen_debug_dialog).pack(
+            fill="x", pady=(0, 7),
+        )
         ttk.Checkbutton(
             side, text="Show world objects", variable=self.show_objects,
             command=self._queue_draw,
@@ -409,6 +424,10 @@ class IslandStudio:
         self.utilities_menu.add_command(
             label="Export Texture Location Map…",
             command=self._export_texture_location_map,
+        )
+        self.utilities_menu.add_command(
+            label="Load Worldgen Debug Layers…",
+            command=self._load_worldgen_debug_dialog,
         )
         self.utilities_menu.add_command(
             label="Export Object Locations…",
@@ -984,10 +1003,54 @@ class IslandStudio:
                 self._messages.put(("error", str(exc)))
         self._executor.submit(load)
 
+    def _load_worldgen_debug_dialog(self) -> None:
+        if self.document is None or self._busy:
+            return
+        chosen = filedialog.askopenfilename(
+            title="Open Worldgen debug layers for this WRP",
+            filetypes=[("Worldgen debug layers", "*.npz")],
+        )
+        if not chosen:
+            return
+        try:
+            self._attach_worldgen_debug(Path(chosen))
+        except (ValueError, OSError, KeyError) as exc:
+            messagebox.showerror("Worldgen Debug Layers", str(exc))
+
+    def _attach_worldgen_debug(self, path: Path) -> None:
+        doc = self.document
+        if doc is None:
+            raise ValueError("Open a world before loading Worldgen debug layers")
+        debug = load_worldgen_debug_layers(
+            path, world_width=doc.world_width, world_height=doc.world_height,
+            wrp_path=doc.path,
+        )
+        self.debug_data = debug
+        self.debug_combo.configure(values=("Off", *debug.choices))
+        self.debug_layer.set("OSM forest")
+        self.status.set(f"Worldgen debug layers loaded: {path.name}")
+        self._queue_draw()
+
     def _accept_document(self, doc: IslandDocument) -> None:
         if self.document:
             self._retire_current_world()
         self.document = doc
+        self.debug_data = None
+        if getattr(self, "debug_layer", None) is not None:
+            self.debug_layer.set("Off")
+        if getattr(self, "debug_combo", None) is not None:
+            self.debug_combo.configure(values=("Off",))
+        # Source WRP is normally output/source/name/name.wrp, and the PBO
+        # is output/@mod/Addons/name.pbo. Both can find the opt-in sidecar
+        # at output/name-worldgen-debug.npz, without including it in the PBO.
+        archive = getattr(doc, "_archive_owner", None)
+        source = Path(getattr(archive, "path", doc.path))
+        debug_path = find_worldgen_debug_layers(source, source.stem)
+        if debug_path is not None and getattr(self, "debug_combo", None) is not None:
+            try:
+                self._attach_worldgen_debug(debug_path)
+            except (ValueError, OSError, KeyError):
+                self.debug_data = None
         if hasattr(doc, "set_model_categories"):
             doc.set_model_categories({
                 path: info for path, info in getattr(self, "_model_categories", {}).items()
@@ -1297,6 +1360,17 @@ class IslandStudio:
                     pixels = highlight_shoreline(
                         pixels, heights, water_level=water_level,
                         height_scale=self.document.height_scale,
+                    )
+            selected_debug = (
+                self.debug_layer.get() if getattr(self, "debug_layer", None)
+                is not None else "Off"
+            )
+            debug = getattr(self, "debug_data", None)
+            if debug is not None and selected_debug != "Off":
+                key = debug.name_key(selected_debug)
+                if key is not None:
+                    pixels = debug.composite(
+                        pixels, key, left=left, top=top, right=right, bottom=bottom,
                     )
             image = Image.fromarray(pixels, "RGB")
             self._image = ImageTk.PhotoImage(image, master=self.canvas)
@@ -1645,7 +1719,22 @@ class IslandStudio:
             self.cursor_info.set("")
             return
         x, z = self._to_world(*self._hover_screen)
-        self.cursor_info.set(cursor_readout(self.document, x, z, self.layer.get()))
+        message = cursor_readout(self.document, x, z, self.layer.get())
+        debug = getattr(self, "debug_data", None)
+        selected = (self.debug_layer.get() if getattr(self, "debug_layer", None)
+                    is not None else "Off")
+        if debug is not None and selected != "Off":
+            key = debug.name_key(selected)
+            if key is not None:
+                value = debug.sample(key, x, z)
+                if value is not None:
+                    if key in {"semantic_base", "semantic_final"}:
+                        materials = debug.metadata["materials"]
+                        code = materials[value]["code"] if value < len(materials) else "?"
+                        message += f" | Worldgen {selected}: {code} ({value})"
+                    else:
+                        message += f" | Worldgen {selected}: {value}"
+        self.cursor_info.set(message)
 
     def _mouse_leave(self, _event: tk.Event) -> None:
         self._hover_screen = None

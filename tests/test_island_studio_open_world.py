@@ -376,6 +376,7 @@ def test_compare_world_in_top_right_utilities_dropdown(
         _compare_dialog=lambda: called.append("compare"),
         _export_texture_location_map=lambda: called.append("atlas"),
         _export_object_location_map=lambda: called.append("objects"),
+        _load_worldgen_debug_dialog=lambda: called.append("debug"),
     )
     header = object()
     IslandStudio._build_utilities(editor, header)
@@ -390,12 +391,13 @@ def test_compare_world_in_top_right_utilities_dropdown(
     assert menu.options["tearoff"] is False
     assert [item["label"] for item in menu.items] == [
         "Compare World…", "Export Texture Location Map…",
-        "Export Object Locations…",
+        "Load Worldgen Debug Layers…", "Export Object Locations…",
     ]
     menu.items[0]["command"]()
     menu.items[1]["command"]()
     menu.items[2]["command"]()
-    assert called == ["compare", "atlas", "objects"]
+    menu.items[3]["command"]()
+    assert called == ["compare", "atlas", "debug", "objects"]
 
     build_source = inspect.getsource(IslandStudio._build)
     assert "self._build_utilities(header)" in build_source

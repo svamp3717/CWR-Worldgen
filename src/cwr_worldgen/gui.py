@@ -783,6 +783,7 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         "procedural_building_interiors": "--procedural-building-interiors",
         "high_quality_building_textures": "--high-quality-building-textures",
         "forest_undergrowth_textures": "--forest-undergrowth-textures",
+        "debug_layers": "--worldgen-debug-layers",
         "odol_buildings": "--odol-buildings",
         "binarize_config": "--binarize-config",
         "forest_individual_objects_only": "--replace-forest-polygons-with-clusters",
@@ -1051,6 +1052,7 @@ def default_gui_values() -> dict[str, object]:
         "house_style_preset": HOUSE_STYLE_AUTO_LABEL,
         "ground_textures": "nogova",
         "forest_undergrowth_textures": False,
+        "debug_layers": False,
         "forest_profile": "everon",
         "strict_assets": False,
         "osm_asset_map": "",
@@ -2588,6 +2590,7 @@ class WorldgenGui(tk.Tk):
             ("Disable all caches", "no_cache"),
             ("Refresh normalized geometry", "normalization_refresh"),
             ("Verify deterministic regeneration (slow)", "verify_regeneration"),
+            ("Export Worldgen debug layers for Island Studio", "debug_layers"),
         )
         for index, (label, key) in enumerate(option_values):
             check = ttk.Checkbutton(build_opts, text=label, variable=self._var(key, False, boolean=True))

@@ -92,6 +92,8 @@ from .terrain import (
 )
 from .wrp import inspect_rvw4, quantize_elevations, quantize_height, write_rvw4
 from .forest_ground_blends import apply_stock_forest_border_blends
+from .debug_layers import write_worldgen_debug_layers
+from cwr_island_studio.object_layers import is_forest_model
 from .surface_pass import (
     MILESTONE9_MATERIALS,
     STOCK_SURFACE_TEXTURES,
@@ -4756,6 +4758,21 @@ def build_milestone4(
         renumber_object_ids=True,
     )
 
+    debug_layers_path: Path | None = None
+    if bool(getattr(spec, "debug_layers", False)):
+        report_progress(86, "Exporting Worldgen diagnostic layers for Island Studio")
+        debug_layers_path = output_dir / f"{spec.name}-worldgen-debug.npz"
+        write_worldgen_debug_layers(
+            debug_layers_path, wrp_path=wrp_path, world_name=spec.name,
+            cells=spec.cells, cell_size=spec.cell_size, raster=raster,
+            base_material=base_material_indices,
+            final_material=material_indices,
+            wrp_slots=wrp_texture_indices, materials=materials,
+            forest_objects=(
+                obj for obj in all_objects if is_forest_model(obj.model_path)
+            ),
+        )
+
     surface_manifest: dict[str, object] | None = None
     overview_cache_hit = False
     overview_cache_path: str | None = None
@@ -5670,6 +5687,8 @@ def build_milestone4(
             "height-preview.png": _sha256(height_preview_path),
             "material-preview.png": _sha256(material_preview_path),
             "osm-geography-preview.png": _sha256(osm_preview_path),
+            **({f"{spec.name}-worldgen-debug.npz": _sha256(debug_layers_path)}
+               if debug_layers_path is not None else {}),
             **({
                 "meadow-grass-placement.png": _sha256(meadow_grass_preview_path)
             } if meadow_grass_preview_path is not None else {}),

@@ -456,6 +456,7 @@ class PlayabilitySpec(OsmSpec):
     town_name_limit: int = 64
     deterministic_seed: str = "cwr-worldgen-milestone4"
     verify_regeneration: bool = False
+    debug_layers: bool = False
 
     def validate(self) -> None:
         OsmSpec.validate(self)
