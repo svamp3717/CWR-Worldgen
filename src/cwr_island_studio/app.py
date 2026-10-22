@@ -23,7 +23,7 @@ from .object_layers import is_forest_model, object_marker_mode
 from .cursor_info import cursor_readout
 from .roads import is_road_model, plan_straight_road, road_segment
 from .navigation import center_on_position, pan_with_arrow, parse_game_position, zoom_around
-from .model_bounds import ModelBounds, load_model_bounds, footprint_corners, footprint_contains
+from .model_bounds import ModelBounds, load_model_bounds, footprint_outline, footprint_contains
 from .model_classification import ModelCategory, load_p3d_category
 from .pbo_textures import PboTextures
 from .pbo_worlds import PboWorldArchive
@@ -1391,6 +1391,26 @@ class IslandStudio:
                 for obj in self.document.visible_objects(
                     left, bottom, right, top, limit=3200, roads_only=True,
                 ):
+                    # Original curved/irregular road pieces are not accurately
+                    # represented by a nominal straight-line segment. If the
+                    # first P3D visual LOD is available, use its scaled outline.
+                    bounds = self._model_bounds.get(self._model_key(obj.model_path))
+                    if bounds is not None:
+                        outline = footprint_outline(
+                            bounds, obj.x, obj.z, obj.heading,
+                            basis=(obj.basis_xx, obj.basis_xz, obj.basis_zx, obj.basis_zz),
+                        )
+                        screen = [self._to_screen(*point) for point in outline]
+                        extent = max(
+                            max(p[0] for p in screen) - min(p[0] for p in screen),
+                            max(p[1] for p in screen) - min(p[1] for p in screen),
+                        )
+                        if extent >= 2.0:
+                            self.canvas.create_polygon(
+                                *(v for point in screen for v in point),
+                                fill="", outline="#ed974a", width=2,
+                            )
+                            continue
                     segment = road_segment(obj.x, obj.z, obj.heading, obj.model_path)
                     if segment is None:
                         sx, sz = self._to_screen(obj.x, obj.z)
@@ -1438,7 +1458,7 @@ class IslandStudio:
                 corners = None
                 extent = 0.0
                 if bounds is not None:
-                    corners = footprint_corners(
+                    corners = footprint_outline(
                         bounds, obj.x, obj.z, obj.heading,
                         basis=(obj.basis_xx, obj.basis_xz, obj.basis_zx, obj.basis_zz),
                     )
@@ -1476,7 +1496,7 @@ class IslandStudio:
                 corners = None
                 extent = 0.0
                 if bounds is not None:
-                    corners = footprint_corners(
+                    corners = footprint_outline(
                         bounds, obj.x, obj.z, obj.heading,
                         basis=(obj.basis_xx, obj.basis_xz, obj.basis_zx, obj.basis_zz),
                     )
@@ -1908,7 +1928,7 @@ class IslandStudio:
                     if self.show_model_footprints.get() else None
                 )
                 if bounds is not None and footprint_contains(
-                    footprint_corners(
+                    footprint_outline(
                         bounds, obj.x, obj.z, obj.heading,
                         basis=(obj.basis_xx, obj.basis_xz, obj.basis_zx, obj.basis_zz),
                     ), world_x, world_z,
