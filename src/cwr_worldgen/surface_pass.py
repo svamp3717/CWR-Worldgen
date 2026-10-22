@@ -50,12 +50,11 @@ _EVERON_FARMLAND_TEXTURE = r"Eden\zbh.paa"
 # while the older dirtier Eden grass is reserved for farmland semantics.
 # The remaining semantic classes reuse the compact verified Eden palette.
 MILESTONE9_MATERIALS: tuple[SurfaceMaterialDefinition, ...] = (
-    # Eden's real sea/shore family: ps seabed, sz beach and tn inland.
-    # Four-corner shoreline transitions are attached to the WRP texture table
-    # after semantic materials and optional forest blend tiles are resolved.
+    # ps is the original sandy/seabed ground: sz is stone, NOT beach sand.
+    # Verified ps/tn quadrant tiles blend the sandy coast to normal grass.
     SurfaceMaterialDefinition("w", "seabed/water", (48, 75, 94), r"Eden\ps.paa"),
-    SurfaceMaterialDefinition("q", "wet shoreline", (116, 104, 75), r"Eden\sz.paa"),
-    SurfaceMaterialDefinition("s", "dry shoreline sand", (184, 168, 111), r"Eden\sz.paa"),
+    SurfaceMaterialDefinition("q", "wet shoreline", (116, 104, 75), r"Eden\ps.paa"),
+    SurfaceMaterialDefinition("s", "dry shoreline sand", (184, 168, 111), r"Eden\ps.paa"),
     SurfaceMaterialDefinition("g", "grass", (83, 121, 67), _EVERON_DEFAULT_GRASS_TEXTURE),
     SurfaceMaterialDefinition("h", "dry grass", (119, 126, 73), _EVERON_DEFAULT_GRASS_TEXTURE),
     SurfaceMaterialDefinition("r", "rock", (109, 106, 101), r"o\l1.paa"),
@@ -77,7 +76,7 @@ MILESTONE9_MATERIALS: tuple[SurfaceMaterialDefinition, ...] = (
     SurfaceMaterialDefinition("v", "gravel road", (80, 76, 68), r"Eden\bak\bah.pac"),
     SurfaceMaterialDefinition("j", "park", (96, 127, 67), _EVERON_DEFAULT_GRASS_TEXTURE),
     SurfaceMaterialDefinition("y", "sports field", (103, 132, 74), _EVERON_DEFAULT_GRASS_TEXTURE),
-    SurfaceMaterialDefinition("x", "mapped beach", (194, 174, 116), r"Eden\sz.paa"),
+    SurfaceMaterialDefinition("x", "mapped beach", (194, 174, 116), r"Eden\ps.paa"),
 )
 
 # Nogova is intentionally independent from Everon. General semantic terrain
