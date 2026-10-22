@@ -270,9 +270,13 @@ def footprint_contains(
     )
     if abs(area) <= 1e-9:
         return False
+    # A projected visual LOD can have any number of hull vertices (3..48).
+    # The previous fixed-size loop crashed on triangles and ignored points
+    # after the fourth vertex on larger model silhouettes.
+    size = len(corners)
     crosses = [
-        (corners[(i + 1) % 4][0] - corners[i][0]) * (z - corners[i][1])
-        - (corners[(i + 1) % 4][1] - corners[i][1]) * (x - corners[i][0])
-        for i in range(4)
+        (corners[(i + 1) % size][0] - corners[i][0]) * (z - corners[i][1])
+        - (corners[(i + 1) % size][1] - corners[i][1]) * (x - corners[i][0])
+        for i in range(size)
     ]
     return min(crosses) >= -1e-7 or max(crosses) <= 1e-7
