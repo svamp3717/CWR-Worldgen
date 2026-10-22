@@ -44,9 +44,10 @@ def _corners(path: str) -> tuple[str, str, str, str]:
 
 def test_everon_beach_and_water_use_ps_not_stone_sz() -> None:
     assert STOCK_GROUND_TEXTURES["everon"]["w"] == r"Eden\ps.paa"
-    assert STOCK_GROUND_TEXTURES["everon"]["s"] == r"Eden\ps.paa"
-    for kind in ("w", "q", "s", "x"):
-        assert STOCK_SURFACE_TEXTURES["everon"][kind] == r"Eden\ps.paa"
+    assert STOCK_GROUND_TEXTURES["everon"]["s"] == r"Eden\tn.paa"
+    assert STOCK_SURFACE_TEXTURES["everon"]["w"] == r"Eden\ps.paa"
+    for kind in ("q", "s", "x"):
+        assert STOCK_SURFACE_TEXTURES["everon"][kind] == r"Eden\tn.paa"
     assert STOCK_SURFACE_TEXTURES["everon"]["g"] == r"Eden\tn.paa"
     assert STOCK_SURFACE_TEXTURES["everon"]["a"] == r"Eden\zbh.paa"
     assert r"Eden\sz.paa" not in STOCK_SURFACE_TEXTURES["everon"].values()
@@ -94,6 +95,7 @@ def test_straight_sandy_border_blends_into_grass_without_stone() -> None:
     paths, cells = _shore()
     expanded, indices = apply_everon_water_borders(
         paths, cells.ravel(), width=13,
+        underwater_mask=(cells == 1).ravel(),
     )
     output = np.asarray(indices).reshape(13, 13)
     assert expanded[int(output[6, 1])] == r"eden\ps.paa"
@@ -122,6 +124,7 @@ def test_curved_sandy_coast_maintains_corner_continuity() -> None:
         cells[row, :coast_col] = 1
     expanded, indices = apply_everon_water_borders(
         paths, cells.ravel(), width=21,
+        underwater_mask=(cells == 1).ravel(),
     )
     output = np.asarray(indices).reshape(21, 21)
     assert all("sz" not in p.lower() for p in expanded)
@@ -144,6 +147,7 @@ def test_farmland_is_preserved_and_single_tile_water_survives() -> None:
     cells[6, 6] = 3
     expanded, indices = apply_everon_water_borders(
         paths, cells.ravel(), width=13,
+        underwater_mask=(cells == 1).ravel(),
     )
     output = np.asarray(indices).reshape(13, 13)
     assert output[6, 6] == 3
@@ -153,6 +157,7 @@ def test_farmland_is_preserved_and_single_tile_water_survives() -> None:
     isolated[6, 6] = 1
     _, texture_slots = apply_everon_water_borders(
         paths, isolated.ravel(), width=13,
+        underwater_mask=(isolated == 1).ravel(),
     )
     assert texture_slots[6 * 13 + 6] == 1
 
@@ -161,12 +166,15 @@ def test_no_invented_textures_and_slot_budget() -> None:
     paths, cells = _shore()
     original = cells.ravel().tolist()
     full_paths, unchanged = apply_everon_water_borders(
-        paths, original, width=13, maximum_texture_slots=len(paths),
+        paths, original, width=13,
+        underwater_mask=(cells == 1).ravel(),
+        maximum_texture_slots=len(paths),
     )
     assert full_paths == tuple(paths)
     assert unchanged == original
     expanded, slots = apply_everon_water_borders(
         paths, original, width=13,
+        underwater_mask=(cells == 1).ravel(),
     )
     assert set(expanded[len(paths):]).issubset({
         rf"eden\{stem}.paa" for stem in _EVERON_SHORE_QUARTETS
@@ -174,9 +182,18 @@ def test_no_invented_textures_and_slot_budget() -> None:
     assert len(expanded) <= 512
     assert len(slots) == 13 * 13
     with pytest.raises(ValueError, match="dimensions"):
-        apply_everon_water_borders(paths, original, width=12)
+        apply_everon_water_borders(
+            paths, original, width=12, underwater_mask=(cells == 1).ravel(),
+        )
     with pytest.raises(ValueError, match="missing paths"):
-        apply_everon_water_borders(paths, [999] * 169, width=13)
+        apply_everon_water_borders(
+            paths, [999] * 169, width=13,
+            underwater_mask=(cells == 1).ravel(),
+        )
+    with pytest.raises(ValueError, match="underwater mask"):
+        apply_everon_water_borders(
+            paths, original, width=13, underwater_mask=[True] * 13,
+        )
 
 
 def test_4wvr_export_and_generation_use_exact_ps_tn_paths(tmp_path) -> None:
@@ -184,26 +201,29 @@ def test_4wvr_export_and_generation_use_exact_ps_tn_paths(tmp_path) -> None:
     mats = np.full((size, size), MATERIAL_INDEX["g"], dtype=np.int32)
     mats[:, :4] = MATERIAL_INDEX["w"]
     mats[:, 4:6] = MATERIAL_INDEX["s"]
-    # Sand and underwater are both ps, so the boundary to tn is only
-    # at the last dry shore column, not between w and s.
+    # The water must be below the plane; dry shore classifications stay tn.
+    heights = np.full((size, size), 2.5, dtype=np.float64)
+    heights[:, :4] = -2.0
     spec = SimpleNamespace(
         name="demo", ground_texture_profile="everon",
         surface_pass_enabled=True, surface_ground_mode="milestone9",
-        forest_undergrowth_textures=False, cells=size,
+        forest_undergrowth_textures=False, cells=size, sea_level=0.0,
         dummy_texture_path=r"demo\data\d.paa",
     )
     raster = SimpleNamespace(forest=np.zeros(size * size, dtype=bool))
     paths, slots = generator._stock_ground_texture_table(
         spec, mats.ravel(), raster, MILESTONE9_MATERIALS,
+        elevations=heights.ravel(),
     )
     result = np.asarray(slots).reshape(size, size)
     assert paths[int(result[6, 2])].casefold() == r"eden\ps.paa"
-    assert paths[int(result[6, 4])].casefold() == r"eden\ps.paa"
-    assert paths[int(result[6, 5])].casefold() == r"eden\pstnpstn.paa"
+    assert paths[int(result[6, 3])].casefold() == r"eden\pstnpstn.paa"
+    assert paths[int(result[6, 4])].casefold() == r"eden\tn.paa"
+    assert paths[int(result[6, 5])].casefold() == r"eden\tn.paa"
     assert paths[int(result[6, 8])].casefold() == r"eden\tn.paa"
     assert not any("sz" in path.casefold() for path in paths)
     wrp = tmp_path / "everon_ps_coast.wrp"
-    write_rvw4(wrp, size, size, [10.0] * (size * size),
+    write_rvw4(wrp, size, size, heights.ravel().tolist(),
                slots, paths, (), height_scale=0.05)
     parsed = inspect_rvw4(wrp, height_scale=0.05)
     assert {p.casefold() for p in parsed.texture_paths} == {
@@ -239,3 +259,61 @@ def test_water_border_manifest_paths_are_only_ps_tn() -> None:
     assert not is_everon_water_blend_path(r"eden\pltnpltn.paa")
     assert not is_everon_water_blend_path(r"eden\ps.paa")
     assert not is_everon_water_blend_path(r"o\pstnpstn.paa")
+
+
+def test_dry_water_semantic_and_above_water_ps_are_never_painted() -> None:
+    paths, cells = _shore()
+    wet = (cells == 1)
+    wet[4, 3] = False
+    expanded, slots = apply_everon_water_borders(
+        paths, cells.ravel(), width=13, underwater_mask=wet.ravel(),
+    )
+    result = np.asarray(slots).reshape((13, 13))
+    assert expanded[int(result[4, 3])] == r"eden\tn.paa"
+    for row, col in np.argwhere(~wet):
+        texture = expanded[int(result[row, col])].casefold()
+        assert texture != r"eden\ps.paa"
+        assert not is_everon_water_blend_path(texture)
+    one = np.full((13, 13), 2, dtype=np.int32)
+    one[6, 6] = 1
+    submerged = np.zeros((13, 13), dtype=np.bool_)
+    submerged[6, 6] = True
+    _, underwater_slots = apply_everon_water_borders(
+        paths, one.ravel(), width=13, underwater_mask=submerged.ravel(),
+    )
+    _, dry_slots = apply_everon_water_borders(
+        paths, one.ravel(), width=13, underwater_mask=np.zeros(169, dtype=bool),
+    )
+    assert underwater_slots[6 * 13 + 6] == 1
+    assert dry_slots[6 * 13 + 6] == 2
+
+
+def test_generator_uses_configured_sea_level_and_requires_final_elevations() -> None:
+    size = 13
+    spec = SimpleNamespace(
+        name="demo", ground_texture_profile="everon",
+        surface_pass_enabled=True, surface_ground_mode="milestone9",
+        forest_undergrowth_textures=False, cells=size, sea_level=7.5,
+        dummy_texture_path=r"demo\data\d.paa",
+    )
+    mats = np.full((size, size), MATERIAL_INDEX["g"], dtype=np.int32)
+    mats[:, 0:4] = MATERIAL_INDEX["w"]
+    heights = np.full((size, size), 7.6)
+    heights[:, 0:2] = 7.5
+    raster = SimpleNamespace(forest=np.zeros(size * size, dtype=bool))
+    with pytest.raises(ValueError, match="final WRP elevations"):
+        generator._stock_ground_texture_table(
+            spec, mats.ravel(), raster, MILESTONE9_MATERIALS,
+        )
+    paths, slots = generator._stock_ground_texture_table(
+        spec, mats.ravel(), raster, MILESTONE9_MATERIALS,
+        elevations=heights.ravel(),
+    )
+    result = np.asarray(slots).reshape((size, size))
+    assert paths[int(result[6, 0])].casefold() == r"eden\ps.paa"
+    for row in range(size):
+        for col in range(size):
+            if heights[row, col] > spec.sea_level:
+                texture = paths[int(result[row, col])].casefold()
+                assert texture != r"eden\ps.paa"
+                assert not is_everon_water_blend_path(texture)
