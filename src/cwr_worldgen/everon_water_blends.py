@@ -56,9 +56,10 @@ def _resolve_missing_ps_tn_diagonal(vertices: np.ndarray) -> None:
     """Resolve missing NE+SW grass diagonal without breaking shared corners.
 
     Eden has 13/14 binary quartet paths: only geographic mask 9 is missing.
-    Remove the SW grass vertex from such a cell, updating the same vertex for
-    its neighbours. Removal is monotone and terminates even for patterns of
-    multiple adjacent missing diagonals.
+    Turn the shared NW sand vertex to grass. Crucially, this NEVER
+    introduces a new ps corner into a dry cell, unlike the previous
+    SW-grass-to-ps fallback. Expanding grass is monotone and terminates
+    even for neighbouring missing diagonals.
     """
     while True:
         ne, nw = vertices[1:, 1:], vertices[1:, :-1]
@@ -67,7 +68,7 @@ def _resolve_missing_ps_tn_diagonal(vertices: np.ndarray) -> None:
         if not np.any(missing):
             return
         rows, cols = np.nonzero(missing)
-        vertices[rows, cols] = 0
+        vertices[rows + 1, cols] = 1
 
 
 def apply_everon_water_borders(
@@ -123,9 +124,10 @@ def apply_everon_water_borders(
         return tuple(paths), original.ravel().tolist()
 
     # A vertex on the dry side MUST be tn, even though its underwater
-    # neighbor may be ps. Therefore the wet tile's border blends all the
-    # way into tn at the coastline; a dry cell stays pure tn. Shared
-    # vertices also ensure adjacent wet tiles agree on their borders.
+    # neighbor may be ps. That also applies to protected forest, road,
+    # rock and farmland cells: treating their vertices as unusable (-1)
+    # caused nearby underwater ps cells to fall back to hard square tiles.
+    # We blend the submerged cell to grass, never editing the protected cell.
     padded = np.pad(centres, 1, constant_values=-2)
     neighbours = (
         padded[:-1, :-1], padded[:-1, 1:],
@@ -133,21 +135,35 @@ def apply_everon_water_borders(
     )
     protected = np.logical_or.reduce(tuple(a == -1 for a in neighbours))
     grass_touches = np.logical_or.reduce(tuple(a == 1 for a in neighbours))
-    vertices = np.where(grass_touches, 1, 0).astype(np.int8)
-    vertices[protected] = -1
+    vertices = np.where(grass_touches | protected, 1, 0).astype(np.int8)
     _resolve_missing_ps_tn_diagonal(vertices)
     ne, nw = vertices[1:, 1:], vertices[1:, :-1]
     se, sw = vertices[:-1, 1:], vertices[:-1, :-1]
 
-    # No ps-containing directional texture ever gets assigned above water.
-    valid = (
-        (centres == 0) & submerged
-        & (ne >= 0) & (nw >= 0) & (se >= 0) & (sw >= 0)
-    )
-    # Avoid swallowing a small water body whose four vertices face grass.
-    valid &= ((ne == 0) | (nw == 0) | (se == 0) | (sw == 0))
-    # There is no need to remap an all-ps cell.
-    valid &= ~((ne == 0) & (nw == 0) & (se == 0) & (sw == 0))
+    underwater_ps = (centres == 0) & submerged
+    all_grass = (ne == 1) & (nw == 1) & (se == 1) & (sw == 1)
+    all_ps = (ne == 0) & (nw == 0) & (se == 0) & (sw == 0)
+
+    # This was the source of the missing borders in the screenshot:
+    # a 1-cell-wide or isolated submerged ps tile touching dry grass on
+    # every corner has NO ps corner to interpolate. Formerly we skipped
+    # it and rendered the full ps tile as a conspicuous square. The only
+    # stock tile consistent with four surrounding tn corners is tn.
+    # Keep water depth and semantic masks unchanged; only its WRP texture
+    # falls back to grass where a continuous ps/tn border is impossible.
+    thin_water = underwater_ps & all_grass
+    if np.any(thin_water):
+        grass_slot = next(
+            (i for i, code in enumerate(kind_by_slot) if code == 1), None
+        )
+        if grass_slot is None:
+            raise ValueError("Everon tn grass slot required for shoreline borders")
+        original[thin_water] = grass_slot
+
+    # Assign stock directional blends to the remaining underwater ps
+    # cells only. All-dry cells are untouched, and all-ps interiors already
+    # have their correct solid texture.
+    valid = underwater_ps & (~all_ps) & (~all_grass)
     if not np.any(valid):
         return tuple(paths), original.ravel().tolist()
 
