@@ -43,7 +43,7 @@ def everon_shore_blend_path(
 
 def is_everon_water_blend_path(path: str) -> bool:
     """True only for a literal directional quartet from original eden.wrp."""
-    normalized = path.replace("/", "\\").casefold()
+        normalized = path.replace("/", "\\").casefold()
     prefix = "eden\\"
     suffix = ".paa"
     return (
