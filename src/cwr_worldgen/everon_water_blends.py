@@ -43,7 +43,7 @@ def everon_shore_blend_path(
 
 def is_everon_water_blend_path(path: str) -> bool:
     """True only for a literal directional quartet from original eden.wrp."""
-        normalized = path.replace("/", "\\").casefold()
+    normalized = path.replace("/", "\\").casefold()
     prefix = "eden\\"
     suffix = ".paa"
     return (
@@ -100,7 +100,7 @@ def apply_everon_water_borders(
     submerged = wet.reshape(height, width)
     kind_by_slot = np.full(len(paths), -1, dtype=np.int8)
     for slot, path in enumerate(paths):
-        normalized = path.replace("/", "\\\\").casefold()
+        normalized = path.replace("/", "\\").casefold()
         for code, family in enumerate(_EVERON_SHORE_BASE):
             if normalized == family:
                 kind_by_slot[slot] = code
