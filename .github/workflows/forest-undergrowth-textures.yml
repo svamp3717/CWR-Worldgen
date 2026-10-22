@@ -8,12 +8,14 @@ on:
     paths:
       - "src/cwr_worldgen/terrain.py"
       - "src/cwr_worldgen/forest_ground_blends.py"
+      - "src/cwr_worldgen/everon_water_blends.py"
       - "src/cwr_worldgen/surface_pass.py"
       - "src/cwr_worldgen/generator.py"
       - "src/cwr_worldgen/milestone9.py"
       - "src/cwr_worldgen/gui.py"
       - "src/cwr_worldgen/cli.py"
       - "tests/test_forest_undergrowth_textures.py"
+      - "tests/test_everon_water_blends.py"
       - "tests/test_milestone9.py"
       - ".github/workflows/forest-undergrowth-textures.yml"
   workflow_dispatch:
@@ -38,6 +40,9 @@ jobs:
       - name: Check forest texture and GUI controls
         run: |
           python -m pytest -q tests/test_forest_undergrowth_textures.py
+      - name: Verify Everon original-water shoreline textures and WRP output
+        run: |
+          python -m pytest -q tests/test_everon_water_blends.py
       - name: Malden and Kolgujev coast classification
         run: |
           python -m pytest -q tests/test_milestone9.py -k test_malden_kolgujev_remove_dry_beach_but_keep_water
