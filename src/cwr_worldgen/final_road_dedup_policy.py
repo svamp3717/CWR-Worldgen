@@ -1100,18 +1100,36 @@ def _replacement_dirt_underlay_object(
     )
     centre = (start + end) * 0.5
     point = _axis_point(axis, centre)
+    gravel = axis.family in {"asf", "gravel"}
+    model_path = (
+        _p.custom_road_model_path(
+            str(getattr(spec, "name", "world")),
+            "gravel",
+            float(axis.half_width) * 2.0,
+            end - start,
+        )
+        if gravel else _replacement_dirt_model_path(
+            obj, axis, nominal, end - start, spec,
+        )
+    )
+    # A generated model has its visible road skin 25 mm above the local
+    # origin. The numerical start/end heights above represent the VISUAL
+    # surface, not local origin height. Compensate exactly as the normal
+    # road placer does, including pitch. This also fixes generated dirt.
+    generated = (
+        _p.is_generated_gravel_road_model(model_path)
+        or _p.is_generated_dirt_road_model(model_path)
+    )
+    visual_origin = (
+        _p.GENERATED_GRAVEL_VISUAL_TOP_METRES * math.cos(math.radians(pitch))
+        if generated else 0.0
+    )
     return replace(
         obj,
         object_id=int(object_id),
-        model_path=_replacement_dirt_model_path(
-            obj,
-            axis,
-            nominal,
-            end - start,
-            spec,
-        ),
+        model_path=model_path,
         x=point[0],
-        y=(start_y + end_y) * 0.5,
+        y=(start_y + end_y) * 0.5 - visual_origin,
         z=point[1],
         pitch_degrees=pitch,
     )
@@ -1309,8 +1327,9 @@ def _trim_dirt_under_paved(report, spec):
             return value
 
         terminal_nominal, terminal_length = variants[-1]
-        # Stock asf must never bridge the paved footprint. Short generated
-        # connectors fill the leftover 25/12/6 m stock tiling gaps instead.
+        # No stock asf slab crosses paving. Generated exact-length connectors
+        # fill the tiling gap, and a pitched generated terminal intentionally
+        # continues UNDER asphalt, rather than stopping at its edge.
         gravel_approach = dirt.family in {"asf", "gravel"}
         clear_intervals = _clear_intervals(dirt.length, blocked)
         for clear_start, clear_end in clear_intervals:
@@ -1373,7 +1392,7 @@ def _trim_dirt_under_paved(report, spec):
                 ),
                 None,
             )
-            if left_block is not None and not gravel_approach:
+            if left_block is not None:
                 span = _terminal_underlay_span(
                     clear_start,
                     clear_end,
@@ -1407,7 +1426,7 @@ def _trim_dirt_under_paved(report, spec):
                 ),
                 None,
             )
-            if right_block is not None and not gravel_approach:
+            if right_block is not None:
                 span = _terminal_underlay_span(
                     clear_start,
                     clear_end,
