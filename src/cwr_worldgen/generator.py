@@ -97,6 +97,9 @@ from .everon_water_blends import apply_everon_water_borders, is_everon_water_ble
 from .stock_water_ground_blends import (
     apply_stock_underwater_borders, is_stock_water_blend_path,
 )
+from .nogova_water_blends import (
+    apply_nogova_underwater_borders, is_nogova_water_blend_path,
+)
 from .debug_layers import write_worldgen_debug_layers
 from cwr_island_studio.object_layers import is_forest_model
 from .surface_pass import (
@@ -2134,7 +2137,7 @@ def _stock_ground_texture_table(
             ),
             enabled=True,
         )
-    if profile in {"everon", "malden", "kolgujev"}:
+    if profile in {"everon", "malden", "kolgujev", "nogova"}:
         if elevations is None:
             raise ValueError(f"{profile} underwater textures require final WRP elevations")
         heights = np.asarray(elevations, dtype=np.float64).reshape(-1)
@@ -2143,6 +2146,11 @@ def _stock_ground_texture_table(
         underwater_mask = heights <= float(spec.sea_level)
         if profile == "everon":
             paths, indices = apply_everon_water_borders(
+                paths, indices, width=spec.cells,
+                underwater_mask=underwater_mask,
+            )
+        elif profile == "nogova":
+            paths, indices = apply_nogova_underwater_borders(
                 paths, indices, width=spec.cells,
                 underwater_mask=underwater_mask,
             )
@@ -4826,15 +4834,17 @@ def build_milestone4(
         surface_manifest["wrp_texture_paths"] = list(ground_texture_paths)
         added_ground_paths = texture_table_paths[1 + len(ground_texture_paths):]
         ground_profile = _ground_texture_profile(spec)
-        is_water_blend = lambda path: (
-            is_everon_water_blend_path(path) if ground_profile == "everon"
-            else is_stock_water_blend_path(ground_profile, path)
-        )
+        def is_water_blend(path: str) -> bool:
+            if ground_profile == "everon":
+                return is_everon_water_blend_path(path)
+            if ground_profile == "nogova":
+                return is_nogova_water_blend_path(path)
+            return is_stock_water_blend_path(ground_profile, path)
         if bool(getattr(spec, "forest_undergrowth_textures", False)):
             surface_manifest["wrp_forest_border_blend_paths"] = [
                 path for path in added_ground_paths if not is_water_blend(path)
             ]
-        if ground_profile in {"everon", "malden", "kolgujev"}:
+        if ground_profile in {"everon", "malden", "kolgujev", "nogova"}:
             surface_manifest["wrp_water_border_blend_paths"] = [
                 path for path in added_ground_paths if is_water_blend(path)
             ]
