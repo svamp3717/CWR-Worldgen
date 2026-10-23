@@ -28,17 +28,17 @@ _EDGE_SAFETY_METRES = 0.035
 _MIN_EDGE_MODEL_METRES = 0.5
 
 
-def _visual_footprint(axis, *, overlap: float):
+def _visual_footprint(axis, *, overlap: float, lateral_padding: float = 0.0):
     from . import final_road_dedup_policy as road
 
     if overlap <= 0.0:
-        return road._surface_polygon(axis)
+        return road._surface_polygon(axis, padding=lateral_padding)
     # Gravel/dirt ribbons have a visual lip at *both* ends. Axis-only
     # intersection tests miss these 0.9 m faces even when nominally clipped.
     x0, z0 = axis.start
     x1, z1 = axis.end
     ux, uz = axis.ux, axis.uz
-    width = axis.half_width
+    width = axis.half_width + lateral_padding
     nx, nz = -uz, ux
     return (
         (x0 - ux * overlap + nx * width, z0 - uz * overlap + nz * width),
@@ -143,7 +143,13 @@ def enforce_visible_road_priority(report, spec, elevations: Sequence[float]):
                 if is_generated and not edge else 0.0
             )
             polygon = road._surface_polygon(axis)
-            painted_polygon = _visual_footprint(axis, overlap=lip)
+            curved_padding = (
+                road._generated_curve_padding(obj.model_path, axis)
+                if axis.curved_model else 0.0
+            )
+            painted_polygon = _visual_footprint(
+                axis, overlap=lip, lateral_padding=curved_padding,
+            )
             possible = set()
             for bucket in road._polygon_buckets(painted_polygon):
                 possible.update(buckets.get(bucket, ()))
@@ -168,6 +174,11 @@ def enforce_visible_road_priority(report, spec, elevations: Sequence[float]):
                 output.append(obj)
                 continue
             changed = True
+            if axis.curved_model:
+                # A custom or stock curve's visual ribbon bows outside the
+                # chord's rectangular axis. A straight cutout would create an
+                # incorrect shape; do not leave painted road faces in paving.
+                continue
             if not nominal_intervals:
                 # Nominal model rectangle is safe, but the 0.9m translucent
                 # painted lip reaches asphalt. Same P3D, without either lip.
