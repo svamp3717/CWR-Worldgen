@@ -658,7 +658,7 @@ def _paved_curve_degrees(subtype: str) -> int:
 
 _CUSTOM_ROAD_SUBTYPE = re.compile(
     r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
-    r"(?P<length>\d{4})(?:_(?P<side>[lr])(?P<curve>\d{3}))?$",
+    r"(?P<length>\d{4})(?:_(?P<side>[lr])(?P<curve>\d{3}))?(?P<edge>_edge)?$",
     re.IGNORECASE,
 )
 
@@ -839,12 +839,15 @@ def _gravel_visual_lod(
     curve_degrees: int,
     texture: str,
     surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
+    *,
+    flush_ends: bool = False,
 ) -> _Lod:
-    """Build a softly irregular gravel ribbon with terrain-visible outer verges."""
+    """Build a gravel/dirt ribbon, optionally without painted overlap lips."""
 
     visual_section_count = max(6, min(20, int(math.ceil(length / GENERATED_GRAVEL_EDGE_SECTION_METRES))))
     full_sections = _road_ribbon_sections(
-        length, half_width, curve_degrees, overhang=GENERATED_GRAVEL_VISUAL_OVERLAP_METRES,
+        length, half_width, curve_degrees,
+        overhang=(0.0 if flush_ends else GENERATED_GRAVEL_VISUAL_OVERLAP_METRES),
         section_count=visual_section_count,
     )
     centres = [((sec[0] + sec[2]) * 0.5, (sec[1] + sec[3]) * 0.5) for sec in full_sections]
@@ -884,7 +887,8 @@ def _gravel_visual_lod(
 
     visual = _ribbon_lod(
         tuple(sections), texture=texture, resolution=_VISUAL_LOD,
-        height=GENERATED_GRAVEL_VISUAL_TOP_METRES, lowered_overlap=True,
+        height=GENERATED_GRAVEL_VISUAL_TOP_METRES,
+        lowered_overlap=not flush_ends,
         double_sided=True, u_span_override=1.0,
         surface_style=surface_style,
     )
@@ -1750,7 +1754,8 @@ def _road_lods(
         # ribbon geometry. Their textures keep the surface families visually
         # distinct while preserving identical connection behaviour.
         visual = _gravel_visual_lod(
-            length, half_w, curve_degrees, texture, surface_style
+            length, half_w, curve_degrees, texture, surface_style,
+            flush_ends=subtype.endswith("_edge"),
         )
 
     # Keep road simulation on the first Resolution LOD, but also emit a face-less
@@ -2049,8 +2054,14 @@ def custom_road_model_path(
     width_metres: float,
     length_metres: float,
     curve_degrees: float = 0.0,
+    *,
+    flush_ends: bool = False,
 ) -> str:
-    """Return a reusable generated road model for geometry absent from stock CWA."""
+    """Return a reusable generated road model for geometry absent from stock CWA.
+
+    ``flush_ends`` disables gravel/dirt visual overlap lips for final road
+    approaches that meet a higher-priority surface. The Roadway LOD remains.
+    """
 
     surface = str(surface).strip().casefold()
     if surface not in {"paved", "gravel", "dirt"}:
@@ -2065,6 +2076,10 @@ def custom_road_model_path(
     if magnitude >= 1:
         side = "r" if signed > 0.0 else "l"
         suffix = f"_{side}{magnitude:03d}"
+    if flush_ends:
+        if surface == "paved":
+            raise ValueError("flush-ends road model is only for dirt/gravel")
+        suffix += "_edge"
     return (
         rf"{world_name}\i\road_{surface}_w{width_dm:03d}_l{length_dm:04d}"
         rf"{suffix}.p3d"
@@ -2240,7 +2255,7 @@ class ProceduralInfrastructureLibrary:
     )
     _CUSTOM_ROAD_PATTERN = re.compile(
         r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
-        r"(?P<length>\d{4})(?:_[lr]\d{3})?\.p3d$",
+        r"(?P<length>\d{4})(?:_[lr]\d{3})?(?:_edge)?\.p3d$",
         re.IGNORECASE,
     )
     _CUSTOM_ROAD_JUNCTION_PATTERN = re.compile(
