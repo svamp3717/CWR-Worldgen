@@ -95,7 +95,7 @@ _GENERATED_PAVED = re.compile(
 )
 _CUSTOM_ROAD = re.compile(
     r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
-    r"(?P<length>\d{4})(?P<curve>_[lr]\d{3})?\.p3d$",
+    r"(?P<length>\d{4})(?P<curve>_[lr]\d{3})?(?:_edge)?\.p3d$",
     re.I,
 )
 _GRAVEL_STRAIGHT = re.compile(r"^gravel(?P<nominal>25|12|6|3)\.p3d$", re.I)
