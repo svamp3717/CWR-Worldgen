@@ -1933,11 +1933,16 @@ def install_final_road_dedup_policy() -> None:
             progress_callback=progress_callback,
         )
         aligned = _align_final_paved_curve_handedness(deduplicated, spec)
-        # The final, quantized road objects still need lateral terrain banking.
-        # Original real-world WRP crossings showed uphill gravel verges hidden
-        # 7-12 cm beneath the slope even after the normal pitch calculation.
+        # CWA can draw lower-priority road artwork over higher asphalt even
+        # when the two meshes have correct WRP elevations. Do not rely on the
+        # deliberately buried underlay faces to disappear in this renderer.
+        # Clip the final visual footprints *before* banking exposed approaches.
+        from .road_visible_surface_priority import enforce_visible_road_priority
+        clipped = enforce_visible_road_priority(aligned, spec, elevations)
+        # Original real-world WRP crossings also had uphill gravel verges
+        # hidden 7-12 cm beneath the ground: fit the remaining exposed skin.
         from .road_cross_slope_grounding import ground_generated_approaches
-        return ground_generated_approaches(aligned, spec, elevations)
+        return ground_generated_approaches(clipped, spec, elevations)
 
     _p.fit_road_objects = deduplicating_fit
     _generator.fit_road_objects = deduplicating_fit
