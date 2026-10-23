@@ -383,9 +383,14 @@ class SurfacePassTests(unittest.TestCase):
             ordinary = paths[MATERIAL_INDEX["g"]]
             for code in ("q", "s", "x"):
                 assert paths[MATERIAL_INDEX[code]] == ordinary, (preset, code)
-            # Water stays classified as water, but its WRP texture is the
-            # same ground artwork as the rest of the island.
-            assert paths[MATERIAL_INDEX["w"]] == ordinary, preset
+            # Water remains classified as water and now uses each island's
+            # real original offshore texture. Only cells at/below sea level
+            # are allowed to receive that texture in the final WRP.
+            expected_seabed = (
+                r"abel\pi.paa" if preset == "malden" else r"cain\l4.paa"
+            )
+            assert paths[MATERIAL_INDEX["w"]] == expected_seabed, preset
+            assert paths[MATERIAL_INDEX["w"]] != ordinary
         # Do not strip beach / shoreline classes from other terrain presets.
         assert everon.wet_shoreline_cells > 0
         assert everon.dry_shoreline_cells > 0

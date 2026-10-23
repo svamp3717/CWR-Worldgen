@@ -91,11 +91,12 @@ def _base_texture_table(profile: str = "everon") -> tuple[str, ...]:
 
 def test_kolgujev_uses_one_main_cain_land_tile() -> None:
     paths = surface_pass.surface_texture_wire_paths("wg_kolgujev", "kolgujev")
-    # Including water: Nogova-style ground texturing keeps the normal
-    # undersea terrain covered by the same ordinary land artwork.
+    # Only submerged Cain terrain uses original l4; all dry classes stay
+    # on the ordinary j9 tile, not bright forest or rock artwork.
+    assert paths[surface_pass.MATERIAL_INDEX["w"]] == r"cain\l4.paa"
     for material in surface_pass.MILESTONE9_MATERIALS:
-        assert paths[surface_pass.MATERIAL_INDEX[material.code]] == r"cain\j9.paa"
-    assert r"cain\l4.paa" not in paths
+        if material.code != "w":
+            assert paths[surface_pass.MATERIAL_INDEX[material.code]] == r"cain\j9.paa"
 
     # Forest, farmland and mountain semantics must not introduce their old
     # high-contrast Cain tiles. They remain semantic masks only.
@@ -116,7 +117,7 @@ def test_kolgujev_uses_one_main_cain_land_tile() -> None:
         )
     )
     assert legacy == (
-        r"cain\j9.paa",
+        r"cain\l4.paa",
         r"cain\j9.paa",
         r"cain\j9.paa",
         r"cain\j9.paa",
@@ -146,8 +147,7 @@ def test_kolgujev_surface_writer_emits_no_world_local_ground_tiles(tmp_path) -> 
 def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
     paths = surface_pass.surface_texture_wire_paths("wg_malden", "malden")
 
-    assert paths[surface_pass.MATERIAL_INDEX["w"]] == r"abel\tt.paa"
-    assert r"abel\pi.paa" not in paths
+    assert paths[surface_pass.MATERIAL_INDEX["w"]] == r"abel\pi.paa"
     assert paths[surface_pass.MATERIAL_INDEX["g"]] == r"abel\tt.paa"
     assert paths[surface_pass.MATERIAL_INDEX["f"]] == r"abel\tt.paa"
     assert paths[surface_pass.MATERIAL_INDEX["e"]] == r"abel\tt.paa"
@@ -171,7 +171,7 @@ def test_malden_classic_uses_stock_abel_ground_tiles() -> None:
         )
     )
     assert legacy == (
-        r"abel\tt.paa",
+        r"abel\pi.paa",
         r"abel\tt.paa",
         r"abel\tt.paa",
         r"abel\tt.paa",
