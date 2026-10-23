@@ -397,6 +397,8 @@ class Milestone9Spec(Milestone8Spec):
     forest_cluster_bush_maximum_float: float = 0.60
     forest_cluster_footprint_margin: float = 0.75
     forest_undergrowth_enabled: bool = True
+    nogova_terrain_clutter_enabled: bool = False
+    nogova_terrain_clutter_maximum_objects: int = 20000
     forest_undergrowth_maximum_objects: int = 120000
     forest_undergrowth_spacing: float = 30.0
     forest_undergrowth_maximum_relief: float = 20.0
@@ -887,6 +889,8 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     forest_cluster_bush_maximum_float: float = 0.60
     forest_cluster_footprint_margin: float = 0.75
     forest_undergrowth_enabled: bool = True
+    nogova_terrain_clutter_enabled: bool = False
+    nogova_terrain_clutter_maximum_objects: int = 20000
     forest_undergrowth_maximum_objects: int = 120000
     forest_undergrowth_spacing: float = 30.0
     forest_undergrowth_maximum_relief: float = 20.0
@@ -1417,6 +1421,8 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         forest_cluster_bush_maximum_float=spec.forest_cluster_bush_maximum_float,
         forest_cluster_footprint_margin=spec.forest_cluster_footprint_margin,
         forest_undergrowth_enabled=spec.forest_undergrowth_enabled,
+        nogova_terrain_clutter_enabled=spec.nogova_terrain_clutter_enabled,
+        nogova_terrain_clutter_maximum_objects=spec.nogova_terrain_clutter_maximum_objects,
         forest_undergrowth_maximum_objects=spec.forest_undergrowth_maximum_objects,
         forest_undergrowth_spacing=float(
             forest_models.get(
