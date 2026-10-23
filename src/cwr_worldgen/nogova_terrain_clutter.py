@@ -1,17 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Opt-in Nogova Resistance bush/sapling clutter, measured from noe.wrp.
+"""Source-measured terrain clutter for Nogova, Eden, Abel and Cain.
 
-The user's stock Nogova object atlas has 177,224 objects, including 101,099
-DD bush models, 21,859 small spruces and 2,358 reeds. This conservative
-pass reuses real stock P3D names in the measured relative frequencies,
-rather than copying the original WRP's geographic object coordinates.
+All four island palettes reuse exact original WRP P3D paths with their
+measured relative counts. Enabled only by the opt-in checkbox and the
+corresponding tree preset; no geographic stock placements are copied.
 """
 from __future__ import annotations
 
-from collections import Counter
 import hashlib
-import math
 from typing import Sequence
+
+from .stock_terrain_clutter_profiles import (
+    STOCK_CLUTTER_WEIGHTS, stock_clutter_tree_preset,
+)
 
 from .osm import WorldObject, _sample_elevation
 
@@ -55,17 +56,34 @@ def nogova_tree_preset_selected(spec: object) -> bool:
     return block in _NOGOVA_FOREST_BLOCKS and single in _NOGOVA_SINGLE_TREES
 
 
+def terrain_clutter_preset(spec: object) -> str | None:
+    """Return matching vegetation family only, never the ground texture."""
+    if nogova_tree_preset_selected(spec):
+        return "nogova"
+    return stock_clutter_tree_preset(spec)
+
+
 def nogova_clutter_active(spec: object) -> bool:
+    """Legacy Nogova-only predicate, preserved for existing consumers."""
     return bool(getattr(spec, "nogova_terrain_clutter_enabled", False)) and nogova_tree_preset_selected(spec)
 
 
-def _weighted_model(selection: int) -> str:
-    index = selection % _TOTAL_WEIGHT
-    for name, weight in NOGOVA_CLUTTER_WEIGHTS:
+def terrain_clutter_active(spec: object) -> bool:
+    """True for any exact supported stock vegetation preset when opted in."""
+    return bool(getattr(spec, "nogova_terrain_clutter_enabled", False)) and terrain_clutter_preset(spec) is not None
+
+
+def _weighted_model(
+    selection: int,
+    weights: tuple[tuple[str, int], ...] = NOGOVA_CLUTTER_WEIGHTS,
+) -> str:
+    total = _TOTAL_WEIGHT if weights is NOGOVA_CLUTTER_WEIGHTS else sum(w for _, w in weights)
+    index = selection % total
+    for name, weight in weights:
         if index < weight:
             return name
         index -= weight
-    return NOGOVA_CLUTTER_WEIGHTS[-1][0]
+    return weights[-1][0]
 
 
 def place_nogova_terrain_clutter(
@@ -74,15 +92,22 @@ def place_nogova_terrain_clutter(
     elevations: Sequence[float],
     existing_objects: Sequence[WorldObject],
 ) -> tuple[WorldObject, ...]:
-    """Place deterministic sparse bushes/saplings in empty dry natural ground.
+    """Place matching stock island bushes/saplings in empty dry natural ground.
 
     Checks coarse road/building/water/urban/farmland/forest masks, final terrain
     heights, local slope, and a spatial exclusion against already placed 3D
     objects. Extra clutter never replaces generated roads, forests or houses,
     and this stage does not alter any OSM raster, terrain material or height.
     """
-    if not nogova_clutter_active(spec):
+    if not terrain_clutter_active(spec):
         return ()
+    palette = terrain_clutter_preset(spec)
+    # Palettes were read from the original island object-models.csv exports.
+    # An explicit tree-model pair, not a matching texture, selects each pool.
+    weights = (
+        NOGOVA_CLUTTER_WEIGHTS if palette == "nogova"
+        else STOCK_CLUTTER_WEIGHTS[palette]
+    )
     maximum = max(0, int(getattr(spec, "nogova_terrain_clutter_maximum_objects", 20000)))
     if maximum == 0:
         return ()
@@ -125,7 +150,13 @@ def place_nogova_terrain_clutter(
     if grid == 0:
         return ()
     seed = str(getattr(spec, "deterministic_seed", 0)).encode("utf-8")
-    seed = hashlib.blake2s(seed + b":nogova-terrain-clutter-v1", digest_size=12).digest()
+    # Keep prior Nogova seeds identical to avoid changing already-approved
+    # Resistance builds. Other palettes have their own deterministic streams.
+    seed = hashlib.blake2s(
+        seed + (b":nogova-terrain-clutter-v1" if palette == "nogova"
+                else f":{palette}-terrain-clutter-v1".encode("ascii")),
+        digest_size=12,
+    ).digest()
     start_id = max((int(obj.object_id) for obj in existing_objects), default=0) + 1
     out: list[WorldObject] = []
     water_plane = float(getattr(spec, "sea_level", 0.0))
@@ -163,7 +194,7 @@ def place_nogova_terrain_clutter(
             ]
             if max(heights) - min(heights) > 0.65:
                 continue
-            model = _weighted_model(int.from_bytes(digest[3:7], "little"))
+            model = _weighted_model(int.from_bytes(digest[3:7], "little"), weights)
             heading = int.from_bytes(digest[7:9], "little") % 360
             # Slight root sink avoids the visibly floating bottom of DD bushes.
             obj = WorldObject(start_id + len(out), model, x, y - 0.025, z, float(heading))
