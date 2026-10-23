@@ -108,9 +108,6 @@ def place_nogova_terrain_clutter(
         NOGOVA_CLUTTER_WEIGHTS if palette == "nogova"
         else STOCK_CLUTTER_WEIGHTS[palette]
     )
-    maximum = max(0, int(getattr(spec, "nogova_terrain_clutter_maximum_objects", 20000)))
-    if maximum == 0:
-        return ()
     cells = int(spec.cells)
     size = float(spec.cell_size)
     side = cells * size
@@ -142,9 +139,9 @@ def place_nogova_terrain_clutter(
                         return True
         return False
 
-    # 45-m stratum with ~48% acceptance gives around 30k candidates on
-    # original 12.8 km Nogova before exclusions/cap, versus >120k stock
-    # small bushes/saplings. Keep large generated maps from overpopulating.
+    # 45-m candidate spacing and ~48% initial acceptance bound *density*,
+    # not the total object count. Larger worlds naturally receive more
+    # eligible clutter without a per-world ceiling.
     spacing = 45.0
     grid = max(0, int(side // spacing))
     if grid == 0:
@@ -200,6 +197,4 @@ def place_nogova_terrain_clutter(
             obj = WorldObject(start_id + len(out), model, x, y - 0.025, z, float(heading))
             out.append(obj)
             record(x, z)
-            if len(out) >= maximum:
-                return tuple(out)
     return tuple(out)
