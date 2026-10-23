@@ -598,7 +598,12 @@ def _generated_curve_padding(model_path: str, axis: _RoadAxis) -> float:
     filename = _filename(model_path)
     match = _GENERATED_PAVED.fullmatch(filename)
     if match is None:
+        match = _CUSTOM_ROAD.fullmatch(filename)
+    if match is None:
         return 0.50
+    # The curved *custom* paved road was previously given only 0.5m of
+    # padding even for 30-60 degree bows. Lower-priority road clippers then
+    # missed paved artwork several metres outside the straight chord.
     curve = match.group("curve")
     if not curve:
         return 0.0
@@ -607,7 +612,10 @@ def _generated_curve_padding(model_path: str, axis: _RoadAxis) -> float:
     if theta <= 1.0e-9:
         return 0.0
     radius = axis.length / max(1.0e-9, 2.0 * math.sin(theta * 0.5))
-    return radius * (1.0 - math.cos(theta * 0.5)) + 0.15
+    sagitta = radius * (1.0 - math.cos(theta * 0.5))
+    # End-cap corners also move laterally as the ribbon cross sections turn.
+    end_corner_sweep = axis.half_width * math.sin(theta * 0.5)
+    return max(0.50, sagitta + end_corner_sweep + 0.15)
 
 
 def _object_plane_terms(obj) -> tuple[
