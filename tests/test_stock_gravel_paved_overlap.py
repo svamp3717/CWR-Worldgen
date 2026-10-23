@@ -1,0 +1,124 @@
+"""Real final-pass gravel-vs-paved road crossing regressions.
+
+The stock asf texture was visibly drawn *over* sil on flat crossings even
+after a vertical-offset change, because final road dedup considered asf to
+be paved and therefore never clipped it at the asphalt footprint.
+"""
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from cwr_worldgen.final_road_dedup_policy import (
+    _is_paved_family,
+    _surface_priority,
+    deduplicate_final_road_objects,
+)
+from cwr_worldgen.model import WorldObject
+from cwr_worldgen.playability import RoadFitReport
+from cwr_worldgen.procedural_infrastructure import (
+    custom_road_model_path, custom_road_model_signature,
+)
+
+
+def _report(objects, *, caps=0):
+    return RoadFitReport(
+        objects=tuple(objects),
+        chain_count=1,
+        connection_count=0,
+        failed_connections=0,
+        maximum_connection_gap=0.0,
+        maximum_chain_gap=0.0,
+        truncated=False,
+        junction_cap_objects=caps,
+    )
+
+
+def _road(oid, path, x, z, *, heading=0.0, y=0.0):
+    return WorldObject(oid, path, x, y, z, heading, 0.0)
+
+
+def _spec(*, custom=False):
+    return SimpleNamespace(
+        road_segment_length=25.0, custom_road_shapes=custom,
+        name="gravel_crossing",
+    )
+
+
+def _gravel(objects):
+    return tuple(
+        obj for obj in objects
+        if obj.model_path.replace("/", "\\").casefold().split("\\")[-1]
+        in {"asf25.p3d", "asf12.p3d", "asf6.p3d"}
+    )
+
+
+def test_stock_asf_is_gravel_not_paved_in_final_pass():
+    assert not _is_paved_family("asf")
+    assert _is_paved_family("sil")
+    assert _surface_priority("ces") < _surface_priority("asf") < _surface_priority("sil")
+
+
+def test_perpendicular_stock_gravel_is_trimmed_below_stock_paved():
+    # Same geometry as the in-game screenshot: 25-m stock asf crossing sil.
+    original = _road(1, r"o\road\asf25.p3d", 100, 100, heading=90.0, y=0.035)
+    paved = _road(2, r"o\road\sil25.p3d", 100, 100, heading=0.0, y=0.095)
+    result = deduplicate_final_road_objects(_report((original, paved)), _spec())
+    assert any(obj.object_id == 2 for obj in result.objects)
+    assert original not in result.objects
+    gravel = _gravel(result.objects)
+    assert gravel, "the gravel approaches must remain on both sides"
+    assert len(gravel) >= 2
+    assert any(obj.pitch_degrees != 0.0 for obj in gravel)
+    assert all(obj.model_path.casefold().endswith(
+        ("asf6.p3d", "asf12.p3d", "asf25.p3d")
+    ) for obj in gravel)
+    # None of the objects crossing the paved centre may be the original asf25.
+    assert all(obj.object_id != original.object_id or obj != original for obj in gravel)
+
+
+def test_two_stock_gravel_approaches_survive_paved_crossing():
+    reports = (
+        _road(1, r"o\road\asf25.p3d", 100, 90, heading=90.0, y=0.035),
+        _road(2, r"o\road\asf25.p3d", 100, 110, heading=90.0, y=0.035),
+        _road(3, r"o\road\sil25.p3d", 100, 100, heading=0.0, y=0.095),
+    )
+    actual = deduplicate_final_road_objects(_report(reports), _spec())
+    assert any(obj.object_id == 3 for obj in actual.objects)
+    assert any(obj.x < 100 for obj in _gravel(actual.objects))
+    assert any(obj.x > 100 for obj in _gravel(actual.objects))
+
+
+def test_paved_overpass_does_not_remove_stock_gravel_underneath():
+    gravel = _road(1, r"o\road\asf25.p3d", 100, 100, heading=90.0, y=0.0)
+    bridge = _road(2, r"o\road\sil25.p3d", 100, 100, y=5.0)
+    result = deduplicate_final_road_objects(_report((gravel, bridge)), _spec())
+    assert result.objects == (gravel, bridge)
+
+
+def test_stock_gravel_only_junction_does_not_delete_dirt_as_paved():
+    # Stock asf junction assets should never be mistaken for a paved blocker.
+    asf = _road(1, r"o\road\kr_new_asf_asf_t.p3d", 100, 100)
+    dirt = _road(2, r"o\road\ces25.p3d", 100, 100, heading=90.0)
+    result = deduplicate_final_road_objects(_report((asf, dirt), caps=1), _spec())
+    assert dirt in result.objects
+
+
+def test_unified_generated_gravel_is_retiled_as_gravel_not_dirt():
+    spec = _spec(custom=True)
+    lower = custom_road_model_path(spec.name, "gravel", 4.6, 25.0)
+    original = _road(1, lower, 100, 89, heading=0.0, y=0.035)
+    higher = _road(2, r"o\road\sil25.p3d", 100, 100, heading=90.0, y=0.095)
+    result = deduplicate_final_road_objects(_report((original, higher)), spec)
+    generated = [
+        obj for obj in result.objects
+        if (
+            (signature := custom_road_model_signature(obj.model_path))
+            is not None and signature[0] == "gravel"
+        )
+    ]
+    assert generated
+    assert all(obj.model_path.casefold() != original.model_path.casefold()
+               or obj != original for obj in generated)
+    assert any(abs(obj.pitch_degrees) > 0.01 for obj in generated)
