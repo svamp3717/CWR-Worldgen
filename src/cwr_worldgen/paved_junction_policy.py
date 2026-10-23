@@ -161,6 +161,21 @@ def _kind(family: str) -> str:
     return str(_family_info().get(family, {}).get("kind", "unknown")).casefold()
 
 
+def _stock_junction_vertical_offset(family: str) -> float:
+    """Layer real CWA donor families, not their catalogue road-class labels.
+
+    The road catalogue calls 'asf' a paved family, but Worldgen's stock
+    gravel option explicitly uses o\\road\\asf*.p3d. It must stay
+    lower than o\\road\\sil*.p3d at intersecting junctions and turns.
+    """
+    name = str(family).casefold()
+    if name in {"asf", "gravel"} or _kind(name) == "gravel":
+        return _p._STOCK_GRAVEL_JUNCTION_VERTICAL_OFFSET_METRES
+    if name in {"ces", "dirt"} or _kind(name) == "dirt":
+        return _p._STOCK_DIRT_VERTICAL_OFFSET_METRES
+    return _p._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+
+
 def _junction_family(family: str) -> str:
     return str(_family_info().get(family, {}).get("junction_family", family)).casefold()
 
@@ -602,14 +617,7 @@ def _curve_object(
     origin = start[0] - sx, start[1] - sz
     ex, ez = _rotate(local_end, yaw)
     finish = origin[0] + ex, origin[1] + ez
-    surface = _kind(family)
-    offset = (
-        _p._STOCK_GRAVEL_JUNCTION_VERTICAL_OFFSET_METRES
-        if surface == "gravel"
-        else _p._STOCK_DIRT_VERTICAL_OFFSET_METRES
-        if surface == "dirt"
-        else _p._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
-    )
+    offset = _stock_junction_vertical_offset(family)
     height = _p._sample_elevation(
         elevations, spec.cells, spec.cell_size, origin[0], origin[1]
     ) + offset
@@ -638,13 +646,7 @@ def _straight_object(
         end,
         elevations,
         spec,
-        vertical_offset=(
-            _p._STOCK_GRAVEL_JUNCTION_VERTICAL_OFFSET_METRES
-            if _kind(family) == "gravel"
-            else _p._STOCK_DIRT_VERTICAL_OFFSET_METRES
-            if _kind(family) == "dirt"
-            else _p._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
-        ),
+        vertical_offset=_stock_junction_vertical_offset(family),
     )
 
 
