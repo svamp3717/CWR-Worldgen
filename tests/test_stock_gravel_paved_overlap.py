@@ -97,12 +97,29 @@ def test_paved_overpass_does_not_remove_stock_gravel_underneath():
     assert result.objects == (gravel, bridge)
 
 
-def test_stock_gravel_only_junction_does_not_delete_dirt_as_paved():
-    # Stock asf junction assets should never be mistaken for a paved blocker.
-    asf = _road(1, r"o\road\kr_new_asf_asf_t.p3d", 100, 100)
+def test_stock_gravel_junction_blocks_dirt_but_never_counts_as_paved():
+    # Gravel-only asf junction is not a *paved* blocker, but is correctly
+    # above ces dirt; its footprint prevents the dirt texture covering asf.
+    asf = _road(1, r"o\road\kr_new_asf_asf_t.p3d", 100, 100, y=0.055)
     dirt = _road(2, r"o\road\ces25.p3d", 100, 100, heading=90.0)
     result = deduplicate_final_road_objects(_report((asf, dirt), caps=1), _spec())
-    assert dirt in result.objects
+    assert asf in result.objects
+    assert dirt not in result.objects
+
+
+def test_stock_dirt_is_split_below_gravel_even_without_paved_roads():
+    lower = _road(1, r"o\road\ces25.p3d", 100, 100, heading=90.0, y=0.0)
+    upper = _road(2, r"o\road\asf25.p3d", 100, 100, heading=0.0, y=0.035)
+    result = deduplicate_final_road_objects(_report((lower, upper)), _spec())
+    assert upper in result.objects
+    assert lower not in result.objects
+    repaired = [
+        obj for obj in result.objects if obj.model_path.casefold().endswith(
+            (r"\ces6.p3d", r"\ces12.p3d")
+        )
+    ]
+    assert len(repaired) >= 2
+    assert any(abs(obj.pitch_degrees) > 0.01 for obj in repaired)
 
 
 def test_unified_generated_gravel_is_retiled_as_gravel_not_dirt():
