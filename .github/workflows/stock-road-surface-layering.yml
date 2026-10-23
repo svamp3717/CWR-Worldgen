@@ -9,6 +9,8 @@ on:
       - "tests/test_stock_road_surface_layering.py"
       - "tests/test_stock_gravel_paved_overlap.py"
       - "src/cwr_worldgen/final_road_dedup_policy.py"
+      - "src/cwr_worldgen/road_cross_slope_grounding.py"
+      - "tests/test_real_wrp_road_cross_slope.py"
       - ".github/workflows/stock-road-surface-layering.yml"
   workflow_dispatch:
 
@@ -31,7 +33,7 @@ jobs:
           python -m pip install -e . pytest
       - name: Assert dirt-gravel-paved surfaces and all junction heights
         run: |
-          python -m pytest -q tests/test_stock_road_surface_layering.py tests/test_stock_gravel_paved_overlap.py
+          python -m pytest -q tests/test_stock_road_surface_layering.py tests/test_stock_gravel_paved_overlap.py tests/test_real_wrp_road_cross_slope.py
       - name: Check existing road finishing, synthetic junctions and stock models
         run: |
           python -m pytest -q tests/test_road_finish_parallel_policy.py tests/test_synthetic_paved_junctions.py tests/test_paved_junction_performance_policy.py tests/test_gravel_junction_policy.py
