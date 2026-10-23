@@ -2699,7 +2699,14 @@ class ProceduralInfrastructureLibrary:
                 # Only curved paved ribbons changed. Reuse existing custom
                 # dirt/gravel/straight/junction artifacts without extra work.
                 signature = _custom_road_signature(key.subtype)
-                if (
+                # The new final-seam family has centimetre-accurate painted
+                # ends and a 40cm Roadway-only continuation. Do not restore
+                # an old "_edge" model whose contact geometry stopped short.
+                if re.search(r"_edge[1-9]?$", key.subtype.casefold()):
+                    model_cache_version = (
+                        "procedural-infrastructure-model-v28-cm-seam-roadway-underlay"
+                    )
+                elif (
                     signature is not None
                     and signature[0] == "paved"
                     and signature[1] != 0
