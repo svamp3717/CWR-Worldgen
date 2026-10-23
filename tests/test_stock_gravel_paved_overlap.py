@@ -269,10 +269,27 @@ def test_generated_dirt_visual_origin_is_compensated_under_paved():
     assert dirt
     # All generated dirt pieces are expressed in P3D *origin* coordinates.
     # The correct visible surface includes the +25 mm local Z-axis rotation.
-    buried = [obj for obj in dirt if abs(obj.pitch_degrees) > 0.01]
-    assert buried
-    for obj in buried:
-        assert math.isfinite(obj.y)
-        assert -89 < obj.pitch_degrees < 89
+    # Dirt may be flat already below sil. The requirement is physical
+    # underneath-coverage and *visual* clearance, not a forced pitch.
+    buried = []
+    for obj in dirt:
+        axis = _road_axis(obj, 0, spec)
+        paved_axis = _road_axis(paved, 1, spec)
+        overlap = _clip_convex_polygon(
+            _surface_polygon(axis), _surface_polygon(paved_axis),
+        )
+        if _polygon_area(overlap) <= 1.0e-5:
+            continue
+        pitch = math.radians(obj.pitch_degrees)
+        for x, z in overlap:
+            along = (x - obj.x) * axis.ux + (z - obj.z) * axis.uz
+            visible_y = (
+                obj.y + GENERATED_GRAVEL_VISUAL_TOP_METRES * math.cos(pitch)
+                + math.sin(pitch) * along
+            )
+            assert visible_y < paved.y - 0.035
+        buried.append(obj)
+    assert buried, "dirt connector must enter underneath paved footprint"
+    assert all(-89 < obj.pitch_degrees < 89 for obj in buried)
 
 
