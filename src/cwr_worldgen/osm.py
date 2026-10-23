@@ -10390,7 +10390,9 @@ def generate_world_objects(
         )
         extra_single_footprint = max(1.5, float(getattr(spec, "forest_single_tree_footprint", 2.0)))
         extra_single_relief = max(1.5, float(getattr(spec, "forest_single_tree_maximum_relief", 8.0)))
-        extra_single_candidates_per_cell = 1
+        # Every safely grounded and spatially separated candidate may be
+        # placed. The old one-tree-per-geographic-cell shortcut discarded
+        # valid candidates even when actual forest ground had room.
 
         # Fill mapped-forest cells that no accepted square, triangle, cluster,
         # road-cut tree, or hillside fallback actually covers. The historical
@@ -10509,7 +10511,12 @@ def generate_world_objects(
                     continue
                 if _mask_at(raster.water, spec.cells, spec.world_size, single_x, single_z) or _mask_at(raster.buildings, spec.cells, spec.world_size, single_x, single_z):
                     continue
-                accepted = 0
+                # Multiple candidates may fit in one geographic forest cell.
+                # Keep a genuine trunk-footprint clearance rather than an
+                # arbitrary maximum count per cell.
+                accepted_positions: list[tuple[float, float]] = []
+                minimum_distance = max(6.0, extra_single_footprint * 2.0)
+                minimum_distance_sq = minimum_distance * minimum_distance
                 for tree_x, tree_z, tree_heading in _forest_single_tree_candidates(
                     seed,
                     projection,
@@ -10519,8 +10526,11 @@ def generate_world_objects(
                     single_longitude,
                     extra_single_spacing,
                 ):
-                    if accepted >= extra_single_candidates_per_cell:
-                        break
+                    if any(
+                        (tree_x - old_x) ** 2 + (tree_z - old_z) ** 2 < minimum_distance_sq
+                        for old_x, old_z in accepted_positions
+                    ):
+                        continue
                     if not (0 <= tree_x < spec.world_size and 0 <= tree_z < spec.world_size):
                         continue
                     if not _mask_at(raster.forest, spec.cells, spec.world_size, tree_x, tree_z):
@@ -10563,7 +10573,7 @@ def generate_world_objects(
                         tree_z,
                         tree_heading,
                     ))
-                    accepted += 1
+                    accepted_positions.append((tree_x, tree_z))
             eligible_extra_single_trees.sort(key=lambda item: item[:3])
             extra_single_available = min(
                 extra_single_limit,
@@ -12032,12 +12042,12 @@ def generate_world_objects(
     mapped_tree_warning_threshold = max(0, int(getattr(spec, "maximum_mapped_tree_objects", 5000)))
     mapped_tree_limit = _advisory_object_limit(mapped_tree_warning_threshold, enabled=advisory_limits)
     mapped_tree_clearance = max(0.0, float(getattr(spec, "mapped_tree_ground_clearance", 0.04)))
-    for mapped_tree_index, feature in enumerate(sorted(dataset.individual_trees, key=lambda item: item.osm_key)):
+    # Do not discard half the actual OSM natural=tree points. Each input
+    # feature is now evaluated against the existing masks, road clearance,
+    # grounding and active category limit, in stable OSM-key order.
+    for feature in sorted(dataset.individual_trees, key=lambda item: item.osm_key):
         if mapped_tree_objects >= mapped_tree_limit:
             break
-        if mapped_tree_index % 2 == 1:
-            mapped_tree_rejections += 1
-            continue
         x, z = projection.to_world(feature.point)
         if not (0.0 <= x < spec.world_size and 0.0 <= z < spec.world_size):
             mapped_tree_rejections += 1
