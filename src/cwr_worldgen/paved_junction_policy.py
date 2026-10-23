@@ -602,9 +602,17 @@ def _curve_object(
     origin = start[0] - sx, start[1] - sz
     ex, ez = _rotate(local_end, yaw)
     finish = origin[0] + ex, origin[1] + ez
+    surface = _kind(family)
+    offset = (
+        _p._STOCK_GRAVEL_JUNCTION_VERTICAL_OFFSET_METRES
+        if surface == "gravel"
+        else _p._STOCK_DIRT_VERTICAL_OFFSET_METRES
+        if surface == "dirt"
+        else _p._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+    )
     height = _p._sample_elevation(
         elevations, spec.cells, spec.cell_size, origin[0], origin[1]
-    ) + 0.060
+    ) + offset
     return (
         _p.WorldObject(
             object_id,
@@ -630,7 +638,13 @@ def _straight_object(
         end,
         elevations,
         spec,
-        vertical_offset=0.060,
+        vertical_offset=(
+            _p._STOCK_GRAVEL_JUNCTION_VERTICAL_OFFSET_METRES
+            if _kind(family) == "gravel"
+            else _p._STOCK_DIRT_VERTICAL_OFFSET_METRES
+            if _kind(family) == "dirt"
+            else _p._STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES
+        ),
     )
 
 
