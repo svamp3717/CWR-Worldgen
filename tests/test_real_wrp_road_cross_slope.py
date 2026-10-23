@@ -7,6 +7,7 @@ These are minimal numeric fixtures, not redistributed original P3D/WRP assets.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import math
 from types import SimpleNamespace
 
@@ -124,4 +125,41 @@ def test_flat_ground_does_not_change_deterministic_plain_road_placements():
     )
     assert tuple(obj.object_id for obj in result.objects) == tuple(
         obj.object_id for obj in report.objects
+    )
+
+
+@pytest.mark.parametrize(
+    ("paved_path", "paved_top"),
+    (
+        (r"wg_belowtest23\\i\\road_paved_w020_l0020.p3d", 10.025),
+        (r"o\\road\\sil6.p3d", 10.0),
+    ),
+)
+def test_small_paved_overlap_between_road_samples_still_limits_gravel_lift(
+    paved_path: str, paved_top: float,
+) -> None:
+    """An asphalt patch between all nine sample sites still owns its footprint.
+
+    The older nine-point-only clamp lifted the gravel to 10.02 m on this
+    flat terrain, leaving just 5 mm below generated asphalt and actually
+    sitting 20 mm *above* the stock sil slab. Both must retain 35 mm clearance.
+    """
+    spec, _, report = _scene()
+    elevations = [10.0] * (spec.cells * spec.cells)
+    gravel = WorldObject(
+        311, r"wg_belowtest23\\i\\road_gravel_w070_l0250.p3d",
+        100.0, 9.9, 100.0, 0.0, 0.0,
+    )
+    paved = WorldObject(
+        312, paved_path, 102.0, 10.0, 104.0, 0.0, 0.0,
+    )
+    report = replace(report, objects=(gravel, paved))
+    result = ground_generated_approaches(report, spec, elevations)
+    assert isinstance(result.objects[0], TerrainShearedWorldObject)
+    assert result.objects[1] == paved
+    assert result.objects[0].y > gravel.y
+    # x=102,z=104 is within both surfaces, but is not one of the gravel
+    # fitter's three-by-three sample locations.
+    assert _surface_y(result.objects[0], 102.0, 104.0) <= (
+        paved_top - 0.035 + 1.0e-6
     )
