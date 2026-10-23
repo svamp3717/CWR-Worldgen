@@ -13,6 +13,10 @@ import pytest
 from cwr_worldgen.final_road_dedup_policy import (
     _is_paved_family,
     _surface_priority,
+    _road_axis,
+    _surface_polygon,
+    _clip_convex_polygon,
+    _polygon_area,
     deduplicate_final_road_objects,
 )
 from cwr_worldgen.model import WorldObject
@@ -54,6 +58,24 @@ def _gravel(objects):
     )
 
 
+def _assert_no_gravel_footprint_over_paved(objects, spec):
+    gravel = []
+    paved = []
+    for index, obj in enumerate(objects):
+        axis = _road_axis(obj, index, spec)
+        if axis is None:
+            continue
+        if axis.family in {"asf", "gravel"}:
+            gravel.append(_surface_polygon(axis))
+        if axis.family in {"sil", "kos", "paved"}:
+            paved.append(_surface_polygon(axis))
+    for lower in gravel:
+        for upper in paved:
+            assert _polygon_area(
+                _clip_convex_polygon(lower, upper)
+            ) < 1.0e-5, "stock gravel extends into the visible paved footprint"
+
+
 def test_stock_asf_is_gravel_not_paved_in_final_pass():
     assert not _is_paved_family("asf")
     assert _is_paved_family("sil")
@@ -70,7 +92,10 @@ def test_perpendicular_stock_gravel_is_trimmed_below_stock_paved():
     gravel = _gravel(result.objects)
     assert gravel, "the gravel approaches must remain on both sides"
     assert len(gravel) >= 2
-    assert any(obj.pitch_degrees != 0.0 for obj in gravel)
+    assert all(obj.pitch_degrees == 0.0 for obj in gravel)
+    # CWA can show stock P3D shoulders through pavement even when the object's
+    # centre origin is lower. Reject gravel geometry under the paved footprint.
+    _assert_no_gravel_footprint_over_paved(result.objects, _spec())
     assert all(obj.model_path.casefold().endswith(
         ("asf6.p3d", "asf12.p3d", "asf25.p3d")
     ) for obj in gravel)
@@ -88,6 +113,7 @@ def test_two_stock_gravel_approaches_survive_paved_crossing():
     assert any(obj.object_id == 3 for obj in actual.objects)
     assert any(obj.x < 100 for obj in _gravel(actual.objects))
     assert any(obj.x > 100 for obj in _gravel(actual.objects))
+    _assert_no_gravel_footprint_over_paved(actual.objects, _spec())
 
 
 def test_paved_overpass_does_not_remove_stock_gravel_underneath():
@@ -138,4 +164,5 @@ def test_unified_generated_gravel_is_retiled_as_gravel_not_dirt():
     assert generated
     assert all(obj.model_path.casefold() != original.model_path.casefold()
                or obj != original for obj in generated)
-    assert any(abs(obj.pitch_degrees) > 0.01 for obj in generated)
+    assert all(abs(obj.pitch_degrees) <= 0.01 for obj in generated)
+    _assert_no_gravel_footprint_over_paved(result.objects, spec)
