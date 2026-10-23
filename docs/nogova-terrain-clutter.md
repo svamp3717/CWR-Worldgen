@@ -1,5 +1,7 @@
 # Optional Nogova terrain clutter from the original Noe WRP
 
+**Update:** This checkbox is now named **Original island terrain clutter (matching trees)** and also works with the Eden, Abel and Cain vegetation presets. It still selects the Nogova pool only for Resistance leaf/pine tree presets. See [Stock island terrain clutter](stock-island-terrain-clutter.md) for all four palettes.
+
 ## What the source shows
 
 The user's Island Studio object export from **Noe.pbo / noe\noe.wrp**
