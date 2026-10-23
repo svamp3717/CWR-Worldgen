@@ -20,7 +20,7 @@ import math
 from typing import Sequence
 
 from .model import TerrainShearedWorldObject
-from .osm import _sample_elevation
+from .osm import _sample_elevation, _triangle_elevation_bounds
 
 _GROUND_CLEARANCE_METRES = 0.02
 _PAVED_VISIBLE_CLEARANCE_METRES = 0.035
@@ -144,7 +144,9 @@ def ground_generated_approaches(
                     has_exposed = True
                     needed_lift = max(
                         needed_lift,
-                        terrain(world_x, world_z) + _GROUND_CLEARANCE_METRES - visual_y,
+                        max(_triangle_elevation_bounds(
+                            elevations, cells, size, world_x, world_z,
+                        )) + _GROUND_CLEARANCE_METRES - visual_y,
                     )
         if not has_exposed:
             continue
