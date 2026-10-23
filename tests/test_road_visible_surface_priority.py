@@ -322,3 +322,86 @@ def test_centimetre_road_model_is_packaged(tmp_path):
         abs(v - pi._ROADWAY_LOD) < 1e9
         for v in pi.inspect_mlod(expected).resolutions
     )
+
+
+def test_diagonal_asphalt_boundary_miters_gravel_instead_of_ending_at_first_corner():
+    """A square cap leaves a >2 m wedge when paving crosses at an angle."""
+    from cwr_worldgen.road_visible_surface_priority import (
+        _edge_miter_cm, _visual_footprint,
+    )
+
+    lower = WorldObject(
+        501, r"o\road\asf25.p3d", 100.0, 10.035, 100.0, 0.0, 0.0,
+    )
+    axis = road._road_axis(lower, 0, SPEC)
+    assert axis is not None
+    blocker = road._blocker_from_polygon(
+        WorldObject(502, r"o\road\sil25.p3d", 100.0, 10.095, 105.0, 0.0, 0.0),
+        ((94.0, 100.0), (106.0, 104.0),
+         (106.0, 115.0), (94.0, 115.0)),
+    )
+    original = road._blocked_interval(
+        axis, road._surface_polygon(axis), blocker,
+    )
+    assert original is not None
+    # Earlier code took the earliest painted corner's longitudinal distance
+    # and cut BOTH sides at that station, leaving the far side 2+ m short.
+    left_clear_end = original[0]
+    profile = _edge_miter_cm(
+        axis, 0.0, left_clear_end - 0.008, (blocker,),
+    )
+    assert profile[0] == profile[1] == 0
+    assert profile[3] > profile[2] + 150, profile
+    assert profile[3] >= 200, profile
+
+    # The full-width cap now follows the angled edge without painting onto it.
+    endpoint_axis = road._RoadAxis(
+        axis.object_id, axis.object_index, axis.family,
+        axis.start,
+        road._axis_point(axis, left_clear_end - 0.008),
+        axis.ux, axis.uz,
+        left_clear_end - 0.008,
+        axis.half_width, axis.elevation,
+        axis.stock_model, axis.curved_model, axis.junction_cap,
+    )
+    points = _visual_footprint(
+        endpoint_axis, overlap=0.0,
+        miter=tuple(n / 100.0 for n in profile),
+    )
+    assert road._polygon_area(
+        road._clip_convex_polygon(points, blocker.polygon)
+    ) < 1.0e-5
+
+
+def test_mitered_p3d_records_both_distinct_end_corners_and_underway_contact(tmp_path):
+    cm = (0, 0, 0, 224)
+    path = pi.custom_road_model_path(
+        SPEC.name, "gravel", 7.0, 10.82,
+        flush_ends=True, miter_centimetres=cm,
+    )
+    assert path.endswith("_edge2_m000000000224.p3d")
+    assert pi.custom_road_miter_metres(path) == (0, 0, 0, 2.24)
+    assert pi.custom_road_model_signature(path) == ("gravel", 7.0, 10.82, 0)
+    library = pi.ProceduralInfrastructureLibrary(
+        SPEC.name, cache_enabled=False,
+        paved_texture_path=r"o\road\sil_new.paa",
+    )
+    library.register_model(path)
+    generated = library.write_assets(tmp_path, tmp_path / "roads.json")
+    assert generated.generated_variants == 1
+    output = tmp_path / path.split("\\", 1)[1].replace("\\", "/")
+    assert output.is_file()
+
+    key = pi.InfrastructureModelKey("road", path.split("\\")[-1][:-4], 70, 108)
+    visual, geometry, roadway, land = pi._road_lods(
+        key, r"landtext\road.paa",
+    )
+    assert visual.points[-1][2] - visual.points[-2][2] == pytest.approx(
+        2.24, abs=1e-5,
+    )
+    assert roadway.points[-1][2] - roadway.points[-2][2] == pytest.approx(
+        2.24, abs=1e-5,
+    )
+    assert max(p[2] for p in roadway.points) - max(
+        p[2] for p in visual.points
+    ) == pytest.approx(0.4, abs=1e-6)
