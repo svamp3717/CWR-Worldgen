@@ -131,16 +131,7 @@ def ground_generated_approaches(
                     blocker for blocker in nearby
                     if _contains(blocker.polygon, world_x, world_z)
                 ]
-                if covering:
-                    for blocker in covering:
-                        asphalt_y = road._blocker_height_at(
-                            blocker, (world_x, world_z)
-                        ) + float(road._p.GENERATED_GRAVEL_VISUAL_TOP_METRES)
-                        allowed_lift = min(
-                            allowed_lift,
-                            asphalt_y - _PAVED_VISIBLE_CLEARANCE_METRES - visual_y,
-                        )
-                else:
+                if not covering:
                     has_exposed = True
                     needed_lift = max(
                         needed_lift,
@@ -148,6 +139,34 @@ def ground_generated_approaches(
                             elevations, cells, size, world_x, world_z,
                         )) + _GROUND_CLEARANCE_METRES - visual_y,
                     )
+
+        # The nine terrain samples do not bound the entire paved overlap:
+        # narrow or oblique asphalt can fit between every sample point. Both
+        # visual surfaces are affine planes, so their smallest separation on
+        # a convex intersection occurs at one of its polygon vertices.
+        # Testing every overlap vertex also accounts for stock versus generated
+        # P3Ds having different visible offsets from their WRP object origins.
+        lower_polygon = road._surface_polygon(axis)
+        for blocker in nearby:
+            overlap = road._clip_convex_polygon(
+                lower_polygon, blocker.polygon,
+            )
+            if road._polygon_area(overlap) <= 1.0e-5:
+                continue
+            for point_x, point_z in overlap:
+                bank = (
+                    gradient_x * (point_x - x)
+                    + gradient_z * (point_z - z)
+                )
+                gravel_y = visual_base + bank
+                paved_y = (
+                    road._blocker_height_at(blocker, (point_x, point_z))
+                    + blocker.visual_offset
+                )
+                allowed_lift = min(
+                    allowed_lift,
+                    paved_y - _PAVED_VISIBLE_CLEARANCE_METRES - gravel_y,
+                )
         if not has_exposed:
             continue
         lift = max(0.0, min(needed_lift, allowed_lift, _MAX_LIFT_METRES))
