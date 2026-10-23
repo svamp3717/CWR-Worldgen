@@ -123,6 +123,7 @@ def test_water_ground_border_continuity_without_invented_tiles(shape):
     assert all(
         item in {
             NOGOVA_WATER_PATH, NOGOVA_COAST_PATH, NOGOVA_LAND_PATH,
+            r"o\pole1.paa",  # untouched protected farmland in input table
         } or is_nogova_water_blend_path(item)
         for item in expanded
     )
@@ -158,8 +159,9 @@ def test_above_sea_level_or_protected_ground_never_contains_water_art() -> None:
     } and not is_nogova_water_blend_path(expanded[int(output[y, x])])
                for y, x in np.argwhere(~wet))
     assert set(expanded[len(paths):]).issubset({
-        rf"o\{stem}.pac"
-        for stem in _NOGOVA_WATER_COAST | _NOGOVA_COAST_LAND
+        NOGOVA_COAST_PATH,
+        *(rf"o\{stem}.pac"
+          for stem in _NOGOVA_WATER_COAST | _NOGOVA_COAST_LAND),
     })
 
 
