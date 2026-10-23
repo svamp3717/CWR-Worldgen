@@ -95,7 +95,7 @@ _GENERATED_PAVED = re.compile(
 )
 _CUSTOM_ROAD = re.compile(
     r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
-    r"(?P<length>\d{4})(?P<curve>_[lr]\d{3})?(?:_edge)?\.p3d$",
+    r"(?P<length>\d{4})(?P<curve>_[lr]\d{3})?(?:_edge(?P<centimetre>[1-9])?)?\.p3d$",
     re.I,
 )
 _GRAVEL_STRAIGHT = re.compile(r"^gravel(?P<nominal>25|12|6|3)\.p3d$", re.I)
@@ -211,7 +211,10 @@ def _road_axis(
         surface = match.group("surface").casefold()
         family = {"paved": "paved", "gravel": "gravel", "dirt": "ces"}[surface]
         half_width = int(match.group("width")) / 20.0
-        expected_length = int(match.group("length")) / 10.0
+        expected_length = (
+            int(match.group("length")) / 10.0
+            + int(match.group("centimetre") or 0) / 100.0
+        )
         start, end = _p._model_axis(obj, expected_length)
         stock_model = False
         curved_model = match.group("curve") is not None
@@ -698,12 +701,44 @@ def _paved_blockers(report, spec) -> tuple[_PavedBlocker, ...]:
     for index, obj in enumerate(report.objects):
         axis = _road_axis(obj, index, spec)
         if axis is not None and _is_paved_family(axis.family):
+            # The previous rectangular chord + sagitta padding could place
+            # the blocked boundary metres ahead of an actual curved asphalt
+            # edge. Use the exact same P3D ribbon cross sections to represent
+            # its painted footprint instead of an inflated bounding strip.
+            # Each consecutive pair forms a convex CCW polygon, compatible
+            # with the existing indexed clipping and height-plane solver.
+            if axis.curved_model and not axis.stock_model:
+                from .procedural_infrastructure import (
+                    _road_ribbon_sections, custom_road_model_signature,
+                )
+                signature = custom_road_model_signature(obj.model_path)
+                if signature is not None:
+                    curve = signature[3]
+                else:
+                    # Generated legacy paved_w* roads use 2-digit angles.
+                    name = _filename(obj.model_path)
+                    pattern = _GENERATED_PAVED.fullmatch(name)
+                    suffix = pattern.group("curve") if pattern else None
+                    curve = (
+                        (1 if suffix[1] == "r" else -1) * int(suffix[-2:])
+                        if suffix else 0
+                    )
+                sections = _road_ribbon_sections(
+                    axis.length, axis.half_width, int(curve),
+                    overhang=0.18, square_ends=False,
+                )
+                for a, b in zip(sections, sections[1:]):
+                    polygon = (
+                        _world_point((a[0], a[1]), obj),
+                        _world_point((a[2], a[3]), obj),
+                        _world_point((b[2], b[3]), obj),
+                        _world_point((b[0], b[1]), obj),
+                    )
+                    blockers.append(_blocker_from_polygon(obj, polygon))
+                continue
             blockers.append(_blocker_from_polygon(
                 obj,
-                _surface_polygon(
-                    axis,
-                    padding=_generated_curve_padding(obj.model_path, axis),
-                ),
+                _surface_polygon(axis),
             ))
             continue
         if _is_paved_junction_cap_model(obj.model_path):
