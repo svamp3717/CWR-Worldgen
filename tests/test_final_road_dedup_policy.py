@@ -205,7 +205,7 @@ def test_shallow_angle_paved_partial_overlap_is_preserved():
     assert len(result.objects) == 2
 
 
-def test_paved_second_pass_does_not_delete_longer_candidate_under_short_wide_piece():
+def test_short_paved_piece_trims_the_actual_stock_gravel_footprint():
     report = _report((
         _road(1, r"o\road\sil6.p3d", 100.0, 100.0),
         _road(2, r"o\road\asf25.p3d", 100.0, 100.0, heading=9.0),
@@ -213,7 +213,17 @@ def test_paved_second_pass_does_not_delete_longer_candidate_under_short_wide_pie
 
     result = deduplicate_final_road_objects(report, _spec())
 
-    assert len(result.objects) == 2
+    # Stock asf is gravel in Worldgen, not a second paved family. The asf25
+    # must be cut around sil6 rather than painted straight through it.
+    assert any(obj.object_id == 1 for obj in result.objects)
+    assert not any(
+        obj.model_path.casefold().endswith(r"\asf25.p3d")
+        for obj in result.objects
+    )
+    assert any(
+        obj.model_path.casefold().endswith((r"\asf6.p3d", r"\asf12.p3d"))
+        for obj in result.objects
+    )
 
 
 def test_dirt_curves_remain_out_of_scope_for_paved_second_pass():
