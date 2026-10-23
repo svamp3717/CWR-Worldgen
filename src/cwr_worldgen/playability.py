@@ -192,15 +192,17 @@ class TownLocation:
     osm_key: str
 
 
-# Stock road meshes sit extremely close to the terrain. At mixed crossings the
-# engine can therefore z-fight when two road families share the same height.
-# Keep one explicit surface stack everywhere: dirt < gravel < paved. Object
-# ordering mirrors these offsets so CWA gets the same precedence from geometry
-# and draw order instead of making two ancient rendering heuristics argue.
-_STOCK_DIRT_VERTICAL_OFFSET_METRES = 0.010
-_STOCK_GRAVEL_VERTICAL_OFFSET_METRES = 0.018
-_STOCK_ROAD_VERTICAL_OFFSET_METRES = 0.035
-_STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES = 0.060
+# Original CWA stock road families have nearly coplanar visible surfaces.
+# The old 8-17 mm differences were smaller than stock-mesh/terrain fitting
+# variations and could let asf (gravel) draw over sil (paved) at crossings.
+# Use real, non-overlapping family planes with margin for stock model pivots:
+# dirt < gravel < paved. Junction caps stay above their own approaches but
+# below the next higher family, so a gravel hub cannot cover paved asphalt.
+_STOCK_DIRT_VERTICAL_OFFSET_METRES = 0.000
+_STOCK_GRAVEL_VERTICAL_OFFSET_METRES = 0.035
+_STOCK_GRAVEL_JUNCTION_VERTICAL_OFFSET_METRES = 0.055
+_STOCK_ROAD_VERTICAL_OFFSET_METRES = 0.095
+_STOCK_PAVED_JUNCTION_VERTICAL_OFFSET_METRES = 0.125
 
 # OSM extracts are not always topologically noded where two paved ways visibly
 # cross. Before stock-piece fitting, promote safe planar crossings and tiny
@@ -234,11 +236,15 @@ _SYNTHETIC_PAVED_JUNCTION_CACHE_VALUE: tuple[
 
 
 def _road_surface_priority(tags: Mapping[str, str]) -> int:
-    if not road_is_dirt(tags):
-        return 2  # asphalt / paved
+    # Keep the draw-order hierarchy consistent with the actual road family.
+    # A paved footway uses a dirt model, even when it advertises asphalt.
+    if str(tags.get("highway", "")).strip().casefold() in PEDESTRIAN_ONLY_HIGHWAYS:
+        return 0
     if road_is_gravel(tags):
-        return 1  # generated gravel family
-    return 0  # dirt / earth
+        return 1  # stock asf / gravel
+    if road_is_dirt(tags):
+        return 0  # stock ces / earth
+    return 2  # stock sil / paved asphalt
 
 
 def _road_surface_vertical_offset(surface: str | None) -> float:
