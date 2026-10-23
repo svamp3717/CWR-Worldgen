@@ -94,6 +94,12 @@ from .terrain import (
 from .wrp import inspect_rvw4, quantize_elevations, quantize_height, write_rvw4
 from .forest_ground_blends import apply_stock_forest_border_blends
 from .everon_water_blends import apply_everon_water_borders, is_everon_water_blend_path
+from .stock_water_ground_blends import (
+    apply_stock_underwater_borders, is_stock_water_blend_path,
+)
+from .nogova_water_blends import (
+    apply_nogova_underwater_borders, is_nogova_water_blend_path,
+)
 from .debug_layers import write_worldgen_debug_layers
 from cwr_island_studio.object_layers import is_forest_model
 from .surface_pass import (
@@ -2131,16 +2137,28 @@ def _stock_ground_texture_table(
             ),
             enabled=True,
         )
-    if profile == "everon":
+    if profile in {"everon", "malden", "kolgujev", "nogova"}:
         if elevations is None:
-            raise ValueError("Everon underwater textures require final WRP elevations")
+            raise ValueError(f"{profile} underwater textures require final WRP elevations")
         heights = np.asarray(elevations, dtype=np.float64).reshape(-1)
         if heights.size != len(indices) or not np.all(np.isfinite(heights)):
-            raise ValueError("Everon WRP elevations have invalid dimensions or values")
-        paths, indices = apply_everon_water_borders(
-            paths, indices, width=spec.cells,
-            underwater_mask=(heights <= float(spec.sea_level)),
-        )
+            raise ValueError(f"{profile} WRP elevations have invalid dimensions or values")
+        underwater_mask = heights <= float(spec.sea_level)
+        if profile == "everon":
+            paths, indices = apply_everon_water_borders(
+                paths, indices, width=spec.cells,
+                underwater_mask=underwater_mask,
+            )
+        elif profile == "nogova":
+            paths, indices = apply_nogova_underwater_borders(
+                paths, indices, width=spec.cells,
+                underwater_mask=underwater_mask,
+            )
+        else:
+            paths, indices = apply_stock_underwater_borders(
+                paths, indices, profile=profile, width=spec.cells,
+                underwater_mask=underwater_mask,
+            )
     return tuple(paths), indices
 
 
@@ -4815,15 +4833,20 @@ def build_milestone4(
         }
         surface_manifest["wrp_texture_paths"] = list(ground_texture_paths)
         added_ground_paths = texture_table_paths[1 + len(ground_texture_paths):]
+        ground_profile = _ground_texture_profile(spec)
+        def is_water_blend(path: str) -> bool:
+            if ground_profile == "everon":
+                return is_everon_water_blend_path(path)
+            if ground_profile == "nogova":
+                return is_nogova_water_blend_path(path)
+            return is_stock_water_blend_path(ground_profile, path)
         if bool(getattr(spec, "forest_undergrowth_textures", False)):
             surface_manifest["wrp_forest_border_blend_paths"] = [
-                path for path in added_ground_paths
-                if not is_everon_water_blend_path(path)
+                path for path in added_ground_paths if not is_water_blend(path)
             ]
-        if _ground_texture_profile(spec) == "everon":
+        if ground_profile in {"everon", "malden", "kolgujev", "nogova"}:
             surface_manifest["wrp_water_border_blend_paths"] = [
-                path for path in added_ground_paths
-                if is_everon_water_blend_path(path)
+                path for path in added_ground_paths if is_water_blend(path)
             ]
         active_material_index = {material.code: index for index, material in enumerate(materials)}
         rocky_index = active_material_index.get("k", active_material_index.get("r", 0))

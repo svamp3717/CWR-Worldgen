@@ -55,7 +55,13 @@ NOGOVA_GROUND_TEXTURES: dict[str, str] = {
     material.code: NOGOVA_GROUND_TEXTURE_CYCLE[index % len(NOGOVA_GROUND_TEXTURE_CYCLE)]
     for index, material in enumerate(OSM_MATERIALS)
 }
+# Original Noe WRP uses ps offshore, pt in the underwater coast strip
+# and t1 for the dry land adjacent to it. Keep semantic rock/farmland
+# overrides; ordinary dry sand and grass use the land-facing t1 artwork.
 NOGOVA_GROUND_TEXTURES.update({
+    "w": r"o\ps.paa",
+    "s": r"o\t1.paa",
+    "g": r"o\t1.paa",
     "a": r"o\pole1.paa",
 })
 
@@ -64,7 +70,7 @@ NOGOVA_GROUND_TEXTURES.update({
 # Ordinary terrain references need no package scan; the shared overlay compositor
 # may open only the selected main background tile (abel\tt.paa), as for Everon.
 MALDEN_GROUND_TEXTURES: dict[str, str] = {
-    "w": r"abel\tt.paa",
+    "w": r"abel\pi.paa",
     "s": r"abel\tt.paa",
     "g": r"abel\tt.paa",
     "r": r"abel\tt.paa",
@@ -76,12 +82,12 @@ MALDEN_GROUND_TEXTURES: dict[str, str] = {
 
 # Kolgujev/Cain uses one main dry-land texture in generated worlds so OSM
 # semantic masks do not produce large farmland, forest or mountain colour blocks.
-# The classifications still drive object placement; only their visible ground tile
-# is unified. Underwater terrain uses the same ordinary ground as Nogova;
-# water is still water semantically and its height is not changed.
+# The classifications still drive object placement; dry land remains j9.
+# Only at/below-sea-level water uses the verified original cain l4 seabed
+# family. Its directional borders are applied when writing the WRP.
 _KOLGUJEV_MAIN_LAND_TEXTURE = r"cain\j9.paa"
 KOLGUJEV_GROUND_TEXTURES: dict[str, str] = {
-    "w": _KOLGUJEV_MAIN_LAND_TEXTURE,
+    "w": r"cain\l4.paa",
     "s": _KOLGUJEV_MAIN_LAND_TEXTURE,
     "g": _KOLGUJEV_MAIN_LAND_TEXTURE,
     "r": _KOLGUJEV_MAIN_LAND_TEXTURE,
