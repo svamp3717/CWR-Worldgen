@@ -131,8 +131,8 @@ def test_flat_ground_does_not_change_deterministic_plain_road_placements():
 @pytest.mark.parametrize(
     ("paved_path", "paved_top"),
     (
-        (r"wg_belowtest23\\i\\road_paved_w020_l0020.p3d", 10.025),
-        (r"o\\road\\sil6.p3d", 10.0),
+        (r"wg_belowtest23\i\road_paved_w020_l0020.p3d", 10.025),
+        (r"o\road\sil6.p3d", 10.0),
     ),
 )
 def test_small_paved_overlap_between_road_samples_still_limits_gravel_lift(
@@ -147,7 +147,7 @@ def test_small_paved_overlap_between_road_samples_still_limits_gravel_lift(
     spec, _, report = _scene()
     elevations = [10.0] * (spec.cells * spec.cells)
     gravel = WorldObject(
-        311, r"wg_belowtest23\\i\\road_gravel_w070_l0250.p3d",
+        311, r"wg_belowtest23\i\road_gravel_w070_l0250.p3d",
         100.0, 9.9, 100.0, 0.0, 0.0,
     )
     paved = WorldObject(
