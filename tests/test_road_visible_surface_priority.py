@@ -149,3 +149,44 @@ def test_flush_end_p3d_has_no_visual_overhang_but_keeps_roadway(surface):
     assert min(p[2] for p in visual.points) >= -3.0 - 1e-6
     assert roadway.faces
     assert geometry.resolution != roadway.resolution
+
+
+@pytest.mark.parametrize(
+    ("surface", "width", "paved_x"),
+    (("gravel", 7.0, 104.8), ("dirt", 3.5, 103.2)),
+)
+def test_curved_lower_ribbon_bow_does_not_escape_paved_visual_cutout(
+    surface, width, paved_x,
+):
+    curved = WorldObject(
+        1, pi.custom_road_model_path(
+            SPEC.name, surface, width, 20.0, 40.0,
+        ),
+        100, 10.0, 100, 0.0, 0.0,
+    )
+    paved = WorldObject(
+        2, pi.custom_road_model_path(SPEC.name, "paved", 2.0, 25.0),
+        paved_x, 10.095, 100, 0.0, 0.0,
+    )
+    scene = _report((curved, paved))
+    axis = road._lower_surface_axis(curved, 0, SPEC)
+    blocker = road._paved_blockers(scene, SPEC)[0]
+    # Their nominal straight chords do not intersect, but the lower road's
+    # outward-curving visible mesh does reach the paved road.
+    assert road._polygon_area(road._clip_convex_polygon(
+        road._surface_polygon(axis), blocker.polygon,
+    )) == pytest.approx(0.0, abs=1e-6)
+    clipped = enforce_visible_road_priority(scene, SPEC, HEIGHTS)
+    assert clipped.objects == (paved,)
+
+
+def test_custom_paved_curve_blocker_includes_its_bow_and_rotated_end_corners():
+    path = pi.custom_road_model_path(
+        SPEC.name, "paved", 9.1, 25.0, 45.0,
+    )
+    obj = WorldObject(9, path, 100, 10.095, 100, 0.0, 0.0)
+    axis = road._road_axis(obj, 0, SPEC)
+    assert axis is not None
+    assert road._generated_curve_padding(path, axis) > 4.0
+    polygon = road._paved_blockers(_report((obj,)), SPEC)[0].polygon
+    assert max(x for x, z in polygon) - obj.x > axis.half_width + 4.0
