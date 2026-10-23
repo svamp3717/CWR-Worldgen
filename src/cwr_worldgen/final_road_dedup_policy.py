@@ -357,6 +357,13 @@ def _is_paved_junction_cap_model(model_path: str) -> bool:
     )
 
 
+def _is_gravel_junction_cap_model(model_path: str) -> bool:
+    return (
+        _filename(model_path).startswith("kr_new_asf_asf")
+        or _p.is_generated_gravel_junction_model(model_path)
+    )
+
+
 def _surface_priority(family: str) -> int:
     # Final WorldObjects do not retain OSM highway class provenance.  Preserve
     # the strongest information still available: paved beats generated gravel,
@@ -692,11 +699,7 @@ def _gravel_blockers(report, spec) -> tuple[_PavedBlocker, ...]:
                 obj, _surface_polygon(axis),
             ))
             continue
-        filename = _filename(obj.model_path)
-        if (
-            filename.startswith("kr_new_asf_asf")
-            or _p.is_generated_gravel_junction_model(obj.model_path)
-        ):
+        if _is_gravel_junction_cap_model(obj.model_path):
             blockers.append(_junction_blocker(obj))
     return tuple(blockers)
 
@@ -1156,6 +1159,27 @@ def _trim_dirt_under_paved(report, spec):
     variants = _dirt_variant_lengths(spec)
 
     for index, obj in enumerate(report.objects):
+        # Gravel hubs have no ordinary _RoadAxis. At mixed paved junctions
+        # they were otherwise left as intact stock P3D caps across asphalt.
+        # Remove only genuine at-grade cap-vs-paved footprint overlaps; a
+        # high bridge deck must not destroy its underlying junction.
+        if _is_gravel_junction_cap_model(obj.model_path):
+            cap = _junction_blocker(obj)
+            nearby: set[int] = set()
+            for bucket in _polygon_buckets(cap.polygon):
+                nearby.update(paved_buckets.get(bucket, ()))
+            if any(
+                paved_blockers[i].elevation - cap.elevation
+                <= _DIRT_PAVED_OVERPASS_CLEARANCE_METRES
+                and _polygon_area(_clip_convex_polygon(
+                    cap.polygon, paved_blockers[i].polygon,
+                )) > 1.0e-5
+                for i in nearby
+            ):
+                replacements[int(obj.object_id)] = ()
+                if index < protected_prefix:
+                    removed_cap_ids.add(int(obj.object_id))
+            continue
         dirt = _lower_surface_axis(
             obj,
             index,
