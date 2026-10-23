@@ -94,13 +94,19 @@ NOGOVA_SURFACE_TEXTURES: dict[str, str] = {
     for index, material in enumerate(MILESTONE9_MATERIALS)
 }
 NOGOVA_SURFACE_TEXTURES.update({
+    # Source noe.wrp has a full two-stage ps/pt/t1 water/shore family.
+    # pt and source quartet blends are added on submerged cells only.
+    "w": r"o\ps.paa",
+    "q": r"o\t1.paa",
+    "s": r"o\t1.paa",
     "a": r"o\pole1.paa",
     "b": r"o\pole2.paa",
     # Keep sports turf on the same standard green grass texture as ordinary
     # grass.  The former o\b1.paa override is visibly lighter and creates pale
     # pitch rectangles that do not match the surrounding Nogova terrain.
     "y": NOGOVA_SURFACE_TEXTURES["g"],
-    "x": r"o\ps.paa",
+    # Mapped beaches above sea level must never contain underwater ps art.
+    "x": r"o\t1.paa",
     # Nogova has no rock tile that blends cleanly with this terrain palette.
     # Rock/scree semantic cells therefore keep their ordinary Nogova cycle
     # texture; 3D stone objects may still be placed independently.
