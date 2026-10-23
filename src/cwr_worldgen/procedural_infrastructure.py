@@ -544,12 +544,6 @@ def _bridge_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
 
     width = key.width_m
     length = key.length_m
-    # The 4-digit nominal road length is decimetres. Final seam models can
-    # encode one extra centimetre digit to avoid a visible 0-10 cm shortfall
-    # beside asphalt; use the exact encoded length for ALL P3D LODs.
-    length_cm = _CUSTOM_ROAD_SUBTYPE.fullmatch(key.subtype.casefold())
-    if length_cm is not None:
-        length += int(length_cm.group("centimetre") or 0) / 100.0
     half_w = width * 0.5
     half_l = length * 0.5
     deck_bottom = -0.30
@@ -1697,6 +1691,11 @@ def _road_lods(
         return _gravel_junction_lods(key, texture, surface_style)
     width = key.width_m
     length = key.length_m
+    # Final seam-model variants carry an extra 1-9 cm after the nominal
+    # decimetres. Their visual AND Roadway LODs must use the full length.
+    centimetre_match = _CUSTOM_ROAD_SUBTYPE.fullmatch(subtype)
+    if centimetre_match is not None:
+        length += int(centimetre_match.group("centimetre") or 0) / 100.0
     half_w = width * 0.5
     custom = _custom_road_signature(key.subtype)
     custom_surface = custom[0] if custom is not None else ""
@@ -1995,11 +1994,7 @@ def paved_fallback_model_path(
     curve_degrees: float = 0.0,
 ) -> str:
     width_dm = max(10, min(999, int(round(float(width_metres) * 10.0))))
-    length_cm = max(50, min(99990, int(math.floor(float(length_metres) * 100.0 + 1e-7))))
-    length_dm = (
-        length_cm // 10 if flush_ends
-        else max(5, min(9999, int(round(float(length_metres) * 10.0))))
-    )
+    length_dm = max(5, min(9999, int(round(float(length_metres) * 10.0))))
     magnitude = abs(float(curve_degrees))
     suffix = ""
     if magnitude >= 2.5:
@@ -2082,7 +2077,11 @@ def custom_road_model_path(
     if surface not in {"paved", "gravel", "dirt"}:
         raise ValueError("custom road surface must be paved, gravel, or dirt")
     width_dm = max(10, min(999, int(round(float(width_metres) * 10.0))))
-    length_dm = max(5, min(9999, int(round(float(length_metres) * 10.0))))
+    length_cm = max(50, min(99990, int(math.floor(float(length_metres) * 100.0 + 1e-7))))
+    length_dm = (
+        length_cm // 10 if flush_ends
+        else max(5, min(9999, int(round(float(length_metres) * 10.0))))
+    )
     signed = float(curve_degrees)
     if not math.isfinite(signed):
         raise ValueError("custom road curve must be finite")
