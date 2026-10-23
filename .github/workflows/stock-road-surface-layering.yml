@@ -14,6 +14,8 @@ on:
       - "src/cwr_worldgen/procedural_infrastructure.py"
       - "tests/test_real_wrp_road_cross_slope.py"
       - "tests/test_road_visible_surface_priority.py"
+      - "tests/test_custom_road_generation.py"
+      - "tests/test_road_fit_cache_policy.py"
       - ".github/workflows/stock-road-surface-layering.yml"
   workflow_dispatch:
 
@@ -37,6 +39,9 @@ jobs:
       - name: Assert dirt-gravel-paved surfaces and all junction heights
         run: |
           python -m pytest -q tests/test_stock_road_surface_layering.py tests/test_stock_gravel_paved_overlap.py tests/test_real_wrp_road_cross_slope.py tests/test_road_visible_surface_priority.py
+      - name: Check generated-road asset packaging and road-fit cache compatibility
+        run: |
+          python -m pytest -q tests/test_custom_road_generation.py tests/test_road_fit_cache_policy.py tests/test_paved_generated_road_fallback.py
       - name: Check existing road finishing, synthetic junctions and stock models
         run: |
           python -m pytest -q tests/test_road_finish_parallel_policy.py tests/test_synthetic_paved_junctions.py tests/test_paved_junction_performance_policy.py tests/test_gravel_junction_policy.py
