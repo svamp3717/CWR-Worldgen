@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import math
+import re
 from typing import Sequence
 
 from .model import WorldObject
@@ -22,9 +23,9 @@ from .procedural_infrastructure import (
     custom_road_model_signature,
 )
 
-# RVW4/P3D coordinates and model lengths are quantized. Leave a small positive
-# gap rather than letting a 0.1 m generated model intrude into asphalt.
-_EDGE_SAFETY_METRES = 0.035
+# Leave only a few millimetres of coordinate tolerance. Seam models now encode
+# lengths to 1 cm, so we need not withdraw 35-85 mm at either boundary.
+_EDGE_SAFETY_METRES = 0.003
 _MIN_EDGE_MODEL_METRES = 0.5
 
 
@@ -52,10 +53,10 @@ def _flush_piece(obj, axis, begin: float, end: float, *, object_id: int,
                  spec, elevations: Sequence[float]):
     from . import final_road_dedup_policy as road
 
-    # Floor, never round outward into the paved polygon. The centre of the
-    # retained interval stays fixed so both endpoints maintain the margin.
+    # One-centimetre P3D lengths keep the artwork within about 8 mm of its
+    # boundary. The previous 0.1m floor and 35mm inset were visibly detached.
     available = end - begin - 2.0 * _EDGE_SAFETY_METRES
-    length = math.floor(available * 10.0 + 1.0e-8) / 10.0
+    length = math.floor(available * 100.0 + 1.0e-8) / 100.0
     if length < _MIN_EDGE_MODEL_METRES:
         return None
     mid = (begin + end) * 0.5
@@ -109,7 +110,7 @@ def _painted_gravel_blockers(report, spec):
             lip = (
                 GENERATED_GRAVEL_VISUAL_OVERLAP_METRES
                 if signature is not None and signature[0] == "gravel"
-                and not str(obj.model_path).casefold().endswith("_edge.p3d")
+                and not re.search(r"_edge[1-9]?\.p3d$", str(obj.model_path), re.I)
                 else 0.0
             )
             padding = (
@@ -166,7 +167,7 @@ def enforce_visible_road_priority(report, spec, elevations: Sequence[float]):
                 continue
             signature = custom_road_model_signature(obj.model_path)
             is_generated = signature is not None and signature[0] == surface
-            edge = str(obj.model_path).casefold().endswith("_edge.p3d")
+            edge = re.search(r"_edge[1-9]?\.p3d$", str(obj.model_path), re.I) is not None
             lip = (
                 GENERATED_GRAVEL_VISUAL_OVERLAP_METRES
                 if is_generated and not edge else 0.0
