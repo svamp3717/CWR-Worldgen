@@ -556,8 +556,14 @@ def _parser() -> argparse.ArgumentParser:
     milestone9.add_argument(
         "--terrain-clutter", "--nogova-terrain-clutter",
         action="store_true", dest="nogova_terrain_clutter",
-        help="add source-measured bushes and saplings for selected Everon, Malden, Kolgujev or Resistance tree preset",
+        help="enable stock island bush and sapling clutter (default; matching trees only)",
     )
+    milestone9.add_argument(
+        "--no-terrain-clutter", "--no-nogova-terrain-clutter",
+        action="store_false", dest="nogova_terrain_clutter",
+        help="disable extra stock island terrain clutter for this build",
+    )
+    milestone9.set_defaults(nogova_terrain_clutter=True)
     # Retain the old spelling so saved build commands still parse, but do
     # not cap clutter. The tree-preset/checkbox gate is the off switch.
     milestone9.add_argument(
