@@ -80,8 +80,8 @@ def test_perpendicular_stock_gravel_is_trimmed_below_stock_paved():
 
 def test_two_stock_gravel_approaches_survive_paved_crossing():
     reports = (
-        _road(1, r"o\road\asf25.p3d", 100, 90, heading=90.0, y=0.035),
-        _road(2, r"o\road\asf25.p3d", 100, 110, heading=90.0, y=0.035),
+        _road(1, r"o\road\asf25.p3d", 90, 100, heading=90.0, y=0.035),
+        _road(2, r"o\road\asf25.p3d", 110, 100, heading=90.0, y=0.035),
         _road(3, r"o\road\sil25.p3d", 100, 100, heading=0.0, y=0.095),
     )
     actual = deduplicate_final_road_objects(_report(reports), _spec())
