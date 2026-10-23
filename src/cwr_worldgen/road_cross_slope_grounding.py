@@ -133,7 +133,7 @@ def ground_generated_approaches(
                 ]
                 if covering:
                     for blocker in covering:
-                        asphalt_y = road._blocker_plane_height(
+                        asphalt_y = road._blocker_height_at(
                             blocker, (world_x, world_z)
                         ) + float(road._p.GENERATED_GRAVEL_VISUAL_TOP_METRES)
                         allowed_lift = min(
