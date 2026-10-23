@@ -22,6 +22,7 @@ from cwr_worldgen.final_road_dedup_policy import (
 from cwr_worldgen.model import WorldObject
 from cwr_worldgen.playability import RoadFitReport
 from cwr_worldgen.procedural_infrastructure import (
+    GENERATED_GRAVEL_VISUAL_TOP_METRES,
     custom_road_model_path, custom_road_model_signature,
 )
 
@@ -96,6 +97,23 @@ def test_perpendicular_stock_gravel_is_trimmed_below_stock_paved():
     # CWA can show stock P3D shoulders through pavement even when the object's
     # centre origin is lower. Reject gravel geometry under the paved footprint.
     _assert_no_gravel_footprint_over_paved(result.objects, _spec())
+    # Stock 6/12/25 parts cannot end at an arbitrary asphalt boundary.
+    # Exact-length generated gravel connectors fill the remainder, using the
+    # generated P3D's 25 mm local visual lift rather than copying donor Y.
+    fillers = [
+        obj for obj in result.objects
+        if (sig := custom_road_model_signature(obj.model_path)) is not None
+        and sig[0] == "gravel"
+    ]
+    assert len(fillers) >= 2
+    assert all(
+        obj.y + GENERATED_GRAVEL_VISUAL_TOP_METRES == pytest.approx(original.y)
+        for obj in fillers
+    )
+    assert all(
+        0.5 <= custom_road_model_signature(obj.model_path)[2] < 6.25
+        for obj in fillers
+    )
     assert all(obj.model_path.casefold().endswith(
         ("asf6.p3d", "asf12.p3d", "asf25.p3d")
     ) for obj in gravel)
