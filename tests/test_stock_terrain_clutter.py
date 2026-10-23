@@ -12,7 +12,7 @@ from cwr_worldgen.gui import (
     build_milestone9_command, default_gui_values,
 )
 from cwr_worldgen.nogova_terrain_clutter import (
-    nogova_clutter_active, place_nogova_terrain_clutter,
+    terrain_clutter_active, place_nogova_terrain_clutter,
     terrain_clutter_preset,
 )
 from cwr_worldgen.stock_terrain_clutter_profiles import (
@@ -77,7 +77,7 @@ def test_exact_model_weights_match_original_export(
     spec = _spec(block, tree)
     assert stock_clutter_tree_preset(spec) == preset
     assert terrain_clutter_preset(spec) == preset
-    assert nogova_clutter_active(spec)
+    assert terrain_clutter_active(spec)
 
 
 @pytest.mark.parametrize("preset,block,tree,weights", PRESETS)
@@ -89,7 +89,7 @@ def test_no_matching_tree_preset_no_clutter(
     assert terrain_clutter_preset(_spec(block, wrong_tree)) is None
     assert terrain_clutter_preset(_spec(wrong_block, tree)) is None
     assert terrain_clutter_preset(_spec(block, tree, enabled=False)) == preset
-    assert not nogova_clutter_active(_spec(block, tree, enabled=False))
+    assert not terrain_clutter_active(_spec(block, tree, enabled=False))
     # The same tree preset works with *any* ground texture selection.
     for ground in ("everon", "malden", "kolgujev", "nogova", "none"):
         spec = _spec(block, tree)
