@@ -397,7 +397,7 @@ class Milestone9Spec(Milestone8Spec):
     forest_cluster_bush_maximum_float: float = 0.60
     forest_cluster_footprint_margin: float = 0.75
     forest_undergrowth_enabled: bool = True
-    nogova_terrain_clutter_enabled: bool = False
+    nogova_terrain_clutter_enabled: bool = True
     forest_undergrowth_maximum_objects: int = 120000
     forest_undergrowth_spacing: float = 30.0
     forest_undergrowth_maximum_relief: float = 20.0
@@ -888,7 +888,7 @@ class _Milestone9PlayabilitySpec(_Milestone8PlayabilitySpec):
     forest_cluster_bush_maximum_float: float = 0.60
     forest_cluster_footprint_margin: float = 0.75
     forest_undergrowth_enabled: bool = True
-    nogova_terrain_clutter_enabled: bool = False
+    nogova_terrain_clutter_enabled: bool = True
     forest_undergrowth_maximum_objects: int = 120000
     forest_undergrowth_spacing: float = 30.0
     forest_undergrowth_maximum_relief: float = 20.0
