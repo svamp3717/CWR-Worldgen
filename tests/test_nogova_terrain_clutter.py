@@ -26,11 +26,10 @@ PINE = r"o\tree\les_nw_jehl_ctver_pruhozi.p3d"
 
 
 def _spec(*, block=LEAF, single=r"o\tree\javor01.p3d",
-          enabled=True, maximum=1000, seed=1234, cells=32):
+          enabled=True, seed=1234, cells=32):
     return SimpleNamespace(
         forest_tree_model=block, forest_single_tree_model=single,
         nogova_terrain_clutter_enabled=enabled,
-        nogova_terrain_clutter_maximum_objects=maximum,
         deterministic_seed=seed, cells=cells, cell_size=25.0, sea_level=0.0,
         ground_texture_profile="everon",
     )
@@ -84,10 +83,9 @@ def test_requires_nogova_tree_preset_not_nogova_ground(block, single, active):
                                        enabled=False)) is False
 
 
-def test_checkbox_defaults_off_and_gui_only_sends_flag_for_resistance_preset():
+def test_checkbox_defaults_on_and_gui_can_disable_resistance_clutter():
     values = default_gui_values()
-    assert values["nogova_terrain_clutter"] is False
-    values["nogova_terrain_clutter"] = True
+    assert values["nogova_terrain_clutter"] is True
     values["ground_textures"] = "nogova"
     values["vegetation_style"] = VEGETATION_EVERON
     assert "--nogova-terrain-clutter" not in build_milestone9_command(values, python="python")
@@ -99,40 +97,58 @@ def test_checkbox_defaults_off_and_gui_only_sends_flag_for_resistance_preset():
     assert "--nogova-terrain-clutter" not in build_milestone9_command(values, python="python")
     values["vegetation_style"] = VEGETATION_RESISTANCE_LEAF
     values["nogova_terrain_clutter"] = False
-    assert "--nogova-terrain-clutter" not in build_milestone9_command(values, python="python")
+    command = build_milestone9_command(values, python="python")
+    assert "--nogova-terrain-clutter" not in command
+    assert "--no-terrain-clutter" in command
+    assert "--no-terrain-clutter" in command
 
 
-def test_cli_flag_is_opt_in_with_hard_object_limit():
+def test_cli_clutter_enabled_by_default_with_explicit_disable_flag():
     parser = _parser()
     default = parser.parse_args(["milestone9", "--source-dir", ".", "--name",
                                  "testworld", "--output", "."])
-    assert default.nogova_terrain_clutter is False
-    assert default.nogova_clutter_max_objects == 20000
+    assert default.nogova_terrain_clutter is True
+    assert default.nogova_clutter_max_objects is None
     enabled = parser.parse_args(["milestone9", "--source-dir", ".", "--name",
                                  "testworld", "--output", ".",
                                  "--nogova-terrain-clutter",
                                  "--nogova-clutter-max-objects", "99"])
     assert enabled.nogova_terrain_clutter is True
+    # A legacy flag remains parseable but no longer imposes any cap.
     assert enabled.nogova_clutter_max_objects == 99
+    for off in ("--no-terrain-clutter", "--no-nogova-terrain-clutter"):
+        parsed = parser.parse_args([
+            "milestone9", "--source-dir", ".", "--name", "testworld",
+            "--output", ".", off,
+        ])
+        assert parsed.nogova_terrain_clutter is False
+    assert parser.parse_args([
+        "milestone9", "--source-dir", ".", "--name", "testworld",
+        "--output", ".", "--no-terrain-clutter", "--terrain-clutter",
+    ]).nogova_terrain_clutter is True
 
 
-def test_deterministic_seed_changes_and_hard_limit():
-    spec = _spec(maximum=15)
+def test_deterministic_seed_changes_without_object_cap():
+    spec = _spec()
     raster = _raster()
     elevations = _heights()
     one = place_nogova_terrain_clutter(spec, raster, elevations, ())
     two = place_nogova_terrain_clutter(spec, raster, elevations, ())
     assert one == two
-    assert 0 < len(one) <= 15
+    assert 0 < len(one) <= (int(spec.cells * spec.cell_size // 45)) ** 2
     assert {o.model_path for o in one}.issubset(
         {item[0] for item in NOGOVA_CLUTTER_WEIGHTS}
     )
     assert all(o.y == pytest.approx(9.975) for o in one)
     assert len({(o.x, o.z) for o in one}) == len(one)
-    different = place_nogova_terrain_clutter(_spec(maximum=15, seed=1245),
+    different = place_nogova_terrain_clutter(_spec(seed=1245),
                                              raster, elevations, ())
     assert one != different
-    assert place_nogova_terrain_clutter(_spec(maximum=0), raster, elevations, ()) == ()
+    old_saved_setting = _spec()
+    old_saved_setting.nogova_terrain_clutter_maximum_objects = 0
+    assert place_nogova_terrain_clutter(
+        old_saved_setting, raster, elevations, ()
+    ) == one  # Deprecated settings cannot cap or disable the new pass.
     assert place_nogova_terrain_clutter(_spec(enabled=False), raster, elevations, ()) == ()
 
 
@@ -152,7 +168,7 @@ def test_water_urban_forest_roads_fields_and_buildings_are_safe():
 
 
 def test_existing_objects_are_kept_and_have_a_clearance():
-    spec = _spec(maximum=50)
+    spec = _spec()
     base = place_nogova_terrain_clutter(spec, _raster(), _heights(), ())
     assert base
     original = base[0]
@@ -181,4 +197,5 @@ def test_pipeline_keeps_extra_objects_in_normal_and_reproducibility_builds():
     assert "nogova_clutter = place_nogova_terrain_clutter(" in source
     assert "repeat_clutter = place_nogova_terrain_clutter(" in source
     assert "combined_model_usage.update(obj.model_path for obj in nogova_clutter)" in source
-    assert '"nogova_terrain_clutter_enabled", "nogova_terrain_clutter_maximum_objects"' in source
+    assert '"nogova_terrain_clutter_enabled",' in source
+    assert '"nogova_terrain_clutter_maximum_objects"' not in source

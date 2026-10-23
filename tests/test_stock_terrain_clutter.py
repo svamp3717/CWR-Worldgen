@@ -35,12 +35,11 @@ PRESETS = (
 )
 
 
-def _spec(block, tree, *, enabled=True, maximum=150, seed=11, cells=32):
+def _spec(block, tree, *, enabled=True, seed=11, cells=32):
     return SimpleNamespace(
         forest_tree_model=block,
         forest_single_tree_model=tree,
         nogova_terrain_clutter_enabled=enabled,
-        nogova_terrain_clutter_maximum_objects=maximum,
         cells=cells, cell_size=25.0, sea_level=0.0,
         deterministic_seed=seed,
         ground_texture_profile="nogova",  # Ground textures cannot select palette.
@@ -101,25 +100,27 @@ def test_no_matching_tree_preset_no_clutter(
 def test_reproducible_dry_natural_ground_only_and_source_models(
     preset, block, tree, weights,
 ) -> None:
-    spec = _spec(block, tree, maximum=12)
+    spec = _spec(block, tree)
     flat = [10.0] * (spec.cells * spec.cells)
     one = place_nogova_terrain_clutter(spec, _raster(), flat, ())
     two = place_nogova_terrain_clutter(spec, _raster(), flat, ())
-    assert 0 < len(one) <= 12
+    assert 0 < len(one) <= (int(spec.cells * spec.cell_size // 45)) ** 2
     assert one == two
     assert set(obj.model_path for obj in one).issubset(dict(weights))
     assert len(set((obj.x, obj.z) for obj in one)) == len(one)
     assert all(obj.y == pytest.approx(9.975) for obj in one)
     varied = place_nogova_terrain_clutter(
-        _spec(block, tree, maximum=12, seed=12), _raster(), flat, (),
+        _spec(block, tree, seed=12), _raster(), flat, (),
     )
     assert one != varied
     assert place_nogova_terrain_clutter(
         _spec(block, tree, enabled=False), _raster(), flat, (),
     ) == ()
+    old_config = _spec(block, tree)
+    old_config.nogova_terrain_clutter_maximum_objects = 0
     assert place_nogova_terrain_clutter(
-        _spec(block, tree, maximum=0), _raster(), flat, (),
-    ) == ()
+        old_config, _raster(), flat, (),
+    ) == one
 
 
 @pytest.mark.parametrize("preset,block,tree,weights", PRESETS)
@@ -143,18 +144,22 @@ def test_coarse_masks_submerged_and_steep_terrain_rejected(
 
 def test_gui_checkbox_uses_correct_preset_independent_of_ground_textures() -> None:
     values = default_gui_values()
-    assert values["nogova_terrain_clutter"] is False
+    assert values["nogova_terrain_clutter"] is True
     for style in (VEGETATION_EVERON, VEGETATION_KOLGUJEV, VEGETATION_MALDEN):
         values["vegetation_style"] = style
-        command = build_milestone9_command(values, python="python")
-        assert "--terrain-clutter" not in command
         values["nogova_terrain_clutter"] = True
+        command = build_milestone9_command(values, python="python")
+        assert command.count("--terrain-clutter") == 1
         for ground in ("nogova", "everon", "generated", "malden"):
             values["ground_textures"] = ground
             command = build_milestone9_command(values, python="python")
             assert command.count("--terrain-clutter") == 1
             assert "--nogova-terrain-clutter" not in command
         values["nogova_terrain_clutter"] = False
+        command = build_milestone9_command(values, python="python")
+        assert "--no-terrain-clutter" in command
+        assert "--terrain-clutter" not in command
+        assert "--nogova-terrain-clutter" not in command
     values["nogova_terrain_clutter"] = True
     for style in (VEGETATION_RESISTANCE_LEAF, VEGETATION_RESISTANCE_PINE):
         values["vegetation_style"] = style
@@ -170,12 +175,16 @@ def test_generic_cli_flag_preserves_original_nogova_compatibility() -> None:
     parser = _parser()
     args = ["milestone9", "--source-dir", ".", "--name", "world", "--output", "."]
     default = parser.parse_args(args)
-    assert default.nogova_terrain_clutter is False
-    assert default.nogova_clutter_max_objects == 20000
+    assert default.nogova_terrain_clutter is True
+    assert default.nogova_clutter_max_objects is None
     for flag in ("--terrain-clutter", "--nogova-terrain-clutter"):
         enabled = parser.parse_args([*args, flag, "--nogova-clutter-max-objects", "3"])
         assert enabled.nogova_terrain_clutter is True
+        # Backward-compatible parse only: object placement ignores this.
         assert enabled.nogova_clutter_max_objects == 3
+    for flag in ("--no-terrain-clutter", "--no-nogova-terrain-clutter"):
+        disabled = parser.parse_args([*args, flag])
+        assert disabled.nogova_terrain_clutter is False
 
 
 def test_original_nogova_family_is_unchanged() -> None:
@@ -183,3 +192,37 @@ def test_original_nogova_family_is_unchanged() -> None:
     assert terrain_clutter_preset(nogova) == "nogova"
     assert stock_clutter_tree_preset(nogova) is None
     assert nogova_clutter_active(nogova)
+
+
+def test_full_size_stock_world_can_place_more_than_old_20000_cap() -> None:
+    """Regression: eligible large worlds have no hidden 20,000-object stop.
+
+    The old default would return exactly 20,000 objects on this world.
+    The new bound is geometric sampling density, not an absolute object cap.
+    """
+    spec = _spec(EVERON_BLOCK, EVERON_TREE, cells=256)
+    spec.cell_size = 50.0  # 12.8 km terrain
+    spec.nogova_terrain_clutter_maximum_objects = 1  # ignored legacy value
+    raster = _raster(cells=256)
+    elevations = [10.0] * (256 * 256)
+    objects = place_nogova_terrain_clutter(spec, raster, elevations, ())
+    assert len(objects) > 20_000
+    assert len(objects) <= int((256 * 50 // 45) ** 2)
+    assert len({o.object_id for o in objects}) == len(objects)
+    assert {o.model_path for o in objects}.issubset(dict(EDEN_CLUTTER_WEIGHTS))
+
+
+def test_public_milestone9_spec_defaults_on_and_can_be_disabled() -> None:
+    from pathlib import Path
+    from cwr_worldgen.milestone9 import (
+        Milestone9Spec, _Milestone9PlayabilitySpec,
+    )
+
+    assert Milestone9Spec(source_dir=Path("unused")).nogova_terrain_clutter_enabled is True
+    assert _Milestone9PlayabilitySpec(heightmap_path=Path("unused")).nogova_terrain_clutter_enabled is True
+    assert Milestone9Spec(
+        source_dir=Path("unused"), nogova_terrain_clutter_enabled=False,
+    ).nogova_terrain_clutter_enabled is False
+    assert _Milestone9PlayabilitySpec(
+        heightmap_path=Path("unused"), nogova_terrain_clutter_enabled=False,
+    ).nogova_terrain_clutter_enabled is False

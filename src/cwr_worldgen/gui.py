@@ -811,11 +811,14 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
     vegetation = str(values.get("vegetation_style", VEGETATION_EVERON)).strip()
     # Tree preset, not ground texture, decides the clutter model family.
     # Preserve the original Nogova CLI flag for saved profiles and tests.
-    if bool(values.get("nogova_terrain_clutter", False)):
-        if vegetation in {VEGETATION_RESISTANCE_LEAF, VEGETATION_RESISTANCE_PINE}:
-            command.append("--nogova-terrain-clutter")
-        elif vegetation in {VEGETATION_EVERON, VEGETATION_MALDEN, VEGETATION_KOLGUJEV}:
-            command.append("--terrain-clutter")
+    if not bool(values.get("nogova_terrain_clutter", True)):
+        # CLI defaults on: explicitly honour a previously unchecked or
+        # user-disabled GUI control, even with otherwise compatible trees.
+        command.append("--no-terrain-clutter")
+    elif vegetation in {VEGETATION_RESISTANCE_LEAF, VEGETATION_RESISTANCE_PINE}:
+        command.append("--nogova-terrain-clutter")
+    elif vegetation in {VEGETATION_EVERON, VEGETATION_MALDEN, VEGETATION_KOLGUJEV}:
+        command.append("--terrain-clutter")
     negative_flags = {
         "include_minor_roads": "--no-minor-roads",
         "forest_clusters": "--no-forest-clusters",
@@ -1107,7 +1110,7 @@ def default_gui_values() -> dict[str, object]:
         "forest_undergrowth": True,
         # Saved key retained for backward compatibility. Effective only when
         # a supported island tree preset is selected; never texture-dependent.
-        "nogova_terrain_clutter": False,
+        "nogova_terrain_clutter": True,
         "forest_undergrowth_max_objects": "120000",
         "forest_undergrowth_spacing": "30",
         "steep_hill_bushes": True,
@@ -2376,7 +2379,7 @@ class WorldgenGui(tk.Tk):
             ("Higher-quality building textures (256 px)", "high_quality_building_textures", False),
             ("Match nearby same-shape town/city building textures", "match_nearby_building_textures", False),
             ("Forest undergrowth", "forest_undergrowth", True),
-            ("Original island terrain clutter (matching trees)", "nogova_terrain_clutter", False),
+            ("Original island terrain clutter (matching trees)", "nogova_terrain_clutter", True),
             ("Stock forest undergrowth ground textures (incl. forest edges)", "forest_undergrowth_textures", True),
             ("Fences, walls and hedges", "barriers", True),
             ("Stock urban pavement / sidewalks (disabled for now)", "sidewalks", False),
