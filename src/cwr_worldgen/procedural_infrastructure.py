@@ -658,7 +658,8 @@ def _paved_curve_degrees(subtype: str) -> int:
 
 _CUSTOM_ROAD_SUBTYPE = re.compile(
     r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
-    r"(?P<length>\d{4})(?:_(?P<side>[lr])(?P<curve>\d{3}))?(?P<edge>_edge(?P<centimetre>[1-9])?)?$",
+    r"(?P<length>\d{4})(?:_(?P<side>[lr])(?P<curve>\d{3}))?"
+    r"(?P<edge>_edge(?P<centimetre>[1-9])?(?:_m(?P<miter>\d{12}))?)?$",
     re.IGNORECASE,
 )
 
@@ -841,8 +842,9 @@ def _gravel_visual_lod(
     surface_style: RoadSurfaceStyle = _DEFAULT_ROAD_SURFACE_STYLE,
     *,
     flush_ends: bool = False,
+    miter: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
 ) -> _Lod:
-    """Build a gravel/dirt ribbon, optionally without painted overlap lips."""
+    """Build a road ribbon with flush or precisely mitered join mouths."""
 
     visual_section_count = max(6, min(20, int(math.ceil(length / GENERATED_GRAVEL_EDGE_SECTION_METRES))))
     full_sections = _road_ribbon_sections(
@@ -883,6 +885,16 @@ def _gravel_visual_lod(
         lz -= (lz - cz) / left_len * left_inset
         rx -= (rx - cx) / right_len * right_inset
         rz -= (rz - cz) / right_len * right_inset
+        # A gravel-to-asphalt cut must follow the actual oblique paved edge:
+        # both sides cannot end at the same longitudinal station. Extend only
+        # the terminal vertices, preserving normal intermediate road geometry.
+        # The 12-digit filename signature stores start L/R and end L/R in cm.
+        if flush_ends and index == 0:
+            lz -= miter[0]
+            rz -= miter[1]
+        if flush_ends and index == last:
+            lz += miter[2]
+            rz += miter[3]
         sections.append((lx, lz, rx, rz))
 
     visual = _ribbon_lod(
@@ -1696,6 +1708,12 @@ def _road_lods(
     centimetre_match = _CUSTOM_ROAD_SUBTYPE.fullmatch(subtype)
     if centimetre_match is not None:
         length += int(centimetre_match.group("centimetre") or 0) / 100.0
+    miter = (
+        tuple(int(centimetre_match.group("miter")[n:n + 3]) / 100.0
+              for n in (0, 3, 6, 9))
+        if centimetre_match is not None and centimetre_match.group("miter")
+        else (0.0, 0.0, 0.0, 0.0)
+    )
     half_w = width * 0.5
     custom = _custom_road_signature(key.subtype)
     custom_surface = custom[0] if custom is not None else ""
@@ -1760,7 +1778,8 @@ def _road_lods(
         # distinct while preserving identical connection behaviour.
         visual = _gravel_visual_lod(
             length, half_w, curve_degrees, texture, surface_style,
-            flush_ends=re.search(r"_edge[1-9]?$", subtype) is not None,
+            flush_ends=re.search(r"_edge[1-9]?(?:_m\d{12})?$", subtype) is not None,
+            miter=miter,
         )
 
     # Keep road simulation on the first Resolution LOD, but also emit a face-less
@@ -1784,6 +1803,16 @@ def _road_lods(
         ),
         square_ends=(paved_fallback and not paved_turn),
     )
+    if any(miter):
+        # Visual and Roadway have the same miter. The Roadway additionally
+        # extends 40 cm beyond the painted end, under higher-priority paving.
+        roadway_sections = tuple(
+            (lx, lz - (miter[0] if i == 0 else 0.0)
+                 + (miter[2] if i == len(roadway_sections)-1 else 0.0),
+             rx, rz - (miter[1] if i == 0 else 0.0)
+                 + (miter[3] if i == len(roadway_sections)-1 else 0.0))
+            for i, (lx, lz, rx, rz) in enumerate(roadway_sections)
+        )
     roadway = _ribbon_lod(
         roadway_sections,
         texture=_roadway_surface_texture(texture, surface_style),
@@ -2066,6 +2095,7 @@ def custom_road_model_path(
     curve_degrees: float = 0.0,
     *,
     flush_ends: bool = False,
+    miter_centimetres: tuple[int, int, int, int] = (0, 0, 0, 0),
 ) -> str:
     """Return a reusable generated road model for geometry absent from stock CWA.
 
@@ -2096,6 +2126,16 @@ def custom_road_model_path(
         suffix += "_edge"
         if length_cm % 10:
             suffix += str(length_cm % 10)
+        if len(miter_centimetres) != 4 or any(
+            int(v) != v or not 0 <= int(v) <= 999 for v in miter_centimetres
+        ):
+            raise ValueError("miter offsets must be four centimetre integers 0..999")
+        if any(miter_centimetres):
+            if magnitude:
+                raise ValueError("miter joins apply only to straight roads")
+            suffix += "_m" + "".join(f"{int(v):03d}" for v in miter_centimetres)
+    elif any(miter_centimetres):
+        raise ValueError("miter offsets require flush_ends=True")
     return (
         rf"{world_name}\i\road_{surface}_w{width_dm:03d}_l{length_dm:04d}"
         rf"{suffix}.p3d"
@@ -2120,6 +2160,17 @@ def custom_road_model_signature(
         (int(match.group("length")) / 10.0
          + int(match.group("centimetre") or 0) / 100.0),
         curve,
+    )
+
+
+def custom_road_miter_metres(model_path: str) -> tuple[float, float, float, float]:
+    """Visual end extensions: start left/right, end left/right, in metres."""
+    filename = model_path.replace("/", "\\").rsplit("\\", 1)[-1]
+    match = _CUSTOM_ROAD_SUBTYPE.fullmatch(filename[:-4]) if filename.lower().endswith(".p3d") else None
+    code = match.group("miter") if match is not None else None
+    return (
+        tuple(int(code[n:n + 3]) / 100.0 for n in (0, 3, 6, 9))
+        if code else (0.0, 0.0, 0.0, 0.0)
     )
 
 
@@ -2272,7 +2323,8 @@ class ProceduralInfrastructureLibrary:
     )
     _CUSTOM_ROAD_PATTERN = re.compile(
         r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
-        r"(?P<length>\d{4})(?:_[lr]\d{3})?(?:_edge[1-9]?)?\.p3d$",
+        r"(?P<length>\d{4})(?:_[lr]\d{3})?"
+        r"(?:_edge[1-9]?(?:_m\d{12})?)?\.p3d$",
         re.IGNORECASE,
     )
     _CUSTOM_ROAD_JUNCTION_PATTERN = re.compile(
@@ -2702,7 +2754,7 @@ class ProceduralInfrastructureLibrary:
                 # The new final-seam family has centimetre-accurate painted
                 # ends and a 40cm Roadway-only continuation. Do not restore
                 # an old "_edge" model whose contact geometry stopped short.
-                if re.search(r"_edge[1-9]?$", key.subtype.casefold()):
+                if re.search(r"_edge[1-9]?(?:_m\d{12})?$", key.subtype.casefold()):
                     model_cache_version = (
                         "procedural-infrastructure-model-v28-cm-seam-roadway-underlay"
                     )
