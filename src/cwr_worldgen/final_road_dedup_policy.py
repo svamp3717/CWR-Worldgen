@@ -54,9 +54,10 @@ _MINIMUM_PAVED_CAP_SURFACE_COVERAGE = 0.85
 _PAVED_JUNCTION_NEIGHBOURHOOD_METRES = 30.0
 _MAXIMUM_VERTICAL_SEPARATION_METRES = 0.75
 _DIRT_PAVED_TRIM_CLEARANCE_METRES = 0.0
-# Original stock gravel has a visible shoulder beyond its nominal geometric
-# endpoints. Never allow any asf gravel slab to reach a paved footprint.
-_GRAVEL_PAVED_TRIM_CLEARANCE_METRES = 0.85
+# Keep original stock asf pieces OUTSIDE the asphalt polygon; exact-length
+# generated gravel seam fillers provide the missing connection. Their visual
+# ends are already designed to feather/dip below adjacent road artwork.
+_GRAVEL_PAVED_TRIM_CLEARANCE_METRES = 0.0
 _DIRT_PAVED_UNDERLAY_DROP_METRES = 0.080
 _DIRT_PAVED_UNDERLAY_EDGE_EPSILON_METRES = 0.10
 _DIRT_PAVED_UNDERLAY_APPROACH_OVERLAP_METRES = 2.0
@@ -887,16 +888,68 @@ def _replacement_dirt_object(
     y = float(obj.y) + math.sin(
         math.radians(float(obj.pitch_degrees))
     ) * local_shift
+    model_path = _replacement_dirt_model_path(
+        obj, axis, nominal, end - start, spec,
+    )
+    if _p.is_generated_gravel_road_model(model_path) or (
+        _p.is_generated_dirt_road_model(model_path)
+    ):
+        # Generated road P3Ds have their visual skin 25 mm ABOVE local Y=0.
+        # Normal Worldgen fitters subtract that amount; the final road repair
+        # used to copy a stock donor Y verbatim, lifting generated connectors.
+        y -= (
+            _p.GENERATED_GRAVEL_VISUAL_TOP_METRES
+            * math.cos(math.radians(float(obj.pitch_degrees)))
+        )
     return replace(
         obj,
         object_id=int(object_id),
-        model_path=_replacement_dirt_model_path(
-            obj,
-            axis,
-            nominal,
-            end - start,
-            spec,
-        ),
+        model_path=model_path,
+        x=x,
+        y=y,
+        z=z,
+    )
+
+
+def _gravel_gap_connector(
+    obj,
+    axis: _RoadAxis,
+    start: float,
+    end: float,
+    *,
+    object_id: int,
+    spec,
+):
+    """Close the final arbitrary-length gap left by stock 25/12/6 modules.
+
+    Reusing another stock asf6 would protrude into asphalt. Generated gravel
+    geometry has exact-length naming to 0.1 m and lowered 0.9 m visual tips,
+    so its central skin meets the paved border while the hidden end feathers
+    BELOW the higher stock sil surface. Apply the same 25 mm origin adjustment
+    as the regular generated-road placer.
+    """
+    span = end - start
+    if span < 0.45:
+        return None
+    centre = (start + end) * 0.5
+    x = axis.start[0] + axis.ux * centre
+    z = axis.start[1] + axis.uz * centre
+    pitch = math.radians(float(obj.pitch_degrees))
+    y = (
+        float(obj.y)
+        + math.sin(pitch) * (centre - axis.length * 0.5)
+        - _p.GENERATED_GRAVEL_VISUAL_TOP_METRES * math.cos(pitch)
+    )
+    path = _p.custom_road_model_path(
+        str(getattr(spec, "name", "world")),
+        "gravel",
+        float(axis.half_width) * 2.0,
+        span,
+    )
+    return replace(
+        obj,
+        object_id=int(object_id),
+        model_path=path,
         x=x,
         y=y,
         z=z,
@@ -1251,9 +1304,8 @@ def _trim_dirt_under_paved(report, spec):
             return value
 
         terminal_nominal, terminal_length = variants[-1]
-        # Stock asf must terminate fully outside the paved footprint.
-        # Lowering an overlapping short P3D by a few centimetres still lets
-        # CWA's visible shoulder/LOD protrude *above* sil in-game.
+        # Stock asf must never bridge the paved footprint. Short generated
+        # connectors fill the leftover 25/12/6 m stock tiling gaps instead.
         gravel_approach = dirt.family in {"asf", "gravel"}
         clear_intervals = _clear_intervals(dirt.length, blocked)
         for clear_start, clear_end in clear_intervals:
@@ -1278,6 +1330,35 @@ def _trim_dirt_under_paved(report, spec):
                     object_id=allocate_id(),
                     spec=spec,
                 ))
+
+            if gravel_approach:
+                # The source stock modules come in 25, 12.5 and 6.25 m
+                # segments, so clipping to a paved footprint leaves up to
+                # 6.25 m missing. Fill EVERY positive remainder using an
+                # exact-size procedural gravel ribbon with its own local
+                # visual-origin compensation. Tiny <0.45 m gaps are already
+                # spanned by the ribbon's nominal 0.9 m lowered end lip.
+                cursor = clear_start
+                for _nominal, packed_start, packed_end in regular_spans:
+                    if packed_start - cursor >= 0.45:
+                        filler = _gravel_gap_connector(
+                            obj, dirt, cursor, packed_start,
+                            object_id=allocate_id(), spec=spec,
+                        )
+                        if filler is not None:
+                            pieces.append(filler)
+                    cursor = packed_end
+                if clear_end - cursor >= 0.45:
+                    filler = _gravel_gap_connector(
+                        obj, dirt, cursor, clear_end,
+                        object_id=allocate_id(), spec=spec,
+                    )
+                    if filler is not None:
+                        pieces.append(filler)
+                if not regular_spans and clear_end - clear_start >= 0.45:
+                    # The preceding empty-pack case was already filled by
+                    # the trailing cursor -> clear_end connector.
+                    pass
 
             left_block = next(
                 (
