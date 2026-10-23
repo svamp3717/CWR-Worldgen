@@ -1919,7 +1919,12 @@ def install_final_road_dedup_policy() -> None:
             spec,
             progress_callback=progress_callback,
         )
-        return _align_final_paved_curve_handedness(deduplicated, spec)
+        aligned = _align_final_paved_curve_handedness(deduplicated, spec)
+        # The final, quantized road objects still need lateral terrain banking.
+        # Original real-world WRP crossings showed uphill gravel verges hidden
+        # 7-12 cm beneath the slope even after the normal pitch calculation.
+        from .road_cross_slope_grounding import ground_generated_approaches
+        return ground_generated_approaches(aligned, spec, elevations)
 
     _p.fit_road_objects = deduplicating_fit
     _generator.fit_road_objects = deduplicating_fit
