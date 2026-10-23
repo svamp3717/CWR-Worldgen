@@ -21,6 +21,7 @@ from .procedural_infrastructure import (
     GENERATED_GRAVEL_VISUAL_TOP_METRES,
     custom_road_model_path,
     custom_road_model_signature,
+    custom_road_miter_metres,
 )
 
 # Leave only a few millimetres of coordinate tolerance. Seam models now encode
@@ -29,10 +30,11 @@ _EDGE_SAFETY_METRES = 0.003
 _MIN_EDGE_MODEL_METRES = 0.5
 
 
-def _visual_footprint(axis, *, overlap: float, lateral_padding: float = 0.0):
+def _visual_footprint(axis, *, overlap: float, lateral_padding: float = 0.0,
+                      miter: tuple[float, float, float, float] = (0, 0, 0, 0)):
     from . import final_road_dedup_policy as road
 
-    if overlap <= 0.0:
+    if overlap <= 0.0 and not any(miter):
         return road._surface_polygon(axis, padding=lateral_padding)
     # Gravel/dirt ribbons have a visual lip at *both* ends. Axis-only
     # intersection tests miss these 0.9 m faces even when nominally clipped.
@@ -42,15 +44,91 @@ def _visual_footprint(axis, *, overlap: float, lateral_padding: float = 0.0):
     width = axis.half_width + lateral_padding
     nx, nz = -uz, ux
     return (
-        (x0 - ux * overlap + nx * width, z0 - uz * overlap + nz * width),
-        (x0 - ux * overlap - nx * width, z0 - uz * overlap - nz * width),
-        (x1 + ux * overlap - nx * width, z1 + uz * overlap - nz * width),
-        (x1 + ux * overlap + nx * width, z1 + uz * overlap + nz * width),
+        (x0 - ux * (overlap + miter[0]) + nx * width,
+         z0 - uz * (overlap + miter[0]) + nz * width),
+        (x0 - ux * (overlap + miter[1]) - nx * width,
+         z0 - uz * (overlap + miter[1]) - nz * width),
+        (x1 + ux * (overlap + miter[3]) - nx * width,
+         z1 + uz * (overlap + miter[3]) - nz * width),
+        (x1 + ux * (overlap + miter[2]) + nx * width,
+         z1 + uz * (overlap + miter[2]) + nz * width),
+    )
+
+
+def _ray_polygon_interval(
+    start: tuple[float, float],
+    direction: tuple[float, float],
+    polygon: tuple[tuple[float, float], ...],
+) -> tuple[float, float] | None:
+    """Distance interval where a longitudinal *road edge* lies inside paving.
+
+    The polygon must be CCW. Cyrus-Beck clipping against its half planes
+    avoids projecting the earliest corner across the road's *whole width*,
+    which previously truncated both sides at the first touched corner.
+    """
+    lo, hi = -math.inf, math.inf
+    for a, b in zip(polygon, polygon[1:] + polygon[:1]):
+        ex, ez = b[0] - a[0], b[1] - a[1]
+        side = ex * (start[1] - a[1]) - ez * (start[0] - a[0])
+        rate = ex * direction[1] - ez * direction[0]
+        if abs(rate) < 1e-10:
+            if side < -1e-8:
+                return None
+        elif rate > 0:
+            lo = max(lo, -side / rate)
+        else:
+            hi = min(hi, -side / rate)
+        if hi < lo - 1e-8:
+            return None
+    return lo, hi
+
+
+def _edge_miter_cm(axis, start: float, end: float, blockers) -> tuple[int, int, int, int]:
+    """Stop the left and right road corners at their OWN asphalt edges."""
+    nx, nz = -axis.uz, axis.ux
+    start_meters = [0.0, 0.0]
+    end_meters = [0.0, 0.0]
+    for side, lateral in enumerate((axis.half_width, -axis.half_width)):
+        origin = (
+            axis.start[0] + nx * lateral,
+            axis.start[1] + nz * lateral,
+        )
+        intervals = []
+        for blocker in blockers:
+            if (
+                blocker.elevation - axis.elevation
+                > 1.50
+            ):
+                continue
+            values = _ray_polygon_interval(
+                origin, (axis.ux, axis.uz), blocker.polygon,
+            )
+            if values is not None:
+                intervals.append(values)
+        if start > 1e-6:
+            exits = [
+                hi for lo, hi in intervals
+                if start - 9.99 <= hi <= start + 0.02
+            ]
+            if exits:
+                start_meters[side] = max(0.0, start - max(exits) - 0.015)
+        if end < axis.length - 1e-6:
+            entries = [
+                lo for lo, hi in intervals
+                if end - 0.02 <= lo <= end + 9.99
+            ]
+            if entries:
+                end_meters[side] = max(0.0, min(entries) - end - 0.015)
+    # For geometric safety, floor each extension rather than rounding into
+    # paving. Keep the 1-cm-precision named P3D family bounded at 9.99 m.
+    return tuple(
+        min(999, max(0, math.floor(v * 100.0 + 1e-7)))
+        for v in (*start_meters, *end_meters)
     )
 
 
 def _flush_piece(obj, axis, begin: float, end: float, *, object_id: int,
-                 spec, elevations: Sequence[float]):
+                 spec, elevations: Sequence[float], blockers=()):
     from . import final_road_dedup_policy as road
 
     # One-centimetre P3D lengths keep the artwork within about 8 mm of its
@@ -65,12 +143,14 @@ def _flush_piece(obj, axis, begin: float, end: float, *, object_id: int,
     start = road._axis_point(axis, left)
     finish = road._axis_point(axis, right)
     surface = "gravel" if axis.family in {"asf", "gravel"} else "dirt"
+    miter = _edge_miter_cm(axis, left, right, blockers)
     path = custom_road_model_path(
         str(getattr(spec, "name", "world")),
         surface,
         axis.half_width * 2.0,
         length,
         flush_ends=True,
+        miter_centimetres=miter,
     )
     cells = int(getattr(spec, "cells", 0))
     size = float(getattr(spec, "cell_size", 0.0))
@@ -110,7 +190,7 @@ def _painted_gravel_blockers(report, spec):
             lip = (
                 GENERATED_GRAVEL_VISUAL_OVERLAP_METRES
                 if signature is not None and signature[0] == "gravel"
-                and not re.search(r"_edge[1-9]?\.p3d$", str(obj.model_path), re.I)
+                and not re.search(r"_edge[1-9]?(?:_m\d{12})?\.p3d$", str(obj.model_path), re.I)
                 else 0.0
             )
             padding = (
@@ -120,6 +200,7 @@ def _painted_gravel_blockers(report, spec):
             blockers.append(road._blocker_from_polygon(
                 obj, _visual_footprint(
                     axis, overlap=lip, lateral_padding=padding,
+                    miter=custom_road_miter_metres(obj.model_path),
                 ),
             ))
         elif road._is_gravel_junction_cap_model(obj.model_path):
@@ -167,7 +248,7 @@ def enforce_visible_road_priority(report, spec, elevations: Sequence[float]):
                 continue
             signature = custom_road_model_signature(obj.model_path)
             is_generated = signature is not None and signature[0] == surface
-            edge = re.search(r"_edge[1-9]?\.p3d$", str(obj.model_path), re.I) is not None
+            edge = re.search(r"_edge[1-9]?(?:_m\d{12})?\.p3d$", str(obj.model_path), re.I) is not None
             lip = (
                 GENERATED_GRAVEL_VISUAL_OVERLAP_METRES
                 if is_generated and not edge else 0.0
@@ -179,11 +260,13 @@ def enforce_visible_road_priority(report, spec, elevations: Sequence[float]):
             )
             painted_polygon = _visual_footprint(
                 axis, overlap=lip, lateral_padding=curved_padding,
+                miter=custom_road_miter_metres(obj.model_path),
             )
             possible = set()
             for bucket in road._polygon_buckets(painted_polygon):
                 possible.update(buckets.get(bucket, ()))
             nominal_intervals = []
+            local_blockers = []
             hits_visual_lip = False
             for bidx in sorted(possible):
                 blocker = blockers[bidx]
@@ -197,6 +280,7 @@ def enforce_visible_road_priority(report, spec, elevations: Sequence[float]):
                 )) <= 1.0e-5:
                     continue
                 hits_visual_lip = True
+                local_blockers.append(blocker)
                 interval = road._blocked_interval(axis, polygon, blocker)
                 if interval is not None:
                     nominal_intervals.append(interval)
@@ -237,6 +321,7 @@ def enforce_visible_road_priority(report, spec, elevations: Sequence[float]):
                 piece = _flush_piece(
                     obj, axis, begin, end, object_id=oid,
                     spec=spec, elevations=elevations,
+                    blockers=local_blockers,
                 )
                 if piece is None:
                     continue
