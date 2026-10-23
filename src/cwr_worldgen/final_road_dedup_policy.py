@@ -141,6 +141,7 @@ class _PavedBlocker:
     origin: tuple[float, float]
     forward: tuple[float, float]
     pitch_sine: float
+    visual_offset: float = 0.0
 
     @property
     def bounds(self) -> tuple[float, float, float, float]:
@@ -650,12 +651,24 @@ def _blocker_from_polygon(
     polygon: tuple[tuple[float, float], ...],
 ) -> _PavedBlocker:
     origin, forward, pitch_sine = _object_plane_terms(obj)
+    # Generated road P3Ds carry their visible skin 25 mm above the object
+    # origin; stock CWA slabs already use the origin as their road plane.
+    # Comparing origin heights alone silently loses that distinction.
+    name = _filename(obj.model_path)
+    generated = (
+        _CUSTOM_ROAD.fullmatch(name) is not None
+        or _GENERATED_PAVED.fullmatch(name) is not None
+    )
+    visual_offset = (
+        float(_p.GENERATED_GRAVEL_VISUAL_TOP_METRES) if generated else 0.0
+    )
     return _PavedBlocker(
         polygon,
         float(obj.y),
         origin,
         forward,
         pitch_sine,
+        visual_offset,
     )
 
 
