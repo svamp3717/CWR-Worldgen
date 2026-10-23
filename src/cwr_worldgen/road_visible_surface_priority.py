@@ -97,6 +97,35 @@ def _flush_piece(obj, axis, begin: float, end: float, *, object_id: int,
     )
 
 
+def _painted_gravel_blockers(report, spec):
+    """Expose complete gravel artwork, including lips, as blockers for dirt."""
+    from . import final_road_dedup_policy as road
+
+    blockers = []
+    for index, obj in enumerate(report.objects):
+        axis = road._road_axis(obj, index, spec)
+        if axis is not None and axis.family in {"asf", "gravel"}:
+            signature = custom_road_model_signature(obj.model_path)
+            lip = (
+                GENERATED_GRAVEL_VISUAL_OVERLAP_METRES
+                if signature is not None and signature[0] == "gravel"
+                and not str(obj.model_path).casefold().endswith("_edge.p3d")
+                else 0.0
+            )
+            padding = (
+                road._generated_curve_padding(obj.model_path, axis)
+                if axis.curved_model else 0.0
+            )
+            blockers.append(road._blocker_from_polygon(
+                obj, _visual_footprint(
+                    axis, overlap=lip, lateral_padding=padding,
+                ),
+            ))
+        elif road._is_gravel_junction_cap_model(obj.model_path):
+            blockers.append(road._junction_blocker(obj))
+    return tuple(blockers)
+
+
 def enforce_visible_road_priority(report, spec, elevations: Sequence[float]):
     """Make lower-priority road *visual geometry* stop before higher surfaces.
 
@@ -116,7 +145,7 @@ def enforce_visible_road_priority(report, spec, elevations: Sequence[float]):
         paved = road._paved_blockers(current, spec)
         blockers = (
             paved if surface == "gravel"
-            else paved + road._gravel_blockers(current, spec)
+            else paved + _painted_gravel_blockers(current, spec)
         )
         if not blockers:
             continue
