@@ -32,4 +32,4 @@ jobs:
           python -m pytest -q tests/test_stock_road_surface_layering.py
       - name: Check existing road finishing, synthetic junctions and stock models
         run: |
-          python -m pytest -q tests/test_road_finish_parallel_policy.py tests/test_synthetic_paved_junctions.py tests/test_paved_junction_policy.py tests/test_gravel_family_policy.py
+          python -m pytest -q tests/test_road_finish_parallel_policy.py tests/test_synthetic_paved_junctions.py tests/test_paved_junction_performance_policy.py tests/test_gravel_junction_policy.py
