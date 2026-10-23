@@ -133,6 +133,26 @@ def test_stock_gravel_junction_blocks_dirt_but_never_counts_as_paved():
     assert dirt not in result.objects
 
 
+def test_stock_gravel_junction_cap_cannot_paint_over_paved():
+    cap = _road(1, r"o\road\kr_new_asf_asf_t.p3d", 100, 100, y=0.055)
+    asphalt = _road(2, r"o\road\sil25.p3d", 100, 100, y=0.095)
+    result = deduplicate_final_road_objects(
+        _report((cap, asphalt), caps=1), _spec(),
+    )
+    assert tuple(obj.object_id for obj in result.objects) == (2,)
+    assert result.junction_cap_objects == 0
+
+
+def test_stock_gravel_junction_cap_under_real_paved_overpass_is_preserved():
+    cap = _road(1, r"o\road\kr_new_asf_asf_x.p3d", 100, 100, y=0.055)
+    elevated = _road(2, r"o\road\sil25.p3d", 100, 100, y=4.0)
+    result = deduplicate_final_road_objects(
+        _report((cap, elevated), caps=1), _spec(),
+    )
+    assert result.objects == (cap, elevated)
+    assert result.junction_cap_objects == 1
+
+
 def test_stock_dirt_is_split_below_gravel_even_without_paved_roads():
     lower = _road(1, r"o\road\ces25.p3d", 100, 100, heading=90.0, y=0.0)
     upper = _road(2, r"o\road\asf25.p3d", 100, 100, heading=0.0, y=0.035)
