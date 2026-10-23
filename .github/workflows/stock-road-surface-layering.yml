@@ -1,0 +1,35 @@
+name: Validate stock road surface layering
+
+on:
+  pull_request:
+    paths:
+      - "src/cwr_worldgen/playability.py"
+      - "src/cwr_worldgen/paved_junction_policy.py"
+      - "src/cwr_worldgen/gravel_family_policy.py"
+      - "tests/test_stock_road_surface_layering.py"
+      - ".github/workflows/stock-road-surface-layering.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stock-road-layer-order:
+    name: Verify stock dirt-gravel-paved height order
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install application and pytest
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Assert dirt-gravel-paved surfaces and all junction heights
+        run: |
+          python -m pytest -q tests/test_stock_road_surface_layering.py
+      - name: Check existing road finishing, synthetic junctions and stock models
+        run: |
+          python -m pytest -q tests/test_road_finish_parallel_policy.py tests/test_synthetic_paved_junctions.py tests/test_paved_junction_policy.py tests/test_gravel_family_policy.py
