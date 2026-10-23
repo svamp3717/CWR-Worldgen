@@ -54,6 +54,9 @@ _MINIMUM_PAVED_CAP_SURFACE_COVERAGE = 0.85
 _PAVED_JUNCTION_NEIGHBOURHOOD_METRES = 30.0
 _MAXIMUM_VERTICAL_SEPARATION_METRES = 0.75
 _DIRT_PAVED_TRIM_CLEARANCE_METRES = 0.0
+# Original stock gravel has a visible shoulder beyond its nominal geometric
+# endpoints. Never allow any asf gravel slab to reach a paved footprint.
+_GRAVEL_PAVED_TRIM_CLEARANCE_METRES = 0.85
 _DIRT_PAVED_UNDERLAY_DROP_METRES = 0.080
 _DIRT_PAVED_UNDERLAY_EDGE_EPSILON_METRES = 0.10
 _DIRT_PAVED_UNDERLAY_APPROACH_OVERLAP_METRES = 2.0
@@ -737,14 +740,13 @@ def _blocked_interval(
     )
     if not projections:
         return None
-    start = max(
-        0.0,
-        min(projections) - _DIRT_PAVED_TRIM_CLEARANCE_METRES,
+    clearance = (
+        _GRAVEL_PAVED_TRIM_CLEARANCE_METRES
+        if dirt.family in {"asf", "gravel"}
+        else _DIRT_PAVED_TRIM_CLEARANCE_METRES
     )
-    end = min(
-        dirt.length,
-        max(projections) + _DIRT_PAVED_TRIM_CLEARANCE_METRES,
-    )
+    start = max(0.0, min(projections) - clearance)
+    end = min(dirt.length, max(projections) + clearance)
     if end <= start + 0.02:
         return None
     return start, end
@@ -1225,6 +1227,10 @@ def _trim_dirt_under_paved(report, spec):
             return value
 
         terminal_nominal, terminal_length = variants[-1]
+        # Stock asf must terminate fully outside the paved footprint.
+        # Lowering an overlapping short P3D by a few centimetres still lets
+        # CWA's visible shoulder/LOD protrude *above* sil in-game.
+        gravel_approach = dirt.family in {"asf", "gravel"}
         clear_intervals = _clear_intervals(dirt.length, blocked)
         for clear_start, clear_end in clear_intervals:
             if (
@@ -1257,7 +1263,7 @@ def _trim_dirt_under_paved(report, spec):
                 ),
                 None,
             )
-            if left_block is not None:
+            if left_block is not None and not gravel_approach:
                 span = _terminal_underlay_span(
                     clear_start,
                     clear_end,
@@ -1291,7 +1297,7 @@ def _trim_dirt_under_paved(report, spec):
                 ),
                 None,
             )
-            if right_block is not None:
+            if right_block is not None and not gravel_approach:
                 span = _terminal_underlay_span(
                     clear_start,
                     clear_end,
