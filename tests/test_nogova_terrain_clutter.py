@@ -83,10 +83,9 @@ def test_requires_nogova_tree_preset_not_nogova_ground(block, single, active):
                                        enabled=False)) is False
 
 
-def test_checkbox_defaults_off_and_gui_only_sends_flag_for_resistance_preset():
+def test_checkbox_defaults_on_and_gui_can_disable_resistance_clutter():
     values = default_gui_values()
-    assert values["nogova_terrain_clutter"] is False
-    values["nogova_terrain_clutter"] = True
+    assert values["nogova_terrain_clutter"] is True
     values["ground_textures"] = "nogova"
     values["vegetation_style"] = VEGETATION_EVERON
     assert "--nogova-terrain-clutter" not in build_milestone9_command(values, python="python")
@@ -98,14 +97,17 @@ def test_checkbox_defaults_off_and_gui_only_sends_flag_for_resistance_preset():
     assert "--nogova-terrain-clutter" not in build_milestone9_command(values, python="python")
     values["vegetation_style"] = VEGETATION_RESISTANCE_LEAF
     values["nogova_terrain_clutter"] = False
-    assert "--nogova-terrain-clutter" not in build_milestone9_command(values, python="python")
+    command = build_milestone9_command(values, python="python")
+    assert "--nogova-terrain-clutter" not in command
+    assert "--no-terrain-clutter" in command
+    assert "--no-terrain-clutter" in command
 
 
-def test_cli_flag_is_opt_in_with_hard_object_limit():
+def test_cli_clutter_enabled_by_default_with_explicit_disable_flag():
     parser = _parser()
     default = parser.parse_args(["milestone9", "--source-dir", ".", "--name",
                                  "testworld", "--output", "."])
-    assert default.nogova_terrain_clutter is False
+    assert default.nogova_terrain_clutter is True
     assert default.nogova_clutter_max_objects is None
     enabled = parser.parse_args(["milestone9", "--source-dir", ".", "--name",
                                  "testworld", "--output", ".",
@@ -114,6 +116,16 @@ def test_cli_flag_is_opt_in_with_hard_object_limit():
     assert enabled.nogova_terrain_clutter is True
     # A legacy flag remains parseable but no longer imposes any cap.
     assert enabled.nogova_clutter_max_objects == 99
+    for off in ("--no-terrain-clutter", "--no-nogova-terrain-clutter"):
+        parsed = parser.parse_args([
+            "milestone9", "--source-dir", ".", "--name", "testworld",
+            "--output", ".", off,
+        ])
+        assert parsed.nogova_terrain_clutter is False
+    assert parser.parse_args([
+        "milestone9", "--source-dir", ".", "--name", "testworld",
+        "--output", ".", "--no-terrain-clutter", "--terrain-clutter",
+    ]).nogova_terrain_clutter is True
 
 
 def test_deterministic_seed_changes_without_object_cap():
