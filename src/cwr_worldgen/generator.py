@@ -100,6 +100,7 @@ from .stock_water_ground_blends import (
 from .nogova_water_blends import (
     apply_nogova_underwater_borders, is_nogova_water_blend_path,
 )
+from .nogova_terrain_clutter import place_nogova_terrain_clutter
 from .debug_layers import write_worldgen_debug_layers
 from cwr_island_studio.object_layers import is_forest_model
 from .surface_pass import (
@@ -3065,6 +3066,7 @@ _PLACEMENT_CACHE_FIELDS = (
     "forest_cluster_maximum_burial", "forest_cluster_maximum_float",
     "forest_cluster_tree_maximum_float", "forest_cluster_bush_maximum_float",
     "forest_cluster_footprint_margin", "forest_undergrowth_enabled",
+    "nogova_terrain_clutter_enabled", "nogova_terrain_clutter_maximum_objects",
     "forest_undergrowth_maximum_objects", "forest_undergrowth_spacing",
     "forest_undergrowth_maximum_relief", "forest_undergrowth_maximum_burial",
     "forest_undergrowth_maximum_float", "forest_undergrowth_ground_clearance",
@@ -4380,11 +4382,20 @@ def build_milestone4(
     all_objects = _assemble_world_objects(
         road_fit.objects, nonroads, semantic.objects, renumber=False
     )
+    # Opt-in scenery uses the FINAL terrain and existing placements. It is
+    # not part of OSM's nonroad cache, but its settings enter the build key
+    # and it runs in the deterministic regeneration path as well.
+    nogova_clutter = place_nogova_terrain_clutter(
+        spec, raster, elevations, all_objects,
+    )
+    if nogova_clutter:
+        all_objects = (*all_objects, *nogova_clutter)
     combined_model_usage: Counter[str] = Counter(dict(nonroads.model_usage))
     # Roads and semantic objects are much smaller populations than dense forest/
     # placement output. Scan each once, then use the aggregate everywhere else.
     combined_model_usage.update(obj.model_path for obj in road_fit.objects)
     combined_model_usage.update(obj.model_path for obj in semantic.objects)
+    combined_model_usage.update(obj.model_path for obj in nogova_clutter)
     generated = ObjectGenerationResult(
         objects=all_objects,
         road_objects=len(road_fit.objects),
@@ -5220,6 +5231,11 @@ def build_milestone4(
         repeat_objects = _assemble_world_objects(
             repeat_roads.objects, repeat_nonroads, repeat_semantic.objects, renumber=False
         )
+        repeat_clutter = place_nogova_terrain_clutter(
+            spec, raster, repeat_elevations, repeat_objects,
+        )
+        if repeat_clutter:
+            repeat_objects = (*repeat_objects, *repeat_clutter)
         repeat_fingerprint = _generation_fingerprint(
             spec,
             repeat_elevations,
