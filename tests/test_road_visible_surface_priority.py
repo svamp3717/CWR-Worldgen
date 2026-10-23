@@ -211,3 +211,26 @@ def test_flush_end_road_variants_are_written_as_real_p3d_assets(tmp_path):
         assert output.is_file()
         info = pi.inspect_mlod(output)
         assert any(abs(v - pi._ROADWAY_LOD) < 1e9 for v in info.resolutions)
+
+
+def test_dirt_cannot_print_over_generated_gravel_overlap_lip():
+    gravel = WorldObject(
+        1, pi.custom_road_model_path(SPEC.name, "gravel", 7.0, 6.0),
+        91.7, 10.035, 100, 90, 0,
+    )
+    dirt = WorldObject(
+        2, pi.custom_road_model_path(SPEC.name, "dirt", 3.5, 6.0),
+        96.7, 10.0, 100, 0, 0,
+    )
+    scene = _report((gravel, dirt))
+    gravel_axis = road._road_axis(gravel, 0, SPEC)
+    dirt_axis = road._road_axis(dirt, 1, SPEC)
+    assert gravel_axis is not None and dirt_axis is not None
+    # The nominal rectangles are disjoint; only gravel's 90cm painted lip
+    # reaches the dirt visual faces.
+    assert road._polygon_area(road._clip_convex_polygon(
+        road._surface_polygon(gravel_axis),
+        road._surface_polygon(dirt_axis),
+    )) == pytest.approx(0.0, abs=1e-6)
+    clipped = enforce_visible_road_priority(scene, SPEC, HEIGHTS)
+    assert clipped.objects == (gravel,)
