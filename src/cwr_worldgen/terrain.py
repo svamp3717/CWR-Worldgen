@@ -55,7 +55,13 @@ NOGOVA_GROUND_TEXTURES: dict[str, str] = {
     material.code: NOGOVA_GROUND_TEXTURE_CYCLE[index % len(NOGOVA_GROUND_TEXTURE_CYCLE)]
     for index, material in enumerate(OSM_MATERIALS)
 }
+# Original Noe WRP uses ps offshore, pt in the underwater coast strip
+# and t1 for the dry land adjacent to it. Keep semantic rock/farmland
+# overrides; ordinary dry sand and grass use the land-facing t1 artwork.
 NOGOVA_GROUND_TEXTURES.update({
+    "w": r"o\ps.paa",
+    "s": r"o\t1.paa",
+    "g": r"o\t1.paa",
     "a": r"o\pole1.paa",
 })
 
