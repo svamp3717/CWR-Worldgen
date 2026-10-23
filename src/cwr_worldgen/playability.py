@@ -43,6 +43,7 @@ from .osm import (
     OsmDataset,
     OsmLineFeature,
     OsmRaster,
+    PEDESTRIAN_ONLY_HIGHWAYS,
     _advisory_object_limit,
     _maximum_polygon_elevation,
     _oriented_rectangle,
