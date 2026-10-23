@@ -144,11 +144,11 @@ def test_coarse_masks_submerged_and_steep_terrain_rejected(
 
 def test_gui_checkbox_uses_correct_preset_independent_of_ground_textures() -> None:
     values = default_gui_values()
-    assert values["nogova_terrain_clutter"] is False
+    assert values["nogova_terrain_clutter"] is True
     for style in (VEGETATION_EVERON, VEGETATION_KOLGUJEV, VEGETATION_MALDEN):
         values["vegetation_style"] = style
         command = build_milestone9_command(values, python="python")
-        assert "--terrain-clutter" not in command
+        assert command.count("--terrain-clutter") == 1
         values["nogova_terrain_clutter"] = True
         for ground in ("nogova", "everon", "generated", "malden"):
             values["ground_textures"] = ground
@@ -156,6 +156,10 @@ def test_gui_checkbox_uses_correct_preset_independent_of_ground_textures() -> No
             assert command.count("--terrain-clutter") == 1
             assert "--nogova-terrain-clutter" not in command
         values["nogova_terrain_clutter"] = False
+        command = build_milestone9_command(values, python="python")
+        assert "--no-terrain-clutter" in command
+        assert "--terrain-clutter" not in command
+        assert "--nogova-terrain-clutter" not in command
     values["nogova_terrain_clutter"] = True
     for style in (VEGETATION_RESISTANCE_LEAF, VEGETATION_RESISTANCE_PINE):
         values["vegetation_style"] = style
@@ -171,13 +175,16 @@ def test_generic_cli_flag_preserves_original_nogova_compatibility() -> None:
     parser = _parser()
     args = ["milestone9", "--source-dir", ".", "--name", "world", "--output", "."]
     default = parser.parse_args(args)
-    assert default.nogova_terrain_clutter is False
+    assert default.nogova_terrain_clutter is True
     assert default.nogova_clutter_max_objects is None
     for flag in ("--terrain-clutter", "--nogova-terrain-clutter"):
         enabled = parser.parse_args([*args, flag, "--nogova-clutter-max-objects", "3"])
         assert enabled.nogova_terrain_clutter is True
         # Backward-compatible parse only: object placement ignores this.
         assert enabled.nogova_clutter_max_objects == 3
+    for flag in ("--no-terrain-clutter", "--no-nogova-terrain-clutter"):
+        disabled = parser.parse_args([*args, flag])
+        assert disabled.nogova_terrain_clutter is False
 
 
 def test_original_nogova_family_is_unchanged() -> None:
@@ -203,3 +210,19 @@ def test_full_size_stock_world_can_place_more_than_old_20000_cap() -> None:
     assert len(objects) <= int((256 * 50 // 45) ** 2)
     assert len({o.object_id for o in objects}) == len(objects)
     assert {o.model_path for o in objects}.issubset(dict(EDEN_CLUTTER_WEIGHTS))
+
+
+def test_public_milestone9_spec_defaults_on_and_can_be_disabled() -> None:
+    from pathlib import Path
+    from cwr_worldgen.milestone9 import (
+        Milestone9Spec, _Milestone9PlayabilitySpec,
+    )
+
+    assert Milestone9Spec(source_dir=Path("unused")).nogova_terrain_clutter_enabled is True
+    assert _Milestone9PlayabilitySpec().nogova_terrain_clutter_enabled is True
+    assert Milestone9Spec(
+        source_dir=Path("unused"), nogova_terrain_clutter_enabled=False,
+    ).nogova_terrain_clutter_enabled is False
+    assert _Milestone9PlayabilitySpec(
+        nogova_terrain_clutter_enabled=False,
+    ).nogova_terrain_clutter_enabled is False
