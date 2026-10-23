@@ -679,6 +679,25 @@ def _paved_blockers(report, spec) -> tuple[_PavedBlocker, ...]:
     return tuple(blockers)
 
 
+def _gravel_blockers(report, spec) -> tuple[_PavedBlocker, ...]:
+    """Gravel blocks dirt, never paved or another gravel road."""
+    blockers = []
+    for index, obj in enumerate(report.objects):
+        axis = _road_axis(obj, index, spec)
+        if axis is not None and axis.family in {"asf", "gravel"}:
+            blockers.append(_blocker_from_polygon(
+                obj, _surface_polygon(axis),
+            ))
+            continue
+        filename = _filename(obj.model_path)
+        if (
+            filename.startswith("kr_new_asf_asf")
+            or _p.is_generated_gravel_junction_model(obj.model_path)
+        ):
+            blockers.append(_junction_blocker(obj))
+    return tuple(blockers)
+
+
 def _polygon_buckets(
     polygon: tuple[tuple[float, float], ...],
 ) -> tuple[tuple[int, int], ...]:
@@ -1108,14 +1127,19 @@ def _trim_dirt_under_paved(report, spec):
 
     if not report.objects:
         return report
-    blockers = _paved_blockers(report, spec)
+    paved_blockers = _paved_blockers(report, spec)
+    blockers = paved_blockers + _gravel_blockers(report, spec)
     if not blockers:
         return report
 
+    paved_count = len(paved_blockers)
     blocker_buckets: dict[tuple[int, int], list[int]] = {}
+    paved_buckets: dict[tuple[int, int], list[int]] = {}
     for blocker_index, blocker in enumerate(blockers):
         for bucket in _polygon_buckets(blocker.polygon):
             blocker_buckets.setdefault(bucket, []).append(blocker_index)
+            if blocker_index < paved_count:
+                paved_buckets.setdefault(bucket, []).append(blocker_index)
 
     protected_prefix = max(
         0,
@@ -1139,10 +1163,15 @@ def _trim_dirt_under_paved(report, spec):
         if dirt is None:
             continue
 
+        # Gravel gives way only to paved. Dirt yields to both higher planes.
+        active_buckets = (
+            paved_buckets if dirt.family in {"asf", "gravel"}
+            else blocker_buckets
+        )
         dirt_polygon = _surface_polygon(dirt)
         candidate_blockers: set[int] = set()
         for bucket in _polygon_buckets(dirt_polygon):
-            candidate_blockers.update(blocker_buckets.get(bucket, ()))
+            candidate_blockers.update(active_buckets.get(bucket, ()))
         blocker_intervals = tuple(
             (blocker_index, interval)
             for blocker_index in sorted(candidate_blockers)
@@ -1246,7 +1275,7 @@ def _trim_dirt_under_paved(report, spec):
                         span[0],
                         span[1],
                         inner_at_start=True,
-                        blocker_buckets=blocker_buckets,
+                        blocker_buckets=active_buckets,
                         blockers=blockers,
                         object_id=allocate_id(),
                         spec=spec,
@@ -1280,7 +1309,7 @@ def _trim_dirt_under_paved(report, spec):
                         span[0],
                         span[1],
                         inner_at_start=False,
-                        blocker_buckets=blocker_buckets,
+                        blocker_buckets=active_buckets,
                         blockers=blockers,
                         object_id=allocate_id(),
                         spec=spec,
