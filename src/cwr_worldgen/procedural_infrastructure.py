@@ -544,6 +544,12 @@ def _bridge_lods(key: InfrastructureModelKey, texture: str) -> tuple[_Lod, ...]:
 
     width = key.width_m
     length = key.length_m
+    # The 4-digit nominal road length is decimetres. Final seam models can
+    # encode one extra centimetre digit to avoid a visible 0-10 cm shortfall
+    # beside asphalt; use the exact encoded length for ALL P3D LODs.
+    length_cm = _CUSTOM_ROAD_SUBTYPE.fullmatch(key.subtype.casefold())
+    if length_cm is not None:
+        length += int(length_cm.group("centimetre") or 0) / 100.0
     half_w = width * 0.5
     half_l = length * 0.5
     deck_bottom = -0.30
@@ -658,7 +664,7 @@ def _paved_curve_degrees(subtype: str) -> int:
 
 _CUSTOM_ROAD_SUBTYPE = re.compile(
     r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
-    r"(?P<length>\d{4})(?:_(?P<side>[lr])(?P<curve>\d{3}))?(?P<edge>_edge)?$",
+    r"(?P<length>\d{4})(?:_(?P<side>[lr])(?P<curve>\d{3}))?(?P<edge>_edge(?P<centimetre>[1-9])?)?$",
     re.IGNORECASE,
 )
 
@@ -1755,7 +1761,7 @@ def _road_lods(
         # distinct while preserving identical connection behaviour.
         visual = _gravel_visual_lod(
             length, half_w, curve_degrees, texture, surface_style,
-            flush_ends=subtype.endswith("_edge"),
+            flush_ends=re.search(r"_edge[1-9]?$", subtype) is not None,
         )
 
     # Keep road simulation on the first Resolution LOD, but also emit a face-less
@@ -1771,7 +1777,12 @@ def _road_lods(
         length,
         half_w,
         curve_degrees,
-        overhang=0.0,
+        # Even when the painted visual surface is flush at asphalt, continue
+        # the invisible Roadway contact underneath it for a seamless drive.
+        overhang=(
+            0.40 if subtype.endswith("_edge") or re.search(r"_edge[1-9]$", subtype)
+            else 0.0
+        ),
         square_ends=(paved_fallback and not paved_turn),
     )
     roadway = _ribbon_lod(
@@ -1984,7 +1995,11 @@ def paved_fallback_model_path(
     curve_degrees: float = 0.0,
 ) -> str:
     width_dm = max(10, min(999, int(round(float(width_metres) * 10.0))))
-    length_dm = max(5, min(9999, int(round(float(length_metres) * 10.0))))
+    length_cm = max(50, min(99990, int(math.floor(float(length_metres) * 100.0 + 1e-7))))
+    length_dm = (
+        length_cm // 10 if flush_ends
+        else max(5, min(9999, int(round(float(length_metres) * 10.0))))
+    )
     magnitude = abs(float(curve_degrees))
     suffix = ""
     if magnitude >= 2.5:
@@ -2080,6 +2095,8 @@ def custom_road_model_path(
         if surface == "paved":
             raise ValueError("flush-ends road model is only for dirt/gravel")
         suffix += "_edge"
+        if length_cm % 10:
+            suffix += str(length_cm % 10)
     return (
         rf"{world_name}\i\road_{surface}_w{width_dm:03d}_l{length_dm:04d}"
         rf"{suffix}.p3d"
@@ -2101,7 +2118,8 @@ def custom_road_model_signature(
     return (
         match.group("surface").casefold(),
         int(match.group("width")) / 10.0,
-        int(match.group("length")) / 10.0,
+        (int(match.group("length")) / 10.0
+         + int(match.group("centimetre") or 0) / 100.0),
         curve,
     )
 
@@ -2255,7 +2273,7 @@ class ProceduralInfrastructureLibrary:
     )
     _CUSTOM_ROAD_PATTERN = re.compile(
         r"^road_(?P<surface>paved|gravel|dirt)_w(?P<width>\d{3})_l"
-        r"(?P<length>\d{4})(?:_[lr]\d{3})?(?:_edge)?\.p3d$",
+        r"(?P<length>\d{4})(?:_[lr]\d{3})?(?:_edge[1-9]?)?\.p3d$",
         re.IGNORECASE,
     )
     _CUSTOM_ROAD_JUNCTION_PATTERN = re.compile(
