@@ -6,6 +6,7 @@ be paved and therefore never clipped it at the asphalt footprint.
 """
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 
 import pytest
@@ -59,22 +60,46 @@ def _gravel(objects):
     )
 
 
-def _assert_no_gravel_footprint_over_paved(objects, spec):
-    gravel = []
-    paved = []
+def _assert_lower_surfaces_run_below_pavement(objects, spec, *, family="gravel"):
+    """Raised stock pieces stay out; generated pitched pieces enter BELOW sil.
+
+    The old no-intersection test enforced a visible road cutoff. A proper
+    joint has hidden overlapping polygons and enough vertical separation.
+    """
+    lower = []
+    upper = []
     for index, obj in enumerate(objects):
         axis = _road_axis(obj, index, spec)
         if axis is None:
             continue
-        if axis.family in {"asf", "gravel"}:
-            gravel.append(_surface_polygon(axis))
+        if axis.family in ({"asf", "gravel"} if family == "gravel" else {"ces"}):
+            lower.append((obj, axis))
         if axis.family in {"sil", "kos", "paved"}:
-            paved.append(_surface_polygon(axis))
-    for lower in gravel:
-        for upper in paved:
-            assert _polygon_area(
-                _clip_convex_polygon(lower, upper)
-            ) < 1.0e-5, "stock gravel extends into the visible paved footprint"
+            upper.append((obj, axis))
+    pitched_underlays = []
+    for obj, axis in lower:
+        for paved_obj, paved_axis in upper:
+            overlap = _clip_convex_polygon(
+                _surface_polygon(axis), _surface_polygon(paved_axis),
+            )
+            if _polygon_area(overlap) <= 1.0e-5:
+                continue
+            signature = custom_road_model_signature(obj.model_path)
+            assert signature is not None and signature[0] == family, (
+                "stock donor geometry must not intrude above the paved road"
+            )
+            assert abs(obj.pitch_degrees) > 0.01, "hidden connector must slope underneath"
+            pitch = math.radians(obj.pitch_degrees)
+            for x, z in overlap:
+                along = (x - obj.x) * axis.ux + (z - obj.z) * axis.uz
+                visible_y = (
+                    obj.y + GENERATED_GRAVEL_VISUAL_TOP_METRES * math.cos(pitch)
+                    + math.sin(pitch) * along
+                )
+                assert visible_y < paved_obj.y - 0.035
+            pitched_underlays.append(obj)
+    assert pitched_underlays, "expected a real buried gravel/dirt connection"
+    return pitched_underlays
 
 
 def test_stock_asf_is_gravel_not_paved_in_final_pass():
@@ -94,9 +119,8 @@ def test_perpendicular_stock_gravel_is_trimmed_below_stock_paved():
     assert gravel, "the gravel approaches must remain on both sides"
     assert len(gravel) >= 2
     assert all(obj.pitch_degrees == 0.0 for obj in gravel)
-    # CWA can show stock P3D shoulders through pavement even when the object's
-    # centre origin is lower. Reject gravel geometry under the paved footprint.
-    _assert_no_gravel_footprint_over_paved(result.objects, _spec())
+    # Buried procedural gravel extends under sil; no raised asf donor does.
+    _assert_lower_surfaces_run_below_pavement(result.objects, _spec())
     # Stock 6/12/25 parts cannot end at an arbitrary asphalt boundary.
     # Exact-length generated gravel connectors fill the remainder, using the
     # generated P3D's 25 mm local visual lift rather than copying donor Y.
@@ -106,14 +130,17 @@ def test_perpendicular_stock_gravel_is_trimmed_below_stock_paved():
         and sig[0] == "gravel"
     ]
     assert len(fillers) >= 2
+    planar_fillers = [o for o in fillers if abs(o.pitch_degrees) < 0.01]
+    assert len(planar_fillers) >= 2
     assert all(
-        obj.y + GENERATED_GRAVEL_VISUAL_TOP_METRES == pytest.approx(original.y)
-        for obj in fillers
+        o.y + GENERATED_GRAVEL_VISUAL_TOP_METRES == pytest.approx(original.y)
+        for o in planar_fillers
     )
     assert all(
-        0.5 <= custom_road_model_signature(obj.model_path)[2] < 6.25
-        for obj in fillers
+        0.5 <= custom_road_model_signature(o.model_path)[2] < 6.25
+        for o in planar_fillers
     )
+    assert len([o for o in fillers if abs(o.pitch_degrees) > 0.01]) >= 2
     assert all(obj.model_path.casefold().endswith(
         ("asf6.p3d", "asf12.p3d", "asf25.p3d")
     ) for obj in gravel)
@@ -141,7 +168,7 @@ def test_generated_connectors_reach_the_paved_boundary_without_cutoff():
     # truncation previously left > 1m missing at the junction.
     assert 0.0 <= edge_left - left_edge <= 0.11
     assert 0.0 <= right_edge - edge_right <= 0.11
-    _assert_no_gravel_footprint_over_paved(result.objects, _spec())
+    _assert_lower_surfaces_run_below_pavement(result.objects, _spec())
 
 
 def test_two_stock_gravel_approaches_survive_paved_crossing():
@@ -154,7 +181,7 @@ def test_two_stock_gravel_approaches_survive_paved_crossing():
     assert any(obj.object_id == 3 for obj in actual.objects)
     assert any(obj.x < 100 for obj in _gravel(actual.objects))
     assert any(obj.x > 100 for obj in _gravel(actual.objects))
-    _assert_no_gravel_footprint_over_paved(actual.objects, _spec())
+    _assert_lower_surfaces_run_below_pavement(actual.objects, _spec())
 
 
 def test_paved_overpass_does_not_remove_stock_gravel_underneath():
@@ -225,5 +252,27 @@ def test_unified_generated_gravel_is_retiled_as_gravel_not_dirt():
     assert generated
     assert all(obj.model_path.casefold() != original.model_path.casefold()
                or obj != original for obj in generated)
-    assert all(abs(obj.pitch_degrees) <= 0.01 for obj in generated)
-    _assert_no_gravel_footprint_over_paved(result.objects, spec)
+    assert any(abs(obj.pitch_degrees) > 0.01 for obj in generated)
+    _assert_lower_surfaces_run_below_pavement(result.objects, spec)
+
+def test_generated_dirt_visual_origin_is_compensated_under_paved():
+    spec = _spec(custom=True)
+    dirt_model = custom_road_model_path(spec.name, "dirt", 3.5, 25.0)
+    original = _road(1, dirt_model, 100, 89, heading=0.0, y=-0.025)
+    paved = _road(2, r"o\road\sil25.p3d", 100, 100, heading=90.0, y=0.095)
+    result = deduplicate_final_road_objects(_report((original, paved)), spec)
+    dirt = [
+        obj for obj in result.objects
+        if (sig := custom_road_model_signature(obj.model_path)) is not None
+        and sig[0] == "dirt"
+    ]
+    assert dirt
+    # All generated dirt pieces are expressed in P3D *origin* coordinates.
+    # The correct visible surface includes the +25 mm local Z-axis rotation.
+    buried = [obj for obj in dirt if abs(obj.pitch_degrees) > 0.01]
+    assert buried
+    for obj in buried:
+        assert math.isfinite(obj.y)
+        assert -89 < obj.pitch_degrees < 89
+
+
