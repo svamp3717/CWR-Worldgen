@@ -320,14 +320,36 @@ def _dirt_axis(
     )
 
 
+def _lower_surface_axis(
+    obj,
+    object_index: int,
+    spec,
+    *,
+    junction_cap: bool = False,
+) -> _RoadAxis | None:
+    """Find dirt or gravel, including stock asf curves and generated gravel."""
+    dirt = _dirt_axis(obj, object_index, spec, junction_cap=junction_cap)
+    if dirt is not None:
+        return dirt
+    candidate = _road_axis(
+        obj, object_index, spec, junction_cap=junction_cap,
+    )
+    return (
+        candidate if candidate is not None
+        and candidate.family in {"asf", "gravel"} else None
+    )
+
+
 def _is_paved_family(family: str) -> bool:
-    return family in {"sil", "kos", "asf", "paved"}
+    # Stock asf is the Worldgen GRAVEL donor, not asphalt/sil.
+    return family in {"sil", "kos", "paved"}
 
 
 def _is_paved_junction_cap_model(model_path: str) -> bool:
     filename = _filename(model_path)
     return (
-        filename.startswith("kr_new_")
+        (filename.startswith("kr_new_")
+         and not filename.startswith("kr_new_asf_asf"))
         or _p.is_generated_paved_junction_model(model_path)
     )
 
@@ -338,7 +360,7 @@ def _surface_priority(family: str) -> int:
     # which beats the stock dirt/earth family.
     if _is_paved_family(family):
         return 3
-    if family == "gravel":
+    if family in {"gravel", "asf"}:
         return 2
     return 1
 
@@ -756,21 +778,27 @@ def _replacement_dirt_model_path(
 ) -> str:
     """Keep dirt repair pieces on the active road-shape family."""
 
+    surface = "gravel" if axis.family in {"asf", "gravel"} else "dirt"
     custom = _CUSTOM_ROAD.fullmatch(_filename(obj.model_path))
     if (
         bool(getattr(spec, "custom_road_shapes", False))
         or (
             custom is not None
-            and custom.group("surface").casefold() == "dirt"
+            and custom.group("surface").casefold() == surface
         )
     ):
         return _p.custom_road_model_path(
             str(getattr(spec, "name", "world")),
-            "dirt",
+            surface,
             float(axis.half_width) * 2.0,
             float(length),
             0.0,
         )
+    if axis.family in {"asf", "gravel"}:
+        normalized = str(obj.model_path).replace("/", "\\")
+        folder = normalized.rsplit("\\", 1)[0] if "\\" in normalized else ""
+        name = f"asf{nominal}.p3d" if axis.family == "asf" else f"gravel{nominal}.p3d"
+        return f"{folder}\\{name}" if folder else name
     return _dirt_variant_path(obj.model_path, nominal)
 
 
@@ -1102,7 +1130,7 @@ def _trim_dirt_under_paved(report, spec):
     variants = _dirt_variant_lengths(spec)
 
     for index, obj in enumerate(report.objects):
-        dirt = _dirt_axis(
+        dirt = _lower_surface_axis(
             obj,
             index,
             spec,
@@ -1137,19 +1165,20 @@ def _trim_dirt_under_paved(report, spec):
         filename = _filename(obj.model_path)
         straight = _STOCK_STRAIGHT.fullmatch(filename)
         custom = _CUSTOM_ROAD.fullmatch(filename)
-        stock_dirt_straight = (
+        stock_lower_straight = (
             straight is not None
-            and straight.group("family").casefold() == "ces"
+            and straight.group("family").casefold() in {"ces", "asf"}
         )
-        generated_dirt_straight = (
-            custom is not None
-            and custom.group("surface").casefold() == "dirt"
-            and custom.group("curve") is None
+        generated_lower_straight = (
+            (custom is not None
+             and custom.group("surface").casefold() in {"dirt", "gravel"}
+             and custom.group("curve") is None)
+            or _GRAVEL_STRAIGHT.fullmatch(filename) is not None
         )
         if (
             index < protected_prefix
             or dirt.curved_model
-            or not (stock_dirt_straight or generated_dirt_straight)
+            or not (stock_lower_straight or generated_lower_straight)
         ):
             replacements[object_id] = ()
             if index < protected_prefix:
