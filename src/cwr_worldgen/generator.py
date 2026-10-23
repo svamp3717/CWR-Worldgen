@@ -3066,7 +3066,7 @@ _PLACEMENT_CACHE_FIELDS = (
     "forest_cluster_maximum_burial", "forest_cluster_maximum_float",
     "forest_cluster_tree_maximum_float", "forest_cluster_bush_maximum_float",
     "forest_cluster_footprint_margin", "forest_undergrowth_enabled",
-    "nogova_terrain_clutter_enabled", "nogova_terrain_clutter_maximum_objects",
+    "nogova_terrain_clutter_enabled",
     "forest_undergrowth_maximum_objects", "forest_undergrowth_spacing",
     "forest_undergrowth_maximum_relief", "forest_undergrowth_maximum_burial",
     "forest_undergrowth_maximum_float", "forest_undergrowth_ground_clearance",
