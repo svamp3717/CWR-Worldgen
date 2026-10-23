@@ -12,7 +12,7 @@ from cwr_worldgen.gui import (
     build_milestone9_command, default_gui_values,
 )
 from cwr_worldgen.nogova_terrain_clutter import (
-    terrain_clutter_active, place_nogova_terrain_clutter,
+    nogova_clutter_active, terrain_clutter_active, place_nogova_terrain_clutter,
     terrain_clutter_preset,
 )
 from cwr_worldgen.stock_terrain_clutter_profiles import (
