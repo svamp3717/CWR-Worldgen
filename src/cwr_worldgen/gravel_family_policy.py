@@ -391,7 +391,7 @@ def _replace_gravel_caps(report, dataset, projection, elevations, spec):
             end,
             elevations,
             spec,
-            vertical_offset=0.060,
+            vertical_offset=_p._STOCK_GRAVEL_JUNCTION_VERTICAL_OFFSET_METRES,
         )
         changed = True
     return replace(report, objects=tuple(objects)) if changed else report
