@@ -6,6 +6,7 @@ overhang lips, rather than simply asserting Y ordering.
 """
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -44,7 +45,7 @@ def _footprint(obj, index):
     lip = (
         pi.GENERATED_GRAVEL_VISUAL_OVERLAP_METRES
         if sig is not None and sig[0] in {"gravel", "dirt"}
-        and not obj.model_path.endswith("_edge.p3d")
+        and not re.search(r"_edge[1-9]?\.p3d$", obj.model_path)
         else 0.0
     )
     return _visual_footprint(axis, overlap=lip)
@@ -102,7 +103,7 @@ def test_both_road_families_have_no_painted_faces_inside_asphalt(surface, source
     assert repaired, (surface, source)
     # Ordinary exterior chain pieces can retain their old overlap lips. Only
     # affected junction pieces need flush visual ends.
-    assert any(o.model_path.endswith("_edge.p3d") for o in repaired)
+    assert any(re.search(r"_edge[1-9]?\.p3d$", o.model_path) for o in repaired)
 
 
 @pytest.mark.parametrize("surface", ("gravel", "dirt"))
@@ -125,7 +126,7 @@ def test_generated_overlap_lip_is_removed_even_when_nominal_axis_is_clear(surfac
         _footprint(gravel, 0), blocker.polygon,
     )) > 0.01
     result = enforce_visible_road_priority(original, SPEC, HEIGHTS)
-    assert result.objects[0].model_path.endswith("_edge.p3d")
+    assert re.search(r"_edge[1-9]?\.p3d$", result.objects[0].model_path)
     assert result.objects[0].object_id == gravel.object_id
     _assert_lower_surfaces_do_not_print(result)
 
@@ -188,8 +189,30 @@ def test_custom_paved_curve_blocker_includes_its_bow_and_rotated_end_corners():
     axis = road._road_axis(obj, 0, SPEC)
     assert axis is not None
     assert road._generated_curve_padding(path, axis) > 4.0
-    polygon = road._paved_blockers(_report((obj,)), SPEC)[0].polygon
-    assert max(x for x, z in polygon) - obj.x > axis.half_width + 4.0
+    # Paved curves now own the six *actual* P3D ribbon quads, rather than one
+    # overinflated bounding rectangle which had cut several metres of gravel.
+    blockers = road._paved_blockers(_report((obj,)), SPEC)
+    sections = pi._road_ribbon_sections(
+        axis.length, axis.half_width, 45, overhang=0.18,
+        square_ends=False,
+    )
+    assert len(blockers) == len(sections) - 1
+    expected_corners = tuple(
+        road._world_point((x, z), obj)
+        for section in sections for x, z in (
+            (section[0], section[1]), (section[2], section[3]),
+        )
+    )
+    actual_corners = tuple(
+        point for blocker in blockers for point in blocker.polygon
+    )
+    for corner in expected_corners:
+        assert any(
+            abs(corner[0] - actual[0]) < 1e-7
+            and abs(corner[1] - actual[1]) < 1e-7
+            for actual in actual_corners
+        )
+    assert max(x for x, z in actual_corners) - obj.x > axis.half_width + 2.0
 
 
 def test_flush_end_road_variants_are_written_as_real_p3d_assets(tmp_path):
@@ -234,3 +257,68 @@ def test_dirt_cannot_print_over_generated_gravel_overlap_lip():
     )) == pytest.approx(0.0, abs=1e-6)
     clipped = enforce_visible_road_priority(scene, SPEC, HEIGHTS)
     assert clipped.objects == (gravel,)
+
+
+@pytest.mark.parametrize("surface,width", (("gravel", 7.0), ("dirt", 3.5)))
+def test_centimetre_seam_p3d_reaches_asphalt_and_drives_under_without_paint(surface, width):
+    from cwr_worldgen.road_visible_surface_priority import _flush_piece
+
+    path = pi.custom_road_model_path(
+        SPEC.name, surface, width, 6.37, flush_ends=True,
+    )
+    assert path.endswith("_l0063_edge7.p3d")
+    assert pi.custom_road_model_signature(path) == (surface, width, 6.37, 0)
+    reference = WorldObject(
+        51, path, 100.0, 9.99, 100.0, 90.0, 0.0,
+    )
+    axis = road._lower_surface_axis(reference, 0, SPEC)
+    assert axis is not None
+    assert axis.length == pytest.approx(6.37, abs=1e-7)
+    # Refitting a nominally 10m clear interval must not reintroduce an
+    # entire decimetre gap at the paved boundary.
+    piece = _flush_piece(
+        reference, axis, 0, 6.37, object_id=51,
+        spec=SPEC, elevations=HEIGHTS,
+    )
+    assert piece is not None
+    new_axis = road._lower_surface_axis(piece, 0, SPEC)
+    assert new_axis is not None
+    assert abs(new_axis.start[0] - axis.start[0]) <= 0.012
+    assert abs(new_axis.end[0] - axis.end[0]) <= 0.012
+    assert piece.model_path.endswith("_edge6.p3d")
+    sig = pi.custom_road_model_signature(piece.model_path)
+    assert sig is not None
+    key = pi.InfrastructureModelKey(
+        "road", piece.model_path.rsplit("\\", 1)[-1][:-4],
+        int(round(width * 10)), int(sig[2] * 10),
+    )
+    visual, geometry, roadway, land = pi._road_lods(
+        key, r"landtext\road.paa",
+    )
+    # The painted skin stops at the seam, but CWA Roadway contact continues
+    # 40 cm UNDER asphalt so that vehicles do not drive over a road gap.
+    assert max(p[2] for p in roadway.points) - max(
+        p[2] for p in visual.points
+    ) == pytest.approx(0.40, abs=1e-6)
+    assert min(p[2] for p in visual.points) - min(
+        p[2] for p in roadway.points
+    ) == pytest.approx(0.40, abs=1e-6)
+
+
+def test_centimetre_road_model_is_packaged(tmp_path):
+    path = pi.custom_road_model_path(
+        SPEC.name, "gravel", 7.0, 6.37, flush_ends=True,
+    )
+    library = pi.ProceduralInfrastructureLibrary(
+        SPEC.name, cache_enabled=False,
+        paved_texture_path=r"o\road\sil_new.paa",
+    )
+    library.register_model(path)
+    report = library.write_assets(tmp_path, tmp_path / "roads.json")
+    assert report.generated_variants == 1
+    expected = tmp_path / path.split("\\", 1)[1].replace("\\", "/")
+    assert expected.is_file()
+    assert any(
+        abs(v - pi._ROADWAY_LOD) < 1e9
+        for v in pi.inspect_mlod(expected).resolutions
+    )
