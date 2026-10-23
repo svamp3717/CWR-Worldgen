@@ -931,6 +931,11 @@ def _gravel_gap_connector(
     span = end - start
     if span < 0.45:
         return None
+    # The generated filename stores length in 0.1 m increments. Rounding to
+    # nearest made a 0.025 m nominal gravel intrusion into asphalt in tests.
+    # Round inward instead: the lowered 0.90 m visual tip closes the tiny
+    # leftover without exposing any *raised* gravel across pavement.
+    length = max(0.5, math.floor(span * 10.0 + 1.0e-8) / 10.0)
     centre = (start + end) * 0.5
     x = axis.start[0] + axis.ux * centre
     z = axis.start[1] + axis.uz * centre
@@ -944,7 +949,7 @@ def _gravel_gap_connector(
         str(getattr(spec, "name", "world")),
         "gravel",
         float(axis.half_width) * 2.0,
-        span,
+        length,
     )
     return replace(
         obj,
