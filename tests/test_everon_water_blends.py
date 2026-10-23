@@ -238,24 +238,24 @@ def test_4wvr_export_and_generation_use_exact_ps_tn_paths(tmp_path) -> None:
     }
 
 
-def test_nogova_ground_profile_still_has_unchanged_texture_table() -> None:
+def test_dry_nogova_land_keeps_unchanged_texture_table() -> None:
     size = 13
-    for profile in ("nogova",):
-        spec = SimpleNamespace(
-            name="demo", ground_texture_profile=profile,
-            surface_pass_enabled=True, surface_ground_mode="milestone9",
-            forest_undergrowth_textures=False, cells=size,
-            dummy_texture_path=r"demo\data\d.paa",
-        )
-        mats = [MATERIAL_INDEX["w"]] * (size * size)
-        raster = SimpleNamespace(forest=[False] * len(mats))
-        paths, slots = generator._stock_ground_texture_table(
-            spec, mats, raster, MILESTONE9_MATERIALS,
-        )
-        assert paths == (
-            spec.dummy_texture_path, *generator._ground_texture_paths(spec),
-        )
-        assert slots == [MATERIAL_INDEX["w"] + 1] * len(mats)
+    spec = SimpleNamespace(
+        name="demo", ground_texture_profile="nogova",
+        surface_pass_enabled=True, surface_ground_mode="milestone9",
+        forest_undergrowth_textures=False, cells=size, sea_level=0.0,
+        dummy_texture_path=r"demo\data\d.paa",
+    )
+    mats = [MATERIAL_INDEX["g"]] * (size * size)
+    raster = SimpleNamespace(forest=[False] * len(mats))
+    paths, slots = generator._stock_ground_texture_table(
+        spec, mats, raster, MILESTONE9_MATERIALS,
+        elevations=[10.0] * len(mats),
+    )
+    assert paths == (
+        spec.dummy_texture_path, *generator._ground_texture_paths(spec),
+    )
+    assert slots == [MATERIAL_INDEX["g"] + 1] * len(mats)
 
 
 def test_water_border_manifest_paths_are_only_ps_tn() -> None:
