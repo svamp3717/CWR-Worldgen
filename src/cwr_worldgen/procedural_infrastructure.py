@@ -1798,7 +1798,7 @@ def _road_lods(
         # Even when the painted visual surface is flush at asphalt, continue
         # the invisible Roadway contact underneath it for a seamless drive.
         overhang=(
-            0.40 if subtype.endswith("_edge") or re.search(r"_edge[1-9]$", subtype)
+            0.40 if re.search(r"_edge[1-9]?(?:_m\d{12})?$", subtype)
             else 0.0
         ),
         square_ends=(paved_fallback and not paved_turn),
