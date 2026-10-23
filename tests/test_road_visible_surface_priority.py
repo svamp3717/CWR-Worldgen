@@ -190,3 +190,24 @@ def test_custom_paved_curve_blocker_includes_its_bow_and_rotated_end_corners():
     assert road._generated_curve_padding(path, axis) > 4.0
     polygon = road._paved_blockers(_report((obj,)), SPEC)[0].polygon
     assert max(x for x, z in polygon) - obj.x > axis.half_width + 4.0
+
+
+def test_flush_end_road_variants_are_written_as_real_p3d_assets(tmp_path):
+    models = tuple(
+        pi.custom_road_model_path(
+            SPEC.name, surface, width, 6.0, flush_ends=True,
+        )
+        for surface, width in (("gravel", 7.0), ("dirt", 3.5))
+    )
+    library = pi.ProceduralInfrastructureLibrary(
+        SPEC.name, cache_enabled=False,
+        paved_texture_path=r"o\road\sil_new.paa",
+    )
+    library.register_models(models)
+    report = library.write_assets(tmp_path, tmp_path / "roads.json")
+    assert report.generated_variants == 2
+    for model in models:
+        output = tmp_path / model.split("\\", 1)[1].replace("\\", "/")
+        assert output.is_file()
+        info = pi.inspect_mlod(output)
+        assert any(abs(v - pi._ROADWAY_LOD) < 1e9 for v in info.resolutions)
