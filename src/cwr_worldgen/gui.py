@@ -809,6 +809,13 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         command.append("--stock-bridges")
 
     vegetation = str(values.get("vegetation_style", VEGETATION_EVERON)).strip()
+    # The clutter box is a separate opt-in; selecting Nogova ground textures
+    # without Nogova Resistance trees must never switch it on.
+    if (
+        bool(values.get("nogova_terrain_clutter", False))
+        and vegetation in {VEGETATION_RESISTANCE_LEAF, VEGETATION_RESISTANCE_PINE}
+    ):
+        command.append("--nogova-terrain-clutter")
     negative_flags = {
         "include_minor_roads": "--no-minor-roads",
         "forest_clusters": "--no-forest-clusters",
@@ -1098,6 +1105,8 @@ def default_gui_values() -> dict[str, object]:
         "forest_severe_hill_relief": "5",
         "forest_severe_hill_trees_per_block": "10",
         "forest_undergrowth": True,
+        # Explicit opt-in; effective only with Nogova Resistance leaf/pine.
+        "nogova_terrain_clutter": False,
         "forest_undergrowth_max_objects": "120000",
         "forest_undergrowth_spacing": "30",
         "steep_hill_bushes": True,
@@ -2366,6 +2375,7 @@ class WorldgenGui(tk.Tk):
             ("Higher-quality building textures (256 px)", "high_quality_building_textures", False),
             ("Match nearby same-shape town/city building textures", "match_nearby_building_textures", False),
             ("Forest undergrowth", "forest_undergrowth", True),
+            ("Nogova terrain clutter (Resistance trees only)", "nogova_terrain_clutter", False),
             ("Stock forest undergrowth ground textures (incl. forest edges)", "forest_undergrowth_textures", True),
             ("Fences, walls and hedges", "barriers", True),
             ("Stock urban pavement / sidewalks (disabled for now)", "sidewalks", False),
