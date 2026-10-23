@@ -147,9 +147,9 @@ def test_gui_checkbox_uses_correct_preset_independent_of_ground_textures() -> No
     assert values["nogova_terrain_clutter"] is True
     for style in (VEGETATION_EVERON, VEGETATION_KOLGUJEV, VEGETATION_MALDEN):
         values["vegetation_style"] = style
+        values["nogova_terrain_clutter"] = True
         command = build_milestone9_command(values, python="python")
         assert command.count("--terrain-clutter") == 1
-        values["nogova_terrain_clutter"] = True
         for ground in ("nogova", "everon", "generated", "malden"):
             values["ground_textures"] = ground
             command = build_milestone9_command(values, python="python")
@@ -219,10 +219,10 @@ def test_public_milestone9_spec_defaults_on_and_can_be_disabled() -> None:
     )
 
     assert Milestone9Spec(source_dir=Path("unused")).nogova_terrain_clutter_enabled is True
-    assert _Milestone9PlayabilitySpec().nogova_terrain_clutter_enabled is True
+    assert _Milestone9PlayabilitySpec(heightmap_path=Path("unused")).nogova_terrain_clutter_enabled is True
     assert Milestone9Spec(
         source_dir=Path("unused"), nogova_terrain_clutter_enabled=False,
     ).nogova_terrain_clutter_enabled is False
     assert _Milestone9PlayabilitySpec(
-        nogova_terrain_clutter_enabled=False,
+        heightmap_path=Path("unused"), nogova_terrain_clutter_enabled=False,
     ).nogova_terrain_clutter_enabled is False
