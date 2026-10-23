@@ -37,9 +37,10 @@ in `src/cwr_worldgen/nogova_terrain_clutter.py`.
 The existing GUI **Common choices** control is now called
 **Original island terrain clutter (matching trees)**. The saved field
 (`nogova_terrain_clutter`) remains intact for compatibility with prior
-profiles, and its default is still **unchecked**.
+profiles, and the checkbox now defaults to **checked** for new worlds. Old
+saved profiles that explicitly disabled clutter remain disabled.
 
-When checked, it selects ONE of the original-model pools based on the
+When enabled (the new default), it selects ONE original-model pool based on the
 actual forest-block *and* single-tree models in the active vegetation
 preset:
 
@@ -54,10 +55,12 @@ Nogova ground textures paired with Everon trees use the **Eden** model pool,
 never DD Resistance bushes. Selecting just a matching texture cannot
 activate the clutter. Direct CLI usage applies the same model-based gate.
 
-CLI: `--terrain-clutter` or `--nogova-terrain-clutter` (compatible
-alias). The former `--nogova-clutter-max-objects N` argument is accepted
-for old saved build scripts but **ignored**; it cannot cap or disable
-clutter. Uncheck the terrain clutter option to disable it.
+CLI builds enable matching-tree clutter by default; pass
+`--no-terrain-clutter` (or `--no-nogova-terrain-clutter`) to switch it
+off. Explicit `--terrain-clutter` and `--nogova-terrain-clutter` flags
+remain accepted. The former `--nogova-clutter-max-objects N` argument
+is accepted for old saved build scripts but **ignored**; it cannot cap
+or disable clutter. Uncheck the GUI box to disable it.
 
 ## Safety, distribution and compatibility
 
