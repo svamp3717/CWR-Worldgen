@@ -29,8 +29,10 @@ handle those categories.
 
 ## Checkbox and tree-preset gating
 
-**Common choices → Nogova terrain clutter (Resistance trees only)** is
-**off by default** and is saved with other GUI settings.
+**Common choices → Original island terrain clutter (matching trees)**
+is **on by default** in new GUI profiles. The setting is saved, and an
+existing profile with the option unchecked remains off. This supports
+Eden, Abel, Cain and Nogova via their respective tree presets.
 
 The pass runs only when BOTH:
 1. This checkbox (CLI flag `--nogova-terrain-clutter`) is enabled.
@@ -48,7 +50,8 @@ clutter object-count cap**. Instead, 45-metre strata, 48% preliminary
 sampling, and terrain/object-clearance checks decide how many objects
 fit naturally. The obsolete `--nogova-clutter-max-objects` CLI argument
 is still accepted for legacy scripts but is ignored, including a value
-of zero. Use the checkbox or CLI enable flag to control clutter.
+of zero. Use the checkbox or CLI `--no-terrain-clutter` to disable clutter;
+`--terrain-clutter` remains an optional explicit enable flag.
 Candidates are seeded from the existing world seed and reproducible
 across normal builds and regeneration audits.
 
