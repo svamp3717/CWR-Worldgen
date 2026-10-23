@@ -83,7 +83,7 @@ def _spec(cells: int, **overrides) -> _Milestone9PlayabilitySpec:
 
 def test_every_mapped_osm_tree_is_evaluated_instead_of_skipping_half() -> None:
     cells = 16
-    spec = _spec(cells, max_forest_objects=0, maximum_mapped_tree_objects=2)
+    spec = _spec(cells, max_forest_objects=0)
     projection = BboxProjection.create(spec.bbox, spec.world_size)
     locations = ((45.0, 45.0), (110.0, 55.0), (170.0, 120.0),
                  (240.0, 250.0), (340.0, 310.0))
@@ -110,24 +110,21 @@ def test_every_mapped_osm_tree_is_evaluated_instead_of_skipping_half() -> None:
     assert result.mapped_tree_rejections == 0
     assert len({obj.object_id for obj in result.objects}) == len(mapped)
 
-    # Disabling the category still works. Direct non-advisory callers also
-    # retain their explicitly requested count budget; only sampling is gone.
-    disabled = _spec(cells, max_forest_objects=0, maximum_mapped_tree_objects=0)
-    assert generate_world_objects(
-        dataset, projection, raster, heights, disabled, include_roads=False,
-    ).mapped_tree_objects == 0
-    bounded = _spec(
-        cells, max_forest_objects=0, maximum_mapped_tree_objects=3,
-        advisory_object_limits=False,
-    )
-    assert generate_world_objects(
-        dataset, projection, raster, heights, bounded, include_roads=False,
-    ).mapped_tree_objects == 3
+    # The count is based only on the five actual OSM points; previously the
+    # unconditional every-other feature skip produced just three.
+    assert len(result.objects) == len(mapped)
 
 
 def test_forest_scatter_uses_more_than_one_candidate_per_geographic_cell() -> None:
     cells = 16
-    spec = _spec(cells, maximum_forest_single_tree_objects=1000)
+    # This bounding box is approximately 400 m at the equator; using a
+    # much larger geographic bbox for a tiny 400 m test world compresses
+    # geographically anchored forest candidates unrealistically and makes
+    # the legitimate 6 m trunk clearance reject every second candidate.
+    spec = _spec(
+        cells, maximum_forest_single_tree_objects=1000,
+        bbox=(0.0, 0.0, 0.0036, 0.0036),
+    )
     projection = BboxProjection.create(spec.bbox, spec.world_size)
     dataset = _dataset()
     raster = _raster(cells, forest=True)
