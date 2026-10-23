@@ -64,7 +64,12 @@ def terrain_clutter_preset(spec: object) -> str | None:
 
 
 def nogova_clutter_active(spec: object) -> bool:
-    """Historical function name preserved for older callers and profiles."""
+    """Legacy Nogova-only predicate, preserved for existing consumers."""
+    return bool(getattr(spec, "nogova_terrain_clutter_enabled", False)) and nogova_tree_preset_selected(spec)
+
+
+def terrain_clutter_active(spec: object) -> bool:
+    """True for any exact supported stock vegetation preset when opted in."""
     return bool(getattr(spec, "nogova_terrain_clutter_enabled", False)) and terrain_clutter_preset(spec) is not None
 
 
@@ -94,7 +99,7 @@ def place_nogova_terrain_clutter(
     objects. Extra clutter never replaces generated roads, forests or houses,
     and this stage does not alter any OSM raster, terrain material or height.
     """
-    if not nogova_clutter_active(spec):
+    if not terrain_clutter_active(spec):
         return ()
     palette = terrain_clutter_preset(spec)
     # Palettes were read from the original island object-models.csv exports.
