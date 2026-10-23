@@ -11,6 +11,8 @@ on:
       - "src/cwr_worldgen/everon_water_blends.py"
       - "src/cwr_worldgen/stock_water_ground_blends.py"
       - "src/cwr_worldgen/nogova_water_blends.py"
+      - "src/cwr_worldgen/nogova_terrain_clutter.py"
+      - "src/cwr_worldgen/stock_terrain_clutter_profiles.py"
       - "src/cwr_worldgen/surface_pass.py"
       - "src/cwr_worldgen/generator.py"
       - "src/cwr_worldgen/milestone9.py"
@@ -20,6 +22,8 @@ on:
       - "tests/test_everon_water_blends.py"
       - "tests/test_stock_water_ground_blends.py"
       - "tests/test_nogova_water_blends.py"
+      - "tests/test_nogova_terrain_clutter.py"
+      - "tests/test_stock_terrain_clutter.py"
       - "tests/test_milestone9.py"
       - ".github/workflows/forest-undergrowth-textures.yml"
   workflow_dispatch:
@@ -53,6 +57,12 @@ jobs:
       - name: Verify original Nogova ps-pt-t1 submerged shoreline borders
         run: |
           python -m pytest -q tests/test_nogova_water_blends.py
+      - name: Validate measured Nogova small-clutter checkbox and placement
+        run: |
+          python -m pytest -q tests/test_nogova_terrain_clutter.py
+      - name: Validate source-measured Eden Abel Cain clutter and tree-preset gating
+        run: |
+          python -m pytest -q tests/test_stock_terrain_clutter.py
       - name: Malden and Kolgujev coast classification
         run: |
           python -m pytest -q tests/test_milestone9.py -k test_malden_kolgujev_remove_dry_beach_but_keep_water
