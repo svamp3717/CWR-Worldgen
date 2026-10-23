@@ -558,9 +558,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true", dest="nogova_terrain_clutter",
         help="add source-measured bushes and saplings for selected Everon, Malden, Kolgujev or Resistance tree preset",
     )
+    # Retain the old spelling so saved build commands still parse, but do
+    # not cap clutter. The tree-preset/checkbox gate is the off switch.
     milestone9.add_argument(
-        "--nogova-clutter-max-objects", type=int, default=20000,
-        help="hard cap for source-matched additional terrain clutter (default 20000)",
+        "--nogova-clutter-max-objects", type=int,
+        help=argparse.SUPPRESS,
     )
     milestone9.add_argument("--forest-undergrowth-max-objects", type=int, default=120000, help="interior-undergrowth warning threshold; exceeded values are logged and generation continues; 0 disables this category")
     milestone9.add_argument("--forest-undergrowth-spacing", type=float, default=30.0, help="interior undergrowth grid spacing in metres")
@@ -1285,7 +1287,6 @@ def main(argv: list[str] | None = None) -> int:
                 forest_cluster_bush_maximum_float=args.forest_cluster_bush_max_float,
                 forest_undergrowth_enabled=args.forest_undergrowth_enabled,
                 nogova_terrain_clutter_enabled=args.nogova_terrain_clutter,
-                nogova_terrain_clutter_maximum_objects=args.nogova_clutter_max_objects,
                 forest_undergrowth_maximum_objects=args.forest_undergrowth_max_objects,
                 forest_undergrowth_spacing=args.forest_undergrowth_spacing,
                 forest_undergrowth_maximum_relief=args.forest_undergrowth_max_relief,
