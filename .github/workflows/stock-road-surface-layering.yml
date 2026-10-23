@@ -34,4 +34,14 @@ jobs:
           python -m pytest -q tests/test_stock_road_surface_layering.py tests/test_stock_gravel_paved_overlap.py
       - name: Check existing road finishing, synthetic junctions and stock models
         run: |
-          python -m pytest -q tests/test_road_finish_parallel_policy.py tests/test_synthetic_paved_junctions.py tests/test_paved_junction_performance_policy.py tests/test_gravel_junction_policy.py tests/test_final_road_dedup_policy.py
+          python -m pytest -q tests/test_road_finish_parallel_policy.py tests/test_synthetic_paved_junctions.py tests/test_paved_junction_performance_policy.py tests/test_gravel_junction_policy.py
+      - name: Regress final mixed-surface road clipping and retained dirt repairs
+        run: |
+          python -m pytest -q \
+            tests/test_final_road_dedup_policy.py::test_short_paved_piece_trims_the_actual_stock_gravel_footprint \
+            tests/test_final_road_dedup_policy.py::test_perpendicular_dirt_crossing_keeps_lowered_terminal_pieces \
+            tests/test_final_road_dedup_policy.py::test_dirt_t_approach_finishes_with_piece_diving_under_paved \
+            tests/test_final_road_dedup_policy.py::test_paved_junction_footprint_keeps_dirt_terminals_below_hub \
+            tests/test_final_road_dedup_policy.py::test_unified_dirt_overlap_repairs_remain_generated_ribbons \
+            tests/test_final_road_dedup_policy.py::test_dirt_under_high_paved_overpass_is_preserved \
+            tests/test_final_road_dedup_policy.py::test_paved_surface_wins_over_coincident_dirt_piece
