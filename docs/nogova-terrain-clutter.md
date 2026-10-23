@@ -43,11 +43,14 @@ Using Nogova trees with any ground texture preset can enable clutter.
 The CLI also enforces this based on resolved WRP model paths, so manually
 supplying the checkbox without the tree preset cannot bypass it.
 
-The density is intentionally far below stock Noe's 120k small objects,
-with a **20,000-object cap** per generated world. Advanced CLI users can
-set `--nogova-clutter-max-objects 20000` (or `0` to disable).
-Candidates are stratified, seeded from the existing world seed, and
-reproducible across the normal WRP build and regeneration audit.
+The density is intentionally conservative, but **there is no fixed
+clutter object-count cap**. Instead, 45-metre strata, 48% preliminary
+sampling, and terrain/object-clearance checks decide how many objects
+fit naturally. The obsolete `--nogova-clutter-max-objects` CLI argument
+is still accepted for legacy scripts but is ignored, including a value
+of zero. Use the checkbox or CLI enable flag to control clutter.
+Candidates are seeded from the existing world seed and reproducible
+across normal builds and regeneration audits.
 
 ## Safety and placement
 
