@@ -405,3 +405,46 @@ def test_mitered_p3d_records_both_distinct_end_corners_and_underway_contact(tmp_
     assert max(p[2] for p in roadway.points) - max(
         p[2] for p in visual.points
     ) == pytest.approx(0.4, abs=1e-6)
+
+
+@pytest.mark.parametrize("surface,width", (("gravel", 7.0), ("dirt", 3.5)))
+def test_final_join_actually_emits_mitered_surface_for_angled_asphalt(
+    monkeypatch, surface, width,
+):
+    """This is the gap regression: do not just test the miter helper."""
+    from cwr_worldgen.road_visible_surface_priority import _visual_footprint
+
+    lower = WorldObject(
+        601, pi.custom_road_model_path(SPEC.name, surface, width, 25.0),
+        100.0, 10.0, 100.0, 0.0, 0.0,
+    )
+    paved = WorldObject(
+        602, r"o\road\sil25.p3d", 100.0, 10.095, 110.0, 0.0, 0.0,
+    )
+    # Paved covers the lower road's left edge earlier than its right edge.
+    blocker = road._blocker_from_polygon(
+        paved,
+        ((94.0, 100.0), (106.0, 104.0),
+         (106.0, 115.0), (94.0, 115.0)),
+    )
+    monkeypatch.setattr(road, "_paved_blockers", lambda *_: (blocker,))
+    final = enforce_visible_road_priority(
+        _report((lower, paved)), SPEC, HEIGHTS,
+    )
+    pieces = [
+        o for o in final.objects
+        if pi.custom_road_model_signature(o.model_path) is not None
+        and pi.custom_road_model_signature(o.model_path)[0] == surface
+    ]
+    assert pieces
+    assert any("_m" in o.model_path for o in pieces)
+    for i, piece in enumerate(pieces):
+        axis = road._lower_surface_axis(piece, i, SPEC)
+        assert axis is not None
+        painted = _visual_footprint(
+            axis, overlap=0.0,
+            miter=pi.custom_road_miter_metres(piece.model_path),
+        )
+        assert road._polygon_area(road._clip_convex_polygon(
+            painted, blocker.polygon,
+        )) < 1.0e-5
