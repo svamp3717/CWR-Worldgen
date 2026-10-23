@@ -193,4 +193,11 @@ def test_road_fit_cache_stays_inside_final_cleanup_wrappers() -> None:
     # Final dedupe is intentionally outside the persistent cache. A cache hit
     # therefore still executes late cleanup, bridge underlay and building-road
     # recording wrappers installed after the Milestone 9 performance chain.
-    assert final_dedup._ORIGINAL_FIT is road_cache._fit
+    wrapped = final_dedup._ORIGINAL_FIT
+    # The audit-progress wrapper is installed between persistent caching and
+    # final dedup. The old direct-identity assertion was stale; verify that
+    # the captured audit closure still delegates to the inner cache stage.
+    assert wrapped is road_cache._fit or any(
+        cell.cell_contents is road_cache._fit
+        for cell in (getattr(wrapped, "__closure__", None) or ())
+    )
