@@ -22,7 +22,7 @@ We select small stock foliage/grass/sapling models and preserve their
 | Eden | 14 | 17,805 | `krovi2/3/4`, small spruce, several grass tufts |
 | Abel | 10 | 44,560 | Grass tufts, `str_fikovnik_ker`, `ker listnac`, bush types |
 | Cain | 8 | 27,423 | Small spruce, grass tufts, `krovi2/3` |
-| Nogova | 11 | 120,670 | DD bushes and `smrk_maly` |
+| Nogova | 11 | 122,670 | DD bushes and `smrk_maly` |
 
 These are model *weights*, not target counts. Large conifers, mature
 trees, full forest polygons, road/farm objects, buildings, and wetland
