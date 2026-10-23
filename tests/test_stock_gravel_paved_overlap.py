@@ -121,6 +121,29 @@ def test_perpendicular_stock_gravel_is_trimmed_below_stock_paved():
     assert all(obj.object_id != original.object_id or obj != original for obj in gravel)
 
 
+def test_generated_connectors_reach_the_paved_boundary_without_cutoff():
+    """The stock pieces alone leave a ~1.7 m approach gap on each side."""
+    stock = _road(1, r"o\road\asf25.p3d", 100, 100, heading=90.0, y=0.035)
+    asphalt = _road(2, r"o\road\sil25.p3d", 100, 100, y=0.095)
+    result = deduplicate_final_road_objects(_report((stock, asphalt)), _spec())
+    edge_left, edge_right = 100 - 4.55, 100 + 4.55
+    gravel_ranges = []
+    for index, obj in enumerate(result.objects):
+        axis = _road_axis(obj, index, _spec())
+        if axis is not None and axis.family in {"asf", "gravel"}:
+            gravel_ranges.append((min(axis.start[0], axis.end[0]),
+                                  max(axis.start[0], axis.end[0])))
+    assert gravel_ranges
+    left_edge = max(hi for lo, hi in gravel_ranges if hi <= edge_left + 1.0e-5)
+    right_edge = min(lo for lo, hi in gravel_ranges if lo >= edge_right - 1.0e-5)
+    # Named generated 0.1m models leave < 0.1m nominal gaps, covered by
+    # their deliberately lowered 0.9m visual overlap tips. Stock donor-only
+    # truncation previously left > 1m missing at the junction.
+    assert 0.0 <= edge_left - left_edge <= 0.11
+    assert 0.0 <= right_edge - edge_right <= 0.11
+    _assert_no_gravel_footprint_over_paved(result.objects, _spec())
+
+
 def test_two_stock_gravel_approaches_survive_paved_crossing():
     reports = (
         _road(1, r"o\road\asf25.p3d", 90, 100, heading=90.0, y=0.035),
