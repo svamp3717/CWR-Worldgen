@@ -37,7 +37,7 @@ def _spec():
 
 def test_parking_recipe_is_procedural_and_uses_stock_gravel_colour() -> None:
     assert parking.PARKING_GRAVEL_RECIPE == STOCK_GRAVEL_PROCEDURAL_RECIPE
-    assert parking.PARKING_TEXTURE_CACHE_SCHEMA >= 7
+    assert parking.PARKING_TEXTURE_CACHE_SCHEMA >= 8
     assert detail.DETAIL_CACHE_SCHEMA >= 4
 
 
