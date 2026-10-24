@@ -160,7 +160,7 @@ def compare_paved_models(
             selected.setdefault(record.path, record)
             continue
         prefix, separator, rest = record.path.partition("\\")
-        match = re.fullmatch(r"(.+?)\\s*\\(\\d+\\)", prefix)
+        match = re.fullmatch(r"(.+?)\s*\(\d+\)", prefix)
         if not separator or match is None:
             continue
         canonical = match.group(1) + separator + rest
