@@ -12,6 +12,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from dataclasses import dataclass
 from hashlib import sha256
+from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 import json
@@ -29,7 +30,10 @@ from .shared_cache_policy import SHARED_CACHE_DIRNAME, shared_cache_root
 
 PARKING_TEXTURE_PREFIX = "pk"
 PARKING_TEXTURE_CACHE_DIRNAME = "parking-lot-textures"
-PARKING_TEXTURE_CACHE_SCHEMA = 1
+PARKING_TEXTURE_CACHE_SCHEMA = 4
+# Non-paved lots reuse the exact neutral-grey gravel art and physical tile
+# scale already used by generated gravel roads, not a separate brown palette.
+PARKING_GRAVEL_RECIPE = "generated-gravel-road-junction-artwork-world-tiles-v1"
 RVW4_TEXTURE_LIMIT = 512
 _INSTALLED = False
 _GENERATED_PARKING_PATHS: ContextVar[tuple[str, ...]] = ContextVar(
@@ -223,6 +227,51 @@ def _world_noise(world_x: np.ndarray, world_z: np.ndarray, *, salt: int) -> np.n
     return (value & np.uint64(0xFFFF)).astype(np.float32) / 65535.0
 
 
+@lru_cache(maxsize=16)
+def _gravel_road_tile_pixels(size: int) -> np.ndarray:
+    """The same neutral aggregate as generated gravel-road junctions.
+
+    Junction artwork omits directional wheel tracks and alpha-verge cutouts,
+    so it can tile over a 2-D parking polygon without stripes or grass seams.
+    The ground texture may have much lower pixel density than a road P3D:
+    resample the source once with LANCZOS before making world-aligned tiles.
+    """
+    from .procedural_infrastructure import create_gravel_junction_texture_image
+
+    source = create_gravel_junction_texture_image(max(32, size)).convert("RGB")
+    if source.size != (size, size):
+        source = source.resize((size, size), Image.Resampling.LANCZOS)
+    pixels = np.asarray(source, dtype=np.float32)
+    pixels.setflags(write=False)
+    return pixels
+
+
+def _gravel_road_material(
+    world_x: np.ndarray, world_z: np.ndarray, *, pixel_scale: float,
+) -> np.ndarray:
+    """Repeat road aggregate at the same 3 m UV scale, across cell seams."""
+    from .procedural_infrastructure import GENERATED_GRAVEL_TEXTURE_REPEAT_METRES
+
+    repeat = float(GENERATED_GRAVEL_TEXTURE_REPEAT_METRES)
+    if repeat <= 0.0 or pixel_scale <= 0.0:
+        raise ValueError("parking gravel texture mapping requires positive scale")
+    # Two filtered samples per output pixel preserve visible stones without
+    # aliasing a high-resolution road photograph onto 128 px terrain cells.
+    size = min(512, max(16, int(math.ceil(2.0 * repeat / pixel_scale))))
+    tile = _gravel_road_tile_pixels(size)
+    u = np.mod(world_x * size / repeat, size)
+    v = np.mod(world_z * size / repeat, size)
+    u0 = np.floor(u).astype(np.int64)
+    v0 = np.floor(v).astype(np.int64)
+    u1 = (u0 + 1) % size
+    v1 = (v0 + 1) % size
+    fu = (u - u0)[:, :, None].astype(np.float32)
+    fv = (v - v0)[:, :, None].astype(np.float32)
+    top = tile[v0, u0] * (1.0 - fu) + tile[v0, u1] * fu
+    bottom = tile[v1, u0] * (1.0 - fu) + tile[v1, u1] * fu
+    return top * (1.0 - fv) + bottom * fv
+
+
 def _render_parking_cell(
     *,
     cell_index: int,
@@ -242,6 +291,7 @@ def _render_parking_cell(
     xs = col * cell_size + (np.arange(size, dtype=np.float64) + 0.5) * pixel_scale
     zs = row * cell_size + (np.arange(size, dtype=np.float64) + 0.5) * pixel_scale
     world_x, world_z = np.meshgrid(xs, zs)
+    gravel_material: np.ndarray | None = None
 
     for geometry in geometries:
         mask = _polygon_mask_for_cell(
@@ -254,14 +304,18 @@ def _render_parking_cell(
         if not bool(np.any(mask)):
             continue
         if geometry.surface == "gravel":
-            noise = _world_noise(world_x, world_z, salt=0x5A17)
-            base_colour = np.asarray((104.0, 96.0, 80.0), dtype=np.float32)
-            material = base_colour[None, None, :] + (noise[:, :, None] - 0.5) * 28.0
+            if gravel_material is None:
+                gravel_material = _gravel_road_material(
+                    world_x, world_z, pixel_scale=pixel_scale,
+                )
+            # Use the road colour directly: blending the original ochre lot
+            # filler back in would undo the whole visual match.
+            image[mask] = gravel_material[mask]
         else:
             noise = _world_noise(world_x, world_z, salt=0xA551)
             base_colour = np.asarray((66.0, 67.0, 66.0), dtype=np.float32)
             material = base_colour[None, None, :] + (noise[:, :, None] - 0.5) * 12.0
-        image[mask] = image[mask] * 0.06 + material[mask] * 0.94
+            image[mask] = image[mask] * 0.06 + material[mask] * 0.94
 
         # Paved lots get restrained parking-bay markings. Gravel lots remain
         # unpainted, matching the coarse rural lots they are intended to model.
@@ -401,7 +455,7 @@ def apply_parking_textures(
         geometries_here = cell_map[cell_index]
         payload = {
             "schema": PARKING_TEXTURE_CACHE_SCHEMA,
-            "renderer": "parking-world-aligned-v1",
+            "renderer": PARKING_GRAVEL_RECIPE,
             "profile": str(getattr(spec, "ground_texture_profile", "generated")),
             "background_path": _canonical(grass_path),
             "background_sha256": background_sha,
@@ -410,7 +464,7 @@ def apply_parking_textures(
             "cell_index": int(cell_index),
             "parking": [_geometry_fingerprint(value) for value in geometries_here],
         }
-        cached = cache_dir / f"{cache_key('parking-cell-v1', payload)}.paa"
+        cached = cache_dir / f"{cache_key('parking-cell-v4', payload)}.paa"
         candidate = source_dir / f".{PARKING_TEXTURE_PREFIX}cell{cell_index:06x}.paa"
 
         def paint(destination: Path, *, index=cell_index, values=geometries_here):
@@ -461,6 +515,7 @@ def apply_parking_textures(
         "schema": 1,
         "mode": "generated-terrain-textures",
         "strategy": "nearest-road-surface-world-aligned-overlay",
+        "gravel_material": PARKING_GRAVEL_RECIPE,
         "parking_count": len(geometries),
         "paved_parking_count": paved,
         "gravel_parking_count": gravel,
