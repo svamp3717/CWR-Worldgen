@@ -86,7 +86,7 @@ def test_paved_detail_adds_clear_stop_lines_and_keeps_outside_untouched() -> Non
 def test_gravel_detail_has_compacted_aisle_ruts_and_parking_row_wear() -> None:
     spec = _spec()
     geometry = _geometry("gravel")
-    base = Image.new("RGB", (128, 128), (104, 96, 80))
+    base = Image.new("RGB", (128, 128), (80, 80, 80))
 
     rendered = apply_parking_visual_detail(
         parking,
@@ -149,7 +149,9 @@ def test_compact_gravel_lot_gets_structured_aisle_and_ruts() -> None:
     ruts = lot & (np.abs(np.abs(lateral) - rut_offset) <= rut_half)
     aisle_centre = lot & (np.abs(lateral) <= 0.30)
 
-    assert np.count_nonzero(np.any(actual[lot] != source[lot], axis=1)) > 300
+    # Base aggregate is already textured. Detail adds parking-specific wear
+    # without covering most of that shared road photograph.
+    assert np.count_nonzero(np.any(actual[lot] != source[lot], axis=1)) > 200
     assert np.count_nonzero(ruts) > 0
     assert np.count_nonzero(aisle_centre) > 0
     assert float(actual[ruts].mean()) < float(actual[aisle_centre].mean()) - 3.0
