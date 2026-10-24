@@ -8,6 +8,7 @@ from zipfile import ZipFile
 from cwr_worldgen.procedural_buildings import (
     _Face, _Lod, _MLOD_HEADER, _write_lod,
 )
+from cwr_worldgen import generator
 from cwr_worldgen.pbo import PboEntry, write_pbo
 from cwr_worldgen.road_surface_comparison import (
     STOCK_PAVED, STOCK_CURVE, SFP_STRAIGHT, SFP_CURVE,
@@ -177,3 +178,15 @@ def test_original_stock_road_zip_is_directly_supported_without_extraction(
         "baseline": {"0x0002c102": 1}, "candidate": {"0x00000000": 1},
     }
     assert result["models"][STOCK_CURVE]["status"] == "ok"
+
+
+
+def test_stock_odol_flags_are_semantically_identical_to_sfp_mlod_flags() -> None:
+    """Raw 0x13F/0x24102 is not equivalent bitwise, only after format decode."""
+    for stock_face in (0x24102, 0x2C102):
+        assert generator._mlod_surface_flags(
+            "ODOL", 0x13F, stock_face,
+        ) == (0x01, 0x00)
+    assert generator._mlod_surface_flags(
+        "MLOD", 0x01, 0x00,
+    ) == (0x01, 0x00)
