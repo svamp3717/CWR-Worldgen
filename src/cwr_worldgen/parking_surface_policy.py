@@ -29,7 +29,14 @@ from .shared_cache_policy import SHARED_CACHE_DIRNAME, shared_cache_root
 
 PARKING_TEXTURE_PREFIX = "pk"
 PARKING_TEXTURE_CACHE_DIRNAME = "parking-lot-textures"
-PARKING_TEXTURE_CACHE_SCHEMA = 1
+PARKING_TEXTURE_CACHE_SCHEMA = 8
+# Stock asf25 is the default gravel donor, but parking uses a new
+# low-contrast dirt/gravel ground material, never any road PAA pixels.
+from .stock_gravel_parking_texture import (
+    STOCK_GRAVEL_PROCEDURAL_RECIPE as PARKING_GRAVEL_RECIPE,
+    STOCK_GRAVEL_REFERENCE_GREY_RGB,
+    stock_gravel_colour_material,
+)
 RVW4_TEXTURE_LIMIT = 512
 _INSTALLED = False
 _GENERATED_PARKING_PATHS: ContextVar[tuple[str, ...]] = ContextVar(
@@ -242,6 +249,7 @@ def _render_parking_cell(
     xs = col * cell_size + (np.arange(size, dtype=np.float64) + 0.5) * pixel_scale
     zs = row * cell_size + (np.arange(size, dtype=np.float64) + 0.5) * pixel_scale
     world_x, world_z = np.meshgrid(xs, zs)
+    gravel_material: np.ndarray | None = None
 
     for geometry in geometries:
         mask = _polygon_mask_for_cell(
@@ -254,14 +262,14 @@ def _render_parking_cell(
         if not bool(np.any(mask)):
             continue
         if geometry.surface == "gravel":
-            noise = _world_noise(world_x, world_z, salt=0x5A17)
-            base_colour = np.asarray((104.0, 96.0, 80.0), dtype=np.float32)
-            material = base_colour[None, None, :] + (noise[:, :, None] - 0.5) * 28.0
+            if gravel_material is None:
+                gravel_material = stock_gravel_colour_material(world_x, world_z)
+            image[mask] = gravel_material[mask]
         else:
             noise = _world_noise(world_x, world_z, salt=0xA551)
             base_colour = np.asarray((66.0, 67.0, 66.0), dtype=np.float32)
             material = base_colour[None, None, :] + (noise[:, :, None] - 0.5) * 12.0
-        image[mask] = image[mask] * 0.06 + material[mask] * 0.94
+            image[mask] = image[mask] * 0.06 + material[mask] * 0.94
 
         # Paved lots get restrained parking-bay markings. Gravel lots remain
         # unpainted, matching the coarse rural lots they are intended to model.
@@ -401,7 +409,7 @@ def apply_parking_textures(
         geometries_here = cell_map[cell_index]
         payload = {
             "schema": PARKING_TEXTURE_CACHE_SCHEMA,
-            "renderer": "parking-world-aligned-v1",
+            "renderer": PARKING_GRAVEL_RECIPE,
             "profile": str(getattr(spec, "ground_texture_profile", "generated")),
             "background_path": _canonical(grass_path),
             "background_sha256": background_sha,
@@ -410,7 +418,7 @@ def apply_parking_textures(
             "cell_index": int(cell_index),
             "parking": [_geometry_fingerprint(value) for value in geometries_here],
         }
-        cached = cache_dir / f"{cache_key('parking-cell-v1', payload)}.paa"
+        cached = cache_dir / f"{cache_key('parking-cell-v8', payload)}.paa"
         candidate = source_dir / f".{PARKING_TEXTURE_PREFIX}cell{cell_index:06x}.paa"
 
         def paint(destination: Path, *, index=cell_index, values=geometries_here):
@@ -461,6 +469,10 @@ def apply_parking_textures(
         "schema": 1,
         "mode": "generated-terrain-textures",
         "strategy": "nearest-road-surface-world-aligned-overlay",
+        "gravel_material": PARKING_GRAVEL_RECIPE,
+        "gravel_colour_reference": r"o\road\asf25.p3d",
+        "gravel_reference_rgb": list(STOCK_GRAVEL_REFERENCE_GREY_RGB),
+        "gravel_asset_source": "procedural-no-stock-texture-used",
         "parking_count": len(geometries),
         "paved_parking_count": paved,
         "gravel_parking_count": gravel,

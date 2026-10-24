@@ -1,0 +1,48 @@
+name: Stock-style gravel parking
+
+on:
+  push:
+    branches:
+      - feature/stock-gravel-unpaved-parking
+    paths:
+      - "src/cwr_worldgen/parking_surface_policy.py"
+      - "src/cwr_worldgen/stock_gravel_parking_texture.py"
+      - "src/cwr_worldgen/parking_visual_detail_policy.py"
+      - "src/cwr_worldgen/parking_dirt_surface_policy.py"
+      - "tests/test_parking_stock_gravel_texture.py"
+      - "tests/test_stock_gravel_parking_texture.py"
+      - "tests/test_parking_surface_policy.py"
+      - "tests/test_parking_dirt_surface_policy.py"
+      - "tests/test_parking_visual_detail_policy.py"
+      - ".github/workflows/stock-gravel-parking.yml"
+  pull_request:
+    paths:
+      - "src/cwr_worldgen/parking_surface_policy.py"
+      - "src/cwr_worldgen/stock_gravel_parking_texture.py"
+      - "src/cwr_worldgen/parking_visual_detail_policy.py"
+      - "tests/test_parking_stock_gravel_texture.py"
+      - "tests/test_stock_gravel_parking_texture.py"
+      - ".github/workflows/stock-gravel-parking.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parking-gravel:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package and test dependencies
+        run: python -m pip install -e . pytest
+      - name: Verify parking surfaces and shared stock-style gravel appearance
+        run: |
+          python -m pytest -q \
+            tests/test_stock_gravel_parking_texture.py \
+            tests/test_parking_stock_gravel_texture.py \
+            tests/test_parking_surface_policy.py \
+            tests/test_parking_dirt_surface_policy.py \
+            tests/test_parking_visual_detail_policy.py

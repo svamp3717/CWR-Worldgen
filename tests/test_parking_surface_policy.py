@@ -124,7 +124,16 @@ def test_paved_and_gravel_render_over_background_without_replacing_outside() -> 
     )
     actual_gravel = np.asarray(rendered_gravel)
     assert np.count_nonzero(np.any(actual_gravel != source, axis=2)) > 0
-    assert float(actual_gravel[:, :, 0].mean()) > float(actual_paved[:, :, 0].mean())
+    # The revised unsealed lot is muted compacted earth with a light gravel
+    # grain. It is deliberately more ground-like than the stock P3D's
+    # monochrome road gravel; avoid testing the old camo-grey palette.
+    gravel_mask = (actual_gravel[:, :, 0] != source[:, :, 0])
+    assert np.count_nonzero(gravel_mask) > 0
+    earth = actual_gravel[gravel_mask].astype(np.float32)
+    assert abs(float(earth[:, 0].mean()) - 78.0) < 8.0
+    assert float(earth[:, 0].mean()) > float(earth[:, 1].mean())
+    assert float(earth[:, 1].mean()) > float(earth[:, 2].mean())
+    assert float(np.percentile(earth[:, 0], 99) - np.percentile(earth[:, 0], 1)) < 20.0
 
 
 def test_malden_parking_overlay_uses_shared_exact_preset_background(tmp_path, monkeypatch) -> None:
@@ -150,6 +159,13 @@ def test_malden_parking_overlay_uses_shared_exact_preset_background(tmp_path, mo
         return exact_background
 
     monkeypatch.setattr(exact, "_load_exact_texture", load_exact_background)
+    # This fixture deliberately mocks the background's PAA bytes rather than
+    # supplying real mip metadata. Exercise the parking compositor with a
+    # real output PAA writer, not the unrelated exact-mipmap copy algorithm.
+    monkeypatch.setattr(
+        exact, "_write_with_preserved_background",
+        lambda path, image, _source: runway.write_rgb_dxt1_paa(path, image),
+    )
     texture_paths = (
         r"parkingworld\data\d.paa",
         *surface_pass.surface_texture_wire_paths("parkingworld", "malden"),
