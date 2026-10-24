@@ -978,6 +978,16 @@ def road_model_variants(
         )
 
     gravel = is_generated_gravel_road_model(model_path)
+    # The default o\\road\\sil25 donor is a physical 25-metre P3D, with
+    # genuine 12m and 6m siblings. The configured 24.5m road segment pitch is
+    # a legacy planning calibration, NOT the mesh length. Treating 24.5 as its
+    # model length makes stock roads fit differently from a byte-identical
+    # copy loaded as an external donor, which is measured at the real 25m.
+    # This surfaced when the user's unchanged stock-control PBO rendered
+    # gravel beneath paving, unlike the original stock model path.
+    stock_paved_mesh_length = (
+        _road_model_key(model_path) == r"o\road\sil25.p3d"
+    )
     nominals = (25, 12, 6, 3) if gravel else (25, 12, 6)
     pieces: list[_RoadPiece] = []
     availability = _ROAD_MODEL_VARIANTS_AVAILABLE.get()
@@ -1005,6 +1015,8 @@ def road_model_variants(
         piece_length = (
             float(measured_piece[1])
             if measured_piece is not None
+            else float(nominal)
+            if stock_paved_mesh_length
             else long_length * nominal / 25.0
         )
         pieces.append(_RoadPiece(path, piece_length, nominal))
