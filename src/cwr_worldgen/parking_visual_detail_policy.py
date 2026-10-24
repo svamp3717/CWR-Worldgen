@@ -7,7 +7,7 @@ from PIL import Image
 
 
 _INSTALLED = False
-DETAIL_CACHE_SCHEMA = 3
+DETAIL_CACHE_SCHEMA = 4
 
 
 def _world_grid(*, cell_index: int, spec, size: int):
@@ -37,51 +37,30 @@ def _add_gravel_detail(
     world_z: np.ndarray,
     pixel_scale: float,
 ) -> None:
-    # Give every unsealed lot obvious aggregate at multiple scales. This part is
-    # intentionally applied even to tiny village parking areas, because the old
-    # large-lot threshold left those cells looking almost identical to the v1
-    # flat brown gravel fill.
-    coarse = parking._world_noise(world_x * 0.22, world_z * 0.22, salt=0x7741)
-    broad = parking._world_noise(world_x * 0.065, world_z * 0.065, salt=0xC0A5)
-    fine = parking._world_noise(world_x * 0.48, world_z * 0.48, salt=0x51A7)
-    variation = (coarse - 0.5) * 16.0 + (broad - 0.5) * 10.0 + (fine - 0.5) * 6.0
-    image[mask] = np.clip(
-        image[mask] + variation[:, :, None][mask], 0.0, 255.0
-    )
+    """Keep real road aggregate intact, with faint parking-specific tyre wear.
 
-    # A few deterministic pale/dark aggregate flecks survive DXT1 better than
-    # low-amplitude noise alone and make an unsealed lot visibly gravel rather
-    # than generic brown terrain at ordinary game distance.
-    pale_fleck = mask & (fine > 0.86) & (coarse > 0.56)
-    dark_fleck = mask & (fine < 0.12) & (broad < 0.47)
-    _blend(image, pale_fleck, (139.0, 131.0, 111.0), 0.24)
-    _blend(image, dark_fleck, (72.0, 68.0, 59.0), 0.20)
-
+    The base parking texture now IS generated road gravel, not a flat brown
+    substitute. Adding artificial beige speckles and dirt colours here would
+    change the material back into something unrelated to the stock-style roads.
+    Darken existing pixels instead of tinting or repainting the photograph.
+    """
     dx = world_x - geometry.centre_x
     dz = world_z - geometry.centre_z
     along = dx * geometry.ux + dz * geometry.uz
     lateral = dx * geometry.px + dz * geometry.pz
-
-    # The parking geometry itself is accepted down to roughly 4 x 3 metres. Do
-    # not require a 16 x 10 metre lot before adding circulation wear. Scale the
-    # aisle to the available width so even a compact roadside pull-off gets a
-    # recognisable compacted centre and paired tyre tracks.
     if geometry.half_length < 2.0 or geometry.half_width < 1.45:
         return
+
     drive_half = max(0.82, geometry.half_width * 0.28)
     drive_half = min(4.2, drive_half, max(0.72, geometry.half_width * 0.62))
     aisle = mask & (np.abs(lateral) <= drive_half)
-    _blend(image, aisle, (108.0, 101.0, 84.0), 0.27)
+    image[aisle] *= 0.96
 
     rut_offset = max(0.36, drive_half * 0.43)
     rut_half = max(0.20, pixel_scale * 0.72)
     ruts = aisle & (np.abs(np.abs(lateral) - rut_offset) <= rut_half)
-    _blend(image, ruts, (68.0, 65.0, 57.0), 0.31)
+    image[ruts] *= 0.83
 
-    # Larger lots gain repeated compacted parking positions on both sides of the
-    # drive aisle. The threshold is deliberately much lower than v2 so modest
-    # rural lots still read as places where cars repeatedly stop rather than as
-    # arbitrary gravel polygons.
     if geometry.half_length < 3.6 or geometry.half_width < 2.2:
         return
     stall = 2.8
@@ -92,16 +71,15 @@ def _add_gravel_detail(
         geometry.half_width - edge_depth * 0.50,
     )
     row_centre = min(row_centre, geometry.half_width - max(0.35, pixel_scale))
-    parked_depth = np.abs(np.abs(lateral) - row_centre) <= min(1.15, edge_depth * 0.31)
+    parked_depth = np.abs(np.abs(lateral) - row_centre) <= min(
+        1.15, edge_depth * 0.31,
+    )
     parked_width = np.abs(phase - stall * 0.5) <= 0.68
-    worn_stalls = mask & parked_depth & parked_width
-    _blend(image, worn_stalls, (82.0, 77.0, 66.0), 0.20)
+    image[mask & parked_depth & parked_width] *= 0.91
 
-    # Turning/braking wear at the aisle ends is another cue that survives on
-    # narrow lots where only a handful of parking positions fit.
     end_band = max(0.75, min(1.8, geometry.half_length * 0.20))
     turning = aisle & (np.abs(along) >= geometry.half_length - end_band)
-    _blend(image, turning, (84.0, 79.0, 67.0), 0.17)
+    image[turning] *= 0.92
 
 
 def _add_paved_detail(
