@@ -12,7 +12,9 @@ from cwr_worldgen.stock_gravel_parking_texture import (
     STOCK_GRAVEL_PROCEDURAL_RECIPE,
     STOCK_GRAVEL_REFERENCE_GREY_RGB,
     STOCK_GRAVEL_REFERENCE_MODEL,
+    PARKING_GROUND_BASE_RGB,
     _hashed_grain,
+    _smooth_ground_noise,
     stock_gravel_colour_material,
 )
 
@@ -40,23 +42,27 @@ def test_stock_asf_is_reference_for_colour_only() -> None:
     assert STOCK_GRAVEL_REFERENCE_MODEL == r"o\road\asf25.p3d"
     assert PlayabilitySpec.__dataclass_fields__["gravel_road_model"].default == STOCK_GRAVEL_REFERENCE_MODEL
     assert STOCK_GRAVEL_REFERENCE_GREY_RGB == (74, 74, 74)
-    assert "procedural" in STOCK_GRAVEL_PROCEDURAL_RECIPE
-    assert parking.PARKING_TEXTURE_CACHE_SCHEMA >= 6
+    assert "compacted-dirt-gravel" in STOCK_GRAVEL_PROCEDURAL_RECIPE
+    assert PARKING_GROUND_BASE_RGB == (92, 90, 82)
+    assert parking.PARKING_TEXTURE_CACHE_SCHEMA >= 7
 
 
-def test_procedural_grey_matched_to_asf25_without_copying_road_pixels() -> None:
+def test_procedural_compacted_ground_is_muted_and_not_camo() -> None:
     x, z = _grid(nx=256, nz=256, spacing=0.23)
     image = stock_gravel_colour_material(x, z)
     assert image.shape == (256, 256, 3)
     assert image.dtype == np.float32
-    # Genuine stock asf25 centre sampled at RGB approximately (74,74,74).
-    # Preserve a similar overall dark grey, but create independent gravel grain.
-    assert abs(float(image.mean()) - 74.0) < 6.0
-    assert 4.0 < float(image.std()) < 22.0
-    assert np.array_equal(image[:, :, 0], image[:, :, 1])
-    assert np.array_equal(image[:, :, 0], image[:, :, 2])
-    assert np.any(image[:, :, 0] < 65.0)
-    assert np.any(image[:, :, 0] > 85.0)
+    # Natural hardpack is warmer and less contrasty than the actual road.
+    # Former metre-scale high-contrast hashes made a camouflage pattern.
+    channel_means = image.mean(axis=(0, 1))
+    assert np.allclose(channel_means, PARKING_GROUND_BASE_RGB, atol=5.0)
+    assert 1.0 < float(image[:, :, 0].std()) < 6.0
+    assert np.all(image[:, :, 0] > image[:, :, 1])
+    assert np.all(image[:, :, 1] > image[:, :, 2])
+    assert np.percentile(image[:, :, 0], 99) - np.percentile(image[:, :, 0], 1) < 19.0
+    # Barely any strong pixel-to-pixel transitions; no blocky camo patches.
+    differences = np.abs(np.diff(image[:, :, 0], axis=1))
+    assert np.percentile(differences, 99) < 4.0
 
 
 def test_world_position_not_cell_index_controls_gravel_grain() -> None:
@@ -100,9 +106,8 @@ def test_stock_source_not_required_or_used_for_parking(monkeypatch) -> None:
     pixels = np.asarray(image)
     assert tuple(pixels[0, 0]) == (29, 100, 20)
     inside = pixels[55, 55]
-    assert inside[0] == inside[1] == inside[2]
-    assert int(inside[0]) > 30
-    assert int(inside[0]) < 115
+    assert int(inside[0]) > int(inside[1]) > int(inside[2])
+    assert 76 <= int(inside[0]) <= 108
 
 
 def test_paved_lot_does_not_invoke_gravel_material(monkeypatch) -> None:
@@ -119,3 +124,12 @@ def test_paved_lot_does_not_invoke_gravel_material(monkeypatch) -> None:
     result = np.asarray(rendered)
     assert np.array_equal(result[0, 0], (29, 100, 20))
     assert not np.array_equal(result[55, 55], (29, 100, 20))
+
+
+def test_broad_ground_noise_has_no_abrupt_cell_boundaries() -> None:
+    # At a lattice edge the interpolation is continuous instead of jumping
+    # between unrelated hashed squares like the original camo texture.
+    x = np.array([[10.0 - 0.001, 10.0, 10.0 + 0.001]])
+    z = np.full_like(x, 14.0)
+    sample = _smooth_ground_noise(x, z, 0.1, 0xA531)
+    assert np.max(np.abs(np.diff(sample))) < 0.002
