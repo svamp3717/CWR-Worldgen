@@ -10,9 +10,9 @@ like camouflage rather than worn ground.
 Unpaved parking now resembles a levelled roadside turnout or a compacted
 dirt/gravel mix:
 
-- **Base colour:** muted, dusty earth grey-brown near RGB **(92, 90, 82)**,
-  informed by the neighbouring dark stock gravel but intentionally softer
-  and warmer.
+- **Base colour:** muted, dusty earth grey-brown near RGB **(78, 76, 70)**,
+  informed by the neighbouring dark stock gravel, while keeping a natural
+  earth tint and lower contrast than the previous version.
 - **Surface variation:** two scales of interpolated, world-coordinate ground
   noise. Smoothstep blending across hash lattice boundaries eliminates hard
   rectangular camouflage-like patches.
@@ -35,10 +35,10 @@ runway and sports-field priority, and non-parking terrain are unchanged.
 
 ## Rebuilding and validation
 
-`PARKING_TEXTURE_CACHE_SCHEMA` is bumped to 7, with cache namespace
-`parking-cell-v7`, and the recipe is now
-`procedural-asf25-colour-compacted-dirt-gravel-v2`. Rebuild the world PBO
-to replace the old high-contrast gravel PAAs.
+`PARKING_TEXTURE_CACHE_SCHEMA` is bumped to 8, with cache namespace
+`parking-cell-v8`, and the recipe is now
+`procedural-asf25-colour-compacted-dirt-gravel-v3`. Rebuild the world PBO
+to replace cached lighter parking PAAs with the darker hardpack version.
 
 The existing `parking-lot-textures.json` report describes the procedural
 material and notes that **no stock road texture was used**. Its
