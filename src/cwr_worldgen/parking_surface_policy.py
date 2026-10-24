@@ -30,10 +30,10 @@ from .shared_cache_policy import SHARED_CACHE_DIRNAME, shared_cache_root
 
 PARKING_TEXTURE_PREFIX = "pk"
 PARKING_TEXTURE_CACHE_DIRNAME = "parking-lot-textures"
-PARKING_TEXTURE_CACHE_SCHEMA = 4
-# Non-paved lots reuse the exact neutral-grey gravel art and physical tile
-# scale already used by generated gravel roads, not a separate brown palette.
-PARKING_GRAVEL_RECIPE = "generated-gravel-road-junction-artwork-world-tiles-v1"
+PARKING_TEXTURE_CACHE_SCHEMA = 5
+# The stock gravel donor is o\\road\\asf25.p3d, not a procedural gravel P3D.
+# Its visible material is o\\road\\asf_new.paa (legacy AI88).
+PARKING_GRAVEL_RECIPE = "o-road-asf25-ai88-stock-gravel-uv-v1"
 RVW4_TEXTURE_LIMIT = 512
 _INSTALLED = False
 _GENERATED_PARKING_PATHS: ContextVar[tuple[str, ...]] = ContextVar(
@@ -278,6 +278,7 @@ def _render_parking_cell(
     geometries: Sequence[_ParkingGeometry],
     spec,
     base: Image.Image,
+    stock_gravel_photo: Image.Image | None = None,
 ) -> Image.Image:
     size = int(base.width)
     cells = int(spec.cells)
@@ -304,13 +305,28 @@ def _render_parking_cell(
         if not bool(np.any(mask)):
             continue
         if geometry.surface == "gravel":
-            if gravel_material is None:
-                gravel_material = _gravel_road_material(
-                    world_x, world_z, pixel_scale=pixel_scale,
+            if stock_gravel_photo is not None:
+                from .stock_gravel_parking_texture import stock_gravel_material
+
+                # asf25 is the configured STOCK GRAVEL DONOR, despite "asf"
+                # looking like an asphalt family name. Keep its exact photo
+                # and 7 m x 6.25 m UV scale, not procedural grey imitation.
+                material = stock_gravel_material(
+                    world_x, world_z,
+                    geometry=geometry,
+                    pixel_scale=pixel_scale,
+                    image=stock_gravel_photo,
                 )
-            # Use the road colour directly: blending the original ochre lot
-            # filler back in would undo the whole visual match.
-            image[mask] = gravel_material[mask]
+            else:
+                # Rootless/test worlds cannot read the proprietary stock PAA.
+                # Keep rendering, but explicitly report the missing stock
+                # reference rather than labelling this a true stock match.
+                if gravel_material is None:
+                    gravel_material = _gravel_road_material(
+                        world_x, world_z, pixel_scale=pixel_scale,
+                    )
+                material = gravel_material
+            image[mask] = material[mask]
         else:
             noise = _world_noise(world_x, world_z, salt=0xA551)
             base_colour = np.asarray((66.0, 67.0, 66.0), dtype=np.float32)
@@ -410,6 +426,19 @@ def apply_parking_textures(
         return tuple(map(int, texture_indices)), tuple(map(str, texture_paths)), ()
 
     source_dir = Path(source_dir)
+    has_gravel_parking = any(
+        geometry.surface == "gravel"
+        for collection in cell_map.values()
+        for geometry in collection
+    )
+    stock_gravel = None
+    if has_gravel_parking:
+        from .stock_gravel_parking_texture import load_stock_gravel_photo
+
+        stock_gravel = load_stock_gravel_photo(spec)
+    stock_gravel_photo = stock_gravel[0] if stock_gravel is not None else None
+    stock_gravel_digest = stock_gravel[1] if stock_gravel is not None else None
+    stock_gravel_source = stock_gravel[2] if stock_gravel is not None else None
     for stale in source_dir.glob(f"{PARKING_TEXTURE_PREFIX}[0-9a-f][0-9a-f][0-9a-f].paa"):
         stale.unlink()
     for stale in source_dir.glob(f".{PARKING_TEXTURE_PREFIX}cell*.paa"):
@@ -456,6 +485,7 @@ def apply_parking_textures(
         payload = {
             "schema": PARKING_TEXTURE_CACHE_SCHEMA,
             "renderer": PARKING_GRAVEL_RECIPE,
+            "stock_gravel_sha256": stock_gravel_digest,
             "profile": str(getattr(spec, "ground_texture_profile", "generated")),
             "background_path": _canonical(grass_path),
             "background_sha256": background_sha,
@@ -464,7 +494,7 @@ def apply_parking_textures(
             "cell_index": int(cell_index),
             "parking": [_geometry_fingerprint(value) for value in geometries_here],
         }
-        cached = cache_dir / f"{cache_key('parking-cell-v4', payload)}.paa"
+        cached = cache_dir / f"{cache_key('parking-cell-v5', payload)}.paa"
         candidate = source_dir / f".{PARKING_TEXTURE_PREFIX}cell{cell_index:06x}.paa"
 
         def paint(destination: Path, *, index=cell_index, values=geometries_here):
@@ -473,6 +503,7 @@ def apply_parking_textures(
                 geometries=values,
                 spec=spec,
                 base=base,
+                stock_gravel_photo=stock_gravel_photo,
             )
             if exact_source is not None and image.size == exact_source.top_image.size:
                 exact._write_with_preserved_background(destination, image, exact_source)
@@ -516,6 +547,14 @@ def apply_parking_textures(
         "mode": "generated-terrain-textures",
         "strategy": "nearest-road-surface-world-aligned-overlay",
         "gravel_material": PARKING_GRAVEL_RECIPE,
+        "stock_gravel_texture_loaded": stock_gravel is not None,
+        "stock_gravel_texture_source": stock_gravel_source,
+        "stock_gravel_texture_sha256": stock_gravel_digest,
+        "stock_gravel_texture_status": (
+            "stock-asf-new-ai88" if stock_gravel is not None
+            else "missing-stock-asf-photo-generated-fallback"
+            if has_gravel_parking else "not-needed-paved-only"
+        ),
         "parking_count": len(geometries),
         "paved_parking_count": paved,
         "gravel_parking_count": gravel,
