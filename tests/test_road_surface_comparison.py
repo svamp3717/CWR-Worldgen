@@ -1,0 +1,192 @@
+"""Compare stock and SFP model data before changing junction rendering."""
+from __future__ import annotations
+
+import io
+from pathlib import Path
+from zipfile import ZipFile
+
+from cwr_worldgen.procedural_buildings import (
+    _Face, _Lod, _MLOD_HEADER, _write_lod,
+)
+from cwr_worldgen import generator
+from cwr_worldgen.pbo import PboEntry, write_pbo
+from cwr_worldgen.road_surface_comparison import (
+    STOCK_PAVED, STOCK_CURVE, SFP_STRAIGHT, SFP_CURVE,
+    compare_paved_models, summarize_road_model,
+)
+
+
+def _model(
+    *,
+    point_flag: int = 0x13F,
+    face_flag: int = 0x2C102,
+    y: float = 0.025,
+    width: float = 9.1,
+) -> bytes:
+    half = width / 2
+    visual = _Lod(
+        (
+            (-half, y, -12.5), (-half, y, 12.5),
+            (half, y, 12.5), (half, y, -12.5),
+        ),
+        ((0.0, -1.0, 0.0),),
+        (
+            _Face(
+                r"textures\paved.paa",
+                ((0, 0, 0., 0.), (1, 0, 0., 1.),
+                 (2, 0, 1., 1.), (3, 0, 1., 0.)),
+                face_flag,
+            ),
+        ),
+        1.0,
+        properties=(("autocenter", "0"), ("class", "road")),
+        point_flags=(point_flag,) * 4,
+    )
+    output = io.BytesIO()
+    output.write(_MLOD_HEADER.pack(b"MLOD", 1, 1, 0, 1))
+    _write_lod(output, visual)
+    return output.getvalue()
+
+
+def _write_model(root: Path, relative: str, payload: bytes) -> None:
+    output = root / relative.replace("\\", "/")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(payload)
+
+
+def test_model_summary_reports_visual_height_flags_and_winding() -> None:
+    summary = summarize_road_model(_model(point_flag=0x13F, face_flag=0x2C102))
+    assert summary["format"] == "MLOD"
+    assert summary["visual_points"] == 4
+    assert summary["visual_faces"] == 1
+    assert summary["visual_point_flags"] == {"0x0000013f": 4}
+    assert summary["visual_face_flags"] == {"0x0002c102": 1}
+    assert summary["visual_height_min_metres"] == 0.025
+    assert summary["visual_height_max_metres"] == 0.025
+    # 0x13f includes the native 0x100 land-clipping flag.
+    assert summary["visual_land_flagged_points"] == 4
+    assert summary["dominant_visual_style"]["point_flag"] == "0x0000013f"
+    assert summary["bounds"]["width_metres"] == 9.1
+    assert "roadway_error" in summary
+
+
+def test_reference_comparison_does_not_assume_sfp_behaves_like_stock(
+    tmp_path: Path,
+) -> None:
+    _write_model(tmp_path, STOCK_PAVED, _model(point_flag=0x13F))
+    _write_model(
+        tmp_path, SFP_STRAIGHT,
+        _model(point_flag=0x140, face_flag=0x52, y=0.040),
+    )
+    _write_model(tmp_path, STOCK_CURVE, _model(width=9.1))
+    _write_model(
+        tmp_path, SFP_CURVE,
+        _model(point_flag=0x140, face_flag=0x52, y=0.040, width=10.0),
+    )
+    result = compare_paved_models((tmp_path,))
+    assert result["all_models_readable"] is True
+    difference = result["comparisons"][SFP_STRAIGHT]["differences"]
+    assert difference["visual_point_flags"]["baseline"] == {
+        "0x0000013f": 4,
+    }
+    assert difference["visual_point_flags"]["candidate"] == {
+        "0x00000140": 4,
+    }
+    assert difference["visual_face_flags"]["candidate"] == {
+        "0x00000052": 1,
+    }
+    assert difference["visual_height_min_metres"]["candidate"] == 0.04
+    assert result["comparisons"][SFP_CURVE]["compared_to"] == STOCK_CURVE
+    assert "bounds" in result["comparisons"][SFP_CURVE]["differences"]
+
+
+def test_missing_sfp_reference_is_explicit_not_faked(tmp_path: Path) -> None:
+    _write_model(tmp_path, STOCK_PAVED, _model())
+    result = compare_paved_models((tmp_path,))
+    assert result["all_models_readable"] is False
+    assert result["models"][STOCK_PAVED]["status"] == "ok"
+    assert result["models"][SFP_STRAIGHT]["status"] == "missing"
+    assert result["models"][SFP_CURVE]["status"] == "missing"
+    assert not result["comparisons"]
+
+
+def test_downloaded_sfp_pbo_suffix_does_not_hide_its_real_models(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "SFP_objects(2).pbo"
+    write_pbo(archive, (
+        PboEntry("roads/sil25.p3d", _model(point_flag=1, face_flag=0, y=0)),
+        PboEntry("roads/sil10 25.p3d", _model(point_flag=1, face_flag=0, y=0)),
+    ))
+    report = compare_paved_models(
+        (archive,), (SFP_STRAIGHT, SFP_CURVE),
+    )
+    assert report["all_models_readable"]
+    assert report["models"][SFP_STRAIGHT]["status"] == "ok"
+    assert report["models"][SFP_STRAIGHT]["visual_point_flags"] == {
+        "0x00000001": 4,
+    }
+    assert report["models"][SFP_CURVE]["status"] == "ok"
+
+
+def test_duplicate_sfp_archives_cannot_silently_override_each_other(
+    tmp_path: Path,
+) -> None:
+    archives = []
+    for suffix in (2, 3):
+        archive = tmp_path / f"SFP_objects({suffix}).pbo"
+        write_pbo(archive, (
+            PboEntry("roads/sil25.p3d", _model(point_flag=suffix)),
+        ))
+        archives.append(archive)
+    report = compare_paved_models(
+        archives, (STOCK_PAVED, SFP_STRAIGHT),
+    )
+    assert report["models"][SFP_STRAIGHT]["status"] == "ambiguous"
+    assert report["all_models_readable"] is False
+
+
+def test_original_stock_road_zip_is_directly_supported_without_extraction(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "Road(1).zip"
+    with ZipFile(archive, "w") as z:
+        z.writestr("Road/sil25.p3d", _model(
+            point_flag=0x13f, face_flag=0x24102, y=0.0,
+        ))
+        z.writestr("Road/sil10 25.p3d", _model(
+            point_flag=0x13f, face_flag=0x2c102, y=0.0,
+        ))
+    sfp = tmp_path / "SFP_objects(2).pbo"
+    write_pbo(sfp, (
+        PboEntry("roads/sil25.p3d", _model(
+            point_flag=1, face_flag=0, y=0.0,
+        )),
+        PboEntry("roads/sil10 25.p3d", _model(
+            point_flag=1, face_flag=0, y=0.0,
+        )),
+    ))
+    result = compare_paved_models((archive, sfp))
+    assert result["all_models_readable"]
+    assert result["models"][STOCK_PAVED]["status"] == "ok"
+    assert "Road/sil25.p3d" in result["models"][STOCK_PAVED]["source"]
+    assert result["comparisons"][SFP_STRAIGHT]["compared_to"] == STOCK_PAVED
+    assert result["comparisons"][SFP_STRAIGHT]["differences"]["visual_face_flags"] == {
+        "baseline": {"0x00024102": 1}, "candidate": {"0x00000000": 1},
+    }
+    assert result["comparisons"][SFP_CURVE]["differences"]["visual_face_flags"] == {
+        "baseline": {"0x0002c102": 1}, "candidate": {"0x00000000": 1},
+    }
+    assert result["models"][STOCK_CURVE]["status"] == "ok"
+
+
+
+def test_stock_odol_flags_are_semantically_identical_to_sfp_mlod_flags() -> None:
+    """Raw 0x13F/0x24102 is not equivalent bitwise, only after format decode."""
+    for stock_face in (0x24102, 0x2C102):
+        assert generator._mlod_surface_flags(
+            "ODOL", 0x13F, stock_face,
+        ) == (0x01, 0x00)
+    assert generator._mlod_surface_flags(
+        "MLOD", 0x01, 0x00,
+    ) == (0x01, 0x00)
