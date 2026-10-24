@@ -10,6 +10,7 @@ on:
       - "tools/build_paved_flag_probe.py"
       - "tests/test_road_surface_comparison.py"
       - "tests/test_paved_flag_probe.py"
+      - "tests/test_stock_vs_relocated_control_fit.py"
       - ".github/workflows/road-surface-reference-comparison.yml"
   workflow_dispatch:
 
@@ -28,5 +29,7 @@ jobs:
         run: python -m pip install -e . pytest
       - name: Validate P3D summaries and model difference reports
         run: python -m pytest -q tests/test_road_surface_comparison.py tests/test_paved_flag_probe.py
+      - name: Compare original versus relocated stock paved WRP placement
+        run: python -m pytest -q -s tests/test_stock_vs_relocated_control_fit.py
       - name: Validate existing generated road geometry tests
         run: python -m pytest -q tests/test_custom_road_generation.py
