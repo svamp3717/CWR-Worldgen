@@ -99,13 +99,30 @@ def test_identical_stock_and_relocated_donors_do_not_move_the_junction(
     control = _fit(RELOCATED, custom_shapes=custom_shapes)
     before = _fingerprint(stock)
     after = _fingerprint(control)
-    print(
-        "PATH_DIAGNOSTIC", {
-            "custom_shapes": custom_shapes,
-            "stock_objects": len(before),
-            "control_objects": len(after),
-            "only_stock": list(sorted(set(before) - set(after)))[:12],
-            "only_control": list(sorted(set(after) - set(before)))[:12],
-        },
+    assert before == after, (
+        "unchanged stock P3Ds must fit like the relocated working control",
+        custom_shapes, len(before), len(after),
+        sorted(set(before) - set(after))[:4],
+        sorted(set(after) - set(before))[:4],
     )
-    assert before == after
+
+
+
+def test_original_stock_sil_model_variants_use_true_mesh_lengths() -> None:
+    variants = playability.road_model_variants(
+        STOCK, configured_long_length=24.5,
+    )
+    assert [(value.model_path, value.length_metres) for value in variants] == [
+        (r"o\road\sil25.p3d", 25.0),
+        (r"o\road\sil12.p3d", 12.0),
+        (r"o\road\sil6.p3d", 6.0),
+    ]
+
+
+def test_stock_dirt_road_keeps_independent_legacy_length_calibration() -> None:
+    variants = playability.road_model_variants(
+        r"o\road\ces25.p3d", configured_long_length=24.5,
+    )
+    assert [value.length_metres for value in variants] == pytest.approx(
+        (24.5, 11.76, 5.88)
+    )
