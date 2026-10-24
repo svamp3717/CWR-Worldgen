@@ -124,15 +124,16 @@ def test_paved_and_gravel_render_over_background_without_replacing_outside() -> 
     )
     actual_gravel = np.asarray(rendered_gravel)
     assert np.count_nonzero(np.any(actual_gravel != source, axis=2)) > 0
-    # The stock asf25 reference is darker neutral grey, not sandy brown.
-    # Test the gravel polygon's distinct, near-monochrome material rather
-    # than assuming it has to be redder/brighter than paved parking.
+    # The revised unsealed lot is muted compacted earth with a light gravel
+    # grain. It is deliberately more ground-like than the stock P3D's
+    # monochrome road gravel; avoid testing the old camo-grey palette.
     gravel_mask = (actual_gravel[:, :, 0] != source[:, :, 0])
     assert np.count_nonzero(gravel_mask) > 0
-    grey = actual_gravel[gravel_mask].astype(np.float32)
-    assert abs(float(grey[:, 0].mean()) - 74.0) < 12.0
-    assert np.array_equal(grey[:, 0], grey[:, 1])
-    assert np.array_equal(grey[:, 1], grey[:, 2])
+    earth = actual_gravel[gravel_mask].astype(np.float32)
+    assert abs(float(earth[:, 0].mean()) - 92.0) < 9.0
+    assert float(earth[:, 0].mean()) > float(earth[:, 1].mean())
+    assert float(earth[:, 1].mean()) > float(earth[:, 2].mean())
+    assert float(np.percentile(earth[:, 0], 99) - np.percentile(earth[:, 0], 1)) < 20.0
 
 
 def test_malden_parking_overlay_uses_shared_exact_preset_background(tmp_path, monkeypatch) -> None:
