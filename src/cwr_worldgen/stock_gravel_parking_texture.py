@@ -143,7 +143,7 @@ def _load_from_roots(roots: tuple[str, ...]):
                     }
                     matches = [
                         member for member in archive.infolist()
-                        if member.filename.replace("\\\\", "/").casefold() in wanted
+                        if member.filename.replace("\\", "/").casefold() in wanted
                         and not member.is_dir()
                         and member.file_size <= 16 * 1024 * 1024
                     ]
