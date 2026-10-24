@@ -11,10 +11,10 @@ import numpy as np
 
 STOCK_GRAVEL_REFERENCE_MODEL = r"o\road\asf25.p3d"
 STOCK_GRAVEL_REFERENCE_GREY_RGB = (74, 74, 74)
-# A little warmer and lighter than the road itself, like dusty, packed soil.
-PARKING_GROUND_BASE_RGB = (92, 90, 82)
-STOCK_GRAVEL_BRIGHTNESS_RANGE = (76, 107)
-STOCK_GRAVEL_PROCEDURAL_RECIPE = "procedural-asf25-colour-compacted-dirt-gravel-v2"
+# Dark, natural compacted soil with a subtle warm tone, not road-texture pixels.
+PARKING_GROUND_BASE_RGB = (78, 76, 70)
+STOCK_GRAVEL_BRIGHTNESS_RANGE = (64, 94)
+STOCK_GRAVEL_PROCEDURAL_RECIPE = "procedural-asf25-colour-compacted-dirt-gravel-v3"
 
 
 def _hashed_grain(
@@ -78,11 +78,11 @@ def stock_gravel_colour_material(
     # Contrast is deliberately an order of magnitude less visually forceful
     # than the old stock-grey gravel grain. Muted taupe is closer to terrain.
     shade = (
-        (broad - 0.5) * 10.0
-        + (medium - 0.5) * 5.0
-        + (fine - 0.5) * 2.8
-        + np.where(stone > 0.985, 2.5, 0.0)
-        - np.where(stone < 0.015, 2.0, 0.0)
+        (broad - 0.5) * 8.0
+        + (medium - 0.5) * 4.0
+        + (fine - 0.5) * 2.2
+        + np.where(stone > 0.988, 1.8, 0.0)
+        - np.where(stone < 0.012, 1.8, 0.0)
     )
     ground = np.asarray(PARKING_GROUND_BASE_RGB, dtype=np.float32)
     result = ground[None, None, :] + shade[:, :, None]
