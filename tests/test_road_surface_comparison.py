@@ -7,6 +7,7 @@ from pathlib import Path
 from cwr_worldgen.procedural_buildings import (
     _Face, _Lod, _MLOD_HEADER, _write_lod,
 )
+from cwr_worldgen.pbo import PboEntry, write_pbo
 from cwr_worldgen.road_surface_comparison import (
     STOCK_PAVED, STOCK_CURVE, SFP_STRAIGHT, SFP_CURVE,
     compare_paved_models, summarize_road_model,
@@ -105,3 +106,39 @@ def test_missing_sfp_reference_is_explicit_not_faked(tmp_path: Path) -> None:
     assert result["models"][SFP_STRAIGHT]["status"] == "missing"
     assert result["models"][SFP_CURVE]["status"] == "missing"
     assert not result["comparisons"]
+
+
+def test_downloaded_sfp_pbo_suffix_does_not_hide_its_real_models(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "SFP_objects(2).pbo"
+    write_pbo(archive, (
+        PboEntry("roads/sil25.p3d", _model(point_flag=1, face_flag=0, y=0)),
+        PboEntry("roads/sil10 25.p3d", _model(point_flag=1, face_flag=0, y=0)),
+    ))
+    report = compare_paved_models(
+        (archive,), (SFP_STRAIGHT, SFP_CURVE),
+    )
+    assert report["all_models_readable"]
+    assert report["models"][SFP_STRAIGHT]["status"] == "ok"
+    assert report["models"][SFP_STRAIGHT]["visual_point_flags"] == {
+        "0x00000001": 4,
+    }
+    assert report["models"][SFP_CURVE]["status"] == "ok"
+
+
+def test_duplicate_sfp_archives_cannot_silently_override_each_other(
+    tmp_path: Path,
+) -> None:
+    archives = []
+    for suffix in (2, 3):
+        archive = tmp_path / f"SFP_objects({suffix}).pbo"
+        write_pbo(archive, (
+            PboEntry("roads/sil25.p3d", _model(point_flag=suffix)),
+        ))
+        archives.append(archive)
+    report = compare_paved_models(
+        archives, (STOCK_PAVED, SFP_STRAIGHT),
+    )
+    assert report["models"][SFP_STRAIGHT]["status"] == "ambiguous"
+    assert report["all_models_readable"] is False
