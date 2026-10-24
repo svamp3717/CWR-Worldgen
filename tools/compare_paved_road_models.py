@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 
 from cwr_worldgen.road_surface_comparison import (
-    STOCK_PAVED, SFP_STRAIGHT, SFP_CURVE, compare_paved_models,
+    STOCK_PAVED, STOCK_CURVE, SFP_STRAIGHT, SFP_CURVE, compare_paved_models,
 )
 
 
@@ -26,6 +26,8 @@ def main(argv: list[str] | None = None) -> int:
                         type=Path, help="Folder or PBO holding stock/SFP assets")
     parser.add_argument("--stock", default=STOCK_PAVED,
                         help="Original paved straight model path")
+    parser.add_argument("--stock-curve", default=STOCK_CURVE,
+                        help="Original paved curve model path")
     parser.add_argument("--sfp-straight", default=SFP_STRAIGHT,
                         help="Working SFP paved straight model path")
     parser.add_argument("--sfp-curve", default=SFP_CURVE,
@@ -33,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, help="Write JSON comparison here")
     args = parser.parse_args(argv)
     report = compare_paved_models(
-        args.asset_root, (args.stock, args.sfp_straight, args.sfp_curve),
+        args.asset_root, (args.stock, args.sfp_straight, args.stock_curve, args.sfp_curve),
     )
     text = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output is None:
