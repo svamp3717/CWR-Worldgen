@@ -1,56 +1,51 @@
-# Procedural unpaved parking with stock gravel colour
+# Compacted dirt-and-gravel parking (natural ground)
 
-Worldgen's default stock gravel model is `o\\road\\asf25.p3d`.
-Its opaque surface has a dark neutral grey colour, not brown.
+Worldgen's stock gravel donor is `o\\road\\asf25.p3d`, but **unpaved parking
+does not reuse that road's texture**. This update responds to the in-game
+report that the previous high-contrast, monochrome, hash-based gravel looked
+like camouflage rather than worn ground.
 
-**The parking generator matches that colour, not the original texture.**
-Stock road P3D/PAA assets are **never loaded or sampled** when painting parking.
-The user specifically does not want road-photo tiling on parking lots.
+## Appearance
 
-## Colour and detail
+Unpaved parking now resembles a levelled roadside turnout or a compacted
+dirt/gravel mix:
 
-The central opaque region of the user-supplied stock `asf25` reference image
-averages about **RGB (74, 74, 74)**. Common opaque intensities are 51, 68,
-85 and 102. These *numeric colour statistics* establish the palette, not a
-copied image pattern.
+- **Base colour:** muted, dusty earth grey-brown near RGB **(92, 90, 82)**,
+  informed by the neighbouring dark stock gravel but intentionally softer
+  and warmer.
+- **Surface variation:** two scales of interpolated, world-coordinate ground
+  noise. Smoothstep blending across hash lattice boundaries eliminates hard
+  rectangular camouflage-like patches.
+- **Aggregate:** faint, sparse fine-gravel specks. No road-photo imagery or
+  repeated source bitmap is used.
+- **Wear:** shallow tyre ruts and faint parking circulation compaction with
+  reduced contrast. Paved parking appearance and painted lines do not change.
+- **Continuity:** the procedural material is generated from world X/Z,
+  preserving coherence across adjacent WRP terrain texture cells.
 
-`stock_gravel_parking_texture.stock_gravel_colour_material` produces fresh
-opaque grey gravel from deterministic, world-coordinate grain at several
-physical scales. The result is monochrome and slightly mottled, with no
-repeating road photograph, no transparent road margins, no material PAA
-source dependencies and no brown tint. Existing subdued parking circulation
-wear and tyre ruts darken the image without adding colour.
+No game road model, `asf_new.paa`, donor texture image, or external photo is
+read when generating the parking material.
 
-Each WRP terrain cell samples the same world-coordinate grain, preventing
-patterns from restarting at cell borders. Pixel detail is limited by the
-generated terrain-texture resolution, which can be lower than actual P3D
-road texture resolution.
+## Selection and preservation
 
-## Selection and preserved behaviour
+Explicit OSM `surface=gravel`, `dirt`, `unpaved`, `earth`, `ground`,
+`sand`, `compacted` and similar tags remain non-paved. Untagged parking
+continues to infer a surface from the nearest supported road. Paved parking,
+runway and sports-field priority, and non-parking terrain are unchanged.
 
-- Explicit `surface=gravel`, `dirt`, `earth`, `ground`, `sand`,
-  `unpaved`, `compacted`, `fine_gravel`, etc. remain unsealed.
-- Untagged parking lots continue to infer paved/gravel from the nearest
-  supported road.
-- Paved parking surfaces and parking-bay markings remain unchanged.
-- Runways and sports pitches retain priority over parking.
-- No new P3D meshes or stock game assets are bundled.
+## Rebuilding and validation
 
-## Validation and caching
+`PARKING_TEXTURE_CACHE_SCHEMA` is bumped to 7, with cache namespace
+`parking-cell-v7`, and the recipe is now
+`procedural-asf25-colour-compacted-dirt-gravel-v2`. Rebuild the world PBO
+to replace the old high-contrast gravel PAAs.
 
-The parking cache schema and recipe fingerprint were bumped, so older
-photo-tiled and brown-gravel PAAs cannot hide this new procedural colour.
+The existing `parking-lot-textures.json` report describes the procedural
+material and notes that **no stock road texture was used**. Its
+`gravel_reference_rgb` field still records the actual stock road's
+(74, 74, 74) colour reference; the new parking **base** is warmer as above.
 
-The generated `parking-lot-textures.json` report records:
-
-- `gravel_material: "procedural-stock-asf25-gravel-grey-v1"`
-- `gravel_reference_rgb: [74, 74, 74]`
-- `gravel_asset_source: "procedural-no-stock-texture-used"`
-
-CI tests assert average tone near the reference, all three RGB channels
-equal, independent world-coordinate grain, unchanged paved appearance,
-OSM parking selection, deterministic output, cache generation and zero
-road-photo reads.
-
-Regenerate the world PBO to inspect the updated colours in CWA. Python
-tests verify the generator, not CWA's own texture filtering/rendering.
+Tests validate the muted channel palette, small intensity range, smooth
+interpolation, deterministic world-space texture, lack of stock image
+dependencies, preserved paved lots and existing parking-cell caching.
+CWA still needs in-game visual confirmation after regeneration.
