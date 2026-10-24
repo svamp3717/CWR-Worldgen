@@ -191,12 +191,13 @@ def install_parking_visual_detail_policy() -> None:
 
     original_renderer = parking._render_parking_cell
 
-    def render_detailed_parking_cell(*, cell_index, geometries, spec, base):
+    def render_detailed_parking_cell(*, cell_index, geometries, spec, base, **kwargs):
         image = original_renderer(
             cell_index=cell_index,
             geometries=geometries,
             spec=spec,
             base=base,
+            **kwargs,
         )
         return apply_parking_visual_detail(
             parking,
