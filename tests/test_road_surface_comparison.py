@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+from zipfile import ZipFile
 
 from cwr_worldgen.procedural_buildings import (
     _Face, _Lod, _MLOD_HEADER, _write_lod,
@@ -142,3 +143,37 @@ def test_duplicate_sfp_archives_cannot_silently_override_each_other(
     )
     assert report["models"][SFP_STRAIGHT]["status"] == "ambiguous"
     assert report["all_models_readable"] is False
+
+
+def test_original_stock_road_zip_is_directly_supported_without_extraction(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "Road(1).zip"
+    with ZipFile(archive, "w") as z:
+        z.writestr("Road/sil25.p3d", _model(
+            point_flag=0x13f, face_flag=0x24102, y=0.0,
+        ))
+        z.writestr("Road/sil10 25.p3d", _model(
+            point_flag=0x13f, face_flag=0x2c102, y=0.0,
+        ))
+    sfp = tmp_path / "SFP_objects(2).pbo"
+    write_pbo(sfp, (
+        PboEntry("roads/sil25.p3d", _model(
+            point_flag=1, face_flag=0, y=0.0,
+        )),
+        PboEntry("roads/sil10 25.p3d", _model(
+            point_flag=1, face_flag=0, y=0.0,
+        )),
+    ))
+    result = compare_paved_models((archive, sfp))
+    assert result["all_models_readable"]
+    assert result["models"][STOCK_PAVED]["status"] == "ok"
+    assert "Road/sil25.p3d" in result["models"][STOCK_PAVED]["source"]
+    assert result["comparisons"][SFP_STRAIGHT]["compared_to"] == STOCK_PAVED
+    assert result["comparisons"][SFP_STRAIGHT]["differences"]["visual_face_flags"] == {
+        "baseline": {"0x00024102": 1}, "candidate": {"0x00000000": 1},
+    }
+    assert result["comparisons"][SFP_CURVE]["differences"]["visual_face_flags"] == {
+        "baseline": {"0x0002c102": 1}, "candidate": {"0x00000000": 1},
+    }
+    assert result["models"][STOCK_CURVE]["status"] == "ok"
