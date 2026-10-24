@@ -7,7 +7,7 @@ from PIL import Image
 
 
 _INSTALLED = False
-DETAIL_CACHE_SCHEMA = 4
+DETAIL_CACHE_SCHEMA = 5
 
 
 def _world_grid(*, cell_index: int, spec, size: int):
@@ -37,12 +37,10 @@ def _add_gravel_detail(
     world_z: np.ndarray,
     pixel_scale: float,
 ) -> None:
-    """Keep real road aggregate intact, with faint parking-specific tyre wear.
+    """Keep weathered hardpack visible through subtle vehicle wear.
 
-    The base parking texture is synthetic monochrome gravel calibrated to the
-    stock asf25 road colour. Adding beige speckles and dirt colours here
-    would spoil that match.
-    Darken existing pixels instead of tinting or repainting the photograph.
+    The parking surface is now a muted dirt/gravel mix, rather than grey
+    gravel blocks. Multiplicative wear preserves its natural soil palette.
     """
     dx = world_x - geometry.centre_x
     dz = world_z - geometry.centre_z
@@ -54,12 +52,12 @@ def _add_gravel_detail(
     drive_half = max(0.82, geometry.half_width * 0.28)
     drive_half = min(4.2, drive_half, max(0.72, geometry.half_width * 0.62))
     aisle = mask & (np.abs(lateral) <= drive_half)
-    image[aisle] *= 0.96
+    image[aisle] *= 0.985
 
     rut_offset = max(0.36, drive_half * 0.43)
     rut_half = max(0.20, pixel_scale * 0.72)
     ruts = aisle & (np.abs(np.abs(lateral) - rut_offset) <= rut_half)
-    image[ruts] *= 0.83
+    image[ruts] *= 0.93
 
     if geometry.half_length < 3.6 or geometry.half_width < 2.2:
         return
@@ -75,11 +73,11 @@ def _add_gravel_detail(
         1.15, edge_depth * 0.31,
     )
     parked_width = np.abs(phase - stall * 0.5) <= 0.68
-    image[mask & parked_depth & parked_width] *= 0.91
+    image[mask & parked_depth & parked_width] *= 0.965
 
     end_band = max(0.75, min(1.8, geometry.half_length * 0.20))
     turning = aisle & (np.abs(along) >= geometry.half_length - end_band)
-    image[turning] *= 0.92
+    image[turning] *= 0.97
 
 
 def _add_paved_detail(
