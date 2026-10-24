@@ -17,6 +17,8 @@ from .legacy_proxy_models import (
     ProxyCloneError,
     _read_mlod_visual,
     _read_odol_visual,
+    _read_mlod_surface_lods,
+    _read_odol_surface_lods,
     inspect_roadway_surface_style,
     inspect_visual_model_dimensions,
     inspect_visual_surface_style,
@@ -98,6 +100,31 @@ def summarize_road_model(data: bytes) -> dict[str, object]:
             for face in lod.faces
         ).items())),
     }
+    # Curved SFP roads have a second visual resolution, while their straight
+    # siblings commonly have just one. CWA can choose different visual LODs
+    # with camera distance; record ALL drawable visual resolutions so a style
+    # difference at LOD 4.0 cannot be hidden by the dominant first LOD.
+    lod_summaries, resolutions = (
+        _read_odol_surface_lods(data)
+        if source_format == "ODOL"
+        else _read_mlod_surface_lods(data)
+    )
+    summary["visual_lods"] = [
+        {
+            "resolution": round(float(resolution), 5),
+            "points": len(part.point_flags),
+            "faces": len(part.faces),
+            "point_flags": _hex_counts(
+                [int(flag) for flag in part.point_flags]
+            ),
+            "face_flags": _hex_counts(
+                [int(face[1]) for face in part.faces]
+            ),
+            "textures": list(part.textures),
+        }
+        for part, resolution in zip(lod_summaries, resolutions)
+        if 0.0 <= float(resolution) < 1e9 and len(part.faces) > 0
+    ]
     try:
         dims = inspect_visual_model_dimensions(data)
         summary["bounds"] = {
@@ -213,7 +240,7 @@ def compare_paved_models(
             "visual_point_flags", "visual_face_flags",
             "visual_projected_winding", "visual_land_flagged_points",
             "visual_height_min_metres", "visual_height_max_metres",
-            "visual_normal_y", "bounds", "roadway",
+            "visual_normal_y", "visual_lods", "bounds", "roadway",
         )
         for field in fields:
             if candidate.get(field) != reference.get(field):
