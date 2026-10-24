@@ -22,9 +22,10 @@ from .legacy_proxy_models import (
 )
 
 STOCK_PAVED = r"o\road\sil25.p3d"
+STOCK_CURVE = r"o\road\sil10 25.p3d"
 SFP_STRAIGHT = r"sfp_objects\roads\sil25.p3d"
 SFP_CURVE = r"sfp_objects\roads\sil10 25.p3d"
-DEFAULT_ROADS = (STOCK_PAVED, SFP_STRAIGHT, SFP_CURVE)
+DEFAULT_ROADS = (STOCK_PAVED, SFP_STRAIGHT, STOCK_CURVE, SFP_CURVE)
 _LAND_FLAG_MASK = 0x0900
 
 
@@ -140,6 +141,8 @@ def compare_paved_models(
     explicitly; callers must not infer that two models are geometrically equal.
     """
     normalized = tuple(canonical_asset_path(value) for value in models)
+    if len(normalized) < 2 or len(normalized) % 2:
+        raise ValueError("models must be (baseline, reference) pairs")
     if len(set(normalized)) != len(normalized):
         raise ValueError("models must resolve to distinct paths")
     scan = scan_assets(
@@ -174,29 +177,30 @@ def compare_paved_models(
     available = [path for path in normalized
                  if summaries[path]["status"] == "ok"]
     comparisons: dict[str, dict[str, object]] = {}
-    if len(available) >= 2:
-        baseline = available[0]
-        for model in available[1:]:
-            candidate = summaries[model]
-            reference = summaries[baseline]
-            differences = {}
-            fields = (
-                "format", "visual_points", "visual_faces",
-                "visual_point_flags", "visual_face_flags",
-                "visual_projected_winding", "visual_land_flagged_points",
-                "visual_height_min_metres", "visual_height_max_metres",
-                "visual_normal_y", "bounds", "roadway",
-            )
-            for field in fields:
-                if candidate.get(field) != reference.get(field):
-                    differences[field] = {
-                        "baseline": reference.get(field),
-                        "candidate": candidate.get(field),
-                    }
-            comparisons[model] = {
-                "compared_to": baseline,
-                "differences": differences,
-            }
+    for index in range(0, len(normalized), 2):
+        baseline, model = normalized[index:index + 2]
+        if baseline not in available or model not in available:
+            continue
+        candidate = summaries[model]
+        reference = summaries[baseline]
+        differences = {}
+        fields = (
+            "format", "visual_points", "visual_faces",
+            "visual_point_flags", "visual_face_flags",
+            "visual_projected_winding", "visual_land_flagged_points",
+            "visual_height_min_metres", "visual_height_max_metres",
+            "visual_normal_y", "bounds", "roadway",
+        )
+        for field in fields:
+            if candidate.get(field) != reference.get(field):
+                differences[field] = {
+                    "baseline": reference.get(field),
+                    "candidate": candidate.get(field),
+                }
+        comparisons[model] = {
+            "compared_to": baseline,
+            "differences": differences,
+        }
     return {
         "schema": 1,
         "models": summaries,
