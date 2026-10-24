@@ -69,8 +69,11 @@ def test_unpaved_lot_is_not_tinted_brown_and_leaves_terrain_outside_untouched(
     )
     values = np.asarray(rendered)
     assert tuple(values[0, 0]) == (12, 40, 6)
-    assert tuple(values[32, 32]) == (78, 83, 88)
-    assert tuple(values[10, 10]) == (78, 83, 88)
+    # The installed parking-detail hook darkens wheel tracks but must not
+    # recolour cool grey road aggregate into the old brown parking filler.
+    assert tuple(values[32, 32]) != (12, 40, 6)
+    assert values[32, 32, 2] > values[32, 32, 1] > values[32, 32, 0]
+    assert values[10, 10, 2] > values[10, 10, 1] > values[10, 10, 0]
 
 
 def test_paved_lots_do_not_consume_gravel_artwork_or_change_paved_colours(
