@@ -150,3 +150,52 @@ P3D first-visual-Lod point/face flags in a separate local test asset.
 Then hold the flags fixed and swap only the asphalt texture. Do this
 in-game, for *both* straight and curved pieces. Only after one of these
 is measured should the production road generator change its defaults.
+
+
+## Controlled flag-only model probe (experimental, not a production change)
+
+Create two CWA addon PBOs from a locally owned original \`Road.zip\`:
+
+\`\`\`sh
+python tools/build_paved_flag_probe.py \
+  --source-zip "Road(1).zip" \
+  --output-dir "./paved-flag-probe"
+\`\`\`
+
+The output PBOs contain the same stock ODOL road models (25/12/6-metre
+straights and all four supported stock \`sil10 <radius>\` curves) with the
+same vertices, UV coordinates, textures, hidden tail data, and Roadway LODs.
+Only drawable ODOL **visual LOD point/face flags** differ:
+
+| Control donor | Flag-only experimental donor |
+| --- | --- |
+| \`cwr_paved_stock_control\roads\sil25.p3d\` | \`cwr_paved_flag_probe\roads\sil25.p3d\` |
+| \`cwr_paved_stock_control\roads\sil10 25.p3d\` | \`cwr_paved_flag_probe\roads\sil10 25.p3d\` |
+
+The experiment changes visual point flags \`0x13F -> 0x01\` and
+visual face flags \`0x24102 / 0x2C102 -> 0x00\`, following the measured
+SFP P3Ds. It does **not** redistribute the stock or SFP source assets in
+this git repository. The script explicitly rejects unexpected ODOL
+formats/flags and confirms nonvisual LOD metadata remains identical.
+
+Run two fresh game builds with identical terrain, seeds, dirt/gravel
+donors, and WRP pipeline settings; change **only** the selected paved
+straight and curve donor paths from control to experiment. Refresh model
+and fit caches. Load the same location:
+
+\`\`\`sqf
+player setPos [3302.524, 3167.709, 0]
+\`\`\`
+
+At close and far camera distances, check whether the gravel/dirt surfaces
+print over the paved road, or whether the junction has a missing section.
+
+- **Control wrong / experiment correct:** visual flags explain the layering
+  difference. Integrate a controlled stock-model-compatible flag variant.
+- **Both wrong:** investigate stock \`sil_new.paa\` versus SFP \`sil.paa\`
+  next, holding geometry and render flags constant.
+- **Both correct:** the donor family/path or other fitting/placement behavior
+  may be the cause. Do **not** conclude that changing flags helped.
+
+As of this writing only the binary invariants and test fixture behavior
+are verified. CWA's actual render-order result **has not been tested**.
