@@ -58,3 +58,39 @@ This diagnostic **does not** infer CWA draw precedence or mutate any P3Ds.
    from Roadway contact geometry.
 5. Keep checks for straight and curved paved junctions. A passing geometry-only
    unit test is necessary but **not** sufficient proof of CWA rendering.
+
+
+## Measured from user-supplied `SFP_objects(2).pbo` (2026-10-24)
+
+Extracted directly from this specific 29 MiB PBO, without copying or
+committing its proprietary P3D or PAA payloads:
+
+| SFP model | First visual LOD | Visual point flag | Visual face flag | Local visual Y (m) | Visual faces |
+| --- | ---: | --- | --- | ---: | ---: |
+| `roads/sil25.p3d` | 0.5 | `0x00000001` | `0x00000000` | 0.000 | 2 triangles |
+| `roads/sil10 25.p3d` | 0.5 | `0x00000001` | `0x00000000` | 0.000 | 4 triangles |
+| `roads/sil12.p3d` | 0.5 | `0x00000001` | `0x00000000` | 0.008 | 2 triangles |
+| `roads/sil6.p3d` | 0.5 | `0x00000001` | `0x00000000` | 0.000 | 2 triangles |
+
+Each model uses `SFP_objects\\roads\\sil.paa` for visual triangles.
+Their Roadway LODs instead use `Data\\asfaltka.paa`, with zero face and
+point flags. The straight `sil25` road spans 9.1 m width and 25 m length.
+The short `sil12` model has an 8 mm visual plane lift, even though the
+other three visual planes are at local origin height zero.
+
+**Important distinction:** The *current generator's built-in stock-style
+visual defaults* are `0x0000013F` point flags and `0x0002C102` face
+flags. These are **not independently measured from the original stock
+`o\\road\\sil25.p3d`**; that P3D was not included in the user upload.
+The defaults and the working SFP geometry differ, but the causal property
+is not proven. Stock texture opacity/transparency and the game's render
+pipeline remain possible confounding variables.
+
+The uploaded PBO was named `SFP_objects(2).pbo`, a common renamed-download
+form. The comparison tool now recognizes that filename's suffix as the
+`SFP_objects` asset prefix only when matching is unambiguous.
+
+**Next experimental step:** compare real `o\\road\\sil25.p3d` and
+`o\\road\\sil10 25.p3d` binaries against these measured SFP models,
+then run controlled stock/SFP A/B renders with identical gravel geometry.
+Do not infer that reducing the visual flag values alone is sufficient.
