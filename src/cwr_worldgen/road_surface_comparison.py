@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+import re
 from typing import Sequence
 
 from .assets import canonical_asset_path, read_asset_record_bytes, scan_assets
@@ -148,14 +149,37 @@ def compare_paved_models(
     scan = scan_assets(
         tuple(Path(value) for value in roots), normalized, use_cache=False,
     )
+    # Downloaded PBOs are commonly named "SFP_objects(2).pbo". The archive
+    # does not declare a prefix, so the PBO reader uses its *filename* as the
+    # namespace. Permit that unambiguous duplicate-download suffix without
+    # silently treating a different mod as the trusted SFP reference.
     selected = {}
+    aliases = {}
     for record in scan.records:
-        if record.path in normalized and record.path not in selected:
-            selected[record.path] = record
+        if record.path in normalized:
+            selected.setdefault(record.path, record)
+            continue
+        prefix, separator, rest = record.path.partition("\\")
+        match = re.fullmatch(r"(.+?)\\s*\\(\\d+\\)", prefix)
+        if not separator or match is None:
+            continue
+        canonical = match.group(1) + separator + rest
+        if canonical in normalized:
+            aliases.setdefault(canonical, []).append(record)
 
     summaries = {}
     for model in normalized:
         record = selected.get(model)
+        if record is None:
+            matches = aliases.get(model, ())
+            if len(matches) == 1:
+                record = matches[0]
+            elif len(matches) > 1:
+                summaries[model] = {
+                    "status": "ambiguous",
+                    "sources": [value.source for value in matches],
+                }
+                continue
         if record is None:
             summaries[model] = {"status": "missing"}
             continue
