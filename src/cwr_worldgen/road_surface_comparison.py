@@ -8,7 +8,9 @@ metadata must be measured before prescribing a height or overlap workaround.
 from __future__ import annotations
 
 from collections import Counter
+from hashlib import sha256
 from pathlib import Path
+from zipfile import ZipFile, is_zipfile
 import re
 from typing import Sequence
 
@@ -173,9 +175,10 @@ def compare_paved_models(
         raise ValueError("models must be (baseline, reference) pairs")
     if len(set(normalized)) != len(normalized):
         raise ValueError("models must resolve to distinct paths")
-    scan = scan_assets(
-        tuple(Path(value) for value in roots), normalized, use_cache=False,
-    )
+    archive_roots = tuple(Path(value) for value in roots)
+    zip_roots = tuple(value for value in archive_roots if value.is_file() and is_zipfile(value))
+    normal_roots = tuple(value for value in archive_roots if value not in zip_roots)
+    scan = scan_assets(normal_roots, normalized, use_cache=False)
     # Downloaded PBOs are commonly named "SFP_objects(2).pbo". The archive
     # does not declare a prefix, so the PBO reader uses its *filename* as the
     # namespace. Permit that unambiguous duplicate-download suffix without
@@ -194,6 +197,28 @@ def compare_paved_models(
         if canonical in normalized:
             aliases.setdefault(canonical, []).append(record)
 
+    # Zip archives supplied by users commonly contain an extracted stock
+    # `Road/` directory instead of a PBO with the `o\\road` prefix. Accept
+    # only this known stock alias and exact P3D paths; never extract files.
+    zip_candidates: dict[str, list[tuple[str, bytes]]] = {}
+    for archive in zip_roots:
+        with ZipFile(archive) as source:
+            for entry in source.infolist():
+                if entry.is_dir() or not entry.filename.casefold().endswith('.p3d'):
+                    continue
+                canonical = canonical_asset_path(entry.filename)
+                lookup = (
+                    'o\\' + canonical if canonical.startswith('road\\')
+                    else canonical
+                )
+                if lookup not in normalized:
+                    continue
+                if entry.file_size > 32 * 1024 * 1024:
+                    raise ValueError('oversized P3D entry in reference ZIP')
+                zip_candidates.setdefault(lookup, []).append((
+                    f'{archive}!{entry.filename}', source.read(entry),
+                ))
+
     summaries = {}
     for model in normalized:
         record = selected.get(model)
@@ -207,16 +232,30 @@ def compare_paved_models(
                     "sources": [value.source for value in matches],
                 }
                 continue
-        if record is None:
+        archive_matches = zip_candidates.get(model, [])
+        if record is not None and archive_matches or len(archive_matches) > 1:
+            summaries[model] = {
+                'status': 'ambiguous',
+                'sources': ([record.source] if record is not None else [])
+                           + [source for source, _ in archive_matches],
+            }
+            continue
+        if record is None and not archive_matches:
             summaries[model] = {"status": "missing"}
             continue
         try:
-            data = read_asset_record_bytes(record)
+            if record is not None:
+                data = read_asset_record_bytes(record)
+                source_name = record.source
+                digest = record.sha256
+            else:
+                source_name, data = archive_matches[0]
+                digest = sha256(data).hexdigest()
             summary = summarize_road_model(data)
             summaries[model] = {
                 "status": "ok",
-                "source": record.source,
-                "sha256": record.sha256,
+                "source": source_name,
+                "sha256": digest,
                 **summary,
             }
         except (OSError, ValueError, ProxyCloneError) as exc:
