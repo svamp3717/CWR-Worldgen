@@ -94,3 +94,59 @@ form. The comparison tool now recognizes that filename's suffix as the
 `o\\road\\sil10 25.p3d` binaries against these measured SFP models,
 then run controlled stock/SFP A/B renders with identical gravel geometry.
 Do not infer that reducing the visual flag values alone is sufficient.
+
+
+## Real stock-road ODOL models from user-supplied `Road(1).zip` (2026-10-24)
+
+The supplied original stock road archive has SHA-256
+`2eff7e0d8899f0805609c30fa5d49d3e9083fe382ff16beee5525529521b4eea`.
+Its P3Ds are ODOL v7, not synthetic test stand-ins. Direct parsing of
+each first drawable LOD produced:
+
+| Model | Visual point flags | Visual face flags | Visual Y | Geometry |
+| --- | --- | --- | --- | --- |
+| Stock `o\\road\\sil25.p3d` | `0x13F` | `0x24102` | 0 m | 9.10 m x 25 m, 2 triangles |
+| SFP `sfp_objects\\roads\\sil25.p3d` | `0x01` | `0x00000` | 0 m | 9.10 m x 25 m, 2 triangles |
+| Stock `o\\road\\sil10 25.p3d` | `0x13F` | `0x2C102` | 0 m | 4 triangles |
+| SFP `sfp_objects\\roads\\sil10 25.p3d` | `0x01` | `0x00000` | 0 m | 4 triangles |
+| Stock `o\\road\\sil12.p3d` | `0x13F` | `0x24102` | 0 m | 2 triangles |
+| SFP `sfp_objects\\roads\\sil12.p3d` | `0x01` | `0x00000` | +0.008 m | 2 triangles |
+| Stock `o\\road\\sil6.p3d` | `0x13F` | `0x2C102` | 0 m | 2 triangles |
+| SFP `sfp_objects\\roads\\sil6.p3d` | `0x01` | `0x00000` | 0 m | 2 triangles |
+
+The first ODOL LOD also has downward normals. The original stock straight
+model therefore does **not** sit below the SFP reference, nor is it narrower
+or shorter. Those earlier explanations are ruled out for the *model-local*
+straight paved geometry. Different world-object elevations are a separate
+question, to be controlled in an in-game A/B experiment.
+
+Other observations:
+
+- Stock `asf25.p3d` and `ces25.p3d` also have `0x13F` point flags
+  and `0x24102` face flags, and their first visual surface is at 0 m.
+- Stock `kr_new_sil_ces_t.p3d` itself contains some dirt-surface vertices
+  approximately **6.63 cm higher** than its asphalt-surface vertices. Native
+  mixed-junction artwork and the independent paved/gravel issue must not be
+  conflated.
+- The original stock asphalt texture `o\\road\\sil_new.paa` begins with
+  format word `0x8080`; the uploaded SFP `SFP_objects\\roads\\sil.paa`
+  starts with `0xE000`. These are raw header values, not a verified claim
+  about engine blending or opacity. Both P3D surface flags and texture
+  format are independent variables.
+- Importantly, the default `_ROAD_SURFACE_FACE_FLAG=0x2C102` in
+  `procedural_infrastructure.py` reflects stock `sil6` and stock curved
+  models, **not** stock `sil25` (which uses `0x24102`). A single uniform
+  "stock face flag" for every variant would be technically inaccurate.
+
+The comparator now also supports the source archive `Road(1).zip` directly:
+`Road/sil25.p3d` is recognized as the canonical stock path
+`o\\road\\sil25.p3d`, and the existing `SFP_objects(2).pbo` is accepted
+as the SFP model namespace. Ambiguous duplicates are explicitly rejected.
+No game files are added to git.
+
+**Most useful controlled next step:** hold the same asphalt texture,
+same actual P3D vertices and same WRP Y constant, and vary only the paved
+P3D first-visual-Lod point/face flags in a separate local test asset.
+Then hold the flags fixed and swap only the asphalt texture. Do this
+in-game, for *both* straight and curved pieces. Only after one of these
+is measured should the production road generator change its defaults.
