@@ -29,9 +29,9 @@ from .shared_cache_policy import SHARED_CACHE_DIRNAME, shared_cache_root
 
 PARKING_TEXTURE_PREFIX = "pk"
 PARKING_TEXTURE_CACHE_DIRNAME = "parking-lot-textures"
-PARKING_TEXTURE_CACHE_SCHEMA = 6
-# Stock asf25 is the actual gravel donor, but parking only shares its *colour*.
-# Never load or reuse the stock PAA image for parking terrain.
+PARKING_TEXTURE_CACHE_SCHEMA = 7
+# Stock asf25 is the default gravel donor, but parking uses a new
+# low-contrast dirt/gravel ground material, never any road PAA pixels.
 from .stock_gravel_parking_texture import (
     STOCK_GRAVEL_PROCEDURAL_RECIPE as PARKING_GRAVEL_RECIPE,
     STOCK_GRAVEL_REFERENCE_GREY_RGB,
@@ -418,7 +418,7 @@ def apply_parking_textures(
             "cell_index": int(cell_index),
             "parking": [_geometry_fingerprint(value) for value in geometries_here],
         }
-        cached = cache_dir / f"{cache_key('parking-cell-v6', payload)}.paa"
+        cached = cache_dir / f"{cache_key('parking-cell-v7', payload)}.paa"
         candidate = source_dir / f".{PARKING_TEXTURE_PREFIX}cell{cell_index:06x}.paa"
 
         def paint(destination: Path, *, index=cell_index, values=geometries_here):
