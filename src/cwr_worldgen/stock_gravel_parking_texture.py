@@ -12,6 +12,7 @@ from hashlib import sha256
 import io
 import math
 from pathlib import Path
+from zipfile import ZipFile, is_zipfile
 import struct
 
 import numpy as np
@@ -132,6 +133,35 @@ def _load_from_roots(roots: tuple[str, ...]):
     from . import runway_exact_background_policy as exact
 
     located = exact._read_external_asset_cached(roots, STOCK_GRAVEL_TEXTURE.casefold())
+    if located is None:
+        for root_name in roots:
+            root = Path(root_name)
+            if root.is_file() and is_zipfile(root):
+                with ZipFile(root) as archive:
+                    wanted = {
+                        "road/asf_new.paa", "o/road/asf_new.paa",
+                    }
+                    matches = [
+                        member for member in archive.infolist()
+                        if member.filename.replace("\\\\", "/").casefold() in wanted
+                        and not member.is_dir()
+                        and member.file_size <= 16 * 1024 * 1024
+                    ]
+                    if len(matches) == 1:
+                        member = matches[0]
+                        located = (
+                            archive.read(member),
+                            f"{root}!{member.filename}",
+                        )
+                        break
+            elif root.is_dir():
+                for relative in ("Road/asf_new.paa", "road/asf_new.paa"):
+                    candidate = root / relative
+                    if candidate.is_file():
+                        located = (candidate.read_bytes(), str(candidate))
+                        break
+                if located is not None:
+                    break
     if located is None:
         return None
     data, source = located
