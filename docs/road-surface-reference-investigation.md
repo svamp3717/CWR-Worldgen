@@ -152,50 +152,68 @@ in-game, for *both* straight and curved pieces. Only after one of these
 is measured should the production road generator change its defaults.
 
 
-## Controlled flag-only model probe (experimental, not a production change)
+## In-game stock-control result and donor-length hypothesis (2026-10-24)
 
-Create two CWA addon PBOs from a locally owned original \`Road.zip\`:
+The user reports **gravel remains beneath the asphalt with the
+\`cwr_paved_stock_control\` model donor**. This PBO contains unchanged stock
+ODOL model bytes, only with a different model prefix, so visual flag patching
+is not necessary for this positive result. The old flag-only control/experiment
+workflow has been retired from this branch; do not treat it as a production fix.
 
-\`\`\`sh
-python tools/build_paved_flag_probe.py \
-  --source-zip "Road(1).zip" \
-  --output-dir "./paved-flag-probe"
-\`\`\`
+**Critical correction to the earlier stock-vs-SFP comparison:**
+Raw stock ODOL flag values and native SFP MLOD flag values are encoded
+differently. The existing \`generator._mlod_surface_flags\` translation maps:
 
-The output PBOs contain the same stock ODOL road models (25/12/6-metre
-straights and all four supported stock \`sil10 <radius>\` curves) with the
-same vertices, UV coordinates, textures, hidden tail data, and Roadway LODs.
-Only drawable ODOL **visual LOD point/face flags** differ:
+- stock ODOL visual point flag \`0x13F\` -> MLOD \`0x01\`
+- stock ODOL face flags \`0x24102\` and \`0x2C102\` -> MLOD \`0x00\`
 
-| Control donor | Flag-only experimental donor |
-| --- | --- |
-| \`cwr_paved_stock_control\roads\sil25.p3d\` | \`cwr_paved_flag_probe\roads\sil25.p3d\` |
-| \`cwr_paved_stock_control\roads\sil10 25.p3d\` | \`cwr_paved_flag_probe\roads\sil10 25.p3d\` |
+These are **the same effective flags** as the working SFP reference.
+Tests assert this directly. Raw flag inequality is **not** evidence that
+flag changes cause asphalt to draw above gravel.
 
-The experiment changes visual point flags \`0x13F -> 0x01\` and
-visual face flags \`0x24102 / 0x2C102 -> 0x00\`, following the measured
-SFP P3Ds. It does **not** redistribute the stock or SFP source assets in
-this git repository. The script explicitly rejects unexpected ODOL
-formats/flags and confirms nonvisual LOD metadata remains identical.
+### Actual fit discrepancy
 
-Run two fresh game builds with identical terrain, seeds, dirt/gravel
-donors, and WRP pipeline settings; change **only** the selected paved
-straight and curve donor paths from control to experiment. Refresh model
-and fit caches. Load the same location:
+\`playability.road_model_variants\` historically interpreted the
+configured nominal \`spec.road_segment_length=24.5\` as the physical
+P3D length of original \`o\road\sil25.p3d\`, and scaled the \`sil12\`
+and \`sil6\` siblings proportionally. The uploaded original stock
+ODOL models are physically **25, 12, and 6 metres**, not 24.5/11.76/5.88.
+The copied stock-control donor uses the mod measurement pipeline and is
+therefore fitted at the real physical dimensions.
 
-\`\`\`sqf
-player setPos [3302.524, 3167.709, 0]
-\`\`\`
+A new deterministic sloped mixed paved/gravel junction fixture compares
+stock vs renamed-control model paths, normalizing only the name. Before
+the correction:
 
-At close and far camera distances, check whether the gravel/dirt surfaces
-print over the paved road, or whether the junction has a missing section.
+- In legacy fitting mode, stock yielded **45 objects**, relocated
+  stock-control **46 objects**. Paved placement coordinates differed.
+- In \`custom_road_shapes=True\` unified mode, both yielded **40 identical
+  objects**, already. This is an important limitation: the length
+  correction cannot explain a remaining in-game difference when the
+  user has enabled unified custom shapes.
 
-- **Control wrong / experiment correct:** visual flags explain the layering
-  difference. Integrate a controlled stock-model-compatible flag variant.
-- **Both wrong:** investigate stock \`sil_new.paa\` versus SFP \`sil.paa\`
-  next, holding geometry and render flags constant.
-- **Both correct:** the donor family/path or other fitting/placement behavior
-  may be the cause. Do **not** conclude that changing flags helped.
+The narrowly scoped source correction treats only the original
+\`o\road\sil25.p3d\` paved donor and its \`sil12\`/\`sil6\`
+siblings as true-length models; dirt, gravel, and other stock donor
+families retain their separate existing segment calibration.
 
-As of this writing only the binary invariants and test fixture behavior
-are verified. CWA's actual render-order result **has not been tested**.
+After the change **both legacy and unified modes emit identical stock and
+control WRP road objects** in that deterministic fixture, including Y/pitch,
+with no new model geometry, underlay trimming, texture, material, or flags.
+A broader CI job compares pre-existing failing road tests against untouched
+\`main\` and rejects any newly introduced failures.
+
+### Remaining essential in-game check
+
+Generate the same island with **original stock**
+\`o\road\sil25.p3d\` / \`o\road\sil10 25.p3d\` from the latest feature
+branch, using the exact settings and gravel donor used in the working
+stock-control island. Check at \`[3302.524, 3167.709]\`.
+If original stock still prints gravel over asphalt **with unified
+custom-road shapes enabled**, that behavior is not explained by the
+now-fixed legacy model-length discrepancy. Compare generated P3D texture
+paths, dependency resolution, and engine handling of the two model
+namespaces, and inspect the final WRP objects before any further patch.
+
+Do not regress to visual cutouts, artificial gravel endpoints, or
+unverified stock/SFP flag substitutions.
