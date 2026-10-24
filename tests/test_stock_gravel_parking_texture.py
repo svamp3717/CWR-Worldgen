@@ -43,8 +43,8 @@ def test_stock_asf_is_reference_for_colour_only() -> None:
     assert PlayabilitySpec.__dataclass_fields__["gravel_road_model"].default == STOCK_GRAVEL_REFERENCE_MODEL
     assert STOCK_GRAVEL_REFERENCE_GREY_RGB == (74, 74, 74)
     assert "compacted-dirt-gravel" in STOCK_GRAVEL_PROCEDURAL_RECIPE
-    assert PARKING_GROUND_BASE_RGB == (92, 90, 82)
-    assert parking.PARKING_TEXTURE_CACHE_SCHEMA >= 7
+    assert PARKING_GROUND_BASE_RGB == (78, 76, 70)
+    assert parking.PARKING_TEXTURE_CACHE_SCHEMA >= 8
 
 
 def test_procedural_compacted_ground_is_muted_and_not_camo() -> None:
@@ -56,7 +56,7 @@ def test_procedural_compacted_ground_is_muted_and_not_camo() -> None:
     # Former metre-scale high-contrast hashes made a camouflage pattern.
     channel_means = image.mean(axis=(0, 1))
     assert np.allclose(channel_means, PARKING_GROUND_BASE_RGB, atol=5.0)
-    assert 1.0 < float(image[:, :, 0].std()) < 6.0
+    assert 0.8 < float(image[:, :, 0].std()) < 5.0
     assert np.all(image[:, :, 0] > image[:, :, 1])
     assert np.all(image[:, :, 1] > image[:, :, 2])
     assert np.percentile(image[:, :, 0], 99) - np.percentile(image[:, :, 0], 1) < 19.0
@@ -107,7 +107,7 @@ def test_stock_source_not_required_or_used_for_parking(monkeypatch) -> None:
     assert tuple(pixels[0, 0]) == (29, 100, 20)
     inside = pixels[55, 55]
     assert int(inside[0]) > int(inside[1]) > int(inside[2])
-    assert 76 <= int(inside[0]) <= 108
+    assert 64 <= int(inside[0]) <= 94
 
 
 def test_paved_lot_does_not_invoke_gravel_material(monkeypatch) -> None:
