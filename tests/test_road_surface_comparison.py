@@ -8,7 +8,7 @@ from cwr_worldgen.procedural_buildings import (
     _Face, _Lod, _MLOD_HEADER, _write_lod,
 )
 from cwr_worldgen.road_surface_comparison import (
-    STOCK_PAVED, SFP_STRAIGHT, SFP_CURVE,
+    STOCK_PAVED, STOCK_CURVE, SFP_STRAIGHT, SFP_CURVE,
     compare_paved_models, summarize_road_model,
 )
 
@@ -60,7 +60,8 @@ def test_model_summary_reports_visual_height_flags_and_winding() -> None:
     assert summary["visual_face_flags"] == {"0x0002c102": 1}
     assert summary["visual_height_min_metres"] == 0.025
     assert summary["visual_height_max_metres"] == 0.025
-    assert summary["visual_land_flagged_points"] == 0
+    # 0x13f includes the native 0x100 land-clipping flag.
+    assert summary["visual_land_flagged_points"] == 4
     assert summary["dominant_visual_style"]["point_flag"] == "0x0000013f"
     assert summary["bounds"]["width_metres"] == 9.1
     assert "roadway_error" in summary
@@ -74,6 +75,7 @@ def test_reference_comparison_does_not_assume_sfp_behaves_like_stock(
         tmp_path, SFP_STRAIGHT,
         _model(point_flag=0x140, face_flag=0x52, y=0.040),
     )
+    _write_model(tmp_path, STOCK_CURVE, _model(width=9.1))
     _write_model(
         tmp_path, SFP_CURVE,
         _model(point_flag=0x140, face_flag=0x52, y=0.040, width=10.0),
@@ -91,6 +93,7 @@ def test_reference_comparison_does_not_assume_sfp_behaves_like_stock(
         "0x00000052": 1,
     }
     assert difference["visual_height_min_metres"]["candidate"] == 0.04
+    assert result["comparisons"][SFP_CURVE]["compared_to"] == STOCK_CURVE
     assert "bounds" in result["comparisons"][SFP_CURVE]["differences"]
 
 
