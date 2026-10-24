@@ -150,6 +150,13 @@ def test_malden_parking_overlay_uses_shared_exact_preset_background(tmp_path, mo
         return exact_background
 
     monkeypatch.setattr(exact, "_load_exact_texture", load_exact_background)
+    # This fixture deliberately mocks the background's PAA bytes rather than
+    # supplying real mip metadata. Exercise the parking compositor with a
+    # real output PAA writer, not the unrelated exact-mipmap copy algorithm.
+    monkeypatch.setattr(
+        exact, "_write_with_preserved_background",
+        lambda path, image, _source: runway.write_rgb_dxt1_paa(path, image),
+    )
     texture_paths = (
         r"parkingworld\data\d.paa",
         *surface_pass.surface_texture_wire_paths("parkingworld", "malden"),
