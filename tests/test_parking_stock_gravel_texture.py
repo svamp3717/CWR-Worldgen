@@ -1,4 +1,4 @@
-"""Grey parking surface is synthetic gravel, not painted stock road pixels."""
+"""Unpaved parking has muted hardpack/gravel tones without road photos."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -37,19 +37,19 @@ def _spec():
 
 def test_parking_recipe_is_procedural_and_uses_stock_gravel_colour() -> None:
     assert parking.PARKING_GRAVEL_RECIPE == STOCK_GRAVEL_PROCEDURAL_RECIPE
-    assert parking.PARKING_TEXTURE_CACHE_SCHEMA >= 6
+    assert parking.PARKING_TEXTURE_CACHE_SCHEMA >= 7
     assert detail.DETAIL_CACHE_SCHEMA >= 4
 
 
-def test_gravel_parking_preserves_background_and_neutral_tone() -> None:
+def test_gravel_parking_preserves_background_and_natural_ground_tone() -> None:
     base = Image.new("RGB", (64, 64), (12, 40, 6))
     rendered = parking._render_parking_cell(
         cell_index=0, geometries=(_parking(),), spec=_spec(), base=base,
     )
     values = np.asarray(rendered)
     assert tuple(values[0, 0]) == (12, 40, 6)
-    assert values[32, 32, 0] == values[32, 32, 1] == values[32, 32, 2]
-    assert values[10, 10, 0] == values[10, 10, 1] == values[10, 10, 2]
+    assert values[32, 32, 0] > values[32, 32, 1] > values[32, 32, 2]
+    assert values[10, 10, 0] > values[10, 10, 1] > values[10, 10, 2]
 
 
 def test_paved_lots_still_use_previous_asphalt_colours() -> None:
