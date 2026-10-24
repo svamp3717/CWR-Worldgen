@@ -130,7 +130,7 @@ def test_paved_and_gravel_render_over_background_without_replacing_outside() -> 
     gravel_mask = (actual_gravel[:, :, 0] != source[:, :, 0])
     assert np.count_nonzero(gravel_mask) > 0
     earth = actual_gravel[gravel_mask].astype(np.float32)
-    assert abs(float(earth[:, 0].mean()) - 92.0) < 9.0
+    assert abs(float(earth[:, 0].mean()) - 78.0) < 8.0
     assert float(earth[:, 0].mean()) > float(earth[:, 1].mean())
     assert float(earth[:, 1].mean()) > float(earth[:, 2].mean())
     assert float(np.percentile(earth[:, 0], 99) - np.percentile(earth[:, 0], 1)) < 20.0
