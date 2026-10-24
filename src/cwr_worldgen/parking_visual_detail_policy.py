@@ -39,9 +39,9 @@ def _add_gravel_detail(
 ) -> None:
     """Keep real road aggregate intact, with faint parking-specific tyre wear.
 
-    The base parking texture now IS generated road gravel, not a flat brown
-    substitute. Adding artificial beige speckles and dirt colours here would
-    change the material back into something unrelated to the stock-style roads.
+    The base parking texture is synthetic monochrome gravel calibrated to the
+    stock asf25 road colour. Adding beige speckles and dirt colours here
+    would spoil that match.
     Darken existing pixels instead of tinting or repainting the photograph.
     """
     dx = world_x - geometry.centre_x
@@ -191,13 +191,12 @@ def install_parking_visual_detail_policy() -> None:
 
     original_renderer = parking._render_parking_cell
 
-    def render_detailed_parking_cell(*, cell_index, geometries, spec, base, **kwargs):
+    def render_detailed_parking_cell(*, cell_index, geometries, spec, base):
         image = original_renderer(
             cell_index=cell_index,
             geometries=geometries,
             spec=spec,
             base=base,
-            **kwargs,
         )
         return apply_parking_visual_detail(
             parking,
