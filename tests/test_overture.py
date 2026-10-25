@@ -53,7 +53,7 @@ class OvertureWorkerTests(unittest.TestCase):
         # last-known fallback must be selected when a valid live release exists.
         with patch.dict(os.environ, {}, clear=True):
             release = selected_overture_release()
-            self.assertRegex(release, r"^\\d{4}-\\d{2}-\\d{2}\\.\\d+$")
+            self.assertRegex(release, r"^\d{4}-\d{2}-\d{2}\.\d+$")
 
     def test_invalid_release_override_is_rejected(self) -> None:
         with patch.dict(os.environ, {"CWR_OVERTURE_RELEASE": "latest"}):
