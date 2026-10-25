@@ -33,7 +33,7 @@ from .location_example import (
     square_bbox,
 )
 from .model import DEFAULT_MAX_BUILDINGS, DEFAULT_MAX_FOREST_OBJECTS, DEFAULT_MAX_ROAD_OBJECTS, PlayabilitySpec
-from .overture import fetch_overture_buildings_geojson
+from .overture import fetch_overture_buildings_geojson, read_overture_fetch_status
 from .progress import report_progress
 from .overpass_endpoints import GLOBAL_OVERPASS_URLS
 
@@ -1027,13 +1027,21 @@ def fetch_sources(spec: SourceFetchSpec) -> FrozenSourceBundle:
     report_progress(37, f"Frozen OpenStreetMap snapshot contains {element_count:,} elements")
 
     overture_buildings_path: Path | None = None
-    overture_document: dict[str, Any] | None = None
+    overture_document: dict[str, Any] = {
+        "provider": "Overture Maps",
+        "purpose": "building enrichment and missing-building fallback",
+        "status": "unavailable",
+        "reason": "disabled",
+        "tile_count": 0,
+        "completed_tile_count": 0,
+        "failed_tiles": [],
+    }
     if spec.overture_buildings_enabled:
         report_progress(38, "Fetching optional Overture building enrichment data")
         # Keep partial Overture tiles outside the frozen source directory.
         # Atomic source refreshes use a temporary sibling directory; a persistent
-        # sibling cache lets a failed large-world Overture run resume on the next
-        # refresh instead of discarding every completed tile with the staging tree.
+        # sibling cache lets a failed large-world Overture run resume from tile
+        # cache, while a partial GeoJSON is still usable in the current build.
         overture_tile_cache = root.parent / ".cwr-worldgen-cache" / "overture"
         overture_buildings_path = fetch_overture_buildings_geojson(
             bbox,
@@ -1041,14 +1049,33 @@ def fetch_sources(spec: SourceFetchSpec) -> FrozenSourceBundle:
             refresh=spec.refresh,
             tile_cache_dir=overture_tile_cache,
         )
+        fetch_status = read_overture_fetch_status(overture_dir / "buildings.geojson")
+        if fetch_status is not None:
+            overture_document.update({
+                key: fetch_status[key]
+                for key in ("status", "release", "tile_count", "completed_tile_count",
+                            "failed_tiles", "features", "duplicates_removed", "reason")
+                if key in fetch_status
+            })
+        elif overture_buildings_path is not None:
+            # Legacy cache and test/mock call sites may provide a valid GeoJSON
+            # without the new status sidecar; flag the uncertainty explicitly.
+            overture_document.update({
+                "status": "complete",
+                "reason": "legacy GeoJSON without tile coverage report; completeness unverified",
+            })
+        else:
+            overture_document["reason"] = "download or tile merge failed"
         if overture_buildings_path is not None:
-            overture_document = {
-                "provider": "Overture Maps",
-                "purpose": "building enrichment and missing-building fallback",
+            overture_document.update({
                 "buildings_geojson": _relative(root, overture_buildings_path),
                 "buildings_geojson_sha256": _sha256(overture_buildings_path),
-            }
-            report_progress(38, "Cached optional Overture building enrichment data")
+            })
+            report_progress(
+                38,
+                f"Cached {overture_document['status']} Overture building data "
+                f"({overture_document['completed_tile_count']}/{overture_document['tile_count']} tiles)",
+            )
         else:
             report_progress(38, "Optional Overture building enrichment unavailable; continuing with OSM only")
     else:
@@ -1357,11 +1384,14 @@ def regrid_sources(spec: SourceRegridSpec) -> FrozenSourceBundle:
         overture_document: dict[str, Any] | None = None
         overture_buildings_path: Path | None = None
         source_overture = source_manifest.get("overture")
-        if isinstance(source_overture, Mapping) and isinstance(source_overture.get("buildings_geojson"), str):
-            overture_buildings_path = _copy_frozen_file(source_root, stage, str(source_overture["buildings_geojson"]))
+        if isinstance(source_overture, Mapping):
+            # Preserve unavailable/partial coverage reports as well as
+            # complete GeoJSON when locally regridding frozen sources.
             overture_document = dict(source_overture)
-            overture_document["buildings_geojson"] = _relative(stage, overture_buildings_path)
-            overture_document["buildings_geojson_sha256"] = _sha256(overture_buildings_path)
+            if isinstance(source_overture.get("buildings_geojson"), str):
+                overture_buildings_path = _copy_frozen_file(source_root, stage, str(source_overture["buildings_geojson"]))
+                overture_document["buildings_geojson"] = _relative(stage, overture_buildings_path)
+                overture_document["buildings_geojson_sha256"] = _sha256(overture_buildings_path)
 
         report_progress(84, "Writing regridded frozen-source manifest")
         osm_document = json.loads(osm_json_path.read_text(encoding="utf-8"))

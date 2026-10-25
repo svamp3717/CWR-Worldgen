@@ -221,8 +221,66 @@ class Milestone5Tests(unittest.TestCase):
                 bundle = fetch_sources(spec)
             fetch_overture.assert_not_called()
             manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
-            self.assertIsNone(manifest["overture"])
+            self.assertEqual(manifest["overture"]["status"], "unavailable")
+            self.assertEqual(manifest["overture"]["reason"], "disabled")
             self.assertIsNone(bundle.overture_buildings_geojson_path)
+
+    def test_frozen_source_manifest_records_partial_tiles_and_failed_bounds(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "sources"
+            spec = self._cached_source(root)
+            overture_path = root / "overture" / "buildings.geojson"
+            from cwr_worldgen.overture import overture_fetch_status_path
+            overture_fetch_status_path(overture_path).write_text(
+                json.dumps({
+                    "status": "partial", "release": "2026-07-22.0",
+                    "tile_count": 3, "completed_tile_count": 2, "features": 37,
+                    "failed_tiles": [{"tile_number": 2,
+                                      "bbox_south_west_north_east": [0, 0.003, 0.01, 0.006],
+                                      "attempts": 2, "error": "remote timeout"}],
+                }), encoding="utf-8",
+            )
+            with (
+                patch("urllib.request.urlopen", side_effect=AssertionError("network access")),
+                patch("cwr_worldgen.source_pipeline.fetch_overture_buildings_geojson",
+                      return_value=overture_path),
+            ):
+                bundle = fetch_sources(spec)
+            doc = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(doc["overture"]["status"], "partial")
+            self.assertEqual(doc["overture"]["completed_tile_count"], 2)
+            self.assertEqual(doc["overture"]["tile_count"], 3)
+            self.assertEqual(doc["overture"]["failed_tiles"][0]["error"], "remote timeout")
+            self.assertEqual(doc["overture"]["buildings_geojson"], "overture/buildings.geojson")
+            self.assertTrue(validate_source_bundle(root).valid)
+
+    def test_frozen_source_manifest_records_unavailable_tiles(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "sources"
+            spec = self._cached_source(root)
+            overture_path = root / "overture" / "buildings.geojson"
+            from cwr_worldgen.overture import overture_fetch_status_path
+            overture_fetch_status_path(overture_path).write_text(
+                json.dumps({
+                    "status": "unavailable", "tile_count": 1,
+                    "completed_tile_count": 0,
+                    "failed_tiles": [{"tile_number": 1,
+                                      "bbox_south_west_north_east": [0, 0, 0.01, 0.01],
+                                      "attempts": 2, "error": "worker timed out"}],
+                }), encoding="utf-8",
+            )
+            with (
+                patch("urllib.request.urlopen", side_effect=AssertionError("network access")),
+                patch("cwr_worldgen.source_pipeline.fetch_overture_buildings_geojson",
+                      return_value=None),
+            ):
+                bundle = fetch_sources(spec)
+            doc = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(doc["overture"]["status"], "unavailable")
+            self.assertEqual(doc["overture"]["failed_tiles"][0]["tile_number"], 1)
+            self.assertNotIn("buildings_geojson", doc["overture"])
+            self.assertIsNone(bundle.overture_buildings_geojson_path)
+            self.assertTrue(validate_source_bundle(root).valid)
 
     def test_fetches_from_cached_raw_files_without_network(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -385,7 +443,7 @@ class Milestone5Tests(unittest.TestCase):
                 patch("urllib.request.urlopen", side_effect=OSError("offline")),
                 patch("cwr_worldgen.location_example.time.sleep", return_value=None),
             ):
-                with self.assertRaisesRegex(RuntimeError, "Overpass is still unavailable"):
+                with self.assertRaisesRegex(RuntimeError, "Overpass is still unavailable|all Overpass endpoints failed"):
                     fetch_sources(refresh)
             self.assertEqual(before, bundle.manifest_path.read_bytes())
             self.assertTrue(validate_source_bundle(root).valid)
