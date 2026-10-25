@@ -178,7 +178,7 @@ def test_streaming_merge_never_calls_json_load_on_tile_streams() -> None:
                     f.write(",")
                 json.dump(
                     {"type": "Feature", "id": f"b-{number}",
-                     "properties": {"label": "special chars: \\" \\\\ , } ] \\u00e9"},
+                     "properties": {"label": 'special chars: " \\ , } ] é'},
                      "geometry": {"type": "Point", "coordinates": [1, 2]}}, f,
                 )
             f.write("]}")
