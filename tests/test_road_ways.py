@@ -244,3 +244,30 @@ def test_tight_or_short_bends_keep_original_geometry(tmp_path):
     assert _way_points(nodes, ways[0]) == [
         (200, 200), (213, 200), (213, 213),
     ]
+
+
+
+def test_bridge_approach_does_not_round_away_from_bridge_endpoint(tmp_path):
+    bridge = OsmLineFeature(
+        "way/bridge", {"highway": "tertiary", "bridge": "yes"},
+        (_ll(400, 200), _ll(550, 200)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [_open_country_road(), bridge], world_size=1000,
+    )
+    assert info["smoothed_rural_bends"] == 0
+    assert info["excluded_bridge_features"] == 1
+    assert _way_points(nodes, ways[0]) == [(200, 200), (400, 200), (400, 400)]
+
+
+def test_watercourse_near_corner_blocks_rural_smoothing(tmp_path):
+    creek = OsmLineFeature(
+        "way/creek", {"waterway": "stream"},
+        (_ll(388, 207), _ll(400, 220)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [_open_country_road()], world_size=1000,
+        watercourses=(creek,),
+    )
+    assert info["smoothed_rural_bends"] == 0
+    assert _way_points(nodes, ways[0]) == [(200, 200), (400, 200), (400, 400)]
