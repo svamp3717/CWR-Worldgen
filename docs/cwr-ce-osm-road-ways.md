@@ -49,8 +49,8 @@ To preserve road connectivity and sensible placement, the writer **keeps
 endpoints and shared OSM road junctions fixed**, and leaves bends unchanged
 inside or near mapped urban land-use polygons, settlement polygons, and
 city/town/village/hamlet places. It also checks the prospective road ribbon
-against nearby road geometry, building footprints/points, water, and map
-boundaries. If a proposed rounding fails any check, that bend remains
+against nearby road geometry (including bridge approaches), building
+footprints/points, water and watercourses, and map boundaries. If a proposed rounding fails any check, that bend remains
 exactly as supplied by OSM.
 
 The build manifest's **road_ways.smoothed_rural_bends** field reports the
