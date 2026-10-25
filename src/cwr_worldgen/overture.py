@@ -734,6 +734,12 @@ def _iter_overture_tile_features(path: Path):
             raise ValueError(f"extra data after Overture GeoJSON envelope: {path}")
 
 
+class _OvertureTileContentError(ValueError):
+    def __init__(self, path: Path, cause: Exception):
+        self.path = Path(path)
+        super().__init__(f"invalid Overture tile {path}: {cause}")
+
+
 def _merge_overture_tile_geojson(tile_paths: list[Path], output: Path) -> tuple[int, int]:
     """Atomically merge only usable tiles; never load a whole tile into RAM."""
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -746,17 +752,20 @@ def _merge_overture_tile_geojson(tile_paths: list[Path], output: Path) -> tuple[
             stream.write('{"type":"FeatureCollection","features":[')
             first = True
             for tile_path in tile_paths:
-                for feature in _iter_overture_tile_features(tile_path):
-                    identity = _feature_identity(feature)
-                    if identity in seen:
-                        duplicates += 1
-                        continue
-                    seen.add(identity)
-                    if not first:
-                        stream.write(",")
-                    json.dump(feature, stream, ensure_ascii=False, separators=(",", ":"))
-                    first = False
-                    written += 1
+                try:
+                    for feature in _iter_overture_tile_features(tile_path):
+                        identity = _feature_identity(feature)
+                        if identity in seen:
+                            duplicates += 1
+                            continue
+                        seen.add(identity)
+                        if not first:
+                            stream.write(",")
+                        json.dump(feature, stream, ensure_ascii=False, separators=(",", ":"))
+                        first = False
+                        written += 1
+                except (ValueError, OSError, TypeError) as exc:
+                    raise _OvertureTileContentError(tile_path, exc) from exc
             stream.write("]}")
         os.replace(temporary, output)
     finally:
@@ -1043,7 +1052,34 @@ def fetch_overture_buildings_geojson(
 
     started_merge = time.monotonic()
     try:
-        feature_count, duplicates = _merge_overture_tile_geojson(tile_paths, output)
+        while tile_paths:
+            try:
+                feature_count, duplicates = _merge_overture_tile_geojson(tile_paths, output)
+                break
+            except _OvertureTileContentError as exc:
+                # A worker can exit successfully but leave truncated GeoJSON.
+                # Quarantine only that tile and salvage the other coverage.
+                tile_index, tile_bbox = next(
+                    (i, box) for i, box in enumerate(tiles, start=1)
+                    if _tile_cache_path(cache_root, box) == exc.path
+                )
+                failed_tiles.append({
+                    "tile_number": tile_index,
+                    "bbox_south_west_north_east": [float(v) for v in tile_bbox],
+                    "attempts": max_attempts,
+                    "error": str(exc)[:500],
+                })
+                completed.discard(_bbox_digest(tile_bbox))
+                tile_paths.remove(exc.path)
+                exc.path.unlink(missing_ok=True)
+                print(
+                    f"CWR Overture: quarantined invalid tile {tile_index}/{len(tiles)} "
+                    f"(S,W,N,E)={list(tile_bbox)}: {exc}; merging surviving tiles",
+                    file=sys.stderr, flush=True,
+                )
+                _write_tile_manifest(manifest_path, state("partial" if tile_paths else "unavailable"))
+        else:
+            raise RuntimeError("no valid Overture tile contents remain")
     except Exception as exc:  # noqa: BLE001 - OSM fallback must remain possible.
         snapshot = state("unavailable", reason=f"tile merge failed: {exc}")
         _write_tile_manifest(manifest_path, snapshot)
