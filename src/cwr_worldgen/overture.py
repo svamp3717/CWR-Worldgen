@@ -452,6 +452,11 @@ def download_overture_buildings_direct(
         extract.unlink(missing_ok=True)
 
 
+def read_overture_fetch_status(output: Path) -> dict[str, object] | None:
+    """Read a local Overture fetch status sidecar without network access."""
+    return _load_tile_manifest(overture_fetch_status_path(Path(output)))
+
+
 def _worker_error_path(output: Path) -> Path:
     return output.with_name(output.name + ".error.txt")
 
