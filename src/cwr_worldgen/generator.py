@@ -2630,6 +2630,12 @@ def _validate_milestone4(
 ) -> list[str]:
     checks: list[tuple[str, bool, str]] = []
     summary = inspect_rvw4(result.wrp_path, height_scale=spec.height_scale)
+    # The native ways profile fits legacy roads for grading but omits them
+    # from the WRP object stream.
+    expected_objects = (
+        generated.objects[len(road_fit.objects):]
+        if is_osm_ways_profile(spec.profile) else generated.objects
+    )
     materials = _material_definitions(spec)
     counts = material_counts(material_indices, len(materials))
     expected_texture_paths, _ = _stock_ground_texture_table(
@@ -2926,13 +2932,13 @@ def _validate_milestone4(
     ))
     checks.append((
         "All generated objects have stable unique IDs",
-        summary.object_count == len(generated.objects)
+        summary.object_count == len(expected_objects)
         and summary.object_ids == tuple(range(1, summary.object_count + 1)),
         f"{summary.object_count} objects",
     ))
     checks.append((
         "WRP object stream preserves tree-before-building priority",
-        summary.object_models == tuple(obj.model_path for obj in generated.objects),
+        summary.object_models == tuple(obj.model_path for obj in expected_objects),
         "roads -> forests/trees -> rural vegetation -> buildings -> infrastructure -> semantic sites",
     ))
     checks.append((
@@ -5617,7 +5623,10 @@ def build_milestone4(
         ],
         "spawn": asdict(spawn),
         "objects": {
-            "total": len(all_objects),
+            "total": len(all_objects) - (
+                len(road_fit.objects) if is_osm_ways_profile(spec.profile) else 0
+            ),
+            "legacy_road_objects_fitted_for_terrain": len(road_fit.objects),
             "wrp_serialization_order": [
                 "roads",
                 "forest_and_trees",
@@ -5628,7 +5637,7 @@ def build_milestone4(
                 "bridges",
                 "semantic_sites",
             ],
-            "roads": len(road_fit.objects),
+            "roads": 0 if is_osm_ways_profile(spec.profile) else len(road_fit.objects),
             "buildings": nonroads.building_objects,
             "building_final_footprint_plans": len(building_placement_plans),
             "building_road_nudges": nonroads.building_road_nudges,
