@@ -626,34 +626,136 @@ def _feature_identity(feature: object) -> str:
     return "sha256:" + sha256(stable.encode("utf-8")).hexdigest()
 
 
+def overture_fetch_status_path(output: Path) -> Path:
+    """A durable download status independent of the generated GeoJSON."""
+    return Path(output).with_name(Path(output).name + ".status.json")
+
+
+def _iter_overture_tile_features(path: Path):
+    """Read one feature at a time from a worker-produced GeoJSON collection.
+
+    Each tile is a single potentially enormous JSON document. json.load would
+    retain all of its features at once, which easily exhausts memory in cities.
+    This incremental decoder retains only a small input buffer and the current
+    feature, while validating the JSON envelope and separators.
+    """
+    decoder = json.JSONDecoder()
+    header = re.compile(r'\s*\{\s*"type"\s*:\s*"FeatureCollection"\s*,\s*"features"\s*:\s*\[')
+    with Path(path).open("r", encoding="utf-8") as stream:
+        buffer = ""
+        index = 0
+        eof = False
+
+        def read_more() -> bool:
+            nonlocal buffer, eof
+            chunk = stream.read(64 * 1024)
+            if not chunk:
+                eof = True
+                return False
+            buffer += chunk
+            return True
+
+        read_more()
+        while True:
+            match = header.match(buffer)
+            if match:
+                index = match.end()
+                break
+            if eof or len(buffer) > 1024 * 1024:
+                raise ValueError(f"invalid Overture GeoJSON feature collection header: {path}")
+            read_more()
+
+        next_feature = True
+        while True:
+            while True:
+                if index >= len(buffer):
+                    if not read_more():
+                        raise ValueError(f"truncated Overture GeoJSON: {path}")
+                    continue
+                if buffer[index].isspace():
+                    index += 1
+                    continue
+                break
+
+            if buffer[index] == "]":
+                index += 1
+                break
+            if not next_feature:
+                if buffer[index] != ",":
+                    raise ValueError(f"invalid Overture GeoJSON feature separator: {path}")
+                index += 1
+                while True:
+                    if index >= len(buffer):
+                        if not read_more():
+                            raise ValueError(f"truncated Overture GeoJSON: {path}")
+                        continue
+                    if buffer[index].isspace():
+                        index += 1
+                        continue
+                    break
+                if buffer[index] == "]":
+                    raise ValueError(f"trailing comma in Overture GeoJSON: {path}")
+
+            while True:
+                try:
+                    feature, index = decoder.raw_decode(buffer, index)
+                    break
+                except json.JSONDecodeError as exc:
+                    if not read_more():
+                        raise ValueError(f"invalid or truncated Overture GeoJSON feature: {path}") from exc
+            if not isinstance(feature, dict) or feature.get("type") != "Feature":
+                raise ValueError(f"non-feature object in Overture GeoJSON: {path}")
+            yield feature
+            next_feature = False
+
+            # Prevent the accumulated JSON buffer growing with every feature.
+            if index > 64 * 1024:
+                buffer = buffer[index:]
+                index = 0
+
+        while True:
+            if index >= len(buffer):
+                if not read_more():
+                    raise ValueError(f"truncated Overture GeoJSON envelope: {path}")
+                continue
+            if buffer[index].isspace():
+                index += 1
+                continue
+            break
+        if buffer[index] != "}":
+            raise ValueError(f"invalid Overture GeoJSON envelope ending: {path}")
+        index += 1
+        if buffer[index:].strip() or stream.read().strip():
+            raise ValueError(f"extra data after Overture GeoJSON envelope: {path}")
+
+
 def _merge_overture_tile_geojson(tile_paths: list[Path], output: Path) -> tuple[int, int]:
-    """Merge cached tile GeoJSONs while removing cross-tile duplicate buildings."""
+    """Atomically merge only usable tiles; never load a whole tile into RAM."""
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(output.name + ".merge.tmp")
     seen: set[str] = set()
     written = 0
     duplicates = 0
-    with temporary.open("w", encoding="utf-8", newline="\n") as stream:
-        stream.write('{"type":"FeatureCollection","features":[')
-        first = True
-        for tile_path in tile_paths:
-            document = json.loads(tile_path.read_text(encoding="utf-8"))
-            features = document.get("features", []) if isinstance(document, dict) else []
-            if not isinstance(features, list):
-                continue
-            for feature in features:
-                identity = _feature_identity(feature)
-                if identity in seen:
-                    duplicates += 1
-                    continue
-                seen.add(identity)
-                if not first:
-                    stream.write(",")
-                json.dump(feature, stream, ensure_ascii=False, separators=(",", ":"))
-                first = False
-                written += 1
-        stream.write("]}")
-    os.replace(temporary, output)
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write('{"type":"FeatureCollection","features":[')
+            first = True
+            for tile_path in tile_paths:
+                for feature in _iter_overture_tile_features(tile_path):
+                    identity = _feature_identity(feature)
+                    if identity in seen:
+                        duplicates += 1
+                        continue
+                    seen.add(identity)
+                    if not first:
+                        stream.write(",")
+                    json.dump(feature, stream, ensure_ascii=False, separators=(",", ":"))
+                    first = False
+                    written += 1
+            stream.write("]}")
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
     return written, duplicates
 
 
