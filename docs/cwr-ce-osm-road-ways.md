@@ -32,6 +32,32 @@ appear twice. Worldgen still computes its original road fit as input for terrain
 grading and building/vegetation clearance. Non-road P3Ds and separately
 modelled bridge/other infrastructure are retained.
 
+## Softer bends outside settlements
+
+The native-ways profile also rounds eligible **rural** corners. Worldgen
+replaces a sharp vertex with a short, tangent-continuous quadratic curve,
+sampled into several shared-node way points for CWR-CE to render. The
+underlying OSM source files and other game profiles are unchanged.
+
+A corner is eligible only when both incoming and outgoing sections are at
+least 18 m long, the direction change is between 25 and 135 degrees, and
+there is room for a gentle bend. The curve is limited to an 18 m tangent
+length and at most 30% of either adjoining section, so it stays close to
+Worldgen's existing terrain-graded road corridor.
+
+To preserve road connectivity and sensible placement, the writer **keeps
+endpoints and shared OSM road junctions fixed**, and leaves bends unchanged
+inside or near mapped urban land-use polygons, settlement polygons, and
+city/town/village/hamlet places. It also checks the prospective road ribbon
+against nearby road geometry, building footprints/points, water, and map
+boundaries. If a proposed rounding fails any check, that bend remains
+exactly as supplied by OSM.
+
+The build manifest's **road_ways.smoothed_rural_bends** field reports the
+number of bends actually rounded. This is a geometric visual improvement;
+it does not rebuild Worldgen's terrain solver or guarantee wider cuttings
+on very steep slopes, so inspect sharply graded mountain roads in-game.
+
 ## Road surface textures
 
 A native road way record takes a **Roadway texture path**, not a road P3D path.
