@@ -2690,43 +2690,46 @@ def _validate_milestone4(
             f"height scale={spec.height_scale:.3f}m"
         ),
     ))
-    checks.append((
-        "Road network emitted without object-budget truncation",
-        (not road_fit.truncated) or spec.max_road_objects == 0,
-        (
-            f"objects={len(road_fit.objects)}, limit={spec.max_road_objects}, "
-            f"truncated={road_fit.truncated}"
-        ),
-    ))
-    checks.append((
-        "Road junctions use bounded deterministic stock-road hubs",
-        road_fit.failed_connections == 0 and road_fit.maximum_connection_gap <= spec.road_connection_tolerance,
-        (
-            f"connections={road_fit.connection_count}, failed={road_fit.failed_connections}, "
-            f"caps={road_fit.junction_cap_objects}, "
-            f"maximum uncovered gap={road_fit.maximum_connection_gap:.3f}m"
-        ),
-    ))
-    checks.append((
-        "Road graph respects CWA's four-connection object limit",
-        road_fit.road_connection_slot_risk_nodes == 0,
-        (
-            f"slot-risk nodes={road_fit.road_connection_slot_risk_nodes}, "
-            f"suppressed degree-two caps={road_fit.suppressed_degree_two_caps}, "
-            f"complex unhubbed junctions={road_fit.complex_junctions_without_caps}, "
-            f"nearby hubs suppressed={road_fit.suppressed_nearby_hubs}"
-        ),
-    ))
-    checks.append((
-        "Road object chains remain connected",
-        road_fit.maximum_chain_gap <= spec.road_connection_tolerance,
-        f"max={road_fit.maximum_chain_gap:.3f}m, tolerance={spec.road_connection_tolerance:.3f}m",
-    ))
-    checks.append((
-        "Road model axes do not overlap longitudinally",
-        road_fit.maximum_model_overlap_metres <= 1e-4,
-        f"maximum overlap={road_fit.maximum_model_overlap_metres:.3f}m",
-    ))
+    # Native CWR-CE ways do not have CWA's 4-link object or P3D hub limits.
+    # These checks only describe the fitted, un-serialized legacy road mesh.
+    if not is_osm_ways_profile(spec.profile):
+        checks.append((
+            "Road network emitted without object-budget truncation",
+            (not road_fit.truncated) or spec.max_road_objects == 0,
+            (
+                f"objects={len(road_fit.objects)}, limit={spec.max_road_objects}, "
+                f"truncated={road_fit.truncated}"
+            ),
+        ))
+        checks.append((
+            "Road junctions use bounded deterministic stock-road hubs",
+            road_fit.failed_connections == 0 and road_fit.maximum_connection_gap <= spec.road_connection_tolerance,
+            (
+                f"connections={road_fit.connection_count}, failed={road_fit.failed_connections}, "
+                f"caps={road_fit.junction_cap_objects}, "
+                f"maximum uncovered gap={road_fit.maximum_connection_gap:.3f}m"
+            ),
+        ))
+        checks.append((
+            "Road graph respects CWA's four-connection object limit",
+            road_fit.road_connection_slot_risk_nodes == 0,
+            (
+                f"slot-risk nodes={road_fit.road_connection_slot_risk_nodes}, "
+                f"suppressed degree-two caps={road_fit.suppressed_degree_two_caps}, "
+                f"complex unhubbed junctions={road_fit.complex_junctions_without_caps}, "
+                f"nearby hubs suppressed={road_fit.suppressed_nearby_hubs}"
+            ),
+        ))
+        checks.append((
+            "Road object chains remain connected",
+            road_fit.maximum_chain_gap <= spec.road_connection_tolerance,
+            f"max={road_fit.maximum_chain_gap:.3f}m, tolerance={spec.road_connection_tolerance:.3f}m",
+        ))
+        checks.append((
+            "Road model axes do not overlap longitudinally",
+            road_fit.maximum_model_overlap_metres <= 1e-4,
+            f"maximum overlap={road_fit.maximum_model_overlap_metres:.3f}m",
+        ))
     checks.append((
         "Terrain grading changed playable corridors",
         grading.changed_cells > 0 if (dataset.roads or dataset.building_polygons) else True,
