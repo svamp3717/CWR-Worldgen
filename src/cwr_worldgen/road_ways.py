@@ -380,28 +380,28 @@ def write_osm_road_ways(
         )
         smoothed_bends += rounded
         for index in range(0, len(run) - 1, _MAX_NODES_PER_WAY - 1):
-                chunk = run[index:index + _MAX_NODES_PER_WAY]
-                if len(chunk) < 2:
-                    continue
-                ids: list[int] = []
-                for point in chunk:
-                    if point not in nodes:
-                        nodes[point] = len(nodes) + 1
-                        if len(nodes) > _MAX_NODES:
-                            raise ValueError(
-                                "CWR-CE .ways supports at most 100,000 nodes; "
-                                "reduce the generated area or road detail"
-                            )
-                    ids.append(nodes[point])
-                if len(lines) >= _MAX_WAYS:
-                    raise ValueError(
-                        "CWR-CE .ways supports at most 10,000 ways; "
-                        "reduce the generated area or road detail"
-                    )
-                lines.append(
-                    f"way {len(lines) + 1} {_width(tags):.3f} {textures[_surface(tags)]} "
-                    + " ".join(map(str, ids))
+            chunk = run[index:index + _MAX_NODES_PER_WAY]
+            if len(chunk) < 2:
+                continue
+            ids: list[int] = []
+            for point in chunk:
+                if point not in nodes:
+                    nodes[point] = len(nodes) + 1
+                    if len(nodes) > _MAX_NODES:
+                        raise ValueError(
+                            "CWR-CE .ways supports at most 100,000 nodes; "
+                            "reduce the generated area or road detail"
+                        )
+                ids.append(nodes[point])
+            if len(lines) >= _MAX_WAYS:
+                raise ValueError(
+                    "CWR-CE .ways supports at most 10,000 ways; "
+                    "reduce the generated area or road detail"
                 )
+            lines.append(
+                f"way {len(lines) + 1} {_width(tags):.3f} {textures[_surface(tags)]} "
+                + " ".join(map(str, ids))
+            )
     # Emit nodes in ID order. Both record types may occur in either order.
     node_lines = [
         f"node {node_id} {x:.4f} {z:.4f}"
