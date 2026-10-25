@@ -1782,7 +1782,7 @@ class WorldgenGui(tk.Tk):
             wraplength=700,
         ).grid(row=5, column=1, columnspan=2, sticky="w", pady=(0, 8))
         ttk.Label(world, text="Game profile").grid(row=6, column=0, sticky="w", padx=(0, 10), pady=4)
-        ttk.Combobox(world, textvariable=self._var("profile"), values=("cwa", "cwr-ce"), state="readonly", width=18).grid(row=6, column=1, sticky="w", pady=4)
+        ttk.Combobox(world, textvariable=self._var("profile"), values=("cwa", "cwr-ce", "cwr-ce-ways"), state="readonly", width=18).grid(row=6, column=1, sticky="w", pady=4)
         ttk.Button(world, text="Suggest names from display name", command=self._suggest_names).grid(row=7, column=1, sticky="w", pady=(10, 0))
         ttk.Label(
             world,
