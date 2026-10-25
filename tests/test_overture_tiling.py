@@ -166,6 +166,45 @@ def test_all_tiles_failed_reports_unavailable_with_bounds() -> None:
         assert status["failed_tiles"][0]["bbox_south_west_north_east"] == list(bbox)
 
 
+def test_invalid_worker_geojson_is_quarantined_and_valid_tile_survives() -> None:
+    # Two longitude columns, one of which produces corrupt GeoJSON despite
+    # an apparently successful worker exit.
+    bbox = (55.0, 12.0, 55.04, 12.28)
+    tiles = overture._overture_bbox_tiles(bbox)
+    assert len(tiles) == 2
+    with TemporaryDirectory() as directory:
+        output = Path(directory) / "buildings.geojson"
+
+        def worker(tile_bbox, tile_output, **kwargs):
+            tile_output.parent.mkdir(parents=True, exist_ok=True)
+            if kwargs["tile_number"] == 1:
+                tile_output.write_text(
+                    '{"type":"FeatureCollection","features":[{"type":"Feature"', encoding="utf-8"
+                )
+            else:
+                tile_output.write_text(
+                    '{"type":"FeatureCollection","features":[{"type":"Feature","id":"good",'
+                    '"properties":{},"geometry":{"type":"Point","coordinates":[0,0]}}]}',
+                    encoding="utf-8",
+                )
+            return True
+
+        with patch.object(overture, "selected_overture_release", return_value="2026-07-22.0"), patch.object(
+            overture, "_run_overture_tile_worker", side_effect=worker
+        ):
+            result = overture.fetch_overture_buildings_geojson(bbox, output, max_attempts=1)
+        assert result == output
+        assert [f["id"] for f in json.loads(output.read_text())["features"]] == ["good"]
+        status = overture.read_overture_fetch_status(output)
+        assert status is not None and status["status"] == "partial"
+        assert status["failed_tiles"][0]["tile_number"] == 1
+        assert status["failed_tiles"][0]["bbox_south_west_north_east"] == list(tiles[0])
+        bad_cache = output.parent / "overture-tiles" / "2026-07-22.0" / (
+            f"building-{overture._bbox_digest(tiles[0])}.geojson"
+        )
+        assert not bad_cache.exists()
+
+
 def test_streaming_merge_never_calls_json_load_on_tile_streams() -> None:
     with TemporaryDirectory() as directory:
         root = Path(directory)
