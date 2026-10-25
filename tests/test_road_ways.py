@@ -6,7 +6,9 @@ from types import SimpleNamespace
 import pytest
 
 from cwr_worldgen.model import validate_world_identity
-from cwr_worldgen.osm import BboxProjection, OsmLineFeature
+from cwr_worldgen.osm import (
+    BboxProjection, GeoPolygon, OsmLineFeature, OsmPointFeature, OsmPolygonFeature,
+)
 from cwr_worldgen.road_ways import is_osm_ways_profile, write_osm_road_ways
 
 
@@ -17,11 +19,11 @@ TEXTURES = {
 }
 
 
-def _export(tmp_path, roads, *, include_minor=True):
-    projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 100.0)
+def _export(tmp_path, roads, *, include_minor=True, world_size=100.0, **features):
+    projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), world_size)
     path = tmp_path / "test_world.ways"
     info = write_osm_road_ways(
-        path, SimpleNamespace(roads=tuple(roads)), projection,
+        path, SimpleNamespace(roads=tuple(roads), **features), projection,
         include_minor_roads=include_minor, surface_textures=TEXTURES,
     )
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -136,3 +138,109 @@ def test_ways_reject_engine_way_limit_before_writing(tmp_path):
     ]
     with pytest.raises(ValueError, match="10,000 ways"):
         _export(tmp_path, many_roads)
+
+
+
+def _ll(x, z, size=1000.0):
+    return (z / size, x / size)
+
+
+def _open_country_road(size=1000.0):
+    return OsmLineFeature(
+        "way/1", {"highway": "tertiary"},
+        tuple(_ll(*point, size) for point in ((200, 200), (400, 200), (400, 400))),
+    )
+
+
+def _way_points(nodes, way):
+    return [nodes[node_id] for node_id in way[3]]
+
+
+def test_rural_bends_become_gradual_curves_when_space_is_available(tmp_path):
+    road = _open_country_road()
+    info, nodes, ways, source = _export(tmp_path, [road], world_size=1000)
+    points = _way_points(nodes, ways[0])
+    assert info["smoothed_rural_bends"] == 1
+    assert points[0] == (200, 200)
+    assert points[-1] == (400, 400)
+    assert (400, 200) not in points
+    assert any(380 < x < 400 and 200 < z < 220 for x, z in points)
+    assert len(points) >= 7
+    assert _export(tmp_path, [road], world_size=1000)[3] == source
+
+
+def test_urban_place_protects_road_bend(tmp_path):
+    village = OsmPointFeature(
+        "node/7", {"place": "village"}, _ll(400, 200),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [_open_country_road()], world_size=1000, places=(village,),
+    )
+    assert info["smoothed_rural_bends"] == 0
+    assert _way_points(nodes, ways[0]) == [(200, 200), (400, 200), (400, 400)]
+
+
+def test_urban_polygon_protects_road_bend(tmp_path):
+    outline = [_ll(*p) for p in (
+        (375, 190), (430, 190), (430, 230), (375, 230), (375, 190),
+    )]
+    housing = OsmPolygonFeature(
+        "area/10", {"landuse": "residential"},
+        (GeoPolygon(tuple(outline)),),
+    )
+    info, _, _, _ = _export(
+        tmp_path, [_open_country_road()], world_size=1000, urban=(housing,),
+    )
+    assert info["smoothed_rural_bends"] == 0
+
+
+def test_buildings_and_other_roads_prevent_unsafe_shortcuts(tmp_path):
+    outline = [_ll(*p) for p in (
+        (385, 205), (399, 205), (399, 218), (385, 218), (385, 205),
+    )]
+    building = OsmPolygonFeature(
+        "building/15", {"building": "yes"},
+        (GeoPolygon(tuple(outline)),),
+    )
+    info, _, _, _ = _export(
+        tmp_path, [_open_country_road()], world_size=1000,
+        building_polygons=(building,),
+    )
+    assert info["smoothed_rural_bends"] == 0
+
+    neighbor = OsmLineFeature(
+        "way/2", {"highway": "residential"},
+        (_ll(380, 212), _ll(420, 212)),
+    )
+    info, _, _, _ = _export(
+        tmp_path, [_open_country_road(), neighbor], world_size=1000,
+    )
+    assert info["smoothed_rural_bends"] == 0
+
+
+def test_connected_junction_is_not_rounded(tmp_path):
+    spur = OsmLineFeature(
+        "way/2", {"highway": "residential"},
+        (_ll(400, 200), _ll(500, 100)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [_open_country_road(), spur], world_size=1000,
+    )
+    assert info["smoothed_rural_bends"] == 0
+    assert (400, 200) in _way_points(nodes, ways[0])
+    assert set(ways[0][3]).intersection(ways[1][3])
+
+
+def test_tight_or_short_bends_keep_original_geometry(tmp_path):
+    # Too little approach distance, even in open countryside.
+    road = OsmLineFeature(
+        "way/short", {"highway": "residential"},
+        (_ll(200, 200), _ll(213, 200), _ll(213, 213)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [road], world_size=1000,
+    )
+    assert info["smoothed_rural_bends"] == 0
+    assert _way_points(nodes, ways[0]) == [
+        (200, 200), (213, 200), (213, 213),
+    ]
