@@ -168,16 +168,26 @@ class _BendClearance:
         source_runs: Sequence[tuple[int, Mapping[str, str], float, list[tuple[float, float]]]],
     ) -> None:
         self.limit = projection.world_size - 0.01
-        self.road_shapes = [LineString(run) for _, _, _, run in source_runs]
-        self.road_owners = [owner for owner, _, _, _ in source_runs]
-        self.road_half_widths = [width * 0.5 for _, _, width, _ in source_runs]
+        # Bridge geometry is omitted from the native export, but its original
+        # approaches and connections still need protection from rounding.
+        bridge_runs = []
+        for index, road in enumerate(getattr(dataset, "roads", ())):
+            if road.tags.get("bridge", "").strip().casefold() in {"", "no", "false", "0"}:
+                continue
+            points = tuple(projection.to_world(point) for point in road.points)
+            for run in _runs(points, self.limit):
+                bridge_runs.append((-(index + 1), road.tags, _width(road.tags), run))
+        clearance_runs = (*source_runs, *bridge_runs)
+        self.road_shapes = [LineString(run) for _, _, _, run in clearance_runs]
+        self.road_owners = [owner for owner, _, _, _ in clearance_runs]
+        self.road_half_widths = [width * 0.5 for _, _, width, _ in clearance_runs]
         self.roads = STRtree(self.road_shapes) if self.road_shapes else None
 
         # A corner shared by two distinct OSM ways is a graph vertex. Moving
         # it would split the RoadNet; protect its whole approach as well.
         owners_by_point: dict[tuple[int, int], set[int]] = defaultdict(set)
         point_coords: dict[tuple[int, int], tuple[float, float]] = {}
-        for owner, _, _, run in source_runs:
+        for owner, _, _, run in clearance_runs:
             for p in run:
                 key = _point_key(p)
                 owners_by_point[key].add(owner)
@@ -217,6 +227,10 @@ class _BendClearance:
             )
         # Ribbon geometry must not drift onto a lake or an unmodelled river.
         obstacles.extend(_polygon_shapes(getattr(dataset, "water", ()), projection))
+        for stream in getattr(dataset, "watercourses", ()):
+            points = [projection.to_world(p) for p in stream.points]
+            if len(points) >= 2:
+                obstacles.append(LineString(points).buffer(4.0))
         self.obstacle_shapes = obstacles
         self.obstacles = STRtree(obstacles) if obstacles else None
 
