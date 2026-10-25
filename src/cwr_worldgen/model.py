@@ -39,8 +39,8 @@ def validate_world_identity(*, name: str, display_name: str, profile: str) -> No
             "world name must be 3-20 lowercase ASCII letters, digits, or underscores, "
             "starting with a letter"
         )
-    if profile not in {"cwa", "cwr-ce"}:
-        raise ValueError("profile must be 'cwa' or 'cwr-ce'")
+    if profile not in {"cwa", "cwr-ce", "cwr-ce-ways"}:
+        raise ValueError("profile must be 'cwa', 'cwr-ce', or 'cwr-ce-ways'")
     try:
         display_name.encode("ascii")
     except UnicodeEncodeError as exc:
