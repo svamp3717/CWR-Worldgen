@@ -97,3 +97,42 @@ def test_ways_reject_missing_surface_texture(tmp_path):
             include_minor_roads=True,
             surface_textures={"paved": "has spaces.pac", "dirt": "x.pac", "gravel": "y.pac"},
         )
+
+
+def test_world_pbo_contains_native_ways_and_enforces_layout(tmp_path):
+    from cwr_worldgen.generator import _verify_single_world_pbo_layout
+    from cwr_worldgen.pbo import pack_directory
+
+    source = tmp_path / "world"
+    source.mkdir()
+    (source / "config.cpp").write_text("class CfgWorlds {};", encoding="utf-8")
+    (source / "world.wrp").write_bytes(b"4WVR" + b"\x00" * 24)
+    (source / "world.ways").write_text(
+        "node 1 10 20\nnode 2 30 20\nway 1 6 data\\silnice.pac 1 2\n",
+        encoding="utf-8",
+    )
+    pbo = tmp_path / "world.pbo"
+    pack_directory(source, pbo, backend="python")
+    result = _verify_single_world_pbo_layout(
+        pbo, "world", None, include_ways=True,
+    )
+    assert result["verified"]
+    (source / "world.ways").unlink()
+    pack_directory(source, pbo, backend="python")
+    with pytest.raises(RuntimeError, match="world.ways"):
+        _verify_single_world_pbo_layout(
+            pbo, "world", None, include_ways=True,
+        )
+
+
+def test_ways_reject_engine_way_limit_before_writing(tmp_path):
+    # The engine limits ways to 10,000 even if the file is below 8 MiB.
+    many_roads = [
+        OsmLineFeature(
+            f"way/{i:05d}", {"highway": "residential"},
+            ((0.5, 0.25), (0.5, 0.75)),
+        )
+        for i in range(10_001)
+    ]
+    with pytest.raises(ValueError, match="10,000 ways"):
+        _export(tmp_path, many_roads)
