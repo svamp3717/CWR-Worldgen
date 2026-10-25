@@ -49,7 +49,8 @@ def _add_common_world_arguments(
         default=default_profile,
         help=(
             "target runtime: cwa for original 1.99 compatibility; cwr-ce for "
-            "the remastered engine"
+            "the remastered engine; cwr-ce-ways for native CWR-CE OSM-style "
+            "road ways (sidecar instead of road P3Ds)"
         ),
     )
     if include_grid:
