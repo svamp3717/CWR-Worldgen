@@ -91,6 +91,7 @@ from .terrain import (
     material_counts,
     material_colour_for_profile,
 )
+from .road_ways import is_osm_ways_profile, write_osm_road_ways
 from .wrp import inspect_rvw4, quantize_elevations, quantize_height, write_rvw4
 from .forest_ground_blends import apply_stock_forest_border_blends
 from .everon_water_blends import apply_everon_water_borders, is_everon_water_blend_path
@@ -3998,6 +3999,8 @@ def _verify_single_world_pbo_layout(
     pbo_path: Path,
     world_name: str,
     infrastructure_generation: InfrastructureAssetResult | None,
+    *,
+    include_ways: bool = False,
 ) -> dict[str, object]:
     """Verify generated infrastructure is packed beside the WRP in one PBO.
 
@@ -4007,6 +4010,8 @@ def _verify_single_world_pbo_layout(
     """
     archive_entries = {entry.name.casefold() for entry in read_pbo(pbo_path)}
     expected_entries = ["config.cpp", f"{world_name}.wrp"]
+    if include_ways:
+        expected_entries.append(f"{world_name}.ways")
     generated_entries: list[str] = []
     if infrastructure_generation is not None:
         generated_entries.extend(infrastructure_generation.model_files)
@@ -4810,10 +4815,42 @@ def build_milestone4(
         elevations,
         wrp_texture_indices,
         texture_table_paths,
-        all_objects,
+        # Fit legacy road objects for terrain grading and object clearance, but
+        # serialize the roads only as native CWR-CE ways in this profile.
+        all_objects[len(road_fit.objects):] if is_osm_ways_profile(spec.profile) else all_objects,
         height_scale=spec.height_scale,
         renumber_object_ids=True,
     )
+
+    ways_path = source_dir / f"{spec.name}.ways"
+    ways_report: dict[str, object] = {"enabled": False}
+    if is_osm_ways_profile(spec.profile):
+        default_way_textures = {
+            "paved": r"data\silnice.pac",
+            "dirt": r"data\cesta.pac",
+            "gravel": r"data\asfaltka.pac",
+        }
+        way_textures = {
+            surface: (
+                road_surface_style_report.get(surface, {}).get("roadway_texture")
+                or fallback
+            )
+            for surface, fallback in default_way_textures.items()
+        }
+        ways_report = {
+            "enabled": True,
+            **write_osm_road_ways(
+                ways_path, dataset, projection,
+                include_minor_roads=spec.include_minor_roads,
+                surface_textures=way_textures,
+            ),
+            "surface_textures": way_textures,
+            "omitted_legacy_road_objects": len(road_fit.objects),
+        }
+    else:
+        # Reusing a build directory must not leak an obsolete .ways sidecar
+        # into an ordinary CWA/CWR-CE world.
+        ways_path.unlink(missing_ok=True)
 
     debug_layers_path: Path | None = None
     if bool(getattr(spec, "debug_layers", False)):
@@ -5022,7 +5059,8 @@ def build_milestone4(
     )
     report_progress(94, "Verifying generated assets inside the world PBO")
     pbo_layout = _verify_single_world_pbo_layout(
-        pbo_path, spec.name, infrastructure_generation
+        pbo_path, spec.name, infrastructure_generation,
+        include_ways=is_osm_ways_profile(spec.profile),
     )
 
     report_progress(95, "Calculating build fingerprints")
@@ -5260,7 +5298,8 @@ def build_milestone4(
             repeat_elevations,
             repeat_texture_indices,
             repeat_texture_paths,
-            repeat_objects,
+            repeat_objects[len(repeat_roads.objects):]
+            if is_osm_ways_profile(spec.profile) else repeat_objects,
             height_scale=spec.height_scale,
             renumber_object_ids=True,
         )
@@ -5528,6 +5567,7 @@ def build_milestone4(
             "coastline_seed_count": raster.coastline_seed_count,
         },
         "pbo_layout": pbo_layout,
+        "road_ways": ways_report,
         "playability": {
             "road_fitting": {key: value for key, value in asdict(road_fit).items() if key != "objects"},
             "terrain_grading": grading_doc,
