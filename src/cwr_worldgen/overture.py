@@ -730,8 +730,11 @@ def _iter_overture_tile_features(path: Path):
         if buffer[index] != "}":
             raise ValueError(f"invalid Overture GeoJSON envelope ending: {path}")
         index += 1
-        if buffer[index:].strip() or stream.read().strip():
+        if buffer[index:].strip():
             raise ValueError(f"extra data after Overture GeoJSON envelope: {path}")
+        for chunk in iter(lambda: stream.read(64 * 1024), ""):
+            if chunk.strip():
+                raise ValueError(f"extra data after Overture GeoJSON envelope: {path}")
 
 
 class _OvertureTileContentError(ValueError):
