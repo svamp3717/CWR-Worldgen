@@ -871,15 +871,18 @@ def fetch_overture_buildings_geojson(
     max_attempts: int = 2,
     tile_cache_dir: Path | None = None,
 ) -> Path | None:
-    """Fetch Overture buildings as resumable bbox tiles and merge them locally.
+    """Fetch Overture as resumable tiles, retaining any successful coverage.
 
-    Large worlds no longer share one global wall-clock timeout. Each roughly
-    10 km tile gets its own adaptive timeout, successful tiles are cached, and
-    an interrupted run resumes from those completed tile files.
+    A failed tile must never discard buildings from other tiles. Persist each
+    tile's bounds/failure diagnostics for the frozen source manifest and retry
+    only missing tiles on subsequent calls, including partial results.
     """
     output = Path(output)
-    if output.is_file() and not refresh:
-        return output
+    status_path = overture_fetch_status_path(output)
+    previous_status = _load_tile_manifest(status_path)
+    if output.is_file() and not refresh and previous_status:
+        if previous_status.get("status") == "complete":
+            return output
     output.parent.mkdir(parents=True, exist_ok=True)
 
     release = selected_overture_release()
@@ -899,10 +902,9 @@ def fetch_overture_buildings_geojson(
     completed: set[str] = set()
     resume_incomplete_refresh = False
     if previous_manifest:
-        previous_release = str(previous_manifest.get("release") or "")
-        previous_world = str(previous_manifest.get("world_bbox_digest") or "")
-        previous_complete = bool(previous_manifest.get("complete", False))
-        if previous_release == release and previous_world == world_digest and not previous_complete:
+        if (str(previous_manifest.get("release") or "") == release
+                and str(previous_manifest.get("world_bbox_digest") or "") == world_digest
+                and not bool(previous_manifest.get("complete", False))):
             raw_completed = previous_manifest.get("completed", [])
             if isinstance(raw_completed, list):
                 completed = {str(value) for value in raw_completed}
@@ -911,32 +913,53 @@ def fetch_overture_buildings_geojson(
     print(
         f"CWR Overture: world bbox approximately {longitude_km:.1f} x {latitude_km:.1f} km; "
         f"using {len(tiles)} tile(s) at <= {float(tile_edge_km):.1f} km, release={release}",
-        file=sys.stderr,
-        flush=True,
+        file=sys.stderr, flush=True,
     )
     if len(tiles) > 1:
         print(
-            "CWR Overture: completed tiles are cached and an interrupted run will resume them",
-            file=sys.stderr,
-            flush=True,
+            "CWR Overture: successful tiles stay usable on failure; missing tiles are retried next run",
+            file=sys.stderr, flush=True,
         )
 
     tile_paths: list[Path] = []
+    failed_tiles: list[dict[str, object]] = []
     max_attempts = max(1, int(max_attempts))
+
+    def state(status: str, *, features: int = 0, duplicates: int = 0,
+              reason: str | None = None) -> dict[str, object]:
+        result: dict[str, object] = {
+            "schema": 2,
+            "status": status,
+            "complete": status == "complete",
+            "release": release,
+            "world_bbox_digest": world_digest,
+            "bbox_south_west_north_east": [float(value) for value in bbox],
+            "tile_edge_km": float(tile_edge_km),
+            "tile_count": len(tiles),
+            "completed_tile_count": len(tile_paths),
+            "completed": sorted(completed),
+            "failed_tiles": failed_tiles,
+            "features": features,
+            "duplicates_removed": duplicates,
+        }
+        if reason:
+            result["reason"] = reason
+        return result
+
     for index, tile_bbox in enumerate(tiles, start=1):
         tile_key = _bbox_digest(tile_bbox)
         tile_path = _tile_cache_path(cache_root, tile_bbox)
-        tile_paths.append(tile_path)
         can_reuse = tile_path.is_file() and (
             not refresh or (resume_incomplete_refresh and tile_key in completed)
         )
         if can_reuse:
             print(
                 f"CWR Overture tile {index}/{len(tiles)}: cached, skipping download",
-                file=sys.stderr,
-                flush=True,
+                file=sys.stderr, flush=True,
             )
             completed.add(tile_key)
+            tile_paths.append(tile_path)
+            _write_tile_manifest(manifest_path, state("partial"))
             continue
 
         tile_timeout = int(timeout) if timeout is not None else _overture_tile_timeout_seconds(tile_bbox)
@@ -945,87 +968,84 @@ def fetch_overture_buildings_geojson(
             print(
                 f"CWR Overture tile {index}/{len(tiles)}: downloading "
                 f"(attempt {attempt}/{max_attempts}, timeout {tile_timeout}s)",
-                file=sys.stderr,
-                flush=True,
+                file=sys.stderr, flush=True,
             )
             success = _run_overture_tile_worker(
-                tile_bbox,
-                tile_path,
-                release=release,
-                release_index_cache=release_index_cache,
-                timeout=tile_timeout,
-                tile_number=index,
-                tile_count=len(tiles),
+                tile_bbox, tile_path,
+                release=release, release_index_cache=release_index_cache,
+                timeout=tile_timeout, tile_number=index, tile_count=len(tiles),
             )
             if success:
                 break
             if attempt < max_attempts:
                 print(
                     f"CWR Overture tile {index}/{len(tiles)}: retrying after 5s",
-                    file=sys.stderr,
-                    flush=True,
+                    file=sys.stderr, flush=True,
                 )
                 time.sleep(5.0)
-        if not success:
-            manifest = {
-                "schema": 1,
-                "release": release,
-                "world_bbox_digest": world_digest,
-                "bbox": [float(value) for value in bbox],
-                "tile_edge_km": float(tile_edge_km),
-                "tile_count": len(tiles),
-                "completed": sorted(completed),
-                "complete": False,
-            }
-            _write_tile_manifest(manifest_path, manifest)
-            print(
-                f"CWR Overture: stopped after tile {index}/{len(tiles)} failed; "
-                f"{len(completed)} completed tile(s) remain cached for resume; continuing with OSM only",
-                file=sys.stderr,
-                flush=True,
-            )
-            return None
 
-        completed.add(tile_key)
-        manifest = {
-            "schema": 1,
-            "release": release,
-            "world_bbox_digest": world_digest,
-            "bbox": [float(value) for value in bbox],
-            "tile_edge_km": float(tile_edge_km),
-            "tile_count": len(tiles),
-            "completed": sorted(completed),
-            "complete": False,
-        }
-        _write_tile_manifest(manifest_path, manifest)
+        if success:
+            completed.add(tile_key)
+            tile_paths.append(tile_path)
+        else:
+            # The worker retains a traceback sidecar on failure. Capture the
+            # useful tail, but bound manifest/log size and never swallow tile
+            # coverage, which is needed to identify geographic gaps.
+            diagnostic = _worker_error_path(tile_path.with_name(tile_path.name + ".tmp"))
+            reason = "worker failed or timed out"
+            if diagnostic.is_file():
+                try:
+                    lines = diagnostic.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+                    if lines:
+                        reason = lines[-1][:500]
+                except OSError:
+                    pass
+            failure = {
+                "tile_number": index,
+                "bbox_south_west_north_east": [float(value) for value in tile_bbox],
+                "attempts": max_attempts,
+                "error": reason,
+            }
+            failed_tiles.append(failure)
+            print(
+                f"CWR Overture tile {index}/{len(tiles)} FAILED "
+                f"(S,W,N,E)={failure['bbox_south_west_north_east']}: {reason}; "
+                "continuing to fetch other tiles",
+                file=sys.stderr, flush=True,
+            )
+
+        _write_tile_manifest(manifest_path, state("partial" if tile_paths else "unavailable"))
+
+    if not tile_paths:
+        snapshot = state("unavailable", reason="all Overture tiles failed")
+        _write_tile_manifest(manifest_path, snapshot)
+        _write_tile_manifest(status_path, snapshot)
+        output.unlink(missing_ok=True)
+        print("CWR Overture unavailable: no usable tiles; continuing with OSM only",
+              file=sys.stderr, flush=True)
+        return None
 
     started_merge = time.monotonic()
     try:
         feature_count, duplicates = _merge_overture_tile_geojson(tile_paths, output)
-    except Exception as exc:  # noqa: BLE001 - a corrupt tile should not abort the whole world build.
-        print(f"CWR Overture tile merge failed: {exc}; continuing with OSM only", file=sys.stderr, flush=True)
+    except Exception as exc:  # noqa: BLE001 - OSM fallback must remain possible.
+        snapshot = state("unavailable", reason=f"tile merge failed: {exc}")
+        _write_tile_manifest(manifest_path, snapshot)
+        _write_tile_manifest(status_path, snapshot)
+        output.unlink(missing_ok=True)
+        print(f"CWR Overture tile merge failed: {exc}; continuing with OSM only",
+              file=sys.stderr, flush=True)
         return None
 
-    _write_tile_manifest(
-        manifest_path,
-        {
-            "schema": 1,
-            "release": release,
-            "world_bbox_digest": world_digest,
-            "bbox": [float(value) for value in bbox],
-            "tile_edge_km": float(tile_edge_km),
-            "tile_count": len(tiles),
-            "completed": sorted(completed),
-            "complete": True,
-            "features": feature_count,
-            "duplicates_removed": duplicates,
-        },
-    )
+    final_status = "partial" if failed_tiles else "complete"
+    snapshot = state(final_status, features=feature_count, duplicates=duplicates)
+    _write_tile_manifest(manifest_path, snapshot)
+    _write_tile_manifest(status_path, snapshot)
     print(
-        f"CWR Overture ready: {feature_count:,} buildings from {len(tiles)} tile(s); "
-        f"removed {duplicates:,} cross-tile duplicate(s); merge took "
+        f"CWR Overture {final_status}: {feature_count:,} buildings from "
+        f"{len(tile_paths)}/{len(tiles)} tile(s), {len(failed_tiles)} failed; "
+        f"removed {duplicates:,} duplicates; merge took "
         f"{time.monotonic() - started_merge:.1f}s: {output}",
-        file=sys.stderr,
-        flush=True,
+        file=sys.stderr, flush=True,
     )
     return output
