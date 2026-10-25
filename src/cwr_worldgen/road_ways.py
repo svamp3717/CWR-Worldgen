@@ -128,7 +128,7 @@ def write_osm_road_ways(
     textures: dict[str, str] = {}
     for surface in ("paved", "dirt", "gravel"):
         texture = str(surface_textures.get(surface) or "").replace("/", "\\")
-        if (not texture or any(char.isspace() for char in texture)
+        if (not texture or "#" in texture or any(char.isspace() for char in texture)
                 or texture.startswith("\\") or texture.endswith("\\")
                 or not texture.casefold().endswith((".paa", ".pac"))):
             raise ValueError(
