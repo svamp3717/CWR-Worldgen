@@ -45,7 +45,7 @@ def _add_common_world_arguments(
     parser.add_argument("--display-name", default=default_display_name, help="name shown in the island list")
     parser.add_argument(
         "--profile",
-        choices=("cwa", "cwr-ce"),
+        choices=("cwa", "cwr-ce", "cwr-ce-ways"),
         default=default_profile,
         help=(
             "target runtime: cwa for original 1.99 compatibility; cwr-ce for "
