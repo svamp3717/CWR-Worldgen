@@ -862,6 +862,10 @@ def _validate_milestone3(
 ) -> list[str]:
     checks: list[tuple[str, bool, str]] = []
     summary = inspect_rvw4(result.wrp_path, height_scale=spec.height_scale)
+    expected_objects = (
+        generated.objects[generated.road_objects:]
+        if is_osm_ways_profile(spec.profile) else generated.objects
+    )
     expected_texture_paths = {spec.dummy_texture_path} | {
         spec.terrain_texture_path(material.code) for material in OSM_MATERIALS
     }
@@ -940,8 +944,8 @@ def _validate_milestone3(
     ))
     checks.append((
         "WRP object count matches generated geography",
-        summary.object_count == len(generated.objects),
-        f"wrp={summary.object_count}, generated={len(generated.objects)}",
+        summary.object_count == len(expected_objects),
+        f"wrp={summary.object_count}, generated={len(expected_objects)}",
     ))
     checks.append((
         "Static object IDs are unique and deterministic",
@@ -950,7 +954,7 @@ def _validate_milestone3(
     ))
     checks.append((
         "WRP object stream preserves generated priority ordering",
-        summary.object_models == tuple(obj.model_path for obj in generated.objects),
+        summary.object_models == tuple(obj.model_path for obj in expected_objects),
         "roads -> forests/trees -> rural vegetation -> buildings -> infrastructure -> semantic sites",
     ))
     checks.append((
@@ -1307,9 +1311,30 @@ def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> 
         elevations,
         wrp_texture_indices,
         texture_table_paths,
-        generated.objects,
+        generated.objects[generated.road_objects:]
+        if is_osm_ways_profile(spec.profile) else generated.objects,
         height_scale=spec.height_scale,
+        renumber_object_ids=is_osm_ways_profile(spec.profile),
     )
+
+    ways_path = source_dir / f"{spec.name}.ways"
+    ways_report: dict[str, object] = {"enabled": False}
+    if is_osm_ways_profile(spec.profile):
+        ways_report = {
+            "enabled": True,
+            **write_osm_road_ways(
+                ways_path, dataset, projection,
+                include_minor_roads=spec.include_minor_roads,
+                surface_textures={
+                    "paved": r"data\silnice.pac",
+                    "dirt": r"data\cesta.pac",
+                    "gravel": r"data\asfaltka.pac",
+                },
+            ),
+            "omitted_legacy_road_objects": generated.road_objects,
+        }
+    else:
+        ways_path.unlink(missing_ok=True)
 
     config_text = render_config(spec, milestone=3)
     validate_cwa_config(config_text)
@@ -1392,6 +1417,7 @@ def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> 
         "generator": GENERATOR_VERSION,
         "world": spec_manifest,
         "height_scale": spec.height_scale,
+        "road_ways": ways_report,
         "heightmap": {
             "source_width": loaded.source_width,
             "source_height": loaded.source_height,
@@ -1444,8 +1470,11 @@ def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> 
         ],
         "spawn": asdict(spawn),
         "objects": {
-            "total": len(generated.objects),
-            "roads": generated.road_objects,
+            "total": len(generated.objects) - (
+                generated.road_objects if is_osm_ways_profile(spec.profile) else 0
+            ),
+            "roads": 0 if is_osm_ways_profile(spec.profile) else generated.road_objects,
+            "legacy_road_objects_fitted_for_terrain": generated.road_objects,
             "buildings": generated.building_objects,
             "forest": generated.forest_objects,
             "forest_road_rejections": generated.forest_road_rejections,
