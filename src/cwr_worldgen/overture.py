@@ -885,8 +885,19 @@ def fetch_overture_buildings_geojson(
     output = Path(output)
     status_path = overture_fetch_status_path(output)
     previous_status = _load_tile_manifest(status_path)
-    if output.is_file() and not refresh and previous_status:
-        if previous_status.get("status") == "complete":
+    if output.is_file() and not refresh:
+        if previous_status and previous_status.get("status") == "complete":
+            return output
+        if previous_status is None:
+            # Preserve compatibility with pre-status GeoJSON caches. We cannot
+            # reconstruct tile coverage from those files: label that uncertainty
+            # instead of unexpectedly redownloading a frozen source.
+            _write_tile_manifest(status_path, {
+                "schema": 2, "status": "complete", "complete": True,
+                "reason": "legacy cached GeoJSON; full coverage unverified",
+                "tile_count": 0, "completed_tile_count": 0, "failed_tiles": [],
+                "features": None,
+            })
             return output
     output.parent.mkdir(parents=True, exist_ok=True)
 
