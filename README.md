@@ -206,11 +206,14 @@ Buildings and other objects are checked against the final road layout so that ge
 
 Select **Game profile: cwr-ce-ways** in the GUI or pass
 `--profile cwr-ce-ways` to the CLI when targeting
-[CWR-CE's OSM-style road ways feature branch](https://github.com/svamp3717/CWR-CE/tree/feature/osm-style-road-ways).
+[CWR-CE's isolated OSM-style road ways feature branch](https://github.com/svamp3717/CWR-CE/tree/feature/osm-style-road-ways-isolated).
 Worldgen writes a `<world>.ways` sidecar beside the WRP and packages it into
-the world PBO. Roads use shared nodes, widths, and native roadway textures
-instead of thousands of legacy road P3Ds, while terrain grading and building
-clearance still use the fitted road geometry. The existing `cwa` and
+the world PBO. Compatible road ways are merged into longer chains and rural
+corners gain adaptive, clearance-aware curves. Each chain uses shared road
+nodes and either a resolved P3D road-material donor (preserving UVs, lighting,
+and roadway contact) or a stock-matched texture fallback instead of thousands
+of legacy road P3Ds. Terrain grading and building clearance still use fitted
+road geometry. The existing `cwa` and
 `cwr-ce` profiles retain their original behavior. Bridges and tunnels
 still need separate modeled geometry. See the
 [native road ways guide](docs/cwr-ce-osm-road-ways.md).
