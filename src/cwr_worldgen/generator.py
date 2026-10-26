@@ -4496,6 +4496,22 @@ def build_milestone4(
     )
     if nogova_clutter:
         all_objects = (*all_objects, *nogova_clutter)
+
+    # Terrain-following native ways cannot paint through an embankment that
+    # covers the stock bridge's roadway. Preserve only short stock asphalt
+    # covers above those buried bridge abutments; all other road P3Ds remain
+    # omitted from the native-ways WRP.
+    bridge_surface_covers: tuple[WorldObject, ...] = ()
+    if is_osm_ways_profile(spec.profile):
+        from .bridge_way_surface import bridge_road_surface_covers
+
+        bridge_surface_covers = bridge_road_surface_covers(
+            nonroads.objects, elevations, spec,
+            starting_id=len(all_objects) + 1,
+        )
+        if bridge_surface_covers:
+            all_objects = (*all_objects, *bridge_surface_covers)
+
     combined_model_usage: Counter[str] = Counter(dict(nonroads.model_usage))
     # Roads and semantic objects are much smaller populations than dense forest/
     # placement output. Scan each once, then use the aggregate everywhere else.
@@ -4505,6 +4521,7 @@ def build_milestone4(
         combined_model_usage.update(obj.model_path for obj in road_fit.objects)
     combined_model_usage.update(obj.model_path for obj in semantic.objects)
     combined_model_usage.update(obj.model_path for obj in nogova_clutter)
+    combined_model_usage.update(obj.model_path for obj in bridge_surface_covers)
     generated = ObjectGenerationResult(
         objects=all_objects,
         road_objects=len(road_fit.objects),
@@ -4998,6 +5015,7 @@ def build_milestone4(
             "surface_textures": way_textures,
             "surface_donors": native_way_donors,
             "pruned_unused_road_assets": list(pruned_road_assets),
+            "buried_bridge_road_covers": len(bridge_surface_covers),
             "omitted_legacy_road_objects": len(road_fit.objects),
         }
     else:
@@ -5427,6 +5445,14 @@ def build_milestone4(
         )
         if repeat_clutter:
             repeat_objects = (*repeat_objects, *repeat_clutter)
+        if is_osm_ways_profile(spec.profile):
+            from .bridge_way_surface import bridge_road_surface_covers
+            repeat_bridge_covers = bridge_road_surface_covers(
+                repeat_nonroads.objects, repeat_elevations, spec,
+                starting_id=len(repeat_objects) + 1,
+            )
+            if repeat_bridge_covers:
+                repeat_objects = (*repeat_objects, *repeat_bridge_covers)
         repeat_fingerprint = _generation_fingerprint(
             spec,
             repeat_elevations,
