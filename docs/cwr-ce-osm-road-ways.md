@@ -72,8 +72,37 @@ or the terrain boundary. Endpoints are always preserved. Although curves
 appear more natural, the generator still fits/grades terrain against the
 original OSM source, so verify steep mountain roads in-game.
 
+### Gentle curves on long straight sections
+
+Corner rounding alone leaves long OSM straight lines completely straight.
+For the **cwr-ce-ways** profile, the exporter now also considers straight
+rural spans of at least **140 m**, including consecutive nearly collinear
+OSM sections, for a smooth, low-frequency S-curve. Road sections adjoining
+a sampled sharp-bend curve need **250 m** of room instead, to avoid
+overcrowding turns.
+
+The displacement is small and road-class dependent: secondary roads are
+subtle (up to 1.4 m base amplitude), tertiary/unclassified/residential
+roads have modest movement, and unsurfaced tracks can use up to **3.8 m
+base amplitude**. The sinusoidal envelope reduces these maxima further
+along the centerline and has zero lateral offset and lateral derivative
+at both endpoints. This avoids sudden heading changes at road joins.
+Curves have no random per-vertex jitter, are deterministic and
+orientation-independent (reversing a road does not change its shape),
+and are sampled approximately every 12 m. Motorways, trunks and primary
+roads are not artificially bent.
+
+The new line is checked against the original centerline (**at most 4 m
+deviation**), towns and urban polygons, buildings, waterways, other
+roads, shared junctions and map boundaries. Modeled bridge and tunnel
+approaches stay exactly aligned. If checks fail, the original straight
+section is exported unchanged. The existing road objects are still
+used for terrain grading, so these curves are cosmetic refinements,
+**not** an automatic regrading or a faithful edit to OSM itself.
+
 The build manifest now includes **road_ways.smoothed_rural_bends**,
-**road_ways.merged_source_runs**, and **road_ways.merged_road_chains**.
+**road_ways.softened_rural_straights**, **road_ways.merged_source_runs**,
+and **road_ways.merged_road_chains**.
 
 ## Road surface materials and isolated CWR-CE
 
