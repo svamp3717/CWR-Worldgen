@@ -468,7 +468,7 @@ def write_osm_road_ways(
     include_minor_roads: bool,
     surface_textures: Mapping[str, str],
     surface_donors: Mapping[str, str] | None = None,
-) -> dict[str, int | str]:
+) -> dict[str, object]:
     """Export terrain-following non-bridge roads as a deterministic sidecar.
 
     Point identity comes from the normalized projected coordinates, so roads
