@@ -287,6 +287,11 @@ class _BendClearance:
             for run in _runs(points, self.limit):
                 non_ground_runs.append((-(index + 1), road.tags, _width(road.tags), run))
         clearance_runs = (*source_runs, *non_ground_runs)
+        self.omitted_approaches = {
+            _point_key(point)
+            for _, _, _, points in non_ground_runs
+            for point in points
+        }
         self.road_shapes = [LineString(run) for _, _, _, run in clearance_runs]
         self.road_owners = [owner for owner, _, _, _ in clearance_runs]
         self.road_half_widths = [width * 0.5 for _, _, width, _ in clearance_runs]
@@ -602,7 +607,11 @@ def _flow_rural_straights(
             else _MIN_FLOW_LENGTH_METRES
         )
         accepted = False
-        if span >= min_length:
+        if (
+            span >= min_length
+            and _point_key(start) not in clearance.omitted_approaches
+            and _point_key(original[-1]) not in clearance.omitted_approaches
+        ):
             end = original[-1]
             direction = ((end[0] - start[0]) / span,
                          (end[1] - start[1]) / span)
