@@ -20,13 +20,14 @@ TEXTURES = {
 
 
 def _export(tmp_path, roads, *, include_minor=True, world_size=100.0,
-            surface_donors=None, **features):
+            surface_donors=None, bridge_objects=(), **features):
     projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), world_size)
     path = tmp_path / "test_world.ways"
     info = write_osm_road_ways(
         path, SimpleNamespace(roads=tuple(roads), **features), projection,
         include_minor_roads=include_minor, surface_textures=TEXTURES,
         surface_donors=surface_donors,
+        bridge_objects=bridge_objects,
     )
     lines = path.read_text(encoding="utf-8").splitlines()
     nodes = {
@@ -667,3 +668,94 @@ def test_flow_keeps_bridges_tunnels_and_junction_points_fixed(tmp_path):
         )
         assert info["softened_rural_straights"] == 0
         assert _way_points(nodes, ways[0]) == [(100, 400), (500, 400)]
+
+
+
+def _stock_bridge(x=400.0, z=400.0, heading=90.0):
+    """A stock 50.19-m bridge with real measured deck endpoints."""
+    return SimpleNamespace(
+        model_path=r"O\Hous\most_stred30.p3d",
+        x=x, y=-7.0, z=z,
+        heading_degrees=heading, pitch_degrees=0.0,
+    )
+
+
+def test_bridge_tagged_osm_way_restores_both_dry_approaches(tmp_path):
+    # A typical OSM bridge=yes feature is 600m long, even though the
+    # actual stock Roadway deck over water is only 50.19m.
+    bridge_tagged = OsmLineFeature(
+        "way/bridge", {"highway": "tertiary", "bridge": "yes"},
+        (_ll(100, 400), _ll(700, 400)),
+    )
+    info, nodes, ways, data = _export(
+        tmp_path, [bridge_tagged], world_size=1000,
+        bridge_objects=(_stock_bridge(),),
+    )
+    assert info["stock_bridge_modules"] == 1
+    assert info["excluded_bridge_features"] == 1
+    assert info["restored_bridge_approach_ways"] == 2
+    assert info["unmatched_bridge_features"] == 0
+    assert len(ways) == 2
+    first, second = [_way_points(nodes, way) for way in ways]
+    assert first[0] == (100, 400)
+    assert second[-1] == (700, 400)
+    # The stock bridge deck joins these ends near x=375 and x=425.
+    assert 374 < first[-1][0] < 378
+    assert 422 < second[0][0] < 426
+    assert first[-1][1] == second[0][1] == 400
+    assert all(not 380 < x < 420 for x, z in first + second)
+    assert _export(
+        tmp_path, [bridge_tagged], world_size=1000,
+        bridge_objects=(_stock_bridge(),),
+    )[3] == data
+
+
+def test_bridge_endpoints_stay_connected_with_reversed_osm_geometry(tmp_path):
+    points = (_ll(100, 400), _ll(700, 400))
+    for source in (points, points[::-1]):
+        feature = OsmLineFeature(
+            "way/bridge", {"highway": "tertiary", "bridge": "yes"}, source,
+        )
+        info, nodes, ways, _ = _export(
+            tmp_path, [feature], world_size=1000,
+            bridge_objects=(_stock_bridge(),),
+        )
+        assert len(ways) == 2
+        terminal_points = [
+            pts
+            for way in ways
+            for pts in (_way_points(nodes, way)[0], _way_points(nodes, way)[-1])
+        ]
+        assert len([p for p in terminal_points if 374 < p[0] < 378]) == 1
+        assert len([p for p in terminal_points if 422 < p[0] < 426]) == 1
+
+
+def test_bridge_way_with_multiple_osm_vertices_retains_road_on_dry_banks(tmp_path):
+    feature = OsmLineFeature(
+        "way/bridge", {"highway": "residential", "bridge": "yes"},
+        tuple(_ll(x, 400) for x in (100, 200, 300, 400, 500, 600, 700)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [feature], world_size=1000,
+        bridge_objects=(_stock_bridge(),),
+    )
+    assert info["restored_bridge_approach_ways"] == 2
+    assert len(ways) == 2
+    left = _way_points(nodes, ways[0])
+    right = _way_points(nodes, ways[1])
+    assert (200, 400) in left and (300, 400) in left
+    assert (500, 400) in right and (600, 400) in right
+
+
+def test_unrelated_bridge_or_missing_stock_deck_does_not_create_water_road(tmp_path):
+    feature = OsmLineFeature(
+        "way/bridge", {"highway": "tertiary", "bridge": "yes"},
+        (_ll(100, 400), _ll(700, 400)),
+    )
+    for decks in ((), (_stock_bridge(z=500.0),),
+                  (_stock_bridge(heading=0.0),)):
+        info, nodes, ways, _ = _export(
+            tmp_path, [feature], world_size=1000, bridge_objects=decks,
+        )
+        assert info["restored_bridge_approach_ways"] == 0
+        assert len(ways) == 0
