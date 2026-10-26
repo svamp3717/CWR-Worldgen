@@ -2,7 +2,7 @@
 """CWR-CE native, model-free OSM-style road way export.
 
 The engine's feature/osm-style-road-ways reader expects local X/Z coordinates,
-shared integer node IDs, and a surface *texture*, not a P3D model name.
+shared integer node IDs, and a texture or optional P3D material donor.
 """
 from __future__ import annotations
 
@@ -121,7 +121,9 @@ def _runs(
 _MIN_LEG_METRES = 18.0
 _MIN_BEND_DEGREES = 25.0
 _MAX_BEND_DEGREES = 135.0
-_MAX_TANGENT_METRES = 18.0
+_MAX_TANGENT_METRES = 38.0
+_MIN_CURVE_RADIUS_METRES = 12.0
+_MAX_CORRIDOR_DEVIATION_METRES = 14.0
 _JUNCTION_CLEARANCE_METRES = 24.0
 _ROAD_SHOULDER_CLEARANCE_METRES = 3.0
 _BUILDING_CLEARANCE_METRES = 4.0
@@ -156,6 +158,80 @@ def _polygon_shapes(features: Sequence[object], projection: BboxProjection):
             polygon = Polygon(outer, holes)
             if not polygon.is_empty and polygon.is_valid and polygon.area > 0:
                 yield polygon
+
+
+
+# Consecutive roads with the same output width and skin can use a single
+# CWR-CE way. Combining before smoothing also lets bends across OSM way
+# boundaries become true tangent-continuous curves.
+_RoadRun = tuple[int, Mapping[str, str], float, list[tuple[float, float]]]
+
+
+def _merge_compatible_runs(
+    source_runs: Sequence[_RoadRun],
+    protected_points: set[tuple[int, int]] | None = None,
+) -> list[_RoadRun]:
+    """Coalesce degree-two, exactly shared endpoints without changing topology.
+
+    Never guess a connection from proximity, and never merge across a crossing,
+    an interior junction, a bridge endpoint, or a surface/width transition.
+    Cyclic chains stop before closing to preserve distinct way endpoints.
+    """
+    ends: dict[tuple[int, int], list[tuple[int, bool]]] = defaultdict(list)
+    interior: set[tuple[int, int]] = set(protected_points or ())
+    for index, (_, _, _, points) in enumerate(source_runs):
+        ends[_point_key(points[0])].append((index, True))
+        ends[_point_key(points[-1])].append((index, False))
+        interior.update(_point_key(p) for p in points[1:-1])
+    protected = interior
+
+    def signature(index: int) -> tuple[str, float]:
+        _, tags, width, _ = source_runs[index]
+        return _surface(tags), round(width, 3)
+
+    visited: set[int] = set()
+    merged: list[_RoadRun] = []
+    for seed, (_, tags, width, points) in enumerate(source_runs):
+        if seed in visited:
+            continue
+        visited.add(seed)
+        chain = list(points)
+        for left in (False, True):
+            while True:
+                joint = chain[0] if left else chain[-1]
+                key = _point_key(joint)
+                choices = ends.get(key, ())
+                if key in protected or len(choices) != 2:
+                    break
+                neighbor_indices = [i for i, _ in choices if i not in visited]
+                if len(neighbor_indices) != 1:
+                    break
+                candidate = neighbor_indices[0]
+                if signature(seed) != signature(candidate):
+                    break
+                candidate_points = source_runs[candidate][3]
+                if left:
+                    if candidate_points[-1] == joint:
+                        addition = candidate_points[:-1]
+                    elif candidate_points[0] == joint:
+                        addition = list(reversed(candidate_points[1:]))
+                    else:
+                        break
+                    proposed = list(addition) + chain
+                else:
+                    if candidate_points[0] == joint:
+                        addition = candidate_points[1:]
+                    elif candidate_points[-1] == joint:
+                        addition = list(reversed(candidate_points[:-1]))
+                    else:
+                        break
+                    proposed = chain + list(addition)
+                if proposed[0] == proposed[-1]:
+                    break
+                visited.add(candidate)
+                chain = proposed
+        merged.append((seed, tags, width, chain))
+    return merged
 
 
 class _BendClearance:
@@ -286,11 +362,11 @@ def _round_rural_bends(
     width: float,
     clearance: _BendClearance,
 ) -> tuple[list[tuple[float, float]], int]:
-    """Replace eligible sharp corners with tangent-continuous quadratic arcs.
+    """Replace eligible sharp corners with approximately circular cubic arcs.
 
     Endpoints, shared junctions, urban bends, and constrained geometry stay
     exactly on their original OSM positions. Adjacent arcs cannot overlap
-    because the trim is at most 30% of either source segment.
+    because the trim is at most 38% of either source segment.
     """
     if len(run) < 3:
         return list(run), 0
@@ -309,21 +385,48 @@ def _round_rural_bends(
         if not _MIN_BEND_DEGREES <= angle <= _MAX_BEND_DEGREES:
             continue
 
-        tangent = min(_MAX_TANGENT_METRES, before * 0.3, after * 0.3)
-        if tangent < 5.0:
+        # A circular-arc approximation with cubic Bezier controls avoids
+        # the triangular-looking center of the older quadratic corner. The
+        # radius grows on long open roads and shrinks on slower/short roads.
+        half_angle = math.radians(angle) * 0.5
+        tangent_of_half = math.tan(half_angle)
+        desired = max(12.0, 10.0 + _MIN_CURVE_RADIUS_METRES * tangent_of_half)
+        tangent = min(_MAX_TANGENT_METRES, desired, before * 0.38, after * 0.38)
+        radius = tangent / tangent_of_half
+        if radius < _MIN_CURVE_RADIUS_METRES:
             continue
         entry = (b[0] - incoming[0] * tangent, b[1] - incoming[1] * tangent)
         exit = (b[0] + outgoing[0] * tangent, b[1] + outgoing[1] * tangent)
-        samples = max(5, math.ceil(tangent / 2.5))
-        arc = []
+        # For a circular arc of angle phi, cubic control offset is
+        # (4/3)*tan(phi/4)*R. It matches each straight segment's tangent.
+        control = (4.0 / 3.0) * math.tan(half_angle * 0.5) * radius
+        p1 = (entry[0] + incoming[0] * control,
+              entry[1] + incoming[1] * control)
+        p2 = (exit[0] - outgoing[0] * control,
+              exit[1] - outgoing[1] * control)
+        samples = max(6, math.ceil(2.0 * tangent / 3.0))
+        arc: list[tuple[float, float]] = []
         for j in range(samples + 1):
             t = j / samples
-            x = (1-t)**2 * entry[0] + 2*(1-t)*t*b[0] + t*t*exit[0]
-            z = (1-t)**2 * entry[1] + 2*(1-t)*t*b[1] + t*t*exit[1]
+            omt = 1.0 - t
+            x = (omt**3 * entry[0] + 3*omt**2*t * p1[0]
+                 + 3*omt*t*t * p2[0] + t**3 * exit[0])
+            z = (omt**3 * entry[1] + 3*omt**2*t * p1[1]
+                 + 3*omt*t*t * p2[1] + t**3 * exit[1])
             point = (round(x, _COORD_DECIMALS), round(z, _COORD_DECIMALS))
             if not arc or point != arc[-1]:
                 arc.append(point)
-        if len(arc) <= 2 or not clearance.allows(owner, b, arc, width):
+        # Do not stray too far from the original terrain-graded road
+        # corridor: the .ways profile still uses the original grade solver.
+        original_path = LineString((a, b, c))
+        if (
+            len(arc) <= 2
+            or any(
+                original_path.distance(Point(*p)) > _MAX_CORRIDOR_DEVIATION_METRES
+                for p in arc
+            )
+            or not clearance.allows(owner, b, arc, width)
+        ):
             continue
         rounded[i] = arc
 
@@ -349,6 +452,7 @@ def write_osm_road_ways(
     *,
     include_minor_roads: bool,
     surface_textures: Mapping[str, str],
+    surface_donors: Mapping[str, str] | None = None,
 ) -> dict[str, int | str]:
     """Export terrain-following non-bridge roads as a deterministic sidecar.
 
@@ -366,6 +470,23 @@ def write_osm_road_ways(
                 f"OSM ways require a valid single-token Roadway texture for {surface}: {texture!r}"
             )
         textures[surface] = texture
+
+    # The isolated CWR-CE engine accepts donor=P3D and reproduces its UVs,
+    # overlays, normal orientation, and separate roadway-contact texture.
+    # Retain texture-only compatibility when the model is not known to exist.
+    sources: dict[str, str] = dict(textures)
+    for surface, donor in (surface_donors or {}).items():
+        if surface not in sources or not str(donor).strip():
+            continue
+        name = str(donor).strip().replace("/", "\\")
+        if name.casefold().startswith("donor="):
+            name = name[6:]
+        if (
+            "#" in name or any(ch.isspace() for ch in name)
+            or name.startswith("\\") or not name.casefold().endswith(".p3d")
+        ):
+            raise ValueError(f"Invalid CWR-CE road donor for {surface}: {donor!r}")
+        sources[surface] = "donor=" + name
 
     limit = projection.world_size - 0.01
     if limit <= 0:
@@ -386,6 +507,16 @@ def write_osm_road_ways(
         for run in _runs(points, limit):
             source_runs.append((owner, tags, _width(tags), run))
 
+    original_run_count = len(source_runs)
+    # Bridges are omitted from native geometry, but their junctions must
+    # remain untouched by chain joining and bend rounding.
+    bridge_points = {
+        _point_key(projection.to_world(p))
+        for road in dataset.roads
+        if road.tags.get("bridge", "").strip().casefold() not in {"", "no", "false", "0"}
+        for p in road.points
+    }
+    source_runs = _merge_compatible_runs(source_runs, bridge_points)
     clearance = _BendClearance(dataset, projection, source_runs)
     smoothed_bends = 0
     for owner, tags, width, original in source_runs:
@@ -413,7 +544,7 @@ def write_osm_road_ways(
                     "reduce the generated area or road detail"
                 )
             lines.append(
-                f"way {len(lines) + 1} {_width(tags):.3f} {textures[_surface(tags)]} "
+                f"way {len(lines) + 1} {width:.3f} {sources[_surface(tags)]} "
                 + " ".join(map(str, ids))
             )
     # Emit nodes in ID order. Both record types may occur in either order.
@@ -439,5 +570,8 @@ def write_osm_road_ways(
         "ways": len(lines),
         "excluded_bridge_features": skipped_elevated,
         "smoothed_rural_bends": smoothed_bends,
+        "merged_source_runs": original_run_count - len(source_runs),
+        "merged_road_chains": len(source_runs),
+        "surface_sources": sources,
         "format": "cwr-ce-osm-ways-v1",
     }
