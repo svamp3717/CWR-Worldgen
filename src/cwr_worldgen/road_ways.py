@@ -49,9 +49,14 @@ def is_osm_ways_profile(profile: str) -> bool:
 
 
 def _non_ground(tags: Mapping[str, str]) -> bool:
-    return any(
-        str(tags.get(key, "")).strip().casefold() not in {"", "no", "false", "0"}
-        for key in ("bridge", "tunnel")
+    return (
+        any(
+            str(tags.get(key, "")).strip().casefold()
+            not in {"", "no", "false", "0", "none"}
+            for key in ("bridge", "tunnel")
+        )
+        or str(tags.get("man_made", "")).strip().casefold() == "bridge"
+        or str(tags.get("special", "")).strip().casefold() == "bridge"
     )
 
 
