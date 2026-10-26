@@ -318,7 +318,9 @@ def test_reversed_ways_can_merge_without_an_unintentional_spur(tmp_path):
     info, nodes, ways, _ = _export(tmp_path, [west, east], world_size=1000)
     assert info["ways"] == 1
     assert info["merged_source_runs"] == 1
-    assert len(_way_points(nodes, ways[0])) == 3
+    merged_points = _way_points(nodes, ways[0])
+    assert len(merged_points) > 3
+    assert {merged_points[0], merged_points[-1]} == {(200, 200), (600, 200)}
 
 
 def test_t_junction_remains_three_ways_with_a_shared_node(tmp_path):
@@ -526,3 +528,142 @@ def test_native_pbo_layout_rejects_unreferenced_generated_road_p3ds(tmp_path):
     assert _verify_single_world_pbo_layout(
         pbo, "world", None, include_ways=True,
     )["verified"]
+
+
+
+def test_long_rural_straights_gain_smooth_wandering_centerlines(tmp_path):
+    road = OsmLineFeature(
+        "way/long_track", {"highway": "track", "surface": "gravel"},
+        (_ll(100, 400), _ll(600, 400)),
+    )
+    info, nodes, ways, first_bytes = _export(
+        tmp_path, [road], world_size=1000,
+    )
+    points = _way_points(nodes, ways[0])
+    assert info["softened_rural_straights"] == 1
+    assert info["smoothed_rural_bends"] == 0
+    assert points[0] == (100, 400)
+    assert points[-1] == (600, 400)
+    offsets = [z - 400 for _, z in points[1:-1]]
+    assert max(offsets) > 0.7
+    assert min(offsets) < -0.7
+    assert max(abs(v) for v in offsets) <= 4.0
+    # No jagged line segments and no accidental duplicate nodes.
+    directions = []
+    for p, q in zip(points, points[1:]):
+        distance = __import__("math").dist(p, q)
+        assert distance > 0
+        directions.append(((q[0]-p[0])/distance, (q[1]-p[1])/distance))
+    assert min(
+        a[0]*b[0] + a[1]*b[1] for a, b in zip(directions, directions[1:])
+    ) > 0.97
+    assert _export(tmp_path, [road], world_size=1000)[3] == first_bytes
+
+
+def test_reversing_rural_road_keeps_the_exact_same_wandering_geometry(tmp_path):
+    vertices = (_ll(100, 430), _ll(600, 430))
+    fwd = OsmLineFeature("way/1", {"highway": "track"}, vertices)
+    rev = OsmLineFeature("way/1", {"highway": "track"}, vertices[::-1])
+    _, nodes, ways, _ = _export(tmp_path, [fwd], world_size=1000)
+    a = _way_points(nodes, ways[0])
+    _, nodes, ways, _ = _export(tmp_path, [rev], world_size=1000)
+    b = _way_points(nodes, ways[0])
+    assert a == list(reversed(b))
+
+
+def test_short_or_major_engineered_roads_remain_straight(tmp_path):
+    for highway, length in (
+        ("track", 120), ("primary", 500), ("trunk", 500),
+        ("motorway", 500),
+    ):
+        road = OsmLineFeature(
+            "way/road", {"highway": highway},
+            (_ll(100, 400), _ll(100 + length, 400)),
+        )
+        info, nodes, ways, _ = _export(
+            tmp_path, [road], world_size=1000,
+        )
+        assert info["softened_rural_straights"] == 0
+        assert _way_points(nodes, ways[0]) == [
+            (100, 400), (100 + length, 400),
+        ]
+
+
+def test_nearly_collinear_osm_vertices_form_one_natural_curve(tmp_path):
+    road = OsmLineFeature(
+        "way/digitized", {"highway": "track"},
+        tuple(_ll(x, 450) for x in (100, 170, 240, 310, 380, 450, 520)),
+    )
+    info, nodes, ways, _ = _export(tmp_path, [road], world_size=1000)
+    points = _way_points(nodes, ways[0])
+    assert info["softened_rural_straights"] == 1
+    assert points[0] == (100, 450)
+    assert points[-1] == (520, 450)
+    assert len(points) > 6
+    assert (240, 450) not in points
+
+
+def test_rural_flow_stays_out_of_settlements_and_nearby_buildings(tmp_path):
+    road = OsmLineFeature(
+        "way/long", {"highway": "track"},
+        (_ll(100, 400), _ll(600, 400)),
+    )
+    village = OsmPointFeature(
+        "node/village", {"place": "village"}, _ll(350, 400),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [road], world_size=1000, places=(village,),
+    )
+    assert info["softened_rural_straights"] == 0
+    assert _way_points(nodes, ways[0]) == [(100, 400), (600, 400)]
+    building = OsmPolygonFeature(
+        "building/b", {"building": "yes"},
+        (GeoPolygon(tuple(_ll(x, z) for x, z in (
+            (350, 403), (360, 403), (360, 413), (350, 413), (350, 403),
+        ))),),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [road], world_size=1000,
+        building_polygons=(building,),
+    )
+    assert info["softened_rural_straights"] == 0
+    assert _way_points(nodes, ways[0]) == [(100, 400), (600, 400)]
+
+
+def test_parallel_road_and_watercourse_protect_open_straight(tmp_path):
+    road = OsmLineFeature(
+        "way/main", {"highway": "track"}, (_ll(100, 400), _ll(600, 400)),
+    )
+    parallel = OsmLineFeature(
+        "way/other", {"highway": "track"}, (_ll(100, 407), _ll(600, 407)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [road, parallel], world_size=1000,
+    )
+    assert info["softened_rural_straights"] == 0
+    assert all(len(way[3]) == 2 for way in ways)
+    stream = OsmLineFeature(
+        "way/stream", {"waterway": "stream"},
+        (_ll(250, 405), _ll(450, 405)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [road], world_size=1000, watercourses=(stream,),
+    )
+    assert info["softened_rural_straights"] == 0
+
+
+def test_flow_keeps_bridges_tunnels_and_junction_points_fixed(tmp_path):
+    for tags in ({"bridge": "yes"}, {"tunnel": "yes"}):
+        main = OsmLineFeature(
+            "way/main", {"highway": "track"},
+            (_ll(100, 400), _ll(500, 400)),
+        )
+        omitted = OsmLineFeature(
+            "way/omitted", {"highway": "track", **tags},
+            (_ll(500, 400), _ll(650, 400)),
+        )
+        info, nodes, ways, _ = _export(
+            tmp_path, [main, omitted], world_size=1000,
+        )
+        assert info["softened_rural_straights"] == 0
+        assert _way_points(nodes, ways[0]) == [(100, 400), (500, 400)]
