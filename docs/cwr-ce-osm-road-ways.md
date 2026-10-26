@@ -1,7 +1,7 @@
 # CWR-CE native OSM road ways profile
 
 The **cwr-ce-ways** game profile targets
-[CWR-CE's model-free OSM-style road implementation](https://github.com/svamp3717/CWR-CE/tree/feature/osm-style-road-ways).
+[CWR-CE's isolated native OSM-style road implementation](https://github.com/svamp3717/CWR-CE/tree/feature/osm-style-road-ways-isolated).
 Use that engine branch (or a CWR-CE build containing the feature). Ordinary
 **cwa** and **cwr-ce** profiles are unchanged.
 
@@ -20,7 +20,10 @@ The file uses the engine's UTF-8 line format:
 
     node 1 100.0000 150.0000
     node 2 180.0000 150.0000
-    way 1 6.000 data\silnice.pac 1 2
+    node 3 220.0000 180.0000
+    way 1 6.000 o\road\sil_new.paa 1 2
+    # When a matching mounted donor P3D is available, instead:
+    way 2 6.000 donor=o\road\sil25.p3d 2 3
 
 Positions are *projected local world X/Z metres*, **not latitude/longitude**.
 Node IDs are shared when projected/snapped road vertices coincide. This preserves
@@ -32,50 +35,66 @@ appear twice. Worldgen still computes its original road fit as input for terrain
 grading and building/vegetation clearance. Non-road P3Ds and separately
 modelled bridge/other infrastructure are retained.
 
-## Softer bends outside settlements
+## Natural bends across rural roads
 
-The native-ways profile also rounds eligible **rural** corners. Worldgen
-replaces a sharp vertex with a short, tangent-continuous quadratic curve,
-sampled into several shared-node way points for CWR-CE to render. The
-underlying OSM source files and other game profiles are unchanged.
+The exporter first **merges compatible end-to-end OSM ways** into continuous
+native road chains, then rounds eligible bends across those original way
+boundaries. Two ways are joinable only when their projected endpoint coordinates
+match exactly, they have the same output width (to 0.001 m) and surface
+material, and the shared point is not a branch or mapped interior crossing.
+Nearby but distinct endpoints are *not* snapped, so the merge never creates
+new connectivity. Junctions, bridges, width/material transitions, and loops
+remain protected. The engine's existing 512-node output chunking still applies
+to long merged chains.
 
-A corner is eligible only when both incoming and outgoing sections are at
-least 18 m long, the direction change is between 25 and 135 degrees, and
-there is room for a gentle bend. The curve is limited to an 18 m tangent
-length and at most 30% of either adjoining section, so it stays close to
-Worldgen's existing terrain-graded road corridor.
+Rural bends now use sampled **cubic circular-arc approximations** with
+tangent-continuity at both ends rather than the old quadratic interpolation.
+The curvature is adaptive: open, long approaches receive larger radii; turns
+with insufficient length for a 12 m minimum radius are left untouched. The
+maximum tangent trim is 38 m and no more than 38% of each approach. Proposed
+curves stay within 14 m of the original OSM road centerline to respect the
+existing terrain-grading corridor.
 
-To preserve road connectivity and sensible placement, the writer **keeps
-endpoints and shared OSM road junctions fixed**, and leaves bends unchanged
-inside or near mapped urban land-use polygons, settlement polygons, and
-city/town/village/hamlet places. It also checks the prospective road ribbon
-against nearby road geometry (including bridge approaches), building
-footprints/points, water and watercourses, and map boundaries. If a proposed rounding fails any check, that bend remains
-exactly as supplied by OSM.
+The same cautious clearance checks remain: no smoothing at shared junctions,
+inside or near towns and residential areas, or when the changed road ribbon
+would touch buildings, other roads, bridge approaches, water/watercourses,
+or the terrain boundary. Endpoints are always preserved. Although curves
+appear more natural, the generator still fits/grades terrain against the
+original OSM source, so verify steep mountain roads in-game.
 
-The build manifest's **road_ways.smoothed_rural_bends** field reports the
-number of bends actually rounded. This is a geometric visual improvement;
-it does not rebuild Worldgen's terrain solver or guarantee wider cuttings
-on very steep slopes, so inspect sharply graded mountain roads in-game.
+The build manifest now includes **road_ways.smoothed_rural_bends**,
+**road_ways.merged_source_runs**, and **road_ways.merged_road_chains**.
 
-## Road surface textures
+## Road surface materials and isolated CWR-CE
 
-A native road way record takes a **Roadway texture path**, not a road P3D path.
-When Worldgen successfully inspects a configured road donor's Roadway LOD,
-it uses that donor's exact Roadway texture for paved/dirt/gravel ways.
-If no donor Roadway texture is available, stock paths are used:
+The isolated branch extends the existing format to accept a **road P3D
+material donor** in the third `way` field, e.g. `donor=o\road\sil25.p3d`.
+Instead of using the model as a rigid placed segment, the engine extracts
+the road's visible texture, UV mapping, multi-material shoulders, vertex
+lighting/face flags and its separate Roadway contact texture.
 
-| Surface | Fallback |
-| --- | --- |
-| Paved | data\silnice.pac |
-| Dirt | data\cesta.pac |
-| Gravel | data\asfaltka.pac |
+For milestone4+ builds, Worldgen emits `donor=...p3d` if the configured
+straight-road donor model is found in the specified **Asset roots**. Ensure
+that P3D is also mounted/accessible to the game when loading the world.
+If it is not found, Worldgen exports the donor's **visual texture** where
+available, or a stock CWA texture. A plain `.paa` / `.pac` source remains
+supported by the isolated CWR-CE engine but cannot recover custom-model
+UVs and other donor-specific behavior.
 
-As in the CWR-CE design, the texture is also used by road surface queries.
-For custom modded road donors, include the relevant model/texture assets in the
-build's **Asset roots** to resolve the actual donor texture. Verify stock
-fallbacks against the game's installed data and inspect the resulting
-**road_ways.surface_textures** entry in the build manifest.
+The three *stock* fallback textures are recognized by the isolated engine,
+which can automatically borrow matching stock P3D lighting/style when
+the texture and donor match:
+
+| Surface | Stock texture-only fallback | Matching P3D |
+| --- | --- | --- |
+| Paved | `o\road\sil_new.paa` | `o\road\sil25.p3d` |
+| Dirt | `o\road\ces_hned.paa` | `o\road\ces25.p3d` |
+| Gravel | `o\road\asf_new.paa` | `o\road\asf25.p3d` |
+
+The emitted source is listed under **road_ways.surface_sources** in the
+build manifest. **road_ways.surface_donors** (milestone4+) lists models
+confirmed in Asset roots. These updates apply only to the **cwr-ce-ways**
+profile and require the isolated CWR-CE engine branch or a build containing it.
 
 ## Current limitations
 
