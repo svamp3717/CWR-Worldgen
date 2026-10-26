@@ -486,6 +486,10 @@ def defaults_with_recent_source(
         result["odol_buildings"] = state["odol_buildings"]
     if type(state.get("binarize_config")) is bool:
         result["binarize_config"] = state["binarize_config"]
+    # Game profile is a GUI preference, not the saved-profile file itself.
+    # Reject invalid/stale values rather than passing them into builds.
+    if state.get("profile") in {"cwa", "cwr-ce", "cwr-ce-ways"}:
+        result["profile"] = state["profile"]
     if isinstance(state.get("world_seed"), str):
         result["world_seed"] = state["world_seed"]
     deploy_text = str(state.get("last_deploy_mod_dir", "")).strip()
@@ -1361,6 +1365,7 @@ class WorldgenGui(tk.Tk):
         self._configure_style()
         self._build_ui()
         self._set_defaults()
+        self._install_game_profile_persistence()
         self._install_appearance_state_persistence()
         self._install_road_asset_state_persistence()
         self._install_odol_building_state_persistence()
@@ -1369,6 +1374,23 @@ class WorldgenGui(tk.Tk):
         self._show_step(0)
         self.after(100, self._drain_output)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _install_game_profile_persistence(self) -> None:
+        variable = self.vars.get("profile")
+        if variable is not None:
+            variable.trace_add("write", lambda *_args: self._persist_game_profile())
+
+    def _persist_game_profile(self) -> None:
+        variable = self.vars.get("profile")
+        if variable is None:
+            return
+        profile = str(variable.get())
+        if profile not in {"cwa", "cwr-ce", "cwr-ce-ways"}:
+            return
+        try:
+            update_gui_state(self.state_path, {"profile": profile})
+        except OSError:
+            pass
 
     def _install_appearance_state_persistence(self) -> None:
         for key in ("ground_textures", "vegetation_style"):
@@ -3867,6 +3889,7 @@ class WorldgenGui(tk.Tk):
     def _on_close(self) -> None:
         if (self.process is not None or self._pipeline_active) and not messagebox.askyesno(APP_TITLE, "A process is still running. Stop it and exit?"):
             return
+        self._persist_game_profile()
         self._persist_appearance_state()
         self._persist_road_asset_state()
         self._persist_odol_building_state()
