@@ -409,3 +409,32 @@ def test_invalid_donor_is_rejected_without_writing_file(tmp_path):
             tmp_path, [_open_country_road()], world_size=1000,
             surface_donors={"paved": r"outside map.p3d"},
         )
+
+
+
+def test_long_open_approaches_get_a_larger_curve_radius(tmp_path):
+    short_approaches = OsmLineFeature(
+        "way/short", {"highway": "residential"},
+        (_ll(200, 200), _ll(280, 200), _ll(280, 280)),
+    )
+    long_approaches = OsmLineFeature(
+        "way/long", {"highway": "residential"},
+        (_ll(200, 200), _ll(400, 200), _ll(400, 400)),
+    )
+    short_info, short_nodes, short_ways, _ = _export(
+        tmp_path, [short_approaches], world_size=1000,
+    )
+    long_info, long_nodes, long_ways, _ = _export(
+        tmp_path, [long_approaches], world_size=1000,
+    )
+    assert short_info["smoothed_rural_bends"] == 1
+    assert long_info["smoothed_rural_bends"] == 1
+    short_pts = _way_points(short_nodes, short_ways[0])
+    long_pts = _way_points(long_nodes, long_ways[0])
+    short_trim = 280 - short_pts[1][0]
+    long_trim = 400 - long_pts[1][0]
+    assert long_trim > short_trim + 5.0
+    assert long_trim <= 38.0 + 0.01
+    assert short_pts[0] == long_pts[0] == (200, 200)
+    assert short_pts[-1] == (280, 280)
+    assert long_pts[-1] == (400, 400)
