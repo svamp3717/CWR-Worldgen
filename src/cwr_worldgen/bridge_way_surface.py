@@ -41,18 +41,33 @@ def _deck_component_ends(bridges, indices):
 
 
 def _cover_lengths(distance: float) -> list[tuple[float, str]]:
-    """Cover a short interval with the fewest known stock straight pieces."""
-    result: list[tuple[float, str]] = []
-    while distance > 0.01:
-        if distance > 24.0:
-            piece = _STOCK_COVER_PIECES[0]
-        elif distance > 10.0:
-            piece = _STOCK_COVER_PIECES[1]
-        else:
-            piece = _STOCK_COVER_PIECES[2]
-        result.append(piece)
-        distance -= piece[0]
-    return result
+    """Minimize bank/deck overhang using real stock straight-piece lengths.
+
+    Prefer covering to within 0.5 m of the target with few large pieces.
+    Avoid the naive 25+12 choice for a 31 m bank, where 25+6 fits.
+    """
+    best = None
+    for long_count in range(int(distance / 25.0) + 2):
+        for medium_count in range(int(distance / 12.0) + 2):
+            for short_count in range(int(distance / 6.0) + 2):
+                count = long_count + medium_count + short_count
+                if count == 0:
+                    continue
+                coverage = 25 * long_count + 12 * medium_count + 6 * short_count
+                shortfall = max(0.0, distance - coverage)
+                excess = max(0.0, coverage - distance)
+                if shortfall > 0.5 or excess > 3.0:
+                    continue
+                ranking = (round(excess + shortfall * 2.0, 4),
+                           count, -long_count)
+                if best is None or ranking < best[0]:
+                    best = (ranking, long_count, medium_count, short_count)
+    if best is None:
+        return []
+    _, long_count, medium_count, short_count = best
+    return ([ _STOCK_COVER_PIECES[0] ] * long_count
+            + [ _STOCK_COVER_PIECES[1] ] * medium_count
+            + [ _STOCK_COVER_PIECES[2] ] * short_count)
 
 
 def _road_shoulder_ground(
@@ -163,7 +178,6 @@ def bridge_road_surface_covers(
             remaining = target - start_distance
             cursor = start_distance
             for piece_length, model in _cover_lengths(remaining):
-                end_distance = min(scan_length, cursor + piece_length)
                 # Skip any model overhanging outside the WRP.
                 x0, z0 = position(cursor)
                 x1, z1 = position(cursor + piece_length)
@@ -213,7 +227,7 @@ def bridge_road_surface_covers(
                 ))
                 next_id += 1
                 cursor += piece_length
-                if cursor >= target - 0.01:
+                if cursor >= target - 0.5:
                     break
 
     return tuple(covers)
