@@ -4763,6 +4763,33 @@ def build_milestone4(
         paved_texture_path = donor_textures.get("paved") or paved_texture_path
         gravel_texture_path = donor_textures.get("gravel")
         dirt_texture_path = donor_textures.get("dirt")
+
+    # Road-only P3Ds are not needed for native ways. Independently resolve
+    # optional model donors against installed assets, even when no generated
+    # P3D road models were registered for final world placement.
+    if is_osm_ways_profile(spec.profile) and spec.asset_roots:
+        native_candidates = {
+            surface: effective_texture_donor(surface)
+            for surface in ("paved", "gravel", "dirt")
+        }
+        native_candidates = {
+            surface: model
+            for surface, model in native_candidates.items()
+            if model and model.casefold().endswith(".p3d")
+        }
+        if native_candidates:
+            native_scan = locate_assets_fast(
+                spec.asset_roots,
+                tuple(dict.fromkeys(native_candidates.values())),
+                cache_dir=getattr(spec, "cache_dir", None),
+                use_cache=bool(getattr(spec, "cache_enabled", True)),
+                refresh=bool(getattr(spec, "cache_refresh", False)),
+            )
+            available = {record.path for record in native_scan.records}
+            for surface, model in native_candidates.items():
+                if canonical_asset_path(model) in available:
+                    native_way_donors[surface] = model
+
     if generated_infrastructure_usage:
         infrastructure_library = ProceduralInfrastructureLibrary(
             spec.name,
