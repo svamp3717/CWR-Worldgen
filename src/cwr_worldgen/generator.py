@@ -1328,7 +1328,7 @@ def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> 
                 surface_textures=STOCK_WAY_TEXTURES,
                 bridge_objects=tuple(
                     obj for obj in generated.objects[generated.road_objects:]
-                    if obj.model_path.replace("/", "\").casefold()
+                    if obj.model_path.replace("/", chr(92)).casefold()
                     == r"o\hous\most_stred30.p3d"
                 ),
             ),
@@ -4991,7 +4991,7 @@ def build_milestone4(
                 surface_donors=native_way_donors,
                 bridge_objects=tuple(
                     obj for obj in nonroads.objects
-                    if obj.model_path.replace("/", "\").casefold()
+                    if obj.model_path.replace("/", chr(92)).casefold()
                     == r"o\hous\most_stred30.p3d"
                 ),
             ),
